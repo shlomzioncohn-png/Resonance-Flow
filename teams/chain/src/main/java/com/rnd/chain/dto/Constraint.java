@@ -2,10 +2,11 @@ package com.rnd.chain.dto;
 
 import java.time.LocalDateTime;
 import java.util.Map;
+import java.util.UUID;
 
 public class Constraint {
     private final String constraintId;
-    private final Inbox.TaskId taskId; // מחכה לטיפוס מ inbox
+    private final UUID taskId; // מחכה לטיפוס מ inbox
     private final ConstraintType type;
     private ConstraintStatus status;
     private Map<String, Object> reason; // יכול להיות null
@@ -13,7 +14,7 @@ public class Constraint {
     private final LocalDateTime createdAt;
     private LocalDateTime updatedAt;
 
-    public Constraint(String constraintId, Inbox.TaskId taskId, ConstraintType type,
+    public Constraint(String constraintId, UUID taskId, ConstraintType type,
                        ConstraintStatus status, Map<String, Object> reason,
                        String sourceRef, LocalDateTime createdAt, LocalDateTime updatedAt) {
         this.constraintId = constraintId;
@@ -27,7 +28,7 @@ public class Constraint {
     }
 
     public String getConstraintId() { return constraintId; }
-    public Inbox.TaskId getTaskId() { return taskId; }
+    public UUID getTaskId() { return taskId; }
     public ConstraintType getType() { return type; }
     public ConstraintStatus getStatus() { return status; }
     public Map<String, Object> getReason() { return reason; }
