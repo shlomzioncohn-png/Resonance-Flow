@@ -1,0 +1,17 @@
+services:
+  mind:
+    build: .
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env
+    volumes:
+      - ./models:/app/models
+    # Uncomment once the vector store is decided (see README "Open decisions")
+    # depends_on:
+    #   - vector-store
+
+  # vector-store:
+  #   image: <tbd: pgvector | qdrant | opensearch | milvus | chroma>
+  #   ports:
+  #     - "6333:6333"
