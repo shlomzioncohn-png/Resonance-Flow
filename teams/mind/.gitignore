@@ -33,3 +33,6 @@ eval/datasets/*
 !eval/datasets/README.md
 !eval/datasets/*.manifest.json
 !eval/datasets/*.sha256
+
+#report
+src/report.json
