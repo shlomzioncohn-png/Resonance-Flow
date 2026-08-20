@@ -1,0 +1,36 @@
+# Keep the build context (and the resulting image) small and free of
+# anything secret. The Dockerfile does `COPY . .`, so anything not
+# excluded here ends up inside the image.
+
+.git
+.github
+.idea
+.vscode
+
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Secrets -- never bake these into an image.
+.env
+.env.local
+
+# Local model weights -- mounted as a volume at runtime (see
+# docker-compose.yml), never baked into the image.
+models/*
+!models/.gitkeep
+!models/README.md
+
+# Not needed at runtime.
+tests/
+docs/
+benchmarks/**/*.json
+benchmarks/**/*.csv
+eval/datasets/*
+!eval/datasets/.gitkeep
+!eval/datasets/README.md
