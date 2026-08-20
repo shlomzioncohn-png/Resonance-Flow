@@ -1,0 +1,34 @@
+[
+  {
+    "tenantId": "kamatech",
+    "from": "hadas@kamatech.org",
+    "to": ["malki@kamatech.org"],
+    "subject": "PR review needed",
+    "date": "2026-08-18T09:15:00Z",
+    "body": "Can you review the PR before Friday? Deadline is close."
+  },
+  {
+    "tenantId": "kamatech",
+    "from": "ruth@kamatech.org",
+    "to": ["malki@kamatech.org"],
+    "subject": "CRM deal update",
+    "date": "2026-08-18T11:00:00Z",
+    "body": "Deal with client X needs review before the meeting."
+  },
+  {
+    "tenantId": "kamatech",
+    "from": "mom@gmail.com",
+    "to": ["malki@kamatech.org"],
+    "subject": "ארוחת ערב בשישי",
+    "date": "2026-08-18T10:00:00Z",
+    "body": "בואי נקבע ארוחת ערב משפחתית בשישי"
+  },
+  {
+    "tenantId": "kamatech",
+    "from": "newsletter@shopping.com",
+    "to": ["malki@kamatech.org"],
+    "subject": "50% off today only!",
+    "date": "2026-08-18T08:00:00Z",
+    "body": "Huge sale on shoes, click here."
+  }
+]
