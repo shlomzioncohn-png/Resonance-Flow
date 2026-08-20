@@ -19,6 +19,7 @@ dev = [
     "pytest-cov",
     "ruff",
     "mypy",
+    "httpx",  # required by fastapi.testclient.TestClient
 ]
 
 [build-system]
