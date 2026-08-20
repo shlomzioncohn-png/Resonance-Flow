@@ -1,6 +1,7 @@
 package com.rnd.inbox.model.entity;
 
 import com.rnd.inbox.model.enums.TaskEventType;
+import io.hypersistence.utils.hibernate.type.basic.PostgreSQLEnumType;
 import io.hypersistence.utils.hibernate.type.json.JsonBinaryType;
 import org.hibernate.annotations.GenericGenerator;
 import org.hibernate.annotations.Type;
@@ -21,6 +22,7 @@ import java.util.Objects;
 import java.util.UUID;
 
 @TypeDef(name = "jsonb", typeClass = JsonBinaryType.class)
+@TypeDef(name = "pgsql_enum", typeClass = PostgreSQLEnumType.class)
 @Entity
 @Table(name = "task_events")
 public class TaskEvent {
@@ -35,8 +37,9 @@ public class TaskEvent {
     @JoinColumn(name = "task_id", nullable = false)
     private Task task;
 
+    @Type(type = "pgsql_enum")
     @Enumerated(EnumType.STRING)
-    @Column(name = "event_type", nullable = false)
+    @Column(name = "event_type", nullable = false, columnDefinition = "task_event_type")
     private TaskEventType eventType;
 
     @Type(type = "jsonb")

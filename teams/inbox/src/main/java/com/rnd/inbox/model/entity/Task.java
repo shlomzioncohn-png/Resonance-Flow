@@ -2,6 +2,7 @@ package com.rnd.inbox.model.entity;
 
 import com.rnd.inbox.model.enums.SourceType;
 import com.rnd.inbox.model.enums.TaskStatus;
+import io.hypersistence.utils.hibernate.type.basic.PostgreSQLEnumType;
 import io.hypersistence.utils.hibernate.type.json.JsonBinaryType;
 import org.hibernate.annotations.CreationTimestamp;
 import org.hibernate.annotations.GenericGenerator;
@@ -20,12 +21,13 @@ import javax.persistence.ManyToOne;
 import javax.persistence.Table;
 import javax.persistence.Version;
 import java.time.Instant;
-import java.time.LocalDate;
+import java.util.HashMap;
 import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
 
 @TypeDef(name = "jsonb", typeClass = JsonBinaryType.class)
+@TypeDef(name = "pgsql_enum", typeClass = PostgreSQLEnumType.class)
 @Entity
 @Table(name = "tasks")
 public class Task {
@@ -54,8 +56,9 @@ public class Task {
     @Column
     private String description;
 
+    @Type(type = "pgsql_enum")
     @Enumerated(EnumType.STRING)
-    @Column(nullable = false)
+    @Column(name = "status", nullable = false, columnDefinition = "task_status")
     private TaskStatus status;
 
     @Column(name = "priority_score")
@@ -64,29 +67,30 @@ public class Task {
     @Column(name = "confidence_score")
     private Double confidenceScore;
 
+    @Type(type = "pgsql_enum")
     @Enumerated(EnumType.STRING)
-    @Column(name = "source_type", nullable = false)
+    @Column(name = "source_type", nullable = false, columnDefinition = "task_source_type")
     private SourceType sourceType;
 
-    @Column(name = "source_ref_id", nullable = false)
+    @Column(name = "source_ref_id")
     private String sourceRefId;
 
     @Column(name = "external_id")
     private String externalId;
 
-    @Column(name = "estimated_duration_minutes", nullable = false)
+    @Column(name = "estimated_duration_minutes")
     private Integer estimatedDurationMinutes;
 
     @Column(name = "due_date")
-    private LocalDate dueDate;
+    private Instant  dueDate;
 
     @Type(type = "jsonb")
-    @Column(columnDefinition = "jsonb")
-    private Map<String, Object> metadata;
+    @Column(columnDefinition = "jsonb",nullable = false)
+    private Map<String, Object> metadata=new HashMap<>();
 
     @Version
     @Column(nullable = false)
-    private Long version;
+    private Integer version;
 
     @CreationTimestamp
     @Column(name = "created_at", nullable = false, updatable = false)
@@ -203,11 +207,11 @@ public class Task {
         this.estimatedDurationMinutes = estimatedDurationMinutes;
     }
 
-    public LocalDate getDueDate() {
+    public Instant  getDueDate() {
         return dueDate;
     }
 
-    public void setDueDate(LocalDate dueDate) {
+    public void setDueDate(Instant  dueDate) {
         this.dueDate = dueDate;
     }
 
@@ -219,11 +223,11 @@ public class Task {
         this.metadata = metadata;
     }
 
-    public Long getVersion() {
+    public Integer getVersion() {
         return version;
     }
 
-    public void setVersion(Long version) {
+    public void setVersion(Integer version) {
         this.version = version;
     }
 

@@ -1,7 +1,10 @@
 package com.rnd.inbox.model.entity;
 
 import com.rnd.inbox.model.enums.AssigneeRole;
+import io.hypersistence.utils.hibernate.type.basic.PostgreSQLEnumType;
 import org.hibernate.annotations.GenericGenerator;
+import org.hibernate.annotations.Type;
+import org.hibernate.annotations.TypeDef;
 
 import javax.persistence.Column;
 import javax.persistence.Entity;
@@ -16,6 +19,7 @@ import java.time.Instant;
 import java.util.Objects;
 import java.util.UUID;
 
+@TypeDef(name = "pgsql_enum", typeClass = PostgreSQLEnumType.class)
 @Entity
 @Table(name = "task_assignees")
 public class TaskAssignee {
@@ -38,8 +42,9 @@ public class TaskAssignee {
     @JoinColumn(name = "team_id", nullable = true)
     private Team team;
 
+    @Type(type = "pgsql_enum")
     @Enumerated(EnumType.STRING)
-    @Column(nullable = false)
+    @Column(name = "role", nullable = false, columnDefinition = "task_assignee_role")
     private AssigneeRole role;
 
     @Column(name = "assigned_at", nullable = false)

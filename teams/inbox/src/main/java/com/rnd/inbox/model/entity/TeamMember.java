@@ -1,7 +1,10 @@
 package com.rnd.inbox.model.entity;
 
 import com.rnd.inbox.model.enums.TeamMemberRole;
+import io.hypersistence.utils.hibernate.type.basic.PostgreSQLEnumType;
 import org.hibernate.annotations.GenericGenerator;
+import org.hibernate.annotations.Type;
+import org.hibernate.annotations.TypeDef;
 
 import javax.persistence.Column;
 import javax.persistence.Entity;
@@ -17,6 +20,7 @@ import java.time.Instant;
 import java.util.Objects;
 import java.util.UUID;
 
+@TypeDef(name = "pgsql_enum", typeClass = PostgreSQLEnumType.class)
 @Entity
 @Table(name = "team_members", uniqueConstraints = @UniqueConstraint(columnNames = {"team_id", "user_id"}))
 public class TeamMember {
@@ -35,8 +39,9 @@ public class TeamMember {
     @JoinColumn(name = "user_id", nullable = false)
     private User user;
 
+    @Type(type = "pgsql_enum")
     @Enumerated(EnumType.STRING)
-    @Column(nullable = false)
+    @Column(name = "role", nullable = false, columnDefinition = "team_member_role")
     private TeamMemberRole role;
 
     @Column(name = "joined_at", nullable = false)
