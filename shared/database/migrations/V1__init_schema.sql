@@ -134,7 +134,7 @@ CREATE TABLE task_events (
     task_id    UUID NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
     event_type task_event_type NOT NULL,
     payload    JSONB NOT NULL DEFAULT '{}'::jsonb,
-    actor      TEXT,
+    actor      TEXT NOT NULL,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
