@@ -16,6 +16,22 @@ services:
       timeout: 5s
       retries: 10
 
+  pgadmin:
+    image: dpage/pgadmin4:8
+    container_name: resonance-pgadmin
+    environment:
+      - PGADMIN_DEFAULT_EMAIL=${PGADMIN_EMAIL:-admin@example.com}
+      - PGADMIN_DEFAULT_PASSWORD=${PGADMIN_PASSWORD:-admin}
+      - PGADMIN_CONFIG_SERVER_MODE=False
+    ports:
+      - "${PGADMIN_PORT:-5050}:80"
+    volumes:
+      - resonance-pgadmin-data:/var/lib/pgadmin
+      - ./shared/database/pgadmin/servers.json:/pgadmin4/servers.json:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+
   chain:
     build: ./teams/chain
     container_name: chain-service
@@ -56,3 +72,4 @@ services:
 
 volumes:
   resonance-postgres-data:
+  resonance-pgadmin-data:
