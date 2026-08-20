@@ -100,7 +100,8 @@ CREATE TABLE tasks (
 
     dependency_task_id          UUID REFERENCES tasks(id) ON DELETE SET NULL,
 
-    CONSTRAINT chk_tasks_no_self_dependency CHECK (id IS DISTINCT FROM dependency_task_id)
+    CONSTRAINT chk_tasks_no_self_dependency CHECK (id IS DISTINCT FROM dependency_task_id),
+    CONSTRAINT chk_tasks_source_ref_required CHECK (source_type = 'MANUAL' OR source_ref_id IS NOT NULL)
 );
 
 CREATE INDEX idx_tasks_org_id ON tasks(org_id);
