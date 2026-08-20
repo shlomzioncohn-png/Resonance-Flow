@@ -9,9 +9,17 @@ goal of this stage is a clean, working Maven/Spring Boot project that later work
 
 - Java 11
 - Spring Boot 2.7.18 (Maven)
+- PostgreSQL, with schema migrations managed by Flyway
 - Docker / Docker Compose
 
-No database is configured yet - the DB choice for the project has not been decided.
+## Database
+
+Migrations live under [`shared/database/migrations`](../../shared/database/migrations) at the repo
+root (shared across services) and are applied automatically by Flyway on application startup - no
+manual step is needed.
+
+Connection settings are read from environment variables (see `.env.example`): `DB_HOST`, `DB_PORT`,
+`DB_NAME`, `DB_USER`, `DB_PASSWORD`.
 
 ## Project structure
 
@@ -29,7 +37,9 @@ src/test/java/com/rnd/inbox/
 
 ## Running locally with Maven
 
-Requires a local Maven installation (`mvn`) and JDK 11.
+Requires a local Maven installation (`mvn`) and JDK 11, plus a running PostgreSQL instance
+(e.g. `docker compose up postgres` from the repo root, or your own local instance matching the
+`.env.example` settings).
 
 ```bash
 mvn spring-boot:run
