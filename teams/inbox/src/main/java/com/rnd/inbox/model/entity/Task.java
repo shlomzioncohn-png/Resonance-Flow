@@ -1,7 +1,7 @@
-package com.rnd.inbox.entity;
+package com.rnd.inbox.model.entity;
 
-import com.rnd.inbox.entity.enums.SourceType;
-import com.rnd.inbox.entity.enums.TaskStatus;
+import com.rnd.inbox.model.enums.SourceType;
+import com.rnd.inbox.model.enums.TaskStatus;
 import io.hypersistence.utils.hibernate.type.json.JsonBinaryType;
 import org.hibernate.annotations.CreationTimestamp;
 import org.hibernate.annotations.GenericGenerator;

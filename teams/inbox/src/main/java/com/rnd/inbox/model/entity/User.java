@@ -1,4 +1,4 @@
-package com.rnd.inbox.entity;
+package com.rnd.inbox.model.entity;
 
 import org.hibernate.annotations.GenericGenerator;
 

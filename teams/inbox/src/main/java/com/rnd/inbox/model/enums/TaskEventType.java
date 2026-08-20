@@ -1,4 +1,4 @@
-package com.rnd.inbox.entity.enums;
+package com.rnd.inbox.model.enums;
 
 public enum TaskEventType {
     STATUS_CHANGE,

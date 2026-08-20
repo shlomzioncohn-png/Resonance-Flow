@@ -1,6 +1,6 @@
-package com.rnd.inbox.entity;
+package com.rnd.inbox.model.entity;
 
-import com.rnd.inbox.entity.enums.TaskEventType;
+import com.rnd.inbox.model.enums.TaskEventType;
 import io.hypersistence.utils.hibernate.type.json.JsonBinaryType;
 import org.hibernate.annotations.GenericGenerator;
 import org.hibernate.annotations.Type;

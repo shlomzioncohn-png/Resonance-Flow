@@ -1,4 +1,4 @@
-package com.rnd.inbox.entity;
+package com.rnd.inbox.model.entity;
 
 import org.hibernate.annotations.GenericGenerator;
 
@@ -6,17 +6,16 @@ import javax.persistence.Column;
 import javax.persistence.Entity;
 import javax.persistence.GeneratedValue;
 import javax.persistence.Id;
-import javax.persistence.OneToMany;
+import javax.persistence.JoinColumn;
+import javax.persistence.ManyToOne;
 import javax.persistence.Table;
 import java.time.Instant;
-import java.util.HashSet;
 import java.util.Objects;
-import java.util.Set;
 import java.util.UUID;
 
 @Entity
-@Table(name = "organizations")
-public class Organization {
+@Table(name = "teams")
+public class Team {
 
     @Id
     @GeneratedValue(generator = "UUID")
@@ -24,22 +23,17 @@ public class Organization {
     @Column(updatable = false, nullable = false)
     private UUID id;
 
+    @ManyToOne
+    @JoinColumn(name = "org_id", nullable = false)
+    private Organization organization;
+
     @Column(nullable = false)
     private String name;
 
     @Column(name = "created_at", nullable = false)
     private Instant createdAt;
 
-    @OneToMany(mappedBy = "organization")
-    private Set<Team> teams = new HashSet<>();
-
-    @OneToMany(mappedBy = "organization")
-    private Set<User> users = new HashSet<>();
-
-    @OneToMany(mappedBy = "organization")
-    private Set<Task> tasks = new HashSet<>();
-
-    public Organization() {
+    public Team() {
     }
 
     public UUID getId() {
@@ -48,6 +42,14 @@ public class Organization {
 
     public void setId(UUID id) {
         this.id = id;
+    }
+
+    public Organization getOrganization() {
+        return organization;
+    }
+
+    public void setOrganization(Organization organization) {
+        this.organization = organization;
     }
 
     public String getName() {
@@ -66,35 +68,11 @@ public class Organization {
         this.createdAt = createdAt;
     }
 
-    public Set<Team> getTeams() {
-        return teams;
-    }
-
-    public void setTeams(Set<Team> teams) {
-        this.teams = teams;
-    }
-
-    public Set<User> getUsers() {
-        return users;
-    }
-
-    public void setUsers(Set<User> users) {
-        this.users = users;
-    }
-
-    public Set<Task> getTasks() {
-        return tasks;
-    }
-
-    public void setTasks(Set<Task> tasks) {
-        this.tasks = tasks;
-    }
-
     @Override
     public boolean equals(Object o) {
         if (this == o) return true;
-        if (!(o instanceof Organization)) return false;
-        Organization that = (Organization) o;
+        if (!(o instanceof Team)) return false;
+        Team that = (Team) o;
         return id != null && id.equals(that.id);
     }
 
