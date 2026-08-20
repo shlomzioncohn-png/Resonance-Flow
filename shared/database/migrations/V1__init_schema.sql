@@ -95,10 +95,6 @@ CREATE TABLE tasks (
     version                     INTEGER NOT NULL DEFAULT 1,
     created_at                  TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at                  TIMESTAMPTZ NOT NULL DEFAULT now(),
-    started_at                  TIMESTAMPTZ,
-    completed_at                TIMESTAMPTZ,
-    dismissed_at                TIMESTAMPTZ,
-    deleted_at                  TIMESTAMPTZ,
 
     owner_id                    UUID REFERENCES users(id) ON DELETE SET NULL,
 
@@ -113,7 +109,6 @@ CREATE INDEX idx_tasks_source_type ON tasks(source_type);
 CREATE INDEX idx_tasks_due_date ON tasks(due_date);
 CREATE INDEX idx_tasks_owner_id ON tasks(owner_id);
 CREATE INDEX idx_tasks_dependency_task_id ON tasks(dependency_task_id);
-CREATE INDEX idx_tasks_deleted_at ON tasks(deleted_at) WHERE deleted_at IS NULL;
 
 CREATE TRIGGER trg_tasks_set_updated_at
     BEFORE UPDATE ON tasks
