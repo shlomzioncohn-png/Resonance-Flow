@@ -20,6 +20,7 @@ import javax.persistence.JoinColumn;
 import javax.persistence.ManyToOne;
 import javax.persistence.Table;
 import javax.persistence.Version;
+import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.HashMap;
 import java.util.Map;
@@ -62,10 +63,10 @@ public class Task {
     private TaskStatus status;
 
     @Column(name = "priority_score")
-    private Double priorityScore;
+    private BigDecimal priorityScore;
 
     @Column(name = "confidence_score")
-    private Double confidenceScore;
+    private BigDecimal  confidenceScore;
 
     @Type(type = "pgsql_enum")
     @Enumerated(EnumType.STRING)
@@ -159,19 +160,19 @@ public class Task {
         this.status = status;
     }
 
-    public Double getPriorityScore() {
+    public BigDecimal  getPriorityScore() {
         return priorityScore;
     }
 
-    public void setPriorityScore(Double priorityScore) {
+    public void setPriorityScore(BigDecimal  priorityScore) {
         this.priorityScore = priorityScore;
     }
 
-    public Double getConfidenceScore() {
+    public BigDecimal  getConfidenceScore() {
         return confidenceScore;
     }
 
-    public void setConfidenceScore(Double confidenceScore) {
+    public void setConfidenceScore(BigDecimal  confidenceScore) {
         this.confidenceScore = confidenceScore;
     }
 
