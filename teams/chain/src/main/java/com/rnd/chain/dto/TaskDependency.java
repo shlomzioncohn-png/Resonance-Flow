@@ -3,7 +3,6 @@ package com.rnd.chain.dto;
 // TODO: import the Inbox type once the Inbox team publishes its package,
 // e.g. import com.inbox.Inbox;
 
-
 public class TaskDependency {
 
     // Identifier type follows Inbox: both ends of the edge use the task id

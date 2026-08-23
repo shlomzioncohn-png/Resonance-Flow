@@ -1,7 +1,7 @@
-package com.chain.model;
+package com.rnd.chain.dto;
 
 import java.time.LocalDateTime;
-i
+
 // TODO: import the Inbox type once the Inbox team publishes its package,
 // e.g. import com.inbox.Inbox;
 
@@ -9,19 +9,20 @@ public class Task {
 
     // Identifier type follows Inbox: we store the task id exactly as Inbox sends it
     // and do not convert it on our side, so the id format stays owned by Inbox.
-    private Inbox.TaskId id;                
-    private Inbox.TaskId parentTaskId;     
+    private Inbox.TaskId id;
+    private Inbox.TaskId parentTaskId;
 
-    private TaskStatus status;              
-    private boolean isReady;               
+    private TaskStatus status;
+    private boolean isReady;
     private int blockingCount;
     private int openConstraintCount;
 
-    private Integer estimatedDurationMin;   
-    private Integer score;                 
+    private Integer estimatedDurationMin;
+    private Integer score;
 
-    private final LocalDateTime createdAt; 
-    private LocalDateTime deletedAt;       
+    private final LocalDateTime createdAt;
+    private LocalDateTime updatedAt;
+    private LocalDateTime deletedAt;
 
     public Task(Inbox.TaskId id,
                 Inbox.TaskId parentTaskId,
