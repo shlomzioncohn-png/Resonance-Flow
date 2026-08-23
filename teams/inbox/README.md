@@ -66,6 +66,48 @@ To stop:
 docker compose down
 ```
 
+## Kafka
+
+Local Kafka (single-node, KRaft mode — no Zookeeper) plus a web UI for it are part of this
+module's `docker-compose.yml`.
+
+### Bringing Kafka up
+
+```bash
+docker compose up -d kafka kafka-ui
+```
+
+(omit `-d` to watch the logs, or leave it off `docker compose up --build` entirely to start
+everything, including the `inbox` app, together). First start pulls the `apache/kafka` image,
+which is a few hundred MB — expect that to take a while once, not on every subsequent start.
+
+Other services in this same `docker-compose.yml` (the `inbox` app, `kafka-ui`) reach Kafka
+internally at `kafka:29092`. From your own machine (a local script, an IDE Kafka plugin, `kcat`,
+etc.) it's at `localhost:${KAFKA_PORT:-9092}`.
+
+### Accessing Kafka UI
+
+Open **http://localhost:8090** (or `${KAFKA_UI_PORT}` from your `.env`) in a browser. It's
+connected to this Kafka out of the box — no login, no extra setup. From there you can browse
+Topics, inspect Messages and their payloads, see Partitions, and see Consumer Groups.
+
+### Verifying the connection is healthy
+
+```bash
+docker compose ps
+```
+
+`inbox-kafka` should show `(healthy)` once it's fully up (health check polls
+`kafka-broker-api-versions` internally, usually ready within ~20-30s of first start). You can
+also confirm end-to-end from the CLI:
+
+```bash
+docker exec inbox-kafka /opt/kafka/bin/kafka-topics.sh --bootstrap-server localhost:9092 --list
+```
+
+An empty list (no error) means Kafka is up and accepting connections. Once Kafka UI is open in
+the browser, its cluster page shows the broker as online — that's the simplest visual check.
+
 ## Tests
 
 ```bash
