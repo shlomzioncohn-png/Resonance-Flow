@@ -29,9 +29,9 @@ class DealToTaskMapperTest {
             "QUALIFIED,   NEW",
             "PROPOSAL,    NEW",
             "NEGOTIATION, NEW",
-            "ON_HOLD,     BLOCKED",
+            "ON_HOLD,     SNOOZED",
             "CLOSED_WON,  DONE",
-            "CLOSED_LOST, DONE"
+            "CLOSED_LOST, CANCELLED"
     })
     void mapsEveryDealStageToExpectedTaskStatus(DealStage stage, TaskStatus expected) {
         assertEquals(expected, DealToTaskMapper.toTaskStatus(stage));
@@ -51,30 +51,30 @@ class DealToTaskMapperTest {
         // Same dealId must still resolve to the same dedup key after the
         // reopen - otherwise the reopened deal creates a second, invisible
         // Task instead of reviving the existing one.
-        assertEquals(DealToTaskMapper.toTaskId(won), DealToTaskMapper.toTaskId(reopened));
+        assertEquals(DealToTaskMapper.toSourceRef(won), DealToTaskMapper.toSourceRef(reopened));
     }
 
     @Test
-    void sameDealYieldsIdenticalIdOnRepeatedMapping() {
+    void sameDealYieldsIdenticalSourceRefOnRepeatedMapping() {
         Deal deal = new Deal("D-10432", DealStage.NEGOTIATION, null, null, null, Instant.now());
 
-        assertEquals(DealToTaskMapper.toTaskId(deal), DealToTaskMapper.toTaskId(deal));
+        assertEquals(DealToTaskMapper.toSourceRef(deal), DealToTaskMapper.toSourceRef(deal));
     }
 
     @Test
-    void idIsDerivedFromDealIdAloneNotFromStageOrTimestampOrOwner() {
+    void sourceRefIsDerivedFromDealIdAloneNotFromStageOrTimestampOrOwner() {
         Deal before = new Deal("D-10432", DealStage.PROPOSAL, null, null, null, Instant.now());
         Deal after = new Deal("D-10432", DealStage.CLOSED_WON, "owner@example.com", null, null,
                 Instant.now().plus(1, ChronoUnit.HOURS));
 
-        assertEquals(DealToTaskMapper.toTaskId(before), DealToTaskMapper.toTaskId(after));
+        assertEquals(DealToTaskMapper.toSourceRef(before), DealToTaskMapper.toSourceRef(after));
     }
 
     @Test
-    void differentDealsYieldDifferentIds() {
+    void differentDealsYieldDifferentSourceRefs() {
         Deal a = new Deal("D-10432", DealStage.PROSPECT, null, null, null, Instant.now());
         Deal b = new Deal("D-99999", DealStage.PROSPECT, null, null, null, Instant.now());
 
-        assertNotEquals(DealToTaskMapper.toTaskId(a), DealToTaskMapper.toTaskId(b));
+        assertNotEquals(DealToTaskMapper.toSourceRef(a), DealToTaskMapper.toSourceRef(b));
     }
 }
