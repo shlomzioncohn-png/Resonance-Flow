@@ -42,8 +42,8 @@ class DealToTaskMapperTest {
         Instant wonAt = Instant.parse("2026-08-20T10:00:00Z");
         Instant reopenedAt = wonAt.plus(1, ChronoUnit.DAYS);
 
-        Deal won = new Deal("D-10432", DealStage.CLOSED_WON, null, null, null, wonAt);
-        Deal reopened = new Deal("D-10432", DealStage.NEGOTIATION, null, null, null, reopenedAt);
+        Deal won = Deal.builder().dealId("D-10432").stage(DealStage.CLOSED_WON).stageChangedAt(wonAt).build();
+        Deal reopened = Deal.builder().dealId("D-10432").stage(DealStage.NEGOTIATION).stageChangedAt(reopenedAt).build();
 
         assertEquals(TaskStatus.DONE, DealToTaskMapper.toTaskStatus(won.stage()));
         assertEquals(TaskStatus.NEW, DealToTaskMapper.toTaskStatus(reopened.stage()));
@@ -56,24 +56,28 @@ class DealToTaskMapperTest {
 
     @Test
     void sameDealYieldsIdenticalSourceRefOnRepeatedMapping() {
-        Deal deal = new Deal("D-10432", DealStage.NEGOTIATION, null, null, null, Instant.now());
+        Deal deal = Deal.builder().dealId("D-10432").stage(DealStage.NEGOTIATION).stageChangedAt(Instant.now()).build();
 
         assertEquals(DealToTaskMapper.toSourceRef(deal), DealToTaskMapper.toSourceRef(deal));
     }
 
     @Test
     void sourceRefIsDerivedFromDealIdAloneNotFromStageOrTimestampOrOwner() {
-        Deal before = new Deal("D-10432", DealStage.PROPOSAL, null, null, null, Instant.now());
-        Deal after = new Deal("D-10432", DealStage.CLOSED_WON, "owner@example.com", null, null,
-                Instant.now().plus(1, ChronoUnit.HOURS));
+        Deal before = Deal.builder().dealId("D-10432").stage(DealStage.PROPOSAL).stageChangedAt(Instant.now()).build();
+        Deal after = Deal.builder()
+                .dealId("D-10432")
+                .stage(DealStage.CLOSED_WON)
+                .ownerEmail("owner@example.com")
+                .stageChangedAt(Instant.now().plus(1, ChronoUnit.HOURS))
+                .build();
 
         assertEquals(DealToTaskMapper.toSourceRef(before), DealToTaskMapper.toSourceRef(after));
     }
 
     @Test
     void differentDealsYieldDifferentSourceRefs() {
-        Deal a = new Deal("D-10432", DealStage.PROSPECT, null, null, null, Instant.now());
-        Deal b = new Deal("D-99999", DealStage.PROSPECT, null, null, null, Instant.now());
+        Deal a = Deal.builder().dealId("D-10432").stage(DealStage.PROSPECT).stageChangedAt(Instant.now()).build();
+        Deal b = Deal.builder().dealId("D-99999").stage(DealStage.PROSPECT).stageChangedAt(Instant.now()).build();
 
         assertNotEquals(DealToTaskMapper.toSourceRef(a), DealToTaskMapper.toSourceRef(b));
     }

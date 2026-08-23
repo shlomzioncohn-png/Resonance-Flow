@@ -4,3 +4,7 @@ server:
 spring:
   application:
     name: bridge
+
+bridge:
+  crm:
+    dataset: classpath:crm/synthetic-deals.json
