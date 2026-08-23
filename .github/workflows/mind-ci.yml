@@ -1,0 +1,37 @@
+name: MIND CI
+
+on:
+  pull_request:
+    paths:
+      - 'teams/mind/**'
+      - '.github/workflows/mind-ci.yml'
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: teams/mind
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+          cache-dependency-path: teams/mind/pyproject.toml
+
+      - name: Install
+        run: pip install -e ".[dev]"
+
+      - name: Lint (ruff)
+        run: ruff check src tests
+
+      - name: Type-check (mypy)
+        run: mypy src
+
+      - name: Tests
+        run: pytest --cov=src/mind
+
+      - name: Evaluation harness (smoke/regression check)
+        run: python -m mind.evaluation.run --model dummy
