@@ -20,6 +20,12 @@ venv/
 .env
 .env.local
 
+# Local-only Docker build workaround (machine-specific TLS-interception
+# CA) -- must never end up inside a built image via `COPY . .`.
+netfree-root-ca.crt
+Dockerfile.local
+docker-compose.override.yml
+
 # Local model weights -- mounted as a volume at runtime (see
 # docker-compose.yml), never baked into the image.
 models/*
