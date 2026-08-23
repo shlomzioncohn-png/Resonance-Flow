@@ -2,12 +2,23 @@ import argparse
 import json
 import sys
 import os
+import importlib.util
 
-eval_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../../eval/personas"))
-if eval_path not in sys.path:
-    sys.path.append(eval_path)
+def load_scenarios(personas_path: str):
+    """Loads MOCK_SCENARIOS from a fixtures.py file inside the given personas directory."""
+    fixtures_path = os.path.join(personas_path, "fixtures.py")
+    if not os.path.isfile(fixtures_path):
+        raise FileNotFoundError(f"No fixtures.py found under --personas path: {personas_path}")
 
-from fixtures import MOCK_SCENARIOS
+    spec = importlib.util.spec_from_file_location("fixtures", fixtures_path)
+    fixtures_module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(fixtures_module)
+
+    if not hasattr(fixtures_module, "MOCK_SCENARIOS"):
+        raise AttributeError(f"{fixtures_path} does not define MOCK_SCENARIOS")
+
+    return fixtures_module.MOCK_SCENARIOS
+
 from mind.evaluation.dummy_model import DummyRankingModel
 
 def evaluate(model, scenarios):
@@ -50,8 +61,12 @@ def evaluate(model, scenarios):
     }
 
 def main():
-    parser =  argparse.ArgumentParser(description="Run evaluateion harness on ranking models.")
+    parser = argparse.ArgumentParser(description="Run evaluation harness on ranking models.")
     parser.add_argument("--model", type=str, default="dummy", help="Model to evaluate. (e.g. dummy)")
+    parser.add_argument(
+        "--personas", type=str, default="eval/personas",
+        help="Path to the personas directory (must contain fixtures.py with MOCK_SCENARIOS)."
+    )
     args = parser.parse_args()
 
     if args.model == "dummy":
@@ -59,7 +74,9 @@ def main():
     else:
         raise ValueError(f"Unknown model: {args.model}")
 
-    report = evaluate(model, MOCK_SCENARIOS)
+    scenarios = load_scenarios(args.personas)
+    report = evaluate(model, scenarios)
+
     print("\n--- Evaluation Report ---")
     print(json.dumps(report, indent=4))
     print("-------------------------\n")
