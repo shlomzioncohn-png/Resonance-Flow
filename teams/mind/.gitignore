@@ -22,6 +22,9 @@ models/*
 .vscode/
 !.vscode/extensions.json
 
+# Personal AI-assistant notes — local only, never shared via git
+CLAUDE.md
+
 # Benchmark run artifacts (keep READMEs, not raw dumps)
 benchmarks/**/*.json
 benchmarks/**/*.csv
