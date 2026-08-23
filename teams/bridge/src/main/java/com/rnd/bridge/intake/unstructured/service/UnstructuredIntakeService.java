@@ -1,19 +1,18 @@
 package com.rnd.bridge.intake.unstructured.service;
 
-import com.rnd.bridge.intake.unstructured.dto.RawObjectEvent;
-import com.rnd.bridge.intake.unstructured.dto.ScopeDecision;
 import com.rnd.bridge.intake.unstructured.dto.SourceRecord;
-import com.rnd.bridge.intake.unstructured.dto.SourceType;
 import com.rnd.bridge.intake.unstructured.fixture.FixtureSourceLoader;
 import com.rnd.bridge.intake.unstructured.service.MinioLandingService.LandingResult;
+import com.rnd.bridge.shared.unstructured.dto.RawObjectEvent;
+import com.rnd.bridge.shared.unstructured.dto.ScopeDecision;
+import com.rnd.bridge.shared.unstructured.dto.SourceType;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.UUID;
 import org.springframework.stereotype.Service;
 
 /**
  * Orchestrates one source end to end: load -> per record: scope -> build key -> land ->
- * publish. One traceId is generated per run and shared by every event that run produces.
+ * publish.
  */
 @Service
 public class UnstructuredIntakeService {
@@ -38,7 +37,6 @@ public class UnstructuredIntakeService {
     }
 
     public List<RawObjectEvent> run(SourceType sourceType) {
-        UUID traceId = UUID.randomUUID();
         List<SourceRecord> records = sourceLoader.load(sourceType);
 
         List<RawObjectEvent> events = new ArrayList<>();
@@ -47,7 +45,7 @@ public class UnstructuredIntakeService {
             String objectKey = objectKeyBuilder.build(record);
             LandingResult landingResult = landingService.land(objectKey, record, scopeDecision);
             RawObjectEvent event =
-                    pointerEventPublisher.publish(objectKey, record, scopeDecision, landingResult, traceId);
+                    pointerEventPublisher.publish(objectKey, record, scopeDecision, landingResult);
             events.add(event);
         }
         return events;

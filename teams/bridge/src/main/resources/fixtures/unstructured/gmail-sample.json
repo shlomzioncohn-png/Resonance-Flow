@@ -13,7 +13,8 @@
     "to": ["malki@kamatech.org"],
     "subject": "CRM deal update",
     "date": "2026-08-18T11:00:00Z",
-    "body": "Deal with client X needs review before the meeting."
+    "body": "Deal with client X needs review before the meeting.",
+    "attachment": { "filename": "deal-invoice-scan.pdf", "mimeType": "application/pdf" }
   },
   {
     "tenantId": "kamatech",

@@ -9,6 +9,7 @@ import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.stream.Collectors;
 import org.springframework.stereotype.Service;
 
@@ -58,24 +59,34 @@ public class ChatSessionGrouper {
 
     private SourceRecord toSourceRecord(List<ChatMessage> sessionMessages) {
         ChatMessage first = sessionMessages.get(0);
-        String participants = sessionMessages.stream()
+        List<String> participants = sessionMessages.stream()
                 .map(ChatMessage::sender)
                 .distinct()
-                .collect(Collectors.joining(", "));
+                .toList();
         String transcript = sessionMessages.stream()
                 .map(m -> m.sender() + ": " + m.text())
                 .collect(Collectors.joining("\n"));
         String naturalId = first.chatId() + "|" + first.timestamp();
+        // A session can mix plain-text and attachment messages; this lane's SourceRecord
+        // carries one mimeType per session, so the first attachment found wins. Good
+        // enough for a skeleton - a session with two different attachment types is an
+        // edge case this doesn't try to solve.
+        String mimeType = sessionMessages.stream()
+                .map(ChatMessage::attachmentMimeType)
+                .filter(Objects::nonNull)
+                .findFirst()
+                .orElse(null);
 
         return new SourceRecord(
                 first.sourceType(),
                 first.tenantId(),
                 naturalId,
                 first.timestamp(),
+                String.join(", ", participants),
                 participants,
                 null,
                 transcript,
                 transcript,
-                null);
+                mimeType);
     }
 }

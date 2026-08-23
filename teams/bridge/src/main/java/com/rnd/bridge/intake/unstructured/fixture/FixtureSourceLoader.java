@@ -4,8 +4,8 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.rnd.bridge.intake.unstructured.dto.ChatMessage;
 import com.rnd.bridge.intake.unstructured.dto.SourceRecord;
-import com.rnd.bridge.intake.unstructured.dto.SourceType;
 import com.rnd.bridge.intake.unstructured.service.ChatSessionGrouper;
+import com.rnd.bridge.shared.unstructured.dto.SourceType;
 import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStream;
@@ -18,6 +18,7 @@ import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import org.springframework.core.io.ClassPathResource;
@@ -39,7 +40,20 @@ public class FixtureSourceLoader {
     private static final DateTimeFormatter WHATSAPP_TIMESTAMP = DateTimeFormatter.ofPattern("dd/MM/yyyy, HH:mm");
     private static final Pattern WHATSAPP_LINE =
             Pattern.compile("^(\\d{2}/\\d{2}/\\d{4}, \\d{2}:\\d{2}) - ([^:]+): (.*)$");
+    private static final Pattern WHATSAPP_ATTACHMENT = Pattern.compile("^<attached: (.+)>$");
     private static final String WHATSAPP_TENANT_ID = "kamatech";
+
+    // Extension -> MIME type for WhatsApp's "<attached: filename>" marker, which carries a
+    // filename but no explicit MIME type (unlike Gmail's fixture "attachment" object).
+    private static final Map<String, String> ATTACHMENT_MIME_BY_EXTENSION = Map.of(
+            "opus", "audio/opus",
+            "m4a", "audio/mp4",
+            "mp3", "audio/mpeg",
+            "wav", "audio/wav",
+            "pdf", "application/pdf",
+            "jpg", "image/jpeg",
+            "jpeg", "image/jpeg",
+            "png", "image/png");
 
     private final ObjectMapper objectMapper;
     private final ChatSessionGrouper chatSessionGrouper;
@@ -57,10 +71,12 @@ public class FixtureSourceLoader {
     public List<SourceRecord> load(SourceType sourceType) {
         return switch (sourceType) {
             case EMAIL -> loadEmail();
-            case DRIVE_DOC -> loadDrive();
+            case DRIVE -> loadDrive();
             case CALENDAR -> loadCalendar();
             case SLACK -> chatSessionGrouper.group(loadSlackMessages());
             case WHATSAPP -> chatSessionGrouper.group(loadWhatsAppMessages());
+            case MEETING -> throw new IllegalArgumentException(
+                    sourceType + " is produced by the meeting/doc/audio lane, not this one");
         };
     }
 
@@ -69,16 +85,21 @@ public class FixtureSourceLoader {
         for (JsonNode node : readJson(FIXTURE_ROOT + "gmail-sample.json")) {
             String from = node.get("from").asText();
             String date = node.get("date").asText();
+            JsonNode attachment = node.get("attachment");
+            String attachmentMimeType = (attachment != null && !attachment.isNull())
+                    ? textOrNull(attachment.get("mimeType"))
+                    : null;
             records.add(new SourceRecord(
                     SourceType.EMAIL,
                     node.get("tenantId").asText(),
                     "EMAIL|" + from + "|" + date,
                     Instant.parse(date),
                     from,
+                    List.of(from),
                     textOrNull(node.get("subject")),
                     textOrNull(node.get("body")),
                     node.toString(),
-                    null));
+                    attachmentMimeType));
         }
         return records;
     }
@@ -88,11 +109,12 @@ public class FixtureSourceLoader {
         for (JsonNode node : readJson(FIXTURE_ROOT + "drive-sample.json")) {
             String owner = node.get("owners").get(0).get("emailAddress").asText();
             records.add(new SourceRecord(
-                    SourceType.DRIVE_DOC,
+                    SourceType.DRIVE,
                     node.get("tenantId").asText(),
                     node.get("id").asText(),
                     Instant.parse(node.get("modifiedTime").asText()),
                     owner,
+                    List.of(owner),
                     textOrNull(node.get("name")),
                     textOrNull(node.get("description")),
                     node.toString(),
@@ -112,6 +134,7 @@ public class FixtureSourceLoader {
                     node.get("id").asText(),
                     Instant.parse(start),
                     organizer,
+                    List.of(organizer),
                     textOrNull(node.get("summary")),
                     textOrNull(node.get("description")),
                     node.toString(),
@@ -130,7 +153,8 @@ public class FixtureSourceLoader {
                     node.get("channel").asText(),
                     node.get("user").asText(),
                     Instant.ofEpochMilli(epochMillis),
-                    node.get("text").asText()));
+                    node.get("text").asText(),
+                    null));
         }
         return messages;
     }
@@ -164,16 +188,31 @@ public class FixtureSourceLoader {
                     continue;
                 }
                 LocalDateTime localTimestamp = LocalDateTime.parse(matcher.group(1), WHATSAPP_TIMESTAMP);
+                String text = matcher.group(3);
                 messages.add(new ChatMessage(
                         SourceType.WHATSAPP,
                         WHATSAPP_TENANT_ID,
                         chatId,
                         matcher.group(2),
                         localTimestamp.toInstant(ZoneOffset.UTC),
-                        matcher.group(3)));
+                        text,
+                        attachmentMimeType(text)));
             }
         }
         return messages;
+    }
+
+    private static String attachmentMimeType(String text) {
+        Matcher matcher = WHATSAPP_ATTACHMENT.matcher(text);
+        if (!matcher.matches()) {
+            return null;
+        }
+        String filename = matcher.group(1);
+        int dot = filename.lastIndexOf('.');
+        if (dot < 0) {
+            return null;
+        }
+        return ATTACHMENT_MIME_BY_EXTENSION.get(filename.substring(dot + 1).toLowerCase());
     }
 
     private JsonNode readJson(String classpathLocation) {

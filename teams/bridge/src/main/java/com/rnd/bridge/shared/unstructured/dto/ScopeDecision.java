@@ -1,4 +1,4 @@
-package com.rnd.bridge.intake.unstructured.dto;
+package com.rnd.bridge.shared.unstructured.dto;
 
 public enum ScopeDecision {
     INCLUDED,

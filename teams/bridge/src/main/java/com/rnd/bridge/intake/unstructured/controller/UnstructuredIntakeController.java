@@ -1,8 +1,8 @@
 package com.rnd.bridge.intake.unstructured.controller;
 
-import com.rnd.bridge.intake.unstructured.dto.RawObjectEvent;
-import com.rnd.bridge.intake.unstructured.dto.SourceType;
 import com.rnd.bridge.intake.unstructured.service.UnstructuredIntakeService;
+import com.rnd.bridge.shared.unstructured.dto.RawObjectEvent;
+import com.rnd.bridge.shared.unstructured.dto.SourceType;
 import java.util.List;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;

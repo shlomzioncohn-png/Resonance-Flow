@@ -1,23 +1,27 @@
 package com.rnd.bridge.intake.unstructured.service;
 
-import com.rnd.bridge.intake.unstructured.dto.Modality;
-import com.rnd.bridge.intake.unstructured.dto.RawObjectEvent;
-import com.rnd.bridge.intake.unstructured.dto.ScopeDecision;
 import com.rnd.bridge.intake.unstructured.dto.SourceRecord;
-import com.rnd.bridge.intake.unstructured.dto.SourceType;
 import com.rnd.bridge.intake.unstructured.service.MinioLandingService.LandingResult;
+import com.rnd.bridge.shared.unstructured.dto.Modality;
+import com.rnd.bridge.shared.unstructured.dto.RawObjectEvent;
+import com.rnd.bridge.shared.unstructured.dto.ScopeDecision;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.time.Instant;
-import java.util.UUID;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.stereotype.Service;
 
 /**
- * Publishes RawObjectEvent to bridge.raw.landed. dedupKey format ("sha256:<64 hex>") and
- * modality derivation follow the official schema exactly — see plan.md's schema update.
+ * Publishes RawObjectEvent to bridge.raw.landed. contentHash is a real SHA-256 of the raw
+ * landed bytes (schema format "sha256:<64 hex>") — identical content always hashes the
+ * same, regardless of when/how it was published. modality is a routing hint for an
+ * attached file's AI engine (ASR for audio, OCR for scanned docs/images), derived from
+ * SourceRecord.mimeType — which is only set when the record actually has an attachment
+ * (an email/WhatsApp attachment, or a Drive file's own type); null (no hint) for plain
+ * text. Not Drive-specific: an audio voice note on WhatsApp gets AUDIO exactly the same
+ * way a Drive audio file would.
  */
 @Service
 public class PointerEventPublisher {
@@ -36,9 +40,8 @@ public class PointerEventPublisher {
             String objectKey,
             SourceRecord record,
             ScopeDecision scopeDecision,
-            LandingResult landingResult,
-            UUID traceId) {
-        String dedupKey = computeDedupKey(record);
+            LandingResult landingResult) {
+        String contentHash = computeContentHash(record);
         Modality modality = deriveModality(record);
 
         RawObjectEvent event = RawObjectEvent.create(
@@ -47,22 +50,22 @@ public class PointerEventPublisher {
                 record.tenantId(),
                 Instant.now(),
                 scopeDecision,
-                dedupKey,
+                contentHash,
                 modality,
-                traceId,
+                record.participants(),
                 landingResult.contentType(),
                 landingResult.sizeBytes(),
                 record.occurredAt());
 
-        kafkaTemplate.send(topic, dedupKey, event);
+        kafkaTemplate.send(topic, contentHash, event);
         return event;
     }
 
-    private String computeDedupKey(SourceRecord record) {
-        String input = record.sourceType().name() + "|" + record.tenantId() + "|" + record.naturalId();
+    private String computeContentHash(SourceRecord record) {
+        byte[] content = record.rawContent().getBytes(StandardCharsets.UTF_8);
         try {
             MessageDigest digest = MessageDigest.getInstance("SHA-256");
-            byte[] hash = digest.digest(input.getBytes(StandardCharsets.UTF_8));
+            byte[] hash = digest.digest(content);
             StringBuilder hex = new StringBuilder("sha256:");
             for (byte b : hash) {
                 hex.append(String.format("%02x", b));
@@ -74,13 +77,16 @@ public class PointerEventPublisher {
     }
 
     private Modality deriveModality(SourceRecord record) {
-        if (record.sourceType() != SourceType.DRIVE_DOC) {
-            return Modality.TEXT;
-        }
         String mimeType = record.mimeType();
-        if (mimeType != null && mimeType.startsWith("image/")) {
-            return Modality.IMAGE;
+        if (mimeType == null) {
+            return null;
         }
-        return Modality.DOCUMENT;
+        if (mimeType.startsWith("audio/")) {
+            return Modality.AUDIO;
+        }
+        if (mimeType.startsWith("image/") || mimeType.equals("application/pdf")) {
+            return Modality.SCANNED_DOC;
+        }
+        return null;
     }
 }

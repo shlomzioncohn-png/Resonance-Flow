@@ -20,8 +20,10 @@ public class ObjectKeyBuilder {
     public String build(SourceRecord record) {
         String date = DATE_FORMAT.format(record.occurredAt());
         String extension = switch (record.sourceType()) {
-            case EMAIL, DRIVE_DOC, CALENDAR -> "json";
+            case EMAIL, DRIVE, CALENDAR -> "json";
             case SLACK, WHATSAPP -> "txt";
+            case MEETING -> throw new IllegalArgumentException(
+                    record.sourceType() + " is produced by the meeting/doc/audio lane, not this one");
         };
         return "%s/%s/%s/%s.%s".formatted(
                 record.sourceType().name(), record.tenantId(), date, UUID.randomUUID(), extension);

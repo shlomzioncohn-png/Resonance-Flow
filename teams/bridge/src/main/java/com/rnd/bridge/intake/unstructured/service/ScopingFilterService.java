@@ -1,7 +1,7 @@
 package com.rnd.bridge.intake.unstructured.service;
 
-import com.rnd.bridge.intake.unstructured.dto.ScopeDecision;
 import com.rnd.bridge.intake.unstructured.dto.SourceRecord;
+import com.rnd.bridge.shared.unstructured.dto.ScopeDecision;
 import org.springframework.stereotype.Service;
 
 /**
