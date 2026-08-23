@@ -91,8 +91,10 @@ the table in `errors.py` and to this table in the same change.
 
 ## API versioning plan
 
-No version prefix exists yet — today's only route (`/health`) is
-unversioned because there is nothing to break yet.
+Today's only route (`/health`) is unversioned because there is nothing to
+break yet. An empty `/v1` router is already mounted in `main.py`
+(`v1_router = APIRouter(prefix="/v1")`, included into `app`) so the first
+business endpoint just needs to be added to it — no wiring left to do.
 
 Plan, to apply starting with the first business endpoint (search/scoring
 in Phase 2):
@@ -117,10 +119,10 @@ in Phase 2):
    taking an old version away. Exact notice window is TBD with the other
    teams — track it here once agreed. The old version keeps working
    until the window closes.
-6. **Implementation:** mount versioned routes with a FastAPI
-   `APIRouter(prefix="/v1")` included into `app` in `main.py` — one
-   router per version, so an old and a new version can run side by side
-   during a deprecation window.
+6. **Implementation:** `v1_router = APIRouter(prefix="/v1")` is already
+   mounted into `app` in `main.py`. When `/v2` is needed, add a second
+   router the same way — one router per version, so an old and a new
+   version can run side by side during a deprecation window.
 
 ## Open decisions this document will need updating for
 

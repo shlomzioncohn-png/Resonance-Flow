@@ -12,7 +12,7 @@ from __future__ import annotations
 import time
 import uuid
 
-from fastapi import FastAPI, Request
+from fastapi import APIRouter, FastAPI, Request
 
 from mind import __version__
 from mind.contracts.errors import register_error_handlers
@@ -20,6 +20,13 @@ from mind.contracts.errors import register_error_handlers
 app = FastAPI(title="MIND API", version=__version__)
 
 register_error_handlers(app)
+
+# Versioned-route scaffold -- see docs/API.md "API versioning plan". Empty
+# until Phase 2's first business endpoint (search/score) lands; /health
+# stays outside it deliberately (unversioned, see the route below). Add
+# new business routes to this router, not directly to `app`.
+v1_router = APIRouter(prefix="/v1")
+app.include_router(v1_router)
 
 _START_TIME = time.time()
 
