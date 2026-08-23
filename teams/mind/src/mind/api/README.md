@@ -12,3 +12,7 @@ Relay's liveness monitoring. Every route here uses the standard error
 format from `contracts/errors.py`. Full contract (endpoints, error
 format, versioning plan) is documented in `docs/API.md` — that's the
 document to share with other teams, not this README.
+
+`v1/` holds `/v1`-prefixed business routes (search/score once Phase 2
+lands) — see `v1/README.md`. `/health` deliberately stays here in
+`main.py`, outside `v1/`: infrastructure endpoints aren't versioned.
