@@ -1,0 +1,56 @@
+spring:
+  application:
+    name: gateway
+  profiles:
+    active: ${SPRING_PROFILES_ACTIVE:local}
+  cloud:
+    gateway:
+      routes:
+        # Route to Bridge service
+        - id: bridge
+          uri: http://bridge:8080
+          predicates:
+            - Path=/api/bridge/**
+          filters:
+            - StripPrefix=2
+        
+        # Route to Mind service
+        - id: mind
+          uri: http://mind:8080
+          predicates:
+            - Path=/api/mind/**
+          filters:
+            - StripPrefix=2
+        
+        # Route to Inbox service
+        - id: inbox
+          uri: http://inbox:8080
+          predicates:
+            - Path=/api/inbox/**
+          filters:
+            - StripPrefix=2
+        
+        # Route to Chain service
+        - id: chain
+          uri: http://chain:8080
+          predicates:
+            - Path=/api/chain/**
+          filters:
+            - StripPrefix=2
+      
+      # Global CORS configuration
+      globalcors:
+        corsConfigurations:
+          '[/**]':
+            allowedOrigins: "*"
+            allowedMethods: "*"
+            allowedHeaders: "*"
+
+server:
+  port: ${SERVER_PORT:8080}
+
+logging:
+  level:
+    root: INFO
+    com.rnd.gateway: DEBUG
+    org.springframework.cloud.gateway: DEBUG
