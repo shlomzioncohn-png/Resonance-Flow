@@ -49,6 +49,17 @@ spring:
 server:
   port: ${SERVER_PORT:8080}
 
+# Service URLs for health checks
+services:
+  bridge:
+    url: ${BRIDGE_URL:http://bridge:8080}
+  mind:
+    url: ${MIND_URL:http://mind:8080}
+  inbox:
+    url: ${INBOX_URL:http://inbox:8080}
+  chain:
+    url: ${CHAIN_URL:http://chain:8080}
+
 logging:
   level:
     root: INFO
