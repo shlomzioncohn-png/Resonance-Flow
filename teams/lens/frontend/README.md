@@ -14,14 +14,24 @@ using Material UI (MUI).
 ## Project structure
 
 ```
-app/                 Next.js routes and global styles
-components/          Shared UI components
-features/            Feature-specific modules
-services/             API/service integrations
-tests/                Test documentation and future tests
-Dockerfile            Production container image
-docker-compose.yml    Local container orchestration
+app/                        Next.js routes, layouts, global styles, MUI theme
+  (app)/                      Routes wrapped in the App Shell (Header + Sidebar)
+  (public)/                   Routes with no shell (/login, /unauthorized)
+components/
+  layout/                     AppShell, Header, Sidebar, PageContainer, Logo
+  feedback/                   LoadingState, EmptyState, ErrorState
+  ui/                          (reserved for shared, non-layout UI components)
+mocks/                       Mock data adapters used until real APIs exist
+docs/                        Architecture docs (see below)
+features/, services/,       Reserved for upcoming feature work — not used yet
+hooks/, config/,
+types/, utils/, tests/
+Dockerfile                  Production container image
+docker-compose.yml          Local container orchestration
 ```
+
+See [docs/app-shell-and-routing.md](docs/app-shell-and-routing.md) for the
+routing structure, the App Shell components, and how to add a new page.
 
 ## Run locally
 
