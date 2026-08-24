@@ -1,26 +1,26 @@
 # LENS Frontend
 
-Frontend foundation for the LENS team in Resonance Flow. The application is a React and Vite
-frontend that is served as a static site behind Nginx when running with Docker.
+Frontend foundation for the LENS team in Resonance Flow. This is a React and Next.js application
+using Material UI (MUI).
 
 ## Stack
 
 - React
 - TypeScript
-- Vite
+- Next.js
+- Material UI (MUI)
 - Docker and Docker Compose
 
 ## Project structure
 
 ```
-src/                 Application entry point and styles
+app/                 Next.js routes and global styles
 components/          Shared UI components
 features/            Feature-specific modules
 services/             API/service integrations
 tests/                Test documentation and future tests
 Dockerfile            Production container image
 docker-compose.yml    Local container orchestration
-nginx.conf            Nginx static-site configuration
 ```
 
 ## Run locally
@@ -32,7 +32,7 @@ npm ci
 npm run dev
 ```
 
-The development server is available at http://localhost:5173.
+The development server is available at http://localhost:3000.
 
 To create a production build:
 
@@ -48,7 +48,7 @@ Build and start the frontend:
 docker compose up --build
 ```
 
-The application is available at http://localhost:5173. To use another host port, set
+The application is available at http://localhost:3000. To use another host port, set
 `FRONTEND_PORT`:
 
 ```bash
