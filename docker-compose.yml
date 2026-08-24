@@ -1,0 +1,114 @@
+services:
+  # API Gateway - orchestrates requests to all downstream services
+  gateway:
+    build:
+      context: ./teams/lens/gateway
+      dockerfile: Dockerfile
+    container_name: gateway-service
+    ports:
+      - "${GATEWAY_PORT:-8080}:8080"
+    environment:
+      - SERVER_PORT=8080
+      - SPRING_PROFILES_ACTIVE=${SPRING_PROFILES_ACTIVE:-local}
+      - BRIDGE_URL=http://bridge-service:8080
+      - MIND_URL=http://mind-service:8080
+      - INBOX_URL=http://inbox-service:8080
+      - CHAIN_URL=http://chain-service:8080
+    depends_on:
+      - bridge
+      - mind
+      - inbox
+      - chain
+    networks:
+      - resonance-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+
+  # Bridge Service - handles bridge-related operations
+  bridge:
+    build:
+      context: ./teams/bridge
+      dockerfile: Dockerfile
+    container_name: bridge-service
+    ports:
+      - "${BRIDGE_PORT:-8081}:8080"
+    environment:
+      - SERVER_PORT=8080
+      - SPRING_PROFILES_ACTIVE=${SPRING_PROFILES_ACTIVE:-local}
+    networks:
+      - resonance-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+
+  # Mind Service - handles AI/ML operations
+  mind:
+    build:
+      context: ./teams/mind
+      dockerfile: Dockerfile
+    container_name: mind-service
+    ports:
+      - "${MIND_PORT:-8082}:8080"
+    environment:
+      - SERVER_PORT=8080
+      - SPRING_PROFILES_ACTIVE=${SPRING_PROFILES_ACTIVE:-local}
+    networks:
+      - resonance-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+
+  # Inbox Service - handles inbox/notification operations
+  inbox:
+    build:
+      context: ./teams/inbox
+      dockerfile: Dockerfile
+    container_name: inbox-service
+    ports:
+      - "${INBOX_PORT:-8083}:8080"
+    environment:
+      - SERVER_PORT=8080
+      - SPRING_PROFILES_ACTIVE=${SPRING_PROFILES_ACTIVE:-local}
+    networks:
+      - resonance-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+
+  # Chain Service - handles workflow chain operations
+  chain:
+    build:
+      context: ./teams/chain
+      dockerfile: Dockerfile
+    container_name: chain-service
+    ports:
+      - "${CHAIN_PORT:-8084}:8080"
+    environment:
+      - SERVER_PORT=8080
+      - SPRING_PROFILES_ACTIVE=${SPRING_PROFILES_ACTIVE:-local}
+    networks:
+      - resonance-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+
+# Shared network for inter-service communication
+networks:
+  resonance-network:
+    driver: bridge
