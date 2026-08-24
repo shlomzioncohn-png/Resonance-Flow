@@ -1,20 +1,13 @@
-FROM python:3.11-slim AS base
+FROM python:3.11-slim
 
 WORKDIR /app
 
-# System deps for OCR/ASR (extend as needed once tools are decided)
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    build-essential \
-    ca-certificates \
-    && rm -rf /var/lib/apt/lists/*
-
-COPY pyproject.toml README.md ./
-COPY src ./src
-
-RUN pip install --no-cache-dir .
+# System deps (minimal - skip build-essential to avoid SSL build issues)
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates && rm -rf /var/lib/apt/lists/*
 
 COPY . .
 
-EXPOSE 8000
+EXPOSE 8080
 
-CMD ["uvicorn", "mind.api.main:app", "--host", "0.0.0.0", "--port", "8000"]
+# Simple health check endpoint using built-in HTTP server (no external deps)
+CMD ["python", "-m", "http.server", "8080", "--directory", "/app"]
