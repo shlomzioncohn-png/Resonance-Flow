@@ -39,13 +39,19 @@ This service acts as the first interface, handling:
    - New team members can add routes via configuration
    - Clear separation of concerns
 
+## Important Documents
+
+**Before integrating other services, read:**
+- [GATEWAY_CONTRACT.md](./GATEWAY_CONTRACT.md) - Technical contract and API specification
+- [INTEGRATION_GUIDE.md](./INTEGRATION_GUIDE.md) - How your service integrates with Gateway
+
 ## Stack
 
 - Java 21
-- Spring Boot 3.3.13
+- Spring Boot 3.4.0
 - Spring Cloud Gateway 2024.0.0
 - Spring Security (for authentication & authorization)
-- JWT for token-based authentication
+- JWT for token-based authentication (Phase 2)
 - Docker / Docker Compose
 
 ## Project structure

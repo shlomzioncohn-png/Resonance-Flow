@@ -53,4 +53,7 @@ logging:
   level:
     root: INFO
     com.rnd.gateway: DEBUG
+    com.rnd.gateway.exception: DEBUG
+    com.rnd.gateway.dto: DEBUG
     org.springframework.cloud.gateway: DEBUG
+    org.springframework.security: DEBUG
