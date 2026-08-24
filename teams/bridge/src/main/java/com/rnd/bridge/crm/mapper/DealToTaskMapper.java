@@ -7,6 +7,7 @@ import com.rnd.bridge.dto.RoleContext;
 import com.rnd.bridge.dto.SourceType;
 import com.rnd.bridge.dto.Task;
 import com.rnd.bridge.dto.TaskStatus;
+import com.rnd.bridge.dto.TaskValidator;
 import com.rnd.bridge.dto.Tier;
 
 import java.time.Instant;
@@ -32,11 +33,13 @@ public final class DealToTaskMapper {
     public static TaskStatus toTaskStatus(DealStage stage) {
         return switch (stage) {
             case PROSPECT, QUALIFIED, PROPOSAL, NEGOTIATION -> TaskStatus.NEW;
-            // Inbox requires snoozed_until whenever status = SNOOZED, but a
-            // Deal carries no resume date (closeDate is a target close date,
-            // not a snooze-until date). Open question for Inbox: what
-            // populates snoozed_until for an ON_HOLD deal? Not inventing one.
-            case ON_HOLD -> TaskStatus.SNOOZED;
+            // Not SNOOZED: Inbox requires snoozed_until whenever
+            // status = snoozed, and a Deal carries no resume date
+            // (closeDate is a target close date, not a snooze-until date).
+            // Fabricating one is forbidden, so the task stays NEW and
+            // toUrgency() holds it at urgency 1 instead of hiding it in a
+            // snoozed queue with a made-up wake time.
+            case ON_HOLD -> TaskStatus.NEW;
             case CLOSED_WON -> TaskStatus.DONE;
             case CLOSED_LOST -> TaskStatus.CANCELLED;
         };
@@ -50,8 +53,12 @@ public final class DealToTaskMapper {
         Objects.requireNonNull(deal, "deal must not be null");
         Objects.requireNonNull(asOf, "asOf must not be null");
 
-        return new Task(
-                null, // organizationId - no source in Deal; open question for Inbox, not inventing one
+        // TODO(organization_id): Inbox's tasks.organization_id is NOT NULL,
+        // but Deal carries no tenant identifier and the shared Task DTO has
+        // no tenantId field to stage one in. Cross-team contract gap awaiting
+        // a decision - do not default or invent a value here.
+        Task task = new Task(
+                null, // organizationId - see TODO above
                 null, // projectId - no source in Deal
                 deal.title(),
                 deal.description(),
@@ -65,7 +72,10 @@ public final class DealToTaskMapper {
                 toSourceRef(deal),
                 null, // estimatedDurationMinutes - a CRM deal carries no effort signal
                 toDeadline(deal.closeDate()),
-                null); // snoozedUntil - no source in Deal; open question for Inbox, not inventing one
+                null); // snoozedUntil - never SNOOZED on this lane, so never populated
+
+        TaskValidator.validate(task);
+        return task;
     }
 
     /**

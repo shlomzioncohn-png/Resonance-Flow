@@ -55,7 +55,7 @@ class DealToTaskMapperTest {
             "QUALIFIED,   NEW",
             "PROPOSAL,    NEW",
             "NEGOTIATION, NEW",
-            "ON_HOLD,     SNOOZED",
+            "ON_HOLD,     NEW",
             "CLOSED_WON,  DONE",
             "CLOSED_LOST, CANCELLED"
     })
@@ -250,5 +250,94 @@ class DealToTaskMapperTest {
 
         assertThrows(NullPointerException.class, () -> DealToTaskMapper.toTask(null, AS_OF));
         assertThrows(NullPointerException.class, () -> DealToTaskMapper.toTask(deal, null));
+    }
+
+    @Test
+    void onHoldMapsToNewNotSnoozedAndNeverSetsSnoozedUntil() {
+        Deal deal = Deal.builder()
+                .dealId("D-90004")
+                .title("Paused deal")
+                .stage(DealStage.ON_HOLD)
+                .closeDate(LocalDate.of(2026, 9, 1))
+                .stageChangedAt(Instant.parse("2026-08-20T00:00:00Z"))
+                .build();
+
+        Task task = DealToTaskMapper.toTask(deal, AS_OF);
+
+        assertEquals(TaskStatus.NEW, task.status());
+        assertNull(task.snoozedUntil());
+    }
+
+    @Test
+    void onHoldProducesUrgencyOne() {
+        Deal deal = Deal.builder()
+                .dealId("D-90005")
+                .title("Paused deal, close date very soon")
+                .stage(DealStage.ON_HOLD)
+                .closeDate(AS_OF.atZone(ZoneOffset.UTC).toLocalDate()) // would earn max bonus if it were an open stage
+                .stageChangedAt(Instant.parse("2026-08-20T00:00:00Z"))
+                .build();
+
+        assertEquals(1, DealToTaskMapper.toUrgency(deal, AS_OF));
+    }
+
+    @Test
+    void closedLostMapsToCancelled() {
+        Deal deal = Deal.builder()
+                .dealId("D-90006")
+                .title("Lost deal")
+                .stage(DealStage.CLOSED_LOST)
+                .closeDate(LocalDate.of(2026, 8, 1))
+                .stageChangedAt(Instant.parse("2026-08-01T00:00:00Z"))
+                .build();
+
+        Task task = DealToTaskMapper.toTask(deal, AS_OF);
+
+        assertEquals(TaskStatus.CANCELLED, task.status());
+    }
+
+    @Test
+    void urgencyStaysClampedAtFiveWhenBonusWouldPushHigher() {
+        Deal deal = Deal.builder()
+                .dealId("D-90007")
+                .title("Negotiation closing today")
+                .stage(DealStage.NEGOTIATION) // base 4
+                .closeDate(AS_OF.atZone(ZoneOffset.UTC).toLocalDate()) // 0 days out -> +2 bonus, would be 6
+                .stageChangedAt(Instant.parse("2026-08-20T00:00:00Z"))
+                .build();
+
+        assertEquals(5, DealToTaskMapper.toUrgency(deal, AS_OF));
+    }
+
+    @Test
+    void nullCloseDateProducesNoDeadlineAndDoesNotThrow() {
+        Deal deal = Deal.builder()
+                .dealId("D-90008")
+                .title("No close date")
+                .stage(DealStage.QUALIFIED)
+                .closeDate(null)
+                .stageChangedAt(Instant.parse("2026-08-20T00:00:00Z"))
+                .build();
+
+        Task task = DealToTaskMapper.toTask(deal, AS_OF);
+
+        assertNull(task.deadline());
+    }
+
+    @Test
+    void dayBoundaryCaseUsesAsOfDateNotAsOfTimeOfDay() {
+        // Deal closes "today" per the pinned as_of date, but as_of itself is
+        // well after midnight - daysToClose must still resolve to 0 (date
+        // arithmetic, not instant arithmetic), giving the max bonus.
+        Instant asOfAfterMidnight = Instant.parse("2026-08-23T15:45:00Z");
+        Deal deal = Deal.builder()
+                .dealId("D-90009")
+                .title("Closing today, evaluated later in the day")
+                .stage(DealStage.NEGOTIATION) // base 4
+                .closeDate(LocalDate.of(2026, 8, 23))
+                .stageChangedAt(Instant.parse("2026-08-20T00:00:00Z"))
+                .build();
+
+        assertEquals(5, DealToTaskMapper.toUrgency(deal, asOfAfterMidnight)); // 4 + 2, clamped to 5
     }
 }
