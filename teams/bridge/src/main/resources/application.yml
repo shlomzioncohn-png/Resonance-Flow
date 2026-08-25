@@ -5,7 +5,11 @@ spring:
   application:
     name: bridge
   kafka:
+    # Team shared / remote environment (do not use unless agreed):
+    #   bootstrap-servers: 3.216.80.66:9092
+    #   topic: bridge.github.tasks
     bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+    topic: bridge.test.hadas
     producer:
       key-serializer: org.apache.kafka.common.serialization.StringSerializer
       value-serializer: org.springframework.kafka.support.serializer.JsonSerializer
