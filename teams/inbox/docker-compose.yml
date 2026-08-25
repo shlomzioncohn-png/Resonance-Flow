@@ -13,11 +13,12 @@ services:
       - DB_USER=${DB_USER:-postgres}
       - DB_PASSWORD=${DB_PASSWORD:-postgres}
       - DB_MIGRATIONS_LOCATION=filesystem:/flyway/migrations
+      - KAFKA_BOOTSTRAP_SERVERS=kafka:29092
+
     volumes:
       - ../../shared/database/migrations:/flyway/migrations:ro
     extra_hosts:
       - "host.docker.internal:host-gateway"
-      - KAFKA_BOOTSTRAP_SERVERS=kafka:29092
     depends_on:
       kafka:
         condition: service_healthy
