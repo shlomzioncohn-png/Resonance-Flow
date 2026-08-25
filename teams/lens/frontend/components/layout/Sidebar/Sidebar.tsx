@@ -11,6 +11,7 @@ import Typography from '@mui/material/Typography'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import Logo from '../Logo'
+import { useRole } from '../RoleProvider'
 import { navSections } from './navConfig'
 
 export const SIDEBAR_WIDTH = 260
@@ -29,6 +30,14 @@ export interface SidebarProps {
 
 export default function Sidebar({ open, onClose, variant }: SidebarProps) {
   const pathname = usePathname()
+  const { role } = useRole()
+
+  const visibleSections =
+    role === 'manager'
+      ? navSections.filter((section) => section.label !== 'Employee')
+      : role === 'employee'
+        ? navSections.filter((section) => section.label === 'Employee')
+        : navSections
 
   const content = (
     <Box
@@ -47,7 +56,7 @@ export default function Sidebar({ open, onClose, variant }: SidebarProps) {
       </Toolbar>
 
       <Box sx={{ flexGrow: 1, overflowY: 'auto', px: 1.5, pb: 2 }}>
-        {navSections.map((section, index) => (
+        {visibleSections.map((section, index) => (
           <Box key={section.label} sx={{ mt: index === 0 ? 0.5 : 2.5 }}>
             <Typography
               variant="caption"

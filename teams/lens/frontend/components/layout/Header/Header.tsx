@@ -9,16 +9,26 @@ import Stack from '@mui/material/Stack'
 import Toolbar from '@mui/material/Toolbar'
 import Tooltip from '@mui/material/Tooltip'
 import Typography from '@mui/material/Typography'
+import Link from 'next/link'
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore'
 import MenuIcon from '@mui/icons-material/Menu'
 import NotificationsNoneOutlinedIcon from '@mui/icons-material/NotificationsNoneOutlined'
 import SearchIcon from '@mui/icons-material/Search'
+import { useRole } from '../RoleProvider'
 
 export interface HeaderProps {
   onMenuClick: () => void
 }
 
+const ROLE_DISPLAY = {
+  manager: { initials: 'MG', title: 'Manager' },
+  employee: { initials: 'EM', title: 'Employee' },
+} as const
+
 export default function Header({ onMenuClick }: HeaderProps) {
+  const { role } = useRole()
+  const display = role ? ROLE_DISPLAY[role] : { initials: 'LN', title: 'Guest user' }
+
   return (
     <AppBar position="sticky" elevation={0}>
       <Toolbar sx={{ gap: 1.5 }}>
@@ -62,15 +72,23 @@ export default function Header({ onMenuClick }: HeaderProps) {
           </IconButton>
         </Tooltip>
 
-        <Tooltip title="Signed-in user placeholder — authentication is not implemented yet">
-          <Stack direction="row" spacing={1} sx={{ alignItems: 'center', pl: 0.5, cursor: 'default' }}>
-            <Avatar sx={{ width: 32, height: 32, bgcolor: 'primary.main', fontSize: 14 }}>LN</Avatar>
+        <Tooltip title="Switch role — authentication is not implemented yet">
+          <Stack
+            component={Link}
+            href="/login"
+            direction="row"
+            spacing={1}
+            sx={{ alignItems: 'center', pl: 0.5, textDecoration: 'none', color: 'inherit' }}
+          >
+            <Avatar sx={{ width: 32, height: 32, bgcolor: 'primary.main', fontSize: 14 }}>
+              {display.initials}
+            </Avatar>
             <Box sx={{ display: { xs: 'none', sm: 'block' } }}>
               <Typography variant="body2" sx={{ fontWeight: 600, lineHeight: 1.2 }}>
-                Guest user
+                {display.title}
               </Typography>
               <Typography variant="caption" color="text.secondary">
-                No role assigned
+                {role ? 'Switch role' : 'No role assigned'}
               </Typography>
             </Box>
             <ExpandMoreIcon
