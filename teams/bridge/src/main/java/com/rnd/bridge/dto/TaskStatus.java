@@ -1,7 +1,12 @@
 package com.rnd.bridge.dto;
 
 public enum TaskStatus {
-    OPEN,
-    CLOSED,
-    IN_PROGRESS
+    NEW,
+    IN_REVIEW,
+    APPROVED,
+    IN_PROGRESS,
+    SNOOZED,
+    DONE,
+    REJECTED,
+    CANCELLED
 }

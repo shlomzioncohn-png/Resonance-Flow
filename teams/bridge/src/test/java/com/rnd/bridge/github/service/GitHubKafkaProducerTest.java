@@ -1,8 +1,10 @@
 package com.rnd.bridge.github.service;
 
+import com.rnd.bridge.dto.ExtractionProvenance;
 import com.rnd.bridge.dto.SourceType;
 import com.rnd.bridge.dto.Task;
 import com.rnd.bridge.dto.TaskStatus;
+import com.rnd.bridge.dto.Tier;
 import org.apache.kafka.clients.producer.ProducerRecord;
 import org.apache.kafka.clients.producer.RecordMetadata;
 import org.apache.kafka.common.TopicPartition;
@@ -52,39 +54,34 @@ class GitHubKafkaProducerTest {
         verify(kafkaTemplate).send(topicCaptor.capture(), keyCaptor.capture(), taskCaptor.capture());
 
         assertThat(topicCaptor.getValue()).isEqualTo(GitHubKafkaProducer.TOPIC);
-        assertThat(keyCaptor.getValue()).isEqualTo("github:repo:issue:1");
+        assertThat(keyCaptor.getValue()).isEqualTo(task.sourceRef());
         assertThat(taskCaptor.getValue()).isEqualTo(task);
     }
 
     @Test
-    void publish_shouldThrowExceptionWhenTaskIdIsNull() {
-        Task task = new Task();
-        task.setTitle("No ID task");
+    void publish_shouldThrowExceptionWhenSourceRefIsNull() {
+        Task task = new Task(null, null, "No sourceRef task", null, TaskStatus.NEW, null, null,
+                Tier.TACTICAL, ExtractionProvenance.ETL, null, SourceType.GITHUB_ISSUE, null, null, null, null);
 
         assertThatThrownBy(() -> gitHubKafkaProducer.publish(task))
                 .isInstanceOf(IllegalArgumentException.class)
-                .hasMessage("Task and task.id must not be null");
+                .hasMessage("Task and sourceRef must not be null");
     }
 
     @Test
     void publish_shouldThrowExceptionWhenTaskIsNull() {
         assertThatThrownBy(() -> gitHubKafkaProducer.publish(null))
                 .isInstanceOf(IllegalArgumentException.class)
-                .hasMessage("Task and task.id must not be null");
+                .hasMessage("Task and sourceRef must not be null");
     }
 
-    private Task createTask(String id) {
-        Task task = new Task();
-        task.setId(id);
-        task.setTitle("Test Task");
-        task.setDescription("Test description");
-        task.setSourceType(SourceType.GITHUB);
-        task.setStatus(TaskStatus.OPEN);
-        return task;
+    private Task createTask(String sourceRef) {
+        return new Task(null, null, "Test Task", "Test description", TaskStatus.NEW, null, null,
+                Tier.TACTICAL, ExtractionProvenance.ETL, null, SourceType.GITHUB_ISSUE, sourceRef, null, null, null);
     }
 
     private SendResult<String, Task> createSendResult(Task task) {
-        ProducerRecord<String, Task> record = new ProducerRecord<>(GitHubKafkaProducer.TOPIC, task.getId(), task);
+        ProducerRecord<String, Task> record = new ProducerRecord<>(GitHubKafkaProducer.TOPIC, task.sourceRef(), task);
         RecordMetadata metadata = new RecordMetadata(new TopicPartition(GitHubKafkaProducer.TOPIC, 0), 0, 0, 0, 0, 0);
         return new SendResult<>(record, metadata);
     }

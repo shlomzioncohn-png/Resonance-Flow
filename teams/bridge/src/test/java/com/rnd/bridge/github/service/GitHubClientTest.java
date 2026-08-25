@@ -6,6 +6,7 @@ import com.rnd.bridge.dto.SourceType;
 import com.rnd.bridge.dto.Task;
 import com.rnd.bridge.dto.TaskStatus;
 import com.rnd.bridge.dto.ExtractionProvenance;
+import com.rnd.bridge.dto.Tier;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -57,14 +58,13 @@ class GitHubClientTest {
 
         assertThat(tasks).hasSize(1);
         Task task = tasks.get(0);
-        assertThat(task.getId()).isEqualTo("github:repo:issue:1");
-        assertThat(task.getTitle()).isEqualTo("Test Issue");
-        assertThat(task.getDescription()).isEqualTo("Issue body");
-        assertThat(task.getSourceType()).isEqualTo(SourceType.GITHUB);
-        assertThat(task.getSourceRef()).isEqualTo("https://github.com/owner/repo/issues/1");
-        assertThat(task.getOwner()).isEqualTo("testuser");
-        assertThat(task.getStatus()).isEqualTo(TaskStatus.OPEN);
-        assertThat(task.getExtractionProvenance()).isEqualTo(ExtractionProvenance.API);
+        assertThat(task.sourceRef()).isEqualTo("https://github.com/owner/repo/issues/1");
+        assertThat(task.title()).isEqualTo("Test Issue");
+        assertThat(task.description()).isEqualTo("Issue body");
+        assertThat(task.sourceType()).isEqualTo(SourceType.GITHUB_ISSUE);
+        assertThat(task.status()).isEqualTo(TaskStatus.NEW);
+        assertThat(task.extractionProvenance()).isEqualTo(ExtractionProvenance.ETL);
+        assertThat(task.tier()).isEqualTo(Tier.TACTICAL);
     }
 
     @Test
@@ -76,14 +76,13 @@ class GitHubClientTest {
 
         assertThat(tasks).hasSize(1);
         Task task = tasks.get(0);
-        assertThat(task.getId()).isEqualTo("github:repo:pr:42");
-        assertThat(task.getTitle()).isEqualTo("Test PR");
-        assertThat(task.getDescription()).isEqualTo("PR body");
-        assertThat(task.getSourceType()).isEqualTo(SourceType.GITHUB);
-        assertThat(task.getSourceRef()).isEqualTo("https://github.com/owner/repo/pull/42");
-        assertThat(task.getOwner()).isEqualTo("contributor");
-        assertThat(task.getStatus()).isEqualTo(TaskStatus.CLOSED);
-        assertThat(task.getExtractionProvenance()).isEqualTo(ExtractionProvenance.API);
+        assertThat(task.sourceRef()).isEqualTo("https://github.com/owner/repo/pull/42");
+        assertThat(task.title()).isEqualTo("Test PR");
+        assertThat(task.description()).isEqualTo("PR body");
+        assertThat(task.sourceType()).isEqualTo(SourceType.GITHUB_PR);
+        assertThat(task.status()).isEqualTo(TaskStatus.DONE);
+        assertThat(task.extractionProvenance()).isEqualTo(ExtractionProvenance.ETL);
+        assertThat(task.tier()).isEqualTo(Tier.TACTICAL);
     }
 
     private GitHubIssue createGitHubIssue(Long number, String title, String body, String state,

@@ -1,9 +1,11 @@
 package com.rnd.bridge.github.service;
 
 import com.rnd.bridge.dto.Task;
+import com.rnd.bridge.dto.TaskValidator;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.kafka.support.SendResult;
 import org.springframework.stereotype.Service;
@@ -16,7 +18,8 @@ public class GitHubKafkaProducer {
 
     private static final Logger log = LoggerFactory.getLogger(GitHubKafkaProducer.class);
 
-    public static final String TOPIC = "bridge.github.tasks";
+    @Value("${spring.kafka.topic:bridge.github.tasks}")
+        private String TOPIC;
 
     private final KafkaTemplate<String, Task> kafkaTemplate;
 
@@ -26,19 +29,21 @@ public class GitHubKafkaProducer {
     }
 
     public CompletableFuture<SendResult<String, Task>> publish(Task task) {
-        if (task == null || task.getId() == null) {
-            throw new IllegalArgumentException("Task and task.id must not be null");
+        if (task == null || task.sourceRef() == null) {
+            throw new IllegalArgumentException("Task and sourceRef must not be null");
         }
 
-        log.info("Publishing task {} to topic {}", task.getId(), TOPIC);
+        TaskValidator.validate(task);
 
-        CompletableFuture<SendResult<String, Task>> future = kafkaTemplate.send(TOPIC, task.getId(), task);
+        log.info("Publishing task {} to topic {}", task.sourceRef(), TOPIC);
+
+        CompletableFuture<SendResult<String, Task>> future = kafkaTemplate.send(TOPIC, task.sourceRef(), task);
         future.whenComplete((result, ex) -> {
             if (ex != null) {
-                log.error("Failed to publish task {} to topic {}", task.getId(), TOPIC, ex);
+                log.error("Failed to publish task {} to topic {}", task.sourceRef(), TOPIC, ex);
             } else {
                 log.info("Successfully published task {} to topic {} at offset {}",
-                        task.getId(), TOPIC, result.getRecordMetadata().offset());
+                        task.sourceRef(), TOPIC, result.getRecordMetadata().offset());
             }
         });
 

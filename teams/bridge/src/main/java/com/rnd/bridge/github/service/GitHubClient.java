@@ -6,6 +6,7 @@ import com.rnd.bridge.dto.SourceType;
 import com.rnd.bridge.dto.Task;
 import com.rnd.bridge.dto.TaskStatus;
 import com.rnd.bridge.dto.Tier;
+import com.rnd.bridge.dto.TaskValidator;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -16,7 +17,6 @@ import reactor.core.publisher.Flux;
 import reactor.util.retry.Retry;
 
 import java.time.Duration;
-import java.util.List;
 
 @Service
 public class GitHubClient {
@@ -25,7 +25,6 @@ public class GitHubClient {
 
     private final WebClient webClient;
 
-    private String currentRepo;
 
     @Value("${github.target.owner:KamaTechOrg}")
     private String defaultOwner;
@@ -38,7 +37,6 @@ public class GitHubClient {
     }
 
     public Flux<Task> fetchIssues(String owner, String repo) {
-        this.currentRepo = repo;
         String url = String.format("/repos/%s/%s/issues", owner, repo);
         log.info("Fetching issues from GitHub: {}", url);
 
@@ -54,7 +52,6 @@ public class GitHubClient {
     }
 
     public Flux<Task> fetchPullRequests(String owner, String repo) {
-        this.currentRepo = repo;
         String url = String.format("/repos/%s/%s/pulls", owner, repo);
         log.info("Fetching pull requests from GitHub: {}", url);
 
@@ -74,45 +71,43 @@ public class GitHubClient {
     }
 
     public Flux<Task> fetchAllTasks(String owner, String repo) {
-        this.currentRepo = repo;
         return Flux.merge(fetchIssues(owner, repo), fetchPullRequests(owner, repo));
     }
 
     private Task mapToTask(GitHubIssue issue) {
-        String type = issue.getPullRequest() != null ? "pr" : "issue";
-        String id = String.format("github:%s:%s:%d", currentRepo, type, issue.getNumber());
-
+        SourceType sourceType = issue.getPullRequest() != null ? SourceType.GITHUB_PR : SourceType.GITHUB_ISSUE;
         TaskStatus status = mapStatus(issue.getState());
 
-        Task task = new Task();
-        task.setId(id);
-        task.setTitle(issue.getTitle());
-        task.setDescription(issue.getBody());
-        task.setSourceType(SourceType.GITHUB);
-        task.setSourceRef(issue.getHtmlUrl());
-        task.setOwner(issue.getUser() != null ? issue.getUser().getLogin() : null);
-        task.setRoleContext(null);
-        task.setTier(Tier.TIER_2);
-        task.setUrgency(null);
-        task.setEffortEstimateMinutes(null);
-        task.setDeadline(null);
-        task.setParentTaskId(null);
-        task.setDependsOn(List.of());
-        task.setConstraints(List.of());
-        task.setConfidence(null);
-        task.setExtractionProvenance(ExtractionProvenance.API);
-        task.setStatus(status);
+        Task task = new Task(
+                null,
+                null,
+                issue.getTitle(),
+                issue.getBody(),
+                status,
+                null,
+                null,
+                Tier.TACTICAL,
+                ExtractionProvenance.ETL,
+                null,
+                sourceType,
+                issue.getHtmlUrl(),
+                null,
+                null,
+                null
+        );
+
+        TaskValidator.validate(task);
 
         return task;
     }
 
     private TaskStatus mapStatus(String githubState) {
         if (githubState == null) {
-            return TaskStatus.OPEN;
+            return TaskStatus.NEW;
         }
         return switch (githubState.toLowerCase()) {
-            case "open" -> TaskStatus.OPEN;
-            case "closed" -> TaskStatus.CLOSED;
+            case "open" -> TaskStatus.NEW;
+            case "closed" -> TaskStatus.DONE;
             default -> TaskStatus.IN_PROGRESS;
         };
     }
