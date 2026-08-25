@@ -1,5 +1,6 @@
 from mind.evaluation.dummy_model import DummyModel
-from mind.evaluation.harness import PLACEHOLDER_SCENARIOS, Report, run
+from mind.evaluation.harness import Report, run
+from mind.evaluation.placeholder_scenarios import PLACEHOLDER_SCENARIOS
 
 
 def test_run_returns_valid_report():

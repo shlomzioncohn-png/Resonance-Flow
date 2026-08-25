@@ -27,7 +27,7 @@ class RankingModel(Protocol):
 ```
 
 `Task` is a Pydantic model (`interfaces.py`) with these fields: `task_id`, `title`,
-`description`, `deadline`, `estimated_duration_minutes`, `tier`, `blocked`, `dependencies`.
+`description`, `deadline`, `estimated_duration_minutes`, `tier`, `blocked`.
 
 The harness (`harness.py`) calls `score()` once per candidate task in a scenario, and
 builds the ranking itself from the returned scores — a model never ranks a whole
@@ -50,8 +50,8 @@ Replace `dummy` with the name of the model you want to evaluate.
 
 If `--personas` (default `eval/personas`) doesn't point to a directory with a
 `fixtures.py`, the harness falls back to a small internal placeholder scenario set
-(`harness.PLACEHOLDER_SCENARIOS`) so the command still runs end-to-end before the real
-persona set (weeks 2-3) lands.
+(`placeholder_scenarios.PLACEHOLDER_SCENARIOS`) so the command still runs end-to-end
+before the real persona set (weeks 2-3) lands.
 
 ## Metric — temporary, pending mentor approval
 

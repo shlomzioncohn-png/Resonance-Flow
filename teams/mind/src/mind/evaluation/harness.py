@@ -30,6 +30,7 @@ class Report:
 
 def run(model: RankingModel, scenarios: list[dict]) -> Report:
     predictions: list[str] = []
+    evaluated_scenarios: list[dict] = []
     scenario_results: list[ScenarioResult] = []
 
     for scenario in scenarios:
@@ -41,6 +42,7 @@ def run(model: RankingModel, scenarios: list[dict]) -> Report:
         best_task, _ = max(scored, key=lambda pair: pair[1])
 
         predictions.append(best_task.task_id)
+        evaluated_scenarios.append(scenario)
         scenario_results.append(
             ScenarioResult(
                 scenario_id=scenario.get("scenario_id"),
@@ -51,65 +53,13 @@ def run(model: RankingModel, scenarios: list[dict]) -> Report:
             )
         )
 
-    accuracy = top1_accuracy(predictions, scenarios)
+    accuracy = top1_accuracy(predictions, evaluated_scenarios)
 
     return Report(
         model_name=model.__class__.__name__,
-        total_scenarios=len(scenarios),
+        total_scenarios=len(evaluated_scenarios),
         correct_top1=sum(r.passed for r in scenario_results),
         top1_accuracy=accuracy,
         scenario_results=scenario_results,
     )
 
-
-# Placeholder scenarios — replace once the real eval/personas/ set (michal/persona-eval-schema) lands.
-PLACEHOLDER_SCENARIOS: list[dict] = [
-    {
-        "scenario_id": "developer_junior_placeholder_1",
-        "expected_top_task_id": "task_A",
-        "tasks": [
-            {
-                "task_id": "task_A",
-                "title": "Fix failing CI test",
-                "description": "A unit test regressed on main and is blocking every PR.",
-                "estimated_duration_minutes": 15,
-                "tier": "Operational",
-                "blocked": False,
-                "dependencies": [],
-            },
-            {
-                "task_id": "task_B",
-                "title": "Write design doc for Q3 feature",
-                "description": "Draft architecture doc for a feature planned for next quarter.",
-                "estimated_duration_minutes": 120,
-                "tier": "Tactical",
-                "blocked": False,
-                "dependencies": [],
-            },
-        ],
-    },
-    {
-        "scenario_id": "manager_placeholder_1",
-        "expected_top_task_id": "task_C",
-        "tasks": [
-            {
-                "task_id": "task_C",
-                "title": "Unblock teammate waiting on approval",
-                "description": "A PR is stuck waiting for the manager's review, blocking a teammate.",
-                "estimated_duration_minutes": 10,
-                "tier": "Tactical",
-                "blocked": False,
-                "dependencies": [],
-            },
-            {
-                "task_id": "task_D",
-                "title": "Long-term roadmap planning",
-                "description": "Quarterly roadmap planning session prep.",
-                "estimated_duration_minutes": 180,
-                "tier": "Strategic",
-                "blocked": False,
-                "dependencies": [],
-            },
-        ],
-    },
-]

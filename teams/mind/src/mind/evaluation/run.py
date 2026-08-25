@@ -5,7 +5,8 @@ import json
 import os
 
 from mind.evaluation.dummy_model import DummyModel
-from mind.evaluation.harness import PLACEHOLDER_SCENARIOS, run
+from mind.evaluation.harness import run
+from mind.evaluation.placeholder_scenarios import PLACEHOLDER_SCENARIOS
 
 
 def load_scenarios(personas_path: str) -> list[dict]:

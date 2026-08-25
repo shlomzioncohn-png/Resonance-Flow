@@ -18,7 +18,6 @@ class Task(BaseModel):
     estimated_duration_minutes: int
     tier: Literal["Operational", "Tactical", "Strategic"]
     blocked: bool
-    dependencies: list[str] = []
 
 
 @runtime_checkable
