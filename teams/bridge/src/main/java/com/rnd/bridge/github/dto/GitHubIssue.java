@@ -1,4 +1,4 @@
-package com.rnd.bridge.dto;
+package com.rnd.bridge.github.dto;
 
 import java.time.Instant;
 import java.util.Map;

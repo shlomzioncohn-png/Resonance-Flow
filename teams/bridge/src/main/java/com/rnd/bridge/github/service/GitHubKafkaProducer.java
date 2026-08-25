@@ -1,4 +1,4 @@
-package com.rnd.bridge.service;
+package com.rnd.bridge.github.service;
 
 import com.rnd.bridge.dto.Task;
 import org.slf4j.Logger;

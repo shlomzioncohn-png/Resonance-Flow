@@ -1,4 +1,4 @@
-package com.rnd.bridge.dto;
+package com.rnd.bridge.github.dto;
 
 public class GitHubUser {
     private String login;

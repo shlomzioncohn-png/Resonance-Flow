@@ -1,13 +1,14 @@
-package com.rnd.bridge.service;
+package com.rnd.bridge.github.service;
 
 import com.rnd.bridge.dto.ExtractionProvenance;
-import com.rnd.bridge.dto.GitHubIssue;
+import com.rnd.bridge.github.dto.GitHubIssue;
 import com.rnd.bridge.dto.SourceType;
 import com.rnd.bridge.dto.Task;
 import com.rnd.bridge.dto.TaskStatus;
 import com.rnd.bridge.dto.Tier;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.web.reactive.function.client.WebClient;
 import org.springframework.web.reactive.function.client.WebClientResponseException;
@@ -25,6 +26,12 @@ public class GitHubClient {
     private final WebClient webClient;
 
     private String currentRepo;
+
+    @Value("${github.target.owner:KamaTechOrg}")
+    private String defaultOwner;
+
+    @Value("${github.target.repo:Resonance-Flow}")
+    private String defaultRepo;
 
     public GitHubClient(WebClient webClient) {
         this.webClient = webClient;
@@ -60,6 +67,10 @@ public class GitHubClient {
                         .filter(this::isRetryableException)
                         .doBeforeRetry(retrySignal -> log.warn("Retrying GitHub API call, attempt: {}", retrySignal.totalRetries() + 1)))
                 .doOnError(error -> log.error("Failed to fetch pull requests from GitHub", error));
+    }
+
+    public Flux<Task> fetchAllTasks() {
+        return fetchAllTasks(defaultOwner, defaultRepo);
     }
 
     public Flux<Task> fetchAllTasks(String owner, String repo) {

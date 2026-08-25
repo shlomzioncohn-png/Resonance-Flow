@@ -1,4 +1,4 @@
-package com.rnd.bridge.config;
+package com.rnd.bridge.github.config;
 
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;

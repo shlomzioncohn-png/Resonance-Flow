@@ -1,7 +1,7 @@
-package com.rnd.bridge.service;
+package com.rnd.bridge.github.service;
 
-import com.rnd.bridge.dto.GitHubIssue;
-import com.rnd.bridge.dto.GitHubUser;
+import com.rnd.bridge.github.dto.GitHubIssue;
+import com.rnd.bridge.github.dto.GitHubUser;
 import com.rnd.bridge.dto.SourceType;
 import com.rnd.bridge.dto.Task;
 import com.rnd.bridge.dto.TaskStatus;
