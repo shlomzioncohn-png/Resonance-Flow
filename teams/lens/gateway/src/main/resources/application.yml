@@ -6,37 +6,14 @@ spring:
   cloud:
     gateway:
       routes:
-        # Route to Bridge service
-        - id: bridge
-          uri: http://bridge-service:8080
+        # Route to BFF (Backend for Frontend)
+        # BFF is responsible for all downstream team communication
+        - id: bff
+          uri: http://bff-service:8080
           predicates:
-            - Path=/api/bridge/**
+            - Path=/api/**
           filters:
-            - StripPrefix=2
-        
-        # Route to Mind service
-        - id: mind
-          uri: http://mind-service:8080
-          predicates:
-            - Path=/api/mind/**
-          filters:
-            - StripPrefix=2
-        
-        # Route to Inbox service
-        - id: inbox
-          uri: http://inbox-service:8080
-          predicates:
-            - Path=/api/inbox/**
-          filters:
-            - StripPrefix=2
-        
-        # Route to Chain service
-        - id: chain
-          uri: http://chain-service:8080
-          predicates:
-            - Path=/api/chain/**
-          filters:
-            - StripPrefix=2
+            - StripPrefix=1
       
       # Global CORS configuration
       globalcors:

@@ -1,47 +1,50 @@
 # LENS Gateway - Service Integration Contract
 
-**Version:** 1.0  
-**Date:** 2026-08-24  
+**Version:** 2.0  
+**Date:** 2026-08-25  
 **Owner:** LENS Team (Dvori)
 
-**Status:** Phase 2 Step 6 Complete - Gateway Ready for Integration
+**Status:** Phase 2 Step 6 Complete - Gateway Ready for BFF Integration
 
 ---
 
 ## Overview
 
-The LENS Gateway is a **transparent routing layer** that dispatches client requests to downstream services. 
+The LENS Gateway is a **transparent routing layer** that dispatches client requests from the **Frontend** to the **BFF (Backend for Frontend)** by Sari.
 
-**Important:** Each team is responsible for their own service implementation, including health checks.
+**Important:** 
+- Gateway routes ALL requests from Frontend to BFF only
+- BFF is responsible for communicating with Bridge, Chain, Inbox, and Mind teams
+- Each team implements their own service independently
 
 ---
 
 ## 1. Gateway Role & Responsibilities
 
-The LENS Gateway is the **single entry point** for all external requests to Resonance Flow services. It acts as a reverse proxy with the following responsibilities:
+The LENS Gateway is the **single entry point** for external client (Frontend) requests. It acts as a reverse proxy with the following responsibilities:
 
 | Responsibility | Scope |
 |---|---|
-| **Routing** | Dispatch requests to appropriate downstream services based on URL path |
+| **Routing** | Dispatch Frontend requests to BFF |
 | **Protocol Translation** | Handle HTTP/HTTPS, WebSocket, gRPC (future) |
-| **Configuration** | Manage service URLs via environment variables (no hardcoding) |
+| **Configuration** | Manage BFF URL via environment variables |
 | **Error Handling** | Provide unified error responses and proper HTTP status codes |
-| **Health Checking** | Monitor **gateway status only** (each service monitors itself) |
+| **Health Checking** | Monitor **gateway status only** (BFF monitors itself) |
 | **Observability** | Log requests, trace routing decisions, measure latencies |
 
 ### Gateway Responsibilities
-- ✅ Route `/api/{service}/**` to downstream services
-- ✅ Strip `/api/{service}` prefix before forwarding
+- ✅ Route `/api/**` to BFF service
+- ✅ Strip `/api` prefix before forwarding
 - ✅ Handle unknown routes (404)
 - ✅ Handle service unavailable (503)
 - ✅ Report gateway health (/health endpoint)
 - ✅ Log and observe routing decisions
 
 ### NOT Gateway Responsibilities
-- ❌ Monitor downstream service health (each service is responsible for its own /health)
+- ❌ Monitor BFF or team services health (each monitors itself)
 - ❌ Aggregate health status from multiple services
+- ❌ Call Bridge, Chain, Inbox, or Mind services directly (that's BFF's job)
 - ❌ Authentication/Authorization (future separate service)
-- ❌ Request transformation/mutation (future BFF service)
 - ❌ Rate limiting (future phases)
 
 ---
@@ -51,21 +54,22 @@ The LENS Gateway is the **single entry point** for all external requests to Reso
 All requests follow this pattern:
 
 ```
-GET/POST/PUT/DELETE  http://gateway:8080/api/{service}/{resource}
-                                           ^^   ^^^^^^  ^^^^^^^^
-                                        version service resource
+GET/POST/PUT/DELETE  http://gateway:8080/api/{resource}
+                                           ^^  ^^^^^^^^
+                                        version resource
+                                        
+                              ↓ Routes to ↓
+                              
+                     http://bff:8080/{resource}
 ```
 
 ### Routing Table
 
-| Service | Internal Name | Downstream URL | Example Path | Forwards To |
-|---|---|---|---|---|
-| Bridge | bridge | http://bridge:8080 | `/api/bridge/sources` | `http://bridge:8080/sources` |
-| Mind | mind | http://mind:8080 | `/api/mind/extract` | `http://mind:8080/extract` |
-| Inbox | inbox | http://inbox:8080 | `/api/inbox/tasks` | `http://inbox:8080/tasks` |
-| Chain | chain | http://chain:8080 | `/api/chain/deps` | `http://chain:8080/deps` |
+| Request Path | Gateway Forwards To | Who Handles Next | Notes |
+|---|---|---|---|
+| `/api/**` | `http://bff-service:8080/**` | BFF (Sari) | All external requests go to BFF |
 
-**Path Stripping:** The `/api/{service}` prefix is stripped before forwarding. Gateway removes 2 path segments.
+**Path Stripping:** The `/api` prefix is stripped before forwarding. Gateway removes 1 path segment.
 
 ---
 
@@ -74,19 +78,22 @@ GET/POST/PUT/DELETE  http://gateway:8080/api/{service}/{resource}
 ### Request Flow
 
 ```
-Client Request
+Frontend Request
     ↓
-[Gateway Receives] GET /api/bridge/sources?limit=10
+[Gateway Receives] GET /api/dashboard
     ↓
-[Routing] → Matches /api/bridge/** → route to Bridge service
+[Routing] → Matches /api/** → route to BFF
     ↓
-[Strip Prefix] → Remove /api/bridge (2 segments)
+[Strip Prefix] → Remove /api (1 segment)
     ↓
-[Forward] → GET http://bridge:8080/sources?limit=10
+[Forward] → GET http://bff-service:8080/dashboard
     ↓
-Bridge Service Response
+BFF Processes:
+  - Calls Bridge, Chain, Inbox, Mind as needed
+  - Aggregates responses
+  - Returns combined data
     ↓
-[Return to Client] with original HTTP status
+[Return to Frontend] with original HTTP status
 ```
 
 ### Success Response (2xx)
@@ -94,7 +101,7 @@ Bridge Service Response
 {
   "status": 200,
   "data": { ... },
-  "timestamp": "2026-08-24T10:30:00Z"
+  "timestamp": "2026-08-25T10:30:00Z"
 }
 ```
 
@@ -104,8 +111,8 @@ Bridge Service Response
   "status": 400,
   "error": "BAD_REQUEST",
   "message": "Invalid request format",
-  "path": "/api/bridge/sources",
-  "timestamp": "2026-08-24T10:30:00Z"
+  "path": "/api/dashboard",
+  "timestamp": "2026-08-25T10:30:00Z"
 }
 ```
 
@@ -116,7 +123,7 @@ Bridge Service Response
 | Scenario | HTTP Status | Error Code | Message |
 |---|---|---|---|
 | Unknown route | 404 | `NOT_FOUND` | "Route not found" |
-| Service unavailable | 503 | `SERVICE_UNAVAILABLE` | "Downstream service unavailable" |
+| BFF unavailable | 503 | `SERVICE_UNAVAILABLE` | "Backend service unavailable" |
 | Request timeout | 504 | `GATEWAY_TIMEOUT` | "Request timeout" |
 | Invalid request | 400 | `BAD_REQUEST` | "Invalid request format" |
 | Authentication required | 401 | `UNAUTHORIZED` | "Authentication required" |

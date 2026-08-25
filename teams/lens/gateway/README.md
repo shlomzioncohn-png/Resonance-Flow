@@ -1,27 +1,43 @@
 # Team LENS - API Gateway Service
 
 **Phase 2 Step 6: COMPLETE ✅**  
-**Status:** Gateway ready for team integration  
+**Status:** Gateway ready for Frontend ↔ BFF routing  
 **Last Updated:** 2026-08-25
 
-API Gateway service responsible for routing and authentication for the Resonance Flow system.
+API Gateway service responsible for routing between **Frontend** and **BFF** (Backend for Frontend by Sari).
 
 ## What This Service Does
 
-This service acts as the single entry point for all Resonance Flow requests:
-- Route requests from `/api/{service}/**` to appropriate downstream services
+This service acts as the single entry point for the Frontend:
+- Route requests from Frontend to BFF service only
 - Error handling and status responses (404, 503, 504, etc)
 - Gateway health monitoring (/health, /health/ready endpoints)
-- CORS handling for client applications
+- CORS handling for Frontend requests
 
 ## What This Service Does NOT Do
 
+❌ Talk directly to Bridge, Chain, Inbox, or Mind services  
 ❌ Monitor downstream service health  
 ❌ Implement service-specific logic  
-❌ Create HealthControllers for other teams  
-❌ Aggregate service status
+❌ Aggregate data from multiple services (that's BFF's job)
 
-**Each team implements their own /health endpoint.**
+**Each team implements their own service independently.**  
+**BFF (Sari) is responsible for orchestrating all team services.**
+
+---
+
+## Architecture
+
+```
+Frontend (UI)
+    ↓
+LENS Gateway (Port 8080)
+    ↓
+BFF (Sari) - Orchestrates all teams
+    ↓
+┌───┬───┬────┬──────┐
+Bridge Chain Inbox Mind
+```
 
 ---
 
@@ -86,14 +102,17 @@ src/test/java/com/rnd/gateway/
 
 ## Gateway Routes
 
-The gateway automatically routes requests to downstream services:
+The gateway has a single route configured:
 
-| Route | Service | Path |
-|-------|---------|------|
-| `/api/bridge/**` | Bridge | ETL & Source Adapters |
-| `/api/mind/**` | Mind | Extraction & Scoring |
-| `/api/inbox/**` | Inbox | Task Model & Lifecycle |
-| `/api/chain/**` | Chain | Dependencie/api
+| Route | Service | Path | Forwards To |
+|-------|---------|------|---|
+| `/api/**` | BFF | All API requests | `http://bff-service:8080/` |
+
+**Path Stripping:** The `/api` prefix is stripped before forwarding (1 segment removed).
+
+---
+
+## Building & Running
 
 To just build the jar:
 
@@ -109,7 +128,7 @@ Build and run with Docker Compose:
 docker-compose up --build
 ```
 
-The service will be available at http://localhost:8080/api
+The Gateway will be available at http://localhost:8080/api
 
 To stop:
 
@@ -131,68 +150,44 @@ spring:
   cloud:
     gateway:
       routes:
-        - id: bridge
-          uri: http://bridge:8080
+        - id: bff
+          uri: http://bff-service:8080
           predicates:
-            - Path=/api/bridge/**
+            - Path=/api/**
           filters:
-            - StripPrefix=2
+            - StripPrefix=1
 ```
 
-## Integration Requirements for Other Teams
+---
 
-Each team must implement their service to work with the Gateway:
+## BFF Integration (Sari's Responsibility)
 
-### 1. Health Endpoint (Required)
-```bash
-GET /health
-HTTP 200 OK
-{
-  "status": "UP",
-  "service": "{your-service-name}",
-  "version": "0.1.0",
-  "timestamp": "2026-08-25T..."
-}
-```
+The BFF service (by Sari) receives ALL requests through the Gateway and is responsible for:
 
-### 2. Readiness Endpoint (Required)
-```bash
-GET /health/ready
-HTTP 200 OK
-{
-  "status": "UP",
-  "service": "{your-service-name}",
-  "ready": true,
-  "timestamp": "2026-08-25T..."
-}
-```
+1. **Routing to team services:**
+   - Bridge: `/api/bridge/...` logic
+   - Chain: `/api/chain/...` logic
+   - Inbox: `/api/inbox/...` logic
+   - Mind: `/api/mind/...` logic
 
-### 3. Service Configuration
-- Listen on port 8080
-- Respond to requests at `/api/{your-service}/**`
-- Return proper HTTP status codes
-- Document your service contract
+2. **Data orchestration:**
+   - Calling multiple team services as needed
+   - Combining and transforming responses
+   - Handling service failures gracefully
 
-### 4. Testing via Gateway
-```bash
-# Your service should be accessible through Gateway
-curl http://localhost:8080/api/{your-service}/health
+3. **Frontend requirements:**
+   - Providing APIs that Frontend needs
+   - Proper error handling
+   - Response formatting for UI
 
-# Example for Bridge team
-curl http://localhost:8080/api/bridge/health
-
-# Example for Mind team  
-curl http://localhost:8080/api/mind/extract
-```
-
-**See:** [GATEWAY_CONTRACT.md](GATEWAY_CONTRACT.md) for complete integration details.
+**See:** [GATEWAY_CONTRACT.md](GATEWAY_CONTRACT.md) for complete API specification.
 
 ---
 
 ## Next Steps
 
-- ✅ Phase 2 Step 6: Docker Integration & Scope Clarification - COMPLETE
-- 🔄 Phase 3: Authentication & Authorization (JWT tokens)
-- 🔄 Phase 4: Frontend BFF (Backend for Frontend)
-- 🔄 Phase 5: Rate limiting & Circuit breakers
-- 🔄 Phase 6: API Documentation (OpenAPI/Swagger)
+- ✅ Phase 2 Step 6: Gateway Complete - Routes to BFF only
+- 🔄 Phase 3: BFF Implementation (Sari)
+- 🔄 Phase 4: Frontend Development
+- 🔄 Phase 5: Authentication & Authorization (JWT tokens)
+- 🔄 Phase 6: Rate limiting & Circuit breakers
