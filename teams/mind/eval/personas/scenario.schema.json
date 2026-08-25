@@ -12,7 +12,8 @@
     "tasks",
     "expected_top_task_id",
     "expected_reason",
-    "source"
+    "source",
+    "mentor_approved"
   ],
   "properties": {
     "scenario_id": {
@@ -37,7 +38,11 @@
       "minLength": 20,
       "description": "Short, checkable, data-grounded explanation of why expected_top_task_id is correct, referencing concrete fields from context/tasks (deadline, free_time_minutes, blocked, tier...). Must not be a vague preference statement."
     },
-    "source": { "$ref": "#/$defs/Source" }
+    "source": { "$ref": "#/$defs/Source" },
+    "mentor_approved": {
+      "type": "boolean",
+      "description": "Whether the mentor has reviewed this specific scenario (its tasks, expected_top_task_id and expected_reason) and signed off on it as correct ground truth. Must be set explicitly by whoever authors the scenario — start it at false and flip it to true only after mentor review, never assume a default. The full eval/personas/ set must have every scenario at true by the Foundation Gate (end of week 3); the harness/CI treats any false as not-yet-ready rather than crashing, so partially-approved sets can still be committed and iterated on. See eval/personas/README.md."
+    }
   },
   "$defs": {
     "Persona": {
@@ -135,7 +140,7 @@
         "tier": {
           "type": "string",
           "enum": ["Operational", "Tactical", "Strategic"],
-          "description": "What KIND of task this is — independent of persona. A Developer can receive an Operational or a Tactical task; tier is not implied by role. See 'Tier vs. Persona' in SCHEMA.md."
+          "description": "What KIND of task this is — independent of persona. A Developer can receive an Operational or a Tactical task; tier is not implied by role. See 'Persona ≠ Tier' in README.md."
         },
         "blocked": {
           "type": "boolean",
