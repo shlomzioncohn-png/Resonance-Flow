@@ -111,14 +111,13 @@
         "description",
         "estimated_duration_minutes",
         "tier",
-        "blocked",
-        "dependencies"
+        "blocked"
       ],
       "properties": {
         "task_id": {
           "type": "string",
           "pattern": "^[a-zA-Z0-9_]+$",
-          "description": "Unique within this scenario. Referenced by dependencies and by expected_top_task_id."
+          "description": "Unique within this scenario. Referenced by expected_top_task_id."
         },
         "title": { "type": "string", "minLength": 1 },
         "description": {
@@ -144,13 +143,7 @@
         },
         "blocked": {
           "type": "boolean",
-          "description": "True if this task cannot currently be worked on (e.g. waiting on a dependency). A blocked task should generally not be the expected_top_task_id."
-        },
-        "dependencies": {
-          "type": "array",
-          "items": { "type": "string" },
-          "default": [],
-          "description": "task_ids (within this same scenario) that must complete before this task can start. Empty array if none — do not omit the key."
+          "description": "True if this task cannot currently be worked on right now (e.g. waiting on something outside this scenario). A blocked task should generally not be the expected_top_task_id."
         }
       }
     },

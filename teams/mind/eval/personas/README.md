@@ -33,7 +33,7 @@ Scenario
 ├── persona        { role, seniority?, department? }
 ├── context         { free_time_minutes, current_datetime, time_horizon, constraints[] }
 ├── tasks[]          { task_id, title, description, deadline?, estimated_duration_minutes,
-                        tier, blocked, dependencies[] }
+                        tier, blocked }
 ├── expected_top_task_id
 ├── expected_reason
 ├── source          { type, source_detail? }
@@ -63,14 +63,13 @@ Scenario
 
 | Field | Represents | Why it's needed | Allowed values | Required/Optional | Who uses it downstream | Example |
 |---|---|---|---|---|---|---|
-| `task_id` | Unique identifier within the scenario | Needed so `dependencies` and `expected_top_task_id` can reference it | Unique string within the scenario | Required | dependencies, expected_top_task_id | `"task_B"` |
+| `task_id` | Unique identifier within the scenario | Needed so `expected_top_task_id` can reference it | Unique string within the scenario | Required | expected_top_task_id | `"task_B"` |
 | `title` | Short title | Human readability + occasionally used as a textual feature | String | Required | Lens (display), extraction pipeline (later) | `"Review PR #482"` |
 | `description` | Task detail | Gives the model (and a human reviewer) enough context to judge duration/urgency/relevance without outside knowledge | String | Required | The ranking model | `"Code review for the auth refactor PR"` |
 | `deadline` | Due date/time, if any | Establishes urgency relative to `current_datetime` | ISO 8601 datetime or `null` | Optional (nullable) | Urgency calculation | `"2026-08-23T17:00:00"` |
 | `estimated_duration_minutes` | How long the task takes | Compared directly against `free_time_minutes` — the most basic "is this even possible right now" check | Positive integer | Required | The ranking model; Chain (constraint satisfaction) | `20` |
 | `tier` | Kind of task (not the role!) | Separates "who the person is" from "what kind of work this is" — see Persona ≠ Tier above | `Operational` / `Tactical` / `Strategic` | Required | R2 (segmented ranking — a separate scoring rule per tier) | `"Operational"` |
 | `blocked` | Whether the task can currently be worked on | A blocked task should generally not be the expected correct answer | Boolean | Required | The ranking model; Chain (actual task selection) | `false` |
-| `dependencies` | task_ids that must complete first | Represents the blocking relationship between tasks in the scenario | Array of `task_id`s, empty by default | Required (even if empty) | Chain (traversal API, later) | `["task_A"]` |
 
 ### Scenario-level fields
 
@@ -85,7 +84,6 @@ Scenario
 ## Constraints not enforced by the JSON Schema itself (enforced in R1's validation code)
 
 - `expected_top_task_id` must equal the `task_id` of one of the entries in `tasks`.
-- Every `task_id` referenced in `dependencies` must actually exist within the same `tasks` array.
 - No duplicate scenarios (`scenario_id` unique across all of `eval/personas/`).
 - Every one of the six roles is covered at least once across the full set.
 - When `source.type` is `AMI`, `FUNSD`, or `other`, `source_detail` must be filled in.

@@ -1,0 +1,34 @@
+{
+  "scenario_id": "manager_mid_status_report_vs_roadmap_planning",
+  "persona": { "role": "Manager", "seniority": "Mid", "department": "Engineering" },
+  "context": {
+    "free_time_minutes": 20,
+    "current_datetime": "2026-08-25T15:30:00",
+    "time_horizon": "today",
+    "constraints": []
+  },
+  "tasks": [
+    {
+      "task_id": "task_status_report",
+      "title": "Compile weekly status update for the higher manager",
+      "description": "Pull together this week's team status into the standard update format, due before end of day.",
+      "deadline": "2026-08-25T17:00:00",
+      "estimated_duration_minutes": 15,
+      "tier": "Operational",
+      "blocked": false
+    },
+    {
+      "task_id": "task_roadmap_planning",
+      "title": "Prepare Q4 roadmap planning session",
+      "description": "Draft the discussion materials for a full three-month roadmap planning session; substantial, unscheduled prep work.",
+      "deadline": null,
+      "estimated_duration_minutes": 120,
+      "tier": "Strategic",
+      "blocked": false
+    }
+  ],
+  "expected_top_task_id": "task_status_report",
+  "expected_reason": "task_status_report fits the 20-minute window and is due by end of day; task_roadmap_planning needs 120 minutes, six times what's available, and has no deadline forcing it today. Tier (Operational vs. Strategic) doesn't decide this one — fit and deadline do.",
+  "source": { "type": "synthetic", "source_detail": null },
+  "mentor_approved": false
+}

@@ -136,14 +136,6 @@ def validate_personas(scenarios: list[dict]) -> ValidationReport:
                 f"{expected_top_task_id!r} is not one of this scenario's task_ids {sorted(task_ids)}"
             )
 
-        for task in scenario.get("tasks", []):
-            for dep in task.get("dependencies", []):
-                if dep not in task_ids:
-                    report.errors.append(
-                        f"{scenario_id}: task {task.get('task_id')!r} depends on "
-                        f"{dep!r}, which is not a task_id in this scenario"
-                    )
-
         source = scenario.get("source", {})
         if source.get("type") in SOURCE_TYPES_REQUIRING_DETAIL and not source.get("source_detail"):
             report.errors.append(

@@ -35,7 +35,6 @@ def make_scenario(
                 "estimated_duration_minutes": 120,
                 "tier": "Strategic",
                 "blocked": False,
-                "dependencies": [],
             },
             {
                 "task_id": "task_B",
@@ -45,7 +44,6 @@ def make_scenario(
                 "estimated_duration_minutes": 20,
                 "tier": "Operational",
                 "blocked": False,
-                "dependencies": [],
             },
         ],
         "expected_top_task_id": expected_top_task_id,

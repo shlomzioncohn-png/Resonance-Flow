@@ -1,0 +1,34 @@
+{
+  "scenario_id": "manager_senior_async_update_vs_meeting_constraint",
+  "persona": { "role": "Manager", "seniority": "Senior", "department": "Engineering" },
+  "context": {
+    "free_time_minutes": 30,
+    "current_datetime": "2026-08-25T14:00:00",
+    "time_horizon": "today",
+    "constraints": ["no meetings can be scheduled for the rest of today"]
+  },
+  "tasks": [
+    {
+      "task_id": "task_conflict_mediation",
+      "title": "Schedule a mediation meeting between two team members",
+      "description": "Two engineers have an ongoing disagreement over code ownership; the next step is getting a meeting on the calendar with both of them.",
+      "deadline": null,
+      "estimated_duration_minutes": 30,
+      "tier": "Tactical",
+      "blocked": false
+    },
+    {
+      "task_id": "task_async_update",
+      "title": "Send written project status update to stakeholders",
+      "description": "Stakeholders are expecting a written update on the migration project's status; can be done entirely over email/Slack, no meeting required.",
+      "deadline": "2026-08-25T16:00:00",
+      "estimated_duration_minutes": 25,
+      "tier": "Tactical",
+      "blocked": false
+    }
+  ],
+  "expected_top_task_id": "task_async_update",
+  "expected_reason": "task_conflict_mediation's next step is scheduling a meeting, which the 'no meetings can be scheduled' constraint rules out right now; task_async_update is fully asynchronous, fits the 30-minute window, and has a deadline two hours away.",
+  "source": { "type": "synthetic", "source_detail": null },
+  "mentor_approved": false
+}
