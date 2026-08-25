@@ -22,16 +22,13 @@ jobs:
           cache-dependency-path: teams/mind/pyproject.toml
 
       - name: Install
-        run: pip install -e ".[dev]"
+        run: make dev
 
-      - name: Lint (ruff)
-        run: ruff check src tests
-
-      - name: Type-check (mypy)
-        run: mypy src
+      - name: Lint (ruff + mypy)
+        run: make lint
 
       - name: Tests
-        run: pytest --cov=src/mind
+        run: make test
 
-      - name: Evaluation harness (smoke/regression check)
-        run: python -m mind.evaluation.run --model dummy
+      - name: Evaluation harness against eval/personas (regression check)
+        run: make eval

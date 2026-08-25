@@ -1,32 +1,11 @@
 import argparse
 import dataclasses
-import importlib.util
 import json
-import os
+import sys
 
 from mind.evaluation.dummy_model import DummyModel
 from mind.evaluation.harness import run
-from mind.evaluation.placeholder_scenarios import PLACEHOLDER_SCENARIOS
-
-
-def load_scenarios(personas_path: str) -> list[dict]:
-    """Loads MOCK_SCENARIOS from a fixtures.py file inside the given personas directory.
-
-    Falls back to the harness's placeholder scenarios if eval/personas/ doesn't
-    exist yet (the real persona set lands in weeks 2-3).
-    """
-    fixtures_path = os.path.join(personas_path, "fixtures.py")
-    if not os.path.isfile(fixtures_path):
-        return PLACEHOLDER_SCENARIOS
-
-    spec = importlib.util.spec_from_file_location("fixtures", fixtures_path)
-    fixtures_module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(fixtures_module)
-
-    if not hasattr(fixtures_module, "MOCK_SCENARIOS"):
-        raise AttributeError(f"{fixtures_path} does not define MOCK_SCENARIOS")
-
-    return fixtures_module.MOCK_SCENARIOS
+from mind.evaluation.personas import PersonaSchemaError, load_personas, validate_personas
 
 
 def main():
@@ -34,8 +13,8 @@ def main():
     parser.add_argument("--model", type=str, default="dummy", help="Model to evaluate. (e.g. dummy)")
     parser.add_argument(
         "--personas", type=str, default="eval/personas",
-        help="Path to the personas directory (must contain fixtures.py with MOCK_SCENARIOS). "
-             "Falls back to a small internal placeholder set if missing.",
+        help="Path to the personas directory. Must contain scenario.schema.json plus the "
+             "scenario *.json files it validates against.",
     )
     args = parser.parse_args()
 
@@ -44,7 +23,22 @@ def main():
     else:
         raise ValueError(f"Unknown model: {args.model}")
 
-    scenarios = load_scenarios(args.personas)
+    try:
+        scenarios = load_personas(args.personas)
+    except (FileNotFoundError, PersonaSchemaError) as e:
+        print(f"Could not load personas from {args.personas!r}: {e}", file=sys.stderr)
+        sys.exit(1)
+
+    validation = validate_personas(scenarios)
+    for warning in validation.warnings:
+        print(f"[persona set warning] {warning}")
+    if not validation.ok:
+        print("\n--- Persona set validation FAILED ---")
+        for error in validation.errors:
+            print(f"  - {error}")
+        print("--------------------------------------\n")
+        sys.exit(1)
+
     report = run(model, scenarios)
     report_dict = dataclasses.asdict(report)
 

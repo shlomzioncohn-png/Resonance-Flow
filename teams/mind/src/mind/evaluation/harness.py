@@ -45,7 +45,7 @@ def run(model: RankingModel, scenarios: list[dict]) -> Report:
         evaluated_scenarios.append(scenario)
         scenario_results.append(
             ScenarioResult(
-                scenario_id=scenario.get("scenario_id"),
+                scenario_id=scenario["scenario_id"],
                 expected_top_task_id=scenario.get("expected_top_task_id"),
                 predicted_top_task_id=best_task.task_id,
                 passed=best_task.task_id == scenario.get("expected_top_task_id"),

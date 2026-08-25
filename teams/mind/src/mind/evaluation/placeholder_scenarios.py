@@ -1,4 +1,6 @@
-# Placeholder scenarios — replace once the real eval/personas/ set (michal/persona-eval-schema) lands.
+# Small fixed toy set used to unit-test harness.run() in isolation from the real,
+# evolving eval/personas/ set. `mind.evaluation.run` (the CLI/CI entry point) uses
+# the real set via load_personas() instead — see tests/test_harness.py for usage here.
 PLACEHOLDER_SCENARIOS: list[dict] = [
     {
         "scenario_id": "developer_junior_placeholder_1",
