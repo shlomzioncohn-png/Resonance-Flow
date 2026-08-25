@@ -1,16 +1,14 @@
 package com.rnd.chain.dto;
 
 import java.time.LocalDateTime;
+import java.util.UUID;
 
-// TODO: import the Inbox type once the Inbox team publishes its package,
-// e.g. import com.inbox.Inbox;
-
+// Identifier type: UUID, pending Inbox publishing its own task id type.
 public class Task {
 
-    // Identifier type follows Inbox: we store the task id exactly as Inbox sends it
-    // and do not convert it on our side, so the id format stays owned by Inbox.
-    private Inbox.TaskId id;
-    private Inbox.TaskId parentTaskId;
+    private UUID id;
+    private UUID parentTaskId;
+    private String ownerId;
 
     private TaskStatus status;
     private boolean isReady;
@@ -18,25 +16,27 @@ public class Task {
     private int openConstraintCount;
 
     private Integer estimatedDurationMin;
-    private Integer score;
+    private Double score;
 
     private final LocalDateTime createdAt;
     private LocalDateTime updatedAt;
     private LocalDateTime deletedAt;
 
-    public Task(Inbox.TaskId id,
-                Inbox.TaskId parentTaskId,
+    public Task(UUID id,
+                UUID parentTaskId,
+                String ownerId,
                 TaskStatus status,
                 boolean isReady,
                 int blockingCount,
                 int openConstraintCount,
                 Integer estimatedDurationMin,
-                Integer score,
+                Double score,
                 LocalDateTime createdAt,
                 LocalDateTime updatedAt,
                 LocalDateTime deletedAt) {
         this.id = id;
         this.parentTaskId = parentTaskId;
+        this.ownerId = ownerId;
         this.status = status;
         this.isReady = isReady;
         this.blockingCount = blockingCount;
@@ -48,21 +48,25 @@ public class Task {
         this.deletedAt = deletedAt;
     }
 
-    public Inbox.TaskId getId() {
+    public UUID getId() {
         return id;
     }
 
-    public void setId(Inbox.TaskId id) {
+    public void setId(UUID id) {
         this.id = id;
     }
 
-    public Inbox.TaskId getParentTaskId() {
+    public UUID getParentTaskId() {
         return parentTaskId;
     }
 
-    public void setParentTaskId(Inbox.TaskId parentTaskId) {
+    public void setParentTaskId(UUID parentTaskId) {
         this.parentTaskId = parentTaskId;
     }
+
+    public String getOwnerId() {return ownerId;}
+
+    public void setOwnerId(String ownerId) {this.ownerId = ownerId;}
 
     public TaskStatus getStatus() {
         return status;
@@ -104,13 +108,9 @@ public class Task {
         this.estimatedDurationMin = estimatedDurationMin;
     }
 
-    public Integer getScore() {
-        return score;
-    }
+    public Double getScore() {return score;}
 
-    public void setScore(Integer score) {
-        this.score = score;
-    }
+    public void setScore(Double score) {this.score = score;}
 
     // createdAt is final: getter only, no setter
     public LocalDateTime getCreatedAt() {

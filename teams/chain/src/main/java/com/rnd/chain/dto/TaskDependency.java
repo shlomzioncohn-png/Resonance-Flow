@@ -1,36 +1,34 @@
 package com.rnd.chain.dto;
 
-// TODO: import the Inbox type once the Inbox team publishes its package,
-// e.g. import com.inbox.Inbox;
+import java.util.UUID;
 
+// Identifier type: UUID, pending Inbox publishing its own task id type.
 public class TaskDependency {
 
-    // Identifier type follows Inbox: both ends of the edge use the task id
-    // exactly as Inbox sends it, with no conversion on our side.
-    private Inbox.TaskId taskId;            // from Mind
-    private Inbox.TaskId dependsOnTaskId;   // from Mind
+    private UUID taskId;            // from Mind
+    private UUID dependsOnTaskId;   // from Mind
 
     public TaskDependency() {
     }
 
-    public TaskDependency(Inbox.TaskId taskId, Inbox.TaskId dependsOnTaskId) {
+    public TaskDependency(UUID taskId, UUID dependsOnTaskId) {
         this.taskId = taskId;
         this.dependsOnTaskId = dependsOnTaskId;
     }
 
-    public Inbox.TaskId getTaskId() {
+    public UUID getTaskId() {
         return taskId;
     }
 
-    public void setTaskId(Inbox.TaskId taskId) {
+    public void setTaskId(UUID taskId) {
         this.taskId = taskId;
     }
 
-    public Inbox.TaskId getDependsOnTaskId() {
+    public UUID getDependsOnTaskId() {
         return dependsOnTaskId;
     }
 
-    public void setDependsOnTaskId(Inbox.TaskId dependsOnTaskId) {
+    public void setDependsOnTaskId(UUID dependsOnTaskId) {
         this.dependsOnTaskId = dependsOnTaskId;
     }
 }
