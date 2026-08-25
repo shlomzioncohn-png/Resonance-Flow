@@ -15,7 +15,7 @@ page uses.
 ```
 app/
 ├── layout.tsx            Root layout: <html>/<body>, ThemeRegistry (MUI theme + SSR cache)
-├── theme.ts               MUI theme (palette, typography, component overrides)
+├── ThemeRegistry.tsx       Wires up the theme from `theme/` (see docs/design-system.md) + emotion SSR cache
 ├── not-found.tsx           Global 404, styled like the public pages (no shell)
 │
 ├── (app)/                  Routes wrapped in the App Shell (Header + Sidebar)
@@ -56,6 +56,11 @@ navigation, so they get the root layout only, styled to match.
 
 `AppShell` is only applied by `app/(app)/layout.tsx`. Pages under `(public)/`
 build their own minimal centered layout instead (see `login/page.tsx`).
+
+Every App Shell component reads its colors, spacing, and radii from the LENS
+theme (`@/theme`) rather than hardcoding values — see
+[docs/design-system.md](design-system.md) for the token reference and the
+conventions this follows.
 
 ## Feedback states
 

@@ -14,13 +14,14 @@ using Material UI (MUI).
 ## Project structure
 
 ```
-app/                        Next.js routes, layouts, global styles, MUI theme
+theme/                       LENS design system: MUI theme, design tokens (see below)
+app/                        Next.js routes, layouts, global styles
   (app)/                      Routes wrapped in the App Shell (Header + Sidebar)
   (public)/                   Routes with no shell (/login, /unauthorized)
 components/
   layout/                     AppShell, Header, Sidebar, PageContainer, Logo
   feedback/                   LoadingState, EmptyState, ErrorState
-  ui/                          (reserved for shared, non-layout UI components)
+  ui/                          Shared, non-layout UI components (e.g. StatusBadge)
 mocks/                       Mock data adapters used until real APIs exist
 docs/                        Architecture docs (see below)
 features/, services/,       Reserved for upcoming feature work — not used yet
@@ -32,6 +33,9 @@ docker-compose.yml          Local container orchestration
 
 See [docs/app-shell-and-routing.md](docs/app-shell-and-routing.md) for the
 routing structure, the App Shell components, and how to add a new page.
+
+See [docs/design-system.md](docs/design-system.md) for the MUI theme, design
+tokens, and conventions for using MUI across the project.
 
 ## Run locally
 

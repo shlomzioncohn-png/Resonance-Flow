@@ -37,8 +37,8 @@ export default function Header({ onMenuClick }: HeaderProps) {
             display: { xs: 'none', sm: 'flex' },
             alignItems: 'center',
             gap: 1,
-            bgcolor: '#f1f3f6',
-            borderRadius: 2,
+            bgcolor: 'grey.100',
+            borderRadius: (theme) => `${theme.custom.radius.sm}px`,
             px: 1.5,
             py: 0.75,
             flexGrow: 1,
@@ -48,6 +48,7 @@ export default function Header({ onMenuClick }: HeaderProps) {
           <SearchIcon fontSize="small" sx={{ color: 'text.secondary' }} />
           <InputBase
             placeholder="Search tasks, projects…"
+            aria-label="Search tasks, projects"
             disabled
             fullWidth
             sx={{ fontSize: 14 }}
@@ -57,7 +58,7 @@ export default function Header({ onMenuClick }: HeaderProps) {
         <Box sx={{ flexGrow: 1 }} />
 
         <Tooltip title="Notifications — not implemented yet">
-          <IconButton>
+          <IconButton aria-label="Notifications">
             <NotificationsNoneOutlinedIcon />
           </IconButton>
         </Tooltip>

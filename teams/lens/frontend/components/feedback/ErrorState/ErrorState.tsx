@@ -30,7 +30,19 @@ export default function ErrorState({
         px: 2,
       }}
     >
-      <ErrorOutlineIcon sx={{ fontSize: 40, color: 'error.main', mb: 1 }} />
+      <Box
+        sx={{
+          width: 56,
+          height: 56,
+          borderRadius: '50%',
+          bgcolor: 'status.critical.bg',
+          display: 'grid',
+          placeItems: 'center',
+          mb: 1,
+        }}
+      >
+        <ErrorOutlineIcon sx={{ fontSize: 26, color: 'error.main' }} />
+      </Box>
       <Typography variant="h6" color="text.primary">
         {title}
       </Typography>

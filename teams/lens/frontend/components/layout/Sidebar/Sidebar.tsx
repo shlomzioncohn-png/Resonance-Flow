@@ -8,18 +8,13 @@ import ListItemIcon from '@mui/material/ListItemIcon'
 import ListItemText from '@mui/material/ListItemText'
 import Toolbar from '@mui/material/Toolbar'
 import Typography from '@mui/material/Typography'
+import { alpha, useTheme } from '@mui/material/styles'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import Logo from '../Logo'
 import { navSections } from './navConfig'
 
 export const SIDEBAR_WIDTH = 260
-
-const SIDEBAR_BG = '#111827'
-const SIDEBAR_TEXT = '#9ca3af'
-const SIDEBAR_TEXT_ACTIVE = '#ffffff'
-const SIDEBAR_DIVIDER = 'rgba(255, 255, 255, 0.08)'
-const SIDEBAR_HOVER = 'rgba(255, 255, 255, 0.06)'
 
 export interface SidebarProps {
   open: boolean
@@ -29,6 +24,17 @@ export interface SidebarProps {
 
 export default function Sidebar({ open, onClose, variant }: SidebarProps) {
   const pathname = usePathname()
+  const theme = useTheme()
+
+  // The sidebar is a permanently dark surface regardless of app-wide theme
+  // mode — a deliberate product choice, not a one-off color. It still reads
+  // every color from the theme (the slate scale + alpha of common.white)
+  // instead of hardcoding hex, so a future dark-mode or rebrand only changes
+  // `theme/tokens.ts`.
+  const sidebarText = alpha(theme.palette.common.white, 0.65)
+  const sidebarTextActive = theme.palette.common.white
+  const sidebarDivider = alpha(theme.palette.common.white, 0.08)
+  const sidebarHover = alpha(theme.palette.common.white, 0.06)
 
   const content = (
     <Box
@@ -38,8 +44,8 @@ export default function Sidebar({ open, onClose, variant }: SidebarProps) {
         height: '100%',
         display: 'flex',
         flexDirection: 'column',
-        bgcolor: SIDEBAR_BG,
-        color: SIDEBAR_TEXT,
+        bgcolor: 'grey.900',
+        color: sidebarText,
       }}
     >
       <Toolbar sx={{ px: 2.5 }}>
@@ -50,15 +56,12 @@ export default function Sidebar({ open, onClose, variant }: SidebarProps) {
         {navSections.map((section, index) => (
           <Box key={section.label} sx={{ mt: index === 0 ? 0.5 : 2.5 }}>
             <Typography
-              variant="caption"
+              variant="overline"
               sx={{
                 display: 'block',
                 px: 1.5,
                 mb: 0.5,
-                color: 'rgba(255,255,255,0.35)',
-                fontWeight: 700,
-                letterSpacing: '0.08em',
-                textTransform: 'uppercase',
+                color: alpha(theme.palette.common.white, 0.35),
               }}
             >
               {section.label}
@@ -74,14 +77,13 @@ export default function Sidebar({ open, onClose, variant }: SidebarProps) {
                     selected={selected}
                     onClick={variant === 'temporary' ? onClose : undefined}
                     sx={{
-                      borderRadius: 1.5,
                       mb: 0.25,
                       pl: item.icon ? 1.5 : 4.5,
-                      color: selected ? SIDEBAR_TEXT_ACTIVE : SIDEBAR_TEXT,
-                      '&:hover': { bgcolor: SIDEBAR_HOVER },
+                      color: selected ? sidebarTextActive : sidebarText,
+                      '&:hover': { bgcolor: sidebarHover },
                       '&.Mui-selected': {
                         bgcolor: 'primary.main',
-                        color: SIDEBAR_TEXT_ACTIVE,
+                        color: sidebarTextActive,
                         '&:hover': { bgcolor: 'primary.main' },
                       },
                     }}
@@ -95,7 +97,12 @@ export default function Sidebar({ open, onClose, variant }: SidebarProps) {
                       primary={item.label}
                       slotProps={{
                         primary: {
-                          sx: { fontSize: 14, fontWeight: selected ? 600 : 500 },
+                          sx: {
+                            fontSize: 14,
+                            fontWeight: selected
+                              ? theme.typography.subtitle2.fontWeight
+                              : theme.typography.body2.fontWeight,
+                          },
                         },
                       }}
                     />
@@ -117,7 +124,7 @@ export default function Sidebar({ open, onClose, variant }: SidebarProps) {
           width: SIDEBAR_WIDTH,
           flexShrink: 0,
           display: { xs: 'none', md: 'block' },
-          borderRight: `1px solid ${SIDEBAR_DIVIDER}`,
+          borderRight: `1px solid ${sidebarDivider}`,
         }}
       >
         {content}

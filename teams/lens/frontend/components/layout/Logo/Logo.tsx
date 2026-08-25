@@ -15,8 +15,9 @@ export default function Logo({ variant = 'dark' }: LogoProps) {
         sx={{
           width: 32,
           height: 32,
-          borderRadius: '9px',
+          borderRadius: (theme) => `${theme.custom.radius.sm}px`,
           bgcolor: 'primary.main',
+          color: 'primary.contrastText',
           display: 'grid',
           placeItems: 'center',
           flexShrink: 0,
@@ -25,7 +26,7 @@ export default function Logo({ variant = 'dark' }: LogoProps) {
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
           <path
             d="M2 14c2.5 0 2.5-5 5-5s2.5 5 5 5 2.5-5 5-5 2.5 5 5 5"
-            stroke="#ffffff"
+            stroke="currentColor"
             strokeWidth="2.4"
             strokeLinecap="round"
             strokeLinejoin="round"

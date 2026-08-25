@@ -28,7 +28,19 @@ export default function EmptyState({
         color: 'text.secondary',
       }}
     >
-      <InboxOutlinedIcon sx={{ fontSize: 40, color: 'text.disabled', mb: 1 }} />
+      <Box
+        sx={{
+          width: 56,
+          height: 56,
+          borderRadius: '50%',
+          bgcolor: 'grey.100',
+          display: 'grid',
+          placeItems: 'center',
+          mb: 1,
+        }}
+      >
+        <InboxOutlinedIcon sx={{ fontSize: 26, color: 'text.disabled' }} />
+      </Box>
       <Typography variant="h6" color="text.primary">
         {title}
       </Typography>
