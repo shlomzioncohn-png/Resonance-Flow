@@ -10,6 +10,7 @@ dependencies = [
     "pydantic>=2.0",
     "fastapi",
     "uvicorn",
+    "jsonschema>=4.0",
     # add as decided: vector-store client, OCR/ASR libs, LLM client, etc.
 ]
 
@@ -19,6 +20,7 @@ dev = [
     "pytest-cov",
     "ruff",
     "mypy",
+    "types-jsonschema",
 ]
 
 [build-system]
