@@ -33,7 +33,7 @@ Frontend (UI)
     ↓
 LENS Gateway (Port 8080)
     ↓
-BFF (Sari) - Orchestrates all teams
+BFF - Orchestrates all teams
     ↓
 ┌───┬───┬────┬──────┐
 Bridge Chain Inbox Mind
