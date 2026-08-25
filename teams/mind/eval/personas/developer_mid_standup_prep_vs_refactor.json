@@ -1,0 +1,34 @@
+{
+  "scenario_id": "developer_mid_standup_prep_vs_refactor",
+  "persona": { "role": "Developer", "seniority": "Mid", "department": "Engineering" },
+  "context": {
+    "free_time_minutes": 15,
+    "current_datetime": "2026-08-25T09:45:00",
+    "time_horizon": "today",
+    "constraints": []
+  },
+  "tasks": [
+    {
+      "task_id": "task_standup_notes",
+      "title": "Prepare notes for daily standup",
+      "description": "Jot down yesterday's progress and today's plan before the 10:00 standup call.",
+      "deadline": "2026-08-25T10:00:00",
+      "estimated_duration_minutes": 10,
+      "tier": "Operational",
+      "blocked": false
+    },
+    {
+      "task_id": "task_refactor",
+      "title": "Refactor the payment-retry module",
+      "description": "Clean up the retry-logic module flagged in the last code review as hard to follow; no functional bugs, purely maintainability.",
+      "deadline": null,
+      "estimated_duration_minutes": 90,
+      "tier": "Tactical",
+      "blocked": false
+    }
+  ],
+  "expected_top_task_id": "task_standup_notes",
+  "expected_reason": "task_standup_notes fits the 15-minute window and has a deadline 15 minutes away (the standup itself); task_refactor needs 90 minutes, six times what's available, and has no deadline pressure.",
+  "source": { "type": "synthetic", "source_detail": null },
+  "mentor_approved": false
+}

@@ -1,0 +1,34 @@
+{
+  "scenario_id": "manager_mid_sprint_plan_vs_1on1_notes",
+  "persona": { "role": "Manager", "seniority": "Mid", "department": "Engineering" },
+  "context": {
+    "free_time_minutes": 90,
+    "current_datetime": "2026-08-25T09:00:00",
+    "time_horizon": "this_week",
+    "constraints": []
+  },
+  "tasks": [
+    {
+      "task_id": "task_sprint_plan",
+      "title": "Prepare next sprint's planning document",
+      "description": "Draft the scope and priorities for the upcoming sprint, due before Friday's planning meeting; needs input from the backlog and last sprint's retro notes.",
+      "deadline": "2026-08-28T17:00:00",
+      "estimated_duration_minutes": 90,
+      "tier": "Tactical",
+      "blocked": false
+    },
+    {
+      "task_id": "task_1on1_notes",
+      "title": "Write up follow-up notes from Tuesday's 1:1",
+      "description": "Summarize action items from a 1:1 that already happened; useful for the record but nothing downstream is waiting on it.",
+      "deadline": null,
+      "estimated_duration_minutes": 20,
+      "tier": "Operational",
+      "blocked": false
+    }
+  ],
+  "expected_top_task_id": "task_sprint_plan",
+  "expected_reason": "task_sprint_plan uses the full 90-minute window productively and has a hard deadline before Friday's planning meeting; task_1on1_notes has no deadline and nothing else is waiting on it being done today.",
+  "source": { "type": "synthetic", "source_detail": null },
+  "mentor_approved": false
+}
