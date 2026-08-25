@@ -1,13 +1,29 @@
 # Team LENS - API Gateway Service
 
-API Gateway service responsible for permissions, routing, and authentication for the Resonance Flow system.
+**Phase 2 Step 6: COMPLETE ✅**  
+**Status:** Gateway ready for team integration  
+**Last Updated:** 2026-08-25
 
-This service acts as the first interface, handling:
-- Request routing to Bridge, Mind, Inbox, and Chain services
-- Authentication and authorization
-- Rate limiting and circuit breakers
-- Request/response transformation
-- CORS handling
+API Gateway service responsible for routing and authentication for the Resonance Flow system.
+
+## What This Service Does
+
+This service acts as the single entry point for all Resonance Flow requests:
+- Route requests from `/api/{service}/**` to appropriate downstream services
+- Error handling and status responses (404, 503, 504, etc)
+- Gateway health monitoring (/health, /health/ready endpoints)
+- CORS handling for client applications
+
+## What This Service Does NOT Do
+
+❌ Monitor downstream service health  
+❌ Implement service-specific logic  
+❌ Create HealthControllers for other teams  
+❌ Aggregate service status
+
+**Each team implements their own /health endpoint.**
+
+---
 
 ## Why Spring Cloud Gateway?
 
@@ -123,23 +139,60 @@ spring:
             - StripPrefix=2
 ```
 
+## Integration Requirements for Other Teams
+
+Each team must implement their service to work with the Gateway:
+
+### 1. Health Endpoint (Required)
+```bash
+GET /health
+HTTP 200 OK
+{
+  "status": "UP",
+  "service": "{your-service-name}",
+  "version": "0.1.0",
+  "timestamp": "2026-08-25T..."
+}
+```
+
+### 2. Readiness Endpoint (Required)
+```bash
+GET /health/ready
+HTTP 200 OK
+{
+  "status": "UP",
+  "service": "{your-service-name}",
+  "ready": true,
+  "timestamp": "2026-08-25T..."
+}
+```
+
+### 3. Service Configuration
+- Listen on port 8080
+- Respond to requests at `/api/{your-service}/**`
+- Return proper HTTP status codes
+- Document your service contract
+
+### 4. Testing via Gateway
+```bash
+# Your service should be accessible through Gateway
+curl http://localhost:8080/api/{your-service}/health
+
+# Example for Bridge team
+curl http://localhost:8080/api/bridge/health
+
+# Example for Mind team  
+curl http://localhost:8080/api/mind/extract
+```
+
+**See:** [GATEWAY_CONTRACT.md](GATEWAY_CONTRACT.md) for complete integration details.
+
+---
+
 ## Next Steps
 
-- Implement JWT token validation filter
-- Add authentication endpoint (login)
-- Integrate with other services
-- Add circuit breaker patterns
-- Setup service discovery (if scaling)
-- Add API documentation (Swagger/OpenAPI)
-## Environment variables
-
-- `SERVER_PORT` - Server port (default: 8080)
-- `SPRING_PROFILES_ACTIVE` - Active Spring profile (default: local)
-
-## Next steps
-
-- Implement authentication endpoints
-- Add authorization/permission middleware
-- Integrate with other services (Bridge, Mind, Inbox, Chain)
-- Add JWT token handling
-- Implement rate limiting and circuit breakers
+- ✅ Phase 2 Step 6: Docker Integration & Scope Clarification - COMPLETE
+- 🔄 Phase 3: Authentication & Authorization (JWT tokens)
+- 🔄 Phase 4: Frontend BFF (Backend for Frontend)
+- 🔄 Phase 5: Rate limiting & Circuit breakers
+- 🔄 Phase 6: API Documentation (OpenAPI/Swagger)
