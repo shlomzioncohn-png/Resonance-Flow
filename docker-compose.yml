@@ -1,5 +1,14 @@
 services:
-  # API Gateway - orchestrates requests to all downstream services
+  # ========================================
+  # LENS TEAM RESPONSIBILITY
+  # ========================================
+  
+  # API Gateway - Port 8080
+  # Responsibilities:
+  # - Route /api/{service}/** to downstream services
+  # - Error handling (404 for unknown routes, etc)
+  # - Gateway health endpoint (/health, /health/ready)
+  # ========================================
   gateway:
     build:
       context: ./teams/lens/gateway
@@ -24,7 +33,15 @@ services:
       retries: 3
       start_period: 20s
 
-  # Bridge Service - handles bridge-related operations
+  # ========================================
+  # OTHER TEAMS' SERVICES (Mock for testing)
+  # Each team is responsible for:
+  # - Building their own /health endpoint
+  # - Responding to /api/{service}/** requests
+  # - Maintaining their own service configuration
+  # ========================================
+
+  # Bridge Service - Bridge Team Responsibility
   bridge:
     build:
       context: ./teams/bridge

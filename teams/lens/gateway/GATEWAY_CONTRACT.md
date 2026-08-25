@@ -4,6 +4,16 @@
 **Date:** 2026-08-24  
 **Owner:** LENS Team (Dvori)
 
+**Status:** Phase 2 Step 6 Complete - Gateway Ready for Integration
+
+---
+
+## Overview
+
+The LENS Gateway is a **transparent routing layer** that dispatches client requests to downstream services. 
+
+**Important:** Each team is responsible for their own service implementation, including health checks.
+
 ---
 
 ## 1. Gateway Role & Responsibilities
@@ -203,28 +213,58 @@ spring:
 
 ---
 
-## 7. Service Integration Example
+## 7. Service Integration Requirements for Each Team
 
-### Bridge Team Integration
-1. Ensure Bridge service is running on `http://bridge:8080`
-2. Test Gateway: `curl http://gateway:8080/api/bridge/health`
-3. Use any Bridge API path after `/api/bridge/`
-4. Gateway will forward with `/api/bridge` stripped
+### Your Team's Responsibility
 
-### Example Request Flow
-```bash
-# Client calls Gateway
-curl -X GET http://gateway:8080/api/bridge/sources
+1. **Build your service** on port 8080
+2. **Implement /health endpoint**
+   ```json
+   GET /health
+   Response:
+   {
+     "status": "UP",
+     "service": "{your-service-name}",
+     "version": "0.1.0",
+     "timestamp": "2026-08-25T..."
+   }
+   ```
 
-# Gateway routes to Bridge
-GET http://bridge:8080/sources
+3. **Implement /health/ready endpoint** (same format as /health)
 
-# Bridge responds
-{ "sources": [...] }
+4. **Register with LENS team**
+   - Provide your service name (e.g., "bridge")
+   - LENS will add a route to Gateway
 
-# Gateway returns to client (unchanged)
-{ "sources": [...] }
+5. **Test via Gateway**
+   ```bash
+   curl http://localhost:8080/api/{your-service}/health
+   ```
+
+### Request Flow Through Gateway
+
 ```
+Client Request
+  ↓
+[Gateway Receives] GET /api/bridge/sources?limit=10
+  ↓
+[Routing Match] /api/bridge/** matches "bridge" route
+  ↓
+[Prefix Strip] Removes /api/bridge (2 path segments)
+  ↓
+[Forward] GET http://bridge-service:8080/sources?limit=10
+  ↓
+[Your Service Processes] Returns response with your status code
+  ↓
+[Gateway Returns] Response to client unchanged
+```
+
+### Example: Bridge Team Integration
+1. Build Bridge service to listen on port 8080
+2. Implement `/health` and `/health/ready` endpoints
+3. Notify LENS team
+4. LENS adds route to Gateway
+5. You're done! Gateway handles routing
 
 ---
 
