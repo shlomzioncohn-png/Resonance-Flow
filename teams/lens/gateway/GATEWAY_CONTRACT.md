@@ -16,14 +16,23 @@ The LENS Gateway is the **single entry point** for all external requests to Reso
 | **Protocol Translation** | Handle HTTP/HTTPS, WebSocket, gRPC (future) |
 | **Configuration** | Manage service URLs via environment variables (no hardcoding) |
 | **Error Handling** | Provide unified error responses and proper HTTP status codes |
-| **Health Checking** | Monitor gateway status and downstream service availability |
+| **Health Checking** | Monitor **gateway status only** (each service monitors itself) |
 | **Observability** | Log requests, trace routing decisions, measure latencies |
 
-### Out of Scope (Phase 2+)
-- Authentication/Authorization (will be added later)
-- Rate limiting (reserved for future phases)
-- Request transformation/mutation (future filters)
-- Circuit breaker logic (future resilience patterns)
+### Gateway Responsibilities
+- ✅ Route `/api/{service}/**` to downstream services
+- ✅ Strip `/api/{service}` prefix before forwarding
+- ✅ Handle unknown routes (404)
+- ✅ Handle service unavailable (503)
+- ✅ Report gateway health (/health endpoint)
+- ✅ Log and observe routing decisions
+
+### NOT Gateway Responsibilities
+- ❌ Monitor downstream service health (each service is responsible for its own /health)
+- ❌ Aggregate health status from multiple services
+- ❌ Authentication/Authorization (future separate service)
+- ❌ Request transformation/mutation (future BFF service)
+- ❌ Rate limiting (future phases)
 
 ---
 
@@ -116,34 +125,45 @@ Bridge Service Response
 ## 5. Health & Readiness Endpoints
 
 ### GET /health
-Returns gateway health status (always available)
+Returns **gateway health status only** (not downstream services).
+
+Each downstream service has its own `/health` endpoint:
+- `GET http://bridge:8080/health`
+- `GET http://mind:8080/health`
+- `GET http://inbox:8080/health`
+- `GET http://chain:8080/health`
+
+**Gateway /health response:**
 ```json
 {
   "status": "UP",
-  "components": {
-    "gateway": { "status": "UP" },
-    "bridge": { "status": "UP" },
-    "mind": { "status": "UP" },
-    "inbox": { "status": "UP" },
-    "chain": { "status": "UP" }
-  }
+  "service": "gateway",
+  "version": "0.1.0",
+  "timestamp": "2026-08-25T10:30:00Z"
 }
 ```
 
 ### GET /health/ready
-Returns readiness status (all critical dependencies up)
+Returns gateway readiness status.
+
 ```json
 {
+  "status": "UP",
+  "service": "gateway",
   "ready": true,
-  "message": "Gateway is ready to accept requests"
+  "timestamp": "2026-08-25T10:30:00Z"
 }
 ```
+
+**Note:** Downstream services have their own `/health/ready` endpoints. Monitor them independently.
 
 ---
 
 ## 6. Configuration
 
 Services are configured via **environment variables** or **application.yml**, never hardcoded.
+
+Gateway routes are defined in `application.yml` with downstream service URLs:
 
 ```yaml
 # application.yml
@@ -152,20 +172,34 @@ spring:
     gateway:
       routes:
         - id: bridge
-          uri: ${BRIDGE_URL:http://bridge:8080}
+          uri: http://bridge-service:8080
           predicates:
             - Path=/api/bridge/**
           filters:
             - StripPrefix=2
+        - id: mind
+          uri: http://mind-service:8080
+          predicates:
+            - Path=/api/mind/**
+          filters:
+            - StripPrefix=2
+        - id: inbox
+          uri: http://inbox-service:8080
+          predicates:
+            - Path=/api/inbox/**
+          filters:
+            - StripPrefix=2
+        - id: chain
+          uri: http://chain-service:8080
+          predicates:
+            - Path=/api/chain/**
+          filters:
+            - StripPrefix=2
 ```
 
-**Environment Variables (for Docker):**
-```
-BRIDGE_URL=http://bridge:8080
-MIND_URL=http://mind:8080
-INBOX_URL=http://inbox:8080
-CHAIN_URL=http://chain:8080
-```
+**For Docker Compose:**
+- Use service container names (e.g., `http://bridge-service:8080`)
+- Gateway automatically resolves via Docker's internal DNS
 
 ---
 
@@ -217,19 +251,44 @@ docker-compose logs
 
 ---
 
-## 9. Next Steps
+## 9. Testing
 
-1. ✅ Define Gateway Contract (this document)
-2. ⚙️ Implement Routing with real downstream services
-3. ⚙️ Add Error Handling middleware
-4. ⚙️ Implement Health/Readiness endpoints
-5. ⚙️ Add Tests (routing, error handling, configuration)
-6. ⚙️ Update docker-compose.yml with Bridge integration
-7. ⚙️ Document consumer guidelines
+### Unit Tests
+- `GatewayHealthTests` - Verify /health and /health/ready endpoints return correct format
+- `GatewayRoutingTests` - Verify routing paths are configured for all services
+- `GatewayErrorHandlingTests` - Verify error handling for unknown routes and malformed requests
+
+### Running Tests
+```bash
+cd teams/lens/gateway
+mvn test
+```
+
+### Test Coverage
+- Health endpoints (2xx responses)
+- Routing path configuration (4xx/5xx responses)
+- Error handling (400, 404, 503, 504)
+- Query parameter forwarding
 
 ---
 
-## 10. Consumer Guidelines (for other teams)
+## 10. Next Steps
+
+## 10. Next Steps
+
+1. ✅ Define Gateway Contract (this document)
+2. ✅ Implement Routing with all downstream services
+3. ✅ Add Error Handling middleware
+4. ✅ Implement Health/Readiness endpoints (gateway-only)
+5. ✅ Add Tests (health, routing, error handling)
+6. ✅ Docker Compose integration with all 5 services
+7. ✅ Documentation for consumers
+
+**Phase 2 Step 6 Definition of Done: COMPLETE**
+
+---
+
+## 11. Consumer Guidelines (for other teams)
 
 ### How to integrate with Gateway
 
@@ -240,14 +299,24 @@ docker-compose logs
 5. **Your service** receives requests without `/api/{your-service}` prefix
 
 ### What Gateway guarantees
-- ✅ Requests forwarded to your service
-- ✅ Original HTTP method preserved
-- ✅ Query parameters forwarded
-- ✅ Request body forwarded
-- ✅ Response status codes preserved
-- ✅ Response body forwarded unchanged
+- ✅ Requests forwarded to your service with original method preserved
+- ✅ Query parameters and request body forwarded unchanged
+- ✅ Response status codes preserved (your service's status code returned to client)
+- ✅ Response body forwarded unchanged (no transformation)
+- ✅ Your service receives requests without `/api/{service}` prefix
 
-### What Gateway does NOT do (yet)
+### What Gateway does NOT do
+- ❌ Monitor your service health (you maintain your own /health endpoint)
+- ❌ Transform requests/responses (pure routing only)
+- ❌ Handle service-specific authentication (future BFF service)
+- ❌ Aggregate data from multiple services (each service is independent)
+
+### Architectural Principle
+**Each service is autonomous:** 
+- Your team owns your service, including its health status
+- Gateway is a transparent routing layer
+- Teams communicate directly (not through Gateway)
+- Each team monitors its own service health
 - ❌ No request/response transformation
 - ❌ No authentication enforcement
 - ❌ No rate limiting
