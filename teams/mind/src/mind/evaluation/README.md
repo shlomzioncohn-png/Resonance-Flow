@@ -53,17 +53,15 @@ If `--personas` (default `eval/personas`) doesn't point to a directory with a
 (`placeholder_scenarios.PLACEHOLDER_SCENARIOS`) so the command still runs end-to-end
 before the real persona set (weeks 2-3) lands.
 
-## Metric — temporary, pending mentor approval
+## Metric
 
-Currently, the harness evaluates models using **Top-1 Accuracy** (`metrics.top1_accuracy`).
+The harness evaluates models using **Top-1 Accuracy** (`metrics.top1_accuracy`) — closed,
+approved.
 
 For each scenario, the metric checks whether the task the model scored highest matches
 that scenario's `expected_top_task_id`. The final number is the proportion of scenarios
 where the model picked the correct top-priority task.
 
-**The metric formula itself — Top-1 Accuracy vs. MRR/nDCG — is a separate, still-open
-decision, not yet closed with the mentor.** This does not affect the model interface or
-the report structure above, both of which are already settled: to keep the door open
-for a future switch to MRR/nDCG without re-running every model, the harness report keeps
-the full list of every candidate's score per scenario (`ScenarioResult.candidates`), not
-just the winner.
+To keep the door open for a future switch to a different metric without re-running every
+model, the harness report keeps the full list of every candidate's score per scenario
+(`ScenarioResult.candidates`), not just the winner.
