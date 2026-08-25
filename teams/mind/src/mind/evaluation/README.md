@@ -48,10 +48,17 @@ python -m mind.evaluation.run --model dummy
 
 Replace `dummy` with the name of the model you want to evaluate.
 
-If `--personas` (default `eval/personas`) doesn't point to a directory with a
-`fixtures.py`, the harness falls back to a small internal placeholder scenario set
-(`placeholder_scenarios.PLACEHOLDER_SCENARIOS`) so the command still runs end-to-end
-before the real persona set (weeks 2-3) lands.
+`--personas` (default `eval/personas`) must point to a directory containing
+`scenario.schema.json` plus the scenario `*.json` files it validates against —
+see `eval/personas/README.md`. Loading goes through
+`mind.evaluation.personas.load_personas`/`validate_personas`: a structurally
+invalid scenario file or a broken cross-scenario invariant (e.g. a dangling
+`expected_top_task_id`) fails the run; a role with no scenario yet or a
+scenario that isn't `mentor_approved` only prints a warning.
+
+`placeholder_scenarios.PLACEHOLDER_SCENARIOS` still exists, but only as a
+small fixed fixture for unit-testing `harness.run()` in isolation
+(`tests/test_harness.py`) — it is not used by this CLI.
 
 ## Metric
 
