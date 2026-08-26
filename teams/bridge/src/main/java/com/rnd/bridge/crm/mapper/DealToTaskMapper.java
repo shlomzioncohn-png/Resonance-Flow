@@ -72,11 +72,6 @@ public final class DealToTaskMapper extends AbstractTaskMapper<Deal> {
     }
 
     @Override
-    protected String toDedupKey(Deal deal) {
-        return toSourceRef(deal);
-    }
-
-    @Override
     protected String toTitle(Deal deal) {
         return deal.title();
     }
