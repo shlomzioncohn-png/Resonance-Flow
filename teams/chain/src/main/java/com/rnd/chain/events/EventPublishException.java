@@ -1,8 +1,8 @@
 package com.rnd.chain.events;
 
 /**
- * נזרקת כאשר פרסום אירוע נכשל - בין אם בגלל כשל serialization
- * ובין אם בגלל שאין topic מוגדר לסוג האירוע.
+ * Thrown when publishing an event fails - either due to a serialization
+ * failure or because no topic is configured for the event type.
  */
 public class EventPublishException extends RuntimeException {
 

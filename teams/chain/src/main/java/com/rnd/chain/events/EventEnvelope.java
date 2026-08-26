@@ -5,14 +5,15 @@ import java.util.Objects;
 import java.util.UUID;
 
 /**
- * מעטפה גנרית לכל האירועים שChain מפרסם או צורך.
+ * Generic envelope for every event that Chain publishes or consumes.
  *
- * TODO: זהו placeholder זמני. לפי המוסכמות הכלליות של הפרויקט (כנראה
- * מוגדרות ע"י צוות Relay), ייתכן שהמבנה האמיתי שונה - שדות נוספים,
- * שמות שדות אחרים, או פורמט serialization שונה (למשל Avro במקום JSON).
- * יש לוודא זאת מול הצוות ולעדכן מחלקה זו בהתאם ברגע שמתברר המבנה הסופי.
+ * TODO: this is a temporary placeholder. Depending on the project-wide
+ * conventions (likely defined by the Relay team), the real structure may
+ * differ - additional fields, different field names, or a different
+ * serialization format (e.g. Avro instead of JSON). Confirm this with the
+ * team and update this class accordingly once the final structure is known.
  *
- * @param <T> הטיפוס של ה-payload הספציפי לאירוע (למשל TaskSchedulingUpdatedPayload)
+ * @param <T> the type of the event-specific payload (e.g. TaskSchedulingUpdatedPayload)
  */
 public class EventEnvelope<T> {
 

@@ -7,6 +7,10 @@ import java.util.HashMap;
 import java.util.Map;
 
 
+/**
+ * Binds the chain.kafka.topics map from application.yml - maps an event
+ * type to the Kafka topic it should be published to.
+ */
 @Component
 @ConfigurationProperties(prefix = "chain.kafka")
 public class ChainEventTopicsProperties {
