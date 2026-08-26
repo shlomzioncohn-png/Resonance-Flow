@@ -1,7 +1,7 @@
 package com.rnd.inbox.model.entity;
 
 import com.rnd.inbox.model.enums.AssignmentRole;
-import io.hypersistence.utils.hibernate.type.basic.PostgreSQLEnumType;
+import com.rnd.inbox.model.type.LowercasePostgreSQLEnumType;
 import org.hibernate.annotations.GenericGenerator;
 import org.hibernate.annotations.Type;
 import org.hibernate.annotations.TypeDef;
@@ -19,7 +19,7 @@ import java.time.Instant;
 import java.util.Objects;
 import java.util.UUID;
 
-@TypeDef(name = "pgsql_enum", typeClass = PostgreSQLEnumType.class)
+@TypeDef(name = "pgsql_enum", typeClass = LowercasePostgreSQLEnumType.class)
 @Entity
 @Table(name = "assignments")
 public class Assignment {
