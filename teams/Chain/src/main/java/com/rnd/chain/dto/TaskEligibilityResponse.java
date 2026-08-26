@@ -39,4 +39,5 @@ public class TaskEligibilityResponse {
     public int getOpenConstraintCount() {
         return openConstraintCount;
     }
+    
 }

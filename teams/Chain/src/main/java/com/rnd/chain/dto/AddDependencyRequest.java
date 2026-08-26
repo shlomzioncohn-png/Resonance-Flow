@@ -1,18 +1,20 @@
 package com.rnd.chain.dto;
+import javax.validation.constraints.NotNull;
+import java.util.UUID;
 
 public class AddDependencyRequest {
 
-    @NotNull(message = "dependsOnTaskId is required")
-    private Inbox.TaskId dependsOnTaskId;
+    @NotNull
+    private UUID dependsOnTaskId;
 
     public AddDependencyRequest() {
     }
 
-    public Inbox.TaskId getDependsOnTaskId() {
+    public UUID getDependsOnTaskId() {
         return dependsOnTaskId;
     }
 
-    public void setDependsOnTaskId(Inbox.TaskId dependsOnTaskId) {
+    public void setDependsOnTaskId(UUID dependsOnTaskId) {
         this.dependsOnTaskId = dependsOnTaskId;
     }
 }
