@@ -2,13 +2,13 @@ package com.rnd.bridge.crm.mapper;
 
 import com.rnd.bridge.crm.model.Deal;
 import com.rnd.bridge.crm.model.DealStage;
-import com.rnd.bridge.dto.ExtractionProvenance;
-import com.rnd.bridge.dto.RoleContext;
-import com.rnd.bridge.dto.SourceType;
-import com.rnd.bridge.dto.Task;
-import com.rnd.bridge.dto.TaskStatus;
-import com.rnd.bridge.dto.Tier;
-import com.rnd.bridge.repository.JsonDealRepository;
+import com.rnd.bridge.crm.repository.JsonDealRepository;
+import com.rnd.bridge.task.model.ExtractionProvenance;
+import com.rnd.bridge.task.model.RoleContext;
+import com.rnd.bridge.task.model.SourceType;
+import com.rnd.bridge.task.model.Task;
+import com.rnd.bridge.task.model.TaskStatus;
+import com.rnd.bridge.task.model.Tier;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
@@ -32,6 +32,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class DealToTaskMapperTest {
 
     private static final Instant AS_OF = Instant.parse("2026-08-23T00:00:00Z");
+    private static final DealToTaskMapper MAPPER = new DealToTaskMapper();
 
     private static JsonDealRepository repository() {
         return new JsonDealRepository(new DefaultResourceLoader(), "classpath:crm/synthetic-deals.json");
@@ -77,14 +78,14 @@ class DealToTaskMapperTest {
         // Same dealId must still resolve to the same dedup key after the
         // reopen - otherwise the reopened deal creates a second, invisible
         // Task instead of reviving the existing one.
-        assertEquals(DealToTaskMapper.toSourceRef(won), DealToTaskMapper.toSourceRef(reopened));
+        assertEquals(MAPPER.toSourceRef(won), MAPPER.toSourceRef(reopened));
     }
 
     @Test
     void sameDealYieldsIdenticalSourceRefOnRepeatedMapping() {
         Deal deal = Deal.builder().dealId("D-10432").stage(DealStage.NEGOTIATION).stageChangedAt(Instant.now()).build();
 
-        assertEquals(DealToTaskMapper.toSourceRef(deal), DealToTaskMapper.toSourceRef(deal));
+        assertEquals(MAPPER.toSourceRef(deal), MAPPER.toSourceRef(deal));
     }
 
     @Test
@@ -97,7 +98,7 @@ class DealToTaskMapperTest {
                 .stageChangedAt(Instant.now().plus(1, ChronoUnit.HOURS))
                 .build();
 
-        assertEquals(DealToTaskMapper.toSourceRef(before), DealToTaskMapper.toSourceRef(after));
+        assertEquals(MAPPER.toSourceRef(before), MAPPER.toSourceRef(after));
     }
 
     @Test
@@ -105,7 +106,7 @@ class DealToTaskMapperTest {
         Deal a = Deal.builder().dealId("D-10432").stage(DealStage.PROSPECT).stageChangedAt(Instant.now()).build();
         Deal b = Deal.builder().dealId("D-99999").stage(DealStage.PROSPECT).stageChangedAt(Instant.now()).build();
 
-        assertNotEquals(DealToTaskMapper.toSourceRef(a), DealToTaskMapper.toSourceRef(b));
+        assertNotEquals(MAPPER.toSourceRef(a), MAPPER.toSourceRef(b));
     }
 
     @Test
@@ -126,7 +127,7 @@ class DealToTaskMapperTest {
                 .stageChangedAt(Instant.parse("2026-08-20T00:00:00Z"))
                 .build();
 
-        Task task = DealToTaskMapper.toTask(deal, AS_OF);
+        Task task = MAPPER.map(deal, AS_OF);
 
         assertEquals("Full deal title", task.title());
         assertEquals("Full deal description", task.description());
@@ -160,7 +161,7 @@ class DealToTaskMapperTest {
                 .stageChangedAt(Instant.parse("2026-08-20T00:00:00Z"))
                 .build();
 
-        Task task = DealToTaskMapper.toTask(deal, AS_OF);
+        Task task = MAPPER.map(deal, AS_OF);
 
         assertEquals("Sparse deal", task.title());
         assertNull(task.description());
@@ -178,7 +179,7 @@ class DealToTaskMapperTest {
         assertEquals(4, history.size());
 
         List<String> sourceRefs = history.stream()
-                .map(DealToTaskMapper::toSourceRef)
+                .map(MAPPER::toSourceRef)
                 .distinct()
                 .collect(Collectors.toList());
 
@@ -191,7 +192,7 @@ class DealToTaskMapperTest {
         JsonDealRepository repo = repository();
 
         for (Deal deal : repo.findAll()) {
-            Integer urgency = DealToTaskMapper.toUrgency(deal, repo.asOf());
+            Integer urgency = MAPPER.toUrgency(deal, repo.asOf());
             assertTrue(urgency >= 1 && urgency <= 5,
                     () -> "urgency out of range for " + deal.dealId() + ": " + urgency);
         }
@@ -205,19 +206,19 @@ class DealToTaskMapperTest {
         Deal negotiationClosingToday = findLatest(repo, "D-10541");
         assertEquals(DealStage.NEGOTIATION, negotiationClosingToday.stage());
         assertEquals(LocalDate.of(2026, 8, 23), negotiationClosingToday.closeDate());
-        assertEquals(5, DealToTaskMapper.toUrgency(negotiationClosingToday, AS_OF));
+        assertEquals(5, MAPPER.toUrgency(negotiationClosingToday, AS_OF));
 
         // D-10530: PROPOSAL closing 2027-03-31, far beyond the 14-day window -> base 3 + bonus 0.
         Deal proposalClosingFarOut = findLatest(repo, "D-10530");
         assertEquals(DealStage.PROPOSAL, proposalClosingFarOut.stage());
         assertEquals(LocalDate.of(2027, 3, 31), proposalClosingFarOut.closeDate());
-        assertEquals(3, DealToTaskMapper.toUrgency(proposalClosingFarOut, AS_OF));
+        assertEquals(3, MAPPER.toUrgency(proposalClosingFarOut, AS_OF));
 
         // D-10520: ON_HOLD, already past its close date -> base 1, no bonus for a paused deal.
         Deal onHoldPastClose = findLatest(repo, "D-10520");
         assertEquals(DealStage.ON_HOLD, onHoldPastClose.stage());
         assertEquals(LocalDate.of(2026, 8, 5), onHoldPastClose.closeDate());
-        assertEquals(1, DealToTaskMapper.toUrgency(onHoldPastClose, AS_OF));
+        assertEquals(1, MAPPER.toUrgency(onHoldPastClose, AS_OF));
     }
 
     @Test
@@ -228,7 +229,7 @@ class DealToTaskMapperTest {
         assertEquals(DealStage.CLOSED_WON, closedWonNoCloseDate.stage());
         assertNull(closedWonNoCloseDate.closeDate());
 
-        Task task = DealToTaskMapper.toTask(closedWonNoCloseDate, AS_OF);
+        Task task = MAPPER.map(closedWonNoCloseDate, AS_OF);
 
         assertNull(task.deadline());
         assertEquals(1, task.urgency());
@@ -241,15 +242,15 @@ class DealToTaskMapperTest {
         Instant deadline = DealToTaskMapper.toDeadline(closeDate);
 
         assertEquals(Instant.parse("2026-09-30T23:59:59.999999999Z"), deadline);
-        assertNull(DealToTaskMapper.toDeadline(null));
+        assertNull(DealToTaskMapper.toDeadline((LocalDate) null));
     }
 
     @Test
     void toTaskRejectsNullDealAndNullAsOf() {
         Deal deal = Deal.builder().dealId("D-90003").stageChangedAt(AS_OF).build();
 
-        assertThrows(NullPointerException.class, () -> DealToTaskMapper.toTask(null, AS_OF));
-        assertThrows(NullPointerException.class, () -> DealToTaskMapper.toTask(deal, null));
+        assertThrows(NullPointerException.class, () -> MAPPER.map(null, AS_OF));
+        assertThrows(NullPointerException.class, () -> MAPPER.map(deal, null));
     }
 
     @Test
@@ -262,7 +263,7 @@ class DealToTaskMapperTest {
                 .stageChangedAt(Instant.parse("2026-08-20T00:00:00Z"))
                 .build();
 
-        Task task = DealToTaskMapper.toTask(deal, AS_OF);
+        Task task = MAPPER.map(deal, AS_OF);
 
         assertEquals(TaskStatus.NEW, task.status());
         assertNull(task.snoozedUntil());
@@ -278,7 +279,7 @@ class DealToTaskMapperTest {
                 .stageChangedAt(Instant.parse("2026-08-20T00:00:00Z"))
                 .build();
 
-        assertEquals(1, DealToTaskMapper.toUrgency(deal, AS_OF));
+        assertEquals(1, MAPPER.toUrgency(deal, AS_OF));
     }
 
     @Test
@@ -291,7 +292,7 @@ class DealToTaskMapperTest {
                 .stageChangedAt(Instant.parse("2026-08-01T00:00:00Z"))
                 .build();
 
-        Task task = DealToTaskMapper.toTask(deal, AS_OF);
+        Task task = MAPPER.map(deal, AS_OF);
 
         assertEquals(TaskStatus.CANCELLED, task.status());
     }
@@ -306,7 +307,7 @@ class DealToTaskMapperTest {
                 .stageChangedAt(Instant.parse("2026-08-20T00:00:00Z"))
                 .build();
 
-        assertEquals(5, DealToTaskMapper.toUrgency(deal, AS_OF));
+        assertEquals(5, MAPPER.toUrgency(deal, AS_OF));
     }
 
     @Test
@@ -319,7 +320,7 @@ class DealToTaskMapperTest {
                 .stageChangedAt(Instant.parse("2026-08-20T00:00:00Z"))
                 .build();
 
-        Task task = DealToTaskMapper.toTask(deal, AS_OF);
+        Task task = MAPPER.map(deal, AS_OF);
 
         assertNull(task.deadline());
     }
@@ -338,6 +339,6 @@ class DealToTaskMapperTest {
                 .stageChangedAt(Instant.parse("2026-08-20T00:00:00Z"))
                 .build();
 
-        assertEquals(5, DealToTaskMapper.toUrgency(deal, asOfAfterMidnight)); // 4 + 2, clamped to 5
+        assertEquals(5, MAPPER.toUrgency(deal, asOfAfterMidnight)); // 4 + 2, clamped to 5
     }
 }

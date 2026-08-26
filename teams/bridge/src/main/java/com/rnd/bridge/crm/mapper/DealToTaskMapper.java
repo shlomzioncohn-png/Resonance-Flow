@@ -2,22 +2,19 @@ package com.rnd.bridge.crm.mapper;
 
 import com.rnd.bridge.crm.model.Deal;
 import com.rnd.bridge.crm.model.DealStage;
-import com.rnd.bridge.dto.ExtractionProvenance;
-import com.rnd.bridge.dto.RoleContext;
-import com.rnd.bridge.dto.SourceType;
-import com.rnd.bridge.dto.Task;
-import com.rnd.bridge.dto.TaskStatus;
-import com.rnd.bridge.dto.TaskValidator;
-import com.rnd.bridge.dto.Tier;
+import com.rnd.bridge.task.AbstractTaskMapper;
+import com.rnd.bridge.task.model.RoleContext;
+import com.rnd.bridge.task.model.SourceType;
+import com.rnd.bridge.task.model.TaskStatus;
+import com.rnd.bridge.task.model.Tier;
 
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.LocalTime;
 import java.time.ZoneOffset;
 import java.time.temporal.ChronoUnit;
-import java.util.Objects;
 
-public final class DealToTaskMapper {
+public final class DealToTaskMapper extends AbstractTaskMapper<Deal> {
 
     private static final String SOURCE_REF_PREFIX = "crm:";
 
@@ -26,9 +23,6 @@ public final class DealToTaskMapper {
     // across all adapters - one-line change here once the answer lands.
     private static final ZoneOffset DEADLINE_ZONE = ZoneOffset.UTC;
     private static final LocalTime DEADLINE_TIME_OF_DAY = LocalTime.MAX;
-
-    private DealToTaskMapper() {
-    }
 
     public static TaskStatus toTaskStatus(DealStage stage) {
         return switch (stage) {
@@ -45,37 +39,61 @@ public final class DealToTaskMapper {
         };
     }
 
-    public static String toSourceRef(Deal deal) {
+    /**
+     * Deal.closeDate is a plain date; Inbox's {@code tasks.deadline} is
+     * {@code TIMESTAMPTZ}. Converted to end-of-day UTC so a deal closing "on
+     * the 30th" is not already overdue at 00:01 on the 30th.
+     * <p>
+     * Provisional pending confirmation from Inbox: a shared date-to-instant
+     * convention across all adapters is out to their team lead. Should be a
+     * one-line change ({@link #DEADLINE_ZONE} / {@link #DEADLINE_TIME_OF_DAY})
+     * once the answer lands.
+     */
+    static Instant toDeadline(LocalDate closeDate) {
+        if (closeDate == null) {
+            return null;
+        }
+        return closeDate.atTime(DEADLINE_TIME_OF_DAY).toInstant(DEADLINE_ZONE);
+    }
+
+    @Override
+    protected SourceType sourceType() {
+        return SourceType.CRM_DEAL;
+    }
+
+    @Override
+    protected Tier tier() {
+        return Tier.TACTICAL;
+    }
+
+    @Override
+    protected RoleContext roleContext() {
+        return RoleContext.SALESPERSON;
+    }
+
+    @Override
+    protected String toDedupKey(Deal deal) {
+        return toSourceRef(deal);
+    }
+
+    @Override
+    protected String toTitle(Deal deal) {
+        return deal.title();
+    }
+
+    @Override
+    protected String toDescription(Deal deal) {
+        return deal.description();
+    }
+
+    @Override
+    public String toSourceRef(Deal deal) {
         return SOURCE_REF_PREFIX + deal.dealId();
     }
 
-    public static Task toTask(Deal deal, Instant asOf) {
-        Objects.requireNonNull(deal, "deal must not be null");
-        Objects.requireNonNull(asOf, "asOf must not be null");
-
-        // TODO(organization_id): Inbox's tasks.organization_id is NOT NULL,
-        // but Deal carries no tenant identifier and the shared Task DTO has
-        // no tenantId field to stage one in. Cross-team contract gap awaiting
-        // a decision - do not default or invent a value here.
-        Task task = new Task(
-                null, // organizationId - see TODO above
-                null, // projectId - no source in Deal
-                deal.title(),
-                deal.description(),
-                toTaskStatus(deal.stage()),
-                toUrgency(deal, asOf),
-                null, // confidence - null on this deterministic ETL lane; Inbox requires confidence only for ML-inferred rows
-                Tier.TACTICAL,
-                ExtractionProvenance.ETL,
-                RoleContext.SALESPERSON,
-                SourceType.CRM_DEAL,
-                toSourceRef(deal),
-                null, // estimatedDurationMinutes - a CRM deal carries no effort signal
-                toDeadline(deal.closeDate()),
-                null); // snoozedUntil - never SNOOZED on this lane, so never populated
-
-        TaskValidator.validate(task);
-        return task;
+    @Override
+    protected TaskStatus toStatus(Deal deal) {
+        return toTaskStatus(deal.stage());
     }
 
     /**
@@ -104,9 +122,12 @@ public final class DealToTaskMapper {
      * </ul>
      * {@code ON_HOLD}, {@code CLOSED_WON} and {@code CLOSED_LOST} get no
      * bonus: a paused or finished deal should not be pushed up the queue by
-     * a date. The result is clamped to 1..5.
+     * a date. The result is clamped to 1..5 (AbstractTaskMapper clamps it
+     * again defensively; this local clamp is kept so calling this method
+     * directly still returns an in-range value).
      */
-    static Integer toUrgency(Deal deal, Instant asOf) {
+    @Override
+    protected Integer toUrgency(Deal deal, Instant asOf) {
         int urgency = switch (deal.stage()) {
             case PROSPECT -> 1 + openStageBonus(deal.closeDate(), asOf);
             case QUALIFIED -> 2 + openStageBonus(deal.closeDate(), asOf);
@@ -137,20 +158,13 @@ public final class DealToTaskMapper {
         return Math.max(min, Math.min(max, value));
     }
 
-    /**
-     * Deal.closeDate is a plain date; Inbox's {@code tasks.deadline} is
-     * {@code TIMESTAMPTZ}. Converted to end-of-day UTC so a deal closing "on
-     * the 30th" is not already overdue at 00:01 on the 30th.
-     * <p>
-     * Provisional pending confirmation from Inbox: a shared date-to-instant
-     * convention across all adapters is out to their team lead. Should be a
-     * one-line change ({@link #DEADLINE_ZONE} / {@link #DEADLINE_TIME_OF_DAY})
-     * once the answer lands.
-     */
-    static Instant toDeadline(LocalDate closeDate) {
-        if (closeDate == null) {
-            return null;
-        }
-        return closeDate.atTime(DEADLINE_TIME_OF_DAY).toInstant(DEADLINE_ZONE);
+    @Override
+    protected Instant toDeadline(Deal deal) {
+        return toDeadline(deal.closeDate());
+    }
+
+    @Override
+    protected Instant toSnoozedUntil(Deal deal) {
+        return null; // never SNOOZED on this lane, so never populated
     }
 }
