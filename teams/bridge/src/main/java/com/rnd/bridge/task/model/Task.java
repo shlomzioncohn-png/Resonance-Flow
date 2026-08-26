@@ -1,4 +1,6 @@
-package com.rnd.bridge.dto;
+package com.rnd.bridge.task.model;
+
+import com.rnd.bridge.core.BridgePayload;
 
 import java.time.Instant;
 
@@ -28,5 +30,15 @@ public record Task(
         // TIMESTAMPTZ. The date-to-instant conversion (presumably
         // start-of-day UTC) isn't decided yet - not building it until it is.
         Instant deadline,
-        Instant snoozedUntil) {
+        Instant snoozedUntil) implements BridgePayload {
+
+    @Override
+    public String tenantId() {
+        return organizationId;
+    }
+
+    @Override
+    public String dedupKey() {
+        return sourceRef;
+    }
 }

@@ -28,3 +28,7 @@ github:
     cron:
       enabled: ${GITHUB_SYNC_CRON_ENABLED:false}
       expression: ${GITHUB_SYNC_CRON_EXPRESSION:0 0 2 * * ?}
+
+bridge:
+  crm:
+    dataset: classpath:crm/synthetic-deals.json

@@ -1,4 +1,4 @@
-package com.rnd.bridge.dto;
+package com.rnd.bridge.task.model;
 
 public enum Tier {
     OPERATIONAL,

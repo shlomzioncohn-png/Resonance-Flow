@@ -1,0 +1,42 @@
+﻿# Build output
+target/
+build/
+out/
+dist/
+
+# Java
+*.class
+*.jar
+*.war
+*.log
+
+# IntelliJ
+.idea/
+*.iml
+*.iws
+*.ipr
+
+# VS Code / Eclipse
+.vscode/
+.classpath
+.project
+.settings/
+
+# Node (Lens)
+node_modules/
+.next/
+
+# Python (Mind)
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# Env & secrets
+.env
+.env.local
+*.pem
+
+# OS
+.DS_Store
+Thumbs.db

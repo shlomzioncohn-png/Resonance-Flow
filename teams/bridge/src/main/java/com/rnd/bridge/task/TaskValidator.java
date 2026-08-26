@@ -1,16 +1,18 @@
-package com.rnd.bridge.dto;
+package com.rnd.bridge.task;
+
+import com.rnd.bridge.core.PayloadValidator;
+import com.rnd.bridge.task.model.Task;
+import com.rnd.bridge.task.model.TaskStatus;
 
 /**
  * Fails fast on a malformed {@link Task} before it leaves the mapper, rather
  * than letting Inbox reject it later with a bare constraint-violation message
  * and no context about which field or deal produced it.
  */
-public final class TaskValidator {
+public final class TaskValidator implements PayloadValidator<Task> {
 
-    private TaskValidator() {
-    }
-
-    public static void validate(Task task) {
+    @Override
+    public void validate(Task task) {
         requireNonNull(task.title(), "title");
         requireNonNull(task.sourceType(), "sourceType");
         requireNonNull(task.status(), "status");
