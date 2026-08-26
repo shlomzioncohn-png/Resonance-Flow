@@ -2,13 +2,13 @@
 
 Foundation module for Team Chain (Dependency Graph, Task Selection & Constraints).
 
-This is a minimal Spring Boot skeleton. No business logic or real APIs are implemented yet - the
+This is a minimal Spring Boot skeleton. No real APIs are implemented yet - the
 goal of this stage is a clean, working Maven/Spring Boot project that later work can build on.
 
 ## Stack
 
-- Java 11
-- Spring Boot 2.7.18 (Maven)
+- Java 21
+- Spring Boot 3.3.13 (Maven)
 - Docker / Docker Compose
 
 No database is configured yet - the DB choice for the project has not been decided.
@@ -71,3 +71,31 @@ docker compose down
 ```bash
 mvn test
 ```
+
+## Dependency graph persistence (Issue #66)
+
+`TaskDependencyRepository` / `InMemoryTaskDependencyRepository` (in `repository/`) are a pure
+CRUD store for dependency edges (`taskId` depends on `dependsOnTaskId`): `findByTaskId`,
+`findByDependsOnTaskId`, `save`, `delete`. `save` is idempotent - saving the same edge twice does
+not create a duplicate row - and `delete` is a no-op if the edge doesn't exist. This layer does not
+validate task existence or reject self-dependencies; it is a thin storage abstraction, currently
+backed by an in-memory synchronized list until a real DB is chosen.
+
+`TaskDependencyService` (in `service/`) sits on top of it and enforces the business rules from
+issue #66:
+
+```java
+addDependency(taskId, dependsOnTaskId)   // throws InvalidDependencyException on self-dependency,
+                                          // TaskNotFoundException if either task doesn't exist,
+                                          // DuplicateDependencyException if the edge already exists
+removeDependency(taskId, dependsOnTaskId) // throws DependencyNotFoundException if the edge doesn't exist
+getDependencies(taskId)                   // ids of tasks that block taskId (empty list if none)
+getDependents(taskId)                     // ids of tasks that taskId blocks (empty list if none)
+```
+
+Callers that need those business rules enforced (duplicate edges, self-dependency, missing tasks)
+should go through `TaskDependencyService` rather than calling the repository directly.
+
+`TaskRepository` / `InMemoryTaskRepository` are also included here (a compatible implementation
+matching the interface used elsewhere in the module) since `TaskDependencyService` needs task
+existence checks and no shared implementation was merged yet at the time this was written.
