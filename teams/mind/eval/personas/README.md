@@ -125,6 +125,64 @@ Salesperson, CEO) are being written by the rest of the team now, to reach the fu
    `errors` must be empty. Warnings about other roles/scenarios not being ready
    yet are expected and fine — that's everyone else's in-progress work, not yours.
 
+## Scenario-writing conventions
+
+None of these are enforced by the schema or by `validate_personas` — they're
+judgment calls that four different people can easily make inconsistently.
+Follow them so the mentor review doesn't come back with "these two scenarios
+contradict each other."
+
+**Deadline proximity ("urgent" vs. not):**
+- A deadline within roughly `free_time_minutes` to 3x that window (e.g. 45 min
+  free, deadline 1-3 hours out) reads as genuinely urgent — a real pressure
+  signal, not decoration.
+- A deadline more than about one `time_horizon` away (e.g. a `this_week`
+  scenario with a deadline next month) is not urgency — don't write
+  `expected_reason` as if it were the deciding factor.
+- `deadline: null` = no urgency signal at all. Don't imply urgency for it.
+
+**Fit margin (`estimated_duration_minutes` vs. `free_time_minutes`):**
+- The *correct* task should fit with clear room to spare (e.g. a 40-min task
+  in a 45-min window), not land on the boundary by coincidence (44-in-45
+  reads as a rounding accident, not a real signal).
+- The *wrong* task(s) should either clearly not fit (2x+ the free time) or
+  lose on a different, unambiguous signal (`blocked`, deadline, scope) — not
+  on a razor-thin duration difference.
+
+**`blocked` as a distractor:**
+- Only mark a task `blocked` when its `description` states a concrete
+  external blocker (waiting on a specific person/team/approval). A reader
+  should be able to point at the sentence that causes it — never "just because."
+
+**`tier` assignment** (independent of role — see "Persona ≠ Tier" above):
+- `Operational` — routine, bounded, no scope beyond the task itself (a
+  bugfix, a status update).
+- `Tactical` — some coordination/scope beyond one person, days-to-weeks
+  horizon (a sprint plan, a review that unblocks someone else).
+- `Strategic` — organization-level scope or multi-month horizon (roadmap
+  planning, architecture sign-off, a budget review).
+- Don't default every Developer task to `Operational` or every Manager task
+  to `Strategic` — assign by what the task actually is, per scenario.
+
+**`seniority`, when set:**
+- Only set it when it's the actual deciding factor named in `expected_reason`
+  (see `developer_junior_architecture_review_vs_bugfix.json` for the pattern).
+  If seniority wouldn't change the answer, leave it `null` — don't set it
+  decoratively.
+
+**One dimension per scenario, no repeats within your role:**
+- Each of your 4-6 scenarios should test a genuinely different tradeoff
+  (deadline-vs-duration, a `blocked` distractor, a `constraints` entry that
+  rules an option out, a seniority-scoped call, a tier-vs-role mismatch...).
+  If two of your scenarios are the same test with different flavor text, cut one.
+
+**Pattern-match against the existing 8 before inventing a new style** —
+`developer_junior_urgent_bugfix_vs_new_feature.json`,
+`developer_junior_architecture_review_vs_bugfix.json`,
+`developer_senior_blocked_oauth_vs_pr_review.json`, and
+`manager_senior_async_update_vs_meeting_constraint.json` each demonstrate one
+of the patterns above end-to-end.
+
 ## Mentor review status
 
 *(Filled in by R1 once an actual review happens — not a placeholder for anyone
