@@ -1,11 +1,17 @@
 package com.rnd.gateway.dto;
 
 import com.fasterxml.jackson.annotation.JsonInclude;
+import lombok.AllArgsConstructor;
+import lombok.Data;
+import lombok.NoArgsConstructor;
 
 /**
  * Health status of a service.
  * Used in HealthStatus response.
  */
+@Data
+@NoArgsConstructor
+@AllArgsConstructor
 @JsonInclude(JsonInclude.Include.NON_NULL)
 public class ServiceHealth {
     
@@ -24,46 +30,5 @@ public class ServiceHealth {
         this.name = name;
         this.status = status;
         this.url = url;
-    }
-    
-    // Getters and Setters
-    public String getName() {
-        return name;
-    }
-    
-    public void setName(String name) {
-        this.name = name;
-    }
-    
-    public String getStatus() {
-        return status;
-    }
-    
-    public void setStatus(String status) {
-        this.status = status;
-    }
-    
-    public String getUrl() {
-        return url;
-    }
-    
-    public void setUrl(String url) {
-        this.url = url;
-    }
-    
-    public Long getResponseTime() {
-        return responseTime;
-    }
-    
-    public void setResponseTime(Long responseTime) {
-        this.responseTime = responseTime;
-    }
-    
-    public String getLastError() {
-        return lastError;
-    }
-    
-    public void setLastError(String lastError) {
-        this.lastError = lastError;
     }
 }
