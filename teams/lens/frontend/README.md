@@ -34,8 +34,82 @@ docker-compose.yml          Local container orchestration
 See [docs/app-shell-and-routing.md](docs/app-shell-and-routing.md) for the
 routing structure, the App Shell components, and how to add a new page.
 
-See [docs/design-system.md](docs/design-system.md) for the MUI theme, design
-tokens, and conventions for using MUI across the project.
+## Design system (LENS on MUI)
+
+LENS does not build its own component library — it uses **MUI** directly and
+adds one layer on top: a shared theme, a small set of design tokens, and a
+few conventions so every screen looks and behaves consistently. Full
+reference: [docs/design-system.md](docs/design-system.md). This section is
+the fast-start version.
+
+### What's already built
+
+- **`theme/`** — the single source of truth, assembled by `theme/index.ts`
+  into one `createTheme()` call, provided app-wide via `app/ThemeRegistry.tsx`:
+  - `tokens.ts` — raw values (brand color, grey scale, semantic colors, font
+    stack, spacing unit, breakpoints).
+  - `palette.ts` — MUI's `palette`, plus a LENS-specific
+    `palette.status.{healthy,warning,critical,neutral}` group for
+    workflow-health state (task/project/blocker status) — kept separate from
+    MUI's `success`/`warning`/`error`, which stay reserved for form/feedback
+    semantics.
+  - `typography.ts` — the full type scale (h1–h6, body, caption, etc.).
+  - `custom.ts` — tokens MUI has no built-in slot for: a border-radius scale
+    (`radius.sm/md/lg/pill`) and named elevation shadows (`elevation.card/
+    raised/overlay`).
+  - `components.ts` — per-component style overrides (`Button`, `Card`,
+    `Chip`, `AppBar`, …), global/base styles via `MuiCssBaseline`, and the
+    accessibility baseline (see below).
+- **`components/ui/StatusBadge`** — the one LENS-specific component created so
+  far. It maps a workflow-health status to a colored label
+  (`<StatusBadge status="critical" label="Blocked" />`), used in
+  `app/(app)/manager/workload/page.tsx`.
+- **Accessibility baseline** — a visible `:focus-visible` ring on every
+  interactive element, `prefers-reduced-motion` support, live regions on
+  `LoadingState`/`ErrorState`, and a rule that status is never conveyed by
+  color alone.
+- The existing App Shell (`Sidebar`, `Header`, `Logo`, `feedback/*State`) was
+  refactored to consume theme tokens — no component under `components/layout`
+  hardcodes a color, radius, or font size.
+
+### How to use it
+
+- **Colors, spacing, radius** — read from the theme, never hardcode:
+  ```tsx
+  <Box sx={{ bgcolor: 'primary.main', p: 2, borderRadius: (t) => t.custom.radius.md }} />
+  ```
+- **Typography** — use the `variant` prop, don't set `fontSize`/`fontWeight`
+  ad hoc:
+  ```tsx
+  <Typography variant="h6">Section title</Typography>
+  ```
+- **Workflow-health status** — use `StatusBadge`, not a raw `Chip`:
+  ```tsx
+  import StatusBadge from '@/components/ui/StatusBadge'
+  <StatusBadge status="healthy" label="On track" />
+  ```
+- **A style that should apply to every instance of a MUI component** (e.g.
+  "buttons are never uppercase") goes in `theme/components.ts`, not repeated
+  as `sx` on every usage.
+
+### How to conduct yourself (rules)
+
+1. No raw hex/px values outside `theme/tokens.ts` — add a token instead of
+   inlining a value.
+2. No pass-through wrapper components (no `LensButton` that just renders
+   `<Button {...props} />`). Style MUI components globally via
+   `theme/components.ts`.
+3. Only create a new `components/ui/*` component when it encodes real product
+   behavior or domain meaning that MUI has no vocabulary for — the same bar
+   `StatusBadge` had to clear. Otherwise, use the MUI component directly.
+4. Extend the theme by editing the relevant `theme/*.ts` file (see the
+   "Extending the theme" section of `docs/design-system.md`), not by
+   creating a second, local theme or a separate stylesheet.
+5. Never let color be the only signal of state/status — pair it with a text
+   label or icon.
+
+See [docs/design-system.md](docs/design-system.md) for the full token
+reference, the reasoning behind each convention, and worked examples.
 
 ## Run locally
 
