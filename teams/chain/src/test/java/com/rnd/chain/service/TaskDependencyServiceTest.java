@@ -140,7 +140,15 @@ class TaskDependencyServiceTest {
     }
 
     private static Task newTask(UUID id) {
-        return new Task(id, null, "owner", TaskStatus.ACTIVE, true, 0, 0,
-                null, null, LocalDateTime.now(), LocalDateTime.now(), null);
+        return Task.builder()
+                .id(id)
+                .ownerId("owner")
+                .status(TaskStatus.ACTIVE)
+                .isReady(true)
+                .blockingCount(0)
+                .openConstraintCount(0)
+                .createdAt(LocalDateTime.now())
+                .updatedAt(LocalDateTime.now())
+                .build();
     }
 }

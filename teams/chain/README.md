@@ -13,6 +13,9 @@ goal of this stage is a clean, working Maven/Spring Boot project that later work
 
 No database is configured yet - the DB choice for the project has not been decided.
 
+Task identifiers are `java.util.UUID` for now, pending the Inbox team publishing its own task id
+type (`Task`/`TaskDependency` will switch to that type once it exists).
+
 ## Project structure
 
 ```
