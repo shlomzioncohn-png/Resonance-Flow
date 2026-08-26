@@ -107,7 +107,10 @@ def _request_id(request: Request) -> str:
     request; the fallback only matters if a handler below somehow runs
     without that middleware (e.g. in an isolated test).
     """
-    return getattr(request.state, "request_id", str(uuid.uuid4()))
+    request_id = getattr(request.state, "request_id", None)
+    if request_id is None:
+        request_id = str(uuid.uuid4())
+    return request_id
 
 
 def _error_body(

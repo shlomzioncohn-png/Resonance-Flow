@@ -10,3 +10,7 @@ Pydantic models for everything crossing the `api/` boundary.
   `api/main.py`. Every endpoint, current and future, returns errors in
   this shape; do not invent a per-endpoint error format. Field reference
   and status-code table: `docs/API.md`.
+- `health.py` — `HealthResponse`, the body of `GET /health`. Every
+  response crossing the API boundary should be a defined model like
+  this one, not a raw `dict` -- FastAPI then validates it and `/docs`
+  reflects the real shape.

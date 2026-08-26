@@ -13,10 +13,13 @@ import time
 import uuid
 
 from fastapi import FastAPI, Request
+from starlette.middleware.base import RequestResponseEndpoint
+from starlette.responses import Response
 
 from mind import __version__
 from mind.api.v1 import router as v1_router
 from mind.contracts.errors import register_error_handlers
+from mind.contracts.health import HealthResponse
 
 app = FastAPI(title="MIND API", version=__version__)
 
@@ -31,17 +34,26 @@ _START_TIME = time.time()
 
 
 @app.middleware("http")
-async def _add_request_id(request: Request, call_next):
+async def _add_request_id(request: Request, call_next: RequestResponseEndpoint) -> Response:
     """Attach a request id to every request/response so an error's
-    request_id (see contracts/errors.py) can be correlated with logs."""
-    request.state.request_id = request.headers.get("x-request-id", str(uuid.uuid4()))
+    request_id (see contracts/errors.py) can be correlated with logs.
+
+    request: the incoming HTTP request.
+    call_next: continues the middleware/handler chain for this request
+        and returns its eventual Response -- calling and awaiting it is
+        what actually runs the rest of the app for this request.
+    """
+    request_id = request.headers.get("x-request-id")
+    if request_id is None:
+        request_id = str(uuid.uuid4())
+    request.state.request_id = request_id
     response = await call_next(request)
-    response.headers["x-request-id"] = request.state.request_id
+    response.headers["x-request-id"] = request_id
     return response
 
 
-@app.get("/health", tags=["health"])
-async def health() -> dict:
+@app.get("/health", tags=["health"], response_model=HealthResponse)
+async def health() -> HealthResponse:
     """Liveness/readiness check for Relay to monitor.
 
     Deliberately cheap: never touches the vector store, a model, or any
@@ -49,8 +61,8 @@ async def health() -> dict:
     and serving HTTP requests" -- nothing more. See docs/API.md for the
     documented response shape and status codes.
     """
-    return {
-        "status": "ok",
-        "version": __version__,
-        "uptime_seconds": round(time.time() - _START_TIME, 3),
-    }
+    return HealthResponse(
+        status="ok",
+        version=__version__,
+        uptime_seconds=round(time.time() - _START_TIME, 3),
+    )

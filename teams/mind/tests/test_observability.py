@@ -1,6 +1,16 @@
 """Tests for MIND's model-call tracking (src/mind/observability)."""
 
-from mind.observability.tracking import get_recent_calls, record_call
+import pytest
+
+from mind.observability.tracking import _reset_for_tests, get_recent_calls, record_call
+
+
+@pytest.fixture(autouse=True)
+def _clean_call_records():
+    """_records in tracking.py is a module-level global -- without this,
+    one test's calls would leak into the next, making assertions here
+    depend on execution order instead of what each test actually did."""
+    _reset_for_tests()
 
 
 def test_record_call_stores_and_returns_the_record():
