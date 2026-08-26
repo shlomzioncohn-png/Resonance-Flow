@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project version="4">
+  <component name="ClaudeCodeEditorTabs">
+    <option name="activeSessionId" value="b606297b-f4c2-4eca-8a5d-a8c93c537008" />
+    <option name="openSessionIds">
+      <list>
+        <option value="b606297b-f4c2-4eca-8a5d-a8c93c537008" />
+      </list>
+    </option>
+    <option name="sessionPaths">
+      <map>
+        <entry key="b606297b-f4c2-4eca-8a5d-a8c93c537008" value="/sessions/new" />
+        <entry key="d3ea2797-a424-49bf-902c-0ca9ed9846fd" value="/sessions/cb0174cd-1f31-48e5-b1c5-44ca00e28db7" />
+      </map>
+    </option>
+    <option name="sessionTitles">
+      <map>
+        <entry key="b606297b-f4c2-4eca-8a5d-a8c93c537008" value="Claude Code" />
+        <entry key="d3ea2797-a424-49bf-902c-0ca9ed9846fd" value="באיזה גרסת גאווה הפרויקט שלי?" />
+      </map>
+    </option>
+  </component>
+</project>
