@@ -112,6 +112,106 @@ The gateway has a single route configured:
 
 ---
 
+## Health Check Endpoints
+
+The Gateway provides health check endpoints for monitoring and orchestration:
+
+### `GET /health` - Full Health Status
+
+Returns the health of the Gateway AND its BFF dependency:
+
+```bash
+curl http://localhost:8080/health
+```
+
+**Response (BFF is UP):**
+```json
+{
+  "status": "UP",
+  "service": "gateway",
+  "version": "0.1.0",
+  "timestamp": "2026-08-26T10:30:45.123456Z",
+  "dependencies": {
+    "bff": "UP",
+    "bff_url": "http://bff-service:8080/health"
+  }
+}
+```
+
+**Response (BFF is DOWN):**
+```json
+{
+  "status": "UP",
+  "service": "gateway",
+  "version": "0.1.0",
+  "timestamp": "2026-08-26T10:30:45.123456Z",
+  "dependencies": {
+    "bff": "DOWN",
+    "bff_url": "http://bff-service:8080/health"
+  }
+}
+```
+
+**Status Codes:**
+- `200 OK` - Gateway is healthy (shown regardless of BFF status)
+- Always check the `dependencies.bff` field to see if BFF is available
+
+### `GET /health/ready` - Readiness Check
+
+Returns readiness status for deployment orchestration (K8s, Docker Swarm):
+
+```bash
+curl http://localhost:8080/health/ready
+```
+
+**Response:**
+```json
+{
+  "status": "UP",
+  "service": "gateway",
+  "ready": true,
+  "timestamp": "2026-08-26T10:30:45.123456Z",
+  "dependencies": {
+    "bff": "UP",
+    "bff_ready": true
+  }
+}
+```
+
+### How Health Checks Work
+
+1. **Gateway Health**
+   - Always returns `UP` when the Gateway process is running
+   - Reports the Gateway version and current timestamp
+
+2. **BFF Dependency Check**
+   - Gateway makes an HTTP call to `http://bff-service:8080/health`
+   - If BFF responds with `200 OK`, status is `UP`
+   - If BFF is unreachable or returns error, status is `DOWN`
+   - Timeout and exceptions are caught and logged (non-fatal)
+
+3. **Failure Handling**
+   - Gateway remains `UP` even if BFF is `DOWN`
+   - Frontend/consumers should check the `dependencies.bff` field
+   - If `bff: "DOWN"`, expect API requests to fail with `503 SERVICE_UNAVAILABLE`
+
+### Docker Healthcheck
+
+Docker Compose automatically probes `/health` every 10 seconds:
+
+```yaml
+healthcheck:
+  test: ["CMD", "curl", "http://localhost:8080/health"]
+  interval: 10s
+  timeout: 5s
+  retries: 3
+  start_period: 20s
+```
+
+Container status becomes `unhealthy` after 3 consecutive failed checks.
+
+---
+
 ## Building & Running
 
 To just build the jar:

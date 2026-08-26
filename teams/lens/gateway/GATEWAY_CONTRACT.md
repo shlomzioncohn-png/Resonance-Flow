@@ -1,10 +1,10 @@
 # LENS Gateway - Service Integration Contract
 
-**Version:** 2.0  
-**Date:** 2026-08-25  
+**Version:** 2.1  
+**Date:** 2026-08-26  
 **Owner:** LENS Team (Dvori)
 
-**Status:** Phase 2 Step 6 Complete - Gateway Ready for BFF Integration
+**Status:** Phase 2 Step 6 Complete - Gateway Ready for BFF Integration with Health Monitoring
 
 ---
 
@@ -142,37 +142,65 @@ BFF Processes:
 ## 5. Health & Readiness Endpoints
 
 ### GET /health
-Returns **gateway health status only** (not downstream services).
+Returns **gateway health status AND BFF dependency status**.
 
-Each downstream service has its own `/health` endpoint:
-- `GET http://bridge:8080/health`
-- `GET http://mind:8080/health`
-- `GET http://inbox:8080/health`
-- `GET http://chain:8080/health`
-
-**Gateway /health response:**
+**Response (BFF Available):**
 ```json
 {
   "status": "UP",
   "service": "gateway",
   "version": "0.1.0",
-  "timestamp": "2026-08-25T10:30:00Z"
+  "timestamp": "2026-08-26T10:30:00Z",
+  "dependencies": {
+    "bff": "UP",
+    "bff_url": "http://bff-service:8080/health"
+  }
 }
 ```
 
-### GET /health/ready
-Returns gateway readiness status.
+**Response (BFF Unavailable):**
+```json
+{
+  "status": "UP",
+  "service": "gateway",
+  "version": "0.1.0",
+  "timestamp": "2026-08-26T10:30:00Z",
+  "dependencies": {
+    "bff": "DOWN",
+    "bff_url": "http://bff-service:8080/health"
+  }
+}
+```
 
+**Note:** Gateway status remains `UP` even if BFF is `DOWN`. Always check `dependencies.bff` field.
+
+### GET /health/ready
+Returns gateway readiness status, including BFF availability check.
+
+**Response:**
 ```json
 {
   "status": "UP",
   "service": "gateway",
   "ready": true,
-  "timestamp": "2026-08-25T10:30:00Z"
+  "timestamp": "2026-08-26T10:30:00Z",
+  "dependencies": {
+    "bff": "UP",
+    "bff_ready": true
+  }
 }
 ```
 
-**Note:** Downstream services have their own `/health/ready` endpoints. Monitor them independently.
+**How it Works:**
+1. Gateway checks its own availability (always UP if process is running)
+2. Gateway makes HTTP call to `http://bff-service:8080/health`
+3. If BFF responds with 200 OK, `dependencies.bff = "UP"`
+4. If BFF is unreachable/errors, `dependencies.bff = "DOWN"`
+5. Health check is non-blocking - failures are logged but don't affect gateway health
+
+**For Consumers:**
+- If `dependencies.bff = "UP"` → Proceed with API calls
+- If `dependencies.bff = "DOWN"` → Expect `503 SERVICE_UNAVAILABLE` errors on `/api/**` requests
 
 ---
 
