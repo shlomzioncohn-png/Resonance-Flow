@@ -53,7 +53,7 @@ class GitHubKafkaProducerTest {
 
         verify(kafkaTemplate).send(topicCaptor.capture(), keyCaptor.capture(), taskCaptor.capture());
 
-        assertThat(topicCaptor.getValue()).isEqualTo(GitHubKafkaProducer.TOPIC);
+        assertThat(topicCaptor.getValue()).isEqualTo(gitHubKafkaProducer.TOPIC);
         assertThat(keyCaptor.getValue()).isEqualTo(task.sourceRef());
         assertThat(taskCaptor.getValue()).isEqualTo(task);
     }
@@ -81,8 +81,8 @@ class GitHubKafkaProducerTest {
     }
 
     private SendResult<String, Task> createSendResult(Task task) {
-        ProducerRecord<String, Task> record = new ProducerRecord<>(GitHubKafkaProducer.TOPIC, task.sourceRef(), task);
-        RecordMetadata metadata = new RecordMetadata(new TopicPartition(GitHubKafkaProducer.TOPIC, 0), 0, 0, 0, 0, 0);
+        ProducerRecord<String, Task> record = new ProducerRecord<>(gitHubKafkaProducer.TOPIC, task.sourceRef(), task);
+        RecordMetadata metadata = new RecordMetadata(new TopicPartition(gitHubKafkaProducer.TOPIC, 0), 0, 0, 0, 0, 0);
         return new SendResult<>(record, metadata);
     }
 }

@@ -9,7 +9,7 @@ spring:
     #   bootstrap-servers: 3.216.80.66:9092
     #   topic: bridge.github.tasks
     bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
-    topic: bridge.test.hadas
+    topic: bridge.test
     producer:
       key-serializer: org.apache.kafka.common.serialization.StringSerializer
       value-serializer: org.springframework.kafka.support.serializer.JsonSerializer
@@ -23,3 +23,8 @@ github:
   target:
     owner: ${GITHUB_TARGET_OWNER:KamaTechOrg}
     repo: ${GITHUB_TARGET_REPO:Resonance-Flow}
+  sync:
+    # Set to true to enable the automatic nightly GitHub to Kafka sync
+    cron:
+      enabled: ${GITHUB_SYNC_CRON_ENABLED:false}
+      expression: ${GITHUB_SYNC_CRON_EXPRESSION:0 0 2 * * ?}

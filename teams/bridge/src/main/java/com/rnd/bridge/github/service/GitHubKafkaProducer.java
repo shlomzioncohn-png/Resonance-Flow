@@ -19,7 +19,7 @@ public class GitHubKafkaProducer {
     private static final Logger log = LoggerFactory.getLogger(GitHubKafkaProducer.class);
 
     @Value("${spring.kafka.topic:bridge.github.tasks}")
-        private String TOPIC;
+    String TOPIC = "bridge.github.tasks";
 
     private final KafkaTemplate<String, Task> kafkaTemplate;
 

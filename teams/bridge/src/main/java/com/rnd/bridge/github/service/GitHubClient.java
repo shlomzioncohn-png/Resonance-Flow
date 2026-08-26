@@ -44,7 +44,7 @@ public class GitHubClient {
                 .uri(url)
                 .retrieve()
                 .bodyToFlux(GitHubIssue.class)
-                .map(this::mapToTask)
+                .map(this::mapToIssue)
                 .retryWhen(Retry.backoff(3, Duration.ofSeconds(1))
                         .filter(this::isRetryableException)
                         .doBeforeRetry(retrySignal -> log.warn("Retrying GitHub API call, attempt: {}", retrySignal.totalRetries() + 1)))
@@ -59,7 +59,7 @@ public class GitHubClient {
                 .uri(url)
                 .retrieve()
                 .bodyToFlux(GitHubIssue.class)
-                .map(this::mapToTask)
+                .map(this::mapToPullRequest)
                 .retryWhen(Retry.backoff(3, Duration.ofSeconds(1))
                         .filter(this::isRetryableException)
                         .doBeforeRetry(retrySignal -> log.warn("Retrying GitHub API call, attempt: {}", retrySignal.totalRetries() + 1)))
@@ -74,8 +74,7 @@ public class GitHubClient {
         return Flux.merge(fetchIssues(owner, repo), fetchPullRequests(owner, repo));
     }
 
-    private Task mapToTask(GitHubIssue issue) {
-        SourceType sourceType = issue.getPullRequest() != null ? SourceType.GITHUB_PR : SourceType.GITHUB_ISSUE;
+    private Task mapToTask(GitHubIssue issue, SourceType sourceType) {
         TaskStatus status = mapStatus(issue.getState());
 
         Task task = new Task(
@@ -99,6 +98,14 @@ public class GitHubClient {
         TaskValidator.validate(task);
 
         return task;
+    }
+
+    private Task mapToIssue(GitHubIssue issue) {
+        return mapToTask(issue, SourceType.GITHUB_ISSUE);
+    }
+
+    private Task mapToPullRequest(GitHubIssue issue) {
+        return mapToTask(issue, SourceType.GITHUB_PR);
     }
 
     private TaskStatus mapStatus(String githubState) {
