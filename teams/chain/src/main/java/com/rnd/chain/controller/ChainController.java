@@ -1,24 +1,25 @@
 package com.rnd.chain.controller;
 
 import com.rnd.chain.dto.AddDependencyRequest;
+import com.rnd.chain.dto.Constraint;
 import com.rnd.chain.dto.CreateConstraintRequest;
-import com.rnd.chain.dto.UpdateConstraintStatusRequest;
+import com.rnd.chain.dto.Task;
+import com.rnd.chain.dto.TaskAvailability;
+import com.rnd.chain.dto.TaskDependency;
 import com.rnd.chain.dto.TaskEligibilityResponse;
+import com.rnd.chain.dto.UpdateConstraintStatusRequest;
 
-import com.rnd.chain.model.Constraint;
-import com.rnd.chain.model.Task;
-import com.rnd.chain.model.TaskDependency;
-
-import com.rnd.chain.service.ChainService;
 import com.rnd.chain.service.ConstraintService;
 import com.rnd.chain.service.DependencyGraphService;
+import com.rnd.chain.service.TaskDependencyService;
+import com.rnd.chain.service.TaskEligibilityService;
 
-import jakarta.validation.Valid;
+import javax.validation.Valid;
 
-import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
+import java.net.URI;
 import java.util.List;
 import java.util.UUID;
 
@@ -26,25 +27,26 @@ import java.util.UUID;
 @RequestMapping("/tasks")
 public class ChainController {
 
-    private final ChainService chainService;
+    private final TaskDependencyService taskDependencyService;
     private final DependencyGraphService dependencyGraphService;
     private final ConstraintService constraintService;
+    private final TaskEligibilityService taskEligibilityService;
 
     public ChainController(
-            ChainService chainService,
+            TaskDependencyService taskDependencyService,
             DependencyGraphService dependencyGraphService,
-            ConstraintService constraintService
+            ConstraintService constraintService,
+            TaskEligibilityService taskEligibilityService
     ) {
-        this.chainService = chainService;
+        this.taskDependencyService = taskDependencyService;
         this.dependencyGraphService = dependencyGraphService;
         this.constraintService = constraintService;
+        this.taskEligibilityService = taskEligibilityService;
     }
-
 
     // =========================================================
     // Stage 1 - Dependency Management
     // =========================================================
-
 
     // 1. Add dependency
     @PostMapping("/{taskId}/dependencies")
@@ -54,16 +56,22 @@ public class ChainController {
     ) {
 
         TaskDependency createdDependency =
-                chainService.addDependency(
+                taskDependencyService.addDependency(
                         taskId,
                         request.getDependsOnTaskId()
                 );
 
+        URI location = URI.create(
+                "/tasks/"
+                        + taskId
+                        + "/dependencies/"
+                        + createdDependency.getDependsOnTaskId()
+        );
+
         return ResponseEntity
-                .status(HttpStatus.CREATED)
+                .created(location)
                 .body(createdDependency);
     }
-
 
     // 2. Remove dependency
     @DeleteMapping("/{taskId}/dependencies/{dependsOnTaskId}")
@@ -72,7 +80,7 @@ public class ChainController {
             @PathVariable UUID dependsOnTaskId
     ) {
 
-        chainService.removeDependency(
+        taskDependencyService.removeDependency(
                 taskId,
                 dependsOnTaskId
         );
@@ -82,50 +90,45 @@ public class ChainController {
                 .build();
     }
 
-
     // 3. Get direct dependencies
     @GetMapping("/{taskId}/dependencies")
-    public ResponseEntity<List<TaskDependency>> getDependencies(
+    public ResponseEntity<List<UUID>> getDependencies(
             @PathVariable UUID taskId
     ) {
 
-        List<TaskDependency> dependencies =
-                chainService.getDependencies(taskId);
+        List<UUID> dependencies =
+                taskDependencyService.getDependencies(taskId);
 
         return ResponseEntity.ok(dependencies);
     }
 
-
     // 4. Get dependents
     @GetMapping("/{taskId}/dependents")
-    public ResponseEntity<List<TaskDependency>> getDependents(
+    public ResponseEntity<List<UUID>> getDependents(
             @PathVariable UUID taskId
     ) {
 
-        List<TaskDependency> dependents =
-                chainService.getDependents(taskId);
+        List<UUID> dependents =
+                taskDependencyService.getDependents(taskId);
 
         return ResponseEntity.ok(dependents);
     }
-
 
     // =========================================================
     // Stage 2 - Dependency Traversal
     // =========================================================
 
-
-    // 5. Get direct blockers
+    // 5. Get direct blockers and open constraints
     @GetMapping("/{taskId}/blockers")
-    public ResponseEntity<List<Task>> getBlockers(
+    public ResponseEntity<TaskAvailability> getBlockers(
             @PathVariable UUID taskId
     ) {
 
-        List<Task> blockers =
+        TaskAvailability blockers =
                 dependencyGraphService.getBlockers(taskId);
 
         return ResponseEntity.ok(blockers);
     }
-
 
     // 6. Get all ancestors
     @GetMapping("/{taskId}/ancestors")
@@ -139,7 +142,6 @@ public class ChainController {
         return ResponseEntity.ok(ancestors);
     }
 
-
     // 7. Get all descendants
     @GetMapping("/{taskId}/descendants")
     public ResponseEntity<List<Task>> getDescendants(
@@ -152,11 +154,9 @@ public class ChainController {
         return ResponseEntity.ok(descendants);
     }
 
-
     // =========================================================
     // Stage 3 - Constraint Management
     // =========================================================
-
 
     // 8. Create constraint
     @PostMapping("/{taskId}/constraints")
@@ -168,14 +168,22 @@ public class ChainController {
         Constraint createdConstraint =
                 constraintService.createConstraint(
                         taskId,
-                        request
+                        request.getType(),
+                        request.getReason(),
+                        request.getSourceRef()
                 );
 
+        URI location = URI.create(
+                "/tasks/"
+                        + taskId
+                        + "/constraints/"
+                        + createdConstraint.getConstraintId()
+        );
+
         return ResponseEntity
-                .status(HttpStatus.CREATED)
+                .created(location)
                 .body(createdConstraint);
     }
-
 
     // 9. Get task constraints
     @GetMapping("/{taskId}/constraints")
@@ -189,7 +197,6 @@ public class ChainController {
         return ResponseEntity.ok(constraints);
     }
 
-
     // 10. Update constraint status
     @PatchMapping("/{taskId}/constraints/{constraintId}")
     public ResponseEntity<Constraint> updateConstraintStatus(
@@ -200,7 +207,6 @@ public class ChainController {
 
         Constraint updatedConstraint =
                 constraintService.updateConstraintStatus(
-                        taskId,
                         constraintId,
                         request.getStatus()
                 );
@@ -208,18 +214,18 @@ public class ChainController {
         return ResponseEntity.ok(updatedConstraint);
     }
 
-
     // =========================================================
     // Stage 4 - Task Eligibility
     // =========================================================
 
+    // 11. Get task eligibility
     @GetMapping("/{taskId}/eligibility")
     public ResponseEntity<TaskEligibilityResponse> getTaskEligibility(
             @PathVariable UUID taskId
     ) {
 
         TaskEligibilityResponse eligibility =
-                chainService.getTaskEligibility(taskId);
+                taskEligibilityService.getTaskEligibility(taskId);
 
         return ResponseEntity.ok(eligibility);
     }
