@@ -15,6 +15,7 @@ import pytest
 
 from mind.embeddings import embed, upsert, search
 from mind.embeddings.config import PG_DSN, PG_TABLE
+from mind.embeddings.generate import EMBEDDING_DIM
 
 
 @pytest.fixture(autouse=True)
@@ -38,7 +39,7 @@ def test_embed_is_independent():
     """embed() alone: correct shape, deterministic, no DB involved."""
     vec = embed("Fix the login bug on the payments page")
     assert isinstance(vec, list)
-    assert len(vec) == 256
+    assert len(vec) == EMBEDDING_DIM
     assert all(isinstance(x, float) for x in vec)
     # Deterministic: same text -> same vector.
     assert vec == embed("Fix the login bug on the payments page")
@@ -81,7 +82,7 @@ def test_full_cycle_embed_upsert_search():
     text = "Customer reported duplicate invoices being generated"
 
     vector = embed(text)
-    assert len(vector) == 256
+    assert len(vector) == EMBEDDING_DIM
 
     upsert(task_id, vector)
 

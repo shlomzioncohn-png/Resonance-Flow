@@ -12,7 +12,7 @@ from psycopg2 import pool
 
 from mind.embeddings.base import VectorStore
 from mind.embeddings.config import HNSW_EF_SEARCH, PG_DSN, PG_TABLE
-from mind.embeddings.embeddings import EMBEDDING_DIM
+from mind.embeddings.generate import EMBEDDING_DIM
 
 
 class PgVectorStore(VectorStore):
