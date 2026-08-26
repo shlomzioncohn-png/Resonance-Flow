@@ -100,6 +100,16 @@ def _code_for_status(status_code: int) -> str:
     return _STATUS_TO_CODE.get(status_code, "error")
 
 
+def _request_id(request: Request) -> str:
+    """The request id to put on an error response.
+
+    Normally already set by main.py's request-id middleware for every
+    request; the fallback only matters if a handler below somehow runs
+    without that middleware (e.g. in an isolated test).
+    """
+    return getattr(request.state, "request_id", str(uuid.uuid4()))
+
+
 def _error_body(
     error_code: str,
     message: str,
@@ -121,7 +131,7 @@ def register_error_handlers(app: FastAPI) -> None:
     async def _http_exception_handler(
         request: Request, exc: StarletteHTTPException
     ) -> JSONResponse:
-        request_id = getattr(request.state, "request_id", str(uuid.uuid4()))
+        request_id = _request_id(request)
         message = exc.detail if isinstance(exc.detail, str) else "Request failed."
         return JSONResponse(
             status_code=exc.status_code,
@@ -136,7 +146,7 @@ def register_error_handlers(app: FastAPI) -> None:
     async def _validation_exception_handler(
         request: Request, exc: RequestValidationError
     ) -> JSONResponse:
-        request_id = getattr(request.state, "request_id", str(uuid.uuid4()))
+        request_id = _request_id(request)
         return JSONResponse(
             status_code=422,
             content=_error_body(
@@ -149,7 +159,7 @@ def register_error_handlers(app: FastAPI) -> None:
 
     @app.exception_handler(Exception)
     async def _unhandled_exception_handler(request: Request, exc: Exception) -> JSONResponse:
-        request_id = getattr(request.state, "request_id", str(uuid.uuid4()))
+        request_id = _request_id(request)
         # The response body deliberately stays generic (never leaks the
         # exception message, type, or a traceback to the caller) -- but
         # the real cause still has to land *somewhere*, or request_id
