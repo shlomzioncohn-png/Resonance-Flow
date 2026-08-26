@@ -73,7 +73,6 @@ licensing constraints.
 
 ## Open decisions (track and update as they close)
 
-- Vector store: pgvector / Qdrant / OpenSearch k-NN / Milvus / Chroma+FAISS
 - OCR/ASR: managed API vs. local model (e.g. local Whisper)
 - Evaluation metric: top-1 accuracy vs. MRR/nDCG
 - How the score is published to Chain: separate event vs. field on `Task`
