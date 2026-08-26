@@ -135,3 +135,21 @@ def test_validate_personas_unapproved_scenario_is_warning_not_error():
     report = validate_personas(scenarios)
     assert report.ok
     assert any("mentor_approved" in w for w in report.warnings)
+
+
+def test_validate_personas_role_count_out_of_range_is_warning_not_error():
+    # Only 2 Developer scenarios: below MIN_SCENARIOS_PER_ROLE (4).
+    scenarios = [
+        make_scenario(scenario_id="developer_scenario_1", role="Developer"),
+        make_scenario(scenario_id="developer_scenario_2", role="Developer"),
+    ]
+    report = validate_personas(scenarios)
+    assert report.ok
+    assert any("Developer" in w and "2" in w for w in report.warnings)
+
+
+def test_validate_personas_total_count_out_of_range_is_warning_not_error():
+    scenarios = [make_scenario()]  # 1 scenario total, below MIN_TOTAL_SCENARIOS (24)
+    report = validate_personas(scenarios)
+    assert report.ok
+    assert any("total" in w and "24-36" in w for w in report.warnings)

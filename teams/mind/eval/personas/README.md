@@ -81,15 +81,57 @@ Scenario
 | `source.source_detail` | The exact source details | Enables tracing back to the actual origin (e.g. a specific AMI meeting ID) | Free-text string or `null` | Optional (required in practice when `type` is AMI/FUNSD/other) | R1 (traceability) | `"AMI meeting ES2002a"` |
 | `mentor_approved` | Whether the mentor has signed off on this specific scenario as correct ground truth | Without a per-scenario flag there is no way to distinguish "drafted" from "mentor-approved" — the set must be fully approved by the Foundation Gate, but gets built up scenario-by-scenario before that | `true` / `false` | Required (must be set explicitly, no implicit default) | The harness/CI (warns, doesn't crash, on any `false`); the mentor review process | `false` |
 
-## Constraints not enforced by the JSON Schema itself (enforced in R1's validation code)
+## Constraints not enforced by the JSON Schema itself (enforced in `validate_personas`, `personas.py`)
 
+**Hard errors** (fail `make eval` / CI):
 - `expected_top_task_id` must equal the `task_id` of one of the entries in `tasks`.
 - No duplicate scenarios (`scenario_id` unique across all of `eval/personas/`).
-- Every one of the six roles is covered at least once across the full set.
 - When `source.type` is `AMI`, `FUNSD`, or `other`, `source_detail` must be filled in.
 
-## What's deliberately not defined yet
+**Warnings** (printed, don't fail the build — the set is built up incrementally by
+multiple people before the Foundation Gate, so a mid-week PR shouldn't go red just
+because the set isn't complete yet):
+- A role has no scenario at all.
+- A role has scenarios, but not 4-6 of them.
+- The full set doesn't total 24-36 scenarios.
+- A scenario has `mentor_approved: false`.
 
-Per the step-10 rule in the original task spec: **only after this schema is approved** — not before —
-do we move on to writing the first 6 scenarios (2 Developer, 2 Manager, 2 CEO) as a sanity check on the
-schema, and only after that to the full 24–36. This file deliberately contains no example scenarios.
+## Status
+
+The schema was sanity-checked against a first batch of 8 scenarios (4 Developer, 4
+Manager, written by R1). The remaining four roles (Higher Manager, Field Engineer,
+Salesperson, CEO) are being written by the rest of the team now, to reach the full
+24-36 across all six roles required by the Foundation Gate.
+
+## Contributing a scenario
+
+1. Pick one of your assigned roles. Write 4-6 scenarios for it, each testing a
+   genuinely different kind of choice (a deadline vs. duration tradeoff, a
+   `blocked` distractor, a `constraints` entry that rules an option out, a
+   seniority-scoped judgment call...) — not six variations on the same idea.
+2. **Name your `scenario_id`s `<role>_<yourname>_<short_slug>`** (e.g.
+   `ceo_dana_quarterly_board_prep`) — the extra name segment exists purely to
+   avoid two people accidentally picking the same `scenario_id` when nobody
+   coordinated in advance. `scenario_id` must still match `^[a-z0-9_]+$`.
+3. One scenario per file, filename `<scenario_id>.json`, dropped directly into
+   this directory. Follow `scenario.schema.json` — see the field tables above
+   for what each field means and why.
+4. Set `mentor_approved: false` — that flag only ever gets flipped to `true` by
+   R1 after an actual mentor review, never by the scenario's author.
+5. Before pushing, validate locally from `teams/mind/`:
+   ```bash
+   python -c "from mind.evaluation.personas import load_personas, validate_personas as v; s = load_personas('eval/personas'); r = v(s); print('errors:', r.errors); print('warnings:', r.warnings)"
+   ```
+   `errors` must be empty. Warnings about other roles/scenarios not being ready
+   yet are expected and fine — that's everyone else's in-progress work, not yours.
+
+## Mentor review status
+
+*(Filled in by R1 once an actual review happens — not a placeholder for anyone
+to hand-wave. "Partially approved with a documented plan to close" is the
+honest state to report if 100% isn't reached by the Foundation Gate.)*
+
+- **Review date:** _TBD_
+- **Reviewed by:** _TBD_
+- **Approved:** _TBD_ / _TBD_ scenarios (`mentor_approved: true`)
+- **Notes / pending changes:** _TBD_

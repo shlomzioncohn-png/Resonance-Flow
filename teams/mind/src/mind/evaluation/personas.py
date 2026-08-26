@@ -9,14 +9,17 @@ eval/personas/README.md:
 - `validate_personas`: the cross-scenario invariants the JSON Schema itself
   cannot express (a dangling `expected_top_task_id`, a duplicate
   `scenario_id`, a role nobody wrote a scenario for yet...). Some of these
-  are hard errors; others (missing role coverage, `mentor_approved: false`)
-  just mean the set isn't finished yet, so they're reported as warnings
-  rather than raised.
+  are hard errors; others (missing/under/over role coverage, an out-of-range
+  total, `mentor_approved: false`) just mean the set isn't finished yet, so
+  they're reported as warnings rather than raised — the set is built up
+  incrementally by multiple people before the Foundation Gate, and a
+  mid-week PR shouldn't fail CI just because the set isn't complete yet.
 """
 
 from __future__ import annotations
 
 import json
+from collections import Counter
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -34,6 +37,11 @@ ALL_ROLES = {
 }
 
 SOURCE_TYPES_REQUIRING_DETAIL = {"AMI", "FUNSD", "other"}
+
+MIN_SCENARIOS_PER_ROLE = 4
+MAX_SCENARIOS_PER_ROLE = 6
+MIN_TOTAL_SCENARIOS = 24
+MAX_TOTAL_SCENARIOS = 36
 
 
 class PersonaSchemaError(ValueError):
@@ -114,7 +122,7 @@ def validate_personas(scenarios: list[dict]) -> ValidationReport:
     report = ValidationReport()
 
     seen_scenario_ids: set[str] = set()
-    roles_covered: set[str] = set()
+    scenarios_per_role: Counter[str] = Counter()
 
     for scenario in scenarios:
         scenario_id = scenario.get("scenario_id", "<missing scenario_id>")
@@ -125,7 +133,7 @@ def validate_personas(scenarios: list[dict]) -> ValidationReport:
 
         role = scenario.get("persona", {}).get("role")
         if role:
-            roles_covered.add(role)
+            scenarios_per_role[role] += 1
 
         task_ids = {task["task_id"] for task in scenario.get("tasks", [])}
 
@@ -145,10 +153,24 @@ def validate_personas(scenarios: list[dict]) -> ValidationReport:
         if scenario.get("mentor_approved") is not True:
             report.warnings.append(f"{scenario_id}: not yet mentor_approved")
 
-    missing_roles = ALL_ROLES - roles_covered
+    missing_roles = ALL_ROLES - scenarios_per_role.keys()
     if missing_roles:
         report.warnings.append(
             f"no scenario yet for role(s): {', '.join(sorted(missing_roles))}"
+        )
+
+    for role, count in sorted(scenarios_per_role.items()):
+        if not (MIN_SCENARIOS_PER_ROLE <= count <= MAX_SCENARIOS_PER_ROLE):
+            report.warnings.append(
+                f"{role}: has {count} scenario(s), expected "
+                f"{MIN_SCENARIOS_PER_ROLE}-{MAX_SCENARIOS_PER_ROLE}"
+            )
+
+    total = len(scenarios)
+    if total and not (MIN_TOTAL_SCENARIOS <= total <= MAX_TOTAL_SCENARIOS):
+        report.warnings.append(
+            f"{total} scenario(s) total, expected "
+            f"{MIN_TOTAL_SCENARIOS}-{MAX_TOTAL_SCENARIOS}"
         )
 
     return report
