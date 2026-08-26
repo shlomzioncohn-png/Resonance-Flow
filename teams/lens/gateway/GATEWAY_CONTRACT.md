@@ -1,10 +1,10 @@
 # LENS Gateway - Service Integration Contract
 
-**Version:** 2.1  
+**Version:** 2.2  
 **Date:** 2026-08-26  
 **Owner:** LENS Team (Dvori)
 
-**Status:** Phase 2 Step 6 Complete - Gateway Ready for BFF Integration with Health Monitoring
+**Status:** Phase 2 Complete - Gateway Ready for BFF Integration (Health Check endpoints pending tech lead approval)
 
 ---
 
@@ -140,6 +140,8 @@ BFF Processes:
 ---
 
 ## 5. Health & Readiness Endpoints
+
+**Status:** 🕐 *Pending approval from tech lead - Implemented but awaiting confirmation before production use*
 
 ### GET /health
 Returns **gateway health status AND BFF dependency status**.

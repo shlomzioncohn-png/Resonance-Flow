@@ -84,7 +84,85 @@ Bridge Chain Inbox Mind
 - Spring Cloud Gateway 2024.0.0
 - Spring Security (for authentication & authorization)
 - JWT for token-based authentication (Phase 2)
+- **Lombok 1.18.30** (reduces boilerplate code)
 - Docker / Docker Compose
+
+---
+
+## Lombok - Reducing Boilerplate Code
+
+[Lombok](https://projectlombok.org/) is a Java library that automatically generates boilerplate code (getters, setters, constructors, toString, etc.) at compile time using annotations.
+
+### Why Lombok?
+
+Traditional Java DTOs require ~100 lines of code per class:
+```java
+// ❌ Without Lombok (~100 lines)
+public class ErrorResponse {
+    private String status;
+    private String errorCode;
+    private String message;
+    private String path;
+    private LocalDateTime timestamp;
+    
+    // getters, setters, constructors, toString...
+}
+```
+
+With Lombok, the same class is just:
+```java
+// ✅ With Lombok (~20 lines)
+@Data
+@NoArgsConstructor
+@AllArgsConstructor
+@ToString
+public class ErrorResponse {
+    private String status;
+    private String errorCode;
+    private String message;
+    private String path;
+    private LocalDateTime timestamp;
+}
+```
+
+### Annotations Used
+
+- **`@Data`** - Generates getters, setters, equals(), hashCode(), toString()
+- **`@NoArgsConstructor`** - Generates no-arg constructor
+- **`@AllArgsConstructor`** - Generates constructor with all fields
+- **`@ToString`** - Generates toString() method
+
+### Maven Configuration
+
+Lombok is configured in `pom.xml`:
+
+```xml
+<!-- Dependency -->
+<dependency>
+    <groupId>org.projectlombok</groupId>
+    <artifactId>lombok</artifactId>
+    <version>1.18.30</version>
+    <scope>provided</scope>
+</dependency>
+
+<!-- Annotation Processor (for compile-time code generation) -->
+<annotationProcessorPaths>
+    <path>
+        <groupId>org.projectlombok</groupId>
+        <artifactId>lombok</artifactId>
+        <version>1.18.30</version>
+    </path>
+</annotationProcessorPaths>
+```
+
+### Usage in Gateway
+
+All DTOs in the Gateway use Lombok:
+- `ErrorResponse.java` - Error response format
+- `ServiceHealth.java` - Health status of a service
+- Any future DTOs added to the project
+
+---
 
 ## Project structure
 
@@ -113,6 +191,8 @@ The gateway has a single route configured:
 ---
 
 ## Health Check Endpoints
+
+**Status:** 🕐 *Pending approval from tech lead - Implemented but awaiting confirmation before production use*
 
 The Gateway provides health check endpoints for monitoring and orchestration:
 
@@ -286,8 +366,22 @@ The BFF service (by Sari) receives ALL requests through the Gateway and is respo
 
 ## Next Steps
 
-- ✅ Phase 2 Step 6: Gateway Complete - Routes to BFF only
+- ✅ Phase 2 Step 6: Gateway Core Complete - Routes to BFF only
+- 🕐 Phase 2 Enhancement: Health Check endpoints (implemented, awaiting tech lead approval)
 - 🔄 Phase 3: BFF Implementation (Sari)
 - 🔄 Phase 4: Frontend Development
 - 🔄 Phase 5: Authentication & Authorization (JWT tokens)
 - 🔄 Phase 6: Rate limiting & Circuit breakers
+
+### Phase 2 Current Status
+
+**Core Gateway Functionality:** ✅ COMPLETE
+- Routing to BFF service
+- Error handling with unified error responses
+- Docker integration
+- Lombok for reducing boilerplate code
+- Comprehensive documentation
+
+**Pending Tech Lead Approval:**
+- Health check endpoints (`/health`, `/health/ready` with BFF monitoring)
+- Implementation is complete and tested, awaiting approval before production use
