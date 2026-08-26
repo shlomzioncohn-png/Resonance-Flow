@@ -42,9 +42,15 @@ def main():
     report = run(model, scenarios)
     report_dict = dataclasses.asdict(report)
 
-    print("\n--- Evaluation Report ---")
+    print("\n=== Evaluation Summary ===")
+    print(f"Model:               {report.model_name}")
+    print(f"Scenarios evaluated: {report.total_scenarios}")
+    print(f"Top-1 accuracy:      {report.top1_accuracy:.1%} ({report.correct_top1}/{report.total_scenarios})")
+    print("===========================\n")
+
+    print("--- Evaluation Report (full detail, also written to report.json) ---")
     print(json.dumps(report_dict, indent=4))
-    print("-------------------------\n")
+    print("----------------------------------------------------------------------\n")
 
     with open("report.json", "w") as f:
         json.dump(report_dict, f, indent=4)

@@ -60,6 +60,22 @@ scenario that isn't `mentor_approved` only prints a warning.
 small fixed fixture for unit-testing `harness.run()` in isolation
 (`tests/test_harness.py`) — it is not used by this CLI.
 
+## For mentors: running this without MIND's help
+
+From a fresh clone, with no prior knowledge of this repo:
+
+```bash
+cd teams/mind
+cp .env.example .env       # no values are actually required for this to work
+make dev                   # installs everything the harness needs
+make eval                  # runs the harness against eval/personas/, prints a summary + full report, writes report.json
+```
+`make eval` exits `0` on success. A "[persona set warning] ..." line is expected
+and not a failure — it just means the persona set (`eval/personas/`) isn't fully
+built out and mentor-approved yet; the run itself still completes and reports a
+score. Only a non-zero exit code, or text under "Persona set validation FAILED",
+means something is actually broken.
+
 ## Metric
 
 The harness evaluates models using **Top-1 Accuracy** (`metrics.top1_accuracy`) — closed,
