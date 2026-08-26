@@ -13,10 +13,6 @@ import java.util.stream.Stream;
  * record at a time - with {@link #errorPolicy()} deciding whether a failed
  * record aborts the run or is recorded and skipped so the rest of the batch
  * still gets processed.
- */
-
-/**
- * ...
  *
  * @param <S> the raw source record type - a GitHub issue, a CRM deal
  * @param <O> the payload published downstream - Task or RawObjectEvent

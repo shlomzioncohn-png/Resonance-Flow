@@ -1,5 +1,6 @@
 package com.rnd.bridge.task;
 
+import com.rnd.bridge.core.error.ValidationException;
 import com.rnd.bridge.task.model.ExtractionProvenance;
 import com.rnd.bridge.task.model.RoleContext;
 import com.rnd.bridge.task.model.SourceType;
@@ -44,42 +45,42 @@ class TaskValidatorTest {
     @Test
     void rejectsUrgencyOutOfRange() {
         Task task = withUrgency(baseTask(), 6);
-        IllegalArgumentException ex = assertThrows(IllegalArgumentException.class, () -> VALIDATOR.validate(task));
+        ValidationException ex = assertThrows(ValidationException.class, () -> VALIDATOR.validate(task));
         assertTrue(ex.getMessage().contains("urgency"));
     }
 
     @Test
     void rejectsConfidenceOutOfRange() {
         Task task = withConfidence(baseTask(), 1.5);
-        IllegalArgumentException ex = assertThrows(IllegalArgumentException.class, () -> VALIDATOR.validate(task));
+        ValidationException ex = assertThrows(ValidationException.class, () -> VALIDATOR.validate(task));
         assertTrue(ex.getMessage().contains("confidence"));
     }
 
     @Test
     void rejectsNonPositiveEffortEstimate() {
         Task task = withEstimatedDurationMinutes(baseTask(), 0);
-        IllegalArgumentException ex = assertThrows(IllegalArgumentException.class, () -> VALIDATOR.validate(task));
+        ValidationException ex = assertThrows(ValidationException.class, () -> VALIDATOR.validate(task));
         assertTrue(ex.getMessage().contains("estimatedDurationMinutes"));
     }
 
     @Test
     void rejectsSnoozedStatusWithoutSnoozedUntil() {
         Task task = withStatus(baseTask(), TaskStatus.SNOOZED);
-        IllegalArgumentException ex = assertThrows(IllegalArgumentException.class, () -> VALIDATOR.validate(task));
+        ValidationException ex = assertThrows(ValidationException.class, () -> VALIDATOR.validate(task));
         assertTrue(ex.getMessage().contains("snoozedUntil"));
     }
 
     @Test
     void rejectsSnoozedUntilWithoutSnoozedStatus() {
         Task task = withSnoozedUntil(withStatus(baseTask(), TaskStatus.NEW), Instant.parse("2026-09-01T00:00:00Z"));
-        IllegalArgumentException ex = assertThrows(IllegalArgumentException.class, () -> VALIDATOR.validate(task));
+        ValidationException ex = assertThrows(ValidationException.class, () -> VALIDATOR.validate(task));
         assertTrue(ex.getMessage().contains("snoozedUntil"));
     }
 
     @Test
     void rejectsMissingTitle() {
         Task task = withTitle(baseTask(), null);
-        IllegalArgumentException ex = assertThrows(IllegalArgumentException.class, () -> VALIDATOR.validate(task));
+        ValidationException ex = assertThrows(ValidationException.class, () -> VALIDATOR.validate(task));
         assertTrue(ex.getMessage().contains("title"));
     }
 

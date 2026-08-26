@@ -1,6 +1,7 @@
 package com.rnd.bridge.task;
 
 import com.rnd.bridge.core.PayloadValidator;
+import com.rnd.bridge.core.error.ValidationException;
 import com.rnd.bridge.task.model.Task;
 import com.rnd.bridge.task.model.TaskStatus;
 
@@ -42,7 +43,7 @@ public final class TaskValidator implements PayloadValidator<Task> {
         }
     }
 
-    private static IllegalArgumentException invalid(String field, Object value, String reason) {
-        return new IllegalArgumentException("Invalid Task." + field + " = " + value + ": " + reason);
+    private static ValidationException invalid(String field, Object value, String reason) {
+        return new ValidationException("Invalid Task." + field + " = " + value + ": " + reason);
     }
 }
