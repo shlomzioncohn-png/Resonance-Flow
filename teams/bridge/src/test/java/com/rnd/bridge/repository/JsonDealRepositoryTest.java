@@ -32,9 +32,9 @@ class JsonDealRepositoryTest {
 
     @Test
     void loadsTheWholeFeed() {
-        assertEquals(24, repository.findAll().size());
-        assertEquals(20, repository.findAllDealIds().size());
-        assertEquals(Instant.parse("2026-08-23T00:00:00Z"), repository.asOf());
+        assertEquals(79, repository.findAll().size());
+        assertEquals(32, repository.findAllDealIds().size());
+        assertEquals(Instant.parse("2026-08-24T09:00:00Z"), repository.asOf());
     }
 
     @Test
@@ -105,5 +105,37 @@ class JsonDealRepositoryTest {
                 () -> new JsonDealRepository(new DefaultResourceLoader(), badLocation));
 
         assertTrue(exception.getMessage().contains(badLocation));
+    }
+
+    @Test
+    void dealIdsHaveNoDuplicatesAndAreFewerThanTotalRecords() {
+        List<String> dealIds = repository.findAllDealIds();
+
+        long distinctCount = dealIds.stream().distinct().count();
+        assertEquals(dealIds.size(), distinctCount, "findAllDealIds() must not contain duplicates");
+        assertTrue(dealIds.size() < repository.findAll().size(),
+                "there must be more stage-change records than distinct deals");
+    }
+
+    @Test
+    void atLeastOneDealHasANullCloseDate() {
+        boolean anyNullCloseDate = repository.findAllDealIds().stream()
+                .map(id -> repository.findLatestByDealId(id).orElseThrow())
+                .anyMatch(deal -> deal.closeDate() == null);
+
+        assertTrue(anyNullCloseDate);
+    }
+
+    @Test
+    void reopenedDealAfterClosedLostReturnsHistoryInOrderEndingOnThePostReopenStage() {
+        List<Deal> history = repository.findHistoryByDealId("D-11007");
+
+        assertEquals(
+                List.of(DealStage.PROSPECT, DealStage.QUALIFIED, DealStage.CLOSED_LOST, DealStage.QUALIFIED),
+                history.stream().map(Deal::stage).toList());
+
+        Deal latest = repository.findLatestByDealId("D-11007").orElseThrow();
+        assertEquals(DealStage.QUALIFIED, latest.stage());
+        assertEquals(history.get(3), latest);
     }
 }
