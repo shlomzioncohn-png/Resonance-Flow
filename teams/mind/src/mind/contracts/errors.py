@@ -9,6 +9,7 @@ added later gets the standard shape for free, with no per-endpoint work.
 
 from __future__ import annotations
 
+import logging
 import time
 import uuid
 from typing import Any
@@ -26,6 +27,19 @@ from pydantic import BaseModel, Field
 # body. Registering the base class catches both, since Starlette walks the
 # raised exception's MRO to find a handler.
 from starlette.exceptions import HTTPException as StarletteHTTPException
+
+logger = logging.getLogger("mind.errors")
+# uvicorn only attaches handlers to its own loggers, and the root logger
+# has no handler by default -- without this, every unhandled-exception
+# log below is silently dropped instead of reaching stderr. Scoped to
+# this logger only (propagate=False) so it neither depends on nor
+# disturbs whatever logging setup the rest of the app ends up using.
+if not logger.handlers:
+    _handler = logging.StreamHandler()
+    _handler.setFormatter(logging.Formatter("%(levelname)s:%(name)s:%(message)s"))
+    logger.addHandler(_handler)
+    logger.setLevel(logging.INFO)
+    logger.propagate = False
 
 # error_code -> default HTTP status code it corresponds to.
 # Keep this in sync with the table in docs/API.md.
@@ -136,6 +150,14 @@ def register_error_handlers(app: FastAPI) -> None:
     @app.exception_handler(Exception)
     async def _unhandled_exception_handler(request: Request, exc: Exception) -> JSONResponse:
         request_id = getattr(request.state, "request_id", str(uuid.uuid4()))
+        # The response body deliberately stays generic (never leaks the
+        # exception message, type, or a traceback to the caller) -- but
+        # the real cause still has to land *somewhere*, or request_id
+        # has nothing to correlate against. Log it server-side, tagged
+        # with the same request_id, with the full traceback.
+        logger.error(
+            "unhandled_exception request_id=%s path=%s", request_id, request.url.path, exc_info=exc
+        )
         return JSONResponse(
             status_code=500,
             content=_error_body(
