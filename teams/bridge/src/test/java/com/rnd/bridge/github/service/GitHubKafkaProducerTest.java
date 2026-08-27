@@ -1,10 +1,10 @@
 package com.rnd.bridge.github.service;
 
-import com.rnd.bridge.dto.ExtractionProvenance;
-import com.rnd.bridge.dto.SourceType;
-import com.rnd.bridge.dto.Task;
-import com.rnd.bridge.dto.TaskStatus;
-import com.rnd.bridge.dto.Tier;
+import com.rnd.bridge.task.model.ExtractionProvenance;
+import com.rnd.bridge.task.model.SourceType;
+import com.rnd.bridge.task.model.Task;
+import com.rnd.bridge.task.model.TaskStatus;
+import com.rnd.bridge.task.model.Tier;
 import org.apache.kafka.clients.producer.ProducerRecord;
 import org.apache.kafka.clients.producer.RecordMetadata;
 import org.apache.kafka.common.TopicPartition;

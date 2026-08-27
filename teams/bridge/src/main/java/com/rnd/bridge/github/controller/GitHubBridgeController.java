@@ -1,6 +1,6 @@
 package com.rnd.bridge.github.controller;
 
-import com.rnd.bridge.dto.Task;
+import com.rnd.bridge.task.model.Task;
 import com.rnd.bridge.github.service.GitHubClient;
 import com.rnd.bridge.github.service.GitHubKafkaProducer;
 import org.slf4j.Logger;

@@ -1,12 +1,10 @@
 package com.rnd.bridge.github.service;
 
-import com.rnd.bridge.dto.ExtractionProvenance;
 import com.rnd.bridge.github.dto.GitHubIssue;
-import com.rnd.bridge.dto.SourceType;
-import com.rnd.bridge.dto.Task;
-import com.rnd.bridge.dto.TaskStatus;
-import com.rnd.bridge.dto.Tier;
-import com.rnd.bridge.dto.TaskValidator;
+import com.rnd.bridge.github.mapper.GitHubIssueMapper;
+import com.rnd.bridge.github.mapper.GitHubPullRequestMapper;
+import com.rnd.bridge.task.model.Task;
+import com.rnd.bridge.task.TaskValidator;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -17,6 +15,7 @@ import reactor.core.publisher.Flux;
 import reactor.util.retry.Retry;
 
 import java.time.Duration;
+import java.time.Instant;
 
 @Service
 public class GitHubClient {
@@ -24,6 +23,8 @@ public class GitHubClient {
     private static final Logger log = LoggerFactory.getLogger(GitHubClient.class);
 
     private final WebClient webClient;
+    private final GitHubIssueMapper gitHubIssueMapper;
+    private final GitHubPullRequestMapper gitHubPullRequestMapper;
 
 
     @Value("${github.target.owner:KamaTechOrg}")
@@ -32,8 +33,10 @@ public class GitHubClient {
     @Value("${github.target.repo:Resonance-Flow}")
     private String defaultRepo;
 
-    public GitHubClient(WebClient webClient) {
+    public GitHubClient(WebClient webClient, GitHubIssueMapper gitHubIssueMapper, GitHubPullRequestMapper gitHubPullRequestMapper) {
         this.webClient = webClient;
+        this.gitHubIssueMapper = gitHubIssueMapper;
+        this.gitHubPullRequestMapper = gitHubPullRequestMapper;
     }
 
     public Flux<Task> fetchIssues(String owner, String repo) {
@@ -44,7 +47,8 @@ public class GitHubClient {
                 .uri(url)
                 .retrieve()
                 .bodyToFlux(GitHubIssue.class)
-                .map(this::mapToIssue)
+                .map(issue -> gitHubIssueMapper.map(issue, Instant.now()))
+                .doOnNext(task -> new TaskValidator().validate(task))
                 .retryWhen(Retry.backoff(3, Duration.ofSeconds(1))
                         .filter(this::isRetryableException)
                         .doBeforeRetry(retrySignal -> log.warn("Retrying GitHub API call, attempt: {}", retrySignal.totalRetries() + 1)))
@@ -56,10 +60,11 @@ public class GitHubClient {
         log.info("Fetching pull requests from GitHub: {}", url);
 
         return webClient.get()
-                .uri(url)
+                .uri(url)                                                                                                                                                                                                                                                                                                                                                       
                 .retrieve()
                 .bodyToFlux(GitHubIssue.class)
-                .map(this::mapToPullRequest)
+                .map(pr -> gitHubPullRequestMapper.map(pr, Instant.now()))
+                .doOnNext(task -> new TaskValidator().validate(task))
                 .retryWhen(Retry.backoff(3, Duration.ofSeconds(1))
                         .filter(this::isRetryableException)
                         .doBeforeRetry(retrySignal -> log.warn("Retrying GitHub API call, attempt: {}", retrySignal.totalRetries() + 1)))
@@ -74,50 +79,6 @@ public class GitHubClient {
         return Flux.merge(fetchIssues(owner, repo), fetchPullRequests(owner, repo));
     }
 
-    private Task mapToTask(GitHubIssue issue, SourceType sourceType) {
-        TaskStatus status = mapStatus(issue.getState());
-
-        Task task = new Task(
-                null,
-                null,
-                issue.getTitle(),
-                issue.getBody(),
-                status,
-                null,
-                null,
-                Tier.TACTICAL,
-                ExtractionProvenance.ETL,
-                null,
-                sourceType,
-                issue.getHtmlUrl(),
-                null,
-                null,
-                null
-        );
-
-        TaskValidator.validate(task);
-
-        return task;
-    }
-
-    private Task mapToIssue(GitHubIssue issue) {
-        return mapToTask(issue, SourceType.GITHUB_ISSUE);
-    }
-
-    private Task mapToPullRequest(GitHubIssue issue) {
-        return mapToTask(issue, SourceType.GITHUB_PR);
-    }
-
-    private TaskStatus mapStatus(String githubState) {
-        if (githubState == null) {
-            return TaskStatus.NEW;
-        }
-        return switch (githubState.toLowerCase()) {
-            case "open" -> TaskStatus.NEW;
-            case "closed" -> TaskStatus.DONE;
-            default -> TaskStatus.IN_PROGRESS;
-        };
-    }
 
     private boolean isRetryableException(Throwable throwable) {
         if (throwable instanceof WebClientResponseException) {

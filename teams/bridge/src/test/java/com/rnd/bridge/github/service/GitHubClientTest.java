@@ -2,16 +2,19 @@ package com.rnd.bridge.github.service;
 
 import com.rnd.bridge.github.dto.GitHubIssue;
 import com.rnd.bridge.github.dto.GitHubUser;
-import com.rnd.bridge.dto.SourceType;
-import com.rnd.bridge.dto.Task;
-import com.rnd.bridge.dto.TaskStatus;
-import com.rnd.bridge.dto.ExtractionProvenance;
-import com.rnd.bridge.dto.Tier;
+import com.rnd.bridge.github.mapper.GitHubIssueMapper;
+import com.rnd.bridge.github.mapper.GitHubPullRequestMapper;
+import com.rnd.bridge.task.model.SourceType;
+import com.rnd.bridge.task.model.Task;
+import com.rnd.bridge.task.model.TaskStatus;
+import com.rnd.bridge.task.model.ExtractionProvenance;
+import com.rnd.bridge.task.model.Tier;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
+import org.mockito.Spy;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.web.reactive.function.client.WebClient;
 import reactor.core.publisher.Flux;
@@ -38,6 +41,12 @@ class GitHubClientTest {
 
     @Mock
     private WebClient.ResponseSpec responseSpec;
+
+    @Spy
+    private GitHubIssueMapper gitHubIssueMapper;
+
+    @Spy
+    private GitHubPullRequestMapper gitHubPullRequestMapper;
 
     @InjectMocks
     private GitHubClient gitHubClient;

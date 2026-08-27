@@ -1,7 +1,7 @@
 package com.rnd.bridge.github.service;
 
-import com.rnd.bridge.dto.Task;
-import com.rnd.bridge.dto.TaskValidator;
+import com.rnd.bridge.task.model.Task;
+import com.rnd.bridge.task.TaskValidator;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -33,7 +33,7 @@ public class GitHubKafkaProducer {
             throw new IllegalArgumentException("Task and sourceRef must not be null");
         }
 
-        TaskValidator.validate(task);
+        new TaskValidator().validate(task);
 
         log.info("Publishing task {} to topic {}", task.sourceRef(), TOPIC);
 
