@@ -7,7 +7,6 @@ import org.springframework.core.io.ResourceLoader;
 
 import java.io.IOException;
 import java.io.InputStream;
-import java.time.Instant;
 import java.util.List;
 
 /**
@@ -43,12 +42,5 @@ final class SyntheticDealsLoader {
         }
 
         return feed.deals();
-    }
-
-    private record SyntheticDealsFeed(
-            String datasetVersion,
-            Instant asOf,
-            String notes,
-            List<Deal> deals) {
     }
 }

@@ -106,11 +106,4 @@ public class JsonDealRepository implements DealRepository {
     public List<String> findAllDealIds() {
         return dealIds;
     }
-
-    private record SyntheticDealsFeed(
-            String datasetVersion,
-            Instant asOf,
-            String notes,
-            List<Deal> deals) {
-    }
 }
