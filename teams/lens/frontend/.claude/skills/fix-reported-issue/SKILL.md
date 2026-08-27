@@ -1,12 +1,17 @@
 ---
 name: fix-reported-issue
-description: Analyze a GitHub issue reporting a bug or problem in the LENS frontend and propose a minimal, validated code fix as a pull request against lens-team.
-argument-hint: "Paste the issue title + body, or leave empty when triggered automatically from a GitHub issue event"
+description: Analyze a reported problem in the LENS frontend - a GitHub issue, or PR review feedback requesting changes - and propose a minimal, validated code fix.
+argument-hint: "Paste the issue/review text, or leave empty when triggered automatically from a GitHub event"
 ---
 
 # Fix Reported Issue (LENS frontend)
 
-Use this skill to analyze and fix a bug/problem reported in a GitHub issue for the LENS team frontend.
+Use this skill to analyze and fix a bug/problem reported for the LENS team frontend, from either of two sources:
+
+- **A new GitHub issue** - the problem has no existing PR yet.
+- **PR review feedback** (e.g. "changes requested" comments on an open PR) - the problem is feedback on code already in flight.
+
+Identify which case applies before starting: if you were given a PR number and reviewer comments, it's the second case; if you were given only an issue number/title/body, it's the first.
 
 ## Scope guard
 
@@ -20,17 +25,18 @@ Use this skill to analyze and fix a bug/problem reported in a GitHub issue for t
 3. Form one falsifiable hypothesis for the root cause and check it against the code before changing anything.
 4. Make the smallest change that fixes the root cause. No unrelated refactors, no drive-by cleanups.
 5. If the fix touches UI-facing data shape, keep it inside the `LensDataInterface` / mock adapter boundary. Do not invent or change backend API contracts.
-6. Follow the git workflow from `teams/lens/frontend/CLAUDE.md`:
-   - Branch name: `claude/fix-<issue-number>-<short-slug>`
-   - Commit message references the issue: `<description> #<issue-number>`
-   - PR base branch is `lens-team`, not the repo default branch.
+6. Follow the git workflow from `teams/lens/frontend/CLAUDE.md`, branching on which case this is:
+   - **New issue**: create branch `claude/fix-<issue-number>-<short-slug>`, commit message `<description> #<issue-number>`, open a PR with base `lens-team`.
+   - **PR review feedback**: the PR and branch already exist - do not create a new branch or a new PR. Commit directly onto the existing branch (`git commit -m "<description> #<pr-number>"`) and push to update the same PR so the reviewer sees the fix on the thread they already opened.
 7. Validate from `teams/lens/frontend`:
    ```
    npm ci
    npm run build
    ```
    Report any validation command that could not run and why.
-8. Open the PR with a description containing: what changed, validation results, remaining risks, and `Fixes #<issue-number>`.
+8. Report the result:
+   - **New issue**: open the PR with a description containing what changed, validation results, remaining risks, and `Fixes #<issue-number>`.
+   - **PR review feedback**: push the commit, then summarize what changed and validation results (posted as a PR comment or workflow log, depending on how the skill was invoked).
 
 ## Output format
 
