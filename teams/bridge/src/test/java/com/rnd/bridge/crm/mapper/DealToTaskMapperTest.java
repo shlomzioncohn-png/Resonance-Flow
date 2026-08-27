@@ -17,7 +17,6 @@ import org.springframework.core.io.DefaultResourceLoader;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.time.LocalDate;
-import java.time.LocalTime;
 import java.time.ZoneOffset;
 import java.time.temporal.ChronoUnit;
 import java.util.List;
@@ -138,7 +137,7 @@ class DealToTaskMapperTest {
         assertEquals(TaskStatus.NEW, task.status());
         assertEquals(5, task.urgency()); // NEGOTIATION base 4 + close-in-3-days bonus 2, clamped to 5
         assertEquals(
-                LocalDate.of(2026, 8, 26).atTime(LocalTime.MAX).toInstant(ZoneOffset.UTC),
+                LocalDate.of(2026, 8, 26).atTime(23, 59, 59).toInstant(ZoneOffset.UTC),
                 task.deadline());
         assertEquals(ExtractionProvenance.ETL, task.extractionProvenance());
         assertNull(task.confidence());
@@ -241,7 +240,7 @@ class DealToTaskMapperTest {
 
         Instant deadline = DealToTaskMapper.toDeadline(closeDate);
 
-        assertEquals(Instant.parse("2026-09-30T23:59:59.999999999Z"), deadline);
+        assertEquals(Instant.parse("2026-09-30T23:59:59Z"), deadline);
         assertNull(DealToTaskMapper.toDeadline((LocalDate) null));
     }
 

@@ -21,8 +21,12 @@ public final class DealToTaskMapper extends AbstractTaskMapper<Deal> {
     // Deal.closeDate -> Task.deadline convention (end-of-day UTC). Provisional
     // pending confirmation from Inbox re: a shared date-to-instant convention
     // across all adapters - one-line change here once the answer lands.
+    //
+    // Not LocalTime.MAX (23:59:59.999999999): Postgres TIMESTAMPTZ stores at
+    // microsecond precision and rounds, so .999999999 rounds up to .000000
+    // of the next second - the deadline would land in Inbox one day late.
     private static final ZoneOffset DEADLINE_ZONE = ZoneOffset.UTC;
-    private static final LocalTime DEADLINE_TIME_OF_DAY = LocalTime.MAX;
+    private static final LocalTime DEADLINE_TIME_OF_DAY = LocalTime.of(23, 59, 59);
 
     public static TaskStatus toTaskStatus(DealStage stage) {
         return switch (stage) {
