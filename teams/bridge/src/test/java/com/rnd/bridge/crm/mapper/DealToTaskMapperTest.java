@@ -232,6 +232,62 @@ class DealToTaskMapperTest {
 
         assertNull(task.deadline());
         assertEquals(1, task.urgency());
+        // A CLOSED_WON deal with no close date recorded is still DONE - the
+        // rep marked it won - but there is nothing to derive completedAt
+        // from, so it stays null rather than throwing or defaulting.
+        assertEquals(TaskStatus.DONE, task.status());
+        assertNull(task.completedAt());
+    }
+
+    @Test
+    void closedWonSetsCompletedAtFromTheCloseDate() {
+        Deal deal = Deal.builder()
+                .dealId("D-90010")
+                .title("Won deal")
+                .stage(DealStage.CLOSED_WON)
+                .closeDate(LocalDate.of(2026, 8, 8))
+                .stageChangedAt(Instant.parse("2026-08-08T16:00:00Z"))
+                .build();
+
+        Task task = MAPPER.map(deal, AS_OF);
+
+        assertEquals(TaskStatus.DONE, task.status());
+        assertEquals(
+                LocalDate.of(2026, 8, 8).atTime(23, 59, 59).toInstant(ZoneOffset.UTC),
+                task.completedAt());
+        // Reuses toDeadline's conversion, so the two cannot drift.
+        assertEquals(task.deadline(), task.completedAt());
+    }
+
+    @Test
+    void closedLostLeavesCompletedAtNull() {
+        Deal deal = Deal.builder()
+                .dealId("D-90011")
+                .title("Lost deal")
+                .stage(DealStage.CLOSED_LOST)
+                .closeDate(LocalDate.of(2026, 8, 8))
+                .stageChangedAt(Instant.parse("2026-08-08T16:00:00Z"))
+                .build();
+
+        Task task = MAPPER.map(deal, AS_OF);
+
+        assertEquals(TaskStatus.CANCELLED, task.status());
+        assertNull(task.completedAt());
+    }
+
+    @Test
+    void anOpenStageLeavesCompletedAtNull() {
+        Deal deal = Deal.builder()
+                .dealId("D-90012")
+                .title("Still open")
+                .stage(DealStage.NEGOTIATION)
+                .closeDate(LocalDate.of(2026, 9, 1))
+                .stageChangedAt(Instant.parse("2026-08-20T00:00:00Z"))
+                .build();
+
+        Task task = MAPPER.map(deal, AS_OF);
+
+        assertNull(task.completedAt());
     }
 
     @Test

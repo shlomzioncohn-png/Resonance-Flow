@@ -52,6 +52,8 @@ public abstract class AbstractTaskMapper<S> implements PayloadMapper<S, Task> {
 
     protected abstract Instant toSnoozedUntil(S source);
 
+    protected abstract Instant toCompletedAt(S source);
+
     @Override
     public final Task map(S source, Instant asOf) {
         Objects.requireNonNull(source, "source must not be null");
@@ -77,7 +79,8 @@ public abstract class AbstractTaskMapper<S> implements PayloadMapper<S, Task> {
                 toSourceRef(source),
                 null, // effortEstimateMinutes - no lane currently sources this
                 toDeadline(source),
-                toSnoozedUntil(source));
+                toSnoozedUntil(source),
+                toCompletedAt(source));
     }
 
     private static int clamp(int value, int min, int max) {

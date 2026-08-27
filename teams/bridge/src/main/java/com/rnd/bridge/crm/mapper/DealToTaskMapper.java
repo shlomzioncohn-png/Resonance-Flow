@@ -166,4 +166,14 @@ public final class DealToTaskMapper extends AbstractTaskMapper<Deal> {
     protected Instant toSnoozedUntil(Deal deal) {
         return null; // never SNOOZED on this lane, so never populated
     }
+
+    @Override
+    protected Instant toCompletedAt(Deal deal) {
+        // Only a won deal actually completed. CLOSED_LOST maps to CANCELLED,
+        // not DONE, and did not complete. Reuses toDeadline's close-date
+        // conversion so the two end-of-day-UTC conversions cannot drift -
+        // including returning null when the close date itself is null (see
+        // D-10552: marked won with no close date recorded).
+        return deal.stage() == DealStage.CLOSED_WON ? toDeadline(deal.closeDate()) : null;
+    }
 }
