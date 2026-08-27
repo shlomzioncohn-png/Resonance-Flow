@@ -1,48 +1,9 @@
+version: '3.8'
+
 services:
-  bridge:
-    build: .
-    container_name: bridge-service
-    ports:
-      - "${SERVER_PORT:-8080}:8080"
-    environment:
-      - SERVER_PORT=${SERVER_PORT:-8080}
-      - SPRING_PROFILES_ACTIVE=${SPRING_PROFILES_ACTIVE:-local}
-      # Service-name addresses: only correct when bridge itself runs inside this compose
-      # network. For the day-to-day loop (mvn spring-boot:run on the host against
-      # `docker compose up -d minio redpanda`), application.yml's own localhost defaults
-      # apply instead and these are unused.
-      - MINIO_ENDPOINT=http://minio:9000
-      - MINIO_ACCESS_KEY=${MINIO_ACCESS_KEY:-minioadmin}
-      - MINIO_SECRET_KEY=${MINIO_SECRET_KEY:-minioadmin}
-      - MINIO_BUCKET=${MINIO_BUCKET:-bridge-raw}
-      - KAFKA_BOOTSTRAP_SERVERS=redpanda:29092
-      - BRIDGE_RAW_LANDED_TOPIC=${BRIDGE_RAW_LANDED_TOPIC:-bridge.raw.landed}
-    depends_on:
-      - minio
-      - redpanda
-
-  minio:
-    image: minio/minio:latest
-    container_name: bridge-minio
-    ports:
-      - "9000:9000"
-      # Host port 9091, not 9001: on this Windows machine 9001 sits in the OS's reserved/
-      # excluded TCP port range (Hyper-V/WSL2 dynamic allocation), so binding it fails.
-      # Container-internal port stays 9001 - only the host-side mapping changed.
-      - "9091:9001"
-    environment:
-      - MINIO_ROOT_USER=${MINIO_ACCESS_KEY:-minioadmin}
-      - MINIO_ROOT_PASSWORD=${MINIO_SECRET_KEY:-minioadmin}
-    command: server /data --console-address ":9001"
-    volumes:
-      - minio-data:/data
-
   redpanda:
-    image: docker.redpanda.com/redpandadata/redpanda:v25.2.7
+    image: docker.redpanda.com/redpandadata/redpanda:latest
     container_name: bridge-redpanda
-    # Two listeners: "internal" for other containers on this compose network (bridge ->
-    # redpanda:29092), "external" for the host (mvn spring-boot:run -> localhost:9092,
-    # matching application.yml's localhost:9092 default with no override needed).
     command:
       - redpanda
       - start
@@ -58,6 +19,39 @@ services:
       - "9092:9092"
     volumes:
       - redpanda-data:/var/lib/redpanda/data
+    networks:
+      - resonance-net
+
+  redpanda-console:
+    image: docker.redpanda.com/redpandadata/console:latest
+    container_name: bridge-redpanda-console
+    ports:
+      - "8090:8080"
+    environment:
+      - KAFKA_BROKERS=redpanda:29092
+    depends_on:
+      - redpanda
+    networks:
+      - resonance-net
+
+  minio:
+    image: minio/minio:latest
+    container_name: bridge-minio
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ACCESS_KEY:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_SECRET_KEY:-minioadmin}
+    ports:
+      - "9000:9000"
+      - "9091:9001"
+    command: server /data --console-address ":9001"
+    volumes:
+      - minio-data:/data
+    networks:
+      - resonance-net
+
+networks:
+  resonance-net:
+    driver: bridge
 
 volumes:
   minio-data:

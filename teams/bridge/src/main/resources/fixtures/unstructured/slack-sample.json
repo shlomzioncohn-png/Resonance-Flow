@@ -20,6 +20,15 @@
     "channel": "#bridge-team",
     "type": "message",
     "user": "ruth",
+    "text": "מצרפת סריקה של החוזה",
+    "ts": "1755507960.000350",
+    "files": [{ "name": "contract-scan.jpg", "mimetype": "image/jpeg" }]
+  },
+  {
+    "tenantId": "kamatech",
+    "channel": "#bridge-team",
+    "type": "message",
+    "user": "ruth",
     "text": "עדכון על deal X?",
     "ts": "1755525600.000300"
   }

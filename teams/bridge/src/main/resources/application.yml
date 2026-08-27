@@ -32,3 +32,15 @@ bridge:
       allowed-keywords: [deploy, deadline, meeting, pr, review, task, urgent, project]
     chat:
       session-gap-minutes: 45
+    # Per-source fixture/real switch - see plan.md. Each source can go "real" independently;
+    # "real" beans throw UnsupportedOperationException until their connector is implemented.
+    email:
+      mode: fixture
+    drive:
+      mode: fixture
+    calendar:
+      mode: fixture
+    slack:
+      mode: fixture
+    whatsapp:
+      mode: fixture

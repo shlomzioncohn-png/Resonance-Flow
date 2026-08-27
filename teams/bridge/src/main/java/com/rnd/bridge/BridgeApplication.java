@@ -1,7 +1,7 @@
 package com.rnd.bridge;
 
-import com.rnd.bridge.intake.unstructured.config.ChatSessionProperties;
-import com.rnd.bridge.intake.unstructured.config.ScopingProperties;
+import com.rnd.bridge.intake.config.ChatSessionProperties;
+import com.rnd.bridge.intake.config.ScopingProperties;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;

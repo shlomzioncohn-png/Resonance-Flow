@@ -7,7 +7,14 @@
     "attendees": [{ "email": "malki@kamatech.org" }],
     "start": { "dateTime": "2026-08-19T13:00:00Z" },
     "end": { "dateTime": "2026-08-19T14:00:00Z" },
-    "description": "Review PR backlog"
+    "description": "Review PR backlog",
+    "attachments": [
+      {
+        "filename": "sprint-review-agenda.pdf",
+        "mimeType": "application/pdf",
+        "content": "RkFLRS1QREYtQ09OVEVOVC1zcHJpbnQtcmV2aWV3LWFnZW5kYS1wbGFjZWhvbGRlci1mb3Itc2tlbGV0b24tdGVzdGluZw=="
+      }
+    ]
   },
   {
     "tenantId": "kamatech",
