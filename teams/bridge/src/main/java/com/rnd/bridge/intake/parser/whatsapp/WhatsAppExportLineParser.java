@@ -3,13 +3,15 @@ package com.rnd.bridge.intake.parser.whatsapp;
 import com.rnd.bridge.intake.model.ChatMessage;
 import com.rnd.bridge.raw.model.RawSourceType;
 import java.time.LocalDateTime;
-import java.time.ZoneOffset;
+import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /**
  * Parses one line of the real WhatsApp export format ("dd/MM/yyyy, HH:mm - sender: text").
@@ -20,6 +22,8 @@ import java.util.regex.Pattern;
  * this class reading files itself.
  */
 final class WhatsAppExportLineParser {
+
+    private static final Logger log = LoggerFactory.getLogger(WhatsAppExportLineParser.class);
 
     private static final DateTimeFormatter TIMESTAMP = DateTimeFormatter.ofPattern("dd/MM/yyyy, HH:mm");
     private static final Pattern LINE = Pattern.compile("^(\\d{2}/\\d{2}/\\d{4}, \\d{2}:\\d{2}) - ([^:]+): (.*)$");
@@ -47,11 +51,17 @@ final class WhatsAppExportLineParser {
     }
 
     static Optional<ChatMessage> parseLine(
-            String tenantId, String chatId, String line, AttachmentResolver attachmentResolver) {
+            String tenantId, String chatId, String line, ZoneId exportZone, AttachmentResolver attachmentResolver) {
         Matcher matcher = LINE.matcher(line);
         if (!matcher.matches()) {
+            // WhatsApp export lines we don't yet recognize (iOS's bracketed format, 12-hour
+            // AM/PM timestamps, or a multi-line message continuing without its own timestamp)
+            // are dropped rather than failing the whole file — logged so the loss is visible.
+            log.warn("Dropping unparsable WhatsApp export line for chatId={}: {}", chatId, line);
             return Optional.empty();
         }
+        // WhatsApp exports the timestamp in the device's local time, not UTC, so the caller
+        // must supply the zone that export was taken in.
         LocalDateTime localTimestamp = LocalDateTime.parse(matcher.group(1), TIMESTAMP);
         String text = matcher.group(3);
         return Optional.of(new ChatMessage(
@@ -59,7 +69,7 @@ final class WhatsAppExportLineParser {
                 tenantId,
                 chatId,
                 matcher.group(2),
-                localTimestamp.toInstant(ZoneOffset.UTC),
+                localTimestamp.atZone(exportZone).toInstant(),
                 text,
                 resolveAttachments(text, attachmentResolver)));
     }

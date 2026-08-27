@@ -8,6 +8,9 @@ import com.rnd.bridge.intake.model.ChatMessage;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Instant;
+import java.time.ZoneId;
+import java.time.ZonedDateTime;
 import java.util.List;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -31,13 +34,17 @@ class RealWhatsAppSourceReaderTest {
                 ""));
         Files.write(importDir.resolve("cake-photo.jpg"), new byte[] {1, 2, 3});
 
-        RealWhatsAppSourceReader reader =
-                new RealWhatsAppSourceReader(new WhatsAppImportProperties(importDir.toString(), "kamatech"));
+        RealWhatsAppSourceReader reader = new RealWhatsAppSourceReader(
+                new WhatsAppImportProperties(importDir.toString(), "kamatech", "Asia/Jerusalem"));
         List<ChatMessage> messages = reader.read();
 
         assertThat(messages).hasSize(3);
         assertThat(messages).allMatch(m -> m.chatId().equals("family-chat"));
         assertThat(messages).allMatch(m -> m.tenantId().equals("kamatech"));
+
+        Instant expectedFirstTimestamp = ZonedDateTime.of(2026, 3, 1, 9, 0, 0, 0, ZoneId.of("Asia/Jerusalem"))
+                .toInstant();
+        assertThat(messages.get(0).timestamp()).isEqualTo(expectedFirstTimestamp);
 
         ChatMessage attachmentMessage = messages.stream()
                 .filter(m -> !m.attachments().isEmpty())
@@ -50,7 +57,8 @@ class RealWhatsAppSourceReaderTest {
 
     @Test
     void failsFastWhenImportDirIsNotConfigured() {
-        RealWhatsAppSourceReader reader = new RealWhatsAppSourceReader(new WhatsAppImportProperties(null, "kamatech"));
+        RealWhatsAppSourceReader reader = new RealWhatsAppSourceReader(
+                new WhatsAppImportProperties(null, "kamatech", "Asia/Jerusalem"));
 
         assertThatThrownBy(reader::read)
                 .isInstanceOf(IllegalStateException.class)
@@ -59,8 +67,8 @@ class RealWhatsAppSourceReaderTest {
 
     @Test
     void failsFastWhenImportDirDoesNotExist() {
-        RealWhatsAppSourceReader reader = new RealWhatsAppSourceReader(
-                new WhatsAppImportProperties(importDir.resolve("missing").toString(), "kamatech"));
+        RealWhatsAppSourceReader reader = new RealWhatsAppSourceReader(new WhatsAppImportProperties(
+                importDir.resolve("missing").toString(), "kamatech", "Asia/Jerusalem"));
 
         assertThatThrownBy(reader::read)
                 .isInstanceOf(IllegalStateException.class)

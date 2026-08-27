@@ -9,6 +9,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.DirectoryStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.List;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
@@ -62,6 +63,7 @@ public class RealWhatsAppSourceReader implements WhatsAppSourceReader {
 
     private List<ChatMessage> parseFile(Path importDir, Path file, String chatId) throws IOException {
         List<ChatMessage> messages = new ArrayList<>();
+        ZoneId exportZone = ZoneId.of(properties.zoneId());
         try (BufferedReader reader = Files.newBufferedReader(file, StandardCharsets.UTF_8)) {
             String line;
             while ((line = reader.readLine()) != null) {
@@ -69,7 +71,7 @@ public class RealWhatsAppSourceReader implements WhatsAppSourceReader {
                     continue;
                 }
                 WhatsAppExportLineParser.parseLine(
-                                properties.tenantId(), chatId, line, (filename, mimeType) ->
+                                properties.tenantId(), chatId, line, exportZone, (filename, mimeType) ->
                                         readAttachment(importDir, filename, mimeType))
                         .ifPresent(messages::add);
             }

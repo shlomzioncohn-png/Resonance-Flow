@@ -11,6 +11,8 @@ import com.rnd.bridge.storage.ObjectStorageClient.PutResult;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
 /**
@@ -24,9 +26,14 @@ import org.springframework.stereotype.Service;
  * steps are identical across all six — splitting into six near-duplicate Lane subclasses
  * would add boilerplate without the benefit Template Method is meant to provide (that
  * benefit shows up when implementations genuinely differ, as with CRM vs GitHub, not here).
+ * Per-record failures are caught and logged rather than aborting the batch, so one bad
+ * record (e.g. a missing attachment file) doesn't discard events already built for every
+ * prior record in the run.
  */
 @Service
 public class UnstructuredIntakeService {
+
+    private static final Logger log = LoggerFactory.getLogger(UnstructuredIntakeService.class);
 
     private final SourceRecordLoader sourceLoader;
     private final AllowlistScopingFilter scopingFilter;
@@ -52,13 +59,19 @@ public class UnstructuredIntakeService {
 
         List<RawObjectEvent> events = new ArrayList<>();
         for (SourceRecord record : records) {
-            Instant ingestedAt = Instant.now();
-            ScopeDecision scopeDecision = scopingFilter.decide(record);
-            String objectKey = objectKeyBuilder.build(record, ingestedAt);
-            PutResult putResult = landingService.land(objectKey, record, scopeDecision, ingestedAt);
-            RawObjectEvent event = pointerEventPublisher.publish(
-                    objectKey, record, scopeDecision, putResult, ingestedAt);
-            events.add(event);
+            try {
+                Instant ingestedAt = Instant.now();
+                ScopeDecision scopeDecision = scopingFilter.decide(record);
+                String objectKey = objectKeyBuilder.build(record, ingestedAt);
+                PutResult putResult = landingService.land(objectKey, record, scopeDecision, ingestedAt);
+                RawObjectEvent event = pointerEventPublisher.publish(
+                        objectKey, record, scopeDecision, putResult, ingestedAt);
+                events.add(event);
+            } catch (RuntimeException e) {
+                log.error(
+                        "Skipping record after failure: sourceType={} naturalId={} correlationId={}",
+                        record.sourceType(), record.naturalId(), record.correlationId(), e);
+            }
         }
         return events;
     }

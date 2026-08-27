@@ -47,3 +47,6 @@ bridge:
       # Only read when mode: real. See plan.md - there's no export API, so this directory is
       # filled manually from WhatsApp's own "Export Chat" feature.
       import-dir: ${BRIDGE_WHATSAPP_IMPORT_DIR:}
+      # Local time zone the exporting phone was set to - WhatsApp export timestamps carry no
+      # offset, so this must match the tenant, not be assumed to be UTC.
+      zone-id: ${BRIDGE_WHATSAPP_ZONE_ID:Asia/Jerusalem}
