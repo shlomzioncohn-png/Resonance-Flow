@@ -71,7 +71,74 @@ teams/lens/shared-dtos/
 
 ---
 
-## How It Works
+## Employee UI - Main Use Case
+
+**Screen:** "My Workspace" - Employee's question: "I have 45 minutes, what should I do?"
+
+**Step-by-step flow:**
+
+1. **Employee enters available time:**
+   ```
+   Frontend sends WorkspaceRequestDTO
+   {
+     "userId": "emp_001",
+     "availableTime": 45
+   }
+   ```
+
+2. **Gateway routes to BFF:**
+   ```
+   POST /api/workspace/recommend
+   (WorkspaceRequestDTO sent to BFF)
+   ```
+
+3. **BFF orchestrates recommendation:**
+   - **Mind:** Scores all tasks (importance, urgency, classification)
+   - **Chain:** Selects best feasible task
+     - Must fit in 45 minutes
+     - Must have no blocking dependencies
+     - Must be highest priority
+
+4. **BFF returns recommendation:**
+   ```
+   TaskRecommendationDTO
+   {
+     "task": {
+       "id": "task_001",
+       "title": "Review API changes",
+       "status": "READY",
+       "priority": "HIGH",
+       "effortEstimate": 35,
+       "owner": "Rachel"
+     },
+     "explanation": "Fits in 45 minutes ✓, High importance ✓, No blockers ✓",
+     "fitsInTime": true,
+     "isHighPriority": true,
+     "hasNoDependencies": true,
+     "confidenceScore": 85
+   }
+   ```
+
+5. **Frontend displays:**
+   ```
+   ✨ BEST TASK FOR YOU
+   
+   Review API changes                     High
+   Platform Service
+   
+   ✓ Fits in your 45 minutes
+   ✓ High importance
+   ✓ No blocking dependency
+   
+   [ Start task ]  [ Chat about it ]  [ View details ]
+   ```
+
+6. **Employee actions:**
+   - **Start task** → Begin work (update task status)
+   - **Chat about it** → Ask questions, provide feedback → Updates task constraints
+   - **View details** → Full task info, edit dependencies, manage blockers
+
+---
 
 ### 1. Define DTOs in shared-dtos
 
@@ -182,13 +249,121 @@ public class ErrorResponse {
 - BFF: Sends errors to Gateway
 - Frontend: Displays error messages
 
+### TaskDTO
+```java
+@Data
+@NoArgsConstructor
+@AllArgsConstructor
+public class TaskDTO {
+    private String id;                    // "task_001"
+    private String title;                 // "Review API changes"
+    private String description;
+    private String status;                // READY, IN_PROGRESS, BLOCKED, COMPLETED
+    private String priority;              // LOW, MEDIUM, HIGH
+    private Integer effortEstimate;       // 35 minutes
+    private LocalDateTime dueDate;
+    private String owner;                 // "Rachel Zahler"
+    private String project;               // "Platform Service"
+    private List<String> dependencies;    // ["task_002", "task_003"]
+    private List<String> constraints;     // ["approval_needed"]
+}
+```
+
+**Used by:**
+- Frontend: Displays task information
+- Gateway: Routes task data
+- BFF: Orchestrates from team services
+- Mind: Scores tasks
+- Chain: Manages dependencies
+
+---
+
+### WorkspaceRequestDTO
+```java
+@Data
+@NoArgsConstructor
+@AllArgsConstructor
+public class WorkspaceRequestDTO {
+    private String userId;                // "emp_001"
+    private Integer availableTime;        // 45 (minutes)
+    private String projectFilter;         // optional filter
+    private String minPriority;           // optional: "LOW", "MEDIUM", "HIGH"
+}
+```
+
+**Flow:**
+```
+Employee: "I have 45 minutes"
+   ↓
+Frontend → Gateway → BFF
+   (WorkspaceRequestDTO)
+```
+
+---
+
+### TaskRecommendationDTO
+```java
+@Data
+@NoArgsConstructor
+@AllArgsConstructor
+public class TaskRecommendationDTO {
+    private TaskDTO task;                 // The recommended task
+    private String explanation;           // "Fits in 45min, High importance, no blockers"
+    private Boolean fitsInTime;           // true
+    private Boolean isHighPriority;       // true
+    private Boolean hasNoDependencies;    // true
+    private Integer confidenceScore;      // 85 (0-100)
+    private List<TaskDTO> alternatives;   // Other tasks if can't do recommended
+}
+```
+
+**Flow:**
+```
+BFF (Mind scores, Chain selects)
+   ↓
+Gateway → Frontend
+   (TaskRecommendationDTO)
+```
+
+---
+
+### ErrorResponse
+```java
+@Data
+@NoArgsConstructor
+@AllArgsConstructor
+public class ErrorResponse {
+    private String status = "ERROR";      // Always "ERROR"
+    private String errorCode;             // "TASK_NOT_FOUND"
+    private String message;               // "Task with ID 'task_999' does not exist"
+    private String path;                  // "/api/tasks/task_999"
+    private LocalDateTime timestamp;      // When error occurred
+    private String details;               // Additional help (optional)
+}
+```
+
+**Example:**
+```json
+{
+  "status": "ERROR",
+  "errorCode": "TASK_NOT_FOUND",
+  "message": "Task with ID 'task_999' does not exist",
+  "path": "/api/tasks/task_999",
+  "timestamp": "2026-08-27T14:30:45.123",
+  "details": "Check the task ID and try again"
+}
+```
+
+---
+
 ### Future DTOs (to be added)
 
 - `UserDTO` - Manager/Employee info
-- `TaskDTO` - Task models
 - `DashboardDTO` - Dashboard data
 - `ProjectDTO` - Project information
 - `AnalyticsDTO` - Analytics metrics
+- `ChatMessageDTO` - For feedback chat
+- `DependencyDTO` - Detailed dependency information
 
 ---
 
