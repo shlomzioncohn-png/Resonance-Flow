@@ -7,6 +7,13 @@ Foundation module for Team Chain (Dependency Graph, Task Selection & Constraints
 `onConstraintStatusChanged`) against in-memory repositories. No REST controllers are wired up
 yet (`controller/` is still empty) - this stage is the eligibility engine and its tests.
 
+`Task`/`TaskDependency`/`TaskStatus` and the `TaskRepository`/`TaskDependencyRepository`
+contracts (with in-memory implementations) come from issue #66's branch
+(`chain/ruthHoltzman/dependency-repository-66`). That branch also has a `TaskDependencyService`
+(existence/self-dependency/duplicate-edge validation) that isn't merged here yet and overlaps
+with some of what `TaskEligibilityService.addDependency`/`removeDependency` already do
+(cycle detection, `blockingCount`) - reconcile the two once #66 lands.
+
 ## Stack
 
 - Java 11
@@ -18,6 +25,9 @@ as a placeholder purely so a `DataSource`/transaction manager exists for `@Trans
 `Task`/`TaskDependency` are plain DTOs (not JPA entities) and are **not** persisted to H2; real
 data still lives in the in-memory `TaskRepository`/`TaskDependencyRepository` implementations.
 See [CLAUDE.md](CLAUDE.md) for the full rationale and open items.
+
+Task identifiers are `java.util.UUID` for now, pending the Inbox team publishing its own task id
+type (`Task`/`TaskDependency` will switch to that type once it exists).
 
 ## Project structure
 

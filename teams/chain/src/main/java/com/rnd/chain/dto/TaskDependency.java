@@ -1,14 +1,18 @@
 package com.rnd.chain.dto;
-import java.util.UUID;
-// TODO: import the Inbox type once the Inbox team publishes its package,
-// e.g. import com.inbox.Inbox;
 
+import java.util.Objects;
+import java.util.UUID;
+
+// Identifier type: UUID, pending Inbox publishing its own task id type. Values are Task.id
+// references (see Task.java) and are not validated or looked up here.
 public class TaskDependency {
 
-    // Identifier type follows Inbox: both ends of the edge use the task id
-    // exactly as Inbox sends it, with no conversion on our side.
-    private UUID taskId;            // from Mind
-    private UUID dependsOnTaskId;   // from Mind
+    // taskId depends on (is blocked by) dependsOnTaskId. This class only models the edge; it does
+    // not validate that either id refers to an existing Task, and it intentionally does not reject
+    // self-dependencies (taskId == dependsOnTaskId) - that check belongs to the service layer,
+    // which has access to the repository needed to enforce it against existing edges.
+    private UUID taskId;
+    private UUID dependsOnTaskId;
 
     public TaskDependency() {
     }
@@ -32,5 +36,23 @@ public class TaskDependency {
 
     public void setDependsOnTaskId(UUID dependsOnTaskId) {
         this.dependsOnTaskId = dependsOnTaskId;
+    }
+
+    @Override
+    public boolean equals(Object o) {
+        if (this == o) {
+            return true;
+        }
+        if (!(o instanceof TaskDependency)) {
+            return false;
+        }
+        TaskDependency other = (TaskDependency) o;
+        return Objects.equals(taskId, other.taskId)
+                && Objects.equals(dependsOnTaskId, other.dependsOnTaskId);
+    }
+
+    @Override
+    public int hashCode() {
+        return Objects.hash(taskId, dependsOnTaskId);
     }
 }

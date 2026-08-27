@@ -35,9 +35,16 @@ class TaskEligibilityServiceTest {
     private TaskEligibilityService taskEligibilityService;
 
     private Task buildTask(UUID id, int blockingCount, int openConstraintCount, boolean isReady) {
-        return new Task(id, null, TaskStatus.ACTIVE, isReady,
-                blockingCount, openConstraintCount, null, null,
-                LocalDateTime.now(), LocalDateTime.now(), null);
+        return Task.builder()
+                .id(id)
+                .ownerId("owner")
+                .status(TaskStatus.ACTIVE)
+                .isReady(isReady)
+                .blockingCount(blockingCount)
+                .openConstraintCount(openConstraintCount)
+                .createdAt(LocalDateTime.now())
+                .updatedAt(LocalDateTime.now())
+                .build();
     }
 
     @Test
