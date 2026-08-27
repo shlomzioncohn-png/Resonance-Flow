@@ -70,13 +70,6 @@
             <version>1.18.30</version>
             <scope>provided</scope>
         </dependency>
-
-        <!-- Shared DTOs for Frontend<->Gateway<->BFF communication -->
-        <dependency>
-            <groupId>com.rnd.lens</groupId>
-            <artifactId>shared-dtos</artifactId>
-            <version>1.0.0</version>
-        </dependency>
     </dependencies>
 
     <dependencyManagement>

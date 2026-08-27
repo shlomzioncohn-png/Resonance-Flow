@@ -1,7 +1,7 @@
 package com.rnd.gateway.controller;
 
-import com.rnd.lens.dto.TaskRecommendationDTO;
-import com.rnd.lens.dto.WorkspaceRequestDTO;
+import com.rnd.gateway.dto.TaskRecommendationDTO;
+import com.rnd.gateway.dto.WorkspaceRequestDTO;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
