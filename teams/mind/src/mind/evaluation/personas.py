@@ -3,17 +3,19 @@
 Two separate steps, matching the two kinds of rule described in
 eval/personas/README.md:
 
-- `load_personas`: every scenario file must structurally conform to
-  scenario.schema.json (required fields, types, enums, ...). A file that
-  doesn't is a bug in that file, not a "maybe" — this raises.
-- `validate_personas`: the cross-scenario invariants the JSON Schema itself
-  cannot express (a dangling `expected_top_task_id`, a duplicate
-  `scenario_id`, a role nobody wrote a scenario for yet...). Some of these
-  are hard errors; others (missing/under/over role coverage, an out-of-range
-  total, `mentor_approved: false`) just mean the set isn't finished yet, so
-  they're reported as warnings rather than raised — the set is built up
-  incrementally by multiple people before the Foundation Gate, and a
-  mid-week PR shouldn't fail CI just because the set isn't complete yet.
+- `load_personas`: every scenario file must parse into a
+  `PersonaEvaluationScenario` (mind.evaluation.interfaces) — required fields,
+  types, enums, bounds, *and* the intra-scenario invariants enforced by that
+  model's `@model_validator`s (a dangling `expected_top_task_id`, a missing
+  `source_detail`). A file that doesn't is a bug in that file, not a "maybe" —
+  this raises.
+- `validate_personas`: the rules a single-scenario model cannot see — a
+  `scenario_id` duplicated across the whole directory (a hard error), plus the
+  "the set isn't finished yet" checks (a role nobody wrote a scenario for, under/
+  over role coverage, an out-of-range total, `mentor_approved: false`). Those
+  last ones are reported as warnings, not raised: the set is built up
+  incrementally by multiple people before the Foundation Gate, and a mid-week PR
+  shouldn't fail CI just because the set isn't complete yet.
 """
 
 from __future__ import annotations
@@ -23,8 +25,12 @@ from collections import Counter
 from dataclasses import dataclass, field
 from pathlib import Path
 
-import jsonschema
+from pydantic import ValidationError
 
+from mind.evaluation.interfaces import PersonaEvaluationScenario
+
+# Present in eval/personas/ as a generated artifact (see mind.evaluation.schema);
+# skipped when scanning the directory for scenario files.
 SCHEMA_FILENAME = "scenario.schema.json"
 
 ALL_ROLES = {
@@ -36,8 +42,6 @@ ALL_ROLES = {
     "CEO",
 }
 
-SOURCE_TYPES_REQUIRING_DETAIL = {"AMI", "FUNSD", "other"}
-
 MIN_SCENARIOS_PER_ROLE = 4
 MAX_SCENARIOS_PER_ROLE = 6
 MIN_TOTAL_SCENARIOS = 24
@@ -45,7 +49,7 @@ MAX_TOTAL_SCENARIOS = 36
 
 
 class PersonaSchemaError(ValueError):
-    """One or more scenario files in the personas directory violate scenario.schema.json."""
+    """One or more scenario files in the personas directory do not conform to the schema."""
 
 
 @dataclass
@@ -61,48 +65,36 @@ class ValidationReport:
         return not self.errors
 
 
-def load_personas(personas_dir: str | Path) -> list[dict]:
-    """Loads every scenario JSON file in `personas_dir`, validated against scenario.schema.json.
+def load_personas(personas_dir: str | Path) -> list[PersonaEvaluationScenario]:
+    """Loads every scenario JSON file in `personas_dir` as a PersonaEvaluationScenario.
 
-    `personas_dir` must contain scenario.schema.json alongside the scenario
-    files (that's the real eval/personas/ layout). Scenario files are every
-    `*.json` file in the directory other than the schema itself.
+    Scenario files are every `*.json` file in the directory other than the
+    generated `scenario.schema.json`.
 
-    Returns an empty list if the directory has no scenario files yet (the set
-    is built up incrementally before the Foundation Gate). Raises
-    FileNotFoundError if the directory or the schema file is missing, and
-    PersonaSchemaError listing every schema violation found, across every
-    offending file, if any scenario fails to validate.
+    Returns an empty list if the directory has no scenario files yet (the set is
+    built up incrementally before the Foundation Gate). Raises FileNotFoundError
+    if the directory is missing, and PersonaSchemaError listing every schema
+    violation found, across every offending file, if any scenario fails to parse.
     """
     personas_path = Path(personas_dir)
     if not personas_path.is_dir():
         raise FileNotFoundError(f"Personas directory not found: {personas_path}")
 
-    schema_path = personas_path / SCHEMA_FILENAME
-    if not schema_path.is_file():
-        raise FileNotFoundError(f"Schema file not found: {schema_path}")
-
-    with schema_path.open(encoding="utf-8") as f:
-        schema = json.load(f)
-
-    validator = jsonschema.Draft202012Validator(schema)
-
-    scenarios: list[dict] = []
+    scenarios: list[PersonaEvaluationScenario] = []
     schema_errors: list[str] = []
     for scenario_path in sorted(personas_path.glob("*.json")):
         if scenario_path.name == SCHEMA_FILENAME:
             continue
 
         with scenario_path.open(encoding="utf-8") as f:
-            scenario = json.load(f)
+            raw = json.load(f)
 
-        file_errors = sorted(validator.iter_errors(scenario), key=lambda e: e.path)
-        if file_errors:
-            for error in file_errors:
-                location = "/".join(str(p) for p in error.path) or "<root>"
-                schema_errors.append(f"{scenario_path.name} [{location}]: {error.message}")
-        else:
-            scenarios.append(scenario)
+        try:
+            scenarios.append(PersonaEvaluationScenario.model_validate(raw))
+        except ValidationError as exc:
+            for err in exc.errors():
+                location = "/".join(str(p) for p in err["loc"]) or "<root>"
+                schema_errors.append(f"{scenario_path.name} [{location}]: {err['msg']}")
 
     if schema_errors:
         raise PersonaSchemaError(
@@ -113,10 +105,10 @@ def load_personas(personas_dir: str | Path) -> list[dict]:
     return scenarios
 
 
-def validate_personas(scenarios: list[dict]) -> ValidationReport:
-    """Checks the cross-scenario invariants scenario.schema.json cannot express on its own.
+def validate_personas(scenarios: list[PersonaEvaluationScenario]) -> ValidationReport:
+    """Checks the rules a single PersonaEvaluationScenario cannot enforce on its own.
 
-    See "Constraints not enforced by the JSON Schema itself" in
+    See "Constraints not enforced by the scenario model itself" in
     eval/personas/README.md for the source of these rules.
     """
     report = ValidationReport()
@@ -125,33 +117,14 @@ def validate_personas(scenarios: list[dict]) -> ValidationReport:
     scenarios_per_role: Counter[str] = Counter()
 
     for scenario in scenarios:
-        scenario_id = scenario.get("scenario_id", "<missing scenario_id>")
+        if scenario.scenario_id in seen_scenario_ids:
+            report.errors.append(f"{scenario.scenario_id}: duplicate scenario_id")
+        seen_scenario_ids.add(scenario.scenario_id)
 
-        if scenario_id in seen_scenario_ids:
-            report.errors.append(f"{scenario_id}: duplicate scenario_id")
-        seen_scenario_ids.add(scenario_id)
+        scenarios_per_role[scenario.persona.role] += 1
 
-        role = scenario.get("persona", {}).get("role")
-        if role:
-            scenarios_per_role[role] += 1
-
-        task_ids = {task["task_id"] for task in scenario.get("tasks", [])}
-
-        expected_top_task_id = scenario.get("expected_top_task_id")
-        if expected_top_task_id not in task_ids:
-            report.errors.append(
-                f"{scenario_id}: expected_top_task_id "
-                f"{expected_top_task_id!r} is not one of this scenario's task_ids {sorted(task_ids)}"
-            )
-
-        source = scenario.get("source", {})
-        if source.get("type") in SOURCE_TYPES_REQUIRING_DETAIL and not source.get("source_detail"):
-            report.errors.append(
-                f"{scenario_id}: source.type is {source.get('type')!r} but source_detail is empty"
-            )
-
-        if scenario.get("mentor_approved") is not True:
-            report.warnings.append(f"{scenario_id}: not yet mentor_approved")
+        if not scenario.mentor_approved:
+            report.warnings.append(f"{scenario.scenario_id}: not yet mentor_approved")
 
     missing_roles = ALL_ROLES - scenarios_per_role.keys()
     if missing_roles:

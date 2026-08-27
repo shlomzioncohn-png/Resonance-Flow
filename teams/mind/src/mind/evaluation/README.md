@@ -29,6 +29,12 @@ class RankingModel(Protocol):
 `Task` is a Pydantic model (`interfaces.py`) with these fields: `task_id`, `title`,
 `description`, `deadline`, `estimated_duration_minutes`, `tier`, `blocked`.
 
+The whole persona scenario schema now lives in `interfaces.py` as Pydantic models
+(`PersonaEvaluationScenario` and its `Persona` / `Context` / `Task` / `Source`
+parts) — that model is the binding source of truth. `eval/personas/scenario.schema.json`
+is generated from it (`make schema` / `python -m mind.evaluation.schema`) and kept
+honest by `tests/test_schema_snapshot.py`; `make lint` runs the staleness check.
+
 The harness (`harness.py`) calls `score()` once per candidate task in a scenario, and
 builds the ranking itself from the returned scores — a model never ranks a whole
 scenario or picks a winner directly. This keeps the contract consistent with the
@@ -48,17 +54,21 @@ python -m mind.evaluation.run --model dummy
 
 Replace `dummy` with the name of the model you want to evaluate.
 
-`--personas` (default `eval/personas`) must point to a directory containing
-`scenario.schema.json` plus the scenario `*.json` files it validates against —
-see `eval/personas/README.md`. Loading goes through
-`mind.evaluation.personas.load_personas`/`validate_personas`: a structurally
-invalid scenario file or a broken cross-scenario invariant (e.g. a dangling
-`expected_top_task_id`) fails the run; a role with no scenario yet or a
-scenario that isn't `mentor_approved` only prints a warning.
+`--personas` (default `eval/personas`) points to the scenario `*.json` files
+(the generated `scenario.schema.json` in that directory is skipped) — see
+`eval/personas/README.md`. Loading goes through
+`mind.evaluation.personas.load_personas`/`validate_personas`. `load_personas`
+parses each file into a `PersonaEvaluationScenario` (Pydantic); a structurally
+invalid file or a broken intra-scenario invariant (a dangling
+`expected_top_task_id`, a missing `source_detail`) raises and fails the run.
+`validate_personas` then adds the cross-file check (a duplicate `scenario_id`
+fails the run) and the not-ready-yet checks (a role with no scenario, an
+under/over count, a scenario that isn't `mentor_approved`) which only print a
+warning.
 
 `placeholder_scenarios.PLACEHOLDER_SCENARIOS` still exists, but only as a
-small fixed fixture for unit-testing `harness.run()` in isolation
-(`tests/test_harness.py`) — it is not used by this CLI.
+small fixed list of `PersonaEvaluationScenario` objects for unit-testing
+`harness.run()` in isolation (`tests/test_harness.py`) — it is not used by this CLI.
 
 ## For mentors: running this without MIND's help
 

@@ -16,4 +16,4 @@ def test_scenario_result_keeps_all_candidate_scores():
     report = run(DummyModel(), PLACEHOLDER_SCENARIOS)
 
     for result, scenario in zip(report.scenario_results, PLACEHOLDER_SCENARIOS):
-        assert len(result.candidates) == len(scenario["tasks"])
+        assert len(result.candidates) == len(scenario.tasks)

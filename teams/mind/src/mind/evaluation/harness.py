@@ -1,6 +1,6 @@
 from dataclasses import dataclass
 
-from mind.evaluation.interfaces import RankingModel, Task
+from mind.evaluation.interfaces import PersonaEvaluationScenario, RankingModel
 from mind.evaluation.metrics import top1_accuracy
 
 
@@ -28,13 +28,13 @@ class Report:
     scenario_results: list[ScenarioResult]
 
 
-def run(model: RankingModel, scenarios: list[dict]) -> Report:
+def run(model: RankingModel, scenarios: list[PersonaEvaluationScenario]) -> Report:
     predictions: list[str] = []
-    evaluated_scenarios: list[dict] = []
+    evaluated_scenarios: list[PersonaEvaluationScenario] = []
     scenario_results: list[ScenarioResult] = []
 
     for scenario in scenarios:
-        candidates = [Task(**task) for task in scenario["tasks"]]
+        candidates = scenario.tasks
         if not candidates:
             continue
 
@@ -45,10 +45,10 @@ def run(model: RankingModel, scenarios: list[dict]) -> Report:
         evaluated_scenarios.append(scenario)
         scenario_results.append(
             ScenarioResult(
-                scenario_id=scenario["scenario_id"],
-                expected_top_task_id=scenario.get("expected_top_task_id"),
+                scenario_id=scenario.scenario_id,
+                expected_top_task_id=scenario.expected_top_task_id,
                 predicted_top_task_id=best_task.task_id,
-                passed=best_task.task_id == scenario.get("expected_top_task_id"),
+                passed=best_task.task_id == scenario.expected_top_task_id,
                 candidates=[CandidateScore(task_id=t.task_id, score=s) for t, s in scored],
             )
         )
@@ -62,4 +62,3 @@ def run(model: RankingModel, scenarios: list[dict]) -> Report:
         top1_accuracy=accuracy,
         scenario_results=scenario_results,
     )
-

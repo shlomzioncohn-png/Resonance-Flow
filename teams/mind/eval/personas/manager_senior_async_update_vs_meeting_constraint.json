@@ -14,7 +14,7 @@
       "description": "Two engineers have an ongoing disagreement over code ownership; the next step is getting a meeting on the calendar with both of them.",
       "deadline": null,
       "estimated_duration_minutes": 30,
-      "tier": "Tactical",
+      "tier": "tactical",
       "blocked": false
     },
     {
@@ -23,7 +23,7 @@
       "description": "Stakeholders are expecting a written update on the migration project's status; can be done entirely over email/Slack, no meeting required.",
       "deadline": "2026-08-25T16:00:00",
       "estimated_duration_minutes": 25,
-      "tier": "Tactical",
+      "tier": "tactical",
       "blocked": false
     }
   ],

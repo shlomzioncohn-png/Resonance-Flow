@@ -14,7 +14,7 @@
       "description": "Draft the scope and priorities for the upcoming sprint, due before Friday's planning meeting; needs input from the backlog and last sprint's retro notes.",
       "deadline": "2026-08-28T17:00:00",
       "estimated_duration_minutes": 90,
-      "tier": "Tactical",
+      "tier": "tactical",
       "blocked": false
     },
     {
@@ -23,7 +23,7 @@
       "description": "Summarize action items from a 1:1 that already happened; useful for the record but nothing downstream is waiting on it.",
       "deadline": null,
       "estimated_duration_minutes": 20,
-      "tier": "Operational",
+      "tier": "operational",
       "blocked": false
     }
   ],

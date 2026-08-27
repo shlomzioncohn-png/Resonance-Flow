@@ -14,7 +14,7 @@
       "description": "Jot down yesterday's progress and today's plan before the 10:00 standup call.",
       "deadline": "2026-08-25T10:00:00",
       "estimated_duration_minutes": 10,
-      "tier": "Operational",
+      "tier": "operational",
       "blocked": false
     },
     {
@@ -23,7 +23,7 @@
       "description": "Clean up the retry-logic module flagged in the last code review as hard to follow; no functional bugs, purely maintainability.",
       "deadline": null,
       "estimated_duration_minutes": 90,
-      "tier": "Tactical",
+      "tier": "tactical",
       "blocked": false
     }
   ],

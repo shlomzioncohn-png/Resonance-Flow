@@ -14,7 +14,7 @@
       "description": "Ongoing implementation of the refresh-token exchange; currently waiting on the security team to approve the token-rotation design before more code can be written.",
       "deadline": null,
       "estimated_duration_minutes": 60,
-      "tier": "Tactical",
+      "tier": "tactical",
       "blocked": true
     },
     {
@@ -23,7 +23,7 @@
       "description": "A teammate's pull request implementing retry logic for failed payment webhooks is waiting for review; they are blocked on merging until it is approved.",
       "deadline": "2026-08-25T14:00:00",
       "estimated_duration_minutes": 20,
-      "tier": "Operational",
+      "tier": "operational",
       "blocked": false
     }
   ],

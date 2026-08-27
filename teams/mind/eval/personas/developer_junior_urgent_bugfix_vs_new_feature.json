@@ -14,7 +14,7 @@
       "description": "Customers are hitting a crash when applying a discount code at checkout; support has escalated it as production-impacting.",
       "deadline": "2026-08-25T12:00:00",
       "estimated_duration_minutes": 40,
-      "tier": "Operational",
+      "tier": "operational",
       "blocked": false
     },
     {
@@ -23,7 +23,7 @@
       "description": "Kick off implementation of a new widget on the customer dashboard showing recent order history; next on the backlog, not requested by anyone yet.",
       "deadline": null,
       "estimated_duration_minutes": 180,
-      "tier": "Tactical",
+      "tier": "tactical",
       "blocked": false
     }
   ],

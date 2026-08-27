@@ -4,6 +4,7 @@ from pathlib import Path
 
 import pytest
 
+from mind.evaluation.interfaces import PersonaEvaluationScenario
 from mind.evaluation.personas import PersonaSchemaError, load_personas, validate_personas
 
 REAL_SCHEMA_PATH = (
@@ -33,7 +34,7 @@ def make_scenario(
                 "title": "Write architecture doc",
                 "description": "Long-form design doc, not urgent",
                 "estimated_duration_minutes": 120,
-                "tier": "Strategic",
+                "tier": "strategic",
                 "blocked": False,
             },
             {
@@ -42,7 +43,7 @@ def make_scenario(
                 "description": "Code review for the auth refactor PR, deadline today",
                 "deadline": "2026-08-23T17:00:00",
                 "estimated_duration_minutes": 20,
-                "tier": "Operational",
+                "tier": "operational",
                 "blocked": False,
             },
         ],
@@ -51,6 +52,10 @@ def make_scenario(
         "source": {"type": source_type, "source_detail": source_detail},
         "mentor_approved": mentor_approved,
     }
+
+
+def make_scenario_model(**kwargs) -> PersonaEvaluationScenario:
+    return PersonaEvaluationScenario.model_validate(make_scenario(**kwargs))
 
 
 def write_personas_dir(tmp_path: Path, scenarios: list[dict]) -> Path:
@@ -70,7 +75,14 @@ def write_personas_dir(tmp_path: Path, scenarios: list[dict]) -> Path:
 def test_load_personas_valid_scenario(tmp_path):
     scenario = make_scenario()
     personas_dir = write_personas_dir(tmp_path, [scenario])
-    assert load_personas(personas_dir) == [scenario]
+
+    loaded = load_personas(personas_dir)
+
+    assert len(loaded) == 1
+    assert isinstance(loaded[0], PersonaEvaluationScenario)
+    assert loaded[0].scenario_id == scenario["scenario_id"]
+    assert loaded[0].expected_top_task_id == "task_B"
+    assert [t.task_id for t in loaded[0].tasks] == ["task_A", "task_B"]
 
 
 def test_load_personas_missing_directory_raises(tmp_path):
@@ -92,47 +104,52 @@ def test_load_personas_schema_invalid_scenario_raises(tmp_path):
         load_personas(personas_dir)
 
 
-# -- validate_personas ---------------------------------------------------------
+def test_load_personas_dangling_expected_top_task_id_raises(tmp_path):
+    # Now an intra-scenario invariant enforced by the model, so it fails at load.
+    scenario = make_scenario(expected_top_task_id="task_does_not_exist")
+    personas_dir = write_personas_dir(tmp_path, [scenario])
+    with pytest.raises(PersonaSchemaError, match="expected_top_task_id"):
+        load_personas(personas_dir)
+
+
+def test_load_personas_missing_source_detail_raises(tmp_path):
+    scenario = make_scenario(source_type="AMI", source_detail=None)
+    personas_dir = write_personas_dir(tmp_path, [scenario])
+    with pytest.raises(PersonaSchemaError, match="source_detail"):
+        load_personas(personas_dir)
+
+
+def test_load_personas_reports_every_offending_file(tmp_path):
+    good = make_scenario(scenario_id="developer_good")
+    bad = make_scenario(scenario_id="developer_bad", expected_top_task_id="nope")
+    personas_dir = write_personas_dir(tmp_path, [good, bad])
+    with pytest.raises(PersonaSchemaError, match="developer_bad"):
+        load_personas(personas_dir)
+
+
+# -- validate_personas ------------------------------------------------------
 
 
 def test_validate_personas_well_formed_set_has_no_errors():
-    scenarios = [make_scenario()]
-    report = validate_personas(scenarios)
+    report = validate_personas([make_scenario_model()])
     assert report.ok
     assert report.errors == []
 
 
 def test_validate_personas_duplicate_scenario_id_is_error():
-    scenarios = [make_scenario(), make_scenario()]
-    report = validate_personas(scenarios)
+    report = validate_personas([make_scenario_model(), make_scenario_model()])
     assert not report.ok
     assert any("duplicate scenario_id" in e for e in report.errors)
 
 
-def test_validate_personas_dangling_expected_top_task_id_is_error():
-    scenarios = [make_scenario(expected_top_task_id="task_does_not_exist")]
-    report = validate_personas(scenarios)
-    assert not report.ok
-    assert any("expected_top_task_id" in e for e in report.errors)
-
-
-def test_validate_personas_missing_source_detail_is_error():
-    scenarios = [make_scenario(source_type="AMI", source_detail=None)]
-    report = validate_personas(scenarios)
-    assert not report.ok
-    assert any("source_detail" in e for e in report.errors)
-
-
 def test_validate_personas_missing_role_is_warning_not_error():
-    scenarios = [make_scenario(role="Developer")]
-    report = validate_personas(scenarios)
+    report = validate_personas([make_scenario_model(role="Developer")])
     assert report.ok
     assert any("CEO" in w for w in report.warnings)
 
 
 def test_validate_personas_unapproved_scenario_is_warning_not_error():
-    scenarios = [make_scenario(mentor_approved=False)]
-    report = validate_personas(scenarios)
+    report = validate_personas([make_scenario_model(mentor_approved=False)])
     assert report.ok
     assert any("mentor_approved" in w for w in report.warnings)
 
@@ -140,8 +157,8 @@ def test_validate_personas_unapproved_scenario_is_warning_not_error():
 def test_validate_personas_role_count_out_of_range_is_warning_not_error():
     # Only 2 Developer scenarios: below MIN_SCENARIOS_PER_ROLE (4).
     scenarios = [
-        make_scenario(scenario_id="developer_scenario_1", role="Developer"),
-        make_scenario(scenario_id="developer_scenario_2", role="Developer"),
+        make_scenario_model(scenario_id="developer_scenario_1", role="Developer"),
+        make_scenario_model(scenario_id="developer_scenario_2", role="Developer"),
     ]
     report = validate_personas(scenarios)
     assert report.ok
@@ -149,7 +166,6 @@ def test_validate_personas_role_count_out_of_range_is_warning_not_error():
 
 
 def test_validate_personas_total_count_out_of_range_is_warning_not_error():
-    scenarios = [make_scenario()]  # 1 scenario total, below MIN_TOTAL_SCENARIOS (24)
-    report = validate_personas(scenarios)
+    report = validate_personas([make_scenario_model()])  # 1 total, below MIN (24)
     assert report.ok
     assert any("total" in w and "24-36" in w for w in report.warnings)

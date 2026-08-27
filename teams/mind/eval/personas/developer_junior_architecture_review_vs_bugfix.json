@@ -14,7 +14,7 @@
       "description": "A senior engineer has proposed a redesign of the authentication microservice's architecture and is asking the team for sign-off before implementation starts.",
       "deadline": null,
       "estimated_duration_minutes": 45,
-      "tier": "Strategic",
+      "tier": "strategic",
       "blocked": false
     },
     {
@@ -23,12 +23,12 @@
       "description": "A notification-service warning is being logged at error level, polluting the on-call error dashboard; low severity but easy to fix.",
       "deadline": null,
       "estimated_duration_minutes": 30,
-      "tier": "Operational",
+      "tier": "operational",
       "blocked": false
     }
   ],
   "expected_top_task_id": "task_logging_bugfix",
-  "expected_reason": "Both tasks fit inside the 60-minute window and neither has a deadline, so duration alone doesn't decide this one. Approving a Strategic architecture redesign is outside a Junior developer's decision scope regardless of free time; the Operational logging fix is squarely within it.",
+  "expected_reason": "Both tasks fit inside the 60-minute window and neither has a deadline, so duration alone doesn't decide this one. Approving a strategic architecture redesign is outside a Junior developer's decision scope regardless of free time; the operational logging fix is squarely within it.",
   "source": { "type": "synthetic", "source_detail": null },
   "mentor_approved": false
 }
