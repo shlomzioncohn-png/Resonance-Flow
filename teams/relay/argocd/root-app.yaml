@@ -1,22 +1,23 @@
 # App-of-apps bootstrap. Apply this once against a cluster that already
 # has ArgoCD (and its CRDs) installed:
 #
-#   kubectl apply -f argocd/project.yaml
-#   kubectl apply -f argocd/root-app.yaml
+#   kubectl apply -f teams/relay/argocd/root-app.yaml
 #
-# From then on, every Application under argocd/apps/ is managed by ArgoCD
-# itself - adding/removing a file there and merging to main is enough.
+# Uses ArgoCD's built-in "default" AppProject - no dedicated project is
+# needed here. From then on, every Application under
+# teams/relay/argocd/apps/ is managed by ArgoCD itself - adding/removing
+# a file there and merging to main is enough.
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
   name: root
   namespace: argocd
 spec:
-  project: resonance-flow
+  project: default
   source:
     repoURL: https://github.com/KamaTechOrg/Resonance-Flow.git
     targetRevision: main
-    path: argocd/apps
+    path: teams/relay/argocd/apps
     directory:
       recurse: false
   destination:

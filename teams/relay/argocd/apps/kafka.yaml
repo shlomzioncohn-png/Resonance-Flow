@@ -8,7 +8,7 @@ metadata:
     # is already reachable.
     argocd.argoproj.io/sync-wave: "-1"
 spec:
-  project: resonance-flow
+  project: default
   source:
     repoURL: https://github.com/KamaTechOrg/Resonance-Flow.git
     targetRevision: main

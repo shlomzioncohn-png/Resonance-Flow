@@ -1,36 +1,40 @@
 # ArgoCD bootstrap
 
-This folder is the shared, no-single-owner ArgoCD setup for this repo. It
-does not install ArgoCD itself - it assumes an ArgoCD instance (with the
-`argocd` namespace and CRDs) is already running on the target cluster.
+This folder is the relay team's ArgoCD setup for this repo. It does not
+install ArgoCD itself - it assumes an ArgoCD instance (with the `argocd`
+namespace and CRDs) is already running on the target cluster.
 
 It replaces an earlier setup that lived under `teams/relay/k8s/argocd/`
 and discovered per-service manifests at `teams/<team>/<service>/k8s`.
 That model no longer matches how services are actually deployed: every
 team's service is now a `components.<team>` entry in the single shared
-[`resonance-flow`](../resonance-flow) Helm chart's `values.yaml`, kept up
-to date by each team's own CI (e.g.
-[`mind-ci.yaml`](../.github/workflows/mind-ci.yaml),
-[`bridge-ci.yaml`](../.github/workflows/bridge-ci.yaml), both built on the
-reusable [`service-ci.yaml`](../.github/workflows/service-ci.yaml)), which
+[`resonance-flow`](../../../resonance-flow) Helm chart's `values.yaml`,
+kept up to date by each team's own CI (e.g.
+[`mind-ci.yaml`](../../../.github/workflows/mind-ci.yaml),
+[`bridge-ci.yaml`](../../../.github/workflows/bridge-ci.yaml), both built
+on the reusable
+[`service-ci.yaml`](../../../.github/workflows/service-ci.yaml)), which
 bumps the image tag and commits straight to `main`. ArgoCD's job is just
 to watch that chart and keep the cluster in sync with it - a classic
 push-based GitOps flow, no image updater needed.
 
+Everything here runs under ArgoCD's built-in `default` AppProject - no
+dedicated project is needed for this repo's scope.
+
 | File                     | Purpose                                                                 |
 |--------------------------|--------------------------------------------------------------------------|
-| `project.yaml`           | `AppProject` "resonance-flow" - the shared source repo + destination boundaries every app below runs under |
 | `root-app.yaml`          | App-of-apps bootstrap `Application` - manages everything under `apps/` |
-| `apps/resonance-flow.yaml` | `Application` syncing the [`resonance-flow`](../resonance-flow) chart (all teams' services) |
-| `apps/kafka.yaml`        | `Application` syncing the [`kafka`](../kafka) chart (shared infra, synced first via a sync-wave) |
+| `apps/resonance-flow.yaml` | `Application` syncing the [`resonance-flow`](../../../resonance-flow) chart (all teams' services) |
+| `apps/kafka.yaml`        | `Application` syncing the [`kafka`](../../../kafka) chart (shared infra, synced first via a sync-wave) |
 
 ## Onboarding your team's service
 
 There is nothing to add here. Once your team's CI writes a
 `components.<your-team>` block into
-[`resonance-flow/values.yaml`](../resonance-flow/values.yaml) (mirror
-`mind-ci.yaml` or `bridge-ci.yaml`), the next `apps/resonance-flow.yaml`
-sync picks it up automatically as part of the same Helm release.
+[`resonance-flow/values.yaml`](../../../resonance-flow/values.yaml)
+(mirror `mind-ci.yaml` or `bridge-ci.yaml`), the next
+`apps/resonance-flow.yaml` sync picks it up automatically as part of the
+same Helm release.
 
 Note: `resonance-flow/` is a chart shared across all teams - coordinate
 chart/template changes with its owner rather than editing it unilaterally.
@@ -49,8 +53,7 @@ bootstrap.
 ## Registering this against a running ArgoCD instance
 
 ```bash
-kubectl apply -f argocd/project.yaml
-kubectl apply -f argocd/root-app.yaml
+kubectl apply -f teams/relay/argocd/root-app.yaml
 ```
 
 Then `argocd app list` should show `root`, `kafka`, and `resonance-flow`;
