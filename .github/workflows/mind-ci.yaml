@@ -6,15 +6,10 @@ on:
     tags: [ "mind-v*.*.*" ]
     paths:
       - "teams/mind/**"
-      - "resonance-flow/**"
-      - ".github/workflows/mind-ci.yaml"
-      - ".github/workflows/service-ci.yaml"
   pull_request:
     branches: [ "main" ]
     paths:
       - "teams/mind/**"
-      - ".github/workflows/mind-ci.yaml"
-      - ".github/workflows/service-ci.yaml"
   workflow_dispatch: {}
 
 jobs:

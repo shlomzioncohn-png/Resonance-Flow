@@ -6,15 +6,10 @@ on:
     tags: [ "lens-bff-v*.*.*" ]
     paths:
       - "teams/lens/bff/**"
-      - "resonance-flow/**"
-      - ".github/workflows/lens-bff-ci.yaml"
-      - ".github/workflows/service-ci.yaml"
   pull_request:
     branches: [ "main" ]
     paths:
       - "teams/lens/bff/**"
-      - ".github/workflows/lens-bff-ci.yaml"
-      - ".github/workflows/service-ci.yaml"
   workflow_dispatch: {}
 
 jobs:

@@ -38,7 +38,7 @@ jobs:
       run:
         working-directory: ${{ inputs.service_dir }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Set up Python 3.12
         if: inputs.language == 'python'
@@ -95,7 +95,7 @@ jobs:
     outputs:
       image_tag: ${{ steps.tags.outputs.short_sha }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Normalize image name to lowercase
         run: echo "IMAGE_NAME=$(echo '${{ env.IMAGE_NAME }}' | tr '[:upper:]' '[:lower:]')" >> "$GITHUB_ENV"
@@ -191,7 +191,7 @@ jobs:
       group: resonance-flow-values-update
       cancel-in-progress: false
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Install yq
         run: |

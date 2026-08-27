@@ -6,15 +6,10 @@ on:
     tags: [ "bridge-v*.*.*" ]
     paths:
       - "teams/bridge/**"
-      - "resonance-flow/**"
-      - ".github/workflows/bridge-ci.yaml"
-      - ".github/workflows/service-ci.yaml"
   pull_request:
     branches: [ "main" ]
     paths:
       - "teams/bridge/**"
-      - ".github/workflows/bridge-ci.yaml"
-      - ".github/workflows/service-ci.yaml"
   workflow_dispatch: {}
 
 jobs:

@@ -7,16 +7,11 @@ on:
     paths:
       - "teams/lens/**"
       - "!teams/lens/bff/**"
-      - "resonance-flow/**"
-      - ".github/workflows/lens-frontend-ci.yaml"
-      - ".github/workflows/service-ci.yaml"
   pull_request:
     branches: [ "main" ]
     paths:
       - "teams/lens/**"
       - "!teams/lens/bff/**"
-      - ".github/workflows/lens-frontend-ci.yaml"
-      - ".github/workflows/service-ci.yaml"
   workflow_dispatch: {}
 
 jobs:
