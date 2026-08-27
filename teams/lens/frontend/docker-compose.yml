@@ -1,0 +1,6 @@
+services:
+  lens-frontend:
+    build: .
+    container_name: lens-frontend
+    ports:
+      - "${FRONTEND_PORT:-3000}:3000"
