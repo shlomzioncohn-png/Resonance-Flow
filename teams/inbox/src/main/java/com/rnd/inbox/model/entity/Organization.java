@@ -3,17 +3,17 @@ package com.rnd.inbox.model.entity;
 import com.rnd.inbox.model.enums.OrganizationStatus;
 import com.rnd.inbox.model.type.LowercasePostgreSQLEnumType;
 import org.hibernate.annotations.GenericGenerator;
-import org.hibernate.annotations.Type;
-import org.hibernate.annotations.TypeDef;
+import org.hibernate.annotations.JdbcType;
+import org.hibernate.dialect.PostgreSQLEnumJdbcType;
 
-import javax.persistence.Column;
-import javax.persistence.Entity;
-import javax.persistence.EnumType;
-import javax.persistence.Enumerated;
-import javax.persistence.GeneratedValue;
-import javax.persistence.Id;
-import javax.persistence.OneToMany;
-import javax.persistence.Table;
+import jakarta.persistence.Column;
+import jakarta.persistence.Entity;
+import jakarta.persistence.EnumType;
+import jakarta.persistence.Enumerated;
+import jakarta.persistence.GeneratedValue;
+import jakarta.persistence.Id;
+import jakarta.persistence.OneToMany;
+import jakarta.persistence.Table;
 import java.time.Instant;
 import java.util.HashSet;
 import java.util.Objects;
@@ -37,7 +37,7 @@ public class Organization {
     @Column(nullable = false, unique = true)
     private String slug;
 
-    @Type(type = "pgsql_enum")
+    @JdbcType(PostgreSQLEnumJdbcType.class)
     @Enumerated(EnumType.STRING)
     @Column(name = "status", nullable = false, columnDefinition = "org_status")
     private OrganizationStatus status;

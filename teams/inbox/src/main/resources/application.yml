@@ -11,3 +11,18 @@ spring:
   flyway:
     locations: ${DB_MIGRATIONS_LOCATION:filesystem:../../shared/database/migrations}
     baseline-on-migrate: true
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+    producer:
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.springframework.kafka.support.serializer.JsonSerializer
+      properties:
+        spring.json.add.type.headers: false
+
+kafka:
+  producer:
+    retry:
+      max-attempts: ${KAFKA_PRODUCER_RETRY_MAX_ATTEMPTS:3}
+      initial-backoff-ms: ${KAFKA_PRODUCER_RETRY_INITIAL_BACKOFF_MS:200}
+      backoff-multiplier: ${KAFKA_PRODUCER_RETRY_BACKOFF_MULTIPLIER:2.0}
+      max-backoff-ms: ${KAFKA_PRODUCER_RETRY_MAX_BACKOFF_MS:5000}

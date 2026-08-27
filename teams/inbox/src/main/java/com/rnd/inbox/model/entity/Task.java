@@ -7,18 +7,18 @@ import com.rnd.inbox.model.enums.TaskStatus;
 import com.rnd.inbox.model.enums.TaskTier;
 import com.rnd.inbox.model.type.LowercasePostgreSQLEnumType;
 import org.hibernate.annotations.GenericGenerator;
-import org.hibernate.annotations.Type;
-import org.hibernate.annotations.TypeDef;
+import org.hibernate.annotations.JdbcType;
+import org.hibernate.dialect.PostgreSQLEnumJdbcType;
 
-import javax.persistence.Column;
-import javax.persistence.Entity;
-import javax.persistence.EnumType;
-import javax.persistence.Enumerated;
-import javax.persistence.GeneratedValue;
-import javax.persistence.Id;
-import javax.persistence.JoinColumn;
-import javax.persistence.ManyToOne;
-import javax.persistence.Table;
+import jakarta.persistence.Column;
+import jakarta.persistence.Entity;
+import jakarta.persistence.EnumType;
+import jakarta.persistence.Enumerated;
+import jakarta.persistence.GeneratedValue;
+import jakarta.persistence.Id;
+import jakarta.persistence.JoinColumn;
+import jakarta.persistence.ManyToOne;
+import jakarta.persistence.Table;
 import java.time.Instant;
 import java.util.Objects;
 import java.util.UUID;
@@ -48,7 +48,7 @@ public class Task {
     @Column
     private String description;
 
-    @Type(type = "pgsql_enum")
+    @JdbcType(PostgreSQLEnumJdbcType.class)
     @Enumerated(EnumType.STRING)
     @Column(name = "source_type", nullable = false, columnDefinition = "task_source_type")
     private SourceType sourceType;
@@ -56,12 +56,12 @@ public class Task {
     @Column(name = "source_ref")
     private String sourceRef;
 
-    @Type(type = "pgsql_enum")
+    @JdbcType(PostgreSQLEnumJdbcType.class)
     @Enumerated(EnumType.STRING)
     @Column(name = "tier", columnDefinition = "task_tier")
     private TaskTier tier;
 
-    @Type(type = "pgsql_enum")
+    @JdbcType(PostgreSQLEnumJdbcType.class)
     @Enumerated(EnumType.STRING)
     @Column(name = "role_context", columnDefinition = "task_role_context")
     private TaskRoleContext roleContext;
@@ -75,7 +75,7 @@ public class Task {
     @Column
     private Instant deadline;
 
-    @Type(type = "pgsql_enum")
+    @JdbcType(PostgreSQLEnumJdbcType.class)
     @Enumerated(EnumType.STRING)
     @Column(name = "status", nullable = false, columnDefinition = "task_status")
     private TaskStatus status;
@@ -89,7 +89,7 @@ public class Task {
     @Column(name = "snoozed_until")
     private Instant snoozedUntil;
 
-    @Type(type = "pgsql_enum")
+    @JdbcType(PostgreSQLEnumJdbcType.class)
     @Enumerated(EnumType.STRING)
     @Column(name = "extraction_provenance", nullable = false, columnDefinition = "task_extraction_provenance")
     private TaskExtractionProvenance extractionProvenance;

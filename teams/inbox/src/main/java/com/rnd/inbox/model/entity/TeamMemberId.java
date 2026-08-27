@@ -1,6 +1,6 @@
 package com.rnd.inbox.model.entity;
 
-import javax.persistence.Embeddable;
+import jakarta.persistence.Embeddable;
 import java.io.Serializable;
 import java.util.Objects;
 import java.util.UUID;
