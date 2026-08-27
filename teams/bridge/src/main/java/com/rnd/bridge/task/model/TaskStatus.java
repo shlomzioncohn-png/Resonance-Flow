@@ -1,5 +1,6 @@
 package com.rnd.bridge.task.model;
 
+import com.fasterxml.jackson.annotation.JsonValue;
 
 public enum TaskStatus {
     NEW,
@@ -9,5 +10,10 @@ public enum TaskStatus {
     SNOOZED,
     DONE,
     REJECTED,
-    CANCELLED
+    CANCELLED;
+
+    @JsonValue
+    public String toJson() {
+        return name().toLowerCase();
+    }
 }
