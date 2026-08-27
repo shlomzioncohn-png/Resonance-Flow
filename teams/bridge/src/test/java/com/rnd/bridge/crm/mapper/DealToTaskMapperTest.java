@@ -142,7 +142,7 @@ class DealToTaskMapperTest {
                 task.deadline());
         assertEquals(ExtractionProvenance.ETL, task.extractionProvenance());
         assertNull(task.confidence());
-        assertNull(task.estimatedDurationMinutes());
+        assertNull(task.effortEstimateMinutes());
         assertNull(task.organizationId());
         assertNull(task.projectId());
         assertNull(task.snoozedUntil());

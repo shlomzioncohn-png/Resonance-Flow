@@ -25,8 +25,8 @@ public final class TaskValidator implements PayloadValidator<Task> {
         if (task.confidence() != null && (task.confidence() < 0.0 || task.confidence() > 1.0)) {
             throw invalid("confidence", task.confidence(), "must be between 0 and 1");
         }
-        if (task.estimatedDurationMinutes() != null && task.estimatedDurationMinutes() <= 0) {
-            throw invalid("estimatedDurationMinutes", task.estimatedDurationMinutes(), "must be > 0");
+        if (task.effortEstimateMinutes() != null && task.effortEstimateMinutes() <= 0) {
+            throw invalid("effortEstimateMinutes", task.effortEstimateMinutes(), "must be > 0");
         }
 
         boolean snoozed = task.status() == TaskStatus.SNOOZED;

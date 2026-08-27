@@ -25,7 +25,7 @@ public record Task(
         RoleContext roleContext,
         SourceType sourceType,
         String sourceRef,
-        Integer estimatedDurationMinutes,
+        Integer effortEstimateMinutes,
         // Deal.closeDate is a LocalDate; the spec has this column as
         // TIMESTAMPTZ. The date-to-instant conversion (presumably
         // start-of-day UTC) isn't decided yet - not building it until it is.
