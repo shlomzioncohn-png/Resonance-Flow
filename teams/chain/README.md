@@ -2,8 +2,10 @@
 
 Foundation module for Team Chain (Dependency Graph, Task Selection & Constraints).
 
-This is a minimal Spring Boot skeleton. No business logic or real APIs are implemented yet - the
-goal of this stage is a clean, working Maven/Spring Boot project that later work can build on.
+`TaskEligibilityService` implements the dependency/constraint update flow (`addDependency`,
+`removeDependency`, `onTaskStatusChanged`, `recalculateTaskEligibility`, `onConstraintAdded`,
+`onConstraintStatusChanged`) against in-memory repositories. No REST controllers are wired up
+yet (`controller/` is still empty) - this stage is the eligibility engine and its tests.
 
 ## Stack
 
@@ -11,17 +13,25 @@ goal of this stage is a clean, working Maven/Spring Boot project that later work
 - Spring Boot 2.7.18 (Maven)
 - Docker / Docker Compose
 
-No database is configured yet - the DB choice for the project has not been decided.
+The DB choice for the project has not been decided yet. An in-memory H2 database is configured
+as a placeholder purely so a `DataSource`/transaction manager exists for `@Transactional` -
+`Task`/`TaskDependency` are plain DTOs (not JPA entities) and are **not** persisted to H2; real
+data still lives in the in-memory `TaskRepository`/`TaskDependencyRepository` implementations.
+See [CLAUDE.md](CLAUDE.md) for the full rationale and open items.
 
 ## Project structure
 
 ```
 src/main/java/com/rnd/chain/
 ├── ChainApplication.java   # Spring Boot entry point
-├── controller/
+├── controller/             # empty - no REST endpoints yet
 ├── service/
+│   └── TaskEligibilityService.java
 ├── repository/
+│   ├── TaskRepository.java / InMemoryTaskRepository.java
+│   └── TaskDependencyRepository.java / InMemoryTaskDependencyRepository.java
 ├── dto/
+│   ├── Task.java, TaskDependency.java, TaskStatus.java, Constraint.java
 └── config/
 src/main/resources/application.yml
 src/test/java/com/rnd/chain/
