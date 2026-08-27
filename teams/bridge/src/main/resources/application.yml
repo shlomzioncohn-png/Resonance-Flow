@@ -44,3 +44,6 @@ bridge:
       mode: fixture
     whatsapp:
       mode: fixture
+      # Only read when mode: real. See plan.md - there's no export API, so this directory is
+      # filled manually from WhatsApp's own "Export Chat" feature.
+      import-dir: ${BRIDGE_WHATSAPP_IMPORT_DIR:}

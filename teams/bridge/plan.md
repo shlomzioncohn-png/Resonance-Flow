@@ -62,6 +62,21 @@ not uniformly, so sources go real independently as each is ready.
 | Slack | Slack Web API, `conversations.history` | cursor-based | OAuth bot token |
 | WhatsApp | **no official export API** for personal WhatsApp | n/a | only path today is a manual `.txt` export per chat — this source likely stays fixture/file-drop-based even after the others go real |
 
+### WhatsApp: how the file actually gets to the server
+
+There is no automated way to trigger a WhatsApp export — a person has to open the chat, use
+WhatsApp's own **Export Chat** feature (Settings/⋮ → More → Export Chat, with or without
+media), and the phone shares the resulting `.txt` (and media files) out through its own share
+sheet. "Going real" for WhatsApp therefore doesn't mean polling an API — `RealWhatsAppSourceReader`
+(implemented) just reads whatever `.txt` files are sitting in a configured directory
+(`bridge.intake.whatsapp.import-dir`), the same export line format the fixtures already use,
+via the shared `WhatsAppExportLineParser`. How the file gets *into* that directory is a
+separate, still-open question — options, cheapest first:
+1. Someone copies the file onto the server manually (what's implemented now — no automation).
+2. A cloud-synced folder (Drive/Dropbox client running on the server) the phone shares into.
+3. A dedicated upload endpoint on Bridge itself (`POST .../whatsapp/upload`, multipart) — more
+   code, but keeps delivery inside the system instead of depending on an external sync client.
+
 ### Trigger: scheduled polling, not webhooks
 
 Real sources need something to actually call `run(sourceType)` periodically — the manual HTTP
