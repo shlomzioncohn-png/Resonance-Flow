@@ -15,7 +15,7 @@ onConstraintStatusChanged.
 - No retry logic (@Retryable) — let exceptions propagate to the caller
 - All code comments must be in English
 
-## Real repository contracts (from ruthHoltzman/dependency-repos branch)
+## Real repository contracts (from chain/ruthHoltzman/dependency-repository-66)
 - TaskRepository: findById, findAllById, findByParentTaskId, save
   (no atomic increment yet — in-memory HashMap, not real DB)
 - TaskDependencyRepository: findByTaskId, findByDependsOnTaskId, save
@@ -23,6 +23,19 @@ onConstraintStatusChanged.
 - Proposed addition (pending team approval, NOT YET MERGED):
   incrementBlockingCount/decrementBlockingCount/
   incrementOpenConstraintCount/decrementOpenConstraintCount
+- Task/TaskDependency/TaskStatus were merged from main (2026-08-27) after
+  ruthHoltzman's DTO review landed there: Task now has a required ownerId,
+  score is Double (was Integer), and construction is via Task.builder()
+  only (the old public constructor is gone).
+- That same branch (#66) also has a TaskDependencyService (existence /
+  self-dependency / duplicate-edge checks, throws TaskNotFoundException /
+  InvalidDependencyException / DuplicateDependencyException) that is NOT
+  merged into main yet. It overlaps with TaskEligibilityService's
+  addDependency/removeDependency (which additionally do cycle detection
+  and blockingCount bookkeeping, which TaskDependencyService does not).
+  Reconcile the two once #66 merges - probably TaskEligibilityService
+  should delegate the raw edge validation/CRUD to TaskDependencyService
+  and keep only cycle detection + counters.
 
 ## Open items
 - pom.xml still lacks a real persistence layer, and Task/TaskDependency
