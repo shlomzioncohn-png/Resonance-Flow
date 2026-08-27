@@ -9,6 +9,7 @@ returns.
 
 from __future__ import annotations
 
+import logging
 import time
 import uuid
 
@@ -20,6 +21,17 @@ from mind import __version__
 from mind.api.v1 import router as v1_router
 from mind.contracts.errors import register_error_handlers
 from mind.contracts.health import HealthResponse
+
+# Configure logging once, centrally, here -- before anything else in the
+# app logs a thing. Python's logging module does nothing by default: with
+# no handler configured anywhere, .info() calls are silently dropped, and
+# .error()/.exception() calls only reach stderr via logging.lastResort,
+# unformatted (no timestamp, level, or logger name). uvicorn only
+# configures its own "uvicorn"/"uvicorn.access"/"uvicorn.error" loggers,
+# not the root logger, so it doesn't do this for us. With this in place,
+# every module can just do `logging.getLogger(__name__)` and call
+# .info()/.error() normally -- no per-module handler setup needed.
+logging.basicConfig(level=logging.INFO, format="%(levelname)s:%(name)s:%(message)s")
 
 app = FastAPI(title="MIND API", version=__version__)
 

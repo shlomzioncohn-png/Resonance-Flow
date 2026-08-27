@@ -135,5 +135,9 @@ in Phase 2):
   `/health/ready`).
 - Deprecation notice window (see versioning plan, step 5).
 
-These track the same "Open decisions" list in the team `README.md` — keep
-both current.
+This list is scoped to the API contract specifically (things Relay and
+the other consuming teams need to know about). The team `README.md` has
+its own, separate "Open decisions" list for broader project decisions
+(vector store choice, eval metric, etc.) that don't affect this contract
+-- the two aren't duplicates of each other, so there's nothing to keep
+in sync between them beyond each staying accurate on its own.

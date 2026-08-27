@@ -9,13 +9,15 @@ field reference and status-code table.
 
 from __future__ import annotations
 
+from typing import Literal
+
 from pydantic import BaseModel, Field
 
 
 class HealthResponse(BaseModel):
     """The body of GET /health."""
 
-    status: str = Field(
+    status: Literal["ok"] = Field(
         ...,
         description=(
             'Always "ok" when this endpoint responds at all. There is no '

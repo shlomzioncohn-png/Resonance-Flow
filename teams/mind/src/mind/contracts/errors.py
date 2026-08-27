@@ -12,7 +12,7 @@ from __future__ import annotations
 import logging
 import time
 import uuid
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
@@ -29,21 +29,27 @@ from pydantic import BaseModel, Field
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 logger = logging.getLogger("mind.errors")
-# uvicorn only attaches handlers to its own loggers, and the root logger
-# has no handler by default -- without this, every unhandled-exception
-# log below is silently dropped instead of reaching stderr. Scoped to
-# this logger only (propagate=False) so it neither depends on nor
-# disturbs whatever logging setup the rest of the app ends up using.
-if not logger.handlers:
-    _handler = logging.StreamHandler()
-    _handler.setFormatter(logging.Formatter("%(levelname)s:%(name)s:%(message)s"))
-    logger.addHandler(_handler)
-    logger.setLevel(logging.INFO)
-    logger.propagate = False
+# Logging itself is configured once, centrally, in api/main.py -- see the
+# comment there. This module just gets a logger and uses it.
+
+# The full set of error_code values MIND's API can return. Keep in sync
+# with the table in docs/API.md.
+ErrorCode = Literal[
+    "bad_request",
+    "unauthorized",
+    "forbidden",
+    "not_found",
+    "conflict",
+    "validation_error",
+    "rate_limited",
+    "internal_error",
+    "service_unavailable",
+    "error",  # fallback for a status code not in _STATUS_TO_CODE below
+]
 
 # error_code -> default HTTP status code it corresponds to.
 # Keep this in sync with the table in docs/API.md.
-_STATUS_TO_CODE = {
+_STATUS_TO_CODE: dict[int, ErrorCode] = {
     400: "bad_request",
     401: "unauthorized",
     403: "forbidden",
@@ -59,7 +65,7 @@ _STATUS_TO_CODE = {
 class ErrorResponse(BaseModel):
     """The body of every non-2xx response from MIND's API."""
 
-    error_code: str = Field(
+    error_code: ErrorCode = Field(
         ...,
         description=(
             "Stable, machine-readable identifier, e.g. 'not_found', "
@@ -96,7 +102,7 @@ class ErrorResponse(BaseModel):
     )
 
 
-def _code_for_status(status_code: int) -> str:
+def _code_for_status(status_code: int) -> ErrorCode:
     return _STATUS_TO_CODE.get(status_code, "error")
 
 
@@ -114,7 +120,7 @@ def _request_id(request: Request) -> str:
 
 
 def _error_body(
-    error_code: str,
+    error_code: ErrorCode,
     message: str,
     request_id: str,
     details: dict[str, Any] | None = None,
