@@ -4,6 +4,9 @@ Foundation module for Team Chain (Dependency Graph, Task Selection & Constraints
 
 This is a minimal Spring Boot skeleton. No business logic or real APIs are implemented yet - the
 goal of this stage is a clean, working Maven/Spring Boot project that later work can build on.
+The dependency graph persistence layer (`DependencyService`, `TaskRepository`,
+`TaskDependencyRepository` and related exceptions) is tracked separately under issue #66 and is
+not part of this module yet.
 
 ## Stack
 
@@ -12,6 +15,9 @@ goal of this stage is a clean, working Maven/Spring Boot project that later work
 - Docker / Docker Compose
 
 No database is configured yet - the DB choice for the project has not been decided.
+
+Task identifiers are `java.util.UUID` for now, pending the Inbox team publishing its own task id
+type (`Task`/`TaskDependency` will switch to that type once it exists).
 
 ## Project structure
 
