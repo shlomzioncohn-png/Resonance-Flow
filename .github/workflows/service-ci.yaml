@@ -81,6 +81,10 @@ jobs:
         if: inputs.language == 'node'
         run: npm ci
 
+      - name: Lint
+        if: inputs.language == 'node'
+        run: npm run lint
+
       - name: Build frontend
         if: inputs.language == 'node'
         run: npm run build
