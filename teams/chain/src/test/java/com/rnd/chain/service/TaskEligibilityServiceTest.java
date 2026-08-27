@@ -60,9 +60,10 @@ class TaskEligibilityServiceTest {
     }
 
     @Test
-    void hasBlocker_staysNotReady() {
+    void hasBlocker_becomesNotReady() {
         UUID taskId = UUID.randomUUID();
-        Task task = buildTask(taskId, 1, 0, false);
+        // isReady starts stale (true) so the blocker actually flips it, exercising the save path.
+        Task task = buildTask(taskId, 1, 0, true);
         when(taskRepository.findById(taskId)).thenReturn(Optional.of(task));
 
         taskEligibilityService.recalculateTaskEligibility(taskId);
@@ -72,9 +73,9 @@ class TaskEligibilityServiceTest {
     }
 
     @Test
-    void hasOpenConstraint_staysNotReady() {
+    void hasOpenConstraint_becomesNotReady() {
         UUID taskId = UUID.randomUUID();
-        Task task = buildTask(taskId, 0, 1, false);
+        Task task = buildTask(taskId, 0, 1, true);
         when(taskRepository.findById(taskId)).thenReturn(Optional.of(task));
 
         taskEligibilityService.recalculateTaskEligibility(taskId);
