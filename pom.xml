@@ -20,13 +20,13 @@
     </properties>
 
     <modules>
-        <!-- Shared Libraries -->
-        <module>teams/lens/shared-dtos</module>
-
         <!-- LENS Team Services -->
         <module>teams/lens/gateway</module>
 
-        <!-- Future Team Services -->
+        <!-- Future: BFF service (Sari) -->
+        <!-- <module>teams/bff</module> -->
+
+        <!-- Future team services -->
         <!-- <module>teams/bridge</module> -->
         <!-- <module>teams/chain</module> -->
         <!-- <module>teams/inbox</module> -->
