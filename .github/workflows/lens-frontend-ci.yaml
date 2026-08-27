@@ -1,0 +1,33 @@
+name: Lens Frontend CI/CD
+
+on:
+  push:
+    branches: [ "main" ]
+    tags: [ "lens-frontend-v*.*.*" ]
+    paths:
+      - "teams/lens/**"
+      - "!teams/lens/bff/**"
+      - "resonance-flow/**"
+      - ".github/workflows/lens-frontend-ci.yaml"
+      - ".github/workflows/service-ci.yaml"
+  pull_request:
+    branches: [ "main" ]
+    paths:
+      - "teams/lens/**"
+      - "!teams/lens/bff/**"
+      - ".github/workflows/lens-frontend-ci.yaml"
+      - ".github/workflows/service-ci.yaml"
+  workflow_dispatch: {}
+
+jobs:
+  ci:
+    permissions:
+      contents: write
+      packages: write
+    uses: ./.github/workflows/service-ci.yaml
+    with:
+      service_name: lens-frontend
+      service_dir: teams/lens
+      language: node
+      container_port: 8083
+      health_path: /

@@ -12,7 +12,7 @@ on:
         required: true
         type: string
       language:
-        description: "python or java"
+        description: "python, java, or node"
         required: true
         type: string
       container_port:
@@ -68,6 +68,22 @@ jobs:
       - name: Run Java tests
         if: inputs.language == 'java'
         run: mvn -B test
+
+      - name: Set up Node 22
+        if: inputs.language == 'node'
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: ${{ inputs.service_dir }}/package-lock.json
+
+      - name: Install dependencies
+        if: inputs.language == 'node'
+        run: npm ci
+
+      - name: Build frontend
+        if: inputs.language == 'node'
+        run: npm run build
 
   build-and-push:
     needs: test
