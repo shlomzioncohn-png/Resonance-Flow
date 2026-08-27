@@ -3,9 +3,6 @@ Full-cycle test for the MIND vector interface.
 
 Each of embed / upsert / search is also exercised on its own, so a failure
 tells you exactly which stage broke rather than just "something is wrong".
-
-Moved from the PoC (`Choose a vector database/mind_vector_poc/tests/test_vector_store.py`)
-now that pgvector's interface lives in `mind.embeddings` directly.
 """
 
 import uuid

@@ -10,10 +10,8 @@ dependencies = [
     "pydantic>=2.0",
     "fastapi",
     "uvicorn",
-    # embeddings (src/mind/embeddings) -- pgvector store client
+    # embeddings (src/mind/embeddings)
     "psycopg2-binary>=2.9",
-    # embeddings (src/mind/embeddings) -- local CPU-only sentence embedding
-    # model (see generate.py for the model choice and why)
     "sentence-transformers>=3.0",
     # add as decided: OCR/ASR libs, LLM client, etc.
 ]

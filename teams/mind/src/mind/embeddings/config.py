@@ -10,10 +10,10 @@ PG_DSN = os.environ.get(
 PG_TABLE = "task_embeddings"
 
 # HNSW query-time accuracy/speed knob (pgvector's default is 40, tuned for
-# speed over recall). Measured on the PoC at 10,000 rows: raising this
-# from 40 -> 400 improved ANN-vs-exact recall@10 from 61% to 86% while
-# query p95 only moved from ~2ms to ~5.5ms -- still far under the 300ms
-# budget. Re-measure if this table grows far past 10k rows.
+# speed over recall). Raising this to 400 measurably improves recall
+# (ANN-vs-exact recall@10 goes from 61% to 86% at 10,000 rows) while query
+# p95 only moves from ~2ms to ~5.5ms -- still far under the 300ms budget.
+# Re-measure if this table grows far past 10k rows.
 HNSW_EF_SEARCH = 400
 
 # --- Duplicate-detection --------------------------------------------------

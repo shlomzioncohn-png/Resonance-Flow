@@ -4,8 +4,7 @@ pgvector-backed implementation of VectorStore.
 This is the ONLY file in the codebase that is allowed to know pgvector /
 Postgres-specific details (SQL, connection strings, the `<=>` operator,
 psycopg2, etc). If we ever swap databases, this file gets replaced by e.g.
-`qdrant_store.py` and nothing outside `factory.py` needs to change. Moved
-from the PoC (`Choose a vector database/mind_vector_poc/mind_vector/pgvector_store.py`).
+`qdrant_store.py` and nothing outside `factory.py` needs to change.
 """
 
 from psycopg2 import pool
@@ -62,11 +61,11 @@ class PgVectorStore(VectorStore):
         conn = self._pool.getconn()
         try:
             with conn, conn.cursor() as cur:
-                # pgvector's default hnsw.ef_search (40) trades recall for
-                # speed more aggressively than this table's latency budget
-                # requires -- see config.HNSW_EF_SEARCH and the PoC's
-                # scale+recall evaluation history for the measurement
-                # (61% -> 86% ANN-vs-exact recall@10 at negligible cost).
+                # pgvector's default hnsw.ef_search (40) favors speed over
+                # recall more than this table's latency budget requires --
+                # see config.HNSW_EF_SEARCH for the measured tradeoff
+                # (raising it to 400 improves ANN-vs-exact recall@10 from
+                # 61% to 86% at negligible extra latency).
                 cur.execute("SET LOCAL hnsw.ef_search = %s;", (HNSW_EF_SEARCH,))
                 cur.execute(
                     f"""

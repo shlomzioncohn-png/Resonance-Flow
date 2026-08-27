@@ -7,18 +7,15 @@ The single switch that decides which VectorStore implementation backs
     2. Change the import + return line below.
 
 That's it -- no other file in the app imports a database-specific class.
-Moved from the PoC (`Choose a vector database/mind_vector_poc/mind_vector/factory.py`).
-
-The import of `pgvector_store` is deferred to inside `get_store()`
-(instead of at module top-level) precisely so that importing `factory`
--- or `base`, which it depends on -- never forces psycopg2 to be
-importable; only actually calling `get_store()` does.
 """
 
 from mind.embeddings.base import VectorStore
 
 
 def get_store() -> VectorStore:
+    # Imported here, not at module top-level, so that importing `factory`
+    # (or `base`, which it depends on) never requires psycopg2 to be
+    # installed -- only actually calling get_store() does.
     from mind.embeddings.pgvector_store import PgVectorStore
 
     return PgVectorStore()
