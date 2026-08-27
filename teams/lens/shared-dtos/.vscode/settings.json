@@ -1,8 +1,0 @@
-{
-  "java.project.referencedLibraries": [
-    "lib/**/*.jar"
-  ],
-  "java.configuration.updateBuildConfiguration": "automatic",
-  "java.import.generatesMetadataForBuildFileScript": true,
-  "java.saveActions.organizeImports": true
-}
