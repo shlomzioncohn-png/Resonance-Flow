@@ -1,10 +1,9 @@
 package com.rnd.inbox.model.entity;
 
 import com.rnd.inbox.model.enums.OrganizationStatus;
-import com.rnd.inbox.model.type.LowercasePostgreSQLEnumType;
+import com.rnd.inbox.model.type.LowercasePostgreSQLEnumJdbcType;
 import org.hibernate.annotations.GenericGenerator;
 import org.hibernate.annotations.JdbcType;
-import org.hibernate.dialect.PostgreSQLEnumJdbcType;
 
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
@@ -20,7 +19,6 @@ import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
 
-@TypeDef(name = "pgsql_enum", typeClass = LowercasePostgreSQLEnumType.class)
 @Entity
 @Table(name = "organizations")
 public class Organization {
@@ -37,7 +35,7 @@ public class Organization {
     @Column(nullable = false, unique = true)
     private String slug;
 
-    @JdbcType(PostgreSQLEnumJdbcType.class)
+    @JdbcType(LowercasePostgreSQLEnumJdbcType.class)
     @Enumerated(EnumType.STRING)
     @Column(name = "status", nullable = false, columnDefinition = "org_status")
     private OrganizationStatus status;

@@ -1,10 +1,9 @@
 package com.rnd.inbox.model.entity;
 
 import com.rnd.inbox.model.enums.AssignmentRole;
-import com.rnd.inbox.model.type.LowercasePostgreSQLEnumType;
+import com.rnd.inbox.model.type.LowercasePostgreSQLEnumJdbcType;
 import org.hibernate.annotations.GenericGenerator;
 import org.hibernate.annotations.JdbcType;
-import org.hibernate.dialect.PostgreSQLEnumJdbcType;
 
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
@@ -19,7 +18,6 @@ import java.time.Instant;
 import java.util.Objects;
 import java.util.UUID;
 
-@TypeDef(name = "pgsql_enum", typeClass = LowercasePostgreSQLEnumType.class)
 @Entity
 @Table(name = "assignments")
 public class Assignment {
@@ -42,7 +40,7 @@ public class Assignment {
     @JoinColumn(name = "team_id", nullable = true)
     private Team team;
 
-    @JdbcType(PostgreSQLEnumJdbcType.class)
+    @JdbcType(LowercasePostgreSQLEnumJdbcType.class)
     @Enumerated(EnumType.STRING)
     @Column(name = "assignment_role", nullable = false, columnDefinition = "assignment_role")
     private AssignmentRole assignmentRole;

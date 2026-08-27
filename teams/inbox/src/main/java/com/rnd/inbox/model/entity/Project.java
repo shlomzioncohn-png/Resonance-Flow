@@ -1,10 +1,9 @@
 package com.rnd.inbox.model.entity;
 
 import com.rnd.inbox.model.enums.ProjectStatus;
-import com.rnd.inbox.model.type.LowercasePostgreSQLEnumType;
+import com.rnd.inbox.model.type.LowercasePostgreSQLEnumJdbcType;
 import org.hibernate.annotations.GenericGenerator;
 import org.hibernate.annotations.JdbcType;
-import org.hibernate.dialect.PostgreSQLEnumJdbcType;
 
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
@@ -20,7 +19,6 @@ import java.time.LocalDate;
 import java.util.Objects;
 import java.util.UUID;
 
-@TypeDef(name = "pgsql_enum", typeClass = LowercasePostgreSQLEnumType.class)
 @Entity
 @Table(name = "projects")
 public class Project {
@@ -49,7 +47,7 @@ public class Project {
     @JoinColumn(name = "team_id", nullable = true)
     private Team team;
 
-    @JdbcType(PostgreSQLEnumJdbcType.class)
+    @JdbcType(LowercasePostgreSQLEnumJdbcType.class)
     @Enumerated(EnumType.STRING)
     @Column(name = "status", nullable = false, columnDefinition = "project_status")
     private ProjectStatus status;

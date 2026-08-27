@@ -2,10 +2,9 @@ package com.rnd.inbox.model.entity;
 
 import com.rnd.inbox.model.enums.OtpChannel;
 import com.rnd.inbox.model.enums.OtpStatus;
-import com.rnd.inbox.model.type.LowercasePostgreSQLEnumType;
+import com.rnd.inbox.model.type.LowercasePostgreSQLEnumJdbcType;
 import org.hibernate.annotations.GenericGenerator;
 import org.hibernate.annotations.JdbcType;
-import org.hibernate.dialect.PostgreSQLEnumJdbcType;
 
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
@@ -20,7 +19,6 @@ import java.time.Instant;
 import java.util.Objects;
 import java.util.UUID;
 
-@TypeDef(name = "pgsql_enum", typeClass = LowercasePostgreSQLEnumType.class)
 @Entity
 @Table(name = "otp_requests")
 public class OtpRequest {
@@ -44,12 +42,12 @@ public class OtpRequest {
     @Column(nullable = false)
     private String purpose;
 
-    @JdbcType(PostgreSQLEnumJdbcType.class)
+    @JdbcType(LowercasePostgreSQLEnumJdbcType.class)
     @Enumerated(EnumType.STRING)
     @Column(name = "channel", nullable = false, columnDefinition = "otp_channel")
     private OtpChannel channel;
 
-    @JdbcType(PostgreSQLEnumJdbcType.class)
+    @JdbcType(LowercasePostgreSQLEnumJdbcType.class)
     @Enumerated(EnumType.STRING)
     @Column(name = "status", nullable = false, columnDefinition = "otp_status")
     private OtpStatus status;
