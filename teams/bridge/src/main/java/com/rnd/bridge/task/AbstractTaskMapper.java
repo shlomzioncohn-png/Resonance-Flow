@@ -75,7 +75,7 @@ public abstract class AbstractTaskMapper<S> implements PayloadMapper<S, Task> {
                 roleContext(),
                 sourceType(),
                 toSourceRef(source),
-                null, // estimatedDurationMinutes - no lane currently sources this
+                null, // effortEstimateMinutes - no lane currently sources this
                 toDeadline(source),
                 toSnoozedUntil(source));
     }

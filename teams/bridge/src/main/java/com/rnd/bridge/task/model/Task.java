@@ -1,5 +1,7 @@
 package com.rnd.bridge.task.model;
 
+import com.fasterxml.jackson.databind.PropertyNamingStrategies;
+import com.fasterxml.jackson.databind.annotation.JsonNaming;
 import com.rnd.bridge.core.BridgePayload;
 
 import java.time.Instant;
@@ -11,7 +13,12 @@ import java.time.Instant;
  * <p>
  * Fields removed on that basis so far: id, version, created_at/updated_at,
  * dependency_task_id, is_available, completed_at, created_by.
+ * <p>
+ * {@code @JsonNaming} is on the class rather than relying on a globally
+ * configured mapper, so Task carries its own wire contract with Inbox
+ * regardless of which ObjectMapper ends up serializing it.
  */
+@JsonNaming(PropertyNamingStrategies.SnakeCaseStrategy.class)
 public record Task(
         String organizationId,
         String projectId,
@@ -25,7 +32,7 @@ public record Task(
         RoleContext roleContext,
         SourceType sourceType,
         String sourceRef,
-        Integer estimatedDurationMinutes,
+        Integer effortEstimateMinutes,
         // Deal.closeDate is a LocalDate; the spec has this column as
         // TIMESTAMPTZ. The date-to-instant conversion (presumably
         // start-of-day UTC) isn't decided yet - not building it until it is.

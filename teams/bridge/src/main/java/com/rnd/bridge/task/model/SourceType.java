@@ -1,5 +1,6 @@
 package com.rnd.bridge.task.model;
 
+import com.fasterxml.jackson.annotation.JsonValue;
 
 public enum SourceType {
     GITHUB_ISSUE,
@@ -11,5 +12,10 @@ public enum SourceType {
     MEETING,
     DOC,
     SCANNED_DOC,
-    CALENDAR
+    CALENDAR;
+
+    @JsonValue
+    public String toJson() {
+        return name().toLowerCase();
+    }
 }

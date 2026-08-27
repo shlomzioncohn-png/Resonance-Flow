@@ -1,9 +1,6 @@
 package com.rnd.bridge.crm.repository;
 
-import com.fasterxml.jackson.databind.DeserializationFeature;
-import com.fasterxml.jackson.databind.PropertyNamingStrategies;
 import com.fasterxml.jackson.databind.json.JsonMapper;
-import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import com.rnd.bridge.crm.model.Deal;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.io.Resource;
@@ -40,12 +37,7 @@ public class JsonDealRepository implements DealRepository {
             ResourceLoader resourceLoader,
             @Value("${bridge.crm.dataset:classpath:crm/synthetic-deals.json}") String datasetLocation) {
 
-        JsonMapper mapper = JsonMapper.builder()
-                .addModule(new JavaTimeModule())
-                .propertyNamingStrategy(PropertyNamingStrategies.SNAKE_CASE)
-                .disable(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES)
-                .disable(DeserializationFeature.ADJUST_DATES_TO_CONTEXT_TIME_ZONE)
-                .build();
+        JsonMapper mapper = CrmDealJsonMapper.create();
 
         Resource resource = resourceLoader.getResource(datasetLocation);
         if (!resource.exists()) {
@@ -113,12 +105,5 @@ public class JsonDealRepository implements DealRepository {
     @Override
     public List<String> findAllDealIds() {
         return dealIds;
-    }
-
-    private record SyntheticDealsFeed(
-            String datasetVersion,
-            Instant asOf,
-            String notes,
-            List<Deal> deals) {
     }
 }

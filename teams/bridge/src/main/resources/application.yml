@@ -16,6 +16,14 @@ spring:
       acks: all
       retries: 3
 
+  # DataSource/Flyway auto-configuration is off by default so the json
+  # profile (the default) never touches a database. The jdbc profile turns
+  # both back on for itself in application-jdbc.yml.
+  autoconfigure:
+    exclude:
+      - org.springframework.boot.autoconfigure.jdbc.DataSourceAutoConfiguration
+      - org.springframework.boot.autoconfigure.flyway.FlywayAutoConfiguration
+
 github:
   api:
     base-url: ${GITHUB_API_BASE_URL:https://api.github.com}

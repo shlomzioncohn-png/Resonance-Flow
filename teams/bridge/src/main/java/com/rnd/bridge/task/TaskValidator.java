@@ -1,6 +1,7 @@
 package com.rnd.bridge.task;
 
 import com.rnd.bridge.core.PayloadValidator;
+import com.rnd.bridge.core.error.ValidationException;
 import com.rnd.bridge.task.model.Task;
 import com.rnd.bridge.task.model.TaskStatus;
 import org.springframework.stereotype.Component;
@@ -26,8 +27,8 @@ public final class TaskValidator implements PayloadValidator<Task> {
         if (task.confidence() != null && (task.confidence() < 0.0 || task.confidence() > 1.0)) {
             throw invalid("confidence", task.confidence(), "must be between 0 and 1");
         }
-        if (task.estimatedDurationMinutes() != null && task.estimatedDurationMinutes() <= 0) {
-            throw invalid("estimatedDurationMinutes", task.estimatedDurationMinutes(), "must be > 0");
+        if (task.effortEstimateMinutes() != null && task.effortEstimateMinutes() <= 0) {
+            throw invalid("effortEstimateMinutes", task.effortEstimateMinutes(), "must be > 0");
         }
 
         boolean snoozed = task.status() == TaskStatus.SNOOZED;
@@ -44,7 +45,7 @@ public final class TaskValidator implements PayloadValidator<Task> {
         }
     }
 
-    private static IllegalArgumentException invalid(String field, Object value, String reason) {
-        return new IllegalArgumentException("Invalid Task." + field + " = " + value + ": " + reason);
+    private static ValidationException invalid(String field, Object value, String reason) {
+        return new ValidationException("Invalid Task." + field + " = " + value + ": " + reason);
     }
 }
