@@ -121,14 +121,21 @@ resources: {}
   #   memory: 128Mi
 
 # This is to setup the liveness and readiness probes more information can be found here: https://kubernetes.io/docs/tasks/configure-pod-container/configure-liveness-readiness-startup-probes/
+# TCP checks against the broker port (9092) - Kafka has no HTTP endpoint to probe.
+# startupProbe gives the broker time to finish booting before liveness can kill it.
+startupProbe:
+  tcpSocket:
+    port: kafka
+  failureThreshold: 30
+  periodSeconds: 5
 livenessProbe:
-  httpGet:
-    path: /
-    port: http
+  tcpSocket:
+    port: kafka
+  periodSeconds: 10
 readinessProbe:
-  httpGet:
-    path: /
-    port: http
+  tcpSocket:
+    port: kafka
+  periodSeconds: 5
 
 # This section is for setting up autoscaling more information can be found here: https://kubernetes.io/docs/concepts/workloads/autoscaling/
 autoscaling:
