@@ -1,0 +1,26 @@
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: resonance-flow
+  namespace: argocd
+spec:
+  description: >-
+    Shared project for everything deployed out of this repo: the
+    resonance-flow umbrella chart (all teams' services, via
+    components.<team> in resonance-flow/values.yaml) and its
+    infra dependencies (e.g. Kafka).
+  sourceRepos:
+    - https://github.com/KamaTechOrg/Resonance-Flow.git
+  destinations:
+    - namespace: resonance-flow
+      server: https://kubernetes.default.svc
+    - namespace: kafka
+      server: https://kubernetes.default.svc
+    - namespace: argocd
+      server: https://kubernetes.default.svc
+  clusterResourceWhitelist:
+    - group: ""
+      kind: Namespace
+  namespaceResourceWhitelist:
+    - group: "*"
+      kind: "*"

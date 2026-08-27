@@ -1,0 +1,200 @@
+name: Service CI/CD (reusable)
+
+on:
+  workflow_call:
+    inputs:
+      service_name:
+        description: "Component name, matches the key under components.<service_name> in resonance-flow/values.yaml"
+        required: true
+        type: string
+      service_dir:
+        description: "Path to the service, e.g. teams/bridge"
+        required: true
+        type: string
+      language:
+        description: "python or java"
+        required: true
+        type: string
+      container_port:
+        description: "Local port used for the post-deploy smoke test port-forward"
+        required: true
+        type: number
+      health_path:
+        description: "HTTP path used for the smoke test health check"
+        required: false
+        type: string
+        default: /health
+
+env:
+  IMAGE_NAME: ghcr.io/${{ github.repository }}/${{ inputs.service_name }}
+  SERVICE_DIR: ${{ inputs.service_dir }}
+  CHART_DIR: resonance-flow
+  CHART_VALUES: resonance-flow/values.yaml
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ${{ inputs.service_dir }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        if: inputs.language == 'python'
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: ${{ inputs.service_dir }}/pyproject.toml
+
+      - name: Install package (dev)
+        if: inputs.language == 'python'
+        run: pip install -e ".[dev]"
+
+      - name: Run Python tests
+        if: inputs.language == 'python'
+        run: pytest --cov=src/${{ inputs.service_name }}
+
+      - name: Set up JDK 21
+        if: inputs.language == 'java'
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: maven
+          cache-dependency-path: ${{ inputs.service_dir }}/pom.xml
+
+      - name: Run Java tests
+        if: inputs.language == 'java'
+        run: mvn -B test
+
+  build-and-push:
+    needs: test
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      image_tag: ${{ steps.tags.outputs.short_sha }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Normalize image name to lowercase
+        run: echo "IMAGE_NAME=$(echo '${{ env.IMAGE_NAME }}' | tr '[:upper:]' '[:lower:]')" >> "$GITHUB_ENV"
+
+      - name: Compute image tags (sha + semver, no latest)
+        id: tags
+        run: |
+          SHORT_SHA=$(git rev-parse --short=7 HEAD)
+          TAGS="${IMAGE_NAME}:${SHORT_SHA}"
+          if [ "${{ github.ref_type }}" = "tag" ]; then
+            VERSION="${GITHUB_REF_NAME#${{ inputs.service_name }}-}"
+            TAGS="${TAGS},${IMAGE_NAME}:${VERSION}"
+          fi
+          echo "short_sha=${SHORT_SHA}" >> "$GITHUB_OUTPUT"
+          echo "tags=${TAGS}" >> "$GITHUB_OUTPUT"
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build image (local, for smoke test)
+        uses: docker/build-push-action@v6
+        with:
+          context: ${{ inputs.service_dir }}
+          load: true
+          tags: ${{ inputs.service_name }}:local
+          cache-from: type=gha,scope=${{ inputs.service_name }}
+          cache-to: type=gha,mode=max,scope=${{ inputs.service_name }}
+
+      - name: Create kind cluster
+        uses: helm/kind-action@v1
+        with:
+          cluster_name: ${{ inputs.service_name }}-cluster
+
+      - name: Load image into kind
+        run: kind load docker-image ${{ inputs.service_name }}:local --name ${{ inputs.service_name }}-cluster
+
+      - uses: azure/setup-helm@v4
+
+      - name: Install yq
+        run: |
+          sudo curl -sL -o /usr/local/bin/yq https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
+          sudo chmod +x /usr/local/bin/yq
+
+      - name: Deploy chart to cluster (smoke test)
+        run: |
+          SERVICE="${{ inputs.service_name }}"
+          # The chart's Deployment template ranges over every entry under .components. A
+          # filtered -f file alone doesn't help: Helm deep-merges it with the chart's own
+          # bundled default values.yaml (the same file), so other teams' components come
+          # right back. --set <key>=null is Helm's documented way to actually delete a key
+          # from the merged values (not just null it out) so the template skips it.
+          OTHER_COMPONENTS=$(yq eval ".components | keys | .[] | select(. != \"${SERVICE}\")" "$CHART_VALUES")
+          NULL_ARGS=()
+          for c in $OTHER_COMPONENTS; do
+            NULL_ARGS+=(--set "components.${c}=null")
+          done
+          helm upgrade --install "$SERVICE" "$CHART_DIR" \
+            -f "$CHART_VALUES" \
+            "${NULL_ARGS[@]}" \
+            --set components.${SERVICE}.image.repository="$SERVICE" \
+            --set components.${SERVICE}.image.tag=local \
+            --set components.${SERVICE}.image.pullPolicy=Never \
+            --namespace "$SERVICE" --create-namespace \
+            --wait --timeout 120s
+
+      - name: Smoke test
+        run: |
+          kubectl -n ${{ inputs.service_name }} port-forward svc/${{ inputs.service_name }}-resonance-flow-${{ inputs.service_name }} ${{ inputs.container_port }}:80 &
+          sleep 5
+          curl -sf http://localhost:${{ inputs.container_port }}${{ inputs.health_path }}
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Push image
+        run: |
+          IFS=',' read -ra TAG_LIST <<< "${{ steps.tags.outputs.tags }}"
+          for t in "${TAG_LIST[@]}"; do
+            docker tag ${{ inputs.service_name }}:local "$t"
+            docker push "$t"
+          done
+
+  update-manifest:
+    needs: build-and-push
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    concurrency:
+      group: resonance-flow-values-update
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install yq
+        run: |
+          sudo curl -sL -o /usr/local/bin/yq https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
+          sudo chmod +x /usr/local/bin/yq
+
+      - name: Update chart values with new image tag
+        run: |
+          IMAGE_NAME_LC=$(echo "${{ env.IMAGE_NAME }}" | tr '[:upper:]' '[:lower:]')
+          yq -i ".components.${{ inputs.service_name }}.image.repository = \"${IMAGE_NAME_LC}\" | .components.${{ inputs.service_name }}.image.tag = \"${{ needs.build-and-push.outputs.image_tag }}\"" "$CHART_VALUES"
+
+      - name: Commit and push updated values
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add "$CHART_VALUES"
+          if git diff --cached --quiet; then
+            echo "No changes to commit"
+          else
+            git commit -m "chore(${{ inputs.service_name }}): deploy image ${{ needs.build-and-push.outputs.image_tag }} [skip ci]"
+            git push origin HEAD:${{ github.ref_name }}
+          fi

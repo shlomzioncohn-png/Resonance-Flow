@@ -1,0 +1,30 @@
+name: Mind CI/CD
+
+on:
+  push:
+    branches: [ "main" ]
+    tags: [ "mind-v*.*.*" ]
+    paths:
+      - "teams/mind/**"
+      - "resonance-flow/**"
+      - ".github/workflows/mind-ci.yaml"
+      - ".github/workflows/service-ci.yaml"
+  pull_request:
+    branches: [ "main" ]
+    paths:
+      - "teams/mind/**"
+      - ".github/workflows/mind-ci.yaml"
+      - ".github/workflows/service-ci.yaml"
+  workflow_dispatch: {}
+
+jobs:
+  ci:
+    permissions:
+      contents: write
+      packages: write
+    uses: ./.github/workflows/service-ci.yaml
+    with:
+      service_name: mind
+      service_dir: teams/mind
+      language: python
+      container_port: 8000
