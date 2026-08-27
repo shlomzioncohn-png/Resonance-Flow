@@ -4,6 +4,7 @@ import com.rnd.bridge.github.dto.GitHubIssue;
 import com.rnd.bridge.github.dto.GitHubUser;
 import com.rnd.bridge.github.mapper.GitHubIssueMapper;
 import com.rnd.bridge.github.mapper.GitHubPullRequestMapper;
+import com.rnd.bridge.task.TaskValidator;
 import com.rnd.bridge.task.model.SourceType;
 import com.rnd.bridge.task.model.Task;
 import com.rnd.bridge.task.model.TaskStatus;
@@ -47,6 +48,9 @@ class GitHubClientTest {
 
     @Spy
     private GitHubPullRequestMapper gitHubPullRequestMapper;
+
+    @Spy
+    private TaskValidator taskValidator;
 
     @InjectMocks
     private GitHubClient gitHubClient;

@@ -22,10 +22,12 @@ public class GitHubKafkaProducer {
     String TOPIC = "bridge.github.tasks";
 
     private final KafkaTemplate<String, Task> kafkaTemplate;
+    private final TaskValidator taskValidator;
 
     @Autowired
-    public GitHubKafkaProducer(KafkaTemplate<String, Task> kafkaTemplate) {
+    public GitHubKafkaProducer(KafkaTemplate<String, Task> kafkaTemplate, TaskValidator taskValidator) {
         this.kafkaTemplate = kafkaTemplate;
+        this.taskValidator = taskValidator;
     }
 
     public CompletableFuture<SendResult<String, Task>> publish(Task task) {
@@ -33,7 +35,7 @@ public class GitHubKafkaProducer {
             throw new IllegalArgumentException("Task and sourceRef must not be null");
         }
 
-        new TaskValidator().validate(task);
+        taskValidator.validate(task);
 
         log.info("Publishing task {} to topic {}", task.sourceRef(), TOPIC);
 

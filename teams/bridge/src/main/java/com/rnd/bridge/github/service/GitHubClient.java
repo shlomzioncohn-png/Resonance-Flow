@@ -25,6 +25,7 @@ public class GitHubClient {
     private final WebClient webClient;
     private final GitHubIssueMapper gitHubIssueMapper;
     private final GitHubPullRequestMapper gitHubPullRequestMapper;
+    private final TaskValidator taskValidator;
 
 
     @Value("${github.target.owner:KamaTechOrg}")
@@ -33,10 +34,11 @@ public class GitHubClient {
     @Value("${github.target.repo:Resonance-Flow}")
     private String defaultRepo;
 
-    public GitHubClient(WebClient webClient, GitHubIssueMapper gitHubIssueMapper, GitHubPullRequestMapper gitHubPullRequestMapper) {
+    public GitHubClient(WebClient webClient, GitHubIssueMapper gitHubIssueMapper, GitHubPullRequestMapper gitHubPullRequestMapper, TaskValidator taskValidator) {
         this.webClient = webClient;
         this.gitHubIssueMapper = gitHubIssueMapper;
         this.gitHubPullRequestMapper = gitHubPullRequestMapper;
+        this.taskValidator = taskValidator;
     }
 
     public Flux<Task> fetchIssues(String owner, String repo) {
@@ -48,7 +50,7 @@ public class GitHubClient {
                 .retrieve()
                 .bodyToFlux(GitHubIssue.class)
                 .map(issue -> gitHubIssueMapper.map(issue, Instant.now()))
-                .doOnNext(task -> new TaskValidator().validate(task))
+                .doOnNext(taskValidator::validate)
                 .retryWhen(Retry.backoff(3, Duration.ofSeconds(1))
                         .filter(this::isRetryableException)
                         .doBeforeRetry(retrySignal -> log.warn("Retrying GitHub API call, attempt: {}", retrySignal.totalRetries() + 1)))
@@ -64,7 +66,7 @@ public class GitHubClient {
                 .retrieve()
                 .bodyToFlux(GitHubIssue.class)
                 .map(pr -> gitHubPullRequestMapper.map(pr, Instant.now()))
-                .doOnNext(task -> new TaskValidator().validate(task))
+                .doOnNext(taskValidator::validate)
                 .retryWhen(Retry.backoff(3, Duration.ofSeconds(1))
                         .filter(this::isRetryableException)
                         .doBeforeRetry(retrySignal -> log.warn("Retrying GitHub API call, attempt: {}", retrySignal.totalRetries() + 1)))

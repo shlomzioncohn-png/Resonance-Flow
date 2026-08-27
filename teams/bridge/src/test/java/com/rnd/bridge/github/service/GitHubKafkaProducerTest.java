@@ -5,6 +5,7 @@ import com.rnd.bridge.task.model.SourceType;
 import com.rnd.bridge.task.model.Task;
 import com.rnd.bridge.task.model.TaskStatus;
 import com.rnd.bridge.task.model.Tier;
+import com.rnd.bridge.task.TaskValidator;
 import org.apache.kafka.clients.producer.ProducerRecord;
 import org.apache.kafka.clients.producer.RecordMetadata;
 import org.apache.kafka.common.TopicPartition;
@@ -13,6 +14,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
+import org.mockito.Spy;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.kafka.support.SendResult;
@@ -31,6 +33,9 @@ class GitHubKafkaProducerTest {
 
     @Mock
     private KafkaTemplate<String, Task> kafkaTemplate;
+
+    @Spy
+    private TaskValidator taskValidator;
 
     @InjectMocks
     private GitHubKafkaProducer gitHubKafkaProducer;
