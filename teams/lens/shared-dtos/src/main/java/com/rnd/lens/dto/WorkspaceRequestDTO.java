@@ -1,4 +1,4 @@
-package com.rnd.lens.dto;
+package main.java.com.rnd.lens.dto;
 
 import lombok.AllArgsConstructor;
 import lombok.Data;
