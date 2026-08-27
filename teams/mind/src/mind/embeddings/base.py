@@ -4,8 +4,7 @@ The contract every vector-database backend must satisfy.
 Deliberately dependency-free (only `abc`) so this interface can be
 imported -- for type-checking, mocking in tests, or sketching a new
 backend -- without requiring psycopg2 or any other backend-specific
-package to be installed. Moved from the PoC
-(`Choose a vector database/mind_vector_poc/mind_vector/base.py`).
+package to be installed.
 
 pgvector is the team's chosen backend -- see
 `../../../benchmarks/vector-store-comparison.md` for the comparison and

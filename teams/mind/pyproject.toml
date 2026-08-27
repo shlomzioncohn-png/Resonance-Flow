@@ -10,10 +10,8 @@ dependencies = [
     "pydantic>=2.0",
     "fastapi",
     "uvicorn",
-    # embeddings (src/mind/embeddings) -- pgvector store client
+    # embeddings (src/mind/embeddings)
     "psycopg2-binary>=2.9",
-    # embeddings (src/mind/embeddings) -- embed() text vectorizer (placeholder,
-    # not a real semantic model yet -- see benchmarks/vector-store-comparison.md)
     "scikit-learn>=1.4",
     "numpy>=1.26",
     # add as decided: OCR/ASR libs, LLM client, etc.

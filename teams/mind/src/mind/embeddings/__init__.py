@@ -13,9 +13,9 @@ changing those files, never anything that imports `mind.embeddings`.
 
 Backend: pgvector (decision + comparison in
 `benchmarks/vector-store-comparison.md`).
-Embedding model: still the PoC's HashingVectorizer placeholder (not a real
-semantic model yet, deliberately -- see `embeddings.py` and the
-comparison doc for why).
+Embedding model: a placeholder HashingVectorizer, not a real semantic
+model yet, deliberately -- see `embeddings.py` and the comparison doc for
+why.
 Target: 10,000+ embedded tasks, semantic query at <300ms p95 (week 8 load
 target, to be confirmed with mentors).
 """
