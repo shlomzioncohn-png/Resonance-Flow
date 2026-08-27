@@ -1,0 +1,29 @@
+[
+  {
+    "tenantId": "kamatech",
+    "id": "evt_sprint_review_0819",
+    "summary": "Sprint review meeting",
+    "organizer": { "email": "hadas@kamatech.org" },
+    "attendees": [{ "email": "malki@kamatech.org" }],
+    "start": { "dateTime": "2026-08-19T13:00:00Z" },
+    "end": { "dateTime": "2026-08-19T14:00:00Z" },
+    "description": "Review PR backlog",
+    "attachments": [
+      {
+        "filename": "sprint-review-agenda.pdf",
+        "mimeType": "application/pdf",
+        "content": "RkFLRS1QREYtQ09OVEVOVC1zcHJpbnQtcmV2aWV3LWFnZW5kYS1wbGFjZWhvbGRlci1mb3Itc2tlbGV0b24tdGVzdGluZw=="
+      }
+    ]
+  },
+  {
+    "tenantId": "kamatech",
+    "id": "evt_grandma_birthday_0820",
+    "summary": "יום הולדת סבתא",
+    "organizer": { "email": "mom@gmail.com" },
+    "attendees": [{ "email": "malki@kamatech.org" }],
+    "start": { "dateTime": "2026-08-20T18:00:00Z" },
+    "end": { "dateTime": "2026-08-20T20:00:00Z" },
+    "description": null
+  }
+]
