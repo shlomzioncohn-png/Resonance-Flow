@@ -1,7 +1,22 @@
-import { createTheme } from '@mui/material/styles'
+import { alpha, createTheme } from '@mui/material/styles'
 
 const fontStack =
   '-apple-system, BlinkMacSystemFont, "Segoe UI", Inter, Roboto, Helvetica, Arial, sans-serif'
+
+declare module '@mui/material/styles' {
+  interface Palette {
+    sidebar: {
+      background: string
+      text: string
+      textActive: string
+      divider: string
+      hover: string
+    }
+  }
+  interface PaletteOptions {
+    sidebar?: Palette['sidebar']
+  }
+}
 
 export const theme = createTheme({
   palette: {
@@ -21,6 +36,13 @@ export const theme = createTheme({
       secondary: '#64748b',
     },
     divider: 'rgba(15, 23, 42, 0.08)',
+    sidebar: {
+      background: '#111827',
+      text: alpha('#ffffff', 0.7),
+      textActive: '#ffffff',
+      divider: alpha('#ffffff', 0.08),
+      hover: alpha('#ffffff', 0.06),
+    },
   },
   shape: {
     borderRadius: 10,

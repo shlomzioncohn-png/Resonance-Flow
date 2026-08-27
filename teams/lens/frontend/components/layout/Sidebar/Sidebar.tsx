@@ -1,13 +1,16 @@
 'use client'
 
-import Box from '@mui/material/Box'
-import Drawer from '@mui/material/Drawer'
-import List from '@mui/material/List'
-import ListItemButton from '@mui/material/ListItemButton'
-import ListItemIcon from '@mui/material/ListItemIcon'
-import ListItemText from '@mui/material/ListItemText'
-import Toolbar from '@mui/material/Toolbar'
-import Typography from '@mui/material/Typography'
+import { alpha, useTheme } from '@mui/material/styles'
+import {
+  Box,
+  Drawer,
+  List,
+  ListItemButton,
+  ListItemIcon,
+  ListItemText,
+  Toolbar,
+  Typography,
+} from '@/design-system/components'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import Logo from '../Logo'
@@ -15,12 +18,6 @@ import { useRole } from '../RoleProvider'
 import { navSections } from './navConfig'
 
 export const SIDEBAR_WIDTH = 260
-
-const SIDEBAR_BG = '#111827'
-const SIDEBAR_TEXT = '#9ca3af'
-const SIDEBAR_TEXT_ACTIVE = '#ffffff'
-const SIDEBAR_DIVIDER = 'rgba(255, 255, 255, 0.08)'
-const SIDEBAR_HOVER = 'rgba(255, 255, 255, 0.06)'
 
 export interface SidebarProps {
   open: boolean
@@ -31,6 +28,13 @@ export interface SidebarProps {
 export default function Sidebar({ open, onClose, variant }: SidebarProps) {
   const pathname = usePathname()
   const { role } = useRole()
+  const theme = useTheme()
+
+  const sidebarBg = theme.palette.sidebar.background
+  const sidebarText = theme.palette.sidebar.text
+  const sidebarTextActive = theme.palette.sidebar.textActive
+  const sidebarDivider = theme.palette.sidebar.divider
+  const sidebarHover = theme.palette.sidebar.hover
 
   const visibleSections =
     role === 'manager'
@@ -47,8 +51,8 @@ export default function Sidebar({ open, onClose, variant }: SidebarProps) {
         height: '100%',
         display: 'flex',
         flexDirection: 'column',
-        bgcolor: SIDEBAR_BG,
-        color: SIDEBAR_TEXT,
+        bgcolor: sidebarBg,
+        color: sidebarText,
       }}
     >
       <Toolbar sx={{ px: 2.5 }}>
@@ -64,7 +68,7 @@ export default function Sidebar({ open, onClose, variant }: SidebarProps) {
                 display: 'block',
                 px: 1.5,
                 mb: 0.5,
-                color: 'rgba(255,255,255,0.35)',
+                color: alpha(theme.palette.common.white, 0.35),
                 fontWeight: 700,
                 letterSpacing: '0.08em',
                 textTransform: 'uppercase',
@@ -86,11 +90,11 @@ export default function Sidebar({ open, onClose, variant }: SidebarProps) {
                       borderRadius: 1.5,
                       mb: 0.25,
                       pl: item.icon ? 1.5 : 4.5,
-                      color: selected ? SIDEBAR_TEXT_ACTIVE : SIDEBAR_TEXT,
-                      '&:hover': { bgcolor: SIDEBAR_HOVER },
+                      color: selected ? sidebarTextActive : sidebarText,
+                      '&:hover': { bgcolor: sidebarHover },
                       '&.Mui-selected': {
                         bgcolor: 'primary.main',
-                        color: SIDEBAR_TEXT_ACTIVE,
+                        color: sidebarTextActive,
                         '&:hover': { bgcolor: 'primary.main' },
                       },
                     }}
@@ -126,7 +130,7 @@ export default function Sidebar({ open, onClose, variant }: SidebarProps) {
           width: SIDEBAR_WIDTH,
           flexShrink: 0,
           display: { xs: 'none', md: 'block' },
-          borderRight: `1px solid ${SIDEBAR_DIVIDER}`,
+          borderRight: `1px solid ${sidebarDivider}`,
         }}
       >
         {content}
