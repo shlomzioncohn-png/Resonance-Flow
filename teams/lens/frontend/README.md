@@ -128,6 +128,12 @@ To create a production build:
 npm run build
 ```
 
+To lint (includes accessibility checks — see [Design system](#design-system-lens-on-mui)):
+
+```bash
+npm run lint
+```
+
 ## Run with Docker
 
 Build and start the frontend:
