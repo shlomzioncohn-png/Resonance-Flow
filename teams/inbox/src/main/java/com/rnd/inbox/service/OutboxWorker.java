@@ -18,6 +18,29 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ExecutionException;
 
+/**
+ * Periodically claims PENDING outbox events and publishes them via the
+ * Generic Producer infrastructure.
+ * <p>
+ * The whole claim-and-publish cycle for a batch runs inside a single
+ * transaction: OutboxEventRepository#claimPendingBatch takes a row lock
+ * (FOR UPDATE SKIP LOCKED) that other INBOX instances respect only while
+ * this transaction is open, so publishing happens while the claim is held.
+ * <p>
+ * Claimed entities are managed by the persistence context - updating their
+ * fields below is enough for Hibernate to persist the change on commit, no
+ * explicit save() call needed.
+ * <p>
+ * EventPublisher.publish(...) is asynchronous and already retries transient
+ * Kafka failures internally (see KafkaEventPublisher). This worker blocks on
+ * the returned CompletableFuture via .get() so that success/failure is known
+ * before the surrounding @Transactional method commits - this keeps the
+ * "claim, publish, update status" cycle atomic from the DB's point of view.
+ * The trade-off: events in a batch are published one at a time, not
+ * concurrently. This worker's own retry (next_retry_at / retryCount) only
+ * kicks in for failures the publisher itself gave up on after its internal
+ * attempts.
+ */
 @Component
 public class OutboxWorker {
 
@@ -48,7 +71,16 @@ public class OutboxWorker {
     @Scheduled(fixedDelayString = "${outbox.worker.poll-interval-ms:5000}")
     @Transactional
     public void pollAndPublish() {
-        List<OutboxEvent> claimed = outboxEventRepository.claimPendingBatch(Instant.now(), batchSize);
+        List<OutboxEvent> claimed;
+        try {
+            claimed = outboxEventRepository.claimPendingBatch(Instant.now(), batchSize);
+        } catch (Exception e) {
+            // If the claim query itself fails (e.g. DB connection issue), log and
+            // let the next scheduled run retry - there is nothing claimed yet to
+            // roll back or mark as failed.
+            log.error("Failed to claim pending outbox events; will retry on next scheduled run", e);
+            return;
+        }
 
         for (OutboxEvent event : claimed) {
             processOne(event);
@@ -57,6 +89,9 @@ public class OutboxWorker {
 
     private void processOne(OutboxEvent outboxEvent) {
         try {
+            // eventId, timestamp and correlationId come from the outbox row
+            // itself (via Event.existing), not freshly generated, so the
+            // same eventId is sent on every retry attempt for this row.
             Event<Map<String, Object>> event = Event.existing(
                     outboxEvent.getEventId(),
                     outboxEvent.getEventType(),
@@ -65,11 +100,13 @@ public class OutboxWorker {
                     outboxEvent.getCorrelationId(),
                     outboxEvent.getPayload());
 
+            // The topic is derived from EventType, not stored on the outbox row.
             eventPublisher.publish(outboxEvent.getEventType().getTopic(), outboxEvent.getMessageKey(), event).get();
 
             outboxEvent.setStatus(OutboxStatus.PUBLISHED);
             outboxEvent.setPublishedAt(Instant.now());
         } catch (ExecutionException e) {
+            // Publisher exhausted its own internal retries - unwrap the real cause.
             handleFailure(outboxEvent, e.getCause() != null ? e.getCause() : e);
         } catch (Exception e) {
             handleFailure(outboxEvent, e);

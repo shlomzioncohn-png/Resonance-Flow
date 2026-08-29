@@ -34,3 +34,7 @@ outbox:
     max-retries: ${OUTBOX_WORKER_MAX_RETRIES:3}
     backoff-base-seconds: ${OUTBOX_WORKER_BACKOFF_BASE_SECONDS:10}
     backoff-max-seconds: ${OUTBOX_WORKER_BACKOFF_MAX_SECONDS:120}
+  cleanup:
+    cron: ${OUTBOX_CLEANUP_CRON:0 0 3 * * *}
+    published-retention-days: ${OUTBOX_CLEANUP_PUBLISHED_RETENTION_DAYS:7}
+    failed-retention-days: ${OUTBOX_CLEANUP_FAILED_RETENTION_DAYS:30}

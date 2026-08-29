@@ -5,9 +5,8 @@
   </component>
   <component name="ChangeListManager">
     <list default="true" id="1e0bd960-6cd7-4184-89a4-ad06bfabd601" name="Changes" comment="">
-      <change beforePath="$PROJECT_DIR$/.idea/misc.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/misc.xml" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/teams/inbox/src/main/java/com/rnd/inbox/event/Event.java" beforeDir="false" afterPath="$PROJECT_DIR$/teams/inbox/src/main/java/com/rnd/inbox/event/Event.java" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/teams/inbox/src/main/java/com/rnd/inbox/repository/OutboxEventRepository.java" beforeDir="false" afterPath="$PROJECT_DIR$/teams/inbox/src/main/java/com/rnd/inbox/repository/OutboxEventRepository.java" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/teams/inbox/src/main/resources/application.yml" beforeDir="false" afterPath="$PROJECT_DIR$/teams/inbox/src/main/resources/application.yml" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
