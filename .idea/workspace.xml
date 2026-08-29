@@ -7,27 +7,37 @@
     <list default="true" id="1e0bd960-6cd7-4184-89a4-ad06bfabd601" name="Changes" comment="">
       <change beforePath="$PROJECT_DIR$/.idea/misc.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/misc.xml" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/teams/inbox/src/main/java/com/rnd/inbox/model/entity/Organization.java" beforeDir="false" afterPath="$PROJECT_DIR$/teams/inbox/src/main/java/com/rnd/inbox/model/entity/Organization.java" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/teams/inbox/src/main/java/com/rnd/inbox/model/entity/Task.java" beforeDir="false" afterPath="$PROJECT_DIR$/teams/inbox/src/main/java/com/rnd/inbox/model/entity/Task.java" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/teams/inbox/src/main/java/com/rnd/inbox/model/entity/TaskAssignee.java" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/teams/inbox/src/main/java/com/rnd/inbox/model/entity/TaskEvent.java" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/teams/inbox/src/main/java/com/rnd/inbox/model/entity/Team.java" beforeDir="false" afterPath="$PROJECT_DIR$/teams/inbox/src/main/java/com/rnd/inbox/model/entity/Team.java" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/teams/inbox/src/main/java/com/rnd/inbox/model/entity/TeamMember.java" beforeDir="false" afterPath="$PROJECT_DIR$/teams/inbox/src/main/java/com/rnd/inbox/model/entity/TeamMember.java" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/teams/inbox/src/main/java/com/rnd/inbox/model/entity/User.java" beforeDir="false" afterPath="$PROJECT_DIR$/teams/inbox/src/main/java/com/rnd/inbox/model/entity/User.java" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/teams/inbox/src/main/java/com/rnd/inbox/model/enums/AssigneeRole.java" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/teams/inbox/src/main/java/com/rnd/inbox/model/enums/SourceType.java" beforeDir="false" afterPath="$PROJECT_DIR$/teams/inbox/src/main/java/com/rnd/inbox/model/enums/SourceType.java" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/teams/inbox/src/main/java/com/rnd/inbox/model/enums/TaskEventType.java" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/teams/inbox/src/main/java/com/rnd/inbox/model/enums/TaskStatus.java" beforeDir="false" afterPath="$PROJECT_DIR$/teams/inbox/src/main/java/com/rnd/inbox/model/enums/TaskStatus.java" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/teams/inbox/src/main/java/com/rnd/inbox/model/enums/TeamMemberRole.java" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/teams/inbox/src/main/java/com/rnd/inbox/event/Event.java" beforeDir="false" afterPath="$PROJECT_DIR$/teams/inbox/src/main/java/com/rnd/inbox/event/Event.java" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/teams/inbox/src/main/resources/application.yml" beforeDir="false" afterPath="$PROJECT_DIR$/teams/inbox/src/main/resources/application.yml" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
     <option name="HIGHLIGHT_NON_ACTIVE_CHANGELIST" value="false" />
     <option name="LAST_RESOLUTION" value="IGNORE" />
   </component>
+  <component name="FileTemplateManagerImpl">
+    <option name="RECENT_TEMPLATES">
+      <list>
+        <option value="Enum" />
+        <option value="Class" />
+      </list>
+    </option>
+  </component>
   <component name="Git.Settings">
     <option name="RECENT_GIT_ROOT_PATH" value="$PROJECT_DIR$" />
   </component>
+  <component name="GitHubPullRequestSearchHistory">{
+  &quot;lastFilter&quot;: {
+    &quot;state&quot;: &quot;OPEN&quot;,
+    &quot;assignee&quot;: &quot;ystroh&quot;
+  }
+}</component>
+  <component name="GithubPullRequestsUISettings">{
+  &quot;selectedUrlAndAccountId&quot;: {
+    &quot;url&quot;: &quot;https://github.com/KamaTechOrg/Resonance-Flow.git&quot;,
+    &quot;accountId&quot;: &quot;5db1329c-10e0-49a6-8058-1e3327544c2d&quot;
+  }
+}</component>
   <component name="KubernetesApiPersistence">{}</component>
   <component name="KubernetesApiProvider">{
   &quot;isMigrated&quot;: true
@@ -43,21 +53,28 @@
   </component>
   <component name="PropertiesComponent">{
   &quot;keyToString&quot;: {
+    &quot;Maven.inbox [compile].executor&quot;: &quot;Run&quot;,
     &quot;ModuleVcsDetector.initialDetectionPerformed&quot;: &quot;true&quot;,
     &quot;RequestMappingsPanelOrder0&quot;: &quot;0&quot;,
     &quot;RequestMappingsPanelOrder1&quot;: &quot;1&quot;,
     &quot;RequestMappingsPanelWidth0&quot;: &quot;75&quot;,
     &quot;RequestMappingsPanelWidth1&quot;: &quot;75&quot;,
     &quot;RunOnceActivity.ShowReadmeOnStart&quot;: &quot;true&quot;,
+    &quot;RunOnceActivity.TerminalTabsStorage.copyFrom.TerminalArrangementManager.252&quot;: &quot;true&quot;,
     &quot;RunOnceActivity.git.unshallow&quot;: &quot;true&quot;,
+    &quot;RunOnceActivity.typescript.service.memoryLimit.init&quot;: &quot;true&quot;,
     &quot;Spring Boot.InboxApplication.executor&quot;: &quot;Run&quot;,
-    &quot;git-widget-placeholder&quot;: &quot;create-models&quot;,
+    &quot;codeWithMe.voiceChat.enabledByDefault&quot;: &quot;false&quot;,
+    &quot;git-widget-placeholder&quot;: &quot;Implement-Transactional-Outbox-for-Reliable-Kafka-Publishing(#157)&quot;,
     &quot;kotlin-language-version-configured&quot;: &quot;true&quot;,
     &quot;node.js.detected.package.eslint&quot;: &quot;true&quot;,
     &quot;node.js.detected.package.tslint&quot;: &quot;true&quot;,
     &quot;node.js.selected.package.eslint&quot;: &quot;(autodetect)&quot;,
     &quot;node.js.selected.package.tslint&quot;: &quot;(autodetect)&quot;,
     &quot;nodejs_package_manager_path&quot;: &quot;npm&quot;,
+    &quot;project.structure.last.edited&quot;: &quot;Project&quot;,
+    &quot;project.structure.proportion&quot;: &quot;0.15&quot;,
+    &quot;project.structure.side.proportion&quot;: &quot;0.19425288&quot;,
     &quot;run.configurations.included.in.services&quot;: &quot;true&quot;,
     &quot;vue.rearranger.settings.migration&quot;: &quot;true&quot;
   }
@@ -72,7 +89,7 @@
       </set>
     </option>
   </component>
-  <component name="RunManager" selected="Spring Boot.InboxApplication">
+  <component name="RunManager">
     <configuration name="BridgeApplication" type="SpringBootApplicationConfigurationType" factoryName="Spring Boot" nameIsGenerated="true">
       <module name="bridge" />
       <option name="SPRING_BOOT_MAIN_CLASS" value="com.rnd.bridge.BridgeApplication" />
@@ -98,8 +115,8 @@
   <component name="SharedIndexes">
     <attachedChunks>
       <set>
-        <option value="bundled-jdk-9823dce3aa75-bf35d07a577b-intellij.indexing.shared.core-IU-252.25557.131" />
-        <option value="bundled-js-predefined-d6986cc7102b-b598e85cdad2-JavaScript-IU-252.25557.131" />
+        <option value="bundled-jdk-30f59d01ecdd-37e91769500f-intellij.indexing.shared.core-IU-261.26222.65" />
+        <option value="bundled-js-predefined-d6986cc7102b-31caf2ab9e3c-JavaScript-IU-261.26222.65" />
       </set>
     </attachedChunks>
   </component>

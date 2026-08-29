@@ -26,3 +26,11 @@ kafka:
       initial-backoff-ms: ${KAFKA_PRODUCER_RETRY_INITIAL_BACKOFF_MS:200}
       backoff-multiplier: ${KAFKA_PRODUCER_RETRY_BACKOFF_MULTIPLIER:2.0}
       max-backoff-ms: ${KAFKA_PRODUCER_RETRY_MAX_BACKOFF_MS:5000}
+
+outbox:
+  worker:
+    poll-interval-ms: ${OUTBOX_WORKER_POLL_INTERVAL_MS:5000}
+    batch-size: ${OUTBOX_WORKER_BATCH_SIZE:20}
+    max-retries: ${OUTBOX_WORKER_MAX_RETRIES:3}
+    backoff-base-seconds: ${OUTBOX_WORKER_BACKOFF_BASE_SECONDS:10}
+    backoff-max-seconds: ${OUTBOX_WORKER_BACKOFF_MAX_SECONDS:120}
