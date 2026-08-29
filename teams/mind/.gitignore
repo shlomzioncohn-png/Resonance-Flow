@@ -40,3 +40,6 @@ eval/datasets/*
 !eval/datasets/README.md
 !eval/datasets/*.manifest.json
 !eval/datasets/*.sha256
+
+# Local raw datasets — never commit
+local-data/
