@@ -5,13 +5,11 @@ on:
     branches: [ "main" ]
     tags: [ "lens-frontend-v*.*.*" ]
     paths:
-      - "teams/lens/**"
-      - "!teams/lens/bff/**"
+      - "teams/lens/frontend/**"
   pull_request:
     branches: [ "main" ]
     paths:
-      - "teams/lens/**"
-      - "!teams/lens/bff/**"
+      - "teams/lens/frontend/**"
   workflow_dispatch: {}
 
 jobs:
@@ -22,7 +20,7 @@ jobs:
     uses: ./.github/workflows/service-ci.yaml
     with:
       service_name: lens-frontend
-      service_dir: teams/lens
+      service_dir: teams/lens/frontend
       language: node
       container_port: 8083
       health_path: /

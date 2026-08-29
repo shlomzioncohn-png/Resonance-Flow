@@ -1,0 +1,25 @@
+name: Inbox CI/CD
+
+on:
+  push:
+    branches: [ "main" ]
+    tags: [ "inbox-v*.*.*" ]
+    paths:
+      - "teams/inbox/**"
+  pull_request:
+    branches: [ "main" ]
+    paths:
+      - "teams/inbox/**"
+  workflow_dispatch: {}
+
+jobs:
+  ci:
+    permissions:
+      contents: write
+      packages: write
+    uses: ./.github/workflows/service-ci.yaml
+    with:
+      service_name: inbox
+      service_dir: teams/inbox
+      language: java
+      container_port: 8080
