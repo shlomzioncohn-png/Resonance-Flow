@@ -2,6 +2,25 @@
 
 `RawObjectEvent` is the event sent by Bridge to MIND.
 
+- Local mirror of Inbox's canonical `Task` schema (read-only conformance — Inbox owns and changes it, not us).
+- Event payloads published to Inbox / Chain / Lens / Relay.
+- Internal request/response models between MIND's own submodules.
+- `errors.py` — `ErrorResponse`, MIND's standard error shape, plus
+  `register_error_handlers(app)` which wires it into FastAPI once in
+  `api/main.py`. Every endpoint, current and future, returns errors in
+  this shape; do not invent a per-endpoint error format. Field reference
+  and status-code table: `docs/API.md`.
+- `health.py` — `HealthResponse`, the body of `GET /health`. Every
+  response crossing the API boundary should be a defined model like
+  this one, not a raw `dict` -- FastAPI then validates it and `/docs`
+  reflects the real shape.
+- `raw_object_event.py` / `raw_object_event_enums.py` — `RawObjectEvent`,
+  the event Bridge sends MIND (see below).
+
+## RawObjectEvent
+
+`RawObjectEvent` is the event sent by Bridge to MIND.
+
 The event points MIND to the raw content stored in MinIO.
 
 ### Required Bridge fields
