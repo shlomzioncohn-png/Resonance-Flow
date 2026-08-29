@@ -89,7 +89,7 @@ published `5432`, so the root file has to be up first.
 ```bash
 # build & test — from teams/inbox/
 mvn test                      # unit + slice tests
-mvn -B package                # build the jar (Java 11)
+mvn -B package                # build the jar (Java 21)
 mvn -B package -DskipTests    # build without tests, as the Dockerfile does
 
 # working local stack
@@ -119,8 +119,8 @@ Local Maven is not guaranteed on every dev machine; if `mvn` is unavailable, bui
 
 | Concern | Choice | Why |
 |---|---|---|
-| Language | Java 11 | Fixed by `pom.xml`; team machines are provisioned with JDK 11. No `record` (Java 16+) — write plain classes. |
-| Framework | Spring Boot 2.7.18 (Maven) | Last Spring Boot line with first-class Java 11 support. |
+| Language | Java 21 | Fixed by `pom.xml`. `record` and other Java 16+ features are available. |
+| Framework | Spring Boot 3.3.13 (Maven) | Current LTS-track Spring Boot line. Brings Flyway 10, which splits database support into separate modules — see `flyway-database-postgresql` in `pom.xml`. |
 | Web layer | Spring MVC (`spring-boot-starter-web`) | Synchronous REST; no need for WebFlux at our scale. |
 | Persistence | PostgreSQL + Spring Data JPA (Hibernate 5.5) | Decided project-wide. Enum columns map to native PG enums via `model/type/LowercasePostgreSQLEnumType` + `hypersistence-utils`. |
 | Migrations | Flyway, from `shared/database/migrations` | Shared schema — read §16 `shared/` before adding one. |
