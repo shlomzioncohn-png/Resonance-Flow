@@ -6,10 +6,10 @@ import java.util.UUID;
 
 public class Constraint {
     private final String constraintId;
-    private final UUID taskId; // מחכה לטיפוס מ inbox
+    private final UUID taskId; // pending Inbox publishing its own task id type
     private final ConstraintType type;
     private ConstraintStatus status;
-    private Map<String, Object> reason; // יכול להיות null
+    private Map<String, Object> reason; // may be null
     private final String sourceRef;
     private final LocalDateTime createdAt;
     private LocalDateTime updatedAt;
@@ -17,6 +17,18 @@ public class Constraint {
     public Constraint(String constraintId, UUID taskId, ConstraintType type,
                        ConstraintStatus status, Map<String, Object> reason,
                        String sourceRef, LocalDateTime createdAt, LocalDateTime updatedAt) {
+        if (constraintId == null) {
+            throw new IllegalArgumentException("constraintId must not be null");
+        }
+        if (taskId == null) {
+            throw new IllegalArgumentException("taskId must not be null");
+        }
+        if (type == null) {
+            throw new IllegalArgumentException("type must not be null");
+        }
+        if (status == null) {
+            throw new IllegalArgumentException("status must not be null");
+        }
         this.constraintId = constraintId;
         this.taskId = taskId;
         this.type = type;

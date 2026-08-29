@@ -109,9 +109,11 @@ class TaskEligibilityServiceTest {
         UUID taskId = UUID.randomUUID();
         UUID dependsOnTaskId = UUID.randomUUID();
         Task task = buildTask(taskId, 0, 0, true);
+        Task dependsOnTask = buildTask(dependsOnTaskId, 0, 0, true); // ACTIVE, not DONE
 
         when(taskDependencyRepository.findByTaskId(dependsOnTaskId)).thenReturn(Collections.emptyList());
         when(taskDependencyRepository.findByTaskId(taskId)).thenReturn(Collections.emptyList());
+        when(taskRepository.findById(dependsOnTaskId)).thenReturn(Optional.of(dependsOnTask));
         when(taskRepository.findById(taskId)).thenReturn(Optional.of(task));
 
         taskEligibilityService.addDependency(taskId, dependsOnTaskId);
@@ -125,14 +127,40 @@ class TaskEligibilityServiceTest {
     void addDependency_duplicate_doesNotInflateBlockingCount() {
         UUID taskId = UUID.randomUUID();
         UUID dependsOnTaskId = UUID.randomUUID();
+        Task dependsOnTask = buildTask(dependsOnTaskId, 0, 0, true);
 
         when(taskDependencyRepository.findByTaskId(dependsOnTaskId)).thenReturn(Collections.emptyList());
         when(taskDependencyRepository.findByTaskId(taskId))
                 .thenReturn(List.of(new TaskDependency(taskId, dependsOnTaskId)));
+        when(taskRepository.findById(dependsOnTaskId)).thenReturn(Optional.of(dependsOnTask));
 
         taskEligibilityService.addDependency(taskId, dependsOnTaskId);
 
-        verify(taskRepository, never()).findById(any());
+        verify(taskRepository, never()).findById(taskId);
+    }
+
+    @Test
+    void addDependency_targetAlreadyDone_doesNotIncrementBlockingCount_butStillRecalculates() {
+        // Adding a dependency on an already-DONE task must not count against blockingCount -
+        // there will be no future status transition to ever decrement it back off - but
+        // eligibility must still be recalculated (e.g. this could be the task's first-ever
+        // edge, and it started isReady=false by default with nothing else to fix that).
+        UUID taskId = UUID.randomUUID();
+        UUID dependsOnTaskId = UUID.randomUUID();
+        Task task = buildTask(taskId, 0, 0, false);
+        Task dependsOnTask = buildTask(dependsOnTaskId, 0, 0, true);
+        dependsOnTask.setStatus(TaskStatus.DONE);
+
+        when(taskDependencyRepository.findByTaskId(dependsOnTaskId)).thenReturn(Collections.emptyList());
+        when(taskDependencyRepository.findByTaskId(taskId)).thenReturn(Collections.emptyList());
+        when(taskRepository.findById(dependsOnTaskId)).thenReturn(Optional.of(dependsOnTask));
+        when(taskRepository.findById(taskId)).thenReturn(Optional.of(task));
+
+        taskEligibilityService.addDependency(taskId, dependsOnTaskId);
+
+        verify(taskDependencyRepository).save(any(TaskDependency.class));
+        assertEquals(0, task.getBlockingCount());
+        assertTrue(task.isReady());
     }
 
     @Test
@@ -156,9 +184,11 @@ class TaskEligibilityServiceTest {
         UUID taskId = UUID.randomUUID();
         UUID dependsOnTaskId = UUID.randomUUID();
         Task task = buildTask(taskId, 1, 0, false);
+        Task dependsOnTask = buildTask(dependsOnTaskId, 0, 0, true);
 
         when(taskDependencyRepository.findByTaskId(taskId))
                 .thenReturn(List.of(new TaskDependency(taskId, dependsOnTaskId)));
+        when(taskRepository.findById(dependsOnTaskId)).thenReturn(Optional.of(dependsOnTask));
         when(taskRepository.findById(taskId)).thenReturn(Optional.of(task));
 
         taskEligibilityService.removeDependency(taskId, dependsOnTaskId);
@@ -166,6 +196,27 @@ class TaskEligibilityServiceTest {
         verify(taskDependencyRepository).delete(taskId, dependsOnTaskId);
         assertEquals(0, task.getBlockingCount());
         assertTrue(task.isReady());
+    }
+
+    @Test
+    void removeDependency_targetAlreadyDone_doesNotDecrementBlockingCount() {
+        // Mirrors addDependency: an edge to an already-DONE task never counted against
+        // blockingCount, so removing it must not decrement.
+        UUID taskId = UUID.randomUUID();
+        UUID dependsOnTaskId = UUID.randomUUID();
+        Task task = buildTask(taskId, 0, 0, true);
+        Task dependsOnTask = buildTask(dependsOnTaskId, 0, 0, true);
+        dependsOnTask.setStatus(TaskStatus.DONE);
+
+        when(taskDependencyRepository.findByTaskId(taskId))
+                .thenReturn(List.of(new TaskDependency(taskId, dependsOnTaskId)));
+        when(taskRepository.findById(dependsOnTaskId)).thenReturn(Optional.of(dependsOnTask));
+        when(taskRepository.findById(taskId)).thenReturn(Optional.of(task));
+
+        taskEligibilityService.removeDependency(taskId, dependsOnTaskId);
+
+        verify(taskDependencyRepository).delete(taskId, dependsOnTaskId);
+        assertEquals(0, task.getBlockingCount());
     }
 
     @Test
@@ -185,9 +236,11 @@ class TaskEligibilityServiceTest {
         UUID taskId = UUID.randomUUID();
         UUID dependsOnTaskId = UUID.randomUUID();
         Task task = buildTask(taskId, 0, 0, true);
+        Task dependsOnTask = buildTask(dependsOnTaskId, 0, 0, true);
 
         when(taskDependencyRepository.findByTaskId(taskId))
                 .thenReturn(List.of(new TaskDependency(taskId, dependsOnTaskId)));
+        when(taskRepository.findById(dependsOnTaskId)).thenReturn(Optional.of(dependsOnTask));
         when(taskRepository.findById(taskId)).thenReturn(Optional.of(task));
 
         taskEligibilityService.removeDependency(taskId, dependsOnTaskId);
