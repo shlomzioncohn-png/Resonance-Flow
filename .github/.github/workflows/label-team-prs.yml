@@ -1,0 +1,69 @@
+name: Label team PRs
+
+on:
+  pull_request:
+    types: [opened]
+
+jobs:
+  add-label:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ensure labels exist
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const teams = [
+              { label: 'LENS',   color: '0e8a16' },
+              { label: 'INBOX',  color: '1d76db' },
+              { label: 'BRIDGE', color: '5319e7' },
+              { label: 'MIND',   color: 'b60205' },
+              { label: 'CHAIN',  color: 'fbca04' },
+              { label: 'RELAY',  color: '0052cc' },
+            ];
+
+            // Fetch existing labels so we don't try to create duplicates
+            const existingLabels = await github.paginate(
+              github.rest.issues.listLabelsForRepo,
+              { owner: context.repo.owner, repo: context.repo.repo }
+            );
+            const existingNames = new Set(existingLabels.map(l => l.name));
+
+            for (const team of teams) {
+              if (!existingNames.has(team.label)) {
+                await github.rest.issues.createLabel({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  name: team.label,
+                  color: team.color,
+                });
+                console.log(`Created missing label: ${team.label}`);
+              }
+            }
+
+      - name: Add label based on team
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const teams = [
+              { label: 'LENS',   members: ['Dvori-558', 'elisheva-666', 'sarisholomon', 'mali8573'] },
+              { label: 'INBOX',  members: [] }, // fill in: INBOX team members
+              { label: 'BRIDGE', members: [] }, // fill in: BRIDGE team members
+              { label: 'MIND',   members: [] }, // fill in: MIND team members
+              { label: 'CHAIN',  members: [] }, // fill in: CHAIN team members
+              { label: 'RELAY',  members: [] }, // fill in: RELAY team members
+            ];
+
+            const author = context.payload.pull_request.user.login;
+            const matchedTeam = teams.find(team => team.members.includes(author));
+
+            if (matchedTeam) {
+              await github.rest.issues.addLabels({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.payload.pull_request.number,
+                labels: [matchedTeam.label]
+              });
+              console.log(`Added label "${matchedTeam.label}" for ${author}`);
+            } else {
+              console.log(`No team match found for ${author}, skipping.`);
+            }

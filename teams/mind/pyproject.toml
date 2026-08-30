@@ -3,7 +3,7 @@ name = "mind"
 version = "0.1.0"
 description = "MIND — extraction, embeddings, and scoring for Resonance Flow (Team MIND, KamaTech x Gong Bootcamp)"
 readme = "README.md"
-requires-python = ">=3.11"
+requires-python = ">=3.12"
 license = { text = "Proprietary" }
 dependencies = [
     # core
@@ -19,6 +19,7 @@ dev = [
     "pytest-cov",
     "ruff",
     "mypy",
+    "httpx",  # required by fastapi.testclient.TestClient
 ]
 
 [build-system]
