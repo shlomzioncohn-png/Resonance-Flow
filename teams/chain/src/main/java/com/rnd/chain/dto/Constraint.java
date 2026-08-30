@@ -6,10 +6,10 @@ import java.util.UUID;
 
 public class Constraint {
     private final String constraintId;
-    private final UUID taskId; // מחכה לטיפוס מ inbox
+    private final UUID taskId; // pending Inbox publishing its own task id type
     private final ConstraintType type;
     private ConstraintStatus status;
-    private Map<String, Object> reason; // יכול להיות null
+    private Map<String, Object> reason; // may be null
     private final String sourceRef;
     private final LocalDateTime createdAt;
     private LocalDateTime updatedAt;

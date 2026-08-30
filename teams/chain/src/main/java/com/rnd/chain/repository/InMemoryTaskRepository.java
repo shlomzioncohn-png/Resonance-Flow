@@ -15,6 +15,11 @@ import java.util.stream.Collectors;
  * {@link ConcurrentHashMap} keyed by task id. Seed data is passed in
  * through the constructor rather than hardcoded, since building real
  * Task instances requires Task's constructor, owned by a teammate.
+ *
+ * Reads return {@link Task#copyOf}, and save() stores a copy rather than the exact instance
+ * passed in - a caller mutating a Task it received (from find*, or the one it just passed to
+ * save()) can never change repository state without an explicit save() call. This mirrors the
+ * isolation a real persistence layer gives for free (see CLAUDE.md "Open items").
  */
 public class InMemoryTaskRepository implements TaskRepository {
 
@@ -29,7 +34,8 @@ public class InMemoryTaskRepository implements TaskRepository {
     @Override
     public Optional<Task> findById(UUID id) {
         return Optional.ofNullable(tasksById.get(id))
-                .filter(this::isNotDeleted);
+                .filter(this::isNotDeleted)
+                .map(Task::copyOf);
     }
 
     @Override
@@ -38,6 +44,7 @@ public class InMemoryTaskRepository implements TaskRepository {
                 .map(tasksById::get)
                 .filter(Objects::nonNull)
                 .filter(this::isNotDeleted)
+                .map(Task::copyOf)
                 .collect(Collectors.toList());
     }
 
@@ -46,12 +53,14 @@ public class InMemoryTaskRepository implements TaskRepository {
         return tasksById.values().stream()
                 .filter(task -> Objects.equals(task.getParentTaskId(), parentTaskId))
                 .filter(this::isNotDeleted)
+                .map(Task::copyOf)
                 .collect(Collectors.toList());
     }
 
     @Override
     public Task save(Task task) {
-        tasksById.put(task.getId(), task);
+        Task stored = Task.copyOf(task);
+        tasksById.put(stored.getId(), stored);
         return task;
     }
 

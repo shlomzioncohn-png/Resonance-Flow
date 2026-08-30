@@ -67,6 +67,21 @@ public class Task {
         this.deletedAt = deletedAt;
     }
 
+    /**
+     * Returns a new, independent Task with the same field values as {@code source}. Repositories
+     * hand out copies (rather than the stored instance) from their read methods, and store a copy
+     * on save(), so a caller mutating a Task it received can never change repository state without
+     * going through save() - see CLAUDE.md "Open items" (this is a stand-in for the isolation a
+     * real persistence layer gives for free).
+     */
+    public static Task copyOf(Task source) {
+        Objects.requireNonNull(source, "source must not be null");
+        return new Task(source.id, source.parentTaskId, source.ownerId, source.status,
+                source.isReady, source.blockingCount, source.openConstraintCount,
+                source.estimatedDurationMin, source.score, source.createdAt, source.updatedAt,
+                source.deletedAt);
+    }
+
     public UUID getId() {
         return id;
     }

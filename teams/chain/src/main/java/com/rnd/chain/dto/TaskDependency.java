@@ -11,11 +11,11 @@ public class TaskDependency {
     // not validate that either id refers to an existing Task, and it intentionally does not reject
     // self-dependencies (taskId == dependsOnTaskId) - that check belongs to the service layer,
     // which has access to the repository needed to enforce it against existing edges.
-    private UUID taskId;
-    private UUID dependsOnTaskId;
-
-    public TaskDependency() {
-    }
+    // final: both fields feed equals/hashCode below, so mutating either after construction
+    // could strand this object in a hash-based collection (HashSet/HashMap bucket picked at
+    // insertion time would no longer match a changed hash).
+    private final UUID taskId;
+    private final UUID dependsOnTaskId;
 
     public TaskDependency(UUID taskId, UUID dependsOnTaskId) {
         this.taskId = taskId;
@@ -26,16 +26,8 @@ public class TaskDependency {
         return taskId;
     }
 
-    public void setTaskId(UUID taskId) {
-        this.taskId = taskId;
-    }
-
     public UUID getDependsOnTaskId() {
         return dependsOnTaskId;
-    }
-
-    public void setDependsOnTaskId(UUID dependsOnTaskId) {
-        this.dependsOnTaskId = dependsOnTaskId;
     }
 
     @Override

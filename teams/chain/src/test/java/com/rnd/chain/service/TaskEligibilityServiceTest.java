@@ -84,14 +84,18 @@ class TaskEligibilityServiceTest {
     }
 
     @Test
-    void alreadyCorrectState_doesNotSaveAgain() {
+    void alreadyCorrectState_stillSavesEveryTime() {
+        // recalculateAndSave always saves, even when isReady doesn't change: a counter can
+        // change (e.g. blockingCount 2 -> 1) without crossing the ready threshold, and that
+        // change must still be persisted - see PR #114 review, Critical finding on
+        // recalculateAndSave silently dropping such updates.
         UUID taskId = UUID.randomUUID();
         Task task = buildTask(taskId, 0, 0, true);
         when(taskRepository.findById(taskId)).thenReturn(Optional.of(task));
 
         taskEligibilityService.recalculateTaskEligibility(taskId);
 
-        verify(taskRepository, never()).save(any());
+        verify(taskRepository).save(task);
     }
 
     @Test
@@ -205,7 +209,10 @@ class TaskEligibilityServiceTest {
         when(taskRepository.findById(taskB)).thenReturn(Optional.of(b));
         when(taskDependencyRepository.findByDependsOnTaskId(taskB))
                 .thenReturn(List.of(new TaskDependency(taskA, taskB)));
-        when(taskRepository.findAllById(List.of(taskA))).thenReturn(List.of(a));
+        // adjustDependentsBlockingCount now fetches each dependent individually, inside its own
+        // lock (taskRepository.findById), rather than batch-fetching via findAllById up front -
+        // see TaskEligibilityService for why (repositories return defensive copies now).
+        when(taskRepository.findById(taskA)).thenReturn(Optional.of(a));
 
         taskEligibilityService.onTaskStatusChanged(taskB, TaskStatus.DONE);
 
@@ -227,7 +234,8 @@ class TaskEligibilityServiceTest {
         when(taskRepository.findById(taskB)).thenReturn(Optional.of(b));
         when(taskDependencyRepository.findByDependsOnTaskId(taskB))
                 .thenReturn(List.of(new TaskDependency(taskA, taskB), new TaskDependency(taskC, taskB)));
-        when(taskRepository.findAllById(List.of(taskA, taskC))).thenReturn(List.of(a, c));
+        when(taskRepository.findById(taskA)).thenReturn(Optional.of(a));
+        when(taskRepository.findById(taskC)).thenReturn(Optional.of(c));
 
         taskEligibilityService.onTaskStatusChanged(taskB, TaskStatus.DONE);
 
@@ -247,7 +255,7 @@ class TaskEligibilityServiceTest {
         when(taskRepository.findById(taskB)).thenReturn(Optional.of(b));
         when(taskDependencyRepository.findByDependsOnTaskId(taskB))
                 .thenReturn(List.of(new TaskDependency(taskA, taskB)));
-        when(taskRepository.findAllById(List.of(taskA))).thenReturn(List.of(a));
+        when(taskRepository.findById(taskA)).thenReturn(Optional.of(a));
 
         taskEligibilityService.onTaskStatusChanged(taskB, TaskStatus.PENDING);
 
