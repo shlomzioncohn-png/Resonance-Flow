@@ -9,7 +9,7 @@ spec:
   project: default
   source:
     repoURL: https://github.com/KamaTechOrg/Resonance-Flow.git
-    targetRevision: main
+    targetRevision: avigail/issue-180-argocd-verify
     path: resonance-flow
     helm:
       valueFiles:
