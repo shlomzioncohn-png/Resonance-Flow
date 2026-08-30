@@ -71,7 +71,7 @@ spec:
       serviceAccountName: kafka-ready-check
       containers:
         - name: wait-for-kafka
-          image: bitnami/kubectl:1.31
+          image: bitnami/kubectl:latest
           command:
             - bash
             - -c
