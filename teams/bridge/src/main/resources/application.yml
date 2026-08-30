@@ -50,3 +50,15 @@ bridge:
       # Local time zone the exporting phone was set to - WhatsApp export timestamps carry no
       # offset, so this must match the tenant, not be assumed to be UTC.
       zone-id: ${BRIDGE_WHATSAPP_ZONE_ID:Asia/Jerusalem}
+  media:
+    # Meeting/doc/audio hand-off (Esther) - local folders to read test files from, one per
+    # source, not committed; set your own in .env. Shares minio.* and
+    # bridge.intake.raw-landed-topic above with the Unstructured-intake lane.
+    zoom-recordings-dir: ${BRIDGE_MEDIA_ZOOM_RECORDINGS_DIR:}
+    bbb-recordings-dir: ${BRIDGE_MEDIA_BBB_RECORDINGS_DIR:}
+    scanned-docs-dir: ${BRIDGE_MEDIA_SCANNED_DOCS_DIR:}
+    tenant-id: ${BRIDGE_MEDIA_TENANT_ID:demo-tenant}
+    # Files at or below this size never land - a conservative proxy for "empty/corrupt
+    # recording", not real audio-duration filtering (that needs a codec-aware library this
+    # lane doesn't depend on). Tune based on what garbage actually shows up in practice.
+    min-file-size-bytes: ${BRIDGE_MEDIA_MIN_FILE_SIZE_BYTES:1024}
