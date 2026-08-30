@@ -11,6 +11,19 @@ import java.util.Map;
 /**
  * EventPublisher implementation that actually publishes to Kafka.
  * Responsible for: serialization, topic resolution by event type, logging, and error handling.
+ *
+ * TODO: publish() is fire-and-forget from the caller's point of view - a
+ * Kafka send failure is only logged (see below), never surfaced back to
+ * whatever business logic already committed its own state change before
+ * calling publish(). This is a real dual-write risk (state committed,
+ * publish fails, no compensating action) with no outbox or equivalent
+ * mitigation today. An Outbox pattern already exists elsewhere in this
+ * repository (Inbox's OutboxEvent/OutboxWorker), but it is Inbox-specific
+ * application code - its own JPA entity, its own event-type enum, its own
+ * Postgres database - with no shared module Chain could depend on, and
+ * Chain has no database of its own yet. Revisit once Chain adopts
+ * persistence; see PLAN.md decision D6 for the full reasoning on reuse vs.
+ * reimplementation vs. extracting a shared module.
  */
 @Component
 public class KafkaEventPublisher implements EventPublisher {

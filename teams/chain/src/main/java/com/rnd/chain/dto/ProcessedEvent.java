@@ -4,38 +4,17 @@ import java.time.Instant;
 import java.util.UUID;
 
 /**
- * Marks that a given event ID has already been processed by this service,
- * so that receiving the same event more than once does not create
- * duplicate state changes.
+ * Marks that a given event ID has already been claimed/processed by this
+ * service, so that receiving the same event more than once does not
+ * create duplicate state changes.
  *
- * This is a plain class on purpose - the project has not yet decided
- * which storage technology will back this (DB table, Redis, etc.).
- * Once that is decided, this class stays as-is; only the storage
- * implementation (see ProcessedEventStore) needs to change.
+ * A record on purpose: a plain, immutable data holder with no inheritance
+ * or framework-(de)serialization requirements - it never crosses Jackson
+ * (unlike EventEnvelope's payload), it only ever moves between
+ * ChainEventConsumer and a ProcessedEventStore implementation in memory.
+ * The storage technology behind ProcessedEventStore is still undecided
+ * (DB table, Redis, etc.) - once that's picked, this record's shape stays
+ * as-is; only the storage implementation changes.
  */
-public class ProcessedEvent {
-
-    private final UUID eventId;
-    private final String eventType;
-    private final Instant processedAt;
-
-    public ProcessedEvent(UUID eventId, String eventType, Instant processedAt) {
-        this.eventId = eventId;
-        this.eventType = eventType;
-        this.processedAt = processedAt;
-    }
-
-    public UUID getEventId() {
-        return eventId;
-    }
-
-    public String getEventType() {
-        return eventType;
-    }
-
-    public Instant getProcessedAt() {
-        return processedAt;
-    }
+public record ProcessedEvent(UUID eventId, String eventType, Instant processedAt) {
 }
-
-

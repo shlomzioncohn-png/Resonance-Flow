@@ -67,4 +67,23 @@ class KafkaEventPublisherTest {
         // An asynchronous send failure should not throw immediately - it is only logged
         assertDoesNotThrow(() -> publisher.publish(event));
     }
+
+    @Test
+    void publish_throwsException_whenSerializationFails() {
+        // A payload whose getter throws during Jackson's introspection -
+        // KafkaEventPublisher.serialize()'s objectMapper.writeValueAsString(...)
+        // call fails, which must surface as EventPublishException rather than
+        // a raw Jackson exception, and must never reach kafkaTemplate.send(...).
+        Object payloadThatFailsToSerialize = new Object() {
+            @SuppressWarnings("unused")
+            public String getValue() {
+                throw new RuntimeException("boom");
+            }
+        };
+        EventEnvelope<Object> event = new EventEnvelope<>(
+                "task.scheduling.updated", "corr-1", payloadThatFailsToSerialize);
+
+        assertThrows(EventPublishException.class, () -> publisher.publish(event));
+        verifyNoInteractions(kafkaTemplate);
+    }
 }

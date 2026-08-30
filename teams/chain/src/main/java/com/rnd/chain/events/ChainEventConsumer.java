@@ -10,6 +10,7 @@ import org.springframework.kafka.annotation.KafkaListener;
 import org.springframework.stereotype.Component;
 
 import java.time.Instant;
+import java.time.format.DateTimeParseException;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -38,14 +39,22 @@ public class ChainEventConsumer {
                               ProcessedEventStore processedEventStore) {
         this.objectMapper = objectMapper;
         this.handlersByEventType = handlers.stream()
-                .collect(Collectors.toMap(EventHandler::getSupportedEventType, h -> h));
+                .collect(Collectors.toMap(
+                        EventHandler::getSupportedEventType,
+                        h -> h,
+                        (first, second) -> {
+                            throw new IllegalStateException(
+                                    "Duplicate EventHandler for event type [" + first.getSupportedEventType()
+                                            + "]: " + first.getClass().getName() + " and " + second.getClass().getName());
+                        }));
         this.processedEventStore = processedEventStore;
     }
 
-    @KafkaListener(topics = "${chain.kafka.consumed-topics:}", groupId = "chain-service")
-    public void onMessage(String rawMessage) throws Exception {
-        JsonNode root = objectMapper.readTree(rawMessage);
-        String eventType = root.get("eventType").asText();
+    @KafkaListener(topics = "${chain.kafka.consumed-topics:}",
+                   groupId = "${chain.kafka.consumer-group-id:chain-service}")
+    public void onMessage(String rawMessage) {
+        JsonNode root = parseRoot(rawMessage);
+        String eventType = readEventType(root);
 
         EventHandler<?> handler = handlersByEventType.get(eventType);
         if (handler == null) {
@@ -57,30 +66,93 @@ public class ChainEventConsumer {
 
         // Any exception from here on propagates out of onMessage on purpose,
         // so ChainKafkaErrorHandlingConfig's DefaultErrorHandler can retry it
-        // and eventually route it to the DLT if it keeps failing.
-        dispatch(handler, root);
+        // (or, for a NonRetryableEventException, skip straight to the DLT).
+        dispatch(handler, root, eventType);
     }
 
-    private <T> void dispatch(EventHandler<T> handler, JsonNode root) throws Exception {
-        UUID eventId = UUID.fromString(root.get("eventId").asText());
-        String eventType = root.get("eventType").asText();
+    private <T> void dispatch(EventHandler<T> handler, JsonNode root, String eventType) {
+        UUID eventId = readEventId(root);
+        Instant occurredAt = readOccurredAt(root);
+        String correlationId = root.hasNonNull("correlationId") ? root.get("correlationId").asText() : null;
+        T payload = readPayload(root, handler);
 
-        if (processedEventStore.isProcessed(eventId)) {
-            // Already handled before (e.g. a duplicate delivery from Kafka) -
-            // skip calling the handler again to avoid duplicate state changes.
-            log.info("Event [{}] of type [{}] was already processed - skipping", eventId, eventType);
+        // Claiming only happens here, after the message is confirmed
+        // well-formed - a message that fails parsing above is never claimed
+        // at all, so it can still be replayed (e.g. from the DLT) once
+        // whatever made it unparseable is fixed. tryClaim is atomic: exactly
+        // one caller wins for a given eventId, which is what closes the race
+        // where two listener threads (concurrency > 1, or a duplicate
+        // delivery landing on two partitions) could otherwise both see "not
+        // yet claimed" and both run the handler. See ProcessedEventStore's
+        // Javadoc for exactly what a claim does and doesn't guarantee.
+        if (!processedEventStore.tryClaim(new ProcessedEvent(eventId, eventType, Instant.now()))) {
+            log.info("Event [{}] of type [{}] was already claimed - skipping", eventId, eventType);
             return;
         }
 
-        Instant occurredAt = Instant.parse(root.get("occurredAt").asText());
-        String correlationId = root.hasNonNull("correlationId") ? root.get("correlationId").asText() : null;
-        T payload = objectMapper.treeToValue(root.get("payload"), handler.getPayloadType());
-
         EventEnvelope<T> event = new EventEnvelope<>(eventId, eventType, occurredAt, correlationId, payload);
-        handler.handle(event);
+        try {
+            handler.handle(event);
+        } catch (RuntimeException e) {
+            // Handling failed - release the claim so a retry (whether
+            // DefaultErrorHandler retrying this same delivery, or a later
+            // redelivery) can claim and attempt this event again. A claim is
+            // only meant to be permanent once handling actually succeeds -
+            // see ProcessedEventStore's Javadoc for the one case this still
+            // doesn't cover (a process crash between the claim above and
+            // this catch block never releases it).
+            processedEventStore.release(eventId);
+            throw e;
+        }
+    }
 
-        // Only mark as processed after handle() succeeds - if it throws,
-        // the event stays unmarked so a retry will still call the handler.
-        processedEventStore.markProcessed(new ProcessedEvent(eventId, eventType, Instant.now()));
+    private JsonNode parseRoot(String rawMessage) {
+        try {
+            return objectMapper.readTree(rawMessage);
+        } catch (Exception e) {
+            throw new NonRetryableEventException("Malformed message payload: " + e.getMessage(), e);
+        }
+    }
+
+    private String readEventType(JsonNode root) {
+        if (!root.hasNonNull("eventType")) {
+            throw new NonRetryableEventException("Message is missing required field [eventType]");
+        }
+        return root.get("eventType").asText();
+    }
+
+    private UUID readEventId(JsonNode root) {
+        if (!root.hasNonNull("eventId")) {
+            throw new NonRetryableEventException("Message is missing required field [eventId]");
+        }
+        String rawEventId = root.get("eventId").asText();
+        try {
+            return UUID.fromString(rawEventId);
+        } catch (IllegalArgumentException e) {
+            throw new NonRetryableEventException("Message has an invalid [eventId] (not a UUID): " + rawEventId, e);
+        }
+    }
+
+    private Instant readOccurredAt(JsonNode root) {
+        if (!root.hasNonNull("occurredAt")) {
+            throw new NonRetryableEventException("Message is missing required field [occurredAt]");
+        }
+        String rawOccurredAt = root.get("occurredAt").asText();
+        try {
+            return Instant.parse(rawOccurredAt);
+        } catch (DateTimeParseException e) {
+            throw new NonRetryableEventException(
+                    "Message has an invalid [occurredAt] (not an ISO-8601 instant): " + rawOccurredAt, e);
+        }
+    }
+
+    private <T> T readPayload(JsonNode root, EventHandler<T> handler) {
+        try {
+            return objectMapper.treeToValue(root.get("payload"), handler.getPayloadType());
+        } catch (Exception e) {
+            throw new NonRetryableEventException(
+                    "Message payload does not match the expected shape for handler ["
+                            + handler.getClass().getName() + "]: " + e.getMessage(), e);
+        }
     }
 }
