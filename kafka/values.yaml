@@ -126,7 +126,11 @@ resources: {}
 startupProbe:
   tcpSocket:
     port: kafka
-  failureThreshold: 30
+  # 30*5s=150s wasn't enough on a resource-constrained kind cluster - the
+  # broker got killed mid-boot repeatedly before finishing KRaft startup
+  # (confirmed live, issue #186). 90*5s=450s gives real headroom without
+  # masking a genuinely stuck broker.
+  failureThreshold: 90
   periodSeconds: 5
 livenessProbe:
   tcpSocket:
