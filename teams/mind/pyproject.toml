@@ -21,6 +21,14 @@ dev = [
     "mypy",
     "httpx",  # required by fastapi.testclient.TestClient
 ]
+# Not a runtime dependency of src/mind/ -- extraction/multimodal isn't
+# built yet (Phase 2). Only benchmarks/ocr_benchmark.py needs these;
+# also requires the tesseract-ocr system binary (not pip-installable).
+benchmark = [
+    "pytesseract",
+    "pillow",
+    "psutil",  # cross-platform peak-RSS/CPU sampling; stdlib `resource` is Unix-only
+]
 
 [build-system]
 requires = ["hatchling"]
