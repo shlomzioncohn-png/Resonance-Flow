@@ -295,12 +295,76 @@ in three stages, whether pgvector actually meets the requirements above:
 
 **Net conclusion: pgvector stays the recommended choice.** Nothing found in
 validation points at pgvector or its HNSW index as the bottleneck — the
-gap is the embedding model (`embeddings.py` still uses a hashing-based
-placeholder, deliberately not swapped for a real semantic model yet). The
-full evaluation (mock corpus, query sets, recall test scripts, and the
-detailed writeups) lived in the PoC at `mind_vector_poc/evaluation/` and
-is preserved in git history / PR #54, not in the working tree — the PoC
-folder itself was removed once its logic was promoted into
-`src/mind/embeddings/`.
+gap was the embedding model. That gap is closed as of the production
+module: `generate.py` now uses a real retrieval-tuned model
+(`BAAI/bge-small-en-v1.5`), not a hashing placeholder — see
+`src/mind/embeddings/README.md`. The full PoC-era evaluation (mock corpus,
+query sets, recall test scripts, and the detailed writeups) lived at
+`mind_vector_poc/evaluation/` and is preserved in git history / PR #54,
+not in the working tree — the PoC folder itself was removed once its
+logic was promoted into `src/mind/embeddings/`. See "Benchmark results"
+below for the follow-up validation against the real model and production
+code.
+
+---
+
+## Benchmark results
+
+The validation above still used the PoC and its hashing-based placeholder
+embedding model. This re-runs the same kind of test against the actual
+**production code** (`src/mind/embeddings`) and the actual **real
+embedding model** (`BAAI/bge-small-en-v1.5`), addressing issue #87. Script:
+[`vector_search_benchmark.py`](vector_search_benchmark.py) (raw results:
+`vector_search_benchmark_results.json`, gitignored — regenerate by
+re-running the script).
+
+### Dataset
+
+| Kind | Count | id prefix | What it is |
+|---|---:|---|---|
+| Synthetic filler | 10,000 | `filler-` | Random word-soup, padding to a realistic load scale — **not real data** |
+| Manually-selected near-duplicate pairs | 16 (8 pairs) | `pair-#-a` / `pair-#-b` | Same underlying problem, different wording, for the recall test |
+| **Total** | **10,016** | | |
+
+### Latency — 100 similarity queries, `search()` only (embedding time excluded, same convention as the earlier PoC benchmarks)
+
+| avg (ms) | p50 (ms) | p95 (ms) | p99 (ms) | max (ms) |
+|---:|---:|---:|---:|---:|
+| 14.07 | 14.58 | 16.06 | 16.70 | 16.97 |
+
+**<300ms p95 target: PASS**, with roughly 18.7x headroom at 10,000 rows.
+Latency is dominated by the fixed cost of an HNSW scan at this scale, not
+by anything the real embedding model changed — consistent with the
+earlier PoC finding that pgvector itself was never the bottleneck.
+
+### Recall — does searching one pair member surface the other?
+
+| k | Recall |
+|---|---:|
+| 5 | **87.5%** (7/8) |
+| 10 | **87.5%** (7/8) |
+
+This uses BGE's query/passage asymmetry correctly (the query side is
+embedded with `is_query=True`, i.e. `config.BGE_QUERY_INSTRUCTION`
+prepended, matching how a real search call would work) — the earlier PoC
+recall numbers (42% avg top-5 precision, then 0% on the harder
+duplicate-pair test) were measured against the old hashing placeholder,
+which had no notion of meaning at all. The one miss ("Customer reported
+duplicate invoices being generated" → "Client says the billing system is
+creating the same invoice twice") shares almost no literal words between
+the two phrasings — a genuinely hard paraphrase case even for a small
+retrieval model, not a sign of a broken pipeline.
+
+### Explicit conclusion
+
+**<300ms p95 is comfortably achievable at the target scale** (10,000+
+rows) — measured p95 is 16.06ms, not an estimate. **No index change is
+needed or was made.** The HNSW index + `hnsw.ef_search = 400` tuning
+already in `pgvector_store.py` (from the earlier PoC recall work) is
+sufficient; latency has ~18x headroom before <300ms would even become a
+concern, and the one recall miss is attributable to the embedding model's
+inherent limits on a hard paraphrase, not to index accuracy. Per the
+issue's instruction, no index was added or modified, and none is
+recommended at this scale.
 
 ---
