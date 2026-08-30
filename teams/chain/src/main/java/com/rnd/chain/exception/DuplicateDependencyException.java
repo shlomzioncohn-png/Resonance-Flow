@@ -9,4 +9,8 @@ public class DuplicateDependencyException extends RuntimeException {
     public DuplicateDependencyException(String message) {
         super(message);
     }
+
+    public DuplicateDependencyException(String message, Throwable cause) {
+        super(message, cause);
+    }
 }
