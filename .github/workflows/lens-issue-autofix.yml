@@ -2,9 +2,13 @@ name: LENS review-driven auto-fix
 
 # Two entry points, both scoped on purpose (5 teams share this repo/issue tracker
 # and this PR history, so an unscoped trigger would fire Claude on everyone's work):
-#   1. issues.labeled "lens-auto-fix"      - a fresh reported bug -> opens a new PR
-#   2. pull_request_review "changes_requested" on a PR that touches
-#      teams/lens/frontend -> pushes a fix commit to that same PR branch
+#   1. issues.labeled "lens-auto-fix"      - a fresh reported bug
+#   2. pull_request_review "changes_requested" on a PR that touches teams/lens/frontend
+#
+# Neither job can push: `contents: write` is deliberately NOT granted below. Claude
+# only proposes a fix as a comment; a human reviews it and applies it themselves as a
+# separate, explicit step. This is intentional (see the skill's "Human approval is
+# required" section) - do not add `contents: write` back to make Claude push directly.
 on:
   issues:
     types: [labeled]
@@ -16,7 +20,6 @@ jobs:
     if: github.event_name == 'issues' && github.event.label.name == 'lens-auto-fix'
     runs-on: ubuntu-latest
     permissions:
-      contents: write
       pull-requests: write
       issues: write
     steps:
@@ -31,13 +34,16 @@ jobs:
             Issue #${{ github.event.issue.number }}: ${{ github.event.issue.title }}
 
             ${{ github.event.issue.body }}
+
+            Do not commit or push anything. Post your proposed fix as a comment on
+            this issue and stop there - a human will review it and decide whether to
+            have it applied.
           claude_args: "--max-turns 20"
 
   fix-pr-review-feedback:
     if: github.event_name == 'pull_request_review' && github.event.review.state == 'changes_requested'
     runs-on: ubuntu-latest
     permissions:
-      contents: write
       pull-requests: write
       issues: write
     steps:
@@ -82,4 +88,8 @@ jobs:
 
             Review comments:
             ${{ steps.review.outputs.comments }}
+
+            Do not commit or push anything. Post your proposed fix as a comment on
+            this PR and stop there - a human will review it and decide whether to
+            have it applied.
           claude_args: "--max-turns 20"
