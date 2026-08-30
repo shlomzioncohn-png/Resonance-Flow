@@ -1,7 +1,6 @@
 # Default values for resonance-flow.
 
-imagePullSecrets:
-  - name: ghcr-pull-secret
+imagePullSecrets: []
 nameOverride: ""
 fullnameOverride: ""
 serviceAccount:
