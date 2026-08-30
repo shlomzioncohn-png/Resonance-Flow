@@ -11,7 +11,7 @@ spec:
   project: default
   source:
     repoURL: https://github.com/KamaTechOrg/Resonance-Flow.git
-    targetRevision: avigail/issue-180-argocd-verify
+    targetRevision: main
     path: kafka
     helm:
       valueFiles:
