@@ -12,10 +12,24 @@ spring:
   application:
     name: bridge
   kafka:
+    # Team shared / remote environment (do not use unless agreed):
+    #   bootstrap-servers: 3.216.80.66:9092
+    #   topic: bridge.github.tasks
     bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+    topic: bridge.test
     producer:
       key-serializer: org.apache.kafka.common.serialization.StringSerializer
       value-serializer: org.springframework.kafka.support.serializer.JsonSerializer
+      acks: all
+      retries: 3
+
+  # DataSource/Flyway auto-configuration is off by default so the json
+  # profile (the default) never touches a database. The jdbc profile turns
+  # both back on for itself in application-jdbc.yml.
+  autoconfigure:
+    exclude:
+      - org.springframework.boot.autoconfigure.jdbc.DataSourceAutoConfiguration
+      - org.springframework.boot.autoconfigure.flyway.FlywayAutoConfiguration
 
 minio:
   endpoint: ${MINIO_ENDPOINT:http://localhost:9000}
@@ -23,7 +37,22 @@ minio:
   secret-key: ${MINIO_SECRET_KEY:minioadmin}
   bucket: ${MINIO_BUCKET:bridge-raw}
 
+github:
+  api:
+    base-url: ${GITHUB_API_BASE_URL:https://api.github.com}
+    token: ${GITHUB_TOKEN:}
+  target:
+    owner: ${GITHUB_TARGET_OWNER:KamaTechOrg}
+    repo: ${GITHUB_TARGET_REPO:Resonance-Flow}
+  sync:
+    # Set to true to enable the automatic nightly GitHub to Kafka sync
+    cron:
+      enabled: ${GITHUB_SYNC_CRON_ENABLED:false}
+      expression: ${GITHUB_SYNC_CRON_EXPRESSION:0 0 2 * * ?}
+
 bridge:
+  crm:
+    dataset: classpath:crm/synthetic-deals.json
   intake:
     raw-landed-topic: ${BRIDGE_RAW_LANDED_TOPIC:bridge.raw.landed}
     scoping:
