@@ -13,22 +13,24 @@
       "title": "Schedule a mediation meeting between two team members",
       "description": "Two engineers have an ongoing disagreement over code ownership; the next step is getting a meeting on the calendar with both of them.",
       "deadline": null,
-      "estimated_duration_minutes": 30,
+      "effort_estimate": 30,
       "tier": "tactical",
-      "blocked": false
+      "blocked": false,
+      "parent_task_id": null
     },
     {
       "task_id": "task_async_update",
       "title": "Send written project status update to stakeholders",
       "description": "Stakeholders are expecting a written update on the migration project's status; can be done entirely over email/Slack, no meeting required.",
       "deadline": "2026-08-25T16:00:00",
-      "estimated_duration_minutes": 25,
+      "effort_estimate": 25,
       "tier": "tactical",
-      "blocked": false
+      "blocked": false,
+      "parent_task_id": null
     }
   ],
   "expected_top_task_id": "task_async_update",
-  "expected_reason": "task_conflict_mediation's next step is scheduling a meeting, which the 'no meetings can be scheduled' constraint rules out right now; task_async_update is fully asynchronous, fits the 30-minute window, and has a deadline two hours away.",
+  "expected_reason": "task_conflict_mediation's next step is scheduling a meeting, which the 'no meetings can be scheduled' constraint rules out right now; task_async_update is fully asynchronous and has a deadline two hours away.",
   "source": { "type": "synthetic", "source_detail": null },
   "mentor_approved": false
 }

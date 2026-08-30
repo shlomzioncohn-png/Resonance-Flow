@@ -13,22 +13,24 @@
       "title": "Fix null-pointer crash in checkout flow",
       "description": "Customers are hitting a crash when applying a discount code at checkout; support has escalated it as production-impacting.",
       "deadline": "2026-08-25T12:00:00",
-      "estimated_duration_minutes": 40,
+      "effort_estimate": 40,
       "tier": "operational",
-      "blocked": false
+      "blocked": false,
+      "parent_task_id": null
     },
     {
       "task_id": "task_feature",
       "title": "Start dashboard widget for order history",
       "description": "Kick off implementation of a new widget on the customer dashboard showing recent order history; next on the backlog, not requested by anyone yet.",
       "deadline": null,
-      "estimated_duration_minutes": 180,
+      "effort_estimate": 180,
       "tier": "tactical",
-      "blocked": false
+      "blocked": false,
+      "parent_task_id": null
     }
   ],
   "expected_top_task_id": "task_bugfix",
-  "expected_reason": "task_bugfix fits inside the 45-minute window and has a hard deadline three hours away on a production-impacting crash; task_feature alone needs 180 minutes, four times the available time, and carries no deadline at all.",
+  "expected_reason": "task_bugfix is a production-impacting crash with a hard deadline three hours away; task_feature is an unrequested backlog item with no deadline. Both urgency and business impact point to the bugfix.",
   "source": { "type": "synthetic", "source_detail": null },
   "mentor_approved": false
 }

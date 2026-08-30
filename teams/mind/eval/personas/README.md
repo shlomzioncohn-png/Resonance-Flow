@@ -38,13 +38,30 @@ Scenario
 ├── scenario_id
 ├── persona        { role, seniority?, department? }
 ├── context         { free_time_minutes, current_datetime, time_horizon, constraints[] }
-├── tasks[]          { task_id, title, description, deadline?, estimated_duration_minutes,
-                        tier, blocked }
+├── tasks[]          { task_id, title, description, deadline?, effort_estimate,
+                        tier, blocked, parent_task_id? }
 ├── expected_top_task_id
 ├── expected_reason
 ├── source          { type, source_detail? }
 └── mentor_approved
 ```
+
+## What the ranking model actually sees
+
+The contract is `RankingModel.score(task: Task) -> float` — the model is handed
+**one `Task` at a time**, nothing else. It never sees `persona`, `context`
+(so not `free_time_minutes`, not `current_datetime`, not `constraints`), and not
+the other candidate tasks. The harness builds the ranking from the per-task
+scores; picking what actually fits the free-time window is Chain's job, not the
+model's ("MIND scores, it does not decide").
+
+Practical consequence for scenario authors: a scenario's `expected_top_task_id`
+must be justifiable from **per-task fields alone** — `deadline`, `blocked`,
+`tier`, and the importance/scope you can read out of `title`/`description`. If the
+only thing that makes the "correct" task correct is that it fits in the available
+minutes and the distractor doesn't, the scenario is grading the model on
+information it structurally cannot use — redesign it. (`free_time_minutes` and
+`effort_estimate` still belong in every scenario; Chain consumes them downstream.)
 
 ## Per-field documentation
 
@@ -53,17 +70,17 @@ Scenario
 | Field | Represents | Why it's needed | Allowed values | Required/Optional | Who uses it downstream | Example |
 |---|---|---|---|---|---|---|
 | `role` | Who the user is, for the purpose of ranking their tasks | Determines the user's "shape of life" — pace, time horizon, kind of relevant tasks (see role table in MIND-01) | `Developer` / `Manager` / `Higher Manager` / `Field Engineer` / `Salesperson` / `CEO` | Required | The harness (ensures every role is covered in the set); R2/R3 when building role-specific features | `"Developer"` |
-| `seniority` | Seniority level within the role | Sometimes changes the correct answer (a Junior wouldn't be expected to pick up an architecture-review task a Senior would); sometimes doesn't — hence optional | `Junior` / `Mid` / `Senior` / `Executive` / `null` | Optional | The ranking model, only where a real signal depends on it | `"Junior"` |
+| `seniority` | Seniority level within the role | Sometimes changes the correct answer (a Junior wouldn't be expected to pick up an architecture-review task a Senior would); sometimes doesn't — hence optional | `Junior` / `Mid` / `Senior` / `Executive` / `null` | Optional | The mentor / R1 when judging the labelled answer (not visible to `score(task)`) | `"Junior"` |
 | `department` | Organizational department | Distinguishes, e.g., a Field Engineer in Operations from a Sales Engineer | `Engineering` / `Sales` / `Operations` / `null` | Optional (some roles, like CEO, aren't scoped to a single department) | Lens (future department-level aggregation) | `"Engineering"` |
 
 ### Context
 
 | Field | Represents | Why it's needed | Allowed values | Required/Optional | Who uses it downstream | Example |
 |---|---|---|---|---|---|---|
-| `free_time_minutes` | How much free time the persona has right now | The single most load-bearing field in the scenario — the same task list can have a completely different correct answer at 20 minutes vs. two hours | Positive integer | Required | Running the harness; later, Chain (actual selection) | `30` |
+| `free_time_minutes` | How much free time the persona has right now | Context for the scenario and a direct input to Chain's constraint-satisfaction step. **Not** visible to the ranking model (it lives on `context`, not `Task`), so the scenario's correct answer must not depend on it — see "What the ranking model actually sees" above | Positive integer | Required | Chain (actual selection); scenario authors as context | `30` |
 | `current_datetime` | "Now" for this scenario | Without it there's no way to judge whether a `deadline` is near, far, or already passed | ISO 8601 datetime | Required | Urgency calculation against deadline | `"2026-08-23T14:00:00"` |
-| `time_horizon` | Planning window (today / this week / this month) | Matches each role's different pace of work (Developer = hours-days, CEO = quarters) | `today` / `this_week` / `this_month` | Required | The ranking model — the horizon affects which tasks are even relevant | `"today"` |
-| `constraints` | Additional constraints the system must know about | Captures cases not covered by free_time/deadline alone (e.g. "no meetings can be scheduled") | Free-text string array, empty by default | Required (the array itself, even if empty) | The ranking model and explanation generation | `["no meetings can be scheduled"]` |
+| `time_horizon` | Planning window (today / this week / this month) | Matches each role's different pace of work (Developer = hours-days, CEO = quarters); frames what "urgent" means for the labelled answer | `today` / `this_week` / `this_month` | Required | The mentor / R1 when judging the labelled answer (not visible to `score(task)`) | `"today"` |
+| `constraints` | Additional constraints the system must know about | Captures cases not covered by deadline/blocked alone (e.g. "no meetings can be scheduled") | Free-text string array, empty by default | Required (the array itself, even if empty) | Chain (feasibility); the mentor / R1 when judging the labelled answer (not visible to `score(task)`) | `["no meetings can be scheduled"]` |
 
 ### Task
 
@@ -73,16 +90,17 @@ Scenario
 | `title` | Short title | Human readability + occasionally used as a textual feature | String | Required | Lens (display), extraction pipeline (later) | `"Review PR #482"` |
 | `description` | Task detail | Gives the model (and a human reviewer) enough context to judge duration/urgency/relevance without outside knowledge | String | Required | The ranking model | `"Code review for the auth refactor PR"` |
 | `deadline` | Due date/time, if any | Establishes urgency relative to `current_datetime` | ISO 8601 datetime or `null` | Optional (nullable) | Urgency calculation | `"2026-08-23T17:00:00"` |
-| `estimated_duration_minutes` | How long the task takes | Compared directly against `free_time_minutes` — the most basic "is this even possible right now" check | Positive integer | Required | The ranking model; Chain (constraint satisfaction) | `20` |
+| `effort_estimate` | How long the task takes, **in minutes** | The eval set's concrete, minutes-valued form of the canonical `Task.effort_estimate` (owned by Inbox). Recorded so Chain can do constraint satisfaction downstream | Positive integer (minutes) | Required | Chain (constraint satisfaction); the ranking model may use it as a weak per-task feature, but the correct answer must not hinge on comparing it to `free_time_minutes` | `20` |
 | `tier` | Kind of task (not the role!) | Separates "who the person is" from "what kind of work this is" — see Persona ≠ Tier above | `operational` / `tactical` / `strategic` (lowercase — matches the canonical Task schema and `src/mind/scoring/`) | Required | R2 (segmented ranking — a separate scoring rule per tier) | `"operational"` |
 | `blocked` | Whether the task can currently be worked on | A blocked task should generally not be the expected correct answer | Boolean | Required | The ranking model; Chain (actual task selection) | `false` |
+| `parent_task_id` | The `task_id` of this task's parent in the **cross-tier** org hierarchy (a dev task under a manager task), matching the canonical `Task.parent_task_id` | Reserved for the week-7 hierarchical value-propagation evaluation, where importance flows down the parent chain via Chain's traversal API. Added now so scenarios don't need a schema change mid-scoring. **Not** the old same-tier `dependencies` array — that was removed deliberately | String or `null`. Points *outside* the scenario, so it is not cross-referenced | Optional (nullable), `null` in every current scenario | R1/R3 (week-7 stretch) | `null` |
 
 ### Scenario-level fields
 
 | Field | Represents | Why it's needed | Allowed values | Required/Optional | Who uses it downstream | Example |
 |---|---|---|---|---|---|---|
 | `expected_top_task_id` | The known-correct answer | Enables comparing Model prediction vs. Expected answer and computing a metric — the entire point of the harness | Must match one `task_id` from `tasks` (enforced by a `@model_validator` on `PersonaEvaluationScenario`, so a bad file fails to load — not expressible in the JSON Schema itself) | Required | The harness (top-1 accuracy / MRR calculation) | `"task_B"` |
-| `expected_reason` | Short, data-grounded explanation for the correct answer | The difference between a "guess" and a checkable judgment; also used later to compare baseline vs. stretch (weeks 6–7) | String, at least 20 characters, must be grounded in fields from the scenario itself | Required | The mentor (plausibility check); R1 (evidence for baseline vs. stretch) | `"Task B fits the available 30-minute window, has a near deadline, and Task A is blocked."` |
+| `expected_reason` | Short, data-grounded explanation for the correct answer | The difference between a "guess" and a checkable judgment; also used later to compare baseline vs. stretch (weeks 6–7) | String, at least 20 characters, grounded in **per-task** fields (`deadline`, `blocked`, `tier`, description) — never in `free_time_minutes` or a duration comparison, which are Chain's concern | Required | The mentor (plausibility check); R1 (evidence for baseline vs. stretch) | `"Task B has a same-day deadline and Task A is blocked, so Task B is the one to do now."` |
 | `source.type` | The scenario's origin | Transparency: lets us know later whether a model was tested on a fabricated example or on real data | `synthetic` / `real` / `AMI` / `FUNSD` / `other` | Required | R1 (performance analysis by source type); data-policy documentation | `"synthetic"` |
 | `source.source_detail` | The exact source details | Enables tracing back to the actual origin (e.g. a specific AMI meeting ID) | Free-text string or `null` | Optional (required in practice when `type` is AMI/FUNSD/other) | R1 (traceability) | `"AMI meeting ES2002a"` |
 | `mentor_approved` | Whether the mentor has signed off on this specific scenario as correct ground truth | Without a per-scenario flag there is no way to distinguish "drafted" from "mentor-approved" — the set must be fully approved by the Foundation Gate, but gets built up scenario-by-scenario before that | `true` / `false` | Required (must be set explicitly, no implicit default) | The harness/CI (warns, doesn't crash, on any `false`); the mentor review process | `false` |
@@ -117,9 +135,10 @@ Salesperson, CEO) are being written by the rest of the team now, to reach the fu
 ## Contributing a scenario
 
 1. Pick one of your assigned roles. Write 4-6 scenarios for it, each testing a
-   genuinely different kind of choice (a deadline vs. duration tradeoff, a
+   genuinely different kind of choice (a hard deadline vs. no deadline, a
    `blocked` distractor, a `constraints` entry that rules an option out, a
-   seniority-scoped judgment call...) — not six variations on the same idea.
+   seniority-scoped judgment call, a tier/scope mismatch...) — not six
+   variations on the same idea.
 2. **Name your `scenario_id`s `<role>_<yourname>_<short_slug>`** (e.g.
    `ceo_dana_quarterly_board_prep`) — the extra name segment exists purely to
    avoid two people accidentally picking the same `scenario_id` when nobody
@@ -148,21 +167,29 @@ Follow them so the mentor review doesn't come back with "these two scenarios
 contradict each other."
 
 **Deadline proximity ("urgent" vs. not):**
-- A deadline within roughly `free_time_minutes` to 3x that window (e.g. 45 min
-  free, deadline 1-3 hours out) reads as genuinely urgent — a real pressure
-  signal, not decoration.
-- A deadline more than about one `time_horizon` away (e.g. a `this_week`
+- A deadline within the same working day as `current_datetime`, or a few hours
+  out, reads as genuinely urgent — a real pressure signal you can lean on in
+  `expected_reason`.
+- A deadline further out than the scenario's `time_horizon` (e.g. a `this_week`
   scenario with a deadline next month) is not urgency — don't write
   `expected_reason` as if it were the deciding factor.
 - `deadline: null` = no urgency signal at all. Don't imply urgency for it.
 
-**Fit margin (`estimated_duration_minutes` vs. `free_time_minutes`):**
-- The *correct* task should fit with clear room to spare (e.g. a 40-min task
-  in a 45-min window), not land on the boundary by coincidence (44-in-45
-  reads as a rounding accident, not a real signal).
-- The *wrong* task(s) should either clearly not fit (2x+ the free time) or
-  lose on a different, unambiguous signal (`blocked`, deadline, scope) — not
-  on a razor-thin duration difference.
+**Duration and free time are Chain's concern, not the ranking model's:**
+- The model being evaluated only ever sees one `Task` at a time (`score(task)`);
+  it never sees `free_time_minutes` or the other candidates (see "What the
+  ranking model actually sees" above). A scenario whose correct answer depends
+  on "task A fits the window and task B doesn't" grades the model on information
+  it structurally cannot use.
+- `effort_estimate` and `free_time_minutes` still belong in every scenario —
+  Chain needs them downstream — but the `expected_reason` must rest on per-task
+  signals: a hard deadline, `blocked`, `tier`, or an importance/scope judgment
+  from the description ("production-impacting", "outside a Junior's decision
+  scope", "unblocks a teammate").
+- Never phrase `expected_reason` as "fits the N-minute window" or "needs Nx the
+  available time". If duration is the *only* thing separating the correct task
+  from a distractor, the scenario is testing the wrong layer — redesign it so a
+  per-task signal decides it.
 
 **`blocked` as a distractor:**
 - Only mark a task `blocked` when its `description` states a concrete
@@ -187,7 +214,7 @@ contradict each other."
 
 **One dimension per scenario, no repeats within your role:**
 - Each of your 4-6 scenarios should test a genuinely different tradeoff
-  (deadline-vs-duration, a `blocked` distractor, a `constraints` entry that
+  (hard deadline vs. none, a `blocked` distractor, a `constraints` entry that
   rules an option out, a seniority-scoped call, a tier-vs-role mismatch...).
   If two of your scenarios are the same test with different flavor text, cut one.
 

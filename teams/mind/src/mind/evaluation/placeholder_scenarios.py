@@ -22,23 +22,25 @@ _RAW_SCENARIOS: list[dict] = [
                 "task_id": "task_A",
                 "title": "Fix failing CI test",
                 "description": "A unit test regressed on main and is blocking every PR.",
-                "estimated_duration_minutes": 15,
+                "effort_estimate": 15,
                 "tier": "operational",
                 "blocked": False,
+                "parent_task_id": None,
             },
             {
                 "task_id": "task_B",
                 "title": "Write design doc for Q3 feature",
                 "description": "Draft architecture doc for a feature planned for next quarter.",
-                "estimated_duration_minutes": 120,
+                "effort_estimate": 120,
                 "tier": "tactical",
                 "blocked": False,
+                "parent_task_id": None,
             },
         ],
         "expected_top_task_id": "task_A",
         "expected_reason": (
-            "task_A is a 15-minute operational fix that unblocks every PR and fits "
-            "the 30-minute window; task_B needs 120 minutes and is not urgent."
+            "task_A is an operational fix that is unblocking every PR right now; "
+            "task_B is next-quarter design work with no deadline."
         ),
         "source": {"type": "synthetic"},
         "mentor_approved": False,
@@ -56,23 +58,25 @@ _RAW_SCENARIOS: list[dict] = [
                 "task_id": "task_C",
                 "title": "Unblock teammate waiting on approval",
                 "description": "A PR is stuck waiting for the manager's review, blocking a teammate.",
-                "estimated_duration_minutes": 10,
+                "effort_estimate": 10,
                 "tier": "tactical",
                 "blocked": False,
+                "parent_task_id": None,
             },
             {
                 "task_id": "task_D",
                 "title": "Long-term roadmap planning",
                 "description": "Quarterly roadmap planning session prep.",
-                "estimated_duration_minutes": 180,
+                "effort_estimate": 180,
                 "tier": "strategic",
                 "blocked": False,
+                "parent_task_id": None,
             },
         ],
         "expected_top_task_id": "task_C",
         "expected_reason": (
-            "task_C is a 10-minute review that fits the 20-minute window and unblocks "
-            "a teammate; task_D needs 180 minutes and has no near-term deadline."
+            "task_C is directly blocking a teammate from merging right now; "
+            "task_D is roadmap prep with no deadline and nothing waiting on it."
         ),
         "source": {"type": "synthetic"},
         "mentor_approved": False,

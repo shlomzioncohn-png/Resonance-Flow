@@ -13,22 +13,24 @@
       "title": "Continue implementing OAuth refresh-token flow",
       "description": "Ongoing implementation of the refresh-token exchange; currently waiting on the security team to approve the token-rotation design before more code can be written.",
       "deadline": null,
-      "estimated_duration_minutes": 60,
+      "effort_estimate": 60,
       "tier": "tactical",
-      "blocked": true
+      "blocked": true,
+      "parent_task_id": null
     },
     {
       "task_id": "task_pr_review",
       "title": "Review PR #512: payments retry logic",
       "description": "A teammate's pull request implementing retry logic for failed payment webhooks is waiting for review; they are blocked on merging until it is approved.",
       "deadline": "2026-08-25T14:00:00",
-      "estimated_duration_minutes": 20,
+      "effort_estimate": 20,
       "tier": "operational",
-      "blocked": false
+      "blocked": false,
+      "parent_task_id": null
     }
   ],
   "expected_top_task_id": "task_pr_review",
-  "expected_reason": "task_oauth_flow is blocked on external security-team approval and cannot be worked on right now regardless of free time; task_pr_review fits the 25-minute window, has a deadline an hour away, and unblocks a teammate.",
+  "expected_reason": "task_oauth_flow is blocked on external security-team approval and cannot be worked on right now; task_pr_review is unblocked, has a deadline an hour away, and unblocks a teammate who cannot merge until it is approved.",
   "source": { "type": "synthetic", "source_detail": null },
   "mentor_approved": false
 }

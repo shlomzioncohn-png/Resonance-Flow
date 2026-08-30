@@ -13,22 +13,24 @@
       "title": "Review and approve the auth microservice redesign",
       "description": "A senior engineer has proposed a redesign of the authentication microservice's architecture and is asking the team for sign-off before implementation starts.",
       "deadline": null,
-      "estimated_duration_minutes": 45,
+      "effort_estimate": 45,
       "tier": "strategic",
-      "blocked": false
+      "blocked": false,
+      "parent_task_id": null
     },
     {
       "task_id": "task_logging_bugfix",
       "title": "Fix incorrect log level in notification service",
       "description": "A notification-service warning is being logged at error level, polluting the on-call error dashboard; low severity but easy to fix.",
       "deadline": null,
-      "estimated_duration_minutes": 30,
+      "effort_estimate": 30,
       "tier": "operational",
-      "blocked": false
+      "blocked": false,
+      "parent_task_id": null
     }
   ],
   "expected_top_task_id": "task_logging_bugfix",
-  "expected_reason": "Both tasks fit inside the 60-minute window and neither has a deadline, so duration alone doesn't decide this one. Approving a strategic architecture redesign is outside a Junior developer's decision scope regardless of free time; the operational logging fix is squarely within it.",
+  "expected_reason": "Neither task has a deadline or is blocked. Signing off on a strategic architecture redesign is outside a Junior developer's decision scope; the operational logging fix is squarely within it, so it is the task this persona should pick up.",
   "source": { "type": "synthetic", "source_detail": null },
   "mentor_approved": false
 }

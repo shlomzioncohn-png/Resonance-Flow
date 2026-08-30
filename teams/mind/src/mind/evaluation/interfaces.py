@@ -72,9 +72,15 @@ class Task(BaseModel):
             "Evaluated against context.current_datetime."
         ),
     )
-    estimated_duration_minutes: int = Field(
+    effort_estimate: int = Field(
         ge=1,
-        description="How long the task takes. Compared directly against context.free_time_minutes.",
+        description=(
+            "Effort estimate for the task, in minutes — the eval set's concrete form "
+            "of the canonical Task.effort_estimate (owned by Inbox). Recorded for "
+            "Chain's downstream constraint-satisfaction step; the ranking model sees "
+            "it, but a scenario's correct answer must not hinge on comparing it to "
+            "context.free_time_minutes (see eval/personas/README.md)."
+        ),
     )
     tier: Tier = Field(
         description=(
@@ -90,6 +96,18 @@ class Task(BaseModel):
             "on something outside this scenario). A blocked task should generally not "
             "be the expected_top_task_id."
         )
+    )
+    parent_task_id: str | None = Field(
+        default=None,
+        description=(
+            "The task_id of this task's parent in the cross-tier organizational "
+            "hierarchy (a developer task under a manager task, etc.), matching the "
+            "canonical Task.parent_task_id. Points outside this scenario, so it is "
+            "not cross-referenced here. Reserved for the week-7 hierarchical "
+            "value-propagation evaluation; null in every scenario until then. This "
+            "is NOT the old same-tier `dependencies` array — that was removed "
+            "deliberately and is not coming back."
+        ),
     )
 
 
@@ -213,9 +231,11 @@ class PersonaEvaluationScenario(BaseModel):
     expected_reason: str = Field(
         min_length=20,
         description=(
-            "Short, checkable, data-grounded explanation of why expected_top_task_id "
-            "is correct, referencing concrete fields (deadline, free_time_minutes, "
-            "blocked, tier...). Not a vague preference statement."
+            "Short, checkable explanation of why expected_top_task_id is correct, "
+            "grounded in per-task signals the ranking model can actually see: a hard "
+            "deadline, blocked, tier, or an importance/scope judgment from the "
+            "description. Must NOT hinge on context.free_time_minutes or a duration "
+            "comparison — that is Chain's concern, not the ranking model's."
         ),
     )
     source: Source

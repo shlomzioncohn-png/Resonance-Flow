@@ -8,7 +8,7 @@ from mind.evaluation.harness import run
 from mind.evaluation.personas import PersonaSchemaError, load_personas, validate_personas
 
 
-def main():
+def main() -> None:
     parser = argparse.ArgumentParser(description="Run evaluation harness on ranking models.")
     parser.add_argument("--model", type=str, default="dummy", help="Model to evaluate. (e.g. dummy)")
     parser.add_argument(

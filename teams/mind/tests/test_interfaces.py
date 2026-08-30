@@ -14,7 +14,7 @@ def test_dummy_model_score_returns_float():
         task_id="task_A",
         title="Review PR",
         description="Code review for the auth refactor",
-        estimated_duration_minutes=20,
+        effort_estimate=20,
         tier="operational",
         blocked=False,
     )
@@ -36,7 +36,7 @@ def _scenario_kwargs(**overrides):
                 "task_id": "task_A",
                 "title": "Doc",
                 "description": "Long-form design doc",
-                "estimated_duration_minutes": 120,
+                "effort_estimate": 120,
                 "tier": "strategic",
                 "blocked": False,
             },
@@ -44,13 +44,13 @@ def _scenario_kwargs(**overrides):
                 "task_id": "task_B",
                 "title": "Review PR #482",
                 "description": "Auth refactor review, deadline today",
-                "estimated_duration_minutes": 20,
+                "effort_estimate": 20,
                 "tier": "operational",
                 "blocked": False,
             },
         ],
         "expected_top_task_id": "task_B",
-        "expected_reason": "Task B fits the 30-minute window and has a same-day deadline.",
+        "expected_reason": "Task B has a same-day deadline and Task A has none, so Task B is the pick.",
         "source": {"type": "synthetic"},
         "mentor_approved": False,
     }
@@ -89,3 +89,15 @@ def test_scenario_model_requires_at_least_two_tasks():
     kwargs["tasks"] = kwargs["tasks"][:1]
     with pytest.raises(ValidationError):
         PersonaEvaluationScenario.model_validate(kwargs)
+
+
+def test_task_parent_task_id_defaults_to_none_when_omitted():
+    scenario = PersonaEvaluationScenario.model_validate(_scenario_kwargs())
+    assert all(task.parent_task_id is None for task in scenario.tasks)
+
+
+def test_task_accepts_explicit_parent_task_id():
+    kwargs = _scenario_kwargs()
+    kwargs["tasks"][0]["parent_task_id"] = "manager_task_42"
+    scenario = PersonaEvaluationScenario.model_validate(kwargs)
+    assert scenario.tasks[0].parent_task_id == "manager_task_42"

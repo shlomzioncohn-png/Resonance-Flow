@@ -35,5 +35,5 @@ eval/datasets/*
 !eval/datasets/*.manifest.json
 !eval/datasets/*.sha256
 
-#report
-src/report.json
+# Harness run output (mind.evaluation.run writes report.json to the cwd)
+report.json

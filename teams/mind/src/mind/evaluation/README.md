@@ -27,7 +27,10 @@ class RankingModel(Protocol):
 ```
 
 `Task` is a Pydantic model (`interfaces.py`) with these fields: `task_id`, `title`,
-`description`, `deadline`, `estimated_duration_minutes`, `tier`, `blocked`.
+`description`, `deadline`, `effort_estimate` (minutes; the eval set's form of the
+canonical `Task.effort_estimate`), `tier`, `blocked`, `parent_task_id` (nullable,
+reserved for the week-7 hierarchical-propagation eval). `score()` receives only a
+single `Task` — no persona, no context, no sibling tasks.
 
 The whole persona scenario schema now lives in `interfaces.py` as Pydantic models
 (`PersonaEvaluationScenario` and its `Persona` / `Context` / `Task` / `Source`

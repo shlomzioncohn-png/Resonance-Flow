@@ -13,22 +13,24 @@
       "title": "Compile weekly status update for the higher manager",
       "description": "Pull together this week's team status into the standard update format, due before end of day.",
       "deadline": "2026-08-25T17:00:00",
-      "estimated_duration_minutes": 15,
+      "effort_estimate": 15,
       "tier": "operational",
-      "blocked": false
+      "blocked": false,
+      "parent_task_id": null
     },
     {
       "task_id": "task_roadmap_planning",
       "title": "Prepare Q4 roadmap planning session",
       "description": "Draft the discussion materials for a full three-month roadmap planning session; substantial, unscheduled prep work.",
       "deadline": null,
-      "estimated_duration_minutes": 120,
+      "effort_estimate": 120,
       "tier": "strategic",
-      "blocked": false
+      "blocked": false,
+      "parent_task_id": null
     }
   ],
   "expected_top_task_id": "task_status_report",
-  "expected_reason": "task_status_report fits the 20-minute window and is due by end of day; task_roadmap_planning needs 120 minutes, six times what's available, and has no deadline forcing it today. Tier (operational vs. strategic) doesn't decide this one — fit and deadline do.",
+  "expected_reason": "task_status_report is due before end of day; task_roadmap_planning has no deadline forcing it now. Tier (operational vs. strategic) does not decide this one — the same-day deadline does.",
   "source": { "type": "synthetic", "source_detail": null },
   "mentor_approved": false
 }
