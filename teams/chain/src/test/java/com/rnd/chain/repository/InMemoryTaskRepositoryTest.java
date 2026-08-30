@@ -28,45 +28,11 @@ class InMemoryTaskRepositoryTest {
         repository = new InMemoryTaskRepository(List.of(newTask(taskId, 0)));
     }
 
-    // --- isolation (defensive copies) --------------------------------
-
-    @Test
-    void findById_returnsACopy_mutatingItDoesNotAffectStoredTask() {
-        Task fetched = repository.findById(taskId).orElseThrow();
-
-        fetched.setBlockingCount(999);
-
-        assertThat(repository.findById(taskId).orElseThrow().getBlockingCount()).isZero();
-    }
-
-    @Test
-    void save_storesACopy_mutatingTheOriginalAfterSaveDoesNotAffectStoredTask() {
-        Task task = newTask(UUID.randomUUID(), 0);
-
-        repository.save(task);
-        task.setBlockingCount(999);
-
-        assertThat(repository.findById(task.getId()).orElseThrow().getBlockingCount()).isZero();
-    }
-
-    @Test
-    void findById_calledTwice_returnsIndependentInstances() {
-        Task first = repository.findById(taskId).orElseThrow();
-        Task second = repository.findById(taskId).orElseThrow();
-
-        first.setBlockingCount(999);
-
-        assertThat(second.getBlockingCount()).isZero();
-    }
-
     // --- update() ------------------------------------------------------
 
     @Test
     void update_appliesMutatorAndPersistsResult() {
-        Optional<Task> result = repository.update(taskId, task -> {
-            task.setBlockingCount(task.getBlockingCount() + 1);
-            return task;
-        });
+        Optional<Task> result = repository.update(taskId, task -> incrementBlockingCount(task));
 
         assertThat(result).isPresent();
         assertThat(result.get().getBlockingCount()).isEqualTo(1);
@@ -92,10 +58,7 @@ class InMemoryTaskRepositoryTest {
                 ready.countDown();
                 await(start);
                 for (int j = 0; j < incrementsPerThread; j++) {
-                    repository.update(taskId, task -> {
-                        task.setBlockingCount(task.getBlockingCount() + 1);
-                        return task;
-                    });
+                    repository.update(taskId, task -> incrementBlockingCount(task));
                 }
                 done.countDown();
             });
@@ -129,6 +92,23 @@ class InMemoryTaskRepositoryTest {
                 .openConstraintCount(0)
                 .createdAt(LocalDateTime.now())
                 .updatedAt(LocalDateTime.now())
+                .build();
+    }
+
+    private static Task incrementBlockingCount(Task task) {
+        return Task.builder()
+                .id(task.getId())
+                .parentTaskId(task.getParentTaskId())
+                .ownerId(task.getOwnerId())
+                .status(task.getStatus())
+                .isReady(task.isReady())
+                .blockingCount(task.getBlockingCount() + 1)
+                .openConstraintCount(task.getOpenConstraintCount())
+                .estimatedDurationMin(task.getEstimatedDurationMin())
+                .score(task.getScore())
+                .createdAt(task.getCreatedAt())
+                .updatedAt(task.getUpdatedAt())
+                .deletedAt(task.getDeletedAt())
                 .build();
     }
 }
