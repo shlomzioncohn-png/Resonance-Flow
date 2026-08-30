@@ -1,6 +1,52 @@
 server:
   port: ${SERVER_PORT:8080}
 
+management:
+  endpoints:
+    web:
+      base-path: /
+      exposure:
+        include: health
+
 spring:
   application:
     name: bridge
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+    producer:
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.springframework.kafka.support.serializer.JsonSerializer
+
+minio:
+  endpoint: ${MINIO_ENDPOINT:http://localhost:9000}
+  access-key: ${MINIO_ACCESS_KEY:minioadmin}
+  secret-key: ${MINIO_SECRET_KEY:minioadmin}
+  bucket: ${MINIO_BUCKET:bridge-raw}
+
+bridge:
+  intake:
+    raw-landed-topic: ${BRIDGE_RAW_LANDED_TOPIC:bridge.raw.landed}
+    scoping:
+      allowed-domains:
+        - kamatech.org
+      allowed-keywords: [deploy, deadline, meeting, pr, review, task, urgent, project]
+    chat:
+      session-gap-minutes: 45
+    # Per-source fixture/real switch - see plan.md. Each source can go "real" independently;
+    # "real" beans throw UnsupportedOperationException until their connector is implemented.
+    email:
+      mode: fixture
+    drive:
+      mode: fixture
+    calendar:
+      mode: fixture
+    slack:
+      mode: fixture
+    whatsapp:
+      mode: fixture
+      # Only read when mode: real. See plan.md - there's no export API, so this directory is
+      # filled manually from WhatsApp's own "Export Chat" feature.
+      import-dir: ${BRIDGE_WHATSAPP_IMPORT_DIR:}
+      # Local time zone the exporting phone was set to - WhatsApp export timestamps carry no
+      # offset, so this must match the tenant, not be assumed to be UTC.
+      zone-id: ${BRIDGE_WHATSAPP_ZONE_ID:Asia/Jerusalem}

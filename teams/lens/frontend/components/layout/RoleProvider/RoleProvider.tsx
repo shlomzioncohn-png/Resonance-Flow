@@ -17,8 +17,15 @@ export function RoleProvider({ children }: { children: ReactNode }) {
   const [role, setRoleState] = useState<Role>(null)
 
   useEffect(() => {
+    // Deliberately setState-in-effect: this hydrates client-only persisted state
+    // (localStorage isn't available during SSR) without a hydration mismatch —
+    // the first client render still matches the server's (role=null), and only
+    // updates after mount. Moving this into a useState lazy initializer would
+    // read localStorage during hydration itself and reintroduce the mismatch
+    // this pattern exists to avoid.
     try {
       const stored = window.localStorage.getItem(STORAGE_KEY)
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       if (stored === 'manager' || stored === 'employee') setRoleState(stored)
     } catch {
       // localStorage unavailable — fall back to the in-memory default (no role)

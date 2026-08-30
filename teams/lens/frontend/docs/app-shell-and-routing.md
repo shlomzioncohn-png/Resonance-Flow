@@ -104,7 +104,8 @@ should follow once they call a real adapter instead of a mock.
    `components/layout/Sidebar/navConfig.tsx` (drill-down pages like
    `/team/:id` are intentionally left out of the nav — they're only reached by
    a link from another page).
-5. Run `npm run build` (typecheck + production build) before committing.
+5. Run `npm run lint` (accessibility, React, and Next.js rules) and `npm run
+   build` (typecheck + production build) before committing.
 
 ## Notes for the next contributor
 
