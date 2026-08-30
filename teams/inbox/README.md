@@ -118,6 +118,71 @@ docker exec inbox-kafka /opt/kafka/bin/kafka-topics.sh --bootstrap-server localh
 An empty list (no error) means Kafka is up and accepting connections. Once Kafka UI is open in
 the browser, its cluster page shows the broker as online — that's the simplest visual check.
 
+## Bridge task ingestion (Kafka)
+
+INBOX consumes structured-source task events published by BRIDGE on the single shared
+`bridge.structured.tasks` topic (all sources — GitHub, CRM, email, Slack, ... — publish to this one
+topic), validates them, and creates canonical `Task` rows.
+
+### One consumer for every platform
+
+There is no per-platform consumer, listener, validator or topic. A single `BridgeTaskConsumer`
+handles the whole ingestion path; the platform a task came from travels inside the event as
+`sourceType`, and is mapped straight onto the canonical `SourceType` enum.
+
+- **Reusable / shared infrastructure** (`messaging.kafka` package): `EventProcessingTemplate<T>`
+  drives the full pipeline — deserialize, validate, persist with retry, ack, and route failures to
+  `<topic>.errors` — plus `ErrorTopicPublisher`, the retry `RetryTemplate` bean and its
+  `KafkaRetryProperties`, and the `EventValidator<T>` / `EventValidationException` /
+  `TransientProcessingException` contracts. None of this knows anything about tasks or platforms.
+- **Task-specific, platform-agnostic** (`bridge.task` package): `BridgeTaskConsumer`,
+  `BridgeTaskEventDto`, `BridgeTaskEventValidator`, `BridgeTaskMapper`, and
+  `BridgeTaskPersistenceHandler` — the shared structured-task payload shape, its validation rules,
+  and how it maps to a `Task`. `BridgeTaskEventValidator` accepts any `sourceType` that is a
+  `SourceType` constant, so it is not tied to a particular platform.
+- **Adding a new source** (e.g. WhatsApp): add the constant to `SourceType` (and the DB enum), and
+  it flows through the existing consumer as-is — no new DTO, validator, mapper, topic or
+  `@KafkaListener`. Only a source whose payload genuinely differs from the shared structured-task
+  shape would need more than that.
+
+### Idempotency
+
+The idempotency key is `(organization_id, source_type, source_ref)`, where `source_ref` is the
+deterministic identifier BRIDGE assigns to the source record (e.g. a GitHub issue/PR reference) —
+not the Kafka message or the event's own `eventId` (which is only used as an audit correlation id
+and may differ across redeliveries of the same underlying record).
+
+A unique index (`uq_tasks_org_source_type_source_ref`) enforces this at the database level.
+`TaskService.createFromBridgeEvent` first checks for an existing task with that key; if two
+deliveries race past that check, the second insert fails with a unique-constraint violation, which
+`BridgeTaskPersistenceHandler` catches and resolves by looking up the row the other delivery just
+created (no new `Task` and no duplicate `Audit` row are ever produced). Redelivery of the same
+message therefore always converges on the single already-created task instead of failing or
+duplicating it.
+
+### Acknowledgment / offset commit
+
+The consumer factory uses `AckMode.MANUAL_IMMEDIATE`: the Kafka offset is committed only after
+`EventProcessingTemplate.process` finishes — i.e. after the task (and audit) are persisted, after a
+non-retryable failure has been published to `.errors`, or after retries are exhausted and the
+failure has been published to `.errors`. If the service crashes before that point (e.g. mid-retry),
+the offset was never committed, so the message is redelivered to the consumer group on restart.
+That redelivery is safe by construction: it goes through the same idempotency check described
+above, so it either creates the task (if the earlier attempt never actually persisted it) or is
+recognized as a duplicate and does nothing.
+
+### Failure handling
+
+- **Non-retryable** (malformed payload, validation failure): no DB write, no retry, message
+  published to `<original-topic>.errors`, offset acknowledged immediately.
+- **Transient technical failure** (`TransientProcessingException`, e.g. DB unavailable/timeout):
+  retried with configurable exponential backoff (`inbox.kafka.retry.*` / `INBOX_KAFKA_RETRY_*` env
+  vars); if all attempts fail, published to `.errors` and acknowledged.
+- **Unexpected failure** (anything not classified as either of the above — a bug, an unmapped
+  enum, a dangling foreign key, etc.): caught by the same template, published to `.errors` as
+  `UNEXPECTED_FAILURE` without being retried, and acknowledged — so a single bad or unanticipated
+  message can never block the partition indefinitely.
+
 ## Tests
 
 ```bash
