@@ -9,9 +9,10 @@ added later gets the standard shape for free, with no per-endpoint work.
 
 from __future__ import annotations
 
+import logging
 import time
 import uuid
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
@@ -27,9 +28,28 @@ from pydantic import BaseModel, Field
 # raised exception's MRO to find a handler.
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
+logger = logging.getLogger("mind.errors")
+# Logging itself is configured once, centrally, in api/main.py -- see the
+# comment there. This module just gets a logger and uses it.
+
+# The full set of error_code values MIND's API can return. Keep in sync
+# with the table in docs/API.md.
+ErrorCode = Literal[
+    "bad_request",
+    "unauthorized",
+    "forbidden",
+    "not_found",
+    "conflict",
+    "validation_error",
+    "rate_limited",
+    "internal_error",
+    "service_unavailable",
+    "error",  # fallback for a status code not in _STATUS_TO_CODE below
+]
+
 # error_code -> default HTTP status code it corresponds to.
 # Keep this in sync with the table in docs/API.md.
-_STATUS_TO_CODE = {
+_STATUS_TO_CODE: dict[int, ErrorCode] = {
     400: "bad_request",
     401: "unauthorized",
     403: "forbidden",
@@ -45,7 +65,7 @@ _STATUS_TO_CODE = {
 class ErrorResponse(BaseModel):
     """The body of every non-2xx response from MIND's API."""
 
-    error_code: str = Field(
+    error_code: ErrorCode = Field(
         ...,
         description=(
             "Stable, machine-readable identifier, e.g. 'not_found', "
@@ -82,12 +102,25 @@ class ErrorResponse(BaseModel):
     )
 
 
-def _code_for_status(status_code: int) -> str:
+def _code_for_status(status_code: int) -> ErrorCode:
     return _STATUS_TO_CODE.get(status_code, "error")
 
 
+def _request_id(request: Request) -> str:
+    """The request id to put on an error response.
+
+    Normally already set by main.py's request-id middleware for every
+    request; the fallback only matters if a handler below somehow runs
+    without that middleware (e.g. in an isolated test).
+    """
+    request_id = getattr(request.state, "request_id", None)
+    if request_id is None:
+        request_id = str(uuid.uuid4())
+    return request_id
+
+
 def _error_body(
-    error_code: str,
+    error_code: ErrorCode,
     message: str,
     request_id: str,
     details: dict[str, Any] | None = None,
@@ -107,7 +140,7 @@ def register_error_handlers(app: FastAPI) -> None:
     async def _http_exception_handler(
         request: Request, exc: StarletteHTTPException
     ) -> JSONResponse:
-        request_id = getattr(request.state, "request_id", str(uuid.uuid4()))
+        request_id = _request_id(request)
         message = exc.detail if isinstance(exc.detail, str) else "Request failed."
         return JSONResponse(
             status_code=exc.status_code,
@@ -122,7 +155,7 @@ def register_error_handlers(app: FastAPI) -> None:
     async def _validation_exception_handler(
         request: Request, exc: RequestValidationError
     ) -> JSONResponse:
-        request_id = getattr(request.state, "request_id", str(uuid.uuid4()))
+        request_id = _request_id(request)
         return JSONResponse(
             status_code=422,
             content=_error_body(
@@ -135,7 +168,15 @@ def register_error_handlers(app: FastAPI) -> None:
 
     @app.exception_handler(Exception)
     async def _unhandled_exception_handler(request: Request, exc: Exception) -> JSONResponse:
-        request_id = getattr(request.state, "request_id", str(uuid.uuid4()))
+        request_id = _request_id(request)
+        # The response body deliberately stays generic (never leaks the
+        # exception message, type, or a traceback to the caller) -- but
+        # the real cause still has to land *somewhere*, or request_id
+        # has nothing to correlate against. Log it server-side, tagged
+        # with the same request_id, with the full traceback.
+        logger.error(
+            "unhandled_exception request_id=%s path=%s", request_id, request.url.path, exc_info=exc
+        )
         return JSONResponse(
             status_code=500,
             content=_error_body(

@@ -80,3 +80,15 @@ def get_recent_calls(limit: int | None = None) -> list[ModelCallRecord]:
     with _lock:
         records = list(_records)
     return records[-limit:] if limit else records
+
+
+def _reset_for_tests() -> None:
+    """Clear every recorded call.
+
+    Test-only: _records is a module-level global, so without resetting
+    it between tests, one test's calls leak into the next -- see
+    tests/test_observability.py's autouse fixture, which calls this
+    before every test.
+    """
+    with _lock:
+        _records.clear()
