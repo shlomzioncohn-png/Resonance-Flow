@@ -26,6 +26,11 @@ public final class Event<T> {
         return new Event<>(UUID.randomUUID(), eventType, Instant.now(), sourceService, correlationId, payload);
     }
 
+    public static <T> Event<T> existing(UUID eventId, EventType eventType, Instant timestamp,
+                                        String sourceService, UUID correlationId, T payload) {
+        return new Event<>(eventId, eventType, timestamp, sourceService, correlationId, payload);
+    }
+
     public UUID getEventId() {
         return eventId;
     }

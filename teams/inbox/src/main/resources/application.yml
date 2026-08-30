@@ -21,7 +21,7 @@ spring:
       value-deserializer: org.apache.kafka.common.serialization.StringDeserializer
     producer:
       key-serializer: org.apache.kafka.common.serialization.StringSerializer
-      value-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.springframework.kafka.support.serializer.JsonSerializer
 
 inbox:
   kafka:
@@ -61,3 +61,4 @@ logging:
       max-file-size: ${LOG_MAX_FILE_SIZE:10MB}
       max-history: ${LOG_MAX_HISTORY_DAYS:14}
       total-size-cap: ${LOG_TOTAL_SIZE_CAP:500MB}
+
