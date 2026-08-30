@@ -12,6 +12,7 @@ import pytest
 
 from mind.embeddings import embed, upsert, search
 from mind.embeddings.config import PG_DSN, PG_TABLE
+from mind.embeddings.factory import get_store
 
 
 @pytest.fixture(autouse=True)
@@ -23,7 +24,15 @@ def clean_table():
     `hnsw.ef_search` tuned higher for better recall (see
     config.HNSW_EF_SEARCH), which makes search *more* likely to surface a
     genuinely-closer leftover row instead of quietly missing it.
+
+    `get_store()` runs first because on a genuinely fresh database (a
+    clean CI container, a first-time local setup) the table doesn't exist
+    yet -- nothing has called it before -- and `TRUNCATE` fails with
+    `UndefinedTable`. `get_store()` runs the same idempotent
+    `CREATE TABLE/INDEX IF NOT EXISTS` schema setup the real store uses,
+    so the table is guaranteed to exist before we try to empty it.
     """
+    get_store()
     conn = psycopg2.connect(PG_DSN)
     with conn, conn.cursor() as cur:
         cur.execute(f"TRUNCATE TABLE {PG_TABLE};")
