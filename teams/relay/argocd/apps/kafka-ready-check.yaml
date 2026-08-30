@@ -64,7 +64,7 @@ metadata:
     argocd.argoproj.io/sync-wave: "-1"
 spec:
   backoffLimit: 2
-  activeDeadlineSeconds: 280
+  activeDeadlineSeconds: 900
   template:
     spec:
       restartPolicy: Never
@@ -81,4 +81,4 @@ spec:
                 echo "waiting for kafka Deployment to exist..."
                 sleep 3
               done
-              kubectl wait --for=condition=available deployment/kafka -n kafka --timeout=260s
+              kubectl wait --for=condition=available deployment/kafka -n kafka --timeout=850s
