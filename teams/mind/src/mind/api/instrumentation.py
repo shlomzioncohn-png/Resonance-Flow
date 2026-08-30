@@ -26,9 +26,12 @@ import logging
 import threading
 import time
 from collections import deque
+from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass, field
-from typing import Any, Iterator
+from typing import Any
+
+from pydantic import BaseModel
 
 logger = logging.getLogger("mind.instrumentation")
 # uvicorn only attaches handlers to its own loggers, and the root
@@ -66,6 +69,15 @@ class Measurement:
         }
 
 
+class InstrumentationSummary(BaseModel):
+    """The body of GET /debug/instrumentation -- current aggregate stats."""
+
+    call_count: int
+    error_count: int
+    p95_duration_ms: float | None
+    cumulative_cost: float
+
+
 def _percentile(sorted_values: list[float], pct: float) -> float:
     """Linear-interpolation percentile over an already-sorted list."""
     if len(sorted_values) == 1:
@@ -81,6 +93,17 @@ def _percentile(sorted_values: list[float], pct: float) -> float:
 class _Aggregator:
     """Cumulative in-memory stats over recorded measurements.
 
+    call_count, error_count, and cumulative_cost are running totals
+    since the process started -- plain counters, incremented in
+    record() and never evicted, so they stay accurate no matter how
+    many calls happen. Only the duration samples used for p95 are kept
+    in a bounded deque: percentile needs *a* sample, not literally
+    every duration ever recorded, so bounding that one is fine -- but
+    bounding the totals themselves would silently make them "totals
+    over roughly the last N calls" instead, which is a very different
+    (and wrong) thing for a number meant to eventually track a real
+    cost budget.
+
     Minimal stand-in for the real monitoring Relay will build in week
     8 -- not a persistent metrics store (see team README "Open
     decisions"); this resets when the process restarts.
@@ -88,35 +111,37 @@ class _Aggregator:
 
     def __init__(self, maxlen: int = _MAX_IN_MEMORY_MEASUREMENTS) -> None:
         self._lock = threading.Lock()
-        self._measurements: deque[Measurement] = deque(maxlen=maxlen)
+        self._durations: deque[float] = deque(maxlen=maxlen)
+        self._call_count = 0
+        self._error_count = 0
+        self._cumulative_cost = 0.0
 
     def record(self, measurement: Measurement) -> None:
         with self._lock:
-            self._measurements.append(measurement)
+            self._durations.append(measurement.duration_ms)
+            self._call_count += 1
+            if measurement.status == "error":
+                self._error_count += 1
+            self._cumulative_cost += measurement.cost
 
-    def summary(self) -> dict[str, Any]:
+    def summary(self) -> InstrumentationSummary:
         with self._lock:
-            measurements = list(self._measurements)
+            durations = sorted(self._durations)
+            call_count = self._call_count
+            error_count = self._error_count
+            cumulative_cost = self._cumulative_cost
 
-        count = len(measurements)
-        if count == 0:
-            return {
-                "call_count": 0,
-                "error_count": 0,
-                "p95_duration_ms": None,
-                "cumulative_cost": 0.0,
-            }
+        if call_count == 0:
+            return InstrumentationSummary(
+                call_count=0, error_count=0, p95_duration_ms=None, cumulative_cost=0.0
+            )
 
-        durations = sorted(m.duration_ms for m in measurements)
-        error_count = sum(1 for m in measurements if m.status == "error")
-        cumulative_cost = sum(m.cost for m in measurements)
-
-        return {
-            "call_count": count,
-            "error_count": error_count,
-            "p95_duration_ms": round(_percentile(durations, 95), 3),
-            "cumulative_cost": round(cumulative_cost, 6),
-        }
+        return InstrumentationSummary(
+            call_count=call_count,
+            error_count=error_count,
+            p95_duration_ms=round(_percentile(durations, 95), 3),
+            cumulative_cost=round(cumulative_cost, 6),
+        )
 
 
 _aggregator = _Aggregator()
@@ -165,13 +190,11 @@ def instrumented_call(name: str, cost: float = 0.0) -> Iterator[None]:
         raise
     finally:
         duration_ms = (time.perf_counter() - start) * 1000
-        measurement = Measurement(
-            call_name=name, duration_ms=duration_ms, cost=cost, status=status
-        )
+        measurement = Measurement(call_name=name, duration_ms=duration_ms, cost=cost, status=status)
         _aggregator.record(measurement)
         logger.info(json.dumps(measurement.as_log_dict()))
 
 
-def instrumentation_summary() -> dict[str, Any]:
+def instrumentation_summary() -> InstrumentationSummary:
     """Current aggregate stats -- what GET /debug/instrumentation returns."""
     return _aggregator.summary()
