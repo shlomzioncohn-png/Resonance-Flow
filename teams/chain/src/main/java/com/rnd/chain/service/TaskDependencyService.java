@@ -34,6 +34,18 @@ public class TaskDependencyService {
     /**
      * Creates a "taskId depends on dependsOnTaskId" edge.
      *
+     * <p>The existence check and the edge creation are atomic (see
+     * {@link TaskDependencyRepository#save}): concurrent callers racing to
+     * add the same edge are guaranteed a deterministic outcome - exactly
+     * one succeeds, the rest get {@link DuplicateDependencyException}.
+     *
+     * <p><b>Known assumption, not fixed here:</b> {@link #requireTaskExists}
+     * runs before the atomic {@code save}, but task existence is checked
+     * against a different repository ({@link TaskRepository}) than the one
+     * the edge is saved to. If a task is concurrently soft-deleted between
+     * that check and the save, this is a TOCTOU window this method does not
+     * close.
+     *
      * @throws InvalidDependencyException  if taskId equals dependsOnTaskId
      * @throws TaskNotFoundException       if either task does not exist
      * @throws DuplicateDependencyException if the edge already exists
@@ -50,14 +62,9 @@ public class TaskDependencyService {
         requireTaskExists(taskId);
         requireTaskExists(dependsOnTaskId);
 
-        boolean alreadyExists = taskDependencyRepository.findByTaskId(taskId).stream()
-                .anyMatch(edge -> edge.getDependsOnTaskId().equals(dependsOnTaskId));
-        if (alreadyExists) {
-            throw new DuplicateDependencyException(
-                    "Task " + taskId + " already depends on " + dependsOnTaskId);
-        }
-
-        return taskDependencyRepository.save(new TaskDependency(taskId, dependsOnTaskId));
+        return taskDependencyRepository.save(new TaskDependency(taskId, dependsOnTaskId))
+                .orElseThrow(() -> new DuplicateDependencyException(
+                        "Task " + taskId + " already depends on " + dependsOnTaskId));
     }
 
     /**
@@ -69,14 +76,11 @@ public class TaskDependencyService {
         Objects.requireNonNull(taskId, "taskId must not be null");
         Objects.requireNonNull(dependsOnTaskId, "dependsOnTaskId must not be null");
 
-        boolean exists = taskDependencyRepository.findByTaskId(taskId).stream()
-                .anyMatch(edge -> edge.getDependsOnTaskId().equals(dependsOnTaskId));
-        if (!exists) {
+        boolean removed = taskDependencyRepository.delete(taskId, dependsOnTaskId);
+        if (!removed) {
             throw new DependencyNotFoundException(
                     "No dependency from " + taskId + " to " + dependsOnTaskId);
         }
-
-        taskDependencyRepository.delete(taskId, dependsOnTaskId);
     }
 
     /**

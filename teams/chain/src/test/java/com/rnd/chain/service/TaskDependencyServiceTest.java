@@ -16,6 +16,11 @@ import org.junit.jupiter.api.Test;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.UUID;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -82,6 +87,26 @@ class TaskDependencyServiceTest {
                 .isInstanceOf(DuplicateDependencyException.class);
     }
 
+    @Test
+    void addDependency_underConcurrentDuplicateAttempts_succeedsExactlyOnce() throws InterruptedException {
+        int threadCount = 20;
+        AtomicInteger successes = new AtomicInteger();
+        AtomicInteger duplicateRejections = new AtomicInteger();
+
+        runConcurrently(threadCount, () -> {
+            try {
+                service.addDependency(taskA, taskB);
+                successes.incrementAndGet();
+            } catch (DuplicateDependencyException e) {
+                duplicateRejections.incrementAndGet();
+            }
+        });
+
+        assertThat(successes.get()).isEqualTo(1);
+        assertThat(duplicateRejections.get()).isEqualTo(threadCount - 1);
+        assertThat(service.getDependencies(taskA)).containsExactly(taskB);
+    }
+
     // --- removeDependency ------------------------------------------------
 
     @Test
@@ -98,6 +123,27 @@ class TaskDependencyServiceTest {
     void removeDependency_rejectsWhenEdgeDoesNotExist() {
         assertThatThrownBy(() -> service.removeDependency(taskA, taskB))
                 .isInstanceOf(DependencyNotFoundException.class);
+    }
+
+    @Test
+    void removeDependency_underConcurrentDuplicateAttempts_succeedsExactlyOnce() throws InterruptedException {
+        service.addDependency(taskA, taskB);
+        int threadCount = 20;
+        AtomicInteger successes = new AtomicInteger();
+        AtomicInteger notFoundRejections = new AtomicInteger();
+
+        runConcurrently(threadCount, () -> {
+            try {
+                service.removeDependency(taskA, taskB);
+                successes.incrementAndGet();
+            } catch (DependencyNotFoundException e) {
+                notFoundRejections.incrementAndGet();
+            }
+        });
+
+        assertThat(successes.get()).isEqualTo(1);
+        assertThat(notFoundRejections.get()).isEqualTo(threadCount - 1);
+        assertThat(service.getDependencies(taskA)).isEmpty();
     }
 
     // --- getDependencies / getDependents ----------------------------------
@@ -137,6 +183,36 @@ class TaskDependencyServiceTest {
 
         assertThat(service.getDependencies(taskA)).containsExactlyInAnyOrder(taskB, taskC);
         assertThat(service.getDependents(taskA)).containsExactly(taskD);
+    }
+
+    private static void runConcurrently(int threadCount, Runnable task) throws InterruptedException {
+        ExecutorService pool = Executors.newFixedThreadPool(threadCount);
+        CountDownLatch ready = new CountDownLatch(threadCount);
+        CountDownLatch start = new CountDownLatch(1);
+        CountDownLatch done = new CountDownLatch(threadCount);
+
+        for (int i = 0; i < threadCount; i++) {
+            pool.submit(() -> {
+                ready.countDown();
+                await(start);
+                task.run();
+                done.countDown();
+            });
+        }
+
+        ready.await(5, TimeUnit.SECONDS);
+        start.countDown();
+        done.await(10, TimeUnit.SECONDS);
+        pool.shutdown();
+    }
+
+    private static void await(CountDownLatch latch) {
+        try {
+            latch.await();
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new RuntimeException(e);
+        }
     }
 
     private static Task newTask(UUID id) {

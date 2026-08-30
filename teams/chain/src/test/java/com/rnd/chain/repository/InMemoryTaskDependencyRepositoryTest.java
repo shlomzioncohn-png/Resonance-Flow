@@ -5,7 +5,14 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.IntConsumer;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -34,8 +41,9 @@ class InMemoryTaskDependencyRepositoryTest {
 
     @Test
     void save_persistsEdge_retrievableFromBothSides() {
-        repository.save(new TaskDependency(a, b));
+        Optional<TaskDependency> result = repository.save(new TaskDependency(a, b));
 
+        assertThat(result).contains(new TaskDependency(a, b));
         assertThat(repository.findByTaskId(a))
                 .extracting(TaskDependency::getDependsOnTaskId)
                 .containsExactly(b);
@@ -46,9 +54,11 @@ class InMemoryTaskDependencyRepositoryTest {
 
     @Test
     void save_isIdempotent_forTheSameEdgeSavedTwice() {
-        repository.save(new TaskDependency(a, b));
-        repository.save(new TaskDependency(a, b));
+        Optional<TaskDependency> first = repository.save(new TaskDependency(a, b));
+        Optional<TaskDependency> second = repository.save(new TaskDependency(a, b));
 
+        assertThat(first).isPresent();
+        assertThat(second).isEmpty();
         assertThat(repository.findByTaskId(a)).hasSize(1);
     }
 
@@ -63,19 +73,21 @@ class InMemoryTaskDependencyRepositoryTest {
     }
 
     @Test
-    void delete_removesEdge() {
+    void delete_removesEdge_andReturnsTrue() {
         repository.save(new TaskDependency(a, b));
 
-        repository.delete(a, b);
+        boolean removed = repository.delete(a, b);
 
+        assertThat(removed).isTrue();
         assertThat(repository.findByTaskId(a)).isEmpty();
         assertThat(repository.findByDependsOnTaskId(b)).isEmpty();
     }
 
     @Test
-    void delete_onEdgeThatDoesNotExist_isANoOp() {
-        repository.delete(a, b);
+    void delete_onEdgeThatDoesNotExist_isANoOp_andReturnsFalse() {
+        boolean removed = repository.delete(a, b);
 
+        assertThat(removed).isFalse();
         assertThat(repository.findByTaskId(a)).isEmpty();
     }
 
@@ -89,5 +101,120 @@ class InMemoryTaskDependencyRepositoryTest {
         assertThat(repository.findByTaskId(a))
                 .extracting(TaskDependency::getDependsOnTaskId)
                 .containsExactly(c);
+    }
+
+    // --- dual-map consistency invariant ---------------------------------
+
+    @Test
+    void save_thenDelete_keepsBothAdjacencyMapsConsistent() {
+        repository.save(new TaskDependency(a, b));
+
+        assertThat(repository.findByTaskId(a))
+                .extracting(TaskDependency::getDependsOnTaskId)
+                .containsExactly(b);
+        assertThat(repository.findByDependsOnTaskId(b))
+                .extracting(TaskDependency::getTaskId)
+                .containsExactly(a);
+
+        repository.delete(a, b);
+
+        assertThat(repository.findByTaskId(a)).isEmpty();
+        assertThat(repository.findByDependsOnTaskId(b)).isEmpty();
+    }
+
+    // --- concurrency -----------------------------------------------------
+
+    @Test
+    void save_underConcurrentDuplicateAttempts_succeedsExactlyOnce() throws InterruptedException {
+        int threadCount = 20;
+        AtomicInteger successes = new AtomicInteger();
+        AtomicInteger noOps = new AtomicInteger();
+
+        runConcurrently(threadCount, () -> {
+            Optional<TaskDependency> result = repository.save(new TaskDependency(a, b));
+            if (result.isPresent()) {
+                successes.incrementAndGet();
+            } else {
+                noOps.incrementAndGet();
+            }
+        });
+
+        assertThat(successes.get()).isEqualTo(1);
+        assertThat(noOps.get()).isEqualTo(threadCount - 1);
+        assertThat(repository.findByTaskId(a))
+                .extracting(TaskDependency::getDependsOnTaskId)
+                .containsExactly(b);
+    }
+
+    @Test
+    void delete_underConcurrentDuplicateAttempts_succeedsExactlyOnce() throws InterruptedException {
+        repository.save(new TaskDependency(a, b));
+        int threadCount = 20;
+        AtomicInteger successes = new AtomicInteger();
+        AtomicInteger noOps = new AtomicInteger();
+
+        runConcurrently(threadCount, () -> {
+            boolean removed = repository.delete(a, b);
+            if (removed) {
+                successes.incrementAndGet();
+            } else {
+                noOps.incrementAndGet();
+            }
+        });
+
+        assertThat(successes.get()).isEqualTo(1);
+        assertThat(noOps.get()).isEqualTo(threadCount - 1);
+        assertThat(repository.findByTaskId(a)).isEmpty();
+    }
+
+    @Test
+    void save_concurrentDistinctEdgesWithSameTaskId_hasNoLostUpdates() throws InterruptedException {
+        int edgeCount = 50;
+        UUID[] dependsOnIds = new UUID[edgeCount];
+        for (int i = 0; i < edgeCount; i++) {
+            dependsOnIds[i] = UUID.randomUUID();
+        }
+
+        runConcurrently(edgeCount, index -> repository.save(new TaskDependency(a, dependsOnIds[index])));
+
+        assertThat(repository.findByTaskId(a))
+                .extracting(TaskDependency::getDependsOnTaskId)
+                .containsExactlyInAnyOrder(dependsOnIds);
+    }
+
+    private static void runConcurrently(int threadCount, Runnable task) throws InterruptedException {
+        runConcurrently(threadCount, index -> task.run());
+    }
+
+    private static void runConcurrently(int threadCount, IntConsumer indexedTask)
+            throws InterruptedException {
+        ExecutorService pool = Executors.newFixedThreadPool(threadCount);
+        CountDownLatch ready = new CountDownLatch(threadCount);
+        CountDownLatch start = new CountDownLatch(1);
+        CountDownLatch done = new CountDownLatch(threadCount);
+
+        for (int i = 0; i < threadCount; i++) {
+            int index = i;
+            pool.submit(() -> {
+                ready.countDown();
+                await(start);
+                indexedTask.accept(index);
+                done.countDown();
+            });
+        }
+
+        ready.await(5, TimeUnit.SECONDS);
+        start.countDown();
+        done.await(10, TimeUnit.SECONDS);
+        pool.shutdown();
+    }
+
+    private static void await(CountDownLatch latch) {
+        try {
+            latch.await();
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new RuntimeException(e);
+        }
     }
 }
