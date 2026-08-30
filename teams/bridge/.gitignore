@@ -5,3 +5,5 @@ target/
 .vscode/
 .env
 .DS_Store
+application-local.yml
+application-local.properties
