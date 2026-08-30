@@ -32,7 +32,11 @@ spec:
         {{- end }}
 
     spec:
-      {{- with $.Values.imagePullSecrets }}
+      {{- $imagePullSecrets := $.Values.imagePullSecrets }}
+      {{- if $.Values.imagePullSecret.create }}
+      {{- $imagePullSecrets = append $imagePullSecrets (dict "name" (printf "%s-ghcr-pull" (include "resonance-flow.fullname" $))) }}
+      {{- end }}
+      {{- with $imagePullSecrets }}
       imagePullSecrets:
         {{- toYaml . | nindent 8 }}
       {{- end }}

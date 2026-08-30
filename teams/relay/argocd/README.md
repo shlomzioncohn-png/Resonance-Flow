@@ -41,6 +41,12 @@ same Helm release.
 Note: `resonance-flow/` is a chart shared across all teams - coordinate
 chart/template changes with its owner rather than editing it unilaterally.
 
+If you're pulling images from private GHCR packages on your own cluster
+(e.g. local `kind`), see
+[`resonance-flow/README.md`](../../../resonance-flow/README.md#local-image-pull-authentication)
+for how to wire up a personal PAT - the chart creates the pull secret
+for you.
+
 ## Known limitation
 
 All components render from the *same* Helm release into the *same*
