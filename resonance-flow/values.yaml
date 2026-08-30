@@ -1,0 +1,304 @@
+# Default values for resonance-flow.
+
+imagePullSecrets: []
+nameOverride: ""
+fullnameOverride: ""
+serviceAccount:
+  create: true
+  automount: true
+  annotations: {}
+  name: ""
+podAnnotations: {}
+podLabels: {}
+podSecurityContext: {}
+securityContext: {}
+# נשאר זמנית בשביל templates ישנים שעדיין משתמשים ב-.Values.service
+service:
+  type: ClusterIP
+  port: 8082
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+  hosts:
+    - host: chart-example.local
+      paths:
+        - path: /
+          pathType: ImplementationSpecific
+  tls: []
+httpRoute:
+  enabled: false
+  annotations: {}
+  parentRefs:
+    - name: gateway
+      sectionName: http
+  hostnames:
+    - chart-example.local
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /headers
+autoscaling:
+  enabled: false
+  minReplicas: 1
+  maxReplicas: 100
+  targetCPUUtilizationPercentage: 80
+volumes: []
+volumeMounts: []
+nodeSelector: {}
+tolerations: []
+affinity: {}
+components:
+  mind:
+    replicaCount: 1
+    image:
+      repository: "ghcr.io/kamatechorg/resonance-flow/mind"
+      pullPolicy: IfNotPresent
+      tag: "22a8e01"
+    containerPort: 8000
+    service:
+      type: ClusterIP
+      port: 80
+    resources:
+      requests:
+        cpu: 100m
+        memory: 256Mi
+      limits:
+        cpu: 500m
+        memory: 512Mi
+    startupProbe:
+      httpGet:
+        path: /health
+        port: http
+      periodSeconds: 5
+      failureThreshold: 40
+    livenessProbe:
+      httpGet:
+        path: /health
+        port: http
+      periodSeconds: 10
+      failureThreshold: 3
+    readinessProbe:
+      httpGet:
+        path: /health
+        port: http
+      periodSeconds: 5
+      failureThreshold: 3
+    env: {}
+  lens-bff:
+    replicaCount: 1
+    image:
+      repository: "ghcr.io/kamatechorg/resonance-flow/lens-bff"
+      pullPolicy: IfNotPresent
+      tag: "placeholder"
+    containerPort: 8082
+    service:
+      type: ClusterIP
+      port: 80
+    resources:
+      requests:
+        cpu: 100m
+        memory: 256Mi
+      limits:
+        cpu: 500m
+        memory: 512Mi
+    startupProbe:
+      httpGet:
+        path: /health
+        port: http
+      periodSeconds: 5
+      failureThreshold: 40
+    livenessProbe:
+      httpGet:
+        path: /health
+        port: http
+      periodSeconds: 10
+      failureThreshold: 3
+    readinessProbe:
+      httpGet:
+        path: /health
+        port: http
+      periodSeconds: 5
+      failureThreshold: 3
+    env: {}
+  bridge:
+    replicaCount: 1
+    image:
+      repository: "ghcr.io/kamatechorg/resonance-flow/bridge"
+      pullPolicy: IfNotPresent
+      tag: "94c3259"
+    containerPort: 8080
+    service:
+      type: ClusterIP
+      port: 80
+    resources:
+      requests:
+        cpu: 100m
+        memory: 256Mi
+      limits:
+        cpu: 500m
+        memory: 512Mi
+    startupProbe:
+      httpGet:
+        path: /health
+        port: http
+      periodSeconds: 5
+      failureThreshold: 40
+    livenessProbe:
+      httpGet:
+        path: /health
+        port: http
+      periodSeconds: 10
+      failureThreshold: 3
+    readinessProbe:
+      httpGet:
+        path: /health
+        port: http
+      periodSeconds: 5
+      failureThreshold: 3
+    env: {}
+  lens-frontend:
+    replicaCount: 1
+    image:
+      repository: "ghcr.io/kamatechorg/resonance-flow/lens-frontend"
+      pullPolicy: IfNotPresent
+      tag: "placeholder"
+    containerPort: 80
+    service:
+      type: ClusterIP
+      port: 80
+    resources:
+      requests:
+        cpu: 100m
+        memory: 128Mi
+      limits:
+        cpu: 250m
+        memory: 256Mi
+    startupProbe:
+      httpGet:
+        path: /
+        port: http
+      periodSeconds: 5
+      failureThreshold: 40
+    livenessProbe:
+      httpGet:
+        path: /
+        port: http
+      periodSeconds: 10
+      failureThreshold: 3
+    readinessProbe:
+      httpGet:
+        path: /
+        port: http
+      periodSeconds: 5
+      failureThreshold: 3
+    env: {}
+  chain:
+    replicaCount: 1
+    image:
+      repository: "ghcr.io/kamatechorg/resonance-flow/chain"
+      pullPolicy: IfNotPresent
+      tag: "placeholder"
+    containerPort: 8081
+    service:
+      type: ClusterIP
+      port: 80
+    resources:
+      requests:
+        cpu: 100m
+        memory: 256Mi
+      limits:
+        cpu: 500m
+        memory: 512Mi
+    startupProbe:
+      httpGet:
+        path: /health
+        port: http
+      periodSeconds: 5
+      failureThreshold: 40
+    livenessProbe:
+      httpGet:
+        path: /health
+        port: http
+      periodSeconds: 10
+      failureThreshold: 3
+    readinessProbe:
+      httpGet:
+        path: /health
+        port: http
+      periodSeconds: 5
+      failureThreshold: 3
+    env: {}
+  inbox:
+    replicaCount: 1
+    image:
+      repository: "ghcr.io/kamatechorg/resonance-flow/inbox"
+      pullPolicy: IfNotPresent
+      tag: "placeholder"
+    containerPort: 8080
+    service:
+      type: ClusterIP
+      port: 80
+    resources:
+      requests:
+        cpu: 100m
+        memory: 256Mi
+      limits:
+        cpu: 500m
+        memory: 512Mi
+    startupProbe:
+      httpGet:
+        path: /health
+        port: http
+      periodSeconds: 5
+      failureThreshold: 40
+    livenessProbe:
+      httpGet:
+        path: /health
+        port: http
+      periodSeconds: 10
+      failureThreshold: 3
+    readinessProbe:
+      httpGet:
+        path: /health
+        port: http
+      periodSeconds: 5
+      failureThreshold: 3
+    env: {}
+  lens-gateway:
+    replicaCount: 1
+    image:
+      repository: "ghcr.io/kamatechorg/resonance-flow/lens-gateway"
+      pullPolicy: IfNotPresent
+      tag: "placeholder"
+    containerPort: 8080
+    service:
+      type: ClusterIP
+      port: 80
+    resources:
+      requests:
+        cpu: 100m
+        memory: 256Mi
+      limits:
+        cpu: 500m
+        memory: 512Mi
+    startupProbe:
+      httpGet:
+        path: /health
+        port: http
+      periodSeconds: 5
+      failureThreshold: 40
+    livenessProbe:
+      httpGet:
+        path: /health
+        port: http
+      periodSeconds: 10
+      failureThreshold: 3
+    readinessProbe:
+      httpGet:
+        path: /health
+        port: http
+      periodSeconds: 5
+      failureThreshold: 3
+    env: {}
