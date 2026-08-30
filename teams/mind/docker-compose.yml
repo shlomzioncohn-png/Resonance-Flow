@@ -7,11 +7,25 @@ services:
       - .env
     volumes:
       - ./models:/app/models
-    # Uncomment once the vector store is decided (see README "Open decisions")
-    # depends_on:
-    #   - vector-store
+    depends_on:
+      vector-store:
+        condition: service_healthy
 
-  # vector-store:
-  #   image: <tbd: pgvector | qdrant | opensearch | milvus | chroma>
-  #   ports:
-  #     - "6333:6333"
+  vector-store:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: mind
+    ports:
+      - "5432:5432"
+    volumes:
+      - vector-store-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  vector-store-data:

@@ -19,6 +19,8 @@ Target: 10,000+ embedded tasks, semantic query at <300ms p95 (week 8 load
 target, to be confirmed with mentors).
 """
 
+import threading
+
 from mind.embeddings.generate import embed, embed_batch
 from mind.embeddings.factory import get_store
 from mind.embeddings.config import DUPLICATE_SIMILARITY_THRESHOLD
@@ -32,14 +34,27 @@ __all__ = [
 ]
 
 _store = None
+_store_lock = threading.Lock()
 
 
 def _get_store():
     # Lazy so `import mind.embeddings` (e.g. from tests that only exercise
     # embed()) never forces a live DB connection.
+    #
+    # Double-checked locking: FastAPI runs sync `def` route handlers in a
+    # thread pool, not on the event loop, so two requests can call this
+    # concurrently on different threads. Without the lock, both could see
+    # `_store is None` at the same time, each construct their own
+    # PgVectorStore (each opening its own connection pool and racing to
+    # run the CREATE EXTENSION/TABLE/INDEX schema setup), and one of those
+    # stores -- and its pool -- would just be silently discarded. The
+    # cheap `if _store is None` check outside the lock keeps the lock
+    # itself off the hot path once `_store` is set.
     global _store
     if _store is None:
-        _store = get_store()
+        with _store_lock:
+            if _store is None:
+                _store = get_store()
     return _store
 
 
