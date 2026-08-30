@@ -20,4 +20,4 @@ The recommendation is to adopt **Top-1 Accuracy** as the primary metric for the 
 
 Our product exists to answer the focused question "what's the single most important thing I can do right now?" Given that, and given the constraint that our scenario set contains exactly one correct answer (Top Task) per given free-time window, measuring the ranking model by its first-place accuracy provides the most precise and simplest indicator of system success. Implementing MRR or nDCG at this stage would be over-engineering and would require labeling resources that don't serve the week-7 proof-of-concept.
 
-In parallel, we've prepared a placeholder extraction function (`score_extraction(predicted, ground_truth)`) to measure entity-level Precision and Recall against the 381 labeled AMI tasks.
+In parallel, we've prepared a placeholder extraction function (`extraction_precision_recall(predicted, ground_truth)`) to measure entity-level Precision and Recall against the 381 labeled AMI tasks.
