@@ -1,0 +1,84 @@
+# Belt-and-suspenders on top of the kafka.yaml / resonance-flow.yaml
+# sync-wave ordering (see argocd-cm-patch.yaml for the health-check fix
+# that makes that ordering actually gate at all).
+#
+# Even with that fix, kafka's Application health briefly - and
+# incorrectly - flickers to "Healthy" for about a second right as its
+# Deployment's `status.observedGeneration` first catches up with
+# `generation`, before the Deployment's real pod-readiness status has
+# settled (a known gap in ArgoCD/gitops-engine's built-in Deployment
+# health check: gitops-engine/pkg/health/health_deployment.go). If
+# root's wave-gate sync happens to land on that exact tick, it reads
+# kafka as done and advances to wave 0 - confirmed live (issue #186).
+#
+# A Job's health check (gitops-engine/pkg/health/health_job.go) doesn't
+# have this race - it only reports Healthy once status.succeeded >= 1,
+# a real one-shot completion signal. So this Job does a real readiness
+# check (not a status-field read) and sits in the same sync-wave as
+# kafka's Application, giving root a second, non-flaky task to wait on
+# in that wave.
+#
+# Runs in the argocd namespace (not kafka) and uses a ClusterRole so it
+# doesn't depend on the kafka namespace already existing when root
+# applies wave -1.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: kafka-ready-check
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: kafka-ready-check
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"
+rules:
+  - apiGroups: ["apps"]
+    resources: ["deployments"]
+    verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: kafka-ready-check
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"
+subjects:
+  - kind: ServiceAccount
+    name: kafka-ready-check
+    namespace: argocd
+roleRef:
+  kind: ClusterRole
+  name: kafka-ready-check
+  apiGroup: rbac.authorization.k8s.io
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: kafka-ready-check
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"
+spec:
+  backoffLimit: 2
+  activeDeadlineSeconds: 280
+  template:
+    spec:
+      restartPolicy: Never
+      serviceAccountName: kafka-ready-check
+      containers:
+        - name: wait-for-kafka
+          image: bitnami/kubectl:1.31
+          command:
+            - bash
+            - -c
+            - |
+              set -e
+              until kubectl get deployment kafka -n kafka >/dev/null 2>&1; do
+                echo "waiting for kafka Deployment to exist..."
+                sleep 3
+              done
+              kubectl wait --for=condition=available deployment/kafka -n kafka --timeout=260s
