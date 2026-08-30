@@ -110,7 +110,7 @@ a chance to surface.
 
 ## Code review fixes (2026-08-30, PR #114 second review round)
 
-Addressed the following findings from the review, directly on this branch:
+Addressed all findings from the review, directly on this branch:
 
 - **`recalculateAndSave` now always saves.** It previously only called `taskRepository.save()`
   when `isReady` flipped, silently dropping counter updates (e.g. `blockingCount` 2 → 1) that
@@ -134,11 +134,17 @@ Addressed the following findings from the review, directly on this branch:
   stores a copy too - a caller can no longer mutate a `Task` it received and have that change
   silently take effect without an explicit `save()`. This is a stand-in for the isolation a real
   persistence layer gives for free; see `Task.copyOf` and CLAUDE.md "Open items".
+- **Removed the duplicate ad-hoc dependency queries** in `addDependency`/`removeDependency`'s
+  cycle/edge checks by extracting shared `requireTask(UUID)` and `edgeExists(UUID, UUID)` helpers
+  (cosmetic - no behavior change).
+- **Closed a narrower race between `addDependency`/`removeDependency` and `onTaskStatusChanged`
+  on a dependency's target-completion status.** Both now read/mutate the target's `DONE` status
+  under the same `dependencyGraphLock`, so a new edge to a task that completes at the same moment
+  is guaranteed to be counted by exactly one of the two code paths - never both (double-counted)
+  and never neither (which would leave the dependent permanently stuck, since no future
+  `onTaskStatusChanged` call would ever come along to decrement it).
 - **Added `TaskEligibilityServiceConcurrencyTest`** and **`InMemoryTaskRepositoryTest`**, both
   exercising the real in-memory implementations (not mocks) under concurrent/mutation scenarios
-  that the previous mock-only test suite couldn't catch.
-
-Still open from that review round (deliberately not addressed here yet - see CLAUDE.md and the
-PR thread): non-blocking cosmetic query de-duplication in `addDependency`'s cycle check, and
-`onTaskStatusChanged`/`addDependency` racing on a dependency's target-task-completion status
-(a separate, narrower race from the per-task-lock gap fixed above).
+  that the previous mock-only test suite couldn't catch, including a dedicated regression test
+  for the target-completion race above
+  (`concurrentAddDependency_raceWithTargetCompletion_neverLeavesDependentPermanentlyStuck`).

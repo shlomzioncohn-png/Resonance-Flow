@@ -85,10 +85,6 @@ class TaskEligibilityServiceTest {
 
     @Test
     void alreadyCorrectState_stillSavesEveryTime() {
-        // recalculateAndSave always saves, even when isReady doesn't change: a counter can
-        // change (e.g. blockingCount 2 -> 1) without crossing the ready threshold, and that
-        // change must still be persisted - see PR #114 review, Critical finding on
-        // recalculateAndSave silently dropping such updates.
         UUID taskId = UUID.randomUUID();
         Task task = buildTask(taskId, 0, 0, true);
         when(taskRepository.findById(taskId)).thenReturn(Optional.of(task));
@@ -116,6 +112,8 @@ class TaskEligibilityServiceTest {
         when(taskDependencyRepository.findByTaskId(dependsOnTaskId)).thenReturn(Collections.emptyList());
         when(taskDependencyRepository.findByTaskId(taskId)).thenReturn(Collections.emptyList());
         when(taskRepository.findById(taskId)).thenReturn(Optional.of(task));
+        when(taskRepository.findById(dependsOnTaskId))
+                .thenReturn(Optional.of(buildTask(dependsOnTaskId, 0, 0, true)));
 
         taskEligibilityService.addDependency(taskId, dependsOnTaskId);
 
@@ -163,6 +161,8 @@ class TaskEligibilityServiceTest {
         when(taskDependencyRepository.findByTaskId(taskId))
                 .thenReturn(List.of(new TaskDependency(taskId, dependsOnTaskId)));
         when(taskRepository.findById(taskId)).thenReturn(Optional.of(task));
+        when(taskRepository.findById(dependsOnTaskId))
+                .thenReturn(Optional.of(buildTask(dependsOnTaskId, 0, 0, true)));
 
         taskEligibilityService.removeDependency(taskId, dependsOnTaskId);
 
@@ -192,6 +192,8 @@ class TaskEligibilityServiceTest {
         when(taskDependencyRepository.findByTaskId(taskId))
                 .thenReturn(List.of(new TaskDependency(taskId, dependsOnTaskId)));
         when(taskRepository.findById(taskId)).thenReturn(Optional.of(task));
+        when(taskRepository.findById(dependsOnTaskId))
+                .thenReturn(Optional.of(buildTask(dependsOnTaskId, 0, 0, true)));
 
         taskEligibilityService.removeDependency(taskId, dependsOnTaskId);
 
@@ -209,9 +211,6 @@ class TaskEligibilityServiceTest {
         when(taskRepository.findById(taskB)).thenReturn(Optional.of(b));
         when(taskDependencyRepository.findByDependsOnTaskId(taskB))
                 .thenReturn(List.of(new TaskDependency(taskA, taskB)));
-        // adjustDependentsBlockingCount now fetches each dependent individually, inside its own
-        // lock (taskRepository.findById), rather than batch-fetching via findAllById up front -
-        // see TaskEligibilityService for why (repositories return defensive copies now).
         when(taskRepository.findById(taskA)).thenReturn(Optional.of(a));
 
         taskEligibilityService.onTaskStatusChanged(taskB, TaskStatus.DONE);
