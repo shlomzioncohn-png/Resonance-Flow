@@ -5,10 +5,13 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.context.request.WebRequest;
 import org.springframework.web.server.ResponseStatusException;
+
+import java.util.stream.Collectors;
 
 /**
  * Global exception handler for Gateway.
@@ -92,6 +95,31 @@ public class GlobalExceptionHandler {
         return new ResponseEntity<>(error, HttpStatus.GATEWAY_TIMEOUT);
     }
     
+    /**
+     * Handle validation errors (400).
+     * Triggered when @Valid fails on request body fields.
+     */
+    @ExceptionHandler(value = {MethodArgumentNotValidException.class})
+    public ResponseEntity<ErrorResponse> handleValidationException(
+            MethodArgumentNotValidException ex, WebRequest request) {
+
+        String path = getRequestPath(request);
+        String details = ex.getBindingResult().getFieldErrors().stream()
+                .map(e -> e.getField() + ": " + e.getDefaultMessage())
+                .collect(Collectors.joining(", "));
+
+        logger.warn("Validation error - Path: {}, Details: {}", path, details);
+
+        ErrorResponse error = new ErrorResponse(
+                "BAD_REQUEST",
+                "Invalid request parameters",
+                path,
+                details
+        );
+
+        return new ResponseEntity<>(error, HttpStatus.BAD_REQUEST);
+    }
+
     /**
      * Handle bad request errors (400).
      * Triggered by malformed requests.
