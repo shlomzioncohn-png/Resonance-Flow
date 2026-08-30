@@ -87,7 +87,7 @@ public class OutboxWorker {
         }
     }
 
-    private void processOne(OutboxEvent outboxEvent) {
+    void processOne(OutboxEvent outboxEvent) {
         try {
             // eventId, timestamp and correlationId come from the outbox row
             // itself (via Event.existing), not freshly generated, so the
@@ -113,7 +113,7 @@ public class OutboxWorker {
         }
     }
 
-    private void handleFailure(OutboxEvent event, Throwable e) {
+    void handleFailure(OutboxEvent event, Throwable e) {
         int attempts = event.getRetryCount() + 1;
         event.setRetryCount((short) attempts);
         event.setLastError(truncate(e.getMessage()));
@@ -127,7 +127,7 @@ public class OutboxWorker {
         }
     }
 
-    private Duration computeBackoff(int attempt) {
+    Duration computeBackoff(int attempt) {
         long seconds = backoffBase.getSeconds() * (1L << (attempt - 1));
         return Duration.ofSeconds(Math.min(seconds, backoffMax.getSeconds()));
     }
