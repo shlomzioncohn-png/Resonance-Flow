@@ -11,9 +11,8 @@ import psycopg2
 import pytest
 
 from mind.embeddings import embed, upsert, search
-from mind.embeddings.config import PG_DSN, PG_TABLE
+from mind.embeddings.config import EMBEDDING_DIM, PG_DSN, PG_TABLE
 from mind.embeddings.factory import get_store
-from mind.embeddings.generate import EMBEDDING_DIM
 
 
 @pytest.fixture(autouse=True)

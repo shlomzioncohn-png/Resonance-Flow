@@ -3,7 +3,8 @@ Tests for mind.embeddings.generate -- no DB required (embed()/embed_batch()
 never touch pgvector).
 """
 
-from mind.embeddings.generate import EMBEDDING_DIM, embed, embed_batch
+from mind.embeddings.config import EMBEDDING_DIM
+from mind.embeddings.generate import embed, embed_batch
 
 
 def test_embed_is_deterministic():
@@ -32,7 +33,7 @@ def test_embed_rejects_non_string():
 
 
 def test_embed_long_text_does_not_crash():
-    # ~5000 words, far beyond the model's 256-token max_seq_length -- must
+    # ~5000 words, far beyond the model's 512-token max_seq_length -- must
     # truncate silently, not raise.
     long_text = " ".join(["invoice payment vendor purchase order"] * 1000)
     vec = embed(long_text)
@@ -42,6 +43,18 @@ def test_embed_long_text_does_not_crash():
 def test_embed_long_text_is_still_deterministic():
     long_text = "field data " * 2000
     assert embed(long_text) == embed(long_text)
+
+
+def test_embed_is_query_changes_the_vector():
+    # BGE is asymmetric: the query instruction prefix should change the
+    # embedding relative to encoding the same text as a passage.
+    text = "customer pricing proposal"
+    assert embed(text, is_query=False) != embed(text, is_query=True)
+
+
+def test_embed_is_query_still_deterministic():
+    text = "customer pricing proposal"
+    assert embed(text, is_query=True) == embed(text, is_query=True)
 
 
 def test_embed_batch_matches_individual_embed():

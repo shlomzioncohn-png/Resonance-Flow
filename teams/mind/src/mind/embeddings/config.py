@@ -1,4 +1,21 @@
 import os
+from pathlib import Path
+
+# --- Embedding model ------------------------------------------------------
+EMBEDDING_MODEL_NAME = "BAAI/bge-small-en-v1.5"
+# Local copy of the model weights (models/ is gitignored -- never
+# committed). If this directory exists, generate.py loads the model
+# straight from disk with no network call at all. Falls back to
+# EMBEDDING_MODEL_NAME (a Hugging Face Hub id, downloaded and cached by
+# sentence-transformers) if it doesn't -- see generate.py.
+EMBEDDING_MODEL_LOCAL_DIR = Path(__file__).resolve().parents[3] / "models" / "bge-small-en-v1.5"
+EMBEDDING_DIM = 384
+MAX_SEQ_LENGTH = 512  # tokens; longer text is truncated, see generate.py
+
+# BGE is an asymmetric retrieval model: queries need this instruction
+# prefix prepended before encoding; stored passages/documents do not.
+# See generate.py's embed()/embed_batch() `is_query` parameter.
+BGE_QUERY_INSTRUCTION = "Represent this sentence for searching relevant passages: "
 
 # --- Database connection (pgvector / Postgres) --------------------------
 # Overridable via env vars so this works the same in dev, CI, and prod.

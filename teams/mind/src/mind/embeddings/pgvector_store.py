@@ -10,8 +10,7 @@ psycopg2, etc). If we ever swap databases, this file gets replaced by e.g.
 from psycopg2 import pool
 
 from mind.embeddings.base import VectorStore
-from mind.embeddings.config import HNSW_EF_SEARCH, PG_DSN, PG_TABLE
-from mind.embeddings.generate import EMBEDDING_DIM
+from mind.embeddings.config import EMBEDDING_DIM, HNSW_EF_SEARCH, PG_DSN, PG_TABLE
 
 
 class PgVectorStore(VectorStore):

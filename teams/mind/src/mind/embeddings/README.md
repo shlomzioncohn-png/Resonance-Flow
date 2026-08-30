@@ -8,19 +8,21 @@ Vectors, semantic search, duplicate/related-task detection.
   [`../../../benchmarks/vector-store-comparison.md`](../../../benchmarks/vector-store-comparison.md)
   for the comparison, decision, and validation results (latency and recall,
   at the real 10,000-vector load target).
-- **Embedding model: Chosen: `sentence-transformers/all-MiniLM-L6-v2`.**
-  Local, open-source (Apache-2.0), CPU-only, output dimension **384**
-  (`EMBEDDING_DIM` in `generate.py`; the pgvector table schema in
-  `pgvector_store.py` is created with `VECTOR(384)` to match). English-only
-  by design — MIND only needs English, no multilingual requirement.
-  `BAAI/bge-small-en-v1.5` was evaluated first and preferred (retrieval-
-  tuned, a better fit than MiniLM's generic sentence similarity for this
-  module's actual query-vs-corpus use case) but its weights are
-  reproducibly blocked by a content filter (NetFree) on the current dev
-  machine; MiniLM is used because it's actually downloadable here. See
-  `generate.py`'s module docstring for the full reasoning and for how text
-  longer than the model's context window is handled (truncation, not
-  chunk-and-average).
+- **Embedding model: Chosen: `BAAI/bge-small-en-v1.5`.** Local, open-source
+  (MIT), CPU-only, output dimension **384** (`EMBEDDING_DIM` in
+  `config.py`; the pgvector table schema in `pgvector_store.py` is created
+  with `VECTOR(384)` to match). English-only by design — MIND only needs
+  English, no multilingual requirement. Retrieval-tuned (query-vs-passage
+  matching), a better fit than a generic sentence-similarity model (e.g.
+  all-MiniLM-L6-v2, an earlier candidate used while BGE's weights were
+  blocked by a content filter on the original dev machine) for this
+  module's actual query-vs-corpus use case. Being asymmetric, it requires
+  queries (not stored passages) to be embedded with an instruction prefix
+  — see `generate.py`'s module docstring for the full reasoning, the
+  query/passage asymmetry, and how text longer than the model's context
+  window is handled (truncation, not chunk-and-average). Weights ship as a
+  local folder (`models/bge-small-en-v1.5/`, gitignored) so loading needs
+  no network access; see `config.EMBEDDING_MODEL_LOCAL_DIR`.
 - **Load target** (week 8, provisional): 10,000+ embedded records, semantic
   query at <300ms p95.
 
@@ -32,7 +34,7 @@ generate.py          embed() / embed_batch() -- the real model, truncation polic
 base.py              VectorStore abstract interface (the "contract") -- dependency-free
 pgvector_store.py    the ONLY file that knows about Postgres/pgvector
 factory.py           single switch that picks the backend implementation
-config.py            connection settings, table name, HNSW tuning, duplicate-detection threshold
+config.py            model name/path/dim, connection settings, table name, HNSW tuning, duplicate-detection threshold
 loader.py            fetches + verifies the real FUNSD manifest slice (see below)
 ingest.py            pipeline: loader -> embed_batch -> upsert(source_ref, vector)
 verify.py            checks table row count == manifest record count
@@ -85,10 +87,13 @@ pytest          # from teams/mind/ -- picks up tests/test_vector_store.py and te
 ```python
 from mind.embeddings import embed, upsert, search
 
+# Indexing a record: is_query defaults to False.
 vector = embed(task.title + " " + task.description)
 upsert(task.id, vector)
 
-similar_task_ids = search(vector, k=5)
+# Searching: is_query=True is required for correct BGE retrieval quality.
+query_vector = embed(user_query_text, is_query=True)
+similar_task_ids = search(query_vector, k=5)
 ```
 
 No caller anywhere else in the codebase should import `pgvector_store.py`

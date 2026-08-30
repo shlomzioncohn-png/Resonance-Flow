@@ -13,8 +13,9 @@ changing those files, never anything that imports `mind.embeddings`.
 
 Backend: pgvector (decision + comparison in
 `benchmarks/vector-store-comparison.md`).
-Embedding model: sentence-transformers/all-MiniLM-L6-v2, 384-dim, local
-CPU-only -- see `generate.py` for why, and how long text is handled.
+Embedding model: BAAI/bge-small-en-v1.5, 384-dim, local CPU-only -- see
+`generate.py` for why, the query/passage asymmetry it requires, and how
+long text is handled.
 Target: 10,000+ embedded tasks, semantic query at <300ms p95 (week 8 load
 target, to be confirmed with mentors).
 """
