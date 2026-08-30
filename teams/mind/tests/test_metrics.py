@@ -1,15 +1,19 @@
-<<<<<<< HEAD
-"""Direct unit tests for top1_accuracy.
+"""Direct unit tests for the metrics in mind.evaluation.metrics.
 
-Until now the metric was only exercised transitively through harness.run() in
-test_harness.py, with DummyModel (every task scores 1.0) and PLACEHOLDER_SCENARIOS
-whose correct answer happens to be listed first. On a score tie max() returns the
-first item, so that path *always* reports 100% — it never checks a "prediction is
-wrong" case. These tests cover that gap.
+top1_accuracy: until these tests it was only exercised transitively through
+harness.run() in test_harness.py, with DummyModel (every task scores 1.0) and
+PLACEHOLDER_SCENARIOS whose correct answer happens to be listed first. On a score
+tie max() returns the first item, so that path *always* reports 100% — it never
+checks a "prediction is wrong" case. These tests cover that gap.
+
+extraction_precision_recall: entity-level precision/recall for extracted tasks
+vs. ground truth, including the empty-input edge cases.
 """
 
+import pytest
+
 from mind.evaluation.interfaces import PersonaEvaluationScenario
-from mind.evaluation.metrics import top1_accuracy
+from mind.evaluation.metrics import extraction_precision_recall, top1_accuracy
 
 
 def _scenario(expected_top_task_id: str) -> PersonaEvaluationScenario:
@@ -66,10 +70,6 @@ def test_half_right_half_wrong_is_one_half():
     # The exact case the DummyModel + fixture-ordering path can never produce.
     scenarios = [_scenario("task_a"), _scenario("task_b")]
     assert top1_accuracy(["task_a", "task_a"], scenarios) == 0.5
-=======
-import pytest
-
-from mind.evaluation.metrics import extraction_precision_recall
 
 
 def test_extraction_precision_recall_perfect_match():
@@ -131,4 +131,3 @@ def test_extraction_precision_recall_ignores_duplicates():
 
     assert result["precision"] == 1.0
     assert result["recall"] == 1.0
->>>>>>> michal/metrics-research
