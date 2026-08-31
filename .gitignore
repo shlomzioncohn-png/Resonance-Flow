@@ -1,0 +1,3 @@
+# Local Helm values overrides that may contain a personal PAT - never commit these.
+*.local.yaml
+values.local.yaml

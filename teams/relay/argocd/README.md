@@ -24,8 +24,10 @@ dedicated project is needed for this repo's scope.
 | File                     | Purpose                                                                 |
 |--------------------------|--------------------------------------------------------------------------|
 | `root-app.yaml`          | App-of-apps bootstrap `Application` - manages everything under `apps/` |
+| `argocd-cm-patch.yaml`   | Restores the `argoproj.io/Application` health check ArgoCD dropped in 1.8 (with a fix for a "Missing" status edge case) - required for the sync-waves below to actually gate on health instead of being a no-op |
 | `apps/resonance-flow.yaml` | `Application` syncing the [`resonance-flow`](../../../resonance-flow) chart (all teams' services) |
 | `apps/kafka.yaml`        | `Application` syncing the [`kafka`](../../../kafka) chart (shared infra, synced first via a sync-wave) |
+| `apps/kafka-ready-check.yaml` | Wave `-1` Job that does a real readiness check on kafka's Deployment, closing a flaky ~1s window where ArgoCD's built-in Deployment health check can momentarily misreport "Healthy" right after creation |
 
 ## Onboarding your team's service
 
@@ -38,6 +40,12 @@ same Helm release.
 
 Note: `resonance-flow/` is a chart shared across all teams - coordinate
 chart/template changes with its owner rather than editing it unilaterally.
+
+If you're pulling images from private GHCR packages on your own cluster
+(e.g. local `kind`), see
+[`resonance-flow/README.md`](../../../resonance-flow/README.md#local-image-pull-authentication)
+for how to wire up a personal PAT - the chart creates the pull secret
+for you.
 
 ## Known limitation
 
@@ -53,6 +61,7 @@ bootstrap.
 ## Registering this against a running ArgoCD instance
 
 ```bash
+kubectl apply -f teams/relay/argocd/argocd-cm-patch.yaml
 kubectl apply -f teams/relay/argocd/root-app.yaml
 ```
 

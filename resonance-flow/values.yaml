@@ -1,6 +1,12 @@
 # Default values for resonance-flow.
 
-imagePullSecrets: []
+imagePullSecrets: [] # pre-existing secret names (cloud/prod path, not yet wired up)
+imagePullSecret:
+  create: false # opt-in: chart creates a dockerconfigjson Secret from a personal PAT
+  registry: ghcr.io
+  username: "" # developer's GitHub username
+  password: "" # developer's PAT, scope: read:packages - NEVER commit a real value here
+  email: "noreply@kamatech.org"
 nameOverride: ""
 fullnameOverride: ""
 serviceAccount:
