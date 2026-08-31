@@ -27,6 +27,17 @@ public abstract class AbstractTaskMapper<S> implements PayloadMapper<S, Task> {
     protected abstract RoleContext roleContext();
 
     /**
+     * Inbox's {@code tasks.organization_id} is NOT NULL, but no lane has a
+     * general-purpose source for it - a subclass overrides this only once it
+     * has an actual value to supply (e.g. a configured account id), never a
+     * made-up one. Defaults to null, which is the cross-team contract gap
+     * for every lane that doesn't override it.
+     */
+    protected String organizationId() {
+        return null;
+    }
+
+    /**
      * Whether this lane's rows carry a meaningful confidence score. Inbox
      * only requires confidence for ML-inferred rows; a deterministic ETL
      * lane has nothing to be confident about, so the default is null.
@@ -62,10 +73,7 @@ public abstract class AbstractTaskMapper<S> implements PayloadMapper<S, Task> {
         Integer urgency = toUrgency(source, asOf);
 
         return new Task(
-                // organizationId - no lane in this tree can source a tenant id yet.
-                // Inbox's tasks.organization_id is NOT NULL; this is a cross-team
-                // contract gap awaiting a decision - do not default or invent one.
-                null,
+                organizationId(),
                 null, // projectId - no lane currently sources this
                 toTitle(source),
                 toDescription(source),

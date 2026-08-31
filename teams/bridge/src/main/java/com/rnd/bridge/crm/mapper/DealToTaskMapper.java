@@ -14,9 +14,23 @@ import java.time.LocalTime;
 import java.time.ZoneOffset;
 import java.time.temporal.ChronoUnit;
 
+/**
+ * {@code organizationId} is a single value read from configuration - a
+ * stand-in for one Inbox organization/account, not a real multi-tenant
+ * mapping. Resolving it per deal from {@link Deal#crmAccountSlug()} is the
+ * real answer, once Inbox supports looking an organization up by that slug;
+ * nothing in this tree does that yet, so one configured value is what every
+ * deal from this lane gets.
+ */
 public final class DealToTaskMapper extends AbstractTaskMapper<Deal> {
 
     private static final String SOURCE_REF_PREFIX = "crm:";
+
+    private final String organizationId;
+
+    public DealToTaskMapper(String organizationId) {
+        this.organizationId = organizationId;
+    }
 
     // Deal.closeDate -> Task.deadline convention (end-of-day UTC). Provisional
     // pending confirmation from Inbox re: a shared date-to-instant convention
@@ -58,6 +72,11 @@ public final class DealToTaskMapper extends AbstractTaskMapper<Deal> {
             return null;
         }
         return closeDate.atTime(DEADLINE_TIME_OF_DAY).toInstant(DEADLINE_ZONE);
+    }
+
+    @Override
+    protected String organizationId() {
+        return organizationId;
     }
 
     @Override

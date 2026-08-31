@@ -31,7 +31,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class DealToTaskMapperTest {
 
     private static final Instant AS_OF = Instant.parse("2026-08-23T00:00:00Z");
-    private static final DealToTaskMapper MAPPER = new DealToTaskMapper();
+    private static final String ORGANIZATION_ID = "org-test-0000";
+    private static final DealToTaskMapper MAPPER = new DealToTaskMapper(ORGANIZATION_ID);
 
     private static JsonDealRepository repository() {
         return new JsonDealRepository(new DefaultResourceLoader(), "classpath:crm/synthetic-deals.json");
@@ -142,7 +143,7 @@ class DealToTaskMapperTest {
         assertEquals(ExtractionProvenance.ETL, task.extractionProvenance());
         assertNull(task.confidence());
         assertNull(task.effortEstimateMinutes());
-        assertNull(task.organizationId());
+        assertEquals(ORGANIZATION_ID, task.organizationId());
         assertNull(task.projectId());
         assertNull(task.snoozedUntil());
     }

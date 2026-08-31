@@ -22,6 +22,8 @@ spring:
       value-serializer: org.springframework.kafka.support.serializer.JsonSerializer
       acks: all
       retries: 3
+      properties:
+        spring.json.add.type.headers: false
 
   # DataSource/Flyway auto-configuration is off by default so the json
   # profile (the default) never touches a database. The jdbc profile turns
@@ -51,8 +53,17 @@ github:
       expression: ${GITHUB_SYNC_CRON_EXPRESSION:0 0 2 * * ?}
 
 bridge:
+  # Shared by every structured lane that publishes a Task via
+  # KafkaPayloadPublisher (see esti/inbox-kafka-ingestion-contract) - one
+  # topic for every source, never a per-lane one.
+  structured-tasks-topic: ${BRIDGE_STRUCTURED_TASKS_TOPIC:bridge.structured.tasks}
   crm:
     dataset: classpath:crm/synthetic-deals.json
+    # Inbox's tasks.organization_id is NOT NULL, but HubSpot (and this
+    # lane's Deal model) has no concept of it - see DealToTaskMapper's class
+    # Javadoc. No default: a missing value must fail startup, not publish a
+    # task Inbox will reject on the FK constraint.
+    organization-id: ${CRM_ORGANIZATION_ID}
   intake:
     raw-landed-topic: ${BRIDGE_RAW_LANDED_TOPIC:bridge.raw.landed}
     scoping:

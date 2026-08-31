@@ -30,7 +30,10 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
         "spring.datasource.driver-class-name=org.h2.Driver",
         "spring.datasource.username=sa",
         "spring.datasource.password=",
-        "bridge.crm.as-of=2026-08-24T09:00:00Z"
+        "bridge.crm.as-of=2026-08-24T09:00:00Z",
+        // No default in application.yml on purpose (a missing value must
+        // fail a real startup) - this test-only value stands in for it.
+        "bridge.crm.organization-id=org-test-0000"
 })
 @ActiveProfiles("jdbc")
 class JdbcDealRepositoryTest {
