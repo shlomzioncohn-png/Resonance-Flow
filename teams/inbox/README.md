@@ -153,7 +153,7 @@ not the Kafka message or the event's own `eventId` (which is only used as an aud
 and may differ across redeliveries of the same underlying record).
 
 A unique index (`uq_tasks_org_source_type_source_ref`) enforces this at the database level.
-`TaskService.createFromBridgeEvent` first checks for an existing task with that key; if two
+`TaskService.createTaskWithAudit` first checks for an existing task with that key; if two
 deliveries race past that check, the second insert fails with a unique-constraint violation, which
 `BridgeTaskPersistenceHandler` catches and resolves by looking up the row the other delivery just
 created (no new `Task` and no duplicate `Audit` row are ever produced). Redelivery of the same

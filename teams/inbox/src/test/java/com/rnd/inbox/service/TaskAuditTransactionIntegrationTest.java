@@ -55,7 +55,7 @@ class TaskAuditTransactionIntegrationTest extends PostgresIntegrationTest {
         incoming.setCreatedAt(Instant.now());
         incoming.setUpdatedAt(Instant.now());
 
-        assertThatThrownBy(() -> taskService.createFromBridgeEvent(incoming, UUID.randomUUID()))
+        assertThatThrownBy(() -> taskService.createTask(incoming, UUID.randomUUID()))
                 .isInstanceOf(DataIntegrityViolationException.class);
 
         assertThat(taskRepository.findByOrganization_IdAndSourceTypeAndSourceRef(

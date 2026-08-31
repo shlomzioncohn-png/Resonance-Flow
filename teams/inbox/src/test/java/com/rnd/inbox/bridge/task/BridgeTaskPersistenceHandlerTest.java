@@ -38,7 +38,7 @@ class BridgeTaskPersistenceHandlerTest {
         Task alreadyPersisted = new Task();
         alreadyPersisted.setId(UUID.randomUUID());
 
-        when(taskService.createFromBridgeEvent(any(), any()))
+        when(taskService.createTask(any(), any()))
                 .thenThrow(new DataIntegrityViolationException("unique violation"));
         when(taskService.findExisting(incoming)).thenReturn(Optional.of(alreadyPersisted));
 
@@ -48,7 +48,7 @@ class BridgeTaskPersistenceHandlerTest {
     @Test
     void aTechnicalFailureIsTranslatedIntoATransientProcessingException() {
         Task incoming = new Task();
-        when(taskService.createFromBridgeEvent(any(), any()))
+        when(taskService.createTask(any(), any()))
                 .thenThrow(new QueryTimeoutException("db timeout"));
 
         assertThatThrownBy(() -> handler.persist(incoming, UUID.randomUUID()))

@@ -20,7 +20,7 @@ public class BridgeTaskPersistenceHandler {
 
     public void persist(Task incoming, UUID correlationId) {
         try {
-            taskService.createFromBridgeEvent(incoming, correlationId);
+            taskService.createTask(incoming, correlationId);
         } catch (DataIntegrityViolationException e) {
             taskService.findExisting(incoming).orElseThrow(() -> e);
         } catch (DataAccessException e) {
