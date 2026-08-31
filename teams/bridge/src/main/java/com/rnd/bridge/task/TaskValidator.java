@@ -4,12 +4,14 @@ import com.rnd.bridge.core.PayloadValidator;
 import com.rnd.bridge.core.error.ValidationException;
 import com.rnd.bridge.task.model.Task;
 import com.rnd.bridge.task.model.TaskStatus;
+import org.springframework.stereotype.Component;
 
 /**
  * Fails fast on a malformed {@link Task} before it leaves the mapper, rather
  * than letting Inbox reject it later with a bare constraint-violation message
  * and no context about which field or deal produced it.
  */
+@Component
 public final class TaskValidator implements PayloadValidator<Task> {
 
     @Override
