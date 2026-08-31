@@ -19,6 +19,12 @@ chain:
     # contract exists and a real topic is configured here.
     # consumed-topics: <topic-name>
     consumer-group-id: ${spring.application.name}
+    retry:
+      # Explicit on purpose, matching ChainKafkaErrorHandlingConfig's
+      # previously-hardcoded FixedBackOff(2000L, 2L) exactly - values here
+      # can be tuned per environment without a code change.
+      max-attempts: 2
+      interval-ms: 2000
   events:
     # Explicit on purpose, even though "in-memory" is also the default:
     # InMemoryProcessedEventStore only activates for this exact value, so

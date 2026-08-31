@@ -30,8 +30,10 @@ class KafkaEventPublisherTest {
         // Instant fields (e.g. EventEnvelope.occurredAt).
         objectMapper = new ObjectMapper().registerModule(new JavaTimeModule());
 
-        ChainEventTopicsProperties topicsProperties = new ChainEventTopicsProperties();
-        topicsProperties.setTopics(Map.of("task.scheduling.updated", "task.scheduling.updated"));
+        // consumedTopics/consumerGroupId are irrelevant to KafkaEventPublisher
+        // (only topics() is read - see its constructor), so they're left null here.
+        ChainEventTopicsProperties topicsProperties = new ChainEventTopicsProperties(
+                Map.of("task.scheduling.updated", "task.scheduling.updated"), null, null);
 
         publisher = new KafkaEventPublisher(kafkaTemplate, objectMapper, topicsProperties);
     }

@@ -1,5 +1,6 @@
 package com.rnd.chain.events;
 
+import com.rnd.chain.events.testsupport.TestPayload;
 import org.apache.kafka.clients.consumer.Consumer;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
 import org.apache.kafka.clients.consumer.ConsumerRecords;
@@ -93,7 +94,7 @@ class ChainEventConsumerIntegrationTest {
      * succeeding, or to always fail - simulating a transient failure that
      * eventually recovers vs. one that never does.
      */
-    static class RecordingEventHandler implements EventHandler<ItPayload> {
+    static class RecordingEventHandler implements EventHandler<TestPayload> {
         private final AtomicInteger invocations = new AtomicInteger(0);
         private volatile int failuresBeforeSuccess = 0;
         private volatile RuntimeException failureToThrow = null;
@@ -104,12 +105,12 @@ class ChainEventConsumerIntegrationTest {
         }
 
         @Override
-        public Class<ItPayload> getPayloadType() {
-            return ItPayload.class;
+        public Class<TestPayload> getPayloadType() {
+            return TestPayload.class;
         }
 
         @Override
-        public void handle(EventEnvelope<ItPayload> event) {
+        public void handle(EventEnvelope<TestPayload> event) {
             int attempt = invocations.incrementAndGet();
             if (failureToThrow != null) {
                 throw failureToThrow;
@@ -135,25 +136,6 @@ class ChainEventConsumerIntegrationTest {
 
         void alwaysFailWith(RuntimeException exception) {
             this.failureToThrow = exception;
-        }
-    }
-
-    /**
-     * Minimal test-only payload type, mirroring ChainEventConsumerTest's
-     * TestPayload.
-     */
-    public static class ItPayload {
-        private String value;
-
-        public ItPayload() {
-        }
-
-        public String getValue() {
-            return value;
-        }
-
-        public void setValue(String value) {
-            this.value = value;
         }
     }
 

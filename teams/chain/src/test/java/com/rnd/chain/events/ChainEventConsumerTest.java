@@ -2,6 +2,7 @@ package com.rnd.chain.events;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.rnd.chain.dto.ProcessedEvent;
+import com.rnd.chain.events.testsupport.TestPayload;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
@@ -205,23 +206,5 @@ class ChainEventConsumerTest {
         return String.format(
                 "{\"eventId\":\"%s\",\"eventType\":\"%s\",\"occurredAt\":\"%s\",\"correlationId\":\"%s\",\"payload\":%s}",
                 eventId, eventType, Instant.now(), correlationId, payloadJson);
-    }
-
-    /**
-     * Minimal test-only payload type used to verify deserialization and routing.
-     */
-    public static class TestPayload {
-        private String value;
-
-        public TestPayload() {
-        }
-
-        public String getValue() {
-            return value;
-        }
-
-        public void setValue(String value) {
-            this.value = value;
-        }
     }
 }

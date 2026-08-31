@@ -50,8 +50,14 @@ public class ChainEventConsumer {
         this.processedEventStore = processedEventStore;
     }
 
+    // groupId has no fallback value here on purpose (PLAN.md Finding 3):
+    // application.yml always sets chain.kafka.consumer-group-id, so a
+    // literal fallback here was dead code that silently disagreed with
+    // ChainEventTopicsProperties's own (also-removed) Java-side default.
+    // If the property is ever genuinely missing, this now fails loudly at
+    // startup instead of silently joining a third, undocumented group.
     @KafkaListener(topics = "${chain.kafka.consumed-topics:}",
-                   groupId = "${chain.kafka.consumer-group-id:chain-service}")
+                   groupId = "${chain.kafka.consumer-group-id}")
     public void onMessage(String rawMessage) {
         JsonNode root = parseRoot(rawMessage);
         String eventType = readEventType(root);
@@ -110,6 +116,11 @@ public class ChainEventConsumer {
         try {
             return objectMapper.readTree(rawMessage);
         } catch (Exception e) {
+            // Logged here (not just wrapped as `cause`) so the original exception's type and
+            // stack trace are visible in application logs without requiring whoever triages the
+            // DLT message to inspect NonRetryableEventException#getCause() - a bug in Chain's own
+            // JSON handling should be easy to tell apart from a genuinely malformed message.
+            log.warn("Failed to parse message as JSON: {}", e.getMessage(), e);
             throw new NonRetryableEventException("Malformed message payload: " + e.getMessage(), e);
         }
     }
@@ -150,6 +161,10 @@ public class ChainEventConsumer {
         try {
             return objectMapper.treeToValue(root.get("payload"), handler.getPayloadType());
         } catch (Exception e) {
+            // See parseRoot's comment: logged here so a bug in our own deserialization logic
+            // (as opposed to a genuinely bad producer payload) is immediately visible, not only
+            // discoverable by inspecting the wrapped exception's cause.
+            log.warn("Failed to deserialize payload for handler [{}]: {}", handler.getClass().getName(), e.getMessage(), e);
             throw new NonRetryableEventException(
                     "Message payload does not match the expected shape for handler ["
                             + handler.getClass().getName() + "]: " + e.getMessage(), e);

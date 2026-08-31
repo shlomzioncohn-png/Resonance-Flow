@@ -1,796 +1,384 @@
-# PLAN.md — Chain Kafka Event Infrastructure: Review Remediation Plan
+# Chain Kafka Code Review Remediation Plan
 
-**Scope of this document:** audit and remediation plan only. No source code was modified to produce
-this plan. No PR was opened. All findings below were checked against the actual repository, not
-assumed from the reviewer's description.
+**Scope:** audit and remediation plan only. No source, test, `pom.xml`, or `application.yml`
+changes were made to produce this plan; only this file was written. Every finding below was
+checked against the actual code on `yehudit/chain-event-infrastructure` (HEAD `92578c3`), not
+assumed from the review text.
 
-**Branch audited:** `yehudit/chain-event-infrastructure` (origin), HEAD `63e2e26`, on top of
-`a4230a0` ("add Kafka event infrastructure for Chain ... (#113)"). This branch is **not yet merged
-into `main`** — `git log main..HEAD` shows both commits are only on this branch.
+**Context:** this is PR #164's *third* round of review. Round 1 (`a4230a0`) added the Kafka
+infrastructure. Round 2's nine findings (exception handling, idempotency race, publisher
+fire-and-forget, DLT config duplication, config naming, in-memory-store safety) were addressed in
+commit `4534c5a` — confirmed by direct code inspection below, not by trusting the PR comment that
+claims it. This document replaces the previous `PLAN.md` (796 lines), which itself was the
+round-1/round-2 remediation record and has since become exactly what this round's Finding 2
+describes: stale session narrative next to durable content worth keeping. See Finding 2's action
+item (§5) for what was kept and why.
 
 ---
 
 ## 1. Executive Summary
 
-The PR adds a first, genuinely reusable Kafka publish/consume skeleton for Chain: a generic
-`EventEnvelope<T>`, an `EventPublisher`/`KafkaEventPublisher` pair, a `ChainEventConsumer` that
-routes by `eventType` to `EventHandler<T>` beans, a `ProcessedEventStore` abstraction with an
-in-memory implementation, and a `DefaultErrorHandler`/DLT wiring. The shape is right and the code
-is honest about its own gaps — three of the four TODO comments in this PR are the *right* TODOs
-(envelope shape pending, in-memory store not production-safe, taskId type pending Inbox's decision).
+**Current situation:** all nine findings in this round are real to varying degrees, and none are
+Critical or Major bugs — round 2 already fixed the two Critical issues (raw exception leakage,
+idempotency race) and every fix is confirmed present and tested (32 tests pass on the reviewer's
+own account, and the code inspected below matches that claim). This round is process hygiene
+(Finding 1), documentation upkeep (Finding 2), and small consistency/robustness cleanups (Findings
+3–9) on top of an already-correct implementation.
 
-The review is largely correct, but two of its assumptions do not hold once checked against the rest
-of the monorepo, and one of its "undocumented" claims is not actually true:
+**Major confirmed risks:** none are urgent. The closest to a real risk is Finding 3 (three
+inconsistent consumer-group-id defaults) — not a live bug (one value always wins today), but a
+"why isn't my config change taking effect" trap for a future engineer.
 
-- **The Spring Boot 3 / Java 21 upgrade is not invented.** `teams/bridge/pom.xml` is *already* on
-  Spring Boot 3.3.13 / Java 21. Chain is simply catching up to an upgrade another team already made
-  on `main`-adjacent branches. It should still be a separate commit (process hygiene), but it is not
-  an architectural surprise.
-- **An Outbox pattern already exists in this monorepo, but it is not reusable by Chain as built.**
-  It lives entirely inside `teams/inbox` — its own JPA entity, its own scheduled worker, its own
-  event-type enum, its own `EventPublisher` — with no shared Java module backing it. Even the
-  branch named `yehudit/bridge-outbox-integration` turns out, on inspection, to add more Inbox-
-  internal code (`teams/inbox/.../TaskService.java`, `OutboxEvent.java`), not anything in
-  `teams/bridge`, which still has zero database or Outbox code of its own. Full analysis in §2A.
-  The reviewer's instinct (fire-and-forget publish is a real gap) is right; "add Outbox to this PR"
-  is not the correct remediation — not because Outbox is being handled elsewhere as a clean shared
-  service, but because copying Inbox's specific implementation isn't possible without first giving
-  Chain a database it doesn't have, and re-deriving a Chain-specific Outbox from scratch is a bigger
-  scope decision than this remediation PR should absorb.
-- **There is a real, unmerged, in-progress cross-team contract document** for exactly the two things
-  the review calls "invented not-yet-approved contracts": the envelope's field naming, and
-  `task.scheduling.updated`'s payload. `teams/inbox/docs/Inbox_Kafka_Ingestion_Contract.md` (on
-  `esti/inbox-kafka-ingestion-contract`) confirms Chain's camelCase field naming is correct, and
-  **explicitly flags `priorityScore` as an unresolved cross-team question** — not settled, not
-  Chain's to decide alone. This upgrades several "DECISION REQUIRED" items from guesswork to
-  "here is the actual open question on record."
+**Two findings need a correction, not just a fix, because the reviewer's stated premise doesn't
+fully hold once checked against the code:**
+- **Finding 2** claims PLAN.md's durable content "is already correctly captured in README.md and
+  Javadoc." Checked directly: **not fully true.** Three production classes carry Javadoc pointing
+  at specific PLAN.md decisions (`ProcessedEventStore` → D2, `TaskSchedulingUpdatedPayload` → D5,
+  `KafkaEventPublisher` → D6), and D5/D6's actual reasoning lives *only* in PLAN.md — README
+  doesn't mention `priorityScore` or the Outbox analysis at all. Deleting the file as suggested
+  would break those references and lose real content. The correct fix is trim, not delete — see §5.
+- **Finding 9** claims the original exception's "stack trace [is] discarded." Checked directly:
+  it isn't — `NonRetryableEventException`'s constructor is always called with the original
+  exception as `cause` (`new NonRetryableEventException("...", e)`), so the full stack trace
+  survives in the exception chain. The real, narrower problem — a misleading top-level message for
+  someone triaging the DLT without digging into `getCause()` — still stands and is worth a small
+  fix.
 
-The two Critical findings (#1 exception handling, #2 idempotency race) are both **confirmed real**
-against the code, and Inbox's parallel Kafka stack (`TransientProcessingException`,
-`RetryTemplate`, DB-unique-constraint idempotency) gives a working precedent for the *shape* of the
-fix — without requiring Chain to copy Inbox's architecture wholesale, which would be over-engineering
-for a component that currently has no live topic to consume from at all (`chain.kafka.consumed-topics`
-is unset, so `ChainEventConsumer` is disabled by `@ConditionalOnProperty` in every environment today).
+**Remediation strategy:** four phases, ordered by risk/dependency, not by finding number (see §4).
+Repository/doc hygiene first (zero code risk), then configuration consistency (touches shared
+config classes, do it as one pass), then the two small robustness/documentation fixes, then test
+deduplication last (fully independent, purely mechanical).
 
-The most important architectural risk is not any single finding — it's that **none of this has ever
-been run**. `teams/chain/pom.xml` has no `spring-kafka-test` dependency, there is no `@EmbeddedKafka`
-test anywhere in Chain, and this sandbox has no network access to verify a build. Phase 1 of the
-implementation order (below) starts with confirming the module currently builds and its existing
-tests currently pass — before changing anything.
+**Important dependencies between fixes:** Findings 3 and 4 both touch
+`ChainEventTopicsProperties.java` — do them together to avoid touching the same file twice.
+Finding 1 (the platform upgrade) is **not fixable by code change** at this point — see §5 for why,
+and why the recommendation is process-only.
 
 ---
 
-## Implementation Status (update — Phases 1–6 implemented)
+## 2. Audit Results
 
-All code changes described in Phases 1–6 have been written and are sitting in the working tree on
-`yehudit/chain-event-infrastructure`, **uncommitted** — nothing has been committed or pushed; that
-stays the user's own step, per this session's established workflow. Two things changed from the
-plan as originally written, both worth reading before running `mvn test`:
-
-1. **`ProcessedEventStore` grew a second method, `release(UUID eventId)`, not just `tryClaim`.**
-   Implementing the plan's original single-method design (claim once, keep the claim forever)
-   turned out to silently break the *existing* transient-retry guarantee: `DefaultErrorHandler`
-   retries by re-invoking the same listener method for the same message, so a permanent claim taken
-   before calling `handler.handle()` would make the *second* retry attempt see "already claimed" and
-   skip the handler entirely — swallowing a transient failure as a silent no-op instead of retrying
-   it. The implemented fix claims right before calling the handler and **releases the claim if the
-   handler throws**, so a retry (same-delivery or a later redelivery) can claim and attempt the
-   event again. This preserves Phase 1's "transient failures keep retrying exactly as they do today"
-   goal, which the plan's originally-described design would not have. The crash-after-claim gap (D2)
-   is now narrower and more accurate than originally written: it only applies to a process crash
-   between claiming and releasing/succeeding, not to any handler exception.
-2. **Finding 9d was corrected during implementation** — see the updated table row and Phase 6.4
-   above. Only `.idea/misc.xml` was a pre-existing tracked file this PR modified; the other four
-   `.idea/*.xml` files are new files this PR's own commit added. `misc.xml`'s content has been
-   restored to match `main` directly in the working tree; the other four still need `git rm` as part
-   of finalizing this PR's commits (not done automatically, since deleting files was outside the
-   scope of what this pass touched).
-
-**Both items flagged as unverified have now been verified on a real machine — `mvn -pl teams/chain
-test` passes, all 32 tests green:**
-- `ChainKafkaErrorHandlingConfig`'s `KafkaTemplate<String, String>` parameter (finding 4b) compiles
-  cleanly against `DeadLetterPublishingRecoverer`'s constructor — no change needed.
-- `ChainEventConsumerIntegrationTest.java` needed two fixes once actually compiled/run against this
-  project's real `spring-kafka-test` version:
-  1. `KafkaTestUtils.getRecords(Consumer, long)` doesn't exist on this version — only the
-     `Duration`-based overload does. Fixed by wrapping the three millisecond timeouts in
-     `Duration.ofMillis(...)`.
-  2. The class-level `@DirtiesContext` was left at its default `classMode` (`AFTER_CLASS`), so all
-     three `@Test` methods were sharing one embedded broker, one consumer group, and one running
-     listener container for the whole class — one test's retry/DLT activity could leak into the
-     next test's assertions. Fixed by setting
-     `classMode = DirtiesContext.ClassMode.AFTER_EACH_TEST_METHOD` so each test gets an isolated
-     Spring context.
-
-**Separately, an environment-only issue showed up on the verifying machine, unrelated to this PR's
-code:** its only installed JDK is 25, and the Mockito/Byte Buddy version pulled in transitively can't
-instrument Java 25 bytecode yet (`"Java 25 (69) is not supported by the current version of Byte
-Buddy"`) — this affected `KafkaEventPublisherTest`'s mocks specifically. The workaround is the JVM
-flag `-Dnet.bytebuddy.experimental=true`, passed at test-run time; with it, all 4 previously-erroring
-`KafkaEventPublisherTest` cases pass cleanly. A permanent fix (adding that flag to
-`teams/chain/pom.xml`'s surefire `<argLine>`) is a project-config decision left to the user — not
-applied here, and not a statement about which Spring Boot version Chain targets (that stays 3.3.13,
-per §2 above; the Byte Buddy version is a transitive test-scope dependency, independent of that).
-
-All 32 tests pass. The remaining pending step is finalizing the commit (see Phase 6.4 for the
-`.idea` file cleanup still outstanding) — not further code changes.
-
----
-
-## 2. Repository Findings
-
-**Chain module today** (`teams/chain`): Spring Boot 3.3.13, Java 21 (already on this branch), single
-`KafkaTemplate<String, String>` auto-configured by Spring Boot Kafka autoconfiguration from
-`application.yml`'s `spring.kafka.producer.key/value-serializer: StringSerializer`. No JPA, no
-database — Chain is still 100% in-memory (`teams/chain/CLAUDE.md`, confirmed in an earlier session
-on `ShifraAisenstain`). `ChainEventConsumer` is gated by
-`@ConditionalOnProperty(prefix = "chain.kafka", name = "consumed-topics")`, and
-`chain.kafka.consumed-topics` is **not set anywhere** in `application.yml` — so today, in every
-environment, the consumer bean does not exist and no `@KafkaListener` is ever registered. This
-matters for severity throughout: several findings describe risk that is real *once the consumer goes
-live*, but is not yet live.
-
-**No CI exists in this repository.** `.github/workflows` has no files at all. There is no automated
-gate on Java version, tests, or anything else. This changes the calculus on "should the version
-bump ride in this PR" (there is no CI matrix to break) but also means there is currently no safety
-net catching any of this — which raises the value of the tests this plan adds.
-
-**No root `.gitignore` exists.** `.idea/` is tracked at the repo root from *before* this PR (8
-files already tracked pre-existing). This PR's working tree modified 5 of those already-tracked
-files (`claudeCodeEditorTabs.xml`, `compiler.xml`, `encodings.xml`, `jarRepositories.xml`,
-`misc.xml`) — almost certainly IntelliJ re-writing them on project open, not a new file added to
-tracking. `teams/chain/.gitignore` already excludes `.idea/` for the module itself; the root-level
-tracking is pre-existing, repo-wide technical debt this PR incidentally touched.
-
-**Sibling teams already have working Kafka infrastructure — on unmerged branches, not `main`.**
-Neither Inbox's Kafka stack nor the Outbox implementation nor the ingestion contract doc is in
-`main` yet. They are real, working, tested code (with `@EmbeddedKafka` integration tests), but they
-are **not an authoritative merged convention** — treat them as the strongest available precedent,
-not as law Chain must follow to the letter.
-
-Key precedents found (all on `origin/inbox-team` unless noted):
-
-| Convention | Where established | What it does |
-|---|---|---|
-| Retryable vs. non-retryable exception split | `KafkaConfig.kafkaRetryTemplate` + `TransientProcessingException` | `SimpleRetryPolicy` retries **only** `TransientProcessingException`; everything else fails fast |
-| Consumer-side integration testing | `spring-kafka-test` + `@EmbeddedKafka` (not Testcontainers) | `BridgeTaskConsumerIntegrationTest`, `KafkaEventPublisherIntegrationTest` |
-| Producer retry with backoff | `teams/inbox/.../event/KafkaEventPublisher.java` | Manual `ScheduledExecutorService` retry loop, classifies `RetriableException` from the cause chain |
-| Consumer-side idempotency | `Inbox_Kafka_Ingestion_Contract.md` §6 | A **DB unique index** on the natural key — atomic by construction, not a check-then-act flag |
-| Outbox pattern | `Implement-Transactional-Outbox-for-Reliable-Kafka-Publishing(#157)` branch | `OutboxEvent` entity + `OutboxWorker` polling job, Postgres-backed, Inbox/Bridge-specific |
-| Java 21 records | *(searched all of `origin/inbox-team`, `main`, this branch)* | **Not used anywhere in the repo yet** — this PR would be the first |
-| `@Autowired` on `@Bean` parameters | `teams/inbox/.../config/KafkaConfig.java` and others | Never used — parameters are injected implicitly, no annotation |
-
-**The cross-team contract document** (`teams/inbox/docs/Inbox_Kafka_Ingestion_Contract.md`, draft,
-unmerged) is the single most load-bearing piece of evidence in this audit. Its §4 is *specifically
-about* `task.scheduling.updated` and states, verbatim: "the INBOX consumer for this topic is not
-built yet" and "`priorityScore` shape not final ... don't build or publish against a guessed shape
-here — get the decision recorded in the spec first." Chain's `TaskSchedulingUpdatedPayload` already
-guessed a shape (`int priorityScore`). That predates this PR and is out of this PR's scope to fix,
-but it is directly relevant to whether `task.scheduling.updated` publishing should be presented as
-"done" — it should be presented as "infrastructure-ready, payload shape not yet cross-team-approved."
-
----
-
-## 2A. Outbox Reusability Analysis
-
-Requested explicitly as a follow-up before finalizing the Outbox decision: is the existing Outbox
-implementation actually reusable by Chain, or does it just exist "somewhere in the repo"? Inspected
-on `origin/Implement-Transactional-Outbox-for-Reliable-Kafka-Publishing(#157)` (the source of the
-merged-into-`inbox-team` implementation) and `origin/yehudit/bridge-outbox-integration` (the
-branch name that most directly implies cross-team reuse).
-
-### Module boundaries and ownership
-
-Every Java file is under `com.rnd.inbox.*`, physically inside `teams/inbox/src/main/java`:
-`model/entity/OutboxEvent.java`, `model/enums/OutboxStatus.java`, `repository/OutboxEventRepository.java`,
-`service/OutboxWorker.java`, `service/OutboxCleanupJob.java`. There is no `shared/src/main/java`
-anywhere in this repository — the only thing under `shared/` is `shared/database/migrations/` (SQL)
-and `shared/database/pgadmin/`, `shared/database/seeds/` (non-Java). **There is no Java module a
-second team could add as a Maven dependency to get this code.** Each team module
-(`teams/chain`, `teams/inbox`, `teams/bridge`, ...) has its own independent `pom.xml` with no
-parent POM tying them together (confirmed in §2: no root `pom.xml` exists) and no
-`<dependency>` between team modules exists anywhere in the repo.
-
-**Direct evidence it hasn't actually been reused, even by its own author:** `git log` on
-`yehudit/bridge-outbox-integration` shows exactly two commits beyond the merged Outbox PR —
-"Add pending Outbox row on Bridge task creation" (`21d539a`) and "Add AuditLog.record() factory and
-fix tests" (`bfe57d5`). Both touch only `teams/inbox/src/main/java/com/rnd/inbox/...` (`TaskService.java`,
-`OutboxEvent.java`, `AuditLog.java`). Despite the branch name, **no file under `teams/bridge` is
-touched at all**, and `teams/bridge/pom.xml` has zero database/JPA/Hibernate/Flyway dependencies.
-What "Bridge outbox integration" actually means is: Inbox's own `TaskService`, when it creates a
-task that originated from Bridge's `bridge.structured.tasks` topic (see
-`Inbox_Kafka_Ingestion_Contract.md` §2), now also writes a row to Inbox's own outbox table. This is
-Inbox extending its own use of its own Outbox to one more of its own code paths — not Bridge (the
-team/module) adopting Outbox as reusable infrastructure. That is the single strongest piece of
-evidence for this section's verdict: if the same engineer who wrote Outbox didn't reach for it as
-shared infrastructure when the obvious next opportunity came up, it is not designed as shared
-infrastructure today, whatever the branch name suggests.
-
-### Dependencies
-
-`OutboxEvent.eventType` is typed as `com.rnd.inbox.event.EventType` — Inbox's own enum, with an
-Inbox-specific `.getTopic()` method used by `OutboxWorker` to resolve where to publish. The column
-is stored as `VARCHAR`, not a native Postgres enum, specifically (per the code's own comment)
-*"because EventType is owned by a teammate's package... not defined at the DB level here"* — i.e.
-the author already anticipated other things might read this table and deliberately kept the DB
-schema from hard-coding Inbox's Java enum. That's a genuinely good instinct for future reuse, but it
-only decouples the **schema**, not the **Java code that reads and writes it**. `OutboxWorker` also
-depends on Inbox's own `EventPublisher`/`Event` interfaces (different types from Chain's
-`EventPublisher`/`EventEnvelope` built in this PR — same concept, incompatible types), and
-`SOURCE_SERVICE = "inbox"` is a compile-time literal, not configuration.
-
-### Persistence model
-
-Postgres-backed, via Spring Data JPA + Hibernate + a native `outbox` table
-(`shared/database/migrations/V3__add_outbox_table.sql`) with a partial index for the worker's
-pickup query and `FOR UPDATE SKIP LOCKED` row claiming (`OutboxEventRepository.claimPendingBatch`).
-This is a solid, standard Outbox schema design. But: **Chain has no Postgres dependency at all**
-(`teams/chain/pom.xml` — no JPA, no JDBC driver, nothing; confirmed again for this analysis) and
-**no Postgres service in `teams/chain/docker-compose.yml`** (grepped — zero results), consistent
-with the earlier-established fact that Chain is 100% in-memory today (`teams/chain/CLAUDE.md`,
-`ProcessedEventStore`'s own TODO). Even setting aside code reuse entirely, Chain reusing *the table*
-would mean Chain connecting to whatever Postgres instance Inbox uses — a shared-database-across-
-services decision, which is a materially bigger architectural commitment than "add an Outbox," and
-one this plan is not positioned to make unilaterally (it affects service boundaries and operational
-ownership, not just Chain).
-
-### Event model
-
-`OutboxEvent.payload`/`metadata` are `Map<String, Object>` mapped via `JsonBinaryType` to `jsonb`
-columns — untyped at the Java level, which is actually reuse-friendly in principle (any service
-could stuff any JSON-serializable payload in). The blocker isn't the payload shape, it's everything
-around it (`eventType`, `EventPublisher`, `SOURCE_SERVICE`) being Inbox-specific as covered above.
-
-### Configuration
-
-`OutboxWorker` takes `outbox.worker.batch-size` / `max-retries` / `backoff-base-seconds` /
-`backoff-max-seconds` / `poll-interval-ms` as `@Value`-injected properties with defaults — these are
-generic and would transfer cleanly to a second service. This is the one piece of the design that
-*is* already reusable-shaped (externalized config, no Inbox-specific literals) — it just isn't
-factored out from the class that also hardcodes `SOURCE_SERVICE` and depends on Inbox's `EventType`.
-
-### Publishing mechanism
-
-`OutboxWorker.pollAndPublish()` is `@Scheduled` + `@Transactional`, running inside Inbox's own
-Spring application process. Chain runs as a **separate Spring Boot application** (`ChainApplication`,
-its own JVM, its own `spring.application.name: chain`). A shared DB table — even if Chain could
-write to one — does not give Chain a shared *worker process*; Chain would need its own
-`@Scheduled` poller running inside Chain's own app either way. There is no sense in which "reuse
-the Outbox" could mean "let Inbox's worker publish Chain's events" — that was never how this is
-built, and would be a much stranger coupling (one service's background job responsible for another
-service's business events) than anything under discussion here.
-
-### Verdict: not reusable as built, and not because it's "elsewhere in scope" — because it's a
-### service-owned implementation, not a library
-
-Every layer — entity, repository, worker, event-type resolution, source-service literal — is
-concretely Inbox's. Nothing is packaged for cross-service consumption, and the one team that has
-since had an opportunity to reuse it (Bridge, via `yehudit/bridge-outbox-integration`) didn't reuse
-the Java code either — it extended Inbox's own use of it instead. Reusing today's Outbox for Chain
-is not a configuration or dependency-declaration exercise; it would require either duplicating the
-~300-line entity/repository/worker/cleanup pattern inside `teams/chain` (real code, real tests, and
-still blocked on Chain adopting Postgres/JPA first — itself a decision this plan can't make), or a
-genuine extraction of a shared library (new Maven module, e.g. `shared/outbox` or similar, with its
-own `pom.xml`, publishing a JAR both `teams/inbox` and `teams/chain` depend on, generalizing
-`EventType`→topic resolution and `SOURCE_SERVICE` into constructor parameters instead of hardcoded
-Inbox types) that does not exist today and that only Inbox's team can safely carve out of its own
-running code without regressing it.
-
-### Extraction vs. reimplementation — which is preferable, and when
-
-**Not now, for Chain, as part of this remediation.** Two independent blockers make this a "later"
-decision rather than a "which approach" decision: Chain has no database (a prerequisite for either
-option), and there is exactly one existing real implementation to generalize from — extracting a
-shared abstraction from a single concrete case tends to guess the wrong abstraction (the classic
-"wait for three examples" argument), especially here where the two candidate reuse sites (Inbox
-itself, and a hypothetical Chain) don't yet even agree on an event envelope shape (§8/D5).
-
-**What would change this recommendation:** if/when Chain actually adopts a database (a decision
-already flagged elsewhere in this plan as blocking multiple other items — see D2, `ProcessedEventStore`),
-and a second service besides Inbox needs outbox-style reliable publishing, that is the natural
-trigger to extract the reusable ~70% (schema shape, claim-batch query, worker polling/retry/backoff
-loop) into a real shared module — at that point duplicating the pattern a second time from scratch
-has a real, measurable cost (two independently-drifting implementations of the same correctness-
-critical mechanism), which justifies the extraction investment in a way that a single, still-
-hypothetical Chain use case doesn't yet. Until then, recommend Inbox's team keep the schema's
-existing decoupling (VARCHAR `event_type`, generic `payload`/`metadata` JSON columns) as-is — it's
-already quietly making a future extraction easier without costing anything today.
-
----
-
-## 3. Code Review Finding Validation
-
-| # | Finding | Severity (reviewer) | Status | Evidence | Recommended Action |
+| # | Finding | Severity | Status | Evidence | Recommended Action |
 |---|---|---|---|---|---|
-| 1 | Consumer exception handling: raw NPE/IllegalArgumentException/DateTimeParseException on malformed events, no not-retryable config, `throws Exception` | Critical | **CONFIRMED** | `ChainEventConsumer.java:45,64-85` — `root.get("eventType").asText()` on a missing field NPEs; `UUID.fromString`, `Instant.parse` throw unchecked on bad input; `ChainKafkaErrorHandlingConfig` has no `addNotRetryableExceptions` | Introduce a business exception for permanent parse/routing failures; register it as not-retryable; remove `throws Exception`. See Phase 1. |
-| 2 | Idempotency check-then-act race (`isProcessed` → `handle` → `markProcessed`) | Critical | **CONFIRMED** | `ChainEventConsumer.dispatch:64-85`, `InMemoryProcessedEventStore.java:25-33` — two separate map operations, nothing atomic between them | Not a drop-in fix — see §4/Phase 2. Minimum viable fix (`putIfAbsent`-based atomic claim) closes the concurrent-duplicate case; the crash-after-success case needs a persistence decision that Chain hasn't made yet. |
-| 3 | Publisher is fire-and-forget, dual-write problem, undocumented | Significant | **PARTIALLY CONFIRMED** | `KafkaEventPublisher.publish:32-47` — confirmed fire-and-forget (logged only, `EventPublisherTest.publish_doesNotThrow_whenKafkaSendFailsAsynchronously` explicitly asserts this). "Undocumented" is real (no TODO exists here, unlike every other gap in this PR). "No existing mitigation" needs a caveat: Outbox exists for Inbox, but per the full analysis in §2A it is Inbox-owned application code (own entity, own worker, own event types, own Postgres dependency) with no shared Java module — **not something Chain can currently adopt**, not "already solved elsewhere and this PR should just plug into it" | Do not add Outbox to this PR — it isn't a matter of plugging in, Chain would need a database first. Add the one paragraph of documentation the other TODOs already have, referencing §2A's verdict. Revisit Outbox-for-Chain once Chain has a database, per §2A's "what would change this recommendation." |
-| 4a | `DeadLetterPublishingRecoverer`'s custom resolver duplicates Spring Kafka's default | Significant | **CONFIRMED** | `ChainKafkaErrorHandlingConfig.java:27-37` — the lambda `(record, exception) -> new TopicPartition(record.topic() + ".DLT", record.partition())` is exactly `DeadLetterPublishingRecoverer`'s documented default destination resolver | Simplify to `new DeadLetterPublishingRecoverer(kafkaTemplate)`. Note a separate, real risk while touching this: partition-preserving DLT resolution fails if the `.DLT` topic doesn't have at least as many partitions as the source topic — worth a one-line comment either way. |
-| 4b | `KafkaTemplate<Object, Object>` vs. the app's only real `KafkaTemplate<String, String>` | Significant | **CONFIRMED in source, functional impact NOT verified** | `ChainKafkaErrorHandlingConfig.java:29` requests `KafkaTemplate<Object, Object>`; `KafkaEventPublisher.java:24` requests `KafkaTemplate<String, String>`; `application.yml` only configures `StringSerializer`. Whether Spring's generic-aware autowiring actually resolves this today could not be verified — this sandbox has no network access to run `mvn` | Align both to `KafkaTemplate<String, String>`. Before any other change in this file, run `mvn -pl teams/chain test` on a machine with real Maven to confirm whether `ChainApplicationTests.contextLoads()` currently passes as-is — this tells you whether this is latent or already broken. |
-| 4c | `@Autowired` on `@Bean` method parameter is redundant | Significant | **CONFIRMED** | `ChainKafkaErrorHandlingConfig.java:29` — Spring has injected `@Bean` method parameters without `@Autowired` since 4.3; no other config class in the repo (`teams/inbox/.../KafkaConfig.java`) uses it | Remove the annotation. Zero behavior change. |
-| 5 | Undocumented Spring Boot 2→3 / Java 11→21 upgrade | Significant | **PARTIALLY CONFIRMED** | `git show a4230a0 -- teams/chain/pom.xml` — real upgrade, real diff. But `teams/bridge/pom.xml` is *already* on 3.3.13/Java 21 — this is not an invented target, Chain is catching up to a sibling module. No `javax.*` usage exists anywhere in `teams/chain` today (verified via repo-wide grep), so the `javax`→`jakarta` migration risk the reviewer names does not actually apply to this module | Still split into its own commit/PR for review hygiene and bisectability — but the PR description should say "aligns Chain with Bridge's existing Spring Boot 3.3.13/Java 21," not present it as a novel upgrade. See §11. |
-| 6 | In-memory idempotency store has no production guardrail | Significant | **CONFIRMED** | `InMemoryProcessedEventStore.java` — plain `@Component`, no `@Profile`, no property gate, would be auto-wired into any environment including production as-is | Add a property-driven guard (see Phase 2/6). Low effort, meaningfully reduces the "silently wrong in prod" risk the TODO already names but doesn't prevent. |
-| 7 | `chain.kafka.topics` (Map, bound) vs. `chain.kafka.consumed-topics` (inline String, unbound) asymmetry; hardcoded `groupId` | Significant | **CONFIRMED** | `ChainEventTopicsProperties.java` binds only `topics`; `@KafkaListener(topics = "${chain.kafka.consumed-topics:}", groupId = "chain-service")` — both the topic list and the group id are inline SpEL, not on any `@ConfigurationProperties` class | Fold both into one properties class; externalize `groupId` (recommend `${spring.application.name}-service` or a dedicated property — see Decisions Required). |
-| 8 | Event contract / envelope structure | — | **DECISION REQUIRED / EXTERNAL CONTRACT** (see §4) | `EventEnvelope.java`'s own TODO already flags this as pending; `Inbox_Kafka_Ingestion_Contract.md` (draft, unmerged) confirms camelCase is the right call for field naming but leaves `priorityScore`'s shape explicitly open | Do not invent further. Chain's current camelCase choice is *correct* per the one document that addresses it — keep it. Do not change `TaskSchedulingUpdatedPayload`'s `priorityScore` type speculatively. |
-| 9a | `eventType` extracted twice (routing, then logging) | Cosmetic | **CONFIRMED** | `ChainEventConsumer.onMessage` reads `root.get("eventType").asText()`, then `dispatch` reads it again from the same `root` | Pass it as a parameter from `onMessage` to `dispatch`. Trivial, zero risk. |
-| 9b | `ProcessedEvent`/`TaskSchedulingUpdatedPayload` as records | Cosmetic | **PARTIALLY CONFIRMED — good candidates, but this is the first record in the repo** | Both are immutable, final-field, no-inheritance, plain data holders with no framework-serialization surprises (`ProcessedEvent` is never Jackson-(de)serialized; `TaskSchedulingUpdatedPayload` is Jackson-serialized on publish only — records serialize fine with Jackson's default introspection) | Safe to convert. Flag explicitly in the PR description that this establishes the repo's first use of records, since no other module has one yet — a one-line heads-up, not a blocker. |
-| 9c | `Collectors.toMap` on duplicate handler registration throws a generic `IllegalStateException` | Cosmetic | **CONFIRMED** | `ChainEventConsumer.java:41-43` — no merge function supplied | Supply an explicit merge function that throws a named exception identifying both handler classes and the conflicting event type. |
-| 9d | `.idea/*.xml` committed, likely missing root `.gitignore` | Cosmetic | **CONFIRMED (corrected during implementation)** | No root `.gitignore` exists (true). Checked precisely via `git show a4230a0 --stat`: of the 5 `.idea/*.xml` files this PR's commit touches, only `misc.xml` is a genuine modification of an already-tracked file (`10 +-` in the stat, confirmed present on `main`); the other 4 (`claudeCodeEditorTabs.xml`, `compiler.xml`, `encodings.xml`, `jarRepositories.xml`) are **newly added by this PR's own commit** (`git show main:<path>` fails with "not in main" for all four) — an earlier pass of this plan mischaracterized all 5 as pre-existing/only-modified; corrected here | `misc.xml` restored to `main`'s content directly in the working tree (done, bypassing a stuck local `.git/index.lock` from an interrupted git operation — see implementation notes). The other 4 are genuinely new files this branch introduced; since they're already committed (`a4230a0`), the fix is `git rm claudeCodeEditorTabs.xml compiler.xml encodings.xml jarRepositories.xml` (paths under `.idea/`) as part of finalizing this PR's commits, not a working-tree revert. |
+| 1 | Platform upgrade (Boot 2→3, Java 11→21) bundled into a feature PR | Major | CONFIRMED | `git show a4230a0 -- teams/chain/pom.xml` — the version bump is in this branch's very first commit, alongside the new Kafka files. `teams/bridge/pom.xml` on `main` is already 3.3.13/21 (real precedent), but `teams/inbox/pom.xml` on `main` is still 2.7.18/11 (repo is *not* uniformly upgraded) | Do not rewrite history (impractical and out of scope — see §5). Document the rationale in the PR description; treat as a process lesson for future PRs, not a code change here. |
+| 2 | 796-line PLAN.md is a stale session log committed as module source | Major | PARTIALLY VALID | Read in full. ~70% is session narrative (exact SHAs, "no PR was opened," an "Implementation Status" update, a step-by-step 2A investigation log) that is already stale or will be the moment this branch merges. The other ~30% (six numbered decisions, D1–D6) is genuinely durable and is what production Javadoc points to by name | Replace with a short, durable-only document (this file). Keep D1–D6's *conclusions* under the same IDs so existing Javadoc references keep resolving; drop the narrative. See §5. |
+| 3 | Consumer group id default duplicated across 3 sources | Major | CONFIRMED | `ChainEventTopicsProperties.consumerGroupId` field default `"chain-service"`; `@KafkaListener(groupId = "${chain.kafka.consumer-group-id:chain-service}")` same literal; `application.yml` sets `chain.kafka.consumer-group-id: ${spring.application.name}` → `"chain"`. `application.yml` ships in every build's classpath, so it always wins — the two `"chain-service"` literals are unreachable in practice today | Keep `application.yml`'s value as the one source of truth (this already matches D3 from the prior round). Drop the two now-dead `"chain-service"` literal defaults, or replace each with a one-line comment stating it's a last-resort fallback that must stay in sync with `application.yml`. |
+| 4 | `ChainEventTopicsProperties` is a mutable JavaBean, unlike this PR's other DTOs | Minor | CONFIRMED | Class uses setters and returns `topics` (a `HashMap`) by reference with no defensive copy. **New evidence since the prior round:** three sibling `@ConfigurationProperties` classes in `teams/bridge` (`ChatSessionProperties`, `ScopingProperties`, `WhatsAppImportProperties`) are already records with constructor binding, one of them using `@DefaultValue` — a real, working precedent on the same Spring Boot/Java version, not just a theoretical option | Convert to a record matching Bridge's exact pattern: `@ConfigurationProperties(prefix = "chain.kafka") public record ChainEventTopicsProperties(Map<String,String> topics, @DefaultValue("") String consumedTopics, @DefaultValue("${spring.application.name}") String consumerGroupId) {}`. Confirm `@DefaultValue` accepts a property placeholder for `consumerGroupId`, or bind it without a default and rely on `application.yml`'s existing default instead. |
+| 5 | Retry policy (`FixedBackOff(2000L, 2L)`) hardcoded | Minor | CONFIRMED | `ChainKafkaErrorHandlingConfig.java` — every other Chain Kafka tunable (topics, group id, store selection) is in `application.yml`; this one isn't. `FixedBackOff(interval, maxAttempts)` — `2L` here means 2 *retries after* the first attempt, i.e. 3 attempts total, matching the class's own Javadoc | Bind `chain.kafka.retry.max-attempts` (default `2`) and `chain.kafka.retry.interval-ms` (default `2000`) via a small nested properties record (record, per Finding 4's precedent), construct `FixedBackOff` from those. |
+| 6 | `TestPayload`/`ItPayload` are duplicate classes | Minor | CONFIRMED | Read both in full — identical: one `String value` field, same getter/setter, same no-arg constructor. No `testsupport`/shared-fixture package convention exists anywhere else in the repo yet | Extract one shared class, e.g. `com.rnd.chain.events.testsupport.TestPayload`, referenced from both test classes. This introduces the pattern rather than following one — reasonable, since no repo convention exists to violate. |
+| 7 | "Task identifiers are `java.util.UUID`..." paragraph duplicated in README | Minor | CONFIRMED | Read `README.md` in full — the paragraph appears twice, back-to-back, in the "Stack" section. No other duplication found in the surrounding section | Delete the second occurrence. One-line fix. |
+| 8 | `EventEnvelope.equals()`/`hashCode()` (identity, by `eventId` only) undocumented at point of use | Minor | CONFIRMED | `EventEnvelope.java:59-69` compares only `eventId`; `EventEnvelopeTest.equals_returnsTrue_whenSameEventId` confirms this is intentional (two envelopes with different payloads assert equal). No comment on `equals()` itself explaining why | Semantics are correct and intentional (an envelope's identity *is* its event id — content changing across redelivery shouldn't mint a "different" event). Add a one-line comment on `equals()`. No behavior change. |
+| 9 | Broad `catch (Exception e)` in `parseRoot`/`readPayload` blurs parse-bug vs. internal-bug triage | Minor | PARTIALLY VALID | Both methods already pass `e` as `cause` to `NonRetryableEventException` — the stack trace is **not** discarded, it's in the exception chain. The real, narrower issue: no log statement at the throw site, so an on-call engineer skimming DLT messages sees only the wrapped message, not immediately "this might be our bug, not bad producer data" | Keep the broad catch (correct for a single wrapped call — narrowing it would just be a longer list of the same rethrow). Add a `log.warn(..., e)` at each throw site so the full exception (type + stack trace) is visible in application logs without requiring someone to inspect `getCause()` on the DLT message. |
 
 ---
 
-## 4. Decisions Required
+## 3. Decisions / Clarifications Required
 
-### D1 — What does "not retryable" mean for Chain's consumer, and what's the exception's name/hierarchy?
-**Why it matters:** blocks Phase 1 entirely; changes retry/DLT behavior for every message.
-**Options:**
-- (a) One exception, e.g. `NonRetryableEventException extends RuntimeException`, thrown for
-  malformed JSON / missing `eventType` / bad `eventId` / bad `occurredAt` / payload mapping
-  failures; registered via `DefaultErrorHandler#addNotRetryableExceptions`. Stays inside Chain's
-  existing Spring Kafka container-level retry architecture.
-- (b) Mirror Inbox's `TransientProcessingException` + `RetryTemplate` shape exactly, inverting the
-  polarity (retry only on a named transient exception instead of skip on a named permanent one).
-**Recommended:** (a). It's a two-class change, keeps Chain on the Spring-native
-`DefaultErrorHandler`/DLT mechanism it already has working, and doesn't require adopting Inbox's
-whole `EventProcessingTemplate`/manual-ack architecture for a consumer that isn't live yet. Revisit
-if/when Chain's Kafka stack needs to converge with Inbox's for real operational consistency.
-**Consequences:** handler-level failures (e.g. a DB timeout inside `handler.handle()`, once handlers
-exist) remain retryable by default, matching current behavior; only parsing/routing failures change.
+**None.** Every finding above is resolvable from the repository itself — either it's a
+straightforward mechanical fix (3, 4, 5, 6, 7, 8, 9), or the correct action is "don't change code,
+document the reasoning" and the reasoning is fully determinable from git history and existing repo
+conventions (1, 2). Nothing here turns on information only the team has.
 
-### D2 — What idempotency guarantee is Chain actually promising, given it has no database yet?
-**Why it matters:** the review's "fix" instinct (atomic claim) only closes the concurrent-duplicate
-race. It does **not** close the crash-after-handle-before-mark case — nothing can, without
-transactionally tying "mark processed" to whatever `handler.handle()` actually mutates, and Chain's
-handlers don't exist yet (no `TaskCreatedEventHandler` etc. has been written).
-**Why the repository doesn't already answer this:** `ProcessedEventStore`'s own Javadoc says the
-storage technology is undecided; Chain doesn't have a `TaskRepository`-analogous persistent store
-for anything yet outside the in-memory `TaskEligibilityService` work.
-**Options:**
-- (a) Minimum viable now: make the store's check-and-mark atomic (`ConcurrentHashMap.putIfAbsent`
-  as an atomic *claim*, not a plain map write) — closes the "two threads, same event, concurrency >
-  1" race precisely. Document plainly (in the same TODO style already used) that "processed" is
-  claimed before, not after, business-side success is durable — so a crash mid-handle currently
-  reprocesses on redelivery, which is safe only if handlers are themselves idempotent or
-  side-effect-free on partial failure. That constraint doesn't exist yet because no handler exists
-  yet — write it down now so the first real handler author sees it.
-- (b) Defer any change and keep `isProcessed`/`markProcessed` as two calls, accepting the race,
-  since `concurrency` is 1 by default and no topic is configured — ship purely as documentation.
-- (c) Block on a persistence decision (DB-backed unique constraint, matching Inbox's proven
-  approach) before writing a single handler.
-**Recommended:** (a). It's a real, bounded improvement that costs one method rewrite, and it's
-honest about what it does and doesn't guarantee — which is what Rule 6 asks for. (c) is the *right*
-end state but shouldn't block this PR; the in-memory store already carries a TODO saying it isn't
-production-ready.
-**Consequences:** the store's return contract must change from "check, then separately mark" to a
-single atomic "claim" call; `ChainEventConsumer.dispatch` needs a matching one-line change.
-
-### D3 — Should the consumer group id be a dedicated Chain property or `${spring.application.name}`-derived?
-**Why it matters:** affects every future consumer group Chain adds, and how ops/other teams read
-Chain's Kafka footprint.
-**Options:** dedicated `chain.kafka.consumer-group-id` property (defaulting to
-`${spring.application.name}`) vs. hardcoded literal (current) vs. reusing `spring.application.name`
-directly with no override property.
-**Recommended:** a dedicated property defaulting to `${spring.application.name}`, so it's
-overridable per-environment without a code change but doesn't silently drift if `application.name`
-is ever repurposed for something else (e.g. a future multi-module split within Chain).
-**Consequences:** touches `application.yml` and `ChainEventConsumer`'s `@KafkaListener` annotation.
-
-### D4 — Repo-wide `.idea/` untracking and a root `.gitignore`
-**Why it matters:** every team's PR will keep showing spurious `.idea/*.xml` diffs until this is
-fixed once, at the root.
-**Why this is not Chain's or this PR's decision alone:** the tracked files are shared repo-root
-state (`.idea/Resonance-Flow.iml`, `.idea/modules.xml` etc. reference every module, not just Chain).
-**Options:** (a) fix repo-wide in a separate, dedicated PR (add root `.gitignore`, `git rm --cached
-.idea`); (b) leave as-is and just avoid touching `.idea/` files in future commits by being
-disciplined about `git add`.
-**Recommended:** (a), but as its own PR, not bundled here. This PR should only revert the 5
-`.idea/*.xml` files it happens to have modified.
-**Consequences:** none for this PR beyond a clean diff, once the revert is done.
-
-### D6 — Reuse Inbox's Outbox, reimplement a Chain-specific one, or extract a shared module?
-**Why it matters:** determines how (not whether — see §2A, this PR should not implement Outbox
-regardless) Chain's eventual publish-reliability gap gets closed.
-**Why the repository doesn't already answer this:** analyzed in full in §2A. Short version: Inbox's
-Outbox is real, working, and Postgres-backed, but it is concretely Inbox's — its own JPA entity, its
-own `EventType` enum, its own hardcoded `SOURCE_SERVICE`, no shared Java module backing it, and no
-parent POM or inter-module dependency mechanism in this repo that would let Chain depend on Inbox's
-code even if the classes were reusable in shape. Tellingly, the one branch whose name implies
-cross-team reuse (`yehudit/bridge-outbox-integration`) turned out, on inspection, to add more code
-inside `teams/inbox` rather than anything in `teams/bridge`.
-**Options:**
-- (a) Chain implements its own Outbox later, independently, once it has a database — duplicating
-  the pattern (entity/repository/worker/cleanup), not the code.
-- (b) Extract a shared Java module now (e.g. `shared/outbox`, its own `pom.xml`, published as a JAR
-  both `teams/inbox` and `teams/chain` depend on) generalizing `EventType`→topic resolution and
-  `SOURCE_SERVICE` into constructor parameters.
-- (c) Do nothing until Chain has a concrete, funded need — keep fire-and-forget with logging as a
-  documented, accepted tradeoff indefinitely.
-**Recommended:** (a), deferred — and only once Chain actually adopts a database (unresolved
-elsewhere in this plan, see D2). Extracting a shared module (b) from a single existing
-implementation risks generalizing the wrong things (Chain and Inbox don't even agree on an event
-envelope shape yet — §8/D5); it becomes the right call once a *second* real consumer of the pattern
-exists and the duplication cost is measured, not projected. (c) is a reasonable interim state, not a
-permanent one, given the dual-write problem the reviewer correctly identified.
-**Consequences:** no code changes now either way. The PR description should state this reasoning
-explicitly (per Phase 3.1) so nobody reads "Outbox exists in the repo" as "this PR should have used
-it."
-
-### D5 — `priorityScore`'s type/shape for `task.scheduling.updated`
-**Why it matters:** `TaskSchedulingUpdatedPayload.priorityScore` is currently `int`. The one
-document that discusses this field on record (`Inbox_Kafka_Ingestion_Contract.md` §4) states its
-producer and semantics are **not yet agreed** between Chain and Inbox.
-**This is `EXTERNAL CONTRACT REQUIRED`** — not something this plan or this PR can resolve. Flagging
-it so nobody reads "Chain publishes `task.scheduling.updated`" as "the contract is final." No code
-change is proposed here; this is a call-out for the PR description and for whoever owns the
-cross-team spec conversation next.
+The six decisions from the previous round (D1–D6) were genuine team-input decisions at the time;
+they're preserved (not re-opened) in Finding 2's action item in §5, since production code still
+references them by ID.
 
 ---
 
-## 5. Phase 1 — Critical Reliability & Error Handling
+## 4. Phased Implementation Plan
 
-**Goal:** malformed/permanent-failure messages stop being retried and reach the DLT immediately;
-transient failures keep retrying exactly as they do today; the consumer no longer leaks raw parser
-exceptions across its public contract.
+### Phase 1 — Repository & Documentation Hygiene
+**Objective:** stop shipping stale/misleading documentation; leave a clean, accurate record for
+the next reviewer. Zero production-code risk.
+**Changes:** Finding 2 (replace PLAN.md), Finding 7 (delete duplicate README paragraph), Finding 1
+(PR description note — no file change).
+**Dependencies:** none. Do first — it's the least risky and unblocks nothing else, but there's no
+reason to sequence it later.
+**Risks:** none beyond a bad edit to a markdown file.
+**Verification:** re-read both files after editing; confirm every `PLAN.md decision D<n>` Javadoc
+reference in the codebase (`ProcessedEventStore`, `TaskSchedulingUpdatedPayload`,
+`KafkaEventPublisher`) still resolves to a real section in the new file.
 
-1. **Before touching anything:** run `mvn -pl teams/chain test` (and ideally `mvn -pl teams/chain
-   spring-boot:run`) on a machine with real Maven/JDK 21, to get a real baseline — does
-   `ChainApplicationTests` currently pass? This resolves D-4b's open "is this actually broken today"
-   question before any other change lands on top of it.
-2. Add `NonRetryableEventException extends RuntimeException` (per D1) to
-   `teams/chain/src/main/java/com/rnd/chain/events/`, alongside the existing `EventPublishException`
-   (same package, same style — a message + optional cause constructor).
-3. In `ChainEventConsumer.onMessage`/`dispatch`, wrap each currently-unchecked failure point
-   (`objectMapper.readTree`, `root.get("eventType").asText()` on a null node,
-   `UUID.fromString(eventId)`, `Instant.parse(occurredAt)`, `objectMapper.treeToValue(payload, ...)`)
-   so each throws `NonRetryableEventException` with a message naming which field/step failed. Do
-   **not** wrap `handler.handle(event)` — a handler failure is exactly the transient case that
-   should keep retrying.
-4. Remove `throws Exception` from both `onMessage` and `dispatch` — now that every checked exception
-   is caught and rethrown as the new unchecked type, this is possible cleanly.
-5. In `ChainKafkaErrorHandlingConfig`, add
-   `errorHandler.addNotRetryableExceptions(NonRetryableEventException.class)` (a genuine constructor/
-   builder-level or setter call depending on final Spring Kafka API shape — confirm exact method
-   name against the `spring-kafka` version pulled by Spring Boot 3.3.13 when implementing).
-6. Fix D-4c (`@Autowired` removal) and D-4b (align to `KafkaTemplate<String, String>`) in the same
-   file while it's open — same file, same phase, low risk to bundle.
-7. Fix 4a (simplify the DLT resolver to the 2-arg `DeadLetterPublishingRecoverer` constructor) here
-   too, since it's the same class and same review comment cluster. Add a one-line comment noting the
-   partition-count caveat for future readers.
+### Phase 2 — Configuration Consistency
+**Objective:** one source of truth per config value; `ChainEventTopicsProperties` matches this
+PR's (and the repo's) established record-based `@ConfigurationProperties` style.
+**Changes:** Finding 4 (convert to record), Finding 3 (drop dead literal defaults), Finding 5
+(externalize retry policy — new nested properties record).
+**Dependencies:** do 3 and 4 together — both touch `ChainEventTopicsProperties.java`. Finding 5 is
+independent (different file) but same category of change; bundle for one focused review pass.
+**Risks:** converting to a record changes the class from mutable to immutable — check for any test
+or code calling a setter after construction (audited: none found in `KafkaEventPublisherTest` or
+production code; the setters are only ever called once, at construction/binding time).
+**Verification:** `mvn -pl teams/chain test`; specifically re-run `KafkaEventPublisherTest` (it
+directly constructs and populates a `ChainEventTopicsProperties` instance) and
+`ChainApplicationTests.contextLoads()` (confirms Spring can still bind the properties correctly as
+a record).
 
-**Dependency:** none of Phase 2/3/4 requires this phase to land first at the code level, but it
-should land first anyway — it's the highest-severity, lowest-risk, most self-contained change, and
-every new consumer test written in Phase 5 should assert against the *new* exception type, not the
-old raw ones.
+### Phase 3 — Consumer Documentation & Triage
+**Objective:** the two remaining `ChainEventConsumer`-adjacent findings that don't change behavior,
+only clarity.
+**Changes:** Finding 8 (comment on `EventEnvelope.equals()`), Finding 9 (log at throw site in
+`parseRoot`/`readPayload`).
+**Dependencies:** none; both are small, isolated, same general area of the codebase as Phase 1/2
+but lower priority since they don't fix a real defect.
+**Risks:** none — a comment and a log statement, no logic change.
+**Verification:** existing tests continue to pass unmodified; manually confirm the new log lines
+appear when running the existing malformed-message tests locally (optional, not required for
+correctness).
 
----
-
-## 6. Phase 2 — Idempotency & Concurrency
-
-**Goal:** the concurrent-duplicate race (two threads, same event, both see "not processed") is
-closed. The crash-after-handle race is explicitly documented as an open limitation, not silently
-left unaddressed.
-
-1. Change `ProcessedEventStore`'s contract from two methods (`isProcessed` / `markProcessed`) to one
-   atomic claim method, e.g. `boolean tryClaim(UUID eventId)` returning `true` if this call is the
-   one that transitioned the event from unclaimed to claimed (semantically a `putIfAbsent`).
-   Keep `markProcessed`-equivalent info (the full `ProcessedEvent` record) by claiming with the
-   `ProcessedEvent` payload directly: `boolean tryClaim(ProcessedEvent event)` backed by
-   `ConcurrentHashMap.putIfAbsent(event.getEventId(), event) == null`.
-2. Update `InMemoryProcessedEventStore` to implement `tryClaim` atomically via `putIfAbsent`.
-3. Update `ChainEventConsumer.dispatch` to call `tryClaim` **before** invoking `handler.handle(...)`,
-   using its boolean result in place of the current `isProcessed` check — this is the actual fix for
-   the race the review describes (claim happens atomically before work starts, not after).
-4. Document, in the class Javadoc (matching the existing TODO style), that a handler failure or
-   process crash after a successful claim does **not** currently retry that event automatically from
-   this store's perspective on redelivery — Kafka's own redelivery-on-uncommitted-offset is what
-   provides the retry path, and this claim step will now (correctly) treat the redelivered copy as
-   "already claimed" and skip it. **This is a real behavior change worth calling out explicitly to
-   reviewers**: today (check-then-act), a crash after `isProcessed=false` but before `markProcessed`
-   means the retry redelivers and reprocesses. After this fix (claim-then-act), the same crash means
-   the retry redelivers and is **skipped** as already-claimed — i.e., the fix trades "the concurrent-
-   duplicate bug" for "an event whose handler crashed after claiming it is never retried by this
-   store." This is *not* worse than today's actual guarantee (today's guarantee was already broken
-   under concurrency), but it is a different failure mode, and it's the direct consequence of D2
-   not being fully resolvable without persistence. Flag this explicitly in the PR description.
-5. Guard `InMemoryProcessedEventStore` against accidental production use (ties to D2/finding 6):
-   add a property-driven `@ConditionalOnProperty` (e.g.
-   `chain.events.processed-store: in-memory` as the default, matching value required to activate this
-   bean) so a future persistent implementation can coexist and be selected by config, and so
-   swapping the property to an unrecognized value with no matching bean fails application startup
-   fast instead of silently defaulting to the unsafe implementation.
-6. Concurrency tests (Phase 5) must actually exercise `concurrency > 1` semantics at the unit level —
-   two threads racing `tryClaim` on the same `eventId`, asserting exactly one returns `true`.
-
-**Dependency:** independent of Phase 1 at the code level (different files), but do Phase 1 first —
-Phase 1 establishes the exception-handling pattern that Phase 2's tests should reuse for consistency.
+### Phase 4 — Test Consolidation
+**Objective:** remove the one piece of real test duplication.
+**Changes:** Finding 6 (extract shared `TestPayload`).
+**Dependencies:** fully independent of Phases 1–3; do last since it's purely mechanical and
+touches only test files.
+**Risks:** none, provided both test classes are updated to import the shared class and their
+existing assertions (which only touch `getValue()`/`setValue()`) are unaffected.
+**Verification:** `mvn -pl teams/chain -Dtest=ChainEventConsumerTest,ChainEventConsumerIntegrationTest test`.
 
 ---
 
-## 7. Phase 3 — Publishing & Configuration
+## 5. Detailed Action Items
 
-**Goal:** publisher failure is at least as observable/documented as every other known gap in this
-PR; Kafka configuration stops being two asymmetric shapes under one prefix; the group id is
-externalized.
+### Finding 1 — Platform upgrade bundled into the feature PR
+**Problem:** `pom.xml`'s Spring Boot 2.7.18→3.3.13 and Java 11→21 bump rode in on the same commit
+(`a4230a0`) as the new Kafka classes.
+**Root Cause:** the author needed `spring-kafka`, which needs a compatible Boot line; rather than
+landing the upgrade as its own preceding change, both went in together as the branch's first
+commit.
+**Proposed Fix:** **no code change.** `main..HEAD` on this branch now contains ~140 commits,
+including several merges of `main` back into this branch (`ebf585d`, `92578c3`) — the upgrade is
+deeply interleaved with unrelated history at this point. Splitting it out would mean rewriting
+published history on a branch three more commits and two merges past the point in question, which
+this task is explicitly not permitted to do and which carries real risk of corrupting the PR for
+marginal bisectability benefit this late. The safe, correct move is: land it as-is, and describe it
+honestly in the PR description — "aligns Chain with Bridge's existing Spring Boot 3.3.13/Java 21
+(`teams/bridge/pom.xml`, already on `main`); Inbox has not yet upgraded, so this is not yet a
+repo-wide standard, just a second module adopting it."
+**Files Affected:** none (documentation-only, in the PR description, not a repo file).
+**Tests:** none applicable.
+**Acceptance Criteria:** PR description explicitly names the version bump and its rationale before
+merge.
+**Risks/Trade-offs:** the only real trade-off is accepting the current bisect/rollback friction as
+a sunk cost. Recommend as a team norm going forward: land platform upgrades as their own commit
+*before* starting feature work that depends on them, not after.
 
-1. **Outbox: do not implement.** Add the same style of TODO comment already used elsewhere in this
-   PR to `KafkaEventPublisher`, explaining the fire-and-forget tradeoff. Per §2A/D6, be precise in
-   the comment and PR description: Inbox's existing Outbox is not adoptable as-is (own entity, own
-   worker, own event-type system, no shared module, and Chain has no database) — this is a "revisit
-   once Chain has persistence" follow-up (option (a) in D6: reimplement the pattern, not import the
-   code), not a "just wire in the existing one" task. This directly answers finding #3 without scope
-   creep (Rule 4/Rule 5) and without overstating what's actually available to reuse.
-2. Fold `chain.kafka.topics` and `chain.kafka.consumed-topics` into one properties shape. Recommend
-   renaming the class to something that doesn't overclaim (`ChainEventTopicsProperties` today only
-   covers publish topics) — either broaden it to genuinely own both directions
-   (`publishTopics`/`consumedTopics` as two maps/lists on the same `@ConfigurationProperties(prefix =
-   "chain.kafka")` class), or rename it to `ChainPublishTopicsProperties` and add a symmetrical
-   `ChainConsumedTopicsProperties`. Broadening one class is simpler and keeps one binding prefix —
-   recommended.
-3. Implement D3: externalize the consumer group id as a property defaulting to
-   `${spring.application.name}`, referenced from the new properties class or directly in
-   `application.yml` + `@KafkaListener(groupId = "${chain.kafka.consumer-group-id}")`.
-4. Re-verify `ChainEventConsumer`'s `@ConditionalOnProperty` still gates correctly once the consumed-
-   topics property moves onto the broadened properties class (the property *name* the
-   `@ConditionalOnProperty` checks must still exist even when unset, i.e. don't accidentally require
-   the whole properties block to bind before the conditional evaluates).
+### Finding 2 — PLAN.md replacement
+**Problem:** the previous `PLAN.md` mixed durable architectural decisions with session-specific
+narrative (exact commit SHAs, "no PR was opened," a running "Implementation Status" log written
+mid-session) in one 796-line file, committed as permanent module source.
+**Root Cause:** the file was written progressively across an audit-then-implement workflow and was
+never pruned back down to what's worth keeping once the work landed.
+**Proposed Fix:** this document *is* the fix — replacing the old file in place at
+`teams/chain/PLAN.md` (same location `teams/bridge/plan.md` already establishes as this repo's
+convention for a module-root, code-referenced design doc — no `/docs/decisions/` ADR structure
+exists anywhere in the repo, so inventing one here would violate this audit's own "reuse existing
+patterns" rule). The prior document's six decisions are condensed below, keeping their original IDs
+so every existing Javadoc `see PLAN.md decision D<n>` reference keeps resolving to real content:
 
-**Dependency:** should follow Phase 1 (shares `ChainEventConsumer`) but is otherwise independent of
-Phase 2.
+| ID | Decision (condensed) | Resolution |
+|---|---|---|
+| D1 | Exception taxonomy for "not retryable" | `NonRetryableEventException extends RuntimeException`, registered via `DefaultErrorHandler#addNotRetryableExceptions`. Implemented and tested. |
+| D2 | Idempotency guarantee without a database | `ProcessedEventStore.tryClaim` is atomic (`putIfAbsent`); claim is released on handler failure so transient errors still retry. Does **not** survive a process crash between claim and release/success — documented in `ProcessedEventStore`'s own Javadoc. Closing that gap needs a real persistence decision Chain hasn't made yet. |
+| D3 | Consumer group id source of truth | `${spring.application.name}` via `application.yml`, not a hardcoded literal. (This round's Finding 3 is cleanup of now-dead fallback literals, not a re-opening of this decision.) |
+| D4 | Repo-wide `.idea/` untracking | Out of scope for this PR — cross-team, root-level concern. **Still open**: a root `.gitignore` now exists (it didn't when D4 was written) but does not exclude `.idea/`, and `.idea/claudeCodeEditorTabs.xml`, `compiler.xml`, `encodings.xml`, `jarRepositories.xml` are still tracked as of this branch's HEAD. Not one of this round's 9 findings, so not actioned here — flagged so it isn't lost. |
+| D5 | `task.scheduling.updated`'s `priorityScore` shape | Unresolved cross-team with Inbox (`Inbox_Kafka_Ingestion_Contract.md` §4 explicitly says so). Chain's `int priorityScore` is infrastructure-ready, not contract-approved. No action for Chain alone to take. |
+| D6 | Outbox reuse for publisher reliability | Inbox's existing Outbox (`teams/inbox/.../OutboxWorker` etc.) is concretely Inbox-owned (own JPA entity, own event-type enum, own Postgres dependency) with no shared Java module in this repo — confirmed by inspecting `yehudit/bridge-outbox-integration`, whose two commits extend Inbox's own code, not Bridge's. Not reusable as-is. Chain stays fire-and-forget, documented via `KafkaEventPublisher`'s TODO, until Chain adopts persistence — at which point reimplementing the pattern (not extracting a shared module from a single example) is the recommended path. |
 
----
+**Files Affected:** `teams/chain/PLAN.md` (this file, replacing the old one).
+**Tests:** none applicable (documentation).
+**Acceptance Criteria:** new file is materially shorter, contains no session-specific language
+("no PR was opened," specific commit SHAs as narrative rather than citations, "Implementation
+Status" play-by-play); every Javadoc `PLAN.md decision D<n>` reference in the codebase resolves to
+a real entry in the table above.
+**Risks/Trade-offs:** none — this is strictly a documentation change.
 
-## 8. Phase 4 — Event Contract & Handler Architecture
+### Finding 3 — Consumer group id default cleanup
+**Problem:** `"chain-service"` is hardcoded in two places (`ChainEventTopicsProperties`'s Java
+field default, the `@KafkaListener` placeholder fallback) in addition to `application.yml`'s real,
+always-active `${spring.application.name}` value.
+**Root Cause:** the placeholder fallback was written defensively (in case the property is ever
+unset) without noticing `ChainEventTopicsProperties` already carries its own, different-valued
+default for the same property.
+**Proposed Fix:** since `application.yml` ships in every environment and always sets this property,
+the two literals are effectively dead. Either delete them (relying entirely on `application.yml`)
+or keep them but make them agree with each other and comment that they exist only as a
+last-resort fallback for a config that omits the property entirely. Recommend deletion — a missing
+property should surface as an explicit binding failure or an obviously-wrong empty value, not
+silently fall back to a third, undocumented default.
+**Files Affected:** `ChainEventTopicsProperties.java`, `ChainEventConsumer.java` (the
+`@KafkaListener` annotation's placeholder).
+**Tests:** no new test needed — existing `ChainApplicationTests.contextLoads()` and any consumer
+test exercising `@KafkaListener` binding already cover that the real (`application.yml`) value is
+what's active.
+**Acceptance Criteria:** `git grep '"chain-service"'` returns zero results under `teams/chain/`.
+**Risks/Trade-offs:** if an environment is ever misconfigured to omit
+`chain.kafka.consumer-group-id` entirely, behavior changes from "silently use chain-service" to
+"bind with an empty/placeholder value" — arguably safer (fails loudly) but worth a one-line PR
+description note.
 
-**Goal:** confirm (not redesign) the envelope and handler-registration behavior; fix the one real
-correctness gap (duplicate handler registration) and the one real duplication (double `eventType`
-extraction).
+### Finding 4 — `ChainEventTopicsProperties` as a record
+**Problem:** mutable setters, `getTopics()` returns the live internal `Map` by reference.
+**Root Cause:** written before this PR (or this repo) had an established `@ConfigurationProperties`
+record pattern to follow.
+**Proposed Fix:** convert to a `record`, matching `teams/bridge`'s
+`ChatSessionProperties`/`ScopingProperties`/`WhatsAppImportProperties` exactly — same annotation
+placement, `@DefaultValue` for the group-id/consumed-topics defaults (see Finding 3's
+recommendation on what those defaults should be, if any are kept). Records have no setters, which
+by itself closes the "future runtime-mutation" risk the reviewer named — an explicit
+`Map.copyOf(...)` wrap is optional extra defense, not required, since nothing can call a setter to
+begin with.
+**Files Affected:** `ChainEventTopicsProperties.java`; `KafkaEventPublisher.java` (constructor
+parameter type is already the properties class, no signature change — only the internal
+`.getTopics()` call becomes `.topics()`).
+**Tests:** `KafkaEventPublisherTest` constructs `ChainEventTopicsProperties` directly via
+`setTopics(...)` — update to the record's constructor. No new test needed beyond that update.
+**Acceptance Criteria:** class compiles as a record; `mvn -pl teams/chain test` passes unchanged in
+outcome.
+**Risks/Trade-offs:** none identified — no `@RefreshScope` or post-construction mutation exists
+anywhere in the codebase today (checked).
 
-1. **Envelope:** no structural change. `EventEnvelope`'s existing TODO stays — it correctly flags
-   that the final shape depends on cross-team agreement Chain doesn't control. Confirmed via §2:
-   camelCase field naming is validated as correct by the one document that addresses it.
-2. **`task.scheduling.updated`:** infrastructure (topic config, publish path, serialization) is
-   ready and tested. The payload shape (`priorityScore` as `int`) is **not** cross-team-confirmed —
-   see D5. Recommend the PR description say so explicitly rather than implying the contract is
-   settled.
-3. Fix `Collectors.toMap` duplicate-handler registration (finding 9c):
-   ```
-   handlers.stream().collect(Collectors.toMap(
-       EventHandler::getSupportedEventType,
-       h -> h,
-       (first, second) -> { throw new IllegalStateException(
-           "Duplicate EventHandler for event type [" + first.getSupportedEventType() + "]: "
-           + first.getClass().getName() + " and " + second.getClass().getName()); }));
-   ```
-4. Fix double `eventType` extraction (finding 9a): have `onMessage` extract it once and pass it into
-   `dispatch` as a parameter (dispatch already re-derives `eventId`/`eventType`/etc. from `root` a
-   second time — pass `eventType` through, leave the rest as-is since they're only read once each
-   already).
-5. Unknown event type: current behavior (log + return, no retry, no DLT) is correct and already
-   tested (`onMessage_ignoresMessage_whenEventTypeIsUnknown`) — no change needed, just confirming
-   review didn't flag this as broken and neither do we.
+### Finding 5 — Externalize retry policy
+**Problem:** `new FixedBackOff(2000L, 2L)` is a code-level literal; every other Chain Kafka tunable
+is in `application.yml`.
+**Root Cause:** written once, alongside the rest of `ChainKafkaErrorHandlingConfig`, without
+revisiting once the externalized-config pattern was established elsewhere in the same PR.
+**Proposed Fix:** bind `chain.kafka.retry.max-attempts` (default `2`, meaning 2 retries after the
+first attempt — 3 total, matching current behavior and this class's own Javadoc) and
+`chain.kafka.retry.interval-ms` (default `2000`) via a small `@ConfigurationProperties(prefix =
+"chain.kafka.retry") record ChainKafkaRetryProperties(@DefaultValue("2") long maxAttempts,
+@DefaultValue("2000") long intervalMs)`, matching Finding 4's record pattern. Construct
+`FixedBackOff` from its values in `chainKafkaErrorHandler`.
+**Files Affected:** `ChainKafkaErrorHandlingConfig.java`; new
+`ChainKafkaRetryProperties.java`; `application.yml` (add the two properties, defaulting to current
+values so behavior is unchanged unless explicitly overridden).
+**Tests:** no behavioral test needed since defaults preserve current behavior; if a test wants to
+assert the values are read from config rather than hardcoded, bind with a non-default
+`application-test.yml`/`@TestPropertySource` value and assert `FixedBackOff.getMaxAttempts()` /
+`.getInterval()` reflect it.
+**Acceptance Criteria:** no hardcoded `FixedBackOff(2000L, 2L)` literal remains; `application.yml`
+carries both new properties with values matching today's behavior.
+**Risks/Trade-offs:** none — additive, defaults unchanged.
 
-**Dependency:** depends on Phase 1 only for the exception type used inside `dispatch` (both touch
-the same method) — sequence Phase 1 first to avoid a merge conflict on the same lines, not because
-of a logical dependency.
+### Finding 6 — Duplicate test payload classes
+**Problem:** `TestPayload` (`ChainEventConsumerTest`) and `ItPayload`
+(`ChainEventConsumerIntegrationTest`) are field-for-field identical.
+**Root Cause:** copy-paste when the integration test was added, no shared test-fixture location
+existed to reach for.
+**Proposed Fix:** extract `com.rnd.chain.events.testsupport.TestPayload` (new package, mirroring
+how `payloads/` already separates concerns) and reference it from both test classes, removing the
+two nested class definitions.
+**Files Affected:** new `src/test/java/com/rnd/chain/events/testsupport/TestPayload.java`;
+`ChainEventConsumerTest.java`, `ChainEventConsumerIntegrationTest.java` (remove nested class,
+import the shared one).
+**Tests:** no new test scenarios — existing tests in both files continue to exercise the same
+class, now shared.
+**Acceptance Criteria:** `git grep -c "class TestPayload\|class ItPayload"` under
+`teams/chain/src/test` returns exactly one class definition.
+**Risks/Trade-offs:** none — pure refactor, no behavior change.
 
----
+### Finding 7 — Duplicated README paragraph
+**Problem:** the "Task identifiers are `java.util.UUID` for now..." paragraph appears twice,
+back-to-back, in README's "Stack" section.
+**Root Cause:** a merge/edit re-added the paragraph directly above where it already existed.
+**Proposed Fix:** delete the second occurrence.
+**Files Affected:** `teams/chain/README.md`.
+**Tests:** none applicable.
+**Acceptance Criteria:** paragraph appears exactly once.
+**Risks/Trade-offs:** none.
 
-## 9. Phase 5 — Testing & Verification
+### Finding 8 — Document `EventEnvelope`'s identity-based equality
+**Problem:** `equals()`/`hashCode()` use only `eventId`; correct and intentional (confirmed by
+`EventEnvelopeTest`), but undocumented at the point someone would actually need to know it.
+**Root Cause:** the behavior was tested but never explained inline.
+**Proposed Fix:** add, directly above `equals()`: `// Identity, not content equality: two envelopes
+are "the same event" iff they share an eventId, regardless of payload.`
+**Files Affected:** `EventEnvelope.java`.
+**Tests:** none needed — behavior is unchanged, already covered by `EventEnvelopeTest`.
+**Acceptance Criteria:** comment present; no test or behavior change.
+**Risks/Trade-offs:** none.
 
-**Established repo convention confirmed:** JUnit 5 + Mockito for unit tests; `spring-kafka-test` +
-`@EmbeddedKafka` for Kafka integration tests (confirmed via `origin/inbox-team`'s
-`BridgeTaskConsumerIntegrationTest`, `KafkaEventPublisherIntegrationTest`) — **not** Testcontainers,
-which does not appear anywhere in this repository. Add `spring-kafka-test` (test scope) to
-`teams/chain/pom.xml`; do not introduce Testcontainers.
-
-**Unit tests (Mockito, existing style):**
-- `InMemoryProcessedEventStoreTest` (currently missing entirely — new file): `tryClaim` returns
-  `true` exactly once for a given `eventId` under sequential calls; a concurrency test with two
-  threads racing `tryClaim` on the same `eventId` asserting exactly one wins (`ExecutorService` +
-  `CountDownLatch`, matching the pattern already used in
-  `TaskEligibilityServiceConcurrencyTest` elsewhere in this repo).
-- Update `ChainEventConsumerTest`: replace `assertThrows(Exception.class, ...)` and
-  `assertThrows(JsonMappingException.class, ...)` with `assertThrows(NonRetryableEventException.class,
-  ...)`; add cases for missing `eventType` field (NPE today), non-UUID `eventId`, and unparseable
-  `occurredAt` — all should now throw `NonRetryableEventException` with a message identifying the
-  bad field.
-- Update `KafkaEventPublisherTest`: add a serialization-failure case (currently entirely untested
-  per finding 8/review) — e.g. a payload type that throws during Jackson serialization, asserting
-  `EventPublishException` and that `kafkaTemplate.send` was never called.
-- Add a duplicate-handler-registration test asserting the new named exception and that it names
-  both conflicting classes.
-- Add a multiple-event-types routing test if not already adequately covered (existing
-  `onMessage_routesToCorrectHandler_whenMultipleHandlersAreRegistered` already covers this —
-  confirm it still passes with the new exception type changes, no new test needed).
-
-**Integration tests (new, `@EmbeddedKafka`):**
-- A consumer integration test that publishes a real malformed message to an embedded topic and
-  asserts it reaches the `.DLT` topic **without** retrying (verify via consumer poll on the DLT
-  topic, and via a counter/spy asserting the handler or retry path was invoked exactly once, not
-  three times) — this is the one thing no unit test can prove, since `DefaultErrorHandler`'s retry/
-  DLT wiring only actually runs inside a real listener container.
-- A second integration test for the transient-failure path: a handler that throws a plain
-  `RuntimeException` (not the new non-retryable type) N times then succeeds, asserting it *does*
-  retry (up to 3 attempts, ~2s apart, per the existing `FixedBackOff` config) before either
-  succeeding or landing on the DLT if it never succeeds.
-- A `task.scheduling.updated` publish-and-consume round-trip test against an embedded broker,
-  confirming serialization/deserialization symmetry for the approved (camelCase) envelope shape.
-
-**Idempotency tests:**
-- Duplicate sequential event: publish the same `eventId` twice, assert the handler runs once.
-- Duplicate concurrent event: covered by the `InMemoryProcessedEventStoreTest` concurrency case
-  above at the store level; optionally also at the `ChainEventConsumer` level with two threads
-  calling `dispatch` for the same envelope.
-- Explicitly do **not** write a test asserting "idempotency survives a restart" — the in-memory
-  store cannot provide that guarantee, and asserting it would be testing a false claim (Rule 6:
-  don't claim idempotency is fixed unless the semantics are actually safe).
-
----
-
-## 10. Phase 6 — Code Quality & Repository Hygiene
-
-1. Convert `ProcessedEvent` and `TaskSchedulingUpdatedPayload` to Java `record`s (finding 9b) —
-   confirmed safe candidates (see §3). Note in the PR description that this is the first record in
-   the repository.
-2. Fix 9a (duplicate `eventType` extraction) — see Phase 4.4, listed here too since it's a Phase
-   4/6 boundary item; do it once, in Phase 4.
-3. Remove the `@Autowired` on the `@Bean` parameter (finding 4c) — see Phase 1.6.
-4. `.idea/misc.xml`'s working-tree content has already been restored to match `main` directly (a
-   pre-existing tracked file this PR modified). `.idea/claudeCodeEditorTabs.xml`,
-   `.idea/compiler.xml`, `.idea/encodings.xml`, and `.idea/jarRepositories.xml` are genuinely new
-   files this PR's commit (`a4230a0`) introduced (confirmed — not on `main` at all) — remove them
-   with `git rm .idea/claudeCodeEditorTabs.xml .idea/compiler.xml .idea/encodings.xml
-   .idea/jarRepositories.xml` as part of finalizing this PR's commits (finding 9d, corrected).
-5. Do **not** add a root `.gitignore` or untrack `.idea/` repo-wide as part of this PR — that's D4,
-   a separate cross-team decision and PR.
-
----
-
-## 11. Exact Files Affected
-
-| File | Change | Reason | Phase |
-|---|---|---|---|
-| `teams/chain/src/main/java/com/rnd/chain/events/NonRetryableEventException.java` | **New file** | Business exception for permanent parse/routing failures (D1) | 1 |
-| `teams/chain/src/main/java/com/rnd/chain/events/ChainEventConsumer.java` | Wrap parse/route failures in `NonRetryableEventException`; remove `throws Exception`; pass `eventType` once instead of re-extracting; use `tryClaim` instead of `isProcessed`+`markProcessed`; supply merge function to `Collectors.toMap` | Findings 1, 2, 9a, 9c | 1, 2, 4 |
-| `teams/chain/src/main/java/com/rnd/chain/events/ChainKafkaErrorHandlingConfig.java` | Register `NonRetryableEventException` as not-retryable; remove `@Autowired`; align `KafkaTemplate<Object,Object>` → `KafkaTemplate<String,String>`; simplify DLT resolver to default constructor | Findings 1, 4a, 4b, 4c | 1 |
-| `teams/chain/src/main/java/com/rnd/chain/events/ProcessedEventStore.java` | Replace `isProcessed`/`markProcessed` with `boolean tryClaim(ProcessedEvent event)` | Finding 2 | 2 |
-| `teams/chain/src/main/java/com/rnd/chain/events/InMemoryProcessedEventStore.java` | Implement `tryClaim` via `putIfAbsent`; add `@ConditionalOnProperty` guard | Findings 2, 6 | 2 |
-| `teams/chain/src/main/java/com/rnd/chain/dto/ProcessedEvent.java` | Convert to `record` | Finding 9b | 6 |
-| `teams/chain/src/main/java/com/rnd/chain/events/payloads/TaskSchedulingUpdatedPayload.java` | Convert to `record` | Finding 9b | 6 |
-| `teams/chain/src/main/java/com/rnd/chain/events/KafkaEventPublisher.java` | Add documentation TODO on fire-and-forget/Outbox tradeoff | Finding 3 | 3 |
-| `teams/chain/src/main/java/com/rnd/chain/events/ChainEventTopicsProperties.java` | Broaden to bind both publish and consumed topics symmetrically | Finding 7 | 3 |
-| `teams/chain/src/main/resources/application.yml` | Add consumer-group-id property (D3); align with broadened topics properties shape | Finding 7 | 3 |
-| `teams/chain/pom.xml` | Add `spring-kafka-test` (test scope) | Testing gap | 5 |
-| `teams/chain/src/test/java/com/rnd/chain/events/ChainEventConsumerTest.java` | Replace raw exception assertions with `NonRetryableEventException`; add missing-field/bad-UUID/bad-timestamp cases | Findings 1, 8 (testing) | 5 |
-| `teams/chain/src/test/java/com/rnd/chain/events/KafkaEventPublisherTest.java` | Add serialization-failure test | Finding 8 (testing) | 5 |
-| `teams/chain/src/test/java/com/rnd/chain/events/InMemoryProcessedEventStoreTest.java` | **New file** — sequential and concurrent `tryClaim` tests | Finding 8 (testing), missing coverage | 5 |
-| `teams/chain/src/test/java/com/rnd/chain/events/ChainEventConsumerIntegrationTest.java` (or similar) | **New file** — `@EmbeddedKafka` retry/DLT round-trip tests | Finding 8 (testing), missing coverage | 5 |
-| `.idea/claudeCodeEditorTabs.xml`, `.idea/compiler.xml`, `.idea/encodings.xml`, `.idea/jarRepositories.xml`, `.idea/misc.xml` | Revert to `main`'s versions | Finding 9d | 6 |
-
----
-
-## 12. Implementation Order
-
-1. Verify baseline: `mvn -pl teams/chain test` on a real machine — confirms current pass/fail state
-   before any change (resolves D-4b's open question empirically).
-2. Phase 1 (exception taxonomy, `ChainKafkaErrorHandlingConfig` fixes) — highest severity, most
-   self-contained, touches the fewest files.
-3. Phase 2 (idempotency `tryClaim`, production guard) — depends conceptually on Phase 1's exception
-   pattern being in place for consistent test style, not on its code.
-4. Phase 4's `Collectors.toMap` and double-extraction fixes — same file as Phase 1/2, do while it's
-   open.
-5. Phase 3 (properties consolidation, group id, publisher TODO) — independent, can run in parallel
-   with 2/4 if split across two people; sequenced after for a single implementer to avoid touching
-   `ChainEventConsumer` three times.
-6. Phase 6 (records, `.idea` revert) — purely mechanical, do last so it doesn't create merge noise
-   against the functional changes above.
-7. Phase 5 (tests) — write incrementally alongside 2–6, not saved entirely for the end; the
-   `@EmbeddedKafka` retry/DLT integration tests specifically should be written *after* Phase 1 lands,
-   since they assert on the new exception's not-retryable behavior.
-8. Final: re-run full `mvn test`, update the PR description to explicitly state the `priorityScore`
-   contract caveat (D5) and the Outbox-deferral rationale (Phase 3.1), and revert the `.idea` diffs
-   as the very last commit.
+### Finding 9 — Log the original exception at the throw site
+**Problem:** `parseRoot`/`readPayload` catch broadly and rewrap, but don't log the original
+exception at the throw site — only its `getMessage()` text ends up in the new exception's message
+(the full exception is still preserved as `cause`, contrary to the review's "discarded" framing).
+**Root Cause:** the wrap-and-rethrow pattern was applied consistently without adding a log call,
+since the exception chain was assumed to be sufficient.
+**Proposed Fix:** keep the broad catch (correct here — a single wrapped call, not a multi-step
+block hiding different failure modes). Add `log.warn("Failed to parse message: {}",
+e.getMessage(), e)` (or `readPayload`'s equivalent) immediately before each throw, so the full
+stack trace is visible in application logs without requiring a DLT-message reader to inspect
+`getCause()`.
+**Files Affected:** `ChainEventConsumer.java` (`parseRoot`, `readPayload`).
+**Tests:** none required for correctness; optionally assert (via a log-capture test utility, if the
+repo has one — none found, so skip) that a log line is emitted, but this is genuinely optional
+polish, not a correctness gap.
+**Acceptance Criteria:** both methods log the original exception before throwing.
+**Risks/Trade-offs:** none — additive logging only.
 
 ---
 
-## 13. Risks
+## 6. Out of Scope
 
-- **Changing idempotency semantics changes failure behavior**, not just fixes a bug (see Phase 2.4)
-  — a handler crash after a successful claim now means that event is never retried by this store,
-  where today's (broken) implementation would have retried it. This is a genuine behavior change to
-  call out to reviewers explicitly, not bury in a diff.
-- **Changing retry/DLT semantics is currently unverifiable without a real Kafka broker** — this
-  audit could not run `mvn test` (no network access to Maven Central in this sandbox). Phase 1 and
-  the Phase 5 `@EmbeddedKafka` tests are the actual verification; don't skip them because the logic
-  "looks right."
-- **`KafkaTemplate<Object,Object>` vs `<String,String>` may or may not be a live bug today** — until
-  verified (Phase 12.1), treat `ChainKafkaErrorHandlingConfig` as a class that might currently be
-  failing to wire at all, which would mean `ChainApplicationTests.contextLoads()` is already red on
-  this branch.
-- **Cross-team contract mismatch**: `task.scheduling.updated`'s `priorityScore` is not settled
-  cross-team (D5). Publishing this event in a demo/staging environment where Inbox is listening
-  (once Inbox builds its consumer) risks sending a shape Inbox doesn't expect. Infrastructure
-  readiness ≠ contract readiness — keep these described separately in the PR.
-- **No CI exists** to catch a regression in any of this. Recommend, as a side note outside this
-  plan's scope, that Chain's `mvn test` be added to some CI once CI exists repo-wide — not a blocker
-  for this PR, just worth naming as the underlying reason manual verification matters more here than
-  it would in a repo with a test gate.
-- **Framework compatibility**: Spring Boot 3.3.13/Java 21 is unlikely to be a real risk for Chain
-  specifically (no `javax.*` usage found), but has not been build-verified in this audit due to the
-  sandbox's lack of Maven/network access. Verify for real before merging.
+- **Splitting the Boot/Java upgrade out of history** (Finding 1) — explicitly prohibited by this
+  task's rules, and impractical given ~140 intervening commits including two merges of `main`.
+- **Migrating `TaskSchedulingUpdatedPayload`'s `priorityScore` shape** (D5) — blocked on a
+  cross-team decision with Inbox, not something Chain can resolve unilaterally.
+- **Implementing an Outbox pattern for `KafkaEventPublisher`** (D6) — Chain has no database yet;
+  reusing Inbox's existing Outbox isn't possible without one (see D6's condensed reasoning in §5).
+- **Repo-root `.idea/` untracking and gitignore fix** (D4) — cross-team, root-level concern, not
+  specific to this PR; also not one of this round's 9 findings.
+- **Removing the four still-tracked `.idea/*.xml` files this branch's first commit added** — this
+  was Finding 9d from the *previous* round's plan and was left incomplete (only `misc.xml` was
+  reverted). Not re-raised by this round's reviewer, so not actioned here, but noted so it isn't
+  silently lost a second time.
+- **Converging Chain's exception/retry architecture with Inbox's `TransientProcessingException`/
+  `RetryTemplate` pattern** (D1) — already decided against, for a consumer that still isn't live in
+  any environment (`chain.kafka.consumed-topics` remains unset).
+- **Testcontainers, or any integration-test infrastructure change** — `@EmbeddedKafka` is the
+  established, working convention repo-wide; nothing here suggests changing it.
 
 ---
 
-## 14. Definition of Done
+## 7. Verification Plan
 
-- [x] Permanent malformed events (`NonRetryableEventException`) do not undergo retries — verified by
-      `permanentFailure_missingEventType_skipsRetryAndReachesDltImmediately`
-- [x] Transient failures (anything else, e.g. a future handler's DB timeout) still retry per the
-      existing `FixedBackOff` policy (3 attempts, 2s apart) — unchanged, verified by
-      `transientFailure_retriesThenSucceeds_neverReachesDlt`
-- [x] Failed messages reach the `.DLT` topic, verified by an `@EmbeddedKafka` integration test, not
-      just by reading the config
-- [x] `ChainEventConsumer` no longer exposes raw `NullPointerException` / `IllegalArgumentException`
-      / `DateTimeParseException` / Jackson exceptions from `onMessage` or `dispatch`
-- [x] `onMessage`/`dispatch` no longer declare `throws Exception`
-- [x] Idempotency claim (`tryClaim`) is atomic under concurrency ≥ 1, verified by a dedicated
-      concurrency test (16 threads, exactly one winner)
-- [x] The crash-after-claim limitation is documented in code, not just in this plan
-- [x] `InMemoryProcessedEventStore` cannot be silently active in an unintended environment (property
-      guard in place)
-- [x] Publisher's fire-and-forget behavior is documented with the same TODO rigor as the rest of the
-      PR; Outbox is explicitly deferred, not implemented, not silently ignored
-- [x] `chain.kafka.topics` / `chain.kafka.consumed-topics` bind through one consistent properties
-      shape
-- [x] Consumer group id is a configurable property, not a hardcoded literal
-- [x] `EventEnvelope`'s camelCase field naming is preserved (confirmed correct, not changed)
-- [ ] `task.scheduling.updated`'s `priorityScore` shape is called out as cross-team-unconfirmed in
-      the PR description, not presented as settled — pending: PR description not yet written
-- [x] Event handlers route correctly by `eventType`; duplicate registration fails fast with a named,
-      descriptive exception
-- [x] Unknown event types are logged and skipped, no retry, no DLT (already correct — confirmed
-      unchanged)
-- [x] Publisher serialization-failure path is unit-tested (currently missing)
-- [x] Consumer failure paths (missing field, bad UUID, bad timestamp, unknown type, handler failure)
-      are each unit-tested against the correct exception type
-- [x] Retry-then-DLT and no-retry-then-DLT are each verified by an `@EmbeddedKafka` integration test
-      — all 32 tests pass on a real machine
-- [x] Idempotency concurrency (two threads, same `eventId`) is tested and passes
-- [ ] The 5 already-tracked `.idea/*.xml` files are reverted to `main`'s content in the final commit
-      — pending: only `misc.xml` was actually pre-existing and has been reverted; the other 4
-      (`claudeCodeEditorTabs.xml`, `compiler.xml`, `encodings.xml`, `jarRepositories.xml`) were newly
-      added by this PR's own commit and need `git rm`, not a revert (see corrected finding 9d)
-- [ ] No new IDE files are newly added to tracking — pending: the `git rm` above
-- [ ] The Spring Boot 3.3.13 / Java 21 change ships as its own commit, with a PR description noting
-      it aligns Chain with Bridge's existing version, not a novel upgrade — pending: nothing has been
-      committed yet
-- [x] `mvn -pl teams/chain test` passes in full, verified on a real machine (not assumed) — **32/32
-      tests pass**, confirmed on the user's machine
+1. **Targeted unit tests:** `mvn -pl teams/chain -Dtest=ChainEventConsumerTest,KafkaEventPublisherTest,ChainEventConsumerIntegrationTest test`
+   after Phases 2–4 — confirms the record conversion, retry externalization, and test-class merge
+   didn't change any assertion's outcome.
+2. **Integration tests:** `mvn -pl teams/chain -Dtest=ChainEventConsumerIntegrationTest test` — the
+   existing `@EmbeddedKafka` retry/DLT round-trip tests are the only way to confirm
+   `ChainKafkaErrorHandlingConfig`'s behavior end-to-end; re-run after Phase 2/3 changes since that
+   class is touched in both.
+3. **Full build:** `mvn -pl teams/chain test` — all tests (currently 32, per the reviewer's own
+   account, confirmed plausible from the test files read) must stay green.
+4. **Configuration verification:** after Phase 2, start the app locally (`mvn spring-boot:run`) and
+   confirm `ChainEventTopicsProperties` binds correctly as a record (no
+   `ConfigurationPropertiesBindException` at startup) — Spring Boot 3.3.13 supports this natively,
+   but binding failures are a startup-time, not compile-time, risk worth a real run.
+5. **Static check:** `git grep '"chain-service"'` and `git grep -c "class TestPayload\|class
+   ItPayload"` under `teams/chain/` (Findings 3 and 6's acceptance criteria) — cheap, exact checks.
+6. **Documentation verification:** grep the codebase for `PLAN.md decision D` and manually confirm
+   each hit (`ProcessedEventStore.java`, `TaskSchedulingUpdatedPayload.java`,
+   `KafkaEventPublisher.java`) resolves to a real entry in the new PLAN.md's D1–D6 table (Finding
+   2's acceptance criteria).
+7. **PR/git verification:** confirm the PR description includes the platform-upgrade rationale
+   (Finding 1) and the `priorityScore`/Outbox caveats (already true per the current PR description,
+   re-verify after any edits).
+
+No static analysis tooling (Checkstyle/Spotless/PMD) is configured in `teams/chain/pom.xml` — none
+to run.
 
 ---
 
-## Open Questions Before Implementation
+## 8. Review Finding Traceability
 
-These require a human/team decision — none can be resolved from the repository alone:
-
-1. **`priorityScore`'s type, range, and update semantics for `task.scheduling.updated`.** The one
-   document addressing this (`Inbox_Kafka_Ingestion_Contract.md` §4) states it is explicitly
-   unresolved between Chain and Inbox. Needs a cross-team conversation, not a Chain-side guess.
-2. **Should Chain's Kafka error-handling architecture converge with Inbox's `RetryTemplate`/
-   `EventProcessingTemplate` pattern, or stay on Spring Kafka's native `DefaultErrorHandler`/DLT
-   mechanism (D1)?** This plan recommends staying native for now since Chain's consumer isn't live
-   yet, but if/when multiple teams' Kafka consumers need to be operated and monitored consistently,
-   this becomes a real cross-team architecture question, not a Chain-internal one.
-3. **When (and how) does Chain get a persistence layer**, and does `ProcessedEventStore`'s eventual
-   real implementation piggyback on whatever Chain picks for `Task`/`TaskDependency`, or does it need
-   its own store? This blocks closing the "crash after claim" gap in Phase 2 for good (D2).
-4. **Should the repo-root `.idea/` untracking + root `.gitignore` (D4) be picked up as its own,
-   separate hygiene task**, and by whom — it's cross-team, not Chain-specific.
-5. **Is Chain expected to eventually adopt an Outbox pattern** once it has a database, and if so,
-   should that be Chain's own implementation (D6 option (a)) or the trigger to finally extract a
-   shared module from Inbox's existing one (D6 option (b))? §2A found Inbox's current Outbox is not
-   reusable as built — including that Yehudit's own follow-up work for Bridge-sourced tasks stayed
-   inside Inbox rather than extracting anything — so this is a real open call, not a formality. Or
-   is Chain's publish volume/criticality low enough that fire-and-forget-with-logging is an
-   acceptable permanent tradeoff (D6 option (c))? This plan defers the decision, not just the
-   implementation.
+| Review Finding | PLAN Section | Files | Tests | Final Status |
+|---|---|---|---|---|
+| [MAJOR] Unrelated platform upgrade bundled into a feature PR | §5 Finding 1, Phase 1 | None (PR description only) | N/A | CONFIRMED — documented, not code-fixed (see rationale) |
+| [MAJOR] Permanent, session-specific audit document committed as module source | §5 Finding 2, Phase 1 | `teams/chain/PLAN.md` | N/A | PARTIALLY VALID — trimmed and kept, not deleted |
+| [MAJOR] Consumer group ID default duplicated across three inconsistent sources | §5 Finding 3, Phase 2 | `ChainEventTopicsProperties.java`, `ChainEventConsumer.java` | Existing `ChainApplicationTests` | CONFIRMED |
+| [MINOR] Mutable, JavaBean-style `@ConfigurationProperties` | §5 Finding 4, Phase 2 | `ChainEventTopicsProperties.java`, `KafkaEventPublisher.java` | `KafkaEventPublisherTest` (update) | CONFIRMED |
+| [MINOR] Retry policy magic numbers not externalized | §5 Finding 5, Phase 2 | `ChainKafkaErrorHandlingConfig.java`, new `ChainKafkaRetryProperties.java`, `application.yml` | None new (defaults preserve behavior) | CONFIRMED |
+| [MINOR] Duplicate identical test payload classes | §5 Finding 6, Phase 4 | New `testsupport/TestPayload.java`; `ChainEventConsumerTest.java`, `ChainEventConsumerIntegrationTest.java` | Existing tests, updated imports | CONFIRMED |
+| [MINOR] Duplicated paragraph in README.md | §5 Finding 7, Phase 1 | `teams/chain/README.md` | N/A | CONFIRMED |
+| [MINOR] Identity-based `equals()`/`hashCode()` undocumented | §5 Finding 8, Phase 3 | `EventEnvelope.java` | None (behavior unchanged) | CONFIRMED |
+| [MINOR] Overly broad `catch (Exception e)` blurs triage | §5 Finding 9, Phase 3 | `ChainEventConsumer.java` | None (logging only) | PARTIALLY VALID — cause was already preserved; added logging for triage clarity |

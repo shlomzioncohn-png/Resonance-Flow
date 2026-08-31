@@ -56,6 +56,8 @@ public class EventEnvelope<T> {
         return payload;
     }
 
+    // Identity, not content equality: two envelopes are "the same event" iff they
+    // share an eventId, regardless of payload.
     @Override
     public boolean equals(Object o) {
         if (this == o) return true;

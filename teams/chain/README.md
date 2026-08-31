@@ -23,9 +23,6 @@ restart.
 Task identifiers are `java.util.UUID` for now, pending the Inbox team publishing its own task id
 type (`Task`/`TaskDependency` will switch to that type once it exists).
 
-Task identifiers are `java.util.UUID` for now, pending the Inbox team publishing its own task id
-type (`Task`/`TaskDependency` will switch to that type once it exists).
-
 ## Project structure
 
 ```
@@ -41,6 +38,7 @@ src/main/java/com/rnd/chain/
 │   ├── EventPublisher.java / KafkaEventPublisher.java
 │   ├── EventHandler.java
 │   ├── ChainEventConsumer.java
+│   ├── ChainEventTopicsProperties.java / ChainKafkaRetryProperties.java
 │   ├── ChainKafkaErrorHandlingConfig.java
 │   ├── ProcessedEventStore.java / InMemoryProcessedEventStore.java
 │   └── payloads/
@@ -68,8 +66,9 @@ today, Chain doesn't consume from anywhere in any environment.
 **Error handling**: malformed or unroutable messages (bad JSON, missing/invalid fields, a payload
 that doesn't match the target handler's type) fail fast with `NonRetryableEventException` and go
 straight to the topic's dead-letter topic (`<topic>.DLT`). Any other failure (e.g. a future
-handler's transient dependency issue) is retried up to 3 times, 2 seconds apart, before falling
-back to the DLT - see `ChainKafkaErrorHandlingConfig`.
+handler's transient dependency issue) is retried before falling back to the DLT, per
+`chain.kafka.retry.max-attempts` / `chain.kafka.retry.interval-ms` (default: 3 attempts total,
+2 seconds apart) - see `ChainKafkaErrorHandlingConfig`.
 
 **Idempotency**: each event is claimed via `ProcessedEventStore` before its handler runs, so a
 duplicate delivery (retry, redelivery, or multiple partitions) is only processed once. The claim
@@ -85,6 +84,8 @@ this service running concurrently. See its Javadoc for what a claim does and doe
 | `chain.kafka.topics.<eventType>` | Topic to publish a given event type to | none - required per event type |
 | `chain.kafka.consumed-topics` | Topic(s) `ChainEventConsumer` listens on | unset (consumer disabled) |
 | `chain.kafka.consumer-group-id` | Consumer group ID | `${spring.application.name}` |
+| `chain.kafka.retry.max-attempts` | Retries after the initial delivery attempt, before falling back to the DLT | `2` |
+| `chain.kafka.retry.interval-ms` | Milliseconds between retry attempts | `2000` |
 | `chain.events.processed-store` | Which `ProcessedEventStore` implementation is active | `in-memory` |
 
 ## Running locally with Maven

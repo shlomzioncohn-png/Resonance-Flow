@@ -9,8 +9,8 @@ package com.rnd.chain.events;
  * Registered as a not-retryable exception on
  * ChainKafkaErrorHandlingConfig's DefaultErrorHandler, so messages that fail
  * this way go straight to the DLT instead of wasting the configured retry
- * attempts (3 attempts, 2 seconds apart) on something that will never
- * succeed. Deliberately thrown only for parsing/routing failures in
+ * attempts (see ChainKafkaRetryProperties / chain.kafka.retry.*) on
+ * something that will never succeed. Deliberately thrown only for parsing/routing failures in
  * ChainEventConsumer - a failure inside handler.handle() itself (e.g. a
  * future handler hitting a database timeout) is exactly the transient case
  * that should keep retrying, so it is left to propagate as whatever

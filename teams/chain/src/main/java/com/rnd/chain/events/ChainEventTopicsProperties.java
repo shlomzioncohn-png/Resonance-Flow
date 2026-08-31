@@ -1,9 +1,7 @@
 package com.rnd.chain.events;
 
 import org.springframework.boot.context.properties.ConfigurationProperties;
-import org.springframework.stereotype.Component;
 
-import java.util.HashMap;
 import java.util.Map;
 
 /**
@@ -21,36 +19,30 @@ import java.util.Map;
  * directly at runtime) - they are bound here too so this class is a
  * complete, accurate picture of Chain's Kafka topic/group configuration
  * for anyone reading it, not just the publish side as before.
+ *
+ * A record with no Java-side defaults on purpose (PLAN.md Finding 3):
+ * application.yml always sets consumerGroupId
+ * (${spring.application.name}) and ships in every build's classpath, so
+ * a second, different-valued Java default here was dead code that
+ * silently disagreed with the real value. If chain.kafka.consumer-group-id
+ * is ever genuinely missing, binding simply leaves consumerGroupId null
+ * (and ChainEventConsumer's @KafkaListener placeholder, which also has no
+ * fallback now, fails loudly at startup) rather than falling back to a
+ * third, undocumented value.
+ *
+ * Registered via @EnableConfigurationProperties on ChainApplication, not
+ * @Component: a record @ConfigurationProperties bean needs Spring Boot's
+ * constructor/value-object binding, which only activates for beans
+ * registered through @EnableConfigurationProperties (or
+ * @ConfigurationPropertiesScan) - a plain @Component-scanned record is
+ * instead treated as an ordinary bean and Spring tries to autowire its
+ * canonical constructor's parameters (Map, String, String) as beans from
+ * the context, which fails at startup ("No qualifying bean of type
+ * 'java.lang.String' available").
  */
-@Component
 @ConfigurationProperties(prefix = "chain.kafka")
-public class ChainEventTopicsProperties {
-
-    private Map<String, String> topics = new HashMap<>();
-    private String consumedTopics = "";
-    private String consumerGroupId = "chain-service";
-
-    public Map<String, String> getTopics() {
-        return topics;
-    }
-
-    public void setTopics(Map<String, String> topics) {
-        this.topics = topics;
-    }
-
-    public String getConsumedTopics() {
-        return consumedTopics;
-    }
-
-    public void setConsumedTopics(String consumedTopics) {
-        this.consumedTopics = consumedTopics;
-    }
-
-    public String getConsumerGroupId() {
-        return consumerGroupId;
-    }
-
-    public void setConsumerGroupId(String consumerGroupId) {
-        this.consumerGroupId = consumerGroupId;
-    }
+public record ChainEventTopicsProperties(
+        Map<String, String> topics,
+        String consumedTopics,
+        String consumerGroupId) {
 }
