@@ -26,7 +26,7 @@ which Pydantic (raise-or-nothing) cannot represent.
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Literal, Protocol, runtime_checkable
+from typing import Literal, Optional, Protocol, runtime_checkable
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -268,10 +268,22 @@ class PersonaEvaluationScenario(BaseModel):
         return self
 
 
+class ScoreResult(BaseModel):
+    score: float
+    reasoning: Optional[str] = None
+
+
+class ScoreTask(BaseModel):
+    """"The task interface will follow up with the other relevant stakeholders.""""
+    pass
+
+class ScoreContext(BaseModel):
+    time: datetime = Field(default_factory=datetime.now)
+
 @runtime_checkable
 class RankingModel(Protocol):
     """Contract every ranking model must implement to run through the evaluation harness."""
 
-    def score(self, task: Task) -> float:
+    def score(self, task: ScoreTask , context: ScoreContext) -> ScoreResult:
         """Returns a priority score for a single task. Higher score = higher priority."""
         ...
