@@ -69,3 +69,24 @@ Build and base64-encode a .dockerconfigjson value from imagePullSecret.* values
 {{- $config := dict "auths" (dict .Values.imagePullSecret.registry (dict "username" .Values.imagePullSecret.username "password" .Values.imagePullSecret.password "email" .Values.imagePullSecret.email "auth" $auth)) }}
 {{- $config | toJson | b64enc }}
 {{- end }}
+
+{{/*
+Render one initContainer per entry in a list of {name, host, port} dicts,
+each blocking until that host:port is TCP-reachable. Used to make a
+component wait for an infra dependency (Kafka, Postgres, ...) to be
+reachable before its main container starts.
+*/}}
+{{- define "resonance-flow.waitForDependencies" -}}
+{{- range . }}
+- name: wait-for-{{ .name }}
+  image: busybox:1.36
+  command:
+    - sh
+    - -c
+    - |
+      until nc -z -w2 {{ .host }} {{ .port }}; do
+        echo "waiting for {{ .name }} ({{ .host }}:{{ .port }})..."
+        sleep 2
+      done
+{{- end }}
+{{- end }}

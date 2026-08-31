@@ -52,6 +52,21 @@ autoscaling:
   targetCPUUtilizationPercentage: 80
 volumes: []
 volumeMounts: []
+# Applies to every component. Each entry blocks the pod with a
+# wait-for-<name> initContainer until <host>:<port> is TCP-reachable,
+# before the main container starts. Set per-component instead via
+# components.<name>.dependencies for a dependency only one service has.
+# dependencies:
+#   - name: kafka
+#     host: kafka.kafka.svc.cluster.local
+#     port: 9092
+dependencies: []
+# Escape hatch for init-container logic the `dependencies` shorthand above
+# can't express (e.g. a readiness check that isn't a plain TCP dial).
+# Raw Kubernetes container specs, merged after the generated
+# wait-for-<dependency> containers. Can also be set per-component via
+# components.<name>.initContainers.
+initContainers: []
 nodeSelector: {}
 tolerations: []
 affinity: {}

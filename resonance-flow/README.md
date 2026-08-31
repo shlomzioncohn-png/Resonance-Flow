@@ -54,3 +54,24 @@ cluster. That's a separate, deliberately deferred problem (a
 non-personal credential + an automated way to provision it); it isn't
 part of this local-auth mechanism and shouldn't block using it for
 dev/test.
+
+## Waiting for dependencies (Kafka, Postgres, ...)
+
+If your component needs an infra dependency reachable before its main
+container starts, set `dependencies` (globally or under your
+`components.<name>`) and the chart adds a `wait-for-<name>` initContainer
+that blocks until `host:port` is TCP-reachable:
+
+```yaml
+components:
+  inbox:
+    dependencies:
+      - name: kafka
+        host: kafka.kafka.svc.cluster.local
+        port: 9092
+```
+
+For anything the TCP-reachability check can't express, drop a raw
+container spec into `initContainers` (globally or per-component) instead
+- it's appended after the generated `dependencies` containers. Nothing is
+set by default, so this is opt-in per team.
