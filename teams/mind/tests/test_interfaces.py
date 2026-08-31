@@ -1,15 +1,23 @@
+from datetime import datetime
+
 import pytest
 from pydantic import ValidationError
 
 from mind.evaluation.dummy_model import DummyModel
-from mind.evaluation.interfaces import PersonaEvaluationScenario, RankingModel, Task
+from mind.evaluation.interfaces import (
+    PersonaEvaluationScenario,
+    RankingModel,
+    ScoreContext,
+    ScoreResult,
+    Task,
+)
 
 
 def test_dummy_model_implements_ranking_model():
     assert isinstance(DummyModel(), RankingModel)
 
 
-def test_dummy_model_score_returns_float():
+def test_dummy_model_score_returns_score_result_in_range():
     task = Task(
         task_id="task_A",
         title="Review PR",
@@ -18,8 +26,10 @@ def test_dummy_model_score_returns_float():
         tier="operational",
         blocked=False,
     )
-    score = DummyModel().score(task)
-    assert isinstance(score, float)
+    context = ScoreContext(current_datetime=datetime.fromisoformat("2026-08-23T14:00:00"))
+    result = DummyModel().score(task, context)
+    assert isinstance(result, ScoreResult)
+    assert 0.0 <= result.score <= 1.0
 
 
 def _scenario_kwargs(**overrides):

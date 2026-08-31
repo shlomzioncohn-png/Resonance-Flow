@@ -1,8 +1,12 @@
-from mind.evaluation.interfaces import Task
+from mind.evaluation.interfaces import ScoreContext, ScoreResult, Task
 
 
 class DummyModel:
-    """A dummy ranking model used to verify the harness runs end-to-end."""
+    """A dummy ranking model used to verify the harness runs end-to-end.
 
-    def score(self, task: Task) -> float:
-        return 1.0
+    Returns a constant score for every task, so the harness ranking falls back to
+    task order — useful only for exercising the plumbing, not as a baseline.
+    """
+
+    def score(self, task: Task, context: ScoreContext) -> ScoreResult:
+        return ScoreResult(score=1.0)

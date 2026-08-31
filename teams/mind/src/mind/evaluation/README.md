@@ -21,16 +21,27 @@ so a model satisfies the contract structurally, without inheriting from it:
 
 ```python
 class RankingModel(Protocol):
-    def score(self, task: Task) -> float:
-        """Returns a priority score for a single task. Higher score = higher priority."""
+    def score(self, task: Task, context: ScoreContext) -> ScoreResult:
+        """Return a ScoreResult (0-1 priority score) for a single task, given the
+        current time via context. Higher score = higher priority."""
         ...
 ```
 
-`Task` is a Pydantic model (`interfaces.py`) with these fields: `task_id`, `title`,
-`description`, `deadline`, `effort_estimate` (minutes; the eval set's form of the
-canonical `Task.effort_estimate`), `tier`, `blocked`, `parent_task_id` (nullable,
-reserved for the week-7 hierarchical-propagation eval). `score()` receives only a
-single `Task` — no persona, no context, no sibling tasks.
+- `Task` (`interfaces.py`): `task_id`, `title`, `description`, `deadline`,
+  `effort_estimate` (minutes; the eval set's form of the canonical
+  `Task.effort_estimate`), `tier`, `blocked`, `parent_task_id` (nullable,
+  reserved for the week-7 hierarchical-propagation eval).
+- `ScoreContext`: just `current_datetime` — the model may judge how near a
+  `deadline` is, and nothing else about the persona's situation (per the mentor's
+  review). The harness fixes it to the scenario's `current_datetime`; it is never
+  the real wall clock.
+- `ScoreResult`: `score` (float on a global **0-1** scale — each tier may be
+  scored by its own rule, but results are calibrated onto one scale so tiers are
+  comparable) and an optional `reasoning` string (kept in the report for later
+  comparison against `expected_reason`, not used by the harness).
+
+`score()` still never sees `persona`, `free_time_minutes`, `constraints`, or the
+sibling tasks.
 
 The whole persona scenario schema now lives in `interfaces.py` as Pydantic models
 (`PersonaEvaluationScenario` and its `Persona` / `Context` / `Task` / `Source`
@@ -99,5 +110,5 @@ that scenario's `expected_top_task_id`. The final number is the proportion of sc
 where the model picked the correct top-priority task.
 
 To keep the door open for a future switch to a different metric without re-running every
-model, the harness report keeps the full list of every candidate's score per scenario
+model, the harness report keeps every candidate's score and reasoning per scenario
 (`ScenarioResult.candidates`), not just the winner.

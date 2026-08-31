@@ -26,7 +26,7 @@ which Pydantic (raise-or-nothing) cannot represent.
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Literal, Optional, Protocol, runtime_checkable
+from typing import Literal, Protocol, runtime_checkable
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -269,21 +269,53 @@ class PersonaEvaluationScenario(BaseModel):
 
 
 class ScoreResult(BaseModel):
-    score: float
-    reasoning: Optional[str] = None
+    """What a ranking model returns for one task."""
 
+    model_config = ConfigDict(extra="forbid")
 
-class ScoreTask(BaseModel):
-    """"The task interface will follow up with the other relevant stakeholders.""""
-    pass
+    score: float = Field(
+        ge=0.0,
+        le=1.0,
+        description=(
+            "Priority score on a global 0-1 scale (higher = more important to do "
+            "now). Each tier may be scored by its own rule, but the model "
+            "calibrates the results onto this one scale so tasks of different "
+            "tiers are comparable."
+        ),
+    )
+    reasoning: str | None = Field(
+        default=None,
+        description=(
+            "Optional short explanation for the score — compared against a "
+            "scenario's expected_reason in later analysis, not by the harness."
+        ),
+    )
+
 
 class ScoreContext(BaseModel):
-    time: datetime = Field(default_factory=datetime.now)
+    """The only situational information a ranking model gets alongside a task.
+
+    Deliberately minimal: it lets the model judge how near `task.deadline` is and
+    nothing else about the persona's situation (not free_time_minutes, not
+    constraints — those are Chain's concern). The harness always sets
+    `current_datetime` from the scenario; it is never defaulted to the wall clock.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    current_datetime: datetime = Field(
+        description=(
+            "'Now', as the model should see it. Set by the harness from the "
+            "current_datetime of the scenario being scored."
+        )
+    )
+
 
 @runtime_checkable
 class RankingModel(Protocol):
     """Contract every ranking model must implement to run through the evaluation harness."""
 
-    def score(self, task: ScoreTask , context: ScoreContext) -> ScoreResult:
-        """Returns a priority score for a single task. Higher score = higher priority."""
+    def score(self, task: Task, context: ScoreContext) -> ScoreResult:
+        """Return a `ScoreResult` (0-1 priority score) for a single task, given
+        the current time via `context`. Higher score = higher priority."""
         ...
