@@ -23,6 +23,9 @@ restart.
 Task identifiers are `java.util.UUID` for now, pending the Inbox team publishing its own task id
 type (`Task`/`TaskDependency` will switch to that type once it exists).
 
+Task identifiers are `java.util.UUID` for now, pending the Inbox team publishing its own task id
+type (`Task`/`TaskDependency` will switch to that type once it exists).
+
 ## Project structure
 
 ```
