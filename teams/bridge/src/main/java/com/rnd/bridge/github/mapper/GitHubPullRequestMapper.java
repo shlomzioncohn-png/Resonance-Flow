@@ -71,4 +71,13 @@ public class GitHubPullRequestMapper extends AbstractTaskMapper<GitHubIssue> {
     protected Instant toSnoozedUntil(GitHubIssue pr) {
         return null;
     }
+
+    @Override
+    protected Instant toCompletedAt(GitHubIssue pr) {
+        // No business completion date to map: closed_at is when the PR was
+        // closed in GitHub, not the same thing as a business completion
+        // date. Deciding whether/how to map it is for the GitHub lane's
+        // owner, not assumed here.
+        return null;
+    }
 }
