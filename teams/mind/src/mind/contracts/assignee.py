@@ -12,7 +12,7 @@ class Assignee(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    type: AssigneeType
+    assignee_type: AssigneeType
     id: UUID
 
 
@@ -21,7 +21,7 @@ class AssigneeCandidate(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    type: AssigneeType
+    assignee_type: AssigneeType
     id: UUID
 
     confidence: float = Field(

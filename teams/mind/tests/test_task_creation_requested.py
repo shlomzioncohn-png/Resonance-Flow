@@ -8,10 +8,12 @@ from pydantic import ValidationError
 from mind.contracts.task_creation_requested import (
     TaskCreationRequested,
 )
+
+from mind.contracts.base_enums import SourceType
+
 from mind.contracts.task_enums import (
     AssigneeType,
     RoleContext,
-    TaskSourceType,
     TaskTier,
 )
 
@@ -37,7 +39,7 @@ def test_accepts_minimal_valid_creation_request() -> None:
         "11111111-1111-1111-1111-111111111111"
     )
     assert request.title == "Prepare customer report"
-    assert request.source_type == TaskSourceType.EMAIL
+    assert request.source_type == SourceType.EMAIL
     assert request.has_dependencies is False
     assert request.confidence == 0.92
 
@@ -55,7 +57,6 @@ def test_accepts_optional_fields() -> None:
             "effort_estimate_minutes": 30,
             "effort_estimate_confidence": 0.80,
             "deadline": "2026-09-01T10:00:00Z",
-            "score": 0.75,
             "suggested_owner_user_id": (
                 "22222222-2222-2222-2222-222222222222"
             ),
@@ -72,7 +73,6 @@ def test_accepts_optional_fields() -> None:
     assert request.urgency == 4
     assert request.effort_estimate_minutes == 30
     assert request.effort_estimate_confidence == 0.80
-    assert request.score == 0.75
     assert request.suggested_owner_user_id == UUID(
         "22222222-2222-2222-2222-222222222222"
     )
@@ -84,12 +84,12 @@ def test_accepts_user_and_team_candidates() -> None:
 
     payload["candidate_assignees"] = [
         {
-            "type": "user",
+            "assignee_type": "user",
             "id": "33333333-3333-3333-3333-333333333333",
             "confidence": 0.91,
         },
         {
-            "type": "team",
+            "assignee_type": "team",
             "id": "44444444-4444-4444-4444-444444444444",
             "confidence": 0.76,
         },
@@ -99,12 +99,12 @@ def test_accepts_user_and_team_candidates() -> None:
 
     assert len(request.candidate_assignees) == 2
 
-    assert request.candidate_assignees[0].type == (
+    assert request.candidate_assignees[0].assignee_type == (
         AssigneeType.USER
     )
     assert request.candidate_assignees[0].confidence == 0.91
 
-    assert request.candidate_assignees[1].type == (
+    assert request.candidate_assignees[1].assignee_type == (
         AssigneeType.TEAM
     )
     assert request.candidate_assignees[1].confidence == 0.76

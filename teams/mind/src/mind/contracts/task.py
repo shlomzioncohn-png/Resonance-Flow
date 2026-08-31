@@ -11,10 +11,11 @@ from pydantic import (
 )
 
 from .assignee import Assignee
+from .base_enums import SourceType
+
 from .task_enums import (
     ExtractionProvenance,
     RoleContext,
-    TaskSourceType,
     TaskStatus,
     TaskTier,
 )
@@ -44,7 +45,7 @@ class Task(BaseModel):
     title: str = Field(min_length=1)
     description: str | None = None
 
-    source_type: TaskSourceType
+    source_type: SourceType
     source_ref: str | None = None
 
     # ------------------------------------------------------------------
@@ -85,9 +86,6 @@ class Task(BaseModel):
 
     # Priority calculated by Chain.
     priority_score: float | None = None
-
-    # Raw score produced by MIND.
-    score: float | None = None
 
     snoozed_until: AwareDatetime | None = None
 

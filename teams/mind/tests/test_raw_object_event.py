@@ -7,7 +7,7 @@ from mind.contracts import RawObjectEvent
 def test_rejects_invalid_object_key() -> None:
     payload = {
         "object_key": "invalid/path/message.eml",
-        "source_type": "EMAIL",
+        "source_type": "email",
         "tenant_id": "tenant-123",
         "ingested_at": "2026-08-20T12:30:00Z",
         "scope_decision": "INCLUDED",
@@ -27,10 +27,10 @@ def test_rejects_invalid_object_key() -> None:
 def test_accepts_valid_raw_object_event() -> None:
     payload = {
         "object_key": "EMAIL/tenant-123/2026-08-20/message.eml",
-        "source_type": "EMAIL",
+        "source_type": "email",
         "tenant_id": "tenant-123",
         "ingested_at": "2026-08-20T12:30:00Z",
-        "scope_decision": "INCLUDED",
+        "scope_decision": "included",
         "content_hash": (
             "sha256:"
             "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
@@ -47,9 +47,9 @@ def test_accepts_valid_raw_object_event() -> None:
     event = RawObjectEvent.model_validate(payload)
 
     assert event.object_key == "EMAIL/tenant-123/2026-08-20/message.eml"
-    assert event.source_type.value == "EMAIL"
+    assert event.source_type.value == "email"
     assert event.tenant_id == "tenant-123"
-    assert event.scope_decision.value == "INCLUDED"
+    assert event.scope_decision.value == "included"
     assert event.attachment_index == 0
     assert str(event.correlation_id) == (
         "550e8400-e29b-41d4-a716-446655440000"
@@ -62,10 +62,10 @@ def test_accepts_valid_raw_object_event() -> None:
 def test_rejects_invalid_source_type() -> None:
     payload = {
         "object_key": "EMAIL/tenant-123/2026-08-20/message.eml",
-        "source_type": "FACEBOOK",
+        "source_type": "facebook",  # Invalid source type
         "tenant_id": "tenant-123",
         "ingested_at": "2026-08-20T12:30:00Z",
-        "scope_decision": "INCLUDED",
+        "scope_decision": "included",
         "content_hash": (
             "sha256:"
             "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
@@ -82,10 +82,10 @@ def test_rejects_invalid_source_type() -> None:
 def test_rejects_negative_size_bytes() -> None:
     payload = {
         "object_key": "EMAIL/tenant-123/2026-08-20/message.eml",
-        "source_type": "EMAIL",
+        "source_type": "email",
         "tenant_id": "tenant-123",
         "ingested_at": "2026-08-20T12:30:00Z",
-        "scope_decision": "INCLUDED",
+        "scope_decision": "included",
         "content_hash": (
             "sha256:"
             "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
@@ -103,10 +103,10 @@ def test_rejects_negative_size_bytes() -> None:
 def test_rejects_invalid_content_hash() -> None:
     payload = {
         "object_key": "EMAIL/tenant-123/2026-08-20/message.eml",
-        "source_type": "EMAIL",
+        "source_type": "email",
         "tenant_id": "tenant-123",
         "ingested_at": "2026-08-20T12:30:00Z",
-        "scope_decision": "INCLUDED",
+        "scope_decision": "included",
         "content_hash": "not-a-sha256",
         "schema_version": "1.0",
         "attachment_index": 0,
@@ -119,10 +119,10 @@ def test_rejects_invalid_content_hash() -> None:
 def test_rejects_unknown_field() -> None:
     payload = {
         "object_key": "EMAIL/tenant-123/2026-08-20/message.eml",
-        "source_type": "EMAIL",
+        "source_type": "email",
         "tenant_id": "tenant-123",
         "ingested_at": "2026-08-20T12:30:00Z",
-        "scope_decision": "INCLUDED",
+        "scope_decision": "included",
         "content_hash": (
             "sha256:"
             "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
@@ -140,10 +140,10 @@ def test_rejects_unknown_field() -> None:
 def test_rejects_empty_tenant_id() -> None:
     payload = {
         "object_key": "EMAIL/tenant-123/2026-08-20/message.eml",
-        "source_type": "EMAIL",
+        "source_type": "email",
         "tenant_id": "",
         "ingested_at": "2026-08-20T12:30:00Z",
-        "scope_decision": "INCLUDED",
+        "scope_decision": "included",
         "content_hash": (
             "sha256:"
             "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
@@ -160,10 +160,10 @@ def test_rejects_empty_tenant_id() -> None:
 def test_rejects_missing_schema_version() -> None:
     payload = {
         "object_key": "EMAIL/tenant-123/2026-08-20/message.eml",
-        "source_type": "EMAIL",
+        "source_type": "email",
         "tenant_id": "tenant-123",
         "ingested_at": "2026-08-20T12:30:00Z",
-        "scope_decision": "INCLUDED",
+        "scope_decision": "included",
         "content_hash": (
             "sha256:"
             "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
@@ -179,10 +179,10 @@ def test_rejects_missing_schema_version() -> None:
 def test_rejects_non_utc_timestamp() -> None:
     payload = {
         "object_key": "EMAIL/tenant-123/2026-08-20/message.eml",
-        "source_type": "EMAIL",
+        "source_type": "email",
         "tenant_id": "tenant-123",
         "ingested_at": "2026-08-20T15:30:00+03:00",
-        "scope_decision": "INCLUDED",
+        "scope_decision": "included",
         "content_hash": (
             "sha256:"
             "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
@@ -199,10 +199,10 @@ def test_rejects_non_utc_timestamp() -> None:
 def test_rejects_missing_attachment_index() -> None:
     payload = {
         "object_key": "EMAIL/tenant-123/2026-08-20/message.eml",
-        "source_type": "EMAIL",
+        "source_type": "email",
         "tenant_id": "tenant-123",
         "ingested_at": "2026-08-20T12:30:00Z",
-        "scope_decision": "INCLUDED",
+        "scope_decision": "included",
         "content_hash": (
             "sha256:"
             "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
@@ -218,10 +218,10 @@ def test_rejects_missing_attachment_index() -> None:
 def test_rejects_negative_attachment_index() -> None:
     payload = {
         "object_key": "EMAIL/tenant-123/2026-08-20/message.eml",
-        "source_type": "EMAIL",
+        "source_type": "email",
         "tenant_id": "tenant-123",
         "ingested_at": "2026-08-20T12:30:00Z",
-        "scope_decision": "INCLUDED",
+        "scope_decision": "included",
         "content_hash": (
             "sha256:"
             "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
@@ -238,10 +238,10 @@ def test_rejects_negative_attachment_index() -> None:
 def test_rejects_invalid_correlation_id() -> None:
     payload = {
         "object_key": "EMAIL/tenant-123/2026-08-20/message.eml",
-        "source_type": "EMAIL",
+        "source_type": "email",
         "tenant_id": "tenant-123",
         "ingested_at": "2026-08-20T12:30:00Z",
-        "scope_decision": "INCLUDED",
+        "scope_decision": "included",
         "content_hash": (
             "sha256:"
             "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
@@ -259,10 +259,10 @@ def test_rejects_invalid_correlation_id() -> None:
 def test_rejects_invalid_transcript_object_key() -> None:
     payload = {
         "object_key": "EMAIL/tenant-123/2026-08-20/message.eml",
-        "source_type": "EMAIL",
+        "source_type": "email",
         "tenant_id": "tenant-123",
         "ingested_at": "2026-08-20T12:30:00Z",
-        "scope_decision": "INCLUDED",
+        "scope_decision": "included",
         "content_hash": (
             "sha256:"
             "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"

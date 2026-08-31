@@ -3,17 +3,6 @@
 from enum import Enum
 
 
-class TaskSourceType(str, Enum):
-    EMAIL = "email"
-    SLACK = "slack"
-    WHATSAPP = "whatsapp"
-    MEETING = "meeting"
-    CALENDAR = "calendar"
-    DOC = "doc"
-    SCANNED_DOC = "scanned_doc"
-    DRIVE = "drive"
-
-
 class TaskTier(str, Enum):
     OPERATIONAL = "operational"
     TACTICAL = "tactical"
@@ -49,4 +38,3 @@ class ExtractionProvenance(str, Enum):
 class AssigneeType(str, Enum):
     USER = "user"
     TEAM = "team"
-    

@@ -10,9 +10,10 @@ from pydantic import (
 )
 
 from .assignee import AssigneeCandidate
+from .base_enums import SourceType
+
 from .task_enums import (
     RoleContext,
-    TaskSourceType,
     TaskTier,
 )
 
@@ -31,7 +32,7 @@ class TaskCreationRequested(BaseModel):
     description: str | None = None
 
     # Original source from which MIND extracted the task.
-    source_type: TaskSourceType
+    source_type: SourceType
     source_ref: str | None = None
 
     # MIND classification fields.
@@ -68,9 +69,6 @@ class TaskCreationRequested(BaseModel):
         ge=0.0,
         le=1.0,
     )
-
-    # Raw ranking score produced by MIND.
-    score: float | None = None
 
     # MIND proposes an owner.
     # The owner is always a User, never a Team.

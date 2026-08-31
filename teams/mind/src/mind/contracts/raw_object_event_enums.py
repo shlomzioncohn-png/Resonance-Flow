@@ -3,22 +3,11 @@
 from enum import Enum
 
 
-class SourceType(str, Enum):
-    """Business origin of the object."""
-
-    EMAIL = "EMAIL"
-    SLACK = "SLACK"
-    WHATSAPP = "WHATSAPP"
-    DRIVE = "DRIVE"
-    CALENDAR = "CALENDAR"
-    MEETING = "MEETING"
-
-
 class ScopeDecision(str, Enum):
     """Bridge work-relevance decision."""
 
-    INCLUDED = "INCLUDED"
-    EXCLUDED = "EXCLUDED"
+    INCLUDED = "included"
+    EXCLUDED = "excluded"
 
 
 class Modality(str, Enum):

@@ -6,10 +6,11 @@ import pytest
 from pydantic import ValidationError
 
 from mind.contracts.task import Task
+from mind.contracts.base_enums import SourceType
+
 from mind.contracts.task_enums import (
     AssigneeType,
     ExtractionProvenance,
-    TaskSourceType,
     TaskStatus,
 )
 
@@ -45,7 +46,7 @@ def test_accepts_valid_task() -> None:
         "22222222-2222-2222-2222-222222222222"
     )
     assert task.title == "Prepare customer report"
-    assert task.source_type == TaskSourceType.EMAIL
+    assert task.source_type == SourceType.EMAIL
     assert task.status == TaskStatus.NEW
     assert task.is_available is True
     assert task.extraction_provenance == (
@@ -73,11 +74,11 @@ def test_accepts_user_and_team_assignees() -> None:
 
     payload["assignees"] = [
         {
-            "type": "user",
+            "assignee_type": "user",
             "id": "44444444-4444-4444-4444-444444444444",
         },
         {
-            "type": "team",
+            "assignee_type": "team",
             "id": "55555555-5555-5555-5555-555555555555",
         },
     ]
@@ -86,8 +87,8 @@ def test_accepts_user_and_team_assignees() -> None:
 
     assert len(task.assignees) == 2
 
-    assert task.assignees[0].type == AssigneeType.USER
-    assert task.assignees[1].type == AssigneeType.TEAM
+    assert task.assignees[0].assignee_type == AssigneeType.USER
+    assert task.assignees[1].assignee_type == AssigneeType.TEAM
 
 
 def test_requires_confidence_for_ml_inferred_task() -> None:

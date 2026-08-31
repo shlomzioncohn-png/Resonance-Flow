@@ -11,10 +11,11 @@ from pydantic import (
     field_validator,
 )
 
+from .base_enums import SourceType
+
 from .raw_object_event_enums import (
     Modality,
     ScopeDecision,
-    SourceType,
 )
 
 
