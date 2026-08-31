@@ -8,6 +8,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
 import java.time.LocalDateTime;
+import java.util.ArrayList;
 import java.util.List;
 
 /**
@@ -43,16 +44,37 @@ public class WorkspaceService {
                         .constraints(List.of())
                         .build();
 
+        boolean fitsInTime = task.getEffortEstimate() <= request.getAvailableTime();
+        boolean isHighPriority = "HIGH".equals(task.getPriority());
+        boolean hasNoDependencies = task.getDependencies().isEmpty();
+
         return TaskRecommendationDTO.builder()
                 .task(task)
-                .explanation(
-                        "Fits in your " + request.getAvailableTime()
-                                + " minutes, high importance, no blocking dependencies")
-                .fitsInTime(task.getEffortEstimate() <= request.getAvailableTime())
-                .isHighPriority("HIGH".equals(task.getPriority()))
-                .hasNoDependencies(task.getDependencies().isEmpty())
+                .explanation(buildExplanation(request, fitsInTime, isHighPriority, hasNoDependencies))
+                .fitsInTime(fitsInTime)
+                .isHighPriority(isHighPriority)
+                .hasNoDependencies(hasNoDependencies)
                 .confidenceScore(85)
                 .alternatives(List.of())
                 .build();
+    }
+
+    private String buildExplanation(
+            WorkspaceRequestDTO request,
+            boolean fitsInTime,
+            boolean isHighPriority,
+            boolean hasNoDependencies) {
+        List<String> reasons = new ArrayList<>();
+        reasons.add(
+                fitsInTime
+                        ? "Fits in your " + request.getAvailableTime() + " minutes"
+                        : "Does not fit in your " + request.getAvailableTime() + " minutes");
+        if (isHighPriority) {
+            reasons.add("high importance");
+        }
+        if (hasNoDependencies) {
+            reasons.add("no blocking dependencies");
+        }
+        return String.join(", ", reasons);
     }
 }

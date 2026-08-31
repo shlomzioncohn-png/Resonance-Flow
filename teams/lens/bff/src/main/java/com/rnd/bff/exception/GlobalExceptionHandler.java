@@ -5,6 +5,8 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.http.converter.HttpMessageNotReadableException;
+import org.springframework.web.HttpRequestMethodNotSupportedException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.MissingRequestHeaderException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
@@ -51,6 +53,30 @@ public class GlobalExceptionHandler {
         return new ResponseEntity<>(
                 new ErrorResponse("BAD_REQUEST", "Missing required header", path, ex.getMessage()),
                 HttpStatus.BAD_REQUEST);
+    }
+
+    /** Triggered by malformed JSON or a field of the wrong type (e.g. availableTime: "abc"). */
+    @ExceptionHandler(HttpMessageNotReadableException.class)
+    public ResponseEntity<ErrorResponse> handleNotReadableException(
+            HttpMessageNotReadableException ex, WebRequest request) {
+        String path = getRequestPath(request);
+        logger.warn("Malformed request body - Path: {}, Details: {}", path, ex.getMessage());
+
+        return new ResponseEntity<>(
+                new ErrorResponse("BAD_REQUEST", "Malformed request body", path, ex.getMessage()),
+                HttpStatus.BAD_REQUEST);
+    }
+
+    /** Triggered by calling an endpoint with the wrong HTTP method. */
+    @ExceptionHandler(HttpRequestMethodNotSupportedException.class)
+    public ResponseEntity<ErrorResponse> handleMethodNotSupportedException(
+            HttpRequestMethodNotSupportedException ex, WebRequest request) {
+        String path = getRequestPath(request);
+        logger.warn("Unsupported method - Path: {}, Details: {}", path, ex.getMessage());
+
+        return new ResponseEntity<>(
+                new ErrorResponse("METHOD_NOT_ALLOWED", "HTTP method not supported", path, ex.getMessage()),
+                HttpStatus.METHOD_NOT_ALLOWED);
     }
 
     /** Catch-all for unexpected errors. */

@@ -1,5 +1,6 @@
 package com.rnd.bff.controller;
 
+import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.is;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -40,6 +41,21 @@ class WorkspaceControllerTest {
                 .andExpect(jsonPath("$.fitsInTime", is(true)))
                 .andExpect(jsonPath("$.isHighPriority", is(true)))
                 .andExpect(jsonPath("$.hasNoDependencies", is(true)));
+    }
+
+    @Test
+    void recommend_availableTimeShorterThanTask_reportsDoesNotFit() throws Exception {
+        WorkspaceRequestDTO request = new WorkspaceRequestDTO(10, null, null);
+
+        mockMvc
+                .perform(
+                        post("/workspace/recommend")
+                                .header("X-User-Id", "emp_001")
+                                .contentType(MediaType.APPLICATION_JSON)
+                                .content(objectMapper.writeValueAsString(request)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.fitsInTime", is(false)))
+                .andExpect(jsonPath("$.explanation", containsString("Does not fit")));
     }
 
     @Test

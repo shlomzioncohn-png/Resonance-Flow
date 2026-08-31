@@ -152,7 +152,12 @@ Error format:
 
 ## 4. Work Plan by Layer
 
-### Gateway — Dvori ✅ Done
+### Gateway — Dvori ✅ Done on `lens/shared-dtos` — not yet merged to `main`
+
+> The rows below are implemented on the `lens/shared-dtos` branch. They are
+> **not yet in `main`** — merging the BFF side (this doc's PR) does not by
+> itself make `POST /api/workspace/recommend` work end to end through the
+> Gateway. Dvori's side needs its own PR into `main` first.
 
 | Task | Status |
 |---|---|
