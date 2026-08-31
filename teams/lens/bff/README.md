@@ -65,13 +65,37 @@ java -jar target/bff-0.1.0-SNAPSHOT.jar
 - `SERVER_PORT` - Server port (default: 8082)
 - `SPRING_PROFILES_ACTIVE` - Active Spring profile (default: local)
 
+## Endpoints
+
+### `POST /workspace/recommend`
+
+Employee workspace recommendation — returns the best-fit task for the caller's
+available time. Full contract (request/response shape, error format, identity
+flow): [../docs/workspace-screen-integration-plan.md](../docs/workspace-screen-integration-plan.md).
+
+- Header: `X-User-Id` (required — set by Gateway, extracted from the JWT once
+  Auth & Identity exists; Gateway currently sends a mock value).
+- Body: `WorkspaceRequestDTO` (`availableTime` required, `projectFilter` /
+  `minPriority` optional).
+- Returns `TaskRecommendationDTO`. Currently backed by
+  `WorkspaceService`, a mock that returns a fixed recommendation — no live
+  Mind/Chain/Inbox calls yet.
+- Errors follow the uniform `ErrorResponse` shape
+  (`errorCode`/`message`/`path`/`timestamp`/`details`), matching the
+  Gateway's format.
+
+### `GET /api/status`
+
+Basic liveness check (`StatusController`).
+
 ## Status
 
-Project skeleton only (stage 1). Routing/DTO-mapping logic will be added once the
-downstream service contracts (Bridge, Mind, Inbox, Chain) are defined.
+DTOs and the `/workspace/recommend` endpoint are implemented against mock
+data (stage 2). Routing/aggregation to Bridge, Mind, Inbox, and Chain is not
+implemented yet.
 
 ## Next steps
 
-- Define DTOs shared with the Frontend
-- Implement routing/aggregation to Bridge, Mind, Inbox, Chain
+- Wire `WorkspaceService` to Mind (scoring), Chain (feasibility/dependencies),
+  and Inbox (task data) once those services expose their endpoints
 - Wire up authentication/authorization propagated from the Gateway
