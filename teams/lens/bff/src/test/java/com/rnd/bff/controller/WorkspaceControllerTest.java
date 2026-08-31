@@ -7,6 +7,9 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.rnd.bff.client.ChainClient;
+import com.rnd.bff.client.InboxClient;
+import com.rnd.bff.client.MindClient;
 import com.rnd.bff.dto.WorkspaceRequestDTO;
 import com.rnd.bff.service.WorkspaceService;
 import org.junit.jupiter.api.Test;
@@ -16,11 +19,12 @@ import org.springframework.context.annotation.Import;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
 
-// WorkspaceService is a real bean here (not mocked) - it's a plain mock-data
-// service with no external dependencies, so exercising it for real is cheap
-// and verifies the actual response shape, not a stubbed stand-in.
+// WorkspaceService and its three clients are real beans here (not mocked) -
+// they're all plain mock-data classes with no actual network calls yet, so
+// exercising them for real is cheap and verifies the actual response shape,
+// not a stubbed stand-in.
 @WebMvcTest(WorkspaceController.class)
-@Import(WorkspaceService.class)
+@Import({WorkspaceService.class, InboxClient.class, ChainClient.class, MindClient.class})
 class WorkspaceControllerTest {
 
     @Autowired private MockMvc mockMvc;

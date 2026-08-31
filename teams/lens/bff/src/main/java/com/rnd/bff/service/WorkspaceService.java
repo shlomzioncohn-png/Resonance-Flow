@@ -1,27 +1,41 @@
 package com.rnd.bff.service;
 
+import com.rnd.bff.client.ChainClient;
+import com.rnd.bff.client.InboxClient;
+import com.rnd.bff.client.MindClient;
 import com.rnd.bff.dto.TaskDTO;
+import com.rnd.bff.dto.TaskDependenciesDTO;
 import com.rnd.bff.dto.TaskRecommendationDTO;
 import com.rnd.bff.dto.WorkspaceRequestDTO;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
-import java.time.LocalDateTime;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
+import java.util.Map;
 
 /**
- * Mock implementation until Mind (scoring), Chain (feasibility), and Inbox
- * (task data) expose their endpoints — see
- * docs/workspace-screen-integration-plan.md, "Work Plan by Layer". Returns a
- * fixed recommendation regardless of input so the Frontend can build against
- * a stable shape today.
+ * Orchestrates Inbox (task data), Chain (dependencies/feasibility), and Mind
+ * (scoring) into a single task recommendation. All three are mocked at the
+ * client level until those services expose real APIs — see
+ * docs/workspace-screen-integration-plan.md, "Work Plan by Layer".
  */
 @Service
 public class WorkspaceService {
 
     private static final Logger logger = LoggerFactory.getLogger(WorkspaceService.class);
+
+    private final InboxClient inboxClient;
+    private final ChainClient chainClient;
+    private final MindClient mindClient;
+
+    public WorkspaceService(InboxClient inboxClient, ChainClient chainClient, MindClient mindClient) {
+        this.inboxClient = inboxClient;
+        this.chainClient = chainClient;
+        this.mindClient = mindClient;
+    }
 
     public TaskRecommendationDTO recommend(WorkspaceRequestDTO request, String userId) {
         logger.info(
@@ -29,34 +43,72 @@ public class WorkspaceService {
                 userId,
                 request.getAvailableTime());
 
-        TaskDTO task =
-                TaskDTO.builder()
-                        .id("task_001")
-                        .title("Review API changes")
-                        .description("Review the latest API changes and update integration tests.")
-                        .status("READY")
-                        .priority("HIGH")
-                        .effortEstimate(35)
-                        .dueDate(LocalDateTime.of(2026, 8, 30, 17, 0))
-                        .owner("Alex Morgan")
-                        .project("Platform Service")
-                        .dependencies(List.of())
-                        .constraints(List.of())
-                        .build();
+        List<TaskDTO> candidates = filterCandidates(inboxClient.getTasksForUser(userId), request);
+        List<String> candidateIds = candidates.stream().map(TaskDTO::getId).toList();
 
-        boolean fitsInTime = task.getEffortEstimate() <= request.getAvailableTime();
-        boolean isHighPriority = "HIGH".equals(task.getPriority());
-        boolean hasNoDependencies = task.getDependencies().isEmpty();
+        Map<String, TaskDependenciesDTO> feasibilityByTaskId =
+                chainClient.getFeasibility(userId, candidateIds);
+        Map<String, Integer> scoreByTaskId =
+                mindClient.getScores(userId, candidateIds, request.getAvailableTime());
+
+        for (TaskDTO task : candidates) {
+            TaskDependenciesDTO feasibility = feasibilityByTaskId.get(task.getId());
+            if (feasibility != null) {
+                task.setDependencies(feasibility.getDependencies());
+                task.setConstraints(feasibility.getConstraints());
+            }
+        }
+
+        TaskDTO bestTask =
+                candidates.stream()
+                        .max(Comparator.comparing(task -> scoreByTaskId.getOrDefault(task.getId(), 0)))
+                        .orElse(null);
+
+        if (bestTask == null) {
+            return TaskRecommendationDTO.builder()
+                    .explanation("No matching tasks available right now.")
+                    .fitsInTime(false)
+                    .isHighPriority(false)
+                    .hasNoDependencies(true)
+                    .confidenceScore(0)
+                    .alternatives(List.of())
+                    .build();
+        }
+
+        boolean fitsInTime = bestTask.getEffortEstimate() <= request.getAvailableTime();
+        boolean isHighPriority = "HIGH".equals(bestTask.getPriority());
+        boolean hasNoDependencies = bestTask.getDependencies().isEmpty();
+
+        List<TaskDTO> alternatives = new ArrayList<>(candidates);
+        alternatives.remove(bestTask);
 
         return TaskRecommendationDTO.builder()
-                .task(task)
+                .task(bestTask)
                 .explanation(buildExplanation(request, fitsInTime, isHighPriority, hasNoDependencies))
                 .fitsInTime(fitsInTime)
                 .isHighPriority(isHighPriority)
                 .hasNoDependencies(hasNoDependencies)
-                .confidenceScore(85)
-                .alternatives(List.of())
+                .confidenceScore(scoreByTaskId.getOrDefault(bestTask.getId(), 0))
+                .alternatives(alternatives)
                 .build();
+    }
+
+    private List<TaskDTO> filterCandidates(List<TaskDTO> tasks, WorkspaceRequestDTO request) {
+        return tasks.stream()
+                .filter(
+                        t ->
+                                request.getProjectFilter() == null
+                                        || request.getProjectFilter().equals(t.getProject()))
+                .filter(
+                        t ->
+                                request.getMinPriority() == null
+                                        || meetsMinPriority(t.getPriority(), request.getMinPriority()))
+                .toList();
+    }
+
+    private boolean meetsMinPriority(String taskPriority, String minPriority) {
+        List<String> order = List.of("LOW", "MEDIUM", "HIGH");
+        return order.indexOf(taskPriority) >= order.indexOf(minPriority);
     }
 
     private String buildExplanation(

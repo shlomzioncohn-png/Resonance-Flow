@@ -22,7 +22,12 @@ consumed by the Frontend.
 ```
 src/main/java/com/rnd/bff/
 ├── BffApplication.java   # Spring Boot entry point
-└── controller/            # REST controllers
+├── controller/            # REST controllers
+├── service/               # Orchestration (combines client responses into a DTO)
+├── client/                # One class per downstream service (Inbox/Chain/Mind) -
+│                            mocked at the service boundary until each is live
+├── dto/                   # Request/response shapes
+└── exception/             # GlobalExceptionHandler + uniform ErrorResponse
 src/main/resources/
 └── application.yml       # config (port, actuator)
 src/test/java/com/rnd/bff/
@@ -77,9 +82,12 @@ flow): [../docs/workspace-screen-integration-plan.md](../docs/workspace-screen-i
   Auth & Identity exists; Gateway currently sends a mock value).
 - Body: `WorkspaceRequestDTO` (`availableTime` required, `projectFilter` /
   `minPriority` optional).
-- Returns `TaskRecommendationDTO`. Currently backed by
-  `WorkspaceService`, a mock that returns a fixed recommendation — no live
-  Mind/Chain/Inbox calls yet.
+- Returns `TaskRecommendationDTO`. `WorkspaceService` orchestrates three
+  clients — `InboxClient` (task data), `ChainClient` (dependencies/
+  feasibility), `MindClient` (scoring) — each currently mocked at the
+  service boundary (same method signature the real HTTP call will use, so
+  wiring one up is a body swap, not a redesign). No live downstream calls
+  yet.
 - Errors follow the uniform `ErrorResponse` shape
   (`errorCode`/`message`/`path`/`timestamp`/`details`), matching the
   Gateway's format.
@@ -90,12 +98,12 @@ Basic liveness check (`StatusController`).
 
 ## Status
 
-DTOs and the `/workspace/recommend` endpoint are implemented against mock
-data (stage 2). Routing/aggregation to Bridge, Mind, Inbox, and Chain is not
-implemented yet.
+DTOs, the `/workspace/recommend` endpoint, and the `InboxClient`/
+`ChainClient`/`MindClient` orchestration are implemented against mock data
+(stage 2). No live calls to Bridge, Mind, Inbox, or Chain yet.
 
 ## Next steps
 
-- Wire `WorkspaceService` to Mind (scoring), Chain (feasibility/dependencies),
-  and Inbox (task data) once those services expose their endpoints
+- Wire `InboxClient`, `ChainClient`, and `MindClient` to their real APIs once
+  each service exposes one — see the `TODO` in each client class
 - Wire up authentication/authorization propagated from the Gateway

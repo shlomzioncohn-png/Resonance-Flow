@@ -178,13 +178,16 @@ Error format:
 | Create `com.rnd.bff.dto.TaskRecommendationDTO` | ✅ |
 | `POST /workspace/recommend` controller | ✅ |
 | Read `X-User-Id` from header | ✅ |
-| Mock service: return hardcoded `TaskRecommendationDTO` | ✅ |
 | Uniform error handling (`com.rnd.bff.dto.ErrorResponse` + `GlobalExceptionHandler`, matching Gateway's shape) | ✅ |
-| Wire to Mind client (when ready) | 🔜 |
-| Wire to Chain client (when ready) | 🔜 |
-| Wire to Inbox client (when ready) | 🔜 |
+| `InboxClient` — mocked task data, real call's method signature already in place | ✅ |
+| `ChainClient` — mocked dependencies/constraints per task id | ✅ |
+| `MindClient` — mocked confidence score per task id | ✅ |
+| `WorkspaceService` orchestrates the three clients into `TaskRecommendationDTO` (filters by `projectFilter`/`minPriority`, picks the highest-scored candidate) | ✅ |
+| Wire `InboxClient` to Inbox's real API | 🔜 |
+| Wire `ChainClient` to Chain's real API | 🔜 |
+| Wire `MindClient` to Mind's real API | 🔜 |
 
-**BFF can start against mock data immediately** — no dependency on Mind, Chain, or Inbox.
+**BFF can start against mock data immediately** — no dependency on Mind, Chain, or Inbox. Each client's mock lives at the service boundary (same method signature the real HTTP call will use), so wiring one up later is a body swap inside that client, not a change to `WorkspaceService` or the controller.
 
 ---
 
