@@ -15,7 +15,12 @@ export function TaskProvider({ children }: { children: ReactNode }) {
   const [task, setTask] = useState<EmployeeTask>(INITIAL_TASK)
 
   const clearBlockedBy = () =>
-    setTask((current) => ({ ...current, blockedBy: [], blockingReason: null }))
+    setTask((current) => ({
+      ...current,
+      blockedBy: [],
+      blockingReason: null,
+      status: 'Ready',
+    }))
 
   return <TaskContext.Provider value={{ task, clearBlockedBy }}>{children}</TaskContext.Provider>
 }

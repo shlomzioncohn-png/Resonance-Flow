@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import Link from 'next/link'
 import { useSearchParams } from 'next/navigation'
 import Avatar from '@mui/material/Avatar'
@@ -24,7 +24,7 @@ import MoreHorizOutlinedIcon from '@mui/icons-material/MoreHorizOutlined'
 import PersonOutlineIcon from '@mui/icons-material/PersonOutlined'
 import { radiusTokens } from '@/theme'
 import type { TaskRef } from '../../mockTask'
-import { DetailRow, softToneSx } from '../../shared'
+import { DetailRow, softToneSx, statusTone } from '../../shared'
 import { useTask } from '../../taskStore'
 import ChatPanel from './ChatPanel'
 
@@ -61,6 +61,19 @@ export default function TaskDetailsPage() {
     searchParams.get('chat') === '1' ? 'chat' : 'overview',
   )
 
+  // Move focus into the swapped-in content so keyboard/screen-reader users land somewhere
+  // sensible instead of on a now-vanished trigger element. Skipped on first mount so
+  // landing on the page doesn't steal focus from the URL bar.
+  const contentRef = useRef<HTMLDivElement>(null)
+  const isFirstRender = useRef(true)
+  useEffect(() => {
+    if (isFirstRender.current) {
+      isFirstRender.current = false
+      return
+    }
+    contentRef.current?.focus()
+  }, [mode])
+
   return (
     <Container maxWidth="lg" sx={{ py: { xs: 3, md: 4 } }}>
       <Button
@@ -81,8 +94,14 @@ export default function TaskDetailsPage() {
       >
         <Box>
           <Stack direction="row" spacing={1.5} sx={{ alignItems: 'center' }}>
-            <Typography variant="h4">{task.title}</Typography>
-            <Chip size="small" label={task.status} sx={[softToneSx('success'), { fontWeight: 600 }]} />
+            <Typography variant="h4" component="h1">
+              {task.title}
+            </Typography>
+            <Chip
+              size="small"
+              label={task.status}
+              sx={[softToneSx(statusTone(task.status)), { fontWeight: 600 }]}
+            />
           </Stack>
           <Typography variant="body1" color="text.secondary">
             {task.team}
@@ -99,7 +118,7 @@ export default function TaskDetailsPage() {
         </Stack>
       </Stack>
 
-      <Tabs value="overview" onChange={() => {}} sx={{ mt: 2, mb: 3 }}>
+      <Tabs value={mode === 'chat' ? false : 'overview'} onChange={() => {}} sx={{ mt: 2, mb: 3 }}>
         <Tab value="overview" label="Overview" />
         <Tab value="dependencies" label={`Dependencies (${task.blockedBy.length + task.blocks.length})`} disabled />
         <Tab value="activity" label="Activity" disabled />
@@ -109,7 +128,7 @@ export default function TaskDetailsPage() {
 
       <Stack direction={{ xs: 'column', lg: 'row' }} spacing={3} sx={{ alignItems: 'flex-start' }}>
         <Card sx={{ flex: 1, minWidth: 0, width: '100%' }}>
-          <CardContent>
+          <CardContent ref={contentRef} tabIndex={-1} sx={{ outline: 'none' }}>
             {mode === 'chat' ? (
               <ChatPanel onBack={() => setMode('overview')} />
             ) : (

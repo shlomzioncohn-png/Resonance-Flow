@@ -9,7 +9,7 @@ export interface EmployeeTask {
   title: string
   team: string
   priority: 'High' | 'Medium' | 'Low'
-  status: string
+  status: 'Ready' | 'Blocked'
   description: string
   owner: string
   due: string
@@ -32,7 +32,7 @@ export const INITIAL_TASK: EmployeeTask = {
   title: 'Review API changes',
   team: 'Platform Service',
   priority: 'High',
-  status: 'Ready',
+  status: 'Blocked',
   description: 'Review the latest API changes and update integration tests accordingly.',
   owner: 'Rachel',
   due: 'Today, 5:00 PM',

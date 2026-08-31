@@ -78,11 +78,11 @@ export default function ChatPanel({ onBack }: { onBack: () => void }) {
     if (!text) return
     setDraft('')
 
-    const userMessage: Message = { id: `u-${Date.now()}`, role: 'user', text }
+    const userMessage: Message = { id: crypto.randomUUID(), role: 'user', text }
 
     if (!resolved) {
       const assistantMessage: Message = {
-        id: `a-${Date.now()}`,
+        id: crypto.randomUUID(),
         role: 'assistant',
         text: `Done. I removed the dependency on "${blockerTitle}". This task is no longer blocked.`,
       }
@@ -91,7 +91,7 @@ export default function ChatPanel({ onBack }: { onBack: () => void }) {
       setResolved(true)
     } else {
       const assistantMessage: Message = {
-        id: `a-${Date.now()}`,
+        id: crypto.randomUUID(),
         role: 'assistant',
         text: "Got it — I don't have anything else to update on this task right now.",
       }
@@ -115,7 +115,7 @@ export default function ChatPanel({ onBack }: { onBack: () => void }) {
         </Box>
       </Stack>
 
-      <Stack spacing={1.25} sx={{ flexGrow: 1, py: 1 }}>
+      <Stack spacing={1.25} sx={{ flexGrow: 1, py: 1 }} aria-live="polite">
         {messages.map((message) => (
           <Bubble key={message.id} message={message} />
         ))}
@@ -155,7 +155,7 @@ export default function ChatPanel({ onBack }: { onBack: () => void }) {
           value={draft}
           onChange={(event) => setDraft(event.target.value)}
           onKeyDown={(event) => {
-            if (event.key === 'Enter') send()
+            if (event.key === 'Enter' && !event.nativeEvent.isComposing) send()
           }}
         />
         <IconButton color="primary" onClick={send} aria-label="Send message">

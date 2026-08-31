@@ -4,7 +4,7 @@ import Typography from '@mui/material/Typography'
 import { alpha, type Theme } from '@mui/material/styles'
 import { radiusTokens } from '@/theme'
 
-export type Tone = 'error' | 'info' | 'secondary' | 'success'
+export type Tone = 'error' | 'info' | 'secondary' | 'success' | 'warning'
 
 // Soft "pastel" chip look (light tinted background, matching-color text/icon) built from
 // the theme's own palette entries via alpha() — MUI's Chip has no built-in "soft" variant.
@@ -28,6 +28,11 @@ export function iconBadgeSx(theme: Theme) {
     bgcolor: alpha(theme.palette.primary.main, 0.1),
     color: 'primary.main',
   }
+}
+
+/** Only two statuses exist in this mock model: whether the task still has an open blocker. */
+export function statusTone(status: 'Ready' | 'Blocked'): Tone {
+  return status === 'Ready' ? 'success' : 'warning'
 }
 
 export function DetailRow({ label, value }: { label: string; value: ReactNode }) {

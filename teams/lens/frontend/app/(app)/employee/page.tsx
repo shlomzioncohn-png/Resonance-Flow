@@ -26,7 +26,7 @@ import PlayArrowOutlinedIcon from '@mui/icons-material/PlayArrowOutlined'
 import ScheduleOutlinedIcon from '@mui/icons-material/ScheduleOutlined'
 import PageContainer from '@/components/layout/PageContainer'
 import { radiusTokens } from '@/theme'
-import { DetailRow, iconBadgeSx, softToneSx } from './shared'
+import { DetailRow, iconBadgeSx, softToneSx, statusTone } from './shared'
 import { useTask } from './taskStore'
 
 const TIME_OPTIONS_MIN = [15, 30, 45, 60, 90]
@@ -42,6 +42,7 @@ export default function EmployeeWorkspacePage() {
   }
 
   const { task } = useTask()
+  const fitsWindow = minutes >= task.estimatedMinutes
 
   return (
     <PageContainer title="My Workspace" description="Make the most of your available time.">
@@ -130,11 +131,19 @@ export default function EmployeeWorkspacePage() {
                     </Typography>
 
                     <Stack spacing={0.75} sx={{ mb: 3 }}>
-                      {[
-                        `Fits in your ${minutes} minute window`,
-                        'High importance',
-                        `Unblocks ${task.blocks.length} other tasks`,
-                      ].map((reason) => (
+                      <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
+                        {fitsWindow ? (
+                          <CheckCircleOutlinedIcon fontSize="small" color="success" />
+                        ) : (
+                          <ScheduleOutlinedIcon fontSize="small" color="warning" />
+                        )}
+                        <Typography variant="body2">
+                          {fitsWindow
+                            ? `Fits in your ${minutes} minute window`
+                            : `Needs about ${task.estimatedMinutes} min — longer than your ${minutes} minute window`}
+                        </Typography>
+                      </Stack>
+                      {['High importance', `Unblocks ${task.blocks.length} other tasks`].map((reason) => (
                         <Stack key={reason} direction="row" spacing={1} sx={{ alignItems: 'center' }}>
                           <CheckCircleOutlinedIcon fontSize="small" color="success" />
                           <Typography variant="body2">{reason}</Typography>
@@ -188,7 +197,7 @@ export default function EmployeeWorkspacePage() {
                   <Chip
                     size="small"
                     label={task.status}
-                    sx={[softToneSx('success'), { fontWeight: 600 }]}
+                    sx={[softToneSx(statusTone(task.status)), { fontWeight: 600 }]}
                   />
                 </Stack>
                 <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
@@ -205,8 +214,8 @@ export default function EmployeeWorkspacePage() {
                   <Chip
                     size="small"
                     icon={<ScheduleOutlinedIcon />}
-                    label={`Fits in ${minutes} min`}
-                    sx={softToneSx('info')}
+                    label={fitsWindow ? `Fits in ${minutes} min` : `Needs ${task.estimatedMinutes} min`}
+                    sx={softToneSx(fitsWindow ? 'info' : 'warning')}
                   />
                   <Chip
                     size="small"
