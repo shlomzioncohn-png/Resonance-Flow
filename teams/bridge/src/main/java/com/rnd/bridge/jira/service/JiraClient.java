@@ -1,6 +1,5 @@
 package com.rnd.bridge.jira.service;
 
-import com.rnd.bridge.jira.dto.JiraIssue;
 import com.rnd.bridge.jira.dto.JiraSearchResult;
 import com.rnd.bridge.jira.mapper.JiraIssueMapper;
 import com.rnd.bridge.task.TaskValidator;
@@ -13,7 +12,6 @@ import org.springframework.stereotype.Service;
 import org.springframework.web.reactive.function.client.WebClient;
 import org.springframework.web.reactive.function.client.WebClientResponseException;
 import reactor.core.publisher.Flux;
-import reactor.core.publisher.Mono;
 import reactor.util.retry.Retry;
 
 import java.time.Duration;
