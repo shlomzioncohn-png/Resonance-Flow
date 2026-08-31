@@ -44,10 +44,4 @@ public class WorkspaceRequestDTO {
      */
     private String projectFilter;
 
-    /**
-     * Optional: minimum priority level
-     * Values: "LOW", "MEDIUM", "HIGH"
-     * Null = any priority
-     */
-    private String minPriority;
 }

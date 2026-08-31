@@ -152,7 +152,7 @@ Error format:
 
 ## 4. Work Plan by Layer
 
-### Gateway — Dvori ✅ Done
+### Gateway — Done
 
 | Task | Status |
 |---|---|
@@ -169,7 +169,7 @@ Error format:
 
 ---
 
-### BFF — Sari
+### BFF
 
 | Task | Status |
 |---|---|

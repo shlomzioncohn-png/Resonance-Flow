@@ -67,17 +67,18 @@ class GatewayHealthTests {
     }
     
     @Test
-    @DisplayName("Health endpoint includes BFF dependency status")
-    void testHealthIncludesBFFStatus() {
+    @DisplayName("Health endpoint does not include BFF dependency (liveness only)")
+    void testHealthDoesNotCallBFF() {
         webTestClient
             .get()
             .uri("/health")
             .exchange()
             .expectStatus().isOk()
             .expectBody()
-            .jsonPath("$.dependencies").exists()
-            .jsonPath("$.dependencies.bff").exists()
-            .jsonPath("$.dependencies.bff_url").isEqualTo("http://bff-service:8080/health");
+            .jsonPath("$.status").isEqualTo("UP")
+            .jsonPath("$.service").isEqualTo("gateway")
+            // /health is liveness-only — no downstream calls, no dependencies block
+            .jsonPath("$.dependencies").doesNotExist();
     }
     
     @Test
@@ -91,6 +92,7 @@ class GatewayHealthTests {
             .expectBody()
             .jsonPath("$.dependencies").exists()
             .jsonPath("$.dependencies.bff").exists()
+            .jsonPath("$.dependencies.bff_url").isNotEmpty()
             .jsonPath("$.dependencies.bff_ready").isNotEmpty();
     }
 }

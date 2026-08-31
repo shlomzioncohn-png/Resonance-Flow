@@ -98,6 +98,34 @@ public class TaskDTO {
     private List<String> constraints;
 
     /**
+     * External source of this task
+     * Example: "GitHub – PR #4821", "Jira – PROJ-123"
+     * TODO: confirm exact format with Inbox/Bridge teams
+     */
+    private String source;
+
+    /**
+     * Sprint this task belongs to
+     * Example: "Sprint 24 (May 6 – May 20)"
+     * TODO: confirm field name and format with Inbox team
+     */
+    private String sprint;
+
+    /**
+     * Tags associated with this task
+     * Example: ["backend", "api", "testing"]
+     * TODO: confirm with Inbox team whether tags are free-text or enum
+     */
+    private List<String> tags;
+
+    /**
+     * Reason this task is blocked (from a dependency or manual input)
+     * Example: "Waiting for the API specification to be finalized"
+     * Null if task is not blocked
+     */
+    private String blockingReason;
+
+    /**
      * Constructor for minimal task creation
      * Used when only essential info is available
      */
