@@ -15,6 +15,7 @@ import java.util.ArrayDeque;
 import java.util.Deque;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
 
@@ -28,6 +29,13 @@ import java.util.UUID;
  * counters atomic today, and is correct as long as a single JVM owns the
  * in-memory repositories. Once real persistence lands, add @Version /
  * an atomic UPDATE for the counters and this locking can be retired.
+ *
+ * A real database has now been confirmed for Chain (see CLAUDE.md and
+ * PLAN.md's "Decisions Required" - D1 is resolved). @Transactional and the
+ * placeholder JPA/H2 dependencies stay as-is deliberately until that
+ * migration happens - see PLAN.md's Phase 3 for the concrete recommended
+ * approach (real JPA entities, atomic counter UPDATEs, retiring the locking
+ * below in favor of DB-level concurrency control).
  *
  * Locking rationale: dependencyGraphLock guards the dependency edges plus any DONE-status read
  * that decides whether an edge currently counts against blockingCount (see addDependency,
@@ -78,6 +86,7 @@ public class TaskEligibilityService {
 
     @Transactional
     public void recalculateTaskEligibility(UUID taskId) {
+        Objects.requireNonNull(taskId, "taskId must not be null");
         synchronized (lockFor(taskId)) {
             Task task = requireTask(taskId);
             recalculateAndSave(task);
@@ -102,6 +111,8 @@ public class TaskEligibilityService {
 
     @Transactional
     public void addDependency(UUID taskId, UUID dependsOnTaskId) {
+        Objects.requireNonNull(taskId, "taskId must not be null");
+        Objects.requireNonNull(dependsOnTaskId, "dependsOnTaskId must not be null");
         log.info("Adding dependency: task {} depends on {}", taskId, dependsOnTaskId);
 
         // The whole cycle-check + edge-insert sequence runs under the graph lock: checking for
@@ -109,6 +120,14 @@ public class TaskEligibilityService {
         // addDependency calls on different task pairs could each pass the check and together
         // create a cycle.
         synchronized (dependencyGraphLock) {
+            // Validate both tasks exist BEFORE touching taskDependencyRepository at all. A
+            // rejected call (missing task, cycle) must never leave a persisted edge behind -
+            // previously requireTask(dependsOnTaskId)/requireTask(taskId) only ran after
+            // save(), so a caller passing a nonexistent id could get an exception while a
+            // phantom edge was permanently stored. See PLAN.md Finding #1.
+            requireTask(taskId);
+            Task dependsOnTask = requireTask(dependsOnTaskId);
+
             if (wouldCreateCycle(taskId, dependsOnTaskId)) {
                 throw new IllegalStateException(
                     "Cannot add dependency: task " + taskId + " -> " + dependsOnTaskId + " would create a cycle");
@@ -124,18 +143,23 @@ public class TaskEligibilityService {
                 return;
             }
 
-            // Read under the same lock that onTaskStatusChanged uses for its DONE-transition +
-            // dependents fan-out, so the two can't race: whichever of "edge becomes visible" vs
-            // "status flips to DONE" happens first here is guaranteed to also be what
-            // onTaskStatusChanged sees too, so the edge is counted exactly once either way.
-            // Only checked for a genuinely new edge - a duplicate already returned above
-            // without touching taskRepository at all.
-            boolean dependsOnAlreadyDone = requireTask(dependsOnTaskId).getStatus() == TaskStatus.DONE;
+            // Reuses the dependsOnTask instance just validated above (still under
+            // dependencyGraphLock, so its DONE status here is exactly what
+            // onTaskStatusChanged's fan-out would also see) instead of a second
+            // requireTask(dependsOnTaskId) call - closes the DONE-status race the same way as
+            // before, one repository read cheaper. Only checked for a genuinely new edge - a
+            // duplicate already returned above without touching taskRepository at all.
+            boolean dependsOnAlreadyDone = dependsOnTask.getStatus() == TaskStatus.DONE;
 
             // Nested inside dependencyGraphLock (graph lock always acquired before a per-task
             // lock, never after) so this counter mutation is mutually exclusive with every
             // other path that touches this task's counters (onTaskStatusChanged,
-            // onConstraintAdded/StatusChanged, removeDependency).
+            // onConstraintAdded/StatusChanged, removeDependency). requireTask(taskId) is called
+            // again here, deliberately - the validation call above ran before this lock was
+            // held, so a concurrent onConstraintAdded/onConstraintStatusChanged on this same
+            // taskId (which only takes lockFor(taskId), not dependencyGraphLock) could have
+            // mutated and saved a newer copy in between; reusing the earlier instance here
+            // would silently clobber that update when recalculateAndSave below calls save().
             synchronized (lockFor(taskId)) {
                 Task task = requireTask(taskId);
                 if (dependsOnAlreadyDone) {
@@ -182,9 +206,18 @@ public class TaskEligibilityService {
 
     @Transactional
     public void removeDependency(UUID taskId, UUID dependsOnTaskId) {
+        Objects.requireNonNull(taskId, "taskId must not be null");
+        Objects.requireNonNull(dependsOnTaskId, "dependsOnTaskId must not be null");
         log.info("Removing dependency: task {} no longer depends on {}", taskId, dependsOnTaskId);
 
         synchronized (dependencyGraphLock) {
+            // Validate taskId exists BEFORE touching taskDependencyRepository. A rejected call
+            // must never leave a real edge deleted behind it. dependsOnTaskId is deliberately
+            // NOT required to exist here - see the dependsOnCurrentlyDone read below, which
+            // already treats a missing target as "not DONE" on purpose: a dangling edge to a
+            // deleted task should still be cleanable. See PLAN.md Finding #1.
+            requireTask(taskId);
+
             // delete() returns void, so we check existence beforehand to know whether the
             // counter should actually change. Doing the check and the delete under the graph
             // lock prevents two concurrent removals of the same edge from both seeing
@@ -205,6 +238,10 @@ public class TaskEligibilityService {
                 .map(t -> t.getStatus() == TaskStatus.DONE)
                 .orElse(false);
 
+            // requireTask(taskId) is called again here, deliberately, for the same
+            // staleness-safety reason documented in addDependency: the validation call above
+            // ran before lockFor(taskId) was held, so a concurrent counter-mutating call could
+            // have saved a newer copy in between.
             synchronized (lockFor(taskId)) {
                 Task task = requireTask(taskId);
                 if (dependsOnCurrentlyDone) {
@@ -224,6 +261,7 @@ public class TaskEligibilityService {
 
     @Transactional
     public void onTaskStatusChanged(UUID taskId, TaskStatus newStatus) {
+        Objects.requireNonNull(taskId, "taskId must not be null");
         log.info("Task {} status changed to {}", taskId, newStatus);
 
         // The whole status flip + dependents fan-out runs under the graph lock (not just
@@ -283,6 +321,7 @@ public class TaskEligibilityService {
 
     @Transactional
     public void onConstraintAdded(UUID taskId) {
+        Objects.requireNonNull(taskId, "taskId must not be null");
         log.info("Constraint added on task {}", taskId);
         synchronized (lockFor(taskId)) {
             Task task = requireTask(taskId);
@@ -295,6 +334,7 @@ public class TaskEligibilityService {
     public void onConstraintStatusChanged(UUID taskId,
                                            Constraint.ConstraintStatus previousStatus,
                                            Constraint.ConstraintStatus newStatus) {
+        Objects.requireNonNull(taskId, "taskId must not be null");
         log.info("Constraint on task {} changed: {} -> {}", taskId, previousStatus, newStatus);
 
         boolean wasOpen = previousStatus == Constraint.ConstraintStatus.PENDING;

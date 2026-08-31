@@ -20,7 +20,7 @@ with some of what `TaskEligibilityService.addDependency`/`removeDependency` alre
 - Spring Boot 2.7.18 (Maven)
 - Docker / Docker Compose
 
-The DB choice for the project has not been decided yet. An in-memory H2 database is configured
+A real database has been confirmed for Chain (decision resolved - see [CLAUDE.md](CLAUDE.md)). An in-memory H2 database is configured
 as a placeholder purely so a `DataSource`/transaction manager exists for `@Transactional` -
 `Task`/`TaskDependency` are plain DTOs (not JPA entities) and are **not** persisted to H2; real
 data still lives in the in-memory `TaskRepository`/`TaskDependencyRepository` implementations.
@@ -148,3 +148,47 @@ Addressed all findings from the review, directly on this branch:
   that the previous mock-only test suite couldn't catch, including a dedicated regression test
   for the target-completion race above
   (`concurrentAddDependency_raceWithTargetCompletion_neverLeavesDependentPermanentlyStuck`).
+
+## Code review fixes (2026-08-31, PR #114 third review round)
+
+Addressed all findings from this round's audit ([PLAN.md](PLAN.md) has the full write-up),
+directly on this branch:
+
+- **`addDependency`/`removeDependency` now validate that both tasks exist *before* touching
+  `TaskDependencyRepository` at all.** Previously `taskDependencyRepository.save()`/`delete()`
+  ran before the existence check, so a call with a nonexistent `taskId`/`dependsOnTaskId` could
+  throw while still leaving a phantom edge saved (or a real edge deleted) behind it.
+- **Added test coverage for the missing-task paths above** (`addDependency_taskDoesNotExist_...`,
+  `addDependency_dependsOnTaskDoesNotExist_...`, `addDependency_bothTasksDoNotExist_...`,
+  `removeDependency_taskDoesNotExist_...`), plus null-argument tests for every public method's
+  UUID parameters.
+- **`TaskEligibilityService`'s public methods and `TaskDependency`'s constructor now validate
+  their UUID parameters with `Objects.requireNonNull`**, matching the existing convention used
+  elsewhere in the codebase (`Task.copyOf`, the in-memory repositories) instead of failing later
+  with a confusing `NullPointerException` deep inside a repository call.
+- **`Constraint` now has id-based `equals`/`hashCode`** (matching `Task`'s pattern) **and
+  defensive-copies its `reason` map** in the constructor and `getReason()`, so a caller can no
+  longer mutate a `Constraint`'s internal state without going through a setter - the same
+  protection `Task.copyOf` already gives `Task`.
+- **`InMemoryTaskDependencyRepository`'s duplicate-edge check now reuses
+  `TaskDependency.equals()`** instead of a separate, redundant `isSameEdge` helper doing the
+  same field comparison.
+- **The DB decision referenced throughout this module as pending is now resolved**: a real
+  database will be available for Chain. No code changes as a result (the placeholder
+  `@Transactional`/JPA/H2 setup stays exactly as-is until the actual migration happens), but
+  `CLAUDE.md`, this file, `pom.xml`, `application.yml`, and `.env.example` are updated so
+  nothing in the repo still describes this as an open question. The concrete recommended
+  migration approach (JPA entities, atomic counter updates, retiring the in-process locking)
+  is recorded in `PLAN.md`'s Phase 3 for when that work actually starts.
+- **Added the concurrency regression test that a PR comment and this file previously claimed
+  already existed but didn't**
+  (`concurrentAddDependency_raceWithTargetCompletion_neverLeavesDependentPermanentlyStuck`,
+  50 trials against the real in-memory repositories) - it now actually covers the race between
+  a new dependency edge and its target completing at the same moment.
+- **Added `TaskDependencyTest` and `ConstraintTest`**, giving `TaskDependency` and `Constraint`
+  the same direct unit coverage of their null-validation/immutability/equals-hashCode behavior
+  that this round added, rather than only exercising it indirectly through
+  `TaskEligibilityServiceTest`.
+
+See [PLAN.md](PLAN.md) for the full audit this round is based on, including which findings were
+confirmed as-is, which were already mitigated, and which are deliberately deferred (and why).

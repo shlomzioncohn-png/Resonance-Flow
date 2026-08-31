@@ -49,8 +49,17 @@ onConstraintStatusChanged.
   No JPA entities/repositories use H2 - real data still lives in the
   in-memory TaskRepository/TaskDependencyRepository, so @Transactional
   does not actually cover Task/TaskDependency mutations yet.
-- Waiting on team lead's answer about whether a real DB is coming,
-  or whether the in-memory contract is final for now
+- RESOLVED: a real database will be available for Chain (no longer
+  waiting on team lead's answer). @Transactional and the placeholder
+  JPA/H2 dependencies stay exactly as-is until that migration actually
+  happens — see PLAN.md's "Phase 3 detail — recommended transactional
+  approach once real persistence lands" for the concrete, already-agreed
+  migration checklist (JPA entities, JPA-backed repository
+  implementations of the existing interfaces, retiring the in-process
+  locking in favor of an atomic counter UPDATE + row locking, and a
+  DB-level unique constraint on (task_id, depends_on_task_id) for edge
+  idempotency). That migration is tracked as separate follow-up work, not
+  part of this remediation PR.
 - Until real JPA-backed repositories exist, TaskEligibilityService ALSO
   uses in-process locking (per-task lock striping + a global
   dependency-graph lock) to make read-modify-write on blockingCount /

@@ -46,7 +46,7 @@ public class InMemoryTaskDependencyRepository implements TaskDependencyRepositor
     public TaskDependency save(TaskDependency dependency) {
         Objects.requireNonNull(dependency, "dependency must not be null");
         synchronized (edges) {
-            boolean alreadyExists = edges.stream().anyMatch(edge -> isSameEdge(edge, dependency));
+            boolean alreadyExists = edges.stream().anyMatch(edge -> edge.equals(dependency));
             if (!alreadyExists) {
                 edges.add(dependency);
             }
@@ -60,10 +60,5 @@ public class InMemoryTaskDependencyRepository implements TaskDependencyRepositor
             edges.removeIf(edge -> edge.getTaskId().equals(taskId)
                     && edge.getDependsOnTaskId().equals(dependsOnTaskId));
         }
-    }
-
-    private boolean isSameEdge(TaskDependency a, TaskDependency b) {
-        return a.getTaskId().equals(b.getTaskId())
-                && a.getDependsOnTaskId().equals(b.getDependsOnTaskId());
     }
 }

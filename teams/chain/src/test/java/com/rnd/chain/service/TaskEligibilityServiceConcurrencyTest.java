@@ -124,4 +124,80 @@ class TaskEligibilityServiceConcurrencyTest {
         assertEquals(0, hub.getBlockingCount(), "every concurrent completion must be counted exactly once");
         assertTrue(hub.isReady());
     }
+
+    /**
+     * PLAN.md Finding #9: a PR comment on this branch claimed a test with this name already
+     * covered the race between adding a new edge to a target and that same target completing at
+     * the same time, but no such test existed anywhere in the repo (confirmed by
+     * {@code git grep} across the whole module and a full read of this file). This is that test.
+     *
+     * <p>The race: {@code addDependency(dependent, target)} and
+     * {@code onTaskStatusChanged(target, DONE)} both read the target's DONE status under
+     * {@code dependencyGraphLock} before deciding whether the new edge counts against
+     * {@code blockingCount} - see the comments in both methods. Run many times (not just once)
+     * because a lock-ordering bug here would only reproduce on some interleavings, and a single
+     * pass could pass by luck even with the bug present.
+     *
+     * <p>Invariant under test: whichever order the two calls actually interleave in, the
+     * dependent must never end up permanently stuck - i.e. it must end with
+     * {@code blockingCount == 0} and {@code isReady == true}, since target is DONE by the time
+     * both operations have completed either way.
+     */
+    @Test
+    void concurrentAddDependency_raceWithTargetCompletion_neverLeavesDependentPermanentlyStuck() throws InterruptedException {
+        int trials = 50;
+        for (int trial = 0; trial < trials; trial++) {
+            UUID dependentId = UUID.randomUUID();
+            UUID targetId = UUID.randomUUID();
+
+            InMemoryTaskRepository taskRepository = new InMemoryTaskRepository(
+                    List.of(buildTask(dependentId), buildTask(targetId)));
+            InMemoryTaskDependencyRepository dependencyRepository =
+                    new InMemoryTaskDependencyRepository(List.of());
+            TaskEligibilityService service = new TaskEligibilityService(taskRepository, dependencyRepository);
+
+            List<Runnable> jobs = List.of(
+                    () -> service.addDependency(dependentId, targetId),
+                    () -> service.onTaskStatusChanged(targetId, TaskStatus.DONE));
+
+            runConcurrentPair(jobs);
+
+            Task dependent = taskRepository.findById(dependentId).orElseThrow();
+            assertEquals(0, dependent.getBlockingCount(),
+                    "trial " + trial + ": dependent must not be left permanently stuck");
+            assertTrue(dependent.isReady(),
+                    "trial " + trial + ": dependent must become ready once target is DONE");
+        }
+    }
+
+    /**
+     * Same shape as runConcurrently, but sized for exactly two racing operations per trial
+     * rather than THREAD_COUNT - a fresh two-thread pool per trial keeps each of the 50 trials
+     * independent (no leftover state or thread reuse across trials).
+     */
+    private void runConcurrentPair(List<Runnable> tasks) throws InterruptedException {
+        ExecutorService pool = Executors.newFixedThreadPool(tasks.size());
+        CountDownLatch ready = new CountDownLatch(tasks.size());
+        CountDownLatch start = new CountDownLatch(1);
+        CountDownLatch done = new CountDownLatch(tasks.size());
+
+        for (Runnable task : tasks) {
+            pool.submit(() -> {
+                ready.countDown();
+                try {
+                    start.await();
+                    task.run();
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                } finally {
+                    done.countDown();
+                }
+            });
+        }
+
+        assertTrue(ready.await(5, TimeUnit.SECONDS), "workers failed to start");
+        start.countDown();
+        assertTrue(done.await(10, TimeUnit.SECONDS), "workers did not finish in time");
+        pool.shutdown();
+    }
 }

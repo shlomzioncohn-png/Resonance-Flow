@@ -43,7 +43,7 @@
              @Transactional in TaskEligibilityService is a real (currently
              no-op-in-practice) transaction manager instead of a missing one.
              No JPA entities/repositories use this yet - swap for the real
-             DB once the team lead's decision lands, see CLAUDE.md. -->
+             DB once that migration actually happens (decision already resolved - see CLAUDE.md and PLAN.md's Phase 3). -->
         <dependency>
             <groupId>com.h2database</groupId>
             <artifactId>h2</artifactId>

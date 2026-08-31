@@ -104,6 +104,12 @@ class TaskEligibilityServiceTest {
     }
 
     @Test
+    void recalculateTaskEligibility_nullTaskId_throwsNpe() {
+        assertThrows(NullPointerException.class,
+                () -> taskEligibilityService.recalculateTaskEligibility(null));
+    }
+
+    @Test
     void addDependency_incrementsBlockingCount_andStaysNotReady() {
         UUID taskId = UUID.randomUUID();
         UUID dependsOnTaskId = UUID.randomUUID();
@@ -126,14 +132,21 @@ class TaskEligibilityServiceTest {
     void addDependency_duplicate_doesNotInflateBlockingCount() {
         UUID taskId = UUID.randomUUID();
         UUID dependsOnTaskId = UUID.randomUUID();
+        Task task = buildTask(taskId, 0, 0, true);
+        Task dependsOnTask = buildTask(dependsOnTaskId, 0, 0, true);
 
+        // Finding #1: both tasks are now validated to exist before the duplicate-edge check
+        // runs, so both must be stubbed even though this call is expected to be a no-op.
+        when(taskRepository.findById(taskId)).thenReturn(Optional.of(task));
+        when(taskRepository.findById(dependsOnTaskId)).thenReturn(Optional.of(dependsOnTask));
         when(taskDependencyRepository.findByTaskId(dependsOnTaskId)).thenReturn(Collections.emptyList());
         when(taskDependencyRepository.findByTaskId(taskId))
                 .thenReturn(List.of(new TaskDependency(taskId, dependsOnTaskId)));
 
         taskEligibilityService.addDependency(taskId, dependsOnTaskId);
 
-        verify(taskRepository, never()).findById(any());
+        assertEquals(0, task.getBlockingCount());
+        verify(taskRepository, never()).save(any());
     }
 
     @Test
@@ -142,6 +155,9 @@ class TaskEligibilityServiceTest {
         UUID taskA = UUID.randomUUID();
         UUID taskB = UUID.randomUUID();
 
+        // Finding #1: both tasks are now validated to exist before the cycle check runs.
+        when(taskRepository.findById(taskA)).thenReturn(Optional.of(buildTask(taskA, 0, 0, true)));
+        when(taskRepository.findById(taskB)).thenReturn(Optional.of(buildTask(taskB, 0, 0, true)));
         when(taskDependencyRepository.findByTaskId(taskA))
                 .thenReturn(List.of(new TaskDependency(taskA, taskB)));
 
@@ -149,7 +165,63 @@ class TaskEligibilityServiceTest {
                 () -> taskEligibilityService.addDependency(taskB, taskA));
 
         verify(taskDependencyRepository, never()).save(any());
-        verify(taskRepository, never()).findById(any());
+    }
+
+    @Test
+    void addDependency_taskDoesNotExist_throwsAndNeverSaves() {
+        UUID taskId = UUID.randomUUID();
+        UUID dependsOnTaskId = UUID.randomUUID();
+
+        when(taskRepository.findById(taskId)).thenReturn(Optional.empty());
+
+        assertThrows(IllegalArgumentException.class,
+                () -> taskEligibilityService.addDependency(taskId, dependsOnTaskId));
+
+        verify(taskDependencyRepository, never()).save(any());
+    }
+
+    @Test
+    void addDependency_dependsOnTaskDoesNotExist_throwsAndNeverSaves() {
+        UUID taskId = UUID.randomUUID();
+        UUID dependsOnTaskId = UUID.randomUUID();
+        Task task = buildTask(taskId, 0, 0, true);
+
+        when(taskRepository.findById(taskId)).thenReturn(Optional.of(task));
+        when(taskRepository.findById(dependsOnTaskId)).thenReturn(Optional.empty());
+
+        assertThrows(IllegalArgumentException.class,
+                () -> taskEligibilityService.addDependency(taskId, dependsOnTaskId));
+
+        verify(taskDependencyRepository, never()).save(any());
+    }
+
+    @Test
+    void addDependency_bothTasksDoNotExist_throwsAndNeverSaves() {
+        UUID taskId = UUID.randomUUID();
+        UUID dependsOnTaskId = UUID.randomUUID();
+
+        when(taskRepository.findById(taskId)).thenReturn(Optional.empty());
+
+        assertThrows(IllegalArgumentException.class,
+                () -> taskEligibilityService.addDependency(taskId, dependsOnTaskId));
+
+        verify(taskDependencyRepository, never()).save(any());
+        // taskId is validated first and fails fast - dependsOnTaskId is never even looked up.
+        verify(taskRepository, never()).findById(dependsOnTaskId);
+    }
+
+    @Test
+    void addDependency_nullTaskId_throwsNpe() {
+        UUID dependsOnTaskId = UUID.randomUUID();
+        assertThrows(NullPointerException.class,
+                () -> taskEligibilityService.addDependency(null, dependsOnTaskId));
+    }
+
+    @Test
+    void addDependency_nullDependsOnTaskId_throwsNpe() {
+        UUID taskId = UUID.randomUUID();
+        assertThrows(NullPointerException.class,
+                () -> taskEligibilityService.addDependency(taskId, null));
     }
 
     @Test
@@ -175,12 +247,29 @@ class TaskEligibilityServiceTest {
     void removeDependency_notFound_doesNotChangeCounter() {
         UUID taskId = UUID.randomUUID();
         UUID dependsOnTaskId = UUID.randomUUID();
+        Task task = buildTask(taskId, 0, 0, true);
 
+        // Finding #1: taskId is now validated to exist even for a no-op removal.
+        when(taskRepository.findById(taskId)).thenReturn(Optional.of(task));
         when(taskDependencyRepository.findByTaskId(taskId)).thenReturn(Collections.emptyList());
 
         taskEligibilityService.removeDependency(taskId, dependsOnTaskId);
 
-        verify(taskRepository, never()).findById(any());
+        assertEquals(0, task.getBlockingCount());
+        verify(taskRepository, never()).save(any());
+    }
+
+    @Test
+    void removeDependency_taskDoesNotExist_throwsAndNeverDeletes() {
+        UUID taskId = UUID.randomUUID();
+        UUID dependsOnTaskId = UUID.randomUUID();
+
+        when(taskRepository.findById(taskId)).thenReturn(Optional.empty());
+
+        assertThrows(IllegalArgumentException.class,
+                () -> taskEligibilityService.removeDependency(taskId, dependsOnTaskId));
+
+        verify(taskDependencyRepository, never()).delete(any(), any());
     }
 
     @Test
@@ -198,6 +287,20 @@ class TaskEligibilityServiceTest {
         taskEligibilityService.removeDependency(taskId, dependsOnTaskId);
 
         assertEquals(0, task.getBlockingCount());
+    }
+
+    @Test
+    void removeDependency_nullTaskId_throwsNpe() {
+        UUID dependsOnTaskId = UUID.randomUUID();
+        assertThrows(NullPointerException.class,
+                () -> taskEligibilityService.removeDependency(null, dependsOnTaskId));
+    }
+
+    @Test
+    void removeDependency_nullDependsOnTaskId_throwsNpe() {
+        UUID taskId = UUID.randomUUID();
+        assertThrows(NullPointerException.class,
+                () -> taskEligibilityService.removeDependency(taskId, null));
     }
 
     @Test
@@ -277,6 +380,12 @@ class TaskEligibilityServiceTest {
     }
 
     @Test
+    void onTaskStatusChanged_nullTaskId_throwsNpe() {
+        assertThrows(NullPointerException.class,
+                () -> taskEligibilityService.onTaskStatusChanged(null, TaskStatus.DONE));
+    }
+
+    @Test
     void onConstraintAdded_incrementsOpenConstraintCount_andStaysNotReady() {
         UUID taskId = UUID.randomUUID();
         Task task = buildTask(taskId, 0, 0, true);
@@ -287,6 +396,12 @@ class TaskEligibilityServiceTest {
 
         assertEquals(1, task.getOpenConstraintCount());
         assertFalse(task.isReady());
+    }
+
+    @Test
+    void onConstraintAdded_nullTaskId_throwsNpe() {
+        assertThrows(NullPointerException.class,
+                () -> taskEligibilityService.onConstraintAdded(null));
     }
 
     @Test
@@ -325,5 +440,12 @@ class TaskEligibilityServiceTest {
                 taskId, Constraint.ConstraintStatus.SATISFIED, Constraint.ConstraintStatus.WAIVED);
 
         verify(taskRepository, never()).findById(any());
+    }
+
+    @Test
+    void onConstraintStatusChanged_nullTaskId_throwsNpe() {
+        assertThrows(NullPointerException.class,
+                () -> taskEligibilityService.onConstraintStatusChanged(
+                        null, Constraint.ConstraintStatus.PENDING, Constraint.ConstraintStatus.SATISFIED));
     }
 }
