@@ -1,11 +1,9 @@
-# Default values for resonance-flow.
-
-imagePullSecrets: [] # pre-existing secret names (cloud/prod path, not yet wired up)
+imagePullSecrets: [] 
 imagePullSecret:
-  create: false # opt-in: chart creates a dockerconfigjson Secret from a personal PAT
+  create: false 
   registry: ghcr.io
-  username: "" # developer's GitHub username
-  password: "" # developer's PAT, scope: read:packages - NEVER commit a real value here
+  username: "" 
+  password: "" 
   email: "noreply@kamatech.org"
 nameOverride: ""
 fullnameOverride: ""
@@ -18,7 +16,6 @@ podAnnotations: {}
 podLabels: {}
 podSecurityContext: {}
 securityContext: {}
-# נשאר זמנית בשביל templates ישנים שעדיין משתמשים ב-.Values.service
 service:
   type: ClusterIP
   port: 8082
@@ -52,6 +49,11 @@ autoscaling:
   targetCPUUtilizationPercentage: 80
 volumes: []
 volumeMounts: []
+dependencies:
+  - name: kafka
+    host: kafka.kafka.svc.cluster.local
+    port: 9092
+initContainers: []
 nodeSelector: {}
 tolerations: []
 affinity: {}
@@ -92,6 +94,10 @@ components:
       periodSeconds: 5
       failureThreshold: 3
     env: {}
+    dependencies:
+      - name: minio
+        host: minio.minio.svc.cluster.local
+        port: 9000
   lens-bff:
     replicaCount: 1
     image:
@@ -164,6 +170,10 @@ components:
       periodSeconds: 5
       failureThreshold: 3
     env: {}
+    dependencies:
+      - name: minio
+        host: minio.minio.svc.cluster.local
+        port: 9000
   lens-frontend:
     replicaCount: 1
     image:
@@ -272,6 +282,10 @@ components:
       periodSeconds: 5
       failureThreshold: 3
     env: {}
+    dependencies:
+      - name: postgres
+        host: postgres.postgres.svc.cluster.local
+        port: 5432
   lens-gateway:
     replicaCount: 1
     image:
