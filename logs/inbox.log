@@ -1,0 +1,94 @@
+2026-08-31T14:27:20.343+03:00  INFO 3480 --- [inbox] [main] com.rnd.inbox.InboxApplication           : Starting InboxApplication using Java 21.0.12.1 with PID 3480 (C:\Users\user1\Documents\יהודית\תכנות שנה ג\פרויקט gong\Resonance-Flow\teams\inbox\target\classes started by user1 in C:\Users\user1\Documents\יהודית\תכנות שנה ג\פרויקט gong\Resonance-Flow)
+2026-08-31T14:27:20.345+03:00  INFO 3480 --- [inbox] [main] com.rnd.inbox.InboxApplication           : No active profile set, falling back to 1 default profile: "default"
+2026-08-31T14:27:21.319+03:00  INFO 3480 --- [inbox] [main] .s.d.r.c.RepositoryConfigurationDelegate : Bootstrapping Spring Data JPA repositories in DEFAULT mode.
+2026-08-31T14:27:21.438+03:00  INFO 3480 --- [inbox] [main] .s.d.r.c.RepositoryConfigurationDelegate : Finished Spring Data repository scanning in 108 ms. Found 8 JPA repository interfaces.
+2026-08-31T14:27:22.574+03:00  INFO 3480 --- [inbox] [main] o.s.b.w.embedded.tomcat.TomcatWebServer  : Tomcat initialized with port 8080 (http)
+2026-08-31T14:27:22.594+03:00  INFO 3480 --- [inbox] [main] o.apache.catalina.core.StandardService   : Starting service [Tomcat]
+2026-08-31T14:27:22.595+03:00  INFO 3480 --- [inbox] [main] o.apache.catalina.core.StandardEngine    : Starting Servlet engine: [Apache Tomcat/10.1.42]
+2026-08-31T14:27:22.670+03:00  INFO 3480 --- [inbox] [main] o.a.c.c.C.[Tomcat].[localhost].[/]       : Initializing Spring embedded WebApplicationContext
+2026-08-31T14:27:22.670+03:00  INFO 3480 --- [inbox] [main] w.s.c.ServletWebServerApplicationContext : Root WebApplicationContext: initialization completed in 2270 ms
+2026-08-31T14:27:23.025+03:00 ERROR 3480 --- [inbox] [main] o.f.c.i.s.filesystem.FileSystemScanner   : Skipping filesystem location: ..\..\shared\database\migrations (not found)
+2026-08-31T14:27:23.034+03:00  INFO 3480 --- [inbox] [main] com.zaxxer.hikari.HikariDataSource       : HikariPool-1 - Starting...
+2026-08-31T14:27:23.250+03:00  INFO 3480 --- [inbox] [main] com.zaxxer.hikari.pool.HikariPool        : HikariPool-1 - Added connection org.postgresql.jdbc.PgConnection@1fb2eec
+2026-08-31T14:27:23.252+03:00  INFO 3480 --- [inbox] [main] com.zaxxer.hikari.HikariDataSource       : HikariPool-1 - Start completed.
+2026-08-31T14:27:23.298+03:00  INFO 3480 --- [inbox] [main] org.flywaydb.core.FlywayExecutor         : Database: jdbc:postgresql://localhost:5432/resonance_flow (PostgreSQL 14.24)
+2026-08-31T14:27:23.351+03:00  INFO 3480 --- [inbox] [main] o.f.core.internal.command.DbValidate     : Successfully validated 3 migrations (execution time 00:00.025s)
+2026-08-31T14:27:23.398+03:00  INFO 3480 --- [inbox] [main] o.f.core.internal.command.DbMigrate      : Current version of schema "public": 3
+2026-08-31T14:27:23.398+03:00 ERROR 3480 --- [inbox] [main] o.f.core.internal.command.DbMigrate      : Schema "public" has version 3, but no migration could be resolved in the configured locations !
+2026-08-31T14:27:23.409+03:00  INFO 3480 --- [inbox] [main] o.f.core.internal.command.DbMigrate      : Schema "public" is up to date. No migration necessary.
+2026-08-31T14:27:23.559+03:00  INFO 3480 --- [inbox] [main] o.hibernate.jpa.internal.util.LogHelper  : HHH000204: Processing PersistenceUnitInfo [name: default]
+2026-08-31T14:27:23.680+03:00  INFO 3480 --- [inbox] [main] org.hibernate.Version                    : HHH000412: Hibernate ORM core version 6.5.3.Final
+2026-08-31T14:27:23.748+03:00  INFO 3480 --- [inbox] [main] o.h.c.internal.RegionFactoryInitiator    : HHH000026: Second-level cache disabled
+2026-08-31T14:27:24.077+03:00  INFO 3480 --- [inbox] [main] o.s.o.j.p.SpringPersistenceUnitInfo      : No LoadTimeWeaver setup: ignoring JPA class transformer
+2026-08-31T14:27:25.348+03:00  INFO 3480 --- [inbox] [main] o.h.e.t.j.p.i.JtaPlatformInitiator       : HHH000489: No JTA platform available (set 'hibernate.transaction.jta.platform' to enable JTA platform integration)
+2026-08-31T14:27:25.351+03:00  INFO 3480 --- [inbox] [main] j.LocalContainerEntityManagerFactoryBean : Initialized JPA EntityManagerFactory for persistence unit 'default'
+2026-08-31T14:27:26.170+03:00  INFO 3480 --- [inbox] [main] o.s.d.j.r.query.QueryEnhancerFactory     : Hibernate is in classpath; If applicable, HQL parser will be used.
+2026-08-31T14:27:26.415+03:00  WARN 3480 --- [inbox] [main] JpaBaseConfiguration$JpaWebConfiguration : spring.jpa.open-in-view is enabled by default. Therefore, database queries may be performed during view rendering. Explicitly configure spring.jpa.open-in-view to disable this warning
+2026-08-31T14:27:27.071+03:00  WARN 3480 --- [inbox] [main] ConfigServletWebServerApplicationContext : Exception encountered during context initialization - cancelling refresh attempt: org.springframework.context.ApplicationContextException: Failed to start bean 'webServerStartStop'
+2026-08-31T14:27:27.074+03:00  INFO 3480 --- [inbox] [main] j.LocalContainerEntityManagerFactoryBean : Closing JPA EntityManagerFactory for persistence unit 'default'
+2026-08-31T14:27:27.076+03:00  INFO 3480 --- [inbox] [main] com.zaxxer.hikari.HikariDataSource       : HikariPool-1 - Shutdown initiated...
+2026-08-31T14:27:27.081+03:00  INFO 3480 --- [inbox] [main] com.zaxxer.hikari.HikariDataSource       : HikariPool-1 - Shutdown completed.
+2026-08-31T14:27:27.102+03:00  INFO 3480 --- [inbox] [main] .s.b.a.l.ConditionEvaluationReportLogger : 
+
+Error starting ApplicationContext. To display the condition evaluation report re-run your application with 'debug' enabled.
+2026-08-31T14:27:27.129+03:00 ERROR 3480 --- [inbox] [main] o.s.b.d.LoggingFailureAnalysisReporter   : 
+
+***************************
+APPLICATION FAILED TO START
+***************************
+
+Description:
+
+Web server failed to start. Port 8080 was already in use.
+
+Action:
+
+Identify and stop the process that's listening on port 8080 or configure this application to listen on another port.
+
+2026-08-31T14:31:21.443+03:00  INFO 25072 --- [inbox] [main] com.rnd.inbox.InboxApplication           : Starting InboxApplication using Java 21.0.12.1 with PID 25072 (C:\Users\user1\Documents\יהודית\תכנות שנה ג\פרויקט gong\Resonance-Flow\teams\inbox\target\classes started by user1 in C:\Users\user1\Documents\יהודית\תכנות שנה ג\פרויקט gong\Resonance-Flow)
+2026-08-31T14:31:21.451+03:00  INFO 25072 --- [inbox] [main] com.rnd.inbox.InboxApplication           : No active profile set, falling back to 1 default profile: "default"
+2026-08-31T14:31:22.450+03:00  INFO 25072 --- [inbox] [main] .s.d.r.c.RepositoryConfigurationDelegate : Bootstrapping Spring Data JPA repositories in DEFAULT mode.
+2026-08-31T14:31:22.578+03:00  INFO 25072 --- [inbox] [main] .s.d.r.c.RepositoryConfigurationDelegate : Finished Spring Data repository scanning in 119 ms. Found 8 JPA repository interfaces.
+2026-08-31T14:31:23.532+03:00  INFO 25072 --- [inbox] [main] o.s.b.w.embedded.tomcat.TomcatWebServer  : Tomcat initialized with port 8080 (http)
+2026-08-31T14:31:23.555+03:00  INFO 25072 --- [inbox] [main] o.apache.catalina.core.StandardService   : Starting service [Tomcat]
+2026-08-31T14:31:23.555+03:00  INFO 25072 --- [inbox] [main] o.apache.catalina.core.StandardEngine    : Starting Servlet engine: [Apache Tomcat/10.1.42]
+2026-08-31T14:31:23.626+03:00  INFO 25072 --- [inbox] [main] o.a.c.c.C.[Tomcat].[localhost].[/]       : Initializing Spring embedded WebApplicationContext
+2026-08-31T14:31:23.627+03:00  INFO 25072 --- [inbox] [main] w.s.c.ServletWebServerApplicationContext : Root WebApplicationContext: initialization completed in 2111 ms
+2026-08-31T14:31:24.016+03:00 ERROR 25072 --- [inbox] [main] o.f.c.i.s.filesystem.FileSystemScanner   : Skipping filesystem location: ..\..\shared\database\migrations (not found)
+2026-08-31T14:31:24.029+03:00  INFO 25072 --- [inbox] [main] com.zaxxer.hikari.HikariDataSource       : HikariPool-1 - Starting...
+2026-08-31T14:31:24.264+03:00  INFO 25072 --- [inbox] [main] com.zaxxer.hikari.pool.HikariPool        : HikariPool-1 - Added connection org.postgresql.jdbc.PgConnection@6ddd1c51
+2026-08-31T14:31:24.267+03:00  INFO 25072 --- [inbox] [main] com.zaxxer.hikari.HikariDataSource       : HikariPool-1 - Start completed.
+2026-08-31T14:31:24.306+03:00  INFO 25072 --- [inbox] [main] org.flywaydb.core.FlywayExecutor         : Database: jdbc:postgresql://localhost:5432/resonance_flow (PostgreSQL 14.24)
+2026-08-31T14:31:24.377+03:00  INFO 25072 --- [inbox] [main] o.f.core.internal.command.DbValidate     : Successfully validated 3 migrations (execution time 00:00.033s)
+2026-08-31T14:31:24.432+03:00  INFO 25072 --- [inbox] [main] o.f.core.internal.command.DbMigrate      : Current version of schema "public": 3
+2026-08-31T14:31:24.433+03:00 ERROR 25072 --- [inbox] [main] o.f.core.internal.command.DbMigrate      : Schema "public" has version 3, but no migration could be resolved in the configured locations !
+2026-08-31T14:31:24.438+03:00  INFO 25072 --- [inbox] [main] o.f.core.internal.command.DbMigrate      : Schema "public" is up to date. No migration necessary.
+2026-08-31T14:31:24.619+03:00  INFO 25072 --- [inbox] [main] o.hibernate.jpa.internal.util.LogHelper  : HHH000204: Processing PersistenceUnitInfo [name: default]
+2026-08-31T14:31:24.685+03:00  INFO 25072 --- [inbox] [main] org.hibernate.Version                    : HHH000412: Hibernate ORM core version 6.5.3.Final
+2026-08-31T14:31:24.741+03:00  INFO 25072 --- [inbox] [main] o.h.c.internal.RegionFactoryInitiator    : HHH000026: Second-level cache disabled
+2026-08-31T14:31:25.167+03:00  INFO 25072 --- [inbox] [main] o.s.o.j.p.SpringPersistenceUnitInfo      : No LoadTimeWeaver setup: ignoring JPA class transformer
+2026-08-31T14:31:26.561+03:00  INFO 25072 --- [inbox] [main] o.h.e.t.j.p.i.JtaPlatformInitiator       : HHH000489: No JTA platform available (set 'hibernate.transaction.jta.platform' to enable JTA platform integration)
+2026-08-31T14:31:26.565+03:00  INFO 25072 --- [inbox] [main] j.LocalContainerEntityManagerFactoryBean : Initialized JPA EntityManagerFactory for persistence unit 'default'
+2026-08-31T14:31:27.195+03:00  INFO 25072 --- [inbox] [main] o.s.d.j.r.query.QueryEnhancerFactory     : Hibernate is in classpath; If applicable, HQL parser will be used.
+2026-08-31T14:31:27.363+03:00  WARN 25072 --- [inbox] [main] JpaBaseConfiguration$JpaWebConfiguration : spring.jpa.open-in-view is enabled by default. Therefore, database queries may be performed during view rendering. Explicitly configure spring.jpa.open-in-view to disable this warning
+2026-08-31T14:31:27.790+03:00  WARN 25072 --- [inbox] [main] ConfigServletWebServerApplicationContext : Exception encountered during context initialization - cancelling refresh attempt: org.springframework.context.ApplicationContextException: Failed to start bean 'webServerStartStop'
+2026-08-31T14:31:27.791+03:00  INFO 25072 --- [inbox] [main] j.LocalContainerEntityManagerFactoryBean : Closing JPA EntityManagerFactory for persistence unit 'default'
+2026-08-31T14:31:27.793+03:00  INFO 25072 --- [inbox] [main] com.zaxxer.hikari.HikariDataSource       : HikariPool-1 - Shutdown initiated...
+2026-08-31T14:31:27.796+03:00  INFO 25072 --- [inbox] [main] com.zaxxer.hikari.HikariDataSource       : HikariPool-1 - Shutdown completed.
+2026-08-31T14:31:27.811+03:00  INFO 25072 --- [inbox] [main] .s.b.a.l.ConditionEvaluationReportLogger : 
+
+Error starting ApplicationContext. To display the condition evaluation report re-run your application with 'debug' enabled.
+2026-08-31T14:31:27.829+03:00 ERROR 25072 --- [inbox] [main] o.s.b.d.LoggingFailureAnalysisReporter   : 
+
+***************************
+APPLICATION FAILED TO START
+***************************
+
+Description:
+
+Web server failed to start. Port 8080 was already in use.
+
+Action:
+
+Identify and stop the process that's listening on port 8080 or configure this application to listen on another port.
+
