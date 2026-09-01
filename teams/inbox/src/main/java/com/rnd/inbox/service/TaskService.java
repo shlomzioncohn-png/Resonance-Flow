@@ -4,6 +4,7 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.rnd.inbox.dto.TaskCreatedPayload;
 import com.rnd.inbox.event.EventType;
+import com.rnd.inbox.exception.TaskNotFoundException;
 import com.rnd.inbox.model.entity.Assignment;
 import com.rnd.inbox.model.entity.OutboxEvent;
 import com.rnd.inbox.model.entity.Task;
@@ -78,6 +79,24 @@ public class TaskService {
                 incoming.getOrganization().getId(), incoming.getSourceType(), incoming.getSourceRef());
     }
 
+    @Transactional
+    public Task applySchedulingUpdate(UUID taskId, boolean available, Float priorityScore, UUID correlationId) {
+        Task task = taskRepository.findById(taskId).orElseThrow(() -> new TaskNotFoundException(taskId));
+
+        task.setAvailable(available);
+        if (priorityScore != null) {
+            task.setPriorityScore(priorityScore);
+        }
+        task.setUpdatedAt(Instant.now(clock));
+
+        Task saved = taskRepository.saveAndFlush(task);
+
+        outboxEventRepository.save(buildTaskUpdatedOutboxEvent(saved, correlationId));
+        auditService.createAuditLog("TASK_SCHEDULING_UPDATED", "Task", saved.getId(), saved.getOrganization(),
+                schedulingSnapshot(saved), correlationId);
+        return saved;
+    }
+
     private Task insertTask(Task incoming) {
         return taskRepository.saveAndFlush(incoming);
     }
@@ -92,6 +111,28 @@ public class TaskService {
                 payload,
                 correlationId,
                 Instant.now(clock));
+    }
+
+    private OutboxEvent buildTaskUpdatedOutboxEvent(Task saved, UUID correlationId) {
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("taskId", saved.getId().toString());
+        payload.put("isAvailable", saved.isAvailable());
+        payload.put("priorityScore", saved.getPriorityScore());
+
+        return OutboxEvent.pending(
+                EventType.TASK_UPDATED,
+                saved.getId(),
+                saved.getId().toString(),
+                payload,
+                correlationId,
+                Instant.now(clock));
+    }
+
+    private Map<String, Object> schedulingSnapshot(Task task) {
+        Map<String, Object> snapshot = new LinkedHashMap<>();
+        snapshot.put("isAvailable", task.isAvailable());
+        snapshot.put("priorityScore", task.getPriorityScore());
+        return snapshot;
     }
 
     private Map<String, Object> auditSnapshot(Task task) {
