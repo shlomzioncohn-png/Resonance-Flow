@@ -16,7 +16,7 @@ spring:
     #   bootstrap-servers: 3.216.80.66:9092
     #   topic: bridge.github.tasks
     bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
-    topic: bridge.test
+    topic: ${KAFKA_TOPIC:bridge.test}
     producer:
       key-serializer: org.apache.kafka.common.serialization.StringSerializer
       value-serializer: org.springframework.kafka.support.serializer.JsonSerializer
@@ -49,6 +49,20 @@ github:
     cron:
       enabled: ${GITHUB_SYNC_CRON_ENABLED:false}
       expression: ${GITHUB_SYNC_CRON_EXPRESSION:0 0 2 * * ?}
+
+jira:
+  api:
+    base-url: ${JIRA_API_BASE_URL:https://example.atlassian.net}
+    token: ${JIRA_TOKEN:}
+  target:
+    project: ${JIRA_TARGET_PROJECT:}
+  kafka:
+    topic: ${JIRA_KAFKA_TOPIC:bridge.jira.tasks}
+  sync:
+    # Set to true to enable the automatic nightly Jira to Kafka sync
+    cron:
+      enabled: ${JIRA_SYNC_CRON_ENABLED:false}
+      expression: ${JIRA_SYNC_CRON_EXPRESSION:0 0 2 * * ?}
 
 bridge:
   crm:
