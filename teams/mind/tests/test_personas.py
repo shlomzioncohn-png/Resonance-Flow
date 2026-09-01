@@ -138,6 +138,13 @@ def test_validate_personas_well_formed_set_has_no_errors():
     assert report.errors == []
 
 
+def test_validate_personas_empty_set_is_error_not_warning():
+    # "measured nothing" must not pass the way "measured everything" does.
+    report = validate_personas([])
+    assert not report.ok
+    assert any("no scenarios loaded" in e for e in report.errors)
+
+
 def test_validate_personas_duplicate_scenario_id_is_error():
     report = validate_personas([make_scenario_model(), make_scenario_model()])
     assert not report.ok

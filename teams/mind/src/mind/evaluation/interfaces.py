@@ -41,7 +41,9 @@ SourceType = Literal["synthetic", "real", "AMI", "FUNSD", "other"]
 
 # `source_detail` is required in practice when the scenario is derived from one of
 # these origins — enforced in PersonaEvaluationScenario, not by the field itself.
-SOURCE_TYPES_REQUIRING_DETAIL: frozenset[str] = frozenset({"AMI", "FUNSD", "other"})
+# Typed with SourceType (not str) so a misspelled member is a mypy error, not a
+# set entry that silently never matches.
+SOURCE_TYPES_REQUIRING_DETAIL: frozenset[SourceType] = frozenset({"AMI", "FUNSD", "other"})
 
 
 class Task(BaseModel):
@@ -248,6 +250,16 @@ class PersonaEvaluationScenario(BaseModel):
             "not-yet-ready rather than crashing."
         )
     )
+
+    @model_validator(mode="after")
+    def _task_ids_unique(self) -> PersonaEvaluationScenario:
+        task_ids = [task.task_id for task in self.tasks]
+        duplicates = sorted({tid for tid in task_ids if task_ids.count(tid) > 1})
+        if duplicates:
+            raise ValueError(
+                f"task_id must be unique within a scenario; duplicated: {duplicates}"
+            )
+        return self
 
     @model_validator(mode="after")
     def _expected_top_task_id_names_a_task(self) -> PersonaEvaluationScenario:

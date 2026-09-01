@@ -72,6 +72,13 @@ def test_half_right_half_wrong_is_one_half():
     assert top1_accuracy(["task_a", "task_a"], scenarios) == 0.5
 
 
+def test_predictions_scenarios_length_mismatch_raises():
+    # A caller bug that a plain zip() would hide behind a quietly wrong number.
+    scenarios = [_scenario("task_a"), _scenario("task_b")]
+    with pytest.raises(ValueError):
+        top1_accuracy(["task_a"], scenarios)
+
+
 def test_extraction_precision_recall_perfect_match():
     predicted = ["task A", "task B"]
     ground_truth = ["task A", "task B"]

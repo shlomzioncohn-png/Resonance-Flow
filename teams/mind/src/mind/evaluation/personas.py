@@ -113,6 +113,15 @@ def validate_personas(scenarios: list[PersonaEvaluationScenario]) -> ValidationR
     """
     report = ValidationReport()
 
+    if not scenarios:
+        # An empty set is a hard error, not a "not ready yet" warning: it means the
+        # personas path is wrong or the files were moved/deleted. "measured nothing"
+        # must never pass the same way "measured everything and it was correct" does.
+        report.errors.append(
+            "no scenarios loaded — the personas directory is empty or the path is wrong"
+        )
+        return report
+
     seen_scenario_ids: set[str] = set()
     scenarios_per_role: Counter[str] = Counter()
 

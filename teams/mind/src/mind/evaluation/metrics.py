@@ -38,9 +38,12 @@ def top1_accuracy(
     if not scenarios:
         return 0.0
 
+    # strict=True: a length mismatch between predictions and scenarios is a bug in
+    # the caller (harness.run appends one prediction per scenario), and a plain zip
+    # would silently truncate to the shorter list and return a quietly wrong number.
     correct = sum(
         1
-        for predicted, scenario in zip(predictions, scenarios)
+        for predicted, scenario in zip(predictions, scenarios, strict=True)
         if predicted == scenario.expected_top_task_id
     )
     return correct / len(scenarios)

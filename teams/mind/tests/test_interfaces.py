@@ -87,6 +87,13 @@ def test_scenario_model_rejects_dangling_expected_top_task_id():
         )
 
 
+def test_scenario_model_rejects_duplicate_task_ids():
+    kwargs = _scenario_kwargs()
+    kwargs["tasks"][1]["task_id"] = kwargs["tasks"][0]["task_id"]
+    with pytest.raises(ValidationError, match="unique within a scenario"):
+        PersonaEvaluationScenario.model_validate(kwargs)
+
+
 def test_scenario_model_requires_source_detail_for_ami():
     with pytest.raises(ValidationError, match="source_detail"):
         PersonaEvaluationScenario.model_validate(

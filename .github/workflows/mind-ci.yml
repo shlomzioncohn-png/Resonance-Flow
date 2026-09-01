@@ -6,9 +6,20 @@ on:
       - 'teams/mind/**'
       - '.github/workflows/mind-ci.yml'
 
+# Cancel an in-progress run when a newer commit is pushed to the same ref —
+# the older run is measuring stale code and just burns Actions minutes.
+concurrency:
+  group: mind-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+# Least privilege: this job only reads the repo (checkout, install, test).
+permissions:
+  contents: read
+
 jobs:
   test:
     runs-on: ubuntu-latest
+    timeout-minutes: 15  # a hung `make eval` must not run to the 6h default
     defaults:
       run:
         working-directory: teams/mind
