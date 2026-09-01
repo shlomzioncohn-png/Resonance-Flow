@@ -13,9 +13,10 @@ REAL_SCHEMA_PATH = (
 
 
 def make_scenario(
-    scenario_id: str = "developer_junior_late_pr_review",
+    scenario_id: str = "developer_late_pr_review",
     role: str = "Developer",
-    expected_top_task_id: str = "task_B",
+    expected_top_task_id: str = "task_b",
+    team_lead_approved: bool = True,
     mentor_approved: bool = True,
     source_type: str = "synthetic",
     source_detail: str | None = None,
@@ -30,7 +31,7 @@ def make_scenario(
         },
         "tasks": [
             {
-                "task_id": "task_A",
+                "task_id": "task_a",
                 "title": "Write architecture doc",
                 "description": "Long-form design doc, not urgent",
                 "effort_estimate": 120,
@@ -39,7 +40,7 @@ def make_scenario(
                 "parent_task_id": None,
             },
             {
-                "task_id": "task_B",
+                "task_id": "task_b",
                 "title": "Review PR #482",
                 "description": "Code review for the auth refactor PR, deadline today",
                 "deadline": "2026-08-23T17:00:00",
@@ -50,8 +51,9 @@ def make_scenario(
             },
         ],
         "expected_top_task_id": expected_top_task_id,
-        "expected_reason": "Task B has a same-day deadline and Task A has none, so Task B is the pick.",
+        "expected_reason": "Task b has a same-day deadline and Task a has none, so Task b is the pick.",
         "source": {"type": source_type, "source_detail": source_detail},
+        "team_lead_approved": team_lead_approved,
         "mentor_approved": mentor_approved,
     }
 
@@ -83,8 +85,8 @@ def test_load_personas_valid_scenario(tmp_path):
     assert len(loaded) == 1
     assert isinstance(loaded[0], PersonaEvaluationScenario)
     assert loaded[0].scenario_id == scenario["scenario_id"]
-    assert loaded[0].expected_top_task_id == "task_B"
-    assert [t.task_id for t in loaded[0].tasks] == ["task_A", "task_B"]
+    assert loaded[0].expected_top_task_id == "task_b"
+    assert [t.task_id for t in loaded[0].tasks] == ["task_a", "task_b"]
 
 
 def test_load_personas_missing_directory_raises(tmp_path):
@@ -95,6 +97,28 @@ def test_load_personas_missing_directory_raises(tmp_path):
 def test_load_personas_empty_directory_returns_empty_list(tmp_path):
     personas_dir = write_personas_dir(tmp_path, [])
     assert load_personas(personas_dir) == []
+
+
+def test_load_personas_recurses_into_group_subdirectories(tmp_path):
+    # The real set is split into same_tier/ and cross_tier/ subdirectories;
+    # loading the parent must pick up both, loading one subdir must pick up just it.
+    personas_dir = write_personas_dir(tmp_path, [])
+    same_tier = personas_dir / "same_tier"
+    cross_tier = personas_dir / "cross_tier"
+    same_tier.mkdir()
+    cross_tier.mkdir()
+    (same_tier / "a.json").write_text(
+        json.dumps(make_scenario(scenario_id="developer_same_tier_a")), encoding="utf-8"
+    )
+    (cross_tier / "b.json").write_text(
+        json.dumps(make_scenario(scenario_id="developer_cross_tier_b")), encoding="utf-8"
+    )
+
+    assert {s.scenario_id for s in load_personas(personas_dir)} == {
+        "developer_same_tier_a",
+        "developer_cross_tier_b",
+    }
+    assert [s.scenario_id for s in load_personas(same_tier)] == ["developer_same_tier_a"]
 
 
 def test_load_personas_schema_invalid_scenario_raises(tmp_path):

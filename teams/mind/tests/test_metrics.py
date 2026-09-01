@@ -47,6 +47,7 @@ def _scenario(expected_top_task_id: str) -> PersonaEvaluationScenario:
             "expected_top_task_id": expected_top_task_id,
             "expected_reason": "Chosen for a concrete, checkable reason at least twenty chars.",
             "source": {"type": "synthetic"},
+            "team_lead_approved": False,
             "mentor_approved": False,
         }
     )

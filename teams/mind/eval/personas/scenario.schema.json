@@ -147,8 +147,8 @@
       "description": "A single candidate task within a persona evaluation scenario.\n\nThe harness calls `RankingModel.score()` once per Task and builds the ranking\nfrom the returned scores — a model never sees the whole scenario.",
       "properties": {
         "task_id": {
-          "description": "Unique within this scenario. Referenced by expected_top_task_id.",
-          "pattern": "^[a-zA-Z0-9_]+$",
+          "description": "Unique within this scenario. Referenced by expected_top_task_id. Same character rule as scenario_id (lowercase, digits, underscore).",
+          "pattern": "^[a-z0-9_]+$",
           "title": "Task Id",
           "type": "string"
         },
@@ -228,7 +228,7 @@
   "description": "One fixed evaluation scenario for MIND's persona evaluation harness.\n\nEvery scenario in eval/personas/, regardless of persona (Developer, Manager,\nHigher Manager, Field Engineer, Salesperson, CEO), conforms to this one\nmodel. Only the values differ between personas — never the structure.",
   "properties": {
     "scenario_id": {
-      "description": "Unique identifier across the whole eval/personas/ set. Convention: <role>_<seniority?>_<short_slug>, e.g. developer_junior_late_pr_review.",
+      "description": "Unique identifier across the whole eval/personas/ set. Convention: <role>_<short_slug>, e.g. developer_late_pr_review.",
       "pattern": "^[a-z0-9_]+$",
       "title": "Scenario Id",
       "type": "string"
@@ -262,6 +262,11 @@
     "source": {
       "$ref": "#/$defs/Source"
     },
+    "team_lead_approved": {
+      "description": "Whether the team lead has reviewed this scenario in a PR and signed off on it — the first gate, before it goes to the mentor. Set explicitly by the author: start at false, the team lead (not the author) flips it to true. Not a Foundation Gate criterion itself, but mentor_approved should not be set until this is true.",
+      "title": "Team Lead Approved",
+      "type": "boolean"
+    },
     "mentor_approved": {
       "description": "Whether the mentor has reviewed this specific scenario and signed off on it as correct ground truth. Set explicitly by the author — start at false, flip to true only after mentor review. The full set must be all true by the Foundation Gate; the harness/CI treats any false as not-yet-ready rather than crashing.",
       "title": "Mentor Approved",
@@ -276,6 +281,7 @@
     "expected_top_task_id",
     "expected_reason",
     "source",
+    "team_lead_approved",
     "mentor_approved"
   ],
   "title": "PersonaEvaluationScenario",

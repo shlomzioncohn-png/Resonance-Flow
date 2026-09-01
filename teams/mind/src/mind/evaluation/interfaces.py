@@ -56,8 +56,11 @@ class Task(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     task_id: str = Field(
-        pattern=r"^[a-zA-Z0-9_]+$",
-        description="Unique within this scenario. Referenced by expected_top_task_id.",
+        pattern=r"^[a-z0-9_]+$",
+        description=(
+            "Unique within this scenario. Referenced by expected_top_task_id. "
+            "Same character rule as scenario_id (lowercase, digits, underscore)."
+        ),
     )
     title: str = Field(min_length=1)
     description: str = Field(
@@ -211,7 +214,7 @@ class PersonaEvaluationScenario(BaseModel):
         pattern=r"^[a-z0-9_]+$",
         description=(
             "Unique identifier across the whole eval/personas/ set. Convention: "
-            "<role>_<seniority?>_<short_slug>, e.g. developer_junior_late_pr_review."
+            "<role>_<short_slug>, e.g. developer_late_pr_review."
         ),
     )
     persona: Persona
@@ -241,6 +244,15 @@ class PersonaEvaluationScenario(BaseModel):
         ),
     )
     source: Source
+    team_lead_approved: bool = Field(
+        description=(
+            "Whether the team lead has reviewed this scenario in a PR and signed off "
+            "on it — the first gate, before it goes to the mentor. Set explicitly by "
+            "the author: start at false, the team lead (not the author) flips it to "
+            "true. Not a Foundation Gate criterion itself, but mentor_approved should "
+            "not be set until this is true."
+        )
+    )
     mentor_approved: bool = Field(
         description=(
             "Whether the mentor has reviewed this specific scenario and signed off on "

@@ -19,7 +19,7 @@ def test_dummy_model_implements_ranking_model():
 
 def test_dummy_model_score_returns_score_result_in_range():
     task = Task(
-        task_id="task_A",
+        task_id="task_a",
         title="Review PR",
         description="Code review for the auth refactor",
         effort_estimate=20,
@@ -34,7 +34,7 @@ def test_dummy_model_score_returns_score_result_in_range():
 
 def _scenario_kwargs(**overrides):
     kwargs = {
-        "scenario_id": "developer_junior_late_pr_review",
+        "scenario_id": "developer_late_pr_review",
         "persona": {"role": "Developer"},
         "context": {
             "free_time_minutes": 30,
@@ -43,7 +43,7 @@ def _scenario_kwargs(**overrides):
         },
         "tasks": [
             {
-                "task_id": "task_A",
+                "task_id": "task_a",
                 "title": "Doc",
                 "description": "Long-form design doc",
                 "effort_estimate": 120,
@@ -51,7 +51,7 @@ def _scenario_kwargs(**overrides):
                 "blocked": False,
             },
             {
-                "task_id": "task_B",
+                "task_id": "task_b",
                 "title": "Review PR #482",
                 "description": "Auth refactor review, deadline today",
                 "effort_estimate": 20,
@@ -59,9 +59,10 @@ def _scenario_kwargs(**overrides):
                 "blocked": False,
             },
         ],
-        "expected_top_task_id": "task_B",
-        "expected_reason": "Task B has a same-day deadline and Task A has none, so Task B is the pick.",
+        "expected_top_task_id": "task_b",
+        "expected_reason": "Task b has a same-day deadline and Task a has none, so Task b is the pick.",
         "source": {"type": "synthetic"},
+        "team_lead_approved": False,
         "mentor_approved": False,
     }
     kwargs.update(overrides)
@@ -70,7 +71,7 @@ def _scenario_kwargs(**overrides):
 
 def test_scenario_model_accepts_a_well_formed_scenario():
     scenario = PersonaEvaluationScenario.model_validate(_scenario_kwargs())
-    assert scenario.tasks[1].task_id == "task_B"
+    assert scenario.tasks[1].task_id == "task_b"
     # ISO strings are coerced to datetime.
     assert scenario.context.current_datetime.year == 2026
 

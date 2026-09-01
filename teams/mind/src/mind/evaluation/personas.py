@@ -66,10 +66,13 @@ class ValidationReport:
 
 
 def load_personas(personas_dir: str | Path) -> list[PersonaEvaluationScenario]:
-    """Loads every scenario JSON file in `personas_dir` as a PersonaEvaluationScenario.
+    """Loads every scenario JSON file under `personas_dir` as a PersonaEvaluationScenario.
 
-    Scenario files are every `*.json` file in the directory other than the
-    generated `scenario.schema.json`.
+    Scenario files are every `*.json` file in the directory tree (searched
+    recursively, so `eval/personas/` picks up both the `same_tier/` and
+    `cross_tier/` groups) other than the generated `scenario.schema.json`.
+    Pass a specific group directory (`eval/personas/same_tier`) to load just
+    that group.
 
     Returns an empty list if the directory has no scenario files yet (the set is
     built up incrementally before the Foundation Gate). Raises FileNotFoundError
@@ -82,7 +85,7 @@ def load_personas(personas_dir: str | Path) -> list[PersonaEvaluationScenario]:
 
     scenarios: list[PersonaEvaluationScenario] = []
     schema_errors: list[str] = []
-    for scenario_path in sorted(personas_path.glob("*.json")):
+    for scenario_path in sorted(personas_path.rglob("*.json")):
         if scenario_path.name == SCHEMA_FILENAME:
             continue
 

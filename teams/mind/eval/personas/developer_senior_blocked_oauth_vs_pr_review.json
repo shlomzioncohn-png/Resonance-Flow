@@ -32,5 +32,6 @@
   "expected_top_task_id": "task_pr_review",
   "expected_reason": "task_oauth_flow is blocked on external security-team approval and cannot be worked on right now; task_pr_review is unblocked, has a deadline an hour away, and unblocks a teammate who cannot merge until it is approved.",
   "source": { "type": "synthetic", "source_detail": null },
+  "team_lead_approved": false,
   "mentor_approved": false
 }

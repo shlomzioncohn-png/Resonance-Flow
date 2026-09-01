@@ -68,10 +68,15 @@ python -m mind.evaluation.run --model dummy
 
 Replace `dummy` with the name of the model you want to evaluate.
 
-`--personas` (default `eval/personas`) points to the scenario `*.json` files
-(the generated `scenario.schema.json` in that directory is skipped) — see
-`eval/personas/README.md`. Loading goes through
-`mind.evaluation.personas.load_personas`/`validate_personas`. `load_personas`
+`--personas` (default `eval/personas`) points to the personas directory. The
+scenario files live in two subdirectories — `same_tier/` and `cross_tier/` (see
+`eval/personas/README.md`) — and `load_personas` recurses into both;
+`scenario.schema.json` at the root is skipped. `make eval` scores each group
+separately and prints a combined number too, and `report.json` carries all
+three. Pass a single group dir (`--personas eval/personas/same_tier`) to score
+just that group. Loading goes through
+`mind.evaluation.personas.load_personas`/`validate_personas` (the coverage /
+count checks run against the combined set). `load_personas`
 parses each file into a `PersonaEvaluationScenario` (Pydantic); a structurally
 invalid file or a broken intra-scenario invariant (a dangling
 `expected_top_task_id`, a missing `source_detail`) raises and fails the run.
@@ -86,24 +91,39 @@ small fixed list of `PersonaEvaluationScenario` objects for unit-testing
 
 ## For mentors: running this without MIND's help
 
-From a fresh clone, with no prior knowledge of this repo:
+From a fresh clone, with no prior knowledge of this repo. Needs **Python 3.11 or
+newer** (tested through 3.14) and nothing else.
 
 ```bash
 cd teams/mind
-cp .env.example .env       # no values are actually required for this to work
-make dev                   # installs everything the harness needs
-make eval                  # runs the harness against eval/personas/, prints a summary + full report, writes report.json
+python -m venv .venv                       # optional but recommended
+source .venv/bin/activate                  # Windows: .venv\Scripts\activate
+cp .env.example .env                       # no values are actually required
+python -m pip install -e ".[dev]"          # installs everything the harness needs
+python -m mind.evaluation.run --model dummy # runs it; prints a summary + the full JSON report; writes report.json
 ```
-`make eval` exits `0` on success. A "[persona set warning] ..." line is expected
-and not a failure — it just means the persona set (`eval/personas/`) isn't fully
-built out and mentor-approved yet; the run itself still completes and reports a
-score. Only a non-zero exit code, or text under "Persona set validation FAILED",
-means something is actually broken.
+
+With GNU `make` installed you can use the shortcuts instead: `make dev` then
+`make eval` (same commands). On Windows without `make`, use the lines above —
+and run the test tools as `python -m pytest` / `python -m ruff check src tests` /
+`python -m mypy src` (the bare `pytest`/`ruff` names may not be on PATH).
+
+The run exits `0` on success. Several `[persona set warning] ... not yet
+mentor_approved` lines are **expected** — they just mean the scenarios haven't
+been through mentor sign-off yet; the run still completes and reports a score.
+Only a non-zero exit code, or text under "Persona set validation FAILED", means
+something is actually broken. A "missing role" / "expected 4-6" warning would
+mean the set is incomplete — there should be none.
 
 ## Metric
 
-The harness evaluates models using **Top-1 Accuracy** (`metrics.top1_accuracy`) — closed,
-approved.
+The harness evaluates models using **Top-1 Accuracy** (`metrics.top1_accuracy`).
+
+**Decision status: closed (final).** Top-1 was chosen over MRR / nDCG with the
+mentor; each scenario carries exactly one labelled correct answer
+(`expected_top_task_id`), which is what top-1 needs and what MRR/nDCG-with-graded-
+labels would not have. This will not change once baseline-vs-stretch scoring
+starts (week 6). See also the "Open decisions" table in `teams/mind/CLAUDE.md`.
 
 For each scenario, the metric checks whether the task the model scored highest matches
 that scenario's `expected_top_task_id`. The final number is the proportion of scenarios

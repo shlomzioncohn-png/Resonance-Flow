@@ -32,5 +32,6 @@
   "expected_top_task_id": "task_bugfix",
   "expected_reason": "task_bugfix is a production-impacting crash with a hard deadline three hours away; task_feature is an unrequested backlog item with no deadline. Both urgency and business impact point to the bugfix.",
   "source": { "type": "synthetic", "source_detail": null },
+  "team_lead_approved": false,
   "mentor_approved": false
 }

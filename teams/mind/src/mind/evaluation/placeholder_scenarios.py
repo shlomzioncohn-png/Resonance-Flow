@@ -10,8 +10,8 @@ from mind.evaluation.interfaces import PersonaEvaluationScenario
 
 _RAW_SCENARIOS: list[dict] = [
     {
-        "scenario_id": "developer_junior_placeholder_1",
-        "persona": {"role": "Developer", "seniority": "Junior"},
+        "scenario_id": "developer_placeholder_1",
+        "persona": {"role": "Developer"},
         "context": {
             "free_time_minutes": 30,
             "current_datetime": "2026-08-23T14:00:00",
@@ -19,7 +19,7 @@ _RAW_SCENARIOS: list[dict] = [
         },
         "tasks": [
             {
-                "task_id": "task_A",
+                "task_id": "task_a",
                 "title": "Fix failing CI test",
                 "description": "A unit test regressed on main and is blocking every PR.",
                 "effort_estimate": 15,
@@ -28,7 +28,7 @@ _RAW_SCENARIOS: list[dict] = [
                 "parent_task_id": None,
             },
             {
-                "task_id": "task_B",
+                "task_id": "task_b",
                 "title": "Write design doc for Q3 feature",
                 "description": "Draft architecture doc for a feature planned for next quarter.",
                 "effort_estimate": 120,
@@ -37,12 +37,13 @@ _RAW_SCENARIOS: list[dict] = [
                 "parent_task_id": None,
             },
         ],
-        "expected_top_task_id": "task_A",
+        "expected_top_task_id": "task_a",
         "expected_reason": (
-            "task_A is an operational fix that is unblocking every PR right now; "
-            "task_B is next-quarter design work with no deadline."
+            "task_a is an operational fix that is unblocking every PR right now; "
+            "task_b is next-quarter design work with no deadline."
         ),
         "source": {"type": "synthetic"},
+        "team_lead_approved": False,
         "mentor_approved": False,
     },
     {
@@ -55,7 +56,7 @@ _RAW_SCENARIOS: list[dict] = [
         },
         "tasks": [
             {
-                "task_id": "task_C",
+                "task_id": "task_c",
                 "title": "Unblock teammate waiting on approval",
                 "description": "A PR is stuck waiting for the manager's review, blocking a teammate.",
                 "effort_estimate": 10,
@@ -64,7 +65,7 @@ _RAW_SCENARIOS: list[dict] = [
                 "parent_task_id": None,
             },
             {
-                "task_id": "task_D",
+                "task_id": "task_d",
                 "title": "Long-term roadmap planning",
                 "description": "Quarterly roadmap planning session prep.",
                 "effort_estimate": 180,
@@ -73,12 +74,13 @@ _RAW_SCENARIOS: list[dict] = [
                 "parent_task_id": None,
             },
         ],
-        "expected_top_task_id": "task_C",
+        "expected_top_task_id": "task_c",
         "expected_reason": (
-            "task_C is directly blocking a teammate from merging right now; "
-            "task_D is roadmap prep with no deadline and nothing waiting on it."
+            "task_c is directly blocking a teammate from merging right now; "
+            "task_d is roadmap prep with no deadline and nothing waiting on it."
         ),
         "source": {"type": "synthetic"},
+        "team_lead_approved": False,
         "mentor_approved": False,
     },
 ]

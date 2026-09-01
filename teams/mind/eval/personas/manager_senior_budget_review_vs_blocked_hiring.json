@@ -32,5 +32,6 @@
   "expected_top_task_id": "task_budget_review",
   "expected_reason": "task_hiring_decision is blocked on outstanding panel feedback and cannot be finalized right now; task_budget_review is unblocked and has a hard deadline before Friday's finance sign-off.",
   "source": { "type": "synthetic", "source_detail": null },
+  "team_lead_approved": false,
   "mentor_approved": false
 }

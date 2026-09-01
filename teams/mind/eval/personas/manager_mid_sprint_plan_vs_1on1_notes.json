@@ -32,5 +32,6 @@
   "expected_top_task_id": "task_sprint_plan",
   "expected_reason": "task_sprint_plan has a hard deadline before Friday's planning meeting and the whole team's next sprint depends on it; task_1on1_notes has no deadline and nothing is waiting on it.",
   "source": { "type": "synthetic", "source_detail": null },
+  "team_lead_approved": false,
   "mentor_approved": false
 }

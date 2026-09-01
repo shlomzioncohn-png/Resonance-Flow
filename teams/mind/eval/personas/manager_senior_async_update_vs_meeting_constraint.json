@@ -32,5 +32,6 @@
   "expected_top_task_id": "task_async_update",
   "expected_reason": "task_conflict_mediation's next step is scheduling a meeting, which the 'no meetings can be scheduled' constraint rules out right now; task_async_update is fully asynchronous and has a deadline two hours away.",
   "source": { "type": "synthetic", "source_detail": null },
+  "team_lead_approved": false,
   "mentor_approved": false
 }

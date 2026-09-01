@@ -32,5 +32,6 @@
   "expected_top_task_id": "task_logging_bugfix",
   "expected_reason": "Neither task has a deadline or is blocked. Signing off on a strategic architecture redesign is outside a Junior developer's decision scope; the operational logging fix is squarely within it, so it is the task this persona should pick up.",
   "source": { "type": "synthetic", "source_detail": null },
+  "team_lead_approved": false,
   "mentor_approved": false
 }
