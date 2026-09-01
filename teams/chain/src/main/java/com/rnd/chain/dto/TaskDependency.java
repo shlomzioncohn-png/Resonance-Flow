@@ -15,8 +15,8 @@ public class TaskDependency {
     private final UUID dependsOnTaskId;
 
     public TaskDependency(UUID taskId, UUID dependsOnTaskId) {
-        this.taskId = taskId;
-        this.dependsOnTaskId = dependsOnTaskId;
+        this.taskId = Objects.requireNonNull(taskId, "taskId must not be null");
+        this.dependsOnTaskId = Objects.requireNonNull(dependsOnTaskId, "dependsOnTaskId must not be null");
     }
 
     public UUID getTaskId() {
