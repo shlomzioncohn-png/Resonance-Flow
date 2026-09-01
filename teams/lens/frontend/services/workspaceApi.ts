@@ -53,6 +53,10 @@ export function recommendTask(request: WorkspaceRequest): Promise<TaskRecommenda
   return api.post<TaskRecommendation>('/api/workspace/recommend', request)
 }
 
+export function getTask(taskId: string): Promise<ApiTask> {
+  return api.get<ApiTask>(`/api/workspace/tasks/${taskId}`)
+}
+
 export type TaskStatus = 'READY' | 'IN_PROGRESS' | 'BLOCKED' | 'COMPLETED'
 
 export function updateTaskStatus(taskId: string, status: TaskStatus): Promise<ApiTask> {

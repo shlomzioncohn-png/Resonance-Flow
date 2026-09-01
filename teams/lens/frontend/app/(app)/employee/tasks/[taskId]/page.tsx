@@ -9,8 +9,8 @@ import Button from '@mui/material/Button'
 import Card from '@mui/material/Card'
 import CardContent from '@mui/material/CardContent'
 import Chip from '@mui/material/Chip'
+import CircularProgress from '@mui/material/CircularProgress'
 import Container from '@mui/material/Container'
-import IconButton from '@mui/material/IconButton'
 import Stack from '@mui/material/Stack'
 import Tab from '@mui/material/Tab'
 import Tabs from '@mui/material/Tabs'
@@ -18,61 +18,55 @@ import Typography from '@mui/material/Typography'
 import { alpha } from '@mui/material/styles'
 import ArrowBackOutlinedIcon from '@mui/icons-material/ArrowBackOutlined'
 import ChatBubbleOutlineOutlinedIcon from '@mui/icons-material/ChatBubbleOutlineOutlined'
-import ChevronRightOutlinedIcon from '@mui/icons-material/ChevronRightOutlined'
-import GitHubIcon from '@mui/icons-material/GitHub'
-import MoreHorizOutlinedIcon from '@mui/icons-material/MoreHorizOutlined'
 import PersonOutlineIcon from '@mui/icons-material/PersonOutlined'
+import WarningAmberOutlinedIcon from '@mui/icons-material/WarningAmberOutlined'
 import { radiusTokens } from '@/theme'
-import type { TaskRef } from '../../mockTask'
 import { DetailRow, softToneSx, statusTone } from '../../shared'
-import { useTask } from '../../taskStore'
+import { getTask, type ApiTask } from '@/services/workspaceApi'
 import ChatPanel from './ChatPanel'
 
-function DependencyRow({ dependency }: { dependency: TaskRef }) {
-  return (
-    <Stack
-      direction="row"
-      spacing={1}
-      sx={{
-        alignItems: 'center',
-        justifyContent: 'space-between',
-        p: 1,
-        borderRadius: radiusTokens.sm,
-        bgcolor: 'action.hover',
-      }}
-    >
-      <Box>
-        <Typography variant="body2">{dependency.title}</Typography>
-        <Typography variant="caption" color="text.secondary">
-          {dependency.owner}
-        </Typography>
-      </Box>
-      <ChevronRightOutlinedIcon fontSize="small" sx={{ color: 'text.disabled' }} />
-    </Stack>
-  )
-}
-
-export default function TaskDetailsPage() {
-  // No Inbox/Chain task endpoint exists yet — every task id resolves to the same shared
-  // mock task (see ../../taskStore.tsx), which the chat panel can mutate.
-  const { task } = useTask()
+export default function TaskDetailsPage({ params }: { params: { taskId: string } }) {
   const searchParams = useSearchParams()
   const [mode, setMode] = useState<'overview' | 'chat'>(
     searchParams.get('chat') === '1' ? 'chat' : 'overview',
   )
+  const [task, setTask] = useState<ApiTask | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
 
-  // Move focus into the swapped-in content so keyboard/screen-reader users land somewhere
-  // sensible instead of on a now-vanished trigger element. Skipped on first mount so
-  // landing on the page doesn't steal focus from the URL bar.
+  useEffect(() => {
+    setLoading(true)
+    getTask(params.taskId)
+      .then(setTask)
+      .catch((err) => setError(err instanceof Error ? err.message : 'Failed to load task'))
+      .finally(() => setLoading(false))
+  }, [params.taskId])
+
   const contentRef = useRef<HTMLDivElement>(null)
   const isFirstRender = useRef(true)
   useEffect(() => {
-    if (isFirstRender.current) {
-      isFirstRender.current = false
-      return
-    }
+    if (isFirstRender.current) { isFirstRender.current = false; return }
     contentRef.current?.focus()
   }, [mode])
+
+  if (loading) {
+    return (
+      <Container maxWidth="lg" sx={{ py: 4, display: 'flex', justifyContent: 'center' }}>
+        <CircularProgress />
+      </Container>
+    )
+  }
+
+  if (error || !task) {
+    return (
+      <Container maxWidth="lg" sx={{ py: 4 }}>
+        <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
+          <WarningAmberOutlinedIcon color="error" />
+          <Typography color="error.main">{error ?? 'Task not found'}</Typography>
+        </Stack>
+      </Container>
+    )
+  }
 
   return (
     <Container maxWidth="lg" sx={{ py: { xs: 3, md: 4 } }}>
@@ -94,36 +88,21 @@ export default function TaskDetailsPage() {
       >
         <Box>
           <Stack direction="row" spacing={1.5} sx={{ alignItems: 'center' }}>
-            <Typography variant="h4" component="h1">
-              {task.title}
-            </Typography>
+            <Typography variant="h4" component="h1">{task.title}</Typography>
             <Chip
               size="small"
               label={task.status}
               sx={[softToneSx(statusTone(task.status)), { fontWeight: 600 }]}
             />
           </Stack>
-          <Typography variant="body1" color="text.secondary">
-            {task.team}
-          </Typography>
+          <Typography variant="body1" color="text.secondary">{task.project}</Typography>
         </Box>
-
-        <Stack direction="row" spacing={1}>
-          <Button variant="outlined" disabled>
-            Edit task
-          </Button>
-          <IconButton disabled>
-            <MoreHorizOutlinedIcon />
-          </IconButton>
-        </Stack>
       </Stack>
 
       <Tabs value={mode === 'chat' ? false : 'overview'} onChange={() => {}} sx={{ mt: 2, mb: 3 }}>
         <Tab value="overview" label="Overview" />
-        <Tab value="dependencies" label={`Dependencies (${task.blockedBy.length + task.blocks.length})`} disabled />
+        <Tab value="dependencies" label={`Dependencies (${(task.dependencies ?? []).length})`} disabled />
         <Tab value="activity" label="Activity" disabled />
-        <Tab value="notes" label="Notes" disabled />
-        <Tab value="attachments" label="Attachments" disabled />
       </Tabs>
 
       <Stack direction={{ xs: 'column', lg: 'row' }} spacing={3} sx={{ alignItems: 'flex-start' }}>
@@ -133,12 +112,8 @@ export default function TaskDetailsPage() {
               <ChatPanel onBack={() => setMode('overview')} />
             ) : (
               <>
-                <Typography variant="subtitle2" color="text.secondary">
-                  Description
-                </Typography>
-                <Typography variant="body1" sx={{ mb: 3 }}>
-                  {task.description}
-                </Typography>
+                <Typography variant="subtitle2" color="text.secondary">Description</Typography>
+                <Typography variant="body1" sx={{ mb: 3 }}>{task.description}</Typography>
 
                 <Box
                   sx={{
@@ -152,47 +127,26 @@ export default function TaskDetailsPage() {
                     label="Owner"
                     value={
                       <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
-                        <Avatar
-                          sx={{
-                            width: 24,
-                            height: 24,
-                            bgcolor: (theme) => alpha(theme.palette.primary.main, 0.12),
-                            color: 'primary.main',
-                          }}
-                        >
+                        <Avatar sx={{ width: 24, height: 24, bgcolor: (theme) => alpha(theme.palette.primary.main, 0.12), color: 'primary.main' }}>
                           <PersonOutlineIcon sx={{ fontSize: 16 }} />
                         </Avatar>
                         {task.owner}
                       </Stack>
                     }
                   />
-                  <DetailRow label="Due" value={task.due} />
+                  {task.dueDate && (
+                    <DetailRow label="Due" value={new Date(task.dueDate).toLocaleString()} />
+                  )}
                   <DetailRow
                     label="Priority"
                     value={<Chip size="small" label={task.priority} sx={softToneSx('error')} />}
                   />
-                  <DetailRow label="Estimated effort" value={`${task.estimatedMinutes} min`} />
-                  <DetailRow
-                    label="Source"
-                    value={
-                      <Stack direction="row" spacing={0.75} sx={{ alignItems: 'center' }}>
-                        <GitHubIcon sx={{ fontSize: 16 }} />
-                        {task.source}
-                      </Stack>
-                    }
-                  />
-                  <DetailRow label="Sprint" value={task.sprint} />
+                  <DetailRow label="Estimated effort" value={`${task.effortEstimate} min`} />
+                  <DetailRow label="Project" value={task.project} />
+                  {(task.constraints ?? []).length > 0 && (
+                    <DetailRow label="Constraints" value={(task.constraints ?? []).join(', ')} />
+                  )}
                 </Box>
-
-                <Typography variant="subtitle2" color="text.secondary" sx={{ mb: 1 }}>
-                  Tags
-                </Typography>
-                <Stack direction="row" spacing={1} sx={{ flexWrap: 'wrap', mb: 3 }}>
-                  {task.tags.map((tag) => (
-                    <Chip key={tag} size="small" variant="outlined" label={tag} />
-                  ))}
-                  <Chip size="small" variant="outlined" label="+" disabled />
-                </Stack>
 
                 <Button
                   variant="outlined"
@@ -206,62 +160,31 @@ export default function TaskDetailsPage() {
           </CardContent>
         </Card>
 
-        <Stack spacing={3} sx={{ width: { xs: '100%', lg: 360 }, flexShrink: 0 }}>
-          <Card>
+        {(task.dependencies ?? []).length > 0 && (
+          <Card sx={{ width: { xs: '100%', lg: 360 }, flexShrink: 0 }}>
             <CardContent>
-              <Stack
-                direction="row"
-                sx={{ alignItems: 'center', justifyContent: 'space-between', mb: 2 }}
-              >
-                <Typography variant="subtitle2">
-                  Dependencies ({task.blockedBy.length + task.blocks.length})
-                </Typography>
-                <Button size="small" disabled>
-                  Edit
-                </Button>
-              </Stack>
-
-              {task.blockedBy.length > 0 && (
-                <>
-                  <Typography variant="caption" color="text.secondary">
-                    This task is blocked by:
-                  </Typography>
-                  <Stack spacing={1} sx={{ mt: 1, mb: 2 }}>
-                    {task.blockedBy.map((dependency) => (
-                      <DependencyRow key={dependency.id} dependency={dependency} />
-                    ))}
-                  </Stack>
-                </>
-              )}
-
-              <Typography variant="caption" color="text.secondary">
-                This task blocks:
+              <Typography variant="subtitle2" sx={{ mb: 2 }}>
+                Dependencies ({task.dependencies!.length})
               </Typography>
-              <Stack spacing={1} sx={{ mt: 1 }}>
-                {task.blocks.map((dependency) => (
-                  <DependencyRow key={dependency.id} dependency={dependency} />
+              <Stack spacing={1}>
+                {task.dependencies!.map((depId) => (
+                  <Stack
+                    key={depId}
+                    direction="row"
+                    sx={{
+                      alignItems: 'center',
+                      p: 1,
+                      borderRadius: radiusTokens.sm,
+                      bgcolor: 'action.hover',
+                    }}
+                  >
+                    <Typography variant="body2">{depId}</Typography>
+                  </Stack>
                 ))}
               </Stack>
             </CardContent>
           </Card>
-
-          <Card>
-            <CardContent>
-              <Stack
-                direction="row"
-                sx={{ alignItems: 'center', justifyContent: 'space-between', mb: 1 }}
-              >
-                <Typography variant="subtitle2">Blocking reason</Typography>
-                <Button size="small" disabled>
-                  Edit
-                </Button>
-              </Stack>
-              <Typography variant="body2" color="text.secondary">
-                {task.blockingReason ?? 'No blocking reason recorded.'}
-              </Typography>
-            </CardContent>
-          </Card>
-        </Stack>
+        )}
       </Stack>
     </Container>
   )

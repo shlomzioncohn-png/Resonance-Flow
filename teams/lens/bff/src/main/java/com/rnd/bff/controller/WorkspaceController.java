@@ -41,6 +41,36 @@ public class WorkspaceController {
     }
 
     /**
+     * Get task details by ID.
+     *
+     * GET /workspace/tasks/{taskId}
+     *
+     * TODO: forward to Inbox service once its API is live.
+     */
+    @GetMapping("/workspace/tasks/{taskId}")
+    public ResponseEntity<TaskDTO> getTask(
+            @PathVariable String taskId,
+            @RequestHeader("X-User-Id") String userId) {
+
+        logger.info("Task details request - userId: {}, taskId: {}", userId, taskId);
+
+        // TODO: replace with Inbox call: inboxClient.getTask(userId, taskId)
+        TaskDTO task = TaskDTO.builder()
+                .id(taskId)
+                .title("Review API changes")
+                .description("Review the latest API changes and update integration tests.")
+                .status("READY")
+                .priority("HIGH")
+                .effortEstimate(35)
+                .dueDate(LocalDateTime.of(2026, 8, 30, 17, 0))
+                .owner("Alex Morgan")
+                .project("Platform Service")
+                .build();
+
+        return ResponseEntity.ok(task);
+    }
+
+    /**
      * Update the status of a task.
      *
      * PATCH /workspace/tasks/{taskId}/status

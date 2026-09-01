@@ -277,7 +277,7 @@ export default function EmployeeWorkspacePage() {
                     <Chip
                       size="small"
                       icon={<LinkOutlinedIcon />}
-                      label={`${task.dependencies.length} dependenc${task.dependencies.length === 1 ? 'y' : 'ies'}`}
+                      label={`${(task.dependencies ?? []).length} dependenc${(task.dependencies ?? []).length === 1 ? 'y' : 'ies'}`}
                       sx={softToneSx('secondary')}
                     />
                   )}
