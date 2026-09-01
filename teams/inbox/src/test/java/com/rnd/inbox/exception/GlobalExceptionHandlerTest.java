@@ -61,6 +61,23 @@ class GlobalExceptionHandlerTest {
         assertThat(body.getFieldErrors().get(1).getMessage()).isEqualTo("must be a well-formed email address");
     }
 
+    @Test
+    void handleUnexpectedException_buildsGenericInternalErrorResponseWithoutLeakingDetails() {
+        Exception ex = new NullPointerException("something null deep in a service");
+
+        ResponseEntity<ErrorResponseDto> response = handler.handleUnexpectedException(ex);
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.INTERNAL_SERVER_ERROR);
+        ErrorResponseDto body = response.getBody();
+        assertThat(body).isNotNull();
+        assertThat(body.getStatus()).isEqualTo(500);
+        assertThat(body.getError()).isEqualTo("INTERNAL_ERROR");
+        assertThat(body.getMessage()).isEqualTo("An unexpected error occurred");
+        assertThat(body.getMessage()).doesNotContain("NullPointerException", "something null deep in a service");
+        assertThat(body.getTimestamp()).isEqualTo(FIXED_NOW);
+        assertThat(body.getFieldErrors()).isNull();
+    }
+
     private MethodArgumentNotValidException validationExceptionWith(FieldError... fieldErrors) throws NoSuchMethodException {
         BeanPropertyBindingResult bindingResult = new BeanPropertyBindingResult(new Object(), "target");
         for (FieldError fieldError : fieldErrors) {

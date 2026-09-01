@@ -2,6 +2,9 @@ package com.rnd.inbox.exception;
 
 import com.rnd.inbox.dto.ErrorResponseDto;
 import com.rnd.inbox.dto.FieldErrorDto;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
@@ -13,6 +16,8 @@ import java.util.List;
 
 @RestControllerAdvice
 public class GlobalExceptionHandler {
+
+    private static final Logger log = LoggerFactory.getLogger(GlobalExceptionHandler.class);
 
     private final Clock clock;
 
@@ -36,5 +41,13 @@ public class GlobalExceptionHandler {
         ErrorResponseDto body = new ErrorResponseDto(
                 400, "VALIDATION_ERROR", "Request validation failed", Instant.now(clock), fieldErrors);
         return ResponseEntity.badRequest().body(body);
+    }
+
+    @ExceptionHandler(Exception.class)
+    public ResponseEntity<ErrorResponseDto> handleUnexpectedException(Exception ex) {
+        log.error("Unexpected error while handling request", ex);
+        ErrorResponseDto body = new ErrorResponseDto(
+                500, "INTERNAL_ERROR", "An unexpected error occurred", Instant.now(clock));
+        return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(body);
     }
 }
