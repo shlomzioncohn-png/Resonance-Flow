@@ -30,8 +30,6 @@ public class OutboxEvent {
     @Column(name = "event_id", updatable = false, nullable = false)
     private UUID eventId;
 
-    // Stored as VARCHAR (not a native Postgres enum) - EventType is owned by
-    // a teammate's package (com.rnd.inbox.event), not defined at the DB level here.
     @Enumerated(EnumType.STRING)
     @Column(name = "event_type", nullable = false)
     private EventType eventType;
@@ -50,9 +48,6 @@ public class OutboxEvent {
     @Column(columnDefinition = "jsonb")
     private Map<String, Object> metadata;
 
-    // Links this row to every other record created from the same originating
-    // request (e.g. the matching AuditLog row) - not tied to a retry attempt,
-    // unlike eventId. Matches AuditLog.correlationId.
     @Column(name = "correlation_id")
     private UUID correlationId;
 
@@ -77,6 +72,21 @@ public class OutboxEvent {
     private Instant publishedAt;
 
     public OutboxEvent() {
+    }
+
+    public static OutboxEvent pending(EventType eventType, UUID aggregateId, String messageKey,
+                                      Map<String, Object> payload, UUID correlationId, Instant now) {
+        OutboxEvent event = new OutboxEvent();
+        event.eventType = eventType;
+        event.aggregateId = aggregateId;
+        event.messageKey = messageKey;
+        event.payload = payload;
+        event.correlationId = correlationId;
+        event.status = OutboxStatus.PENDING;
+        event.retryCount = 0;
+        event.nextRetryAt = now;
+        event.createdAt = now;
+        return event;
     }
 
     public UUID getEventId() {

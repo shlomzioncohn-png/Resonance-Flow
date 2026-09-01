@@ -1,12 +1,18 @@
 package com.rnd.inbox.bridge.task;
 
+import com.rnd.inbox.model.entity.Assignment;
 import com.rnd.inbox.model.entity.Organization;
 import com.rnd.inbox.model.entity.Task;
+import com.rnd.inbox.model.entity.Team;
+import com.rnd.inbox.model.entity.User;
+import com.rnd.inbox.model.enums.AssignmentRole;
 import com.rnd.inbox.model.enums.SourceType;
 import com.rnd.inbox.model.enums.TaskExtractionProvenance;
 import com.rnd.inbox.model.enums.TaskStatus;
 import com.rnd.inbox.repository.OrganizationRepository;
 import com.rnd.inbox.repository.ProjectRepository;
+import com.rnd.inbox.repository.TeamRepository;
+import com.rnd.inbox.repository.UserRepository;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
@@ -31,6 +37,12 @@ class BridgeTaskMapperTest {
     @Mock
     private ProjectRepository projectRepository;
 
+    @Mock
+    private UserRepository userRepository;
+
+    @Mock
+    private TeamRepository teamRepository;
+
     private final Clock clock = Clock.fixed(FIXED_NOW, ZoneOffset.UTC);
 
     @Test
@@ -50,7 +62,7 @@ class BridgeTaskMapperTest {
         dto.setUrgency(4);
         dto.setConfidence(0.9);
 
-        BridgeTaskMapper mapper = new BridgeTaskMapper(organizationRepository, projectRepository, clock);
+        BridgeTaskMapper mapper = mapper();
         Task task = mapper.map(dto);
 
         assertThat(task.getId()).isNull();
@@ -80,9 +92,81 @@ class BridgeTaskMapperTest {
         dto.setSourceType("GITHUB_ISSUE");
         dto.setSourceRef("github:owner/repo:issue:42");
 
-        BridgeTaskMapper mapper = new BridgeTaskMapper(organizationRepository, projectRepository, clock);
+        BridgeTaskMapper mapper = mapper();
         Task task = mapper.map(dto);
 
         assertThat(task.getStatus()).isEqualTo(TaskStatus.NEW);
+    }
+
+    @Test
+    void mapAssignment_whenNoAssigneeIsPresent_returnsNull() {
+        BridgeTaskEventDto dto = new BridgeTaskEventDto();
+
+        Assignment assignment = mapper().mapAssignment(dto);
+
+        assertThat(assignment).isNull();
+    }
+
+    @Test
+    void mapAssignment_withAssigneeUserId_buildsAnAssignmentToThatUser() {
+        UUID userId = UUID.randomUUID();
+        User userRef = new User();
+        userRef.setId(userId);
+        when(userRepository.getReferenceById(userId)).thenReturn(userRef);
+
+        BridgeTaskEventDto dto = new BridgeTaskEventDto();
+        dto.setAssigneeUserId(userId.toString());
+        dto.setAssignmentRole("ASSIGNEE");
+
+        Assignment assignment = mapper().mapAssignment(dto);
+
+        assertThat(assignment.getUser()).isSameAs(userRef);
+        assertThat(assignment.getTeam()).isNull();
+        assertThat(assignment.getAssignmentRole()).isEqualTo(AssignmentRole.ASSIGNEE);
+        assertThat(assignment.getAssignedAt()).isEqualTo(FIXED_NOW);
+        assertThat(assignment.getAssignedBy()).isNull();
+    }
+
+    @Test
+    void mapAssignment_withAssigneeTeamId_buildsAnAssignmentToThatTeam() {
+        UUID teamId = UUID.randomUUID();
+        Team teamRef = new Team();
+        teamRef.setId(teamId);
+        when(teamRepository.getReferenceById(teamId)).thenReturn(teamRef);
+
+        BridgeTaskEventDto dto = new BridgeTaskEventDto();
+        dto.setAssigneeTeamId(teamId.toString());
+        dto.setAssignmentRole("OWNER");
+
+        Assignment assignment = mapper().mapAssignment(dto);
+
+        assertThat(assignment.getTeam()).isSameAs(teamRef);
+        assertThat(assignment.getUser()).isNull();
+        assertThat(assignment.getAssignmentRole()).isEqualTo(AssignmentRole.OWNER);
+    }
+
+    @Test
+    void mapAssignment_withAssignedByUserId_setsWhoPerformedTheAssignment() {
+        UUID userId = UUID.randomUUID();
+        UUID assignedByUserId = UUID.randomUUID();
+        User userRef = new User();
+        userRef.setId(userId);
+        User assignedByRef = new User();
+        assignedByRef.setId(assignedByUserId);
+        when(userRepository.getReferenceById(userId)).thenReturn(userRef);
+        when(userRepository.getReferenceById(assignedByUserId)).thenReturn(assignedByRef);
+
+        BridgeTaskEventDto dto = new BridgeTaskEventDto();
+        dto.setAssigneeUserId(userId.toString());
+        dto.setAssignmentRole("ASSIGNEE");
+        dto.setAssignedByUserId(assignedByUserId.toString());
+
+        Assignment assignment = mapper().mapAssignment(dto);
+
+        assertThat(assignment.getAssignedBy()).isSameAs(assignedByRef);
+    }
+
+    private BridgeTaskMapper mapper() {
+        return new BridgeTaskMapper(organizationRepository, projectRepository, userRepository, teamRepository, clock);
     }
 }

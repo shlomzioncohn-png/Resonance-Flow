@@ -89,11 +89,6 @@ class OutboxWorkerTest {
 
     @Test
     void processOne_sendsSameEventId_onEveryAttempt() {
-        // This is the guarantee behind "publish succeeded but the outbox
-        // update failed - the same event can be republished with the same
-        // event_id": the eventId sent to Kafka always comes from the outbox
-        // row itself (via Event.existing), never freshly generated, so
-        // calling processOne again for the same row sends the same eventId.
         OutboxEvent event = pendingEvent();
         when(eventPublisher.publish(anyString(), anyString(), any())).thenReturn(CompletableFuture.completedFuture(null));
 
@@ -127,7 +122,7 @@ class OutboxWorkerTest {
     @Test
     void processOne_marksFailed_afterMaxRetriesReached() {
         OutboxEvent event = pendingEvent();
-        event.setRetryCount((short) (MAX_RETRIES - 1)); // this attempt will be the MAX_RETRIES-th
+        event.setRetryCount((short) (MAX_RETRIES - 1));
         CompletableFuture<Void> failed = new CompletableFuture<>();
         failed.completeExceptionally(new RuntimeException("permanent failure"));
         when(eventPublisher.publish(anyString(), anyString(), any())).thenReturn(failed);
@@ -147,7 +142,6 @@ class OutboxWorkerTest {
 
     @Test
     void computeBackoff_neverExceedsConfiguredMax() {
-        // 10 * 2^9 = 5120s, far above the 120s max configured in setUp()
         assertThat(worker.computeBackoff(10)).isEqualTo(Duration.ofSeconds(BACKOFF_MAX_SECONDS));
     }
 
@@ -156,9 +150,6 @@ class OutboxWorkerTest {
         when(outboxEventRepository.claimPendingBatch(any(), org.mockito.ArgumentMatchers.anyInt()))
                 .thenThrow(new RuntimeException("DB connection lost"));
 
-        // Should be caught and logged internally, not propagate - this is
-        // what lets @Scheduled keep running on the next cycle instead of
-        // Spring's scheduler silently disabling future runs after an error.
         worker.pollAndPublish();
     }
 }

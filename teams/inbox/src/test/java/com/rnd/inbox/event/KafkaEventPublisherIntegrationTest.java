@@ -51,9 +51,6 @@ class KafkaEventPublisherIntegrationTest {
 
     @AfterAll
     static void stopBroker() {
-        // EmbeddedKafkaBroker.destroy() can throw (e.g. EOFException from the embedded ZooKeeper) on Windows
-        // due to file-locking during shutdown, even though the test itself already completed successfully.
-        // Cleanup failures shouldn't fail the whole test class.
         try {
             broker.destroy();
         } catch (Exception ex) {

@@ -156,6 +156,65 @@ class BridgeTaskEventValidationTest {
     }
 
     @Test
+    void acceptsAnEventWithNoAssignmentDataAtAll() {
+        assertThatCode(() -> validator.validate(validEvent())).doesNotThrowAnyException();
+    }
+
+    @Test
+    void acceptsAnAssignmentToAUser() {
+        BridgeTaskEventDto dto = validEvent();
+        dto.setAssigneeUserId(UUID.randomUUID().toString());
+        dto.setAssignmentRole("ASSIGNEE");
+
+        assertThatCode(() -> validator.validate(dto)).doesNotThrowAnyException();
+    }
+
+    @Test
+    void acceptsAnAssignmentToATeamWithAnAssigner() {
+        BridgeTaskEventDto dto = validEvent();
+        dto.setAssigneeTeamId(UUID.randomUUID().toString());
+        dto.setAssignmentRole("OWNER");
+        dto.setAssignedByUserId(UUID.randomUUID().toString());
+
+        assertThatCode(() -> validator.validate(dto)).doesNotThrowAnyException();
+    }
+
+    @Test
+    void rejectsAnAssignmentWithBothAUserAndATeam() {
+        BridgeTaskEventDto dto = validEvent();
+        dto.setAssigneeUserId(UUID.randomUUID().toString());
+        dto.setAssigneeTeamId(UUID.randomUUID().toString());
+        dto.setAssignmentRole("ASSIGNEE");
+
+        assertRejects(dto, "assigneeUserId");
+    }
+
+    @Test
+    void rejectsAnAssignmentRoleWithoutAnAssignee() {
+        BridgeTaskEventDto dto = validEvent();
+        dto.setAssignmentRole("ASSIGNEE");
+
+        assertRejects(dto, "assigneeUserId");
+    }
+
+    @Test
+    void rejectsAnAssigneeWithoutAnAssignmentRole() {
+        BridgeTaskEventDto dto = validEvent();
+        dto.setAssigneeUserId(UUID.randomUUID().toString());
+
+        assertRejects(dto, "assignmentRole");
+    }
+
+    @Test
+    void rejectsUnrecognizedAssignmentRole() {
+        BridgeTaskEventDto dto = validEvent();
+        dto.setAssigneeUserId(UUID.randomUUID().toString());
+        dto.setAssignmentRole("NOT_A_ROLE");
+
+        assertRejects(dto, "assignmentRole");
+    }
+
+    @Test
     void reportsAMissingRequiredFieldExactlyOnce() {
         BridgeTaskEventDto dto = validEvent();
         dto.setOrganizationId("  ");
