@@ -1,5 +1,10 @@
 # personas
 
+> **The scenario `*.json` files land in their own PR** (the persona evaluation
+> set). This branch/PR is the harness engine only — `eval/personas/` here holds
+> just this doc and the generated `scenario.schema.json`. CI smoke-tests the
+> harness against `tests/fixtures/personas/` instead.
+
 The fixed evaluation scenario set: 4-6 scenarios per role (Developer,
 Manager, Higher Manager, Field Engineer, Salesperson, CEO), ~24-36 total.
 Each scenario states a free-time window and a mentor-agreed "correct" top
