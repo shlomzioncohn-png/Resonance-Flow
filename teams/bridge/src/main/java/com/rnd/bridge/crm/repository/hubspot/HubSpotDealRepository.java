@@ -25,7 +25,7 @@ import java.util.Optional;
 
 /**
  * Reads the CRM deal feed straight from the live HubSpot API, instead of the
- * synthetic JSON file or the Postgres staging table.
+ * synthetic JSON file ({@code JsonDealRepository}).
  * <p>
  * <b>The shape mismatch.</b> {@link DealRepository} wants append-only
  * stage-change events, oldest first. HubSpot's deals endpoint returns
@@ -65,8 +65,7 @@ import java.util.Optional;
  * repository never produces it.
  * <p>
  * <b>{@code asOf()}.</b> {@code JsonDealRepository} reads {@code asOf} from
- * the file envelope; {@code JdbcDealRepository} takes it from configuration.
- * Neither applies here - a live API has no notion of "as of when" built in.
+ * the file envelope; a live API has no notion of "as of when" built in.
  * The clock is read exactly once, at the start of a sync, in
  * {@link #fetchSync()} - deliberately not buried inside the per-record
  * mapping loop - and every {@link Deal} that sync produces shares the
@@ -74,12 +73,11 @@ import java.util.Optional;
  * triggers one full, paginated fetch of every deal, which is then cached
  * for the remaining lifetime of this repository instance, so {@link
  * #asOf()} and every {@code find*} call agree with each other no matter
- * which is called first or how many times. Unlike {@code
- * JdbcDealRepository} - a local, cheap-to-repeat query - re-running a
- * multi-page HTTP fetch on every accessor call would multiply network calls
- * and rate-limit exposure for no benefit within one logical sync. Observing
- * a genuinely new HubSpot state means restarting this repository (a new
- * deployment), not calling {@link #findAll()} again.
+ * which is called first or how many times. Re-running a multi-page HTTP
+ * fetch on every accessor call would multiply network calls and rate-limit
+ * exposure for no benefit within one logical sync. Observing a genuinely
+ * new HubSpot state means restarting this repository (a new deployment),
+ * not calling {@link #findAll()} again.
  * <p>
  * The token is read once, from configuration backed by the {@code
  * HUBSPOT_TOKEN} environment variable, purely to build the {@code

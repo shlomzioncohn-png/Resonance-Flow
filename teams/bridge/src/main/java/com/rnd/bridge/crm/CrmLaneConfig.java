@@ -18,9 +18,8 @@ import org.springframework.kafka.core.KafkaTemplate;
  * no Spring annotations of their own - {@link DealToTaskMapper} and
  * {@link TaskValidator} are plain, framework-free classes shared or shareable
  * across lanes - plus the publisher, which is the logging stand-in unless
- * the {@code kafka} profile is active, mirroring how the {@code jdbc} and
- * {@code hubspot} profiles override {@code JsonDealRepository} elsewhere in
- * this package.
+ * the {@code kafka} profile is active, mirroring how the {@code hubspot}
+ * profile overrides {@code JsonDealRepository} elsewhere in this package.
  */
 @Configuration
 class CrmLaneConfig {
