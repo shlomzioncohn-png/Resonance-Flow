@@ -183,6 +183,9 @@ Fields are listed with their type, whether they are required, their foreign-key 
 | `extraction_provenance` | VARCHAR / ENUM | Yes | `etl / ml_inferred / manual` | How the task was created. |
 | `confidence` | REAL | Cond. | CHECK `0..1`; required for ML-inferred tasks | Confidence score for ML-inferred task data. |
 | `owner_id` | UUID | No | FK → `users.id` | The single user who manages/follows the task — the accountable owner, distinct from whoever the task is assigned to via ASSIGNMENTS. May be NULL before triage/claim. |
+| `effort_estimate_confidence` | REAL | No | CHECK `0..1` | Confidence score for the ML-inferred `effort_estimate_minutes` value. |
+| `suggested_owner_user_id` | UUID | No | FK → `users.id` | ML-suggested owner proposed by Mind. Distinct from `owner_id`, which is the confirmed accountable owner — this is a proposal, not a decision. |
+| `suggested_owner_confidence` | REAL | No | CHECK `0..1` | Confidence score for `suggested_owner_user_id`. |
 | `created_by` | UUID | No | FK → `users.id` | User who manually created the task; NULL for automatically created tasks. |
 | `created_at` | TIMESTAMPTZ | Yes | DEFAULT `now()` | Creation timestamp. |
 | `updated_at` | TIMESTAMPTZ | Yes | DEFAULT `now()` | Last update timestamp. |

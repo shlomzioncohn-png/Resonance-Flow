@@ -16,9 +16,11 @@ public final class TaskCreatedPayload {
     private final UUID organizationId;
     private final UUID projectId;
     private final String title;
+
     private final String description;
     private final SourceType sourceType;
     private final String sourceRef;
+    private final boolean isAvailable;
     private final TaskTier tier;
     private final TaskRoleContext roleContext;
     private final Short urgency;
@@ -27,18 +29,23 @@ public final class TaskCreatedPayload {
     private final TaskStatus status;
     private final TaskExtractionProvenance extractionProvenance;
     private final Float confidence;
+    private final Float effortEstimateConfidence;
+    private final UUID suggestedOwnerUserId;
+    private final Float suggestedOwnerConfidence;
     private final UUID createdBy;
     private final Instant createdAt;
 
-    private TaskCreatedPayload(UUID taskId, UUID organizationId, UUID projectId, String title, String description,
+    private TaskCreatedPayload(UUID taskId, UUID organizationId, UUID projectId, String title, String description,boolean isAvailable,
                                 SourceType sourceType, String sourceRef, TaskTier tier, TaskRoleContext roleContext,
                                 Short urgency, Integer effortEstimateMinutes, Instant deadline, TaskStatus status,
-                                TaskExtractionProvenance extractionProvenance, Float confidence, UUID createdBy,
-                                Instant createdAt) {
+                                TaskExtractionProvenance extractionProvenance, Float confidence,
+                                Float effortEstimateConfidence, UUID suggestedOwnerUserId, Float suggestedOwnerConfidence,
+                                UUID createdBy, Instant createdAt) {
         this.taskId = taskId;
         this.organizationId = organizationId;
         this.projectId = projectId;
         this.title = title;
+        this.isAvailable=isAvailable;
         this.description = description;
         this.sourceType = sourceType;
         this.sourceRef = sourceRef;
@@ -50,6 +57,9 @@ public final class TaskCreatedPayload {
         this.status = status;
         this.extractionProvenance = extractionProvenance;
         this.confidence = confidence;
+        this.effortEstimateConfidence = effortEstimateConfidence;
+        this.suggestedOwnerUserId = suggestedOwnerUserId;
+        this.suggestedOwnerConfidence = suggestedOwnerConfidence;
         this.createdBy = createdBy;
         this.createdAt = createdAt;
     }
@@ -61,6 +71,7 @@ public final class TaskCreatedPayload {
                 task.getProject() != null ? task.getProject().getId() : null,
                 task.getTitle(),
                 task.getDescription(),
+                task.isAvailable(),
                 task.getSourceType(),
                 task.getSourceRef(),
                 task.getTier(),
@@ -71,6 +82,9 @@ public final class TaskCreatedPayload {
                 task.getStatus(),
                 task.getExtractionProvenance(),
                 task.getConfidence(),
+                task.getEffortEstimateConfidence(),
+                task.getSuggestedOwnerUser() != null ? task.getSuggestedOwnerUser().getId() : null,
+                task.getSuggestedOwnerConfidence(),
                 task.getCreatedBy() != null ? task.getCreatedBy().getId() : null,
                 task.getCreatedAt()
         );
@@ -104,6 +118,10 @@ public final class TaskCreatedPayload {
         return sourceRef;
     }
 
+    public boolean isAvailable() {
+        return isAvailable;
+    }
+
     public TaskTier getTier() {
         return tier;
     }
@@ -134,6 +152,18 @@ public final class TaskCreatedPayload {
 
     public Float getConfidence() {
         return confidence;
+    }
+
+    public Float getEffortEstimateConfidence() {
+        return effortEstimateConfidence;
+    }
+
+    public UUID getSuggestedOwnerUserId() {
+        return suggestedOwnerUserId;
+    }
+
+    public Float getSuggestedOwnerConfidence() {
+        return suggestedOwnerConfidence;
     }
 
     public UUID getCreatedBy() {
