@@ -1,0 +1,37 @@
+{
+  "scenario_id": "developer_release_gate_vs_flaky_repro",
+  "persona": { "role": "Developer", "department": "Engineering" },
+  "context": {
+    "free_time_minutes": 60,
+    "current_datetime": "2026-08-25T15:00:00",
+    "time_horizon": "today",
+    "constraints": []
+  },
+  "tasks": [
+    {
+      "task_id": "task_coverage_gate",
+      "title": "Add the missing tests for the tax-calculation helper",
+      "description": "The tax-calculation helper flagged in code review has no test coverage; CI blocks the 17:00 release cut if coverage on the release branch stays below the threshold.",
+      "deadline": "2026-08-25T17:00:00",
+      "effort_estimate": 40,
+      "tier": "operational",
+      "blocked": false,
+      "parent_task_id": null
+    },
+    {
+      "task_id": "task_flaky_repro",
+      "title": "Reproduce the intermittent 502 on the orders endpoint",
+      "description": "QA reported an intermittent 502 from the orders service; it happens rarely and there is no deadline on chasing it down.",
+      "deadline": null,
+      "effort_estimate": 45,
+      "tier": "operational",
+      "blocked": false,
+      "parent_task_id": null
+    }
+  ],
+  "expected_top_task_id": "task_coverage_gate",
+  "expected_reason": "Both tasks are operational and unblocked. task_coverage_gate has a hard same-day deadline (CI blocks the 17:00 release cut without it); task_flaky_repro is a rare intermittent issue with no deadline.",
+  "source": { "type": "synthetic", "source_detail": null },
+  "team_lead_approved": false,
+  "mentor_approved": false
+}

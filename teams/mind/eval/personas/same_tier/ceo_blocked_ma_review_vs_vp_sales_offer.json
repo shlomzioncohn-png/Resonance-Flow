@@ -1,0 +1,37 @@
+{
+  "scenario_id": "ceo_blocked_ma_review_vs_vp_sales_offer",
+  "persona": { "role": "CEO", "department": null },
+  "context": {
+    "free_time_minutes": 50,
+    "current_datetime": "2026-09-16T10:00:00",
+    "time_horizon": "this_week",
+    "constraints": []
+  },
+  "tasks": [
+    {
+      "task_id": "task_ma_review",
+      "title": "Review the acquisition term sheet",
+      "description": "The CEO's review is on hold until legal delivers the due-diligence memo, which is still in progress.",
+      "deadline": null,
+      "effort_estimate": 60,
+      "tier": "strategic",
+      "blocked": true,
+      "parent_task_id": null
+    },
+    {
+      "task_id": "task_vp_offer",
+      "title": "Make the final call on the VP Sales offer",
+      "description": "The preferred candidate has a competing offer expiring Friday and needs a yes or no from the CEO this week.",
+      "deadline": "2026-09-18T17:00:00",
+      "effort_estimate": 30,
+      "tier": "strategic",
+      "blocked": false,
+      "parent_task_id": null
+    }
+  ],
+  "expected_top_task_id": "task_vp_offer",
+  "expected_reason": "task_ma_review is blocked pending legal's due-diligence memo and cannot move forward now. task_vp_offer is unblocked and has a hard deadline this week: the candidate's competing offer expires Friday.",
+  "source": { "type": "synthetic", "source_detail": null },
+  "team_lead_approved": false,
+  "mentor_approved": false
+}

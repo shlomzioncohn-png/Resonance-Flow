@@ -1,0 +1,37 @@
+{
+  "scenario_id": "salesperson_booked_call_vs_proposal_deck",
+  "persona": { "role": "Salesperson", "department": "Sales" },
+  "context": {
+    "free_time_minutes": 50,
+    "current_datetime": "2026-08-25T13:00:00",
+    "time_horizon": "this_week",
+    "constraints": []
+  },
+  "tasks": [
+    {
+      "task_id": "task_proposal_deck",
+      "title": "Build the custom proposal deck for Stark",
+      "description": "Assemble a tailored proposal deck for Stark from the latest pricing and slides; useful for an active opportunity but no date is set for it yet.",
+      "deadline": null,
+      "effort_estimate": 60,
+      "tier": "tactical",
+      "blocked": false,
+      "parent_task_id": null
+    },
+    {
+      "task_id": "task_booked_call",
+      "title": "Discovery call with the Hooli lead",
+      "description": "A qualified inbound lead from Hooli booked a 20-minute discovery call for 16:00 today.",
+      "deadline": "2026-08-25T16:00:00",
+      "effort_estimate": 20,
+      "tier": "tactical",
+      "blocked": false,
+      "parent_task_id": null
+    }
+  ],
+  "expected_top_task_id": "task_booked_call",
+  "expected_reason": "Both tasks are tactical and unblocked. task_booked_call is a scheduled commitment with a qualified lead at a fixed time today; task_proposal_deck has no date attached and can be done later.",
+  "source": { "type": "synthetic", "source_detail": null },
+  "team_lead_approved": false,
+  "mentor_approved": false
+}

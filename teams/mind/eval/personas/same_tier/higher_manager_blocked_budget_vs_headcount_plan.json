@@ -1,0 +1,37 @@
+{
+  "scenario_id": "higher_manager_blocked_budget_vs_headcount_plan",
+  "persona": { "role": "Higher Manager", "department": null },
+  "context": {
+    "free_time_minutes": 60,
+    "current_datetime": "2026-09-16T11:00:00",
+    "time_horizon": "this_month",
+    "constraints": []
+  },
+  "tasks": [
+    {
+      "task_id": "task_annual_budget",
+      "title": "Submit the annual department budget",
+      "description": "The submission is on hold until the CFO's office sends the revised cost-center figures, which have not yet arrived.",
+      "deadline": "2026-09-30T17:00:00",
+      "effort_estimate": 45,
+      "tier": "strategic",
+      "blocked": true,
+      "parent_task_id": null
+    },
+    {
+      "task_id": "task_headcount_plan",
+      "title": "Approve the Q4 headcount plan",
+      "description": "Sign off on which of the open roles the department will fill next quarter; all the inputs are in hand.",
+      "deadline": "2026-09-25T17:00:00",
+      "effort_estimate": 40,
+      "tier": "strategic",
+      "blocked": false,
+      "parent_task_id": null
+    }
+  ],
+  "expected_top_task_id": "task_headcount_plan",
+  "expected_reason": "task_annual_budget is blocked: it cannot be submitted until the CFO's revised figures arrive. task_headcount_plan is unblocked, has all its inputs, and carries a deadline within the month.",
+  "source": { "type": "synthetic", "source_detail": null },
+  "team_lead_approved": false,
+  "mentor_approved": false
+}

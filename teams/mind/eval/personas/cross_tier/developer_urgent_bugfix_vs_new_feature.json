@@ -1,0 +1,47 @@
+{
+  "scenario_id": "developer_urgent_bugfix_vs_new_feature",
+  "persona": { "role": "Developer", "department": "Engineering" },
+  "context": {
+    "free_time_minutes": 45,
+    "current_datetime": "2026-08-25T09:00:00",
+    "time_horizon": "today",
+    "constraints": []
+  },
+  "tasks": [
+    {
+      "task_id": "task_bugfix",
+      "title": "Fix null-pointer crash in checkout flow",
+      "description": "Customers are hitting a crash when applying a discount code at checkout; support has escalated it as production-impacting.",
+      "deadline": "2026-08-25T12:00:00",
+      "effort_estimate": 40,
+      "tier": "operational",
+      "blocked": false,
+      "parent_task_id": null
+    },
+    {
+      "task_id": "task_feature",
+      "title": "Start dashboard widget for order history",
+      "description": "Kick off implementation of a new widget on the customer dashboard showing recent order history; next on the backlog, not requested by anyone yet.",
+      "deadline": null,
+      "effort_estimate": 180,
+      "tier": "tactical",
+      "blocked": false,
+      "parent_task_id": null
+    },
+    {
+      "task_id": "task_wiki",
+      "title": "Update the onboarding wiki page",
+      "description": "Refresh a few outdated setup steps on the team's onboarding wiki; nice to have, nobody is waiting on it.",
+      "deadline": null,
+      "effort_estimate": 20,
+      "tier": "operational",
+      "blocked": false,
+      "parent_task_id": null
+    }
+  ],
+  "expected_top_task_id": "task_bugfix",
+  "expected_reason": "task_bugfix is a production-impacting crash with a hard deadline three hours away; task_feature is an unrequested backlog item and task_wiki has no deadline and nobody waiting. Both urgency and stated business impact point to the bugfix.",
+  "source": { "type": "synthetic", "source_detail": null },
+  "team_lead_approved": true,
+  "mentor_approved": false
+}

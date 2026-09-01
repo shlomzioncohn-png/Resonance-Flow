@@ -1,0 +1,37 @@
+{
+  "scenario_id": "manager_incident_actions_vs_process_polish",
+  "persona": { "role": "Manager", "department": "Engineering" },
+  "context": {
+    "free_time_minutes": 60,
+    "current_datetime": "2026-08-25T11:00:00",
+    "time_horizon": "this_week",
+    "constraints": []
+  },
+  "tasks": [
+    {
+      "task_id": "task_incident_actions",
+      "title": "Drive the fixes from last week's incident review",
+      "description": "Follow-up actions from the incident review that address a recurring production risk which has already caused two outages this quarter; owners need to be assigned and the work scheduled.",
+      "deadline": null,
+      "effort_estimate": 50,
+      "tier": "tactical",
+      "blocked": false,
+      "parent_task_id": null
+    },
+    {
+      "task_id": "task_process_polish",
+      "title": "Tidy up the team's onboarding checklist",
+      "description": "Reorganize and refresh the onboarding checklist so it reads better; a nice-to-have with nobody waiting on it.",
+      "deadline": null,
+      "effort_estimate": 30,
+      "tier": "tactical",
+      "blocked": false,
+      "parent_task_id": null
+    }
+  ],
+  "expected_top_task_id": "task_incident_actions",
+  "expected_reason": "Both tasks are tactical, unblocked, and have no deadline. task_incident_actions addresses a recurring production risk that has already caused two outages this quarter; task_process_polish is a nice-to-have with nobody waiting on it.",
+  "source": { "type": "synthetic", "source_detail": null },
+  "team_lead_approved": false,
+  "mentor_approved": false
+}

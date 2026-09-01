@@ -1,0 +1,47 @@
+{
+  "scenario_id": "manager_sprint_plan_vs_1on1_notes",
+  "persona": { "role": "Manager", "department": "Engineering" },
+  "context": {
+    "free_time_minutes": 90,
+    "current_datetime": "2026-08-25T09:00:00",
+    "time_horizon": "this_week",
+    "constraints": []
+  },
+  "tasks": [
+    {
+      "task_id": "task_sprint_plan",
+      "title": "Prepare next sprint's planning document",
+      "description": "Draft the scope and priorities for the upcoming sprint, due before Friday's planning meeting; the whole team's sprint work depends on it being ready.",
+      "deadline": "2026-08-28T17:00:00",
+      "effort_estimate": 90,
+      "tier": "tactical",
+      "blocked": false,
+      "parent_task_id": null
+    },
+    {
+      "task_id": "task_1on1_notes",
+      "title": "Write up follow-up notes from Tuesday's 1:1",
+      "description": "Summarize action items from a 1:1 that already happened; useful for the record but nothing downstream is waiting on it.",
+      "deadline": null,
+      "effort_estimate": 20,
+      "tier": "operational",
+      "blocked": false,
+      "parent_task_id": null
+    },
+    {
+      "task_id": "task_expenses",
+      "title": "Approve pending expense reports",
+      "description": "Three expense reports from last month are waiting for manager approval; routine, no deadline flagged.",
+      "deadline": null,
+      "effort_estimate": 15,
+      "tier": "operational",
+      "blocked": false,
+      "parent_task_id": null
+    }
+  ],
+  "expected_top_task_id": "task_sprint_plan",
+  "expected_reason": "task_sprint_plan has a hard deadline before Friday's planning meeting and the whole team's next sprint depends on it; task_1on1_notes and task_expenses have no deadline and nothing downstream is waiting on them.",
+  "source": { "type": "synthetic", "source_detail": null },
+  "team_lead_approved": false,
+  "mentor_approved": false
+}

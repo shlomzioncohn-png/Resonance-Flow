@@ -1,0 +1,37 @@
+{
+  "scenario_id": "salesperson_blocked_enterprise_quote_vs_qbr_prep",
+  "persona": { "role": "Salesperson", "department": "Sales" },
+  "context": {
+    "free_time_minutes": 50,
+    "current_datetime": "2026-08-25T11:00:00",
+    "time_horizon": "this_week",
+    "constraints": []
+  },
+  "tasks": [
+    {
+      "task_id": "task_enterprise_quote",
+      "title": "Send the enterprise quote to Globex",
+      "description": "The quote includes a non-standard discount that deal desk has not yet approved; it cannot go out until they sign off.",
+      "deadline": null,
+      "effort_estimate": 25,
+      "tier": "tactical",
+      "blocked": true,
+      "parent_task_id": null
+    },
+    {
+      "task_id": "task_qbr_prep",
+      "title": "Prepare the QBR deck for Initech",
+      "description": "The quarterly business review with Initech is next Tuesday; the deck needs updated usage numbers and renewal talking points.",
+      "deadline": "2026-09-01T09:00:00",
+      "effort_estimate": 60,
+      "tier": "tactical",
+      "blocked": false,
+      "parent_task_id": null
+    }
+  ],
+  "expected_top_task_id": "task_qbr_prep",
+  "expected_reason": "task_enterprise_quote is blocked on deal-desk approval of a non-standard discount and cannot be sent yet. task_qbr_prep is unblocked and has a deadline ahead of next Tuesday's review.",
+  "source": { "type": "synthetic", "source_detail": null },
+  "team_lead_approved": false,
+  "mentor_approved": false
+}

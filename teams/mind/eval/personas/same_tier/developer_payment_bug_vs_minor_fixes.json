@@ -1,0 +1,47 @@
+{
+  "scenario_id": "developer_payment_bug_vs_minor_fixes",
+  "persona": { "role": "Developer", "department": "Engineering" },
+  "context": {
+    "free_time_minutes": 40,
+    "current_datetime": "2026-08-25T14:00:00",
+    "time_horizon": "today",
+    "constraints": []
+  },
+  "tasks": [
+    {
+      "task_id": "task_payment_bug",
+      "title": "Fix payment-capture failures on ~5% of orders",
+      "description": "Since this morning about 5% of order payment captures are failing and the amounts are not being charged; finance needs it resolved before the 16:00 daily reconciliation.",
+      "deadline": "2026-08-25T16:00:00",
+      "effort_estimate": 35,
+      "tier": "operational",
+      "blocked": false,
+      "parent_task_id": null
+    },
+    {
+      "task_id": "task_email_typo",
+      "title": "Fix a typo in the password-reset email",
+      "description": "A word is misspelled in the password-reset email template; cosmetic, no user impact beyond the wording, no deadline.",
+      "deadline": null,
+      "effort_estimate": 10,
+      "tier": "operational",
+      "blocked": false,
+      "parent_task_id": null
+    },
+    {
+      "task_id": "task_log_noise",
+      "title": "Silence a noisy debug log in the scheduler",
+      "description": "The scheduler prints a verbose debug line every run, cluttering logs; minor cleanup, nobody is waiting on it.",
+      "deadline": null,
+      "effort_estimate": 15,
+      "tier": "operational",
+      "blocked": false,
+      "parent_task_id": null
+    }
+  ],
+  "expected_top_task_id": "task_payment_bug",
+  "expected_reason": "All three are operational and unblocked. task_payment_bug is actively losing charges and has a hard deadline before the 16:00 reconciliation; task_email_typo and task_log_noise are cosmetic cleanups with no deadline and no impact.",
+  "source": { "type": "synthetic", "source_detail": null },
+  "team_lead_approved": false,
+  "mentor_approved": false
+}

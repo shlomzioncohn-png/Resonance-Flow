@@ -1,0 +1,37 @@
+{
+  "scenario_id": "ceo_investor_update_vs_allhands_prep",
+  "persona": { "role": "CEO", "department": null },
+  "context": {
+    "free_time_minutes": 60,
+    "current_datetime": "2026-09-15T16:00:00",
+    "time_horizon": "this_week",
+    "constraints": []
+  },
+  "tasks": [
+    {
+      "task_id": "task_investor_update",
+      "title": "Send the monthly investor update",
+      "description": "The update goes out to investors on the 16th every month without exception; tomorrow is the 16th and the draft still needs the CEO's final pass.",
+      "deadline": "2026-09-16T09:00:00",
+      "effort_estimate": 45,
+      "tier": "strategic",
+      "blocked": false,
+      "parent_task_id": null
+    },
+    {
+      "task_id": "task_allhands_prep",
+      "title": "Prepare talking points for next month's all-hands",
+      "description": "Outline the themes for the October all-hands; no date pressure, the meeting is weeks away.",
+      "deadline": null,
+      "effort_estimate": 40,
+      "tier": "strategic",
+      "blocked": false,
+      "parent_task_id": null
+    }
+  ],
+  "expected_top_task_id": "task_investor_update",
+  "expected_reason": "task_investor_update has a hard deadline tomorrow morning against a fixed monthly commitment; task_allhands_prep is weeks out with no date pressure. Both are strategic, so the deadline decides.",
+  "source": { "type": "synthetic", "source_detail": null },
+  "team_lead_approved": false,
+  "mentor_approved": false
+}

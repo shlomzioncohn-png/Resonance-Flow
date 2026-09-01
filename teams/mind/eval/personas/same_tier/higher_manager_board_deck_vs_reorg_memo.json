@@ -1,0 +1,37 @@
+{
+  "scenario_id": "higher_manager_board_deck_vs_reorg_memo",
+  "persona": { "role": "Higher Manager", "department": null },
+  "context": {
+    "free_time_minutes": 90,
+    "current_datetime": "2026-09-15T16:00:00",
+    "time_horizon": "this_week",
+    "constraints": []
+  },
+  "tasks": [
+    {
+      "task_id": "task_board_deck",
+      "title": "Finalize the slides for tomorrow's board meeting",
+      "description": "The quarterly board meeting is at 09:00 tomorrow; the deck must be sent to board members tonight.",
+      "deadline": "2026-09-15T21:00:00",
+      "effort_estimate": 75,
+      "tier": "strategic",
+      "blocked": false,
+      "parent_task_id": null
+    },
+    {
+      "task_id": "task_reorg_memo",
+      "title": "Draft the department reorganization memo",
+      "description": "Outline the proposed restructuring of the two engineering groups; no target date set, still at the thinking stage.",
+      "deadline": null,
+      "effort_estimate": 90,
+      "tier": "strategic",
+      "blocked": false,
+      "parent_task_id": null
+    }
+  ],
+  "expected_top_task_id": "task_board_deck",
+  "expected_reason": "task_board_deck has a hard deadline tonight ahead of the 09:00 board meeting; task_reorg_memo is still exploratory with no target date. Both are strategic, so the deadline is what decides it.",
+  "source": { "type": "synthetic", "source_detail": null },
+  "team_lead_approved": false,
+  "mentor_approved": false
+}

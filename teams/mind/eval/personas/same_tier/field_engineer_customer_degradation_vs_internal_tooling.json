@@ -1,0 +1,37 @@
+{
+  "scenario_id": "field_engineer_customer_degradation_vs_internal_tooling",
+  "persona": { "role": "Field Engineer", "department": "Operations" },
+  "context": {
+    "free_time_minutes": 40,
+    "current_datetime": "2026-08-25T10:30:00",
+    "time_horizon": "today",
+    "constraints": []
+  },
+  "tasks": [
+    {
+      "task_id": "task_degradation",
+      "title": "Investigate slow query responses reported by Customer D",
+      "description": "Customer D's support ticket reports query latency up 3x since yesterday; the system is still usable but noticeably degrading for their analysts.",
+      "deadline": null,
+      "effort_estimate": 40,
+      "tier": "operational",
+      "blocked": false,
+      "parent_task_id": null
+    },
+    {
+      "task_id": "task_internal_script",
+      "title": "Improve the log-collection script",
+      "description": "Add retry handling to the internal log-collection script so it fails less often when run over VPN; a convenience for the field team.",
+      "deadline": null,
+      "effort_estimate": 35,
+      "tier": "operational",
+      "blocked": false,
+      "parent_task_id": null
+    }
+  ],
+  "expected_top_task_id": "task_degradation",
+  "expected_reason": "Neither task has a deadline or is blocked. task_degradation is a live performance regression affecting a paying customer's users; task_internal_script is an internal convenience for the field team. The customer-facing impact makes the degradation the priority.",
+  "source": { "type": "synthetic", "source_detail": null },
+  "team_lead_approved": false,
+  "mentor_approved": false
+}
