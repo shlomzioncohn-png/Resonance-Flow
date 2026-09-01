@@ -1,11 +1,18 @@
 package com.rnd.inbox.controller;
 
+import com.rnd.inbox.dto.ErrorResponseDto;
 import com.rnd.inbox.dto.PageResponseDto;
 import com.rnd.inbox.dto.UserCreateRequestDto;
 import com.rnd.inbox.dto.UserResponseDto;
 import com.rnd.inbox.dto.UserStatusUpdateRequestDto;
 import com.rnd.inbox.dto.UserUpdateRequestDto;
 import com.rnd.inbox.service.UserService;
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.media.Content;
+import io.swagger.v3.oas.annotations.media.Schema;
+import io.swagger.v3.oas.annotations.responses.ApiResponse;
+import io.swagger.v3.oas.annotations.responses.ApiResponses;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import org.springframework.data.domain.Pageable;
 import org.springframework.http.ResponseEntity;
@@ -21,6 +28,7 @@ import org.springframework.web.util.UriComponentsBuilder;
 
 import java.util.UUID;
 
+@Tag(name = "Users", description = "Create, update, and look up users, including their organization")
 @RestController
 @RequestMapping("/api/v1/users")
 public class UserController {
@@ -31,6 +39,17 @@ public class UserController {
         this.userService = userService;
     }
 
+    @Operation(summary = "Create a new user")
+    @ApiResponses({
+            @ApiResponse(responseCode = "201", description = "User created",
+                    content = @Content(schema = @Schema(implementation = UserResponseDto.class))),
+            @ApiResponse(responseCode = "400", description = "Request validation failed",
+                    content = @Content(schema = @Schema(implementation = ErrorResponseDto.class))),
+            @ApiResponse(responseCode = "404", description = "Organization not found",
+                    content = @Content(schema = @Schema(implementation = ErrorResponseDto.class))),
+            @ApiResponse(responseCode = "409", description = "Email or username already exists",
+                    content = @Content(schema = @Schema(implementation = ErrorResponseDto.class)))
+    })
     @PostMapping
     public ResponseEntity<UserResponseDto> createUser(@Valid @RequestBody UserCreateRequestDto request,
                                                         UriComponentsBuilder uriBuilder) {
@@ -40,21 +59,51 @@ public class UserController {
                 .body(created);
     }
 
+    @Operation(summary = "Get a user by id, including its organization")
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "User found",
+                    content = @Content(schema = @Schema(implementation = UserResponseDto.class))),
+            @ApiResponse(responseCode = "404", description = "User not found",
+                    content = @Content(schema = @Schema(implementation = ErrorResponseDto.class)))
+    })
     @GetMapping("/{id}")
     public UserResponseDto getUserById(@PathVariable UUID id) {
         return userService.getUserById(id);
     }
 
+    @Operation(summary = "List users, paginated")
+    @ApiResponse(responseCode = "200", description = "Page of users",
+            content = @Content(schema = @Schema(implementation = PageResponseDto.class)))
     @GetMapping
     public PageResponseDto<UserResponseDto> listUsers(Pageable pageable) {
         return userService.listUsers(pageable);
     }
 
+    @Operation(summary = "Update a user's details")
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "User updated",
+                    content = @Content(schema = @Schema(implementation = UserResponseDto.class))),
+            @ApiResponse(responseCode = "400", description = "Request validation failed",
+                    content = @Content(schema = @Schema(implementation = ErrorResponseDto.class))),
+            @ApiResponse(responseCode = "404", description = "User not found",
+                    content = @Content(schema = @Schema(implementation = ErrorResponseDto.class))),
+            @ApiResponse(responseCode = "409", description = "Email or username already exists",
+                    content = @Content(schema = @Schema(implementation = ErrorResponseDto.class)))
+    })
     @PutMapping("/{id}")
     public UserResponseDto updateUser(@PathVariable UUID id, @Valid @RequestBody UserUpdateRequestDto request) {
         return userService.updateUser(id, request);
     }
 
+    @Operation(summary = "Change a user's status")
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "Status updated",
+                    content = @Content(schema = @Schema(implementation = UserResponseDto.class))),
+            @ApiResponse(responseCode = "400", description = "Request validation failed",
+                    content = @Content(schema = @Schema(implementation = ErrorResponseDto.class))),
+            @ApiResponse(responseCode = "404", description = "User not found",
+                    content = @Content(schema = @Schema(implementation = ErrorResponseDto.class)))
+    })
     @PatchMapping("/{id}/status")
     public UserResponseDto updateStatus(@PathVariable UUID id,
                                          @Valid @RequestBody UserStatusUpdateRequestDto request) {
