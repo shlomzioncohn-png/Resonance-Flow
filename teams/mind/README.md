@@ -34,8 +34,11 @@ teams/mind/
 │   ├── embeddings/     # vectors, search, duplicates
 │   ├── scoring/        # segmented ranking + propagation
 │   ├── evaluation/     # harness + metrics
-│   ├── api/            # outward service boundary
-│   └── contracts/      # Pydantic models
+│   ├── api/            # outward service boundary (FastAPI app, /health)
+│   ├── contracts/      # Pydantic models + the standard error format
+│   └── observability/  # record_call() — tracks time/cost of every model call
+├── docs/
+│   └── API.md          # the API contract shared with other teams
 ├── eval/
 │   ├── personas/       # the fixed scenario set
 │   └── datasets/       # manifests + checksums only, never the corpora
@@ -44,6 +47,7 @@ teams/mind/
 ├── models/             # local model weights — gitignored, never committed
 ├── pyproject.toml
 ├── Dockerfile
+├── .dockerignore
 ├── docker-compose.yml
 ├── Makefile
 ├── .env.example
@@ -121,8 +125,13 @@ make run                   # run the API locally
 make docker-up             # or run everything via docker compose
 ```
 
-CI ([`mind-ci.yml`](../../.github/workflows/mind-ci.yml)) runs exactly these
-`make dev` / `make lint` / `make test` / `make eval` steps on every PR — see
+Once running, `curl http://localhost:8000/health` should return `200` with
+`{"status": "ok", ...}`. Full API contract (endpoints, error format,
+versioning plan) is in [`docs/API.md`](./docs/API.md) — that's the document
+shared with other teams, in particular Relay.
+
+CI ([`mind-ci.yml`](../../.github/workflows/mind-ci.yml)) runs `make dev` /
+`make lint` / `make test` plus a harness smoke check on every PR — see
 [Continuous integration](#continuous-integration) below for what each one
 checks and who owns what.
 
