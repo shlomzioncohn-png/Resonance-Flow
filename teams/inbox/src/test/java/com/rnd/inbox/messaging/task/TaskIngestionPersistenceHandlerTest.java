@@ -1,4 +1,4 @@
-package com.rnd.inbox.bridge.task;
+package com.rnd.inbox.messaging.task;
 
 import com.rnd.inbox.messaging.kafka.TransientProcessingException;
 import com.rnd.inbox.model.entity.Assignment;
@@ -23,16 +23,16 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
-class BridgeTaskPersistenceHandlerTest {
+class TaskIngestionPersistenceHandlerTest {
 
     @Mock
     private TaskService taskService;
 
-    private BridgeTaskPersistenceHandler handler;
+    private TaskIngestionPersistenceHandler handler;
 
     @BeforeEach
     void setUp() {
-        handler = new BridgeTaskPersistenceHandler(taskService);
+        handler = new TaskIngestionPersistenceHandler(taskService);
     }
 
     @Test

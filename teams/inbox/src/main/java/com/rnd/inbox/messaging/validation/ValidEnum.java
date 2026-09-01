@@ -22,6 +22,8 @@ public @interface ValidEnum {
 
     Class<? extends Enum<?>> enumClass();
 
+    String[] allowed() default {};
+
     String message() default "must be one of the supported values";
 
     Class<?>[] groups() default {};

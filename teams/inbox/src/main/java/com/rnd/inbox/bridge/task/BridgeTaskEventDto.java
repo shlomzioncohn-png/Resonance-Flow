@@ -34,7 +34,7 @@ public class BridgeTaskEventDto {
     private String description;
 
     @NotBlank
-    @ValidEnum(enumClass = SourceType.class)
+    @ValidEnum(enumClass = SourceType.class, allowed = {"GITHUB_ISSUE", "GITHUB_PR", "CRM_DEAL"})
     private String sourceType;
 
     @NotBlank

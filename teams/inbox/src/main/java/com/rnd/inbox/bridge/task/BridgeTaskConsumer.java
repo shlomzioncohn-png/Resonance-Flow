@@ -3,6 +3,7 @@ package com.rnd.inbox.bridge.task;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.rnd.inbox.messaging.kafka.ErrorTopicPublisher;
 import com.rnd.inbox.messaging.kafka.EventProcessingTemplate;
+import com.rnd.inbox.messaging.task.TaskIngestionPersistenceHandler;
 import com.rnd.inbox.messaging.validation.BeanValidationEventValidator;
 import jakarta.validation.Validator;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
@@ -20,7 +21,7 @@ public class BridgeTaskConsumer {
 
     public BridgeTaskConsumer(ObjectMapper objectMapper, RetryTemplate kafkaRetryTemplate,
             ErrorTopicPublisher errorTopicPublisher, Validator validator,
-            BridgeTaskMapper mapper, BridgeTaskPersistenceHandler persistenceHandler) {
+            BridgeTaskMapper mapper, TaskIngestionPersistenceHandler persistenceHandler) {
         this.template = new EventProcessingTemplate<>(
                 objectMapper,
                 kafkaRetryTemplate,
