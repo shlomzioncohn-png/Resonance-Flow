@@ -1,8 +1,8 @@
 # Team LENS - API Gateway Service
 
-**Phase 2 Step 6: COMPLETE ✅**  
-**Status:** Gateway ready for Frontend ↔ BFF routing  
-**Last Updated:** 2026-08-25
+**Phase 2 Step 6-7: COMPLETE ✅**  
+**Status:** Gateway ready for Frontend ↔ BFF routing + Employee Workspace  
+**Last Updated:** 2026-08-27
 
 API Gateway service responsible for routing between **Frontend** and **BFF** (Backend for Frontend by Sari).
 
@@ -289,6 +289,136 @@ healthcheck:
 ```
 
 Container status becomes `unhealthy` after 3 consecutive failed checks.
+
+---
+
+## Employee Workspace - Task Recommendation
+
+**Status:** 🆕 NEW - Phase 2 Step 7  
+**Controller:** `WorkspaceController.java`  
+**Endpoint:** `POST /api/workspace/recommend`
+
+### Purpose
+
+Provides task recommendations to employees based on available time.
+
+**Main Question:** "I have 45 minutes - what should I work on?"
+
+### Endpoint
+
+**Request:**
+```bash
+POST /api/workspace/recommend
+Content-Type: application/json
+
+{
+  "userId": "emp_001",
+  "availableTime": 45,
+  "projectFilter": null,
+  "minPriority": null
+}
+```
+
+**Response:**
+```json
+{
+  "task": {
+    "id": "task_001",
+    "title": "Review API changes",
+    "description": "Review the new API endpoints and provide feedback",
+    "status": "READY",
+    "priority": "HIGH",
+    "effortEstimate": 35,
+    "dueDate": "2026-08-28T17:00:00",
+    "owner": "Rachel",
+    "project": "Platform Service",
+    "dependencies": [],
+    "constraints": []
+  },
+  "explanation": "Fits in 45 minutes ✓, High importance ✓, No blockers ✓",
+  "fitsInTime": true,
+  "isHighPriority": true,
+  "hasNoDependencies": true,
+  "confidenceScore": 85,
+  "alternatives": []
+}
+```
+
+### How It Works
+
+1. **Frontend** sends `WorkspaceRequestDTO`
+   - `userId`: Which employee
+   - `availableTime`: Minutes available (e.g., 45)
+   - Optional: `projectFilter`, `minPriority`
+
+2. **Gateway** (WorkspaceController) forwards to BFF
+
+3. **BFF** orchestrates:
+   - **Mind** scores all tasks
+   - **Chain** selects best feasible task based on:
+     - Available time constraint
+     - No blocking dependencies
+     - Highest priority/importance
+   - Returns `TaskRecommendationDTO` with task + explanation
+
+4. **Gateway** forwards response back to Frontend
+
+5. **Frontend** displays:
+   ```
+   ✨ BEST TASK FOR YOU
+   
+   Review API changes                     High
+   Platform Service
+   
+   ✓ Fits in your 45 minutes
+   ✓ High importance
+   ✓ No blocking dependency
+   
+   [ Start task ]  [ Chat about it ]  [ View details ]
+   ```
+
+### Flow Diagram
+
+```
+Frontend
+  │
+  │ POST /api/workspace/recommend
+  │ WorkspaceRequestDTO
+  │ (userId, availableTime)
+  ▼
+Gateway (WorkspaceController)
+  │
+  │ Forward to BFF
+  ▼
+BFF
+  ├── Mind: Score all tasks
+  ├── Chain: Select best feasible
+  └── Return TaskRecommendationDTO
+  │
+  │ (task + explanation + flags)
+  ▼
+Gateway
+  │
+  │ Return response
+  ▼
+Frontend
+  │
+  └── Display recommended task
+```
+
+### Using Shared DTOs
+
+This endpoint uses DTOs from `shared-dtos` library:
+- **Input:** `WorkspaceRequestDTO` from `com.rnd.lens.dto`
+- **Output:** `TaskRecommendationDTO` from `com.rnd.lens.dto`
+- **Task Model:** `TaskDTO` from `com.rnd.lens.dto`
+
+These DTOs are used consistently across:
+- Frontend (TypeScript interfaces generated from same source)
+- Gateway (Java classes imported)
+- BFF (Java classes imported)
+
+Single source of truth ensures type safety and consistency.
 
 ---
 

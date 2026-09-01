@@ -5,11 +5,17 @@ spring:
     active: ${SPRING_PROFILES_ACTIVE:local}
   cloud:
     gateway:
+      # Timeouts for the reactive HTTP client used by Spring Cloud Gateway routes.
+      # These are separate from the RestTemplate timeouts in GatewayApplication.
+      # Both must be set — fixing one does not cover the other.
+      httpclient:
+        connect-timeout: ${BFF_CONNECT_TIMEOUT_MS:2000}
+        response-timeout: ${BFF_READ_TIMEOUT_MS:10000}ms
       routes:
         # Route to BFF (Backend for Frontend)
         # BFF is responsible for all downstream team communication
         - id: bff
-          uri: http://bff-service:8080
+          uri: ${bff.service.url:http://bff-service:8080}
           predicates:
             - Path=/api/**
           filters:
@@ -22,6 +28,18 @@ spring:
             allowedOrigins: "*"
             allowedMethods: "*"
             allowedHeaders: "*"
+
+# BFF service configuration
+# Override BFF_SERVICE_URL to point at a different BFF without recompiling
+bff:
+  service:
+    url: ${BFF_SERVICE_URL:http://bff-service:8080}
+  connect-timeout-ms: ${BFF_CONNECT_TIMEOUT_MS:2000}
+  read-timeout-ms: ${BFF_READ_TIMEOUT_MS:10000}
+  # BFF endpoint paths — change here if BFF renames a route, no code changes needed
+  endpoints:
+    workspace-recommend: ${BFF_ENDPOINT_WORKSPACE_RECOMMEND:/workspace/recommend}
+    tasks: ${BFF_ENDPOINT_TASKS:/workspace/tasks}
 
 server:
   port: ${SERVER_PORT:8080}
