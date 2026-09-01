@@ -43,7 +43,8 @@ mvn spring-boot:run
 
 The service starts on [http://localhost:8082](http://localhost:8082).
 
-- Health check: `GET /actuator/health`
+- Health check (Gateway-facing, GATEWAY_CONTRACT.md §7 shape): `GET /health`
+- Health check (Spring Actuator, different shape): `GET /actuator/health`
 - Status: `GET /api/status`
 
 ## Running with Docker

@@ -9,8 +9,14 @@ services:
     environment:
       - SERVER_PORT=8080
       - SPRING_PROFILES_ACTIVE=${SPRING_PROFILES_ACTIVE:-local}
+      # Gateway's Java default (bff-service:8080) matches neither this compose file's
+      # bff service name nor its port — must be overridden here or every BFF-bound
+      # request (workspace endpoints, /health/ready) fails to resolve.
+      - BFF_SERVICE_URL=http://bff:8082
     ports:
       - "${GATEWAY_PORT:-8080}:8080"
+    depends_on:
+      - bff
 
   bff:
     build: ./bff
