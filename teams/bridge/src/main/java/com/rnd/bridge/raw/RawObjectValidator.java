@@ -8,8 +8,9 @@ import org.springframework.stereotype.Component;
 /**
  * Fails fast on a malformed {@link RawObjectEvent} before it leaves the
  * lane, mirroring task.TaskValidator's role for the Task side of the
- * pipeline. Wired into PointerEventPublisher as a gate between building the
- * event and sending it to Kafka.
+ * pipeline. Wired in as UnstructuredIntakeLane's PayloadValidator - the
+ * template method calls it between UnstructuredPayloadMapper.map() and
+ * KafkaRawObjectPublisher.publish().
  */
 @Component
 public final class RawObjectValidator implements PayloadValidator<RawObjectEvent> {

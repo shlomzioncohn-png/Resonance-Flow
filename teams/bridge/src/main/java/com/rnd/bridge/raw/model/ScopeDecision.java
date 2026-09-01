@@ -1,6 +1,8 @@
 package com.rnd.bridge.raw.model;
 
+import com.fasterxml.jackson.annotation.JsonProperty;
+
 public enum ScopeDecision {
-    INCLUDED,
-    EXCLUDED
+    @JsonProperty("included") INCLUDED,
+    @JsonProperty("excluded") EXCLUDED
 }

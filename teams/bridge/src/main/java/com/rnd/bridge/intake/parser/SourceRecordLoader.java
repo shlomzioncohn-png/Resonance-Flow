@@ -1,5 +1,6 @@
 package com.rnd.bridge.intake.parser;
 
+import com.rnd.bridge.core.ReadCursor;
 import com.rnd.bridge.intake.model.SourceRecord;
 import com.rnd.bridge.intake.parser.calendar.CalendarSourceReader;
 import com.rnd.bridge.intake.parser.drive.DriveSourceReader;
@@ -12,8 +13,9 @@ import java.util.List;
 import org.springframework.stereotype.Component;
 
 /**
- * Replaces the old FixtureSourceLoader as UnstructuredIntakeService's single entry point —
- * same load(RawSourceType) -> List<SourceRecord> contract. Each source now has its own
+ * Replaces the old FixtureSourceLoader as the single entry point each UnstructuredIntakeLane
+ * reads through (via SourceRecordReaderAdapter, one per RawSourceType) — same
+ * load(RawSourceType) -> List<SourceRecord> contract. Each source now has its own
  * Fixture.../Real...Reader pair (bridge.intake.<source>.mode selects which bean is active —
  * see plan.md), so this class only dispatches and, for chat sources, groups raw messages
  * into sessions via ChatSessionGrouper before returning.
@@ -43,12 +45,15 @@ public class SourceRecordLoader {
         this.chatSessionGrouper = chatSessionGrouper;
     }
 
-    public List<SourceRecord> load(RawSourceType sourceType) {
+    public List<SourceRecord> load(RawSourceType sourceType, ReadCursor cursor) {
         return switch (sourceType) {
             case EMAIL -> emailReader.read();
             case DRIVE -> driveReader.read();
             case CALENDAR -> calendarReader.read();
-            case SLACK -> chatSessionGrouper.group(slackReader.read());
+            // Only Slack honors the cursor today (stage 2, per plan.md "Cursor persistence") -
+            // the other sources still read everything every run until their Real reader adds
+            // since-filtering of its own.
+            case SLACK -> chatSessionGrouper.group(slackReader.read(cursor.since()));
             case WHATSAPP -> chatSessionGrouper.group(whatsAppReader.read());
             case MEETING -> throw new IllegalArgumentException(
                     sourceType + " is produced by the meeting/doc/audio lane, not this one");

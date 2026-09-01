@@ -27,6 +27,15 @@ public abstract class AbstractIntakeLane<S, O extends BridgePayload> {
 
     protected abstract PayloadPublisher<O> payloadPublisher();
 
+    /**
+     * Optional side-effect hook between mapping and validation - e.g. persisting raw bytes
+     * somewhere durable before the event is published. No-op by default: most lanes map
+     * straight to the payload that gets published, with no separate durable copy to write.
+     * Override only if the lane actually needs it (see UnstructuredIntakeLane).
+     */
+    protected void afterMap(S source, O payload, Instant asOf) {
+    }
+
     protected ErrorPolicy errorPolicy() {
         return ErrorPolicy.RECORD_AND_CONTINUE;
     }
@@ -42,6 +51,7 @@ public abstract class AbstractIntakeLane<S, O extends BridgePayload> {
                 read++;
                 try {
                     O payload = payloadMapper().map(source, asOf);
+                    afterMap(source, payload, asOf);
                     payloadValidator().validate(payload);
                     payloadPublisher().publish(payload);
                     published++;

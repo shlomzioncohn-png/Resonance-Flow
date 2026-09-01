@@ -3,6 +3,7 @@ package com.rnd.bridge.intake.parser;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.rnd.bridge.core.ReadCursor;
 import com.rnd.bridge.intake.config.ChatSessionProperties;
 import com.rnd.bridge.intake.model.SourceRecord;
 import com.rnd.bridge.intake.parser.calendar.FixtureCalendarSourceReader;
@@ -34,7 +35,7 @@ class SourceRecordLoaderSanityTest {
 
     @Test
     void loadsAllFourEmailBodiesPlusTwoAttachmentRecords() {
-        List<SourceRecord> records = loader.load(RawSourceType.EMAIL);
+        List<SourceRecord> records = loader.load(RawSourceType.EMAIL, ReadCursor.full());
         List<SourceRecord> bodies = records.stream().filter(r -> r.attachmentFilename() == null).toList();
 
         assertThat(records).hasSize(6); // 4 email bodies + 2 attachments split off Ruth's email
@@ -45,7 +46,7 @@ class SourceRecordLoaderSanityTest {
 
     @Test
     void loadsDriveWithNullDescriptionForImage() {
-        List<SourceRecord> records = loader.load(RawSourceType.DRIVE);
+        List<SourceRecord> records = loader.load(RawSourceType.DRIVE, ReadCursor.full());
         assertThat(records).hasSize(2);
         SourceRecord image = records.stream().filter(r -> r.naturalId().equals("9f8e7d6c5b")).findFirst().orElseThrow();
         assertThat(image.body()).isNull();
@@ -54,7 +55,7 @@ class SourceRecordLoaderSanityTest {
 
     @Test
     void emailWithTwoAttachmentsProducesTwoRecordsBothSharingTheBodysCorrelationId() {
-        List<SourceRecord> records = loader.load(RawSourceType.EMAIL);
+        List<SourceRecord> records = loader.load(RawSourceType.EMAIL, ReadCursor.full());
         SourceRecord body = records.stream()
                 .filter(r -> "CRM deal update".equals(r.subject()))
                 .findFirst().orElseThrow();
@@ -76,7 +77,7 @@ class SourceRecordLoaderSanityTest {
 
     @Test
     void loadsCalendarEventsPlusOneAttachmentOnTheSprintReviewEvent() {
-        List<SourceRecord> records = loader.load(RawSourceType.CALENDAR);
+        List<SourceRecord> records = loader.load(RawSourceType.CALENDAR, ReadCursor.full());
         List<SourceRecord> bodies = records.stream().filter(r -> r.attachmentFilename() == null).toList();
 
         assertThat(records).hasSize(3); // 2 event bodies + 1 agenda attachment
@@ -96,7 +97,7 @@ class SourceRecordLoaderSanityTest {
 
     @Test
     void slackMessagesSplitIntoTwoSessionsAcrossTheFiveHourGap() {
-        List<SourceRecord> records = loader.load(RawSourceType.SLACK);
+        List<SourceRecord> records = loader.load(RawSourceType.SLACK, ReadCursor.full());
         List<SourceRecord> transcripts = records.stream().filter(r -> r.attachmentFilename() == null).toList();
 
         assertThat(transcripts).hasSize(2);
@@ -109,7 +110,7 @@ class SourceRecordLoaderSanityTest {
 
     @Test
     void slackFileShareBecomesItsOwnAttachmentRecordFromTheRealFilesArray() {
-        List<SourceRecord> records = loader.load(RawSourceType.SLACK);
+        List<SourceRecord> records = loader.load(RawSourceType.SLACK, ReadCursor.full());
 
         assertThat(records).hasSize(3); // 2 session transcripts + 1 attachment from the "files" message
         SourceRecord attachment = records.stream()
@@ -126,7 +127,7 @@ class SourceRecordLoaderSanityTest {
 
     @Test
     void whatsAppFamilyChatIsTextOnlyWorkChatAlsoHasAnAttachment() {
-        List<SourceRecord> records = loader.load(RawSourceType.WHATSAPP);
+        List<SourceRecord> records = loader.load(RawSourceType.WHATSAPP, ReadCursor.full());
         // family: 1 body record. work: 1 body record + 1 attachment record. Total 3.
         assertThat(records).hasSize(3);
         assertThat(records).anyMatch(s -> s.naturalId().startsWith("whatsapp-family-sample|"));

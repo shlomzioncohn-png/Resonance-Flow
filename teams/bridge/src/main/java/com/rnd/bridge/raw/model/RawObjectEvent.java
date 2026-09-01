@@ -14,13 +14,10 @@ import java.util.List;
  * ("[A-Z_]+/tenant/yyyy-MM-dd/file") are schema-enforced. traceId and language from an
  * earlier schema draft are gone — the current schema has no such fields.
  *
- * correlationId/attachmentIndex are a Bridge-proposed addition (not yet confirmed by
- * Mind, proceeding on Malki's call — see plan.md): they let a body event and its
- * attachment event(s), split from the same logical source item, be linked without Mind
- * having to parse object_key. Nullable so a producer that never splits items (or a
- * consumer that doesn't care) is unaffected. If Mind comes back with a different
- * name/shape, only this file, PointerEventPublisher, and this file's serialization test
- * need to change.
+ * correlationId/attachmentIndex are a Bridge-proposed addition, confirmed by Mind: they
+ * let a body event and its attachment event(s), split from the same logical source item,
+ * be linked without Mind having to parse object_key. Nullable so a producer that never
+ * splits items (or a consumer that doesn't care) is unaffected.
  *
  * implements BridgePayload (see core.BridgePayload): tenantId() is satisfied by the
  * record's own tenantId component; dedupKey() is contentHash — the object_key is always
