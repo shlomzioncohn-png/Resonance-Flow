@@ -30,9 +30,12 @@ export function iconBadgeSx(theme: Theme) {
   }
 }
 
-/** Only two statuses exist in this mock model: whether the task still has an open blocker. */
-export function statusTone(status: 'Ready' | 'Blocked'): Tone {
-  return status === 'Ready' ? 'success' : 'warning'
+/** Maps a task status string to a display tone. Handles both API-casing (READY/BLOCKED) and legacy mock casing (Ready/Blocked). */
+export function statusTone(status: string): Tone {
+  const normalised = status.toUpperCase()
+  if (normalised === 'READY' || normalised === 'COMPLETED') return 'success'
+  if (normalised === 'IN_PROGRESS') return 'info'
+  return 'warning' // BLOCKED or unknown
 }
 
 export function DetailRow({ label, value }: { label: string; value: ReactNode }) {

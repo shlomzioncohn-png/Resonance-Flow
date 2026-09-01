@@ -6,6 +6,8 @@ import org.springframework.boot.web.client.RestTemplateBuilder;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.web.client.RestTemplate;
+import org.springframework.web.servlet.config.annotation.CorsRegistry;
+import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
 
 import java.time.Duration;
 
@@ -15,7 +17,7 @@ public class GatewayApplication {
     public static void main(String[] args) {
         SpringApplication.run(GatewayApplication.class, args);
     }
-    
+
     /**
      * RestTemplate bean with explicit connect and read timeouts.
      *
@@ -39,5 +41,23 @@ public class GatewayApplication {
                 .connectTimeout(Duration.ofMillis(connectTimeoutMs))
                 .readTimeout(Duration.ofMillis(readTimeoutMs))
                 .build();
+    }
+
+    /**
+     * Global CORS configuration — allow all origins/methods/headers.
+     * Mirrors the previous spring.cloud.gateway.globalcors config.
+     * Restrict origins in production when a real auth layer is in place.
+     */
+    @Bean
+    public WebMvcConfigurer corsConfigurer() {
+        return new WebMvcConfigurer() {
+            @Override
+            public void addCorsMappings(CorsRegistry registry) {
+                registry.addMapping("/**")
+                        .allowedOriginPatterns("*")
+                        .allowedMethods("*")
+                        .allowedHeaders("*");
+            }
+        };
     }
 }

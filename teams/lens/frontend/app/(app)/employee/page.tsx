@@ -8,6 +8,7 @@ import Button from '@mui/material/Button'
 import Card from '@mui/material/Card'
 import CardContent from '@mui/material/CardContent'
 import Chip from '@mui/material/Chip'
+import CircularProgress from '@mui/material/CircularProgress'
 import MenuItem from '@mui/material/MenuItem'
 import Stack from '@mui/material/Stack'
 import TextField from '@mui/material/TextField'
@@ -18,31 +19,43 @@ import AutoAwesomeOutlinedIcon from '@mui/icons-material/AutoAwesomeOutlined'
 import CheckCircleOutlinedIcon from '@mui/icons-material/CheckCircleOutlined'
 import ChatBubbleOutlineOutlinedIcon from '@mui/icons-material/ChatBubbleOutlineOutlined'
 import CodeOutlinedIcon from '@mui/icons-material/CodeOutlined'
-import GitHubIcon from '@mui/icons-material/GitHub'
 import LinkOutlinedIcon from '@mui/icons-material/LinkOutlined'
 import NotificationsActiveOutlinedIcon from '@mui/icons-material/NotificationsActiveOutlined'
 import PersonOutlineIcon from '@mui/icons-material/PersonOutlined'
 import PlayArrowOutlinedIcon from '@mui/icons-material/PlayArrowOutlined'
 import ScheduleOutlinedIcon from '@mui/icons-material/ScheduleOutlined'
+import WarningAmberOutlinedIcon from '@mui/icons-material/WarningAmberOutlined'
 import PageContainer from '@/components/layout/PageContainer'
 import { radiusTokens } from '@/theme'
 import { DetailRow, iconBadgeSx, softToneSx, statusTone } from './shared'
-import { useTask } from './taskStore'
+import { recommendTask, type TaskRecommendation } from '@/services/workspaceApi'
 
 const TIME_OPTIONS_MIN = [15, 30, 45, 60, 90]
 
 export default function EmployeeWorkspacePage() {
   const [minutes, setMinutes] = useState(45)
-  const [recommended, setRecommended] = useState(false)
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [recommendation, setRecommendation] = useState<TaskRecommendation | null>(null)
   const [started, setStarted] = useState(false)
 
-  const findBestTask = () => {
+  const findBestTask = async () => {
     setStarted(false)
-    setRecommended(true)
+    setError(null)
+    setLoading(true)
+    try {
+      const result = await recommendTask({ availableTime: minutes })
+      setRecommendation(result)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to fetch recommendation')
+      setRecommendation(null)
+    } finally {
+      setLoading(false)
+    }
   }
 
-  const { task } = useTask()
-  const fitsWindow = minutes >= task.estimatedMinutes
+  const task = recommendation?.task ?? null
+  const fitsWindow = task ? minutes >= task.effortEstimate : false
 
   return (
     <PageContainer title="My Workspace" description="Make the most of your available time.">
@@ -87,17 +100,33 @@ export default function EmployeeWorkspacePage() {
                 </TextField>
                 <Button
                   variant="contained"
-                  startIcon={<AutoAwesomeOutlinedIcon />}
+                  startIcon={loading ? <CircularProgress size={16} color="inherit" /> : <AutoAwesomeOutlinedIcon />}
                   onClick={findBestTask}
+                  disabled={loading}
                 >
-                  Find my best task
+                  {loading ? 'Finding…' : 'Find my best task'}
                 </Button>
               </Stack>
             </Stack>
           </CardContent>
         </Card>
 
-        {recommended && (
+        {/* Error state */}
+        {error && (
+          <Card sx={{ border: '1px solid', borderColor: 'error.main' }}>
+            <CardContent>
+              <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
+                <WarningAmberOutlinedIcon color="error" />
+                <Typography color="error.main" variant="body2">
+                  {error}
+                </Typography>
+              </Stack>
+            </CardContent>
+          </Card>
+        )}
+
+        {/* Recommendation result */}
+        {recommendation && task && (
           <Stack direction={{ xs: 'column', lg: 'row' }} spacing={3} sx={{ alignItems: 'stretch' }}>
             <Card sx={{ flex: 1, minWidth: 0 }}>
               <CardContent>
@@ -106,6 +135,13 @@ export default function EmployeeWorkspacePage() {
                   <Typography variant="subtitle1" sx={{ fontWeight: 700 }}>
                     Best task for you
                   </Typography>
+                  {recommendation.confidenceScore > 0 && (
+                    <Chip
+                      size="small"
+                      label={`${recommendation.confidenceScore}% match`}
+                      sx={softToneSx('success')}
+                    />
+                  )}
                 </Stack>
 
                 <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2}>
@@ -127,7 +163,7 @@ export default function EmployeeWorkspacePage() {
                       />
                     </Stack>
                     <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-                      {task.team}
+                      {task.project}
                     </Typography>
 
                     <Stack spacing={0.75} sx={{ mb: 3 }}>
@@ -138,17 +174,21 @@ export default function EmployeeWorkspacePage() {
                           <ScheduleOutlinedIcon fontSize="small" color="warning" />
                         )}
                         <Typography variant="body2">
-                          {fitsWindow
-                            ? `Fits in your ${minutes} minute window`
-                            : `Needs about ${task.estimatedMinutes} min — longer than your ${minutes} minute window`}
+                          {recommendation.explanation}
                         </Typography>
                       </Stack>
-                      {['High importance', `Unblocks ${task.blocks.length} other tasks`].map((reason) => (
-                        <Stack key={reason} direction="row" spacing={1} sx={{ alignItems: 'center' }}>
+                      {recommendation.isHighPriority && (
+                        <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
                           <CheckCircleOutlinedIcon fontSize="small" color="success" />
-                          <Typography variant="body2">{reason}</Typography>
+                          <Typography variant="body2">High importance</Typography>
                         </Stack>
-                      ))}
+                      )}
+                      {recommendation.hasNoDependencies && (
+                        <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
+                          <CheckCircleOutlinedIcon fontSize="small" color="success" />
+                          <Typography variant="body2">No blocking dependencies</Typography>
+                        </Stack>
+                      )}
                     </Stack>
 
                     <Stack direction="row" spacing={1.5} sx={{ flexWrap: 'wrap' }}>
@@ -201,7 +241,7 @@ export default function EmployeeWorkspacePage() {
                   />
                 </Stack>
                 <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-                  {task.team}
+                  {task.project}
                 </Typography>
 
                 <Stack direction="row" spacing={1} sx={{ flexWrap: 'wrap', mb: 3 }}>
@@ -214,15 +254,17 @@ export default function EmployeeWorkspacePage() {
                   <Chip
                     size="small"
                     icon={<ScheduleOutlinedIcon />}
-                    label={fitsWindow ? `Fits in ${minutes} min` : `Needs ${task.estimatedMinutes} min`}
+                    label={fitsWindow ? `Fits in ${minutes} min` : `Needs ${task.effortEstimate} min`}
                     sx={softToneSx(fitsWindow ? 'info' : 'warning')}
                   />
-                  <Chip
-                    size="small"
-                    icon={<LinkOutlinedIcon />}
-                    label={`Unblocks ${task.blocks.length} tasks`}
-                    sx={softToneSx('secondary')}
-                  />
+                  {task.dependencies.length > 0 && (
+                    <Chip
+                      size="small"
+                      icon={<LinkOutlinedIcon />}
+                      label={`${task.dependencies.length} dependenc${task.dependencies.length === 1 ? 'y' : 'ies'}`}
+                      sx={softToneSx('secondary')}
+                    />
+                  )}
                 </Stack>
 
                 <Stack spacing={2}>
@@ -245,19 +287,14 @@ export default function EmployeeWorkspacePage() {
                       </Stack>
                     }
                   />
-                  <DetailRow label="Due" value={task.due} />
-                  <DetailRow label="Estimated effort" value={`${task.estimatedMinutes} min`} />
-                  <DetailRow label="Created" value={task.createdAt} />
-                  <DetailRow
-                    label="Source"
-                    value={
-                      <Stack direction="row" spacing={0.75} sx={{ alignItems: 'center' }}>
-                        <GitHubIcon sx={{ fontSize: 16 }} />
-                        {task.source}
-                      </Stack>
-                    }
-                  />
-                  <DetailRow label="Sprint" value={task.sprint} />
+                  {task.dueDate && (
+                    <DetailRow label="Due" value={new Date(task.dueDate).toLocaleString()} />
+                  )}
+                  <DetailRow label="Estimated effort" value={`${task.effortEstimate} min`} />
+                  <DetailRow label="Project" value={task.project} />
+                  {task.constraints.length > 0 && (
+                    <DetailRow label="Constraints" value={task.constraints.join(', ')} />
+                  )}
                 </Stack>
               </CardContent>
             </Card>
