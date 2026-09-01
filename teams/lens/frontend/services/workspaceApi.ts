@@ -52,3 +52,9 @@ export interface TaskRecommendation {
 export function recommendTask(request: WorkspaceRequest): Promise<TaskRecommendation> {
   return api.post<TaskRecommendation>('/api/workspace/recommend', request)
 }
+
+export type TaskStatus = 'READY' | 'IN_PROGRESS' | 'BLOCKED' | 'COMPLETED'
+
+export function updateTaskStatus(taskId: string, status: TaskStatus): Promise<ApiTask> {
+  return api.patch<ApiTask>(`/api/workspace/tasks/${taskId}/status`, { status })
+}

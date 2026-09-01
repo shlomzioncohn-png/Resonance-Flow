@@ -28,7 +28,7 @@ import WarningAmberOutlinedIcon from '@mui/icons-material/WarningAmberOutlined'
 import PageContainer from '@/components/layout/PageContainer'
 import { radiusTokens } from '@/theme'
 import { DetailRow, iconBadgeSx, softToneSx, statusTone } from './shared'
-import { recommendTask, type TaskRecommendation } from '@/services/workspaceApi'
+import { recommendTask, updateTaskStatus, type TaskRecommendation } from '@/services/workspaceApi'
 
 const TIME_OPTIONS_MIN = [15, 30, 45, 60, 90]
 
@@ -37,6 +37,7 @@ export default function EmployeeWorkspacePage() {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [recommendation, setRecommendation] = useState<TaskRecommendation | null>(null)
+  const [starting, setStarting] = useState(false)
   const [started, setStarted] = useState(false)
 
   const findBestTask = async () => {
@@ -51,6 +52,21 @@ export default function EmployeeWorkspacePage() {
       setRecommendation(null)
     } finally {
       setLoading(false)
+    }
+  }
+
+  const startTask = async () => {
+    if (!recommendation?.task) return
+    setStarting(true)
+    try {
+      const updated = await updateTaskStatus(recommendation.task.id, 'IN_PROGRESS')
+      // Reflect the new status in the displayed recommendation
+      setRecommendation((prev) => prev ? { ...prev, task: updated } : prev)
+      setStarted(true)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to start task')
+    } finally {
+      setStarting(false)
     }
   }
 
@@ -194,11 +210,11 @@ export default function EmployeeWorkspacePage() {
                     <Stack direction="row" spacing={1.5} sx={{ flexWrap: 'wrap' }}>
                       <Button
                         variant="contained"
-                        disabled={started}
-                        onClick={() => setStarted(true)}
-                        startIcon={!started && <PlayArrowOutlinedIcon />}
+                        disabled={started || starting}
+                        onClick={startTask}
+                        startIcon={starting ? <CircularProgress size={16} color="inherit" /> : (!started && <PlayArrowOutlinedIcon />)}
                       >
-                        {started ? 'Task started' : 'Start task'}
+                        {started ? 'Task started' : starting ? 'Starting…' : 'Start task'}
                       </Button>
                       <Button
                         variant="outlined"
