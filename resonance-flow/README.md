@@ -55,23 +55,36 @@ non-personal credential + an automated way to provision it); it isn't
 part of this local-auth mechanism and shouldn't block using it for
 dev/test.
 
-## Waiting for dependencies (Kafka, Postgres, ...)
+## Waiting for dependencies (Kafka, Postgres, MinIO)
 
 If your component needs an infra dependency reachable before its main
 container starts, set `dependencies` (globally or under your
 `components.<name>`) and the chart adds a `wait-for-<name>` initContainer
-that blocks until `host:port` is TCP-reachable:
+that blocks until `host:port` is TCP-reachable.
+
+Currently wired up:
+
+- **Kafka** - every component depends on it, so it's set globally
+  (`dependencies` in `values.yaml`) as `kafka.kafka.svc.cluster.local:9092`.
+- **Postgres** - only `inbox` uses it:
+  `postgres.postgres.svc.cluster.local:5432`.
+- **MinIO** - `bridge` and `mind` use it:
+  `minio.minio.svc.cluster.local:9000`.
+
+Postgres and MinIO hostnames follow the same convention as the `kafka/`
+chart in this repo (chart deployed into a same-named namespace). Neither
+has its own chart here yet - until one is deployed at that address, pods
+for `inbox`, `bridge`, and `mind` will block in `Init:0/1` forever.
 
 ```yaml
 components:
   inbox:
     dependencies:
-      - name: kafka
-        host: kafka.kafka.svc.cluster.local
-        port: 9092
+      - name: postgres
+        host: postgres.postgres.svc.cluster.local
+        port: 5432
 ```
 
 For anything the TCP-reachability check can't express, drop a raw
 container spec into `initContainers` (globally or per-component) instead
-- it's appended after the generated `dependencies` containers. Nothing is
-set by default, so this is opt-in per team.
+- it's appended after the generated `dependencies` containers.
