@@ -12,7 +12,8 @@ import org.springframework.security.web.SecurityFilterChain;
  *
  * Current state (local / dev): all endpoints are permitted without
  * authentication so the end-to-end flow can be verified without a
- * real JWT issuer.
+ * real JWT issuer. 
+ *?""
  *
  * TODO: when Auth & Identity is implemented, restrict /api/** to
  * requests that carry a valid JWT and extract the userId from the

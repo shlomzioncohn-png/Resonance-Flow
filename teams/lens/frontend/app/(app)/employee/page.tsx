@@ -273,7 +273,7 @@ export default function EmployeeWorkspacePage() {
                     label={fitsWindow ? `Fits in ${minutes} min` : `Needs ${task.effortEstimate} min`}
                     sx={softToneSx(fitsWindow ? 'info' : 'warning')}
                   />
-                  {task.dependencies.length > 0 && (
+                  {(task.dependencies ?? []).length > 0 && (
                     <Chip
                       size="small"
                       icon={<LinkOutlinedIcon />}
@@ -308,8 +308,8 @@ export default function EmployeeWorkspacePage() {
                   )}
                   <DetailRow label="Estimated effort" value={`${task.effortEstimate} min`} />
                   <DetailRow label="Project" value={task.project} />
-                  {task.constraints.length > 0 && (
-                    <DetailRow label="Constraints" value={task.constraints.join(', ')} />
+                  {(task.constraints ?? []).length > 0 && (
+                    <DetailRow label="Constraints" value={(task.constraints ?? []).join(', ')} />
                   )}
                 </Stack>
               </CardContent>

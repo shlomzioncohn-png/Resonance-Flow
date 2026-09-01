@@ -29,9 +29,9 @@ export interface ApiTask {
   owner: string
   project: string
   /** IDs of tasks this task depends on */
-  dependencies: string[]
+  dependencies?: string[]
   /** Blocker labels, e.g. "approval_needed" */
-  constraints: string[]
+  constraints?: string[]
 }
 
 // ── Recommendation response ────────────────────────────────────────────────
