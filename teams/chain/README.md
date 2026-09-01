@@ -82,7 +82,7 @@ CRUD store for dependency edges (`taskId` depends on `dependsOnTaskId`): `findBy
 `findByDependsOnTaskId`, `save`, `delete`. `save` is idempotent - saving the same edge twice does
 not create a duplicate row - and `delete` is a no-op if the edge doesn't exist. This layer does not
 validate task existence or reject self-dependencies; it is a thin storage abstraction, currently
-backed by an in-memory synchronized list until a real DB is chosen.
+backed by an in-memory dual adjacency map (`ConcurrentHashMap`) until a real DB is chosen.
 
 `TaskDependencyService` (in `service/`) sits on top of it and enforces the business rules from
 issue #66:
