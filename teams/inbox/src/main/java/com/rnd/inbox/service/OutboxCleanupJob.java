@@ -54,10 +54,6 @@ public class OutboxCleanupJob {
             log.info("Outbox cleanup: removed {} published row(s) older than {} day(s), {} failed row(s) older than {} day(s)",
                     deletedPublished, publishedRetention.toDays(), deletedFailed, failedRetention.toDays());
         } catch (Exception e) {
-            // Both deletes run in the same transaction, so a failure in either one
-            // aborts both - there is no partial cleanup to report. Logging here
-            // just gives a clear message instead of a raw framework stack trace;
-            // the next scheduled run will retry both.
             log.error("Outbox cleanup failed; will retry on next scheduled run", e);
         }
     }

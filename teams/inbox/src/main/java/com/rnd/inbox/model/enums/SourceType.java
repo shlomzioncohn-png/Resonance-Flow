@@ -11,5 +11,6 @@ public enum SourceType {
     DOC,
     SCANNED_DOC,
     CALENDAR,
-    MANUAL
+    MANUAL,
+    DRIVE
 }

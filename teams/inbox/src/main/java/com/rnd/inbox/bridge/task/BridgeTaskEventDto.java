@@ -3,6 +3,7 @@ package com.rnd.inbox.bridge.task;
 import com.rnd.inbox.messaging.validation.IsoInstant;
 import com.rnd.inbox.messaging.validation.ValidEnum;
 import com.rnd.inbox.messaging.validation.ValidUuid;
+import com.rnd.inbox.model.enums.AssignmentRole;
 import com.rnd.inbox.model.enums.SourceType;
 import com.rnd.inbox.model.enums.TaskRoleContext;
 import com.rnd.inbox.model.enums.TaskStatus;
@@ -14,6 +15,7 @@ import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Positive;
 
+@ConsistentAssignment
 public class BridgeTaskEventDto {
 
     @ValidUuid
@@ -60,6 +62,18 @@ public class BridgeTaskEventDto {
     @DecimalMin("0.0")
     @DecimalMax("1.0")
     private Double confidence;
+
+    @ValidUuid
+    private String assigneeUserId;
+
+    @ValidUuid
+    private String assigneeTeamId;
+
+    @ValidEnum(enumClass = AssignmentRole.class)
+    private String assignmentRole;
+
+    @ValidUuid
+    private String assignedByUserId;
 
     public String getEventId() {
         return eventId;
@@ -171,5 +185,37 @@ public class BridgeTaskEventDto {
 
     public void setConfidence(Double confidence) {
         this.confidence = confidence;
+    }
+
+    public String getAssigneeUserId() {
+        return assigneeUserId;
+    }
+
+    public void setAssigneeUserId(String assigneeUserId) {
+        this.assigneeUserId = assigneeUserId;
+    }
+
+    public String getAssigneeTeamId() {
+        return assigneeTeamId;
+    }
+
+    public void setAssigneeTeamId(String assigneeTeamId) {
+        this.assigneeTeamId = assigneeTeamId;
+    }
+
+    public String getAssignmentRole() {
+        return assignmentRole;
+    }
+
+    public void setAssignmentRole(String assignmentRole) {
+        this.assignmentRole = assignmentRole;
+    }
+
+    public String getAssignedByUserId() {
+        return assignedByUserId;
+    }
+
+    public void setAssignedByUserId(String assignedByUserId) {
+        this.assignedByUserId = assignedByUserId;
     }
 }

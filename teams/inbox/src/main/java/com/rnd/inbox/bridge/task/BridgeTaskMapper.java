@@ -1,6 +1,8 @@
 package com.rnd.inbox.bridge.task;
 
+import com.rnd.inbox.model.entity.Assignment;
 import com.rnd.inbox.model.entity.Task;
+import com.rnd.inbox.model.enums.AssignmentRole;
 import com.rnd.inbox.model.enums.SourceType;
 import com.rnd.inbox.model.enums.TaskExtractionProvenance;
 import com.rnd.inbox.model.enums.TaskRoleContext;
@@ -8,6 +10,8 @@ import com.rnd.inbox.model.enums.TaskStatus;
 import com.rnd.inbox.model.enums.TaskTier;
 import com.rnd.inbox.repository.OrganizationRepository;
 import com.rnd.inbox.repository.ProjectRepository;
+import com.rnd.inbox.repository.TeamRepository;
+import com.rnd.inbox.repository.UserRepository;
 import org.springframework.stereotype.Component;
 
 import java.time.Clock;
@@ -19,12 +23,16 @@ public class BridgeTaskMapper {
 
     private final OrganizationRepository organizationRepository;
     private final ProjectRepository projectRepository;
+    private final UserRepository userRepository;
+    private final TeamRepository teamRepository;
     private final Clock clock;
 
     public BridgeTaskMapper(OrganizationRepository organizationRepository, ProjectRepository projectRepository,
-            Clock clock) {
+            UserRepository userRepository, TeamRepository teamRepository, Clock clock) {
         this.organizationRepository = organizationRepository;
         this.projectRepository = projectRepository;
+        this.userRepository = userRepository;
+        this.teamRepository = teamRepository;
         this.clock = clock;
     }
 
@@ -51,5 +59,25 @@ public class BridgeTaskMapper {
         task.setCreatedAt(now);
         task.setUpdatedAt(now);
         return task;
+    }
+
+    public Assignment mapAssignment(BridgeTaskEventDto dto) {
+        if (dto.getAssigneeUserId() == null && dto.getAssigneeTeamId() == null) {
+            return null;
+        }
+
+        Assignment assignment = new Assignment();
+        if (dto.getAssigneeUserId() != null) {
+            assignment.setUser(userRepository.getReferenceById(UUID.fromString(dto.getAssigneeUserId())));
+        }
+        if (dto.getAssigneeTeamId() != null) {
+            assignment.setTeam(teamRepository.getReferenceById(UUID.fromString(dto.getAssigneeTeamId())));
+        }
+        assignment.setAssignmentRole(AssignmentRole.valueOf(dto.getAssignmentRole()));
+        assignment.setAssignedAt(Instant.now(clock));
+        if (dto.getAssignedByUserId() != null) {
+            assignment.setAssignedBy(userRepository.getReferenceById(UUID.fromString(dto.getAssignedByUserId())));
+        }
+        return assignment;
     }
 }

@@ -56,9 +56,6 @@ class OutboxCleanupJobIntegrationTest extends AbstractIntegrationTest {
 
     @Test
     void cleanup_removesOldPublishedAndFailedRows_butNeverPending() {
-        // With 0-day retention, "older than now minus 0 days" still requires
-        // strictly before the cutoff, so back these off by a second to be
-        // unambiguously in the past.
         Instant old = Instant.now().minusSeconds(60);
 
         OutboxEvent published = save(OutboxStatus.PUBLISHED, old);

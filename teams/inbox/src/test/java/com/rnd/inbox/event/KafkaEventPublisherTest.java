@@ -49,7 +49,6 @@ class KafkaEventPublisherTest {
 
     @BeforeEach
     void setUp() {
-        // Runs the scheduled retry immediately (synchronously) instead of waiting for the real backoff delay.
         lenient().when(retryScheduler.schedule(any(Runnable.class), anyLong(), any(TimeUnit.class)))
                 .thenAnswer(invocation -> {
                     Runnable task = invocation.getArgument(0);

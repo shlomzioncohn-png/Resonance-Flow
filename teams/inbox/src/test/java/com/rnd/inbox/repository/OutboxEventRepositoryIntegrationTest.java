@@ -23,12 +23,6 @@ import java.util.concurrent.TimeUnit;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-/**
- * Integration tests for OutboxEventRepository against a real Postgres
- * container - claimPendingBatch relies on FOR UPDATE SKIP LOCKED, which is
- * real database locking behavior that cannot be faithfully simulated with
- * mocks.
- */
 class OutboxEventRepositoryIntegrationTest extends AbstractIntegrationTest {
 
     @Autowired
@@ -46,18 +40,6 @@ class OutboxEventRepositoryIntegrationTest extends AbstractIntegrationTest {
         return outboxEventRepository.save(newUnsavedEvent(Instant.now()));
     }
 
-    // created_at is updatable = false (it's meant to be immutable once
-    // written), so a row that needs a backdated created_at must have it set
-    // before the first save - setting it on an already-persisted entity and
-    // saving again silently keeps the original value.
-    //
-    // OutboxEvent.eventId uses a Hibernate-assigned @GeneratedValue, which
-    // overwrites the id set here on insert. Because the id is already
-    // non-null before that first save, Spring Data treats it as an update
-    // (merge) rather than a fresh persist, so the generated id only comes
-    // back on the object returned by save() - the original reference keeps
-    // the discarded id. Callers must reassign from save()'s return value
-    // before using getEventId().
     private OutboxEvent newUnsavedEvent(Instant createdAt) {
         OutboxEvent event = new OutboxEvent();
         event.setEventId(UUID.randomUUID());
@@ -107,10 +89,7 @@ class OutboxEventRepositoryIntegrationTest extends AbstractIntegrationTest {
 
     @Test
     void claimPendingBatch_skipsRowsLockedByAnotherConcurrentTransaction() throws Exception {
-        // Simulates two INBOX instances polling at the same moment: this
-        // test proves SKIP LOCKED actually prevents both from claiming the
-        // same rows, using two real, concurrently open transactions rather
-        // than mocked repository calls.
+     
         OutboxEvent event = newPendingEvent();
 
         CountDownLatch firstTransactionHasClaimed = new CountDownLatch(1);
@@ -138,7 +117,7 @@ class OutboxEventRepositoryIntegrationTest extends AbstractIntegrationTest {
         executor.shutdown();
 
         assertThat(first).extracting(OutboxEvent::getEventId).containsExactly(event.getEventId());
-        assertThat(second).isEmpty(); // row was locked by the first transaction, SKIP LOCKED skips it
+        assertThat(second).isEmpty(); 
     }
 
     private static void awaitQuietly(CountDownLatch latch) {

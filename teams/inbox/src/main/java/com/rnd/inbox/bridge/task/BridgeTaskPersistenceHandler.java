@@ -1,6 +1,7 @@
 package com.rnd.inbox.bridge.task;
 
 import com.rnd.inbox.messaging.kafka.TransientProcessingException;
+import com.rnd.inbox.model.entity.Assignment;
 import com.rnd.inbox.model.entity.Task;
 import com.rnd.inbox.service.TaskService;
 import org.springframework.dao.DataAccessException;
@@ -18,9 +19,9 @@ public class BridgeTaskPersistenceHandler {
         this.taskService = taskService;
     }
 
-    public void persist(Task incoming, UUID correlationId) {
+    public void persist(Task incoming, Assignment assignment, UUID correlationId) {
         try {
-            taskService.createTask(incoming, correlationId);
+            taskService.createTask(incoming, assignment, correlationId);
         } catch (DataIntegrityViolationException e) {
             taskService.findExisting(incoming).orElseThrow(() -> e);
         } catch (DataAccessException e) {
