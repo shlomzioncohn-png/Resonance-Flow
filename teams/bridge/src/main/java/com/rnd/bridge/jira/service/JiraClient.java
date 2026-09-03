@@ -9,6 +9,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
+import org.springframework.util.StringUtils;
 import org.springframework.web.reactive.function.client.WebClient;
 import org.springframework.web.reactive.function.client.WebClientResponseException;
 import reactor.core.publisher.Flux;
@@ -38,18 +39,25 @@ public class JiraClient {
     }
 
     public Flux<Task> fetchIssues() {
-        return searchIssues(defaultProject.isEmpty() ? "" : "project = " + defaultProject);
+        if (!StringUtils.hasText(defaultProject)) {
+            return Flux.error(new IllegalArgumentException("jira.target.project must be configured for default sync"));
+        }
+        return searchIssues("project = " + defaultProject);
     }
 
     public Flux<Task> fetchIssues(String projectKey) {
-        return searchIssues("project = " + projectKey);
+        String effectiveProject = StringUtils.hasText(projectKey) ? projectKey : defaultProject;
+        if (!StringUtils.hasText(effectiveProject)) {
+            return Flux.error(new IllegalArgumentException("Jira project key must be configured or provided"));
+        }
+        return searchIssues("project = " + effectiveProject);
     }
 
     public Flux<Task> searchIssues(String jql) {
         log.info("Searching Jira issues with JQL: {}", jql);
 
         return webClient.get()
-                .uri("/rest/api/2/search?jql={jql}", jql)
+                .uri(uriBuilder -> uriBuilder.path("/rest/api/2/search").queryParam("jql", jql).build())
                 .retrieve()
                 .bodyToMono(JiraSearchResult.class)
                 .flatMapMany(result -> {
