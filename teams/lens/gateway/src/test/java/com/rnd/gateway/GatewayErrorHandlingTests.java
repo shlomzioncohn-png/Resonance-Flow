@@ -50,4 +50,45 @@ class GatewayErrorHandlingTests {
             .andExpect(status().isOk())
             .andExpect(content().contentType(MediaType.APPLICATION_JSON));
     }
+
+    @Test
+    @DisplayName("Health ready endpoint returns 200 with BFF status")
+    void testHealthReadyEndpoint() throws Exception {
+        mockMvc
+            .perform(get("/health/ready"))
+            .andExpect(status().isOk())
+            .andExpect(content().contentType(MediaType.APPLICATION_JSON));
+    }
+
+    @Test
+    @DisplayName("Malformed JSON body returns 400 BAD_REQUEST")
+    void testMalformedJsonBody() throws Exception {
+        mockMvc
+            .perform(post("/api/workspace/recommend")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{invalid json}"))
+            .andExpect(status().isBadRequest())
+            .andExpect(jsonPath("$.errorCode").value("BAD_REQUEST"));
+    }
+
+    @Test
+    @DisplayName("Missing required field returns 400 with details")
+    void testMissingRequiredField() throws Exception {
+        mockMvc
+            .perform(post("/api/workspace/recommend")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{}"))
+            .andExpect(status().isBadRequest())
+            .andExpect(jsonPath("$.details").exists());
+    }
+
+    @Test
+    @DisplayName("Invalid availableTime returns 400")
+    void testInvalidAvailableTime() throws Exception {
+        mockMvc
+            .perform(post("/api/workspace/recommend")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"availableTime\": 0}"))
+            .andExpect(status().isBadRequest());
+    }
 }

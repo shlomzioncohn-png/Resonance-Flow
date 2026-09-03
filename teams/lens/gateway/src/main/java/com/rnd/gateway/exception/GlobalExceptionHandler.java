@@ -1,15 +1,16 @@
 package com.rnd.gateway.exception;
-
 import com.rnd.gateway.dto.ErrorResponse;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.web.servlet.NoHandlerFoundException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.context.request.WebRequest;
 import org.springframework.http.converter.HttpMessageNotReadableException;
+import org.springframework.web.server.ResponseStatusException;
 
 import java.util.stream.Collectors;
 
@@ -25,8 +26,30 @@ public class GlobalExceptionHandler {
     private static final Logger logger = LoggerFactory.getLogger(GlobalExceptionHandler.class);
     
     /**
-     * Handle 404 NOT_FOUND errors.
-     * Triggered when Gateway can't find a route or downstream service returns 404.
+     * Handle 404 NOT_FOUND errors from Spring servlet dispatcher.
+     * Triggered when no handler is found for a request path.
+     * This takes precedence over ResponseStatusException for servlet-level 404s.
+     */
+    @ExceptionHandler(value = {NoHandlerFoundException.class})
+    public ResponseEntity<ErrorResponse> handleNoHandlerFoundException(
+            NoHandlerFoundException ex, WebRequest request) {
+        
+        String path = ex.getRequestURL();
+        logger.warn("No handler found - Path: {}, Method: {}", path, ex.getHttpMethod());
+        
+        ErrorResponse error = new ErrorResponse(
+                "NOT_FOUND",
+                "Route not found. Check the request path and HTTP method.",
+                path
+        );
+        
+        return new ResponseEntity<>(error, HttpStatus.NOT_FOUND);
+    }
+
+    /**
+     * Handle 404 NOT_FOUND errors from downstream services (via ResponseStatusException).
+     * Triggered when Gateway receives 404 from BFF or other ResponseStatusException errors.
+     * NoHandlerFoundException has higher priority for servlet-level 404s.
      */
     @ExceptionHandler(value = {ResponseStatusException.class})
     public ResponseEntity<ErrorResponse> handleResponseStatusException(

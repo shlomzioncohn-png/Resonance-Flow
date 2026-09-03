@@ -4,6 +4,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.context.annotation.Bean;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -14,6 +15,7 @@ import org.springframework.web.client.RestClientException;
 import java.time.Instant;
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.concurrent.*;
 
 /**
  * Health check endpoints for the Gateway.
@@ -31,12 +33,26 @@ import java.util.Map;
 public class HealthController {
 
     private static final Logger logger = LoggerFactory.getLogger(HealthController.class);
+    private static final int HEALTH_CHECK_TIMEOUT_SECONDS = 2;
+    private static final int HEALTH_CHECK_THREAD_POOL_SIZE = 4;
 
     @Value("${bff.service.url:http://bff-service:8080}")
     private String bffServiceUrl;
 
     @Autowired(required = false)
     private RestTemplate restTemplate;
+    
+    private final ExecutorService healthCheckExecutor = Executors.newFixedThreadPool(
+        HEALTH_CHECK_THREAD_POOL_SIZE,
+        r -> {
+            Thread t = new Thread(r, "gateway-health-check-" + System.nanoTime());
+            t.setDaemon(true);
+            t.setUncaughtExceptionHandler((thread, ex) -> 
+                logger.error("Uncaught exception in health check thread: {}", ex.getMessage(), ex)
+            );
+            return t;
+        }
+    );
 
     /**
      * Gateway liveness check — Gateway process only, no downstream calls.
@@ -90,8 +106,10 @@ public class HealthController {
     /**
      * Check if BFF service is available.
      * Only called from /health/ready — never from /health.
+     * Health check calls timeout quickly to avoid blocking orchestration probes.
+     * Uses dedicated thread pool to prevent exhaustion of common ForkJoinPool.
      *
-     * @return "UP" if BFF responds 200, "DOWN" otherwise, "UNKNOWN" if RestTemplate unavailable
+     * @return "UP" if BFF responds 200 within 2 seconds, "DOWN" otherwise, "UNKNOWN" if RestTemplate unavailable
      */
     private String checkBFFHealth() {
         if (restTemplate == null) {
@@ -101,8 +119,15 @@ public class HealthController {
 
         try {
             long startTime = System.currentTimeMillis();
-            ResponseEntity<String> response = restTemplate.getForEntity(
-                    bffServiceUrl + "/health", String.class);
+            
+            // Use dedicated executor with bounded threads + timeout to prevent blocking
+            CompletableFuture<ResponseEntity<String>> future = 
+                CompletableFuture.supplyAsync(() -> 
+                    restTemplate.getForEntity(bffServiceUrl + "/health", String.class),
+                    healthCheckExecutor
+                );
+            
+            ResponseEntity<String> response = future.orTimeout(HEALTH_CHECK_TIMEOUT_SECONDS, TimeUnit.SECONDS).get();
             long responseTime = System.currentTimeMillis() - startTime;
 
             if (response.getStatusCode() == HttpStatus.OK) {
@@ -112,8 +137,19 @@ public class HealthController {
                 logger.warn("BFF returned status: {}", response.getStatusCode());
                 return "DOWN";
             }
+        } catch (TimeoutException e) {
+            long responseTime = System.currentTimeMillis() - startTime;
+            logger.warn("BFF health check timeout after {}ms", responseTime);
+            return "DOWN";
         } catch (RestClientException e) {
             logger.warn("BFF health check failed: {} ({})", e.getClass().getSimpleName(), e.getMessage());
+            return "DOWN";
+        } catch (ExecutionException e) {
+            logger.warn("BFF health check execution failed: {}", e.getMessage());
+            return "DOWN";
+        } catch (InterruptedException e) {
+            logger.warn("BFF health check interrupted");
+            Thread.currentThread().interrupt();
             return "DOWN";
         } catch (Exception e) {
             logger.error("Unexpected error checking BFF health", e);

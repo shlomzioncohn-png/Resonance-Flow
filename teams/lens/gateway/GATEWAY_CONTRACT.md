@@ -100,6 +100,9 @@ BFF Processes:
 ```
 
 ### Error Response (4xx, 5xx)
+
+**BREAKING CHANGE (Phase 2)**: Error response format changed. Clients expecting numeric HTTP status in response body should update to new format:
+
 ```json
 {
   "status": "ERROR",
@@ -111,13 +114,21 @@ BFF Processes:
 }
 ```
 
-**Fields:**
-- `status` (string, always "ERROR")
-- `errorCode` (machine-readable error code)
-- `message` (human-readable message)
-- `path` (original request path)
-- `timestamp` (ISO-8601 datetime)
-- `details` (optional, additional context)
+**Old format (no longer used):**
+```json
+{
+  "status": 400,
+  "error": "BAD_REQUEST"
+}
+```
+
+**Frontend action required**: Update error response parsing to expect:
+- `status`: Always the string "ERROR" (not HTTP code)
+- `errorCode`: Machine-readable error type (e.g., "BAD_REQUEST", "NOT_FOUND", "SERVICE_UNAVAILABLE")
+- `message`: Human-readable message
+- `path`: Original request path
+- `timestamp`: ISO-8601 datetime
+- `details`: Optional context (null if not present)
 
 ---
 
