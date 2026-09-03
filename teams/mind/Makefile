@@ -1,4 +1,4 @@
-.PHONY: install dev test lint fmt run eval docker-build docker-up
+.PHONY: install dev test lint fmt run eval schema docker-build docker-up
 
 install:
 	pip install -e .
@@ -12,6 +12,10 @@ test:
 lint:
 	ruff check src tests
 	mypy src
+	python -m mind.evaluation.schema --check
+
+schema:
+	python -m mind.evaluation.schema
 
 fmt:
 	ruff format src tests
