@@ -4,8 +4,9 @@ on:
   workflow_call:
     inputs:
       service_name:
-        description: "Component name, matches the key under components.<service_name> in teams/relay/helm/resonance-flow/values.yaml"        required: true
-        type: string
+      description: "Component name, matches the key under components.<service_name> in teams/relay/helm/resonance-flow/values.yaml"
+      required: true
+      type: string
       service_dir:
         description: "Path to the service, e.g. teams/bridge"
         required: true
