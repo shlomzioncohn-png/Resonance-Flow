@@ -1,37 +1,22 @@
 components:
   lens-frontend:
-    replicaCount: 1
-    image:
-      repository: "ghcr.io/kamatechorg/resonance-flow/lens-frontend"
-      pullPolicy: IfNotPresent
-      tag: "placeholder"
-    containerPort: 80
-    service:
-      type: ClusterIP
-      port: 80
-    resources:
-      requests:
-        cpu: 100m
-        memory: 128Mi
-      limits:
-        cpu: 250m
-        memory: 256Mi
-    startupProbe:
-      httpGet:
-        path: /
-        port: http
-      periodSeconds: 5
-      failureThreshold: 40
-    livenessProbe:
-      httpGet:
-        path: /
-        port: http
-      periodSeconds: 10
-      failureThreshold: 3
-    readinessProbe:
-      httpGet:
-        path: /
-        port: http
-      periodSeconds: 5
-      failureThreshold: 3
-    env: {}
+    enabled: true
+  mind:
+    enabled: false
+  lens-bff:
+    enabled: false
+  bridge:
+    enabled: false
+  chain:
+    enabled: false
+  inbox:
+    enabled: false
+  lens-gateway:
+    enabled: false
+
+kafka:
+  enabled: true
+minio:
+  enabled: false
+postgresql:
+  enabled: false
