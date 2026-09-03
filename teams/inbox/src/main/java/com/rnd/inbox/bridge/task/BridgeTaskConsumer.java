@@ -27,7 +27,7 @@ public class BridgeTaskConsumer {
                 errorTopicPublisher,
                 BridgeTaskEventDto.class,
                 new BeanValidationEventValidator<>(validator),
-                dto -> persistenceHandler.persist(mapper.map(dto), correlationUuidOf(dto)),
+                dto -> persistenceHandler.persist(mapper.map(dto), mapper.mapAssignment(dto), correlationUuidOf(dto)),
                 BridgeTaskConsumer::correlationIdOf);
     }
 

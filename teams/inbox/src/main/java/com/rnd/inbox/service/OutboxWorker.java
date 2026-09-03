@@ -75,9 +75,6 @@ public class OutboxWorker {
         try {
             claimed = outboxEventRepository.claimPendingBatch(Instant.now(), batchSize);
         } catch (Exception e) {
-            // If the claim query itself fails (e.g. DB connection issue), log and
-            // let the next scheduled run retry - there is nothing claimed yet to
-            // roll back or mark as failed.
             log.error("Failed to claim pending outbox events; will retry on next scheduled run", e);
             return;
         }
@@ -89,9 +86,6 @@ public class OutboxWorker {
 
     void processOne(OutboxEvent outboxEvent) {
         try {
-            // eventId, timestamp and correlationId come from the outbox row
-            // itself (via Event.existing), not freshly generated, so the
-            // same eventId is sent on every retry attempt for this row.
             Event<Map<String, Object>> event = Event.existing(
                     outboxEvent.getEventId(),
                     outboxEvent.getEventType(),
@@ -100,13 +94,11 @@ public class OutboxWorker {
                     outboxEvent.getCorrelationId(),
                     outboxEvent.getPayload());
 
-            // The topic is derived from EventType, not stored on the outbox row.
             eventPublisher.publish(outboxEvent.getEventType().getTopic(), outboxEvent.getMessageKey(), event).get();
 
             outboxEvent.setStatus(OutboxStatus.PUBLISHED);
             outboxEvent.setPublishedAt(Instant.now());
         } catch (ExecutionException e) {
-            // Publisher exhausted its own internal retries - unwrap the real cause.
             handleFailure(outboxEvent, e.getCause() != null ? e.getCause() : e);
         } catch (Exception e) {
             handleFailure(outboxEvent, e);

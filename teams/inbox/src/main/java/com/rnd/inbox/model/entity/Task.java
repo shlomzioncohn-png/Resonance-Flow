@@ -95,6 +95,16 @@ public class Task {
     @Column
     private Float confidence;
 
+    @Column(name = "effort_estimate_confidence")
+    private Float effortEstimateConfidence;
+
+    @ManyToOne
+    @JoinColumn(name = "suggested_owner_user_id")
+    private User suggestedOwnerUser;
+
+    @Column(name = "suggested_owner_confidence")
+    private Float suggestedOwnerConfidence;
+
     @ManyToOne
     @JoinColumn(name = "created_by", nullable = true)
     private User createdBy;
@@ -254,6 +264,30 @@ public class Task {
 
     public void setConfidence(Float confidence) {
         this.confidence = confidence;
+    }
+
+    public Float getEffortEstimateConfidence() {
+        return effortEstimateConfidence;
+    }
+
+    public void setEffortEstimateConfidence(Float effortEstimateConfidence) {
+        this.effortEstimateConfidence = effortEstimateConfidence;
+    }
+
+    public User getSuggestedOwnerUser() {
+        return suggestedOwnerUser;
+    }
+
+    public void setSuggestedOwnerUser(User suggestedOwnerUser) {
+        this.suggestedOwnerUser = suggestedOwnerUser;
+    }
+
+    public Float getSuggestedOwnerConfidence() {
+        return suggestedOwnerConfidence;
+    }
+
+    public void setSuggestedOwnerConfidence(Float suggestedOwnerConfidence) {
+        this.suggestedOwnerConfidence = suggestedOwnerConfidence;
     }
 
     public User getCreatedBy() {

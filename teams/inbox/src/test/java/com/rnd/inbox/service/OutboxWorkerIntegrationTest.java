@@ -76,11 +76,6 @@ class OutboxWorkerIntegrationTest extends AbstractIntegrationTest {
 
     @Test
     void pollAndPublish_thenSucceedsOnSubsequentRun_afterInitialFailure() {
-        // Simulates a service restart with a still-pending event: the first
-        // run fails and schedules a retry; once next_retry_at has passed
-        // (simulated here by moving it into the past directly, rather than
-        // sleeping for the real backoff), a later run - just like after a
-        // restart - picks the same row up again and succeeds.
         OutboxEvent saved = savePendingEvent();
         CompletableFuture<Void> failedOnce = new CompletableFuture<>();
         failedOnce.completeExceptionally(new RuntimeException("kafka temporarily down"));
@@ -94,7 +89,6 @@ class OutboxWorkerIntegrationTest extends AbstractIntegrationTest {
         assertThat(afterFirstAttempt.getStatus()).isEqualTo(OutboxStatus.PENDING);
         assertThat(afterFirstAttempt.getRetryCount()).isEqualTo((short) 1);
 
-        // Force the retry to be due now, instead of waiting for the real backoff.
         afterFirstAttempt.setNextRetryAt(Instant.now().minusSeconds(1));
         outboxEventRepository.save(afterFirstAttempt);
 
@@ -102,6 +96,6 @@ class OutboxWorkerIntegrationTest extends AbstractIntegrationTest {
 
         OutboxEvent afterSecondAttempt = outboxEventRepository.findById(saved.getEventId()).orElseThrow();
         assertThat(afterSecondAttempt.getStatus()).isEqualTo(OutboxStatus.PUBLISHED);
-        assertThat(afterSecondAttempt.getEventId()).isEqualTo(saved.getEventId()); // same event_id preserved across attempts
+        assertThat(afterSecondAttempt.getEventId()).isEqualTo(saved.getEventId());
     }
 }
