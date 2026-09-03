@@ -1,5 +1,5 @@
 {{- range $componentName, $component := .Values.components }}
-{{- if $component.service }}
+{{- if and $component.enabled $component.service }}
 ---
 apiVersion: v1
 kind: Service
