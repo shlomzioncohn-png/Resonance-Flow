@@ -10,8 +10,8 @@ not part of this module yet.
 
 ## Stack
 
-- Java 11
-- Spring Boot 2.7.18 (Maven)
+- Java 21
+- Spring Boot 3.3.13 (Maven)
 - Docker / Docker Compose
 
 No database is configured yet - the DB choice for the project has not been decided.
