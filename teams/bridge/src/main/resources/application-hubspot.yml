@@ -1,0 +1,16 @@
+bridge:
+  crm:
+    hubspot:
+      base-url: https://api.hubspot.com
+      # Backed by the HUBSPOT_TOKEN environment variable - never given a
+      # default here, so a missing token fails startup loudly instead of
+      # this repository silently making unauthenticated requests.
+      token: ${HUBSPOT_TOKEN}
+      # HubSpot caps requests that include propertiesWithHistory at 50
+      # objects per page (confirmed live: a limit above 50 returns a 400
+      # VALIDATION_ERROR, "You can only request at most 50 objects in one
+      # request for properties with history").
+      page-size: 50
+      max-retries: 5
+      initial-backoff-millis: 500
+      max-backoff-millis: 8000
