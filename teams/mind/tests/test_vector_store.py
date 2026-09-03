@@ -10,7 +10,7 @@ import uuid
 import psycopg2
 import pytest
 
-from mind.embeddings import embed, upsert, search
+from mind.embeddings import delete, embed, upsert, search
 from mind.embeddings.config import EMBEDDING_DIM, PG_DSN, PG_TABLE
 from mind.embeddings.factory import get_store
 
@@ -93,6 +93,23 @@ def test_full_cycle_embed_upsert_search():
 
     results = search(vector, k=1)
     assert results == [task_id]
+
+
+def test_delete_removes_a_stored_vector():
+    """delete() alone: the vector stops being findable afterward."""
+    task_id = f"test-{uuid.uuid4()}"
+    vec = embed("Retire the legacy export endpoint")
+    upsert(task_id, vec)
+    assert task_id in search(vec, k=5)
+
+    delete(task_id)
+
+    assert task_id not in search(vec, k=5)
+
+
+def test_delete_is_a_noop_for_an_unknown_task_id():
+    """Deleting something that was never stored should not raise."""
+    delete(f"test-{uuid.uuid4()}")  # should not raise
 
 
 def test_future_data_source_uses_same_interface():
