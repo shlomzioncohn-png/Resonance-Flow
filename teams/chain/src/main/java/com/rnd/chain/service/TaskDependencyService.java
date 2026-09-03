@@ -44,8 +44,9 @@ public class TaskDependencyService {
      * against a different repository ({@link TaskRepository}) than the one
      * the edge is saved to. If a task is concurrently soft-deleted between
      * that check and the save, this is a TOCTOU window this method does not
-     * close.
+     * close. Tracked as issue #243.
      *
+     * @see <a href="https://github.com/KamaTechOrg/Resonance-Flow/issues/243">#243</a>
      * @throws InvalidDependencyException  if taskId equals dependsOnTaskId
      * @throws TaskNotFoundException       if either task does not exist
      * @throws DuplicateDependencyException if the edge already exists
