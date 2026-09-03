@@ -7,7 +7,7 @@ goal of this stage is a clean, working Maven/Spring Boot project that later work
 
 ## Stack
 
-- Java 11
+- Java 21
 - Spring Boot 3.3.13 (Maven)
 - Docker / Docker Compose
 

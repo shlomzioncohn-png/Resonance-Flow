@@ -1,0 +1,37 @@
+{
+  "scenario_id": "manager_ci_smoke",
+  "persona": { "role": "Manager", "department": "Engineering" },
+  "context": {
+    "free_time_minutes": 45,
+    "current_datetime": "2026-08-25T09:00:00",
+    "time_horizon": "this_week",
+    "constraints": []
+  },
+  "tasks": [
+    {
+      "task_id": "task_unblock",
+      "title": "Approve the design a teammate is blocked on",
+      "description": "A teammate cannot start until this design is approved; it has been waiting two days.",
+      "deadline": null,
+      "effort_estimate": 30,
+      "tier": "tactical",
+      "blocked": false,
+      "parent_task_id": null
+    },
+    {
+      "task_id": "task_plan",
+      "title": "Start the annual plan draft",
+      "description": "Begin next year's plan; due in about six weeks.",
+      "deadline": "2026-10-06T17:00:00",
+      "effort_estimate": 120,
+      "tier": "strategic",
+      "blocked": false,
+      "parent_task_id": null
+    }
+  ],
+  "expected_top_task_id": "task_unblock",
+  "expected_reason": "task_plan's deadline is weeks away; task_unblock has a teammate blocked on it right now.",
+  "source": { "type": "synthetic", "source_detail": null },
+  "team_lead_approved": false,
+  "mentor_approved": false
+}

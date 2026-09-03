@@ -21,11 +21,19 @@ src/main/java/com/rnd/inbox/
 ├── controller/
 ├── service/
 ├── repository/
+├── model/
+│   ├── entity/
+│   └── enums/
 ├── dto/
+├── mapper/
+├── exception/
 └── config/
 src/main/resources/application.yml
 src/test/java/com/rnd/inbox/
 ```
+
+See [`CLAUDE.md`](./CLAUDE.md) for what each package is responsible for and the rules for
+working in this module.
 
 ## Running locally with Maven
 
