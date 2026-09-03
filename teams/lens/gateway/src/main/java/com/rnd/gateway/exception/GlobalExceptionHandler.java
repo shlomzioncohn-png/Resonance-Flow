@@ -9,7 +9,7 @@ import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.context.request.WebRequest;
-import org.springframework.web.server.ResponseStatusException;
+import org.springframework.http.converter.HttpMessageNotReadableException;
 
 import java.util.stream.Collectors;
 
@@ -117,6 +117,27 @@ public class GlobalExceptionHandler {
                 details
         );
 
+        return new ResponseEntity<>(error, HttpStatus.BAD_REQUEST);
+    }
+
+    /**
+     * Handle malformed JSON body (400).
+     * Triggered when request body is not valid JSON.
+     */
+    @ExceptionHandler(value = {HttpMessageNotReadableException.class})
+    public ResponseEntity<ErrorResponse> handleHttpMessageNotReadableException(
+            HttpMessageNotReadableException ex, WebRequest request) {
+        
+        String path = getRequestPath(request);
+        logger.warn("Malformed request body - Path: {}, Cause: {}", path, ex.getMostSpecificCause().getMessage());
+        
+        ErrorResponse error = new ErrorResponse(
+                "BAD_REQUEST",
+                "Malformed request body. Request body must be valid JSON.",
+                path,
+                ex.getMostSpecificCause().getMessage()
+        );
+        
         return new ResponseEntity<>(error, HttpStatus.BAD_REQUEST);
     }
 

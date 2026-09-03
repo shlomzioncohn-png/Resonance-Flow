@@ -102,13 +102,22 @@ BFF Processes:
 ### Error Response (4xx, 5xx)
 ```json
 {
-  "status": 400,
-  "error": "BAD_REQUEST",
+  "status": "ERROR",
+  "errorCode": "BAD_REQUEST",
   "message": "Invalid request format",
-  "path": "/api/dashboard",
-  "timestamp": "2026-08-25T10:30:00Z"
+  "path": "/api/workspace/tasks/123",
+  "timestamp": "2026-08-25T10:30:00Z",
+  "details": "Request body is malformed"
 }
 ```
+
+**Fields:**
+- `status` (string, always "ERROR")
+- `errorCode` (machine-readable error code)
+- `message` (human-readable message)
+- `path` (original request path)
+- `timestamp` (ISO-8601 datetime)
+- `details` (optional, additional context)
 
 ---
 
@@ -119,16 +128,18 @@ BFF Processes:
 | Unknown route | 404 | `NOT_FOUND` | "Route not found" |
 | BFF unavailable | 503 | `SERVICE_UNAVAILABLE` | "Backend service unavailable" |
 | Request timeout | 504 | `GATEWAY_TIMEOUT` | "Request timeout" |
-| Invalid request | 400 | `BAD_REQUEST` | "Invalid request format" |
+| Invalid request (malformed JSON) | 400 | `BAD_REQUEST` | "Invalid request format" |
 | Authentication required | 401 | `UNAUTHORIZED` | "Authentication required" |
 | Insufficient permissions | 403 | `FORBIDDEN` | "Insufficient permissions" |
 | Internal error | 500 | `INTERNAL_ERROR` | "Internal server error" |
 
-**All errors must include:**
-- `status` (HTTP status code)
-- `error` (error code)
-- `message` (human-readable message)
-- `path` (original request path)
+**All errors return:**
+- `status`: Fixed string "ERROR"
+- `errorCode`: One of the error codes above
+- `message`: Human-readable message
+- `path`: Original request path
+- `timestamp`: ISO-8601 datetime when error occurred
+- `details`: Optional additional context (omitted if null)
 - `timestamp` (ISO 8601)
 
 ---

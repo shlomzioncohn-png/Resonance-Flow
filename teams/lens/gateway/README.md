@@ -74,7 +74,6 @@ The initial design considered Spring Cloud Gateway but was replaced with manual 
 
 - Java 21
 - Spring Boot 3.4.0
-- Spring Cloud Gateway 2024.0.0
 - Spring Security (for authentication & authorization)
 - JWT for token-based authentication (Phase 2)
 - **Lombok 1.18.30** (reduces boilerplate code)
