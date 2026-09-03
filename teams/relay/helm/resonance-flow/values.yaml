@@ -59,6 +59,7 @@ tolerations: []
 affinity: {}
 components:
   mind:
+    enabled: true
     replicaCount: 1
     image:
       repository: "ghcr.io/kamatechorg/resonance-flow/mind"
@@ -99,6 +100,7 @@ components:
         host: minio.minio.svc.cluster.local
         port: 9000
   lens-bff:
+    enabled: true
     replicaCount: 1
     image:
       repository: "ghcr.io/kamatechorg/resonance-flow/lens-bff"
@@ -135,6 +137,7 @@ components:
       failureThreshold: 3
     env: {}
   bridge:
+    enabled: true
     replicaCount: 1
     image:
       repository: "ghcr.io/kamatechorg/resonance-flow/bridge"
@@ -175,6 +178,7 @@ components:
         host: minio.minio.svc.cluster.local
         port: 9000
   lens-frontend:
+    enabled: true
     replicaCount: 1
     image:
       repository: "ghcr.io/kamatechorg/resonance-flow/lens-frontend"
@@ -211,6 +215,7 @@ components:
       failureThreshold: 3
     env: {}
   chain:
+    enabled: true
     replicaCount: 1
     image:
       repository: "ghcr.io/kamatechorg/resonance-flow/chain"
@@ -247,6 +252,7 @@ components:
       failureThreshold: 3
     env: {}
   inbox:
+    enabled: true
     replicaCount: 1
     image:
       repository: "ghcr.io/kamatechorg/resonance-flow/inbox"
@@ -286,7 +292,23 @@ components:
       - name: postgres
         host: postgres.postgres.svc.cluster.local
         port: 5432
+    config:
+      data:
+        datasource:
+          host: postgres.postgres.svc.cluster.local
+          port: 5432
+          database: resonance_flow
+          username: postgres
+          password: postgres
+        kafka:
+          bootstrapServers: kafka.kafka.svc.cluster.local:9092
+          consumerGroupId: inbox-service
+          topics:
+            bridgeStructuredTasks: bridge.structured.tasks
+            chainSchedulingUpdated: task.scheduling.updated
+            mindTaskCreationRequested: task.creation.requested
   lens-gateway:
+    enabled: true
     replicaCount: 1
     image:
       repository: "ghcr.io/kamatechorg/resonance-flow/lens-gateway"
@@ -324,7 +346,7 @@ components:
     env: {}
 
 kafka:
-  enabled: false
+  enabled: true
   controller:
     replicaCount: 1
     controllerOnly: false
@@ -339,7 +361,7 @@ kafka:
     replicaCount: 0
 
 minio:
-  enabled: false
+  enabled: true
   mode: standalone
   persistence:
     enabled: false
@@ -352,7 +374,7 @@ minio:
       memory: 192Mi
 
 postgresql:
-  enabled: false
+  enabled: true
   architecture: standalone
   primary:
     persistence:

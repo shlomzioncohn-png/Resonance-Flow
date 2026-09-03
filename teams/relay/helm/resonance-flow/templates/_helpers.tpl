@@ -90,3 +90,17 @@ reachable before its main container starts.
       done
 {{- end }}
 {{- end }}
+
+{{/*
+Render the env entries for a component whose config is mounted as a file
+at /etc/resonance-flow/config/config.yaml. SPRING_CONFIG_ADDITIONAL_LOCATION
+is what actually makes Spring Boot load the mounted file (processed after
+the classpath application.yml, so its values win); CONFIG_FILE_PATH is kept
+for anything that wants the raw path.
+*/}}
+{{- define "resonance-flow.configFilePathEnv" -}}
+- name: CONFIG_FILE_PATH
+  value: "/etc/resonance-flow/config/config.yaml"
+- name: SPRING_CONFIG_ADDITIONAL_LOCATION
+  value: "file:/etc/resonance-flow/config/config.yaml"
+{{- end }}
