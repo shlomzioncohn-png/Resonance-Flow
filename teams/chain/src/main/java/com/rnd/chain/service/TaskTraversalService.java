@@ -3,6 +3,7 @@ package com.rnd.chain.service;
 import com.rnd.chain.dto.Task;
 import com.rnd.chain.dto.TaskDependency;
 import com.rnd.chain.dto.TaskResponse;
+import com.rnd.chain.dto.TaskTraceResponse;
 import com.rnd.chain.exception.TaskNotFoundException;
 import com.rnd.chain.repository.TaskDependencyRepository;
 import com.rnd.chain.repository.TaskRepository;
@@ -108,6 +109,25 @@ public class TaskTraversalService {
     public List<TaskResponse> getAncestors(UUID taskId) {
         Task start = requireTask(taskId);
         return toResponses(ancestorIds(start));
+    }
+
+    /**
+     * Full cross-tier context for {@code taskId}: everything reachable on the dependency-graph
+     * axis and everything reachable on the hierarchy axis, kept in two separate, named sections
+     * (see {@link TaskTraceResponse}) rather than merged into one undifferentiated list.
+     */
+    public TaskTraceResponse getTrace(UUID taskId) {
+        requireTask(taskId);
+        TaskTraceResponse.DependencyGraphSection dependencyGraph = new TaskTraceResponse.DependencyGraphSection(
+                getDirectDependencies(taskId),
+                getAllDependencies(taskId),
+                getDirectDependents(taskId),
+                getAllDependents(taskId));
+        TaskTraceResponse.HierarchySection hierarchy = new TaskTraceResponse.HierarchySection(
+                getAncestors(taskId),
+                getDirectChildren(taskId),
+                getAllDescendants(taskId));
+        return new TaskTraceResponse(taskId, dependencyGraph, hierarchy);
     }
 
     private List<UUID> ancestorIds(Task start) {

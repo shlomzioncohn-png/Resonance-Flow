@@ -3,6 +3,7 @@ package com.rnd.chain.service;
 import com.rnd.chain.dto.Task;
 import com.rnd.chain.dto.TaskDependency;
 import com.rnd.chain.dto.TaskResponse;
+import com.rnd.chain.dto.TaskTraceResponse;
 import com.rnd.chain.exception.TaskNotFoundException;
 import com.rnd.chain.repository.InMemoryTaskDependencyRepository;
 import com.rnd.chain.repository.InMemoryTaskRepository;
@@ -315,6 +316,60 @@ class TaskTraversalServiceTest {
         assertEquals(2, result.size());
         assertEquals(b, result.get(0).getId());
         assertEquals(c, result.get(1).getId());
+    }
+
+    // ---- Cross-tier trace ---------------------------------------------------
+
+    @Test
+    void getTrace_keepsTheDependencyAndHierarchyAxesSeparate() {
+        UUID task = UUID.randomUUID();
+        UUID dependency = UUID.randomUUID();
+        UUID dependent = UUID.randomUUID();
+        UUID parent = UUID.randomUUID();
+        UUID child = UUID.randomUUID();
+        // task's dependency axis: depends on `dependency`, `dependent` depends on task.
+        // task's hierarchy axis: child of `parent`, parent of `child`.
+        // None of these four overlap with each other, so a bug that merged the two axes
+        // into one undifferentiated list would be visible immediately (e.g. `parent` leaking
+        // into the dependency-graph section, or `dependency` leaking into hierarchy).
+        List<Task> tasks = tasksWithParents(
+                entry(task, parent), entry(parent, null), entry(child, task),
+                entry(dependency, null), entry(dependent, null));
+        TaskTraversalService service = serviceOf(tasks, dependencies(edge(task, dependency), edge(dependent, task)));
+
+        TaskTraceResponse trace = service.getTrace(task);
+
+        assertEquals(task, trace.getTaskId());
+        assertIds(trace.getDependencyGraph().getDirectDependencies(), dependency);
+        assertIds(trace.getDependencyGraph().getAllDependencies(), dependency);
+        assertIds(trace.getDependencyGraph().getDirectDependents(), dependent);
+        assertIds(trace.getDependencyGraph().getAllDependents(), dependent);
+        assertIds(trace.getHierarchy().getAncestors(), parent);
+        assertIds(trace.getHierarchy().getDirectChildren(), child);
+        assertIds(trace.getHierarchy().getAllDescendants(), child);
+    }
+
+    @Test
+    void getTrace_returnsEmptySections_whenTaskHasNoRelationshipsAtAll() {
+        UUID a = UUID.randomUUID();
+        TaskTraversalService service = serviceOf(tasksWithParents(entry(a, null)), dependencies());
+
+        TaskTraceResponse trace = service.getTrace(a);
+
+        assertTrue(trace.getDependencyGraph().getDirectDependencies().isEmpty());
+        assertTrue(trace.getDependencyGraph().getAllDependencies().isEmpty());
+        assertTrue(trace.getDependencyGraph().getDirectDependents().isEmpty());
+        assertTrue(trace.getDependencyGraph().getAllDependents().isEmpty());
+        assertTrue(trace.getHierarchy().getAncestors().isEmpty());
+        assertTrue(trace.getHierarchy().getDirectChildren().isEmpty());
+        assertTrue(trace.getHierarchy().getAllDescendants().isEmpty());
+    }
+
+    @Test
+    void getTrace_throwsTaskNotFoundException_whenTaskDoesNotExist() {
+        TaskTraversalService service = serviceOf(tasks(), dependencies());
+
+        assertThrows(TaskNotFoundException.class, () -> service.getTrace(UUID.randomUUID()));
     }
 
     // ---- fixtures -----------------------------------------------------------
