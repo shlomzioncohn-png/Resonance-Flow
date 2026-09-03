@@ -1,5 +1,5 @@
 apiVersion: v2
-name: kafka
+name: resonance-flow
 description: A Helm chart for Kubernetes
 
 # A chart can be either an 'application' or a 'library' chart.
@@ -21,4 +21,18 @@ version: 0.1.0
 # incremented each time you make changes to the application. Versions are not expected to
 # follow Semantic Versioning. They should reflect the version the application is using.
 # It is recommended to use it with quotes.
-appVersion: "1.16.0"
+dependencies:
+  - name: kafka
+    version: 32.4.3
+    repository: oci://registry-1.docker.io/bitnamicharts
+    condition: kafka.enabled
+
+  - name: minio
+    version: 17.0.21
+    repository: oci://registry-1.docker.io/bitnamicharts
+    condition: minio.enabled
+
+  - name: postgresql
+    version: 18.8.13
+    repository: oci://registry-1.docker.io/bitnamicharts
+    condition: postgresql.enabled

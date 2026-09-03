@@ -322,3 +322,45 @@ components:
       periodSeconds: 5
       failureThreshold: 3
     env: {}
+
+kafka:
+  enabled: false
+  controller:
+    replicaCount: 1
+    controllerOnly: false
+    resources:
+      requests:
+        cpu: 100m
+        memory: 128Mi
+      limits:
+        cpu: 150m
+        memory: 192Mi
+  broker:
+    replicaCount: 0
+
+minio:
+  enabled: false
+  mode: standalone
+  persistence:
+    enabled: false
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 150m
+      memory: 192Mi
+
+postgresql:
+  enabled: false
+  architecture: standalone
+  primary:
+    persistence:
+      enabled: false
+    resources:
+      requests:
+        cpu: 100m
+        memory: 128Mi
+      limits:
+        cpu: 150m
+        memory: 192Mi
