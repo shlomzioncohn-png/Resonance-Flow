@@ -1,0 +1,60 @@
+syntax = "proto3";
+
+package com.rnd.bridge.dto;
+
+option java_package = "com.rnd.bridge.dto";
+option java_multiple_files = true;
+
+import "google/protobuf/timestamp.proto";
+
+// kafkaTopic: bridge.github.tasks
+// DRAFT for review - mirrors the fields sent to 'bridge.github.tasks' (branch
+// hadas-lavi/get-data-source, com.rnd.bridge.dto.Task via GitHubKafkaProducer). Serialized as
+// plain JSON there today, not Protobuf. Optional fields below are a best-effort guess based on
+// Java boxed types and field semantics (e.g. parent_task_id only applies to subtasks) - needs
+// confirmation with the Bridge team, not yet verified against real behavior.
+
+message Task {
+  string id = 1;
+  string title = 2;
+  optional string description = 3;
+  SourceType source_type = 4;                 
+  string source_ref = 5;                       
+  string owner = 6;
+  string role_context = 7;
+  optional Tier tier = 8;
+  optional int32 urgency = 9;
+  optional double effort_estimate_minutes = 10;
+  optional google.protobuf.Timestamp deadline = 11;
+  optional string parent_task_id = 12;          
+  repeated string depends_on = 13;
+  repeated string constraints = 14;
+  optional double confidence = 15;              
+  ExtractionProvenance extraction_provenance = 16;
+  TaskStatus status = 17;
+}
+
+enum SourceType {
+  SOURCE_TYPE_UNSPECIFIED = 0;
+  GITHUB = 1;
+}
+
+enum Tier {
+  TIER_UNSPECIFIED = 0;
+  TIER_1 = 1;
+  TIER_2 = 2;
+  TIER_3 = 3;
+}
+
+enum ExtractionProvenance {
+  EXTRACTION_PROVENANCE_UNSPECIFIED = 0;
+  API = 1;
+  WEBHOOK = 2;
+}
+
+enum TaskStatus {
+  TASK_STATUS_UNSPECIFIED = 0;
+  OPEN = 1;
+  CLOSED = 2;
+  IN_PROGRESS = 3;
+}

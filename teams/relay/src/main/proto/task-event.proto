@@ -1,0 +1,28 @@
+syntax = "proto3";
+
+package com.rnd.relay.event;
+
+option java_package = "com.rnd.relay.event";
+option java_multiple_files = true;
+
+import "google/protobuf/timestamp.proto";
+
+// kafkaTopic: task-event
+message TaskEvent {
+  string event_id = 1;   // Unique id of this event instance.
+  string task_id = 2;    // Id of the task this event belongs to. Used as the Kafka message key.
+  string org_id = 3;     // Organization id (multi-tenancy).
+  TaskEventType event_type = 4;
+  string actor = 5;      // Who performed the action.
+  google.protobuf.Timestamp created_at = 6;
+}
+
+enum TaskEventType {
+  TASK_EVENT_TYPE_UNSPECIFIED = 0; 
+  CREATED = 1;
+  UPDATED = 2;
+  STARTED = 3;
+  COMPLETED = 4;
+  DISMISSED = 5;
+  DELETED = 6;
+}
