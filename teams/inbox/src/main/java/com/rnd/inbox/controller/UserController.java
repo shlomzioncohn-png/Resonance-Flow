@@ -1,6 +1,5 @@
 package com.rnd.inbox.controller;
 
-import com.rnd.inbox.dto.ErrorResponseDto;
 import com.rnd.inbox.dto.PageResponseDto;
 import com.rnd.inbox.dto.UserCreateRequestDto;
 import com.rnd.inbox.dto.UserResponseDto;
@@ -43,12 +42,8 @@ public class UserController {
     @ApiResponses({
             @ApiResponse(responseCode = "201", description = "User created",
                     content = @Content(schema = @Schema(implementation = UserResponseDto.class))),
-            @ApiResponse(responseCode = "400", description = "Request validation failed",
-                    content = @Content(schema = @Schema(implementation = ErrorResponseDto.class))),
-            @ApiResponse(responseCode = "404", description = "Organization not found",
-                    content = @Content(schema = @Schema(implementation = ErrorResponseDto.class))),
-            @ApiResponse(responseCode = "409", description = "Email or username already exists",
-                    content = @Content(schema = @Schema(implementation = ErrorResponseDto.class)))
+            @ApiResponse(responseCode = "404", description = "Organization not found"),
+            @ApiResponse(responseCode = "409", description = "Email or username already exists")
     })
     @PostMapping
     public ResponseEntity<UserResponseDto> createUser(@Valid @RequestBody UserCreateRequestDto request,
@@ -63,8 +58,7 @@ public class UserController {
     @ApiResponses({
             @ApiResponse(responseCode = "200", description = "User found",
                     content = @Content(schema = @Schema(implementation = UserResponseDto.class))),
-            @ApiResponse(responseCode = "404", description = "User not found",
-                    content = @Content(schema = @Schema(implementation = ErrorResponseDto.class)))
+            @ApiResponse(responseCode = "404", description = "User not found")
     })
     @GetMapping("/{id}")
     public UserResponseDto getUserById(@PathVariable UUID id) {
@@ -83,12 +77,8 @@ public class UserController {
     @ApiResponses({
             @ApiResponse(responseCode = "200", description = "User updated",
                     content = @Content(schema = @Schema(implementation = UserResponseDto.class))),
-            @ApiResponse(responseCode = "400", description = "Request validation failed",
-                    content = @Content(schema = @Schema(implementation = ErrorResponseDto.class))),
-            @ApiResponse(responseCode = "404", description = "User not found",
-                    content = @Content(schema = @Schema(implementation = ErrorResponseDto.class))),
-            @ApiResponse(responseCode = "409", description = "Email or username already exists",
-                    content = @Content(schema = @Schema(implementation = ErrorResponseDto.class)))
+            @ApiResponse(responseCode = "404", description = "User not found"),
+            @ApiResponse(responseCode = "409", description = "Email or username already exists")
     })
     @PutMapping("/{id}")
     public UserResponseDto updateUser(@PathVariable UUID id, @Valid @RequestBody UserUpdateRequestDto request) {
@@ -99,10 +89,7 @@ public class UserController {
     @ApiResponses({
             @ApiResponse(responseCode = "200", description = "Status updated",
                     content = @Content(schema = @Schema(implementation = UserResponseDto.class))),
-            @ApiResponse(responseCode = "400", description = "Request validation failed",
-                    content = @Content(schema = @Schema(implementation = ErrorResponseDto.class))),
-            @ApiResponse(responseCode = "404", description = "User not found",
-                    content = @Content(schema = @Schema(implementation = ErrorResponseDto.class)))
+            @ApiResponse(responseCode = "404", description = "User not found")
     })
     @PatchMapping("/{id}/status")
     public UserResponseDto updateStatus(@PathVariable UUID id,
