@@ -12,6 +12,7 @@ import java.util.ArrayList;
 import java.util.Deque;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 import java.util.function.Function;
@@ -79,6 +80,58 @@ public class TaskTraversalService {
         return toResponses(collectReachableIds(taskId, this::dependentNeighborIds, false));
     }
 
+    /**
+     * @return the direct children of {@code taskId} in the hierarchy.
+     */
+    public List<TaskResponse> getDirectChildren(UUID taskId) {
+        requireTask(taskId);
+        return toResponses(collectReachableIds(taskId, this::childNeighborIds, true));
+    }
+
+    /**
+     * @return every descendant of {@code taskId} in the hierarchy (its direct children, their
+     * children, and so on), nearest-first, each node appearing at most once.
+     */
+    public List<TaskResponse> getAllDescendants(UUID taskId) {
+        requireTask(taskId);
+        return toResponses(collectReachableIds(taskId, this::childNeighborIds, false));
+    }
+
+    /**
+     * @return the ancestor chain of {@code taskId}, nearest parent first and the root last.
+     * There is no separate "direct ancestor" method - the first entry of this list already is
+     * the direct parent. Unlike the dependency/hierarchy-descendant traversals above, this
+     * walks a single parentTaskId chain rather than a general graph, so it isn't built on
+     * collectReachableIds - it has its own visited set as a defensive cycle guard instead, since
+     * the hierarchy is supposed to be a tree (a task is never its own ancestor).
+     */
+    public List<TaskResponse> getAncestors(UUID taskId) {
+        Task start = requireTask(taskId);
+        return toResponses(ancestorIds(start));
+    }
+
+    private List<UUID> ancestorIds(Task start) {
+        List<UUID> chain = new ArrayList<>();
+        Set<UUID> visited = new HashSet<>();
+        visited.add(start.getId());
+        UUID parentId = start.getParentTaskId();
+        while (parentId != null) {
+            if (!visited.add(parentId)) {
+                // Defensive cycle guard: the hierarchy is supposed to be a tree, so this should
+                // never trigger in practice, but stop rather than loop forever if it ever does.
+                break;
+            }
+            Optional<Task> parent = taskRepository.findById(parentId);
+            if (!parent.isPresent()) {
+                // Dangling parent reference - stop rather than fail the whole traversal.
+                break;
+            }
+            chain.add(parentId);
+            parentId = parent.get().getParentTaskId();
+        }
+        return chain;
+    }
+
     private List<UUID> dependencyNeighborIds(UUID taskId) {
         List<UUID> ids = new ArrayList<>();
         for (TaskDependency dependency : taskDependencyRepository.findByTaskId(taskId)) {
@@ -91,6 +144,14 @@ public class TaskTraversalService {
         List<UUID> ids = new ArrayList<>();
         for (TaskDependency dependency : taskDependencyRepository.findByDependsOnTaskId(taskId)) {
             ids.add(dependency.getTaskId());
+        }
+        return ids;
+    }
+
+    private List<UUID> childNeighborIds(UUID taskId) {
+        List<UUID> ids = new ArrayList<>();
+        for (Task child : taskRepository.findByParentTaskId(taskId)) {
+            ids.add(child.getId());
         }
         return ids;
     }
