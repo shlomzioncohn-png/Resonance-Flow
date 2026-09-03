@@ -79,7 +79,15 @@ class InstrumentationSummary(BaseModel):
 
 
 def _percentile(sorted_values: list[float], pct: float) -> float:
-    """Linear-interpolation percentile over an already-sorted list."""
+    """Linear-interpolation percentile over an already-sorted list.
+
+    _Aggregator.summary() already guards the only call site against an
+    empty list (there's no meaningful percentile of zero
+    measurements), but guard here too in case this ever gets reused
+    elsewhere without that guard.
+    """
+    if not sorted_values:
+        return 0.0
     if len(sorted_values) == 1:
         return sorted_values[0]
     rank = (pct / 100) * (len(sorted_values) - 1)
@@ -173,7 +181,11 @@ def instrumented_call(name: str, cost: float = 0.0) -> Iterator[None]:
 
     An exception raised inside the wrapped block is still recorded
     (status="error") and always re-raised -- this never swallows a
-    failure.
+    failure. Catches BaseException, not just Exception: a client
+    disconnect mid-request raises asyncio.CancelledError, which
+    inherits from BaseException (not Exception, since Python 3.8) --
+    `except Exception` alone would miss it and record a cancelled call
+    as "success".
 
     Note on async: decorating an `async def` directly does not time it
     correctly (the decorator would return the coroutine without
@@ -185,7 +197,7 @@ def instrumented_call(name: str, cost: float = 0.0) -> Iterator[None]:
     status = "success"
     try:
         yield
-    except Exception:
+    except BaseException:
         status = "error"
         raise
     finally:

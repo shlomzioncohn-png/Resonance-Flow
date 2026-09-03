@@ -17,8 +17,21 @@ RUN python -m venv /opt/venv
 ENV PATH="/opt/venv/bin:$PATH"
 
 COPY pyproject.toml README.md ./
-COPY src ./src
+
+# Install dependencies before the real source ever shows up in a layer
+# -- pyproject.toml/hatchling still needs *a* src/mind/ to build the
+# wheel, so give it an empty placeholder. Editing any file under the
+# real src/ later won't invalidate this layer, so fastapi/uvicorn/etc.
+# don't get re-downloaded and rebuilt on every code change.
+RUN mkdir -p src/mind && touch src/mind/__init__.py
 RUN pip install --no-cache-dir .
+
+# Now bring in the real source and reinstall over the placeholder.
+# --no-deps: dependencies are already installed above; this step is
+# just copying mind's own (pure-Python) files into the venv, so it's
+# fast even though it reruns on every code change.
+COPY src ./src
+RUN pip install --no-cache-dir --no-deps .
 
 # ---- runtime ----
 # Lean image: only the venv built above crosses the stage boundary.
@@ -29,8 +42,14 @@ FROM python:3.12-slim AS runtime
 
 WORKDIR /app
 
-COPY --from=builder /opt/venv /opt/venv
+# Don't run as root -- standard hardening, matters more once this
+# handles uploaded files / talks to other services in production.
+RUN useradd --create-home --uid 1000 --shell /usr/sbin/nologin mind
+
+COPY --from=builder --chown=mind:mind /opt/venv /opt/venv
 ENV PATH="/opt/venv/bin:$PATH"
+
+USER mind
 
 EXPOSE 8000
 
