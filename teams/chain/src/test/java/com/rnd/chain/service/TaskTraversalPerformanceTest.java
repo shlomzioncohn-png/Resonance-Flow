@@ -60,12 +60,14 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * traversal type. p95 is the 95th-percentile value of the sorted measured latencies. Every
  * result - and the JVM/OS environment - is printed to test output regardless of pass/fail: this
  * benchmark exists to get real numbers, not to be silently green, so the target is reported,
- * never asserted. Given InMemoryTaskDependencyRepository and InMemoryTaskRepository (and Task /
- * TaskDependency / TaskStatus) are copied verbatim from chain/ruthHoltzman/dependency-
- * repository-66 (out of scope to modify - see PLAN.md), a miss here is reported as a finding,
- * not "fixed" by touching either repository. Note InMemoryTaskDependencyRepository on this
- * branch is a dual adjacency map (O(1) average lookup + O(k) materialization), not a linear
- * scan - only InMemoryTaskRepository.findByParentTaskId remains a linear scan here.
+ * never asserted. InMemoryTaskDependencyRepository (and Task / TaskDependency / TaskStatus)
+ * are copied verbatim from chain/ruthHoltzman/dependency-repository-66 (out of scope to modify
+ * - see PLAN.md); a miss attributable to that repository is reported as a finding, not "fixed"
+ * by touching it. InMemoryTaskDependencyRepository is a dual adjacency map (O(1) average lookup
+ * + O(k) materialization), not a linear scan. InMemoryTaskRepository is the one exception: it
+ * was hand-authored for this task (approved directly, not copied) after every branch checked
+ * for a faster findByParentTaskId turned out to be a linear scan too - see its own class
+ * Javadoc for which branches were checked and the indexing approach used instead.
  */
 class TaskTraversalPerformanceTest {
 
