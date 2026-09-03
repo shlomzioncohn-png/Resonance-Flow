@@ -1,4 +1,4 @@
-// Copied verbatim from chain/ruthHoltzman/dependency-repository-66, unmodified.
+// Copied verbatim from Riki-Kaplan, unmodified.
 
 package com.rnd.chain.repository;
 
@@ -10,7 +10,6 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.function.UnaryOperator;
 import java.util.stream.Collectors;
 
 /**
@@ -26,14 +25,13 @@ public class InMemoryTaskRepository implements TaskRepository {
     public InMemoryTaskRepository(List<Task> tasks) {
         Objects.requireNonNull(tasks, "tasks must not be null");
         this.tasksById = new ConcurrentHashMap<>();
-        tasks.forEach(task -> tasksById.put(task.getId(), task.copy()));
+        tasks.forEach(task -> tasksById.put(task.getId(), task));
     }
 
     @Override
     public Optional<Task> findById(UUID id) {
         return Optional.ofNullable(tasksById.get(id))
-                .filter(this::isNotDeleted)
-                .map(Task::copy);
+                .filter(this::isNotDeleted);
     }
 
     @Override
@@ -42,7 +40,6 @@ public class InMemoryTaskRepository implements TaskRepository {
                 .map(tasksById::get)
                 .filter(Objects::nonNull)
                 .filter(this::isNotDeleted)
-                .map(Task::copy)
                 .collect(Collectors.toList());
     }
 
@@ -51,29 +48,13 @@ public class InMemoryTaskRepository implements TaskRepository {
         return tasksById.values().stream()
                 .filter(task -> Objects.equals(task.getParentTaskId(), parentTaskId))
                 .filter(this::isNotDeleted)
-                .map(Task::copy)
                 .collect(Collectors.toList());
     }
 
     @Override
     public Task save(Task task) {
-        Objects.requireNonNull(task, "task must not be null");
-        Task copy = task.copy();
-        tasksById.put(copy.getId(), copy);
-        return copy.copy();
-    }
-
-    @Override
-    public Optional<Task> update(UUID id, UnaryOperator<Task> mutator) {
-        Objects.requireNonNull(id, "id must not be null");
-        Objects.requireNonNull(mutator, "mutator must not be null");
-        // computeIfPresent locks this key's bucket for the duration of the
-        // remapping function, so the read-modify-write is atomic per id:
-        // two concurrent updates on the same task can no longer race.
-        Task updated = tasksById.computeIfPresent(id, (key, existing) -> mutator.apply(existing.copy()));
-        return Optional.ofNullable(updated)
-                .filter(this::isNotDeleted)
-                .map(Task::copy);
+        tasksById.put(task.getId(), task);
+        return task;
     }
 
     /**

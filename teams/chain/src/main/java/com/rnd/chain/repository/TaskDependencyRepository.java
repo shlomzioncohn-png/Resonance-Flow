@@ -1,11 +1,10 @@
-// Copied verbatim from chain/ruthHoltzman/dependency-repository-66, unmodified.
+// Copied verbatim from Riki-Kaplan, unmodified.
 
 package com.rnd.chain.repository;
 
 import com.rnd.chain.dto.TaskDependency;
 
 import java.util.List;
-import java.util.Optional;
 import java.util.UUID;
 
 /**
@@ -37,25 +36,18 @@ public interface TaskDependencyRepository {
     List<TaskDependency> findByDependsOnTaskId(UUID taskId);
 
     /**
-     * Persists the given edge atomically: the check for whether the edge
-     * already exists and the insertion happen as a single indivisible
-     * operation, so concurrent callers saving the same edge cannot both
-     * observe "it didn't exist yet".
+     * Persists the given edge. Idempotent: saving the same (taskId,
+     * dependsOnTaskId) pair more than once does not create a second
+     * copy of it.
      *
-     * @return {@code Optional.of(dependency)} if the edge was actually
-     * created (it did not exist before this call).
-     * {@code Optional.empty()} if the edge already existed and no change
-     * was made (no-op).
+     * @return the same dependency instance that was passed in, for
+     * convenient chaining at the call site.
      */
-    Optional<TaskDependency> save(TaskDependency dependency);
+    TaskDependency save(TaskDependency dependency);
 
     /**
-     * Removes the edge (taskId, dependsOnTaskId) atomically: the check
-     * for whether the edge exists and the removal happen as a single
-     * indivisible operation.
-     *
-     * @return {@code true} if such an edge existed and was removed.
-     * {@code false} if no such edge existed and no change was made.
+     * Removes the edge (taskId, dependsOnTaskId) if it exists. A no-op,
+     * not an error, if no such edge is present.
      */
-    boolean delete(UUID taskId, UUID dependsOnTaskId);
+    void delete(UUID taskId, UUID dependsOnTaskId);
 }
