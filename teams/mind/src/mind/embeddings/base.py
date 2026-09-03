@@ -27,3 +27,12 @@ class VectorStore(ABC):
     def search(self, query_vector: list[float], k: int) -> list[str]:
         """Return up to k task_ids most similar to query_vector, best match first."""
         raise NotImplementedError
+
+    @abstractmethod
+    def delete(self, task_id: str) -> None:
+        """Remove the vector for a given task_id, if it exists.
+
+        Deleting a task_id that isn't stored is not an error -- same
+        no-op-if-absent semantics as SQL's DELETE.
+        """
+        raise NotImplementedError
