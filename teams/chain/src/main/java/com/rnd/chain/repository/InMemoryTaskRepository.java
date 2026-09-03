@@ -24,7 +24,10 @@ public class InMemoryTaskRepository implements TaskRepository {
     public InMemoryTaskRepository(List<Task> tasks) {
         Objects.requireNonNull(tasks, "tasks must not be null");
         this.tasksById = new ConcurrentHashMap<>();
-        tasks.forEach(task -> tasksById.put(task.getId(), task));
+        tasks.forEach(task -> {
+            Objects.requireNonNull(task, "tasks must not contain null elements");
+            tasksById.put(task.getId(), task);
+        });
     }
 
     @Override
@@ -69,7 +72,10 @@ public class InMemoryTaskRepository implements TaskRepository {
         // computeIfPresent locks this key's bucket for the duration of the
         // remapping function, so the read-modify-write is atomic per id:
         // two concurrent updates on the same task can no longer race.
-        Task updated = tasksById.computeIfPresent(id, (key, existing) -> mutator.apply(existing));
+        // A soft-deleted task is left untouched (mutator is not applied to it),
+        // matching findById().map(mutator).map(save) semantics.
+        Task updated = tasksById.computeIfPresent(id,
+                (key, existing) -> isNotDeleted(existing) ? mutator.apply(existing) : existing);
         return Optional.ofNullable(updated)
                 .filter(this::isNotDeleted);
     }

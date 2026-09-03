@@ -53,6 +53,7 @@ public class InMemoryTaskDependencyRepository implements TaskDependencyRepositor
     public InMemoryTaskDependencyRepository(List<TaskDependency> edges) {
         Objects.requireNonNull(edges, "edges must not be null");
         for (TaskDependency edge : edges) {
+            Objects.requireNonNull(edge, "edges must not contain null elements");
             UUID taskId = edge.getTaskId();
             UUID dependsOnTaskId = edge.getDependsOnTaskId();
             dependenciesByTask.computeIfAbsent(taskId, id -> ConcurrentHashMap.newKeySet())
