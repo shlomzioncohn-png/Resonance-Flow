@@ -1,4 +1,4 @@
-// Copied verbatim from Riki-Kaplan, unmodified.
+// Copied verbatim from chain/ruthHoltzman/dependency-repository-66, unmodified.
 
 package com.rnd.chain.repository;
 
@@ -7,6 +7,7 @@ import com.rnd.chain.dto.Task;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.function.UnaryOperator;
 
 /**
  * Contract for looking up and persisting Task nodes. NOTE: Task itself
@@ -38,10 +39,27 @@ public interface TaskRepository {
 
     /**
      * Persists the given task - inserts it if its id doesn't already
-     * exist, or replaces the existing one if it does (upsert).
+     * exist, or replaces the existing one if it does (upsert). The
+     * caller's instance is not retained: the repository stores and
+     * returns an independent copy, so later mutations on either side
+     * cannot leak across.
      *
-     * @return the same task instance that was passed in, for convenient
+     * @return an independent copy of the persisted task, for convenient
      * chaining at the call site.
      */
     Task save(Task task);
+
+    /**
+     * Atomically reads the current task with this id, applies
+     * {@code mutator} to a private copy of it, and persists the result -
+     * equivalent to {@code findById(id).map(mutator).map(this::save)} but
+     * performed as a single operation under a per-id lock. Use this
+     * instead of a separate findById/save pair whenever the new value
+     * depends on the current one (e.g. decrementing a counter), since two
+     * concurrent findById/save pairs on the same id can otherwise race
+     * and silently lose one of the updates.
+     *
+     * @return the updated task, or empty if no task with this id exists
+     */
+    Optional<Task> update(UUID id, UnaryOperator<Task> mutator);
 }

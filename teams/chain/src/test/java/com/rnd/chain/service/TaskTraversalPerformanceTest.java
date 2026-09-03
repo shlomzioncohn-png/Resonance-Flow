@@ -2,6 +2,7 @@ package com.rnd.chain.service;
 
 import com.rnd.chain.dto.Task;
 import com.rnd.chain.dto.TaskDependency;
+import com.rnd.chain.dto.TaskStatus;
 import com.rnd.chain.repository.InMemoryTaskDependencyRepository;
 import com.rnd.chain.repository.InMemoryTaskRepository;
 import org.junit.jupiter.api.BeforeAll;
@@ -59,9 +60,12 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * traversal type. p95 is the 95th-percentile value of the sorted measured latencies. Every
  * result - and the JVM/OS environment - is printed to test output regardless of pass/fail: this
  * benchmark exists to get real numbers, not to be silently green, so the target is reported,
- * never asserted. Given InMemoryTaskDependencyRepository and InMemoryTaskRepository are copied
- * verbatim from Riki-Kaplan (out of scope to modify - see PLAN.md), a miss here is reported as
- * a finding, not "fixed" by touching either repository.
+ * never asserted. Given InMemoryTaskDependencyRepository and InMemoryTaskRepository (and Task /
+ * TaskDependency / TaskStatus) are copied verbatim from chain/ruthHoltzman/dependency-
+ * repository-66 (out of scope to modify - see PLAN.md), a miss here is reported as a finding,
+ * not "fixed" by touching either repository. Note InMemoryTaskDependencyRepository on this
+ * branch is a dual adjacency map (O(1) average lookup + O(k) materialization), not a linear
+ * scan - only InMemoryTaskRepository.findByParentTaskId remains a linear scan here.
  */
 class TaskTraversalPerformanceTest {
 
@@ -116,6 +120,7 @@ class TaskTraversalPerformanceTest {
                     .id(ids[i])
                     .parentTaskId(parentTaskId[i])
                     .ownerId("owner")
+                    .status(TaskStatus.PENDING)
                     .build());
         }
 

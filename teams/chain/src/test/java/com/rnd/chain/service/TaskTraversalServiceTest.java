@@ -3,6 +3,7 @@ package com.rnd.chain.service;
 import com.rnd.chain.dto.Task;
 import com.rnd.chain.dto.TaskDependency;
 import com.rnd.chain.dto.TaskResponse;
+import com.rnd.chain.dto.TaskStatus;
 import com.rnd.chain.dto.TaskTraceResponse;
 import com.rnd.chain.exception.TaskNotFoundException;
 import com.rnd.chain.repository.InMemoryTaskDependencyRepository;
@@ -388,6 +389,7 @@ class TaskTraversalServiceTest {
         return Task.builder()
                 .id(id)
                 .ownerId("owner-" + id)
+                .status(TaskStatus.PENDING)
                 .build();
     }
 
@@ -399,6 +401,7 @@ class TaskTraversalServiceTest {
                     .id(e.getKey())
                     .parentTaskId(e.getValue())
                     .ownerId("owner-" + e.getKey())
+                    .status(TaskStatus.PENDING)
                     .build());
         }
         return result;

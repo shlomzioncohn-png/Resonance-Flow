@@ -5,11 +5,12 @@ import java.util.UUID;
 /**
  * Read-facing view of {@link Task} returned by every graph-traversal endpoint. Mirrors the
  * TaskResponse shape already established (unused so far) on the Riki-Kaplan branch - same field
- * list, same purpose (don't leak the mutable domain object directly into API responses) - adapted
- * only where the real, already-merged {@link Task} on main disagrees with that branch's own
- * (never-merged) copy of Task: here score is a {@code Double}, not an {@code Integer}, and there
- * is no ownerId field on this response, matching the branch precedent's field list rather than
- * adding a field it didn't have.
+ * list, same purpose (don't leak the domain object directly into API responses) - adapted only
+ * where that branch's own field list disagrees with the real {@link Task}, now sourced verbatim
+ * from chain/ruthHoltzman/dependency-repository-66 (immutable, no setters): here score is a
+ * {@code Double}, not an {@code Integer}, and there is no ownerId field on this response,
+ * matching the Riki-Kaplan branch precedent's field list rather than adding a field it didn't
+ * have.
  */
 public class TaskResponse {
 

@@ -1,4 +1,4 @@
-// Copied verbatim from Riki-Kaplan, unmodified.
+// Copied verbatim from chain/ruthHoltzman/dependency-repository-66, unmodified.
 
 package com.rnd.chain.repository;
 
@@ -10,6 +10,7 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.function.UnaryOperator;
 import java.util.stream.Collectors;
 
 /**
@@ -51,10 +52,28 @@ public class InMemoryTaskRepository implements TaskRepository {
                 .collect(Collectors.toList());
     }
 
+    /**
+     * Note: save is an unconditional overwrite. Racing it against a
+     * concurrent {@link #update} on the same id is a last-write-wins race -
+     * prefer {@link #update} when the new value depends on the current one.
+     */
     @Override
     public Task save(Task task) {
+        Objects.requireNonNull(task, "task must not be null");
         tasksById.put(task.getId(), task);
         return task;
+    }
+
+    @Override
+    public Optional<Task> update(UUID id, UnaryOperator<Task> mutator) {
+        Objects.requireNonNull(id, "id must not be null");
+        Objects.requireNonNull(mutator, "mutator must not be null");
+        // computeIfPresent locks this key's bucket for the duration of the
+        // remapping function, so the read-modify-write is atomic per id:
+        // two concurrent updates on the same task can no longer race.
+        Task updated = tasksById.computeIfPresent(id, (key, existing) -> mutator.apply(existing));
+        return Optional.ofNullable(updated)
+                .filter(this::isNotDeleted);
     }
 
     /**
