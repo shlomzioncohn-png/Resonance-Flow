@@ -188,6 +188,19 @@ class UserControllerTest {
     }
 
     @Test
+    void updateUser_withOnlyOneFieldProvided_returns200() throws Exception {
+        when(userService.updateUser(eq(userId), any(), eq(actorId))).thenReturn(sampleUser());
+        UserUpdateRequestDto request = new UserUpdateRequestDto();
+        request.setEmail("only-this-changes@acme.com");
+
+        mockMvc.perform(put("/api/v1/users/{id}", userId)
+                        .header(ACTOR_HEADER, actorId.toString())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(request)))
+                .andExpect(status().isOk());
+    }
+
+    @Test
     void updateUser_withInvalidEmail_returns400() throws Exception {
         UserUpdateRequestDto request = validUpdateRequest();
         request.setEmail("not-an-email");

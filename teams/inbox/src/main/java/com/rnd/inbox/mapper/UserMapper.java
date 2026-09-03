@@ -39,13 +39,27 @@ public class UserMapper {
     }
 
     public void applyUpdate(User user, UserUpdateRequestDto dto) {
-        user.setDisplayName(dto.getDisplayName());
-        user.setFirstName(dto.getFirstName());
-        user.setLastName(dto.getLastName());
-        user.setEmail(dto.getEmail());
-        user.setPhone(dto.getPhone());
-        user.setUsername(dto.getUsername());
-        user.setRole(dto.getRole());
+        if (dto.getDisplayName() != null) {
+            user.setDisplayName(dto.getDisplayName());
+        }
+        if (dto.getFirstName() != null) {
+            user.setFirstName(dto.getFirstName());
+        }
+        if (dto.getLastName() != null) {
+            user.setLastName(dto.getLastName());
+        }
+        if (dto.getEmail() != null) {
+            user.setEmail(dto.getEmail());
+        }
+        if (dto.getPhone() != null) {
+            user.setPhone(dto.getPhone());
+        }
+        if (dto.getUsername() != null) {
+            user.setUsername(dto.getUsername());
+        }
+        if (dto.getRole() != null) {
+            user.setRole(dto.getRole());
+        }
         user.setUpdatedAt(Instant.now(clock));
     }
 
