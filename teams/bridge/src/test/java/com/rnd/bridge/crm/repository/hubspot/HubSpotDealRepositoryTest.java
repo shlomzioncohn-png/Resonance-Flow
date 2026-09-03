@@ -339,6 +339,57 @@ class HubSpotDealRepositoryTest {
     }
 
     @Test
+    void aFiveOhThreeIsRetriedRatherThanPropagated() {
+        enqueuePipeline();
+        server.enqueue(new MockResponse()
+                .setResponseCode(503)
+                .setHeader("Content-Type", "application/json")
+                .setBody("{\"status\":\"error\",\"message\":\"service unavailable\"}"));
+        String deal = dealJson("D-11", "Survives a 503", "1000", null, "2026-08-01T08:00:00Z",
+                historyEntry("st-100", "2026-08-01T08:00:00.000Z"));
+        enqueueJson(dealsPage(null, deal));
+
+        HubSpotDealRepository repository = newRepository();
+        List<Deal> all = repository.findAll();
+
+        assertEquals(1, all.size());
+        assertEquals("D-11", all.get(0).dealId());
+    }
+
+    @Test
+    void exhaustingTheRetryBudgetOnRepeatedFiveOhFoursFailsWithAClearError() {
+        enqueuePipeline();
+        for (int i = 0; i < 3; i++) {
+            server.enqueue(new MockResponse()
+                    .setResponseCode(504)
+                    .setHeader("Content-Type", "application/json")
+                    .setBody("{}"));
+        }
+
+        HubSpotDealRepository repository = newRepository(3, 0L, 0L);
+
+        HubSpotClientException exception = assertThrows(HubSpotClientException.class, repository::findAll);
+        assertTrue(exception.getMessage().contains("504"));
+        assertTrue(exception.getMessage().contains("/crm/v3/objects/deals"));
+        assertTrue(exception.getMessage().toLowerCase().indexOf("test-token") < 0);
+    }
+
+    @Test
+    void aFatalFourOhFourFailsImmediatelyWithoutRetrying() {
+        enqueuePipeline();
+        server.enqueue(new MockResponse()
+                .setResponseCode(404)
+                .setHeader("Content-Type", "application/json")
+                .setBody("{\"status\":\"error\",\"message\":\"not found\"}"));
+
+        HubSpotDealRepository repository = newRepository();
+
+        HubSpotClientException exception = assertThrows(HubSpotClientException.class, repository::findAll);
+        assertTrue(exception.getMessage().contains("404"));
+        assertEquals(2, server.getRequestCount()); // pipeline + one non-retried deal request
+    }
+
+    @Test
     void asOfIsStableAcrossCallsWithinOneSync() {
         enqueuePipeline();
         String deal = dealJson("D-10", "Stable asOf", "1000", null, "2026-08-01T08:00:00Z",
