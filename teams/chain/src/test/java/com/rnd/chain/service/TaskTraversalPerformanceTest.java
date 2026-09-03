@@ -31,8 +31,13 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  *   <li>Dependency edges (20,000 total), always pointing from a higher index to a lower one,
  *       so the graph is a DAG and a single weakly-connected component by construction:
  *       <ul>
- *         <li>Backbone: for i = 1..9999, one edge (task[i] depends on task[random(0..i-1)]) -
- *             9,999 edges, guarantees every task is reachable from/to the rest of the graph.
+ *         <li>Backbone: for i = 1..9999, one edge (task[i] depends on task[i-1]) - a straight
+ *             chain of 9,999 edges. A uniformly random predecessor (as in a random recursive
+ *             tree) was tried first and rejected: it gives each node an expected depth of only
+ *             O(log n) (roughly 9-13 for n=10,000), so no single node's transitive dependency
+ *             closure would reach a large fraction of the graph. The chain guarantees the
+ *             highest-index task's transitive dependencies (and the lowest-index task's
+ *             transitive dependents) cover (near-)all 9,999 other tasks.
  *         <li>Extra density: 10,001 more edges (i = random(1..9999), j = random(0..i-1)), same
  *             backward-pointing rule, adds branching without introducing a cycle.
  *       </ul>
@@ -86,8 +91,10 @@ class TaskTraversalPerformanceTest {
 
         List<TaskDependency> edges = new ArrayList<>(EDGE_COUNT);
         for (int i = 1; i < TASK_COUNT; i++) {
-            int dependsOn = random.nextInt(i);
-            edges.add(new TaskDependency(ids[i], ids[dependsOn]));
+            // Straight chain, not a random earlier index - see class Javadoc: a random
+            // predecessor gives each node an expected depth of only O(log n), which would not
+            // exercise the "large fraction of the graph" stress case this benchmark needs.
+            edges.add(new TaskDependency(ids[i], ids[i - 1]));
         }
         while (edges.size() < EDGE_COUNT) {
             int i = 1 + random.nextInt(TASK_COUNT - 1);
