@@ -138,16 +138,6 @@ public class Task {
         return new Builder();
     }
 
-    /**
-     * @return an independent copy of this task, with the same field
-     * values. Used by repositories to hand out/store snapshots instead
-     * of shared references, so mutating one copy never affects another.
-     */
-    public Task copy() {
-        return new Task(id, parentTaskId, ownerId, status, isReady, blockingCount,
-                openConstraintCount, estimatedDurationMin, score, createdAt, updatedAt, deletedAt);
-    }
-
     /** Builder for {@link Task}, useful given the number of constructor parameters. */
     public static class Builder {
         private UUID id;
