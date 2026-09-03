@@ -76,18 +76,16 @@ spec:
               containerPort: {{ $component.containerPort }}
               protocol: TCP
 
-          {{- if $.Values.config }}
-          envFrom:
-            - configMapRef:
-                name: {{ include "resonance-flow.fullname" $ }}-config
-          {{- end }}
-          
-          {{- if $component.env }}
+          {{- if or $component.config $component.env }}
           env:
-            {{- range $name, $value := $component.env }}
+            {{- if $component.config }}
+            - name: CONFIG_FILE_PATH
+              value: "/etc/resonance-flow/config/config.yaml"
+              {{- end }}
+              {{- range $name, $value := $component.env }}
             - name: {{ $name }}
               value: {{ $value | quote }}
-              {{- end }}
+               {{- end }}
           {{- end }}
 
           {{- with $component.startupProbe }}
@@ -109,15 +107,29 @@ spec:
           resources:
             {{- toYaml . | nindent 12 }}
           {{- end }}
-
-          {{- with $.Values.volumeMounts }}
+          {{- if or $component.config $.Values.volumeMounts }}
           volumeMounts:
-            {{- toYaml . | nindent 12 }}
+            {{- if $component.config }}
+            - name: resonance-flow-config
+              mountPath: /etc/resonance-flow/config/config.yaml
+              subPath: config.yaml
+              readOnly: true
+              {{- end }}
+              {{- with $.Values.volumeMounts }}
+              {{- toYaml . | nindent 12 }}
+              {{- end }}
           {{- end }}
 
-      {{- with $.Values.volumes }}
+      {{- if or $component.config $.Values.volumes }}
       volumes:
-        {{- toYaml . | nindent 8 }}
+        {{- if $component.config }}
+        - name: resonance-flow-config
+          configMap:
+            name: {{ include "resonance-flow.fullname" $ }}-{{ $componentName }}-config
+          {{- end }}
+          {{- with $.Values.volumes }}
+          {{- toYaml . | nindent 8 }}
+          {{- end }}
       {{- end }}
 
       {{- with $.Values.nodeSelector }}

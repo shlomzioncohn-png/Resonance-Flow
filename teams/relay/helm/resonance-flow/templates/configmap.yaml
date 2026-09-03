@@ -1,0 +1,19 @@
+{{- range $componentName, $component := .Values.components }}
+{{- if $component.enabled }}
+{{- with $component.config }}
+---
+apiVersion: v1
+kind: ConfigMap
+
+metadata:
+  name: {{ include "resonance-flow.fullname" $ }}-{{ $componentName }}-config
+  labels:
+    {{- include "resonance-flow.labels" $ | nindent 4 }}
+    app.kubernetes.io/component: {{ $componentName }}
+
+data:
+  config.yaml: |
+{{ toYaml . | nindent 4 }}
+{{- end }}
+{{- end }}
+{{- end }}
