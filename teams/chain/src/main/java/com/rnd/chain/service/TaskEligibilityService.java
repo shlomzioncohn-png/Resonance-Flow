@@ -4,11 +4,14 @@ import com.rnd.chain.dto.Task;
 import com.rnd.chain.dto.TaskDependency;
 import com.rnd.chain.dto.TaskEligibilityResponse;
 import com.rnd.chain.dto.TaskStatus;
+import com.rnd.chain.repository.ConstraintRepository;
 import com.rnd.chain.repository.TaskDependencyRepository;
 import com.rnd.chain.repository.TaskRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
+import com.rnd.chain.repository.ConstraintRepository;
+import com.rnd.chain.dto.Constraint;
 
 import java.util.List;
 import java.util.UUID;
@@ -21,14 +24,17 @@ public class TaskEligibilityService {
     private final TaskRepository taskRepository;
     private final TaskDependencyRepository taskDependencyRepository;
     private final SchedulingUpdateService schedulingUpdateService;
+    private final ConstraintRepository constraintRepository;
 
     public TaskEligibilityService(
             TaskRepository taskRepository,
-            TaskDependencyRepository taskDependencyRepository, SchedulingUpdateService schedulingUpdateService) {
+            TaskDependencyRepository taskDependencyRepository,
+            ConstraintRepository constraintRepository,
+            SchedulingUpdateService schedulingUpdateService) {
         this.taskRepository = taskRepository;
         this.taskDependencyRepository = taskDependencyRepository;
+        this.constraintRepository = constraintRepository;
         this.schedulingUpdateService = schedulingUpdateService;
-
     }
 
     public void recalculateTaskEligibility(UUID taskId) {
@@ -36,6 +42,11 @@ public class TaskEligibilityService {
         Task task = taskRepository.findById(taskId)
                 .orElseThrow(() -> new IllegalArgumentException(
                         "Task not found: " + taskId));
+        long openCount = constraintRepository.findByTaskId(taskId).stream()
+                .filter(constraint -> constraint.getStatus() == Constraint.ConstraintStatus.PENDING)
+                .count();
+
+        task.setOpenConstraintCount((int) openCount);
 
         boolean newIsReady = task.getBlockingCount() == 0
                 && task.getOpenConstraintCount() == 0;
@@ -49,11 +60,11 @@ public class TaskEligibilityService {
                     newIsReady);
 
             task.setReady(newIsReady);
-            schedulingUpdateService.publishSchedulingUpdate(task);
             taskRepository.save(task);
+            schedulingUpdateService.publishSchedulingUpdate(task);
 
         } else {
-
+            taskRepository.save(task);
             log.debug(
                     "Task {} eligibility unchanged (isReady={})",
                     taskId,

@@ -29,6 +29,7 @@ import java.util.Map;
 import java.util.UUID;
 
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.doNothing;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.when;
@@ -290,7 +291,10 @@ class ChainControllerTest {
 
     @Test
     void updateConstraintStatus_shouldReturnOk() throws Exception {
-        when(constraintService.updateConstraintStatus(any(), any()))
+        when(constraintService.updateConstraintStatus(
+                any(UUID.class),
+                anyString(),
+                any(Constraint.ConstraintStatus.class)))
                 .thenReturn(createConstraint("c1"));
 
         mockMvc.perform(patch("/tasks/" + TASK_ID + "/constraints/c1")
@@ -301,7 +305,10 @@ class ChainControllerTest {
 
     @Test
     void updateConstraintStatus_whenMissing_shouldReturnNotFound() throws Exception {
-        when(constraintService.updateConstraintStatus(any(), any()))
+        when(constraintService.updateConstraintStatus(
+                any(UUID.class),
+                anyString(),
+                any(Constraint.ConstraintStatus.class)))
                 .thenThrow(new ConstraintNotFoundException("Constraint not found"));
 
         mockMvc.perform(patch("/tasks/" + TASK_ID + "/constraints/c1")

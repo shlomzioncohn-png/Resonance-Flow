@@ -207,6 +207,7 @@ public class ChainController {
 
         Constraint updatedConstraint =
                 constraintService.updateConstraintStatus(
+                        taskId,
                         constraintId,
                         request.getStatus()
                 );
