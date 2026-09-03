@@ -1,11 +1,16 @@
 package com.rnd.bridge.crm.repository.hubspot;
 
+import org.springframework.boot.web.client.ClientHttpRequestFactories;
+import org.springframework.boot.web.client.ClientHttpRequestFactorySettings;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.web.client.ResourceAccessException;
 import org.springframework.web.client.RestClient;
+import org.springframework.web.client.RestClientException;
 import org.springframework.web.util.UriBuilder;
 
+import java.io.IOException;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.function.LongConsumer;
@@ -24,21 +29,37 @@ import java.util.function.UnaryOperator;
  *   <li>{@code 502}/{@code 503}/{@code 504} (transient server errors) -
  *       always exponential backoff, HubSpot does not send a useful
  *       {@code Retry-After} for these.</li>
- *   <li>Transport-level failures (connect/read timeouts, DNS/IO errors -
- *       surfaced by {@code RestClient} as {@link ResourceAccessException}) -
- *       always exponential backoff.</li>
+ *   <li>Transport-level failures (connect/read timeouts, DNS/IO errors) -
+ *       always exponential backoff. Surfaced by {@code RestClient} two
+ *       different ways for the same underlying problem: a failure before
+ *       any response exists (refused connection, DNS, a connect timeout) is
+ *       a {@link ResourceAccessException}; a read timeout that hits
+ *       mid-body, after a 2xx status already came back, is a plain {@link
+ *       RestClientException} from message-converter extraction instead.
+ *       Both are recognised by walking the cause chain for an {@link
+ *       IOException} rather than by exception type.</li>
  * </ul>
  * Any other non-2xx response (e.g. {@code 400}/{@code 401}/{@code 404}) is
  * fatal and fails immediately, not retried. Exhausting the retry budget on
  * any of the three retryable classes above, or hitting a fatal response,
  * fails with a {@link HubSpotClientException} - never containing the bearer
  * token.
+ * <p>
+ * {@link #production} configures explicit connect/read timeouts (see
+ * {@code bridge.crm.hubspot.connect-timeout-millis} /
+ * {@code read-timeout-millis}) so a server that accepts a connection and
+ * then never responds - no status code, nothing for the retry logic above
+ * to react to on its own - fails the request instead of blocking the
+ * calling thread indefinitely, and is then retried like any other
+ * transport failure.
  */
 final class HubSpotClient {
 
     private static final String DEALS_PROPERTIES = "dealname,amount,closedate,dealstage";
     private static final String HISTORY_PROPERTY = "dealstage";
     private static final String RETRY_AFTER_HEADER = "Retry-After";
+    private static final String DEALS_ENDPOINT = "/crm/v3/objects/deals";
+    private static final String PIPELINES_ENDPOINT = "/crm/v3/pipelines/deals";
 
     private final RestClient restClient;
     private final String token;
@@ -70,15 +91,21 @@ final class HubSpotClient {
         this.sleeper = sleeper;
     }
 
-    static HubSpotClient production(
+     static HubSpotClient production(
             RestClient.Builder restClientBuilder,
             String baseUrl,
             String token,
             int pageSize,
             int maxRetries,
             long initialBackoffMillis,
-            long maxBackoffMillis) {
-        return new HubSpotClient(restClientBuilder, baseUrl, token, pageSize, maxRetries,
+            long maxBackoffMillis,
+            long connectTimeoutMillis,
+            long readTimeoutMillis) {
+        RestClient.Builder timeoutAwareBuilder = restClientBuilder.requestFactory(
+                ClientHttpRequestFactories.get(ClientHttpRequestFactorySettings.DEFAULTS
+                        .withConnectTimeout(Duration.ofMillis(connectTimeoutMillis))
+                        .withReadTimeout(Duration.ofMillis(readTimeoutMillis))));
+        return new HubSpotClient(timeoutAwareBuilder, baseUrl, token, pageSize, maxRetries,
                 initialBackoffMillis, maxBackoffMillis, HubSpotClient::sleep);
     }
 
@@ -96,10 +123,9 @@ final class HubSpotClient {
 
     List<HubSpotPipeline> fetchPipelines() {
         HubSpotPipelinesResponse response =
-                execute("/crm/v3/pipelines/deals", UnaryOperator.identity(), HubSpotPipelinesResponse.class);
+                execute(PIPELINES_ENDPOINT, UnaryOperator.identity(), HubSpotPipelinesResponse.class);
         return response.results() == null ? List.of() : response.results();
     }
-
     /** Follows {@code paging.next.after} until HubSpot stops returning one. */
     List<HubSpotDealRecord> fetchAllDeals() {
         List<HubSpotDealRecord> all = new ArrayList<>();
@@ -122,7 +148,7 @@ final class HubSpotClient {
     }
 
     private HubSpotDealsPage fetchDealsPage(String after) {
-        return execute("/crm/v3/objects/deals", uriBuilder -> {
+        return execute(DEALS_ENDPOINT, uriBuilder -> {
             uriBuilder.queryParam("limit", pageSize)
                     .queryParam("properties", DEALS_PROPERTIES)
                     .queryParam("propertiesWithHistory", HISTORY_PROPERTY);
@@ -195,15 +221,36 @@ final class HubSpotClient {
                         }
                         return response.bodyTo(responseType);
                     });
-        } catch (ResourceAccessException transportFailure) {
-            // Connect/read timeout, DNS failure, connection reset, etc. -
-            // RestClient never got a response to inspect a status code on.
-            throw new TransportFailure(transportFailure);
+        } catch (RestClientException restClientFailure) {
+            // Two different shapes reach here under the same root cause. A
+            // connect timeout / DNS failure / connection reset before any
+            // response exists surfaces directly as ResourceAccessException.
+            // A read timeout that hits mid-body - the connection succeeded,
+            // headers came back 2xx, then the body stalled - surfaces
+            // instead as a plain RestClientException from message-converter
+            // extraction (see DefaultRestClient.readWithMessageConverters),
+            // with the IOException one or two levels down its cause chain
+            // rather than as the exception type itself. Checking the cause
+            // chain for IOException catches both without also catching a
+            // fatal one, like a converter failing on a malformed body.
+            if (isTransportFailure(restClientFailure)) {
+                throw new TransportFailure(restClientFailure);
+            }
+            throw restClientFailure;
         }
     }
 
     private static boolean isTransientServerError(int status) {
         return status == 502 || status == 503 || status == 504;
+    }
+
+    private static boolean isTransportFailure(Throwable failure) {
+        for (Throwable cause = failure; cause != null; cause = cause.getCause()) {
+            if (cause instanceof IOException) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private static Long retryAfterMillis(HttpHeaders headers) {
@@ -243,9 +290,13 @@ final class HubSpotClient {
         }
     }
 
-    /** Wraps a {@link ResourceAccessException} so it retries like the other transient failures above. */
+    /**
+     * Wraps an IOException-caused {@link RestClientException} (which
+     * {@link ResourceAccessException} is a subtype of) so it retries like
+     * the other transient failures above.
+     */
     private static final class TransportFailure extends RuntimeException {
-        TransportFailure(ResourceAccessException cause) {
+        TransportFailure(RestClientException cause) {
             super(cause);
         }
     }
