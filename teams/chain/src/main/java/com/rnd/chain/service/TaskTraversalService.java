@@ -7,6 +7,7 @@ import com.rnd.chain.dto.TaskTraceResponse;
 import com.rnd.chain.exception.TaskNotFoundException;
 import com.rnd.chain.repository.TaskDependencyRepository;
 import com.rnd.chain.repository.TaskRepository;
+import org.springframework.stereotype.Service;
 
 import java.util.ArrayDeque;
 import java.util.ArrayList;
@@ -37,6 +38,7 @@ import java.util.function.Function;
  * lookup happens exactly once, naturally, via the visited set (a node is
  * never expanded twice within one traversal call).
  */
+@Service
 public class TaskTraversalService {
 
     private final TaskRepository taskRepository;
