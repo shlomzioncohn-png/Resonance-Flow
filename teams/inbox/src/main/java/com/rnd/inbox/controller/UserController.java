@@ -5,6 +5,7 @@ import com.rnd.inbox.dto.UserCreateRequestDto;
 import com.rnd.inbox.dto.UserResponseDto;
 import com.rnd.inbox.dto.UserStatusUpdateRequestDto;
 import com.rnd.inbox.dto.UserUpdateRequestDto;
+import com.rnd.inbox.security.CurrentActor;
 import com.rnd.inbox.service.UserService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.media.Content;
@@ -42,13 +43,15 @@ public class UserController {
     @ApiResponses({
             @ApiResponse(responseCode = "201", description = "User created",
                     content = @Content(schema = @Schema(implementation = UserResponseDto.class))),
+            @ApiResponse(responseCode = "401", description = "Missing or unrecognized actor identity"),
             @ApiResponse(responseCode = "404", description = "Organization not found"),
             @ApiResponse(responseCode = "409", description = "Email or username already exists")
     })
     @PostMapping
     public ResponseEntity<UserResponseDto> createUser(@Valid @RequestBody UserCreateRequestDto request,
+                                                        @CurrentActor UUID actorId,
                                                         UriComponentsBuilder uriBuilder) {
-        UserResponseDto created = userService.createUser(request);
+        UserResponseDto created = userService.createUser(request, actorId);
         return ResponseEntity
                 .created(uriBuilder.path("/api/v1/users/{id}").build(created.getId()))
                 .body(created);
@@ -77,12 +80,14 @@ public class UserController {
     @ApiResponses({
             @ApiResponse(responseCode = "200", description = "User updated",
                     content = @Content(schema = @Schema(implementation = UserResponseDto.class))),
+            @ApiResponse(responseCode = "401", description = "Missing or unrecognized actor identity"),
             @ApiResponse(responseCode = "404", description = "User not found"),
             @ApiResponse(responseCode = "409", description = "Email or username already exists")
     })
     @PutMapping("/{id}")
-    public UserResponseDto updateUser(@PathVariable UUID id, @Valid @RequestBody UserUpdateRequestDto request) {
-        return userService.updateUser(id, request);
+    public UserResponseDto updateUser(@PathVariable UUID id, @Valid @RequestBody UserUpdateRequestDto request,
+                                       @CurrentActor UUID actorId) {
+        return userService.updateUser(id, request, actorId);
     }
 
     @Operation(summary = "Change a user's status")

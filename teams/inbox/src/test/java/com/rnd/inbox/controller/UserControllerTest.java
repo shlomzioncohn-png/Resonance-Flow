@@ -2,6 +2,7 @@ package com.rnd.inbox.controller;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.rnd.inbox.config.AppConfig;
+import com.rnd.inbox.config.WebMvcConfig;
 import com.rnd.inbox.dto.OrganizationSummaryDto;
 import com.rnd.inbox.dto.PageResponseDto;
 import com.rnd.inbox.dto.UserCreateRequestDto;
@@ -38,8 +39,10 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 @WebMvcTest(UserController.class)
-@Import(AppConfig.class)
+@Import({AppConfig.class, WebMvcConfig.class})
 class UserControllerTest {
+
+    private static final String ACTOR_HEADER = "X-Actor-Id";
 
     @Autowired
     private MockMvc mockMvc;
@@ -52,11 +55,13 @@ class UserControllerTest {
 
     private UUID userId;
     private UUID organizationId;
+    private UUID actorId;
 
     @BeforeEach
     void setUp() {
         userId = UUID.randomUUID();
         organizationId = UUID.randomUUID();
+        actorId = UUID.randomUUID();
     }
 
     private UserResponseDto sampleUser() {
@@ -82,9 +87,10 @@ class UserControllerTest {
 
     @Test
     void createUser_withValidRequest_returns201WithLocationHeader() throws Exception {
-        when(userService.createUser(any())).thenReturn(sampleUser());
+        when(userService.createUser(any(), eq(actorId))).thenReturn(sampleUser());
 
         mockMvc.perform(post("/api/v1/users")
+                        .header(ACTOR_HEADER, actorId.toString())
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(validCreateRequest())))
                 .andExpect(status().isCreated())
@@ -97,6 +103,7 @@ class UserControllerTest {
     @Test
     void createUser_withMissingRequiredFields_returns400WithFieldErrors() throws Exception {
         mockMvc.perform(post("/api/v1/users")
+                        .header(ACTOR_HEADER, actorId.toString())
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(new UserCreateRequestDto())))
                 .andExpect(status().isBadRequest())
@@ -105,10 +112,20 @@ class UserControllerTest {
     }
 
     @Test
+    void createUser_withoutActorHeader_returns401() throws Exception {
+        mockMvc.perform(post("/api/v1/users")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(validCreateRequest())))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.error").value("UNAUTHENTICATED"));
+    }
+
+    @Test
     void createUser_whenOrganizationNotFound_returns404() throws Exception {
-        when(userService.createUser(any())).thenThrow(new OrganizationNotFoundException(organizationId));
+        when(userService.createUser(any(), eq(actorId))).thenThrow(new OrganizationNotFoundException(organizationId));
 
         mockMvc.perform(post("/api/v1/users")
+                        .header(ACTOR_HEADER, actorId.toString())
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(validCreateRequest())))
                 .andExpect(status().isNotFound())
@@ -117,9 +134,10 @@ class UserControllerTest {
 
     @Test
     void createUser_whenEmailAlreadyExists_returns409() throws Exception {
-        when(userService.createUser(any())).thenThrow(new DuplicateEmailException("yehudit@acme.com"));
+        when(userService.createUser(any(), eq(actorId))).thenThrow(new DuplicateEmailException("yehudit@acme.com"));
 
         mockMvc.perform(post("/api/v1/users")
+                        .header(ACTOR_HEADER, actorId.toString())
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(validCreateRequest())))
                 .andExpect(status().isConflict())
@@ -159,9 +177,10 @@ class UserControllerTest {
 
     @Test
     void updateUser_withValidRequest_returns200() throws Exception {
-        when(userService.updateUser(eq(userId), any())).thenReturn(sampleUser());
+        when(userService.updateUser(eq(userId), any(), eq(actorId))).thenReturn(sampleUser());
 
         mockMvc.perform(put("/api/v1/users/{id}", userId)
+                        .header(ACTOR_HEADER, actorId.toString())
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(validUpdateRequest())))
                 .andExpect(status().isOk())
@@ -174,6 +193,7 @@ class UserControllerTest {
         request.setEmail("not-an-email");
 
         mockMvc.perform(put("/api/v1/users/{id}", userId)
+                        .header(ACTOR_HEADER, actorId.toString())
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(request)))
                 .andExpect(status().isBadRequest())
@@ -181,10 +201,20 @@ class UserControllerTest {
     }
 
     @Test
+    void updateUser_withoutActorHeader_returns401() throws Exception {
+        mockMvc.perform(put("/api/v1/users/{id}", userId)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(validUpdateRequest())))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.error").value("UNAUTHENTICATED"));
+    }
+
+    @Test
     void updateUser_whenNotFound_returns404() throws Exception {
-        when(userService.updateUser(eq(userId), any())).thenThrow(new UserNotFoundException(userId));
+        when(userService.updateUser(eq(userId), any(), eq(actorId))).thenThrow(new UserNotFoundException(userId));
 
         mockMvc.perform(put("/api/v1/users/{id}", userId)
+                        .header(ACTOR_HEADER, actorId.toString())
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(validUpdateRequest())))
                 .andExpect(status().isNotFound())

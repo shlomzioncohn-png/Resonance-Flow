@@ -8,6 +8,7 @@ import com.rnd.inbox.dto.UserUpdateRequestDto;
 import com.rnd.inbox.exception.DuplicateEmailException;
 import com.rnd.inbox.exception.DuplicateUsernameException;
 import com.rnd.inbox.exception.OrganizationNotFoundException;
+import com.rnd.inbox.exception.UnauthenticatedException;
 import com.rnd.inbox.exception.UserNotFoundException;
 import com.rnd.inbox.mapper.UserMapper;
 import com.rnd.inbox.model.entity.Organization;
@@ -32,6 +33,8 @@ import java.util.UUID;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -48,16 +51,21 @@ class UserServiceTest {
     @Mock
     private UserMapper userMapper;
 
+    @Mock
+    private AuditService auditService;
+
     private UserService userService;
 
     private UUID organizationId;
     private Organization organization;
     private UUID userId;
     private User user;
+    private UUID actorId;
+    private User actor;
 
     @BeforeEach
     void setUp() {
-        userService = new UserService(userRepository, organizationRepository, userMapper);
+        userService = new UserService(userRepository, organizationRepository, userMapper, auditService);
 
         organizationId = UUID.randomUUID();
         organization = new Organization();
@@ -67,6 +75,11 @@ class UserServiceTest {
         user = new User();
         user.setId(userId);
         user.setOrganization(organization);
+        user.setStatus(UserStatus.ACTIVE);
+
+        actorId = UUID.randomUUID();
+        actor = new User();
+        actor.setId(actorId);
     }
 
     private UserCreateRequestDto createRequest(String email, String username) {
@@ -88,8 +101,13 @@ class UserServiceTest {
         return request;
     }
 
+    private void stubActorFound() {
+        when(userRepository.findById(actorId)).thenReturn(Optional.of(actor));
+    }
+
     @Test
     void createUser_whenOrganizationExistsAndNoDuplicates_savesAndReturnsUser() {
+        stubActorFound();
         UserCreateRequestDto request = createRequest("yehudit@acme.com", "yehudit");
         UserResponseDto responseDto = new UserResponseDto(userId, "Yehudit Cohen", null, null,
                 "yehudit@acme.com", null, "yehudit", "developer", UserStatus.ACTIVE, null, null, null, null);
@@ -101,18 +119,33 @@ class UserServiceTest {
         when(userRepository.save(user)).thenReturn(user);
         when(userMapper.toResponseDto(user)).thenReturn(responseDto);
 
-        UserResponseDto result = userService.createUser(request);
+        UserResponseDto result = userService.createUser(request, actorId);
 
         assertThat(result).isSameAs(responseDto);
         verify(userRepository).save(user);
+        verify(auditService).createAuditLog(eq("USER_CREATED"), eq("User"), eq(userId), eq(organization),
+                eq(actor), any(), isNull());
+    }
+
+    @Test
+    void createUser_whenActorDoesNotExist_throwsUnauthenticatedException() {
+        UserCreateRequestDto request = createRequest("yehudit@acme.com", "yehudit");
+        when(userRepository.findById(actorId)).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> userService.createUser(request, actorId))
+                .isInstanceOf(UnauthenticatedException.class);
+
+        verify(userRepository, never()).save(any());
+        verify(auditService, never()).createAuditLog(any(), any(), any(), any(), any(), any(), any());
     }
 
     @Test
     void createUser_whenOrganizationDoesNotExist_throwsOrganizationNotFoundException() {
+        stubActorFound();
         UserCreateRequestDto request = createRequest("yehudit@acme.com", "yehudit");
         when(organizationRepository.findById(organizationId)).thenReturn(Optional.empty());
 
-        assertThatThrownBy(() -> userService.createUser(request))
+        assertThatThrownBy(() -> userService.createUser(request, actorId))
                 .isInstanceOf(OrganizationNotFoundException.class);
 
         verify(userRepository, never()).save(any());
@@ -120,6 +153,7 @@ class UserServiceTest {
 
     @Test
     void createUser_whenEmailAlreadyExists_throwsDuplicateEmailException() {
+        stubActorFound();
         UserCreateRequestDto request = createRequest("yehudit@acme.com", "yehudit");
         User existing = new User();
         existing.setId(UUID.randomUUID());
@@ -127,7 +161,7 @@ class UserServiceTest {
         when(organizationRepository.findById(organizationId)).thenReturn(Optional.of(organization));
         when(userRepository.findByEmail("yehudit@acme.com")).thenReturn(Optional.of(existing));
 
-        assertThatThrownBy(() -> userService.createUser(request))
+        assertThatThrownBy(() -> userService.createUser(request, actorId))
                 .isInstanceOf(DuplicateEmailException.class);
 
         verify(userRepository, never()).save(any());
@@ -135,6 +169,7 @@ class UserServiceTest {
 
     @Test
     void createUser_whenUsernameAlreadyExists_throwsDuplicateUsernameException() {
+        stubActorFound();
         UserCreateRequestDto request = createRequest("yehudit@acme.com", "yehudit");
         User existing = new User();
         existing.setId(UUID.randomUUID());
@@ -143,7 +178,7 @@ class UserServiceTest {
         when(userRepository.findByEmail("yehudit@acme.com")).thenReturn(Optional.empty());
         when(userRepository.findByUsername("yehudit")).thenReturn(Optional.of(existing));
 
-        assertThatThrownBy(() -> userService.createUser(request))
+        assertThatThrownBy(() -> userService.createUser(request, actorId))
                 .isInstanceOf(DuplicateUsernameException.class);
 
         verify(userRepository, never()).save(any());
@@ -151,6 +186,7 @@ class UserServiceTest {
 
     @Test
     void createUser_whenEmailAndUsernameAreNull_skipsUniquenessChecksAndSaves() {
+        stubActorFound();
         UserCreateRequestDto request = createRequest(null, null);
 
         when(organizationRepository.findById(organizationId)).thenReturn(Optional.of(organization));
@@ -160,7 +196,7 @@ class UserServiceTest {
                 userId, "Yehudit Cohen", null, null, null, null, null, "developer",
                 UserStatus.ACTIVE, null, null, null, null));
 
-        userService.createUser(request);
+        userService.createUser(request, actorId);
 
         verify(userRepository, never()).findByEmail(any());
         verify(userRepository, never()).findByUsername(any());
@@ -190,6 +226,7 @@ class UserServiceTest {
 
     @Test
     void updateUser_whenUserExists_updatesAndReturnsUser() {
+        stubActorFound();
         UserUpdateRequestDto request = updateRequest("new@acme.com", "newname");
         UserResponseDto responseDto = new UserResponseDto(userId, "Yehudit Cohen", null, null,
                 "new@acme.com", null, "newname", "developer", UserStatus.ACTIVE, null, null, null, null);
@@ -200,19 +237,34 @@ class UserServiceTest {
         when(userRepository.save(user)).thenReturn(user);
         when(userMapper.toResponseDto(user)).thenReturn(responseDto);
 
-        UserResponseDto result = userService.updateUser(userId, request);
+        UserResponseDto result = userService.updateUser(userId, request, actorId);
 
         assertThat(result).isSameAs(responseDto);
         verify(userMapper).applyUpdate(user, request);
         verify(userRepository).save(user);
+        verify(auditService).createAuditLog(eq("USER_UPDATED"), eq("User"), eq(userId), eq(organization),
+                eq(actor), any(), isNull());
+    }
+
+    @Test
+    void updateUser_whenActorDoesNotExist_throwsUnauthenticatedException() {
+        UserUpdateRequestDto request = updateRequest("new@acme.com", "newname");
+        when(userRepository.findById(actorId)).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> userService.updateUser(userId, request, actorId))
+                .isInstanceOf(UnauthenticatedException.class);
+
+        verify(userMapper, never()).applyUpdate(any(), any());
+        verify(auditService, never()).createAuditLog(any(), any(), any(), any(), any(), any(), any());
     }
 
     @Test
     void updateUser_whenUserDoesNotExist_throwsUserNotFoundException() {
+        stubActorFound();
         UserUpdateRequestDto request = updateRequest("new@acme.com", "newname");
         when(userRepository.findById(userId)).thenReturn(Optional.empty());
 
-        assertThatThrownBy(() -> userService.updateUser(userId, request))
+        assertThatThrownBy(() -> userService.updateUser(userId, request, actorId))
                 .isInstanceOf(UserNotFoundException.class);
 
         verify(userMapper, never()).applyUpdate(any(), any());
@@ -220,6 +272,7 @@ class UserServiceTest {
 
     @Test
     void updateUser_whenEmailBelongsToAnotherUser_throwsDuplicateEmailException() {
+        stubActorFound();
         UserUpdateRequestDto request = updateRequest("taken@acme.com", "newname");
         User anotherUser = new User();
         anotherUser.setId(UUID.randomUUID());
@@ -227,7 +280,7 @@ class UserServiceTest {
         when(userRepository.findById(userId)).thenReturn(Optional.of(user));
         when(userRepository.findByEmail("taken@acme.com")).thenReturn(Optional.of(anotherUser));
 
-        assertThatThrownBy(() -> userService.updateUser(userId, request))
+        assertThatThrownBy(() -> userService.updateUser(userId, request, actorId))
                 .isInstanceOf(DuplicateEmailException.class);
 
         verify(userMapper, never()).applyUpdate(any(), any());
@@ -236,6 +289,7 @@ class UserServiceTest {
 
     @Test
     void updateUser_whenEmailBelongsToTheSameUser_doesNotThrowAndSaves() {
+        stubActorFound();
         UserUpdateRequestDto request = updateRequest("yehudit@acme.com", "yehudit");
 
         when(userRepository.findById(userId)).thenReturn(Optional.of(user));
@@ -246,7 +300,7 @@ class UserServiceTest {
                 userId, "Yehudit Cohen", null, null, "yehudit@acme.com", null, "yehudit", "developer",
                 UserStatus.ACTIVE, null, null, null, null));
 
-        userService.updateUser(userId, request);
+        userService.updateUser(userId, request, actorId);
 
         verify(userMapper).applyUpdate(user, request);
         verify(userRepository).save(user);
@@ -254,6 +308,7 @@ class UserServiceTest {
 
     @Test
     void updateUser_whenUsernameBelongsToAnotherUser_throwsDuplicateUsernameException() {
+        stubActorFound();
         UserUpdateRequestDto request = updateRequest("yehudit@acme.com", "taken");
         User anotherUser = new User();
         anotherUser.setId(UUID.randomUUID());
@@ -262,7 +317,7 @@ class UserServiceTest {
         when(userRepository.findByEmail("yehudit@acme.com")).thenReturn(Optional.empty());
         when(userRepository.findByUsername("taken")).thenReturn(Optional.of(anotherUser));
 
-        assertThatThrownBy(() -> userService.updateUser(userId, request))
+        assertThatThrownBy(() -> userService.updateUser(userId, request, actorId))
                 .isInstanceOf(DuplicateUsernameException.class);
 
         verify(userRepository, never()).save(any());
