@@ -98,6 +98,28 @@ class UserMapperTest {
     }
 
     @Test
+    void applyUpdate_whenFieldIsOmitted_preservesItsExistingValue() {
+        User user = new User();
+        user.setDisplayName("Existing Name");
+        user.setEmail("existing@acme.com");
+        user.setUsername("existingusername");
+        user.setPhone("0501111111");
+        user.setRole("developer");
+
+        UserUpdateRequestDto request = new UserUpdateRequestDto();
+        request.setDisplayName("New Name");
+        request.setRole("developer");
+        // email, username and phone intentionally left null — not part of this update
+
+        userMapper.applyUpdate(user, request);
+
+        assertThat(user.getDisplayName()).isEqualTo("New Name");
+        assertThat(user.getEmail()).isEqualTo("existing@acme.com");
+        assertThat(user.getUsername()).isEqualTo("existingusername");
+        assertThat(user.getPhone()).isEqualTo("0501111111");
+    }
+
+    @Test
     void applyStatusChange_setsStatusAndBumpsUpdatedAt() {
         User user = new User();
         user.setStatus(UserStatus.ACTIVE);

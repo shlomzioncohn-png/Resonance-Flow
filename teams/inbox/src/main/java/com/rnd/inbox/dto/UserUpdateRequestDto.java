@@ -1,12 +1,10 @@
 package com.rnd.inbox.dto;
 
 import jakarta.validation.constraints.Email;
-import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Size;
 
 public class UserUpdateRequestDto {
 
-    @NotBlank
     @Size(max = 255)
     private String displayName;
 
@@ -26,7 +24,6 @@ public class UserUpdateRequestDto {
     @Size(max = 100)
     private String username;
 
-    @NotBlank
     @Size(max = 50)
     private String role;
 
