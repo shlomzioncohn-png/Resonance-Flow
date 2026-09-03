@@ -29,14 +29,14 @@ public class MockDataConfig {
     @Bean
     @ConditionalOnMissingBean(TaskRepository.class)
     public TaskRepository taskRepository() {
-        List<Task> fakeTasks = List.of();
-        return new InMemoryTaskRepository(fakeTasks);
+        List<Task> noSeedTasks = List.of();
+        return new InMemoryTaskRepository(noSeedTasks);
     }
 
     @Bean
     @ConditionalOnMissingBean(TaskDependencyRepository.class)
     public TaskDependencyRepository taskDependencyRepository() {
-        List<TaskDependency> fakeEdges = List.of();
-        return new InMemoryTaskDependencyRepository(fakeEdges);
+        List<TaskDependency> noSeedEdges = List.of();
+        return new InMemoryTaskDependencyRepository(noSeedEdges);
     }
 }

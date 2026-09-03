@@ -5,7 +5,7 @@ import java.util.Objects;
 import java.util.UUID;
 
 // Identifier type: UUID, pending Inbox publishing its own task id type.
-public class Task {
+public final class Task {
 
     private final UUID id;
     private final UUID parentTaskId;
