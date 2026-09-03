@@ -56,6 +56,14 @@ class PgVectorStore(VectorStore):
         finally:
             self._pool.putconn(conn)
 
+    def delete(self, task_id: str) -> None:
+        conn = self._pool.getconn()
+        try:
+            with conn, conn.cursor() as cur:
+                cur.execute(f"DELETE FROM {PG_TABLE} WHERE task_id = %s;", (task_id,))
+        finally:
+            self._pool.putconn(conn)
+
     def search(self, query_vector: list[float], k: int) -> list[str]:
         conn = self._pool.getconn()
         try:

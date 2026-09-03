@@ -19,7 +19,7 @@ Vectors, semantic search, duplicate/related-task detection.
 ## What's here
 
 ```
-__init__.py         the public interface -- embed() / upsert() / search()
+__init__.py         the public interface -- embed() / upsert() / search() / delete()
 embeddings.py       embed() -- the (placeholder) text vectorizer
 base.py             VectorStore abstract interface (the "contract") -- dependency-free
 pgvector_store.py   the ONLY file that knows about Postgres/pgvector
@@ -54,12 +54,14 @@ pytest          # from teams/mind/ -- picks up tests/test_vector_store.py automa
 ## Using the interface elsewhere in the app
 
 ```python
-from mind.embeddings import embed, upsert, search
+from mind.embeddings import embed, upsert, search, delete
 
 vector = embed(task.title + " " + task.description)
 upsert(task.id, vector)
 
 similar_task_ids = search(vector, k=5)
+
+delete(task.id)  # e.g. when the task itself is deleted
 ```
 
 No caller anywhere else in the codebase should import `pgvector_store.py`

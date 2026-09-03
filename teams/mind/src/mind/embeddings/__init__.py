@@ -4,7 +4,7 @@ Vectors, semantic search, duplicate/related-task detection.
 Public interface -- everything else in the app should only ever import
 from this top-level package:
 
-    from mind.embeddings import embed, upsert, search
+    from mind.embeddings import embed, upsert, search, delete
 
 Never import `base.py` / `pgvector_store.py` / `factory.py` directly. The
 concrete vector database is an implementation detail hidden behind
@@ -30,6 +30,7 @@ __all__ = [
     "embed",
     "upsert",
     "search",
+    "delete",
     "DUPLICATE_SIMILARITY_THRESHOLD",
 ]
 
@@ -66,3 +67,8 @@ def upsert(task_id: str, vector: list[float]) -> None:
 def search(query_vector: list[float], k: int) -> list[str]:
     """Return the `k` task_ids whose vectors are most similar to `query_vector`."""
     return _get_store().search(query_vector, k)
+
+
+def delete(task_id: str) -> None:
+    """Remove the vector for `task_id`, if it exists. No-op if it doesn't."""
+    _get_store().delete(task_id)
