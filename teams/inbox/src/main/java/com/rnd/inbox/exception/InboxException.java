@@ -1,10 +1,23 @@
 package com.rnd.inbox.exception;
 
+import org.springframework.http.HttpStatus;
+
 public abstract class InboxException extends RuntimeException {
 
-    protected InboxException(String message) {
+    private final String errorCode;
+    private final HttpStatus httpStatus;
+
+    protected InboxException(String message, String errorCode, HttpStatus httpStatus) {
         super(message);
+        this.errorCode = errorCode;
+        this.httpStatus = httpStatus;
     }
 
-    public abstract String getErrorCode();
+    public String getErrorCode() {
+        return errorCode;
+    }
+
+    public HttpStatus getHttpStatus() {
+        return httpStatus;
+    }
 }

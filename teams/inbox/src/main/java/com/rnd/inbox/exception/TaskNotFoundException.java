@@ -1,17 +1,12 @@
 package com.rnd.inbox.exception;
 
+import org.springframework.http.HttpStatus;
+
 import java.util.UUID;
 
 public class TaskNotFoundException extends InboxException {
 
-    private static final String ERROR_CODE = "TASK_NOT_FOUND";
-
     public TaskNotFoundException(UUID taskId) {
-        super("Task " + taskId + " not found");
-    }
-
-    @Override
-    public String getErrorCode() {
-        return ERROR_CODE;
+        super("Task " + taskId + " not found", "TASK_NOT_FOUND", HttpStatus.NOT_FOUND);
     }
 }
