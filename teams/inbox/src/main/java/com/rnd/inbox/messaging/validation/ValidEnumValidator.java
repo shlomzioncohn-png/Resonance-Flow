@@ -12,9 +12,22 @@ public class ValidEnumValidator implements ConstraintValidator<ValidEnum, String
 
     @Override
     public void initialize(ValidEnum annotation) {
-        allowed = Arrays.stream(annotation.enumClass().getEnumConstants())
+        List<String> constants = Arrays.stream(annotation.enumClass().getEnumConstants())
                 .map(Enum::name)
                 .toList();
+
+        if (annotation.allowed().length == 0) {
+            allowed = constants;
+            return;
+        }
+
+        List<String> subset = List.of(annotation.allowed());
+        List<String> unknown = subset.stream().filter(name -> !constants.contains(name)).toList();
+        if (!unknown.isEmpty()) {
+            throw new IllegalStateException("@ValidEnum(allowed=...) on " + annotation.enumClass().getSimpleName()
+                    + " lists values that are not constants of that enum: " + unknown);
+        }
+        allowed = subset;
     }
 
     @Override

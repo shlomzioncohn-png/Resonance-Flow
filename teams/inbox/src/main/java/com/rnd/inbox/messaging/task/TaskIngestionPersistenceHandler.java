@@ -1,4 +1,4 @@
-package com.rnd.inbox.bridge.task;
+package com.rnd.inbox.messaging.task;
 
 import com.rnd.inbox.messaging.kafka.TransientProcessingException;
 import com.rnd.inbox.model.entity.Assignment;
@@ -11,12 +11,16 @@ import org.springframework.stereotype.Component;
 import java.util.UUID;
 
 @Component
-public class BridgeTaskPersistenceHandler {
+public class TaskIngestionPersistenceHandler {
 
     private final TaskService taskService;
 
-    public BridgeTaskPersistenceHandler(TaskService taskService) {
+    public TaskIngestionPersistenceHandler(TaskService taskService) {
         this.taskService = taskService;
+    }
+
+    public void persist(Task incoming, UUID correlationId) {
+        persist(incoming, null, correlationId);
     }
 
     public void persist(Task incoming, Assignment assignment, UUID correlationId) {
@@ -25,7 +29,7 @@ public class BridgeTaskPersistenceHandler {
         } catch (DataIntegrityViolationException e) {
             taskService.findExisting(incoming).orElseThrow(() -> e);
         } catch (DataAccessException e) {
-            throw new TransientProcessingException("Technical failure while persisting task from bridge event", e);
+            throw new TransientProcessingException("Technical failure while persisting task from ingestion event", e);
         }
     }
 }

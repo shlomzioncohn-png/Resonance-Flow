@@ -82,12 +82,22 @@ class BridgeTaskEventValidationTest {
     }
 
     @ParameterizedTest
-    @EnumSource(SourceType.class)
-    void acceptsEverySupportedPlatform(SourceType sourceType) {
+    @EnumSource(value = SourceType.class, names = {"GITHUB_ISSUE", "GITHUB_PR", "CRM_DEAL"})
+    void acceptsEveryStructuredPlatform(SourceType sourceType) {
         BridgeTaskEventDto dto = validEvent();
         dto.setSourceType(sourceType.name());
 
         assertThatCode(() -> validator.validate(dto)).doesNotThrowAnyException();
+    }
+
+    @ParameterizedTest
+    @EnumSource(value = SourceType.class, names = {"GITHUB_ISSUE", "GITHUB_PR", "CRM_DEAL"},
+            mode = EnumSource.Mode.EXCLUDE)
+    void rejectsASourceTypeThatBelongsOnTheUnstructuredPath(SourceType sourceType) {
+        BridgeTaskEventDto dto = validEvent();
+        dto.setSourceType(sourceType.name());
+
+        assertRejects(dto, "sourceType");
     }
 
     @Test

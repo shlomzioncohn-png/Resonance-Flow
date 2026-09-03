@@ -27,6 +27,8 @@ inbox:
   kafka:
     topics:
       bridge-structured-tasks: ${BRIDGE_STRUCTURED_TASKS_TOPIC:bridge.structured.tasks}
+      chain-scheduling-updated: ${CHAIN_SCHEDULING_UPDATED_TOPIC:task.scheduling.updated}
+      mind-task-creation-requested: ${MIND_TASK_CREATION_REQUESTED_TOPIC:task.creation.requested}
     retry:
       max-attempts: ${INBOX_KAFKA_RETRY_MAX_ATTEMPTS:3}
       initial-backoff-ms: ${INBOX_KAFKA_RETRY_INITIAL_BACKOFF_MS:500}

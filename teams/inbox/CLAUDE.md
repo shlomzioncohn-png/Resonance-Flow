@@ -50,6 +50,10 @@ to get wrong by writing the "obvious" thing instead:
   `depends_on` table here.
 - **`is_available` is calculated by Chain and only materialized in Inbox.** Inbox does not
   compute it.
+- **`priority_score` is Chain's too, on the same terms** — `1..10`, fractional allowed, higher
+  means more important, NULL until Chain has scored the task. Delivered on
+  `task.scheduling.updated`; omitting it leaves the stored value unchanged, so a message that
+  updates only availability never wipes a score. Inbox does not compute it either.
 - **OTP is stored in PostgreSQL** (hash + expiry). Don't introduce Redis for it.
 - **No granular RBAC.** A basic `users.role` only, until a schema change is agreed.
 - **`tier`, `role_context` and `confidence` are nullable** — they may be unset before Mind
@@ -64,7 +68,7 @@ to get wrong by writing the "obvious" thing instead:
 The spec's section 5 lists items explicitly awaiting a decision from the Inbox lead, mentors, or a
 cross-team owner. As of this writing: audit-trail granularity (JSONB vs. per-field),
 **ownership of the parent/child task hierarchy** (`tasks.parent_task_id` vs. Chain), whether
-`users.manager_id` is needed alongside team lead, and the producer/semantics of `priority_score`.
+`users.manager_id` is needed alongside team lead.
 
 If work requires one of these, **stop and get the decision** — implementing a guess here creates
 a schema fact other teams will build on. Record the answer in the spec, then implement.

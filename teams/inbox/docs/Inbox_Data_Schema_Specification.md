@@ -178,7 +178,7 @@ Fields are listed with their type, whether they are required, their foreign-key 
 | `deadline` | TIMESTAMPTZ | No | — | Task deadline. |
 | `status` | VARCHAR / ENUM | Yes | `new / in_review / approved / in_progress / snoozed / done / rejected / cancelled` | Task lifecycle state. |
 | `is_available` | BOOLEAN | Yes | DEFAULT `false` or agreed default | Whether the task is currently available for execution. Calculated by Chain and materialized in Inbox. |
-| `priority_score` | REAL | No | — | Latest prioritization/scheduling score used by the task experience. Producer & exact semantics not yet finalized — see Open Questions. |
+| `priority_score` | REAL | No | CHECK `1..10` | Latest prioritization/scheduling score used by the task experience. Produced by Chain and materialized in Inbox, like `is_available`. Fractional values allowed; higher means more important. NULL until Chain has scored the task. |
 | `snoozed_until` | TIMESTAMPTZ | No | Required when `status = 'snoozed'` | Time until which the task is deferred. |
 | `extraction_provenance` | VARCHAR / ENUM | Yes | `etl / ml_inferred / manual` | How the task was created. |
 | `confidence` | REAL | Cond. | CHECK `0..1`; required for ML-inferred tasks | Confidence score for ML-inferred task data. |
@@ -196,7 +196,7 @@ Fields are listed with their type, whether they are required, their foreign-key 
 | Data | Type / Structure | Stored by | Description |
 |---|---|---|---|
 | `is_available` | BOOLEAN | Inbox | Materialized availability state, calculated by Chain. |
-| `priority_score` | REAL | Inbox | Latest prioritization/scheduling score. Computed by / producer not yet documented — see Open Questions. |
+| `priority_score` | REAL | Inbox | Latest prioritization/scheduling score, `1..10`, higher is more important. Calculated by Chain, materialized in Inbox. Delivered on `task.scheduling.updated`; omitting it leaves the stored value unchanged. |
 | Task dependencies | Dependency graph | Chain | Blocking relationships between tasks; not stored in Inbox. |
 | Blocker resolution | Chain service logic | Chain | Resolves dependency state and recalculates task availability. |
 | Parent / child hierarchy | `parent_task_id UUID`, or Chain hierarchy | TBD | Structural task hierarchy. Open ownership decision. |
