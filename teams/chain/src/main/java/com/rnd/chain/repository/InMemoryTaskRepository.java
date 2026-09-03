@@ -50,6 +50,11 @@ public class InMemoryTaskRepository implements TaskRepository {
                 .collect(Collectors.toList());
     }
 
+    /**
+     * Note: save is an unconditional overwrite. Racing it against a
+     * concurrent {@link #update} on the same id is a last-write-wins race -
+     * prefer {@link #update} when the new value depends on the current one.
+     */
     @Override
     public Task save(Task task) {
         Objects.requireNonNull(task, "task must not be null");
