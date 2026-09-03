@@ -68,6 +68,9 @@ public class WorkspaceController {
     @Value("${bff.read-timeout-ms:10000}")
     private long bffReadTimeoutMs;
 
+    @Value("${app.dev-mode:false}")
+    private boolean devMode;
+
     public WorkspaceController(RestTemplate restTemplate) {
         this.restTemplate = restTemplate;
     }
@@ -75,6 +78,28 @@ public class WorkspaceController {
     // -------------------------------------------------------------------------
     // Private helpers
     // -------------------------------------------------------------------------
+
+    /**
+     * Get mock user ID for dev/test flow.
+     * Only returns mock ID if dev-mode is explicitly enabled.
+     * In production (dev-mode=false), this call will fail with an error
+     * until proper JWT extraction is implemented.
+     * 
+     * @param endpoint endpoint identifier for logging
+     * @return MOCK_USER_ID if dev-mode enabled
+     * @throws IllegalStateException if dev-mode is not enabled (production guard)
+     */
+    private String getMockUserId(String endpoint) {
+        if (!devMode) {
+            logger.error("Attempt to use mock user ID in production mode for endpoint: {}", endpoint);
+            throw new IllegalStateException(
+                "Mock user ID cannot be used in production. " +
+                "JWT extraction must be implemented for: " + endpoint
+            );
+        }
+        logger.warn("Using mock user ID for endpoint: {} (dev-mode enabled)", endpoint);
+        return MOCK_USER_ID;
+    }
 
     /**
      * Builds the X-User-Id header for BFF requests.
@@ -112,7 +137,7 @@ public class WorkspaceController {
         // TODO: extract userId from JWT token (Authorization: Bearer <token>)
         //       JwtUtil.extractUserId(request.getHeader("Authorization"))
         //       For now: using mock userId so the full flow FE → Gateway → BFF works
-        String userId = MOCK_USER_ID;
+        String userId = getMockUserId("workspace.recommend");
 
         logger.info("Workspace recommendation request - userId: {}, availableTime: {} minutes",
                 userId, request.getAvailableTime());
@@ -178,7 +203,7 @@ public class WorkspaceController {
     @GetMapping("/tasks/{taskId}")
     public ResponseEntity<TaskDTO> getTaskDetails(@PathVariable String taskId) {
 
-        String userId = MOCK_USER_ID; // TODO: extract from JWT
+        String userId = getMockUserId("workspace.details"); // TODO: extract from JWT
 
         logger.info("Task details request - userId: {}, taskId: {}", userId, taskId);
 
@@ -237,7 +262,7 @@ public class WorkspaceController {
             @PathVariable String taskId,
             @Valid @RequestBody TaskStatusUpdateDTO statusUpdate) {
 
-        String userId = MOCK_USER_ID; // TODO: extract from JWT
+        String userId = getMockUserId("workspace.status-update"); // TODO: extract from JWT
 
         logger.info("Task status update request - userId: {}, taskId: {}, newStatus: {}",
                 userId, taskId, statusUpdate.getStatus());
