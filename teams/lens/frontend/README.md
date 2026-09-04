@@ -14,14 +14,13 @@ using Material UI (MUI).
 ## Project structure
 
 ```
-theme/                       LENS design system: MUI theme, design tokens (see below)
-app/                        Next.js routes, layouts, global styles
+app/                        Next.js routes, layouts, global styles, MUI theme
   (app)/                      Routes wrapped in the App Shell (Header + Sidebar)
   (public)/                   Routes with no shell (/login, /unauthorized)
 components/
   layout/                     AppShell, Header, Sidebar, PageContainer, Logo
   feedback/                   LoadingState, EmptyState, ErrorState
-  ui/                          Shared, non-layout UI components (e.g. StatusBadge)
+  ui/                          (reserved for shared, non-layout UI components)
 mocks/                       Mock data adapters used until real APIs exist
 docs/                        Architecture docs (see below)
 features/, services/,       Reserved for upcoming feature work — not used yet
