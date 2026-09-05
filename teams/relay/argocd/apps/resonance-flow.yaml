@@ -10,7 +10,7 @@ spec:
   source:
     repoURL: https://github.com/KamaTechOrg/Resonance-Flow.git
     targetRevision: main
-    path: resonance-flow
+    path: teams/relay/helm/resonance-flow
     helm:
       valueFiles:
         - values.yaml
