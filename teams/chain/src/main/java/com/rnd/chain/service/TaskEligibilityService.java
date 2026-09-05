@@ -94,8 +94,16 @@ public class TaskEligibilityService {
         Objects.requireNonNull(dependsOnTaskId, "dependsOnTaskId must not be null");
         log.info("Adding dependency: task {} depends on {}", taskId, dependsOnTaskId);
 
-        boolean isNewEdge;
-        boolean dependsOnAlreadyDone;
+        // [CRITICAL fix] The counter mutation below used to run in a second, separately
+        // acquired synchronized (lockFor(taskId)) block, after this dependencyGraphLock section
+        // had already been released. dependsOnAlreadyDone/isNewEdge were decided here, under
+        // this lock, but applied later under a different, narrower lock - leaving a gap where a
+        // concurrent removeDependency/onTaskStatusChanged on the same edge (both of which also
+        // take dependencyGraphLock) could act on the real edge/status state in between, making
+        // this method's captured decision stale by the time it finally ran. Nesting the per-task
+        // lock inside this one instead - the same nesting order (graph lock outer, per-task lock
+        // inner) already used safely by adjustDependentsBlockingCount - closes that gap: decide
+        // and act now happen in one uninterrupted critical section.
         synchronized (dependencyGraphLock) {
             if (wouldCreateCycle(taskId, dependsOnTaskId)) {
                 throw new IllegalStateException(
@@ -106,34 +114,34 @@ public class TaskEligibilityService {
             // dependents fan-out, so the two can't race: whichever of "edge becomes visible" vs
             // "status flips to DONE" happens first here is guaranteed to also be what
             // onTaskStatusChanged (or this check) sees, so the edge is counted exactly once.
-            dependsOnAlreadyDone = requireTask(dependsOnTaskId).getStatus() == TaskStatus.DONE;
+            boolean dependsOnAlreadyDone = requireTask(dependsOnTaskId).getStatus() == TaskStatus.DONE;
 
             // save() on TaskDependencyRepository is idempotent by contract, but it doesn't tell
             // us whether the edge already existed - we check that ourselves so we only bump
             // blockingCount for a genuinely new edge.
-            isNewEdge = !edgeExists(taskId, dependsOnTaskId);
+            boolean isNewEdge = !edgeExists(taskId, dependsOnTaskId);
             taskDependencyRepository.save(new TaskDependency(taskId, dependsOnTaskId));
-        }
 
-        if (!isNewEdge) {
-            log.warn("Dependency {} -> {} already existed, blockingCount left unchanged", taskId, dependsOnTaskId);
-            return;
-        }
-
-        synchronized (lockFor(taskId)) {
-            Task task = requireTask(taskId);
-            if (dependsOnAlreadyDone) {
-                // A dependency on an already-completed task will never trigger a future
-                // onTaskStatusChanged transition to decrement it, so counting it here would
-                // leave the dependent permanently stuck. blockingCount is left untouched, but
-                // eligibility is still recalculated: if this is the task's first-ever edge and
-                // it started isReady=false by default, nothing else would ever recompute it.
-                log.info("Dependency {} -> {} added but {} is already DONE, blockingCount left unchanged",
-                    taskId, dependsOnTaskId, dependsOnTaskId);
-            } else {
-                task.setBlockingCount(task.getBlockingCount() + 1);
+            if (!isNewEdge) {
+                log.warn("Dependency {} -> {} already existed, blockingCount left unchanged", taskId, dependsOnTaskId);
+                return;
             }
-            recalculateAndSave(task);
+
+            synchronized (lockFor(taskId)) {
+                Task task = requireTask(taskId);
+                if (dependsOnAlreadyDone) {
+                    // A dependency on an already-completed task will never trigger a future
+                    // onTaskStatusChanged transition to decrement it, so counting it here would
+                    // leave the dependent permanently stuck. blockingCount is left untouched, but
+                    // eligibility is still recalculated: if this is the task's first-ever edge and
+                    // it started isReady=false by default, nothing else would ever recompute it.
+                    log.info("Dependency {} -> {} added but {} is already DONE, blockingCount left unchanged",
+                        taskId, dependsOnTaskId, dependsOnTaskId);
+                } else {
+                    task.setBlockingCount(task.getBlockingCount() + 1);
+                }
+                recalculateAndSave(task);
+            }
         }
     }
 
@@ -164,44 +172,47 @@ public class TaskEligibilityService {
         Objects.requireNonNull(dependsOnTaskId, "dependsOnTaskId must not be null");
         log.info("Removing dependency: task {} no longer depends on {}", taskId, dependsOnTaskId);
 
-        boolean existed;
-        boolean dependsOnCurrentlyDone;
+        // [CRITICAL fix] See addDependency for the full explanation: the counter mutation used
+        // to run in a second, separately acquired synchronized (lockFor(taskId)) block after
+        // dependencyGraphLock had already been released, leaving a gap where a concurrent
+        // addDependency/onTaskStatusChanged on the same edge could act on stale state. Nesting
+        // the per-task lock inside this one closes that gap.
         synchronized (dependencyGraphLock) {
             // delete() returns void, so we check existence beforehand to know whether the
             // counter should actually change. Doing the check and the delete under the graph
             // lock prevents two concurrent removals of the same edge from both seeing
             // existed=true and double-decrementing.
-            existed = edgeExists(taskId, dependsOnTaskId);
+            boolean existed = edgeExists(taskId, dependsOnTaskId);
 
             // A missing target task is treated as "not currently DONE" (i.e. safe to decrement)
             // rather than failing the removal - a dangling edge to a deleted task should still
             // be cleanable.
-            dependsOnCurrentlyDone = existed
+            boolean dependsOnCurrentlyDone = existed
                 && taskRepository.findById(dependsOnTaskId)
                     .map(t -> t.getStatus() == TaskStatus.DONE)
                     .orElse(false);
 
             taskDependencyRepository.delete(taskId, dependsOnTaskId);
-        }
 
-        if (!existed) {
-            log.warn("No dependency {} -> {} found to remove, skipping counter update", taskId, dependsOnTaskId);
-            return;
-        }
-
-        synchronized (lockFor(taskId)) {
-            Task task = requireTask(taskId);
-            if (dependsOnCurrentlyDone) {
-                // Mirrors addDependency: an edge to an already-DONE task never counted against
-                // blockingCount in the first place (or was already subtracted when it
-                // transitioned), so removing it must not decrement again - but still
-                // recalculate for the same defensive reason as addDependency.
-                log.info("Dependency {} -> {} removed but {} was already DONE, blockingCount left unchanged",
-                    taskId, dependsOnTaskId, dependsOnTaskId);
-            } else {
-                task.setBlockingCount(Math.max(0, task.getBlockingCount() - 1));
+            if (!existed) {
+                log.warn("No dependency {} -> {} found to remove, skipping counter update", taskId, dependsOnTaskId);
+                return;
             }
-            recalculateAndSave(task);
+
+            synchronized (lockFor(taskId)) {
+                Task task = requireTask(taskId);
+                if (dependsOnCurrentlyDone) {
+                    // Mirrors addDependency: an edge to an already-DONE task never counted against
+                    // blockingCount in the first place (or was already subtracted when it
+                    // transitioned), so removing it must not decrement again - but still
+                    // recalculate for the same defensive reason as addDependency.
+                    log.info("Dependency {} -> {} removed but {} was already DONE, blockingCount left unchanged",
+                        taskId, dependsOnTaskId, dependsOnTaskId);
+                } else {
+                    task.setBlockingCount(Math.max(0, task.getBlockingCount() - 1));
+                }
+                recalculateAndSave(task);
+            }
         }
     }
 
