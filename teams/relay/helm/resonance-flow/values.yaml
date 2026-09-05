@@ -51,7 +51,7 @@ volumes: []
 volumeMounts: []
 dependencies:
   - name: kafka
-    host: kafka.kafka.svc.cluster.local
+    host: resonance-flow-kafka.resonance-flow.svc.cluster.local
     port: 9092
 initContainers: []
 nodeSelector: {}
@@ -97,7 +97,7 @@ components:
     env: {}
     dependencies:
       - name: minio
-        host: minio.minio.svc.cluster.local
+        host: resonance-flow-minio.resonance-flow.svc.cluster.local
         port: 9000
   lens-bff:
     enabled: true
@@ -175,7 +175,7 @@ components:
     env: {}
     dependencies:
       - name: minio
-        host: minio.minio.svc.cluster.local
+        host: resonance-flow-minio.resonance-flow.svc.cluster.local
         port: 9000
   lens-frontend:
     enabled: true
@@ -290,18 +290,18 @@ components:
     env: {}
     dependencies:
       - name: postgres
-        host: postgres.postgres.svc.cluster.local
+        host: resonance-flow-postgresql.resonance-flow.svc.cluster.local
         port: 5432
     config:
       data:
         datasource:
-          host: postgres.postgres.svc.cluster.local
+          host: resonance-flow-postgresql.resonance-flow.svc.cluster.local
           port: 5432
           database: resonance_flow
           username: postgres
           password: postgres
         kafka:
-          bootstrapServers: kafka.kafka.svc.cluster.local:9092
+          bootstrapServers: resonance-flow-kafka.resonance-flow.svc.cluster.local:9092
           consumerGroupId: inbox-service
           topics:
             bridgeStructuredTasks: bridge.structured.tasks

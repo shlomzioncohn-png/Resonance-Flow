@@ -5,7 +5,7 @@ Shared Helm chart for every team's service. One release, one namespace
 [`values.yaml`](values.yaml) (image, probes, resources, env), kept up to
 date by that team's own CI. ArgoCD watches this chart and keeps the
 cluster in sync with it; see
-[`teams/relay/argocd/README.md`](../teams/relay/argocd/README.md) for
+[`teams/relay/argocd/README.md`](../../argocd/README.md) for
 how that's wired up.
 
 Note: this chart is shared across all teams - coordinate chart/template
@@ -65,23 +65,30 @@ that blocks until `host:port` is TCP-reachable.
 Currently wired up:
 
 - **Kafka** - every component depends on it, so it's set globally
-  (`dependencies` in `values.yaml`) as `kafka.kafka.svc.cluster.local:9092`.
+  (`dependencies` in `values.yaml`) as
+  `resonance-flow-kafka.resonance-flow.svc.cluster.local:9092`.
 - **Postgres** - only `inbox` uses it:
-  `postgres.postgres.svc.cluster.local:5432`.
+  `resonance-flow-postgresql.resonance-flow.svc.cluster.local:5432`.
 - **MinIO** - `bridge` and `mind` use it:
-  `minio.minio.svc.cluster.local:9000`.
+  `resonance-flow-minio.resonance-flow.svc.cluster.local:9000`.
 
-Postgres and MinIO hostnames follow the same convention as the `kafka/`
-chart in this repo (chart deployed into a same-named namespace). Neither
-has its own chart here yet - until one is deployed at that address, pods
-for `inbox`, `bridge`, and `mind` will block in `Init:0/1` forever.
+Kafka, Postgres, and MinIO are Bitnami subcharts declared as `dependencies`
+in `Chart.yaml`, each gated on its own `<name>.enabled` in `values.yaml` -
+not separate charts deployed into a same-named namespace of their own.
+Because they render into the *same* Helm release as every component
+(namespace `resonance-flow`), their Service names follow Helm's default
+subchart naming, `<release-name>-<chart-name>` (verified with
+`helm template`) - hence the `resonance-flow-` prefix on every hostname
+above. If a component depends on one of these and its `enabled` flag is
+`false` for the values file in use, that component's pod will block in
+`Init:0/1` forever waiting for a Service that was never created.
 
 ```yaml
 components:
   inbox:
     dependencies:
       - name: postgres
-        host: postgres.postgres.svc.cluster.local
+        host: resonance-flow-postgresql.resonance-flow.svc.cluster.local
         port: 5432
 ```
 
