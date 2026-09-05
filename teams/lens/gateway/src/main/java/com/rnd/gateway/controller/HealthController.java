@@ -4,6 +4,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.Bean;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -16,6 +17,7 @@ import java.time.Instant;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.concurrent.*;
+import jakarta.annotation.PreDestroy;
 
 /**
  * Health check endpoints for the Gateway.
@@ -53,6 +55,28 @@ public class HealthController {
             return t;
         }
     );
+
+    /**
+     * Gracefully shut down health check executor on application shutdown.
+     * Prevents resource leaks and ensures clean termination.
+     */
+    @PreDestroy
+    public void shutdown() {
+        if (healthCheckExecutor != null && !healthCheckExecutor.isShutdown()) {
+            logger.info("Shutting down health check executor");
+            healthCheckExecutor.shutdown();
+            try {
+                if (!healthCheckExecutor.awaitTermination(5, TimeUnit.SECONDS)) {
+                    logger.warn("Health check executor did not terminate within 5 seconds, forcing shutdown");
+                    healthCheckExecutor.shutdownNow();
+                }
+            } catch (InterruptedException e) {
+                logger.error("Interrupted waiting for health check executor shutdown", e);
+                healthCheckExecutor.shutdownNow();
+                Thread.currentThread().interrupt();
+            }
+        }
+    }
 
     /**
      * Gateway liveness check — Gateway process only, no downstream calls.
@@ -117,9 +141,8 @@ public class HealthController {
             return "UNKNOWN";
         }
 
+        long startTime = System.currentTimeMillis();
         try {
-            long startTime = System.currentTimeMillis();
-            
             // Use dedicated executor with bounded threads + timeout to prevent blocking
             CompletableFuture<ResponseEntity<String>> future = 
                 CompletableFuture.supplyAsync(() -> 
@@ -137,10 +160,7 @@ public class HealthController {
                 logger.warn("BFF returned status: {}", response.getStatusCode());
                 return "DOWN";
             }
-        } catch (TimeoutException e) {
-            long responseTime = System.currentTimeMillis() - startTime;
-            logger.warn("BFF health check timeout after {}ms", responseTime);
-            return "DOWN";
+
         } catch (RestClientException e) {
             logger.warn("BFF health check failed: {} ({})", e.getClass().getSimpleName(), e.getMessage());
             return "DOWN";
