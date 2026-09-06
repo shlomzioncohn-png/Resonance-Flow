@@ -1,0 +1,95 @@
+name: LENS review-driven auto-fix
+
+# Two entry points, both scoped on purpose (5 teams share this repo/issue tracker
+# and this PR history, so an unscoped trigger would fire Claude on everyone's work):
+#   1. issues.labeled "lens-auto-fix"      - a fresh reported bug
+#   2. pull_request_review "changes_requested" on a PR that touches teams/lens/frontend
+#
+# Neither job can push: `contents: write` is deliberately NOT granted below. Claude
+# only proposes a fix as a comment; a human reviews it and applies it themselves as a
+# separate, explicit step. This is intentional (see the skill's "Human approval is
+# required" section) - do not add `contents: write` back to make Claude push directly.
+on:
+  issues:
+    types: [labeled]
+  pull_request_review:
+    types: [submitted]
+
+jobs:
+  fix-labeled-issue:
+    if: github.event_name == 'issues' && github.event.label.name == 'lens-auto-fix'
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+      issues: write
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: anthropics/claude-code-action@v1
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          prompt: |
+            /fix-reported-issue
+
+            Issue #${{ github.event.issue.number }}: ${{ github.event.issue.title }}
+
+            ${{ github.event.issue.body }}
+
+            Do not commit or push anything. Post your proposed fix as a comment on
+            this issue and stop there - a human will review it and decide whether to
+            have it applied.
+          claude_args: "--max-turns 20"
+
+  fix-pr-review-feedback:
+    if: github.event_name == 'pull_request_review' && github.event.review.state == 'changes_requested'
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+      issues: write
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.ref }}
+
+      - name: Check if this PR touches the LENS frontend
+        id: scope
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          if gh pr diff "$PR_NUMBER" --name-only | grep -q '^teams/lens/frontend/'; then
+            echo "in_scope=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "in_scope=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Collect review comments
+        if: steps.scope.outputs.in_scope == 'true'
+        id: review
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          {
+            echo 'comments<<EOF'
+            gh api "repos/${{ github.repository }}/pulls/$PR_NUMBER/comments" --jq '.[] | "File: \(.path)\n\(.body)\n---"'
+            echo 'EOF'
+          } >> "$GITHUB_OUTPUT"
+
+      - uses: anthropics/claude-code-action@v1
+        if: steps.scope.outputs.in_scope == 'true'
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          prompt: |
+            /fix-reported-issue
+
+            @${{ github.event.review.user.login }} requested changes on PR #${{ github.event.pull_request.number }} ("${{ github.event.pull_request.title }}").
+            This PR already exists on branch ${{ github.event.pull_request.head.ref }} - do not create a new branch or a new PR.
+
+            Review comments:
+            ${{ steps.review.outputs.comments }}
+
+            Do not commit or push anything. Post your proposed fix as a comment on
+            this PR and stop there - a human will review it and decide whether to
+            have it applied.
+          claude_args: "--max-turns 20"
