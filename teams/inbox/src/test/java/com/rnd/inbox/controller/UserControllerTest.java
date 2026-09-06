@@ -160,33 +160,57 @@ class UserControllerTest {
 
     @Test
     void getUserById_whenFound_returns200() throws Exception {
-        when(userService.getUserById(userId)).thenReturn(sampleUser());
+        when(userService.getUserById(userId, actorId)).thenReturn(sampleUser());
 
-        mockMvc.perform(get("/api/v1/users/{id}", userId))
+        mockMvc.perform(get("/api/v1/users/{id}", userId).header(ACTOR_HEADER, actorId.toString()))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.id").value(userId.toString()))
                 .andExpect(jsonPath("$.organization.name").value("Acme Inc"));
     }
 
     @Test
-    void getUserById_whenNotFound_returns404() throws Exception {
-        when(userService.getUserById(userId)).thenThrow(new UserNotFoundException(userId));
-
+    void getUserById_withoutActorHeader_returns401() throws Exception {
         mockMvc.perform(get("/api/v1/users/{id}", userId))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.error").value("UNAUTHENTICATED"));
+    }
+
+    @Test
+    void getUserById_whenNotFound_returns404() throws Exception {
+        when(userService.getUserById(userId, actorId)).thenThrow(new UserNotFoundException(userId));
+
+        mockMvc.perform(get("/api/v1/users/{id}", userId).header(ACTOR_HEADER, actorId.toString()))
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.error").value("USER_NOT_FOUND"));
     }
 
     @Test
+    void getUserById_whenActorOutsideTargetOrganization_returns403() throws Exception {
+        when(userService.getUserById(userId, actorId))
+                .thenThrow(new ForbiddenActionException("Actor cannot act on organization " + organizationId));
+
+        mockMvc.perform(get("/api/v1/users/{id}", userId).header(ACTOR_HEADER, actorId.toString()))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.error").value("FORBIDDEN"));
+    }
+
+    @Test
     void listUsers_returns200WithPageResponse() throws Exception {
         PageResponseDto<UserResponseDto> page = new PageResponseDto<>(List.of(sampleUser()), 0, 20, 1, 1);
-        when(userService.listUsers(any())).thenReturn(page);
+        when(userService.listUsers(any(), eq(actorId))).thenReturn(page);
 
-        mockMvc.perform(get("/api/v1/users"))
+        mockMvc.perform(get("/api/v1/users").header(ACTOR_HEADER, actorId.toString()))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.content[0].id").value(userId.toString()))
                 .andExpect(jsonPath("$.totalElements").value(1))
                 .andExpect(jsonPath("$.totalPages").value(1));
+    }
+
+    @Test
+    void listUsers_withoutActorHeader_returns401() throws Exception {
+        mockMvc.perform(get("/api/v1/users"))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.error").value("UNAUTHENTICATED"));
     }
 
     @Test

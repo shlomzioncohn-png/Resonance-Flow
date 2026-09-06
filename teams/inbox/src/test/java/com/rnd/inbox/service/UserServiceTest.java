@@ -224,23 +224,45 @@ class UserServiceTest {
 
     @Test
     void getUserById_whenUserExists_returnsUser() {
+        stubActorFound();
         UserResponseDto responseDto = new UserResponseDto(userId, "Yehudit Cohen", null, null,
                 null, null, null, "developer", UserStatus.ACTIVE, null, null, null, null);
 
         when(userRepository.findById(userId)).thenReturn(Optional.of(user));
         when(userMapper.toResponseDto(user)).thenReturn(responseDto);
 
-        UserResponseDto result = userService.getUserById(userId);
+        UserResponseDto result = userService.getUserById(userId, actorId);
 
         assertThat(result).isSameAs(responseDto);
     }
 
     @Test
+    void getUserById_whenActorDoesNotExist_throwsUnauthenticatedException() {
+        when(userRepository.findById(actorId)).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> userService.getUserById(userId, actorId))
+                .isInstanceOf(UnauthenticatedException.class);
+    }
+
+    @Test
     void getUserById_whenUserDoesNotExist_throwsUserNotFoundException() {
+        stubActorFound();
         when(userRepository.findById(userId)).thenReturn(Optional.empty());
 
-        assertThatThrownBy(() -> userService.getUserById(userId))
+        assertThatThrownBy(() -> userService.getUserById(userId, actorId))
                 .isInstanceOf(UserNotFoundException.class);
+    }
+
+    @Test
+    void getUserById_whenActorBelongsToAnotherOrganization_throwsForbiddenActionException() {
+        stubActorFound();
+        actor.setOrganization(new Organization());
+        actor.getOrganization().setId(UUID.randomUUID());
+
+        when(userRepository.findById(userId)).thenReturn(Optional.of(user));
+
+        assertThatThrownBy(() -> userService.getUserById(userId, actorId))
+                .isInstanceOf(ForbiddenActionException.class);
     }
 
     @Test
@@ -360,9 +382,11 @@ class UserServiceTest {
 
     @Test
     void listUsers_mapsEachUserAndPreservesPageMetadata() {
+        stubActorFound();
         Pageable pageable = PageRequest.of(0, 2);
         User secondUser = new User();
         secondUser.setId(UUID.randomUUID());
+        secondUser.setOrganization(organization);
         Page<User> entityPage = new PageImpl<>(List.of(user, secondUser), pageable, 5);
 
         UserResponseDto firstDto = new UserResponseDto(userId, "Yehudit Cohen", null, null,
@@ -370,17 +394,27 @@ class UserServiceTest {
         UserResponseDto secondDto = new UserResponseDto(secondUser.getId(), "Someone Else", null, null,
                 null, null, null, "developer", UserStatus.ACTIVE, null, null, null, null);
 
-        when(userRepository.findAll(pageable)).thenReturn(entityPage);
+        when(userRepository.findAllByOrganizationId(organizationId, pageable)).thenReturn(entityPage);
         when(userMapper.toResponseDto(user)).thenReturn(firstDto);
         when(userMapper.toResponseDto(secondUser)).thenReturn(secondDto);
 
-        PageResponseDto<UserResponseDto> result = userService.listUsers(pageable);
+        PageResponseDto<UserResponseDto> result = userService.listUsers(pageable, actorId);
 
         assertThat(result.getContent()).containsExactly(firstDto, secondDto);
         assertThat(result.getPage()).isEqualTo(0);
         assertThat(result.getSize()).isEqualTo(2);
         assertThat(result.getTotalElements()).isEqualTo(5);
         assertThat(result.getTotalPages()).isEqualTo(3);
+    }
+
+    @Test
+    void listUsers_whenActorDoesNotExist_throwsUnauthenticatedException() {
+        when(userRepository.findById(actorId)).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> userService.listUsers(PageRequest.of(0, 2), actorId))
+                .isInstanceOf(UnauthenticatedException.class);
+
+        verify(userRepository, never()).findAllByOrganizationId(any(), any());
     }
 
     @Test

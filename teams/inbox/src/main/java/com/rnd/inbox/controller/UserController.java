@@ -61,19 +61,24 @@ public class UserController {
     @ApiResponses({
             @ApiResponse(responseCode = "200", description = "User found",
                     content = @Content(schema = @Schema(implementation = UserResponseDto.class))),
+            @ApiResponse(responseCode = "401", description = "Missing or unrecognized actor identity"),
+            @ApiResponse(responseCode = "403", description = "Actor cannot access a user outside their organization"),
             @ApiResponse(responseCode = "404", description = "User not found")
     })
     @GetMapping("/{id}")
-    public UserResponseDto getUserById(@PathVariable UUID id) {
-        return userService.getUserById(id);
+    public UserResponseDto getUserById(@PathVariable UUID id, @CurrentActor UUID actorId) {
+        return userService.getUserById(id, actorId);
     }
 
-    @Operation(summary = "List users, paginated")
-    @ApiResponse(responseCode = "200", description = "Page of users",
-            content = @Content(schema = @Schema(implementation = PageResponseDto.class)))
+    @Operation(summary = "List users in the actor's organization, paginated")
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "Page of users",
+                    content = @Content(schema = @Schema(implementation = PageResponseDto.class))),
+            @ApiResponse(responseCode = "401", description = "Missing or unrecognized actor identity")
+    })
     @GetMapping
-    public PageResponseDto<UserResponseDto> listUsers(Pageable pageable) {
-        return userService.listUsers(pageable);
+    public PageResponseDto<UserResponseDto> listUsers(Pageable pageable, @CurrentActor UUID actorId) {
+        return userService.listUsers(pageable, actorId);
     }
 
     @Operation(summary = "Update a user's details")

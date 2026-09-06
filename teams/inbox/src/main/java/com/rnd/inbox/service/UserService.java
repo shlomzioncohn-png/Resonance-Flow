@@ -58,8 +58,10 @@ public class UserService {
     }
 
     @Transactional(readOnly = true)
-    public UserResponseDto getUserById(UUID id) {
+    public UserResponseDto getUserById(UUID id, UUID actorId) {
+        User actor = findActorOrThrow(actorId);
         User user = findUserOrThrow(id);
+        assertActorCanAccessUser(actor, user);
         return userMapper.toResponseDto(user);
     }
 
@@ -67,7 +69,7 @@ public class UserService {
     public UserResponseDto updateUser(UUID id, UserUpdateRequestDto request, UUID actorId) {
         User actor = findActorOrThrow(actorId);
         User user = findUserOrThrow(id);
-        assertActorCanManageUser(actor, user);
+        assertActorCanAccessUser(actor, user);
         assertEmailAvailable(request.getEmail().orElse(null), id);
         assertUsernameAvailable(request.getUsername().orElse(null), id);
 
@@ -79,8 +81,11 @@ public class UserService {
     }
 
     @Transactional(readOnly = true)
-    public PageResponseDto<UserResponseDto> listUsers(Pageable pageable) {
-        Page<UserResponseDto> responsePage = userRepository.findAll(pageable).map(userMapper::toResponseDto);
+    public PageResponseDto<UserResponseDto> listUsers(Pageable pageable, UUID actorId) {
+        User actor = findActorOrThrow(actorId);
+        Page<UserResponseDto> responsePage = userRepository
+                .findAllByOrganizationId(actor.getOrganization().getId(), pageable)
+                .map(userMapper::toResponseDto);
         return PageResponseDto.from(responsePage);
     }
 
@@ -88,7 +93,7 @@ public class UserService {
     public UserResponseDto updateStatus(UUID id, UserStatusUpdateRequestDto request, UUID actorId) {
         User actor = findActorOrThrow(actorId);
         User user = findUserOrThrow(id);
-        assertActorCanManageUser(actor, user);
+        assertActorCanAccessUser(actor, user);
 
         userMapper.applyStatusChange(user, UserStatus.valueOf(request.getStatus()));
         User saved = userRepository.save(user);
@@ -122,7 +127,7 @@ public class UserService {
         return snapshot;
     }
 
-    private void assertActorCanManageUser(User actor, User targetUser) {
+    private void assertActorCanAccessUser(User actor, User targetUser) {
         assertActorBelongsToOrganization(actor, targetUser.getOrganization());
     }
 

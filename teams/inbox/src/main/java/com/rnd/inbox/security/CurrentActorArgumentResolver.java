@@ -9,6 +9,12 @@ import org.springframework.web.method.support.ModelAndViewContainer;
 
 import java.util.UUID;
 
+/**
+ * Resolves the acting user from the {@code X-Actor-Id} header, trusting it as sent — there is
+ * no token, signature, or session behind it, only a check that it is a real user's id. This is
+ * a stand-in for real authentication, not a permanent design; see the "Known gap" note under
+ * §9 REST API rules in {@code CLAUDE.md} before relying on it as an authentication boundary.
+ */
 public class CurrentActorArgumentResolver implements HandlerMethodArgumentResolver {
 
     private static final String ACTOR_HEADER = "X-Actor-Id";
