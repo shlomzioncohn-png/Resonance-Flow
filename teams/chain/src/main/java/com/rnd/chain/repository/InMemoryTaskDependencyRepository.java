@@ -43,6 +43,16 @@ import java.util.concurrent.ConcurrentHashMap;
  * a future caller needs a cross-map snapshot (e.g. a method that returns
  * both dependencies and dependents of a task atomically together), this
  * design is not sufficient and needs to be revisited.
+ *
+ * <p><b>Known limitation - single global write lock:</b> {@code writeLock}
+ * serializes every {@code save}/{@code delete} call across the entire
+ * repository, regardless of which task ids are involved - two unrelated
+ * edges (e.g. {@code A->B} and {@code X->Y}) block each other unnecessarily.
+ * A per-key locking strategy (e.g. striping) would allow more concurrent
+ * throughput, but is deliberately not implemented here: this class is an
+ * in-memory stand-in until a real database is chosen, so the added
+ * complexity (fixed lock-acquisition ordering to avoid deadlock, stripe
+ * sizing) is not considered worth it for a temporary component.
  */
 public class InMemoryTaskDependencyRepository implements TaskDependencyRepository {
 
