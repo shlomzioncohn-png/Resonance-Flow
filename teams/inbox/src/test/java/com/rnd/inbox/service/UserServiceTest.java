@@ -20,15 +20,20 @@ import com.rnd.inbox.repository.UserRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.openapitools.jackson.nullable.JsonNullable;
+import org.hibernate.exception.ConstraintViolationException;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 
+import java.sql.SQLException;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -106,6 +111,13 @@ class UserServiceTest {
 
     private void stubActorFound() {
         when(userRepository.findById(actorId)).thenReturn(Optional.of(actor));
+    }
+
+    private DataIntegrityViolationException constraintViolation(String constraintName) {
+        ConstraintViolationException hibernateException = new ConstraintViolationException(
+                "duplicate key value violates unique constraint \"" + constraintName + "\"",
+                new SQLException("duplicate key"), constraintName);
+        return new DataIntegrityViolationException("could not execute statement", hibernateException);
     }
 
     @Test
@@ -204,6 +216,40 @@ class UserServiceTest {
     }
 
     @Test
+    void createUser_whenEmailUniqueConstraintViolatedConcurrently_throwsDuplicateEmailException() {
+        stubActorFound();
+        UserCreateRequestDto request = createRequest("race@acme.com", "racer");
+        user.setEmail("race@acme.com");
+
+        when(organizationRepository.findById(organizationId)).thenReturn(Optional.of(organization));
+        when(userRepository.findByEmail("race@acme.com")).thenReturn(Optional.empty());
+        when(userRepository.findByUsername("racer")).thenReturn(Optional.empty());
+        when(userMapper.toEntity(request, organization)).thenReturn(user);
+        when(userRepository.save(user)).thenThrow(constraintViolation("uq_users_email"));
+
+        assertThatThrownBy(() -> userService.createUser(request, actorId))
+                .isInstanceOf(DuplicateEmailException.class);
+
+        verify(auditService, never()).createAuditLog(any(), any(), any(), any(), any(), any(), any());
+    }
+
+    @Test
+    void createUser_whenUnrecognizedConstraintViolated_rethrowsOriginalException() {
+        stubActorFound();
+        UserCreateRequestDto request = createRequest("yehudit@acme.com", "yehudit");
+        DataIntegrityViolationException original = constraintViolation("uq_users_phone");
+
+        when(organizationRepository.findById(organizationId)).thenReturn(Optional.of(organization));
+        when(userRepository.findByEmail("yehudit@acme.com")).thenReturn(Optional.empty());
+        when(userRepository.findByUsername("yehudit")).thenReturn(Optional.empty());
+        when(userMapper.toEntity(request, organization)).thenReturn(user);
+        when(userRepository.save(user)).thenThrow(original);
+
+        assertThatThrownBy(() -> userService.createUser(request, actorId))
+                .isSameAs(original);
+    }
+
+    @Test
     void createUser_whenEmailAndUsernameAreNull_skipsUniquenessChecksAndSaves() {
         stubActorFound();
         UserCreateRequestDto request = createRequest(null, null);
@@ -285,6 +331,40 @@ class UserServiceTest {
         verify(userRepository).save(user);
         verify(auditService).createAuditLog(eq("USER_UPDATED"), eq("User"), eq(userId), eq(organization),
                 eq(actor), any(), isNull());
+    }
+
+    @Test
+    void updateUser_writesAuditSnapshotWithAllUserFields() {
+        stubActorFound();
+        user.setDisplayName("Yehudit Cohen");
+        user.setFirstName("Yehudit");
+        user.setLastName("Cohen");
+        user.setEmail("yehudit@acme.com");
+        user.setPhone("0501234567");
+        user.setUsername("yehudit");
+        user.setRole("developer");
+        UserUpdateRequestDto request = updateRequest("yehudit@acme.com", "yehudit");
+
+        when(userRepository.findById(userId)).thenReturn(Optional.of(user));
+        when(userRepository.findByEmail("yehudit@acme.com")).thenReturn(Optional.of(user));
+        when(userRepository.findByUsername("yehudit")).thenReturn(Optional.of(user));
+        when(userRepository.save(user)).thenReturn(user);
+
+        userService.updateUser(userId, request, actorId);
+
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<Map<String, Object>> snapshotCaptor = ArgumentCaptor.forClass(Map.class);
+        verify(auditService).createAuditLog(eq("USER_UPDATED"), eq("User"), eq(userId), eq(organization),
+                eq(actor), snapshotCaptor.capture(), isNull());
+        assertThat(snapshotCaptor.getValue())
+                .containsEntry("displayName", "Yehudit Cohen")
+                .containsEntry("firstName", "Yehudit")
+                .containsEntry("lastName", "Cohen")
+                .containsEntry("email", "yehudit@acme.com")
+                .containsEntry("phone", "0501234567")
+                .containsEntry("username", "yehudit")
+                .containsEntry("role", "developer")
+                .containsEntry("status", "ACTIVE");
     }
 
     @Test
@@ -378,6 +458,23 @@ class UserServiceTest {
                 .isInstanceOf(DuplicateUsernameException.class);
 
         verify(userRepository, never()).save(any());
+    }
+
+    @Test
+    void updateUser_whenUsernameUniqueConstraintViolatedConcurrently_throwsDuplicateUsernameException() {
+        stubActorFound();
+        user.setUsername("racer");
+        UserUpdateRequestDto request = updateRequest("yehudit@acme.com", "racer");
+
+        when(userRepository.findById(userId)).thenReturn(Optional.of(user));
+        when(userRepository.findByEmail("yehudit@acme.com")).thenReturn(Optional.empty());
+        when(userRepository.findByUsername("racer")).thenReturn(Optional.empty());
+        when(userRepository.save(user)).thenThrow(constraintViolation("uq_users_username"));
+
+        assertThatThrownBy(() -> userService.updateUser(userId, request, actorId))
+                .isInstanceOf(DuplicateUsernameException.class);
+
+        verify(auditService, never()).createAuditLog(any(), any(), any(), any(), any(), any(), any());
     }
 
     @Test

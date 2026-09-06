@@ -17,6 +17,8 @@ import com.rnd.inbox.model.entity.User;
 import com.rnd.inbox.model.enums.UserStatus;
 import com.rnd.inbox.repository.OrganizationRepository;
 import com.rnd.inbox.repository.UserRepository;
+import org.hibernate.exception.ConstraintViolationException;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
@@ -51,7 +53,7 @@ public class UserService {
         assertUsernameAvailable(request.getUsername(), null);
 
         User user = userMapper.toEntity(request, organization);
-        User saved = userRepository.save(user);
+        User saved = saveUser(user);
         auditService.createAuditLog("USER_CREATED", "User", saved.getId(), organization,
                 actor, auditSnapshot(saved), null);
         return userMapper.toResponseDto(saved);
@@ -74,7 +76,7 @@ public class UserService {
         assertUsernameAvailable(request.getUsername().orElse(null), id);
 
         userMapper.applyUpdate(user, request);
-        User saved = userRepository.save(user);
+        User saved = saveUser(user);
         auditService.createAuditLog("USER_UPDATED", "User", saved.getId(), saved.getOrganization(),
                 actor, auditSnapshot(saved), null);
         return userMapper.toResponseDto(saved);
@@ -120,7 +122,10 @@ public class UserService {
     private Map<String, Object> auditSnapshot(User user) {
         Map<String, Object> snapshot = new LinkedHashMap<>();
         snapshot.put("displayName", user.getDisplayName());
+        snapshot.put("firstName", user.getFirstName());
+        snapshot.put("lastName", user.getLastName());
         snapshot.put("email", user.getEmail());
+        snapshot.put("phone", user.getPhone());
         snapshot.put("username", user.getUsername());
         snapshot.put("role", user.getRole());
         snapshot.put("status", user.getStatus().name());
@@ -136,6 +141,43 @@ public class UserService {
             throw new ForbiddenActionException(
                     "Actor " + actor.getId() + " cannot act on organization " + organization.getId());
         }
+    }
+
+    /**
+     * Saves the user and translates a concurrent unique-constraint violation into the same
+     * DuplicateEmailException/DuplicateUsernameException the pre-check throws. The pre-checks in
+     * assertEmailAvailable/assertUsernameAvailable read-then-decide, so two requests racing on the
+     * same email/username can both pass them before either has saved; the database's unique index
+     * (uq_users_email / uq_users_username) is what actually stops the second write, and this is
+     * what turns that low-level rejection into the normal 409 response instead of a raw 500.
+     */
+    private User saveUser(User user) {
+        try {
+            return userRepository.save(user);
+        } catch (DataIntegrityViolationException e) {
+            throw translateUniqueConstraintViolation(user, e);
+        }
+    }
+
+    private RuntimeException translateUniqueConstraintViolation(User user, DataIntegrityViolationException e) {
+        String constraintName = extractConstraintName(e);
+        if ("uq_users_email".equals(constraintName)) {
+            return new DuplicateEmailException(user.getEmail());
+        }
+        if ("uq_users_username".equals(constraintName)) {
+            return new DuplicateUsernameException(user.getUsername());
+        }
+        // Not a violation we know how to translate (e.g. a future constraint) - don't guess, surface it as-is.
+        throw e;
+    }
+
+    private String extractConstraintName(Throwable exception) {
+        for (Throwable cause = exception; cause != null; cause = cause.getCause()) {
+            if (cause instanceof ConstraintViolationException constraintViolation) {
+                return constraintViolation.getConstraintName();
+            }
+        }
+        return null;
     }
 
     private void assertEmailAvailable(String email, UUID excludingUserId) {
