@@ -20,6 +20,13 @@ class ChatSessionGrouperTest {
                 RawSourceType.WHATSAPP, "kamatech", chatId, sender, Instant.parse(isoTimestamp), text, List.of());
     }
 
+    private ChatMessage threadMessage(
+            String chatId, String sender, String isoTimestamp, String text, String id, String threadId) {
+        return new ChatMessage(
+                RawSourceType.SLACK, "kamatech", chatId, sender, Instant.parse(isoTimestamp), text, List.of(),
+                id, threadId);
+    }
+
     private ChatMessage attachment(String chatId, String sender, String isoTimestamp, String filename, String mimeType) {
         ChatMessage.Attachment attachment =
                 new ChatMessage.Attachment(filename, mimeType, "fake-bytes".getBytes(StandardCharsets.UTF_8));
@@ -106,6 +113,49 @@ class ChatSessionGrouperTest {
         assertThat(records).hasSize(1);
         assertThat(records.get(0).attachmentFilename()).isNull();
         assertThat(records.get(0).mimeType()).isNull();
+    }
+
+    @Test
+    void threadRepliesGroupByThreadIdRegardlessOfTimeGap() {
+        List<ChatMessage> messages = List.of(
+                threadMessage("chat-a", "malki", "2026-08-18T09:00:00Z", "root question", "t1", "t1"),
+                // 5 days later - far past the 45-minute gap threshold, still same thread.
+                threadMessage("chat-a", "ruth", "2026-08-23T09:00:00Z", "late reply", "t2", "t1"));
+
+        List<SourceRecord> records = grouper.group(messages);
+
+        assertThat(records).hasSize(1);
+        assertThat(records.get(0).correlationId()).isEqualTo("t1");
+        assertThat(records.get(0).body()).contains("root question").contains("late reply");
+    }
+
+    @Test
+    void differentThreadsProduceSeparateRecordsEvenInTheSameChannel() {
+        List<ChatMessage> messages = List.of(
+                threadMessage("chat-a", "malki", "2026-08-18T09:00:00Z", "thread one root", "t1", "t1"),
+                threadMessage("chat-a", "ruth", "2026-08-18T09:00:05Z", "thread two root", "t2", "t2"));
+
+        List<SourceRecord> records = grouper.group(messages);
+
+        assertThat(records).hasSize(2);
+        assertThat(records.stream().map(SourceRecord::correlationId)).containsExactlyInAnyOrder("t1", "t2");
+    }
+
+    @Test
+    void threadMessagesAreKeptOutOfTheTimeGapSessionsInTheSameChannel() {
+        List<ChatMessage> messages = List.of(
+                message("chat-a", "malki", "2026-08-18T09:00:00Z", "plain channel message"),
+                threadMessage("chat-a", "ruth", "2026-08-18T09:00:05Z", "thread root", "t1", "t1"));
+
+        List<SourceRecord> records = grouper.group(messages);
+
+        // Same chat, seconds apart - would merge under the old time-gap-only logic, but the
+        // threaded message must not leak into the plain session (and vice versa).
+        assertThat(records).hasSize(2);
+        SourceRecord plainSession = records.stream()
+                .filter(r -> r.body().contains("plain channel message"))
+                .findFirst().orElseThrow();
+        assertThat(plainSession.body()).doesNotContain("thread root");
     }
 
     @Test

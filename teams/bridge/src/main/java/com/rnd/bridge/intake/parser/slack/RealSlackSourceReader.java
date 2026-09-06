@@ -7,8 +7,10 @@ import com.slack.api.Slack;
 import com.slack.api.methods.MethodsClient;
 import com.slack.api.methods.SlackApiException;
 import com.slack.api.methods.request.conversations.ConversationsHistoryRequest;
+import com.slack.api.methods.request.conversations.ConversationsRepliesRequest;
 import com.slack.api.methods.request.users.UsersInfoRequest;
 import com.slack.api.methods.response.conversations.ConversationsHistoryResponse;
+import com.slack.api.methods.response.conversations.ConversationsRepliesResponse;
 import com.slack.api.methods.response.users.UsersInfoResponse;
 import com.slack.api.model.File;
 import com.slack.api.model.Message;
@@ -22,6 +24,7 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -69,7 +72,13 @@ public class RealSlackSourceReader implements SlackSourceReader {
         for (String channelId : properties.channels()) {
             messages.addAll(readChannel(channelId, since));
         }
-        return messages;
+        // A broadcast reply ("also send to channel") appears in both conversations.history
+        // and conversations.replies - keep the first occurrence per id, drop the duplicate.
+        Map<String, ChatMessage> byId = new LinkedHashMap<>();
+        for (ChatMessage message : messages) {
+            byId.putIfAbsent(message.id(), message);
+        }
+        return new ArrayList<>(byId.values());
     }
 
     private List<ChatMessage> readChannel(String channelId, Instant since) {
@@ -78,11 +87,65 @@ public class RealSlackSourceReader implements SlackSourceReader {
         do {
             ConversationsHistoryResponse response = call(channelId, cursor, since);
             for (Message message : response.getMessages()) {
-                messages.add(toChatMessage(channelId, message));
+                // conversations.history never returns thread replies (broadcast replies are
+                // the one exception) - a message with reply_count > 0 is a thread root, and
+                // its replies have to be fetched separately via conversations.replies.
+                String threadId = hasReplies(message) ? message.getTs() : message.getThreadTs();
+                messages.add(toChatMessage(channelId, message, threadId));
+                if (hasReplies(message)) {
+                    messages.addAll(readReplies(channelId, message.getTs()));
+                }
             }
             cursor = response.getResponseMetadata() == null ? null : response.getResponseMetadata().getNextCursor();
         } while (cursor != null && !cursor.isBlank());
         return messages;
+    }
+
+    // Package-visible (not private) so RealSlackSourceReaderTest can exercise the id/threadId
+    // mapping directly with plain Message POJOs, without mocking the Slack network client.
+    boolean hasReplies(Message message) {
+        return message.getReplyCount() != null && message.getReplyCount() > 0;
+    }
+
+    // The root message comes back as the first entry of conversations.replies too - skipped
+    // here since readChannel() already added it from conversations.history.
+    private List<ChatMessage> readReplies(String channelId, String rootTs) {
+        List<ChatMessage> replies = new ArrayList<>();
+        String cursor = null;
+        boolean first = true;
+        do {
+            ConversationsRepliesResponse response = callReplies(channelId, rootTs, cursor);
+            for (Message message : response.getMessages()) {
+                if (first) {
+                    first = false;
+                    continue;
+                }
+                replies.add(toChatMessage(channelId, message, rootTs));
+            }
+            cursor = response.getResponseMetadata() == null ? null : response.getResponseMetadata().getNextCursor();
+        } while (cursor != null && !cursor.isBlank());
+        return replies;
+    }
+
+    private ConversationsRepliesResponse callReplies(String channelId, String rootTs, String cursor) {
+        try {
+            ConversationsRepliesResponse response = methods.conversationsReplies(ConversationsRepliesRequest
+                    .builder()
+                    .channel(channelId)
+                    .ts(rootTs)
+                    .cursor(cursor)
+                    .limit(200)
+                    .build());
+            if (!response.isOk()) {
+                throw new IllegalStateException(
+                        "Slack conversations.replies failed for channel " + channelId + " ts " + rootTs
+                                + ": " + response.getError());
+            }
+            return response;
+        } catch (IOException | SlackApiException e) {
+            throw new IllegalStateException(
+                    "Slack conversations.replies call failed for channel " + channelId + " ts " + rootTs, e);
+        }
     }
 
     private ConversationsHistoryResponse call(String channelId, String cursor, Instant since) {
@@ -108,7 +171,7 @@ public class RealSlackSourceReader implements SlackSourceReader {
         }
     }
 
-    private ChatMessage toChatMessage(String channelId, Message message) {
+    ChatMessage toChatMessage(String channelId, Message message, String threadId) {
         long epochMillis = Math.round(Double.parseDouble(message.getTs()) * 1000);
         return new ChatMessage(
                 RawSourceType.SLACK,
@@ -117,7 +180,9 @@ public class RealSlackSourceReader implements SlackSourceReader {
                 resolveUserName(message.getUser()),
                 Instant.ofEpochMilli(epochMillis),
                 message.getText(),
-                resolveAttachments(message.getFiles()));
+                resolveAttachments(message.getFiles()),
+                message.getTs(),
+                threadId);
     }
 
     // Falls back to the raw id (userId itself, or "unknown" if even that is missing - e.g. a
