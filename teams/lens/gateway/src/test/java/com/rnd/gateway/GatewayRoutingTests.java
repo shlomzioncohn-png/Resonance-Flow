@@ -177,12 +177,54 @@ class GatewayRoutingTests {
     }
 
     // -------------------------------------------------------------------------
+    // Task list ("My Tasks" screen)
+    // -------------------------------------------------------------------------
+
+    @Test
+    @Order(10)
+    @DisplayName("GET /api/workspace/tasks forwards filter/search/page/size as query params to BFF")
+    void testTaskListForwardsQueryParamsToBff() throws Exception {
+        mockBff.enqueue(new MockResponse()
+                .setResponseCode(200)
+                .setHeader("Content-Type", "application/json")
+                .setBody("{\"items\":[],\"total\":0,\"page\":1,\"size\":5}"));
+
+        mockMvc.perform(get("/api/workspace/tasks?filter=blocked&search=login&page=1&size=5"))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.page").value(1))
+            .andExpect(jsonPath("$.size").value(5));
+
+        RecordedRequest recorded = takeRequest();
+        assertThat(recorded.getPath()).contains("/workspace/tasks");
+        assertThat(recorded.getPath()).contains("filter=blocked");
+        assertThat(recorded.getPath()).contains("search=login");
+        assertThat(recorded.getPath()).contains("page=1");
+        assertThat(recorded.getPath()).contains("size=5");
+    }
+
+    @Test
+    @Order(11)
+    @DisplayName("GET /api/workspace/tasks with no params forwards no query params (Gateway invents no defaults)")
+    void testTaskListWithNoParamsForwardsNoQueryParams() throws Exception {
+        mockBff.enqueue(new MockResponse()
+                .setResponseCode(200)
+                .setHeader("Content-Type", "application/json")
+                .setBody("{\"items\":[],\"total\":0,\"page\":0,\"size\":20}"));
+
+        mockMvc.perform(get("/api/workspace/tasks"))
+            .andExpect(status().isOk());
+
+        RecordedRequest recorded = takeRequest();
+        assertThat(recorded.getPath()).isEqualTo("/workspace/tasks");
+    }
+
+    // -------------------------------------------------------------------------
     // BFF unavailable — must run last: it permanently shuts down the shared
     // mockBff instance that every other test in this class depends on.
     // -------------------------------------------------------------------------
 
     @Test
-    @Order(7)
+    @Order(20)
     @DisplayName("BFF unavailable returns 503 SERVICE_UNAVAILABLE")
     void testBffUnavailableReturns503() throws Exception {
         mockBff.shutdown();
