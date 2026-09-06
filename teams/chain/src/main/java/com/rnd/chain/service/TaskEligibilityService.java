@@ -127,21 +127,32 @@ public class TaskEligibilityService {
                 return;
             }
 
-            synchronized (lockFor(taskId)) {
-                Task task = requireTask(taskId);
-                if (dependsOnAlreadyDone) {
-                    // A dependency on an already-completed task will never trigger a future
-                    // onTaskStatusChanged transition to decrement it, so counting it here would
-                    // leave the dependent permanently stuck. blockingCount is left untouched, but
-                    // eligibility is still recalculated: if this is the task's first-ever edge and
-                    // it started isReady=false by default, nothing else would ever recompute it.
-                    log.info("Dependency {} -> {} added but {} is already DONE, blockingCount left unchanged",
-                        taskId, dependsOnTaskId, dependsOnTaskId);
-                } else {
-                    task.setBlockingCount(task.getBlockingCount() + 1);
-                }
-                recalculateAndSave(task);
+            // [MINOR fix] The nested-lock-and-adjust block below used to be duplicated here and
+            // in removeDependency, differing only in +1/no-clamp vs -1/Math.max-clamp - this is
+            // literally where the original PR #172 bug (and the CRITICAL lock-nesting fix above)
+            // lived, so a future fix applied to only one copy would silently resurrect the same
+            // class of bug in the other. Extracted into adjustBlockingCount so both call the same
+            // code.
+            adjustBlockingCount(taskId, dependsOnAlreadyDone, 1);
+        }
+    }
+
+    // A dependency on an already-completed task will never trigger a future onTaskStatusChanged
+    // transition to decrement it (add) or have already been decremented by one (remove), so
+    // counting it here would leave the dependent permanently stuck / double-decrement it.
+    // blockingCount is left untouched in that case, but eligibility is still recalculated: e.g.
+    // if this is the task's first-ever edge and it started isReady=false by default, nothing else
+    // would ever recompute it.
+    private void adjustBlockingCount(UUID taskId, boolean dependsOnIsDone, int delta) {
+        synchronized (lockFor(taskId)) {
+            Task task = requireTask(taskId);
+            if (dependsOnIsDone) {
+                log.info("Dependency change for task {} (delta={}) involves a dependency that is "
+                    + "already DONE, blockingCount left unchanged", taskId, delta);
+            } else {
+                task.setBlockingCount(Math.max(0, task.getBlockingCount() + delta));
             }
+            recalculateAndSave(task);
         }
     }
 
@@ -199,20 +210,9 @@ public class TaskEligibilityService {
                 return;
             }
 
-            synchronized (lockFor(taskId)) {
-                Task task = requireTask(taskId);
-                if (dependsOnCurrentlyDone) {
-                    // Mirrors addDependency: an edge to an already-DONE task never counted against
-                    // blockingCount in the first place (or was already subtracted when it
-                    // transitioned), so removing it must not decrement again - but still
-                    // recalculate for the same defensive reason as addDependency.
-                    log.info("Dependency {} -> {} removed but {} was already DONE, blockingCount left unchanged",
-                        taskId, dependsOnTaskId, dependsOnTaskId);
-                } else {
-                    task.setBlockingCount(Math.max(0, task.getBlockingCount() - 1));
-                }
-                recalculateAndSave(task);
-            }
+            // [MINOR fix] See addDependency's adjustBlockingCount extraction: this used to be a
+            // separate, near-identical copy of the same nested-lock-and-adjust block.
+            adjustBlockingCount(taskId, dependsOnCurrentlyDone, -1);
         }
     }
 
