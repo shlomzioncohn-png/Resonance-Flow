@@ -1,29 +1,33 @@
 package com.rnd.inbox.dto;
 
+import com.rnd.inbox.validation.OptionalNotBlank;
 import jakarta.validation.constraints.Email;
 import jakarta.validation.constraints.Size;
+import org.openapitools.jackson.nullable.JsonNullable;
 
 public class UserUpdateRequestDto {
 
+    @OptionalNotBlank
     @Size(max = 255)
     private String displayName;
 
     @Size(max = 100)
-    private String firstName;
+    private JsonNullable<String> firstName = JsonNullable.undefined();
 
     @Size(max = 100)
-    private String lastName;
+    private JsonNullable<String> lastName = JsonNullable.undefined();
 
     @Email
     @Size(max = 255)
-    private String email;
+    private JsonNullable<String> email = JsonNullable.undefined();
 
     @Size(max = 30)
-    private String phone;
+    private JsonNullable<String> phone = JsonNullable.undefined();
 
     @Size(max = 100)
-    private String username;
+    private JsonNullable<String> username = JsonNullable.undefined();
 
+    @OptionalNotBlank
     @Size(max = 50)
     private String role;
 
@@ -35,43 +39,43 @@ public class UserUpdateRequestDto {
         this.displayName = displayName;
     }
 
-    public String getFirstName() {
+    public JsonNullable<String> getFirstName() {
         return firstName;
     }
 
-    public void setFirstName(String firstName) {
+    public void setFirstName(JsonNullable<String> firstName) {
         this.firstName = firstName;
     }
 
-    public String getLastName() {
+    public JsonNullable<String> getLastName() {
         return lastName;
     }
 
-    public void setLastName(String lastName) {
+    public void setLastName(JsonNullable<String> lastName) {
         this.lastName = lastName;
     }
 
-    public String getEmail() {
+    public JsonNullable<String> getEmail() {
         return email;
     }
 
-    public void setEmail(String email) {
+    public void setEmail(JsonNullable<String> email) {
         this.email = email;
     }
 
-    public String getPhone() {
+    public JsonNullable<String> getPhone() {
         return phone;
     }
 
-    public void setPhone(String phone) {
+    public void setPhone(JsonNullable<String> phone) {
         this.phone = phone;
     }
 
-    public String getUsername() {
+    public JsonNullable<String> getUsername() {
         return username;
     }
 
-    public void setUsername(String username) {
+    public void setUsername(JsonNullable<String> username) {
         this.username = username;
     }
 

@@ -65,8 +65,8 @@ public class UserService {
     public UserResponseDto updateUser(UUID id, UserUpdateRequestDto request, UUID actorId) {
         User actor = findActorOrThrow(actorId);
         User user = findUserOrThrow(id);
-        assertEmailAvailable(request.getEmail(), id);
-        assertUsernameAvailable(request.getUsername(), id);
+        assertEmailAvailable(request.getEmail().orElse(null), id);
+        assertUsernameAvailable(request.getUsername().orElse(null), id);
 
         userMapper.applyUpdate(user, request);
         User saved = userRepository.save(user);

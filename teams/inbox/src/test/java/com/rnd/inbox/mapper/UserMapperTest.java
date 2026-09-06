@@ -9,6 +9,7 @@ import com.rnd.inbox.model.entity.User;
 import com.rnd.inbox.model.enums.UserStatus;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.openapitools.jackson.nullable.JsonNullable;
 
 import java.time.Clock;
 import java.time.Instant;
@@ -76,11 +77,11 @@ class UserMapperTest {
 
         UserUpdateRequestDto request = new UserUpdateRequestDto();
         request.setDisplayName("New Name");
-        request.setFirstName("New");
-        request.setLastName("Name");
-        request.setEmail("new@acme.com");
-        request.setPhone("0509999999");
-        request.setUsername("newname");
+        request.setFirstName(JsonNullable.of("New"));
+        request.setLastName(JsonNullable.of("Name"));
+        request.setEmail(JsonNullable.of("new@acme.com"));
+        request.setPhone(JsonNullable.of("0509999999"));
+        request.setUsername(JsonNullable.of("newname"));
         request.setRole("manager");
 
         userMapper.applyUpdate(user, request);
@@ -117,6 +118,22 @@ class UserMapperTest {
         assertThat(user.getEmail()).isEqualTo("existing@acme.com");
         assertThat(user.getUsername()).isEqualTo("existingusername");
         assertThat(user.getPhone()).isEqualTo("0501111111");
+    }
+
+    @Test
+    void applyUpdate_whenFieldIsExplicitlyNull_clearsItRatherThanPreservingIt() {
+        User user = new User();
+        user.setPhone("0501111111");
+        user.setEmail("existing@acme.com");
+
+        UserUpdateRequestDto request = new UserUpdateRequestDto();
+        request.setPhone(JsonNullable.of(null));
+        // email intentionally left undefined — not part of this update, must be preserved
+
+        userMapper.applyUpdate(user, request);
+
+        assertThat(user.getPhone()).isNull();
+        assertThat(user.getEmail()).isEqualTo("existing@acme.com");
     }
 
     @Test

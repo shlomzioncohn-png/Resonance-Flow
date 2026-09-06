@@ -16,6 +16,7 @@ import com.rnd.inbox.model.enums.UserStatus;
 import com.rnd.inbox.service.UserService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.openapitools.jackson.nullable.JsonNullable;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
 import org.springframework.boot.test.mock.mockito.MockBean;
@@ -33,7 +34,6 @@ import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
-import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -179,7 +179,7 @@ class UserControllerTest {
     void updateUser_withValidRequest_returns200() throws Exception {
         when(userService.updateUser(eq(userId), any(), eq(actorId))).thenReturn(sampleUser());
 
-        mockMvc.perform(put("/api/v1/users/{id}", userId)
+        mockMvc.perform(patch("/api/v1/users/{id}", userId)
                         .header(ACTOR_HEADER, actorId.toString())
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(validUpdateRequest())))
@@ -191,9 +191,9 @@ class UserControllerTest {
     void updateUser_withOnlyOneFieldProvided_returns200() throws Exception {
         when(userService.updateUser(eq(userId), any(), eq(actorId))).thenReturn(sampleUser());
         UserUpdateRequestDto request = new UserUpdateRequestDto();
-        request.setEmail("only-this-changes@acme.com");
+        request.setEmail(JsonNullable.of("only-this-changes@acme.com"));
 
-        mockMvc.perform(put("/api/v1/users/{id}", userId)
+        mockMvc.perform(patch("/api/v1/users/{id}", userId)
                         .header(ACTOR_HEADER, actorId.toString())
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(request)))
@@ -203,9 +203,35 @@ class UserControllerTest {
     @Test
     void updateUser_withInvalidEmail_returns400() throws Exception {
         UserUpdateRequestDto request = validUpdateRequest();
-        request.setEmail("not-an-email");
+        request.setEmail(JsonNullable.of("not-an-email"));
 
-        mockMvc.perform(put("/api/v1/users/{id}", userId)
+        mockMvc.perform(patch("/api/v1/users/{id}", userId)
+                        .header(ACTOR_HEADER, actorId.toString())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(request)))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error").value("VALIDATION_ERROR"));
+    }
+
+    @Test
+    void updateUser_withBlankDisplayName_returns400() throws Exception {
+        UserUpdateRequestDto request = validUpdateRequest();
+        request.setDisplayName("   ");
+
+        mockMvc.perform(patch("/api/v1/users/{id}", userId)
+                        .header(ACTOR_HEADER, actorId.toString())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(request)))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error").value("VALIDATION_ERROR"));
+    }
+
+    @Test
+    void updateUser_withBlankRole_returns400() throws Exception {
+        UserUpdateRequestDto request = validUpdateRequest();
+        request.setRole("");
+
+        mockMvc.perform(patch("/api/v1/users/{id}", userId)
                         .header(ACTOR_HEADER, actorId.toString())
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(request)))
@@ -215,7 +241,7 @@ class UserControllerTest {
 
     @Test
     void updateUser_withoutActorHeader_returns401() throws Exception {
-        mockMvc.perform(put("/api/v1/users/{id}", userId)
+        mockMvc.perform(patch("/api/v1/users/{id}", userId)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(validUpdateRequest())))
                 .andExpect(status().isUnauthorized())
@@ -226,7 +252,7 @@ class UserControllerTest {
     void updateUser_whenNotFound_returns404() throws Exception {
         when(userService.updateUser(eq(userId), any(), eq(actorId))).thenThrow(new UserNotFoundException(userId));
 
-        mockMvc.perform(put("/api/v1/users/{id}", userId)
+        mockMvc.perform(patch("/api/v1/users/{id}", userId)
                         .header(ACTOR_HEADER, actorId.toString())
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(validUpdateRequest())))

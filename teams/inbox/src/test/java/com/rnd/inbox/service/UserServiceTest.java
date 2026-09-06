@@ -20,6 +20,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
+import org.openapitools.jackson.nullable.JsonNullable;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageImpl;
@@ -95,8 +96,8 @@ class UserServiceTest {
     private UserUpdateRequestDto updateRequest(String email, String username) {
         UserUpdateRequestDto request = new UserUpdateRequestDto();
         request.setDisplayName("Yehudit Cohen");
-        request.setEmail(email);
-        request.setUsername(username);
+        request.setEmail(JsonNullable.of(email));
+        request.setUsername(JsonNullable.of(username));
         request.setRole("developer");
         return request;
     }
