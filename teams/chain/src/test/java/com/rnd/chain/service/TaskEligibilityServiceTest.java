@@ -180,6 +180,41 @@ class TaskEligibilityServiceTest {
     }
 
     @Test
+    void addDependency_taskNotFound_throwsAndLeavesStateUnchanged() {
+        // Regression test for the code review finding: taskDependencyRepository.save() used to
+        // run before taskId's existence was validated (only requireTask(taskId) inside
+        // adjustBlockingCount checked it, which ran after save()) - so a non-existent taskId
+        // left a phantom edge permanently persisted even though the method threw.
+        UUID taskId = UUID.randomUUID();
+        UUID dependsOnTaskId = UUID.randomUUID();
+        Task dependsOnTask = buildTask(dependsOnTaskId, 0, 0, true);
+
+        when(taskDependencyRepository.findByTaskId(dependsOnTaskId)).thenReturn(Collections.emptyList());
+        when(taskDependencyRepository.findByTaskId(taskId)).thenReturn(Collections.emptyList());
+        when(taskRepository.findById(dependsOnTaskId)).thenReturn(Optional.of(dependsOnTask));
+        when(taskRepository.findById(taskId)).thenReturn(Optional.empty());
+
+        assertThrows(IllegalArgumentException.class,
+                () -> taskEligibilityService.addDependency(taskId, dependsOnTaskId));
+
+        verify(taskDependencyRepository, never()).save(any());
+    }
+
+    @Test
+    void addDependency_dependsOnTaskNotFound_throwsAndLeavesStateUnchanged() {
+        UUID taskId = UUID.randomUUID();
+        UUID dependsOnTaskId = UUID.randomUUID();
+
+        when(taskDependencyRepository.findByTaskId(dependsOnTaskId)).thenReturn(Collections.emptyList());
+        when(taskRepository.findById(dependsOnTaskId)).thenReturn(Optional.empty());
+
+        assertThrows(IllegalArgumentException.class,
+                () -> taskEligibilityService.addDependency(taskId, dependsOnTaskId));
+
+        verify(taskDependencyRepository, never()).save(any());
+    }
+
+    @Test
     void removeDependency_decrementsBlockingCount_becomesReady() {
         UUID taskId = UUID.randomUUID();
         UUID dependsOnTaskId = UUID.randomUUID();
@@ -229,6 +264,27 @@ class TaskEligibilityServiceTest {
         taskEligibilityService.removeDependency(taskId, dependsOnTaskId);
 
         verify(taskRepository, never()).findById(any());
+    }
+
+    @Test
+    void removeDependency_taskNotFound_throwsAndLeavesStateUnchanged() {
+        // Mirrors addDependency_taskNotFound_throwsAndLeavesStateUnchanged: taskId's existence
+        // used to be validated only inside adjustBlockingCount, which ran after delete() already
+        // removed the edge - so a real edge could be permanently removed while the caller still
+        // saw an exception implying the removal had failed.
+        UUID taskId = UUID.randomUUID();
+        UUID dependsOnTaskId = UUID.randomUUID();
+        Task dependsOnTask = buildTask(dependsOnTaskId, 0, 0, true);
+
+        when(taskDependencyRepository.findByTaskId(taskId))
+                .thenReturn(List.of(new TaskDependency(taskId, dependsOnTaskId)));
+        when(taskRepository.findById(dependsOnTaskId)).thenReturn(Optional.of(dependsOnTask));
+        when(taskRepository.findById(taskId)).thenReturn(Optional.empty());
+
+        assertThrows(IllegalArgumentException.class,
+                () -> taskEligibilityService.removeDependency(taskId, dependsOnTaskId));
+
+        verify(taskDependencyRepository, never()).delete(any(), any());
     }
 
     @Test

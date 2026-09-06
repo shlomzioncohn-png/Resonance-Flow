@@ -20,12 +20,21 @@ import java.util.Set;
 import java.util.UUID;
 
 /**
- * See CLAUDE.md "Open items" for why @Transactional doesn't yet cover Task/TaskDependency
- * mutations, and for the locking rationale summarized here: dependencyGraphLock guards the
- * dependency edges plus any DONE-status read that decides whether an edge currently counts
- * against blockingCount; per-task locks (see {@link #lockFor}) guard a single task's counters.
- * dependencyGraphLock is always acquired before any per-task lock, never after, so the two
- * never form a cycle.
+ * See CLAUDE.md "Open items" for the locking rationale summarized here: dependencyGraphLock
+ * guards the dependency edges plus any DONE-status read that decides whether an edge currently
+ * counts against blockingCount; per-task locks (see {@link #lockFor}) guard a single task's
+ * counters. dependencyGraphLock is always acquired before any per-task lock, never after, so
+ * the two never form a cycle.
+ *
+ * <p><b>{@code @Transactional} on the methods below does not currently provide atomicity or
+ * rollback.</b> Task/TaskDependency live in plain in-memory repositories with no JPA
+ * participation - spring-boot-starter-data-jpa and the embedded H2 dependency exist solely so a
+ * PlatformTransactionManager bean is available and the annotation doesn't blow up
+ * DataSourceAutoConfiguration at startup (see teams/chain/pom.xml). The actual correctness
+ * guarantee here comes entirely from the hand-rolled locks described above. This is intentional
+ * for now (code review findings raised it twice) - the plan is to re-add real transactional
+ * semantics once persistence moves to a real JPA-backed store (e.g. Postgres), at which point
+ * this annotation will start meaning what it says.
  */
 @Service
 public class TaskEligibilityService {
@@ -114,12 +123,25 @@ public class TaskEligibilityService {
             // dependents fan-out, so the two can't race: whichever of "edge becomes visible" vs
             // "status flips to DONE" happens first here is guaranteed to also be what
             // onTaskStatusChanged (or this check) sees, so the edge is counted exactly once.
+            // requireTask(dependsOnTaskId) also validates it exists - see the [MAJOR fix] below.
             boolean dependsOnAlreadyDone = requireTask(dependsOnTaskId).getStatus() == TaskStatus.DONE;
 
             // save() on TaskDependencyRepository is idempotent by contract, but it doesn't tell
             // us whether the edge already existed - we check that ourselves so we only bump
             // blockingCount for a genuinely new edge.
             boolean isNewEdge = !edgeExists(taskId, dependsOnTaskId);
+
+            // [MAJOR fix] Only reached for a genuinely new edge, and BEFORE the mutation below -
+            // previously taskId's existence wasn't validated until inside adjustBlockingCount,
+            // which only runs after taskDependencyRepository.save() already persisted the edge.
+            // Since there's no real transactional rollback for these in-memory repositories (see
+            // the class Javadoc), a non-existent taskId meant the method threw while a phantom
+            // edge to it stayed permanently saved. Guarded by isNewEdge (not called unconditionally)
+            // so a duplicate-edge call - which never touches taskId's counters - still never
+            // touches taskRepository for taskId either, matching the existing no-op behavior.
+            if (isNewEdge) {
+                requireTask(taskId);
+            }
             taskDependencyRepository.save(new TaskDependency(taskId, dependsOnTaskId));
 
             if (!isNewEdge) {
@@ -203,6 +225,16 @@ public class TaskEligibilityService {
                     .map(t -> t.getStatus() == TaskStatus.DONE)
                     .orElse(false);
 
+            // [MAJOR fix] Mirrors addDependency: validate taskId exists BEFORE deleting the edge,
+            // not after. Previously requireTask(taskId) only ran inside adjustBlockingCount,
+            // after delete() already removed the edge, so a real edge could be permanently
+            // deleted and the caller still see an exception implying the removal had failed.
+            // Guarded by existed (not called unconditionally) so removing a non-existent edge -
+            // which never touches taskId's counters - still never touches taskRepository for
+            // taskId either, matching the existing no-op behavior.
+            if (existed) {
+                requireTask(taskId);
+            }
             taskDependencyRepository.delete(taskId, dependsOnTaskId);
 
             if (!existed) {
