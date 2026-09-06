@@ -126,20 +126,20 @@ topic), validates them, and creates canonical `Task` rows.
 
 ### One consumer for every platform
 
-There is no per-platform consumer, listener, validator or topic. A single `BridgeTaskConsumer`
+There is no per-platform consumer, listener, validator or topic. A single `StructuredTaskConsumer`
 handles the whole ingestion path; the platform a task came from travels inside the event as
 `sourceType`, and is mapped straight onto the canonical `SourceType` enum.
 
-- **Reusable / shared infrastructure** (`messaging.kafka` package): `EventProcessingTemplate<T>`
+- **Reusable / shared infrastructure** (`shared.messaging.kafka` package): `EventProcessingTemplate<T>`
   drives the full pipeline — deserialize, validate, persist with retry, ack, and route failures to
   `<topic>.errors` — plus `ErrorTopicPublisher`, the retry `RetryTemplate` bean and its
   `KafkaRetryProperties`, and the `EventValidator<T>` / `EventValidationException` /
   `TransientProcessingException` contracts. None of this knows anything about tasks or platforms.
-- **Task-specific, platform-agnostic** (`bridge.task` package): `BridgeTaskConsumer`,
-  `BridgeTaskEventDto`, `BridgeTaskEventValidator`, `BridgeTaskMapper`, and
-  `BridgeTaskPersistenceHandler` — the shared structured-task payload shape, its validation rules,
-  and how it maps to a `Task`. `BridgeTaskEventValidator` accepts any `sourceType` that is a
-  `SourceType` constant, so it is not tied to a particular platform.
+- **Task-specific, platform-agnostic** (`structuredtask` package): `StructuredTaskConsumer`,
+  `StructuredTaskEventDto`, `StructuredTaskMapper`, and (`task` package) `TaskIngestionPersistenceHandler`
+  — the shared structured-task payload shape, its validation rules, and how it maps to a `Task`.
+  Validation accepts any `sourceType` that is a `SourceType` constant, so it is not tied to a
+  particular platform.
 - **Adding a new source** (e.g. WhatsApp): add the constant to `SourceType` (and the DB enum), and
   it flows through the existing consumer as-is — no new DTO, validator, mapper, topic or
   `@KafkaListener`. Only a source whose payload genuinely differs from the shared structured-task
@@ -147,7 +147,7 @@ handles the whole ingestion path; the platform a task came from travels inside t
 
 ### Idempotency
 
-The idempotency key is `(organization_id, source_type, source_ref)`, where `source_ref` is the
+The idempotency key is `(tenant_id, source_type, source_ref)`, where `source_ref` is the
 deterministic identifier BRIDGE assigns to the source record (e.g. a GitHub issue/PR reference) —
 not the Kafka message or the event's own `eventId` (which is only used as an audit correlation id
 and may differ across redeliveries of the same underlying record).
@@ -155,7 +155,7 @@ and may differ across redeliveries of the same underlying record).
 A unique index (`uq_tasks_org_source_type_source_ref`) enforces this at the database level.
 `TaskService.createTaskWithAudit` first checks for an existing task with that key; if two
 deliveries race past that check, the second insert fails with a unique-constraint violation, which
-`BridgeTaskPersistenceHandler` catches and resolves by looking up the row the other delivery just
+`TaskIngestionPersistenceHandler` catches and resolves by looking up the row the other delivery just
 created (no new `Task` and no duplicate `Audit` row are ever produced). Redelivery of the same
 message therefore always converges on the single already-created task instead of failing or
 duplicating it.

@@ -33,9 +33,9 @@ Where they touch the same subject, the spec wins.
 | `docs/Inbox_Data_Schema_Specification.md` | The 11 entities, their fields, types, constraints and enum values (its section 3); key design decisions (section 2); Inbox↔Chain ownership (section 3.8.1); open questions (section 5). |
 | `docs/Gong_Technical_Spec_EN_with_Flows.md` | Cross-team data flow: the two ingestion paths, stage-by-stage flow, the topic/API table, audit-trail behaviour, and the lifecycle flow diagrams. |
 
-Entities and enums under `model/entity` and `model/enums` are the Java projection of that spec.
-Migrations in `shared/database/migrations` are its physical form. All three must agree — if the
-code and the spec disagree, that is a bug to raise, not a discrepancy to code around.
+Entities and enums, living in their owning domain module (§5), are the Java projection of that
+spec. Migrations in `shared/database/migrations` are its physical form. All three must agree — if
+the code and the spec disagree, that is a bug to raise, not a discrepancy to code around.
 
 ### Decisions already made — do not re-litigate in code
 
@@ -126,7 +126,7 @@ Local Maven is not guaranteed on every dev machine; if `mvn` is unavailable, bui
 | Language | Java 21 | Fixed by `pom.xml`. `record` and other Java 16+ features are available. |
 | Framework | Spring Boot 3.3.13 (Maven) | Current LTS-track Spring Boot line. Brings Flyway 10, which splits database support into separate modules — see `flyway-database-postgresql` in `pom.xml`. |
 | Web layer | Spring MVC (`spring-boot-starter-web`) | Synchronous REST; no need for WebFlux at our scale. |
-| Persistence | PostgreSQL + Spring Data JPA (Hibernate 5.5) | Decided project-wide. Enum columns map to native PG enums via `model/type/LowercasePostgreSQLEnumType` + `hypersistence-utils`. |
+| Persistence | PostgreSQL + Spring Data JPA (Hibernate 5.5) | Decided project-wide. Enum columns map to native PG enums via `shared/model/type/LowercasePostgreSQLEnumType` + `hypersistence-utils`. |
 | Migrations | Flyway, from `shared/database/migrations` | Shared schema — read §16 `shared/` before adding one. |
 | Messaging | Kafka (`spring-kafka`) + `spring-retry` | How Bridge/Mind deliver tasks into Inbox — see §10 Event consumption. |
 | Boilerplate | **No Lombok.** Hand-written getters/constructors/`equals`/`hashCode` | Not in `pom.xml`; existing entities are written by hand. Don't add `@Data`/`@Slf4j` — it won't compile. Adding it is a team decision, not a silent one. |
@@ -135,39 +135,76 @@ Local Maven is not guaranteed on every dev machine; if `mvn` is unavailable, bui
 
 ## 5. Project structure & packages
 
-`✅` exists today · `🎯` required by this standard, not created yet
+Package **by feature, not by layer**. Each domain module is one flat top-level package holding
+every class that module owns — entity, enum, repository, service, controller, mapper, dto,
+exception — whichever of those it actually has. The old layout (a `controller/`, `service/`,
+`repository/`, `dto/`, `model/entity`, … each mixing every domain's classes together) is gone:
+finding everything about `Task` meant checking half a dozen folders. Now it's one.
 
 ```
 teams/inbox/src/main/java/com/rnd/inbox/
-├── InboxApplication.java         ✅
-├── controller/                   ✅ (empty)  REST endpoints
-├── service/                      ✅ (empty)  business logic
-├── repository/                   ✅ (empty)  Spring Data interfaces
-├── model/
-│   ├── entity/                   ✅  persisted domain model (JPA entities)
-│   ├── enums/                    ✅  typed domain values (TaskStatus, SourceType, …)
-│   └── type/                     ✅  Hibernate UserTypes (PG enum mapping)
-├── dto/                          ✅ (empty)  request/response shapes
-├── config/                       ✅ (empty)  @Configuration, @ConfigurationProperties
-├── mapper/                       🎯  DTO <-> entity conversion
-├── exception/                    🎯  custom exceptions + GlobalExceptionHandler
-└── messaging/                    🎯  Kafka consumers/producers — see §10
+├── InboxApplication.java
+├── task/               Task, TaskFeedback, Assignment (+ enums), TaskRepository,
+│                       AssignmentRepository, TaskService, TaskIngestionPersistenceHandler,
+│                       TaskCreatedPayload, TaskNotFoundException
+├── user/               User, UserAuthIdentity, OtpRequest (+ enums), UserRepository,
+│                       UserService, UserController, UserMapper, User*Dto,
+│                       UserNotFoundException, DuplicateEmailException, DuplicateUsernameException
+├── tenant/             Tenant, TenantStatus, TenantRepository, TenantNotFoundException,
+│                       TenantSummaryDto
+├── project/            Project, ProjectStatus, ProjectRepository (placeholder — no
+│                       service/controller yet)
+├── team/               Team, TeamMember, TeamMemberId, TeamStatus, TeamRepository
+│                       (placeholder — no service/controller yet)
+├── audit/              AuditLog, AuditLogRepository, AuditService — used by task and user,
+│                       but owns real behavior of its own, so it's a module, not shared infra
+├── outbox/              OutboxEvent, OutboxStatus, OutboxEventRepository, OutboxWorker,
+│                       OutboxCleanupJob — generic transactional-outbox infra
+├── structuredtask/      Kafka ingestion of structured-source task events (from BRIDGE, topic
+│                       `bridge.structured.tasks`): StructuredTaskConsumer,
+│                       StructuredTaskEventDto, StructuredTaskMapper, ConsistentAssignment(Validator)
+├── taskcreationrequest/ Kafka ingestion of AI-extracted task-creation requests (from MIND, topic
+│                       `task.creation.requested`): TaskCreationRequestConsumer,
+│                       TaskCreationRequestEventDto, TaskCreationRequestMapper
+├── scheduling/          Kafka ingestion of scheduling/availability updates (from CHAIN, topic
+│                       `task.scheduling.updated`): SchedulingConsumer, SchedulingEventDto,
+│                       SchedulingPersistenceHandler
+│
+└── shared/              cross-cutting infra, used by 2+ modules or fully generic — nothing here
+    │                    is owned by, or named after, any one domain module
+    ├── messaging/
+    │   ├── kafka/        generic Kafka event-processing template — see §10
+    │   └── validation/   generic bean-validation annotations (`@ValidUuid`, `@IsoInstant`, …)
+    ├── event/            generic publish-side Kafka infra (Event, EventPublisher, KafkaEventPublisher)
+    ├── security/         CurrentActor / CurrentActorArgumentResolver, wired globally in WebMvcConfig
+    ├── config/           @Configuration, @ConfigurationProperties
+    ├── exception/        InboxException (base), GlobalExceptionHandler, UnauthenticatedException,
+    │                    ForbiddenActionException (currently unused)
+    ├── dto/              ErrorResponseDto, FieldErrorDto, PageResponseDto — generic API shapes
+    └── model/type/       Hibernate UserTypes (PG enum mapping)
 ```
 
 Tests mirror this tree under `src/test/java/com/rnd/inbox/`.
 
-**Decision (background):** the Foundation skeleton had only
-`controller/service/repository/dto/config`. `model`, `mapper` and `exception` are additions:
+**Why `shared/` exists:** early on, `dto/` and `exception/` were the only two packages left named
+after a technical layer instead of a role — everything else (`security/`, `config/`, `messaging/`)
+already read as "what it does." Grouping every cross-cutting package under one `shared/` parent
+fixes that inconsistently-named leftover and makes the split explicit: a domain module at the top
+level owns its own code, `shared/` never does — it's a landing spot classes earn by being used
+from 2+ modules (or having no domain meaning at all), not a place to put something because it
+doesn't obviously belong anywhere else.
 
-- Without `model/entity`, DTOs and persisted objects have no natural place to stay apart —
-  which is exactly what leads to entities leaking through the API (§7 Layer responsibilities).
-- Without `mapper`, DTO↔entity conversion gets inlined into services and duplicated.
-- Without `exception`, exception types and the handler scatter per-controller.
+**Naming rule:** a module is named for the action it performs, not for whoever sends it the data.
+`structuredtask`, `taskcreationrequest` and `scheduling` are named after what they ingest (and the
+Kafka topic that names it), not after the team that publishes to them (Bridge/Mind/Chain) — those
+team names belong in comments and docs describing *where the event comes from*, never in a
+package or class name. This bit us for real: those three packages used to be named `bridge.task`,
+`mind.task` and `chain.scheduling`.
 
-All internal to `teams/inbox`; no cross-team coordination needed.
-
-Sub-package by domain concept once a layer passes a handful of classes (`service/task/`,
-`service/user/`). Don't pre-create domain sub-packages before there is a second domain concept.
+New module, same rule as before: create a domain package once there's an actual class to put in
+it — don't pre-create an empty one for a concept that has no code yet. `project/` and `team/` are
+the exception, kept as placeholders because they already hold a real (if minimal) entity +
+repository.
 
 ## 6. Naming conventions
 
@@ -278,8 +315,10 @@ point into the same domain and follows the same layering as a controller.
 
 - A consumer is an **adapter**: deserialize, validate the event shape, delegate to exactly one
   `Service` method. No business logic, no direct `Repository` access.
-- Consumers live under `messaging/` (transport plumbing), with per-source packages for the event
-  contracts they consume.
+- Each ingestion path is its own module (`structuredtask/`, `taskcreationrequest/`,
+  `scheduling/` — see §5), holding its consumer and the event contract it consumes.
+  `shared/messaging/kafka` and `shared/messaging/validation` hold only the transport-layer plumbing genuinely
+  shared across all of them.
 - Delivery is **at-least-once — every consumer must be idempotent.** Redelivery of the same
   event must not create a duplicate task. Deduplicate on the source's own identifier (source
   system + external id), not on a locally generated key.
@@ -302,9 +341,11 @@ point into the same domain and follows the same layering as a controller.
 
 ## 12. Exception handling
 
-- Custom unchecked exceptions extending a common `InboxException` base, under `exception/`
-  (`TaskNotFoundException`, `InvalidTaskStateException`).
-- One `@RestControllerAdvice` — `exception/GlobalExceptionHandler` — maps exception types to a
+- Custom unchecked exceptions extending a common `InboxException` base (`shared/exception/`),
+  living in the module they belong to, not in `shared/exception/` itself (`TaskNotFoundException`
+  is in `task/`, `UserNotFoundException` is in `user/`, …) — `shared/exception/` holds only the
+  base type and truly cross-cutting exceptions (`UnauthenticatedException`).
+- One `@RestControllerAdvice` — `shared/exception/GlobalExceptionHandler` — maps exception types to a
   status plus a single error shape:
 
   ```json
