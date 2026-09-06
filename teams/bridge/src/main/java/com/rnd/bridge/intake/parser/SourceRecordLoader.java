@@ -49,10 +49,10 @@ public class SourceRecordLoader {
         return switch (sourceType) {
             case EMAIL -> emailReader.read();
             case DRIVE -> driveReader.read();
-            case CALENDAR -> calendarReader.read();
-            // Only Slack honors the cursor today (stage 2, per plan.md "Cursor persistence") -
-            // the other sources still read everything every run until their Real reader adds
-            // since-filtering of its own.
+            // Slack and Calendar honor the cursor today (stage 2, per plan.md "Cursor
+            // persistence") - Email/Drive/WhatsApp still read everything every run until their
+            // Real reader adds since-filtering of its own.
+            case CALENDAR -> calendarReader.read(cursor);
             case SLACK -> chatSessionGrouper.group(slackReader.read(cursor.since()));
             case WHATSAPP -> chatSessionGrouper.group(whatsAppReader.read());
             case MEETING -> throw new IllegalArgumentException(

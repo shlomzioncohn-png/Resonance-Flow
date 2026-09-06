@@ -6,6 +6,7 @@ import static com.rnd.bridge.intake.parser.FixtureIoSupport.textOrNull;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.rnd.bridge.core.ReadCursor;
 import com.rnd.bridge.intake.model.SourceRecord;
 import com.rnd.bridge.raw.model.RawSourceType;
 import java.nio.charset.StandardCharsets;
@@ -33,7 +34,7 @@ public class FixtureCalendarSourceReader implements CalendarSourceReader {
     }
 
     @Override
-    public List<SourceRecord> read() {
+    public List<SourceRecord> read(ReadCursor cursor) {
         List<SourceRecord> records = new ArrayList<>();
         for (JsonNode node : readJson(objectMapper, FIXTURE_ROOT + "calendar-sample.json")) {
             String organizer = node.get("organizer").get("email").asText();
