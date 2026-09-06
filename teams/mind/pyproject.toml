@@ -8,10 +8,11 @@ license = { text = "Proprietary" }
 dependencies = [
     # core
     "pydantic>=2.0",
+    "pydantic-settings>=2.0",
     "fastapi",
     "uvicorn",
     # embeddings (src/mind/embeddings)
-    "psycopg2-binary>=2.9",
+    "psycopg[binary,pool]>=3.1",
     "scikit-learn>=1.4",
     "numpy>=1.26",
     # add as decided: OCR/ASR libs, LLM client, etc.
@@ -20,6 +21,7 @@ dependencies = [
 [project.optional-dependencies]
 dev = [
     "pytest",
+    "pytest-asyncio",
     "pytest-cov",
     "ruff",
     "mypy",
@@ -38,3 +40,4 @@ src = ["src", "tests"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+asyncio_mode = "auto"
