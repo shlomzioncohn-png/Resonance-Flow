@@ -16,6 +16,11 @@ import java.util.stream.Collectors;
  * {@link ConcurrentHashMap} keyed by task id. Seed data is passed in
  * through the constructor rather than hardcoded, since building real
  * Task instances requires Task's constructor, owned by a teammate.
+ *
+ * <p>Satisfies {@link TaskRepository#save}'s no-cross-mutation contract
+ * without any defensive copying: {@link Task} is immutable (all fields
+ * final, no setters), so a stored reference simply cannot be mutated by
+ * either side after the fact.
  */
 public class InMemoryTaskRepository implements TaskRepository {
 

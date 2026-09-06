@@ -37,25 +37,27 @@ public interface TaskRepository {
 
     /**
      * Persists the given task - inserts it if its id doesn't already
-     * exist, or replaces the existing one if it does (upsert). The
-     * caller's instance is not retained: the repository stores and
-     * returns an independent copy, so later mutations on either side
-     * cannot leak across.
+     * exist, or replaces the existing one if it does (upsert). Contract:
+     * mutations the caller makes to its own {@code task} reference after
+     * calling this method must not affect the stored task, and vice versa
+     * - implementations are free to satisfy this however fits their
+     * storage model (e.g. because the value type is immutable, or via an
+     * explicit defensive copy).
      *
-     * @return an independent copy of the persisted task, for convenient
-     * chaining at the call site.
+     * @return the persisted task, safe to use per the contract above.
      */
     Task save(Task task);
 
     /**
      * Atomically reads the current task with this id, applies
-     * {@code mutator} to a private copy of it, and persists the result -
-     * equivalent to {@code findById(id).map(mutator).map(this::save)} but
-     * performed as a single operation under a per-id lock. Use this
-     * instead of a separate findById/save pair whenever the new value
-     * depends on the current one (e.g. decrementing a counter), since two
-     * concurrent findById/save pairs on the same id can otherwise race
-     * and silently lose one of the updates.
+     * {@code mutator} to it, and persists the result - equivalent to
+     * {@code findById(id).map(mutator).map(this::save)} but performed as a
+     * single operation under a per-id lock. Use this instead of a separate
+     * findById/save pair whenever the new value depends on the current one
+     * (e.g. decrementing a counter), since two concurrent findById/save
+     * pairs on the same id can otherwise race and silently lose one of the
+     * updates. {@code mutator} must not mutate the task it's given in
+     * place - it must return the new value, per the same save() contract.
      *
      * @return the updated task, or empty if no task with this id exists
      */
