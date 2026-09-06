@@ -5,7 +5,7 @@ import java.util.UUID;
 
 // Identifier type: UUID, pending Inbox publishing its own task id type. Values are Task.id
 // references (see Task.java) and are not validated or looked up here.
-public class TaskDependency {
+public final class TaskDependency {
 
     // taskId depends on (is blocked by) dependsOnTaskId. This class only models the edge; it does
     // not validate that either id refers to an existing Task, and it intentionally does not reject
