@@ -44,7 +44,7 @@ public class Constraint {
     public LocalDateTime getUpdatedAt() { return updatedAt; }
 
     public void setStatus(ConstraintStatus status) { this.status = status; }
-    public void setReason(Map<String, Object> reason) { this.reason = reason; }
+    public void setReason(Map<String, Object> reason) { this.reason = copyReason(reason); }
     public void setUpdatedAt(LocalDateTime updatedAt) { this.updatedAt = updatedAt; }
 
     private static Map<String, Object> copyReason(Map<String, Object> reason) {
