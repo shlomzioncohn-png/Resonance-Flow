@@ -18,16 +18,20 @@ bumps the image tag and commits straight to `main`. ArgoCD's job is just
 to watch that chart and keep the cluster in sync with it - a classic
 push-based GitOps flow, no image updater needed.
 
+`Kafka` itself is also no longer a standalone chart/Application - it's a
+Bitnami subchart declared as a `dependency` in the chart's own
+`Chart.yaml` (gated on `kafka.enabled`), rendered into the *same* release
+and namespace as every component. There is deliberately no separate
+`apps/kafka.yaml` anymore.
+
 Everything here runs under ArgoCD's built-in `default` AppProject - no
 dedicated project is needed for this repo's scope.
 
 | File                     | Purpose                                                                 |
 |--------------------------|--------------------------------------------------------------------------|
 | `root-app.yaml`          | App-of-apps bootstrap `Application` - manages everything under `apps/` |
-| `argocd-cm-patch.yaml`   | Restores the `argoproj.io/Application` health check ArgoCD dropped in 1.8 (with a fix for a "Missing" status edge case) - required for the sync-waves below to actually gate on health instead of being a no-op |
-| `apps/resonance-flow.yaml` | `Application` syncing the [`resonance-flow`](../helm/resonance-flow) chart (all teams' services) |
-| `apps/kafka.yaml`        | `Application` syncing the [`kafka`](../../../kafka) chart (shared infra, synced first via a sync-wave) |
-| `apps/kafka-ready-check.yaml` | Wave `-1` Job that does a real readiness check on kafka's Deployment, closing a flaky ~1s window where ArgoCD's built-in Deployment health check can momentarily misreport "Healthy" right after creation |
+| `argocd-cm-patch.yaml`   | Restores the `argoproj.io/Application` health check ArgoCD dropped in 1.8 (with a fix for a "Missing" status edge case) - kept in case a future child `Application` needs sync-wave gating on another `Application`'s health; nothing under `apps/` currently uses more than one wave |
+| `apps/resonance-flow.yaml` | `Application` syncing the [`resonance-flow`](../helm/resonance-flow) chart (all teams' services, including the Kafka/Postgres/MinIO subcharts) |
 
 ## Onboarding your team's service
 
@@ -65,7 +69,7 @@ kubectl apply -f teams/relay/argocd/argocd-cm-patch.yaml
 kubectl apply -f teams/relay/argocd/root-app.yaml
 ```
 
-Then `argocd app list` should show `root`, `kafka`, and `resonance-flow`;
+Then `argocd app list` should show `root` and `resonance-flow`;
 `argocd app get resonance-flow` to check the umbrella chart's status.
 
 If `teams-mind-api`/`teams-relay-*`-style Applications from the old
