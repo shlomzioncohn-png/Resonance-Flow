@@ -2,18 +2,16 @@ package com.rnd.bff.controller;
 
 import com.rnd.bff.dto.TaskDTO;
 import com.rnd.bff.dto.TaskRecommendationDTO;
+import com.rnd.bff.dto.TaskStatusUpdateDTO;
 import com.rnd.bff.dto.WorkspaceRequestDTO;
 import com.rnd.bff.service.WorkspaceService;
 import jakarta.validation.Valid;
-import jakarta.validation.constraints.NotBlank;
-import jakarta.validation.constraints.Pattern;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
 import java.time.LocalDateTime;
-import java.util.Map;
 
 /**
  * Employee workspace recommendations.
@@ -83,10 +81,10 @@ public class WorkspaceController {
     @PatchMapping("/workspace/tasks/{taskId}/status")
     public ResponseEntity<TaskDTO> updateTaskStatus(
             @PathVariable String taskId,
-            @RequestBody Map<String, String> body,
+            @Valid @RequestBody TaskStatusUpdateDTO body,
             @RequestHeader("X-User-Id") String userId) {
 
-        String status = body.get("status");
+        String status = body.getStatus();
         logger.info("Task status update - userId: {}, taskId: {}, newStatus: {}", userId, taskId, status);
 
         // TODO: replace with Inbox call: inboxClient.updateTaskStatus(userId, taskId, status)

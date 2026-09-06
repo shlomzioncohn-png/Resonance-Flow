@@ -79,6 +79,27 @@ public class GlobalExceptionHandler {
                 HttpStatus.METHOD_NOT_ALLOWED);
     }
 
+    /**
+     * Triggered when a downstream dependency (Inbox, Chain, Mind) cannot be
+     * reached and no recommendation is possible without it — see
+     * WorkspaceService.recommend() and
+     * docs/workspace-screen-integration-plan.md.
+     */
+    @ExceptionHandler(ServiceUnavailableException.class)
+    public ResponseEntity<ErrorResponse> handleServiceUnavailableException(
+            ServiceUnavailableException ex, WebRequest request) {
+        String path = getRequestPath(request);
+        logger.error("Service unavailable: {} - Path: {}", ex.getMessage(), path);
+
+        return new ResponseEntity<>(
+                new ErrorResponse(
+                        "SERVICE_UNAVAILABLE",
+                        "Downstream service is unavailable. Please try again later.",
+                        path,
+                        "Service: " + ex.getServiceName()),
+                HttpStatus.SERVICE_UNAVAILABLE);
+    }
+
     /** Catch-all for unexpected errors. */
     @ExceptionHandler(Exception.class)
     public ResponseEntity<ErrorResponse> handleGeneralException(Exception ex, WebRequest request) {
