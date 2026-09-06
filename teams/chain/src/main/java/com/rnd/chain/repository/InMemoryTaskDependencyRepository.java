@@ -118,11 +118,25 @@ public class InMemoryTaskDependencyRepository implements TaskDependencyRepositor
             if (!removed) {
                 return false;
             }
+            removeIfEmpty(dependenciesByTask, taskId, dependsOn);
+
             Set<UUID> dependents = dependentsByTask.get(dependsOnTaskId);
             if (dependents != null) {
                 dependents.remove(taskId);
+                removeIfEmpty(dependentsByTask, dependsOnTaskId, dependents);
             }
             return true;
+        }
+    }
+
+    /**
+     * Drops {@code key} from {@code map} once its edge set is empty, so
+     * adjacency-map entries don't accumulate forever for tasks whose edges
+     * have all been removed. Callers must hold {@code writeLock}.
+     */
+    private static void removeIfEmpty(ConcurrentHashMap<UUID, Set<UUID>> map, UUID key, Set<UUID> edges) {
+        if (edges.isEmpty()) {
+            map.remove(key);
         }
     }
 }
