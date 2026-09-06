@@ -155,6 +155,22 @@ class UserServiceTest {
     }
 
     @Test
+    void createUser_whenActorBelongsToAnotherOrganization_throwsForbiddenActionException() {
+        stubActorFound();
+        actor.setOrganization(new Organization());
+        actor.getOrganization().setId(UUID.randomUUID());
+        UserCreateRequestDto request = createRequest("yehudit@acme.com", "yehudit");
+
+        when(organizationRepository.findById(organizationId)).thenReturn(Optional.of(organization));
+
+        assertThatThrownBy(() -> userService.createUser(request, actorId))
+                .isInstanceOf(ForbiddenActionException.class);
+
+        verify(userRepository, never()).save(any());
+        verify(auditService, never()).createAuditLog(any(), any(), any(), any(), any(), any(), any());
+    }
+
+    @Test
     void createUser_whenEmailAlreadyExists_throwsDuplicateEmailException() {
         stubActorFound();
         UserCreateRequestDto request = createRequest("yehudit@acme.com", "yehudit");

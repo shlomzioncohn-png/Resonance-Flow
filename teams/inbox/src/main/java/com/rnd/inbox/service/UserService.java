@@ -46,6 +46,7 @@ public class UserService {
     public UserResponseDto createUser(UserCreateRequestDto request, UUID actorId) {
         User actor = findActorOrThrow(actorId);
         Organization organization = findOrganizationOrThrow(UUID.fromString(request.getOrganizationId()));
+        assertActorBelongsToOrganization(actor, organization);
         assertEmailAvailable(request.getEmail(), null);
         assertUsernameAvailable(request.getUsername(), null);
 
@@ -122,9 +123,13 @@ public class UserService {
     }
 
     private void assertActorCanManageUser(User actor, User targetUser) {
-        if (!actor.getOrganization().getId().equals(targetUser.getOrganization().getId())) {
+        assertActorBelongsToOrganization(actor, targetUser.getOrganization());
+    }
+
+    private void assertActorBelongsToOrganization(User actor, Organization organization) {
+        if (!actor.getOrganization().getId().equals(organization.getId())) {
             throw new ForbiddenActionException(
-                    "Actor " + actor.getId() + " cannot manage users outside their own organization");
+                    "Actor " + actor.getId() + " cannot act on organization " + organization.getId());
         }
     }
 

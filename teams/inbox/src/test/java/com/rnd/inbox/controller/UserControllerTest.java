@@ -134,6 +134,19 @@ class UserControllerTest {
     }
 
     @Test
+    void createUser_whenActorOutsideRequestedOrganization_returns403() throws Exception {
+        when(userService.createUser(any(), eq(actorId)))
+                .thenThrow(new ForbiddenActionException("Actor cannot act on organization " + organizationId));
+
+        mockMvc.perform(post("/api/v1/users")
+                        .header(ACTOR_HEADER, actorId.toString())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(validCreateRequest())))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.error").value("FORBIDDEN"));
+    }
+
+    @Test
     void createUser_whenEmailAlreadyExists_returns409() throws Exception {
         when(userService.createUser(any(), eq(actorId))).thenThrow(new DuplicateEmailException("yehudit@acme.com"));
 

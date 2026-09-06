@@ -43,6 +43,7 @@ public class UserController {
             @ApiResponse(responseCode = "201", description = "User created",
                     content = @Content(schema = @Schema(implementation = UserResponseDto.class))),
             @ApiResponse(responseCode = "401", description = "Missing or unrecognized actor identity"),
+            @ApiResponse(responseCode = "403", description = "Actor cannot create a user in another organization"),
             @ApiResponse(responseCode = "404", description = "Organization not found"),
             @ApiResponse(responseCode = "409", description = "Email or username already exists")
     })
