@@ -100,6 +100,18 @@ public class GlobalExceptionHandler {
                 HttpStatus.SERVICE_UNAVAILABLE);
     }
 
+    /** Triggered when a task id doesn't exist in Inbox's task set. */
+    @ExceptionHandler(TaskNotFoundException.class)
+    public ResponseEntity<ErrorResponse> handleTaskNotFoundException(
+            TaskNotFoundException ex, WebRequest request) {
+        String path = getRequestPath(request);
+        logger.warn("Task not found - Path: {}, taskId: {}", path, ex.getTaskId());
+
+        return new ResponseEntity<>(
+                new ErrorResponse("NOT_FOUND", "Task not found", path, ex.getMessage()),
+                HttpStatus.NOT_FOUND);
+    }
+
     /** Catch-all for unexpected errors. */
     @ExceptionHandler(Exception.class)
     public ResponseEntity<ErrorResponse> handleGeneralException(Exception ex, WebRequest request) {

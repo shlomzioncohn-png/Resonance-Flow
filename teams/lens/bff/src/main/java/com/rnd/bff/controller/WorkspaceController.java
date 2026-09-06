@@ -1,6 +1,7 @@
 package com.rnd.bff.controller;
 
 import com.rnd.bff.dto.TaskDTO;
+import com.rnd.bff.dto.TaskListResponseDTO;
 import com.rnd.bff.dto.TaskRecommendationDTO;
 import com.rnd.bff.dto.TaskStatusUpdateDTO;
 import com.rnd.bff.dto.WorkspaceRequestDTO;
@@ -10,8 +11,6 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
-
-import java.time.LocalDateTime;
 
 /**
  * Employee workspace recommendations.
@@ -39,11 +38,33 @@ public class WorkspaceController {
     }
 
     /**
+     * "My Tasks" screen: full task list with filter, title search, and
+     * pagination.
+     *
+     * GET /workspace/tasks?filter=&search=&page=&size=
+     *
+     * filter: all | in_progress | blocked | waiting_on_me (default all)
+     * page: 0-based (default 0), size: default 20, clamped to [1, 100]
+     */
+    @GetMapping("/workspace/tasks")
+    public ResponseEntity<TaskListResponseDTO> listTasks(
+            @RequestParam(required = false) String filter,
+            @RequestParam(required = false) String search,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "20") int size,
+            @RequestHeader("X-User-Id") String userId) {
+
+        logger.info(
+                "Task list request - userId: {}, filter: {}, search: {}, page: {}, size: {}",
+                userId, filter, search, page, size);
+
+        return ResponseEntity.ok(workspaceService.listTasks(userId, filter, search, page, size));
+    }
+
+    /**
      * Get task details by ID.
      *
      * GET /workspace/tasks/{taskId}
-     *
-     * TODO: forward to Inbox service once its API is live.
      */
     @GetMapping("/workspace/tasks/{taskId}")
     public ResponseEntity<TaskDTO> getTask(
@@ -52,20 +73,7 @@ public class WorkspaceController {
 
         logger.info("Task details request - userId: {}, taskId: {}", userId, taskId);
 
-        // TODO: replace with Inbox call: inboxClient.getTask(userId, taskId)
-        TaskDTO task = TaskDTO.builder()
-                .id(taskId)
-                .title("Review API changes")
-                .description("Review the latest API changes and update integration tests.")
-                .status("READY")
-                .priority("HIGH")
-                .effortEstimate(35)
-                .dueDate(LocalDateTime.of(2026, 8, 30, 17, 0))
-                .owner("Alex Morgan")
-                .project("Platform Service")
-                .build();
-
-        return ResponseEntity.ok(task);
+        return ResponseEntity.ok(workspaceService.getTask(userId, taskId));
     }
 
     /**
@@ -73,10 +81,6 @@ public class WorkspaceController {
      *
      * PATCH /workspace/tasks/{taskId}/status
      * Body: { "status": "IN_PROGRESS" }
-     *
-     * TODO: forward to Inbox service once its API is live.
-     * For now returns the mock task with the updated status so the
-     * full Gateway → BFF flow is provable end-to-end.
      */
     @PatchMapping("/workspace/tasks/{taskId}/status")
     public ResponseEntity<TaskDTO> updateTaskStatus(
@@ -84,22 +88,10 @@ public class WorkspaceController {
             @Valid @RequestBody TaskStatusUpdateDTO body,
             @RequestHeader("X-User-Id") String userId) {
 
-        String status = body.getStatus();
-        logger.info("Task status update - userId: {}, taskId: {}, newStatus: {}", userId, taskId, status);
+        logger.info(
+                "Task status update - userId: {}, taskId: {}, newStatus: {}",
+                userId, taskId, body.getStatus());
 
-        // TODO: replace with Inbox call: inboxClient.updateTaskStatus(userId, taskId, status)
-        TaskDTO updated = TaskDTO.builder()
-                .id(taskId)
-                .title("Review API changes")
-                .description("Review the latest API changes and update integration tests.")
-                .status(status)
-                .priority("HIGH")
-                .effortEstimate(35)
-                .dueDate(LocalDateTime.of(2026, 8, 30, 17, 0))
-                .owner("Alex Morgan")
-                .project("Platform Service")
-                .build();
-
-        return ResponseEntity.ok(updated);
+        return ResponseEntity.ok(workspaceService.updateTaskStatus(userId, taskId, body.getStatus()));
     }
 }
