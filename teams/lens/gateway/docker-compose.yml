@@ -1,0 +1,12 @@
+services:
+  gateway:
+    build: .
+    container_name: gateway-service
+    ports:
+      - "${SERVER_PORT:-8080}:8080"
+    environment:
+      - SERVER_PORT=${SERVER_PORT:-8080}
+      - SPRING_PROFILES_ACTIVE=${SPRING_PROFILES_ACTIVE:-local}
+      - BFF_SERVICE_URL=${BFF_SERVICE_URL:-http://bff-service:8080}
+      - BFF_CONNECT_TIMEOUT_MS=${BFF_CONNECT_TIMEOUT_MS:-2000}
+      - BFF_READ_TIMEOUT_MS=${BFF_READ_TIMEOUT_MS:-10000}

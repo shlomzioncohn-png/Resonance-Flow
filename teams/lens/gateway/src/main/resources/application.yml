@@ -1,0 +1,40 @@
+spring:
+  application:
+    name: gateway
+  profiles:
+    active: ${SPRING_PROFILES_ACTIVE:local}
+  # Enable exception handling for unmapped routes (404)
+  mvc:
+    throw-exception-if-no-handler-found: true
+    static-path-pattern: /static/**
+  web:
+    resources:
+      add-mappings: false
+
+# Application mode configuration
+app:
+  # dev-mode: set to true ONLY in local/dev environments
+  # In production, this MUST be false to force JWT extraction
+  dev-mode: ${APP_DEV_MODE:true}
+
+# BFF service configuration
+# Override BFF_SERVICE_URL to point at a different BFF without recompiling
+bff:
+  service:
+    url: ${BFF_SERVICE_URL:http://bff-service:8080}
+  connect-timeout-ms: ${BFF_CONNECT_TIMEOUT_MS:2000}
+  read-timeout-ms: ${BFF_READ_TIMEOUT_MS:10000}
+  # BFF endpoint paths — change here if BFF renames a route, no code changes needed
+  endpoints:
+    workspace-recommend: ${BFF_ENDPOINT_WORKSPACE_RECOMMEND:/workspace/recommend}
+    tasks: ${BFF_ENDPOINT_TASKS:/workspace/tasks}
+
+server:
+  port: ${SERVER_PORT:8080}
+
+logging:
+  level:
+    root: INFO
+    com.rnd.gateway: DEBUG
+    org.springframework.cloud.gateway: DEBUG
+    org.springframework.security: DEBUG

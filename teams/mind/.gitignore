@@ -1,0 +1,52 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+
+# Local model weights — never commit
+models/*
+!models/.gitkeep
+!models/README.md
+
+# Env / secrets
+.env
+.env.local
+
+# OS / editor
+.DS_Store
+.vscode/
+!.vscode/extensions.json
+
+# Personal AI-assistant notes — local only, never shared via git
+CLAUDE.md
+
+# Local-only Docker build workaround for this machine's network TLS
+# interception (NetFree). Machine-specific, never shared -- the real
+# Dockerfile that ships to Relay/CI is untouched.
+netfree-root-ca.crt
+Dockerfile.local
+docker-compose.override.yml
+
+# Benchmark run artifacts (keep READMEs, not raw dumps)
+benchmarks/**/*.json
+benchmarks/**/*.csv
+!benchmarks/README.md
+
+# Datasets — manifests/checksums only, never the corpora
+eval/datasets/*
+!eval/datasets/.gitkeep
+!eval/datasets/README.md
+!eval/datasets/*.manifest.json
+!eval/datasets/*.sha256
+
+# Harness run output (mind.evaluation.run writes report.json to the cwd)
+report.json
+
+# Local raw datasets — never commit
+local-data/

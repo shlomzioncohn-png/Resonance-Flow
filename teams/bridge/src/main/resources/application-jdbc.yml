@@ -1,0 +1,14 @@
+spring:
+  # Re-enable what the base application.yml turns off, for this profile only.
+  autoconfigure:
+    exclude: []
+  datasource:
+    url: jdbc:postgresql://${DB_HOST:localhost}:${DB_PORT:5432}/${DB_NAME:bridge}
+    username: ${DB_USERNAME:bridge}
+    password: ${DB_PASSWORD:}
+    driver-class-name: org.postgresql.Driver
+
+bridge:
+  crm:
+    # Same instant the synthetic dataset declares as its as_of.
+    as-of: "2026-08-24T09:00:00Z"
