@@ -16,19 +16,18 @@ Addresses issue #87:
      reference).
 
 Run:  python vector_search_benchmark.py
-(from teams/mind/, with MIND_PG_DSN pointed at a real pgvector instance
-and the `mind` package installed -- same setup as the test suite.)
+(from teams/mind/, with MIND_VECTOR_STORE_DSN pointed at a real pgvector
+instance and the `mind` package installed -- same setup as the test
+suite.)
 """
 
+import asyncio
 import json
 import random
 import statistics
 import time
 
-import psycopg2
-
-from mind.embeddings import embed, embed_batch, search, upsert
-from mind.embeddings.config import PG_DSN, PG_TABLE
+from mind.embeddings import clear, embed, embed_batch, search, upsert
 
 N_FILLER = 10_000  # upper end of the 5,000-10,000 range asked for
 N_LATENCY_QUERIES = 100
@@ -90,17 +89,10 @@ def percentile(values: list[float], p: float) -> float:
     return values[idx]
 
 
-def reset_table():
-    conn = psycopg2.connect(PG_DSN)
-    with conn, conn.cursor() as cur:
-        cur.execute(f"TRUNCATE TABLE {PG_TABLE};")
-    conn.close()
-
-
-def main():
+async def main():
     random.seed(87)
     print("Resetting table...")
-    reset_table()
+    await clear()
 
     # --- 1. Load synthetic filler (clearly id-prefixed, batch-embedded) ---
     print(f"Generating {N_FILLER} synthetic filler texts...")
@@ -118,7 +110,7 @@ def main():
 
     print("Upserting filler rows...")
     for i, (task_id, vector) in enumerate(zip(filler_ids, filler_vectors)):
-        upsert(task_id, vector)
+        await upsert(task_id, vector)
         if i % 2000 == 0:
             print(f"  upserted {i}/{N_FILLER}")
 
@@ -127,8 +119,8 @@ def main():
     pair_rows = []  # (id_a, id_b, text_a, text_b)
     for i, (text_a, text_b) in enumerate(PAIRS):
         id_a, id_b = f"pair-{i}-a", f"pair-{i}-b"
-        upsert(id_a, embed(text_a))
-        upsert(id_b, embed(text_b))
+        await upsert(id_a, embed(text_a))
+        await upsert(id_b, embed(text_b))
         pair_rows.append((id_a, id_b, text_a, text_b))
 
     total_rows = N_FILLER + 2 * len(PAIRS)
@@ -140,7 +132,7 @@ def main():
     for _ in range(N_LATENCY_QUERIES):
         qvec = embed(fake_filler_text(), is_query=True)
         start = time.perf_counter()
-        search(qvec, k=10)
+        await search(qvec, k=10)
         query_latencies.append((time.perf_counter() - start) * 1000)
 
     # --- 4. Recall: does querying one pair member surface the other? ---
@@ -151,7 +143,7 @@ def main():
         query_vec = embed(text_a, is_query=True)  # BGE asymmetry: query side
         hits_this_pair = {}
         for k in K_VALUES:
-            results = search(query_vec, k=k)
+            results = await search(query_vec, k=k)
             hit = id_b in results
             pair_hits[k].append(hit)
             hits_this_pair[k] = hit
@@ -202,4 +194,4 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())

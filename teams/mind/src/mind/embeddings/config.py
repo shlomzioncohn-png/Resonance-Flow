@@ -1,42 +1,72 @@
-import os
 from pathlib import Path
 
-# --- Embedding model ------------------------------------------------------
-EMBEDDING_MODEL_NAME = "BAAI/bge-small-en-v1.5"
+from pydantic_settings import BaseSettings, SettingsConfigDict
+
 # Local copy of the model weights (models/ is gitignored -- never
 # committed). If this directory exists, generate.py loads the model
 # straight from disk with no network call at all. Falls back to
 # EMBEDDING_MODEL_NAME (a Hugging Face Hub id, downloaded and cached by
 # sentence-transformers) if it doesn't -- see generate.py.
 EMBEDDING_MODEL_LOCAL_DIR = Path(__file__).resolve().parents[3] / "models" / "bge-small-en-v1.5"
-EMBEDDING_DIM = 384
-MAX_SEQ_LENGTH = 512  # tokens; longer text is truncated, see generate.py
 
-# BGE is an asymmetric retrieval model: queries need this instruction
-# prefix prepended before encoding; stored passages/documents do not.
-# See generate.py's embed()/embed_batch() `is_query` parameter.
-BGE_QUERY_INSTRUCTION = "Represent this sentence for searching relevant passages: "
 
-# --- Database connection (pgvector / Postgres) --------------------------
-# Overridable via env vars so this works the same in dev, CI, and prod.
-PG_DSN = os.environ.get(
-    "MIND_PG_DSN",
-    "dbname=mind user=postgres password=postgres host=localhost port=5432",
-)
+class Settings(BaseSettings):
+    """Config for this module, read from env vars (or a `.env` file).
 
-PG_TABLE = "task_embeddings"
+    Backed by Pydantic so a missing/malformed value fails fast at import
+    time with a clear error, instead of silently falling back to a
+    hardcoded default (previous behavior defaulted `vector_store_dsn` to
+    `user=postgres password=postgres` -- fine for a laptop, dangerous if
+    it were ever forgotten in a real environment) or blowing up later,
+    deep inside a request, with a confusing psycopg error.
 
-# HNSW query-time accuracy/speed knob (pgvector's default is 40, tuned for
-# speed over recall). Raising this to 400 measurably improves recall
-# (ANN-vs-exact recall@10 goes from 61% to 86% at 10,000 rows) while query
-# p95 only moves from ~2ms to ~5.5ms -- still far under the 300ms budget.
-# Re-measure if this table grows far past 10k rows.
-HNSW_EF_SEARCH = 400
+    Field names deliberately don't mention Postgres/pgvector -- this
+    module's public interface (`mind.embeddings`) hides which database
+    backs it, and that should hold for its configuration too. Only
+    `pgvector_store.py` (via `factory.py`) knows the connection string is
+    actually a libpq DSN.
+    """
 
-# --- Duplicate-detection --------------------------------------------------
-# TODO(tune-me): placeholder cosine-similarity threshold above which two
-# tasks are considered "likely duplicates". 0.9 is a guess, not a measured
-# value. Revisit once we have a labeled set of real duplicate/non-duplicate
-# task pairs from production data, and pick this properly via a
-# precision/recall sweep. Do not ship this value to prod without re-tuning.
-DUPLICATE_SIMILARITY_THRESHOLD = 0.90
+    model_config = SettingsConfigDict(env_prefix="MIND_", env_file=".env", extra="ignore")
+
+    vector_store_dsn: str
+    vector_store_table: str = "task_embeddings"
+
+    # --- Embedding model -----------------------------------------------
+    embedding_model_name: str = "BAAI/bge-small-en-v1.5"
+    # Must match whatever generate.py's embed() actually returns -- the
+    # pgvector column is created as VECTOR(embedding_dim).
+    embedding_dim: int = 384
+    max_seq_length: int = 512  # tokens; longer text is truncated, see generate.py
+
+    # BGE is an asymmetric retrieval model: queries need this instruction
+    # prefix prepended before encoding; stored passages/documents do not.
+    # See generate.py's embed()/embed_batch() `is_query` parameter.
+    bge_query_instruction: str = "Represent this sentence for searching relevant passages: "
+
+    # HNSW query-time accuracy/speed knob (pgvector's default is 40, tuned
+    # for speed over recall). Raising this to 400 measurably improves
+    # recall (ANN-vs-exact recall@10 goes from 61% to 86% at 10,000 rows)
+    # while query p95 only moves from ~2ms to ~5.5ms -- still far under
+    # the 300ms budget. Re-measure if this table grows far past 10k rows.
+    hnsw_ef_search: int = 400
+
+    # TODO(tune-me): placeholder cosine-similarity threshold above which
+    # two tasks are considered "likely duplicates". 0.9 is a guess, not a
+    # measured value. Revisit once we have a labeled set of real
+    # duplicate/non-duplicate task pairs from production data, and pick
+    # this properly via a precision/recall sweep. Do not ship this value
+    # to prod without re-tuning.
+    duplicate_similarity_threshold: float = 0.90
+
+
+settings = Settings()
+
+PG_DSN = settings.vector_store_dsn
+PG_TABLE = settings.vector_store_table
+EMBEDDING_MODEL_NAME = settings.embedding_model_name
+EMBEDDING_DIM = settings.embedding_dim
+MAX_SEQ_LENGTH = settings.max_seq_length
+BGE_QUERY_INSTRUCTION = settings.bge_query_instruction
+HNSW_EF_SEARCH = settings.hnsw_ef_search
+DUPLICATE_SIMILARITY_THRESHOLD = settings.duplicate_similarity_threshold
