@@ -61,13 +61,21 @@ public class GoogleCredentialsProvider {
                     .setDataStoreFactory(new FileDataStoreFactory(resolveTokensDirectory().toFile()))
                     .setAccessType("offline")
                     .build();
-            return new AuthorizationCodeInstalledApp(flow, new LocalServerReceiver()).authorize("kamatech");
+            // Store key must vary by scope set - a fixed key would make a second reader with
+            // narrower/different scopes silently reuse the first reader's stored token instead
+            // of asking for its own consent, then fail at request time with
+            // ACCESS_TOKEN_SCOPE_INSUFFICIENT (found the hard way testing Gmail after Calendar).
+            return new AuthorizationCodeInstalledApp(flow, new LocalServerReceiver()).authorize(storeKey(scopes));
         } catch (IOException e) {
             throw new UncheckedIOException(
                     "Failed to obtain Google OAuth credentials for scopes " + scopes
                             + " - if this is the first run, a browser window should have opened for consent",
                     e);
         }
+    }
+
+    private static String storeKey(List<String> scopes) {
+        return scopes.stream().sorted().reduce((a, b) -> a + "+" + b).orElseThrow();
     }
 
     private Path resolveClientSecretsPath() {

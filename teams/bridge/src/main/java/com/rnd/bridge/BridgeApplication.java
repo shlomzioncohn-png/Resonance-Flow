@@ -2,6 +2,7 @@ package com.rnd.bridge;
 
 import com.rnd.bridge.intake.config.CalendarImportProperties;
 import com.rnd.bridge.intake.config.ChatSessionProperties;
+import com.rnd.bridge.intake.config.GmailImportProperties;
 import com.rnd.bridge.intake.config.GoogleOAuthProperties;
 import com.rnd.bridge.intake.config.ScopingProperties;
 import com.rnd.bridge.intake.config.SlackApiProperties;
@@ -17,7 +18,8 @@ import org.springframework.boot.context.properties.EnableConfigurationProperties
     WhatsAppImportProperties.class,
     SlackApiProperties.class,
     GoogleOAuthProperties.class,
-    CalendarImportProperties.class
+    CalendarImportProperties.class,
+    GmailImportProperties.class
 })
 public class BridgeApplication {
 
