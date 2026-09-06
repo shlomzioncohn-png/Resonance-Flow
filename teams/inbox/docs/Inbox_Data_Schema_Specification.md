@@ -190,6 +190,7 @@ Fields are listed with their type, whether they are required, their foreign-key 
 | `created_at` | TIMESTAMPTZ | Yes | DEFAULT `now()` | Creation timestamp. |
 | `updated_at` | TIMESTAMPTZ | Yes | DEFAULT `now()` | Last update timestamp. |
 | `completed_at` | TIMESTAMPTZ | No | — | Completion timestamp. `is_completed` is intentionally not stored because `status = 'done'` is the source of truth. |
+| `metadata` | JSONB | No | — | Free-form structured metadata attached to the task. No fixed schema. |
 
 #### 3.8.1 Task / Chain data ownership
 

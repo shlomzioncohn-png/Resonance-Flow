@@ -6,8 +6,10 @@ import com.rnd.inbox.model.enums.TaskRoleContext;
 import com.rnd.inbox.model.enums.TaskStatus;
 import com.rnd.inbox.model.enums.TaskTier;
 import com.rnd.inbox.model.type.LowercasePostgreSQLEnumJdbcType;
+import io.hypersistence.utils.hibernate.type.json.JsonBinaryType;
 import org.hibernate.annotations.GenericGenerator;
 import org.hibernate.annotations.JdbcType;
+import org.hibernate.annotations.Type;
 
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
@@ -19,6 +21,7 @@ import jakarta.persistence.JoinColumn;
 import jakarta.persistence.ManyToOne;
 import jakarta.persistence.Table;
 import java.time.Instant;
+import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
 
@@ -118,6 +121,10 @@ public class Task {
 
     @Column(name = "completed_at")
     private Instant completedAt;
+
+    @Type(JsonBinaryType.class)
+    @Column(columnDefinition = "jsonb")
+    private Map<String, Object> metadata;
 
     public Task() {
     }
@@ -320,6 +327,14 @@ public class Task {
 
     public void setCompletedAt(Instant completedAt) {
         this.completedAt = completedAt;
+    }
+
+    public Map<String, Object> getMetadata() {
+        return metadata;
+    }
+
+    public void setMetadata(Map<String, Object> metadata) {
+        this.metadata = metadata;
     }
 
     @Override

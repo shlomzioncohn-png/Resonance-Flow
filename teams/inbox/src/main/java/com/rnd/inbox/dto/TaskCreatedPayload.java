@@ -8,6 +8,7 @@ import com.rnd.inbox.model.enums.TaskStatus;
 import com.rnd.inbox.model.enums.TaskTier;
 
 import java.time.Instant;
+import java.util.Map;
 import java.util.UUID;
 
 public final class TaskCreatedPayload {
@@ -32,13 +33,14 @@ public final class TaskCreatedPayload {
     private final Float effortEstimateConfidence;
     private final UUID createdBy;
     private final Instant createdAt;
+    private final Map<String, Object> metadata;
 
     private TaskCreatedPayload(UUID taskId, UUID organizationId, UUID projectId, String title, String description,boolean isAvailable,
                                 SourceType sourceType, String sourceRef, TaskTier tier, TaskRoleContext roleContext,
                                 Short urgency, Integer effortEstimateMinutes, Instant deadline, TaskStatus status,
                                 TaskExtractionProvenance extractionProvenance, Float confidence,
                                 Float effortEstimateConfidence,
-                                UUID createdBy, Instant createdAt) {
+                                UUID createdBy, Instant createdAt, Map<String, Object> metadata) {
         this.taskId = taskId;
         this.organizationId = organizationId;
         this.projectId = projectId;
@@ -58,6 +60,7 @@ public final class TaskCreatedPayload {
         this.effortEstimateConfidence = effortEstimateConfidence;
         this.createdBy = createdBy;
         this.createdAt = createdAt;
+        this.metadata = metadata;
     }
 
     public static TaskCreatedPayload from(Task task) {
@@ -80,7 +83,8 @@ public final class TaskCreatedPayload {
                 task.getConfidence(),
                 task.getEffortEstimateConfidence(),
                 task.getCreatedBy() != null ? task.getCreatedBy().getId() : null,
-                task.getCreatedAt()
+                task.getCreatedAt(),
+                task.getMetadata()
         );
     }
 
@@ -158,5 +162,9 @@ public final class TaskCreatedPayload {
 
     public Instant getCreatedAt() {
         return createdAt;
+    }
+
+    public Map<String, Object> getMetadata() {
+        return metadata;
     }
 }
