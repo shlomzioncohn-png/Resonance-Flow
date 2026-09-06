@@ -15,7 +15,6 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
-import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
@@ -39,6 +38,7 @@ public class UserController {
             @ApiResponse(responseCode = "201", description = "User created",
                     content = @Content(schema = @Schema(implementation = UserResponseDto.class))),
             @ApiResponse(responseCode = "401", description = "Missing or unrecognized actor identity"),
+            @ApiResponse(responseCode = "403", description = "Actor cannot create a user in another tenant"),
             @ApiResponse(responseCode = "404", description = "Tenant not found"),
             @ApiResponse(responseCode = "409", description = "Email or username already exists")
     })
@@ -56,19 +56,24 @@ public class UserController {
     @ApiResponses({
             @ApiResponse(responseCode = "200", description = "User found",
                     content = @Content(schema = @Schema(implementation = UserResponseDto.class))),
+            @ApiResponse(responseCode = "401", description = "Missing or unrecognized actor identity"),
+            @ApiResponse(responseCode = "403", description = "Actor cannot access a user outside their tenant"),
             @ApiResponse(responseCode = "404", description = "User not found")
     })
     @GetMapping("/{id}")
-    public UserResponseDto getUserById(@PathVariable UUID id) {
-        return userService.getUserById(id);
+    public UserResponseDto getUserById(@PathVariable UUID id, @CurrentActor UUID actorId) {
+        return userService.getUserById(id, actorId);
     }
 
-    @Operation(summary = "List users, paginated")
-    @ApiResponse(responseCode = "200", description = "Page of users",
-            content = @Content(schema = @Schema(implementation = PageResponseDto.class)))
+    @Operation(summary = "List users in the actor's tenant, paginated")
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "Page of users",
+                    content = @Content(schema = @Schema(implementation = PageResponseDto.class))),
+            @ApiResponse(responseCode = "401", description = "Missing or unrecognized actor identity")
+    })
     @GetMapping
-    public PageResponseDto<UserResponseDto> listUsers(Pageable pageable) {
-        return userService.listUsers(pageable);
+    public PageResponseDto<UserResponseDto> listUsers(Pageable pageable, @CurrentActor UUID actorId) {
+        return userService.listUsers(pageable, actorId);
     }
 
     @Operation(summary = "Update a user's details")
@@ -76,10 +81,11 @@ public class UserController {
             @ApiResponse(responseCode = "200", description = "User updated",
                     content = @Content(schema = @Schema(implementation = UserResponseDto.class))),
             @ApiResponse(responseCode = "401", description = "Missing or unrecognized actor identity"),
+            @ApiResponse(responseCode = "403", description = "Actor cannot manage a user outside their tenant"),
             @ApiResponse(responseCode = "404", description = "User not found"),
             @ApiResponse(responseCode = "409", description = "Email or username already exists")
     })
-    @PutMapping("/{id}")
+    @PatchMapping("/{id}")
     public UserResponseDto updateUser(@PathVariable UUID id, @Valid @RequestBody UserUpdateRequestDto request,
                                        @CurrentActor UUID actorId) {
         return userService.updateUser(id, request, actorId);
@@ -89,11 +95,14 @@ public class UserController {
     @ApiResponses({
             @ApiResponse(responseCode = "200", description = "Status updated",
                     content = @Content(schema = @Schema(implementation = UserResponseDto.class))),
+            @ApiResponse(responseCode = "401", description = "Missing or unrecognized actor identity"),
+            @ApiResponse(responseCode = "403", description = "Actor cannot manage a user outside their tenant"),
             @ApiResponse(responseCode = "404", description = "User not found")
     })
     @PatchMapping("/{id}/status")
     public UserResponseDto updateStatus(@PathVariable UUID id,
-                                         @Valid @RequestBody UserStatusUpdateRequestDto request) {
-        return userService.updateStatus(id, request);
+                                         @Valid @RequestBody UserStatusUpdateRequestDto request,
+                                         @CurrentActor UUID actorId) {
+        return userService.updateStatus(id, request, actorId);
     }
 }

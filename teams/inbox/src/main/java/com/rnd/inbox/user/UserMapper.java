@@ -37,20 +37,20 @@ public class UserMapper {
         if (dto.getDisplayName() != null) {
             user.setDisplayName(dto.getDisplayName());
         }
-        if (dto.getFirstName() != null) {
-            user.setFirstName(dto.getFirstName());
+        if (dto.getFirstName().isPresent()) {
+            user.setFirstName(dto.getFirstName().get());
         }
-        if (dto.getLastName() != null) {
-            user.setLastName(dto.getLastName());
+        if (dto.getLastName().isPresent()) {
+            user.setLastName(dto.getLastName().get());
         }
-        if (dto.getEmail() != null) {
-            user.setEmail(dto.getEmail());
+        if (dto.getEmail().isPresent()) {
+            user.setEmail(dto.getEmail().get());
         }
-        if (dto.getPhone() != null) {
-            user.setPhone(dto.getPhone());
+        if (dto.getPhone().isPresent()) {
+            user.setPhone(dto.getPhone().get());
         }
-        if (dto.getUsername() != null) {
-            user.setUsername(dto.getUsername());
+        if (dto.getUsername().isPresent()) {
+            user.setUsername(dto.getUsername().get());
         }
         if (dto.getRole() != null) {
             user.setRole(dto.getRole());

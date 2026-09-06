@@ -4,10 +4,12 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.rnd.inbox.shared.config.AppConfig;
 import com.rnd.inbox.shared.config.WebMvcConfig;
 import com.rnd.inbox.shared.dto.PageResponseDto;
+import com.rnd.inbox.shared.exception.ForbiddenActionException;
 import com.rnd.inbox.tenant.TenantNotFoundException;
 import com.rnd.inbox.tenant.TenantSummaryDto;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.openapitools.jackson.nullable.JsonNullable;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
 import org.springframework.boot.test.mock.mockito.MockBean;
@@ -25,7 +27,6 @@ import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
-import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -125,6 +126,19 @@ class UserControllerTest {
     }
 
     @Test
+    void createUser_whenActorOutsideRequestedTenant_returns403() throws Exception {
+        when(userService.createUser(any(), eq(actorId)))
+                .thenThrow(new ForbiddenActionException("Actor cannot act on tenant " + tenantId));
+
+        mockMvc.perform(post("/api/v1/users")
+                        .header(ACTOR_HEADER, actorId.toString())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(validCreateRequest())))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.error").value("FORBIDDEN"));
+    }
+
+    @Test
     void createUser_whenEmailAlreadyExists_returns409() throws Exception {
         when(userService.createUser(any(), eq(actorId))).thenThrow(new DuplicateEmailException("yehudit@acme.com"));
 
@@ -138,29 +152,46 @@ class UserControllerTest {
 
     @Test
     void getUserById_whenFound_returns200() throws Exception {
-        when(userService.getUserById(userId)).thenReturn(sampleUser());
+        when(userService.getUserById(userId, actorId)).thenReturn(sampleUser());
 
-        mockMvc.perform(get("/api/v1/users/{id}", userId))
+        mockMvc.perform(get("/api/v1/users/{id}", userId).header(ACTOR_HEADER, actorId.toString()))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.id").value(userId.toString()))
                 .andExpect(jsonPath("$.tenant.name").value("Acme Inc"));
     }
 
     @Test
-    void getUserById_whenNotFound_returns404() throws Exception {
-        when(userService.getUserById(userId)).thenThrow(new UserNotFoundException(userId));
-
+    void getUserById_withoutActorHeader_returns401() throws Exception {
         mockMvc.perform(get("/api/v1/users/{id}", userId))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.error").value("UNAUTHENTICATED"));
+    }
+
+    @Test
+    void getUserById_whenNotFound_returns404() throws Exception {
+        when(userService.getUserById(userId, actorId)).thenThrow(new UserNotFoundException(userId));
+
+        mockMvc.perform(get("/api/v1/users/{id}", userId).header(ACTOR_HEADER, actorId.toString()))
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.error").value("USER_NOT_FOUND"));
     }
 
     @Test
+    void getUserById_whenActorOutsideTargetTenant_returns403() throws Exception {
+        when(userService.getUserById(userId, actorId))
+                .thenThrow(new ForbiddenActionException("Actor cannot act on tenant " + tenantId));
+
+        mockMvc.perform(get("/api/v1/users/{id}", userId).header(ACTOR_HEADER, actorId.toString()))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.error").value("FORBIDDEN"));
+    }
+
+    @Test
     void listUsers_returns200WithPageResponse() throws Exception {
         PageResponseDto<UserResponseDto> page = new PageResponseDto<>(List.of(sampleUser()), 0, 20, 1, 1);
-        when(userService.listUsers(any())).thenReturn(page);
+        when(userService.listUsers(any(), eq(actorId))).thenReturn(page);
 
-        mockMvc.perform(get("/api/v1/users"))
+        mockMvc.perform(get("/api/v1/users").header(ACTOR_HEADER, actorId.toString()))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.content[0].id").value(userId.toString()))
                 .andExpect(jsonPath("$.totalElements").value(1))
@@ -168,10 +199,17 @@ class UserControllerTest {
     }
 
     @Test
+    void listUsers_withoutActorHeader_returns401() throws Exception {
+        mockMvc.perform(get("/api/v1/users"))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.error").value("UNAUTHENTICATED"));
+    }
+
+    @Test
     void updateUser_withValidRequest_returns200() throws Exception {
         when(userService.updateUser(eq(userId), any(), eq(actorId))).thenReturn(sampleUser());
 
-        mockMvc.perform(put("/api/v1/users/{id}", userId)
+        mockMvc.perform(patch("/api/v1/users/{id}", userId)
                         .header(ACTOR_HEADER, actorId.toString())
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(validUpdateRequest())))
@@ -183,9 +221,9 @@ class UserControllerTest {
     void updateUser_withOnlyOneFieldProvided_returns200() throws Exception {
         when(userService.updateUser(eq(userId), any(), eq(actorId))).thenReturn(sampleUser());
         UserUpdateRequestDto request = new UserUpdateRequestDto();
-        request.setEmail("only-this-changes@acme.com");
+        request.setEmail(JsonNullable.of("only-this-changes@acme.com"));
 
-        mockMvc.perform(put("/api/v1/users/{id}", userId)
+        mockMvc.perform(patch("/api/v1/users/{id}", userId)
                         .header(ACTOR_HEADER, actorId.toString())
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(request)))
@@ -195,9 +233,35 @@ class UserControllerTest {
     @Test
     void updateUser_withInvalidEmail_returns400() throws Exception {
         UserUpdateRequestDto request = validUpdateRequest();
-        request.setEmail("not-an-email");
+        request.setEmail(JsonNullable.of("not-an-email"));
 
-        mockMvc.perform(put("/api/v1/users/{id}", userId)
+        mockMvc.perform(patch("/api/v1/users/{id}", userId)
+                        .header(ACTOR_HEADER, actorId.toString())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(request)))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error").value("VALIDATION_ERROR"));
+    }
+
+    @Test
+    void updateUser_withBlankDisplayName_returns400() throws Exception {
+        UserUpdateRequestDto request = validUpdateRequest();
+        request.setDisplayName("   ");
+
+        mockMvc.perform(patch("/api/v1/users/{id}", userId)
+                        .header(ACTOR_HEADER, actorId.toString())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(request)))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error").value("VALIDATION_ERROR"));
+    }
+
+    @Test
+    void updateUser_withBlankRole_returns400() throws Exception {
+        UserUpdateRequestDto request = validUpdateRequest();
+        request.setRole("");
+
+        mockMvc.perform(patch("/api/v1/users/{id}", userId)
                         .header(ACTOR_HEADER, actorId.toString())
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(request)))
@@ -207,7 +271,7 @@ class UserControllerTest {
 
     @Test
     void updateUser_withoutActorHeader_returns401() throws Exception {
-        mockMvc.perform(put("/api/v1/users/{id}", userId)
+        mockMvc.perform(patch("/api/v1/users/{id}", userId)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(validUpdateRequest())))
                 .andExpect(status().isUnauthorized())
@@ -218,7 +282,7 @@ class UserControllerTest {
     void updateUser_whenNotFound_returns404() throws Exception {
         when(userService.updateUser(eq(userId), any(), eq(actorId))).thenThrow(new UserNotFoundException(userId));
 
-        mockMvc.perform(put("/api/v1/users/{id}", userId)
+        mockMvc.perform(patch("/api/v1/users/{id}", userId)
                         .header(ACTOR_HEADER, actorId.toString())
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(validUpdateRequest())))
@@ -227,16 +291,42 @@ class UserControllerTest {
     }
 
     @Test
+    void updateUser_whenActorOutsideTargetTenant_returns403() throws Exception {
+        when(userService.updateUser(eq(userId), any(), eq(actorId)))
+                .thenThrow(new ForbiddenActionException("Actor cannot manage users outside their own tenant"));
+
+        mockMvc.perform(patch("/api/v1/users/{id}", userId)
+                        .header(ACTOR_HEADER, actorId.toString())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(validUpdateRequest())))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.error").value("FORBIDDEN"));
+    }
+
+    @Test
     void updateStatus_withValidStatus_returns200() throws Exception {
         UserStatusUpdateRequestDto request = new UserStatusUpdateRequestDto();
         request.setStatus("SUSPENDED");
-        when(userService.updateStatus(eq(userId), any())).thenReturn(sampleUser());
+        when(userService.updateStatus(eq(userId), any(), eq(actorId))).thenReturn(sampleUser());
 
         mockMvc.perform(patch("/api/v1/users/{id}/status", userId)
+                        .header(ACTOR_HEADER, actorId.toString())
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(request)))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.id").value(userId.toString()));
+    }
+
+    @Test
+    void updateStatus_withoutActorHeader_returns401() throws Exception {
+        UserStatusUpdateRequestDto request = new UserStatusUpdateRequestDto();
+        request.setStatus("SUSPENDED");
+
+        mockMvc.perform(patch("/api/v1/users/{id}/status", userId)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(request)))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.error").value("UNAUTHENTICATED"));
     }
 
     @Test
@@ -255,12 +345,28 @@ class UserControllerTest {
     void updateStatus_whenNotFound_returns404() throws Exception {
         UserStatusUpdateRequestDto request = new UserStatusUpdateRequestDto();
         request.setStatus("SUSPENDED");
-        when(userService.updateStatus(eq(userId), any())).thenThrow(new UserNotFoundException(userId));
+        when(userService.updateStatus(eq(userId), any(), eq(actorId))).thenThrow(new UserNotFoundException(userId));
 
         mockMvc.perform(patch("/api/v1/users/{id}/status", userId)
+                        .header(ACTOR_HEADER, actorId.toString())
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(request)))
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.error").value("USER_NOT_FOUND"));
+    }
+
+    @Test
+    void updateStatus_whenActorOutsideTargetTenant_returns403() throws Exception {
+        UserStatusUpdateRequestDto request = new UserStatusUpdateRequestDto();
+        request.setStatus("SUSPENDED");
+        when(userService.updateStatus(eq(userId), any(), eq(actorId)))
+                .thenThrow(new ForbiddenActionException("Actor cannot manage users outside their own tenant"));
+
+        mockMvc.perform(patch("/api/v1/users/{id}/status", userId)
+                        .header(ACTOR_HEADER, actorId.toString())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(request)))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.error").value("FORBIDDEN"));
     }
 }

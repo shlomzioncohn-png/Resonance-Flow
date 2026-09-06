@@ -298,6 +298,16 @@ Repository → Entity
   `409` conflict, `500` only for genuinely unexpected failures (§12 Exception handling).
 - Every endpoint validates its request DTO (§11 Validation) before calling a `Service`.
 
+> **Known gap — actor identity (`X-Actor-Id`) is trusted as sent, not verified.**
+> `CurrentActorArgumentResolver` (`security/`) takes the actor id straight from the `X-Actor-Id`
+> request header and only checks that it parses as a UUID and belongs to an existing user — there
+> is no token, signature, or session behind it. Anyone who can reach the API can claim to be any
+> user id they can guess or observe, and every audit log entry and every authorization check on
+> Users (organization-scoping — §7 Service, `UserService.assertActorBelongsToOrganization`)
+> ultimately trusts this header. This is a stand-in for a real authentication mechanism (session
+> or JWT-backed identity) and must not be treated as sufficient once the API is reachable by
+> anyone other than trusted internal callers.
+
 ## 10. Event consumption (Kafka)
 
 Bridge and Mind deliver tasks into Inbox over Kafka, not over REST. A consumer is a second entry
