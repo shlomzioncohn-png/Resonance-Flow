@@ -1,10 +1,10 @@
 package com.rnd.inbox.mapper;
 
-import com.rnd.inbox.dto.OrganizationSummaryDto;
+import com.rnd.inbox.dto.TenantSummaryDto;
 import com.rnd.inbox.dto.UserCreateRequestDto;
 import com.rnd.inbox.dto.UserResponseDto;
 import com.rnd.inbox.dto.UserUpdateRequestDto;
-import com.rnd.inbox.model.entity.Organization;
+import com.rnd.inbox.model.entity.Tenant;
 import com.rnd.inbox.model.entity.User;
 import com.rnd.inbox.model.enums.UserStatus;
 import org.junit.jupiter.api.BeforeEach;
@@ -22,21 +22,21 @@ class UserMapperTest {
     private static final Instant FIXED_NOW = Instant.parse("2026-01-01T00:00:00Z");
 
     private UserMapper userMapper;
-    private Organization organization;
+    private Tenant tenant;
 
     @BeforeEach
     void setUp() {
         userMapper = new UserMapper(Clock.fixed(FIXED_NOW, ZoneOffset.UTC));
 
-        organization = new Organization();
-        organization.setId(UUID.randomUUID());
-        organization.setName("Acme Inc");
-        organization.setSlug("acme");
+        tenant = new Tenant();
+        tenant.setId(UUID.randomUUID());
+        tenant.setName("Acme Inc");
+        tenant.setSlug("acme");
     }
 
     private UserCreateRequestDto createRequest() {
         UserCreateRequestDto request = new UserCreateRequestDto();
-        request.setOrganizationId(organization.getId().toString());
+        request.setTenantId(tenant.getId().toString());
         request.setDisplayName("Yehudit Cohen");
         request.setFirstName("Yehudit");
         request.setLastName("Cohen");
@@ -48,10 +48,10 @@ class UserMapperTest {
     }
 
     @Test
-    void toEntity_buildsUserFromCreateRequestAndOrganization_withActiveStatus() {
-        User user = userMapper.toEntity(createRequest(), organization);
+    void toEntity_buildsUserFromCreateRequestAndTenant_withActiveStatus() {
+        User user = userMapper.toEntity(createRequest(), tenant);
 
-        assertThat(user.getOrganization()).isSameAs(organization);
+        assertThat(user.getTenant()).isSameAs(tenant);
         assertThat(user.getDisplayName()).isEqualTo("Yehudit Cohen");
         assertThat(user.getFirstName()).isEqualTo("Yehudit");
         assertThat(user.getLastName()).isEqualTo("Cohen");
@@ -67,7 +67,7 @@ class UserMapperTest {
     @Test
     void applyUpdate_overwritesMutableFieldsAndBumpsUpdatedAt() {
         User user = new User();
-        user.setOrganization(organization);
+        user.setTenant(tenant);
         user.setStatus(UserStatus.ACTIVE);
         user.setCreatedAt(Instant.parse("2025-01-01T00:00:00Z"));
         user.setUpdatedAt(Instant.parse("2025-01-01T00:00:00Z"));
@@ -92,7 +92,7 @@ class UserMapperTest {
         assertThat(user.getUpdatedAt()).isEqualTo(FIXED_NOW);
 
         // fields applyUpdate must never touch
-        assertThat(user.getOrganization()).isSameAs(organization);
+        assertThat(user.getTenant()).isSameAs(tenant);
         assertThat(user.getStatus()).isEqualTo(UserStatus.ACTIVE);
         assertThat(user.getCreatedAt()).isEqualTo(Instant.parse("2025-01-01T00:00:00Z"));
     }
@@ -132,10 +132,10 @@ class UserMapperTest {
     }
 
     @Test
-    void toResponseDto_mapsAllFieldsIncludingNestedOrganizationSummary() {
+    void toResponseDto_mapsAllFieldsIncludingNestedTenantSummary() {
         User user = new User();
         user.setId(UUID.randomUUID());
-        user.setOrganization(organization);
+        user.setTenant(tenant);
         user.setDisplayName("Yehudit Cohen");
         user.setFirstName("Yehudit");
         user.setLastName("Cohen");
@@ -158,22 +158,22 @@ class UserMapperTest {
         assertThat(dto.getCreatedAt()).isEqualTo(FIXED_NOW);
         assertThat(dto.getLastLoginAt()).isEqualTo(FIXED_NOW);
 
-        OrganizationSummaryDto organizationSummary = dto.getOrganization();
-        assertThat(organizationSummary).isNotNull();
-        assertThat(organizationSummary.getId()).isEqualTo(organization.getId());
-        assertThat(organizationSummary.getName()).isEqualTo("Acme Inc");
-        assertThat(organizationSummary.getSlug()).isEqualTo("acme");
+        TenantSummaryDto tenantSummary = dto.getTenant();
+        assertThat(tenantSummary).isNotNull();
+        assertThat(tenantSummary.getId()).isEqualTo(tenant.getId());
+        assertThat(tenantSummary.getName()).isEqualTo("Acme Inc");
+        assertThat(tenantSummary.getSlug()).isEqualTo("acme");
     }
 
     @Test
-    void toResponseDto_whenOrganizationIsNull_organizationSummaryIsNull() {
+    void toResponseDto_whenTenantIsNull_tenantSummaryIsNull() {
         User user = new User();
         user.setId(UUID.randomUUID());
-        user.setOrganization(null);
+        user.setTenant(null);
         user.setStatus(UserStatus.ACTIVE);
 
         UserResponseDto dto = userMapper.toResponseDto(user);
 
-        assertThat(dto.getOrganization()).isNull();
+        assertThat(dto.getTenant()).isNull();
     }
 }

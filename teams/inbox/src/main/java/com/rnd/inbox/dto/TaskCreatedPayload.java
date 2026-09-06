@@ -14,7 +14,7 @@ import java.util.UUID;
 public final class TaskCreatedPayload {
 
     private final UUID taskId;
-    private final UUID organizationId;
+    private final UUID tenantId;
     private final UUID projectId;
     private final String title;
 
@@ -35,14 +35,14 @@ public final class TaskCreatedPayload {
     private final Instant createdAt;
     private final Map<String, Object> metadata;
 
-    private TaskCreatedPayload(UUID taskId, UUID organizationId, UUID projectId, String title, String description,boolean isAvailable,
+    private TaskCreatedPayload(UUID taskId, UUID tenantId, UUID projectId, String title, String description,boolean isAvailable,
                                 SourceType sourceType, String sourceRef, TaskTier tier, TaskRoleContext roleContext,
                                 Short urgency, Integer effortEstimateMinutes, Instant deadline, TaskStatus status,
                                 TaskExtractionProvenance extractionProvenance, Float confidence,
                                 Float effortEstimateConfidence,
                                 UUID createdBy, Instant createdAt, Map<String, Object> metadata) {
         this.taskId = taskId;
-        this.organizationId = organizationId;
+        this.tenantId = tenantId;
         this.projectId = projectId;
         this.title = title;
         this.isAvailable=isAvailable;
@@ -66,7 +66,7 @@ public final class TaskCreatedPayload {
     public static TaskCreatedPayload from(Task task) {
         return new TaskCreatedPayload(
                 task.getId(),
-                task.getOrganization() != null ? task.getOrganization().getId() : null,
+                task.getTenant() != null ? task.getTenant().getId() : null,
                 task.getProject() != null ? task.getProject().getId() : null,
                 task.getTitle(),
                 task.getDescription(),
@@ -92,8 +92,8 @@ public final class TaskCreatedPayload {
         return taskId;
     }
 
-    public UUID getOrganizationId() {
-        return organizationId;
+    public UUID getTenantId() {
+        return tenantId;
     }
 
     public UUID getProjectId() {

@@ -1,6 +1,6 @@
 package com.rnd.inbox.model.entity;
 
-import com.rnd.inbox.model.enums.OrganizationStatus;
+import com.rnd.inbox.model.enums.TenantStatus;
 import com.rnd.inbox.model.type.LowercasePostgreSQLEnumJdbcType;
 import org.hibernate.annotations.GenericGenerator;
 import org.hibernate.annotations.JdbcType;
@@ -20,8 +20,8 @@ import java.util.Set;
 import java.util.UUID;
 
 @Entity
-@Table(name = "organizations")
-public class Organization {
+@Table(name = "tenants")
+public class Tenant {
 
     @Id
     @GeneratedValue(generator = "UUID")
@@ -37,8 +37,8 @@ public class Organization {
 
     @JdbcType(LowercasePostgreSQLEnumJdbcType.class)
     @Enumerated(EnumType.STRING)
-    @Column(name = "status", nullable = false, columnDefinition = "org_status")
-    private OrganizationStatus status;
+    @Column(name = "status", nullable = false, columnDefinition = "tenant_status")
+    private TenantStatus status;
 
     @Column
     private String timezone;
@@ -52,16 +52,16 @@ public class Organization {
     @Column(name = "updated_at", nullable = false)
     private Instant updatedAt;
 
-    @OneToMany(mappedBy = "organization")
+    @OneToMany(mappedBy = "tenant")
     private Set<Team> teams = new HashSet<>();
 
-    @OneToMany(mappedBy = "organization")
+    @OneToMany(mappedBy = "tenant")
     private Set<User> users = new HashSet<>();
 
-    @OneToMany(mappedBy = "organization")
+    @OneToMany(mappedBy = "tenant")
     private Set<Task> tasks = new HashSet<>();
 
-    public Organization() {
+    public Tenant() {
     }
 
     public UUID getId() {
@@ -88,11 +88,11 @@ public class Organization {
         this.slug = slug;
     }
 
-    public OrganizationStatus getStatus() {
+    public TenantStatus getStatus() {
         return status;
     }
 
-    public void setStatus(OrganizationStatus status) {
+    public void setStatus(TenantStatus status) {
         this.status = status;
     }
 
@@ -155,8 +155,8 @@ public class Organization {
     @Override
     public boolean equals(Object o) {
         if (this == o) return true;
-        if (!(o instanceof Organization)) return false;
-        Organization that = (Organization) o;
+        if (!(o instanceof Tenant)) return false;
+        Tenant that = (Tenant) o;
         return id != null && id.equals(that.id);
     }
 

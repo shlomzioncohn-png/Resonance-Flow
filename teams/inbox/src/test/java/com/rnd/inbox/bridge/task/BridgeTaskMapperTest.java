@@ -1,7 +1,7 @@
 package com.rnd.inbox.bridge.task;
 
 import com.rnd.inbox.model.entity.Assignment;
-import com.rnd.inbox.model.entity.Organization;
+import com.rnd.inbox.model.entity.Tenant;
 import com.rnd.inbox.model.entity.Task;
 import com.rnd.inbox.model.entity.Team;
 import com.rnd.inbox.model.entity.User;
@@ -9,7 +9,7 @@ import com.rnd.inbox.model.enums.AssignmentRole;
 import com.rnd.inbox.model.enums.SourceType;
 import com.rnd.inbox.model.enums.TaskExtractionProvenance;
 import com.rnd.inbox.model.enums.TaskStatus;
-import com.rnd.inbox.repository.OrganizationRepository;
+import com.rnd.inbox.repository.TenantRepository;
 import com.rnd.inbox.repository.ProjectRepository;
 import com.rnd.inbox.repository.TeamRepository;
 import com.rnd.inbox.repository.UserRepository;
@@ -32,7 +32,7 @@ class BridgeTaskMapperTest {
     private static final Instant FIXED_NOW = Instant.parse("2026-01-01T00:00:00Z");
 
     @Mock
-    private OrganizationRepository organizationRepository;
+    private TenantRepository tenantRepository;
 
     @Mock
     private ProjectRepository projectRepository;
@@ -47,13 +47,13 @@ class BridgeTaskMapperTest {
 
     @Test
     void mapsDtoToTaskWithoutTakingIdFromThePayload() {
-        UUID organizationId = UUID.randomUUID();
-        Organization organizationRef = new Organization();
-        organizationRef.setId(organizationId);
-        when(organizationRepository.getReferenceById(organizationId)).thenReturn(organizationRef);
+        UUID tenantId = UUID.randomUUID();
+        Tenant tenantRef = new Tenant();
+        tenantRef.setId(tenantId);
+        when(tenantRepository.getReferenceById(tenantId)).thenReturn(tenantRef);
 
         BridgeTaskEventDto dto = new BridgeTaskEventDto();
-        dto.setOrganizationId(organizationId.toString());
+        dto.setTenantId(tenantId.toString());
         dto.setTitle("Fix flaky test");
         dto.setDescription("Investigate intermittent CI failure");
         dto.setSourceType("GITHUB_ISSUE");
@@ -66,7 +66,7 @@ class BridgeTaskMapperTest {
         Task task = mapper.map(dto);
 
         assertThat(task.getId()).isNull();
-        assertThat(task.getOrganization()).isSameAs(organizationRef);
+        assertThat(task.getTenant()).isSameAs(tenantRef);
         assertThat(task.getTitle()).isEqualTo("Fix flaky test");
         assertThat(task.getSourceType()).isEqualTo(SourceType.GITHUB_ISSUE);
         assertThat(task.getSourceRef()).isEqualTo("github:owner/repo:issue:42");
@@ -81,13 +81,13 @@ class BridgeTaskMapperTest {
 
     @Test
     void defaultsStatusToNewWhenAbsent() {
-        UUID organizationId = UUID.randomUUID();
-        Organization organizationRef = new Organization();
-        organizationRef.setId(organizationId);
-        when(organizationRepository.getReferenceById(organizationId)).thenReturn(organizationRef);
+        UUID tenantId = UUID.randomUUID();
+        Tenant tenantRef = new Tenant();
+        tenantRef.setId(tenantId);
+        when(tenantRepository.getReferenceById(tenantId)).thenReturn(tenantRef);
 
         BridgeTaskEventDto dto = new BridgeTaskEventDto();
-        dto.setOrganizationId(organizationId.toString());
+        dto.setTenantId(tenantId.toString());
         dto.setTitle("Fix flaky test");
         dto.setSourceType("GITHUB_ISSUE");
         dto.setSourceRef("github:owner/repo:issue:42");
@@ -167,6 +167,6 @@ class BridgeTaskMapperTest {
     }
 
     private BridgeTaskMapper mapper() {
-        return new BridgeTaskMapper(organizationRepository, projectRepository, userRepository, teamRepository, clock);
+        return new BridgeTaskMapper(tenantRepository, projectRepository, userRepository, teamRepository, clock);
     }
 }

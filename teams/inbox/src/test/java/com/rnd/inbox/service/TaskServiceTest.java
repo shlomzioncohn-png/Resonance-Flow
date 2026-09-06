@@ -6,7 +6,7 @@ import com.rnd.inbox.event.EventType;
 import com.rnd.inbox.exception.TaskNotFoundException;
 import com.rnd.inbox.mapper.TaskMapper;
 import com.rnd.inbox.model.entity.Assignment;
-import com.rnd.inbox.model.entity.Organization;
+import com.rnd.inbox.model.entity.Tenant;
 import com.rnd.inbox.model.entity.OutboxEvent;
 import com.rnd.inbox.model.entity.Project;
 import com.rnd.inbox.model.entity.Task;
@@ -66,8 +66,8 @@ class TaskServiceTest {
     private final Clock clock = Clock.fixed(NOW, ZoneOffset.UTC);
 
     private TaskService taskService;
-    private Organization organization;
-    private UUID organizationId;
+    private Tenant tenant;
+    private UUID tenantId;
 
     @BeforeEach
     void setUp() {
@@ -79,9 +79,9 @@ class TaskServiceTest {
                 taskMapper,
                 objectMapper,
                 clock);
-        organizationId = UUID.randomUUID();
-        organization = new Organization();
-        organization.setId(organizationId);
+        tenantId = UUID.randomUUID();
+        tenant = new Tenant();
+        tenant.setId(tenantId);
     }
 
     @Test
@@ -99,7 +99,7 @@ class TaskServiceTest {
 
         @SuppressWarnings("unchecked")
         ArgumentCaptor<Map<String, Object>> snapshotCaptor = ArgumentCaptor.forClass(Map.class);
-        verify(auditService).createAuditLog(eq("TASK_CREATED"), eq("Task"), eq(generatedId), eq(organization), eq(incoming.getCreatedBy()),
+        verify(auditService).createAuditLog(eq("TASK_CREATED"), eq("Task"), eq(generatedId), eq(tenant), eq(incoming.getCreatedBy()),
                 snapshotCaptor.capture(), eq(correlationId));
         assertThat(snapshotCaptor.getValue())
                 .containsEntry("title", "Fix flaky test")
@@ -140,7 +140,7 @@ class TaskServiceTest {
 
         assertThat(capturedOutboxEvent().getPayload())
                 .containsEntry("taskId", generatedId.toString())
-                .containsEntry("organizationId", organizationId.toString())
+                .containsEntry("tenantId", tenantId.toString())
                 .containsEntry("title", "Fix flaky test")
                 .containsEntry("sourceType", "GITHUB_ISSUE")
                 .containsEntry("sourceRef", SOURCE_REF)
@@ -163,8 +163,8 @@ class TaskServiceTest {
         Task incoming = incomingTask();
         Task existing = incomingTask();
         existing.setId(UUID.randomUUID());
-        when(taskRepository.findByOrganization_IdAndSourceTypeAndSourceRef(
-                organizationId, SourceType.GITHUB_ISSUE, SOURCE_REF))
+        when(taskRepository.findByTenant_IdAndSourceTypeAndSourceRef(
+                tenantId, SourceType.GITHUB_ISSUE, SOURCE_REF))
                 .thenReturn(Optional.of(existing));
 
         Task result = taskService.createTask(incoming, UUID.randomUUID());
@@ -215,7 +215,7 @@ class TaskServiceTest {
 
         assertThat(result).isSameAs(task);
         verify(taskRepository).save(task);
-        verify(auditService).createAuditLog(eq("TASK_UPDATED"), eq("Task"), eq(task.getId()), eq(organization),
+        verify(auditService).createAuditLog(eq("TASK_UPDATED"), eq("Task"), eq(task.getId()), eq(tenant),
                 any(), eq(correlationId));
     }
 
@@ -298,7 +298,7 @@ class TaskServiceTest {
 
         taskService.completeTask(task, completedBy, UUID.randomUUID());
 
-        verify(auditService).createAuditLog(eq("TASK_COMPLETED"), eq("Task"), eq(task.getId()), eq(organization),
+        verify(auditService).createAuditLog(eq("TASK_COMPLETED"), eq("Task"), eq(task.getId()), eq(tenant),
                 eq(completedBy), any(), any());
     }
 
@@ -327,8 +327,8 @@ class TaskServiceTest {
     }
 
     private void stubNoExistingTask() {
-        when(taskRepository.findByOrganization_IdAndSourceTypeAndSourceRef(
-                organizationId, SourceType.GITHUB_ISSUE, SOURCE_REF))
+        when(taskRepository.findByTenant_IdAndSourceTypeAndSourceRef(
+                tenantId, SourceType.GITHUB_ISSUE, SOURCE_REF))
                 .thenReturn(Optional.empty());
     }
 
@@ -353,7 +353,7 @@ class TaskServiceTest {
         createdBy.setId(UUID.randomUUID());
 
         Task task = new Task();
-        task.setOrganization(organization);
+        task.setTenant(tenant);
         task.setProject(project);
         task.setTitle("Fix flaky test");
         task.setDescription("Investigate the intermittent failure");

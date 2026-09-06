@@ -3,14 +3,14 @@ package com.rnd.inbox.controller;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.rnd.inbox.config.AppConfig;
 import com.rnd.inbox.config.WebMvcConfig;
-import com.rnd.inbox.dto.OrganizationSummaryDto;
+import com.rnd.inbox.dto.TenantSummaryDto;
 import com.rnd.inbox.dto.PageResponseDto;
 import com.rnd.inbox.dto.UserCreateRequestDto;
 import com.rnd.inbox.dto.UserResponseDto;
 import com.rnd.inbox.dto.UserStatusUpdateRequestDto;
 import com.rnd.inbox.dto.UserUpdateRequestDto;
 import com.rnd.inbox.exception.DuplicateEmailException;
-import com.rnd.inbox.exception.OrganizationNotFoundException;
+import com.rnd.inbox.exception.TenantNotFoundException;
 import com.rnd.inbox.exception.UserNotFoundException;
 import com.rnd.inbox.model.enums.UserStatus;
 import com.rnd.inbox.service.UserService;
@@ -54,25 +54,25 @@ class UserControllerTest {
     private UserService userService;
 
     private UUID userId;
-    private UUID organizationId;
+    private UUID tenantId;
     private UUID actorId;
 
     @BeforeEach
     void setUp() {
         userId = UUID.randomUUID();
-        organizationId = UUID.randomUUID();
+        tenantId = UUID.randomUUID();
         actorId = UUID.randomUUID();
     }
 
     private UserResponseDto sampleUser() {
         return new UserResponseDto(userId, "Yehudit Cohen", null, null, "yehudit@acme.com",
                 null, "yehudit", "developer", UserStatus.ACTIVE,
-                new OrganizationSummaryDto(organizationId, "Acme Inc", "acme"), null, null, null);
+                new TenantSummaryDto(tenantId, "Acme Inc", "acme"), null, null, null);
     }
 
     private UserCreateRequestDto validCreateRequest() {
         UserCreateRequestDto request = new UserCreateRequestDto();
-        request.setOrganizationId(organizationId.toString());
+        request.setTenantId(tenantId.toString());
         request.setDisplayName("Yehudit Cohen");
         request.setRole("developer");
         return request;
@@ -97,7 +97,7 @@ class UserControllerTest {
                 .andExpect(header().string("Location", containsString("/api/v1/users/" + userId)))
                 .andExpect(jsonPath("$.id").value(userId.toString()))
                 .andExpect(jsonPath("$.displayName").value("Yehudit Cohen"))
-                .andExpect(jsonPath("$.organization.name").value("Acme Inc"));
+                .andExpect(jsonPath("$.tenant.name").value("Acme Inc"));
     }
 
     @Test
@@ -121,15 +121,15 @@ class UserControllerTest {
     }
 
     @Test
-    void createUser_whenOrganizationNotFound_returns404() throws Exception {
-        when(userService.createUser(any(), eq(actorId))).thenThrow(new OrganizationNotFoundException(organizationId));
+    void createUser_whenTenantNotFound_returns404() throws Exception {
+        when(userService.createUser(any(), eq(actorId))).thenThrow(new TenantNotFoundException(tenantId));
 
         mockMvc.perform(post("/api/v1/users")
                         .header(ACTOR_HEADER, actorId.toString())
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(validCreateRequest())))
                 .andExpect(status().isNotFound())
-                .andExpect(jsonPath("$.error").value("ORGANIZATION_NOT_FOUND"));
+                .andExpect(jsonPath("$.error").value("TENANT_NOT_FOUND"));
     }
 
     @Test
@@ -151,7 +151,7 @@ class UserControllerTest {
         mockMvc.perform(get("/api/v1/users/{id}", userId))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.id").value(userId.toString()))
-                .andExpect(jsonPath("$.organization.name").value("Acme Inc"));
+                .andExpect(jsonPath("$.tenant.name").value("Acme Inc"));
     }
 
     @Test

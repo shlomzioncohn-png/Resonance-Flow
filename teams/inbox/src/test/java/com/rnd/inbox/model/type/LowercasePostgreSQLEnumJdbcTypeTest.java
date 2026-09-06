@@ -1,6 +1,6 @@
 package com.rnd.inbox.model.type;
 
-import com.rnd.inbox.model.enums.OrganizationStatus;
+import com.rnd.inbox.model.enums.TenantStatus;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.hibernate.type.descriptor.ValueBinder;
@@ -20,7 +20,7 @@ import static org.mockito.Mockito.when;
 @ExtendWith(MockitoExtension.class)
 class LowercasePostgreSQLEnumJdbcTypeTest {
 
-    private static final EnumJavaType<OrganizationStatus> JAVA_TYPE = new EnumJavaType<>(OrganizationStatus.class);
+    private static final EnumJavaType<TenantStatus> JAVA_TYPE = new EnumJavaType<>(TenantStatus.class);
 
     private final LowercasePostgreSQLEnumJdbcType jdbcType = new LowercasePostgreSQLEnumJdbcType();
 
@@ -32,16 +32,16 @@ class LowercasePostgreSQLEnumJdbcTypeTest {
 
     @Test
     void writesTheEnumNameInLowercase() throws Exception {
-        ValueBinder<OrganizationStatus> binder = jdbcType.getBinder(JAVA_TYPE);
+        ValueBinder<TenantStatus> binder = jdbcType.getBinder(JAVA_TYPE);
 
-        binder.bind(preparedStatement, OrganizationStatus.ACTIVE, 1, null);
+        binder.bind(preparedStatement, TenantStatus.ACTIVE, 1, null);
 
         verify(preparedStatement).setObject(1, "active", Types.OTHER);
     }
 
     @Test
     void writesNullAsANullOfTheEnumType() throws Exception {
-        ValueBinder<OrganizationStatus> binder = jdbcType.getBinder(JAVA_TYPE);
+        ValueBinder<TenantStatus> binder = jdbcType.getBinder(JAVA_TYPE);
 
         binder.bind(preparedStatement, null, 1, null);
 
@@ -51,19 +51,19 @@ class LowercasePostgreSQLEnumJdbcTypeTest {
     @Test
     void readsALowercaseDbValueBackAsTheMatchingUppercaseEnumConstant() throws Exception {
         when(resultSet.getObject(1)).thenReturn("suspended");
-        ValueExtractor<OrganizationStatus> extractor = jdbcType.getExtractor(JAVA_TYPE);
+        ValueExtractor<TenantStatus> extractor = jdbcType.getExtractor(JAVA_TYPE);
 
-        OrganizationStatus result = extractor.extract(resultSet, 1, null);
+        TenantStatus result = extractor.extract(resultSet, 1, null);
 
-        assertThat(result).isEqualTo(OrganizationStatus.SUSPENDED);
+        assertThat(result).isEqualTo(TenantStatus.SUSPENDED);
     }
 
     @Test
     void readsANullDbValueAsNull() throws Exception {
         when(resultSet.getObject(1)).thenReturn(null);
-        ValueExtractor<OrganizationStatus> extractor = jdbcType.getExtractor(JAVA_TYPE);
+        ValueExtractor<TenantStatus> extractor = jdbcType.getExtractor(JAVA_TYPE);
 
-        OrganizationStatus result = extractor.extract(resultSet, 1, null);
+        TenantStatus result = extractor.extract(resultSet, 1, null);
 
         assertThat(result).isNull();
     }

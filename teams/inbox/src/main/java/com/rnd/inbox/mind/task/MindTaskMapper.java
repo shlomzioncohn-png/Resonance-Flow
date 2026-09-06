@@ -6,7 +6,7 @@ import com.rnd.inbox.model.enums.TaskExtractionProvenance;
 import com.rnd.inbox.model.enums.TaskRoleContext;
 import com.rnd.inbox.model.enums.TaskStatus;
 import com.rnd.inbox.model.enums.TaskTier;
-import com.rnd.inbox.repository.OrganizationRepository;
+import com.rnd.inbox.repository.TenantRepository;
 import com.rnd.inbox.repository.ProjectRepository;
 import org.springframework.stereotype.Component;
 
@@ -17,20 +17,20 @@ import java.util.UUID;
 @Component
 public class MindTaskMapper {
 
-    private final OrganizationRepository organizationRepository;
+    private final TenantRepository tenantRepository;
     private final ProjectRepository projectRepository;
     private final Clock clock;
 
-    public MindTaskMapper(OrganizationRepository organizationRepository, ProjectRepository projectRepository,
+    public MindTaskMapper(TenantRepository tenantRepository, ProjectRepository projectRepository,
             Clock clock) {
-        this.organizationRepository = organizationRepository;
+        this.tenantRepository = tenantRepository;
         this.projectRepository = projectRepository;
         this.clock = clock;
     }
 
     public Task map(MindTaskEventDto dto) {
         Task task = new Task();
-        task.setOrganization(organizationRepository.getReferenceById(UUID.fromString(dto.getOrganizationId())));
+        task.setTenant(tenantRepository.getReferenceById(UUID.fromString(dto.getTenantId())));
         if (dto.getProjectId() != null) {
             task.setProject(projectRepository.getReferenceById(UUID.fromString(dto.getProjectId())));
         }

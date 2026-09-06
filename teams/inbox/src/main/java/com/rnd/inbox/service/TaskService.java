@@ -76,7 +76,7 @@ public class TaskService {
         }
 
         outboxEventRepository.save(buildOutboxEvent(EventType.TASK_CREATED, TaskCreatedPayload.from(saved), saved, correlationId));
-        auditService.createAuditLog("TASK_CREATED", "Task", saved.getId(), saved.getOrganization(), saved.getCreatedBy(),
+        auditService.createAuditLog("TASK_CREATED", "Task", saved.getId(), saved.getTenant(), saved.getCreatedBy(),
                 auditSnapshot(saved), correlationId);
         return saved;
     }
@@ -96,7 +96,7 @@ public class TaskService {
         Task saved = taskRepository.save(task);
 
         outboxEventRepository.save(buildOutboxEvent(EventType.TASK_UPDATED, TaskUpdatedPayload.from(saved), saved, correlationId));
-        auditService.createAuditLog("TASK_UPDATED", "Task", saved.getId(), saved.getOrganization(),
+        auditService.createAuditLog("TASK_UPDATED", "Task", saved.getId(), saved.getTenant(),
                 auditSnapshot(saved), correlationId);
         return saved;
     }
@@ -116,15 +116,15 @@ public class TaskService {
         Task saved = taskRepository.save(task);
 
         outboxEventRepository.save(buildOutboxEvent(EventType.TASK_COMPLETED, TaskCompletedPayload.from(saved), saved, correlationId));
-        auditService.createAuditLog("TASK_COMPLETED", "Task", saved.getId(), saved.getOrganization(), completedBy,
+        auditService.createAuditLog("TASK_COMPLETED", "Task", saved.getId(), saved.getTenant(), completedBy,
                 auditSnapshot(saved), correlationId);
         return saved;
     }
 
     @Transactional(readOnly = true)
     public Optional<Task> findExisting(Task incoming) {
-        return taskRepository.findByOrganization_IdAndSourceTypeAndSourceRef(
-                incoming.getOrganization().getId(), incoming.getSourceType(), incoming.getSourceRef());
+        return taskRepository.findByTenant_IdAndSourceTypeAndSourceRef(
+                incoming.getTenant().getId(), incoming.getSourceType(), incoming.getSourceRef());
     }
 
     @Transactional
@@ -140,7 +140,7 @@ public class TaskService {
         Task saved = taskRepository.saveAndFlush(task);
 
         outboxEventRepository.save(buildTaskUpdatedOutboxEvent(saved, correlationId));
-        auditService.createAuditLog("TASK_SCHEDULING_UPDATED", "Task", saved.getId(), saved.getOrganization(),
+        auditService.createAuditLog("TASK_SCHEDULING_UPDATED", "Task", saved.getId(), saved.getTenant(),
                 schedulingSnapshot(saved), correlationId);
         return saved;
     }

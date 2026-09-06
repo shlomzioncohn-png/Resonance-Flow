@@ -9,7 +9,7 @@ public class UserCreateRequestDto {
 
     @NotBlank
     @ValidUuid
-    private String organizationId;
+    private String tenantId;
 
     @NotBlank
     @Size(max = 255)
@@ -35,12 +35,12 @@ public class UserCreateRequestDto {
     @Size(max = 50)
     private String role;
 
-    public String getOrganizationId() {
-        return organizationId;
+    public String getTenantId() {
+        return tenantId;
     }
 
-    public void setOrganizationId(String organizationId) {
-        this.organizationId = organizationId;
+    public void setTenantId(String tenantId) {
+        this.tenantId = tenantId;
     }
 
     public String getDisplayName() {

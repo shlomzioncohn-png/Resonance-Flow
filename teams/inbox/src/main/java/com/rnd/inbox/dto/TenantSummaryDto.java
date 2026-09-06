@@ -2,13 +2,13 @@ package com.rnd.inbox.dto;
 
 import java.util.UUID;
 
-public final class OrganizationSummaryDto {
+public final class TenantSummaryDto {
 
     private final UUID id;
     private final String name;
     private final String slug;
 
-    public OrganizationSummaryDto(UUID id, String name, String slug) {
+    public TenantSummaryDto(UUID id, String name, String slug) {
         this.id = id;
         this.name = name;
         this.slug = slug;

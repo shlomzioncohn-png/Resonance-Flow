@@ -28,7 +28,7 @@ import org.springframework.web.util.UriComponentsBuilder;
 
 import java.util.UUID;
 
-@Tag(name = "Users", description = "Create, update, and look up users, including their organization")
+@Tag(name = "Users", description = "Create, update, and look up users, including their tenant")
 @RestController
 @RequestMapping("/api/v1/users")
 public class UserController {
@@ -44,7 +44,7 @@ public class UserController {
             @ApiResponse(responseCode = "201", description = "User created",
                     content = @Content(schema = @Schema(implementation = UserResponseDto.class))),
             @ApiResponse(responseCode = "401", description = "Missing or unrecognized actor identity"),
-            @ApiResponse(responseCode = "404", description = "Organization not found"),
+            @ApiResponse(responseCode = "404", description = "Tenant not found"),
             @ApiResponse(responseCode = "409", description = "Email or username already exists")
     })
     @PostMapping
@@ -57,7 +57,7 @@ public class UserController {
                 .body(created);
     }
 
-    @Operation(summary = "Get a user by id, including its organization")
+    @Operation(summary = "Get a user by id, including its tenant")
     @ApiResponses({
             @ApiResponse(responseCode = "200", description = "User found",
                     content = @Content(schema = @Schema(implementation = UserResponseDto.class))),

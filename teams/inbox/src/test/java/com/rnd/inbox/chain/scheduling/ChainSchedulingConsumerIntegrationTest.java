@@ -1,15 +1,15 @@
 package com.rnd.inbox.chain.scheduling;
 
 import com.rnd.inbox.model.entity.AuditLog;
-import com.rnd.inbox.model.entity.Organization;
+import com.rnd.inbox.model.entity.Tenant;
 import com.rnd.inbox.model.entity.OutboxEvent;
 import com.rnd.inbox.model.entity.Task;
-import com.rnd.inbox.model.enums.OrganizationStatus;
+import com.rnd.inbox.model.enums.TenantStatus;
 import com.rnd.inbox.model.enums.SourceType;
 import com.rnd.inbox.model.enums.TaskExtractionProvenance;
 import com.rnd.inbox.model.enums.TaskStatus;
 import com.rnd.inbox.repository.AuditLogRepository;
-import com.rnd.inbox.repository.OrganizationRepository;
+import com.rnd.inbox.repository.TenantRepository;
 import com.rnd.inbox.repository.OutboxEventRepository;
 import com.rnd.inbox.repository.TaskRepository;
 import com.rnd.inbox.support.PostgresIntegrationTest;
@@ -63,7 +63,7 @@ class ChainSchedulingConsumerIntegrationTest extends PostgresIntegrationTest {
     private OutboxEventRepository outboxEventRepository;
 
     @Autowired
-    private OrganizationRepository organizationRepository;
+    private TenantRepository tenantRepository;
 
     private KafkaTemplate<String, String> producer;
     private Consumer<String, String> errorConsumer;
@@ -87,16 +87,16 @@ class ChainSchedulingConsumerIntegrationTest extends PostgresIntegrationTest {
     }
 
     private Task persistTask(boolean available, Float priorityScore) {
-        Organization organization = new Organization();
-        organization.setName("Acme");
-        organization.setSlug("acme-" + UUID.randomUUID());
-        organization.setStatus(OrganizationStatus.ACTIVE);
-        organization.setCreatedAt(Instant.now());
-        organization.setUpdatedAt(Instant.now());
-        Organization saved = organizationRepository.saveAndFlush(organization);
+        Tenant tenant = new Tenant();
+        tenant.setName("Acme");
+        tenant.setSlug("acme-" + UUID.randomUUID());
+        tenant.setStatus(TenantStatus.ACTIVE);
+        tenant.setCreatedAt(Instant.now());
+        tenant.setUpdatedAt(Instant.now());
+        Tenant saved = tenantRepository.saveAndFlush(tenant);
 
         Task task = new Task();
-        task.setOrganization(saved);
+        task.setTenant(saved);
         task.setTitle("Scheduling target");
         task.setSourceType(SourceType.GITHUB_ISSUE);
         task.setSourceRef("github:acme/web:issue:" + UUID.randomUUID());

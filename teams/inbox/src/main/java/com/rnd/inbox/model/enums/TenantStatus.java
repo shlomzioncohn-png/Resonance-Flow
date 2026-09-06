@@ -1,6 +1,6 @@
 package com.rnd.inbox.model.enums;
 
-public enum OrganizationStatus {
+public enum TenantStatus {
     ACTIVE,
     SUSPENDED,
     ARCHIVED

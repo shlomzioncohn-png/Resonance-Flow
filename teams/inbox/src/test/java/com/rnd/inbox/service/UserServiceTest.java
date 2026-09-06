@@ -7,14 +7,14 @@ import com.rnd.inbox.dto.UserStatusUpdateRequestDto;
 import com.rnd.inbox.dto.UserUpdateRequestDto;
 import com.rnd.inbox.exception.DuplicateEmailException;
 import com.rnd.inbox.exception.DuplicateUsernameException;
-import com.rnd.inbox.exception.OrganizationNotFoundException;
+import com.rnd.inbox.exception.TenantNotFoundException;
 import com.rnd.inbox.exception.UnauthenticatedException;
 import com.rnd.inbox.exception.UserNotFoundException;
 import com.rnd.inbox.mapper.UserMapper;
-import com.rnd.inbox.model.entity.Organization;
+import com.rnd.inbox.model.entity.Tenant;
 import com.rnd.inbox.model.entity.User;
 import com.rnd.inbox.model.enums.UserStatus;
-import com.rnd.inbox.repository.OrganizationRepository;
+import com.rnd.inbox.repository.TenantRepository;
 import com.rnd.inbox.repository.UserRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -46,7 +46,7 @@ class UserServiceTest {
     private UserRepository userRepository;
 
     @Mock
-    private OrganizationRepository organizationRepository;
+    private TenantRepository tenantRepository;
 
     @Mock
     private UserMapper userMapper;
@@ -56,8 +56,8 @@ class UserServiceTest {
 
     private UserService userService;
 
-    private UUID organizationId;
-    private Organization organization;
+    private UUID tenantId;
+    private Tenant tenant;
     private UUID userId;
     private User user;
     private UUID actorId;
@@ -65,16 +65,16 @@ class UserServiceTest {
 
     @BeforeEach
     void setUp() {
-        userService = new UserService(userRepository, organizationRepository, userMapper, auditService);
+        userService = new UserService(userRepository, tenantRepository, userMapper, auditService);
 
-        organizationId = UUID.randomUUID();
-        organization = new Organization();
-        organization.setId(organizationId);
+        tenantId = UUID.randomUUID();
+        tenant = new Tenant();
+        tenant.setId(tenantId);
 
         userId = UUID.randomUUID();
         user = new User();
         user.setId(userId);
-        user.setOrganization(organization);
+        user.setTenant(tenant);
         user.setStatus(UserStatus.ACTIVE);
 
         actorId = UUID.randomUUID();
@@ -84,7 +84,7 @@ class UserServiceTest {
 
     private UserCreateRequestDto createRequest(String email, String username) {
         UserCreateRequestDto request = new UserCreateRequestDto();
-        request.setOrganizationId(organizationId.toString());
+        request.setTenantId(tenantId.toString());
         request.setDisplayName("Yehudit Cohen");
         request.setEmail(email);
         request.setUsername(username);
@@ -106,16 +106,16 @@ class UserServiceTest {
     }
 
     @Test
-    void createUser_whenOrganizationExistsAndNoDuplicates_savesAndReturnsUser() {
+    void createUser_whenTenantExistsAndNoDuplicates_savesAndReturnsUser() {
         stubActorFound();
         UserCreateRequestDto request = createRequest("yehudit@acme.com", "yehudit");
         UserResponseDto responseDto = new UserResponseDto(userId, "Yehudit Cohen", null, null,
                 "yehudit@acme.com", null, "yehudit", "developer", UserStatus.ACTIVE, null, null, null, null);
 
-        when(organizationRepository.findById(organizationId)).thenReturn(Optional.of(organization));
+        when(tenantRepository.findById(tenantId)).thenReturn(Optional.of(tenant));
         when(userRepository.findByEmail("yehudit@acme.com")).thenReturn(Optional.empty());
         when(userRepository.findByUsername("yehudit")).thenReturn(Optional.empty());
-        when(userMapper.toEntity(request, organization)).thenReturn(user);
+        when(userMapper.toEntity(request, tenant)).thenReturn(user);
         when(userRepository.save(user)).thenReturn(user);
         when(userMapper.toResponseDto(user)).thenReturn(responseDto);
 
@@ -123,7 +123,7 @@ class UserServiceTest {
 
         assertThat(result).isSameAs(responseDto);
         verify(userRepository).save(user);
-        verify(auditService).createAuditLog(eq("USER_CREATED"), eq("User"), eq(userId), eq(organization),
+        verify(auditService).createAuditLog(eq("USER_CREATED"), eq("User"), eq(userId), eq(tenant),
                 eq(actor), any(), isNull());
     }
 
@@ -140,13 +140,13 @@ class UserServiceTest {
     }
 
     @Test
-    void createUser_whenOrganizationDoesNotExist_throwsOrganizationNotFoundException() {
+    void createUser_whenTenantDoesNotExist_throwsTenantNotFoundException() {
         stubActorFound();
         UserCreateRequestDto request = createRequest("yehudit@acme.com", "yehudit");
-        when(organizationRepository.findById(organizationId)).thenReturn(Optional.empty());
+        when(tenantRepository.findById(tenantId)).thenReturn(Optional.empty());
 
         assertThatThrownBy(() -> userService.createUser(request, actorId))
-                .isInstanceOf(OrganizationNotFoundException.class);
+                .isInstanceOf(TenantNotFoundException.class);
 
         verify(userRepository, never()).save(any());
     }
@@ -158,7 +158,7 @@ class UserServiceTest {
         User existing = new User();
         existing.setId(UUID.randomUUID());
 
-        when(organizationRepository.findById(organizationId)).thenReturn(Optional.of(organization));
+        when(tenantRepository.findById(tenantId)).thenReturn(Optional.of(tenant));
         when(userRepository.findByEmail("yehudit@acme.com")).thenReturn(Optional.of(existing));
 
         assertThatThrownBy(() -> userService.createUser(request, actorId))
@@ -174,7 +174,7 @@ class UserServiceTest {
         User existing = new User();
         existing.setId(UUID.randomUUID());
 
-        when(organizationRepository.findById(organizationId)).thenReturn(Optional.of(organization));
+        when(tenantRepository.findById(tenantId)).thenReturn(Optional.of(tenant));
         when(userRepository.findByEmail("yehudit@acme.com")).thenReturn(Optional.empty());
         when(userRepository.findByUsername("yehudit")).thenReturn(Optional.of(existing));
 
@@ -189,8 +189,8 @@ class UserServiceTest {
         stubActorFound();
         UserCreateRequestDto request = createRequest(null, null);
 
-        when(organizationRepository.findById(organizationId)).thenReturn(Optional.of(organization));
-        when(userMapper.toEntity(request, organization)).thenReturn(user);
+        when(tenantRepository.findById(tenantId)).thenReturn(Optional.of(tenant));
+        when(userMapper.toEntity(request, tenant)).thenReturn(user);
         when(userRepository.save(user)).thenReturn(user);
         when(userMapper.toResponseDto(user)).thenReturn(new UserResponseDto(
                 userId, "Yehudit Cohen", null, null, null, null, null, "developer",
@@ -242,7 +242,7 @@ class UserServiceTest {
         assertThat(result).isSameAs(responseDto);
         verify(userMapper).applyUpdate(user, request);
         verify(userRepository).save(user);
-        verify(auditService).createAuditLog(eq("USER_UPDATED"), eq("User"), eq(userId), eq(organization),
+        verify(auditService).createAuditLog(eq("USER_UPDATED"), eq("User"), eq(userId), eq(tenant),
                 eq(actor), any(), isNull());
     }
 

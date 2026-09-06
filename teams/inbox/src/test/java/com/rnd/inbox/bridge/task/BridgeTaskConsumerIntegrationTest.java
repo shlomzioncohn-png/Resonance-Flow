@@ -1,12 +1,12 @@
 package com.rnd.inbox.bridge.task;
 
 import com.rnd.inbox.model.entity.AuditLog;
-import com.rnd.inbox.model.entity.Organization;
+import com.rnd.inbox.model.entity.Tenant;
 import com.rnd.inbox.model.entity.Task;
-import com.rnd.inbox.model.enums.OrganizationStatus;
+import com.rnd.inbox.model.enums.TenantStatus;
 import com.rnd.inbox.model.enums.SourceType;
 import com.rnd.inbox.repository.AuditLogRepository;
-import com.rnd.inbox.repository.OrganizationRepository;
+import com.rnd.inbox.repository.TenantRepository;
 import com.rnd.inbox.repository.TaskRepository;
 import com.rnd.inbox.support.PostgresIntegrationTest;
 import org.apache.kafka.clients.consumer.Consumer;
@@ -52,7 +52,7 @@ class BridgeTaskConsumerIntegrationTest extends PostgresIntegrationTest {
     private AuditLogRepository auditLogRepository;
 
     @Autowired
-    private OrganizationRepository organizationRepository;
+    private TenantRepository tenantRepository;
 
     private KafkaTemplate<String, String> producer;
     private Consumer<String, String> errorConsumer;
@@ -75,20 +75,20 @@ class BridgeTaskConsumerIntegrationTest extends PostgresIntegrationTest {
         errorConsumer.close();
     }
 
-    private Organization persistOrganization() {
-        Organization organization = new Organization();
-        organization.setName("Acme");
-        organization.setSlug("acme-" + UUID.randomUUID());
-        organization.setStatus(OrganizationStatus.ACTIVE);
-        organization.setCreatedAt(Instant.now());
-        organization.setUpdatedAt(Instant.now());
-        return organizationRepository.saveAndFlush(organization);
+    private Tenant persistTenant() {
+        Tenant tenant = new Tenant();
+        tenant.setName("Acme");
+        tenant.setSlug("acme-" + UUID.randomUUID());
+        tenant.setStatus(TenantStatus.ACTIVE);
+        tenant.setCreatedAt(Instant.now());
+        tenant.setUpdatedAt(Instant.now());
+        return tenantRepository.saveAndFlush(tenant);
     }
 
-    private String validPayload(UUID organizationId, SourceType sourceType, String sourceRef, String eventId) {
+    private String validPayload(UUID tenantId, SourceType sourceType, String sourceRef, String eventId) {
         return "{"
                 + "\"eventId\":\"" + eventId + "\","
-                + "\"organizationId\":\"" + organizationId + "\","
+                + "\"tenantId\":\"" + tenantId + "\","
                 + "\"title\":\"Fix flaky test\","
                 + "\"sourceType\":\"" + sourceType.name() + "\","
                 + "\"sourceRef\":\"" + sourceRef + "\","
@@ -98,14 +98,14 @@ class BridgeTaskConsumerIntegrationTest extends PostgresIntegrationTest {
 
     @Test
     void validEventCreatesATaskWithAnAuditRecord() {
-        Organization organization = persistOrganization();
+        Tenant tenant = persistTenant();
         String sourceRef = "github:owner/repo:issue:" + UUID.randomUUID();
         String eventId = UUID.randomUUID().toString();
 
         producer.send("bridge.structured.tasks",
-                validPayload(organization.getId(), SourceType.GITHUB_ISSUE, sourceRef, eventId));
+                validPayload(tenant.getId(), SourceType.GITHUB_ISSUE, sourceRef, eventId));
 
-        Task task = awaitTask(organization.getId(), SourceType.GITHUB_ISSUE, sourceRef);
+        Task task = awaitTask(tenant.getId(), SourceType.GITHUB_ISSUE, sourceRef);
 
         assertThat(task.getId()).isNotNull();
         assertThat(task.getTitle()).isEqualTo("Fix flaky test");
@@ -120,14 +120,14 @@ class BridgeTaskConsumerIntegrationTest extends PostgresIntegrationTest {
 
     @Test
     void tasksFromANonGithubSourceGoThroughTheSameConsumer() {
-        Organization organization = persistOrganization();
+        Tenant tenant = persistTenant();
         String sourceRef = "crm:deal:" + UUID.randomUUID();
         String eventId = UUID.randomUUID().toString();
 
         producer.send("bridge.structured.tasks",
-                validPayload(organization.getId(), SourceType.CRM_DEAL, sourceRef, eventId));
+                validPayload(tenant.getId(), SourceType.CRM_DEAL, sourceRef, eventId));
 
-        Task task = awaitTask(organization.getId(), SourceType.CRM_DEAL, sourceRef);
+        Task task = awaitTask(tenant.getId(), SourceType.CRM_DEAL, sourceRef);
 
         assertThat(task.getId()).isNotNull();
         assertThat(task.getSourceType()).isEqualTo(SourceType.CRM_DEAL);
@@ -135,15 +135,15 @@ class BridgeTaskConsumerIntegrationTest extends PostgresIntegrationTest {
 
     @Test
     void duplicateDeliveryDoesNotCreateASecondTask() {
-        Organization organization = persistOrganization();
+        Tenant tenant = persistTenant();
         String sourceRef = "github:owner/repo:issue:" + UUID.randomUUID();
 
         producer.send("bridge.structured.tasks", validPayload(
-                organization.getId(), SourceType.GITHUB_ISSUE, sourceRef, UUID.randomUUID().toString()));
-        awaitTask(organization.getId(), SourceType.GITHUB_ISSUE, sourceRef);
+                tenant.getId(), SourceType.GITHUB_ISSUE, sourceRef, UUID.randomUUID().toString()));
+        awaitTask(tenant.getId(), SourceType.GITHUB_ISSUE, sourceRef);
 
         producer.send("bridge.structured.tasks", validPayload(
-                organization.getId(), SourceType.GITHUB_ISSUE, sourceRef, UUID.randomUUID().toString()));
+                tenant.getId(), SourceType.GITHUB_ISSUE, sourceRef, UUID.randomUUID().toString()));
         sleep(2000);
 
         long count = taskRepository.findAll().stream()
@@ -166,11 +166,11 @@ class BridgeTaskConsumerIntegrationTest extends PostgresIntegrationTest {
         assertThat(taskRepository.findAll().stream().noneMatch(t -> sourceRef.equals(t.getSourceRef()))).isTrue();
     }
 
-    private Task awaitTask(UUID organizationId, SourceType sourceType, String sourceRef) {
+    private Task awaitTask(UUID tenantId, SourceType sourceType, String sourceRef) {
         long deadline = System.currentTimeMillis() + 10000;
         while (System.currentTimeMillis() < deadline) {
-            Optional<Task> found = taskRepository.findByOrganization_IdAndSourceTypeAndSourceRef(
-                    organizationId, sourceType, sourceRef);
+            Optional<Task> found = taskRepository.findByTenant_IdAndSourceTypeAndSourceRef(
+                    tenantId, sourceType, sourceRef);
             if (found.isPresent()) {
                 return found.get();
             }

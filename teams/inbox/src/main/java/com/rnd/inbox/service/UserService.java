@@ -7,14 +7,14 @@ import com.rnd.inbox.dto.UserStatusUpdateRequestDto;
 import com.rnd.inbox.dto.UserUpdateRequestDto;
 import com.rnd.inbox.exception.DuplicateEmailException;
 import com.rnd.inbox.exception.DuplicateUsernameException;
-import com.rnd.inbox.exception.OrganizationNotFoundException;
+import com.rnd.inbox.exception.TenantNotFoundException;
 import com.rnd.inbox.exception.UnauthenticatedException;
 import com.rnd.inbox.exception.UserNotFoundException;
 import com.rnd.inbox.mapper.UserMapper;
-import com.rnd.inbox.model.entity.Organization;
+import com.rnd.inbox.model.entity.Tenant;
 import com.rnd.inbox.model.entity.User;
 import com.rnd.inbox.model.enums.UserStatus;
-import com.rnd.inbox.repository.OrganizationRepository;
+import com.rnd.inbox.repository.TenantRepository;
 import com.rnd.inbox.repository.UserRepository;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
@@ -29,14 +29,14 @@ import java.util.UUID;
 public class UserService {
 
     private final UserRepository userRepository;
-    private final OrganizationRepository organizationRepository;
+    private final TenantRepository tenantRepository;
     private final UserMapper userMapper;
     private final AuditService auditService;
 
-    public UserService(UserRepository userRepository, OrganizationRepository organizationRepository,
+    public UserService(UserRepository userRepository, TenantRepository tenantRepository,
                         UserMapper userMapper, AuditService auditService) {
         this.userRepository = userRepository;
-        this.organizationRepository = organizationRepository;
+        this.tenantRepository = tenantRepository;
         this.userMapper = userMapper;
         this.auditService = auditService;
     }
@@ -44,13 +44,13 @@ public class UserService {
     @Transactional
     public UserResponseDto createUser(UserCreateRequestDto request, UUID actorId) {
         User actor = findActorOrThrow(actorId);
-        Organization organization = findOrganizationOrThrow(UUID.fromString(request.getOrganizationId()));
+        Tenant tenant = findTenantOrThrow(UUID.fromString(request.getTenantId()));
         assertEmailAvailable(request.getEmail(), null);
         assertUsernameAvailable(request.getUsername(), null);
 
-        User user = userMapper.toEntity(request, organization);
+        User user = userMapper.toEntity(request, tenant);
         User saved = userRepository.save(user);
-        auditService.createAuditLog("USER_CREATED", "User", saved.getId(), organization,
+        auditService.createAuditLog("USER_CREATED", "User", saved.getId(), tenant,
                 actor, auditSnapshot(saved), null);
         return userMapper.toResponseDto(saved);
     }
@@ -70,7 +70,7 @@ public class UserService {
 
         userMapper.applyUpdate(user, request);
         User saved = userRepository.save(user);
-        auditService.createAuditLog("USER_UPDATED", "User", saved.getId(), saved.getOrganization(),
+        auditService.createAuditLog("USER_UPDATED", "User", saved.getId(), saved.getTenant(),
                 actor, auditSnapshot(saved), null);
         return userMapper.toResponseDto(saved);
     }
@@ -89,9 +89,9 @@ public class UserService {
         return userMapper.toResponseDto(saved);
     }
 
-    private Organization findOrganizationOrThrow(UUID id) {
-        return organizationRepository.findById(id)
-                .orElseThrow(() -> new OrganizationNotFoundException(id));
+    private Tenant findTenantOrThrow(UUID id) {
+        return tenantRepository.findById(id)
+                .orElseThrow(() -> new TenantNotFoundException(id));
     }
 
     private User findUserOrThrow(UUID id) {

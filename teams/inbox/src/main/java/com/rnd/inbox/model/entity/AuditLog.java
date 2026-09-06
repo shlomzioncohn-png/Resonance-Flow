@@ -26,8 +26,8 @@ public class AuditLog {
     private Long id;
 
     @ManyToOne
-    @JoinColumn(name = "organization_id", nullable = true)
-    private Organization organization;
+    @JoinColumn(name = "tenant_id", nullable = true)
+    private Tenant tenant;
 
     @ManyToOne
     @JoinColumn(name = "actor_user_id", nullable = true)
@@ -77,12 +77,12 @@ public class AuditLog {
         this.id = id;
     }
 
-    public Organization getOrganization() {
-        return organization;
+    public Tenant getTenant() {
+        return tenant;
     }
 
-    public void setOrganization(Organization organization) {
-        this.organization = organization;
+    public void setTenant(Tenant tenant) {
+        this.tenant = tenant;
     }
 
     public User getActor() {

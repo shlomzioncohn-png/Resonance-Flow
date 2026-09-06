@@ -30,7 +30,7 @@ The team is responsible for the following entities:
 -   Permissions
 -   Teams
 -   Tasks --- canonical schema
--   Organizations
+-   Tenants
 -   Projects
 -   Change history (Audit Trail) --- for every change to every field in
     a task record

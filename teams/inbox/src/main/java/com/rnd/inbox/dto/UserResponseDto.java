@@ -16,14 +16,14 @@ public final class UserResponseDto {
     private final String username;
     private final String role;
     private final UserStatus status;
-    private final OrganizationSummaryDto organization;
+    private final TenantSummaryDto tenant;
     private final Instant createdAt;
     private final Instant updatedAt;
     private final Instant lastLoginAt;
 
     public UserResponseDto(UUID id, String displayName, String firstName, String lastName, String email,
                             String phone, String username, String role, UserStatus status,
-                            OrganizationSummaryDto organization, Instant createdAt, Instant updatedAt,
+                            TenantSummaryDto tenant, Instant createdAt, Instant updatedAt,
                             Instant lastLoginAt) {
         this.id = id;
         this.displayName = displayName;
@@ -34,7 +34,7 @@ public final class UserResponseDto {
         this.username = username;
         this.role = role;
         this.status = status;
-        this.organization = organization;
+        this.tenant = tenant;
         this.createdAt = createdAt;
         this.updatedAt = updatedAt;
         this.lastLoginAt = lastLoginAt;
@@ -76,8 +76,8 @@ public final class UserResponseDto {
         return status;
     }
 
-    public OrganizationSummaryDto getOrganization() {
-        return organization;
+    public TenantSummaryDto getTenant() {
+        return tenant;
     }
 
     public Instant getCreatedAt() {

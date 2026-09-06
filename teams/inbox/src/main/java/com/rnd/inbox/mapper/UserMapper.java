@@ -1,10 +1,10 @@
 package com.rnd.inbox.mapper;
 
-import com.rnd.inbox.dto.OrganizationSummaryDto;
+import com.rnd.inbox.dto.TenantSummaryDto;
 import com.rnd.inbox.dto.UserCreateRequestDto;
 import com.rnd.inbox.dto.UserResponseDto;
 import com.rnd.inbox.dto.UserUpdateRequestDto;
-import com.rnd.inbox.model.entity.Organization;
+import com.rnd.inbox.model.entity.Tenant;
 import com.rnd.inbox.model.entity.User;
 import com.rnd.inbox.model.enums.UserStatus;
 import org.springframework.stereotype.Component;
@@ -21,9 +21,9 @@ public class UserMapper {
         this.clock = clock;
     }
 
-    public User toEntity(UserCreateRequestDto dto, Organization organization) {
+    public User toEntity(UserCreateRequestDto dto, Tenant tenant) {
         User user = new User();
-        user.setOrganization(organization);
+        user.setTenant(tenant);
         user.setDisplayName(dto.getDisplayName());
         user.setFirstName(dto.getFirstName());
         user.setLastName(dto.getLastName());
@@ -69,9 +69,9 @@ public class UserMapper {
     }
 
     public UserResponseDto toResponseDto(User user) {
-        Organization organization = user.getOrganization();
-        OrganizationSummaryDto organizationSummary = organization != null
-                ? new OrganizationSummaryDto(organization.getId(), organization.getName(), organization.getSlug())
+        Tenant tenant = user.getTenant();
+        TenantSummaryDto tenantSummary = tenant != null
+                ? new TenantSummaryDto(tenant.getId(), tenant.getName(), tenant.getSlug())
                 : null;
 
         return new UserResponseDto(
@@ -84,7 +84,7 @@ public class UserMapper {
                 user.getUsername(),
                 user.getRole(),
                 user.getStatus(),
-                organizationSummary,
+                tenantSummary,
                 user.getCreatedAt(),
                 user.getUpdatedAt(),
                 user.getLastLoginAt());

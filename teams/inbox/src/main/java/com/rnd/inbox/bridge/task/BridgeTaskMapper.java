@@ -8,7 +8,7 @@ import com.rnd.inbox.model.enums.TaskExtractionProvenance;
 import com.rnd.inbox.model.enums.TaskRoleContext;
 import com.rnd.inbox.model.enums.TaskStatus;
 import com.rnd.inbox.model.enums.TaskTier;
-import com.rnd.inbox.repository.OrganizationRepository;
+import com.rnd.inbox.repository.TenantRepository;
 import com.rnd.inbox.repository.ProjectRepository;
 import com.rnd.inbox.repository.TeamRepository;
 import com.rnd.inbox.repository.UserRepository;
@@ -21,15 +21,15 @@ import java.util.UUID;
 @Component
 public class BridgeTaskMapper {
 
-    private final OrganizationRepository organizationRepository;
+    private final TenantRepository tenantRepository;
     private final ProjectRepository projectRepository;
     private final UserRepository userRepository;
     private final TeamRepository teamRepository;
     private final Clock clock;
 
-    public BridgeTaskMapper(OrganizationRepository organizationRepository, ProjectRepository projectRepository,
+    public BridgeTaskMapper(TenantRepository tenantRepository, ProjectRepository projectRepository,
             UserRepository userRepository, TeamRepository teamRepository, Clock clock) {
-        this.organizationRepository = organizationRepository;
+        this.tenantRepository = tenantRepository;
         this.projectRepository = projectRepository;
         this.userRepository = userRepository;
         this.teamRepository = teamRepository;
@@ -38,7 +38,7 @@ public class BridgeTaskMapper {
 
     public Task map(BridgeTaskEventDto dto) {
         Task task = new Task();
-        task.setOrganization(organizationRepository.getReferenceById(UUID.fromString(dto.getOrganizationId())));
+        task.setTenant(tenantRepository.getReferenceById(UUID.fromString(dto.getTenantId())));
         if (dto.getProjectId() != null) {
             task.setProject(projectRepository.getReferenceById(UUID.fromString(dto.getProjectId())));
         }

@@ -38,7 +38,7 @@ class BridgeTaskEventValidationTest {
     private BridgeTaskEventDto validEvent() {
         BridgeTaskEventDto dto = new BridgeTaskEventDto();
         dto.setEventId(UUID.randomUUID().toString());
-        dto.setOrganizationId(UUID.randomUUID().toString());
+        dto.setTenantId(UUID.randomUUID().toString());
         dto.setTitle("Fix flaky test");
         dto.setSourceType("GITHUB_ISSUE");
         dto.setSourceRef("github:owner/repo:issue:42");
@@ -78,7 +78,7 @@ class BridgeTaskEventValidationTest {
 
     @Test
     void rejectsMissingRequiredFields() {
-        assertRejects(new BridgeTaskEventDto(), "organizationId", "title", "sourceRef", "sourceType");
+        assertRejects(new BridgeTaskEventDto(), "tenantId", "title", "sourceRef", "sourceType");
     }
 
     @ParameterizedTest
@@ -133,11 +133,11 @@ class BridgeTaskEventValidationTest {
     }
 
     @Test
-    void rejectsInvalidOrganizationIdFormat() {
+    void rejectsInvalidTenantIdFormat() {
         BridgeTaskEventDto dto = validEvent();
-        dto.setOrganizationId("not-a-uuid");
+        dto.setTenantId("not-a-uuid");
 
-        assertRejects(dto, "organizationId");
+        assertRejects(dto, "tenantId");
     }
 
     @Test
@@ -227,12 +227,12 @@ class BridgeTaskEventValidationTest {
     @Test
     void reportsAMissingRequiredFieldExactlyOnce() {
         BridgeTaskEventDto dto = validEvent();
-        dto.setOrganizationId("  ");
+        dto.setTenantId("  ");
 
         assertThatThrownBy(() -> validator.validate(dto))
                 .asInstanceOf(type(EventValidationException.class))
                 .satisfies(e -> assertThat(e.getFieldErrors())
-                        .filteredOn(msg -> msg.contains("organizationId"))
+                        .filteredOn(msg -> msg.contains("tenantId"))
                         .hasSize(1));
     }
 }

@@ -36,8 +36,8 @@ public class Task {
     private UUID id;
 
     @ManyToOne
-    @JoinColumn(name = "organization_id", nullable = false)
-    private Organization organization;
+    @JoinColumn(name = "tenant_id", nullable = false)
+    private Tenant tenant;
 
     @ManyToOne
     @JoinColumn(name = "project_id", nullable = true)
@@ -137,12 +137,12 @@ public class Task {
         this.id = id;
     }
 
-    public Organization getOrganization() {
-        return organization;
+    public Tenant getTenant() {
+        return tenant;
     }
 
-    public void setOrganization(Organization organization) {
-        this.organization = organization;
+    public void setTenant(Tenant tenant) {
+        this.tenant = tenant;
     }
 
     public Project getProject() {

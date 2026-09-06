@@ -147,7 +147,7 @@ handles the whole ingestion path; the platform a task came from travels inside t
 
 ### Idempotency
 
-The idempotency key is `(organization_id, source_type, source_ref)`, where `source_ref` is the
+The idempotency key is `(tenant_id, source_type, source_ref)`, where `source_ref` is the
 deterministic identifier BRIDGE assigns to the source record (e.g. a GitHub issue/PR reference) —
 not the Kafka message or the event's own `eventId` (which is only used as an audit correlation id
 and may differ across redeliveries of the same underlying record).

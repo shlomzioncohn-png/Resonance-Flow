@@ -1,14 +1,14 @@
 package com.rnd.inbox.mind.task;
 
 import com.rnd.inbox.model.entity.AuditLog;
-import com.rnd.inbox.model.entity.Organization;
+import com.rnd.inbox.model.entity.Tenant;
 import com.rnd.inbox.model.entity.OutboxEvent;
 import com.rnd.inbox.model.entity.Task;
-import com.rnd.inbox.model.enums.OrganizationStatus;
+import com.rnd.inbox.model.enums.TenantStatus;
 import com.rnd.inbox.model.enums.SourceType;
 import com.rnd.inbox.model.enums.TaskExtractionProvenance;
 import com.rnd.inbox.repository.AuditLogRepository;
-import com.rnd.inbox.repository.OrganizationRepository;
+import com.rnd.inbox.repository.TenantRepository;
 import com.rnd.inbox.repository.OutboxEventRepository;
 import com.rnd.inbox.repository.TaskRepository;
 import com.rnd.inbox.support.PostgresIntegrationTest;
@@ -61,7 +61,7 @@ class MindTaskConsumerIntegrationTest extends PostgresIntegrationTest {
     private OutboxEventRepository outboxEventRepository;
 
     @Autowired
-    private OrganizationRepository organizationRepository;
+    private TenantRepository tenantRepository;
 
     private KafkaTemplate<String, String> producer;
     private Consumer<String, String> errorConsumer;
@@ -84,22 +84,22 @@ class MindTaskConsumerIntegrationTest extends PostgresIntegrationTest {
         errorConsumer.close();
     }
 
-    private Organization persistOrganization() {
-        Organization organization = new Organization();
-        organization.setName("Acme");
-        organization.setSlug("acme-" + UUID.randomUUID());
-        organization.setStatus(OrganizationStatus.ACTIVE);
-        organization.setCreatedAt(Instant.now());
-        organization.setUpdatedAt(Instant.now());
-        return organizationRepository.saveAndFlush(organization);
+    private Tenant persistTenant() {
+        Tenant tenant = new Tenant();
+        tenant.setName("Acme");
+        tenant.setSlug("acme-" + UUID.randomUUID());
+        tenant.setStatus(TenantStatus.ACTIVE);
+        tenant.setCreatedAt(Instant.now());
+        tenant.setUpdatedAt(Instant.now());
+        return tenantRepository.saveAndFlush(tenant);
     }
 
-    private String validPayload(UUID organizationId, String sourceRef, String correlationId,
+    private String validPayload(UUID tenantId, String sourceRef, String correlationId,
             boolean hasDependencies) {
         return "{"
                 + "\"eventId\":\"" + UUID.randomUUID() + "\","
                 + "\"correlationId\":\"" + correlationId + "\","
-                + "\"organizationId\":\"" + organizationId + "\","
+                + "\"tenantId\":\"" + tenantId + "\","
                 + "\"title\":\"Send the revised pricing deck to Acme\","
                 + "\"sourceType\":\"SLACK\","
                 + "\"sourceRef\":\"" + sourceRef + "\","
@@ -110,13 +110,13 @@ class MindTaskConsumerIntegrationTest extends PostgresIntegrationTest {
 
     @Test
     void validEventCreatesAnMlInferredTaskWithAnAuditRecord() {
-        Organization organization = persistOrganization();
+        Tenant tenant = persistTenant();
         String sourceRef = "slack:T012AB3CD:C024BE91L:" + UUID.randomUUID();
         String correlationId = UUID.randomUUID().toString();
 
-        producer.send(TOPIC, validPayload(organization.getId(), sourceRef, correlationId, false));
+        producer.send(TOPIC, validPayload(tenant.getId(), sourceRef, correlationId, false));
 
-        Task task = awaitTask(organization.getId(), sourceRef);
+        Task task = awaitTask(tenant.getId(), sourceRef);
 
         assertThat(task.getId()).isNotNull();
         assertThat(task.getTitle()).isEqualTo("Send the revised pricing deck to Acme");
@@ -134,13 +134,13 @@ class MindTaskConsumerIntegrationTest extends PostgresIntegrationTest {
 
     @Test
     void mindsCorrelationIdRidesOnTheOutboxRowSoItComesBackOnTaskCreated() {
-        Organization organization = persistOrganization();
+        Tenant tenant = persistTenant();
         String sourceRef = "slack:T012AB3CD:C024BE91L:" + UUID.randomUUID();
         String correlationId = UUID.randomUUID().toString();
 
-        producer.send(TOPIC, validPayload(organization.getId(), sourceRef, correlationId, false));
+        producer.send(TOPIC, validPayload(tenant.getId(), sourceRef, correlationId, false));
 
-        Task task = awaitTask(organization.getId(), sourceRef);
+        Task task = awaitTask(tenant.getId(), sourceRef);
 
         List<OutboxEvent> outboxEvents = outboxEventRepository.findAll();
         assertThat(outboxEvents).anySatisfy(event -> {
@@ -151,28 +151,28 @@ class MindTaskConsumerIntegrationTest extends PostgresIntegrationTest {
 
     @Test
     void aTaskWithDependenciesStartsBlockedUntilChainCalculatesAvailability() {
-        Organization organization = persistOrganization();
+        Tenant tenant = persistTenant();
         String sourceRef = "slack:T012AB3CD:C024BE91L:" + UUID.randomUUID();
 
         producer.send(TOPIC, validPayload(
-                organization.getId(), sourceRef, UUID.randomUUID().toString(), true));
+                tenant.getId(), sourceRef, UUID.randomUUID().toString(), true));
 
-        assertThat(awaitTask(organization.getId(), sourceRef).isAvailable()).isFalse();
+        assertThat(awaitTask(tenant.getId(), sourceRef).isAvailable()).isFalse();
     }
 
     @Test
     void duplicateDeliveryDoesNotCreateASecondTask() {
-        Organization organization = persistOrganization();
+        Tenant tenant = persistTenant();
         String sourceRef = "slack:T012AB3CD:C024BE91L:" + UUID.randomUUID();
 
         producer.send(TOPIC, validPayload(
-                organization.getId(), sourceRef, UUID.randomUUID().toString(), false));
-        awaitTask(organization.getId(), sourceRef);
+                tenant.getId(), sourceRef, UUID.randomUUID().toString(), false));
+        awaitTask(tenant.getId(), sourceRef);
 
         // A different correlationId on the redelivery: idempotency keys on the source record,
         // never on the event or request id.
         producer.send(TOPIC, validPayload(
-                organization.getId(), sourceRef, UUID.randomUUID().toString(), false));
+                tenant.getId(), sourceRef, UUID.randomUUID().toString(), false));
         sleep(2000);
 
         long count = taskRepository.findAll().stream()
@@ -198,12 +198,12 @@ class MindTaskConsumerIntegrationTest extends PostgresIntegrationTest {
 
     @Test
     void aStructuredSourceTypeIsAcceptedAndStillRecordedAsMlInferred() {
-        Organization organization = persistOrganization();
+        Tenant tenant = persistTenant();
         String sourceRef = "github:acme/web:issue:" + UUID.randomUUID();
         String payload = "{"
                 + "\"eventId\":\"" + UUID.randomUUID() + "\","
                 + "\"correlationId\":\"" + UUID.randomUUID() + "\","
-                + "\"organizationId\":\"" + organization.getId() + "\","
+                + "\"tenantId\":\"" + tenant.getId() + "\","
                 + "\"title\":\"Extracted from a thread that references a GitHub issue\","
                 + "\"sourceType\":\"GITHUB_ISSUE\","
                 + "\"sourceRef\":\"" + sourceRef + "\","
@@ -213,21 +213,21 @@ class MindTaskConsumerIntegrationTest extends PostgresIntegrationTest {
 
         producer.send(TOPIC, payload);
 
-        Task task = awaitTask(organization.getId(), SourceType.GITHUB_ISSUE, sourceRef);
+        Task task = awaitTask(tenant.getId(), SourceType.GITHUB_ISSUE, sourceRef);
 
         // What separates this path from Bridge's is the provenance, not the source.
         assertThat(task.getExtractionProvenance()).isEqualTo(TaskExtractionProvenance.ML_INFERRED);
     }
 
-    private Task awaitTask(UUID organizationId, String sourceRef) {
-        return awaitTask(organizationId, SourceType.SLACK, sourceRef);
+    private Task awaitTask(UUID tenantId, String sourceRef) {
+        return awaitTask(tenantId, SourceType.SLACK, sourceRef);
     }
 
-    private Task awaitTask(UUID organizationId, SourceType sourceType, String sourceRef) {
+    private Task awaitTask(UUID tenantId, SourceType sourceType, String sourceRef) {
         long deadline = System.currentTimeMillis() + 10000;
         while (System.currentTimeMillis() < deadline) {
-            Optional<Task> found = taskRepository.findByOrganization_IdAndSourceTypeAndSourceRef(
-                    organizationId, sourceType, sourceRef);
+            Optional<Task> found = taskRepository.findByTenant_IdAndSourceTypeAndSourceRef(
+                    tenantId, sourceType, sourceRef);
             if (found.isPresent()) {
                 return found.get();
             }

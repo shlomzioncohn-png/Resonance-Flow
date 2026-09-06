@@ -9,6 +9,6 @@ import java.util.UUID;
 
 public interface TaskRepository extends JpaRepository<Task, UUID> {
 
-    Optional<Task> findByOrganization_IdAndSourceTypeAndSourceRef(
-            UUID organizationId, SourceType sourceType, String sourceRef);
+    Optional<Task> findByTenant_IdAndSourceTypeAndSourceRef(
+            UUID tenantId, SourceType sourceType, String sourceRef);
 }

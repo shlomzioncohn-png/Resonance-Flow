@@ -26,7 +26,7 @@ public class MindTaskEventDto {
 
     @NotBlank
     @ValidUuid
-    private String organizationId;
+    private String tenantId;
 
     @ValidUuid
     private String projectId;
@@ -86,12 +86,12 @@ public class MindTaskEventDto {
         this.correlationId = correlationId;
     }
 
-    public String getOrganizationId() {
-        return organizationId;
+    public String getTenantId() {
+        return tenantId;
     }
 
-    public void setOrganizationId(String organizationId) {
-        this.organizationId = organizationId;
+    public void setTenantId(String tenantId) {
+        this.tenantId = tenantId;
     }
 
     public String getProjectId() {

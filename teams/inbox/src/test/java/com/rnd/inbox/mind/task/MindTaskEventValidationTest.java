@@ -40,7 +40,7 @@ class MindTaskEventValidationTest {
         MindTaskEventDto dto = new MindTaskEventDto();
         dto.setEventId(UUID.randomUUID().toString());
         dto.setCorrelationId(UUID.randomUUID().toString());
-        dto.setOrganizationId(UUID.randomUUID().toString());
+        dto.setTenantId(UUID.randomUUID().toString());
         dto.setTitle("Send the revised pricing deck to Acme");
         dto.setSourceType("SLACK");
         dto.setSourceRef("slack:T012AB3CD:C024BE91L:1756550400.001900");
@@ -144,6 +144,6 @@ class MindTaskEventValidationTest {
         dto.setConfidence(0.5);
         dto.setHasDependencies(false);
 
-        assertRejects(dto, "organizationId", "title", "sourceType", "sourceRef");
+        assertRejects(dto, "tenantId", "title", "sourceType", "sourceRef");
     }
 }

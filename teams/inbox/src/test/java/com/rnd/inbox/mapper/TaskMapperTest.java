@@ -1,6 +1,6 @@
 package com.rnd.inbox.mapper;
 
-import com.rnd.inbox.model.entity.Organization;
+import com.rnd.inbox.model.entity.Tenant;
 import com.rnd.inbox.model.entity.Project;
 import com.rnd.inbox.model.entity.Task;
 import com.rnd.inbox.model.entity.User;
@@ -80,7 +80,7 @@ class TaskMapperTest {
     void applyUpdate_neverTouchesIdentityFields() {
         Task existing = existingTask();
         UUID originalId = existing.getId();
-        Organization originalOrganization = existing.getOrganization();
+        Tenant originalTenant = existing.getTenant();
         SourceType originalSourceType = existing.getSourceType();
         String originalSourceRef = existing.getSourceRef();
         User originalCreatedBy = existing.getCreatedBy();
@@ -92,7 +92,7 @@ class TaskMapperTest {
         taskMapper.applyUpdate(existing, changes);
 
         assertThat(existing.getId()).isEqualTo(originalId);
-        assertThat(existing.getOrganization()).isSameAs(originalOrganization);
+        assertThat(existing.getTenant()).isSameAs(originalTenant);
         assertThat(existing.getSourceType()).isEqualTo(originalSourceType);
         assertThat(existing.getSourceRef()).isEqualTo(originalSourceRef);
         assertThat(existing.getCreatedBy()).isSameAs(originalCreatedBy);
@@ -100,14 +100,14 @@ class TaskMapperTest {
     }
 
     private Task existingTask() {
-        Organization organization = new Organization();
-        organization.setId(UUID.randomUUID());
+        Tenant tenant = new Tenant();
+        tenant.setId(UUID.randomUUID());
         User createdBy = new User();
         createdBy.setId(UUID.randomUUID());
 
         Task task = new Task();
         task.setId(UUID.randomUUID());
-        task.setOrganization(organization);
+        task.setTenant(tenant);
         task.setTitle("Original title");
         task.setDescription("Original description");
         task.setSourceType(SourceType.GITHUB_ISSUE);

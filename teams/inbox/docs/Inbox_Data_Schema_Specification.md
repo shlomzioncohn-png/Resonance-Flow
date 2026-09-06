@@ -2,7 +2,7 @@
 
 # Data Schema Specification
 
-**Canonical relational data model owned by the Inbox team — organizations, users, teams, projects, tasks, assignments and audit trail.**
+**Canonical relational data model owned by the Inbox team — tenants, users, teams, projects, tasks, assignments and audit trail.**
 
 | Item | Value |
 |---|---|
@@ -19,7 +19,7 @@
 
 ## 1. Purpose & Scope
 
-This document specifies the canonical relational data schema owned by the Inbox team, as defined in the Intelligent Work Prioritization Platform. It covers organizations, users, authentication, teams, projects, tasks, worker assignments, and the audit trail. Every other team in the program (Bridge, Mind, Chain, Lens, Relay) builds against this schema as the single source of truth for task data.
+This document specifies the canonical relational data schema owned by the Inbox team, as defined in the Intelligent Work Prioritization Platform. It covers tenants, users, authentication, teams, projects, tasks, worker assignments, and the audit trail. Every other team in the program (Bridge, Mind, Chain, Lens, Relay) builds against this schema as the single source of truth for task data.
 
 Fields are listed with their type, whether they are required, their foreign-key / constraint definition, and a description. Where a field's ownership or semantics is not yet settled between teams, this is noted inline and consolidated in the final section of this document.
 
@@ -42,17 +42,17 @@ Fields are listed with their type, whether they are required, their foreign-key 
 
 ## 3. Entity Definitions
 
-### 3.1 ORGANIZATIONS
+### 3.1 TENANTS
 
-*Top-level tenant. Every user, team, project and task belongs to exactly one organization.*
+*Top-level tenant. Every user, team, project and task belongs to exactly one tenant.*
 
 | Field | Type | Required | FK / Constraints | Description |
 |---|---|---|---|---|
-| `id` | UUID | Yes | PK | Unique organization identifier. |
-| `name` | VARCHAR(255) | Yes | — | Organization name. |
+| `id` | UUID | Yes | PK | Unique tenant identifier. |
+| `name` | VARCHAR(255) | Yes | — | Tenant name. |
 | `slug` | VARCHAR(100) | Yes | UNIQUE | Unique textual identifier suitable for URLs/configuration. |
-| `status` | VARCHAR(30) | Yes | `active / suspended / archived` | Organization lifecycle status. |
-| `timezone` | VARCHAR(100) | No | — | Default organization timezone. |
+| `status` | VARCHAR(30) | Yes | `active / suspended / archived` | Tenant lifecycle status. |
+| `timezone` | VARCHAR(100) | No | — | Default tenant timezone. |
 | `default_locale` | VARCHAR(20) | No | — | Default language/locale. |
 | `created_at` | TIMESTAMPTZ | Yes | DEFAULT `now()` | Record creation timestamp. |
 | `updated_at` | TIMESTAMPTZ | Yes | DEFAULT `now()` | Last update timestamp. |
@@ -64,7 +64,7 @@ Fields are listed with their type, whether they are required, their foreign-key 
 | Field | Type | Required | FK / Constraints | Description |
 |---|---|---|---|---|
 | `id` | UUID | Yes | PK | Unique user identifier. |
-| `organization_id` | UUID | Yes | FK → `organizations.id` | Organization the user belongs to. |
+| `tenant_id` | UUID | Yes | FK → `tenants.id` | Tenant the user belongs to. |
 | `email` | VARCHAR(255) | Cond. | Recommended UNIQUE when used for login | User email; may also be used as a login identifier. |
 | `phone` | VARCHAR(30) | Cond. | Recommended UNIQUE when used for login | User phone number; may be used for OTP login. |
 | `username` | VARCHAR(100) | Cond. | UNIQUE | Username when username/password authentication is supported. |
@@ -121,7 +121,7 @@ Fields are listed with their type, whether they are required, their foreign-key 
 | Field | Type | Required | FK / Constraints | Description |
 |---|---|---|---|---|
 | `id` | UUID | Yes | PK | Unique team identifier. |
-| `organization_id` | UUID | Yes | FK → `organizations.id` | Organization the team belongs to. |
+| `tenant_id` | UUID | Yes | FK → `tenants.id` | Tenant the team belongs to. |
 | `name` | VARCHAR(255) | Yes | — | Team name. |
 | `team_lead_id` | UUID | Yes | FK → `users.id` | The team's single team lead. |
 | `status` | VARCHAR(30) | Yes | `active / archived` | Team lifecycle status. |
@@ -146,7 +146,7 @@ Fields are listed with their type, whether they are required, their foreign-key 
 | Field | Type | Required | FK / Constraints | Description |
 |---|---|---|---|---|
 | `id` | UUID | Yes | PK | Unique project identifier. |
-| `organization_id` | UUID | Yes | FK → `organizations.id` | Organization owning the project. |
+| `tenant_id` | UUID | Yes | FK → `tenants.id` | Tenant owning the project. |
 | `name` | VARCHAR(255) | Yes | — | Project name. |
 | `description` | TEXT | No | — | Project description. |
 | `owner_id` | UUID | No | FK → `users.id` | Project owner, if required. |
@@ -164,7 +164,7 @@ Fields are listed with their type, whether they are required, their foreign-key 
 | Field | Type | Required | FK / Constraints | Description |
 |---|---|---|---|---|
 | `id` | UUID | Yes | PK | Final canonical task ID issued by Inbox. |
-| `organization_id` | UUID | Yes | FK → `organizations.id` | Organization the task belongs to. |
+| `tenant_id` | UUID | Yes | FK → `tenants.id` | Tenant the task belongs to. |
 | `project_id` | UUID | No | FK → `projects.id` | Project associated with the task. |
 | `title` | TEXT | Yes | — | Short task title. |
 | `description` | TEXT | No | — | Detailed task description. |
@@ -260,7 +260,7 @@ If feedback also mutates a `TASKS` field directly, for example `status → in_re
 | Field | Type | Required | FK / Constraints | Description |
 |---|---|---|---|---|
 | `id` | BIGINT IDENTITY | Yes | PK | Sequential audit record identifier. |
-| `organization_id` | UUID | No | FK → `organizations.id` | Organization in which the action occurred. |
+| `tenant_id` | UUID | No | FK → `tenants.id` | Tenant in which the action occurred. |
 | `actor_user_id` | UUID | No | FK → `users.id` | User who performed the action; NULL for system-driven actions. |
 | `action` | VARCHAR(100) | Yes | e.g. `user.login / task.created / task.updated / task.completed / task.reassigned` | Type of action performed. |
 | `entity_type` | VARCHAR(50) | Yes | e.g. `user / team / project / task` | Type of affected entity. |
@@ -281,10 +281,10 @@ If feedback also mutates a `TASKS` field directly, for example `status → in_re
 
 | Source | Relationship | Target | FK / Join |
 |---|---|---|---|
-| ORGANIZATIONS | 1 → N | USERS | `users.organization_id` |
-| ORGANIZATIONS | 1 → N | TEAMS | `teams.organization_id` |
-| ORGANIZATIONS | 1 → N | PROJECTS | `projects.organization_id` |
-| ORGANIZATIONS | 1 → N | TASKS | `tasks.organization_id` |
+| TENANTS | 1 → N | USERS | `users.tenant_id` |
+| TENANTS | 1 → N | TEAMS | `teams.tenant_id` |
+| TENANTS | 1 → N | PROJECTS | `projects.tenant_id` |
+| TENANTS | 1 → N | TASKS | `tasks.tenant_id` |
 | USERS | 1 → N | USER_AUTH_IDENTITIES | `user_auth_identities.user_id` |
 | USERS | 1 → N | OTP_REQUESTS | `otp_requests.user_id` |
 | USERS | N ↔ N | TEAMS | `TEAM_MEMBERS` |

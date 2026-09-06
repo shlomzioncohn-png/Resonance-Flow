@@ -1,7 +1,7 @@
 package com.rnd.inbox.service;
 
 import com.rnd.inbox.model.entity.AuditLog;
-import com.rnd.inbox.model.entity.Organization;
+import com.rnd.inbox.model.entity.Tenant;
 import com.rnd.inbox.model.entity.User;
 import com.rnd.inbox.repository.AuditLogRepository;
 import org.junit.jupiter.api.BeforeEach;
@@ -37,13 +37,13 @@ class AuditServiceTest {
 
     @Test
     void record_savesAnAuditLogBuiltFromTheGivenFields() {
-        Organization organization = new Organization();
-        organization.setId(UUID.randomUUID());
+        Tenant tenant = new Tenant();
+        tenant.setId(UUID.randomUUID());
         UUID entityId = UUID.randomUUID();
         UUID correlationId = UUID.randomUUID();
         Map<String, Object> newValues = Map.of("title", "Fix flaky test");
 
-        auditService.createAuditLog("TASK_CREATED", "Task", entityId, organization, newValues, correlationId);
+        auditService.createAuditLog("TASK_CREATED", "Task", entityId, tenant, newValues, correlationId);
 
         ArgumentCaptor<AuditLog> captor = ArgumentCaptor.forClass(AuditLog.class);
         verify(auditLogRepository).save(captor.capture());
@@ -51,7 +51,7 @@ class AuditServiceTest {
         assertThat(audit.getAction()).isEqualTo("TASK_CREATED");
         assertThat(audit.getEntityType()).isEqualTo("Task");
         assertThat(audit.getEntityId()).isEqualTo(entityId);
-        assertThat(audit.getOrganization()).isEqualTo(organization);
+        assertThat(audit.getTenant()).isEqualTo(tenant);
         assertThat(audit.getNewValues()).isEqualTo(newValues);
         assertThat(audit.getCorrelationId()).isEqualTo(correlationId);
         assertThat(audit.getCreatedAt()).isEqualTo(FIXED_NOW);
@@ -59,11 +59,11 @@ class AuditServiceTest {
 
     @Test
     void createAuditLog_withoutActor_leavesActorNull() {
-        Organization organization = new Organization();
-        organization.setId(UUID.randomUUID());
+        Tenant tenant = new Tenant();
+        tenant.setId(UUID.randomUUID());
         Map<String, Object> newValues = Map.of("title", "Fix flaky test");
 
-        auditService.createAuditLog("TASK_CREATED", "Task", UUID.randomUUID(), organization, newValues, UUID.randomUUID());
+        auditService.createAuditLog("TASK_CREATED", "Task", UUID.randomUUID(), tenant, newValues, UUID.randomUUID());
 
         ArgumentCaptor<AuditLog> captor = ArgumentCaptor.forClass(AuditLog.class);
         verify(auditLogRepository).save(captor.capture());
@@ -72,13 +72,13 @@ class AuditServiceTest {
 
     @Test
     void createAuditLog_withActor_setsActorOnTheAuditLog() {
-        Organization organization = new Organization();
-        organization.setId(UUID.randomUUID());
+        Tenant tenant = new Tenant();
+        tenant.setId(UUID.randomUUID());
         User actor = new User();
         actor.setId(UUID.randomUUID());
         Map<String, Object> newValues = Map.of("status", "DONE");
 
-        auditService.createAuditLog("TASK_COMPLETED", "Task", UUID.randomUUID(), organization, actor,
+        auditService.createAuditLog("TASK_COMPLETED", "Task", UUID.randomUUID(), tenant, actor,
                 newValues, UUID.randomUUID());
 
         ArgumentCaptor<AuditLog> captor = ArgumentCaptor.forClass(AuditLog.class);

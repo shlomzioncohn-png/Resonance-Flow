@@ -1,7 +1,7 @@
 package com.rnd.inbox.service;
 
 import com.rnd.inbox.model.entity.AuditLog;
-import com.rnd.inbox.model.entity.Organization;
+import com.rnd.inbox.model.entity.Tenant;
 import com.rnd.inbox.model.entity.User;
 import com.rnd.inbox.repository.AuditLogRepository;
 import org.springframework.stereotype.Service;
@@ -22,15 +22,15 @@ public class AuditService {
         this.clock = clock;
     }
 
-    public void createAuditLog(String action, String entityType, UUID entityId, Organization organization,
+    public void createAuditLog(String action, String entityType, UUID entityId, Tenant tenant,
                         Map<String, Object> newValues, UUID correlationId) {
-        createAuditLog(action, entityType, entityId, organization, null, newValues, correlationId);
+        createAuditLog(action, entityType, entityId, tenant, null, newValues, correlationId);
     }
 
-    public void createAuditLog(String action, String entityType, UUID entityId, Organization organization,
+    public void createAuditLog(String action, String entityType, UUID entityId, Tenant tenant,
                         User actor, Map<String, Object> newValues, UUID correlationId) {
         AuditLog audit = new AuditLog();
-        audit.setOrganization(organization);
+        audit.setTenant(tenant);
         audit.setActor(actor);
         audit.setAction(action);
         audit.setEntityType(entityType);

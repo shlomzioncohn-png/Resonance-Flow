@@ -30,8 +30,8 @@ public class Project {
     private UUID id;
 
     @ManyToOne
-    @JoinColumn(name = "organization_id", nullable = false)
-    private Organization organization;
+    @JoinColumn(name = "tenant_id", nullable = false)
+    private Tenant tenant;
 
     @Column(nullable = false)
     private String name;
@@ -75,12 +75,12 @@ public class Project {
         this.id = id;
     }
 
-    public Organization getOrganization() {
-        return organization;
+    public Tenant getTenant() {
+        return tenant;
     }
 
-    public void setOrganization(Organization organization) {
-        this.organization = organization;
+    public void setTenant(Tenant tenant) {
+        this.tenant = tenant;
     }
 
     public String getName() {
