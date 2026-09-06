@@ -1,0 +1,53 @@
+{
+  "scenario_id": "salesperson_expense_report_vs_departed_champion",
+  "persona": {
+    "role": "Salesperson",
+    "department": null
+  },
+  "context": {
+    "free_time_minutes": 40,
+    "current_datetime": "2026-09-07T09:00:00",
+    "time_horizon": "this_week",
+    "constraints": []
+  },
+  "tasks": [
+    {
+      "task_id": "task_expense",
+      "title": "File the monthly expense report",
+      "description": "The expense report is due today; routine admin.",
+      "deadline": "2026-09-07T23:00:00",
+      "effort_estimate": 15,
+      "tier": "operational",
+      "blocked": false,
+      "parent_task_id": null
+    },
+    {
+      "task_id": "task_filler_crm",
+      "title": "Clean up stale CRM opportunities",
+      "description": "Archive old pipeline entries that never progressed; housekeeping, no deadline.",
+      "deadline": null,
+      "effort_estimate": 15,
+      "tier": "operational",
+      "blocked": false,
+      "parent_task_id": null
+    },
+    {
+      "task_id": "task_champion",
+      "title": "Re-engage the new stakeholder on the Vertex deal",
+      "description": "Your champion at Vertex left the company last week; a competitor is already in the account and you need to build a relationship with their replacement before the evaluation closes. No deadline set.",
+      "deadline": null,
+      "effort_estimate": 40,
+      "tier": "tactical",
+      "blocked": false,
+      "parent_task_id": null
+    }
+  ],
+  "expected_top_task_id": "task_champion",
+  "expected_reason": "task_expense has a deadline but is routine admin; task_champion has no deadline but the deal is slipping — the champion is gone and a competitor is engaged — and the window is closing.",
+  "source": {
+    "type": "synthetic",
+    "source_detail": null
+  },
+  "team_lead_approved": false,
+  "mentor_approved": false
+}

@@ -1,0 +1,43 @@
+{
+  "scenario_id": "manager_escalation_call_vs_design_review",
+  "persona": {
+    "role": "Manager",
+    "department": null
+  },
+  "context": {
+    "free_time_minutes": 60,
+    "current_datetime": "2026-09-07T09:00:00",
+    "time_horizon": "this_week",
+    "constraints": []
+  },
+  "tasks": [
+    {
+      "task_id": "task_escalation",
+      "title": "Join the customer escalation call at 10:00",
+      "description": "A customer's integration broke overnight and their account team asked you to join the 10:00 call to speak to priorities and next steps.",
+      "deadline": "2026-09-07T10:00:00",
+      "effort_estimate": 40,
+      "tier": "tactical",
+      "blocked": false,
+      "parent_task_id": null
+    },
+    {
+      "task_id": "task_review",
+      "title": "Chair tomorrow's design review",
+      "description": "You are chairing the notifications-service design review at 14:00 tomorrow; prep the agenda and pre-read.",
+      "deadline": "2026-09-08T14:00:00",
+      "effort_estimate": 30,
+      "tier": "tactical",
+      "blocked": false,
+      "parent_task_id": null
+    }
+  ],
+  "expected_top_task_id": "task_escalation",
+  "expected_reason": "Both tasks are tactical with hard deadlines, but task_escalation's call is within the hour and task_review's is tomorrow afternoon.",
+  "source": {
+    "type": "synthetic",
+    "source_detail": null
+  },
+  "team_lead_approved": false,
+  "mentor_approved": false
+}

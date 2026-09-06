@@ -1,0 +1,43 @@
+{
+  "scenario_id": "manager_blocked_hire_vs_budget_review",
+  "persona": {
+    "role": "Manager",
+    "department": null
+  },
+  "context": {
+    "free_time_minutes": 45,
+    "current_datetime": "2026-09-07T09:00:00",
+    "time_horizon": "this_week",
+    "constraints": []
+  },
+  "tasks": [
+    {
+      "task_id": "task_budget",
+      "title": "Review the Q3 team budget before sign-off",
+      "description": "Go through the Q3 budget line by line and flag discrepancies before it goes to finance next Wednesday.",
+      "deadline": "2026-09-16T12:00:00",
+      "effort_estimate": 40,
+      "tier": "strategic",
+      "blocked": false,
+      "parent_task_id": null
+    },
+    {
+      "task_id": "task_hire",
+      "title": "Finalize the backend hire decision",
+      "description": "The candidate's competing offer expires Friday at 17:00, but you are still waiting on written feedback from two interview-panel members before you can make the call.",
+      "deadline": "2026-09-11T17:00:00",
+      "effort_estimate": 20,
+      "tier": "tactical",
+      "blocked": true,
+      "parent_task_id": null
+    }
+  ],
+  "expected_top_task_id": "task_budget",
+  "expected_reason": "task_hire is blocked on outstanding panel feedback and cannot be decided now, even though its deadline is sooner; task_budget is unblocked with a firm finance deadline next week.",
+  "source": {
+    "type": "synthetic",
+    "source_detail": null
+  },
+  "team_lead_approved": false,
+  "mentor_approved": false
+}

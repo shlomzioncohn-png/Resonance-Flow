@@ -1,0 +1,53 @@
+{
+  "scenario_id": "salesperson_at_risk_renewal_vs_new_logo",
+  "persona": {
+    "role": "Salesperson",
+    "department": null
+  },
+  "context": {
+    "free_time_minutes": 45,
+    "current_datetime": "2026-09-07T09:00:00",
+    "time_horizon": "this_week",
+    "constraints": []
+  },
+  "tasks": [
+    {
+      "task_id": "task_filler_crm",
+      "title": "Clean up stale CRM opportunities",
+      "description": "Archive old pipeline entries that never progressed; housekeeping, no deadline.",
+      "deadline": null,
+      "effort_estimate": 15,
+      "tier": "tactical",
+      "blocked": false,
+      "parent_task_id": null
+    },
+    {
+      "task_id": "task_renewal",
+      "title": "Address the Umbrella account churn risk",
+      "description": "Customer success flagged Umbrella as a churn risk after a rough support quarter; it is a large share of your territory and the renewal is in three weeks. No hard deadline yet.",
+      "deadline": null,
+      "effort_estimate": 45,
+      "tier": "tactical",
+      "blocked": false,
+      "parent_task_id": null
+    },
+    {
+      "task_id": "task_newlogo",
+      "title": "Prospect a high-profile new logo",
+      "description": "A well-known brand looks like a plausible fit; purely proactive outreach, no timeline.",
+      "deadline": null,
+      "effort_estimate": 40,
+      "tier": "tactical",
+      "blocked": false,
+      "parent_task_id": null
+    }
+  ],
+  "expected_top_task_id": "task_renewal",
+  "expected_reason": "Neither task has a deadline. task_renewal protects an at-risk renewal that is a large share of the territory; task_newlogo is speculative outreach with no timeline.",
+  "source": {
+    "type": "synthetic",
+    "source_detail": null
+  },
+  "team_lead_approved": false,
+  "mentor_approved": false
+}

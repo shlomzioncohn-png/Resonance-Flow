@@ -1,0 +1,53 @@
+{
+  "scenario_id": "higher_manager_vendor_firefight_vs_org_planning",
+  "persona": {
+    "role": "Higher Manager",
+    "department": null
+  },
+  "context": {
+    "free_time_minutes": 55,
+    "current_datetime": "2026-09-07T09:00:00",
+    "time_horizon": "this_week",
+    "constraints": []
+  },
+  "tasks": [
+    {
+      "task_id": "task_planning",
+      "title": "Start next year's org planning",
+      "description": "Kick off headcount and structure planning for next year; no deadline, early stage.",
+      "deadline": null,
+      "effort_estimate": 50,
+      "tier": "strategic",
+      "blocked": false,
+      "parent_task_id": null
+    },
+    {
+      "task_id": "task_vendor",
+      "title": "Personally close the stalled vendor contract",
+      "description": "You are the only person with the executive relationship at the vendor, and the deal collapses if it is not signed by Friday. Legal and procurement are ready; it needs your call.",
+      "deadline": null,
+      "effort_estimate": 45,
+      "tier": "operational",
+      "blocked": false,
+      "parent_task_id": null
+    },
+    {
+      "task_id": "task_filler_newsletter",
+      "title": "Write the monthly department newsletter blurb",
+      "description": "A short update for the company newsletter; flexible, no deadline.",
+      "deadline": null,
+      "effort_estimate": 15,
+      "tier": "strategic",
+      "blocked": false,
+      "parent_task_id": null
+    }
+  ],
+  "expected_top_task_id": "task_vendor",
+  "expected_reason": "Neither task carries a deadline field, but task_vendor's window closes Friday — the deal collapses without your signature — and only this persona can act on it; task_planning is early-stage work with no time pressure.",
+  "source": {
+    "type": "synthetic",
+    "source_detail": null
+  },
+  "team_lead_approved": false,
+  "mentor_approved": false
+}

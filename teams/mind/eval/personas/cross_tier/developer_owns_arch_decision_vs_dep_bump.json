@@ -1,0 +1,43 @@
+{
+  "scenario_id": "developer_owns_arch_decision_vs_dep_bump",
+  "persona": {
+    "role": "Developer",
+    "department": null
+  },
+  "context": {
+    "free_time_minutes": 50,
+    "current_datetime": "2026-09-07T09:00:00",
+    "time_horizon": "this_week",
+    "constraints": []
+  },
+  "tasks": [
+    {
+      "task_id": "task_arch",
+      "title": "Approve the payments-service architecture redesign",
+      "description": "You own the payments domain and three engineers are blocked from starting the rebuild until you review and sign off; it must be settled before Thursday's sprint planning so the work can be scoped.",
+      "deadline": "2026-09-10T10:00:00",
+      "effort_estimate": 45,
+      "tier": "strategic",
+      "blocked": false,
+      "parent_task_id": null
+    },
+    {
+      "task_id": "task_bump",
+      "title": "Bump the HTTP client library to the latest minor",
+      "description": "Routine dependency update; no behaviour change expected, no deadline.",
+      "deadline": null,
+      "effort_estimate": 20,
+      "tier": "operational",
+      "blocked": false,
+      "parent_task_id": null
+    }
+  ],
+  "expected_top_task_id": "task_arch",
+  "expected_reason": "task_arch is a strategic decision only this persona can make, three engineers are blocked until it is done, and it has a deadline before Thursday's planning; task_bump is a routine no-impact update with no deadline.",
+  "source": {
+    "type": "synthetic",
+    "source_detail": null
+  },
+  "team_lead_approved": false,
+  "mentor_approved": false
+}

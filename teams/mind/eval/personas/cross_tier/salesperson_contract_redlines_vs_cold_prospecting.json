@@ -1,37 +1,40 @@
 {
   "scenario_id": "salesperson_contract_redlines_vs_cold_prospecting",
-  "persona": { "role": "Salesperson", "department": "Sales" },
+  "persona": {
+    "role": "Salesperson",
+    "department": null
+  },
   "context": {
-    "free_time_minutes": 45,
-    "current_datetime": "2026-08-25T10:00:00",
+    "free_time_minutes": 50,
+    "current_datetime": "2026-09-07T10:00:00",
     "time_horizon": "this_week",
     "constraints": []
   },
   "tasks": [
     {
+      "task_id": "task_prospecting",
+      "title": "Cold-email a fresh 50-prospect list",
+      "description": "Work through intro emails to a newly pulled list; nothing time-bound.",
+      "deadline": null,
+      "effort_estimate": 40,
+      "tier": "operational",
+      "blocked": false,
+      "parent_task_id": null
+    },
+    {
       "task_id": "task_redlines",
-      "title": "Return the redlined contract to Acme",
-      "description": "Acme's legal team sent back redlines and said they will sign this Friday if they have our response by Wednesday.",
-      "deadline": "2026-08-26T17:00:00",
+      "title": "Return Acme's redlined contract",
+      "description": "Acme's legal team said they will sign this Friday only if they have our response by Wednesday 17:00.",
+      "deadline": "2026-09-09T17:00:00",
       "effort_estimate": 40,
       "tier": "tactical",
       "blocked": false,
       "parent_task_id": null
     },
     {
-      "task_id": "task_prospecting",
-      "title": "Cold-email a new prospect list",
-      "description": "Work through a freshly pulled list of 50 prospects with intro emails; early-stage outreach, nothing time-bound.",
-      "deadline": null,
-      "effort_estimate": 60,
-      "tier": "operational",
-      "blocked": false,
-      "parent_task_id": null
-    },
-    {
-      "task_id": "task_crm_notes",
+      "task_id": "task_crm",
       "title": "Log last week's call notes in the CRM",
-      "description": "Backfill notes from three discovery calls last week; housekeeping, nobody waiting on it.",
+      "description": "Backfill notes from three discovery calls; housekeeping, nobody waiting.",
       "deadline": null,
       "effort_estimate": 20,
       "tier": "operational",
@@ -40,8 +43,11 @@
     }
   ],
   "expected_top_task_id": "task_redlines",
-  "expected_reason": "task_redlines has a hard deadline Wednesday that a signature this Friday depends on; task_prospecting and task_crm_notes have no deadline and nothing time-bound. Closing the in-flight deal outranks both.",
-  "source": { "type": "synthetic", "source_detail": null },
+  "expected_reason": "task_redlines has a hard deadline Wednesday that the Friday signature depends on; task_prospecting and task_crm have no deadline and nothing time-bound.",
+  "source": {
+    "type": "synthetic",
+    "source_detail": null
+  },
   "team_lead_approved": false,
   "mentor_approved": false
 }

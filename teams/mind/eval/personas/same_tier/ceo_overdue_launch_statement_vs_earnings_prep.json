@@ -1,0 +1,43 @@
+{
+  "scenario_id": "ceo_overdue_launch_statement_vs_earnings_prep",
+  "persona": {
+    "role": "CEO",
+    "department": null
+  },
+  "context": {
+    "free_time_minutes": 50,
+    "current_datetime": "2026-09-07T09:00:00",
+    "time_horizon": "this_week",
+    "constraints": []
+  },
+  "tasks": [
+    {
+      "task_id": "task_statement",
+      "title": "Approve the product-launch press statement",
+      "description": "The statement was meant to go out with yesterday's launch, which has already happened; it is now only useful as a late follow-up.",
+      "deadline": "2026-09-06T09:00:00",
+      "effort_estimate": 25,
+      "tier": "strategic",
+      "blocked": false,
+      "parent_task_id": null
+    },
+    {
+      "task_id": "task_earnings",
+      "title": "Prepare for tomorrow's earnings call",
+      "description": "You present quarterly results to analysts at 08:00 tomorrow and the remarks are not finalized.",
+      "deadline": "2026-09-08T08:00:00",
+      "effort_estimate": 40,
+      "tier": "strategic",
+      "blocked": false,
+      "parent_task_id": null
+    }
+  ],
+  "expected_top_task_id": "task_earnings",
+  "expected_reason": "task_statement's deadline has already passed — the launch happened without it, so it is now low value; task_earnings has a real deadline tomorrow morning for a call that has not happened.",
+  "source": {
+    "type": "synthetic",
+    "source_detail": null
+  },
+  "team_lead_approved": false,
+  "mentor_approved": false
+}

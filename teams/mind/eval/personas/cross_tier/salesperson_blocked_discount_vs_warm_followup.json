@@ -1,27 +1,30 @@
 {
   "scenario_id": "salesperson_blocked_discount_vs_warm_followup",
-  "persona": { "role": "Salesperson", "department": "Sales" },
+  "persona": {
+    "role": "Salesperson",
+    "department": null
+  },
   "context": {
     "free_time_minutes": 30,
-    "current_datetime": "2026-08-25T15:00:00",
+    "current_datetime": "2026-09-07T15:00:00",
     "time_horizon": "this_week",
     "constraints": []
   },
   "tasks": [
     {
-      "task_id": "task_discount_quote",
-      "title": "Send Beta Corp the discounted quote they asked for",
-      "description": "Beta Corp says they will sign today at 25% off. The discount is non-standard and cannot be sent until the sales manager approves it; that approval is still outstanding.",
-      "deadline": "2026-08-25T18:00:00",
+      "task_id": "task_discount",
+      "title": "Send Beta Corp the 25%-off quote",
+      "description": "Beta Corp will sign today if they get the quote by 18:00, but a discount that size still needs the sales manager's approval and it has not come through.",
+      "deadline": "2026-09-07T18:00:00",
       "effort_estimate": 15,
       "tier": "tactical",
       "blocked": true,
       "parent_task_id": null
     },
     {
-      "task_id": "task_warm_followup",
+      "task_id": "task_followup",
       "title": "Send follow-up materials to three warm leads",
-      "description": "Three leads from last week's webinar asked for the case-study pack and pricing overview.",
+      "description": "Three webinar leads asked for the case-study pack and pricing overview.",
       "deadline": null,
       "effort_estimate": 25,
       "tier": "operational",
@@ -29,9 +32,12 @@
       "parent_task_id": null
     }
   ],
-  "expected_top_task_id": "task_warm_followup",
-  "expected_reason": "task_discount_quote is blocked: the non-standard discount cannot be sent until the sales manager approves it, so its same-day deadline cannot be acted on right now. task_warm_followup is unblocked and moves three warm leads forward.",
-  "source": { "type": "synthetic", "source_detail": null },
+  "expected_top_task_id": "task_followup",
+  "expected_reason": "task_discount is blocked on the sales manager's outstanding approval and cannot be sent now despite its same-day deadline; task_followup is unblocked and moves three warm leads forward.",
+  "source": {
+    "type": "synthetic",
+    "source_detail": null
+  },
   "team_lead_approved": false,
   "mentor_approved": false
 }

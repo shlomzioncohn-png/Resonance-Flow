@@ -156,19 +156,40 @@ can only raise, not warn, which is why these stay in Python rather than in the m
 
 ## Status
 
-The full set is drafted: **26 scenarios** across all six roles (Developer 4,
-Manager 5, Higher Manager 4, Field Engineer 5, Salesperson 4, CEO 4), split into
-`same_tier/` (16) and `cross_tier/` (10). All load cleanly through
-`load_personas` and `validate_personas` reports no errors and no role-coverage /
+The full set is drafted: **30 scenarios** across all six roles (**5 per role**),
+split into `same_tier/` (17) and `cross_tier/` (13). All load cleanly through
+`load_personas`; `validate_personas` reports no errors and no role-coverage /
 count warnings — the only warnings left are `mentor_approved: false` on every
 scenario, which is expected until the mentor review happens.
 
-Each role's scenarios test different tradeoffs, drawn from a shared set: a
-same-day hard deadline vs. no deadline; a `blocked` distractor with a concrete
-external blocker; a customer-facing vs. internal importance call; a recurring
-risk vs. a nice-to-have; and a deadline far in the future that must *not* read
-as urgency. Five scenarios carry a third "clear filler" task as a robustness
-distractor.
+Each role's five scenarios test five *different* tradeoffs, no dimension repeated
+within a role:
+
+- **A** — a hard deadline vs. a task with none (deadline is right)
+- **blocked** — the *blocked* task carries the *nearest* deadline, so a model that
+  ignores `blocked` and picks the soonest deadline gets it wrong
+- **proximity** — both tasks have deadlines; the nearer one is right
+- **nearest-deadline-wrong** — a soon but trivial deadline vs. a critical task
+  with no/later deadline; only reading the description gets this right
+- one of: **persona ≠ tier** (a CEO's operational firefight, a Developer's
+  strategic sign-off), a **deadline that has already passed** (the thing it was
+  for is over — deprioritize it), or **customer-facing vs. internal impact**
+
+### Cheap-baseline scores (the reason this set exists)
+
+The set is the measuring stick for baseline-vs-stretch. If a two-line heuristic
+already near-ceilings, there is no room to show a real model's improvement. Run
+against all 30:
+
+| Strategy | Score |
+|---|---|
+| pick the first task (`DummyModel`) | ~37% |
+| pick the nearest deadline, ignore `blocked` | ~43% |
+| **skip `blocked`, then nearest deadline** | **~63%** |
+
+No trivial position rule beats ~50%. The ~20-point gap between the last two rows
+is deliberate — it is the headroom a model earns by recognising `blocked`; the
+~37 points above 63% is the headroom it earns by reading descriptions.
 
 **Post-mentor-review cleanup (2026-08-31).** The mentor's feedback: (1) the model
 now receives `current_datetime` as context, so deadline-proximity reasoning is
@@ -199,6 +220,24 @@ Field Engineer 5, Salesperson 4, CEO 4).
   never being the deciding factor — which it structurally can't be (the model
   never sees it, and the mentor ruled no scenario may depend on it). The field
   stays in the schema for future consumers; this set just doesn't populate it.
+
+**Mentor review of the set (2026-09-06).** The mentor ran trivial baselines and
+found a two-line heuristic scored 85%, leaving no room to measure a real model's
+improvement. The set was rebuilt to **30 scenarios (5 per role)** so that:
+
+- the "skip `blocked`, then nearest deadline" baseline scores **~63%** (down from
+  85%) — see *Cheap-baseline scores* above;
+- every `blocked` scenario gives the **blocked task the nearest deadline**, so
+  handling `blocked` is what separates the ~43% and ~63% baselines;
+- **both tasks fit `free_time_minutes`** in every scenario, so Chain's effort
+  filter can never eliminate the distractor and hand the model a free answer;
+- the correct answer's **position is shuffled** (index 0 in 11/30, 1 in 15, 2 in
+  4; no "pick task *k*" rule beats ~50%), and no 3-task scenario has it first;
+- **persona ≠ tier** in several scenarios (a CEO doing operational work, a
+  Developer doing strategic work), so "role ⇒ tier" is not a shortcut;
+- two scenarios test a **deadline that has already passed**;
+- every `deadline` is justified in the task's own `description`;
+- no scheduled-meeting start time is used as a `deadline`.
 
 ## Contributing a scenario
 
@@ -295,11 +334,11 @@ which the model does see:
   If two of your scenarios are the same test with different flavor text, cut one.
 
 **Pattern-match against the existing set before inventing a new style** —
-`cross_tier/developer_urgent_bugfix_vs_new_feature.json` (deadline + impact),
+`cross_tier/developer_prod_crash_vs_backlog_feature.json` (deadline + impact),
 `cross_tier/developer_blocked_oauth_vs_pr_review.json` (`blocked` distractor),
 `same_tier/field_engineer_customer_degradation_vs_internal_tooling.json` (customer
-vs. internal), and `cross_tier/manager_unblock_design_review_vs_annual_plan.json`
-(a far-future deadline that isn't urgency) each demonstrate one pattern end-to-end.
+vs. internal), and `same_tier/manager_status_digest_vs_reorg_proposal.json`
+(a near deadline that is the *wrong* choice) each demonstrate one pattern end-to-end.
 
 ## Review status
 
@@ -307,14 +346,11 @@ vs. internal), and `cross_tier/manager_unblock_design_review_vs_annual_plan.json
 "Partially approved with a documented plan to close" is the honest state to
 report if 100% isn't reached by the Foundation Gate.)*
 
-**Team-lead review (PR):**
-- **Reviewed by:** estherora-tem — in progress on PR #198
-- **Approved:** 1 / 26 scenarios (`team_lead_approved: true`) —
-  `developer_urgent_bugfix_vs_new_feature`; the rest pending re-review after the
-  2026-09-01 cleanup.
-
-**Mentor review:**
-- **Review date:** _TBD_
-- **Reviewed by:** _TBD_
-- **Approved:** _TBD_ / 26 scenarios (`mentor_approved: true`)
+**Team-lead / mentor review (PR #198):**
+- **Reviewed by:** estherora-tem
+- **Approved:** 0 / 30 (`team_lead_approved` / `mentor_approved` both `false` on
+  every scenario). The set was rebuilt on 2026-09-06 in response to the mentor's
+  review (baseline too high, blocked-distractor pattern, effort/free-time,
+  persona↔tier, position bias, deadline-passed) — all 30 are pending a fresh
+  review pass.
 - **Notes / pending changes:** _TBD_

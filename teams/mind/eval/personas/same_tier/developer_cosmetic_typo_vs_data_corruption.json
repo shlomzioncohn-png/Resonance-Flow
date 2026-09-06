@@ -1,0 +1,53 @@
+{
+  "scenario_id": "developer_cosmetic_typo_vs_data_corruption",
+  "persona": {
+    "role": "Developer",
+    "department": null
+  },
+  "context": {
+    "free_time_minutes": 60,
+    "current_datetime": "2026-09-07T09:00:00",
+    "time_horizon": "today",
+    "constraints": []
+  },
+  "tasks": [
+    {
+      "task_id": "task_filler_wiki",
+      "title": "Update a stale section of the team wiki",
+      "description": "Refresh a few out-of-date paragraphs on the internal wiki; nobody is waiting on it, no deadline.",
+      "deadline": null,
+      "effort_estimate": 15,
+      "tier": "operational",
+      "blocked": false,
+      "parent_task_id": null
+    },
+    {
+      "task_id": "task_typo",
+      "title": "Fix a typo in a dashboard tooltip",
+      "description": "A product manager asked to fix a wording typo in a tooltip before this afternoon's 15:00 demo; purely cosmetic.",
+      "deadline": "2026-09-07T15:00:00",
+      "effort_estimate": 15,
+      "tier": "operational",
+      "blocked": false,
+      "parent_task_id": null
+    },
+    {
+      "task_id": "task_corruption",
+      "title": "Stop the nightly export job corrupting rows",
+      "description": "The customer-data export job has started writing malformed records; every run corrupts more rows and there is no clean rollback. No deadline set, but it worsens each night.",
+      "deadline": null,
+      "effort_estimate": 40,
+      "tier": "operational",
+      "blocked": false,
+      "parent_task_id": null
+    }
+  ],
+  "expected_top_task_id": "task_corruption",
+  "expected_reason": "task_corruption is silently damaging customer data and compounding every night; task_typo is a cosmetic wording change. The typo has a deadline and the corruption does not, but the data loss is far more serious.",
+  "source": {
+    "type": "synthetic",
+    "source_detail": null
+  },
+  "team_lead_approved": false,
+  "mentor_approved": false
+}

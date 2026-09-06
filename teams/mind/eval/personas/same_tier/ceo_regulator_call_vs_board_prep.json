@@ -1,0 +1,43 @@
+{
+  "scenario_id": "ceo_regulator_call_vs_board_prep",
+  "persona": {
+    "role": "CEO",
+    "department": null
+  },
+  "context": {
+    "free_time_minutes": 55,
+    "current_datetime": "2026-09-07T09:00:00",
+    "time_horizon": "today",
+    "constraints": []
+  },
+  "tasks": [
+    {
+      "task_id": "task_board",
+      "title": "Finalize Thursday's board prep",
+      "description": "Pull together your notes for Thursday's board session; two days out.",
+      "deadline": "2026-09-10T09:00:00",
+      "effort_estimate": 45,
+      "tier": "strategic",
+      "blocked": false,
+      "parent_task_id": null
+    },
+    {
+      "task_id": "task_regulator",
+      "title": "Take the regulator's call at 11:00",
+      "description": "The regulator's office scheduled a call with you personally at 11:00 today about the pending licence review; it cannot be delegated.",
+      "deadline": "2026-09-07T11:00:00",
+      "effort_estimate": 30,
+      "tier": "strategic",
+      "blocked": false,
+      "parent_task_id": null
+    }
+  ],
+  "expected_top_task_id": "task_regulator",
+  "expected_reason": "Both tasks are strategic with hard deadlines, but the regulator call is in two hours and the board prep is two days out.",
+  "source": {
+    "type": "synthetic",
+    "source_detail": null
+  },
+  "team_lead_approved": false,
+  "mentor_approved": false
+}

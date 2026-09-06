@@ -1,0 +1,43 @@
+{
+  "scenario_id": "developer_login_hotfix_vs_migration",
+  "persona": {
+    "role": "Developer",
+    "department": null
+  },
+  "context": {
+    "free_time_minutes": 40,
+    "current_datetime": "2026-09-07T09:00:00",
+    "time_horizon": "today",
+    "constraints": []
+  },
+  "tasks": [
+    {
+      "task_id": "task_migration",
+      "title": "Run the accounts-table migration",
+      "description": "A schema migration that must be applied before tomorrow's 06:00 deploy window or the release slips a day.",
+      "deadline": "2026-09-08T06:00:00",
+      "effort_estimate": 35,
+      "tier": "operational",
+      "blocked": false,
+      "parent_task_id": null
+    },
+    {
+      "task_id": "task_hotfix",
+      "title": "Hotfix the login 500 spike",
+      "description": "Login has been returning 500s for a growing share of users since 08:40; the on-call SLA requires a fix within the hour.",
+      "deadline": "2026-09-07T10:00:00",
+      "effort_estimate": 30,
+      "tier": "operational",
+      "blocked": false,
+      "parent_task_id": null
+    }
+  ],
+  "expected_top_task_id": "task_hotfix",
+  "expected_reason": "Both tasks are operational with hard deadlines, but task_hotfix's is within the hour (an active login outage) while task_migration's is tomorrow morning.",
+  "source": {
+    "type": "synthetic",
+    "source_detail": null
+  },
+  "team_lead_approved": false,
+  "mentor_approved": false
+}
