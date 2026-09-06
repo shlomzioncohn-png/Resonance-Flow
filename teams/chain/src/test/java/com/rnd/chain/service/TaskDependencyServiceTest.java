@@ -10,16 +10,13 @@ import com.rnd.chain.repository.InMemoryTaskDependencyRepository;
 import com.rnd.chain.repository.InMemoryTaskRepository;
 import com.rnd.chain.repository.TaskDependencyRepository;
 import com.rnd.chain.repository.TaskRepository;
+import com.rnd.chain.testsupport.ConcurrentTestRunner;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.UUID;
-import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
-import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -93,7 +90,7 @@ class TaskDependencyServiceTest {
         AtomicInteger successes = new AtomicInteger();
         AtomicInteger duplicateRejections = new AtomicInteger();
 
-        runConcurrently(threadCount, () -> {
+        ConcurrentTestRunner.run(threadCount, () -> {
             try {
                 service.addDependency(taskA, taskB);
                 successes.incrementAndGet();
@@ -132,7 +129,7 @@ class TaskDependencyServiceTest {
         AtomicInteger successes = new AtomicInteger();
         AtomicInteger notFoundRejections = new AtomicInteger();
 
-        runConcurrently(threadCount, () -> {
+        ConcurrentTestRunner.run(threadCount, () -> {
             try {
                 service.removeDependency(taskA, taskB);
                 successes.incrementAndGet();
@@ -183,36 +180,6 @@ class TaskDependencyServiceTest {
 
         assertThat(service.getDependencies(taskA)).containsExactlyInAnyOrder(taskB, taskC);
         assertThat(service.getDependents(taskA)).containsExactly(taskD);
-    }
-
-    private static void runConcurrently(int threadCount, Runnable task) throws InterruptedException {
-        ExecutorService pool = Executors.newFixedThreadPool(threadCount);
-        CountDownLatch ready = new CountDownLatch(threadCount);
-        CountDownLatch start = new CountDownLatch(1);
-        CountDownLatch done = new CountDownLatch(threadCount);
-
-        for (int i = 0; i < threadCount; i++) {
-            pool.submit(() -> {
-                ready.countDown();
-                await(start);
-                task.run();
-                done.countDown();
-            });
-        }
-
-        ready.await(5, TimeUnit.SECONDS);
-        start.countDown();
-        done.await(10, TimeUnit.SECONDS);
-        pool.shutdown();
-    }
-
-    private static void await(CountDownLatch latch) {
-        try {
-            latch.await();
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            throw new RuntimeException(e);
-        }
     }
 
     private static Task newTask(UUID id) {

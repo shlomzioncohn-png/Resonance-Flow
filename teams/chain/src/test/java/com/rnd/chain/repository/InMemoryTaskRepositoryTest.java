@@ -2,6 +2,7 @@ package com.rnd.chain.repository;
 
 import com.rnd.chain.dto.Task;
 import com.rnd.chain.dto.TaskStatus;
+import com.rnd.chain.testsupport.ConcurrentTestRunner;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -9,10 +10,6 @@ import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
-import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
-import java.util.concurrent.TimeUnit;
 import java.util.function.UnaryOperator;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -48,38 +45,15 @@ class InMemoryTaskRepositoryTest {
     void update_isAtomicUnderConcurrentIncrement() throws InterruptedException {
         int threadCount = 20;
         int incrementsPerThread = 200;
-        ExecutorService pool = Executors.newFixedThreadPool(threadCount);
-        CountDownLatch ready = new CountDownLatch(threadCount);
-        CountDownLatch start = new CountDownLatch(1);
-        CountDownLatch done = new CountDownLatch(threadCount);
 
-        for (int i = 0; i < threadCount; i++) {
-            pool.submit(() -> {
-                ready.countDown();
-                await(start);
-                for (int j = 0; j < incrementsPerThread; j++) {
-                    repository.update(taskId, task -> incrementBlockingCount(task));
-                }
-                done.countDown();
-            });
-        }
-
-        ready.await(5, TimeUnit.SECONDS);
-        start.countDown();
-        done.await(10, TimeUnit.SECONDS);
-        pool.shutdown();
+        ConcurrentTestRunner.run(threadCount, () -> {
+            for (int j = 0; j < incrementsPerThread; j++) {
+                repository.update(taskId, task -> incrementBlockingCount(task));
+            }
+        });
 
         assertThat(repository.findById(taskId).orElseThrow().getBlockingCount())
                 .isEqualTo(threadCount * incrementsPerThread);
-    }
-
-    private static void await(CountDownLatch latch) {
-        try {
-            latch.await();
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            throw new RuntimeException(e);
-        }
     }
 
     private static Task newTask(UUID id, int blockingCount) {

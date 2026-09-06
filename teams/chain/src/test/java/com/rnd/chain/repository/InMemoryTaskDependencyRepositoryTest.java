@@ -1,18 +1,14 @@
 package com.rnd.chain.repository;
 
 import com.rnd.chain.dto.TaskDependency;
+import com.rnd.chain.testsupport.ConcurrentTestRunner;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
-import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
-import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
-import java.util.function.IntConsumer;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -130,7 +126,7 @@ class InMemoryTaskDependencyRepositoryTest {
         AtomicInteger successes = new AtomicInteger();
         AtomicInteger noOps = new AtomicInteger();
 
-        runConcurrently(threadCount, () -> {
+        ConcurrentTestRunner.run(threadCount, () -> {
             Optional<TaskDependency> result = repository.save(new TaskDependency(a, b));
             if (result.isPresent()) {
                 successes.incrementAndGet();
@@ -153,7 +149,7 @@ class InMemoryTaskDependencyRepositoryTest {
         AtomicInteger successes = new AtomicInteger();
         AtomicInteger noOps = new AtomicInteger();
 
-        runConcurrently(threadCount, () -> {
+        ConcurrentTestRunner.run(threadCount, () -> {
             boolean removed = repository.delete(a, b);
             if (removed) {
                 successes.incrementAndGet();
@@ -175,46 +171,10 @@ class InMemoryTaskDependencyRepositoryTest {
             dependsOnIds[i] = UUID.randomUUID();
         }
 
-        runConcurrently(edgeCount, index -> repository.save(new TaskDependency(a, dependsOnIds[index])));
+        ConcurrentTestRunner.run(edgeCount, index -> repository.save(new TaskDependency(a, dependsOnIds[index])));
 
         assertThat(repository.findByTaskId(a))
                 .extracting(TaskDependency::getDependsOnTaskId)
                 .containsExactlyInAnyOrder(dependsOnIds);
-    }
-
-    private static void runConcurrently(int threadCount, Runnable task) throws InterruptedException {
-        runConcurrently(threadCount, index -> task.run());
-    }
-
-    private static void runConcurrently(int threadCount, IntConsumer indexedTask)
-            throws InterruptedException {
-        ExecutorService pool = Executors.newFixedThreadPool(threadCount);
-        CountDownLatch ready = new CountDownLatch(threadCount);
-        CountDownLatch start = new CountDownLatch(1);
-        CountDownLatch done = new CountDownLatch(threadCount);
-
-        for (int i = 0; i < threadCount; i++) {
-            int index = i;
-            pool.submit(() -> {
-                ready.countDown();
-                await(start);
-                indexedTask.accept(index);
-                done.countDown();
-            });
-        }
-
-        ready.await(5, TimeUnit.SECONDS);
-        start.countDown();
-        done.await(10, TimeUnit.SECONDS);
-        pool.shutdown();
-    }
-
-    private static void await(CountDownLatch latch) {
-        try {
-            latch.await();
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            throw new RuntimeException(e);
-        }
     }
 }
