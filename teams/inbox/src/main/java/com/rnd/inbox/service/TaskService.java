@@ -2,12 +2,17 @@ package com.rnd.inbox.service;
 
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.rnd.inbox.dto.TaskCompletedPayload;
 import com.rnd.inbox.dto.TaskCreatedPayload;
+import com.rnd.inbox.dto.TaskUpdatedPayload;
 import com.rnd.inbox.event.EventType;
 import com.rnd.inbox.exception.TaskNotFoundException;
+import com.rnd.inbox.mapper.TaskMapper;
 import com.rnd.inbox.model.entity.Assignment;
 import com.rnd.inbox.model.entity.OutboxEvent;
 import com.rnd.inbox.model.entity.Task;
+import com.rnd.inbox.model.entity.User;
+import com.rnd.inbox.model.enums.TaskStatus;
 import com.rnd.inbox.repository.AssignmentRepository;
 import com.rnd.inbox.repository.OutboxEventRepository;
 import com.rnd.inbox.repository.TaskRepository;
@@ -31,6 +36,7 @@ public class TaskService {
     private final AuditService auditService;
     private final OutboxEventRepository outboxEventRepository;
     private final AssignmentRepository assignmentRepository;
+    private final TaskMapper taskMapper;
     private final ObjectMapper objectMapper;
     private final Clock clock;
 
@@ -38,12 +44,14 @@ public class TaskService {
                        AuditService auditService,
                        OutboxEventRepository outboxEventRepository,
                        AssignmentRepository assignmentRepository,
+                       TaskMapper taskMapper,
                        ObjectMapper objectMapper,
                        Clock clock) {
         this.taskRepository = taskRepository;
         this.auditService = auditService;
         this.outboxEventRepository = outboxEventRepository;
         this.assignmentRepository = assignmentRepository;
+        this.taskMapper = taskMapper;
         this.objectMapper = objectMapper;
         this.clock = clock;
     }
@@ -67,8 +75,48 @@ public class TaskService {
             assignmentRepository.save(assignment);
         }
 
-        outboxEventRepository.save(buildTaskCreatedOutboxEvent(saved, correlationId));
-        auditService.createAuditLog("TASK_CREATED", "Task", saved.getId(), saved.getOrganization(),
+        outboxEventRepository.save(buildOutboxEvent(EventType.TASK_CREATED, TaskCreatedPayload.from(saved), saved, correlationId));
+        auditService.createAuditLog("TASK_CREATED", "Task", saved.getId(), saved.getOrganization(), saved.getCreatedBy(),
+                auditSnapshot(saved), correlationId);
+        return saved;
+    }
+
+    @Transactional
+    public Task updateTask(UUID taskId, Task changes, UUID correlationId) {
+        Task existing = taskRepository.findById(taskId)
+                .orElseThrow(() -> new TaskNotFoundException(taskId));
+
+        taskMapper.applyUpdate(existing, changes);
+
+        return updateTask(existing, correlationId);
+    }
+
+    @Transactional
+    public Task updateTask(Task task, UUID correlationId) {
+        Task saved = taskRepository.save(task);
+
+        outboxEventRepository.save(buildOutboxEvent(EventType.TASK_UPDATED, TaskUpdatedPayload.from(saved), saved, correlationId));
+        auditService.createAuditLog("TASK_UPDATED", "Task", saved.getId(), saved.getOrganization(),
+                auditSnapshot(saved), correlationId);
+        return saved;
+    }
+
+    @Transactional
+    public Task completeTask(UUID taskId, User completedBy, UUID correlationId) {
+        Task existing = taskRepository.findById(taskId)
+                .orElseThrow(() -> new TaskNotFoundException(taskId));
+
+        return completeTask(existing, completedBy, correlationId);
+    }
+
+    @Transactional
+    public Task completeTask(Task task, User completedBy, UUID correlationId) {
+        task.setStatus(TaskStatus.DONE);
+        task.setCompletedAt(Instant.now(clock));
+        Task saved = taskRepository.save(task);
+
+        outboxEventRepository.save(buildOutboxEvent(EventType.TASK_COMPLETED, TaskCompletedPayload.from(saved), saved, correlationId));
+        auditService.createAuditLog("TASK_COMPLETED", "Task", saved.getId(), saved.getOrganization(), completedBy,
                 auditSnapshot(saved), correlationId);
         return saved;
     }
@@ -101,14 +149,14 @@ public class TaskService {
         return taskRepository.saveAndFlush(incoming);
     }
 
-    private OutboxEvent buildTaskCreatedOutboxEvent(Task saved, UUID correlationId) {
-        Map<String, Object> payload = objectMapper.convertValue(TaskCreatedPayload.from(saved), PAYLOAD_TYPE);
+    private OutboxEvent buildOutboxEvent(EventType eventType, Object payload, Task saved, UUID correlationId) {
+        Map<String, Object> payloadMap = objectMapper.convertValue(payload, PAYLOAD_TYPE);
 
         return OutboxEvent.pending(
-                EventType.TASK_CREATED,
+                eventType,
                 saved.getId(),
                 saved.getId().toString(),
-                payload,
+                payloadMap,
                 correlationId,
                 Instant.now(clock));
     }

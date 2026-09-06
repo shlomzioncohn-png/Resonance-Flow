@@ -2,6 +2,7 @@ package com.rnd.inbox.service;
 
 import com.rnd.inbox.model.entity.AuditLog;
 import com.rnd.inbox.model.entity.Organization;
+import com.rnd.inbox.model.entity.User;
 import com.rnd.inbox.repository.AuditLogRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -54,5 +55,34 @@ class AuditServiceTest {
         assertThat(audit.getNewValues()).isEqualTo(newValues);
         assertThat(audit.getCorrelationId()).isEqualTo(correlationId);
         assertThat(audit.getCreatedAt()).isEqualTo(FIXED_NOW);
+    }
+
+    @Test
+    void createAuditLog_withoutActor_leavesActorNull() {
+        Organization organization = new Organization();
+        organization.setId(UUID.randomUUID());
+        Map<String, Object> newValues = Map.of("title", "Fix flaky test");
+
+        auditService.createAuditLog("TASK_CREATED", "Task", UUID.randomUUID(), organization, newValues, UUID.randomUUID());
+
+        ArgumentCaptor<AuditLog> captor = ArgumentCaptor.forClass(AuditLog.class);
+        verify(auditLogRepository).save(captor.capture());
+        assertThat(captor.getValue().getActor()).isNull();
+    }
+
+    @Test
+    void createAuditLog_withActor_setsActorOnTheAuditLog() {
+        Organization organization = new Organization();
+        organization.setId(UUID.randomUUID());
+        User actor = new User();
+        actor.setId(UUID.randomUUID());
+        Map<String, Object> newValues = Map.of("status", "DONE");
+
+        auditService.createAuditLog("TASK_COMPLETED", "Task", UUID.randomUUID(), organization, actor,
+                newValues, UUID.randomUUID());
+
+        ArgumentCaptor<AuditLog> captor = ArgumentCaptor.forClass(AuditLog.class);
+        verify(auditLogRepository).save(captor.capture());
+        assertThat(captor.getValue().getActor()).isEqualTo(actor);
     }
 }

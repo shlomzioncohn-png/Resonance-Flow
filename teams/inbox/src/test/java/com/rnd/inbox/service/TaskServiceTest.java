@@ -3,6 +3,8 @@ package com.rnd.inbox.service;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import com.rnd.inbox.event.EventType;
+import com.rnd.inbox.exception.TaskNotFoundException;
+import com.rnd.inbox.mapper.TaskMapper;
 import com.rnd.inbox.model.entity.Assignment;
 import com.rnd.inbox.model.entity.Organization;
 import com.rnd.inbox.model.entity.OutboxEvent;
@@ -32,6 +34,7 @@ import java.util.Optional;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
@@ -56,6 +59,9 @@ class TaskServiceTest {
     @Mock
     private AssignmentRepository assignmentRepository;
 
+    @Mock
+    private TaskMapper taskMapper;
+
     private final ObjectMapper objectMapper = new ObjectMapper().registerModule(new JavaTimeModule());
     private final Clock clock = Clock.fixed(NOW, ZoneOffset.UTC);
 
@@ -70,6 +76,7 @@ class TaskServiceTest {
                 auditService,
                 outboxEventRepository,
                 assignmentRepository,
+                taskMapper,
                 objectMapper,
                 clock);
         organizationId = UUID.randomUUID();
@@ -92,7 +99,7 @@ class TaskServiceTest {
 
         @SuppressWarnings("unchecked")
         ArgumentCaptor<Map<String, Object>> snapshotCaptor = ArgumentCaptor.forClass(Map.class);
-        verify(auditService).createAuditLog(eq("TASK_CREATED"), eq("Task"), eq(generatedId), eq(organization),
+        verify(auditService).createAuditLog(eq("TASK_CREATED"), eq("Task"), eq(generatedId), eq(organization), eq(incoming.getCreatedBy()),
                 snapshotCaptor.capture(), eq(correlationId));
         assertThat(snapshotCaptor.getValue())
                 .containsEntry("title", "Fix flaky test")
@@ -195,6 +202,128 @@ class TaskServiceTest {
         taskService.createTask(incoming, null, UUID.randomUUID());
 
         verify(assignmentRepository, never()).save(any());
+    }
+
+    @Test
+    void updateTask_persistsChangesAndWritesAuditLog() {
+        Task task = incomingTask();
+        task.setId(UUID.randomUUID());
+        UUID correlationId = UUID.randomUUID();
+        when(taskRepository.save(task)).thenReturn(task);
+
+        Task result = taskService.updateTask(task, correlationId);
+
+        assertThat(result).isSameAs(task);
+        verify(taskRepository).save(task);
+        verify(auditService).createAuditLog(eq("TASK_UPDATED"), eq("Task"), eq(task.getId()), eq(organization),
+                any(), eq(correlationId));
+    }
+
+    @Test
+    void updateTask_writesPendingOutboxEventWithTaskUpdatedType() {
+        Task task = incomingTask();
+        task.setId(UUID.randomUUID());
+        when(taskRepository.save(task)).thenReturn(task);
+
+        taskService.updateTask(task, UUID.randomUUID());
+
+        OutboxEvent event = capturedOutboxEvent();
+        assertThat(event.getEventType()).isEqualTo(EventType.TASK_UPDATED);
+        assertThat(event.getAggregateId()).isEqualTo(task.getId());
+        assertThat(event.getPayload()).containsEntry("taskId", task.getId().toString());
+    }
+
+    @Test
+    void updateTask_whenTaskIdFound_appliesMapperAndDelegatesToInternalUpdate() {
+        UUID taskId = UUID.randomUUID();
+        Task existing = incomingTask();
+        existing.setId(taskId);
+        Task changes = new Task();
+        changes.setTitle("New title");
+        when(taskRepository.findById(taskId)).thenReturn(Optional.of(existing));
+        when(taskRepository.save(existing)).thenReturn(existing);
+
+        Task result = taskService.updateTask(taskId, changes, UUID.randomUUID());
+
+        verify(taskMapper).applyUpdate(existing, changes);
+        assertThat(result).isSameAs(existing);
+    }
+
+    @Test
+    void updateTask_whenTaskIdNotFound_throwsTaskNotFoundExceptionAndNeverTouchesOutboxOrAudit() {
+        UUID taskId = UUID.randomUUID();
+        when(taskRepository.findById(taskId)).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> taskService.updateTask(taskId, new Task(), UUID.randomUUID()))
+                .isInstanceOf(TaskNotFoundException.class);
+
+        verify(outboxEventRepository, never()).save(any());
+        verify(auditService, never()).createAuditLog(any(), any(), any(), any(), any(), any());
+    }
+
+    @Test
+    void completeTask_setsStatusDoneAndCompletedAt() {
+        Task task = incomingTask();
+        task.setId(UUID.randomUUID());
+        when(taskRepository.save(task)).thenReturn(task);
+
+        Task result = taskService.completeTask(task, null, UUID.randomUUID());
+
+        assertThat(result.getStatus()).isEqualTo(TaskStatus.DONE);
+        assertThat(result.getCompletedAt()).isEqualTo(NOW);
+    }
+
+    @Test
+    void completeTask_writesPendingOutboxEventWithTaskCompletedTypeAndIsCompletedTrue() {
+        Task task = incomingTask();
+        task.setId(UUID.randomUUID());
+        when(taskRepository.save(task)).thenReturn(task);
+
+        taskService.completeTask(task, null, UUID.randomUUID());
+
+        OutboxEvent event = capturedOutboxEvent();
+        assertThat(event.getEventType()).isEqualTo(EventType.TASK_COMPLETED);
+        assertThat(event.getPayload())
+                .containsEntry("taskId", task.getId().toString())
+                .containsEntry("completed", true);
+    }
+
+    @Test
+    void completeTask_writesAuditLogWithActor() {
+        Task task = incomingTask();
+        task.setId(UUID.randomUUID());
+        User completedBy = new User();
+        completedBy.setId(UUID.randomUUID());
+        when(taskRepository.save(task)).thenReturn(task);
+
+        taskService.completeTask(task, completedBy, UUID.randomUUID());
+
+        verify(auditService).createAuditLog(eq("TASK_COMPLETED"), eq("Task"), eq(task.getId()), eq(organization),
+                eq(completedBy), any(), any());
+    }
+
+    @Test
+    void completeTask_whenTaskIdFound_delegatesToInternalComplete() {
+        UUID taskId = UUID.randomUUID();
+        Task existing = incomingTask();
+        existing.setId(taskId);
+        when(taskRepository.findById(taskId)).thenReturn(Optional.of(existing));
+        when(taskRepository.save(existing)).thenReturn(existing);
+
+        Task result = taskService.completeTask(taskId, null, UUID.randomUUID());
+
+        assertThat(result.getStatus()).isEqualTo(TaskStatus.DONE);
+    }
+
+    @Test
+    void completeTask_whenTaskIdNotFound_throwsTaskNotFoundExceptionAndNeverTouchesOutbox() {
+        UUID taskId = UUID.randomUUID();
+        when(taskRepository.findById(taskId)).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> taskService.completeTask(taskId, null, UUID.randomUUID()))
+                .isInstanceOf(TaskNotFoundException.class);
+
+        verify(outboxEventRepository, never()).save(any());
     }
 
     private void stubNoExistingTask() {

@@ -23,12 +23,12 @@ public class AuditService {
     }
 
     public void createAuditLog(String action, String entityType, UUID entityId, Organization organization,
-                               Map<String, Object> newValues, UUID correlationId) {
+                        Map<String, Object> newValues, UUID correlationId) {
         createAuditLog(action, entityType, entityId, organization, null, newValues, correlationId);
     }
 
     public void createAuditLog(String action, String entityType, UUID entityId, Organization organization,
-                               User actor, Map<String, Object> newValues, UUID correlationId) {
+                        User actor, Map<String, Object> newValues, UUID correlationId) {
         AuditLog audit = new AuditLog();
         audit.setOrganization(organization);
         audit.setActor(actor);
