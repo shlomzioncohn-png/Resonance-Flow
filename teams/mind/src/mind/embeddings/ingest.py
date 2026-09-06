@@ -5,11 +5,13 @@ Ingest pipeline: loader.fetch_real_slice() -> embed_batch() -> upsert
 Run:  python -m mind.embeddings.ingest
 """
 
+import asyncio
+
 from mind.embeddings import embed_batch, upsert
 from mind.embeddings.loader import fetch_real_slice
 
 
-def main():
+async def main():
     records = fetch_real_slice()
     print(f"Loaded {len(records)} real records from the FUNSD manifest slice.")
 
@@ -18,9 +20,9 @@ def main():
     print(f"Embedded {len(vectors)} records (dim={len(vectors[0])}).")
 
     for record, vector in zip(records, vectors):
-        upsert(record.source_ref, vector)
+        await upsert(record.source_ref, vector)
     print(f"Upserted {len(records)} rows (source_ref -> embedding) into pgvector.")
 
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())

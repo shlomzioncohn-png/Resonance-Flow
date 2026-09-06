@@ -8,7 +8,7 @@ Exits 0 on match, 1 on mismatch (so it's usable as a CI gate).
 
 import sys
 
-import psycopg2
+import psycopg
 
 from mind.embeddings.config import PG_DSN, PG_TABLE
 from mind.embeddings.loader import MANIFEST_PATH, _load_manifest
@@ -17,11 +17,13 @@ from mind.embeddings.loader import MANIFEST_PATH, _load_manifest
 def main() -> int:
     manifest_count = len(_load_manifest()["records"])
 
-    conn = psycopg2.connect(PG_DSN)
-    with conn, conn.cursor() as cur:
-        cur.execute(f"SELECT COUNT(*) FROM {PG_TABLE};")
-        table_count = cur.fetchone()[0]
-    conn.close()
+    # Plain sync psycopg here (not the async pool pgvector_store.py uses)
+    # -- this is a one-off CLI check, not a request-serving hot path, so
+    # there's no event loop to protect.
+    with psycopg.connect(PG_DSN) as conn:
+        with conn.cursor() as cur:
+            cur.execute(f"SELECT COUNT(*) FROM {PG_TABLE};")
+            table_count = cur.fetchone()[0]
 
     print(f"Manifest ({MANIFEST_PATH.name}): {manifest_count} records")
     print(f"Table row count:                {table_count} rows")

@@ -293,14 +293,34 @@ in three stages, whether pgvector actually meets the requirements above:
 | Semantic-quality evaluation (80-task corpus, 20 queries) | Does semantic search return the *right* results across realistic query types? | Partial — 42% avg top-5 precision with the placeholder embedding model; a real model raised this to 68% on the same test |
 | Scale + recall evaluation (10,000-row load test, duplicate-pair recall, ANN-vs-exact recall) | Does pgvector meet the <300ms p95 / 10,000-vector goal **with recall measured, not just latency**? | **pgvector: meets it** — latency PASS with large headroom, and HNSW recall reaches 86% once `hnsw.ef_search` is tuned (applied in `src/mind/embeddings/pgvector_store.py`). **End-to-end: not yet** — 0% recall on realistic near-duplicate detection, traced to the placeholder embedding model, not pgvector or the index. |
 
-**Net conclusion: pgvector stays the recommended choice.** Nothing found in
-validation points at pgvector or its HNSW index as the bottleneck — the
-gap is the embedding model (`embeddings.py` still uses a hashing-based
-placeholder, deliberately not swapped for a real semantic model yet). The
-full evaluation (mock corpus, query sets, recall test scripts, and the
-detailed writeups) lived in the PoC at `mind_vector_poc/evaluation/` and
-is preserved in git history / PR #54, not in the working tree — the PoC
+**Net conclusion: pgvector stays the recommended choice for the read/write
+path validated here.** Nothing found in validation points at *query-time*
+HNSW tuning (`hnsw.ef_search`) as the bottleneck — the dominant gap was
+the embedding model (`embeddings.py` used a hashing-based placeholder at
+validation time, since swapped for the real BGE model -- see this
+directory's other reports for the before/after). This does **not** yet
+rule out *build-time* HNSW quality (`hnsw.ef_construction`, and whether
+the index is built before or after the data load) — that wasn't tested;
+see the open follow-up issue below.
+
+The full evaluation (mock corpus, query sets, recall test scripts, and
+the detailed writeups) lived in the PoC at `mind_vector_poc/evaluation/`.
+The two summary reports are copied into this directory —
+[`SCALE_AND_RECALL_REPORT.md`](SCALE_AND_RECALL_REPORT.md) and
+[`BENCHMARK_REPORT.md`](BENCHMARK_REPORT.md) — since the PoC PR (#54)
+won't be merged and its branch history won't be part of `main`. The PoC
 folder itself was removed once its logic was promoted into
 `src/mind/embeddings/`.
+
+## Follow-up (open, not fixed here)
+
+HNSW *build-time* quality was never investigated — only `ef_search`
+(query-time) was tuned. Two things are still untested: the default
+`ef_construction=64` (pgvector's docs suggest higher values, e.g. 200, can
+improve recall for a given `ef_search`), and whether building the index
+before vs. after loading the 10,000-row dataset changes recall. Tracked
+as [issue #270](https://github.com/KamaTechOrg/Resonance-Flow/issues/270)
+rather than fixed in this PR, since it needs its own benchmark run to
+answer.
 
 ---

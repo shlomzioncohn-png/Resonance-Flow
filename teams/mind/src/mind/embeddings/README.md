@@ -29,12 +29,12 @@ Vectors, semantic search, duplicate/related-task detection.
 ## What's here
 
 ```
-__init__.py         the public interface -- embed() / embed_batch() / upsert() / search() / delete()
+__init__.py         the public interface -- embed() / embed_batch() / upsert() / search() / delete() / clear()
 generate.py          embed() / embed_batch() -- the real model, truncation policy
 base.py              VectorStore abstract interface (the "contract") -- dependency-free
 pgvector_store.py    the ONLY file that knows about Postgres/pgvector
 factory.py           single switch that picks the backend implementation
-config.py            model name/path/dim, connection settings, table name, HNSW tuning, duplicate-detection threshold
+config.py            Pydantic Settings: model name/path/dim, connection DSN, table name, HNSW tuning, duplicate-detection threshold
 loader.py            fetches + verifies the real FUNSD manifest slice (see below)
 ingest.py            pipeline: loader -> embed_batch -> upsert(source_ref, vector)
 verify.py            checks table row count == manifest record count
@@ -44,8 +44,12 @@ Nothing outside `__init__.py` should be imported by callers elsewhere in
 the app. `base.py` deliberately has zero backend-specific dependencies
 (only `abc`) so the interface itself can be imported -- for type-checking,
 mocking in tests, or sketching a new backend -- without requiring
-psycopg2 to be installed; only `pgvector_store.py` (reached through
+psycopg to be installed; only `pgvector_store.py` (reached through
 `factory.py`) actually imports it.
+
+`upsert`/`search`/`delete`/`clear` are all `async def` -- the store talks
+to Postgres over psycopg's async API so it doesn't block the event loop
+under FastAPI's `async def` route handlers.
 
 ## Real data: the FUNSD slice (not R2 -- see why)
 
@@ -73,8 +77,12 @@ package installed with its normal dependencies:
 
 ```bash
 make dev        # from teams/mind/ -- installs everything, including this module's deps
-export MIND_PG_DSN="dbname=mind user=postgres password=postgres host=localhost port=5432"
+export MIND_VECTOR_STORE_DSN="dbname=mind user=postgres password=postgres host=localhost port=5432"
 ```
+
+There's no hardcoded fallback for this DSN -- `config.py` fails fast at
+import time if it isn't set, rather than silently connecting with
+guessed/default credentials.
 
 ## Run the tests
 
@@ -89,13 +97,13 @@ from mind.embeddings import embed, upsert, search, delete
 
 # Indexing a record: is_query defaults to False.
 vector = embed(task.title + " " + task.description)
-upsert(task.id, vector)
+await upsert(task.id, vector)
 
 # Searching: is_query=True is required for correct BGE retrieval quality.
 query_vector = embed(user_query_text, is_query=True)
-similar_task_ids = search(query_vector, k=5)
+similar_task_ids = await search(query_vector, k=5)
 
-delete(task.id)  # e.g. when the task itself is deleted
+await delete(task.id)  # e.g. when the task itself is deleted
 ```
 
 No caller anywhere else in the codebase should import `pgvector_store.py`

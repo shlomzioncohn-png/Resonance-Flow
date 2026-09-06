@@ -5,6 +5,12 @@ services:
       - "8000:8000"
     env_file:
       - .env
+    environment:
+      # Overrides the host= in .env's MIND_VECTOR_STORE_DSN: on this
+      # compose network the DB is reachable at its service name,
+      # `vector-store`, not `localhost` (which inside this container would
+      # mean the `mind` container itself).
+      MIND_VECTOR_STORE_DSN: dbname=mind user=postgres password=postgres host=vector-store port=5432
     volumes:
       - ./models:/app/models
     depends_on:
