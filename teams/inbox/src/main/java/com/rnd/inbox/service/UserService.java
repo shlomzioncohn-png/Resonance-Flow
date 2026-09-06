@@ -143,14 +143,6 @@ public class UserService {
         }
     }
 
-    /**
-     * Saves the user and translates a concurrent unique-constraint violation into the same
-     * DuplicateEmailException/DuplicateUsernameException the pre-check throws. The pre-checks in
-     * assertEmailAvailable/assertUsernameAvailable read-then-decide, so two requests racing on the
-     * same email/username can both pass them before either has saved; the database's unique index
-     * (uq_users_email / uq_users_username) is what actually stops the second write, and this is
-     * what turns that low-level rejection into the normal 409 response instead of a raw 500.
-     */
     private User saveUser(User user) {
         try {
             return userRepository.save(user);

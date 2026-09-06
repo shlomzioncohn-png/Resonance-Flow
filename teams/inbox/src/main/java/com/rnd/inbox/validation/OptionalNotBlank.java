@@ -14,12 +14,6 @@ import static java.lang.annotation.ElementType.METHOD;
 import static java.lang.annotation.ElementType.PARAMETER;
 import static java.lang.annotation.ElementType.RECORD_COMPONENT;
 
-/**
- * For a partial-update field that may be omitted from the request but, when present,
- * must carry real content. {@code null} passes (the field was not sent — leave it alone);
- * an empty or whitespace-only string fails (the field was sent with no meaningful value).
- * Unlike {@code @NotBlank}, this never rejects {@code null}.
- */
 @Documented
 @Constraint(validatedBy = OptionalNotBlankValidator.class)
 @Target({FIELD, METHOD, PARAMETER, RECORD_COMPONENT, ANNOTATION_TYPE})
