@@ -76,14 +76,15 @@ files placed inside a team's own folder.
 
 ### Deployment model (Helm + ArgoCD, GitOps)
 
-- `resonance-flow/` is the **one shared Helm chart** for every team's service — one release, one
-  namespace (`resonance-flow`). Each team owns a `components.<team>` block (image, probes,
-  resources, env), split out per-team under `resonance-flow/values/values-<team>.yaml`. Coordinate
-  chart/template changes with its owner rather than editing the chart unilaterally.
+- `teams/relay/helm/resonance-flow/` is the **one shared Helm chart** for every team's service —
+  one release, one namespace (`resonance-flow`). Each team owns a `components.<team>` block (image,
+  probes, resources, env), split out per-team under
+  `teams/relay/helm/resonance-flow/values/values-<team>.yaml`. Coordinate chart/template changes
+  with its owner rather than editing the chart unilaterally.
 - `kafka/` is a separate Helm chart for the **cluster's** shared Kafka (distinct from the
   single-node Kafka each team may run locally via its own `docker-compose.yml`).
 - A team's CI, on push to `main`, builds and pushes a GHCR image, then commits the new image tag
-  straight into `resonance-flow/values/values-<team>.yaml` (see the `update-manifest` job in
+  straight into `teams/relay/helm/resonance-flow/values/values-<team>.yaml` (see the `update-manifest` job in
   `service-ci.yaml`). ArgoCD (`teams/relay/argocd/`) watches the `resonance-flow` and `kafka`
   charts and reconciles the cluster — push-based GitOps, no image updater involved.
 - Because every team's component renders from the same Helm release into the same namespace, a
@@ -92,7 +93,7 @@ files placed inside a team's own folder.
 - A component that needs an infra dependency (Kafka, Postgres, MinIO) reachable before its main
   container starts declares it under `dependencies` in the Helm values; the chart adds a
   `wait-for-<name>` initContainer that blocks until `host:port` is TCP-reachable — see
-  `resonance-flow/README.md`.
+  `teams/relay/helm/resonance-flow/README.md`.
 
 ### Local dev infra — known gaps
 

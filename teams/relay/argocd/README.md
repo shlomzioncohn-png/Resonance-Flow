@@ -8,7 +8,7 @@ It replaces an earlier setup that lived under `teams/relay/k8s/argocd/`
 and discovered per-service manifests at `teams/<team>/<service>/k8s`.
 That model no longer matches how services are actually deployed: every
 team's service is now a `components.<team>` entry in the single shared
-[`resonance-flow`](../../../resonance-flow) Helm chart's `values.yaml`,
+[`resonance-flow`](../helm/resonance-flow) Helm chart's `values.yaml`,
 kept up to date by each team's own CI (e.g.
 [`mind-ci.yaml`](../../../.github/workflows/mind-ci.yaml),
 [`bridge-ci.yaml`](../../../.github/workflows/bridge-ci.yaml), both built
@@ -25,7 +25,7 @@ dedicated project is needed for this repo's scope.
 |--------------------------|--------------------------------------------------------------------------|
 | `root-app.yaml`          | App-of-apps bootstrap `Application` - manages everything under `apps/` |
 | `argocd-cm-patch.yaml`   | Restores the `argoproj.io/Application` health check ArgoCD dropped in 1.8 (with a fix for a "Missing" status edge case) - required for the sync-waves below to actually gate on health instead of being a no-op |
-| `apps/resonance-flow.yaml` | `Application` syncing the [`resonance-flow`](../../../resonance-flow) chart (all teams' services) |
+| `apps/resonance-flow.yaml` | `Application` syncing the [`resonance-flow`](../helm/resonance-flow) chart (all teams' services) |
 | `apps/kafka.yaml`        | `Application` syncing the [`kafka`](../../../kafka) chart (shared infra, synced first via a sync-wave) |
 | `apps/kafka-ready-check.yaml` | Wave `-1` Job that does a real readiness check on kafka's Deployment, closing a flaky ~1s window where ArgoCD's built-in Deployment health check can momentarily misreport "Healthy" right after creation |
 
@@ -33,7 +33,7 @@ dedicated project is needed for this repo's scope.
 
 There is nothing to add here. Once your team's CI writes a
 `components.<your-team>` block into
-[`resonance-flow/values.yaml`](../../../resonance-flow/values.yaml)
+[`resonance-flow/values.yaml`](../helm/resonance-flow/values.yaml)
 (mirror `mind-ci.yaml` or `bridge-ci.yaml`), the next
 `apps/resonance-flow.yaml` sync picks it up automatically as part of the
 same Helm release.
@@ -43,7 +43,7 @@ chart/template changes with its owner rather than editing it unilaterally.
 
 If you're pulling images from private GHCR packages on your own cluster
 (e.g. local `kind`), see
-[`resonance-flow/README.md`](../../../resonance-flow/README.md#local-image-pull-authentication)
+[`resonance-flow/README.md`](../helm/resonance-flow/README.md#local-image-pull-authentication)
 for how to wire up a personal PAT - the chart creates the pull secret
 for you.
 
