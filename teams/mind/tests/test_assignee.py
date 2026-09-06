@@ -14,7 +14,7 @@ from mind.contracts.task_enums import AssigneeType
 
 def test_accepts_user_assignee() -> None:
     payload = {
-        "assignee_type": "user",
+        "assignee_type": "USER",
         "id": "11111111-1111-1111-1111-111111111111",
     }
 
@@ -28,7 +28,7 @@ def test_accepts_user_assignee() -> None:
 
 def test_accepts_team_assignee() -> None:
     payload = {
-        "assignee_type": "team",
+        "assignee_type": "TEAM",
         "id": "22222222-2222-2222-2222-222222222222",
     }
 
@@ -42,7 +42,7 @@ def test_accepts_team_assignee() -> None:
 
 def test_rejects_invalid_assignee_type() -> None:
     payload = {
-        "assignee_type": "department",
+        "assignee_type": "DEPARTMENT",
         "id": "11111111-1111-1111-1111-111111111111",
     }
 
@@ -52,7 +52,7 @@ def test_rejects_invalid_assignee_type() -> None:
 
 def test_rejects_invalid_assignee_id() -> None:
     payload = {
-        "assignee_type": "user",
+        "assignee_type": "USER",
         "id": "not-a-uuid",
     }
 
@@ -62,7 +62,7 @@ def test_rejects_invalid_assignee_id() -> None:
 
 def test_accepts_user_assignee_candidate() -> None:
     payload = {
-        "assignee_type": "user",
+        "assignee_type": "USER",
         "id": "33333333-3333-3333-3333-333333333333",
         "confidence": 0.91,
     }
@@ -78,7 +78,7 @@ def test_accepts_user_assignee_candidate() -> None:
 
 def test_accepts_team_assignee_candidate() -> None:
     payload = {
-        "assignee_type": "team",
+        "assignee_type": "TEAM",
         "id": "44444444-4444-4444-4444-444444444444",
         "confidence": 0.75,
     }
@@ -97,7 +97,7 @@ def test_rejects_invalid_candidate_confidence(
     confidence: float,
 ) -> None:
     payload = {
-        "assignee_type": "user",
+        "assignee_type": "USER",
         "id": "33333333-3333-3333-3333-333333333333",
         "confidence": confidence,
     }
@@ -108,7 +108,7 @@ def test_rejects_invalid_candidate_confidence(
 
 def test_rejects_unknown_assignee_field() -> None:
     payload = {
-        "assignee_type": "user",
+        "assignee_type": "USER",
         "id": "11111111-1111-1111-1111-111111111111",
         "unknown_field": "unexpected",
     }

@@ -4,37 +4,37 @@ from enum import Enum
 
 
 class TaskTier(str, Enum):
-    OPERATIONAL = "operational"
-    TACTICAL = "tactical"
-    STRATEGIC = "strategic"
+    OPERATIONAL = "OPERATIONAL"
+    TACTICAL = "TACTICAL"
+    STRATEGIC = "STRATEGIC"
 
 
 class RoleContext(str, Enum):
-    DEVELOPER = "developer"
-    MANAGER = "manager"
-    HIGHER_MANAGER = "higher_manager"
-    FIELD_ENGINEER = "field_engineer"
-    SALESPERSON = "salesperson"
-    CEO = "ceo"
+    DEVELOPER = "DEVELOPER"
+    MANAGER = "MANAGER"
+    HIGHER_MANAGER = "HIGHER_MANAGER"
+    FIELD_ENGINEER = "FIELD_ENGINEER"
+    SALESPERSON = "SALESPERSON"
+    CEO = "CEO"
 
 
 class TaskStatus(str, Enum):
-    NEW = "new"
-    IN_REVIEW = "in_review"
-    APPROVED = "approved"
-    IN_PROGRESS = "in_progress"
-    SNOOZED = "snoozed"
-    DONE = "done"
-    REJECTED = "rejected"
-    CANCELLED = "cancelled"
+    NEW = "NEW"
+    IN_REVIEW = "IN_REVIEW"
+    APPROVED = "APPROVED"
+    IN_PROGRESS = "IN_PROGRESS"
+    SNOOZED = "SNOOZED"
+    DONE = "DONE"
+    REJECTED = "REJECTED"
+    CANCELLED = "CANCELLED"
 
 
 class ExtractionProvenance(str, Enum):
-    ETL = "etl"
-    ML_INFERRED = "ml_inferred"
-    MANUAL = "manual"
+    ETL = "ETL"
+    ML_INFERRED = "ML_INFERRED"
+    MANUAL = "MANUAL"
 
 
 class AssigneeType(str, Enum):
-    USER = "user"
-    TEAM = "team"
+    USER = "USER"
+    TEAM = "TEAM"

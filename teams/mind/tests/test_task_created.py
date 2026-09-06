@@ -18,10 +18,10 @@ def valid_task_payload() -> dict:
             "22222222-2222-2222-2222-222222222222"
         ),
         "title": "Prepare customer report",
-        "source_type": "email",
-        "status": "new",
+        "source_type": "EMAIL",
+        "status": "NEW",
         "is_available": True,
-        "extraction_provenance": "ml_inferred",
+        "extraction_provenance": "ML_INFERRED",
         "confidence": 0.92,
         "created_at": "2026-08-30T10:00:00Z",
         "updated_at": "2026-08-30T10:00:00Z",

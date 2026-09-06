@@ -6,13 +6,13 @@ from enum import Enum
 class ScopeDecision(str, Enum):
     """Bridge work-relevance decision."""
 
-    INCLUDED = "included"
-    EXCLUDED = "excluded"
+    INCLUDED = "INCLUDED"
+    EXCLUDED = "EXCLUDED"
 
 
 class Modality(str, Enum):
     """Technical routing hint supplied by Bridge."""
 
-    AUDIO = "audio"
-    SCANNED_DOC = "scanned_doc"
-    TEXT = "text"
+    AUDIO = "AUDIO"
+    SCANNED_DOC = "SCANNED_DOC"
+    TEXT = "TEXT"

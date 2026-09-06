@@ -39,6 +39,7 @@ class RawObjectEvent(BaseModel):
     )
     schema_version: str
     attachment_index: int = Field(ge=0)
+    attachment_count: int = Field(ge=0)
 
     
     # Optional fields
@@ -53,7 +54,7 @@ class RawObjectEvent(BaseModel):
     source_timestamp: AwareDatetime | None = None
     modality: Modality = Modality.TEXT
     # Optional correlation identifier shared by the source body and its attachments.
-    correlation_id: UUID | None = None
+    correlation_id: str | None = None
 
     @field_validator("ingested_at", "source_timestamp")
     @classmethod

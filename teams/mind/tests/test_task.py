@@ -24,10 +24,10 @@ def valid_payload() -> dict:
             "22222222-2222-2222-2222-222222222222"
         ),
         "title": "Prepare customer report",
-        "source_type": "email",
-        "status": "new",
+        "source_type": "EMAIL",
+        "status": "NEW",
         "is_available": True,
-        "extraction_provenance": "ml_inferred",
+        "extraction_provenance": "ML_INFERRED",
         "confidence": 0.92,
         "created_at": "2026-08-30T10:00:00Z",
         "updated_at": "2026-08-30T10:00:00Z",
@@ -74,11 +74,11 @@ def test_accepts_user_and_team_assignees() -> None:
 
     payload["assignees"] = [
         {
-            "assignee_type": "user",
+            "assignee_type": "USER",
             "id": "44444444-4444-4444-4444-444444444444",
         },
         {
-            "assignee_type": "team",
+            "assignee_type": "TEAM",
             "id": "55555555-5555-5555-5555-555555555555",
         },
     ]
@@ -105,7 +105,7 @@ def test_requires_confidence_for_ml_inferred_task() -> None:
 def test_allows_missing_confidence_for_manual_task() -> None:
     payload = valid_payload()
 
-    payload["extraction_provenance"] = "manual"
+    payload["extraction_provenance"] = "MANUAL"
     payload.pop("confidence")
 
     task = Task.model_validate(payload)
@@ -118,7 +118,7 @@ def test_allows_missing_confidence_for_manual_task() -> None:
 
 def test_requires_snoozed_until_when_status_is_snoozed() -> None:
     payload = valid_payload()
-    payload["status"] = "snoozed"
+    payload["status"] = "SNOOZED"
 
     with pytest.raises(
         ValidationError,
@@ -130,7 +130,7 @@ def test_requires_snoozed_until_when_status_is_snoozed() -> None:
 def test_accepts_snoozed_task_with_snoozed_until() -> None:
     payload = valid_payload()
 
-    payload["status"] = "snoozed"
+    payload["status"] = "SNOOZED"
     payload["snoozed_until"] = "2026-09-01T10:00:00Z"
 
     task = Task.model_validate(payload)

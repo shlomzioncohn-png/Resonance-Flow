@@ -16,6 +16,7 @@ from mind.contracts.task_enums import (
     RoleContext,
     TaskTier,
 )
+import json
 
 
 def valid_payload() -> dict:
@@ -24,7 +25,7 @@ def valid_payload() -> dict:
     return {
         "tenant_id": "11111111-1111-1111-1111-111111111111",
         "title": "Prepare customer report",
-        "source_type": "email",
+        "source_type": "EMAIL",
         "has_dependencies": False,
         "confidence": 0.92,
     }
@@ -51,8 +52,8 @@ def test_accepts_optional_fields() -> None:
         {
             "description": "Prepare the report before Monday.",
             "source_ref": "EMAIL/message-123",
-            "tier": "operational",
-            "role_context": "developer",
+            "tier": "OPERATIONAL",
+            "role_context": "DEVELOPER",
             "urgency": 4,
             "effort_estimate_minutes": 30,
             "effort_estimate_confidence": 0.80,
@@ -84,12 +85,12 @@ def test_accepts_user_and_team_candidates() -> None:
 
     payload["candidate_assignees"] = [
         {
-            "assignee_type": "user",
+            "assignee_type": "USER",
             "id": "33333333-3333-3333-3333-333333333333",
             "confidence": 0.91,
         },
         {
-            "assignee_type": "team",
+            "assignee_type": "TEAM",
             "id": "44444444-4444-4444-4444-444444444444",
             "confidence": 0.76,
         },
@@ -171,3 +172,13 @@ def test_rejects_unknown_field() -> None:
 
     with pytest.raises(ValidationError):
         TaskCreationRequested.model_validate(payload)
+
+
+def test_serializes_enums_as_upper_snake_case() -> None:
+    payload = valid_payload()
+
+    request = TaskCreationRequested.model_validate(payload)
+
+    serialized = json.loads(request.model_dump_json())
+
+    assert serialized["source_type"] == "EMAIL"
