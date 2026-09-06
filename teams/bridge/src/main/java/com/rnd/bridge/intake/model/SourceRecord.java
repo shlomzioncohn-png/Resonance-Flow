@@ -30,6 +30,12 @@ import java.util.List;
  * ObjectKeyBuilder includes it in the object key so two attachments on the same message
  * that happen to share a filename (e.g. two files both named "invoice.pdf") still get
  * distinct keys instead of silently overwriting each other in MinIO.
+ * sourceMessageIds is the stable per-message id(s) (ChatMessage.id — Slack's ts) of the raw
+ * chat messages this record was built from: every message in the session for a transcript
+ * record, or the single owning message for an attachment record. Empty (never null) for
+ * non-chat sources and for chat messages with no stable id (WhatsApp, fixtures) — there is
+ * nothing to preserve there yet. Not yet consumed downstream; this is groundwork for future
+ * edit/delete handling (see Bridge issue #264), not a schema or contract change.
  */
 public record SourceRecord(
         RawSourceType sourceType,
@@ -44,5 +50,6 @@ public record SourceRecord(
         byte[] rawContent,
         String mimeType,
         String attachmentFilename,
-        int attachmentIndex) {
+        int attachmentIndex,
+        List<String> sourceMessageIds) {
 }

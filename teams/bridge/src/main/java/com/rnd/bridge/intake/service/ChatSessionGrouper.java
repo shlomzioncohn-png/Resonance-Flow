@@ -27,6 +27,10 @@ import org.springframework.stereotype.Service;
  * under the same id instead of a fresh random one. Messages with no threadId keep the
  * original heuristic: a run of consecutive messages with no gap larger than the configured
  * threshold, correlationId minted fresh per session.
+ * Each SourceRecord carries sourceMessageIds — the stable id(s) (ChatMessage.id) of the raw
+ * messages it was built from — so a later edit/delete on one of those source messages can be
+ * traced back to the record(s) it landed in (not yet consumed anywhere; see SourceRecord's
+ * javadoc and Bridge issue #264).
  * See plan.md for why sessions, not individual messages, are this lane's unit of work for chat.
  */
 @Service
@@ -100,6 +104,10 @@ public class ChatSessionGrouper {
                 .map(m -> m.sender() + ": " + m.text())
                 .collect(Collectors.joining("\n"));
         String naturalId = first.chatId() + "|" + first.timestamp();
+        List<String> sessionMessageIds = sessionMessages.stream()
+                .map(ChatMessage::id)
+                .filter(id -> id != null)
+                .toList();
 
         List<SourceRecord> records = new ArrayList<>();
         records.add(new SourceRecord(
@@ -115,12 +123,14 @@ public class ChatSessionGrouper {
                 transcript.getBytes(StandardCharsets.UTF_8),
                 null,
                 null,
-                0));
+                0,
+                sessionMessageIds));
 
         int attachmentIndex = 0;
         for (ChatMessage message : sessionMessages) {
             for (ChatMessage.Attachment attachment : message.attachments()) {
                 attachmentIndex++;
+                List<String> ownerMessageId = message.id() == null ? List.of() : List.of(message.id());
                 records.add(new SourceRecord(
                         message.sourceType(),
                         message.tenantId(),
@@ -134,7 +144,8 @@ public class ChatSessionGrouper {
                         attachment.content(),
                         attachment.mimeType(),
                         attachment.filename(),
-                        attachmentIndex));
+                        attachmentIndex,
+                        ownerMessageId));
             }
         }
         return records;

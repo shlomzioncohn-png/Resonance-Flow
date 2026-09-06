@@ -32,7 +32,7 @@ class UnstructuredPayloadMapperSanityTest {
         SourceRecord record = new SourceRecord(
                 RawSourceType.DRIVE, "kamatech", "9f8e7d6c5b", "corr-1",
                 Instant.parse("2026-08-16T20:00:00Z"), "malki@kamatech.org", List.of("malki@kamatech.org"),
-                "IMG_2043.jpg", null, "{}".getBytes(StandardCharsets.UTF_8), "image/jpeg", null, 0);
+                "IMG_2043.jpg", null, "{}".getBytes(StandardCharsets.UTF_8), "image/jpeg", null, 0, List.of());
 
         RawObjectEvent event = mapper.map(record, Instant.now());
 
@@ -49,7 +49,7 @@ class UnstructuredPayloadMapperSanityTest {
         SourceRecord record = new SourceRecord(
                 RawSourceType.EMAIL, "kamatech", "EMAIL|hadas@kamatech.org|2026-08-18T09:15:00Z", "corr-2",
                 Instant.parse("2026-08-18T09:15:00Z"), "hadas@kamatech.org", List.of("hadas@kamatech.org"),
-                "PR review needed", "body", "{}".getBytes(StandardCharsets.UTF_8), null, null, 0);
+                "PR review needed", "body", "{}".getBytes(StandardCharsets.UTF_8), null, null, 0, List.of());
 
         RawObjectEvent event = mapper.map(record, Instant.now());
 
@@ -62,7 +62,8 @@ class UnstructuredPayloadMapperSanityTest {
         SourceRecord record = new SourceRecord(
                 RawSourceType.EMAIL, "kamatech", "EMAIL|ruth@kamatech.org|2026-08-18T11:00:00Z|attachment", "corr-3",
                 Instant.parse("2026-08-18T11:00:00Z"), "ruth@kamatech.org", List.of("ruth@kamatech.org"),
-                null, null, "fake-audio-bytes".getBytes(StandardCharsets.UTF_8), "audio/opus", "voice-note.opus", 1);
+                null, null, "fake-audio-bytes".getBytes(StandardCharsets.UTF_8), "audio/opus", "voice-note.opus", 1,
+                List.of());
 
         RawObjectEvent event = mapper.map(record, Instant.now());
 
@@ -74,7 +75,7 @@ class UnstructuredPayloadMapperSanityTest {
         SourceRecord record = new SourceRecord(
                 RawSourceType.EMAIL, "kamatech", "id-1", "corr-4", Instant.now(),
                 "hadas@kamatech.org", List.of("hadas@kamatech.org"), "subject", "body",
-                "{}".getBytes(StandardCharsets.UTF_8), null, null, 0);
+                "{}".getBytes(StandardCharsets.UTF_8), null, null, 0, List.of());
 
         RawObjectEvent event = mapper.map(record, Instant.now());
 
@@ -86,7 +87,7 @@ class UnstructuredPayloadMapperSanityTest {
         SourceRecord record = new SourceRecord(
                 RawSourceType.EMAIL, "kamatech", "EMAIL|hadas@kamatech.org|2026-08-18T09:15:00Z", "corr-5",
                 Instant.parse("2026-08-18T09:15:00Z"), "hadas@kamatech.org", List.of("hadas@kamatech.org"),
-                "PR review needed", "body", "{}".getBytes(StandardCharsets.UTF_8), null, null, 0);
+                "PR review needed", "body", "{}".getBytes(StandardCharsets.UTF_8), null, null, 0, List.of());
 
         RawObjectEvent first = mapper.map(record, Instant.now());
         RawObjectEvent second = mapper.map(record, Instant.now());

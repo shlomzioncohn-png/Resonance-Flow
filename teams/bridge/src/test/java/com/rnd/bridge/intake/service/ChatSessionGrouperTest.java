@@ -116,6 +116,47 @@ class ChatSessionGrouperTest {
     }
 
     @Test
+    void messagesWithNoStableIdProduceAnEmptySourceMessageIdsList() {
+        // WhatsApp/fixture messages carry no platform id - nothing to preserve yet.
+        List<ChatMessage> messages = List.of(
+                message("chat-a", "malki", "2026-08-18T09:00:00Z", "hi"),
+                message("chat-a", "ruth", "2026-08-18T09:01:00Z", "hey"));
+
+        List<SourceRecord> records = grouper.group(messages);
+
+        assertThat(records).hasSize(1);
+        assertThat(records.get(0).sourceMessageIds()).isEmpty();
+    }
+
+    @Test
+    void threadSessionRecordCarriesEveryMessagesStableIdInOrder() {
+        List<ChatMessage> messages = List.of(
+                threadMessage("chat-a", "malki", "2026-08-18T09:00:00Z", "root question", "t1", "t1"),
+                threadMessage("chat-a", "ruth", "2026-08-23T09:00:00Z", "late reply", "t2", "t1"));
+
+        List<SourceRecord> records = grouper.group(messages);
+
+        assertThat(records).hasSize(1);
+        assertThat(records.get(0).sourceMessageIds()).containsExactly("t1", "t2");
+    }
+
+    @Test
+    void attachmentRecordCarriesOnlyItsOwningMessagesStableId() {
+        List<ChatMessage.Attachment> attachments =
+                List.of(new ChatMessage.Attachment("voice-note.opus", "audio/opus",
+                        "fake-bytes".getBytes(StandardCharsets.UTF_8)));
+        ChatMessage rootWithAttachment = new ChatMessage(
+                RawSourceType.SLACK, "kamatech", "chat-a", "malki", Instant.parse("2026-08-18T09:00:00Z"),
+                "listen to this", attachments, "t1", "t1");
+
+        List<SourceRecord> records = grouper.group(List.of(rootWithAttachment));
+
+        SourceRecord attachmentRecord =
+                records.stream().filter(r -> r.attachmentFilename() != null).findFirst().orElseThrow();
+        assertThat(attachmentRecord.sourceMessageIds()).containsExactly("t1");
+    }
+
+    @Test
     void threadRepliesGroupByThreadIdRegardlessOfTimeGap() {
         List<ChatMessage> messages = List.of(
                 threadMessage("chat-a", "malki", "2026-08-18T09:00:00Z", "root question", "t1", "t1"),

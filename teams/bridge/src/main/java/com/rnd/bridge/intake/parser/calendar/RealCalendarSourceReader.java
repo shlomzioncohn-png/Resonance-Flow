@@ -90,7 +90,7 @@ public class RealCalendarSourceReader implements CalendarSourceReader {
         return new SourceRecord(
                 RawSourceType.CALENDAR, properties.tenantId(), event.getId(), UUID.randomUUID().toString(),
                 occurredAt, organizer, List.of(organizer), event.getSummary(), event.getDescription(),
-                event.toString().getBytes(StandardCharsets.UTF_8), null, null, 0);
+                event.toString().getBytes(StandardCharsets.UTF_8), null, null, 0, List.of());
     }
 
     private static Instant startInstant(EventDateTime start) {

@@ -46,7 +46,7 @@ public class FixtureCalendarSourceReader implements CalendarSourceReader {
             records.add(new SourceRecord(
                     RawSourceType.CALENDAR, tenantId, eventId, correlationId, occurredAt, organizer,
                     List.of(organizer), textOrNull(node.get("summary")), textOrNull(node.get("description")),
-                    node.toString().getBytes(StandardCharsets.UTF_8), null, null, 0));
+                    node.toString().getBytes(StandardCharsets.UTF_8), null, null, 0, List.of()));
 
             JsonNode attachments = node.get("attachments");
             if (attachments != null) {
@@ -57,7 +57,8 @@ public class FixtureCalendarSourceReader implements CalendarSourceReader {
                     records.add(new SourceRecord(
                             RawSourceType.CALENDAR, tenantId, eventId + "|attachment-" + index, correlationId,
                             occurredAt, organizer, List.of(organizer), null, null, content,
-                            textOrNull(attachment.get("mimeType")), textOrNull(attachment.get("filename")), index));
+                            textOrNull(attachment.get("mimeType")), textOrNull(attachment.get("filename")), index,
+                            List.of()));
                 }
             }
         }

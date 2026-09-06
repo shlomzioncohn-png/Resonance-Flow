@@ -31,7 +31,7 @@ class UnstructuredIntakeLaneTest {
     private static final SourceRecord RECORD = new SourceRecord(
             RawSourceType.EMAIL, "kamatech", "id-1", "corr-1", Instant.parse("2026-08-18T09:15:00Z"),
             "hadas@kamatech.org", List.of("hadas@kamatech.org"), "subject", "body",
-            "{}".getBytes(StandardCharsets.UTF_8), null, null, 0);
+            "{}".getBytes(StandardCharsets.UTF_8), null, null, 0, List.of());
 
     private static final RawObjectEvent EVENT = RawObjectEvent.create(
             "EMAIL/kamatech/2026-08-18/x.json", RawSourceType.EMAIL, "kamatech", Instant.parse("2026-08-18T09:15:00Z"),

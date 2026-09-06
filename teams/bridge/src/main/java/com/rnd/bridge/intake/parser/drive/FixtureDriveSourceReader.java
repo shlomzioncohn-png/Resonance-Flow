@@ -48,7 +48,8 @@ public class FixtureDriveSourceReader implements DriveSourceReader {
                     node.toString().getBytes(StandardCharsets.UTF_8),
                     textOrNull(node.get("mimeType")),
                     null,
-                    0));
+                    0,
+                    List.of()));
         }
         return records;
     }
