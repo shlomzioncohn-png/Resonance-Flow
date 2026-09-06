@@ -7,6 +7,7 @@ import com.rnd.inbox.dto.UserStatusUpdateRequestDto;
 import com.rnd.inbox.dto.UserUpdateRequestDto;
 import com.rnd.inbox.exception.DuplicateEmailException;
 import com.rnd.inbox.exception.DuplicateUsernameException;
+import com.rnd.inbox.exception.ForbiddenActionException;
 import com.rnd.inbox.exception.OrganizationNotFoundException;
 import com.rnd.inbox.exception.UnauthenticatedException;
 import com.rnd.inbox.exception.UserNotFoundException;
@@ -81,6 +82,7 @@ class UserServiceTest {
         actorId = UUID.randomUUID();
         actor = new User();
         actor.setId(actorId);
+        actor.setOrganization(organization);
     }
 
     private UserCreateRequestDto createRequest(String email, String username) {
@@ -272,6 +274,22 @@ class UserServiceTest {
     }
 
     @Test
+    void updateUser_whenActorBelongsToAnotherOrganization_throwsForbiddenActionException() {
+        stubActorFound();
+        actor.setOrganization(new Organization());
+        actor.getOrganization().setId(UUID.randomUUID());
+        UserUpdateRequestDto request = updateRequest("new@acme.com", "newname");
+
+        when(userRepository.findById(userId)).thenReturn(Optional.of(user));
+
+        assertThatThrownBy(() -> userService.updateUser(userId, request, actorId))
+                .isInstanceOf(ForbiddenActionException.class);
+
+        verify(userMapper, never()).applyUpdate(any(), any());
+        verify(userRepository, never()).save(any());
+    }
+
+    @Test
     void updateUser_whenEmailBelongsToAnotherUser_throwsDuplicateEmailException() {
         stubActorFound();
         UserUpdateRequestDto request = updateRequest("taken@acme.com", "newname");
@@ -351,6 +369,7 @@ class UserServiceTest {
 
     @Test
     void updateStatus_whenUserExists_updatesStatusAndReturnsUser() {
+        stubActorFound();
         UserStatusUpdateRequestDto request = new UserStatusUpdateRequestDto();
         request.setStatus("SUSPENDED");
         UserResponseDto responseDto = new UserResponseDto(userId, "Yehudit Cohen", null, null,
@@ -360,22 +379,55 @@ class UserServiceTest {
         when(userRepository.save(user)).thenReturn(user);
         when(userMapper.toResponseDto(user)).thenReturn(responseDto);
 
-        UserResponseDto result = userService.updateStatus(userId, request);
+        UserResponseDto result = userService.updateStatus(userId, request, actorId);
 
         assertThat(result).isSameAs(responseDto);
         verify(userMapper).applyStatusChange(user, UserStatus.SUSPENDED);
         verify(userRepository).save(user);
+        verify(auditService).createAuditLog(eq("USER_STATUS_UPDATED"), eq("User"), eq(userId), eq(organization),
+                eq(actor), any(), isNull());
+    }
+
+    @Test
+    void updateStatus_whenActorDoesNotExist_throwsUnauthenticatedException() {
+        UserStatusUpdateRequestDto request = new UserStatusUpdateRequestDto();
+        request.setStatus("SUSPENDED");
+        when(userRepository.findById(actorId)).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> userService.updateStatus(userId, request, actorId))
+                .isInstanceOf(UnauthenticatedException.class);
+
+        verify(userMapper, never()).applyStatusChange(any(), any());
+        verify(auditService, never()).createAuditLog(any(), any(), any(), any(), any(), any(), any());
     }
 
     @Test
     void updateStatus_whenUserDoesNotExist_throwsUserNotFoundException() {
+        stubActorFound();
         UserStatusUpdateRequestDto request = new UserStatusUpdateRequestDto();
         request.setStatus("SUSPENDED");
         when(userRepository.findById(userId)).thenReturn(Optional.empty());
 
-        assertThatThrownBy(() -> userService.updateStatus(userId, request))
+        assertThatThrownBy(() -> userService.updateStatus(userId, request, actorId))
                 .isInstanceOf(UserNotFoundException.class);
 
         verify(userMapper, never()).applyStatusChange(any(), any());
+    }
+
+    @Test
+    void updateStatus_whenActorBelongsToAnotherOrganization_throwsForbiddenActionException() {
+        stubActorFound();
+        actor.setOrganization(new Organization());
+        actor.getOrganization().setId(UUID.randomUUID());
+        UserStatusUpdateRequestDto request = new UserStatusUpdateRequestDto();
+        request.setStatus("SUSPENDED");
+
+        when(userRepository.findById(userId)).thenReturn(Optional.of(user));
+
+        assertThatThrownBy(() -> userService.updateStatus(userId, request, actorId))
+                .isInstanceOf(ForbiddenActionException.class);
+
+        verify(userMapper, never()).applyStatusChange(any(), any());
+        verify(userRepository, never()).save(any());
     }
 }

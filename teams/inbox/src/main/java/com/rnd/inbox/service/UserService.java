@@ -7,6 +7,7 @@ import com.rnd.inbox.dto.UserStatusUpdateRequestDto;
 import com.rnd.inbox.dto.UserUpdateRequestDto;
 import com.rnd.inbox.exception.DuplicateEmailException;
 import com.rnd.inbox.exception.DuplicateUsernameException;
+import com.rnd.inbox.exception.ForbiddenActionException;
 import com.rnd.inbox.exception.OrganizationNotFoundException;
 import com.rnd.inbox.exception.UnauthenticatedException;
 import com.rnd.inbox.exception.UserNotFoundException;
@@ -65,6 +66,7 @@ public class UserService {
     public UserResponseDto updateUser(UUID id, UserUpdateRequestDto request, UUID actorId) {
         User actor = findActorOrThrow(actorId);
         User user = findUserOrThrow(id);
+        assertActorCanManageUser(actor, user);
         assertEmailAvailable(request.getEmail().orElse(null), id);
         assertUsernameAvailable(request.getUsername().orElse(null), id);
 
@@ -82,10 +84,15 @@ public class UserService {
     }
 
     @Transactional
-    public UserResponseDto updateStatus(UUID id, UserStatusUpdateRequestDto request) {
+    public UserResponseDto updateStatus(UUID id, UserStatusUpdateRequestDto request, UUID actorId) {
+        User actor = findActorOrThrow(actorId);
         User user = findUserOrThrow(id);
+        assertActorCanManageUser(actor, user);
+
         userMapper.applyStatusChange(user, UserStatus.valueOf(request.getStatus()));
         User saved = userRepository.save(user);
+        auditService.createAuditLog("USER_STATUS_UPDATED", "User", saved.getId(), saved.getOrganization(),
+                actor, auditSnapshot(saved), null);
         return userMapper.toResponseDto(saved);
     }
 
@@ -112,6 +119,13 @@ public class UserService {
         snapshot.put("role", user.getRole());
         snapshot.put("status", user.getStatus().name());
         return snapshot;
+    }
+
+    private void assertActorCanManageUser(User actor, User targetUser) {
+        if (!actor.getOrganization().getId().equals(targetUser.getOrganization().getId())) {
+            throw new ForbiddenActionException(
+                    "Actor " + actor.getId() + " cannot manage users outside their own organization");
+        }
     }
 
     private void assertEmailAvailable(String email, UUID excludingUserId) {

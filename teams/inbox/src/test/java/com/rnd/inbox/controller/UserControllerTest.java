@@ -10,6 +10,7 @@ import com.rnd.inbox.dto.UserResponseDto;
 import com.rnd.inbox.dto.UserStatusUpdateRequestDto;
 import com.rnd.inbox.dto.UserUpdateRequestDto;
 import com.rnd.inbox.exception.DuplicateEmailException;
+import com.rnd.inbox.exception.ForbiddenActionException;
 import com.rnd.inbox.exception.OrganizationNotFoundException;
 import com.rnd.inbox.exception.UserNotFoundException;
 import com.rnd.inbox.model.enums.UserStatus;
@@ -261,16 +262,42 @@ class UserControllerTest {
     }
 
     @Test
+    void updateUser_whenActorOutsideTargetOrganization_returns403() throws Exception {
+        when(userService.updateUser(eq(userId), any(), eq(actorId)))
+                .thenThrow(new ForbiddenActionException("Actor cannot manage users outside their own organization"));
+
+        mockMvc.perform(patch("/api/v1/users/{id}", userId)
+                        .header(ACTOR_HEADER, actorId.toString())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(validUpdateRequest())))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.error").value("FORBIDDEN"));
+    }
+
+    @Test
     void updateStatus_withValidStatus_returns200() throws Exception {
         UserStatusUpdateRequestDto request = new UserStatusUpdateRequestDto();
         request.setStatus("SUSPENDED");
-        when(userService.updateStatus(eq(userId), any())).thenReturn(sampleUser());
+        when(userService.updateStatus(eq(userId), any(), eq(actorId))).thenReturn(sampleUser());
 
         mockMvc.perform(patch("/api/v1/users/{id}/status", userId)
+                        .header(ACTOR_HEADER, actorId.toString())
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(request)))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.id").value(userId.toString()));
+    }
+
+    @Test
+    void updateStatus_withoutActorHeader_returns401() throws Exception {
+        UserStatusUpdateRequestDto request = new UserStatusUpdateRequestDto();
+        request.setStatus("SUSPENDED");
+
+        mockMvc.perform(patch("/api/v1/users/{id}/status", userId)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(request)))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.error").value("UNAUTHENTICATED"));
     }
 
     @Test
@@ -289,12 +316,28 @@ class UserControllerTest {
     void updateStatus_whenNotFound_returns404() throws Exception {
         UserStatusUpdateRequestDto request = new UserStatusUpdateRequestDto();
         request.setStatus("SUSPENDED");
-        when(userService.updateStatus(eq(userId), any())).thenThrow(new UserNotFoundException(userId));
+        when(userService.updateStatus(eq(userId), any(), eq(actorId))).thenThrow(new UserNotFoundException(userId));
 
         mockMvc.perform(patch("/api/v1/users/{id}/status", userId)
+                        .header(ACTOR_HEADER, actorId.toString())
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(request)))
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.error").value("USER_NOT_FOUND"));
+    }
+
+    @Test
+    void updateStatus_whenActorOutsideTargetOrganization_returns403() throws Exception {
+        UserStatusUpdateRequestDto request = new UserStatusUpdateRequestDto();
+        request.setStatus("SUSPENDED");
+        when(userService.updateStatus(eq(userId), any(), eq(actorId)))
+                .thenThrow(new ForbiddenActionException("Actor cannot manage users outside their own organization"));
+
+        mockMvc.perform(patch("/api/v1/users/{id}/status", userId)
+                        .header(ACTOR_HEADER, actorId.toString())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(request)))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.error").value("FORBIDDEN"));
     }
 }

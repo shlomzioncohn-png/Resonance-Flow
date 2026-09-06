@@ -80,6 +80,7 @@ public class UserController {
             @ApiResponse(responseCode = "200", description = "User updated",
                     content = @Content(schema = @Schema(implementation = UserResponseDto.class))),
             @ApiResponse(responseCode = "401", description = "Missing or unrecognized actor identity"),
+            @ApiResponse(responseCode = "403", description = "Actor cannot manage a user outside their organization"),
             @ApiResponse(responseCode = "404", description = "User not found"),
             @ApiResponse(responseCode = "409", description = "Email or username already exists")
     })
@@ -93,11 +94,14 @@ public class UserController {
     @ApiResponses({
             @ApiResponse(responseCode = "200", description = "Status updated",
                     content = @Content(schema = @Schema(implementation = UserResponseDto.class))),
+            @ApiResponse(responseCode = "401", description = "Missing or unrecognized actor identity"),
+            @ApiResponse(responseCode = "403", description = "Actor cannot manage a user outside their organization"),
             @ApiResponse(responseCode = "404", description = "User not found")
     })
     @PatchMapping("/{id}/status")
     public UserResponseDto updateStatus(@PathVariable UUID id,
-                                         @Valid @RequestBody UserStatusUpdateRequestDto request) {
-        return userService.updateStatus(id, request);
+                                         @Valid @RequestBody UserStatusUpdateRequestDto request,
+                                         @CurrentActor UUID actorId) {
+        return userService.updateStatus(id, request, actorId);
     }
 }
