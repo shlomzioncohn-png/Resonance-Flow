@@ -16,6 +16,12 @@ app:
   # dev-mode: set to true ONLY in local/dev environments
   # In production, this MUST be false to force JWT extraction
   dev-mode: ${APP_DEV_MODE:true}
+  
+  # JWT Configuration (required when dev-mode=false)
+  # If dev-mode=false but these are not set, startup validation will fail
+  jwt:
+    issuer: ${APP_JWT_ISSUER:}
+    secret: ${APP_JWT_SECRET:}
 
 # BFF service configuration
 # Override BFF_SERVICE_URL to point at a different BFF without recompiling

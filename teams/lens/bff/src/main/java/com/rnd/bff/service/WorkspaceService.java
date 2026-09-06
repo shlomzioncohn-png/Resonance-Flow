@@ -191,12 +191,14 @@ public class WorkspaceService {
      * for null/blank/unrecognized - fail open rather than hide tasks behind
      * a typo'd filter value).
      *
-     * "waiting_on_me" is a judgment call made 2026-09-06 with no product/
-     * mentor answer available: mapped to status == READY, i.e. "nothing is
-     * blocking it, the next action is mine". Flag for confirmation - if
-     * "waiting_on_me" is meant to mean something else (e.g. tasks blocking
-     * OTHER people that are waiting on this one), this mapping needs to
-     * change together with the Chain-provided data it would need.
+     * AWAITING PRODUCT CONFIRMATION: "waiting_on_me" is currently mapped to
+     * status == READY (i.e., "nothing is blocking it, the next action is mine").
+     * If the intended semantic is different (e.g., tasks blocking OTHER people
+     * that are waiting on this one, or tasks delegated to me that I haven't
+     * started), this mapping will change together with the Chain-provided data
+     * it would need. Please confirm the intended filter behavior before Phase 2.
+     *
+     * Related: docs/employee-ui-design.md, My Workspace screenshot, "waiting on me" badge.
      */
     public TaskListResponseDTO listTasks(String userId, String filter, String search, int page, int size) {
         int safePage = Math.max(page, 0);
