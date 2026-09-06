@@ -20,15 +20,9 @@ import java.util.stream.Collectors;
  * task cannot depend on itself, and a given edge cannot be added twice.
  *
  * <p><b>Known limitation, out of scope for this class:</b>
- * {@link #addDependency} and {@link #removeDependency} only mutate the
- * dependency graph - they do not update {@code Task.blockingCount} or
- * {@code Task.isReady} on either endpoint, so those fields go stale the
- * instant an edge is added or removed through this service. Keeping them
- * in sync (either by recomputing eagerly on every graph change, or by
- * deriving them on demand instead of storing them) is deliberately left
- * to whichever service owns task-readiness/eligibility, not this one,
- * since it needs to reconcile with how that responsibility is already
- * being handled elsewhere in the team's in-progress work on this module.
+ * {@link #addDependency}/{@link #removeDependency} don't update
+ * {@code Task.blockingCount}/{@code isReady} - keeping those in sync is
+ * left to whichever service owns task-readiness/eligibility.
  */
 @Service
 public class TaskDependencyService {
