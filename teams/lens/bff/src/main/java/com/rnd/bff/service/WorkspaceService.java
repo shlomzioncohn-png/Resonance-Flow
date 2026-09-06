@@ -5,9 +5,11 @@ import com.rnd.bff.client.InboxClient;
 import com.rnd.bff.client.MindClient;
 import com.rnd.bff.dto.TaskDTO;
 import com.rnd.bff.dto.TaskDependenciesDTO;
+import com.rnd.bff.dto.TaskListResponseDTO;
 import com.rnd.bff.dto.TaskRecommendationDTO;
 import com.rnd.bff.dto.WorkspaceRequestDTO;
 import com.rnd.bff.exception.ServiceUnavailableException;
+import com.rnd.bff.exception.TaskNotFoundException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
@@ -179,5 +181,97 @@ public class WorkspaceService {
             reasons.add("ranking unavailable, showing default order");
         }
         return String.join(", ", reasons);
+    }
+
+    /**
+     * "My Tasks" screen: the employee's full task list, with filter, title
+     * search, and pagination.
+     *
+     * filter values: all | in_progress | blocked | waiting_on_me (default all
+     * for null/blank/unrecognized - fail open rather than hide tasks behind
+     * a typo'd filter value).
+     *
+     * "waiting_on_me" is a judgment call made 2026-09-06 with no product/
+     * mentor answer available: mapped to status == READY, i.e. "nothing is
+     * blocking it, the next action is mine". Flag for confirmation - if
+     * "waiting_on_me" is meant to mean something else (e.g. tasks blocking
+     * OTHER people that are waiting on this one), this mapping needs to
+     * change together with the Chain-provided data it would need.
+     */
+    public TaskListResponseDTO listTasks(String userId, String filter, String search, int page, int size) {
+        int safePage = Math.max(page, 0);
+        int safeSize = Math.min(Math.max(size, 1), 100);
+
+        List<TaskDTO> all;
+        try {
+            all = inboxClient.getTasksForUser(userId);
+        } catch (RuntimeException ex) {
+            throw new ServiceUnavailableException("Inbox", "Inbox is unavailable", ex);
+        }
+
+        List<TaskDTO> matching =
+                all.stream()
+                        .filter(t -> matchesFilter(t, filter))
+                        .filter(t -> matchesSearch(t, search))
+                        .toList();
+
+        int from = Math.min(safePage * safeSize, matching.size());
+        int to = Math.min(from + safeSize, matching.size());
+
+        return TaskListResponseDTO.builder()
+                .items(matching.subList(from, to))
+                .total(matching.size())
+                .page(safePage)
+                .size(safeSize)
+                .build();
+    }
+
+    private boolean matchesFilter(TaskDTO task, String filter) {
+        if (filter == null || filter.isBlank()) {
+            return true;
+        }
+        return switch (filter.toLowerCase()) {
+            case "in_progress" -> "IN_PROGRESS".equals(task.getStatus());
+            case "blocked" -> "BLOCKED".equals(task.getStatus());
+            case "waiting_on_me" -> "READY".equals(task.getStatus());
+            case "all" -> true;
+            default -> true;
+        };
+    }
+
+    private boolean matchesSearch(TaskDTO task, String search) {
+        if (search == null || search.isBlank()) {
+            return true;
+        }
+        return task.getTitle() != null
+                && task.getTitle().toLowerCase().contains(search.toLowerCase());
+    }
+
+    /** Task details panel / drill-down from either My Workspace or My Tasks. */
+    public TaskDTO getTask(String userId, String taskId) {
+        TaskDTO task;
+        try {
+            task = inboxClient.getTaskById(userId, taskId);
+        } catch (RuntimeException ex) {
+            throw new ServiceUnavailableException("Inbox", "Inbox is unavailable", ex);
+        }
+        if (task == null) {
+            throw new TaskNotFoundException(taskId);
+        }
+        return task;
+    }
+
+    /** "Start task" / manual status changes from the task details panel. */
+    public TaskDTO updateTaskStatus(String userId, String taskId, String newStatus) {
+        TaskDTO updated;
+        try {
+            updated = inboxClient.updateStatus(userId, taskId, newStatus);
+        } catch (RuntimeException ex) {
+            throw new ServiceUnavailableException("Inbox", "Inbox is unavailable", ex);
+        }
+        if (updated == null) {
+            throw new TaskNotFoundException(taskId);
+        }
+        return updated;
     }
 }
