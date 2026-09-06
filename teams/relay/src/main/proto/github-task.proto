@@ -36,7 +36,7 @@ message Task {
 
 enum SourceType {
   SOURCE_TYPE_UNSPECIFIED = 0;
-  GITHUB = 1;
+  SOURCE_TYPE_GITHUB = 1;
 }
 
 enum Tier {
@@ -48,13 +48,13 @@ enum Tier {
 
 enum ExtractionProvenance {
   EXTRACTION_PROVENANCE_UNSPECIFIED = 0;
-  API = 1;
-  WEBHOOK = 2;
+  EXTRACTION_PROVENANCE_API = 1;
+  EXTRACTION_PROVENANCE_WEBHOOK = 2;
 }
 
 enum TaskStatus {
   TASK_STATUS_UNSPECIFIED = 0;
-  OPEN = 1;
-  CLOSED = 2;
-  IN_PROGRESS = 3;
+  TASK_STATUS_OPEN = 1;
+  TASK_STATUS_CLOSED = 2;
+  TASK_STATUS_IN_PROGRESS = 3;
 }
