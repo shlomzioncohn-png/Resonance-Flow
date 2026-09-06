@@ -55,7 +55,7 @@ class RawObjectEventSerializationTest {
     }
 
     @Test
-    void serializesModalityValuesLowercase() throws Exception {
+    void serializesModalityValuesUppercase() throws Exception {
         RawObjectEvent event = RawObjectEvent.create(
                 "EMAIL/kamatech/2026-08-18/x.json", RawSourceType.EMAIL, "kamatech",
                 Instant.now(), ScopeDecision.INCLUDED, "sha256:" + "a".repeat(64),
@@ -63,11 +63,11 @@ class RawObjectEventSerializationTest {
 
         String json = objectMapper.writeValueAsString(event);
 
-        assertThat(json).contains("\"modality\":\"scanned_doc\"");
+        assertThat(json).contains("\"modality\":\"SCANNED_DOC\"");
     }
 
     @Test
-    void serializesSourceTypeAndScopeDecisionValuesLowercase() throws Exception {
+    void serializesSourceTypeAndScopeDecisionValuesUppercase() throws Exception {
         RawObjectEvent event = RawObjectEvent.create(
                 "EMAIL/kamatech/2026-08-18/x.json", RawSourceType.EMAIL, "kamatech",
                 Instant.now(), ScopeDecision.INCLUDED, "sha256:" + "a".repeat(64),
@@ -75,7 +75,7 @@ class RawObjectEventSerializationTest {
 
         String json = objectMapper.writeValueAsString(event);
 
-        assertThat(json).contains("\"source_type\":\"email\"");
-        assertThat(json).contains("\"scope_decision\":\"included\"");
+        assertThat(json).contains("\"source_type\":\"EMAIL\"");
+        assertThat(json).contains("\"scope_decision\":\"INCLUDED\"");
     }
 }

@@ -1,8 +1,7 @@
 package com.rnd.bridge.raw.model;
 
-import com.fasterxml.jackson.annotation.JsonProperty;
-
+/** Wire format is the enum name verbatim (uppercase snake_case), per Mind's request (2026-09). */
 public enum ScopeDecision {
-    @JsonProperty("included") INCLUDED,
-    @JsonProperty("excluded") EXCLUDED
+    INCLUDED,
+    EXCLUDED
 }
