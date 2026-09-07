@@ -1,0 +1,73 @@
+name: Relay / schema compatibility (PR)
+
+# Pre-merge gate: blocks a PR that would break Kafka schema compatibility,
+# WITHOUT any live cluster. It stands up a throwaway Schema Registry (the same
+# Apicurio image prod uses), seeds it with each schema version as it exists on
+# the PR's base branch — the "previous known-good schema from Git" — then
+# dry-run checks the PR's versions against it.
+#
+# No `branches:` filter: the base branch is whatever the PR targets, read from
+# github.event.pull_request.base.sha, so this works for PRs into main or any
+# other branch.
+#
+# The post-merge equivalent is teams/relay/schema-sync-hook, which runs the
+# same check + an actual register inside the cluster via ArgoCD. See
+# teams/relay/ci/README.md.
+on:
+  pull_request:
+    paths:
+      - "teams/relay/src/main/proto/**"
+      - "teams/relay/ci/**"
+      - "teams/relay/schema-sync-hook/**"
+      - ".github/workflows/relay-schema-ci.yaml"
+
+jobs:
+  schema-compat:
+    runs-on: ubuntu-latest
+
+    services:
+      schema-registry:
+        image: apicurio/apicurio-registry-mem:2.5.11.Final
+        ports:
+          - 8081:8080
+
+    env:
+      SCHEMA_REGISTRY_URL: http://localhost:8081/apis/ccompat/v6
+      COMPATIBILITY_LEVEL: FULL
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # seed-registry.sh reads the base branch's schema files via `git show`
+          fetch-depth: 0
+
+      - name: Wait for Schema Registry to be ready
+        run: |
+          for i in $(seq 1 30); do
+            if curl -sf "${SCHEMA_REGISTRY_URL}/subjects" >/dev/null; then
+              echo "Schema Registry is up."
+              exit 0
+            fi
+            echo "waiting for Schema Registry... ($i)"
+            sleep 2
+          done
+          echo "Schema Registry did not come up in time." >&2
+          exit 1
+
+      - name: Seed registry with base-branch schema versions
+        run: bash teams/relay/ci/seed-registry.sh "${{ github.event.pull_request.base.sha }}"
+
+      - name: Check PR schema versions for compatibility
+        run: bash teams/relay/ci/check-all-schemas.sh
+
+  chart-lint:
+    # Catches a broken schema-sync-hook chart (templating errors in
+    # configmap.yaml / job.yaml) before merge, instead of at ArgoCD sync time.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: azure/setup-helm@v4
+      - name: Lint and render the schema-sync-hook chart
+        run: |
+          helm lint teams/relay/schema-sync-hook
+          helm template t teams/relay/schema-sync-hook >/dev/null

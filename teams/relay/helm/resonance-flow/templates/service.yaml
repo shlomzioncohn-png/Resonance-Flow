@@ -1,0 +1,27 @@
+{{- range $componentName, $component := .Values.components }}
+{{- if and $component.enabled $component.service }}
+---
+apiVersion: v1
+kind: Service
+
+metadata:
+  name: {{ include "resonance-flow.fullname" $ }}-{{ $componentName }}
+  labels:
+    {{- include "resonance-flow.labels" $ | nindent 4 }}
+    app.kubernetes.io/component: {{ $componentName }}
+
+spec:
+  type: {{ $component.service.type }}
+
+  ports:
+    - port: {{ $component.service.port }}
+      targetPort: http
+      protocol: TCP
+      name: http
+
+  selector:
+    {{- include "resonance-flow.selectorLabels" $ | nindent 4 }}
+    app.kubernetes.io/component: {{ $componentName }}
+
+{{- end }}
+{{- end }}
