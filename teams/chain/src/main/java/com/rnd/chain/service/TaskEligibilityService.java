@@ -180,6 +180,11 @@ public class TaskEligibilityService {
             // taskId (which only takes lockFor(taskId), not dependencyGraphLock) could have
             // mutated and saved a newer copy in between; reusing the earlier instance here
             // would silently clobber that update when recalculateAndSave below calls save().
+            // TODO(JPA): this second requireTask(taskId) is a second real DB round-trip once
+            // real persistence lands (currently a cheap in-memory lookup) - not worth changing
+            // now (no benefit against an in-memory ConcurrentHashMap, and risks reopening the
+            // exact race this closes), but flagged for the eventual single-lock-scope,
+            // single-read redesign described in PLAN.md Phase 3 (review finding #17).
             withTaskLock(taskId, task -> {
                 if (dependsOnAlreadyDone) {
                     // A dependency on an already-completed task will never trigger a future
@@ -261,6 +266,9 @@ public class TaskEligibilityService {
             // staleness-safety reason documented in addDependency: the validation call above
             // ran before lockFor(taskId) was held, so a concurrent counter-mutating call could
             // have saved a newer copy in between.
+            // TODO(JPA): same forward-looking note as addDependency - this second
+            // requireTask(taskId) becomes a real DB round-trip post-migration; not changed now,
+            // see review finding #17 / PLAN.md Phase 3.
             withTaskLock(taskId, task -> {
                 if (dependsOnCurrentlyDone) {
                     // Mirrors addDependency: an edge to an already-DONE task never counted
