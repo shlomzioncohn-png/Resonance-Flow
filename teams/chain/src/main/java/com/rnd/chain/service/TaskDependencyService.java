@@ -32,6 +32,8 @@ public class TaskDependencyService {
 
     public TaskDependencyService(TaskRepository taskRepository,
                                   TaskDependencyRepository taskDependencyRepository) {
+        Objects.requireNonNull(taskRepository, "taskRepository must not be null");
+        Objects.requireNonNull(taskDependencyRepository, "taskDependencyRepository must not be null");
         this.taskRepository = taskRepository;
         this.taskDependencyRepository = taskDependencyRepository;
     }

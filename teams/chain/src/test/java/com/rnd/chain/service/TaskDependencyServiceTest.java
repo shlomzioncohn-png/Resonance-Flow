@@ -48,6 +48,26 @@ class TaskDependencyServiceTest {
         service = new TaskDependencyService(taskRepository, taskDependencyRepository);
     }
 
+    // --- constructor -----------------------------------------------------
+
+    @Test
+    void constructor_throwsNullPointerException_whenTaskRepositoryIsNull() {
+        TaskDependencyRepository taskDependencyRepository = new InMemoryTaskDependencyRepository(List.of());
+
+        assertThatThrownBy(() -> new TaskDependencyService(null, taskDependencyRepository))
+                .isInstanceOf(NullPointerException.class)
+                .hasMessageContaining("taskRepository");
+    }
+
+    @Test
+    void constructor_throwsNullPointerException_whenTaskDependencyRepositoryIsNull() {
+        TaskRepository taskRepository = new InMemoryTaskRepository(List.of());
+
+        assertThatThrownBy(() -> new TaskDependencyService(taskRepository, null))
+                .isInstanceOf(NullPointerException.class)
+                .hasMessageContaining("taskDependencyRepository");
+    }
+
     // --- addDependency -------------------------------------------------
 
     @Test
