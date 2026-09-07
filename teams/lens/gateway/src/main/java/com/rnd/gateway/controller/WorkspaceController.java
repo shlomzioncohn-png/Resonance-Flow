@@ -7,6 +7,9 @@ import com.rnd.gateway.dto.TaskStatusUpdateDTO;
 import com.rnd.gateway.dto.WorkspaceRequestDTO;
 import com.rnd.gateway.exception.GatewayTimeoutException;
 import com.rnd.gateway.exception.ServiceUnavailableException;
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.Parameter;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -49,6 +52,7 @@ import java.net.SocketTimeoutException;
  */
 @RestController
 @RequestMapping("/api/workspace")
+@Tag(name = "Workspace", description = "Employee My Workspace / My Tasks screens — forwards to BFF")
 public class WorkspaceController {
 
     private static final Logger logger = LoggerFactory.getLogger(WorkspaceController.class);
@@ -132,6 +136,8 @@ public class WorkspaceController {
      *   "confidenceScore": 85
      * }
      */
+    @Operation(summary = "Find my best task",
+            description = "\"I have X minutes — what should I work on?\" Returns one recommended task.")
     @PostMapping("/recommend")
     public ResponseEntity<TaskRecommendationDTO> getRecommendedTask(
             @Valid @RequestBody WorkspaceRequestDTO request) {
@@ -208,11 +214,17 @@ public class WorkspaceController {
      *
      * Response: TaskListResponseDTO { items, total, page, size }
      */
+    @Operation(summary = "List my tasks",
+            description = "\"My Tasks\" screen — filter, title search, and pagination.")
     @GetMapping("/tasks")
     public ResponseEntity<TaskListResponseDTO> getTaskList(
+            @Parameter(description = "all | in_progress | blocked | waiting_on_me (default all)")
             @RequestParam(required = false) String filter,
+            @Parameter(description = "Free-text, matched against task title (case-insensitive)")
             @RequestParam(required = false) String search,
+            @Parameter(description = "0-based page index (default 0)")
             @RequestParam(required = false) Integer page,
+            @Parameter(description = "Page size (default 20, clamped to 1-100)")
             @RequestParam(required = false) Integer size) {
 
         String userId = getMockUserId("workspace.tasks.list"); // TODO: extract from JWT
@@ -279,6 +291,7 @@ public class WorkspaceController {
      * Response: TaskDTO with all fields including dependencies, constraints,
      *           source, sprint, tags, blockingReason
      */
+    @Operation(summary = "Get task details", description = "Full task detail panel, by task id.")
     @GetMapping("/tasks/{taskId}")
     public ResponseEntity<TaskDTO> getTaskDetails(@PathVariable String taskId) {
 
@@ -336,6 +349,8 @@ public class WorkspaceController {
      *
      * Response: updated TaskDTO
      */
+    @Operation(summary = "Update task status",
+            description = "Allowed values: READY, IN_PROGRESS, BLOCKED, COMPLETED.")
     @PatchMapping("/tasks/{taskId}/status")
     public ResponseEntity<TaskDTO> updateTaskStatus(
             @PathVariable String taskId,
