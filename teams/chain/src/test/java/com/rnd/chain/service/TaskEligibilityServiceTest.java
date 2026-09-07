@@ -132,6 +132,25 @@ class TaskEligibilityServiceTest {
     }
 
     @Test
+    void addSecondDependency_multipleBlockers() {
+        // Restored regression scenario (review finding #9) - dropped during an earlier package
+        // restructuring, originally at com.rnd.chain.TaskEligibilityServiceTest (commit a8148d6).
+        UUID taskId = UUID.randomUUID();
+        UUID dependsOnTaskId = UUID.randomUUID();
+        Task task = buildTask(taskId, 1, 0, false); // already has one blocker
+
+        when(taskDependencyRepository.findByTaskId(dependsOnTaskId)).thenReturn(Collections.emptyList());
+        when(taskRepository.findById(taskId)).thenReturn(Optional.of(task));
+        when(taskRepository.findById(dependsOnTaskId))
+                .thenReturn(Optional.of(buildTask(dependsOnTaskId, 0, 0, true)));
+
+        taskEligibilityService.addDependency(taskId, dependsOnTaskId);
+
+        assertEquals(2, task.getBlockingCount());
+        assertFalse(task.isReady());
+    }
+
+    @Test
     void addDependency_duplicate_doesNotInflateBlockingCount() {
         UUID taskId = UUID.randomUUID();
         UUID dependsOnTaskId = UUID.randomUUID();
@@ -247,6 +266,25 @@ class TaskEligibilityServiceTest {
     }
 
     @Test
+    void removeOneOfMultipleBlockers_staysNotReady() {
+        // Restored regression scenario (review finding #9) - see addSecondDependency_multipleBlockers.
+        UUID taskId = UUID.randomUUID();
+        UUID dependsOnTaskId = UUID.randomUUID();
+        Task task = buildTask(taskId, 2, 0, false); // two blockers
+
+        when(taskDependencyRepository.existsDependency(taskId, dependsOnTaskId)).thenReturn(true);
+        when(taskRepository.findById(taskId)).thenReturn(Optional.of(task));
+        when(taskRepository.findById(dependsOnTaskId))
+                .thenReturn(Optional.of(buildTask(dependsOnTaskId, 0, 0, true)));
+
+        taskEligibilityService.removeDependency(taskId, dependsOnTaskId);
+
+        verify(taskDependencyRepository).delete(taskId, dependsOnTaskId);
+        assertEquals(1, task.getBlockingCount());
+        assertFalse(task.isReady());
+    }
+
+    @Test
     void removeDependency_notFound_doesNotChangeCounter() {
         UUID taskId = UUID.randomUUID();
         UUID dependsOnTaskId = UUID.randomUUID();
@@ -349,6 +387,31 @@ class TaskEligibilityServiceTest {
 
         assertTrue(a.isReady());
         assertTrue(c.isReady());
+    }
+
+    @Test
+    void dependencyChain_onlyDirectDependentUpdated_notTransitive() {
+        // Restored regression scenario (review finding #9) - see addSecondDependency_multipleBlockers.
+        // A depends on B depends on C. C -> DONE should only update B; A needs its own event.
+        UUID taskC = UUID.randomUUID();
+        UUID taskB = UUID.randomUUID();
+        UUID taskA = UUID.randomUUID();
+
+        Task c = buildTask(taskC, 0, 0, true);
+        Task b = buildTask(taskB, 1, 0, false); // B is blocked only by C
+
+        when(taskRepository.findById(taskC)).thenReturn(Optional.of(c));
+        when(taskDependencyRepository.findByDependsOnTaskId(taskC))
+                .thenReturn(List.of(new TaskDependency(taskB, taskC)));
+        when(taskRepository.findById(taskB)).thenReturn(Optional.of(b));
+
+        taskEligibilityService.onTaskStatusChanged(taskC, TaskStatus.DONE);
+
+        assertTrue(b.isReady());
+        // A (which depends on B) is never looked up - the fan-out only reaches direct
+        // dependents of C, not transitively past them.
+        verify(taskRepository, never()).findById(taskA);
+        verify(taskDependencyRepository, never()).findByDependsOnTaskId(taskB);
     }
 
     @Test
