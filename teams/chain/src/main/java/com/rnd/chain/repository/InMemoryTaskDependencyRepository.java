@@ -47,7 +47,9 @@ import java.util.concurrent.ConcurrentHashMap;
  * <p><b>Known limitation:</b> {@code writeLock} is a single global lock,
  * so unrelated edges (different task ids) serialize against each other
  * unnecessarily. Deliberately not striped per-key - not worth the added
- * complexity for a temporary in-memory stand-in.
+ * complexity for a temporary in-memory stand-in. Tracked as issue #299.
+ *
+ * @see <a href="https://github.com/KamaTechOrg/Resonance-Flow/issues/299">#299</a>
  */
 public class InMemoryTaskDependencyRepository implements TaskDependencyRepository {
 
