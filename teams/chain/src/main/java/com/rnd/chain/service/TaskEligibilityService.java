@@ -18,6 +18,7 @@ import java.util.List;
 import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
+import java.util.function.Consumer;
 
 /**
  * Task and TaskDependency are plain DTOs (not JPA entities yet), and the
@@ -93,10 +94,7 @@ public class TaskEligibilityService {
     @Transactional
     public void recalculateTaskEligibility(UUID taskId) {
         Objects.requireNonNull(taskId, "taskId must not be null");
-        synchronized (lockFor(taskId)) {
-            Task task = requireTask(taskId);
-            recalculateAndSave(task);
-        }
+        withTaskLock(taskId, task -> { });
     }
 
     // Always saves, regardless of whether isReady flips: a counter can change (e.g.
@@ -112,6 +110,20 @@ public class TaskEligibilityService {
             log.info("Task {} eligibility changed: isReady {} -> {}", task.getId(), previousIsReady, newIsReady);
         } else {
             log.debug("Task {} eligibility unchanged (isReady={})", task.getId(), newIsReady);
+        }
+    }
+
+    // Shared shape behind every single-task counter mutation in this class (review finding
+    // #13): lock this task's stripe, re-fetch the freshest copy (never trust a reference read
+    // before the lock was held - see the requireTask staleness comments below), let the caller
+    // mutate it, then recalculate + save. Not used by onTaskStatusChanged, which nests under
+    // dependencyGraphLock instead and needs a value (previousStatus) out of the locked block -
+    // a different shape than "mutate this Task, then save it".
+    private void withTaskLock(UUID taskId, Consumer<Task> mutator) {
+        synchronized (lockFor(taskId)) {
+            Task task = requireTask(taskId);
+            mutator.accept(task);
+            recalculateAndSave(task);
         }
     }
 
@@ -166,8 +178,7 @@ public class TaskEligibilityService {
             // taskId (which only takes lockFor(taskId), not dependencyGraphLock) could have
             // mutated and saved a newer copy in between; reusing the earlier instance here
             // would silently clobber that update when recalculateAndSave below calls save().
-            synchronized (lockFor(taskId)) {
-                Task task = requireTask(taskId);
+            withTaskLock(taskId, task -> {
                 if (dependsOnAlreadyDone) {
                     // A dependency on an already-completed task will never trigger a future
                     // onTaskStatusChanged transition to decrement it, so counting it here would
@@ -180,8 +191,7 @@ public class TaskEligibilityService {
                 } else {
                     task.setBlockingCount(task.getBlockingCount() + 1);
                 }
-                recalculateAndSave(task);
-            }
+            });
         }
     }
 
@@ -248,8 +258,7 @@ public class TaskEligibilityService {
             // staleness-safety reason documented in addDependency: the validation call above
             // ran before lockFor(taskId) was held, so a concurrent counter-mutating call could
             // have saved a newer copy in between.
-            synchronized (lockFor(taskId)) {
-                Task task = requireTask(taskId);
+            withTaskLock(taskId, task -> {
                 if (dependsOnCurrentlyDone) {
                     // Mirrors addDependency: an edge to an already-DONE task never counted
                     // against blockingCount in the first place (or was already subtracted when
@@ -260,8 +269,7 @@ public class TaskEligibilityService {
                 } else {
                     task.setBlockingCount(Math.max(0, task.getBlockingCount() - 1));
                 }
-                recalculateAndSave(task);
-            }
+            });
         }
     }
 
@@ -340,11 +348,7 @@ public class TaskEligibilityService {
     public void onConstraintAdded(UUID taskId) {
         Objects.requireNonNull(taskId, "taskId must not be null");
         log.info("Constraint added on task {}", taskId);
-        synchronized (lockFor(taskId)) {
-            Task task = requireTask(taskId);
-            task.setOpenConstraintCount(task.getOpenConstraintCount() + 1);
-            recalculateAndSave(task);
-        }
+        withTaskLock(taskId, task -> task.setOpenConstraintCount(task.getOpenConstraintCount() + 1));
     }
 
     @Transactional
@@ -362,11 +366,8 @@ public class TaskEligibilityService {
             return;
         }
 
-        synchronized (lockFor(taskId)) {
-            Task task = requireTask(taskId);
-            int delta = isOpenNow ? 1 : -1;
-            task.setOpenConstraintCount(Math.max(0, task.getOpenConstraintCount() + delta));
-            recalculateAndSave(task);
-        }
+        int delta = isOpenNow ? 1 : -1;
+        withTaskLock(taskId, task ->
+            task.setOpenConstraintCount(Math.max(0, task.getOpenConstraintCount() + delta)));
     }
 }
