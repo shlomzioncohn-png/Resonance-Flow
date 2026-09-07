@@ -16,7 +16,6 @@ class TaskTest {
                 .id(UUID.randomUUID())
                 .ownerId("owner")
                 .status(null)
-                .isReady(true)
                 .blockingCount(0)
                 .openConstraintCount(0)
                 .createdAt(LocalDateTime.now())
@@ -105,7 +104,6 @@ class TaskTest {
                 .id(UUID.randomUUID())
                 .ownerId("owner")
                 .status(TaskStatus.ACTIVE)
-                .isReady(true)
                 .blockingCount(0)
                 .openConstraintCount(0)
                 .createdAt(LocalDateTime.now());

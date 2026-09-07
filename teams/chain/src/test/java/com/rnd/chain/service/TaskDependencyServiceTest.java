@@ -187,7 +187,6 @@ class TaskDependencyServiceTest {
                 .id(id)
                 .ownerId("owner")
                 .status(TaskStatus.ACTIVE)
-                .isReady(true)
                 .blockingCount(0)
                 .openConstraintCount(0)
                 .createdAt(LocalDateTime.now())

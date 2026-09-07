@@ -13,9 +13,6 @@ public final class Task {
 
     private final TaskStatus status;
 
-    /** Whether all of this task's dependencies and constraints are satisfied, so it can be worked on. */
-    private final boolean isReady;
-
     /** Number of not-yet-completed tasks that this task depends on (i.e. tasks blocking it). */
     private final int blockingCount;
 
@@ -33,7 +30,6 @@ public final class Task {
                  UUID parentTaskId,
                  String ownerId,
                  TaskStatus status,
-                 boolean isReady,
                  int blockingCount,
                  int openConstraintCount,
                  Integer estimatedDurationMin,
@@ -60,7 +56,6 @@ public final class Task {
         this.parentTaskId = parentTaskId;
         this.ownerId = ownerId;
         this.status = status;
-        this.isReady = isReady;
         this.blockingCount = blockingCount;
         this.openConstraintCount = openConstraintCount;
         this.estimatedDurationMin = estimatedDurationMin;
@@ -86,8 +81,9 @@ public final class Task {
         return status;
     }
 
+    /** Derived, not stored: ready iff nothing is blocking it and no constraint is open. */
     public boolean isReady() {
-        return isReady;
+        return blockingCount == 0 && openConstraintCount == 0;
     }
 
     public int getBlockingCount() {
@@ -144,7 +140,6 @@ public final class Task {
         private UUID parentTaskId;
         private String ownerId;
         private TaskStatus status;
-        private boolean isReady;
         private int blockingCount;
         private int openConstraintCount;
         private Integer estimatedDurationMin;
@@ -170,11 +165,6 @@ public final class Task {
 
         public Builder status(TaskStatus status) {
             this.status = status;
-            return this;
-        }
-
-        public Builder isReady(boolean isReady) {
-            this.isReady = isReady;
             return this;
         }
 
@@ -214,7 +204,7 @@ public final class Task {
         }
 
         public Task build() {
-            return new Task(id, parentTaskId, ownerId, status, isReady, blockingCount,
+            return new Task(id, parentTaskId, ownerId, status, blockingCount,
                     openConstraintCount, estimatedDurationMin, score, createdAt, updatedAt, deletedAt);
         }
     }
