@@ -1,4 +1,4 @@
-﻿# Build output
+# Build output
 target/
 build/
 out/
@@ -40,3 +40,7 @@ venv/
 # OS
 .DS_Store
 Thumbs.db
+
+# Local Helm values overrides that may contain a personal PAT - never commit these.
+*.local.yaml
+values.local.yaml

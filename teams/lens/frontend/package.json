@@ -7,7 +7,8 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint ."
+    "lint": "eslint .",
+    "test": "vitest run"
   },
   "dependencies": {
     "@emotion/react": "latest",
@@ -26,6 +27,7 @@
     "eslint": "^9.39.5",
     "eslint-config-next": "^16.3.3",
     "eslint-plugin-jsx-a11y": "^6.10.2",
-    "typescript": "5.9.3"
+    "typescript": "5.9.3",
+    "vitest": "^4.1.11"
   }
 }
