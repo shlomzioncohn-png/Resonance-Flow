@@ -1,0 +1,18 @@
+# Single source for the pipe's tunable constants (design doc §11), so each is swappable
+# per-environment without hunting through the doc or the codebase, and without a rebuild.
+#
+# kafka.topics.task-notifications.* are topic-provisioning settings (Terraform / an admin script /
+# kafka-topics.sh), not app runtime config — the running service doesn't read them. Both stay
+# marked (proposed) in the doc until §10's open questions are answered.
+relay:
+  kafka:
+    topics:
+      task-notifications:
+        partitions: 12
+        retention-days: 7
+  pipe:
+    replay-buffer:
+      capacity-per-user: 200
+    websocket:
+      outbox-capacity: 32
+      heartbeat-interval-seconds: 15
