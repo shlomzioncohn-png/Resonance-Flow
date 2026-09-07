@@ -34,6 +34,13 @@ public interface TaskDependencyRepository {
     List<TaskDependency> findByDependsOnTaskId(UUID taskId);
 
     /**
+     * @return true if the edge (taskId, dependsOnTaskId) currently exists. A dedicated
+     * membership query (review finding #16) rather than making every caller materialize the
+     * full {@link #findByTaskId} list just to test one id against it.
+     */
+    boolean existsDependency(UUID taskId, UUID dependsOnTaskId);
+
+    /**
      * Persists the given edge. Idempotent: saving the same (taskId,
      * dependsOnTaskId) pair more than once does not create a second
      * copy of it.

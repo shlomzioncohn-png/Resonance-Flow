@@ -79,9 +79,10 @@ public class TaskEligibilityService {
             .orElseThrow(() -> new IllegalArgumentException("Task not found: " + taskId));
     }
 
+    // Delegates to the repository's O(1) membership query (review finding #16) instead of
+    // materializing the full findByTaskId list just to test one edge against it.
     private boolean edgeExists(UUID taskId, UUID dependsOnTaskId) {
-        return taskDependencyRepository.findByTaskId(taskId).stream()
-            .anyMatch(edge -> edge.getDependsOnTaskId().equals(dependsOnTaskId));
+        return taskDependencyRepository.existsDependency(taskId, dependsOnTaskId);
     }
 
     @Transactional

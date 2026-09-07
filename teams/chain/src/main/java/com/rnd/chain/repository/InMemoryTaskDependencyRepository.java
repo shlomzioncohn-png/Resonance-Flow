@@ -84,6 +84,18 @@ public class InMemoryTaskDependencyRepository implements TaskDependencyRepositor
     }
 
     @Override
+    public boolean existsDependency(UUID taskId, UUID dependsOnTaskId) {
+        Objects.requireNonNull(taskId, "taskId must not be null");
+        Objects.requireNonNull(dependsOnTaskId, "dependsOnTaskId must not be null");
+        lock.readLock().lock();
+        try {
+            return dependenciesByTask.getOrDefault(taskId, Set.of()).contains(dependsOnTaskId);
+        } finally {
+            lock.readLock().unlock();
+        }
+    }
+
+    @Override
     public TaskDependency save(TaskDependency dependency) {
         Objects.requireNonNull(dependency, "dependency must not be null");
         lock.writeLock().lock();

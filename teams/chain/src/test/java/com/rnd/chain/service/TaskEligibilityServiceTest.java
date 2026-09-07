@@ -115,8 +115,11 @@ class TaskEligibilityServiceTest {
         UUID dependsOnTaskId = UUID.randomUUID();
         Task task = buildTask(taskId, 0, 0, true);
 
+        // findByTaskId(dependsOnTaskId) backs wouldCreateCycle's DFS (starts at dependsOnTaskId).
+        // Finding #16: edgeExists now delegates to existsDependency, not findByTaskId(taskId) -
+        // no stub needed for it here, since Mockito's boolean default (false) is already the
+        // "not a duplicate" outcome this test wants.
         when(taskDependencyRepository.findByTaskId(dependsOnTaskId)).thenReturn(Collections.emptyList());
-        when(taskDependencyRepository.findByTaskId(taskId)).thenReturn(Collections.emptyList());
         when(taskRepository.findById(taskId)).thenReturn(Optional.of(task));
         when(taskRepository.findById(dependsOnTaskId))
                 .thenReturn(Optional.of(buildTask(dependsOnTaskId, 0, 0, true)));
@@ -140,8 +143,8 @@ class TaskEligibilityServiceTest {
         when(taskRepository.findById(taskId)).thenReturn(Optional.of(task));
         when(taskRepository.findById(dependsOnTaskId)).thenReturn(Optional.of(dependsOnTask));
         when(taskDependencyRepository.findByTaskId(dependsOnTaskId)).thenReturn(Collections.emptyList());
-        when(taskDependencyRepository.findByTaskId(taskId))
-                .thenReturn(List.of(new TaskDependency(taskId, dependsOnTaskId)));
+        // Finding #16: edgeExists now delegates to existsDependency, not findByTaskId(taskId).
+        when(taskDependencyRepository.existsDependency(taskId, dependsOnTaskId)).thenReturn(true);
 
         taskEligibilityService.addDependency(taskId, dependsOnTaskId);
 
@@ -230,8 +233,8 @@ class TaskEligibilityServiceTest {
         UUID dependsOnTaskId = UUID.randomUUID();
         Task task = buildTask(taskId, 1, 0, false);
 
-        when(taskDependencyRepository.findByTaskId(taskId))
-                .thenReturn(List.of(new TaskDependency(taskId, dependsOnTaskId)));
+        // Finding #16: edgeExists now delegates to existsDependency, not findByTaskId(taskId).
+        when(taskDependencyRepository.existsDependency(taskId, dependsOnTaskId)).thenReturn(true);
         when(taskRepository.findById(taskId)).thenReturn(Optional.of(task));
         when(taskRepository.findById(dependsOnTaskId))
                 .thenReturn(Optional.of(buildTask(dependsOnTaskId, 0, 0, true)));
@@ -250,8 +253,9 @@ class TaskEligibilityServiceTest {
         Task task = buildTask(taskId, 0, 0, true);
 
         // Finding #1: taskId is now validated to exist even for a no-op removal.
+        // Finding #16: existsDependency defaults to false when unstubbed, which is already the
+        // "no such edge" outcome this test wants - no explicit stub needed.
         when(taskRepository.findById(taskId)).thenReturn(Optional.of(task));
-        when(taskDependencyRepository.findByTaskId(taskId)).thenReturn(Collections.emptyList());
 
         taskEligibilityService.removeDependency(taskId, dependsOnTaskId);
 
@@ -278,8 +282,10 @@ class TaskEligibilityServiceTest {
         UUID dependsOnTaskId = UUID.randomUUID();
         Task task = buildTask(taskId, 0, 0, true);
 
-        when(taskDependencyRepository.findByTaskId(taskId))
-                .thenReturn(List.of(new TaskDependency(taskId, dependsOnTaskId)));
+        // Finding #16: edgeExists now delegates to existsDependency, not findByTaskId(taskId).
+        // Must stub true, or the decrement branch (the thing this test exists to exercise) is
+        // never reached at all.
+        when(taskDependencyRepository.existsDependency(taskId, dependsOnTaskId)).thenReturn(true);
         when(taskRepository.findById(taskId)).thenReturn(Optional.of(task));
         when(taskRepository.findById(dependsOnTaskId))
                 .thenReturn(Optional.of(buildTask(dependsOnTaskId, 0, 0, true)));
