@@ -27,9 +27,11 @@ class TaskEligibilityServiceConcurrencyTest {
 
     private static final int THREAD_COUNT = 16;
 
-    /** Runs `task` on THREAD_COUNT threads simultaneously (released by a shared latch), waits for all to finish. */
-    private void runConcurrently(List<Runnable> tasks) throws InterruptedException {
-        ExecutorService pool = Executors.newFixedThreadPool(THREAD_COUNT);
+    /** Runs `tasks` simultaneously (released by a shared latch) on a pool of `poolSize` threads,
+     * waiting up to `timeoutSeconds` for all to finish (review finding #24 - merges what used to
+     * be two line-for-line-identical harness methods differing only in these two values). */
+    private void runConcurrently(List<Runnable> tasks, int poolSize, long timeoutSeconds) throws InterruptedException {
+        ExecutorService pool = Executors.newFixedThreadPool(poolSize);
         CountDownLatch ready = new CountDownLatch(tasks.size());
         CountDownLatch start = new CountDownLatch(1);
         CountDownLatch done = new CountDownLatch(tasks.size());
@@ -50,7 +52,7 @@ class TaskEligibilityServiceConcurrencyTest {
 
         assertTrue(ready.await(5, TimeUnit.SECONDS), "workers failed to start");
         start.countDown();
-        assertTrue(done.await(30, TimeUnit.SECONDS), "workers did not finish in time");
+        assertTrue(done.await(timeoutSeconds, TimeUnit.SECONDS), "workers did not finish in time");
         pool.shutdown();
     }
 
@@ -73,7 +75,7 @@ class TaskEligibilityServiceConcurrencyTest {
                 .<Runnable>map(blockerId -> () -> service.addDependency(hubId, blockerId))
                 .collect(Collectors.toList());
 
-        runConcurrently(jobs);
+        runConcurrently(jobs, THREAD_COUNT, 30);
 
         Task hub = taskRepository.findById(hubId).orElseThrow();
         assertEquals(THREAD_COUNT, hub.getBlockingCount(), "every concurrent addDependency must be counted exactly once");
@@ -104,7 +106,7 @@ class TaskEligibilityServiceConcurrencyTest {
                 .<Runnable>map(blockerId -> () -> service.onTaskStatusChanged(blockerId, TaskStatus.DONE))
                 .collect(Collectors.toList());
 
-        runConcurrently(jobs);
+        runConcurrently(jobs, THREAD_COUNT, 30);
 
         Task hub = taskRepository.findById(hubId).orElseThrow();
         assertEquals(0, hub.getBlockingCount(), "every concurrent completion must be counted exactly once");
@@ -146,7 +148,7 @@ class TaskEligibilityServiceConcurrencyTest {
                     () -> service.addDependency(dependentId, targetId),
                     () -> service.onTaskStatusChanged(targetId, TaskStatus.DONE));
 
-            runConcurrentPair(jobs);
+            runConcurrently(jobs, jobs.size(), 10);
 
             Task dependent = taskRepository.findById(dependentId).orElseThrow();
             assertEquals(0, dependent.getBlockingCount(),
@@ -156,34 +158,4 @@ class TaskEligibilityServiceConcurrencyTest {
         }
     }
 
-    /**
-     * Same shape as runConcurrently, but sized for exactly two racing operations per trial
-     * rather than THREAD_COUNT - a fresh two-thread pool per trial keeps each of the 50 trials
-     * independent (no leftover state or thread reuse across trials).
-     */
-    private void runConcurrentPair(List<Runnable> tasks) throws InterruptedException {
-        ExecutorService pool = Executors.newFixedThreadPool(tasks.size());
-        CountDownLatch ready = new CountDownLatch(tasks.size());
-        CountDownLatch start = new CountDownLatch(1);
-        CountDownLatch done = new CountDownLatch(tasks.size());
-
-        for (Runnable task : tasks) {
-            pool.submit(() -> {
-                ready.countDown();
-                try {
-                    start.await();
-                    task.run();
-                } catch (InterruptedException e) {
-                    Thread.currentThread().interrupt();
-                } finally {
-                    done.countDown();
-                }
-            });
-        }
-
-        assertTrue(ready.await(5, TimeUnit.SECONDS), "workers failed to start");
-        start.countDown();
-        assertTrue(done.await(10, TimeUnit.SECONDS), "workers did not finish in time");
-        pool.shutdown();
-    }
 }
