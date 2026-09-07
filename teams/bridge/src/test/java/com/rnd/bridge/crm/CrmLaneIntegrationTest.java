@@ -30,7 +30,7 @@ class CrmLaneIntegrationTest {
     private static CrmLane newLane(DealRepository repository) {
         return new CrmLane(
                 new CrmSourceReader(repository),
-                new DealToTaskMapper(),
+                new DealToTaskMapper("org-test-0000"),
                 new TaskValidator(),
                 new LoggingPayloadPublisher<Task>());
     }

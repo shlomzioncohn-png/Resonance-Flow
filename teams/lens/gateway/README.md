@@ -161,12 +161,13 @@ All DTOs in the Gateway use Lombok:
 ```
 src/main/java/com/rnd/gateway/
 ├── GatewayApplication.java   # Spring Boot entry point
-├── security/                 # Authentication & authorization
-├── filters/                  # Custom gateway filters
-└── config/                   # Configuration classes
+├── config/                   # SecurityConfig (permitAll for now — JWT is a TODO)
+├── controller/                # WorkspaceController, HealthController
+├── dto/                       # Request/response DTOs
+└── exception/                 # GlobalExceptionHandler + typed exceptions
 src/main/resources/
 ├── application.yml          # Gateway routes & configuration
-└── application-dev.yml      # Development profile
+└── application-local.yml    # Local-profile overrides (disables Spring Security's default login)
 src/test/java/com/rnd/gateway/
 ```
 
@@ -402,19 +403,17 @@ Frontend
   └── Display recommended task
 ```
 
-### Using Shared DTOs
+### DTOs
 
-This endpoint uses DTOs from `shared-dtos` library:
-- **Input:** `WorkspaceRequestDTO` from `com.rnd.lens.dto`
-- **Output:** `TaskRecommendationDTO` from `com.rnd.lens.dto`
-- **Task Model:** `TaskDTO` from `com.rnd.lens.dto`
+There is no shared DTO library — each layer owns its own copy in its own package,
+kept structurally in sync by convention (per `docs/workspace-screen-integration-plan.md`
+principle #2, "each layer owns its DTOs"):
+- **Gateway:** `com.rnd.gateway.dto` (this module)
+- **BFF:** `com.rnd.bff.dto`
+- **Frontend:** TypeScript interfaces in `services/workspaceApi.ts`
 
-These DTOs are used consistently across:
-- Frontend (TypeScript interfaces generated from same source)
-- Gateway (Java classes imported)
-- BFF (Java classes imported)
-
-Single source of truth ensures type safety and consistency.
+`WorkspaceRequestDTO`, `TaskDTO`, and `TaskRecommendationDTO` exist independently in
+Gateway and BFF. When a field is added or removed on one side, update the other by hand.
 
 ---
 
