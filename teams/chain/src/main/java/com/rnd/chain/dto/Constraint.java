@@ -38,7 +38,10 @@ public class Constraint {
     public ConstraintType getType() { return type; }
     public ConstraintStatus getStatus() { return status; }
 
-    public Map<String, Object> getReason() { return copyReason(reason); }
+    // this.reason is always already the result of copyReason() (set that way in the
+    // constructor and in setReason()), so it is already an unmodifiable, independent copy -
+    // re-copying it again on every read is redundant (review finding #14).
+    public Map<String, Object> getReason() { return this.reason; }
 
     public String getSourceRef() { return sourceRef; }
     public LocalDateTime getCreatedAt() { return createdAt; }
