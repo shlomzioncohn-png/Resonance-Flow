@@ -132,3 +132,83 @@ where the model picked the correct top-priority task.
 To keep the door open for a future switch to a different metric without re-running every
 model, the harness report keeps every candidate's score and reasoning per scenario
 (`ScenarioResult.candidates`), not just the winner.
+
+## Extraction-quality eval
+
+A **second, separate** harness — not a variant of the ranking metric above, which
+is why it is its own section. Top-1 accuracy asks "given a list of tasks, did the
+model rank the right one first?". This asks a question one step upstream: **"did
+the pipeline extract the right action items from a meeting at all?"** — measured
+as precision / recall / F1 of the extracted items against a human-annotated
+reference (AMI's tagged action items). It lives in `extraction_eval.py`
+(`evaluate_extraction`), with a CLI at `python -m mind.evaluation.run_extraction_eval`.
+The full design, including the hand-sketch on real AMI meetings, is in
+`extraction_eval_design.md`.
+
+### What it measures
+
+Given `extracted` action items and `annotated` (reference) ones, both as strings:
+
+- **precision** = `TP / len(extracted)` — of what was extracted, how much was real.
+- **recall** = `TP / len(annotated)` — of the real action items, how many were found.
+- **f1** — harmonic mean. Micro-F1 over the whole slice is the number CI will
+  regress on (`extraction_eval_design.md` §3.5).
+
+The report also carries the matched pairs, the missed annotations, and the false
+positives — the raw evidence, kept for "why did this run score that?" analysis in
+later weeks, the same requirement `ScenarioResult.candidates` exists for above.
+
+### The matching rule
+
+An extracted task and an annotated sentence are almost never byte-identical
+("UI Designer to present the interface concept" vs. "The User Interface Designer
+will make a presentation on the user interface concept"). The rule
+(`extraction_eval_design.md` §3):
+
+1. Normalize both sides — lowercase, collapse whitespace, drop a trailing period.
+2. Score every (extracted, annotated) pair with a `similarity(a, b) -> float` in
+   `[0, 1]`.
+3. Match greedily, one-to-one: highest similarity first, take a pair iff both
+   endpoints are still free and the score is `>= threshold`. A merge (two
+   annotations covered by one extracted item) therefore shows up as one true
+   positive plus one missed annotation, not hidden.
+4. `TP` = matched pairs, `FP` = unmatched extracted, `FN` = unmatched annotated.
+
+`similarity` and `threshold` are **required parameters of `evaluate_extraction`,
+never hardcoded**: Ayala's embedding-similarity function swaps in at the call site
+with no change to the harness, and the locked lexical threshold
+(`extraction_eval_design.md` §6 — τ = 0.60, for the `rapidfuzz` backend) can be
+revised as a visible call-site change rather than a silent code edit.
+
+### This eval is approximate
+
+It compares free text to free text. A "true positive" means *our rule* — a
+similarity function and a threshold that are judgement calls — decided two
+sentences are the same commitment. Two models' scores are comparable only because
+they were scored with the *same frozen* rule; the absolute number carries an
+error bar we do not quantify. The job is to catch regressions and large
+differences on a fixed reference, not to certify absolute extraction quality.
+
+### Running it
+
+```bash
+python -m mind.evaluation.run_extraction_eval                   # the bundled hand-built fixture
+python -m mind.evaluation.run_extraction_eval --input pair.json
+```
+
+`pair.json` is `{"extracted": [...], "annotated": [...]}`. With no `--input`, the
+fixture in `extraction_fixture.py` runs — three true positives, one false
+positive, one false negative, precision = recall = 0.75, worked out by hand in
+that file's docstring. The default similarity is a pure-Python Jaccard placeholder
+(`default_similarity`); the real backend (embeddings, or a `rapidfuzz` baseline)
+is not built yet — blocked on Ayala's answer (`extraction_eval_design.md` §4).
+`metrics.extraction_precision_recall` is a stricter placeholder still (exact
+string match); it is not this eval.
+
+### Current status
+
+**Fixture-validated, not yet run against real pipeline output** — see
+[Cross-team: should the Task model / API error format be shared contracts? #21](https://github.com/KamaTechOrg/Resonance-Flow/issues/21).
+The extracted side needs Yonit's extraction pipeline and Michal's ASR to be
+producing output; the annotated side (AMI action items) wires in via a manifest
+edit, not a code change (`extraction_eval_design.md` §"Scope").
