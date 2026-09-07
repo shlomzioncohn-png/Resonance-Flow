@@ -144,12 +144,16 @@ Three branches stacked on each other, each with its own PR:
    lane-agnostic foundation: `core` (the `AbstractIntakeLane` template + its four collaborator
    interfaces), `task` (`Task`, `AbstractTaskMapper`, `TaskValidator`, the enums), and
    `LoggingPayloadPublisher`. Title: "Bridge: shared pipeline infrastructure (blocks the other
-   three lanes)". **Status: reviewed by 1 of 8 requested reviewers (MalkaSafra, approved
-   2026-09-06 10:07); the other 7 (danielkap-tr, KamaTechOrg, tamarmar, leaRevivo, ayalaw,
-   estherora-tem, Bezbran, rachelzahler) have not reviewed yet — `reviewDecision` is
-   `REVIEW_REQUIRED`.** `mergeable: MERGEABLE`, CI not failing. **This PR merging is what actually
-   lands all of Ruth's CRM work on `main` — until then, everything below exists only on these
-   branches, not on `main`.** Not something Ruth can resolve alone; needs the other reviewers.
+   three lanes)". **Status as of 2026-09-06 13:4x: 0 of 8 requested reviewers currently approved.**
+   MalkaSafra approved once (2026-09-06 10:07, against commit `fd0a3e2`), but that approval was
+   **auto-dismissed by GitHub** when (4) below pushed new commits onto this same branch —
+   `ruth/bridge-core` is PR #159's head, so any push here invalidates prior reviews of it. All 8
+   reviewers (danielkap-tr, KamaTechOrg, tamarmar, leaRevivo, ayalaw, estherora-tem, Bezbran,
+   rachelzahler) were re-requested and a status comment was posted 2026-09-06 explaining the
+   blocking. `mergeable` briefly went `UNKNOWN` right after the push (GitHub recomputing) — check
+   fresh rather than trusting a cached value. **This PR merging is what actually lands all of
+   Ruth's CRM + enrichment work on `main`** — until then, everything below exists only on these
+   branches. Not something Ruth can resolve alone; needs the other reviewers.
 2. **`ruth/crm-deal-mapper`** (PR **#161**, `ruth/crm-deal-mapper → ruth/bridge-core`, **MERGED**
    2026-09-06 09:35, merge commit `fd0a3e2`) — the CRM lane itself, built on top of (1). Had 6
    `add/add` merge conflicts against `ruth/bridge-core` at merge time (both branches had
@@ -160,11 +164,14 @@ Three branches stacked on each other, each with its own PR:
    (isolated `git worktree` + `BridgeApplicationTests` full context load) that the resulting
    `TaskValidator` (`@Component` + `CrmLaneConfig`'s manual `@Bean` for the same type) does not
    collide.
-3. **`ruth/llm-enrichment`** (current branch, **not yet pushed / no PR opened**) — branched from
-   `ruth/bridge-core` after (2) merged into it, so it starts from a clean, conflict-free base.
-   Carries the new `enrichment` package (§9.3) as uncommitted, untracked files as of this writing
-   — nothing on this branch has been committed yet, on Ruth's explicit instruction not to change
-   anything further until she reviews.
+3. **`ruth/llm-enrichment`** (branched from `ruth/bridge-core` after (2) merged into it) — carried
+   the new `enrichment` package (§9.3). Committed (`bb84a69`), pushed, opened as PR **#286**
+   (`ruth/llm-enrichment → ruth/bridge-core`), and **merged** 2026-09-06 13:42:55 (merge commit
+   `e9d78c2`). This branch's work is done; the branch itself can be deleted (GitHub already offers
+   this after merge) — nothing further happens on it.
+4. Net effect: **`ruth/bridge-core` now contains both (2) and (3)**, at commit `e9d78c2`. Local
+   checkout was fast-forwarded to match. PR #159 (item 1) is the only thing standing between all of
+   this and `main`.
 
 ### 9.2 What's done — CRM lane (Ruth's core deliverable)
 
@@ -206,7 +213,8 @@ suite (126 tests, 0 failures — see §7):
 
 ### 9.3 What's done — enrichment scaffolding (Stage 3, first slice only)
 
-New package `com.rnd.bridge.enrichment`, built 2026-09-06, **uncommitted** on `ruth/llm-enrichment`:
+New package `com.rnd.bridge.enrichment`, built 2026-09-06 on `ruth/llm-enrichment`, committed
+(`bb84a69`), merged into `ruth/bridge-core` via PR #286 (§9.1 item 3):
 
 - `DueDateSuggestion`, `SeveritySuggestion`, `DependencySuggestion` (+ `DependencyRelation` enum:
   `BLOCKS`/`BLOCKED_BY`/`FIXES`/`RELATES_TO`) — each carries its own `confidence` (`double`,
