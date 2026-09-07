@@ -1,8 +1,11 @@
-// Copied verbatim from chain/ruthHoltzman/dependency-repository-66, unmodified.
+// Originally copied from chain/ruthHoltzman/dependency-repository-66; logging added since.
 
 package com.rnd.chain.repository;
 
 import com.rnd.chain.dto.TaskDependency;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -28,6 +31,8 @@ import java.util.concurrent.ConcurrentHashMap;
  */
 public class InMemoryTaskDependencyRepository implements TaskDependencyRepository {
 
+    private static final Logger log = LoggerFactory.getLogger(InMemoryTaskDependencyRepository.class);
+
     private final ConcurrentHashMap<UUID, Set<UUID>> dependenciesByTask = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<UUID, Set<UUID>> dependentsByTask = new ConcurrentHashMap<>();
     private final Object writeLock = new Object();
@@ -42,6 +47,7 @@ public class InMemoryTaskDependencyRepository implements TaskDependencyRepositor
             dependentsByTask.computeIfAbsent(dependsOnTaskId, id -> ConcurrentHashMap.newKeySet())
                     .add(taskId);
         }
+        log.debug("Loaded {} dependency edge(s)", edges.size());
     }
 
     @Override
@@ -73,10 +79,12 @@ public class InMemoryTaskDependencyRepository implements TaskDependencyRepositor
             Set<UUID> dependsOn = dependenciesByTask.computeIfAbsent(taskId, id -> ConcurrentHashMap.newKeySet());
             boolean added = dependsOn.add(dependsOnTaskId);
             if (!added) {
+                log.debug("Dependency already exists: task {} depends on {} - no-op", taskId, dependsOnTaskId);
                 return Optional.empty();
             }
             dependentsByTask.computeIfAbsent(dependsOnTaskId, id -> ConcurrentHashMap.newKeySet())
                     .add(taskId);
+            log.info("Saved dependency: task {} depends on {}", taskId, dependsOnTaskId);
             return Optional.of(dependency);
         }
     }
@@ -87,12 +95,14 @@ public class InMemoryTaskDependencyRepository implements TaskDependencyRepositor
             Set<UUID> dependsOn = dependenciesByTask.get(taskId);
             boolean removed = dependsOn != null && dependsOn.remove(dependsOnTaskId);
             if (!removed) {
+                log.debug("Dependency not found for delete: task {} depends on {} - no-op", taskId, dependsOnTaskId);
                 return false;
             }
             Set<UUID> dependents = dependentsByTask.get(dependsOnTaskId);
             if (dependents != null) {
                 dependents.remove(taskId);
             }
+            log.info("Deleted dependency: task {} depends on {}", taskId, dependsOnTaskId);
             return true;
         }
     }
