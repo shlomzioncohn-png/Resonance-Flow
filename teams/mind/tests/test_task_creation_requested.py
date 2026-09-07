@@ -1,22 +1,20 @@
 """Tests for the TaskCreationRequested contract."""
 
+import json
 from uuid import UUID
 
 import pytest
 from pydantic import ValidationError
 
+from mind.contracts.base_enums import SourceType
 from mind.contracts.task_creation_requested import (
     TaskCreationRequested,
 )
-
-from mind.contracts.base_enums import SourceType
-
 from mind.contracts.task_enums import (
     AssigneeType,
     RoleContext,
     TaskTier,
 )
-import json
 
 
 def valid_payload() -> dict:

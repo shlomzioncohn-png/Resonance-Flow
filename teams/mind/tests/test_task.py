@@ -5,9 +5,8 @@ from uuid import UUID
 import pytest
 from pydantic import ValidationError
 
-from mind.contracts.task import Task
 from mind.contracts.base_enums import SourceType
-
+from mind.contracts.task import Task
 from mind.contracts.task_enums import (
     AssigneeType,
     ExtractionProvenance,

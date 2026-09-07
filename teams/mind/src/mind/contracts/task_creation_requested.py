@@ -11,7 +11,6 @@ from pydantic import (
 
 from .assignee import AssigneeCandidate
 from .base_enums import SourceType
-
 from .task_enums import (
     RoleContext,
     TaskTier,

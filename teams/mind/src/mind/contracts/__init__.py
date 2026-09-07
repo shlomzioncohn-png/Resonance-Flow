@@ -22,7 +22,6 @@ from .task_enums import (
     TaskTier,
 )
 
-
 __all__ = [
     "Assignee",
     "AssigneeCandidate",

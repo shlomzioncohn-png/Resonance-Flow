@@ -1,7 +1,6 @@
 """Contract for raw-object events received from Bridge."""
 
 from datetime import timedelta
-from uuid import UUID
 
 from pydantic import (
     AwareDatetime,
@@ -12,7 +11,6 @@ from pydantic import (
 )
 
 from .base_enums import SourceType
-
 from .raw_object_event_enums import (
     Modality,
     ScopeDecision,
