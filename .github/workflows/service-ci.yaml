@@ -144,12 +144,8 @@ jobs:
 
       - name: Deploy chart to cluster (smoke test)
         run: |
+          helm dependency build "$CHART_DIR"
           SERVICE="${{ inputs.service_name }}"
-          # The chart's Deployment template ranges over every entry under .components. A
-          # filtered -f file alone doesn't help: Helm deep-merges it with the chart's own
-          # bundled default values.yaml (the same file), so other teams' components come
-          # right back. --set <key>=null is Helm's documented way to actually delete a key
-          # from the merged values (not just null it out) so the template skips it.
           OTHER_COMPONENTS=$(yq eval ".components | keys | .[] | select(. != \"${SERVICE}\")" "$CHART_VALUES")
           NULL_ARGS=()
           for c in $OTHER_COMPONENTS; do
