@@ -272,11 +272,21 @@ public class TaskEligibilityService {
         // briefly blocks unrelated addDependency/removeDependency calls - a deliberate
         // correctness-over-throughput tradeoff at the current scale.
         synchronized (dependencyGraphLock) {
-            Task task = requireTask(taskId);
-
-            TaskStatus previousStatus = task.getStatus();
-            task.setStatus(newStatus);
-            taskRepository.save(task);
+            // Also nested under lockFor(taskId) (graph lock always acquired before a per-task
+            // lock, never after - same discipline as addDependency/removeDependency): this
+            // status read-modify-write was previously guarded ONLY by dependencyGraphLock, which
+            // gave it no mutual exclusion against onConstraintAdded/onConstraintStatusChanged -
+            // both of which mutate this same Task's counters under lockFor(taskId) alone. Two
+            // different monitors protecting writes to the same Task record is a lost-update race:
+            // whichever save() ran last would silently clobber the other's change. See PLAN.md /
+            // review Finding #1.
+            TaskStatus previousStatus;
+            synchronized (lockFor(taskId)) {
+                Task task = requireTask(taskId);
+                previousStatus = task.getStatus();
+                task.setStatus(newStatus);
+                taskRepository.save(task);
+            }
 
             if (previousStatus != TaskStatus.DONE && newStatus == TaskStatus.DONE) {
                 adjustDependentsBlockingCount(taskId, -1);
