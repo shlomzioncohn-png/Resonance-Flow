@@ -12,13 +12,8 @@ class TaskTest {
 
     @Test
     void builder_throwsIllegalArgumentException_whenStatusIsNull() {
-        assertThatThrownBy(() -> Task.builder()
-                .id(UUID.randomUUID())
-                .ownerId("owner")
+        assertThatThrownBy(() -> newTaskBuilder()
                 .status(null)
-                .blockingCount(0)
-                .openConstraintCount(0)
-                .createdAt(LocalDateTime.now())
                 .build())
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("status");
