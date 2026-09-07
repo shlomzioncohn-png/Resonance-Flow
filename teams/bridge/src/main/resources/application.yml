@@ -50,8 +50,6 @@ jira:
     token: ${JIRA_TOKEN:}
   target:
     project: ${JIRA_TARGET_PROJECT:}
-  kafka:
-    topic: ${JIRA_KAFKA_TOPIC:bridge.jira.tasks}
   sync:
     # Set to true to enable the automatic nightly Jira to Kafka sync
     cron:
@@ -63,13 +61,15 @@ bridge:
   # KafkaPayloadPublisher (see esti/inbox-kafka-ingestion-contract) - one
   # topic for every source, never a per-lane one.
   structured-tasks-topic: ${BRIDGE_STRUCTURED_TASKS_TOPIC:bridge.structured.tasks}
+  manual-sync:
+    enabled: false
   crm:
     dataset: classpath:crm/synthetic-deals.json
     # Inbox's tasks.organization_id is NOT NULL, but HubSpot (and this
     # lane's Deal model) has no concept of it - see DealToTaskMapper's class
-    # Javadoc. No default: a missing value must fail startup, not publish a
-    # task Inbox will reject on the FK constraint.
-    organization-id: ${CRM_ORGANIZATION_ID}
+    # Javadoc. Set CRM_ORGANIZATION_ID for a real org; falls back to a
+    # local placeholder for development so the app can start without it.
+    organization-id: ${CRM_ORGANIZATION_ID:local-crm-org}
   intake:
     raw-landed-topic: ${BRIDGE_RAW_LANDED_TOPIC:bridge.raw.landed}
     scoping:

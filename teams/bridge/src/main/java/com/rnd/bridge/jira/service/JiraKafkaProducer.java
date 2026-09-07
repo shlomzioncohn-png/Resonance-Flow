@@ -1,55 +1,51 @@
 package com.rnd.bridge.jira.service;
 
-import com.rnd.bridge.task.model.Task;
+import com.rnd.bridge.publish.kafka.KafkaPayloadPublisher;
+import com.rnd.bridge.task.BridgeTaskEventDto;
 import com.rnd.bridge.task.TaskValidator;
+import com.rnd.bridge.task.model.Task;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.kafka.core.KafkaTemplate;
-import org.springframework.kafka.support.SendResult;
 import org.springframework.stereotype.Service;
 
 import java.util.List;
-import java.util.concurrent.CompletableFuture;
 
 @Service
 public class JiraKafkaProducer {
 
     private static final Logger log = LoggerFactory.getLogger(JiraKafkaProducer.class);
 
-    @Value("${jira.kafka.topic:bridge.jira.tasks}")
-    String TOPIC = "bridge.jira.tasks";
+    private static final String DEFAULT_TOPIC = "bridge.structured.tasks";
 
-    private final KafkaTemplate<String, Task> kafkaTemplate;
+    final String TOPIC;
+    private final KafkaPayloadPublisher kafkaPayloadPublisher;
     private final TaskValidator taskValidator;
 
     @Autowired
-    public JiraKafkaProducer(KafkaTemplate<String, Task> kafkaTemplate, TaskValidator taskValidator) {
-        this.kafkaTemplate = kafkaTemplate;
+    public JiraKafkaProducer(
+            KafkaTemplate<String, BridgeTaskEventDto> kafkaTemplate,
+            @Value("${bridge.structured-tasks-topic:bridge.structured.tasks}") String topic,
+            TaskValidator taskValidator) {
+        this.TOPIC = (topic != null && !topic.isBlank()) ? topic : DEFAULT_TOPIC;
+        this.kafkaPayloadPublisher = new KafkaPayloadPublisher(kafkaTemplate, this.TOPIC);
         this.taskValidator = taskValidator;
     }
 
-    public CompletableFuture<SendResult<String, Task>> publish(Task task) {
+    public void publish(Task task) {
         if (task == null || task.sourceRef() == null) {
             throw new IllegalArgumentException("Task and sourceRef must not be null");
         }
 
         taskValidator.validate(task);
 
-        log.info("Publishing task {} to topic {}", task.sourceRef(), TOPIC);
+        log.info("Publishing task {} to topic {} as BridgeTaskEventDto", task.sourceRef(), TOPIC);
 
-        CompletableFuture<SendResult<String, Task>> future = kafkaTemplate.send(TOPIC, task.sourceRef(), task);
-        future.whenComplete((result, ex) -> {
-            if (ex != null) {
-                log.error("Failed to publish task {} to topic {}", task.sourceRef(), TOPIC, ex);
-            } else {
-                log.info("Successfully published task {} to topic {} at offset {}",
-                        task.sourceRef(), TOPIC, result.getRecordMetadata().offset());
-            }
-        });
+        kafkaPayloadPublisher.publish(task);
 
-        return future;
+        log.info("Successfully published task {} to topic {}", task.sourceRef(), TOPIC);
     }
 
     public void publishAll(List<Task> tasks) {
