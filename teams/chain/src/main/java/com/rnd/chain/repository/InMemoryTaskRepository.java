@@ -37,7 +37,7 @@ public class InMemoryTaskRepository implements TaskRepository {
     public Optional<Task> findById(UUID id) {
         Objects.requireNonNull(id, "id must not be null");
         return Optional.ofNullable(tasksById.get(id))
-                .filter(this::isNotDeleted);
+                .filter(InMemoryTaskRepository::isNotDeleted);
     }
 
     @Override
@@ -46,7 +46,7 @@ public class InMemoryTaskRepository implements TaskRepository {
         return ids.stream()
                 .map(tasksById::get)
                 .filter(Objects::nonNull)
-                .filter(this::isNotDeleted)
+                .filter(InMemoryTaskRepository::isNotDeleted)
                 .collect(Collectors.toList());
     }
 
@@ -54,7 +54,7 @@ public class InMemoryTaskRepository implements TaskRepository {
     public List<Task> findByParentTaskId(UUID parentTaskId) {
         return tasksById.values().stream()
                 .filter(task -> Objects.equals(task.getParentTaskId(), parentTaskId))
-                .filter(this::isNotDeleted)
+                .filter(InMemoryTaskRepository::isNotDeleted)
                 .collect(Collectors.toList());
     }
 
@@ -87,13 +87,13 @@ public class InMemoryTaskRepository implements TaskRepository {
                         ? Objects.requireNonNull(mutator.apply(existing), "mutator must not return null")
                         : existing);
         return Optional.ofNullable(updated)
-                .filter(this::isNotDeleted);
+                .filter(InMemoryTaskRepository::isNotDeleted);
     }
 
     /**
      * Soft-deleted tasks (deletedAt != null) are treated as not found.
      */
-    private boolean isNotDeleted(Task task) {
+    private static boolean isNotDeleted(Task task) {
         return task.getDeletedAt() == null;
     }
 }
