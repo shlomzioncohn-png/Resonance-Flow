@@ -10,11 +10,14 @@ import org.springframework.http.client.SimpleClientHttpRequestFactory;
 import org.springframework.web.client.RestClient;
 
 import java.io.IOException;
+import java.time.Duration;
 import java.util.List;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTimeoutPreemptively;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -80,5 +83,35 @@ class HubSpotClientTest {
         HubSpotClientException exception = assertThrows(HubSpotClientException.class, client::fetchPipelines);
         assertTrue(exception.getMessage().contains("/crm/v3/pipelines/deals"));
         assertTrue(exception.getMessage().toLowerCase().indexOf("test-token") < 0);
+    }
+
+    /**
+     * Proves {@link HubSpotClient#production} actually wires the configured
+     * read timeout into the {@code RestClient} it builds - not just that the
+     * constructor accepts the parameter. A server that accepts the
+     * connection and then sits on the response forever is exactly the
+     * failure mode timeouts exist for: no status code, no exception, unless
+     * the client gives up on its own. {@code assertTimeoutPreemptively}
+     * guards the test itself from hanging if that wiring is ever lost.
+     */
+    @Test
+    void aReadTimeoutFailsAHangingResponseInsteadOfBlockingForever() {
+        server.enqueue(new MockResponse()
+                .setResponseCode(200)
+                .setHeader("Content-Type", "application/json")
+                .setBody(EMPTY_PIPELINES)
+                .setBodyDelay(2, TimeUnit.SECONDS));
+        server.enqueue(new MockResponse()
+                .setResponseCode(200)
+                .setHeader("Content-Type", "application/json")
+                .setBody(EMPTY_PIPELINES));
+
+        HubSpotClient client = HubSpotClient.production(RestClient.builder(), server.url("/").toString(),
+                "test-token", 100, 3, 0L, 0L, 5000L, 100L);
+
+        List<HubSpotPipeline> pipelines =
+                assertTimeoutPreemptively(Duration.ofSeconds(5), client::fetchPipelines);
+
+        assertEquals(List.of(), pipelines);
     }
 }

@@ -22,8 +22,10 @@ components/
   feedback/                   LoadingState, EmptyState, ErrorState
   ui/                          (reserved for shared, non-layout UI components)
 mocks/                       Mock data adapters used until real APIs exist
+services/                    Gateway API client (api.ts) — not wired into any page yet;
+                              see docs/api-integration-status.md for why
 docs/                        Architecture docs (see below)
-features/, services/,       Reserved for upcoming feature work — not used yet
+features/,                  Reserved for upcoming feature work — not used yet
 hooks/, config/,
 types/, utils/, tests/
 Dockerfile                  Production container image

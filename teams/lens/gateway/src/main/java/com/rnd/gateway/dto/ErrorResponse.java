@@ -5,13 +5,23 @@ import lombok.AllArgsConstructor;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 import lombok.ToString;
+
 import java.time.LocalDateTime;
 
 /**
- * Unified error response contract matching GATEWAY_CONTRACT.md
- * 
- * Used for all error responses from Gateway.
- * Ensures consistent error format across all consumers.
+ * Error Response DTO - Unified error format for Gateway
+ *
+ * Used by GlobalExceptionHandler to return consistent error responses.
+ *
+ * Example:
+ * {
+ *   "status": "ERROR",
+ *   "errorCode": "TASK_NOT_FOUND",
+ *   "message": "Task with ID 'task_999' does not exist",
+ *   "path": "/api/tasks/task_999",
+ *   "timestamp": "2026-08-27T14:30:45.123Z",
+ *   "details": "Check the task ID and try again"
+ * }
  */
 @Data
 @NoArgsConstructor
@@ -19,24 +29,58 @@ import java.time.LocalDateTime;
 @ToString
 @JsonInclude(JsonInclude.Include.NON_NULL)
 public class ErrorResponse {
-    
-    private String status           = "ERROR";           // ERROR
-    private String errorCode;                             // e.g., NOT_FOUND, SERVICE_UNAVAILABLE, TIMEOUT
-    private String message;                               // Human-readable error message
-    private String path;                                  // Request path that caused error
-    private LocalDateTime timestamp;                      // When error occurred
-    private String details;                               // Optional: additional error details
-    
-    // Custom constructor with required fields
+
+    /**
+     * Status indicator
+     * Always: "ERROR"
+     */
+    private String status = "ERROR";
+
+    /**
+     * Error code (machine-readable)
+     * Examples: "TASK_NOT_FOUND", "INVALID_REQUEST", "UNAUTHORIZED", "SERVICE_UNAVAILABLE"
+     */
+    private String errorCode;
+
+    /**
+     * Error message (human-readable)
+     * Example: "Task with ID 'task_999' does not exist"
+     */
+    private String message;
+
+    /**
+     * API path where error occurred
+     * Example: "/api/tasks/task_999"
+     */
+    private String path;
+
+    /**
+     * Timestamp when error occurred
+     * ISO-8601 format
+     */
+    private LocalDateTime timestamp;
+
+    /**
+     * Additional error details (optional)
+     * Example: "Check the task ID and try again"
+     * Null fields are not serialized (JsonInclude.NON_NULL)
+     */
+    private String details;
+
+    /**
+     * Constructor for basic error
+     * Sets status="ERROR" and timestamp=now()
+     */
     public ErrorResponse(String errorCode, String message, String path) {
-        this.status = "ERROR";
         this.errorCode = errorCode;
         this.message = message;
         this.path = path;
         this.timestamp = LocalDateTime.now();
     }
-    
-    // Custom constructor with all fields
+
+    /**
+     * Constructor with details
+     */
     public ErrorResponse(String errorCode, String message, String path, String details) {
         this(errorCode, message, path);
         this.details = details;

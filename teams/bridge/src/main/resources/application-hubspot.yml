@@ -14,3 +14,11 @@ bridge:
       max-retries: 5
       initial-backoff-millis: 500
       max-backoff-millis: 8000
+      # A server that accepts the connection and then never responds gives
+      # the retry logic above nothing to react to - no status code, no
+      # exception - unless the request itself gives up first. connect-timeout
+      # bounds how long establishing the TCP connection can take; read-timeout
+      # bounds how long we wait for a response once sent. Both are generous
+      # (a v3 objects/deals page can be slow on a large portal) but finite.
+      connect-timeout-millis: 5000
+      read-timeout-millis: 15000

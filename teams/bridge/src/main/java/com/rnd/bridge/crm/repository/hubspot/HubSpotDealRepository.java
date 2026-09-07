@@ -104,9 +104,12 @@ public class HubSpotDealRepository implements DealRepository {
             @Value("${bridge.crm.hubspot.page-size:100}") int pageSize,
             @Value("${bridge.crm.hubspot.max-retries:5}") int maxRetries,
             @Value("${bridge.crm.hubspot.initial-backoff-millis:500}") long initialBackoffMillis,
-            @Value("${bridge.crm.hubspot.max-backoff-millis:8000}") long maxBackoffMillis) {
+            @Value("${bridge.crm.hubspot.max-backoff-millis:8000}") long maxBackoffMillis,
+            @Value("${bridge.crm.hubspot.connect-timeout-millis:5000}") long connectTimeoutMillis,
+            @Value("${bridge.crm.hubspot.read-timeout-millis:15000}") long readTimeoutMillis) {
         this(HubSpotClient.production(restClientBuilder, baseUrl, token, pageSize, maxRetries,
-                initialBackoffMillis, maxBackoffMillis), Clock.systemUTC());
+                initialBackoffMillis, maxBackoffMillis, connectTimeoutMillis, readTimeoutMillis),
+                Clock.systemUTC());
     }
 
     HubSpotDealRepository(HubSpotClient client, Clock clock) {

@@ -1,0 +1,13 @@
+# Source of truth: which .proto file maps to which Schema Registry subject.
+# Format: <file-under-src/main/proto>\t<subject>   (tab-separated; lines starting with # are ignored)
+#
+# Single list for both stages:
+#  - CI (pre-merge): seed-registry.sh + check-all-schemas.sh read this file directly.
+#  - CD (post-merge): relay-schema-sync.yaml copies it into the schema-sync-hook
+#    chart as files/schema-subjects.tsv, and configmap.yaml renders the schema
+#    list from it.
+# Add a schema here and nowhere else.
+task-event.proto	task-event-value
+task-created-event.proto	task.created-value
+raw-object-event.proto	bridge.raw.landed-value
+github-task.proto	bridge.github.tasks-value
