@@ -70,7 +70,12 @@ public class TaskEligibilityService {
     }
 
     private Object lockFor(UUID taskId) {
-        int stripe = (taskId.hashCode() & 0x7fffffff) % LOCK_STRIPE_COUNT;
+        // Math.floorMod instead of hand-rolling a sign-bit mask (review finding #22) - the JDK
+        // built-in for "always non-negative modulo" expresses the intent directly, and doesn't
+        // rely on the reader recognizing the bit trick or on LOCK_STRIPE_COUNT happening to be
+        // a power of two (the old mask-based version was only equivalent to this for a
+        // power-of-two stripe count).
+        int stripe = Math.floorMod(taskId.hashCode(), LOCK_STRIPE_COUNT);
         return taskLockStripes[stripe];
     }
 
