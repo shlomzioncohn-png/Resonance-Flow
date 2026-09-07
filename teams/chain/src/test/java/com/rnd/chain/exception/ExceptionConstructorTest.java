@@ -5,34 +5,48 @@ import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
 
 import java.util.function.BiFunction;
+import java.util.function.Function;
 import java.util.stream.Stream;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
 class ExceptionConstructorTest {
 
+    /** Both constructor references for one exception type. */
+    private record ExceptionConstructors(Function<String, RuntimeException> messageOnly,
+                                          BiFunction<String, Throwable, RuntimeException> messageAndCause) {
+    }
+
     private static Stream<Arguments> exceptionConstructors() {
         return Stream.of(
                 Arguments.of("TaskNotFoundException",
-                        (BiFunction<String, Throwable, RuntimeException>) TaskNotFoundException::new),
+                        new ExceptionConstructors(TaskNotFoundException::new, TaskNotFoundException::new)),
                 Arguments.of("DependencyNotFoundException",
-                        (BiFunction<String, Throwable, RuntimeException>) DependencyNotFoundException::new),
+                        new ExceptionConstructors(DependencyNotFoundException::new, DependencyNotFoundException::new)),
                 Arguments.of("DuplicateDependencyException",
-                        (BiFunction<String, Throwable, RuntimeException>) DuplicateDependencyException::new),
+                        new ExceptionConstructors(DuplicateDependencyException::new, DuplicateDependencyException::new)),
                 Arguments.of("InvalidDependencyException",
-                        (BiFunction<String, Throwable, RuntimeException>) InvalidDependencyException::new)
+                        new ExceptionConstructors(InvalidDependencyException::new, InvalidDependencyException::new))
         );
     }
 
     @ParameterizedTest(name = "{0}")
     @MethodSource("exceptionConstructors")
-    void constructor_withMessageAndCause_setsBoth(String exceptionName,
-                                                   BiFunction<String, Throwable, RuntimeException> constructor) {
+    void constructor_withMessageAndCause_setsBoth(String exceptionName, ExceptionConstructors constructors) {
         Throwable cause = new RuntimeException("root cause");
 
-        RuntimeException exception = constructor.apply("message", cause);
+        RuntimeException exception = constructors.messageAndCause().apply("message", cause);
 
         assertThat(exception.getMessage()).isEqualTo("message");
         assertThat(exception.getCause()).isSameAs(cause);
+    }
+
+    @ParameterizedTest(name = "{0}")
+    @MethodSource("exceptionConstructors")
+    void constructor_withMessageOnly_setsMessageAndLeavesCauseNull(String exceptionName, ExceptionConstructors constructors) {
+        RuntimeException exception = constructors.messageOnly().apply("message");
+
+        assertThat(exception.getMessage()).isEqualTo("message");
+        assertThat(exception.getCause()).isNull();
     }
 }
