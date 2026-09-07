@@ -1,7 +1,7 @@
 package com.rnd.chain.repository;
 
 import com.rnd.chain.dto.Task;
-import com.rnd.chain.dto.TaskStatus;
+import com.rnd.chain.dto.TaskTestFixtures;
 import org.junit.jupiter.api.Test;
 
 import java.time.LocalDateTime;
@@ -12,25 +12,10 @@ import static org.junit.jupiter.api.Assertions.*;
 
 class InMemoryTaskRepositoryTest {
 
-    private Task buildTask(UUID id, UUID parentTaskId, LocalDateTime deletedAt) {
-        return Task.builder()
-                .id(id)
-                .parentTaskId(parentTaskId)
-                .ownerId("owner")
-                .status(TaskStatus.ACTIVE)
-                .isReady(false)
-                .blockingCount(0)
-                .openConstraintCount(0)
-                .createdAt(LocalDateTime.now())
-                .updatedAt(LocalDateTime.now())
-                .deletedAt(deletedAt)
-                .build();
-    }
-
     @Test
     void findById_returnsExistingTask() {
         UUID id = UUID.randomUUID();
-        Task task = buildTask(id, null, null);
+        Task task = TaskTestFixtures.defaultTask(id).build();
         InMemoryTaskRepository repo = new InMemoryTaskRepository(List.of(task));
 
         Task found = repo.findById(id).orElseThrow();
@@ -41,7 +26,7 @@ class InMemoryTaskRepositoryTest {
     @Test
     void findById_mutatingReturnedTask_doesNotAffectStoredState() {
         UUID id = UUID.randomUUID();
-        Task task = buildTask(id, null, null);
+        Task task = TaskTestFixtures.defaultTask(id).build();
         InMemoryTaskRepository repo = new InMemoryTaskRepository(List.of(task));
 
         Task found = repo.findById(id).orElseThrow();
@@ -61,7 +46,7 @@ class InMemoryTaskRepositoryTest {
     @Test
     void findById_softDeletedTask_treatedAsNotFound() {
         UUID id = UUID.randomUUID();
-        Task deleted = buildTask(id, null, LocalDateTime.now());
+        Task deleted = TaskTestFixtures.defaultTask(id).deletedAt(LocalDateTime.now()).build();
         InMemoryTaskRepository repo = new InMemoryTaskRepository(List.of(deleted));
 
         assertTrue(repo.findById(id).isEmpty());
@@ -73,8 +58,8 @@ class InMemoryTaskRepositoryTest {
         UUID deleted = UUID.randomUUID();
         UUID missing = UUID.randomUUID();
         InMemoryTaskRepository repo = new InMemoryTaskRepository(List.of(
-                buildTask(present, null, null),
-                buildTask(deleted, null, LocalDateTime.now())));
+                TaskTestFixtures.defaultTask(present).build(),
+                TaskTestFixtures.defaultTask(deleted).deletedAt(LocalDateTime.now()).build()));
 
         List<Task> result = repo.findAllById(List.of(present, deleted, missing));
 
@@ -89,9 +74,9 @@ class InMemoryTaskRepositoryTest {
         UUID deletedChild = UUID.randomUUID();
         UUID otherParentChild = UUID.randomUUID();
         InMemoryTaskRepository repo = new InMemoryTaskRepository(List.of(
-                buildTask(child, parentId, null),
-                buildTask(deletedChild, parentId, LocalDateTime.now()),
-                buildTask(otherParentChild, UUID.randomUUID(), null)));
+                TaskTestFixtures.defaultTask(child).parentTaskId(parentId).build(),
+                TaskTestFixtures.defaultTask(deletedChild).parentTaskId(parentId).deletedAt(LocalDateTime.now()).build(),
+                TaskTestFixtures.defaultTask(otherParentChild).parentTaskId(UUID.randomUUID()).build()));
 
         List<Task> children = repo.findByParentTaskId(parentId);
 
@@ -103,7 +88,7 @@ class InMemoryTaskRepositoryTest {
     void save_newTask_isRetrievable() {
         InMemoryTaskRepository repo = new InMemoryTaskRepository(List.of());
         UUID id = UUID.randomUUID();
-        Task task = buildTask(id, null, null);
+        Task task = TaskTestFixtures.defaultTask(id).build();
 
         repo.save(task);
 
@@ -115,10 +100,10 @@ class InMemoryTaskRepositoryTest {
     @Test
     void save_existingId_upsertsReplacingPreviousValue() {
         UUID id = UUID.randomUUID();
-        Task original = buildTask(id, null, null);
+        Task original = TaskTestFixtures.defaultTask(id).build();
         InMemoryTaskRepository repo = new InMemoryTaskRepository(List.of(original));
 
-        Task updated = buildTask(id, null, null);
+        Task updated = TaskTestFixtures.defaultTask(id).build();
         updated.setBlockingCount(5);
         repo.save(updated);
 

@@ -4,6 +4,7 @@ import com.rnd.chain.dto.Constraint;
 import com.rnd.chain.dto.Task;
 import com.rnd.chain.dto.TaskDependency;
 import com.rnd.chain.dto.TaskStatus;
+import com.rnd.chain.dto.TaskTestFixtures;
 import com.rnd.chain.repository.TaskDependencyRepository;
 import com.rnd.chain.repository.TaskRepository;
 import org.junit.jupiter.api.Test;
@@ -12,7 +13,6 @@ import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
-import java.time.LocalDateTime;
 import java.util.Collections;
 import java.util.List;
 import java.util.Optional;
@@ -34,23 +34,10 @@ class TaskEligibilityServiceTest {
     @InjectMocks
     private TaskEligibilityService taskEligibilityService;
 
-    private Task buildTask(UUID id, int blockingCount, int openConstraintCount, boolean isReady) {
-        return Task.builder()
-                .id(id)
-                .ownerId("owner")
-                .status(TaskStatus.ACTIVE)
-                .isReady(isReady)
-                .blockingCount(blockingCount)
-                .openConstraintCount(openConstraintCount)
-                .createdAt(LocalDateTime.now())
-                .updatedAt(LocalDateTime.now())
-                .build();
-    }
-
     @Test
     void noDependencies_becomesReady() {
         UUID taskId = UUID.randomUUID();
-        Task task = buildTask(taskId, 0, 0, false);
+        Task task = TaskTestFixtures.defaultTask(taskId).blockingCount(0).openConstraintCount(0).isReady(false).build();
         when(taskRepository.findById(taskId)).thenReturn(Optional.of(task));
 
         taskEligibilityService.recalculateTaskEligibility(taskId);
@@ -62,7 +49,7 @@ class TaskEligibilityServiceTest {
     @Test
     void hasBlocker_staysNotReady() {
         UUID taskId = UUID.randomUUID();
-        Task task = buildTask(taskId, 1, 0, false);
+        Task task = TaskTestFixtures.defaultTask(taskId).blockingCount(1).openConstraintCount(0).isReady(false).build();
         when(taskRepository.findById(taskId)).thenReturn(Optional.of(task));
 
         taskEligibilityService.recalculateTaskEligibility(taskId);
@@ -74,7 +61,7 @@ class TaskEligibilityServiceTest {
     @Test
     void hasOpenConstraint_staysNotReady() {
         UUID taskId = UUID.randomUUID();
-        Task task = buildTask(taskId, 0, 1, false);
+        Task task = TaskTestFixtures.defaultTask(taskId).blockingCount(0).openConstraintCount(1).isReady(false).build();
         when(taskRepository.findById(taskId)).thenReturn(Optional.of(task));
 
         taskEligibilityService.recalculateTaskEligibility(taskId);
@@ -86,7 +73,7 @@ class TaskEligibilityServiceTest {
     @Test
     void alreadyCorrectState_stillSavesEveryTime() {
         UUID taskId = UUID.randomUUID();
-        Task task = buildTask(taskId, 0, 0, true);
+        Task task = TaskTestFixtures.defaultTask(taskId).blockingCount(0).openConstraintCount(0).isReady(true).build();
         when(taskRepository.findById(taskId)).thenReturn(Optional.of(task));
 
         taskEligibilityService.recalculateTaskEligibility(taskId);
@@ -113,7 +100,7 @@ class TaskEligibilityServiceTest {
     void addDependency_incrementsBlockingCount_andStaysNotReady() {
         UUID taskId = UUID.randomUUID();
         UUID dependsOnTaskId = UUID.randomUUID();
-        Task task = buildTask(taskId, 0, 0, true);
+        Task task = TaskTestFixtures.defaultTask(taskId).blockingCount(0).openConstraintCount(0).isReady(true).build();
 
         // findByTaskId(dependsOnTaskId) backs wouldCreateCycle's DFS (starts at dependsOnTaskId).
         // Finding #16: edgeExists now delegates to existsDependency, not findByTaskId(taskId) -
@@ -122,7 +109,7 @@ class TaskEligibilityServiceTest {
         when(taskDependencyRepository.findByTaskId(dependsOnTaskId)).thenReturn(Collections.emptyList());
         when(taskRepository.findById(taskId)).thenReturn(Optional.of(task));
         when(taskRepository.findById(dependsOnTaskId))
-                .thenReturn(Optional.of(buildTask(dependsOnTaskId, 0, 0, true)));
+                .thenReturn(Optional.of(TaskTestFixtures.defaultTask(dependsOnTaskId).blockingCount(0).openConstraintCount(0).isReady(true).build()));
 
         taskEligibilityService.addDependency(taskId, dependsOnTaskId);
 
@@ -137,12 +124,12 @@ class TaskEligibilityServiceTest {
         // restructuring, originally at com.rnd.chain.TaskEligibilityServiceTest (commit a8148d6).
         UUID taskId = UUID.randomUUID();
         UUID dependsOnTaskId = UUID.randomUUID();
-        Task task = buildTask(taskId, 1, 0, false); // already has one blocker
+        Task task = TaskTestFixtures.defaultTask(taskId).blockingCount(1).openConstraintCount(0).isReady(false).build(); // already has one blocker
 
         when(taskDependencyRepository.findByTaskId(dependsOnTaskId)).thenReturn(Collections.emptyList());
         when(taskRepository.findById(taskId)).thenReturn(Optional.of(task));
         when(taskRepository.findById(dependsOnTaskId))
-                .thenReturn(Optional.of(buildTask(dependsOnTaskId, 0, 0, true)));
+                .thenReturn(Optional.of(TaskTestFixtures.defaultTask(dependsOnTaskId).blockingCount(0).openConstraintCount(0).isReady(true).build()));
 
         taskEligibilityService.addDependency(taskId, dependsOnTaskId);
 
@@ -154,8 +141,8 @@ class TaskEligibilityServiceTest {
     void addDependency_duplicate_doesNotInflateBlockingCount() {
         UUID taskId = UUID.randomUUID();
         UUID dependsOnTaskId = UUID.randomUUID();
-        Task task = buildTask(taskId, 0, 0, true);
-        Task dependsOnTask = buildTask(dependsOnTaskId, 0, 0, true);
+        Task task = TaskTestFixtures.defaultTask(taskId).blockingCount(0).openConstraintCount(0).isReady(true).build();
+        Task dependsOnTask = TaskTestFixtures.defaultTask(dependsOnTaskId).blockingCount(0).openConstraintCount(0).isReady(true).build();
 
         // Finding #1: both tasks are now validated to exist before the duplicate-edge check
         // runs, so both must be stubbed even though this call is expected to be a no-op.
@@ -178,8 +165,8 @@ class TaskEligibilityServiceTest {
         UUID taskB = UUID.randomUUID();
 
         // Finding #1: both tasks are now validated to exist before the cycle check runs.
-        when(taskRepository.findById(taskA)).thenReturn(Optional.of(buildTask(taskA, 0, 0, true)));
-        when(taskRepository.findById(taskB)).thenReturn(Optional.of(buildTask(taskB, 0, 0, true)));
+        when(taskRepository.findById(taskA)).thenReturn(Optional.of(TaskTestFixtures.defaultTask(taskA).blockingCount(0).openConstraintCount(0).isReady(true).build()));
+        when(taskRepository.findById(taskB)).thenReturn(Optional.of(TaskTestFixtures.defaultTask(taskB).blockingCount(0).openConstraintCount(0).isReady(true).build()));
         when(taskDependencyRepository.findByTaskId(taskA))
                 .thenReturn(List.of(new TaskDependency(taskA, taskB)));
 
@@ -206,7 +193,7 @@ class TaskEligibilityServiceTest {
     void addDependency_dependsOnTaskDoesNotExist_throwsAndNeverSaves() {
         UUID taskId = UUID.randomUUID();
         UUID dependsOnTaskId = UUID.randomUUID();
-        Task task = buildTask(taskId, 0, 0, true);
+        Task task = TaskTestFixtures.defaultTask(taskId).blockingCount(0).openConstraintCount(0).isReady(true).build();
 
         when(taskRepository.findById(taskId)).thenReturn(Optional.of(task));
         when(taskRepository.findById(dependsOnTaskId)).thenReturn(Optional.empty());
@@ -250,13 +237,13 @@ class TaskEligibilityServiceTest {
     void removeDependency_decrementsBlockingCount_becomesReady() {
         UUID taskId = UUID.randomUUID();
         UUID dependsOnTaskId = UUID.randomUUID();
-        Task task = buildTask(taskId, 1, 0, false);
+        Task task = TaskTestFixtures.defaultTask(taskId).blockingCount(1).openConstraintCount(0).isReady(false).build();
 
         // Finding #16: edgeExists now delegates to existsDependency, not findByTaskId(taskId).
         when(taskDependencyRepository.existsDependency(taskId, dependsOnTaskId)).thenReturn(true);
         when(taskRepository.findById(taskId)).thenReturn(Optional.of(task));
         when(taskRepository.findById(dependsOnTaskId))
-                .thenReturn(Optional.of(buildTask(dependsOnTaskId, 0, 0, true)));
+                .thenReturn(Optional.of(TaskTestFixtures.defaultTask(dependsOnTaskId).blockingCount(0).openConstraintCount(0).isReady(true).build()));
 
         taskEligibilityService.removeDependency(taskId, dependsOnTaskId);
 
@@ -270,12 +257,12 @@ class TaskEligibilityServiceTest {
         // Restored regression scenario (review finding #9) - see addSecondDependency_multipleBlockers.
         UUID taskId = UUID.randomUUID();
         UUID dependsOnTaskId = UUID.randomUUID();
-        Task task = buildTask(taskId, 2, 0, false); // two blockers
+        Task task = TaskTestFixtures.defaultTask(taskId).blockingCount(2).openConstraintCount(0).isReady(false).build(); // two blockers
 
         when(taskDependencyRepository.existsDependency(taskId, dependsOnTaskId)).thenReturn(true);
         when(taskRepository.findById(taskId)).thenReturn(Optional.of(task));
         when(taskRepository.findById(dependsOnTaskId))
-                .thenReturn(Optional.of(buildTask(dependsOnTaskId, 0, 0, true)));
+                .thenReturn(Optional.of(TaskTestFixtures.defaultTask(dependsOnTaskId).blockingCount(0).openConstraintCount(0).isReady(true).build()));
 
         taskEligibilityService.removeDependency(taskId, dependsOnTaskId);
 
@@ -288,7 +275,7 @@ class TaskEligibilityServiceTest {
     void removeDependency_notFound_doesNotChangeCounter() {
         UUID taskId = UUID.randomUUID();
         UUID dependsOnTaskId = UUID.randomUUID();
-        Task task = buildTask(taskId, 0, 0, true);
+        Task task = TaskTestFixtures.defaultTask(taskId).blockingCount(0).openConstraintCount(0).isReady(true).build();
 
         // Finding #1: taskId is now validated to exist even for a no-op removal.
         // Finding #16: existsDependency defaults to false when unstubbed, which is already the
@@ -318,7 +305,7 @@ class TaskEligibilityServiceTest {
     void removeDependency_blockingCountNeverGoesNegative() {
         UUID taskId = UUID.randomUUID();
         UUID dependsOnTaskId = UUID.randomUUID();
-        Task task = buildTask(taskId, 0, 0, true);
+        Task task = TaskTestFixtures.defaultTask(taskId).blockingCount(0).openConstraintCount(0).isReady(true).build();
 
         // Finding #16: edgeExists now delegates to existsDependency, not findByTaskId(taskId).
         // Must stub true, or the decrement branch (the thing this test exists to exercise) is
@@ -326,7 +313,7 @@ class TaskEligibilityServiceTest {
         when(taskDependencyRepository.existsDependency(taskId, dependsOnTaskId)).thenReturn(true);
         when(taskRepository.findById(taskId)).thenReturn(Optional.of(task));
         when(taskRepository.findById(dependsOnTaskId))
-                .thenReturn(Optional.of(buildTask(dependsOnTaskId, 0, 0, true)));
+                .thenReturn(Optional.of(TaskTestFixtures.defaultTask(dependsOnTaskId).blockingCount(0).openConstraintCount(0).isReady(true).build()));
 
         taskEligibilityService.removeDependency(taskId, dependsOnTaskId);
 
@@ -352,8 +339,8 @@ class TaskEligibilityServiceTest {
         UUID taskB = UUID.randomUUID();
         UUID taskA = UUID.randomUUID();
 
-        Task b = buildTask(taskB, 0, 0, true);
-        Task a = buildTask(taskA, 1, 0, false);
+        Task b = TaskTestFixtures.defaultTask(taskB).blockingCount(0).openConstraintCount(0).isReady(true).build();
+        Task a = TaskTestFixtures.defaultTask(taskA).blockingCount(1).openConstraintCount(0).isReady(false).build();
 
         when(taskRepository.findById(taskB)).thenReturn(Optional.of(b));
         when(taskDependencyRepository.findByDependsOnTaskId(taskB))
@@ -373,9 +360,9 @@ class TaskEligibilityServiceTest {
         UUID taskA = UUID.randomUUID();
         UUID taskC = UUID.randomUUID();
 
-        Task b = buildTask(taskB, 0, 0, true);
-        Task a = buildTask(taskA, 1, 0, false);
-        Task c = buildTask(taskC, 1, 0, false);
+        Task b = TaskTestFixtures.defaultTask(taskB).blockingCount(0).openConstraintCount(0).isReady(true).build();
+        Task a = TaskTestFixtures.defaultTask(taskA).blockingCount(1).openConstraintCount(0).isReady(false).build();
+        Task c = TaskTestFixtures.defaultTask(taskC).blockingCount(1).openConstraintCount(0).isReady(false).build();
 
         when(taskRepository.findById(taskB)).thenReturn(Optional.of(b));
         when(taskDependencyRepository.findByDependsOnTaskId(taskB))
@@ -397,8 +384,8 @@ class TaskEligibilityServiceTest {
         UUID taskB = UUID.randomUUID();
         UUID taskA = UUID.randomUUID();
 
-        Task c = buildTask(taskC, 0, 0, true);
-        Task b = buildTask(taskB, 1, 0, false); // B is blocked only by C
+        Task c = TaskTestFixtures.defaultTask(taskC).blockingCount(0).openConstraintCount(0).isReady(true).build();
+        Task b = TaskTestFixtures.defaultTask(taskB).blockingCount(1).openConstraintCount(0).isReady(false).build(); // B is blocked only by C
 
         when(taskRepository.findById(taskC)).thenReturn(Optional.of(c));
         when(taskDependencyRepository.findByDependsOnTaskId(taskC))
@@ -419,9 +406,9 @@ class TaskEligibilityServiceTest {
         UUID taskB = UUID.randomUUID();
         UUID taskA = UUID.randomUUID();
 
-        Task b = buildTask(taskB, 0, 0, true);
+        Task b = TaskTestFixtures.defaultTask(taskB).blockingCount(0).openConstraintCount(0).isReady(true).build();
         b.setStatus(TaskStatus.DONE);
-        Task a = buildTask(taskA, 0, 0, true); // A was ready because B was DONE
+        Task a = TaskTestFixtures.defaultTask(taskA).blockingCount(0).openConstraintCount(0).isReady(true).build(); // A was ready because B was DONE
 
         when(taskRepository.findById(taskB)).thenReturn(Optional.of(b));
         when(taskDependencyRepository.findByDependsOnTaskId(taskB))
@@ -438,7 +425,7 @@ class TaskEligibilityServiceTest {
     @Test
     void statusChangeToNonDone_fromNonDone_doesNotTriggerDependentsRecalculation() {
         UUID taskB = UUID.randomUUID();
-        Task b = buildTask(taskB, 0, 0, true);
+        Task b = TaskTestFixtures.defaultTask(taskB).blockingCount(0).openConstraintCount(0).isReady(true).build();
 
         when(taskRepository.findById(taskB)).thenReturn(Optional.of(b));
 
@@ -457,7 +444,7 @@ class TaskEligibilityServiceTest {
     @Test
     void onConstraintAdded_incrementsOpenConstraintCount_andStaysNotReady() {
         UUID taskId = UUID.randomUUID();
-        Task task = buildTask(taskId, 0, 0, true);
+        Task task = TaskTestFixtures.defaultTask(taskId).blockingCount(0).openConstraintCount(0).isReady(true).build();
 
         when(taskRepository.findById(taskId)).thenReturn(Optional.of(task));
 
@@ -476,7 +463,7 @@ class TaskEligibilityServiceTest {
     @Test
     void onConstraintStatusChanged_closingLastConstraint_becomesReady() {
         UUID taskId = UUID.randomUUID();
-        Task task = buildTask(taskId, 0, 1, false);
+        Task task = TaskTestFixtures.defaultTask(taskId).blockingCount(0).openConstraintCount(1).isReady(false).build();
 
         when(taskRepository.findById(taskId)).thenReturn(Optional.of(task));
 
@@ -490,7 +477,7 @@ class TaskEligibilityServiceTest {
     @Test
     void onConstraintStatusChanged_reopeningConstraint_becomesNotReadyAgain() {
         UUID taskId = UUID.randomUUID();
-        Task task = buildTask(taskId, 0, 0, true);
+        Task task = TaskTestFixtures.defaultTask(taskId).blockingCount(0).openConstraintCount(0).isReady(true).build();
 
         when(taskRepository.findById(taskId)).thenReturn(Optional.of(task));
 

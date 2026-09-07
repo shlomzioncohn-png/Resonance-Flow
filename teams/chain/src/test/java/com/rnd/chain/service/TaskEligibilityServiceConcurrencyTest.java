@@ -1,12 +1,11 @@
 package com.rnd.chain.service;
 
 import com.rnd.chain.dto.Task;
-import com.rnd.chain.dto.TaskStatus;
+import com.rnd.chain.dto.TaskTestFixtures;
 import com.rnd.chain.repository.InMemoryTaskDependencyRepository;
 import com.rnd.chain.repository.InMemoryTaskRepository;
 import org.junit.jupiter.api.Test;
 
-import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
@@ -27,19 +26,6 @@ import static org.junit.jupiter.api.Assertions.*;
 class TaskEligibilityServiceConcurrencyTest {
 
     private static final int THREAD_COUNT = 16;
-
-    private Task buildTask(UUID id) {
-        return Task.builder()
-                .id(id)
-                .ownerId("owner")
-                .status(TaskStatus.ACTIVE)
-                .isReady(false)
-                .blockingCount(0)
-                .openConstraintCount(0)
-                .createdAt(LocalDateTime.now())
-                .updatedAt(LocalDateTime.now())
-                .build();
-    }
 
     /** Runs `task` on THREAD_COUNT threads simultaneously (released by a shared latch), waits for all to finish. */
     private void runConcurrently(List<Runnable> tasks) throws InterruptedException {
@@ -76,8 +62,8 @@ class TaskEligibilityServiceConcurrencyTest {
                 .collect(Collectors.toList());
 
         List<Task> allTasks = new ArrayList<>();
-        allTasks.add(buildTask(hubId));
-        blockerIds.forEach(id -> allTasks.add(buildTask(id)));
+        allTasks.add(TaskTestFixtures.defaultTask(hubId).build());
+        blockerIds.forEach(id -> allTasks.add(TaskTestFixtures.defaultTask(id).build()));
 
         InMemoryTaskRepository taskRepository = new InMemoryTaskRepository(allTasks);
         InMemoryTaskDependencyRepository dependencyRepository = new InMemoryTaskDependencyRepository(List.of());
@@ -102,8 +88,8 @@ class TaskEligibilityServiceConcurrencyTest {
                 .collect(Collectors.toList());
 
         List<Task> allTasks = new ArrayList<>();
-        allTasks.add(buildTask(hubId));
-        blockerIds.forEach(id -> allTasks.add(buildTask(id)));
+        allTasks.add(TaskTestFixtures.defaultTask(hubId).build());
+        blockerIds.forEach(id -> allTasks.add(TaskTestFixtures.defaultTask(id).build()));
 
         InMemoryTaskRepository taskRepository = new InMemoryTaskRepository(allTasks);
         InMemoryTaskDependencyRepository dependencyRepository = new InMemoryTaskDependencyRepository(List.of());
@@ -151,7 +137,7 @@ class TaskEligibilityServiceConcurrencyTest {
             UUID targetId = UUID.randomUUID();
 
             InMemoryTaskRepository taskRepository = new InMemoryTaskRepository(
-                    List.of(buildTask(dependentId), buildTask(targetId)));
+                    List.of(TaskTestFixtures.defaultTask(dependentId).build(), TaskTestFixtures.defaultTask(targetId).build()));
             InMemoryTaskDependencyRepository dependencyRepository =
                     new InMemoryTaskDependencyRepository(List.of());
             TaskEligibilityService service = new TaskEligibilityService(taskRepository, dependencyRepository);
