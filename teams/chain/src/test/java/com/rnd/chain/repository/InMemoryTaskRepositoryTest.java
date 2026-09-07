@@ -59,6 +59,24 @@ class InMemoryTaskRepositoryTest extends TaskRepositoryContractTest {
         assertThat(stillPresent).contains(original);
     }
 
+    @Test
+    void findById_throwsNullPointerException_whenIdIsNull() {
+        InMemoryTaskRepository repository = new InMemoryTaskRepository(List.of());
+
+        assertThatThrownBy(() -> repository.findById(null))
+                .isInstanceOf(NullPointerException.class)
+                .hasMessageContaining("id");
+    }
+
+    @Test
+    void findAllById_throwsNullPointerException_whenIdsIsNull() {
+        InMemoryTaskRepository repository = new InMemoryTaskRepository(List.of());
+
+        assertThatThrownBy(() -> repository.findAllById(null))
+                .isInstanceOf(NullPointerException.class)
+                .hasMessageContaining("ids");
+    }
+
     private static Task incrementBlockingCount(Task task) {
         return Task.builder()
                 .id(task.getId())

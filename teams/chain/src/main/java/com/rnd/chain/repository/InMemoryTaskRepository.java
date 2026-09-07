@@ -35,12 +35,14 @@ public class InMemoryTaskRepository implements TaskRepository {
 
     @Override
     public Optional<Task> findById(UUID id) {
+        Objects.requireNonNull(id, "id must not be null");
         return Optional.ofNullable(tasksById.get(id))
                 .filter(this::isNotDeleted);
     }
 
     @Override
     public List<Task> findAllById(List<UUID> ids) {
+        Objects.requireNonNull(ids, "ids must not be null");
         return ids.stream()
                 .map(tasksById::get)
                 .filter(Objects::nonNull)
