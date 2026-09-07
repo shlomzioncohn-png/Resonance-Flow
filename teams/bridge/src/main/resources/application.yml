@@ -56,6 +56,13 @@ bridge:
     # Javadoc. No default: a missing value must fail startup, not publish a
     # task Inbox will reject on the FK constraint.
     organization-id: ${CRM_ORGANIZATION_ID}
+    sync:
+      # Set to true to enable the automatic daily HubSpot to Kafka sync.
+      # Off by default, same convention as github.sync.cron - an operator
+      # opts in per environment, not a code change.
+      cron:
+        enabled: ${CRM_SYNC_CRON_ENABLED:false}
+        expression: ${CRM_SYNC_CRON_EXPRESSION:0 0 3 * * ?}
   intake:
     raw-landed-topic: ${BRIDGE_RAW_LANDED_TOPIC:bridge.raw.landed}
     scoping:
