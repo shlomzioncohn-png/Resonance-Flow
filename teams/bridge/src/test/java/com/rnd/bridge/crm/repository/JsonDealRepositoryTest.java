@@ -23,7 +23,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 
 class JsonDealRepositoryTest {
 
-    private static final DealToTaskMapper MAPPER = new DealToTaskMapper();
+    private static final DealToTaskMapper MAPPER = new DealToTaskMapper("org-test-0000");
 
     private DealRepository repository;
 
