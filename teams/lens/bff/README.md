@@ -103,8 +103,42 @@ DTOs, the `/workspace/recommend` endpoint, and the `InboxClient`/
 `ChainClient`/`MindClient` orchestration are implemented against mock data
 (stage 2). No live calls to Bridge, Mind, Inbox, or Chain yet.
 
+## Security & Architecture Notes
+
+### X-User-Id Header Trust Model
+
+The BFF **trusts X-User-Id headers implicitly**, without verification. This is architecturally
+safe **only if**:
+
+1. The Gateway is the **exclusive entry point** for all requests to the BFF — the BFF is never
+   exposed directly (firewall rules, network isolation, Kubernetes service mesh policies).
+2. The Gateway is **trustworthy** — it validates JWT tokens and sets X-User-Id only for
+   authenticated callers matching the JWT subject.
+3. **Deployment isolation** — the BFF is not exposed on public networks or uncontrolled
+   internal networks.
+
+If any of these assumptions break (e.g., BFF port is exposed, Gateway is compromised, or
+network misconfiguration allows direct calls), callers can spoof any user ID, leading to
+**IDOR (Insecure Direct Object Reference) vulnerabilities**.
+
+**Mitigation strategies (if isolation cannot be guaranteed):**
+- Add an authentication layer inside the BFF (e.g., verify JWT tokens independently)
+- Reject requests that claim a user ID not present in a trusted Authorization header
+- Monitor for direct BFF calls outside the Gateway (should not happen in normal operation)
+- Enforce network policies (firewall, service mesh) to restrict BFF access
+
+For now, assume the Gateway is trusted and network isolation is in place. **Flag this for review
+if deployment strategy changes.**
+
+### Test Coverage
+
+- **WorkspaceControllerTest** — HTTP request/response cycles, validation errors, 404s, and downstream failures (including missing headers, validation failures). Exception handler is tested implicitly here.
+- **WorkspaceServiceTest** — Orchestration logic, multi-client failures, edge cases in filtering/pagination, fallback semantics.
+- Future: Direct GlobalExceptionHandler unit tests for exception-to-HTTP-status mapping can be added if verification needs to be isolated from controller tests.
+
 ## Next steps
 
 - Wire `InboxClient`, `ChainClient`, and `MindClient` to their real APIs once
   each service exposes one — see the `TODO` in each client class
 - Wire up authentication/authorization propagated from the Gateway
+- Confirm "waiting_on_me" filter semantics with Product team (currently mapped to READY status)

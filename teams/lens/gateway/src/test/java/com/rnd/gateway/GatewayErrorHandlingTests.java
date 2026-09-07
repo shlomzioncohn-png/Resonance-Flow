@@ -33,13 +33,18 @@ class GatewayErrorHandlingTests {
     }
 
     @Test
-    @DisplayName("Workspace endpoint without authentication")
+    @DisplayName("Workspace endpoint has no auth check (SecurityConfig permitAll) — fails downstream instead, on BFF being unreachable")
     void testWorkspaceEndpointAccess() throws Exception {
+        // SecurityConfig.permitAll() means this never 401s/403s for lacking credentials.
+        // With no BFF running in this test context, RestTemplate can't resolve
+        // bff-service, so the request fails downstream as 503 SERVICE_UNAVAILABLE —
+        // not a 4xx — which is itself proof no auth layer is rejecting the request first.
         mockMvc
             .perform(post("/api/workspace/recommend")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"availableTime\": 45}"))
-            .andExpect(status().is4xxClientError());
+            .andExpect(status().isServiceUnavailable())
+            .andExpect(jsonPath("$.errorCode").value("SERVICE_UNAVAILABLE"));
     }
 
     @Test

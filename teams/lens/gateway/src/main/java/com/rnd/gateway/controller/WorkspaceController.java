@@ -1,6 +1,7 @@
 package com.rnd.gateway.controller;
 
 import com.rnd.gateway.dto.TaskDTO;
+import com.rnd.gateway.dto.TaskListResponseDTO;
 import com.rnd.gateway.dto.TaskRecommendationDTO;
 import com.rnd.gateway.dto.TaskStatusUpdateDTO;
 import com.rnd.gateway.dto.WorkspaceRequestDTO;
@@ -19,6 +20,7 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.client.HttpStatusCodeException;
 import org.springframework.web.client.ResourceAccessException;
@@ -188,6 +190,83 @@ public class WorkspaceController {
 
         } catch (Exception e) {
             logger.error("Unexpected error forwarding workspace request for user: {}", userId, e);
+            throw new ServiceUnavailableException("bff", "Unexpected error communicating with BFF");
+        }
+    }
+
+    /**
+     * Get the employee's full task list ("My Tasks" screen), with filter,
+     * title search, and pagination.
+     *
+     * Request: GET /api/workspace/tasks?filter=&search=&page=&size=
+     *
+     * filter/search/page/size are all optional here and only forwarded to
+     * BFF when present — unlike /recommend's body fields, defaults for these
+     * live in BFF (WorkspaceService.listTasks), not in the Gateway. The
+     * Gateway is a transparent proxy for this endpoint: it forwards exactly
+     * what the Frontend sent, nothing more.
+     *
+     * Response: TaskListResponseDTO { items, total, page, size }
+     */
+    @GetMapping("/tasks")
+    public ResponseEntity<TaskListResponseDTO> getTaskList(
+            @RequestParam(required = false) String filter,
+            @RequestParam(required = false) String search,
+            @RequestParam(required = false) Integer page,
+            @RequestParam(required = false) Integer size) {
+
+        String userId = getMockUserId("workspace.tasks.list"); // TODO: extract from JWT
+
+        logger.info("Task list request - userId: {}, filter: {}, search: {}, page: {}, size: {}",
+                userId, filter, search, page, size);
+
+        try {
+            UriComponentsBuilder bffUrlBuilder = UriComponentsBuilder.fromHttpUrl(bffServiceUrl)
+                    .path(bffTasksPath);
+            if (filter != null) {
+                bffUrlBuilder.queryParam("filter", filter);
+            }
+            if (search != null) {
+                bffUrlBuilder.queryParam("search", search);
+            }
+            if (page != null) {
+                bffUrlBuilder.queryParam("page", page);
+            }
+            if (size != null) {
+                bffUrlBuilder.queryParam("size", size);
+            }
+            String bffUrl = bffUrlBuilder.toUriString();
+            logger.debug("Forwarding to BFF: {}", bffUrl);
+
+            HttpEntity<Void> listRequest = new HttpEntity<>(buildHeaders(userId));
+
+            ResponseEntity<TaskListResponseDTO> bffResponse = restTemplate.exchange(
+                    bffUrl, HttpMethod.GET, listRequest, TaskListResponseDTO.class);
+
+            TaskListResponseDTO taskList = bffResponse.getBody();
+            if (taskList == null) {
+                throw new ServiceUnavailableException("bff", "BFF returned empty response");
+            }
+
+            logger.info("Received task list from BFF - userId: {}, total: {}", userId, taskList.getTotal());
+            return ResponseEntity.ok(taskList);
+
+        } catch (ServiceUnavailableException | GatewayTimeoutException | ResponseStatusException e) {
+            throw e;
+        } catch (ResourceAccessException e) {
+            if (e.getCause() instanceof SocketTimeoutException) {
+                logger.error("BFF read timeout for task list - userId: {}", userId, e);
+                throw new GatewayTimeoutException("bff", bffReadTimeoutMs, "BFF did not respond in time");
+            }
+            logger.error("BFF unreachable for task list - userId: {}", userId, e);
+            throw new ServiceUnavailableException("bff", "BFF is currently unavailable");
+
+        } catch (HttpStatusCodeException e) {
+            logger.warn("BFF returned {} for task list - userId: {}", e.getStatusCode(), userId);
+            throw new ResponseStatusException(e.getStatusCode(), "Downstream service returned an error");
+
+        } catch (Exception e) {
+            logger.error("Unexpected error fetching task list for userId: {}", userId, e);
             throw new ServiceUnavailableException("bff", "Unexpected error communicating with BFF");
         }
     }
