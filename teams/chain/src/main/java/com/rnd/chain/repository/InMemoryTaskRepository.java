@@ -9,7 +9,6 @@ import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.UnaryOperator;
-import java.util.stream.Collectors;
 
 /**
  * In-memory implementation of {@link TaskRepository}, backed by a
@@ -47,7 +46,7 @@ public class InMemoryTaskRepository implements TaskRepository {
                 .map(tasksById::get)
                 .filter(Objects::nonNull)
                 .filter(InMemoryTaskRepository::isNotDeleted)
-                .collect(Collectors.toList());
+                .toList();
     }
 
     @Override
@@ -55,7 +54,7 @@ public class InMemoryTaskRepository implements TaskRepository {
         return tasksById.values().stream()
                 .filter(task -> Objects.equals(task.getParentTaskId(), parentTaskId))
                 .filter(InMemoryTaskRepository::isNotDeleted)
-                .collect(Collectors.toList());
+                .toList();
     }
 
     /**
