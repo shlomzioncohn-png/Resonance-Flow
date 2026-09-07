@@ -347,16 +347,23 @@ components:
 
 kafka:
   enabled: true
+  # bitnami/kafka was pruned from Docker Hub's free tier in 2025; bitnamilegacy/kafka
+  # is the same image content, relocated by Broadcom, kept free/unmaintained.
+  image:
+    registry: docker.io
+    repository: bitnamilegacy/kafka
   controller:
     replicaCount: 1
     controllerOnly: false
     resources:
+      # 192Mi was OOMKilling the JVM before it finished KRaft storage formatting on
+      # startup (verified locally - combined broker+controller needs more headroom).
       requests:
-        cpu: 100m
-        memory: 128Mi
+        cpu: 250m
+        memory: 512Mi
       limits:
-        cpu: 150m
-        memory: 192Mi
+        cpu: 500m
+        memory: 768Mi
   broker:
     replicaCount: 0
 
@@ -376,6 +383,12 @@ minio:
 postgresql:
   enabled: true
   architecture: standalone
+  # Must match components.inbox.config.data.datasource.{password,database} above -
+  # nothing else wires these two together, and the subchart otherwise generates a
+  # random password / only creates the default "postgres" database.
+  auth:
+    postgresPassword: postgres
+    database: resonance_flow
   primary:
     persistence:
       enabled: false
