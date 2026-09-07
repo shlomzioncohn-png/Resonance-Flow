@@ -28,7 +28,10 @@ public class InMemoryTaskRepository implements TaskRepository {
     public InMemoryTaskRepository(List<Task> tasks) {
         Objects.requireNonNull(tasks, "tasks must not be null");
         this.tasksById = new ConcurrentHashMap<>();
-        tasks.forEach(task -> tasksById.put(task.getId(), task));
+        // Defensive-copy seed tasks too (review finding #6) - save() already does this, but the
+        // constructor stored the caller's exact Task references, so a caller mutating a Task it
+        // passed into the seed list could change repository state without ever calling save().
+        tasks.forEach(task -> tasksById.put(task.getId(), Task.copyOf(task)));
     }
 
     @Override
