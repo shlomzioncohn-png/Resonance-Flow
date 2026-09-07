@@ -52,6 +52,10 @@ src/main/java/com/rnd/chain/
 src/main/resources/application.yml
 src/test/java/com/rnd/chain/
 ├── ChainApplicationTests.java
+├── dto/
+│   ├── ConstraintTest.java
+│   ├── TaskDependencyTest.java
+│   └── TaskTestFixtures.java   # shared Task.Builder defaults, used by all 3 test classes below
 ├── repository/
 │   └── InMemoryTaskRepositoryTest.java
 └── service/
@@ -192,3 +196,103 @@ directly on this branch:
 
 See [PLAN.md](PLAN.md) for the full audit this round is based on, including which findings were
 confirmed as-is, which were already mitigated, and which are deliberately deferred (and why).
+
+## Code review fixes (2026-09-07, PR #114 fourth review round)
+
+Addressed all findings from this round's review comments (discussed and planned one-by-one
+directly with the reviewer before implementation, then implemented as a batch of separate commits
+on this branch):
+
+- **Closed a lost-update race in `onTaskStatusChanged`.** It mutated and saved the task's status
+  under `dependencyGraphLock` only, while `onConstraintAdded`/`onConstraintStatusChanged` mutate
+  the same task's counters under `lockFor(taskId)` only - two different monitors gave zero mutual
+  exclusion between them, so a concurrent status change and constraint change on the same task
+  could race, with whichever `save()` ran last silently clobbering the other's update.
+  `onTaskStatusChanged` now nests `lockFor(taskId)` inside `dependencyGraphLock` for its
+  read-modify-write, matching the locking discipline already used elsewhere (graph lock always
+  acquired before the per-task lock, never after, so this can't deadlock).
+- **`onTaskStatusChanged`/`onConstraintStatusChanged` now validate `newStatus`/`previousStatus`**
+  with `Objects.requireNonNull`, closing a gap where the "guard every parameter" convention the
+  other public methods follow had silently been dropped for these two.
+- **`InMemoryTaskDependencyRepository`'s reads are now guarded by a lock too.**
+  `findByTaskId`/`findByDependsOnTaskId` previously took no lock at all, while `save()`/`delete()`
+  update both adjacency maps sequentially (not atomically) under the old plain `Object` lock - a
+  reader could observe a torn view where one map reflects a write and the other doesn't. Replaced
+  the plain lock with a `ReadWriteLock`: writes stay exclusive, reads are now guarded too (and
+  still run concurrently with each other via the shared read lock). Both finder methods also
+  gained a missing `Objects.requireNonNull` guard on `taskId`, matching `save()`'s existing
+  convention.
+- **`InMemoryTaskDependencyRepository.delete()` no longer inlines its adjacency-map-update pattern
+  twice by hand** - extracted `removeFromIndex` as the removal-direction mirror of the existing
+  `indexEdge` helper.
+- **Restored 3 regression test scenarios** (`addSecondDependency_multipleBlockers`,
+  `removeOneOfMultipleBlockers_staysNotReady`, `dependencyChain_onlyDirectDependentUpdated_notTransitive`)
+  that existed in the original `com.rnd.chain.TaskEligibilityServiceTest` before the package
+  restructuring to `com.rnd.chain.service`, but were never recreated afterward - ported to the
+  current `Task`/UUID-based fixtures and repository contract.
+- **`Constraint.reason` now rejects nested `Collection`/`Map` values.** The existing defensive copy
+  only ever copied the top-level `Map` - a nested mutable value inside `reason` would still be a
+  live, externally-mutable reference even after the "defensive" copy. A full recursive deep-copy
+  isn't practical for a generic `Map<String, Object>`, so this takes the pragmatic middle ground of
+  rejecting the shape outright; `reason` is documented/expected to hold flat scalar values only.
+- **`Constraint.getReason()` no longer re-copies an already-copied map** - `this.reason` is always
+  already the result of `copyReason()`, set that way by both the constructor and `setReason()`, so
+  re-copying it again on every read was redundant work with no added safety.
+- **`InMemoryTaskRepository`'s constructor now defensive-copies seed tasks**, consistent with
+  `save()` (which already stores `Task.copyOf(task)` rather than the caller's exact reference) - a
+  caller mutating a `Task` it passed into the seed list could previously change repository state
+  without ever calling `save()`.
+- **Added an O(1) `existsDependency(taskId, dependsOnTaskId)` repository method**, and
+  `TaskEligibilityService.edgeExists()` now delegates to it instead of materializing the full
+  `findByTaskId` result just to linear-scan it for one edge - both call sites (`addDependency`/
+  `removeDependency`) are hot paths that run under a lock.
+- **`lockFor(taskId)`'s stripe index now uses `Math.floorMod`** instead of a hand-rolled
+  `(hashCode & 0x7fffffff) % LOCK_STRIPE_COUNT` sign-bit mask, which is only bit-for-bit equivalent
+  to `Math.floorMod` because `LOCK_STRIPE_COUNT` (256) happens to be a power of two - an assumption
+  nobody had written down. `Math.floorMod` expresses the intent directly and holds for any stripe
+  count.
+- **Extracted a shared `withTaskLock(taskId, mutator)` helper** for the
+  `synchronized (lockFor(taskId)) { Task task = requireTask(taskId); ...; recalculateAndSave(task); }`
+  shape that was duplicated across 5 call sites (`recalculateTaskEligibility`, `addDependency`,
+  `removeDependency`, `onConstraintAdded`, `onConstraintStatusChanged`); each site now supplies
+  only what actually differs. `onTaskStatusChanged` deliberately does not use this helper - it
+  nests under `dependencyGraphLock` rather than locking `taskId` alone, and needs a value
+  (`previousStatus`) out of the locked block, a different shape than "mutate this task, then save
+  it".
+- **Added inline `TODO(JPA)` comments at each `@Transactional` method's call sites** flagging two
+  costs that only become real once a JPA migration lands: the transaction boundary becoming
+  meaningful (today it's a deliberate placeholder - see `CLAUDE.md`), and the second
+  `requireTask(taskId)` read in `addDependency`/`removeDependency` becoming a second real DB
+  round-trip (it's a deliberate staleness-safety re-fetch today, cheap against an in-memory map;
+  see `PLAN.md` Phase 3 for the eventual single-lock-scope, single-read redesign).
+- **`RepositoryConfig`'s `@Bean` methods now individually document why they're singletons and why
+  they're empty-seeded** (singleton because the service's locking is only correct for beans sharing
+  the same repository instances; empty-seeded because no real persistence layer exists yet) - the
+  class-level Javadoc already said this, but not on each bean.
+- **Extracted a shared `TaskTestFixtures.defaultTask(id)` test helper**, replacing 3 independently
+  hand-rolled `buildTask(...)` methods (in `InMemoryTaskRepositoryTest`,
+  `TaskEligibilityServiceConcurrencyTest`, `TaskEligibilityServiceTest`) that each built the same
+  underlying object via `Task.builder()` with a different ad-hoc parameter list. `Task`'s shape has
+  already changed several times in this project's history, so every future change meant editing up
+  to 3 near-identical methods with real drift risk; each test now chains only the field(s) it
+  actually varies off the shared builder.
+- **Merged `TaskEligibilityServiceConcurrencyTest`'s two line-for-line-identical concurrency test
+  harness methods** (`runConcurrently`/`runConcurrentPair`) into one `runConcurrently(tasks,
+  poolSize, timeoutSeconds)`, taking the pool size and timeout as explicit parameters instead of
+  hardcoding them per method.
+- **Fixed stale documentation**: `CLAUDE.md` claimed cycle detection uses "full in-memory BFS" -
+  the actual implementation (`wouldCreateCycle`) is a stack-based DFS (`push`/`pop` on a `Deque`),
+  and always has been. `PLAN.md`'s own audit table also still marked its Finding #1
+  (validate-before-mutate ordering) and Finding #9 (missing concurrency regression test) as
+  needing work, even though both were already fixed on this branch - their Status cells now
+  reflect that.
+
+A few of this round's comments were discussed and deliberately **not** acted on, each for a
+specific reason rather than being skipped silently: cosmetic getter/setter formatting in
+`Task.java` (not this branch's file - see file-ownership notes above); adding Lombok to
+`Constraint`/`Task` (would create a 6th divergent DTO variant across the unmerged branches that
+also touch `teams/chain/dto`, rather than resolving the inconsistency it's meant to fix); unifying
+`Task.copyOf` and `Constraint.copyReason` behind a shared abstraction (no second concrete DTO on
+this branch's near-term horizon to justify the abstraction yet); and the `spring-boot-starter-data-jpa`
++ H2 placeholder dependencies with zero JPA entities (intentional - see "Open items" in
+`CLAUDE.md` and the DB-migration rationale above).
