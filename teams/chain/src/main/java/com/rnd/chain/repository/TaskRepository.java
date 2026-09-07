@@ -1,4 +1,4 @@
-// Copied verbatim from chain/ruthHoltzman/dependency-repository-66, unmodified.
+// Originally copied from chain/ruthHoltzman/dependency-repository-66; notes shortened since.
 
 package com.rnd.chain.repository;
 
@@ -10,56 +10,45 @@ import java.util.UUID;
 import java.util.function.UnaryOperator;
 
 /**
- * Contract for looking up and persisting Task nodes. NOTE: Task itself
- * is owned by a teammate, not defined here.
+ * Contract for looking up and persisting Task nodes. Task itself is
+ * owned by a teammate, not defined here.
  */
 public interface TaskRepository {
 
     /**
-     * @return the Task with this id, or empty if it doesn't exist -
-     * including tasks that are soft-deleted (deletedAt != null), which
-     * are treated as not found.
+     * @return the Task with this id, or empty if missing or soft-deleted.
      */
     Optional<Task> findById(UUID id);
 
     /**
-     * @return the Task objects matching the given ids. Ids that don't
-     * exist, or belong to a soft-deleted task, are simply omitted from
-     * the result (no exception).
+     * @return matching Task objects; missing or soft-deleted ids are
+     * simply omitted (no exception).
      */
     List<Task> findAllById(List<UUID> ids);
 
     /**
-     * @return the direct children of the given task in the hierarchy
-     * (tasks whose parentTaskId equals this id). Empty list, never null,
-     * if the task has no children. Soft-deleted children are excluded,
-     * same as the other lookups here.
+     * @return direct children of the given task (parentTaskId == this
+     * id). Empty list, never null, if none. Soft-deleted children excluded.
      */
     List<Task> findByParentTaskId(UUID parentTaskId);
 
     /**
-     * Persists the given task - inserts it if its id doesn't already
-     * exist, or replaces the existing one if it does (upsert). The
-     * caller's instance is not retained: the repository stores and
-     * returns an independent copy, so later mutations on either side
-     * cannot leak across.
+     * Upserts the task (insert if new, replace if the id exists). Stores
+     * and returns an independent copy, so later mutations don't leak
+     * across.
      *
-     * @return an independent copy of the persisted task, for convenient
-     * chaining at the call site.
+     * @return an independent copy of the persisted task.
      */
     Task save(Task task);
 
     /**
-     * Atomically reads the current task with this id, applies
-     * {@code mutator} to a private copy of it, and persists the result -
-     * equivalent to {@code findById(id).map(mutator).map(this::save)} but
-     * performed as a single operation under a per-id lock. Use this
-     * instead of a separate findById/save pair whenever the new value
-     * depends on the current one (e.g. decrementing a counter), since two
-     * concurrent findById/save pairs on the same id can otherwise race
-     * and silently lose one of the updates.
+     * Atomically reads, applies {@code mutator}, and persists the result
+     * under a per-id lock - equivalent to
+     * {@code findById(id).map(mutator).map(this::save)} but race-free.
+     * Use this instead of a separate findById/save pair when the new
+     * value depends on the current one.
      *
-     * @return the updated task, or empty if no task with this id exists
+     * @return the updated task, or empty if no task with this id exists.
      */
     Optional<Task> update(UUID id, UnaryOperator<Task> mutator);
 }
