@@ -10,7 +10,7 @@ onConstraintStatusChanged.
 - Tasks CAN reopen from DONE (confirmed by team lead) - blockingCount
   must be restored on dependents when this happens
 - Constraints CAN also reopen (PENDING -> DONE/WAIVED -> PENDING again)
-- Cycle detection required in addDependency (full in-memory BFS, no
+- Cycle detection required in addDependency (full in-memory DFS, no
   depth limit — not optimized yet, revisit only if it's a bottleneck)
 - No retry logic (@Retryable) — let exceptions propagate to the caller
 - All code comments must be in English

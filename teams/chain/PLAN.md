@@ -113,7 +113,7 @@ pass as Finding #1.
 
 | # | Finding | Status | Severity | Recommended Action | Main Files |
 |---|---|---|---|---|---|
-| 1 | Repository mutation before existence validation | CONFIRMED | Critical | Reorder: validate both task ids before `save`/`delete` | `TaskEligibilityService.java` |
+| 1 | Repository mutation before existence validation | FIXED (validation now runs before any repository mutation) | Critical | Reorder: validate both task ids before `save`/`delete` | `TaskEligibilityService.java` |
 | 2 | Missing test coverage for not-found paths | CONFIRMED | Major | Add tests once #1 is fixed, asserting no repo mutation | `TaskEligibilityServiceTest.java` |
 | 3 | Decorative `@Transactional` / unnecessary JPA+H2 | CONFIRMED (today), RESOLVED (going forward) | Major | Keep `@Transactional` + JPA/H2 now (DB decision resolved: a real DB is coming); plan the concrete JPA migration — see Phase 3 | `pom.xml`, `application.yml`, `TaskEligibilityService.java` |
 | 4 | Missing null validation on UUID parameters | CONFIRMED | Minor | Add `Objects.requireNonNull` (existing convention) to all public methods + `TaskDependency`'s constructor | `TaskEligibilityService.java`, `TaskDependency.java` |
@@ -121,7 +121,7 @@ pass as Finding #1.
 | 6 | `isSameEdge` DRY violation | CONFIRMED | Minor (Cosmetic) | Replace with `a.equals(b)`; delete `isSameEdge` | `InMemoryTaskDependencyRepository.java` |
 | 7 | Global `dependencyGraphLock` throughput trade-off | ALREADY ADDRESSED (correctness) / PARTIALLY VALID (process) | Minor | No code change; open a tracked follow-up item, not just a comment | *(none — process action)* |
 | 8 | Generic exceptions vs. domain exceptions | PARTIALLY VALID | Minor | Do not introduce new exception types now; already designed on unmerged branch #66, tracked in `CLAUDE.md` | *(none in this PR)* |
-| 9 *(discovered, not in review)* | Claimed concurrency regression test does not exist in the repo | CONFIRMED | Major | Write the test that was claimed as already added, using real in-memory repos, or correct the claim | `TaskEligibilityServiceConcurrencyTest.java`, `README.md` |
+| 9 *(discovered, not in review)* | Claimed concurrency regression test does not exist in the repo | FIXED (TaskEligibilityServiceConcurrencyTest now exists, using real in-memory repos) | Major | Write the test that was claimed as already added, using real in-memory repos, or correct the claim | `TaskEligibilityServiceConcurrencyTest.java`, `README.md` |
 
 ---
 
