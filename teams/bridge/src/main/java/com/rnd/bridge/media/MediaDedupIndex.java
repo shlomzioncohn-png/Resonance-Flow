@@ -1,100 +1,90 @@
 package com.rnd.bridge.media;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
 import com.rnd.bridge.raw.model.RawSourceType;
-import io.minio.BucketExistsArgs;
-import io.minio.GetObjectArgs;
-import io.minio.MakeBucketArgs;
-import io.minio.MinioClient;
-import io.minio.PutObjectArgs;
-import io.minio.errors.ErrorResponseException;
-import org.springframework.beans.factory.annotation.Value;
+import com.rnd.bridge.storage.ControlPlaneStateStore;
+import java.util.Arrays;
+import java.util.concurrent.atomic.AtomicBoolean;
 import org.springframework.stereotype.Component;
 
-import java.io.ByteArrayInputStream;
-import java.io.InputStream;
-import java.util.HashSet;
-import java.util.Set;
-
 /**
- * Content-hash dedup index for the media lane, stored in MinIO rather than a new
- * datastore - same reasoning plan.md (Malki's lane) uses for cursor persistence
- * (`_cursors/{sourceType}/{tenantId}.json`): it's small control-plane state, not lane
- * content, so it doesn't go through the shared ObjectStorageClient (which is for landing
- * raw content, tagged and content-addressed by object key) - it talks to MinioClient
- * directly, at a path prefix (`_dedup/`) that stays out of the object_key pattern
+ * Content-hash dedup index for the media lane, stored in MinIO rather than a new datastore -
+ * same reasoning plan.md (Malki's lane) uses for cursor persistence
+ * (`_cursors/{sourceType}/{tenantId}.json`): it's small control-plane state, not lane content,
+ * so it doesn't go through the shared ObjectStorageClient (which is for landing raw content,
+ * tagged and content-addressed by object key) - it goes through ControlPlaneStateStore, at a
+ * path prefix (`_dedup/`) that stays out of the object_key pattern
  * ([A-Z_]+/tenant/yyyy-MM-dd/file) every real landed object follows.
  * <p>
- * Not safe for concurrent runs against the same (sourceType, tenantId) - a load-then-save
- * race could drop a hash written by a concurrent run. Fine for this lane's single-instance
- * manual trigger; would need a lock (or an atomic MinIO conditional write) if that changes.
+ * {@link #checkAndRecord} is the only way to touch this index - it checks and (if new) records
+ * a hash in one call, under one lock, via {@link ControlPlaneStateStore}. This used to be two
+ * separate load()/save() methods with the check-and-add done by the caller in between, which
+ * left a load-then-save race window open for two concurrent runs on the same
+ * (sourceType, tenantId); ControlPlaneStateStore closes that window.
  */
 @Component
 public class MediaDedupIndex {
 
     private static final String PREFIX = "_dedup";
+    private static final String[] EMPTY = new String[0];
 
-    private final MinioClient minioClient;
-    private final ObjectMapper objectMapper;
-    private final String bucket;
-    private volatile boolean bucketEnsured = false;
+    private final ControlPlaneStateStore stateStore;
 
-    public MediaDedupIndex(MinioClient minioClient, ObjectMapper objectMapper,
-                            @Value("${minio.bucket}") String bucket) {
-        this.minioClient = minioClient;
-        this.objectMapper = objectMapper;
-        this.bucket = bucket;
+    public MediaDedupIndex(ControlPlaneStateStore stateStore) {
+        this.stateStore = stateStore;
     }
 
-    public Set<String> load(RawSourceType sourceType, String tenantId) {
-        ensureBucket();
-        String key = indexKey(sourceType, tenantId);
-        try (InputStream in = minioClient.getObject(
-                GetObjectArgs.builder().bucket(bucket).object(key).build())) {
-            String[] hashes = objectMapper.readValue(in, String[].class);
-            return new HashSet<>(Set.of(hashes));
-        } catch (ErrorResponseException e) {
-            if ("NoSuchKey".equals(e.errorResponse().code())) {
-                return new HashSet<>();
+    /**
+     * Atomically checks whether contentHash was already recorded for (sourceType, tenantId)
+     * and, if not, records it now - in one locked load-mutate-save cycle, so two concurrent
+     * calls for the same (sourceType, tenantId) can't drop each other's recorded hashes.
+     *
+     * @return true if contentHash was already present (this is a duplicate, not newly
+     *         recorded); false if it was just recorded for the first time.
+     */
+    public boolean checkAndRecord(RawSourceType sourceType, String tenantId, String contentHash) {
+        AtomicBoolean alreadyPresent = new AtomicBoolean(false);
+        stateStore.update(indexKey(sourceType, tenantId), String[].class, EMPTY, current -> {
+            for (String existing : current) {
+                if (existing.equals(contentHash)) {
+                    alreadyPresent.set(true);
+                    return current;
+                }
             }
-            throw new IllegalStateException("Failed to read dedup index " + key, e);
-        } catch (Exception e) {
-            throw new IllegalStateException("Failed to read dedup index " + key, e);
-        }
+            String[] updated = Arrays.copyOf(current, current.length + 1);
+            updated[current.length] = contentHash;
+            return updated;
+        });
+        return alreadyPresent.get();
     }
 
-    public void save(RawSourceType sourceType, String tenantId, Set<String> hashes) {
-        ensureBucket();
-        String key = indexKey(sourceType, tenantId);
-        try {
-            byte[] json = objectMapper.writeValueAsBytes(hashes);
-            minioClient.putObject(PutObjectArgs.builder()
-                    .bucket(bucket)
-                    .object(key)
-                    .stream(new ByteArrayInputStream(json), json.length, -1)
-                    .contentType("application/json")
-                    .build());
-        } catch (Exception e) {
-            throw new IllegalStateException("Failed to write dedup index " + key, e);
+    /**
+     * Rolls back a hash recorded by {@link #checkAndRecord} whose upload turned out to fail
+     * after the hash was already claimed - without this, a failed upload would be marked as
+     * "already seen" forever and its content would never get a real chance to land on retry.
+     */
+    public void forget(RawSourceType sourceType, String tenantId, String contentHash) {
+        stateStore.update(indexKey(sourceType, tenantId), String[].class, EMPTY, current -> {
+            int index = indexOf(current, contentHash);
+            if (index < 0) {
+                return current;
+            }
+            String[] updated = new String[current.length - 1];
+            System.arraycopy(current, 0, updated, 0, index);
+            System.arraycopy(current, index + 1, updated, index, current.length - index - 1);
+            return updated;
+        });
+    }
+
+    private int indexOf(String[] values, String target) {
+        for (int i = 0; i < values.length; i++) {
+            if (values[i].equals(target)) {
+                return i;
+            }
         }
+        return -1;
     }
 
     private String indexKey(RawSourceType sourceType, String tenantId) {
         return "%s/%s/%s.json".formatted(PREFIX, sourceType.name(), tenantId);
-    }
-
-    private synchronized void ensureBucket() {
-        if (bucketEnsured) {
-            return;
-        }
-        try {
-            boolean exists = minioClient.bucketExists(BucketExistsArgs.builder().bucket(bucket).build());
-            if (!exists) {
-                minioClient.makeBucket(MakeBucketArgs.builder().bucket(bucket).build());
-            }
-            bucketEnsured = true;
-        } catch (Exception e) {
-            throw new IllegalStateException("Failed to ensure MinIO bucket " + bucket, e);
-        }
     }
 }

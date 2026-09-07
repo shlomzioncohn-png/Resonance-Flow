@@ -124,20 +124,17 @@ public class MediaIntakeOrchestrator {
 
         Path uploadedDir = dir.resolve(UPLOADED_SUBDIR);
         Path rejectedDir = dir.resolve(REJECTED_SUBDIR);
-        Set<String> seenHashes = dedupIndex.load(source.sourceType(), tenantId);
 
         for (Path file : files) {
             if (transcripts.contains(file)) {
                 continue;
             }
-            upload(file, dir, uploadedDir, rejectedDir, source, seenHashes, uploaded, duplicates, rejected, failed);
+            upload(file, dir, uploadedDir, rejectedDir, source, uploaded, duplicates, rejected, failed);
         }
-
-        dedupIndex.save(source.sourceType(), tenantId, seenHashes);
     }
 
     private void upload(Path file, Path dir, Path uploadedDir, Path rejectedDir, IntakeSource source,
-                         Set<String> seenHashes, List<String> uploaded, List<String> duplicates,
+                         List<String> uploaded, List<String> duplicates,
                          List<String> rejected, List<String> failed) {
         try {
             byte[] content = Files.readAllBytes(file);
@@ -156,7 +153,8 @@ public class MediaIntakeOrchestrator {
                     : null;
 
             String contentHash = sha256Hex(content);
-            if (seenHashes.contains(contentHash)) {
+            boolean isDuplicate = dedupIndex.checkAndRecord(source.sourceType(), tenantId, contentHash);
+            if (isDuplicate) {
                 moveTo(file, uploadedDir);
                 // The sidecar is tied to this specific filename, not to the content hash -
                 // move it out of the way too, or it sits here forever getting re-checked
@@ -169,28 +167,36 @@ public class MediaIntakeOrchestrator {
                 return;
             }
 
-            Instant ingestedAt = Instant.now();
-            String transcriptObjectKey = null;
-            if (transcript != null) {
-                byte[] transcriptContent = Files.readAllBytes(transcript);
-                transcriptObjectKey = intakeService.landTranscript(
-                        transcriptContent, transcript.getFileName().toString(), tenantId,
-                        source.sourceType(), ingestedAt);
+            try {
+                Instant ingestedAt = Instant.now();
+                String transcriptObjectKey = null;
+                if (transcript != null) {
+                    byte[] transcriptContent = Files.readAllBytes(transcript);
+                    transcriptObjectKey = intakeService.landTranscript(
+                            transcriptContent, transcript.getFileName().toString(), tenantId,
+                            source.sourceType(), ingestedAt);
+                }
+
+                RawObjectEvent event = intakeService.land(
+                        content, contentHash, file.getFileName().toString(), tenantId,
+                        source.sourceType(), source.modality(), ingestedAt, transcriptObjectKey);
+                eventPublisher.publish(event);
+
+                moveTo(file, uploadedDir);
+                if (transcript != null) {
+                    moveTo(transcript, uploadedDir);
+                }
+
+                log.info("Uploaded {} as {}", file.getFileName(), event.objectKey());
+                uploaded.add(event.objectKey());
+            } catch (Exception e) {
+                // checkAndRecord() already claimed contentHash above so a concurrent run
+                // couldn't land the same content twice - but this attempt failed before
+                // actually landing anything, so undo the claim or this content would be
+                // treated as "already seen" forever and never get a real retry.
+                dedupIndex.forget(source.sourceType(), tenantId, contentHash);
+                throw e;
             }
-
-            RawObjectEvent event = intakeService.land(
-                    content, contentHash, file.getFileName().toString(), tenantId,
-                    source.sourceType(), source.modality(), ingestedAt, transcriptObjectKey);
-            eventPublisher.publish(event);
-
-            moveTo(file, uploadedDir);
-            if (transcript != null) {
-                moveTo(transcript, uploadedDir);
-            }
-
-            seenHashes.add(contentHash);
-            log.info("Uploaded {} as {}", file.getFileName(), event.objectKey());
-            uploaded.add(event.objectKey());
         } catch (Exception e) {
             log.error("Failed to upload {}", file, e);
             failed.add(file.getFileName().toString());

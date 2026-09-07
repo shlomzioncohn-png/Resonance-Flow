@@ -4,7 +4,6 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
-import static org.mockito.Mockito.atLeastOnce;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
@@ -18,9 +17,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.security.MessageDigest;
 import java.time.Instant;
-import java.util.HashSet;
 import java.util.HexFormat;
-import java.util.Set;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -42,7 +39,7 @@ class MediaIntakeOrchestratorTest {
 
     @BeforeEach
     void setUp() {
-        when(dedupIndex.load(any(), any())).thenReturn(new HashSet<>());
+        when(dedupIndex.checkAndRecord(any(), any(), any())).thenReturn(false);
         orchestrator = new MediaIntakeOrchestrator(
                 intakeService, eventPublisher, dedupIndex,
                 zoomDir.toString(), bbbDir.toString(), scannedDocsDir.toString(),
@@ -84,17 +81,15 @@ class MediaIntakeOrchestratorTest {
         assertThat(summary.uploadedObjectKeys()).containsExactly(event.objectKey());
         assertThat(Files.exists(zoomDir.resolve("uploaded").resolve("meeting.mp3"))).isTrue();
         verify(eventPublisher).publish(event);
-        // Called once per MEETING-typed source dir (zoom + bbb), even when a dir is empty -
-        // not asserting an exact count here, just that the run persisted the index.
-        verify(dedupIndex, atLeastOnce()).save(eq(RawSourceType.MEETING), eq("demo-tenant"), any());
+        verify(dedupIndex).checkAndRecord(eq(RawSourceType.MEETING), eq("demo-tenant"), any());
     }
 
     @Test
     void duplicateContentIsSkippedButStillMovedToUploaded() throws Exception {
         byte[] content = "b".repeat(2000).getBytes();
         Files.write(zoomDir.resolve("dup.mp3"), content);
-        when(dedupIndex.load(eq(RawSourceType.MEETING), eq("demo-tenant")))
-                .thenReturn(new HashSet<>(Set.of(sha256(content))));
+        when(dedupIndex.checkAndRecord(eq(RawSourceType.MEETING), eq("demo-tenant"), eq(sha256(content))))
+                .thenReturn(true);
 
         MediaIntakeOrchestrator.IntakeSummary summary = orchestrator.runIntake();
 
@@ -123,6 +118,21 @@ class MediaIntakeOrchestratorTest {
         assertThat(Files.exists(zoomDir.resolve("uploaded").resolve("meeting.vtt"))).isTrue();
         verify(intakeService).landTranscript(any(), eq("meeting.vtt"), eq("demo-tenant"),
                 eq(RawSourceType.MEETING), any());
+    }
+
+    @Test
+    void failedLandRollsBackTheDedupClaimSoARetryIsNotBlockedForever() throws Exception {
+        byte[] content = "d".repeat(2000).getBytes();
+        Files.write(zoomDir.resolve("broken.mp3"), content);
+        when(intakeService.land(any(), any(), eq("broken.mp3"), eq("demo-tenant"),
+                eq(RawSourceType.MEETING), eq(Modality.AUDIO), any(), isNull()))
+                .thenThrow(new IllegalStateException("MinIO unreachable"));
+
+        MediaIntakeOrchestrator.IntakeSummary summary = orchestrator.runIntake();
+
+        assertThat(summary.failedFiles()).containsExactly("broken.mp3");
+        verify(dedupIndex).forget(RawSourceType.MEETING, "demo-tenant", sha256(content));
+        verifyNoInteractions(eventPublisher);
     }
 
     private RawObjectEvent fakeEvent(String objectKey) {
