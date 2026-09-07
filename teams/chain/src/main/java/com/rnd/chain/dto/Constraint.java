@@ -1,6 +1,7 @@
 package com.rnd.chain.dto;
 
 import java.time.LocalDateTime;
+import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.Map;
@@ -47,8 +48,27 @@ public class Constraint {
     public void setReason(Map<String, Object> reason) { this.reason = copyReason(reason); }
     public void setUpdatedAt(LocalDateTime updatedAt) { this.updatedAt = updatedAt; }
 
+    // Only copies the top-level map, not its values (review finding #4) - a value that is
+    // itself a Collection or Map would still be a live, externally-mutable reference even
+    // after this "defensive" copy. Rather than a full recursive deep-copy (impractical to do
+    // generically for an unstructured Map<String, Object>), this rejects that shape outright:
+    // reason is documented/expected to hold flat scalar values (strings, numbers, dates), so a
+    // nested Collection/Map is refused rather than silently allowing a copy that isn't actually
+    // safe.
     private static Map<String, Object> copyReason(Map<String, Object> reason) {
-        return reason == null ? null : Collections.unmodifiableMap(new HashMap<>(reason));
+        if (reason == null) {
+            return null;
+        }
+        for (Map.Entry<String, Object> entry : reason.entrySet()) {
+            Object value = entry.getValue();
+            if (value instanceof Collection || value instanceof Map) {
+                throw new IllegalArgumentException(
+                    "Constraint reason value for key '" + entry.getKey() + "' must not be a "
+                        + "Collection or Map - reason only supports flat scalar values, since "
+                        + "the defensive copy does not recurse into nested mutable structures");
+            }
+        }
+        return Collections.unmodifiableMap(new HashMap<>(reason));
     }
 
     @Override
