@@ -6,6 +6,9 @@ import com.rnd.bff.dto.TaskRecommendationDTO;
 import com.rnd.bff.dto.TaskStatusUpdateDTO;
 import com.rnd.bff.dto.WorkspaceRequestDTO;
 import com.rnd.bff.service.WorkspaceService;
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.Parameter;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -20,6 +23,7 @@ import org.springframework.web.bind.annotation.*;
  * X-User-Id — see docs/workspace-screen-integration-plan.md.
  */
 @RestController
+@Tag(name = "Workspace", description = "Called only by the Gateway, never directly by the Frontend")
 public class WorkspaceController {
 
     private static final Logger logger = LoggerFactory.getLogger(WorkspaceController.class);
@@ -30,6 +34,7 @@ public class WorkspaceController {
         this.workspaceService = workspaceService;
     }
 
+    @Operation(summary = "Recommend a task", description = "Best-fit task for the given available time.")
     @PostMapping("/workspace/recommend")
     public ResponseEntity<TaskRecommendationDTO> recommend(
             @Valid @RequestBody WorkspaceRequestDTO request,
@@ -46,11 +51,16 @@ public class WorkspaceController {
      * filter: all | in_progress | blocked | waiting_on_me (default all)
      * page: 0-based (default 0), size: default 20, clamped to [1, 100]
      */
+    @Operation(summary = "List tasks", description = "Filter, title search, and pagination for My Tasks.")
     @GetMapping("/workspace/tasks")
     public ResponseEntity<TaskListResponseDTO> listTasks(
+            @Parameter(description = "all | in_progress | blocked | waiting_on_me (default all)")
             @RequestParam(required = false) String filter,
+            @Parameter(description = "Free-text, matched against task title (case-insensitive)")
             @RequestParam(required = false) String search,
+            @Parameter(description = "0-based page index")
             @RequestParam(defaultValue = "0") int page,
+            @Parameter(description = "Page size, clamped to 1-100")
             @RequestParam(defaultValue = "20") int size,
             @RequestHeader("X-User-Id") String userId) {
 
@@ -66,6 +76,7 @@ public class WorkspaceController {
      *
      * GET /workspace/tasks/{taskId}
      */
+    @Operation(summary = "Get task details", description = "404 if the task id doesn't exist.")
     @GetMapping("/workspace/tasks/{taskId}")
     public ResponseEntity<TaskDTO> getTask(
             @PathVariable String taskId,
@@ -82,6 +93,7 @@ public class WorkspaceController {
      * PATCH /workspace/tasks/{taskId}/status
      * Body: { "status": "IN_PROGRESS" }
      */
+    @Operation(summary = "Update task status", description = "404 if the task id doesn't exist.")
     @PatchMapping("/workspace/tasks/{taskId}/status")
     public ResponseEntity<TaskDTO> updateTaskStatus(
             @PathVariable String taskId,
