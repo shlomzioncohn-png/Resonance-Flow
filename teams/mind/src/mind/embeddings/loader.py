@@ -1,21 +1,17 @@
 """
 Real-record loader for the embeddings ingest pipeline.
 
-There is no R2 loader anywhere in this repo (checked; Bridge's object
-storage work uses MinIO, not R2, and no loader code exists for either).
-What *does* exist is a real-data manifest for a small FUNSD slice --
-`eval/datasets/.manifest.json` + `.sha256` -- added in PR #141
-(`yonit/funsd-foundation-gate`, not yet merged; this branch pulled in just
-those two files). The manifest lists two real FUNSD test-split documents
-by id, with checksums, but not the documents themselves -- per
+The real data is a small FUNSD slice, fetched from FUNSD's public source.
+Its manifest -- `eval/datasets/.manifest.json` + `.sha256` -- was added in
+PR #141 (`yonit/funsd-foundation-gate`, not yet merged; this branch pulled
+in just those two files). The manifest lists two real FUNSD test-split
+documents by id, with checksums, but not the documents themselves -- per
 `eval/datasets/README.md`'s own rule ("manifests + checksums only, never
 the corpora"), the raw files are gitignored under `eval/datasets/local-data/`.
 
-So "the loader" here does what a real object-storage loader would: given
-the manifest, fetch each record's raw content (from FUNSD's public source,
-the closest available equivalent to a real remote store for this slice),
-verify it against the committed checksum, and hand back plain text. Once
-cached under `local-data/` it's not re-downloaded.
+So this loader fetches each record's raw content from FUNSD's public
+source, verifies it against the committed checksum, and hands back plain
+text. Once cached under `local-data/` it's not re-downloaded.
 
 FUNSD annotation JSON is a list of form fields (`form: [{text, label,
 words, ...}, ...]`); the text handed to embed() is those fields' text
