@@ -44,4 +44,9 @@ public final class TaskDependency {
     public int hashCode() {
         return Objects.hash(taskId, dependsOnTaskId);
     }
+
+    @Override
+    public String toString() {
+        return "TaskDependency{taskId=" + taskId + ", dependsOnTaskId=" + dependsOnTaskId + "}";
+    }
 }

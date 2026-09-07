@@ -99,6 +99,18 @@ class TaskTest {
         assertThat(a).isNotEqualTo(b);
     }
 
+    @Test
+    void toString_containsIdStatusAndCounts() {
+        UUID id = UUID.randomUUID();
+        Task task = newTaskBuilder().id(id).status(TaskStatus.ACTIVE).blockingCount(2).openConstraintCount(1).build();
+
+        assertThat(task.toString())
+                .contains(id.toString())
+                .contains("ACTIVE")
+                .contains("blockingCount=2")
+                .contains("openConstraintCount=1");
+    }
+
     private static Task.Builder newTaskBuilder() {
         return Task.builder()
                 .id(UUID.randomUUID())
