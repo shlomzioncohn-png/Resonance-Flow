@@ -1,54 +1,38 @@
 package com.rnd.chain.repository;
 
 import com.rnd.chain.dto.Task;
-import com.rnd.chain.dto.TaskStatus;
 import com.rnd.chain.testsupport.ConcurrentTestRunner;
-import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
-import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
-import java.util.function.UnaryOperator;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
-class InMemoryTaskRepositoryTest {
+/**
+ * In addition to the shared {@link TaskRepositoryContractTest} suite,
+ * exercises behavior specific to this implementation's use of
+ * {@link java.util.concurrent.ConcurrentHashMap}.
+ */
+class InMemoryTaskRepositoryTest extends TaskRepositoryContractTest {
 
-    private final UUID taskId = UUID.randomUUID();
-
-    private InMemoryTaskRepository repository;
-
-    @BeforeEach
-    void setUp() {
-        repository = new InMemoryTaskRepository(List.of(newTask(taskId, 0)));
-    }
-
-    // --- update() ------------------------------------------------------
-
-    @Test
-    void update_appliesMutatorAndPersistsResult() {
-        Optional<Task> result = repository.update(taskId, task -> incrementBlockingCount(task));
-
-        assertThat(result).isPresent();
-        assertThat(result.get().getBlockingCount()).isEqualTo(1);
-        assertThat(repository.findById(taskId).orElseThrow().getBlockingCount()).isEqualTo(1);
-    }
-
-    @Test
-    void update_returnsEmpty_whenTaskDoesNotExist() {
-        assertThat(repository.update(UUID.randomUUID(), UnaryOperator.identity())).isEmpty();
+    @Override
+    protected TaskRepository createRepository(List<Task> seed) {
+        return new InMemoryTaskRepository(seed);
     }
 
     @Test
     void update_isAtomicUnderConcurrentIncrement() throws InterruptedException {
+        UUID taskId = UUID.randomUUID();
+        InMemoryTaskRepository repository = new InMemoryTaskRepository(List.of(newTaskBuilder(taskId).build()));
         int threadCount = 20;
         int incrementsPerThread = 200;
 
         ConcurrentTestRunner.run(threadCount, () -> {
             for (int j = 0; j < incrementsPerThread; j++) {
-                repository.update(taskId, task -> incrementBlockingCount(task));
+                repository.update(taskId, InMemoryTaskRepositoryTest::incrementBlockingCount);
             }
         });
 
@@ -56,16 +40,23 @@ class InMemoryTaskRepositoryTest {
                 .isEqualTo(threadCount * incrementsPerThread);
     }
 
-    private static Task newTask(UUID id, int blockingCount) {
-        return Task.builder()
-                .id(id)
-                .ownerId("owner")
-                .status(TaskStatus.ACTIVE)
-                .blockingCount(blockingCount)
-                .openConstraintCount(0)
-                .createdAt(LocalDateTime.now())
-                .updatedAt(LocalDateTime.now())
-                .build();
+    @Test
+    void update_throwsAndLeavesTaskInPlace_whenMutatorReturnsNull() {
+        // Regression test: update() is implemented via
+        // ConcurrentHashMap.computeIfPresent, which removes the mapping
+        // entirely if the remapping function returns null. Without a guard,
+        // a mutator returning null would silently delete the task instead
+        // of failing loudly - this proves the fix rejects that case and
+        // that the task survives the attempt.
+        UUID taskId = UUID.randomUUID();
+        Task original = newTaskBuilder(taskId).build();
+        InMemoryTaskRepository repository = new InMemoryTaskRepository(List.of(original));
+
+        assertThatThrownBy(() -> repository.update(taskId, task -> null))
+                .isInstanceOf(NullPointerException.class);
+
+        Optional<Task> stillPresent = repository.findById(taskId);
+        assertThat(stillPresent).contains(original);
     }
 
     private static Task incrementBlockingCount(Task task) {
