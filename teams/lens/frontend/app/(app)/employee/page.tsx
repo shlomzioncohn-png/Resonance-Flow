@@ -256,6 +256,7 @@ export default function EmployeeWorkspacePage() {
                         disabled={started || starting}
                         onClick={startTask}
                         startIcon={starting ? <CircularProgress size={16} color="inherit" /> : (!started && <PlayArrowOutlinedIcon />)}
+                        data-testid="start-task-btn"
                       >
                         {started ? 'Task started' : starting ? 'Starting…' : 'Start task'}
                       </Button>
