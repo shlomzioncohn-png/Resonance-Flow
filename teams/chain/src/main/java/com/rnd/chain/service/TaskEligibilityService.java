@@ -91,6 +91,7 @@ public class TaskEligibilityService {
         return taskDependencyRepository.existsDependency(taskId, dependsOnTaskId);
     }
 
+    // TODO(JPA): becomes a real transaction boundary once Task/TaskDependency are JPA entities (see PLAN.md Phase 3).
     @Transactional
     public void recalculateTaskEligibility(UUID taskId) {
         Objects.requireNonNull(taskId, "taskId must not be null");
@@ -127,6 +128,7 @@ public class TaskEligibilityService {
         }
     }
 
+    // TODO(JPA): becomes a real transaction boundary once Task/TaskDependency are JPA entities (see PLAN.md Phase 3).
     @Transactional
     public void addDependency(UUID taskId, UUID dependsOnTaskId) {
         Objects.requireNonNull(taskId, "taskId must not be null");
@@ -220,6 +222,7 @@ public class TaskEligibilityService {
         return false;
     }
 
+    // TODO(JPA): becomes a real transaction boundary once Task/TaskDependency are JPA entities (see PLAN.md Phase 3).
     @Transactional
     public void removeDependency(UUID taskId, UUID dependsOnTaskId) {
         Objects.requireNonNull(taskId, "taskId must not be null");
@@ -273,6 +276,7 @@ public class TaskEligibilityService {
         }
     }
 
+    // TODO(JPA): becomes a real transaction boundary once Task/TaskDependency are JPA entities (see PLAN.md Phase 3).
     @Transactional
     public void onTaskStatusChanged(UUID taskId, TaskStatus newStatus) {
         Objects.requireNonNull(taskId, "taskId must not be null");
@@ -344,6 +348,7 @@ public class TaskEligibilityService {
     // and a caller-supplied previousStatus - no ConstraintRepository has been shared yet,
     // so these remain as designed earlier.
 
+    // TODO(JPA): becomes a real transaction boundary once Task/TaskDependency are JPA entities (see PLAN.md Phase 3).
     @Transactional
     public void onConstraintAdded(UUID taskId) {
         Objects.requireNonNull(taskId, "taskId must not be null");
@@ -351,6 +356,7 @@ public class TaskEligibilityService {
         withTaskLock(taskId, task -> task.setOpenConstraintCount(task.getOpenConstraintCount() + 1));
     }
 
+    // TODO(JPA): becomes a real transaction boundary once Task/TaskDependency are JPA entities (see PLAN.md Phase 3).
     @Transactional
     public void onConstraintStatusChanged(UUID taskId,
                                            Constraint.ConstraintStatus previousStatus,
