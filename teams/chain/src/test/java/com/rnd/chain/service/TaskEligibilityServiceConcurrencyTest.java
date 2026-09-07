@@ -1,6 +1,7 @@
 package com.rnd.chain.service;
 
 import com.rnd.chain.dto.Task;
+import com.rnd.chain.dto.TaskStatus;
 import com.rnd.chain.dto.TaskTestFixtures;
 import com.rnd.chain.repository.InMemoryTaskDependencyRepository;
 import com.rnd.chain.repository.InMemoryTaskRepository;
