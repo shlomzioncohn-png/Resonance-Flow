@@ -18,11 +18,25 @@ import java.util.List;
 @Configuration
 public class RepositoryConfig {
 
+    /**
+     * Singleton (default Spring bean scope) so every consumer shares the same in-memory store -
+     * required for TaskEligibilityService's locking to actually be effective, since locking
+     * only closes races if all callers see the same repository instance. Seeded empty because
+     * there is no real persistence layer yet to seed from (see CLAUDE.md "Open items") - all
+     * Task data is created at runtime through the service layer, not preloaded (review finding
+     * #12).
+     */
     @Bean
     public TaskRepository taskRepository() {
         return new InMemoryTaskRepository(List.of());
     }
 
+    /**
+     * Singleton, empty-seeded for the same reasons as {@link #taskRepository()}: a shared
+     * instance is required for the dependency-graph locking in TaskEligibilityService to be
+     * effective, and there is no real persistence layer yet to seed edges from (review finding
+     * #12).
+     */
     @Bean
     public TaskDependencyRepository taskDependencyRepository() {
         return new InMemoryTaskDependencyRepository(List.of());
