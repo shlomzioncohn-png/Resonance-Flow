@@ -58,6 +58,9 @@ public interface TaskRepository {
      * pairs on the same id can otherwise race and silently lose one of the
      * updates. {@code mutator} must not mutate the task it's given in
      * place - it must return the new value, per the same save() contract.
+     * {@code mutator} must not return null: implementations must reject a
+     * null result (e.g. by throwing {@link NullPointerException}) rather
+     * than treating it as "delete this task".
      *
      * @return the updated task, or empty if no task with this id exists
      */

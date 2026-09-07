@@ -77,8 +77,13 @@ public class InMemoryTaskRepository implements TaskRepository {
         // two concurrent updates on the same task can no longer race.
         // A soft-deleted task is left untouched (mutator is not applied to it),
         // matching findById().map(mutator).map(save) semantics.
+        // Guard mutator's result against null: computeIfPresent removes the
+        // mapping entirely if its remapping function returns null, which
+        // would silently delete the task instead of failing loudly.
         Task updated = tasksById.computeIfPresent(id,
-                (key, existing) -> isNotDeleted(existing) ? mutator.apply(existing) : existing);
+                (key, existing) -> isNotDeleted(existing)
+                        ? Objects.requireNonNull(mutator.apply(existing), "mutator must not return null")
+                        : existing);
         return Optional.ofNullable(updated)
                 .filter(this::isNotDeleted);
     }
