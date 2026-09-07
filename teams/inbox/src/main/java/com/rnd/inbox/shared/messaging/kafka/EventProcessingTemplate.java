@@ -2,11 +2,9 @@ package com.rnd.inbox.shared.messaging.kafka;
 
 import com.fasterxml.jackson.core.JsonParseException;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.rnd.inbox.shared.exception.InboxException;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.dao.DataAccessException;
 import org.springframework.kafka.support.Acknowledgment;
 import org.springframework.retry.support.RetryTemplate;
 
@@ -67,8 +65,6 @@ public class EventProcessingTemplate<T> {
             handleSuccess(record, attempts.get());
         } catch (TransientProcessingException e) {
             handleTransientFailure(record, event, attempts.get(), e);
-        } catch (InboxException e) {
-            handleRejectedEvent(record, event, attempts.get(), e);
         } catch (Exception e) {
             handleUnexpectedFailure(record, event, attempts.get(), e);
         } finally {
@@ -83,11 +79,7 @@ public class EventProcessingTemplate<T> {
     private void persistWithRetry(T event, AtomicInteger attempts) {
         retryTemplate.execute(context -> {
             attempts.set(context.getRetryCount() + 1);
-            try {
-                persistHandler.accept(event);
-            } catch (DataAccessException e) {
-                throw new TransientProcessingException("Technical failure while processing event", e);
-            }
+            persistHandler.accept(event);
             return null;
         });
     }
@@ -126,14 +118,6 @@ public class EventProcessingTemplate<T> {
                 attempts, record.topic(), record.partition(), record.offset(), e.getMessage());
         errorTopicPublisher.publish(record, "TECHNICAL_FAILURE", e.getMessage(),
                 List.of(), attempts, safeCorrelationId(event));
-    }
-
-    private void handleRejectedEvent(ConsumerRecord<String, String> record, T event, int attempts,
-            InboxException e) {
-        log.warn("Rejecting message on topic {} (partition={}, offset={}): {}",
-                record.topic(), record.partition(), record.offset(), e.getMessage());
-        errorTopicPublisher.publish(record, "VALIDATION_FAILURE", e.getMessage(),
-                List.of(e.getErrorCode()), attempts, safeCorrelationId(event));
     }
 
     private void handleUnexpectedFailure(ConsumerRecord<String, String> record, T event, int attempts, Exception e) {

@@ -1,14 +1,12 @@
 package com.rnd.inbox.shared.messaging.kafka;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.rnd.inbox.tenant.TenantNotFoundException;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
-import org.springframework.dao.QueryTimeoutException;
 import org.springframework.kafka.support.Acknowledgment;
 import org.springframework.retry.backoff.FixedBackOffPolicy;
 import org.springframework.retry.policy.SimpleRetryPolicy;
@@ -16,7 +14,6 @@ import org.springframework.retry.support.RetryTemplate;
 
 import java.util.List;
 import java.util.Map;
-import java.util.UUID;
 import java.util.function.Consumer;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -182,47 +179,6 @@ class EventProcessingTemplateTest {
         assertThat(callCount[0]).isEqualTo(1);
         verify(errorTopicPublisher).publish(eq(rec), eq("UNEXPECTED_FAILURE"), anyString(),
                 eq(List.of()), eq(1), anyString());
-        verify(acknowledgment).acknowledge();
-    }
-
-    @Test
-    void anEventRejectedOnABusinessRuleIsNotRetriedAndIsReportedAsAValidationFailure() {
-        int[] callCount = {0};
-        UUID tenantId = UUID.randomUUID();
-        Consumer<Fixture> persistHandler = event -> {
-            callCount[0]++;
-            throw new TenantNotFoundException(tenantId);
-        };
-        EventProcessingTemplate<Fixture> template = new EventProcessingTemplate<>(
-                objectMapper, retryTemplate(3), errorTopicPublisher, Fixture.class,
-                event -> { }, persistHandler, Fixture::getId);
-
-        ConsumerRecord<String, String> rec = record("{\"id\":\"abc\"}");
-        template.process(rec, acknowledgment);
-
-        assertThat(callCount[0]).isEqualTo(1);
-        verify(errorTopicPublisher).publish(eq(rec), eq("VALIDATION_FAILURE"), anyString(),
-                eq(List.of("TENANT_NOT_FOUND")), eq(1), anyString());
-        verify(acknowledgment).acknowledge();
-    }
-
-    @Test
-    void aDataAccessFailureIsClassifiedAsTransientAndRetried() {
-        int[] callCount = {0};
-        Consumer<Fixture> persistHandler = event -> {
-            callCount[0]++;
-            throw new QueryTimeoutException("db timeout");
-        };
-        EventProcessingTemplate<Fixture> template = new EventProcessingTemplate<>(
-                objectMapper, retryTemplate(3), errorTopicPublisher, Fixture.class,
-                event -> { }, persistHandler, Fixture::getId);
-
-        ConsumerRecord<String, String> rec = record("{\"id\":\"abc\"}");
-        template.process(rec, acknowledgment);
-
-        assertThat(callCount[0]).isEqualTo(3);
-        verify(errorTopicPublisher).publish(eq(rec), eq("TECHNICAL_FAILURE"), anyString(),
-                eq(List.of()), eq(3), anyString());
         verify(acknowledgment).acknowledge();
     }
 

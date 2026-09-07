@@ -1,31 +1,39 @@
 package com.rnd.inbox.taskcreationrequest;
 
-import com.rnd.inbox.project.Project;
+import com.rnd.inbox.project.ProjectRepository;
 import com.rnd.inbox.task.SourceType;
 import com.rnd.inbox.task.Task;
 import com.rnd.inbox.task.TaskExtractionProvenance;
 import com.rnd.inbox.task.TaskRoleContext;
 import com.rnd.inbox.task.TaskStatus;
 import com.rnd.inbox.task.TaskTier;
-import com.rnd.inbox.tenant.Tenant;
+import com.rnd.inbox.tenant.TenantRepository;
 import org.springframework.stereotype.Component;
 
 import java.time.Clock;
 import java.time.Instant;
+import java.util.UUID;
 
 @Component
 public class TaskCreationRequestMapper {
 
+    private final TenantRepository tenantRepository;
+    private final ProjectRepository projectRepository;
     private final Clock clock;
 
-    public TaskCreationRequestMapper(Clock clock) {
+    public TaskCreationRequestMapper(TenantRepository tenantRepository, ProjectRepository projectRepository,
+            Clock clock) {
+        this.tenantRepository = tenantRepository;
+        this.projectRepository = projectRepository;
         this.clock = clock;
     }
 
-    public Task map(TaskCreationRequestEventDto dto, Tenant tenant, Project project) {
+    public Task map(TaskCreationRequestEventDto dto) {
         Task task = new Task();
-        task.setTenant(tenant);
-        task.setProject(project);
+        task.setTenant(tenantRepository.getReferenceById(UUID.fromString(dto.getTenantId())));
+        if (dto.getProjectId() != null) {
+            task.setProject(projectRepository.getReferenceById(UUID.fromString(dto.getProjectId())));
+        }
         task.setTitle(dto.getTitle());
         task.setDescription(dto.getDescription());
         task.setSourceType(SourceType.valueOf(dto.getSourceType()));
