@@ -262,6 +262,7 @@ public class TaskEligibilityService {
     @Transactional
     public void onTaskStatusChanged(UUID taskId, TaskStatus newStatus) {
         Objects.requireNonNull(taskId, "taskId must not be null");
+        Objects.requireNonNull(newStatus, "newStatus must not be null");
         log.info("Task {} status changed to {}", taskId, newStatus);
 
         // The whole status flip + dependents fan-out runs under the graph lock (not just
@@ -345,6 +346,8 @@ public class TaskEligibilityService {
                                            Constraint.ConstraintStatus previousStatus,
                                            Constraint.ConstraintStatus newStatus) {
         Objects.requireNonNull(taskId, "taskId must not be null");
+        Objects.requireNonNull(previousStatus, "previousStatus must not be null");
+        Objects.requireNonNull(newStatus, "newStatus must not be null");
         log.info("Constraint on task {} changed: {} -> {}", taskId, previousStatus, newStatus);
 
         boolean wasOpen = previousStatus == Constraint.ConstraintStatus.PENDING;
