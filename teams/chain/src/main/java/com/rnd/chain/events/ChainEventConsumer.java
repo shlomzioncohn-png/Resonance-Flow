@@ -1,5 +1,6 @@
 package com.rnd.chain.events;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.rnd.chain.dto.ProcessedEvent;
@@ -115,7 +116,7 @@ public class ChainEventConsumer {
     private JsonNode parseRoot(String rawMessage) {
         try {
             return objectMapper.readTree(rawMessage);
-        } catch (Exception e) {
+        } catch (JsonProcessingException e) {
             // Logged here (not just wrapped as `cause`) so the original exception's type and
             // stack trace are visible in application logs without requiring whoever triages the
             // DLT message to inspect NonRetryableEventException#getCause() - a bug in Chain's own
@@ -161,7 +162,7 @@ public class ChainEventConsumer {
         requirePresent(root, "payload");
         try {
             return objectMapper.treeToValue(root.get("payload"), handler.getPayloadType());
-        } catch (Exception e) {
+        } catch (JsonProcessingException e) {
             // See parseRoot's comment: logged here so a bug in our own deserialization logic
             // (as opposed to a genuinely bad producer payload) is immediately visible, not only
             // discoverable by inspecting the wrapped exception's cause.
