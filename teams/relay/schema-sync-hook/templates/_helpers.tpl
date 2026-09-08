@@ -40,3 +40,19 @@ Selector labels
 app.kubernetes.io/name: {{ include "schema-sync-hook.name" . }}
 app.kubernetes.io/instance: {{ .Release.Name }}
 {{- end }}
+
+{{/*
+Compatibility level, from the "# compatibility: <LEVEL>" line in
+files/schema-subjects.tsv (default FULL). Same source and level the PR-time CI
+check reads from teams/relay/ci/schema-subjects.tsv.
+*/}}
+{{- define "schema-sync-hook.compatLevel" -}}
+{{- $level := "FULL" -}}
+{{- range .Files.Lines "files/schema-subjects.tsv" -}}
+{{- $t := trim . -}}
+{{- if and (hasPrefix "#" $t) (contains "compatibility:" $t) -}}
+{{- $level = (splitList "compatibility:" $t | last) | trim -}}
+{{- end -}}
+{{- end -}}
+{{- $level -}}
+{{- end }}
