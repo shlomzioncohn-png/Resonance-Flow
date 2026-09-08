@@ -154,9 +154,25 @@ jobs:
           for c in $OTHER_COMPONENTS; do
             NULL_ARGS+=(--set "components.${c}=null")
           done
+
+          # Only the shared infra subcharts this service actually declares a dependency on
+          # (global .dependencies plus its own components.<service>.dependencies) need to
+          # come up for the smoke test - deploying the rest (e.g. postgres for a service
+          # that never waits on it) just burns the --wait budget for no reason.
+          declare -A SUBCHART_FOR=([kafka]=kafka [minio]=minio [postgres]=postgresql)
+          NEEDED_DEPS=$( { yq eval '.dependencies // [] | .[].name' "$CHART_VALUES"; \
+                            yq eval ".components.${SERVICE}.dependencies // [] | .[].name" "$CHART_VALUES"; } | sort -u)
+          DISABLE_ARGS=()
+          for dep in "${!SUBCHART_FOR[@]}"; do
+            if ! grep -qx "$dep" <<< "$NEEDED_DEPS"; then
+              DISABLE_ARGS+=(--set "${SUBCHART_FOR[$dep]}.enabled=false")
+            fi
+          done
+
           helm upgrade --install "$SERVICE" "$CHART_DIR" \
             -f "$CHART_VALUES" \
             "${NULL_ARGS[@]}" \
+            "${DISABLE_ARGS[@]}" \
             --set components.${SERVICE}.image.repository="$SERVICE" \
             --set components.${SERVICE}.image.tag=local \
             --set components.${SERVICE}.image.pullPolicy=Never \
