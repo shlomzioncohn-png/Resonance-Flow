@@ -5,6 +5,9 @@
 # Current Services:
 # 1. Gateway (LENS Team) - Routes Frontend ↔ BFF
 # 2. BFF (Sari) - [PENDING - Add when ready]
+# 3. Shared PostgreSQL + pgAdmin - used by chain, bridge, inbox
+# 4. Chain, Bridge, Inbox - backend team services (see teams/inbox/CLAUDE.md §3
+#    for the two-compose-file split and known cross-team gaps around Kafka/ports)
 #
 # TODO: When BFF is ready, add this section:
 # 
@@ -69,20 +72,93 @@ services:
       start_period: 20s
 
   # ========================================
+  # BACKEND TEAMS - shared Postgres + pgAdmin, and the Chain/Bridge/Inbox
+  # services themselves (Mind is developed/run separately for now).
+  # ========================================
+  postgres:
+    image: postgres:14-alpine
+    container_name: resonance-postgres
+    environment:
+      - POSTGRES_DB=${DB_NAME:-resonance_flow}
+      - POSTGRES_USER=${DB_USER:-postgres}
+      - POSTGRES_PASSWORD=${DB_PASSWORD:-postgres}
+    ports:
+      - "${DB_PORT:-5432}:5432"
+    volumes:
+      - resonance-postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-postgres} -d ${DB_NAME:-resonance_flow}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  pgadmin:
+    image: dpage/pgadmin4:8
+    container_name: resonance-pgadmin
+    environment:
+      - PGADMIN_DEFAULT_EMAIL=${PGADMIN_EMAIL:-admin@example.com}
+      - PGADMIN_DEFAULT_PASSWORD=${PGADMIN_PASSWORD:-admin}
+      - PGADMIN_CONFIG_SERVER_MODE=False
+    ports:
+      - "${PGADMIN_PORT:-5050}:80"
+    volumes:
+      - resonance-pgadmin-data:/var/lib/pgadmin
+      - ./shared/database/pgadmin/servers.json:/pgadmin4/servers.json:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  chain:
+    build: ./teams/chain
+    container_name: chain-service
+    ports:
+      - "${CHAIN_SERVER_PORT:-8081}:8081"
+    environment:
+      - SERVER_PORT=8081
+      - SPRING_PROFILES_ACTIVE=${SPRING_PROFILES_ACTIVE:-local}
+
+  bridge:
+    build: ./teams/bridge
+    container_name: bridge-service
+    ports:
+      - "${BRIDGE_SERVER_PORT:-8080}:8080"
+    environment:
+      - SERVER_PORT=8080
+      - SPRING_PROFILES_ACTIVE=${SPRING_PROFILES_ACTIVE:-local}
+
+  inbox:
+    build: ./teams/inbox
+    container_name: inbox-service
+    ports:
+      - "${INBOX_SERVER_PORT:-8082}:8080"
+    environment:
+      - SERVER_PORT=8080
+      - SPRING_PROFILES_ACTIVE=${SPRING_PROFILES_ACTIVE:-local}
+      - DB_HOST=postgres
+      - DB_PORT=5432
+      - DB_NAME=${DB_NAME:-resonance_flow}
+      - DB_USER=${DB_USER:-postgres}
+      - DB_PASSWORD=${DB_PASSWORD:-postgres}
+      - DB_MIGRATIONS_LOCATION=filesystem:/flyway/migrations
+    volumes:
+      - ./shared/database/migrations:/flyway/migrations:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  # ========================================
   # NOT IN DOCKER-COMPOSE (Team responsibility)
   # ========================================
   # 
-  # The following services are built and maintained
-  # by their respective teams independently:
-  # - Bridge Team: teams/bridge/
-  # - Chain Team: teams/chain/
-  # - Inbox Team: teams/inbox/
+  # The following are built and maintained by their respective teams
+  # independently, and are not wired in here yet:
   # - Mind Team: teams/mind/
-  #
-  # These teams will provide their service images
-  # for docker-compose when their implementations
-  # are ready. For now, they are developed separately.
+  # - Lens BFF: pending (see the TODO block above)
 
 networks:
   resonance-network:
     driver: bridge
+
+volumes:
+  resonance-postgres-data:
+  resonance-pgadmin-data:
