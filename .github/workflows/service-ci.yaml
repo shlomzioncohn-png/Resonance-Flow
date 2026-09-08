@@ -140,23 +140,18 @@ jobs:
       - name: Fetch chart dependencies
         run: helm dependency build "$CHART_DIR"
 
-      - name: Install yq
-        run: |
-          sudo curl -sL -o /usr/local/bin/yq https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
-          sudo chmod +x /usr/local/bin/yq
-
       - name: Deploy chart to cluster (smoke test)
         run: |
-          helm dependency build "$CHART_DIR"
           SERVICE="${{ inputs.service_name }}"
-          OTHER_COMPONENTS=$(yq eval ".components | keys | .[] | select(. != \"${SERVICE}\")" "$CHART_VALUES")
-          NULL_ARGS=()
-          for c in $OTHER_COMPONENTS; do
-            NULL_ARGS+=(--set "components.${c}=null")
-          done
+
+          # values/values-<service>.yaml already enables only this service's
+          # component plus the shared infra subcharts it actually depends on
+          # (see teams/relay/helm/resonance-flow/README.md) - layering it over
+          # the base values.yaml is the per-team smoke-test install, no need
+          # to recompute which components/subcharts to disable here.
           helm upgrade --install "$SERVICE" "$CHART_DIR" \
             -f "$CHART_VALUES" \
-            "${NULL_ARGS[@]}" \
+            -f "$CHART_DIR/values/values-${SERVICE}.yaml" \
             --set components.${SERVICE}.image.repository="$SERVICE" \
             --set components.${SERVICE}.image.tag=local \
             --set components.${SERVICE}.image.pullPolicy=Never \
