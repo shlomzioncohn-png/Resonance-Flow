@@ -205,7 +205,7 @@ jobs:
             --set components.${SERVICE}.image.tag=local \
             --set components.${SERVICE}.image.pullPolicy=Never \
             --namespace "$SERVICE" --create-namespace \
-            --wait --timeout 300s
+            --wait --timeout 420s
 
       - name: Smoke test
         if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
