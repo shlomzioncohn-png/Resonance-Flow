@@ -307,6 +307,12 @@ components:
             bridgeStructuredTasks: bridge.structured.tasks
             chainSchedulingUpdated: task.scheduling.updated
             mindTaskCreationRequested: task.creation.requested
+          # Must match kafka.sasl.client.users/passwords above - the client listener requires
+          # SASL_PLAINTEXT and has no other way to authenticate.
+          sasl:
+            mechanism: PLAIN
+            username: inbox
+            password: "resonance-flow-dev-sasl"
   lens-gateway:
     enabled: true
     replicaCount: 1
@@ -352,6 +358,18 @@ kafka:
   image:
     registry: docker.io
     repository: bitnamilegacy/kafka
+  # The client listener defaults to SASL_PLAINTEXT (chart-level, not something we chose here),
+  # but nothing was ever configured to authenticate against it - every consuming service's
+  # client silently failed the handshake and retried forever without ever actually connecting
+  # or crashing (verified locally). Pinning explicit client credentials here (instead of the
+  # chart's own randomly-generated ones) so every component's mounted config can reference the
+  # same known username/password - see components.inbox.config.data.kafka.sasl below.
+  sasl:
+    client:
+      users:
+        - inbox
+      passwords:
+        - "resonance-flow-dev-sasl"
   controller:
     replicaCount: 1
     controllerOnly: false

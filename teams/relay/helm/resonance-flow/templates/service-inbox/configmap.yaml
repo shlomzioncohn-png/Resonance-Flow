@@ -28,6 +28,11 @@ data:
         baseline-on-migrate: true
       kafka:
         bootstrap-servers: {{ $cfg.kafka.bootstrapServers | quote }}
+        security:
+          protocol: SASL_PLAINTEXT
+        properties:
+          sasl.mechanism: {{ $cfg.kafka.sasl.mechanism | quote }}
+          sasl.jaas.config: {{ printf "org.apache.kafka.common.security.plain.PlainLoginModule required username=\"%s\" password=\"%s\";" $cfg.kafka.sasl.username $cfg.kafka.sasl.password | quote }}
         consumer:
           group-id: {{ $cfg.kafka.consumerGroupId | quote }}
           auto-offset-reset: earliest
