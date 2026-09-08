@@ -9,6 +9,25 @@ spring:
     producer:
       key-serializer: org.apache.kafka.common.serialization.StringSerializer
       value-serializer: org.apache.kafka.common.serialization.StringSerializer
+  # Chain has no live database in production yet (PLAN.md D6). DataSource/JPA/
+  # Flyway are on the classpath already (ChainOutboxWorker groundwork), but
+  # autoconfiguring them here would make every context - including the plain
+  # embedded-Kafka integration tests - require a real Postgres connection to
+  # even start. Excluded by default so nothing changes for existing
+  # deployments/tests; an environment that does have Postgres (e.g. the
+  # shared local docker-compose) overrides this property to empty and sets
+  # spring.datasource.* to turn the outbox subsystem on for real.
+  autoconfigure:
+    exclude:
+      - org.springframework.boot.autoconfigure.jdbc.DataSourceAutoConfiguration
+      - org.springframework.boot.autoconfigure.orm.jpa.HibernateJpaAutoConfiguration
+      - org.springframework.boot.autoconfigure.flyway.FlywayAutoConfiguration
+  datasource:
+    url: jdbc:postgresql://${DB_HOST:localhost}:${DB_PORT:5432}/${DB_NAME:resonance_flow}
+    username: ${DB_USER:postgres}
+    password: ${DB_PASSWORD:postgres}
+  flyway:
+    baseline-on-migrate: true
 
 chain:
   kafka:
@@ -31,3 +50,15 @@ chain:
     # an environment that meant to run a persistent store but forgot to
     # set this fails fast instead of silently falling back to it.
     processed-store: in-memory
+  outbox:
+    # Only take effect once spring.autoconfigure.exclude above is cleared
+    # for an environment with a real Postgres - see ChainOutboxWorker.
+    worker:
+      batch-size: 20
+      poll-interval-ms: 5000
+      max-retries: 3
+      backoff-base-seconds: 10
+      backoff-max-seconds: 120
+    cleanup:
+      interval-ms: 3600000
+      retention-days: 7
