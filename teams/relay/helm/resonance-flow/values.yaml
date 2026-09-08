@@ -359,8 +359,8 @@ kafka:
       # 192Mi was OOMKilling the JVM before it finished KRaft storage formatting on
       # startup (verified locally - combined broker+controller needs more headroom).
       requests:
-        cpu: 250m
-        memory: 512Mi
+        cpu: 100m
+        memory: 128Mi
       limits:
         cpu: 500m
         memory: 768Mi
