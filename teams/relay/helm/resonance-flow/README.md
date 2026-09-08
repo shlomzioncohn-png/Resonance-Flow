@@ -59,36 +59,36 @@ dev/test.
 
 If your component needs an infra dependency reachable before its main
 container starts, set `dependencies` (globally or under your
-`components.<name>`) and the chart adds a `wait-for-<name>` initContainer
-that blocks until `host:port` is TCP-reachable.
+`components.<name>`) as a list of `{name, port}` entries, and the chart adds
+a `wait-for-<name>` initContainer that blocks until that dependency's
+`host:port` is TCP-reachable.
+
+`name` must match the dependency's actual subchart name (`kafka`,
+`postgresql`, `minio`) - the host isn't a literal in `values.yaml`, it's
+computed at render time as `<release-name>-<name>` (see
+`resonance-flow.waitForDependencies` in `_helpers.tpl`), because Kafka,
+Postgres, and MinIO are Bitnami subcharts that name their own Service
+`<release-name>-<chart-name>` directly (their own chart's fullname logic,
+verified with `helm template`) - not through this chart's own
+`resonance-flow.fullname` helper, and not always under a release literally
+named "resonance-flow" (CI's smoke-test and Postgres-only test-fixture
+installs use other release names, e.g. `inbox`). If a component depends on
+one of these and its `enabled` flag is `false` for the values file in use,
+that component's pod will block in `Init:0/1` forever waiting for a Service
+that was never created.
 
 Currently wired up:
 
 - **Kafka** - every component depends on it, so it's set globally
-  (`dependencies` in `values.yaml`) as
-  `resonance-flow-kafka.resonance-flow.svc.cluster.local:9092`.
-- **Postgres** - only `inbox` uses it:
-  `resonance-flow-postgresql.resonance-flow.svc.cluster.local:5432`.
-- **MinIO** - `bridge` and `mind` use it:
-  `resonance-flow-minio.resonance-flow.svc.cluster.local:9000`.
-
-Kafka, Postgres, and MinIO are Bitnami subcharts declared as `dependencies`
-in `Chart.yaml`, each gated on its own `<name>.enabled` in `values.yaml` -
-not separate charts deployed into a same-named namespace of their own.
-Because they render into the *same* Helm release as every component
-(namespace `resonance-flow`), their Service names follow Helm's default
-subchart naming, `<release-name>-<chart-name>` (verified with
-`helm template`) - hence the `resonance-flow-` prefix on every hostname
-above. If a component depends on one of these and its `enabled` flag is
-`false` for the values file in use, that component's pod will block in
-`Init:0/1` forever waiting for a Service that was never created.
+  (`dependencies` in `values.yaml`).
+- **Postgres** - only `inbox` uses it.
+- **MinIO** - `bridge` and `mind` use it.
 
 ```yaml
 components:
   inbox:
     dependencies:
-      - name: postgres
-        host: resonance-flow-postgresql.resonance-flow.svc.cluster.local
+      - name: postgresql
         port: 5432
 ```
 

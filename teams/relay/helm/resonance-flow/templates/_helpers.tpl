@@ -71,21 +71,33 @@ Build and base64-encode a .dockerconfigjson value from imagePullSecret.* values
 {{- end }}
 
 {{/*
-Render one initContainer per entry in a list of {name, host, port} dicts,
-each blocking until that host:port is TCP-reachable. Used to make a
+Render one initContainer per entry in a list of {name, port} dicts, each
+blocking until that dependency's host:port is TCP-reachable. Used to make a
 component wait for an infra dependency (Kafka, Postgres, ...) to be
 reachable before its main container starts.
+
+Takes (dict "root" $ "deps" <list>) rather than the list alone, because the
+host is derived from the release name at render time - kafka/postgresql/minio
+are Bitnami subcharts that name their own Service `<release-name>-<name>`
+directly (their own chart's fullname logic, independent of this chart's own
+resonance-flow.fullname), so a dependency is only ever reachable under
+whatever name *this* release actually has. Hardcoding a literal host (e.g.
+"resonance-flow-kafka...") only worked for the one release actually named
+"resonance-flow" - any other release name (as CI's smoke-test and Postgres
+test-fixture installs use, e.g. release "inbox") pointed the initContainer at
+a host that could never exist, hanging in Init forever regardless of timeout.
 */}}
 {{- define "resonance-flow.waitForDependencies" -}}
-{{- range . }}
+{{- $root := .root }}
+{{- range .deps }}
 - name: wait-for-{{ .name }}
   image: busybox:1.36
   command:
     - sh
     - -c
     - |
-      until nc -z -w2 {{ .host }} {{ .port }}; do
-        echo "waiting for {{ .name }} ({{ .host }}:{{ .port }})..."
+      until nc -z -w2 {{ $root.Release.Name }}-{{ .name }} {{ .port }}; do
+        echo "waiting for {{ .name }} ({{ $root.Release.Name }}-{{ .name }}:{{ .port }})..."
         sleep 2
       done
 {{- end }}

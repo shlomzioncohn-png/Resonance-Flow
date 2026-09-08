@@ -20,14 +20,18 @@ data:
       application:
         name: inbox
       datasource:
-        url: "jdbc:postgresql://{{ $cfg.datasource.host }}:{{ $cfg.datasource.port }}/{{ $cfg.datasource.database }}?stringtype=unspecified"
+        # postgresql/kafka are Bitnami subcharts naming their own Service
+        # `<release-name>-<subchart-name>` directly - not a hardcoded host,
+        # since this release isn't always named "resonance-flow" (e.g. CI's
+        # smoke-test and Postgres-only test-fixture installs use other names).
+        url: "jdbc:postgresql://{{ $.Release.Name }}-postgresql:{{ $cfg.datasource.port }}/{{ $cfg.datasource.database }}?stringtype=unspecified"
         username: {{ $cfg.datasource.username | quote }}
         password: {{ $cfg.datasource.password | quote }}
       flyway:
         locations: "filesystem:../../shared/database/migrations"
         baseline-on-migrate: true
       kafka:
-        bootstrap-servers: {{ $cfg.kafka.bootstrapServers | quote }}
+        bootstrap-servers: {{ printf "%s-kafka:9092" $.Release.Name | quote }}
         security:
           protocol: SASL_PLAINTEXT
         properties:
