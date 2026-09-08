@@ -307,12 +307,6 @@ components:
             bridgeStructuredTasks: bridge.structured.tasks
             chainSchedulingUpdated: task.scheduling.updated
             mindTaskCreationRequested: task.creation.requested
-          # Must match kafka.sasl.client.users/passwords above - the client listener requires
-          # SASL_PLAINTEXT and has no other way to authenticate.
-          sasl:
-            mechanism: PLAIN
-            username: inbox
-            password: "resonance-flow-dev-sasl"
   lens-gateway:
     enabled: true
     replicaCount: 1

@@ -31,8 +31,8 @@ data:
         security:
           protocol: SASL_PLAINTEXT
         properties:
-          sasl.mechanism: {{ $cfg.kafka.sasl.mechanism | quote }}
-          sasl.jaas.config: {{ printf "org.apache.kafka.common.security.plain.PlainLoginModule required username=\"%s\" password=\"%s\";" $cfg.kafka.sasl.username $cfg.kafka.sasl.password | quote }}
+          sasl.mechanism: "PLAIN"
+          sasl.jaas.config: {{ include "resonance-flow.kafkaSaslJaasConfig" $ | quote }}
         consumer:
           group-id: {{ $cfg.kafka.consumerGroupId | quote }}
           auto-offset-reset: earliest
