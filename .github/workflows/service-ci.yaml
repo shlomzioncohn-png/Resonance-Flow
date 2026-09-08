@@ -37,7 +37,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - uses: azure/setup-helm@v4
+      - uses: azure/setup-helm@v5
 
       # Created whenever inbox needs it for a real Postgres (every run, since
       # its tests need one) or whenever a later step needs it for the smoke
@@ -64,6 +64,14 @@ jobs:
       # comes up) under the release name the smoke-test phase will later
       # `helm upgrade` in place, instead of installing the whole chart a
       # second time from scratch once the image exists.
+      #
+      # kafka is left at its default (enabled) here even though tests don't
+      # need it: toggling kafka.enabled false->true on the *second* install
+      # trips the Bitnami chart's "you must provide your current passwords
+      # when upgrading" guard, since disabling it here means no Secret with
+      # those passwords ever gets created for the later upgrade to find.
+      # Leaving it enabled throughout avoids the false->true transition
+      # entirely instead of working around that guard.
       - name: Deploy chart with ${{ inputs.service_name }} disabled (infra only, for tests)
         if: inputs.service_name == 'inbox'
         run: |
@@ -72,7 +80,6 @@ jobs:
             -f "$CHART_VALUES" \
             -f "$CHART_DIR/values/values-${SERVICE}.yaml" \
             --set components.${SERVICE}.enabled=false \
-            --set kafka.enabled=false \
             --namespace "$SERVICE" --create-namespace \
             --wait --timeout 300s
 
