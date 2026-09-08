@@ -25,8 +25,8 @@ import java.time.Instant;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicInteger;
-import java.util.function.BooleanSupplier;
 
+import static org.awaitility.Awaitility.await;
 import static org.junit.jupiter.api.Assertions.*;
 
 /**
@@ -166,8 +166,9 @@ class ChainEventConsumerIntegrationTest {
 
         publishTestEvent(UUID.randomUUID(), EVENT_TYPE, validPayloadJson());
 
-        awaitTrue(() -> recordingEventHandler.getInvocationCount() == 3, 15_000,
-                "expected exactly 3 handler invocations (2 failures + 1 success)");
+        await().atMost(Duration.ofMillis(15_000))
+                .alias("expected exactly 3 handler invocations (2 failures + 1 success)")
+                .until(() -> recordingEventHandler.getInvocationCount() == 3);
 
         ConsumerRecords<String, String> dltRecords = KafkaTestUtils.getRecords(dltConsumer, Duration.ofMillis(2_000L));
         assertEquals(0, dltRecords.count(), "a transient failure that eventually succeeds must not reach the DLT");
@@ -211,21 +212,5 @@ class ChainEventConsumerIntegrationTest {
 
     private String validPayloadJson() {
         return "{\"value\":\"hello\"}";
-    }
-
-    private void awaitTrue(BooleanSupplier condition, long timeoutMillis, String message) {
-        long deadline = System.currentTimeMillis() + timeoutMillis;
-        while (System.currentTimeMillis() < deadline) {
-            if (condition.getAsBoolean()) {
-                return;
-            }
-            try {
-                Thread.sleep(100);
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-                fail("interrupted while waiting: " + message);
-            }
-        }
-        fail("condition not met within " + timeoutMillis + "ms: " + message);
     }
 }
