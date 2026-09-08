@@ -9,7 +9,6 @@ import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.UnaryOperator;
-import java.util.stream.Collectors;
 
 /**
  * In-memory implementation of {@link TaskRepository}, backed by a
@@ -35,25 +34,27 @@ public class InMemoryTaskRepository implements TaskRepository {
 
     @Override
     public Optional<Task> findById(UUID id) {
+        Objects.requireNonNull(id, "id must not be null");
         return Optional.ofNullable(tasksById.get(id))
-                .filter(this::isNotDeleted);
+                .filter(InMemoryTaskRepository::isNotDeleted);
     }
 
     @Override
     public List<Task> findAllById(List<UUID> ids) {
+        Objects.requireNonNull(ids, "ids must not be null");
         return ids.stream()
                 .map(tasksById::get)
                 .filter(Objects::nonNull)
-                .filter(this::isNotDeleted)
-                .collect(Collectors.toList());
+                .filter(InMemoryTaskRepository::isNotDeleted)
+                .toList();
     }
 
     @Override
     public List<Task> findByParentTaskId(UUID parentTaskId) {
         return tasksById.values().stream()
                 .filter(task -> Objects.equals(task.getParentTaskId(), parentTaskId))
-                .filter(this::isNotDeleted)
-                .collect(Collectors.toList());
+                .filter(InMemoryTaskRepository::isNotDeleted)
+                .toList();
     }
 
     /**
@@ -77,16 +78,21 @@ public class InMemoryTaskRepository implements TaskRepository {
         // two concurrent updates on the same task can no longer race.
         // A soft-deleted task is left untouched (mutator is not applied to it),
         // matching findById().map(mutator).map(save) semantics.
+        // Guard mutator's result against null: computeIfPresent removes the
+        // mapping entirely if its remapping function returns null, which
+        // would silently delete the task instead of failing loudly.
         Task updated = tasksById.computeIfPresent(id,
-                (key, existing) -> isNotDeleted(existing) ? mutator.apply(existing) : existing);
+                (key, existing) -> isNotDeleted(existing)
+                        ? Objects.requireNonNull(mutator.apply(existing), "mutator must not return null")
+                        : existing);
         return Optional.ofNullable(updated)
-                .filter(this::isNotDeleted);
+                .filter(InMemoryTaskRepository::isNotDeleted);
     }
 
     /**
      * Soft-deleted tasks (deletedAt != null) are treated as not found.
      */
-    private boolean isNotDeleted(Task task) {
+    private static boolean isNotDeleted(Task task) {
         return task.getDeletedAt() == null;
     }
 }

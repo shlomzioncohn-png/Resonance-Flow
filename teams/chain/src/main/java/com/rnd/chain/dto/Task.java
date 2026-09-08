@@ -130,6 +130,16 @@ public final class Task {
         return Objects.hashCode(id);
     }
 
+    @Override
+    public String toString() {
+        return "Task{id=" + id
+                + ", status=" + status
+                + ", blockingCount=" + blockingCount
+                + ", openConstraintCount=" + openConstraintCount
+                + ", deletedAt=" + deletedAt
+                + "}";
+    }
+
     public static Builder builder() {
         return new Builder();
     }

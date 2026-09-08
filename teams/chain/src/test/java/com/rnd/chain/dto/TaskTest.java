@@ -12,13 +12,8 @@ class TaskTest {
 
     @Test
     void builder_throwsIllegalArgumentException_whenStatusIsNull() {
-        assertThatThrownBy(() -> Task.builder()
-                .id(UUID.randomUUID())
-                .ownerId("owner")
+        assertThatThrownBy(() -> newTaskBuilder()
                 .status(null)
-                .blockingCount(0)
-                .openConstraintCount(0)
-                .createdAt(LocalDateTime.now())
                 .build())
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("status");
@@ -97,6 +92,18 @@ class TaskTest {
         Task b = newTaskBuilder().id(UUID.randomUUID()).build();
 
         assertThat(a).isNotEqualTo(b);
+    }
+
+    @Test
+    void toString_containsIdStatusAndCounts() {
+        UUID id = UUID.randomUUID();
+        Task task = newTaskBuilder().id(id).status(TaskStatus.ACTIVE).blockingCount(2).openConstraintCount(1).build();
+
+        assertThat(task.toString())
+                .contains(id.toString())
+                .contains("ACTIVE")
+                .contains("blockingCount=2")
+                .contains("openConstraintCount=1");
     }
 
     private static Task.Builder newTaskBuilder() {

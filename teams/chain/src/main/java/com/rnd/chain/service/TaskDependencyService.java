@@ -12,7 +12,6 @@ import org.springframework.stereotype.Service;
 import java.util.List;
 import java.util.Objects;
 import java.util.UUID;
-import java.util.stream.Collectors;
 
 /**
  * Enforces the business rules around the dependency graph on top of the
@@ -32,6 +31,8 @@ public class TaskDependencyService {
 
     public TaskDependencyService(TaskRepository taskRepository,
                                   TaskDependencyRepository taskDependencyRepository) {
+        Objects.requireNonNull(taskRepository, "taskRepository must not be null");
+        Objects.requireNonNull(taskDependencyRepository, "taskDependencyRepository must not be null");
         this.taskRepository = taskRepository;
         this.taskDependencyRepository = taskDependencyRepository;
     }
@@ -100,7 +101,7 @@ public class TaskDependencyService {
 
         return taskDependencyRepository.findByTaskId(taskId).stream()
                 .map(TaskDependency::getDependsOnTaskId)
-                .collect(Collectors.toList());
+                .toList();
     }
 
     /**
@@ -114,7 +115,7 @@ public class TaskDependencyService {
 
         return taskDependencyRepository.findByDependsOnTaskId(taskId).stream()
                 .map(TaskDependency::getTaskId)
-                .collect(Collectors.toList());
+                .toList();
     }
 
     private void requireTaskExists(UUID taskId) {

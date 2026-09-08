@@ -95,4 +95,16 @@ class TaskDependencyTest {
 
         assertThat(forward).isNotEqualTo(reverse);
     }
+
+    @Test
+    void toString_containsBothIds() {
+        UUID taskId = UUID.randomUUID();
+        UUID dependsOnTaskId = UUID.randomUUID();
+
+        TaskDependency dependency = new TaskDependency(taskId, dependsOnTaskId);
+
+        assertThat(dependency.toString())
+                .contains(taskId.toString())
+                .contains(dependsOnTaskId.toString());
+    }
 }
