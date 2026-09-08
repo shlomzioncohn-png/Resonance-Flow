@@ -597,6 +597,369 @@ this plan's current scope — treat that as a possible outcome, not a blocker to
 
 ---
 
+## 4a. Round 4 Findings (new external review pass, post-#9)
+
+### Finding #10 — `onConstraintAdded`/`onConstraintStatusChanged` have no protection against duplicate event delivery
+
+**Problem:** Every other counter-mutating path in `TaskEligibilityService` guards against being
+invoked twice for the same logical event: `addDependency`/`removeDependency` check `edgeExists()`
+(real repository state) before touching `blockingCount`, and `onTaskStatusChanged` is naturally
+idempotent because it compares against the task's own stored `previousStatus`. `onConstraintAdded`
+(line 361) and `onConstraintStatusChanged` (line 369) have no equivalent: they unconditionally do
+`openConstraintCount + 1` / `+ delta` off a caller-supplied `UUID taskId` and status enums, with no
+`constraintId` parameter and no per-constraint identity ever consulted.
+
+**Root Cause:** Written before any `Constraint` model/`ConstraintRepository` was shared by the team
+(see `CLAUDE.md`: "no ConstraintRepository has been shared yet, so these remain as designed
+earlier") — the methods assumed a single trusted caller invoking each method exactly once per real
+transition. That assumption breaks under at-least-once delivery once a real event source (e.g. the
+Kafka event-infrastructure branch, `yehudit/chain-event-infrastructure`) eventually drives these
+calls: a redelivered "constraint added" event permanently inflates `openConstraintCount` with no
+backing set of open-constraint ids to detect or repair the drift.
+
+**Proposed Solution (decided):** Option (a) — add a `constraintId` parameter to both methods and
+track a `Set<UUID>` of currently-open constraint ids per task (mirroring how `edgeExists()` gives
+`addDependency`/`removeDependency` a real membership check), so a duplicate add/close becomes a
+no-op instead of double-counting. `onConstraintStatusChanged` should derive "was open" from
+`openConstraintIds.contains(constraintId)` rather than trusting the caller-supplied
+`previousStatus` at all, mirroring how `onTaskStatusChanged` re-reads `task.getStatus()` as ground
+truth instead of trusting a caller-supplied previous value.
+
+Considered and rejected for now: relying solely on `yehudit/chain-event-infrastructure`'s
+`ProcessedEventStore`/`tryClaim` (event-id-based, already atomic via `putIfAbsent`) once that branch
+merges. Rejected because (1) it only protects the one call path that goes through that Kafka
+consumer — `TaskEligibilityService` itself stays unprotected against any other caller, unlike every
+other counter-mutating path in this class; (2) it dedupes by transport-level `eventId`, not
+business-level `constraintId`, so two distinct events describing the same real-world constraint
+change would still double-count; (3) it is blocked on a branch merge that hasn't happened.
+
+**Files Affected:** `TaskEligibilityService.java` (method signatures, new per-task open-constraint
+tracking); `TaskEligibilityServiceTest.java` (existing constraint tests need the new parameter;
+new duplicate-delivery no-op tests).
+
+**Dependencies:** None — self-contained within this class. Does not require a real
+`ConstraintRepository`; `constraintId` is already a field on the `Constraint` DTO.
+
+**Tests:** New tests: duplicate `onConstraintAdded` with the same `constraintId` is a no-op (counter
+doesn't move a second time); `onConstraintStatusChanged` replaying the same transition for the same
+`constraintId` is a no-op; existing constraint tests updated to pass a `constraintId`.
+
+**Acceptance Criteria:** Calling `onConstraintAdded`/`onConstraintStatusChanged` twice with the same
+`constraintId` and the same logical transition changes `openConstraintCount` only once.
+
+**Risks / Trade-offs:** Where the open-constraint-id set lives needs care: adding it to `Task`
+touches a DTO partially owned by another branch's evolving model; keeping it as a separate
+per-service map avoids that but creates a second piece of state that must stay in lock-step with
+`openConstraintCount` under the same per-task lock — the exact kind of drift this fix is meant to
+close, just moved one level over if not implemented carefully.
+
+---
+
+### Finding #11 — No dedicated unit test for `InMemoryTaskDependencyRepository`
+
+**Problem:** `InMemoryTaskDependencyRepository` carries the module's most delicate invariant — two
+`ConcurrentHashMap<UUID, Set<UUID>>` adjacency maps that must stay mirror-consistent, guarded by a
+`ReadWriteLock` (lines 40-46) specifically added to prevent readers observing a torn view mid-write.
+It has zero direct tests. `TaskEligibilityServiceTest` mocks the repository entirely (never
+exercises the real map/lock logic); `TaskEligibilityServiceConcurrencyTest` uses the real class but
+only drives it through `addDependency`/`onTaskStatusChanged` happy paths — never calls `delete`
+directly, never checks `removeFromIndex`'s empty-set map cleanup (lines 124-132), never checks
+`findByTaskId`/`findByDependsOnTaskId` directionality.
+
+**Root Cause:** Flagged and consciously deferred in an earlier round (§4 Finding #6: *"No new test
+required — `InMemoryTaskDependencyRepository` doesn't have a dedicated test file currently... If a
+dedicated repository test file is added for other reasons in the future, a
+`save_duplicateEdge_isNotAddedTwice` test would cover this incidentally."*) — a reasonable call at
+the time for a purely cosmetic DRY change, but the class has since grown substantially (rewritten
+in Phase 3 from a flat list to the dual-map + `ReadWriteLock` design) without the deferred test ever
+being revisited. It is now the only implementation class in the module without a sibling test file
+(`Constraint`, `TaskDependency`, `InMemoryTaskRepository` all have one).
+
+**Proposed Solution (decided):** Add `InMemoryTaskDependencyRepositoryTest.java`, instantiating the
+real class (no mocks), covering: `save` idempotency (same edge twice → one entry); `delete` on a
+nonexistent edge (no-op); `delete` removing the last edge for a key (the map entry itself is
+removed, not left as an empty `Set` — needs reflection into the private map fields, since no public
+method exposes map-entry-vs-empty-set state); `findByTaskId`/`findByDependsOnTaskId` directionality;
+constructor seeding from a non-empty list.
+
+**Files Affected:** New file
+`teams/chain/src/test/java/com/rnd/chain/repository/InMemoryTaskDependencyRepositoryTest.java`.
+
+**Dependencies:** None.
+
+**Tests:** This item *is* the test.
+
+**Acceptance Criteria:** All five scenarios above pass; a deliberate regression (e.g. removing
+`removeFromIndex`'s `map.remove(key)` empty-set cleanup) causes a test failure.
+
+**Risks / Trade-offs:** None — purely additive, no production code changes.
+
+---
+
+### Finding #12 — No dedicated unit test for `Task`
+
+**Problem:** `Task` is the module's central mutable entity and carries real validation logic — the
+constructor rejects null `id`/`ownerId` and negative `blockingCount`/`openConstraintCount` (lines
+44-55), `copyOf` null-checks its argument (line 78), and `equals`/`hashCode` are id-only (lines
+166-180) — a contract the whole per-task locking design in `TaskEligibilityService` leans on. None
+of it has a direct test. `Constraint` (96 lines) and `TaskDependency` (50 lines) — both with
+strictly less logic than `Task` (266 lines) — got dedicated test classes in this same module;
+`Task` did not.
+
+**Root Cause:** Unlike Finding #11, this gap was never previously raised or consciously deferred —
+no mention of it exists anywhere in this document's earlier rounds. When dedicated tests were added
+for `Constraint` (§4 Finding #5) and `TaskDependency`, `Task` — the largest and most validation-
+heavy of the three DTOs — was simply skipped, with no documented reason. It is only exercised
+incidentally today via `TaskTestFixtures` (used by `InMemoryTaskRepositoryTest`,
+`TaskEligibilityServiceTest`, `TaskEligibilityServiceConcurrencyTest`), which always builds valid
+tasks — so the guard clauses, `copyOf`'s independence guarantee, and the equals/hashCode contract
+have zero direct verification.
+
+**Proposed Solution (decided):** Add `TaskTest.java` (mirroring `ConstraintTest`/
+`TaskDependencyTest`'s existing style), covering: constructor (via `Task.builder()...build()`)
+rejects null `id`, null `ownerId`, negative `blockingCount`, negative `openConstraintCount`;
+`copyOf(null)` throws NPE; `copyOf` produces an independent instance (mutating the copy does not
+affect the source); `equals`/`hashCode` based solely on `id` (same id, every other field different
+→ equal; different id → not equal).
+
+**Files Affected:** New file `teams/chain/src/test/java/com/rnd/chain/dto/TaskTest.java`.
+
+**Dependencies:** None.
+
+**Tests:** This item *is* the test.
+
+**Acceptance Criteria:** All scenarios above pass; a deliberate regression (e.g. adding a field to
+`equals`) causes a test failure.
+
+**Risks / Trade-offs:** None — purely additive, no production code changes.
+
+---
+
+### Finding #13 — `Constraint.getReason()` returns a nullable `Map` instead of signaling absence
+
+**Problem:** `getReason()` (line 44) returns the raw `Map<String, Object> reason` field as-is, which
+can be `null` (the field comment at line 16 says so explicitly: `// may be null`). A caller who
+chains off the result without a null-check (e.g. `constraint.getReason().get("key")`) gets an NPE.
+No call site does this today (only `ConstraintTest` calls `getReason()`), so the risk is currently
+latent, not exercised in production code.
+
+**Root Cause:** `reason` was modeled as a genuinely optional field from the start; the getter was
+never revisited for its null-vs-empty signaling contract. An earlier review round already touched
+this exact line (the comment cites "review finding #14," about removing a redundant re-copy) without
+addressing nullability.
+
+**Proposed Solution (decided):** Reviewer proposed wrapping the return type in
+`Optional<Map<String, Object>>`. Rejected in favor of keeping the return type as
+`Map<String, Object>` and returning an empty map instead of `null`:
+```java
+public Map<String, Object> getReason() {
+    return this.reason == null ? Collections.emptyMap() : this.reason;
+}
+```
+Rejected the `Optional<Map<...>>` route because (1) wrapping a collection/map type in `Optional` is
+a known anti-pattern (Effective Java Item 55 — collections already have a natural empty
+representation; forces callers into `.map(m -> m.get(...))` instead of a direct `.get(...)`), and
+(2) this exact codebase already has an established convention for this exact situation — "empty
+collection, never null" (see `TaskDependencyRepository.findByTaskId`/`findByDependsOnTaskId`,
+`TaskRepository.findByParentTaskId`, all documented that way) — which `Optional` would break, not
+follow, despite the reviewer citing `TaskRepository.findById` as the precedent (a different case:
+`Optional` for a repository lookup's existence check, not a DTO field's emptiness).
+
+**Files Affected:** `Constraint.java` (`getReason()` only; internal `reason` field and
+`copyReason`/`setReason` stay as-is).
+
+**Dependencies:** None.
+
+**Tests:** Update `ConstraintTest`'s existing `assertNull(constraint.getReason())` case to
+`assertTrue(constraint.getReason().isEmpty())`; no new test needed beyond that.
+
+**Acceptance Criteria:** `getReason()` never returns `null`; a constraint constructed with no
+`reason` returns an empty, unmodifiable map.
+
+**Risks / Trade-offs:** Unlike `Optional`, this gives no compile-time reminder that the map can be
+empty — a caller who doesn't read the Javadoc simply won't know emptiness is possible (though
+nothing crashes if they don't check, unlike the current `null` behavior).
+
+---
+
+### Finding #14 — `Constraint.copyReason`'s mutability guard doesn't cover array values
+
+**Problem:** `copyReason` (lines 61-75) rejects `Collection`/`Map` values because they'd remain
+live, externally-mutable references after only a shallow copy (`new HashMap<>(reason)`) — but an
+array (`String[]`, `int[]`, etc.) is exactly as mutable and exactly as uncopied, and
+`value instanceof Collection || value instanceof Map` doesn't catch it (arrays implement neither
+interface). `reason.put("tags", new String[]{"a","b"})` passes validation silently; mutating the
+array afterward mutates the "immutable" `Constraint`'s internal state.
+
+**Root Cause:** The guard was itself added in an earlier review round (the comment at line 54 cites
+"review finding #4") to close this exact bug class for `Collection`/`Map` — arrays weren't
+considered at the time, not a conceptual gap, just incomplete coverage of "mutable container
+types." No production call site passes an array today, so the risk is currently latent.
+
+**Proposed Solution (decided):** Extend the type check:
+```java
+if (value instanceof Collection || value instanceof Map || value.getClass().isArray()) {
+    throw new IllegalArgumentException(...);
+}
+```
+`getClass().isArray()` is the standard Java check, covers both object and primitive array types.
+
+**Files Affected:** `Constraint.java` (`copyReason` only).
+
+**Dependencies:** None.
+
+**Tests:** New test: `copyReason`/constructor rejects a `reason` map containing an array value with
+`IllegalArgumentException`, mirroring the existing Collection/Map-rejection test.
+
+**Acceptance Criteria:** Constructing or `setReason`-ing a `Constraint` with an array value in
+`reason` throws `IllegalArgumentException`, same as it already does for `Collection`/`Map` values.
+
+**Risks / Trade-offs:** None — one-line change, no existing call site passes an array value.
+
+---
+
+### Finding #15 — `addDependency` runs the full cycle-check DFS before the cheap duplicate-edge check
+
+**Problem:** `wouldCreateCycle` (line 151, an O(V+E) traversal) runs unconditionally, before
+`isNewEdge` (line 158, an O(1) `existsDependency` lookup) determines whether the call is actually a
+no-op re-add of an already-present edge. An edge that already exists cannot be introducing a new
+cycle (it already passed this same check when first inserted, and the graph is kept acyclic by this
+same method) — so the traversal is pure waste on that path, held under `dependencyGraphLock`, which
+the class's own comments describe as a deliberate single-writer bottleneck.
+
+**Root Cause:** The two checks were written in validation order ("reject an invalid graph shape,
+then check idempotency"), not cost order. Not related to `CLAUDE.md`'s existing "DFS not optimized
+yet, revisit only if it's a bottleneck" note — that's about the traversal algorithm itself; this is
+about skipping the traversal entirely on a path where its answer is already known, which doesn't
+touch the algorithm or the locking mechanism at all.
+
+**Proposed Solution (decided):** Reorder: compute `isNewEdge` first; only call `wouldCreateCycle`
+when the edge is actually new. Verified semantically equivalent on every path, including
+self-dependency (a self-edge is rejected via `wouldCreateCycle` itself and so never reaches
+`save()`, meaning `edgeExists(taskId, taskId)` is always false — the cycle check still always runs
+for that case under the new order too).
+
+**Files Affected:** `TaskEligibilityService.java` (`addDependency` only).
+
+**Dependencies:** None.
+
+**Tests:** Existing `addDependency` tests continue to pass unchanged (behavior-preserving); optional
+new test asserting `wouldCreateCycle`/the repository's traversal path is not invoked for a duplicate
+edge, if easy to express without over-mocking.
+
+**Acceptance Criteria:** Re-adding an already-existing edge no longer runs the cycle-detection
+traversal; all existing `addDependency` behavior (including cycle rejection for genuinely new
+edges) is unchanged.
+
+**Risks / Trade-offs:** None.
+
+---
+
+### Finding #16 — No method-level Javadoc on `TaskEligibilityService`'s public API
+
+**Problem:** All 6 public methods (`recalculateTaskEligibility` line 96, `addDependency` line 133,
+`removeDependency` line 232, `onTaskStatusChanged` line 289, `onConstraintAdded` line 361,
+`onConstraintStatusChanged` line 369) throw a meaningful mix of `NullPointerException` (missing
+args), `IllegalArgumentException` (task not found), and — for `addDependency` only —
+`IllegalStateException` (cycle detected), none of it documented. Each method has only a one-line
+`// TODO(JPA)` comment above it, no `@param`/`@throws` Javadoc. `README.md` (lines 5-8) confirms
+`controller/` is still empty — this class is currently the module's only real API surface.
+
+**Root Cause:** The class grew through several remediation rounds, each fix addressing its own
+finding; no round included writing the method-level documentation reflecting the accumulated
+contract, so there was never anything to update — it was simply never written. Distinct from
+§4 Finding #8 (generic vs. domain exception *types*, deferred pending branch #66) — this is about
+the complete absence of documentation for whichever exception types are in use today.
+
+**Proposed Solution (decided):** Add Javadoc to each of the 6 public methods with accurate
+`@param`/`@throws` per method (not identical boilerplate across all six — e.g. only `addDependency`
+throws `IllegalStateException`; `removeDependency`'s `dependsOnTaskId` is deliberately not required
+to exist, unlike every other id parameter in the class).
+
+**Files Affected:** `TaskEligibilityService.java` (Javadoc only, no behavior change).
+
+**Dependencies:** None.
+
+**Tests:** None — documentation only.
+
+**Acceptance Criteria:** Each of the 6 public methods has a Javadoc block with an accurate `@throws`
+list matching what its body actually throws.
+
+**Risks / Trade-offs:** None.
+
+---
+
+### Finding #17 — Adopt Lombok on the module's DTOs (`Task`, `TaskDependency`, `Constraint`)
+
+**Problem/Request:** Not from the external review — a direct decision by Shifra: adopt Lombok on
+this module's DTOs to remove hand-written getter/setter/equals/hashCode boilerplate.
+
+**Constraint driving the design:** This is not a mechanical `@Data` swap. Two invariants that
+earlier findings in this very plan depend on must survive unchanged:
+- `Task`/`Constraint` both have **id-only** `equals`/`hashCode` (§4 Finding #12 depends on this
+  staying exactly as-is — the whole per-task locking design leans on it), not all-fields equality,
+  which is what Lombok's `@EqualsAndHashCode`/`@Data` generate by default.
+- `Task`'s constructor validates (`id`/`ownerId` non-null, counts non-negative) and `Constraint`'s
+  constructor defensively copies `reason` via `copyReason` (rejecting `Collection`/`Map`/array
+  values, per §4a Finding #14) — both must keep running on every construction path, including
+  through a generated builder.
+
+**Proposed Solution:** Per-class, explicit (not blanket `@Data`):
+- **`Task`**: `@Getter`/`@Setter` on the mutable fields (skip `@Setter` on the `final` `id`/
+  `createdAt`), `@EqualsAndHashCode(onlyExplicitlyIncluded = true)` with `@EqualsAndHashCode.Include`
+  on `id` only. Keep the hand-written private constructor (with its validation) and the existing
+  `copyOf` static method as-is — replace the hand-written `Builder` inner class with Lombok's
+  `@Builder` placed on the private constructor (Lombok's generated builder calls that constructor,
+  so validation still runs on every `build()`).
+- **`Constraint`**: same shape — `@Getter`/`@Setter` on mutable fields, `@EqualsAndHashCode
+  (onlyExplicitlyIncluded = true)` with `@EqualsAndHashCode.Include` on `constraintId` only. Keep
+  the hand-written constructor (calls `copyReason`) and `copyReason`/`setReason` as-is — `getReason`
+  also stays hand-written (§4a Finding #13's empty-map behavior isn't something `@Getter` produces).
+- **`TaskDependency`**: simplest case — both fields (`taskId`, `dependsOnTaskId`) are `final`, both
+  already participate in `equals`/`hashCode` together (confirmed by reading the current
+  implementation), so this one *can* safely use `@Value` (Lombok's all-`final`-fields,
+  all-fields-equals immutable shape) with no field-level overrides needed.
+- **`pom.xml`**: add `org.projectlombok:lombok` (provided scope) plus the
+  `lombok-maven-plugin`/annotation-processor wiring already implied by using
+  `spring-boot-starter-parent` (Spring Boot's parent POM manages the Lombok version; `mvn` picks it
+  up automatically as an annotation processor once the dependency is declared — no separate plugin
+  needed for a standard Maven build).
+
+**Files Affected:** `pom.xml`, `Task.java`, `Constraint.java`, `TaskDependency.java`.
+
+**Implementation note (discovered while implementing):** the parent-managed
+`maven-compiler-plugin` (3.10.1, from 2022) did not reliably invoke Lombok's annotation processor
+via implicit classpath scanning under the JDK on this machine (JDK 25) - compiled with every
+Lombok-generated method silently absent, no error. Fixed by (1) pinning
+`org.projectlombok:lombok` to `1.18.46` explicitly (the Spring Boot 2.7.18-managed `1.18.30`
+predates JDK 25 support) and (2) adding an explicit `<annotationProcessorPaths>` entry for Lombok
+on `maven-compiler-plugin` in `pom.xml`'s `<build>` section, rather than relying on implicit
+discovery. Also required using `@lombok.Builder(builderClassName = "Builder")` (fully-qualified)
+on `Task`'s constructor instead of a plain `@Builder` import - the generated nested `Task.Builder`
+class and the imported `lombok.Builder` annotation share the simple name `Builder`, which javac
+resolves ambiguously once the nested class exists.
+
+**Dependencies:** None — independent of every other finding, but should land after §4a Findings
+#12-14 (the new `TaskTest`, the `getReason` fix, the array-value guard) so those are verified
+against the hand-written versions first, then re-run against the Lombok versions to confirm nothing
+shifted.
+
+**Tests:** No new tests — existing `TaskTest` (Finding #12), `ConstraintTest`, `TaskDependencyTest`
+must all continue to pass unchanged; they are what proves the Lombok-generated code preserves the
+same `equals`/`hashCode`/validation contracts.
+
+**Acceptance Criteria:** All three DTOs compile and behave identically (verified by the existing
++ new test suites); `Task`/`Constraint` equality is still id-only; `Task`/`Constraint` construction
+still validates/defensively-copies exactly as before.
+
+**Risks / Trade-offs:** The main risk is exactly the failure mode Finding #12 was written to guard
+against — a careless `@Data`/`@EqualsAndHashCode` default would silently switch `Task`/`Constraint`
+to all-fields equality, breaking the locking design without any compiler error. Mitigated by
+`onlyExplicitlyIncluded` + explicit `@EqualsAndHashCode.Include` on the id field only, and by
+running `TaskTest`/`ConstraintTest`'s equals/hashCode assertions immediately after the change.
+
+---
+
 ## 5. Decisions Required
 
 ### D1 — Keep or remove `@Transactional` + JPA/H2 now? — **RESOLVED**
@@ -726,3 +1089,11 @@ this plan's current scope — treat that as a possible outcome, not a blocker to
 | [MINOR] Global lock trade-off | §4 Finding #7, Phase 3 | *(none — tracked issue)* | N/A | ALREADY ADDRESSED / PARTIALLY VALID |
 | [MINOR] Generic exceptions vs. domain exceptions | §4 Finding #8, §5 D2, Phase 2 | *(none in this PR)* | N/A | PARTIALLY VALID |
 | *(discovered)* Claimed concurrency regression test does not exist | §4 Finding #9, §5 D3, Phase 4 | `TaskEligibilityServiceConcurrencyTest.java`, `README.md` | Is itself the test coverage | CONFIRMED |
+| [MAJOR] `onConstraintAdded`/`onConstraintStatusChanged` no duplicate-delivery protection | §4a Finding #10 | `TaskEligibilityService.java`, `TaskEligibilityServiceTest.java` | New duplicate-delivery no-op tests | CONFIRMED |
+| [MAJOR] No dedicated unit test for `InMemoryTaskDependencyRepository` | §4a Finding #11 | *(new)* `InMemoryTaskDependencyRepositoryTest.java` | Is itself the test coverage | CONFIRMED |
+| [MAJOR] No dedicated unit test for `Task` | §4a Finding #12 | *(new)* `TaskTest.java` | Is itself the test coverage | CONFIRMED |
+| [MINOR] `Constraint.getReason()` returns nullable `Map` instead of signaling absence | §4a Finding #13 | `Constraint.java` | Updated `ConstraintTest` assertion | CONFIRMED (alternate fix chosen) |
+| [MINOR] `Constraint.copyReason` mutability guard misses array values | §4a Finding #14 | `Constraint.java` | New array-rejection test | CONFIRMED |
+| [MINOR] `addDependency` runs cycle-check DFS before cheap duplicate-edge check | §4a Finding #15 | `TaskEligibilityService.java` | Existing tests unchanged | CONFIRMED |
+| [MINOR] No method-level Javadoc on `TaskEligibilityService` public API | §4a Finding #16 | `TaskEligibilityService.java` | N/A — docs only | CONFIRMED |
+| Adopt Lombok on `Task`/`Constraint`/`TaskDependency` | §4a Finding #17 | `pom.xml`, `Task.java`, `Constraint.java`, `TaskDependency.java` | Existing `TaskTest`/`ConstraintTest`/`TaskDependencyTest` | DECIDED (direct request) |

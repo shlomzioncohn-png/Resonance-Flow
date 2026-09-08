@@ -1,14 +1,28 @@
 package com.rnd.chain.dto;
 
+import lombok.EqualsAndHashCode;
+import lombok.Getter;
+import lombok.Setter;
+
 import java.time.LocalDateTime;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.Map;
-import java.util.Objects;
 import java.util.UUID;
 
+// @Getter/@Setter (PLAN.md Finding #17) generate the trivial accessors below; getReason/setReason
+// stay hand-written (Lombok skips generating an accessor when one with that name already exists)
+// because they must keep running copyReason's defensive-copy/validation and getReason's
+// empty-map-not-null behavior (Finding #13) - neither is something @Getter/@Setter produce.
+// @EqualsAndHashCode(onlyExplicitlyIncluded = true) + @Include on constraintId only: this MUST
+// stay id-only equality (the locking design elsewhere in this module leans on it), not the
+// all-fields default @Data/@EqualsAndHashCode would otherwise generate.
+@Getter
+@Setter
+@EqualsAndHashCode(onlyExplicitlyIncluded = true)
 public class Constraint {
+    @EqualsAndHashCode.Include
     private final String constraintId;
     private final UUID taskId; // pending Inbox publishing its own task id type
     private final ConstraintType type;
@@ -33,23 +47,17 @@ public class Constraint {
         this.updatedAt = updatedAt;
     }
 
-    public String getConstraintId() { return constraintId; }
-    public UUID getTaskId() { return taskId; }
-    public ConstraintType getType() { return type; }
-    public ConstraintStatus getStatus() { return status; }
-
     // this.reason is always already the result of copyReason() (set that way in the
     // constructor and in setReason()), so it is already an unmodifiable, independent copy -
     // re-copying it again on every read is redundant (review finding #14).
-    public Map<String, Object> getReason() { return this.reason; }
+    // Returns an empty map rather than null (PLAN.md Finding #13) - matches this module's own
+    // "empty collection, never null" convention (see TaskDependencyRepository/TaskRepository),
+    // and avoids wrapping a Map in Optional, which Effective Java Item 55 advises against.
+    public Map<String, Object> getReason() {
+        return this.reason == null ? Collections.emptyMap() : this.reason;
+    }
 
-    public String getSourceRef() { return sourceRef; }
-    public LocalDateTime getCreatedAt() { return createdAt; }
-    public LocalDateTime getUpdatedAt() { return updatedAt; }
-
-    public void setStatus(ConstraintStatus status) { this.status = status; }
     public void setReason(Map<String, Object> reason) { this.reason = copyReason(reason); }
-    public void setUpdatedAt(LocalDateTime updatedAt) { this.updatedAt = updatedAt; }
 
     // Only copies the top-level map, not its values (review finding #4) - a value that is
     // itself a Collection or Map would still be a live, externally-mutable reference even
@@ -64,31 +72,18 @@ public class Constraint {
         }
         for (Map.Entry<String, Object> entry : reason.entrySet()) {
             Object value = entry.getValue();
-            if (value instanceof Collection || value instanceof Map) {
+            // Arrays are exactly as mutable and exactly as uncopied by new HashMap<>(reason)
+            // below as a Collection/Map value would be, but instanceof Collection/Map alone
+            // doesn't catch them (arrays implement neither interface) - PLAN.md Finding #14.
+            if (value instanceof Collection || value instanceof Map
+                    || (value != null && value.getClass().isArray())) {
                 throw new IllegalArgumentException(
                     "Constraint reason value for key '" + entry.getKey() + "' must not be a "
-                        + "Collection or Map - reason only supports flat scalar values, since "
-                        + "the defensive copy does not recurse into nested mutable structures");
+                        + "Collection, Map, or array - reason only supports flat scalar values, "
+                        + "since the defensive copy does not recurse into nested mutable structures");
             }
         }
         return Collections.unmodifiableMap(new HashMap<>(reason));
-    }
-
-    @Override
-    public boolean equals(Object o) {
-        if (this == o) {
-            return true;
-        }
-        if (!(o instanceof Constraint)) {
-            return false;
-        }
-        Constraint other = (Constraint) o;
-        return Objects.equals(constraintId, other.constraintId);
-    }
-
-    @Override
-    public int hashCode() {
-        return Objects.hash(constraintId);
     }
 
     public enum ConstraintType { APPROVAL_NEEDED, BLOCKED_BY_INFO, DATE_WINDOW }

@@ -148,8 +148,9 @@ class TaskEligibilityServiceTest {
         // runs, so both must be stubbed even though this call is expected to be a no-op.
         when(taskRepository.findById(taskId)).thenReturn(Optional.of(task));
         when(taskRepository.findById(dependsOnTaskId)).thenReturn(Optional.of(dependsOnTask));
-        when(taskDependencyRepository.findByTaskId(dependsOnTaskId)).thenReturn(Collections.emptyList());
         // Finding #16: edgeExists now delegates to existsDependency, not findByTaskId(taskId).
+        // Finding #15: isNewEdge is now checked before wouldCreateCycle, so a duplicate edge
+        // never reaches the cycle-check traversal - no findByTaskId(dependsOnTaskId) stub needed.
         when(taskDependencyRepository.existsDependency(taskId, dependsOnTaskId)).thenReturn(true);
 
         taskEligibilityService.addDependency(taskId, dependsOnTaskId);
@@ -444,31 +445,57 @@ class TaskEligibilityServiceTest {
     @Test
     void onConstraintAdded_incrementsOpenConstraintCount_andStaysNotReady() {
         UUID taskId = UUID.randomUUID();
+        UUID constraintId = UUID.randomUUID();
         Task task = TaskTestFixtures.defaultTask(taskId).blockingCount(0).openConstraintCount(0).isReady(true).build();
 
         when(taskRepository.findById(taskId)).thenReturn(Optional.of(task));
 
-        taskEligibilityService.onConstraintAdded(taskId);
+        taskEligibilityService.onConstraintAdded(taskId, constraintId);
 
         assertEquals(1, task.getOpenConstraintCount());
         assertFalse(task.isReady());
     }
 
     @Test
+    void onConstraintAdded_sameConstraintIdTwice_isNoOpSecondTime() {
+        UUID taskId = UUID.randomUUID();
+        UUID constraintId = UUID.randomUUID();
+        Task task = TaskTestFixtures.defaultTask(taskId).blockingCount(0).openConstraintCount(0).isReady(true).build();
+
+        when(taskRepository.findById(taskId)).thenReturn(Optional.of(task));
+
+        taskEligibilityService.onConstraintAdded(taskId, constraintId);
+        taskEligibilityService.onConstraintAdded(taskId, constraintId);
+
+        assertEquals(1, task.getOpenConstraintCount());
+    }
+
+    @Test
     void onConstraintAdded_nullTaskId_throwsNpe() {
         assertThrows(NullPointerException.class,
-                () -> taskEligibilityService.onConstraintAdded(null));
+                () -> taskEligibilityService.onConstraintAdded(null, UUID.randomUUID()));
+    }
+
+    @Test
+    void onConstraintAdded_nullConstraintId_throwsNpe() {
+        assertThrows(NullPointerException.class,
+                () -> taskEligibilityService.onConstraintAdded(UUID.randomUUID(), null));
     }
 
     @Test
     void onConstraintStatusChanged_closingLastConstraint_becomesReady() {
         UUID taskId = UUID.randomUUID();
-        Task task = TaskTestFixtures.defaultTask(taskId).blockingCount(0).openConstraintCount(1).isReady(false).build();
+        UUID constraintId = UUID.randomUUID();
+        Task task = TaskTestFixtures.defaultTask(taskId).blockingCount(0).openConstraintCount(0).isReady(false).build();
 
         when(taskRepository.findById(taskId)).thenReturn(Optional.of(task));
 
+        // Seed the tracked-open-constraints set (and the counter) via onConstraintAdded first,
+        // so onConstraintStatusChanged's ground-truth check (PLAN.md Finding #10) recognizes
+        // this constraintId as currently open and actually decrements on close.
+        taskEligibilityService.onConstraintAdded(taskId, constraintId);
         taskEligibilityService.onConstraintStatusChanged(
-                taskId, Constraint.ConstraintStatus.PENDING, Constraint.ConstraintStatus.SATISFIED);
+                taskId, constraintId, Constraint.ConstraintStatus.PENDING, Constraint.ConstraintStatus.SATISFIED);
 
         assertEquals(0, task.getOpenConstraintCount());
         assertTrue(task.isReady());
@@ -477,15 +504,32 @@ class TaskEligibilityServiceTest {
     @Test
     void onConstraintStatusChanged_reopeningConstraint_becomesNotReadyAgain() {
         UUID taskId = UUID.randomUUID();
+        UUID constraintId = UUID.randomUUID();
         Task task = TaskTestFixtures.defaultTask(taskId).blockingCount(0).openConstraintCount(0).isReady(true).build();
 
         when(taskRepository.findById(taskId)).thenReturn(Optional.of(task));
 
         taskEligibilityService.onConstraintStatusChanged(
-                taskId, Constraint.ConstraintStatus.SATISFIED, Constraint.ConstraintStatus.PENDING);
+                taskId, constraintId, Constraint.ConstraintStatus.SATISFIED, Constraint.ConstraintStatus.PENDING);
 
         assertEquals(1, task.getOpenConstraintCount());
         assertFalse(task.isReady());
+    }
+
+    @Test
+    void onConstraintStatusChanged_sameTransitionReplayed_isNoOpSecondTime() {
+        UUID taskId = UUID.randomUUID();
+        UUID constraintId = UUID.randomUUID();
+        Task task = TaskTestFixtures.defaultTask(taskId).blockingCount(0).openConstraintCount(0).isReady(true).build();
+
+        when(taskRepository.findById(taskId)).thenReturn(Optional.of(task));
+
+        taskEligibilityService.onConstraintStatusChanged(
+                taskId, constraintId, Constraint.ConstraintStatus.SATISFIED, Constraint.ConstraintStatus.PENDING);
+        taskEligibilityService.onConstraintStatusChanged(
+                taskId, constraintId, Constraint.ConstraintStatus.SATISFIED, Constraint.ConstraintStatus.PENDING);
+
+        assertEquals(1, task.getOpenConstraintCount());
     }
 
     @Test
@@ -493,7 +537,7 @@ class TaskEligibilityServiceTest {
         UUID taskId = UUID.randomUUID();
 
         taskEligibilityService.onConstraintStatusChanged(
-                taskId, Constraint.ConstraintStatus.SATISFIED, Constraint.ConstraintStatus.WAIVED);
+                taskId, UUID.randomUUID(), Constraint.ConstraintStatus.SATISFIED, Constraint.ConstraintStatus.WAIVED);
 
         verify(taskRepository, never()).findById(any());
     }
@@ -502,6 +546,14 @@ class TaskEligibilityServiceTest {
     void onConstraintStatusChanged_nullTaskId_throwsNpe() {
         assertThrows(NullPointerException.class,
                 () -> taskEligibilityService.onConstraintStatusChanged(
-                        null, Constraint.ConstraintStatus.PENDING, Constraint.ConstraintStatus.SATISFIED));
+                        null, UUID.randomUUID(), Constraint.ConstraintStatus.PENDING, Constraint.ConstraintStatus.SATISFIED));
+    }
+
+    @Test
+    void onConstraintStatusChanged_nullConstraintId_throwsNpe() {
+        UUID taskId = UUID.randomUUID();
+        assertThrows(NullPointerException.class,
+                () -> taskEligibilityService.onConstraintStatusChanged(
+                        taskId, null, Constraint.ConstraintStatus.PENDING, Constraint.ConstraintStatus.SATISFIED));
     }
 }

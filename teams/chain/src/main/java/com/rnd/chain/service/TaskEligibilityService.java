@@ -15,9 +15,11 @@ import java.util.ArrayDeque;
 import java.util.Deque;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Consumer;
 
 /**
@@ -91,6 +93,13 @@ public class TaskEligibilityService {
         return taskDependencyRepository.existsDependency(taskId, dependsOnTaskId);
     }
 
+    /**
+     * Recomputes and persists {@code taskId}'s {@code isReady} flag from its current
+     * {@code blockingCount}/{@code openConstraintCount} (isReady = both are zero).
+     *
+     * @throws NullPointerException if taskId is null
+     * @throws IllegalArgumentException if no task with this id exists
+     */
     // TODO(JPA): becomes a real transaction boundary once Task/TaskDependency are JPA entities (see PLAN.md Phase 3).
     @Transactional
     public void recalculateTaskEligibility(UUID taskId) {
@@ -128,6 +137,16 @@ public class TaskEligibilityService {
         }
     }
 
+    /**
+     * Adds a dependency edge: {@code taskId} depends on (is blocked by) {@code dependsOnTaskId}.
+     * Increments {@code taskId}'s {@code blockingCount} and recalculates its eligibility, unless
+     * {@code dependsOnTaskId} is already DONE (nothing to block on) or the edge already existed
+     * (no-op).
+     *
+     * @throws NullPointerException if either id is null
+     * @throws IllegalArgumentException if either task does not exist
+     * @throws IllegalStateException if adding this edge would create a cycle
+     */
     // TODO(JPA): becomes a real transaction boundary once Task/TaskDependency are JPA entities (see PLAN.md Phase 3).
     @Transactional
     public void addDependency(UUID taskId, UUID dependsOnTaskId) {
@@ -148,14 +167,20 @@ public class TaskEligibilityService {
             requireTask(taskId);
             Task dependsOnTask = requireTask(dependsOnTaskId);
 
-            if (wouldCreateCycle(taskId, dependsOnTaskId)) {
+            // Checked before wouldCreateCycle (PLAN.md Finding #15): an edge that already exists
+            // cannot be introducing a new cycle - it already passed this same check when first
+            // inserted, and the graph is kept acyclic by this method. Skipping the O(V+E)
+            // traversal on this path matters because it runs under dependencyGraphLock, and a
+            // duplicate/retried addDependency call is exactly what at-least-once event delivery
+            // makes common (same concern as Finding #10). Self-dependency is unaffected: a
+            // self-edge is rejected by wouldCreateCycle itself and so never reaches save() below,
+            // meaning edgeExists(taskId, taskId) is always false and wouldCreateCycle still runs.
+            boolean isNewEdge = !edgeExists(taskId, dependsOnTaskId);
+            if (isNewEdge && wouldCreateCycle(taskId, dependsOnTaskId)) {
                 throw new IllegalStateException(
                     "Cannot add dependency: task " + taskId + " -> " + dependsOnTaskId + " would create a cycle");
             }
 
-            // edgeExists() doesn't tell us whether the edge already existed before save() -
-            // check first, since save() on TaskDependencyRepository is idempotent by contract.
-            boolean isNewEdge = !edgeExists(taskId, dependsOnTaskId);
             taskDependencyRepository.save(new TaskDependency(taskId, dependsOnTaskId));
 
             if (!isNewEdge) {
@@ -227,6 +252,15 @@ public class TaskEligibilityService {
         return false;
     }
 
+    /**
+     * Removes the dependency edge {@code taskId} -&gt; {@code dependsOnTaskId}, if it exists.
+     * Decrements {@code taskId}'s {@code blockingCount} and recalculates its eligibility, unless
+     * {@code dependsOnTaskId} was already DONE or the edge didn't exist (no-op either way).
+     *
+     * @throws NullPointerException if either id is null
+     * @throws IllegalArgumentException if {@code taskId} does not exist. {@code dependsOnTaskId}
+     * is deliberately not required to exist - a dangling edge to a deleted task is still cleanable.
+     */
     // TODO(JPA): becomes a real transaction boundary once Task/TaskDependency are JPA entities (see PLAN.md Phase 3).
     @Transactional
     public void removeDependency(UUID taskId, UUID dependsOnTaskId) {
@@ -284,6 +318,17 @@ public class TaskEligibilityService {
         }
     }
 
+    /**
+     * Records {@code taskId}'s new status and, when the transition crosses the DONE boundary in
+     * either direction, adjusts every direct dependent's {@code blockingCount} accordingly
+     * (decrementing on a transition into DONE, restoring on a transition out of DONE - tasks can
+     * reopen from DONE) and recalculates each affected dependent's eligibility. Idempotent: the
+     * previous status is read from the stored task, not supplied by the caller, so replaying the
+     * same transition twice has no further effect the second time.
+     *
+     * @throws NullPointerException if either argument is null
+     * @throws IllegalArgumentException if no task with this id exists
+     */
     // TODO(JPA): becomes a real transaction boundary once Task/TaskDependency are JPA entities (see PLAN.md Phase 3).
     @Transactional
     public void onTaskStatusChanged(UUID taskId, TaskStatus newStatus) {
@@ -352,36 +397,91 @@ public class TaskEligibilityService {
         }
     }
 
-    // Constraint-related methods below still assume Constraint status transitions
-    // and a caller-supplied previousStatus - no ConstraintRepository has been shared yet,
-    // so these remain as designed earlier.
+    // Constraint-related methods below still assume Constraint status transitions - no
+    // ConstraintRepository has been shared yet. They DO now track which constraintIds are
+    // currently open per task (openConstraintIdsByTask, PLAN.md Finding #10), specifically so a
+    // duplicate/redelivered event is a no-op instead of double-counting: every other
+    // counter-mutating path in this class guards itself this way (edgeExists() for
+    // addDependency/removeDependency, the task's own stored previousStatus for
+    // onTaskStatusChanged) and these two methods previously had no equivalent.
+    private final Map<UUID, Set<UUID>> openConstraintIdsByTask = new ConcurrentHashMap<>();
 
+    /**
+     * Records that {@code constraintId} is now open on {@code taskId}: increments
+     * {@code openConstraintCount} and recalculates eligibility. Idempotent per {@code
+     * constraintId} - calling this again for a constraint already tracked as open on this task is
+     * a no-op, so a redelivered "constraint added" event cannot inflate the counter twice.
+     *
+     * @throws NullPointerException if either id is null
+     * @throws IllegalArgumentException if no task with this id exists
+     */
     // TODO(JPA): becomes a real transaction boundary once Task/TaskDependency are JPA entities (see PLAN.md Phase 3).
     @Transactional
-    public void onConstraintAdded(UUID taskId) {
+    public void onConstraintAdded(UUID taskId, UUID constraintId) {
         Objects.requireNonNull(taskId, "taskId must not be null");
-        log.info("Constraint added on task {}", taskId);
-        withTaskLock(taskId, task -> task.setOpenConstraintCount(task.getOpenConstraintCount() + 1));
+        Objects.requireNonNull(constraintId, "constraintId must not be null");
+        log.info("Constraint {} added on task {}", constraintId, taskId);
+        withTaskLock(taskId, task -> {
+            Set<UUID> openIds = openConstraintIdsByTask.computeIfAbsent(taskId, id -> ConcurrentHashMap.newKeySet());
+            if (!openIds.add(constraintId)) {
+                log.debug("Constraint {} already tracked as open on task {} - duplicate add, no-op",
+                    constraintId, taskId);
+                return;
+            }
+            task.setOpenConstraintCount(task.getOpenConstraintCount() + 1);
+        });
     }
 
+    /**
+     * Records {@code constraintId}'s status transition on {@code taskId}, adjusting
+     * {@code openConstraintCount} and recalculating eligibility only when this actually flips the
+     * constraint between open (PENDING) and not-open (any other status) - constraints, like
+     * tasks, can reopen. Idempotent per {@code constraintId}: whether the constraint is currently
+     * tracked as open is read from {@link #openConstraintIdsByTask}, not solely trusted from the
+     * caller-supplied {@code previousStatus}, so a redelivered event that repeats a transition
+     * already applied is a no-op instead of double-adjusting the counter.
+     *
+     * @throws NullPointerException if any argument is null
+     * @throws IllegalArgumentException if no task with this id exists
+     */
     // TODO(JPA): becomes a real transaction boundary once Task/TaskDependency are JPA entities (see PLAN.md Phase 3).
     @Transactional
     public void onConstraintStatusChanged(UUID taskId,
+                                           UUID constraintId,
                                            Constraint.ConstraintStatus previousStatus,
                                            Constraint.ConstraintStatus newStatus) {
         Objects.requireNonNull(taskId, "taskId must not be null");
+        Objects.requireNonNull(constraintId, "constraintId must not be null");
         Objects.requireNonNull(previousStatus, "previousStatus must not be null");
         Objects.requireNonNull(newStatus, "newStatus must not be null");
-        log.info("Constraint on task {} changed: {} -> {}", taskId, previousStatus, newStatus);
+        log.info("Constraint {} on task {} changed: {} -> {}", constraintId, taskId, previousStatus, newStatus);
 
         boolean wasOpen = previousStatus == Constraint.ConstraintStatus.PENDING;
         boolean isOpenNow = newStatus == Constraint.ConstraintStatus.PENDING;
         if (wasOpen == isOpenNow) {
+            // Genuinely no open/close transition per the caller's own claim (e.g.
+            // SATISFIED -> WAIVED) - cheap fast path, no lock/repository touch needed.
             return;
         }
 
-        int delta = isOpenNow ? 1 : -1;
-        withTaskLock(taskId, task ->
-            task.setOpenConstraintCount(Math.max(0, task.getOpenConstraintCount() + delta)));
+        withTaskLock(taskId, task -> {
+            Set<UUID> openIds = openConstraintIdsByTask.computeIfAbsent(taskId, id -> ConcurrentHashMap.newKeySet());
+            boolean currentlyTrackedOpen = openIds.contains(constraintId);
+            if (currentlyTrackedOpen == isOpenNow) {
+                // Ground truth already reflects the target state - a duplicate/redelivered event
+                // repeating a transition already applied, not trusted solely on the caller's
+                // previousStatus claim. No-op.
+                log.debug("Constraint {} on task {} already reflects the {} -> {} transition - duplicate event, no-op",
+                    constraintId, taskId, previousStatus, newStatus);
+                return;
+            }
+            if (isOpenNow) {
+                openIds.add(constraintId);
+                task.setOpenConstraintCount(task.getOpenConstraintCount() + 1);
+            } else {
+                openIds.remove(constraintId);
+                task.setOpenConstraintCount(Math.max(0, task.getOpenConstraintCount() - 1));
+            }
+        });
     }
 }

@@ -67,9 +67,18 @@ class ConstraintTest {
     }
 
     @Test
-    void getReason_nullReason_returnsNull() {
+    void getReason_nullReason_returnsEmptyMap() {
         Constraint constraint = buildConstraint("c-1", null);
 
-        assertNull(constraint.getReason());
+        assertNotNull(constraint.getReason());
+        assertTrue(constraint.getReason().isEmpty());
+    }
+
+    @Test
+    void constructor_reasonWithArrayValue_throwsIllegalArgumentException() {
+        Map<String, Object> reason = new HashMap<>();
+        reason.put("tags", new String[] {"a", "b"});
+
+        assertThrows(IllegalArgumentException.class, () -> buildConstraint("c-1", reason));
     }
 }
