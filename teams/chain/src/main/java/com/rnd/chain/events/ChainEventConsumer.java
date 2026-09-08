@@ -126,16 +126,12 @@ public class ChainEventConsumer {
     }
 
     private String readEventType(JsonNode root) {
-        if (!root.hasNonNull("eventType")) {
-            throw new NonRetryableEventException("Message is missing required field [eventType]");
-        }
+        requirePresent(root, "eventType");
         return root.get("eventType").asText();
     }
 
     private UUID readEventId(JsonNode root) {
-        if (!root.hasNonNull("eventId")) {
-            throw new NonRetryableEventException("Message is missing required field [eventId]");
-        }
+        requirePresent(root, "eventId");
         String rawEventId = root.get("eventId").asText();
         try {
             return UUID.fromString(rawEventId);
@@ -145,9 +141,7 @@ public class ChainEventConsumer {
     }
 
     private Instant readOccurredAt(JsonNode root) {
-        if (!root.hasNonNull("occurredAt")) {
-            throw new NonRetryableEventException("Message is missing required field [occurredAt]");
-        }
+        requirePresent(root, "occurredAt");
         String rawOccurredAt = root.get("occurredAt").asText();
         try {
             return Instant.parse(rawOccurredAt);
@@ -157,10 +151,14 @@ public class ChainEventConsumer {
         }
     }
 
-    private <T> T readPayload(JsonNode root, EventHandler<T> handler) {
-        if (!root.hasNonNull("payload")) {
-            throw new NonRetryableEventException("Message is missing required field [payload]");
+    private void requirePresent(JsonNode root, String field) {
+        if (!root.hasNonNull(field)) {
+            throw new NonRetryableEventException("Message is missing required field [" + field + "]");
         }
+    }
+
+    private <T> T readPayload(JsonNode root, EventHandler<T> handler) {
+        requirePresent(root, "payload");
         try {
             return objectMapper.treeToValue(root.get("payload"), handler.getPayloadType());
         } catch (Exception e) {
