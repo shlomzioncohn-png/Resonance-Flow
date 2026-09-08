@@ -158,6 +158,9 @@ public class ChainEventConsumer {
     }
 
     private <T> T readPayload(JsonNode root, EventHandler<T> handler) {
+        if (!root.hasNonNull("payload")) {
+            throw new NonRetryableEventException("Message is missing required field [payload]");
+        }
         try {
             return objectMapper.treeToValue(root.get("payload"), handler.getPayloadType());
         } catch (Exception e) {
