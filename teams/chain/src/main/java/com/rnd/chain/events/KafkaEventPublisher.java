@@ -39,7 +39,9 @@ public class KafkaEventPublisher implements EventPublisher {
                                ChainEventTopicsProperties topicsProperties) {
         this.kafkaTemplate = kafkaTemplate;
         this.objectMapper = objectMapper;
-        this.eventTypeToTopic = topicsProperties.topics();
+        this.eventTypeToTopic = topicsProperties.topics() != null
+                ? Map.copyOf(topicsProperties.topics())
+                : Map.of();
     }
 
     @Override
