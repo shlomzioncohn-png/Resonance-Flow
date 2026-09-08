@@ -61,35 +61,29 @@ jobs:
         with:
           cluster_name: ${{ inputs.service_name }}-test-postgres
 
-      - name: Install yq
-        if: inputs.service_name == 'inbox'
-        run: |
-          sudo curl -sL -o /usr/local/bin/yq https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
-          sudo chmod +x /usr/local/bin/yq
-
       - name: Deploy chart's Postgres dependency into kind
         if: inputs.service_name == 'inbox'
         working-directory: ${{ github.workspace }}
         run: |
           helm dependency build "$CHART_DIR"
-          COMPONENTS=$(yq eval '.components | keys | .[]' "$CHART_VALUES")
-          NULL_ARGS=()
-          for c in $COMPONENTS; do
-            # templates/service-inbox/configmap.yaml dereferences .Values.components.inbox
-            # unconditionally (no range/nil-guard), unlike every other component which is
-            # only ever touched inside a `range .Values.components` loop - so deleting the
-            # inbox key with --set components.inbox=null crashes the whole render with
-            # "nil pointer evaluating interface {}.enabled". Disabling it instead of
-            # deleting it keeps the key present (as an actual map) with enabled: false.
-            if [ "$c" = "inbox" ]; then
-              NULL_ARGS+=(--set "components.inbox.enabled=false")
-            else
-              NULL_ARGS+=(--set "components.${c}=null")
-            fi
-          done
+          # This release only exists to give the test job a real Postgres - no
+          # component pods, no kafka/minio. Every components.<x>.enabled defaults
+          # true in the base values.yaml, so all seven need disabling explicitly
+          # (this list is fixed, not data-driven per service, unlike the smoke-test
+          # install below - so a static --set list beats re-deriving it with yq).
+          # components.inbox stays a present map with enabled: false rather than
+          # null, since templates/service-inbox/configmap.yaml dereferences
+          # .Values.components.inbox unconditionally (no range/nil-guard) and
+          # --set components.inbox=null crashes the render.
           helm upgrade --install ci-postgres "$CHART_DIR" \
             -f "$CHART_VALUES" \
-            "${NULL_ARGS[@]}" \
+            --set components.mind.enabled=false \
+            --set components.lens-bff.enabled=false \
+            --set components.bridge.enabled=false \
+            --set components.lens-frontend.enabled=false \
+            --set components.chain.enabled=false \
+            --set components.inbox.enabled=false \
+            --set components.lens-gateway.enabled=false \
             --set kafka.enabled=false \
             --set minio.enabled=false \
             --namespace ci-postgres --create-namespace \
@@ -207,23 +201,18 @@ jobs:
       - name: Fetch chart dependencies
         run: helm dependency build "$CHART_DIR"
 
-      - name: Install yq
-        run: |
-          sudo curl -sL -o /usr/local/bin/yq https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
-          sudo chmod +x /usr/local/bin/yq
-
       - name: Deploy chart to cluster (smoke test)
         run: |
-          helm dependency build "$CHART_DIR"
           SERVICE="${{ inputs.service_name }}"
-          OTHER_COMPONENTS=$(yq eval ".components | keys | .[] | select(. != \"${SERVICE}\")" "$CHART_VALUES")
-          NULL_ARGS=()
-          for c in $OTHER_COMPONENTS; do
-            NULL_ARGS+=(--set "components.${c}=null")
-          done
+
+          # values/values-<service>.yaml already enables only this service's
+          # component plus the shared infra subcharts it actually depends on
+          # (see teams/relay/helm/resonance-flow/README.md) - layering it over
+          # the base values.yaml is the per-team smoke-test install, no need
+          # to recompute which components/subcharts to disable here.
           helm upgrade --install "$SERVICE" "$CHART_DIR" \
             -f "$CHART_VALUES" \
-            "${NULL_ARGS[@]}" \
+            -f "$CHART_DIR/values/values-${SERVICE}.yaml" \
             --set components.${SERVICE}.image.repository="$SERVICE" \
             --set components.${SERVICE}.image.tag=local \
             --set components.${SERVICE}.image.pullPolicy=Never \
