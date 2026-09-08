@@ -207,6 +207,28 @@ jobs:
             --namespace "$SERVICE" --create-namespace \
             --wait --timeout 420s
 
+      - name: Diagnose deploy failure
+        if: failure() && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+        run: |
+          SERVICE="${{ inputs.service_name }}"
+          echo "::group::kubectl get pods -o wide"
+          kubectl -n "$SERVICE" get pods -o wide
+          echo "::endgroup::"
+          echo "::group::kubectl describe pods"
+          kubectl -n "$SERVICE" describe pods
+          echo "::endgroup::"
+          echo "::group::kubectl get events (sorted)"
+          kubectl -n "$SERVICE" get events --sort-by=.lastTimestamp
+          echo "::endgroup::"
+          for pod in $(kubectl -n "$SERVICE" get pods -l app.kubernetes.io/component="$SERVICE" -o jsonpath='{.items[*].metadata.name}'); do
+            echo "::group::kubectl logs $pod (current)"
+            kubectl -n "$SERVICE" logs "$pod" --all-containers --tail=200 || true
+            echo "::endgroup::"
+            echo "::group::kubectl logs $pod (previous, if it restarted)"
+            kubectl -n "$SERVICE" logs "$pod" --all-containers --previous --tail=200 || true
+            echo "::endgroup::"
+          done
+
       - name: Smoke test
         if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
         run: |
