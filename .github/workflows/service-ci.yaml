@@ -75,7 +75,17 @@ jobs:
           COMPONENTS=$(yq eval '.components | keys | .[]' "$CHART_VALUES")
           NULL_ARGS=()
           for c in $COMPONENTS; do
-            NULL_ARGS+=(--set "components.${c}=null")
+            # templates/service-inbox/configmap.yaml dereferences .Values.components.inbox
+            # unconditionally (no range/nil-guard), unlike every other component which is
+            # only ever touched inside a `range .Values.components` loop - so deleting the
+            # inbox key with --set components.inbox=null crashes the whole render with
+            # "nil pointer evaluating interface {}.enabled". Disabling it instead of
+            # deleting it keeps the key present (as an actual map) with enabled: false.
+            if [ "$c" = "inbox" ]; then
+              NULL_ARGS+=(--set "components.inbox.enabled=false")
+            else
+              NULL_ARGS+=(--set "components.${c}=null")
+            fi
           done
           helm upgrade --install ci-postgres "$CHART_DIR" \
             -f "$CHART_VALUES" \
