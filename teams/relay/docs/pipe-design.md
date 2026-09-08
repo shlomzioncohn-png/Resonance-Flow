@@ -1,4 +1,4 @@
-# The pipe: Kafka → SSE for Resonance Flow
+# The pipe: Kafka → WebSocket for Resonance Flow
 
 **Backend design doc · v1**
 
@@ -26,6 +26,7 @@ How an urgency signal gets from the moment it's computed to the moment it lands 
 - [08 — Isolation & sensitive data](#08-isolation--sensitive-data)
 - [09 — Observability & test plan](#09-observability--test-plan)
 - [10 — Decisions & open questions](#10-decisions--open-questions)
+- [11 — Configuration](#11--configuration)
 
 ---
 
@@ -33,16 +34,16 @@ How an urgency signal gets from the moment it's computed to the moment it lands 
 
 The product answers one question — given X minutes free, what's the most urgent thing to do. Nobody is watching LENS wait for a ping the instant a task changes; the bar is lower and more useful than that: **the screen should never need a manual refresh to be right.**
 
-The Pipe is what makes that true. It consumes processed task-notification events from Kafka and fans them out to LENS over Server-Sent Events.
+The Pipe is what makes that true. It consumes processed task-notification events from Kafka and fans them out to LENS over WebSocket.
 
 The current flow has two Kafka stages:
 
-1. The existing service consumes raw task events from the raw task-events topic.
-2. A **Processing Module inside the existing service** calculates the urgency information and creates a `TaskNotification`.
+1. The existing service consumes `TaskNotification` from the `resonance.task-events-notifications` topic.
+2. A **Processing Module inside the existing service** calculates things in `TaskNotification`.
 3. The service publishes the resulting notification to `resonance.task-notifications`.
-4. The Pipe consumes `resonance.task-notifications` and delivers relevant notifications to connected LENS clients over SSE.
+4. The Pipe consumes `resonance.task-notifications` and delivers relevant notifications to connected LENS clients over WebSocket.
 
-The Pipe itself is deliberately kept separate from the task-processing logic. Its responsibility starts at `resonance.task-notifications` and ends at the client's SSE connection.
+The Pipe itself is deliberately kept separate from the task-processing logic. Its responsibility starts at `resonance.task-events-notifications` and ends at the client's WebSocket connection.
 
 This design intentionally avoids Redis. Kafka provides the durable replay source, while full-topic fan-out removes the need for cross-pod routing.
 
@@ -50,146 +51,74 @@ This design intentionally avoids Redis. Kafka provides the durable replay source
 
 ## 01 — Where the pipe sits
 
-The current-stage architecture is:
-
-```text
-Raw Task Events
-       │
-       ▼
-Existing Service
-       │
-       ▼
-Processing Module
-       │
-       ├── calculate urgency
-       ├── determine push policy
-       └── create TaskNotification
-       │
-       ▼
-Kafka: resonance.task-notifications
-       │
-       │ full fan-out
-       ├───────────────┬───────────────┬───────────────┐
-       ▼               ▼               ▼
-   Pipe Pod A       Pipe Pod B      Pipe Pod C
-   pipe-pod-a       pipe-pod-b      pipe-pod-c
-       │               │               │
-       ▼               ▼               ▼
- local SSE map     local SSE map    local SSE map
-       │               │               │
-       ▼               ▼               ▼
-   LENS Client      LENS Client     LENS Client
-```
-
 The Processing Module is **not a separate service at this stage**. It is a module inside the existing service responsible for consuming raw task events, performing the required calculations, and publishing the stable `TaskNotification` contract.
 
 A future extraction into a dedicated scoring service remains possible, but is not part of the current deployment.
 
-The transport is **SSE, not a WebSocket**, because the traffic is one-directional — the client never needs to push data back over this channel. That buys three things a WebSocket wouldn't:
+The transport is based on WebSockets, despite the current traffic being primarily one-directional (server-to-client). While Server-Sent Events (SSE) offer a lightweight HTTP-native option, adopting WebSockets as the core transport layer provides three key advantages:
 
-- it rides plain HTTP, so it survives the proxies and load balancers already in front of every other endpoint;
-- browsers reconnect it natively;
-- and it carries `Last-Event-ID` as a first-class header, which is the exact hook the offline catch-up mechanism depends on.
+1. Industry Standard & Maintainability: WebSockets are widely adopted and standardized across modern backend ecosystems, making maintenance, onboarding, and infrastructure monitoring straightforward for the engineering team;
+
+2. Future-Proof Architecture: Establishing a full-duplex socket from day one eliminates the need for architectural refactoring when bidirectional communication features are introduced down the road;
+
+3. Unified Protocol: Utilizing a single protocol for real-time messaging simplifies client-side state management and streamlines edge routing.
 
 ### High-level flow
 
 ```text
-Raw Task Events
-      │
-      ▼
-Existing Service
-      │
-      ▼
-Processing Module
-      │
-      │ calculate urgency
-      │ create TaskNotification
-      ▼
-Kafka: resonance.task-notifications
-      │
-      │ full fan-out
-      ├──────────────┬──────────────┬──────────────┐
-      ▼              ▼              ▼
-   Pod A           Pod B           Pod C
-   full topic      full topic      full topic
-      │              │              │
-      ▼              ▼              ▼
- local map        local map        local map
-      │
-      ├── match ───────▶ SSE ──▶ LENS
-      │
-      └── no match ────▶ drop
+               ┌─────────────────────────────────────────┐
+               │         Kafka Cluster                   │
+               └────────────────────┬────────────────────┘
+                                    │
+                                    │  1. Inbound Notification Topic
+                                    ▼
+                      ┌───────────────────────────┐
+                      │   Your Processing Service │
+                      │ ┌───────────────────────┐ │
+                      │ │   Processing Module   │ │  
+                      │ │ (Calculations/Logic)  │ │      
+                      │ └───────────────────────┘ │
+                      └─────────────┬─────────────┘
+                                    │
+                                    │  2. Outbound Processed Topic
+                                    ▼
+               ┌─────────────────────────────────────────┐
+               │         Kafka Cluster                   │
+               └────┬──────────────────┬─────────────┬───┘
+                    │                  │             │
+                    │  3. Full Fan-Out (Consumers)   │
+                    ▼                  ▼             ▼        
+                  Pod A           Pod B           Pod C
+                  full topic      full topic      full topic
+                        │              │              │
+                        ▼              ▼              ▼
+                  local map        local map        local map
+                        │
+                        ├── match ───────▶ WS ──▶ LENS
+                        │
+                        └── no match ────▶ drop
 ```
 
-A REST poll endpoint covers clients that cannot hold a long-lived SSE connection.
+A REST poll endpoint covers clients that cannot hold a long-lived WebSocket connection.
 
-For reconnects, the client supplies `Last-Event-ID` and the receiving pod can recover missed events from its local ring buffer or directly from Kafka.
+For reconnects, the client supplies the last received event ID (e.g., via a reconnection message payload or query parameter), and the receiving pod can recover missed events from its local ring buffer or directly from Kafka.
 
 ---
 
 ## 02 — The topic contract
 
-### 2.1 Raw task-events topic
-
-The raw topic contains the original task lifecycle events.
-
-These events are intended for task processing and may contain information that is not relevant to the notification delivery layer.
-
-The raw topic is keyed according to the task-event pipeline's requirements.
-
-The Pipe does **not** consume this topic directly for SSE delivery.
-
-Instead, the Processing Module consumes the raw events and converts the relevant information into the stable notification contract described below.
-
-### 2.2 Notification topic
-
-The service publishes a separate topic:
+The service publishes a topic:
 
 `resonance.task-notifications`
 
-This topic is intentionally different from the raw task-events topic.
-
-There are two important differences:
-
-1. **Partitioning / key**
+**Partitioning / key**
 
    The notification topic is keyed by:
 
-   `tenant_id:user_id`
+   `org_id:user_id`
 
    This gives Kafka ordering for events belonging to the same user.
 
-2. **Data shape**
-
-   The notification topic contains only the information required by the notification delivery layer and the client.
-
-   It does not carry the full raw task-event payload.
-
-This keeps the delivery contract narrow and stable even if the internal task-event schema changes.
-
-### Why a separate topic, not extra fields on the raw topic?
-
-1. **Decoupling** — task-lifecycle schema changes do not directly become delivery-pipe schema changes.
-2. **Partitioning** — the notification topic can be keyed for per-user ordering.
-3. **Minimalism** — the notification topic stays small, making replay inexpensive.
-
-### Current processing flow
-
-```text
-Raw Task Event
-      │
-      ▼
-Processing Module
-      │
-      ├── calculate urgency_score
-      ├── determine push_policy
-      └── build TaskNotification
-      │
-      ▼
-Kafka: resonance.task-notifications
-```
-
-The Processing Module is currently part of the existing service.
 
 ### Schema — v1
 
@@ -197,7 +126,7 @@ The Processing Module is currently part of the existing service.
 // resonance.task-notifications, v1
 message TaskNotification {
   string event_id = 1;                 // UUID, minted by producer — dedup key
-  string tenant_id = 2;                // partition key (with user_id)
+  string org_id = 2;                   // partition key (with user_id)
   string user_id = 3;                  // recipient / assignee
   string task_id = 4;
   EventType event_type = 5;            // what happened
@@ -210,26 +139,19 @@ message TaskNotification {
 ```
 
 ```protobuf
-enum EventType {
-  TASK_CREATED = 0;
-  TASK_STATUS_CHANGED = 1;
-  TASK_TIME_ESTIMATE_UPDATED = 2;
-  TASK_PRIORITY_RECALCULATED = 3;
-}
-
 enum PushPolicy {
-  PUSH_ACTIVITY = 0;       // deliver immediately as its own SSE event
+  PUSH_ACTIVITY = 0;       // deliver immediately as its own WebSocket message
   PUSH_REFRESH_ONLY = 1;   // coalesced into a refresh signal
 }
 ```
 
 | Decision | Value | Why |
 |---|---|---|
-| Partition key | `tenant_id:user_id` | Every event for one user lands in one partition, giving per-user ordering |
+| Partition key | `org_id:user_id` | Every event for one user lands in one partition, giving per-user ordering |
 | Dedup key | `event_id` | Producer retries may create another Kafka record with a new offset but the same logical event |
 | Resume token | partition offset | Assigned by Kafka |
 | Push decision | `push_policy` | Explicitly supplied by the producer rather than inferred by the Pipe |
-| Retention | 7 days *(proposed)* | Covers expected offline periods while keeping replay bounded |
+| Retention | 7 days *(proposed)* | Covers expected offline periods while keeping replay bounded — see [§11](#11--configuration) |
 
 ---
 
@@ -249,10 +171,10 @@ This keeps the classification with the component that knows whether the change i
 
 A new event type can therefore be introduced without requiring the Pipe to be redeployed just to understand its delivery behavior.
 
-| `push_policy` | On the wire | Typical event |
+| `push_policy` | On the wire |
 |---|---|---|
-| `PUSH_ACTIVITY` | Pushed immediately as its own SSE event | `TASK_CREATED`, `TASK_STATUS_CHANGED` |
-| `PUSH_REFRESH_ONLY` | Not pushed individually; marks the user's rollup dirty | `TASK_TIME_ESTIMATE_UPDATED`, `TASK_PRIORITY_RECALCULATED` |
+| `PUSH_ACTIVITY` | Pushed immediately as its own WebSocket message |
+| `PUSH_REFRESH_ONLY` | Not pushed individually; marks the user's rollup dirty |
 
 ### Refresh coalescing
 
@@ -292,34 +214,22 @@ A hard ceiling is applied so a continuously changing user still receives a bound
 
 ### The problem
 
-At any moment there can be thousands of live SSE connections spread across many pods behind one Gateway/LB.
+At any moment there can be thousands of live WebSocket connections spread across many pods behind one Gateway/LB.
 
 A Kafka notification is addressed to a specific user, but that user's browser can be connected to any Pipe pod.
 
 The design therefore needs to deliver the notification to the correct connection without requiring pods to know about each other.
 
-### Two ways to solve it
+To see the decision table with the options and trade-offs go to `kafka-relay-consumption-strategy.md`
 
-#### Option A — shared router
-
-One pod receives the Kafka message, looks up a shared registry of:
-
-```text
-user → pod
-```
-
-and forwards the message to the correct pod.
-
-This requires shared state such as Redis.
-
-#### Option B — full fan-out per pod — chosen
+#### full fan-out per pod — chosen
 
 Every Pipe pod independently consumes the entire `resonance.task-notifications` topic.
 
 Each pod maintains only its own local connection map:
 
 ```text
-user_id → active SSE connection
+user_id → active WebSocket connection
 ```
 
 When a message arrives:
@@ -349,9 +259,9 @@ Therefore Redis is not required for either replay or routing.
 ### How full fan-out works
 
 1. The Processing Module creates a `TaskNotification`.
-2. The service publishes it to `resonance.task-notifications`, keyed by `tenant_id:user_id`.
+2. The service publishes it to `resonance.task-notifications`, keyed by `org_id:user_id`.
 3. **Every Pipe pod** consumes that same Kafka record using its own consumer group.
-4. Each pod checks its own local `user_id → SSE connection` map.
+4. Each pod checks its own local `user_id → WebSocket connection` map.
 5. A pod with no matching connection drops the message.
 6. The pod holding the user's connection pushes the event to the client.
 
@@ -370,7 +280,7 @@ Kafka: resonance.task-notifications
               User X
                   │
                   ▼
-                 SSE
+                  WS
 ```
 
 ### What this model does not need
@@ -403,7 +313,7 @@ The workload therefore uses a normal Kubernetes `Deployment`, not a `StatefulSet
 |---|---|---|
 | Workload kind | `Deployment` | Pods are interchangeable |
 | Consumer group id | `pipe-${POD_NAME}` | Each pod independently consumes the full topic |
-| Autoscaling | HPA on active SSE connections/pod | Connection-bound workload |
+| Autoscaling | HPA on active WebSocket connections/pod | Connection-bound workload |
 | Rolling update | `maxUnavailable: 0`, `maxSurge: 25%` | Avoid intentionally reducing capacity |
 | Shutdown | `terminationGracePeriodSeconds: 30` | Stop new connections and drain existing streams |
 | Readiness probe | Consumer-attached check | Do not route clients before Kafka consumption is active |
@@ -444,7 +354,7 @@ Every pod independently reads the entire topic.
 
 A crashed pod loses only ephemeral state:
 
-- its SSE connections;
+- its WebSocket connections;
 - its local connection map;
 - its optional in-memory replay buffer.
 
@@ -486,7 +396,7 @@ Kafka retention is the durable recovery mechanism.
 
 The pod can seek to the partition offset immediately after the client's last received event, replay forward, and then resume live consumption.
 
-After replay, the connection rejoins the normal live SSE path.
+After replay, the connection rejoins the normal live WebSocket path.
 
 ### 2 · Reconnect thundering herd — availability
 
@@ -517,7 +427,7 @@ A producer retry can create the same logical event twice with different Kafka of
 
 **Fix:**
 
-- `tenant_id:user_id` provides per-user partition ordering;
+- `org_id:user_id` provides per-user partition ordering;
 - `event_id` provides logical-event identity;
 - a small per-user recently-seen set is used for deduplication.
 
@@ -537,7 +447,7 @@ Kafka offsets alone cannot identify retries because the retry receives a new off
 
 ### 6 · Pod crash & recovery — no durable data loss
 
-**Cause:** A pod is killed while serving an SSE connection.
+**Cause:** A pod is killed while serving a WebSocket connection.
 
 **Fix:**
 
@@ -547,7 +457,7 @@ Nothing durable lives exclusively on the pod.
 Pod crash
     │
     ▼
-SSE connection lost
+WebSocket connection lost
     │
     ▼
 Client reconnects
@@ -564,7 +474,7 @@ Any available Pipe Pod
 dedup
     │
     ▼
-live SSE
+live WebSocket
 ```
 
 ### Important: Consumer offsets are not the recovery mechanism
@@ -584,7 +494,7 @@ Kafka partition offset
       ↓
 replay
       ↓
-live SSE
+live WebSocket
 ```
 
 This keeps Kafka consumption state separate from client delivery state.
@@ -603,44 +513,7 @@ OOMKill, node eviction/preemption, and SIGKILL past the `terminationGracePeriodS
 SIGTERM received
       │
       ▼
-drain SSE connections
-      │
-      ▼
-delete own consumer group
-      │
-      ▼
-process exits
-```
-
-- on `SIGTERM`, after streams have drained but before exit, the pod calls `AdminClient.deleteConsumerGroups()` on its own group id;
-- an hourly `CronJob` lists all `pipe-*` groups, describes them, and deletes any with `GroupState == EMPTY`;
-- the sweep is safe without a grace window — group ids are pod-name-derived and never reused, so an empty group is orphaned, not mid-restart;
-- the sweep is idempotent (`concurrencyPolicy: Forbid`; deleting an already-gone group is a no-op);
-- the sweep uses a scoped ACL (`DELETE` on `Group` resource, `pipe-*` pattern only).
-
-The graceful path and the sweep are not redundant. The graceful path covers the common case — deploys and scale-downs — and keeps steady-state clutter near zero. The sweep is the backstop for every non-graceful exit, which the graceful path cannot reach by definition.
-
-No committed offsets or delivery state are affected either way — this cleans up group registration only. The recovery mechanism in §06.6 (`Last-Event-ID` + Kafka replay) is unrelated and untouched.
-
-Confirm whether the broker already expires empty groups with no committed offsets on its own (version/config-dependent) — if so, the sweep may only need to catch what the broker's own expiry misses.
-
----
-
-### 7 · Orphaned consumer group metadata — operational cleanliness
-
-**Cause:** Each Pipe pod runs its own throwaway consumer group (`pipe-${POD_NAME}`).
-
-On a clean shutdown — rolling deploy, HPA scale-down, manual pod delete — the pod has an opportunity to remove its own group before exiting.
-
-OOMKill, node eviction/preemption, and SIGKILL past the `terminationGracePeriodSeconds` window give the process no such opportunity. The group's metadata is left registered on the broker with no owner, and since pod names are never reused, nothing ever comes back to claim it.
-
-**Fix:**
-
-```text
-SIGTERM received
-      │
-      ▼
-drain SSE connections
+drain WebSocket connections
       │
       ▼
 delete own consumer group
@@ -667,27 +540,29 @@ Confirm whether the broker already expires empty groups with no committed offset
 
 | Endpoint | Purpose | Notes |
 |---|---|---|
-| `GET /api/v1/events/stream` | Main SSE stream | `Last-Event-ID` optional; user/tenant resolved from auth token |
+| `GET /api/v1/events/stream` (WebSocket upgrade) | Main WebSocket stream | `Last-Event-ID` sent as query param or first client frame on connect; user/tenant resolved from auth token |
 | `GET /api/v1/events/sync?since=` | REST catch-up / polling fallback | Same dedup rules apply |
 | `GET /healthz` | Liveness | Process up |
 | `GET /readyz` | Readiness | Kafka consumer attached and not critically lagging |
 
-### SSE connection flow
+### WebSocket connection flow
 
 ```text
 Browser
    │
    │ GET /api/v1/events/stream
-   │ Last-Event-ID: <optional>
+   │ Upgrade: websocket
+   │ Connection: Upgrade
+   │ (optional) Last-Event-ID sent on connect
    ▼
 Gateway / LB
    │
    ▼
 Any Pipe Pod
    │
-   ├── register user_id → SSE connection
+   ├── register user_id → WebSocket connection
    │
-   └── start delivery
+   └── start delivery (bidirectional; pings/pongs for keepalive)
 ```
 
 The Gateway does not need to know which pod previously served the user.
@@ -699,7 +574,7 @@ The Gateway does not need to know which pod previously served the user.
 The Gateway authenticates every connection and resolves:
 
 ```text
-tenant_id
+org_id
 user_id
 ```
 
@@ -710,7 +585,7 @@ A client cannot request another user's stream by supplying a different user ID.
 The notification topic is keyed by:
 
 ```text
-tenant_id:user_id
+org_id:user_id
 ```
 
 which also provides per-user ordering.
@@ -733,7 +608,7 @@ No meeting, email, chat, or other large raw payload is sent through the notifica
 
 Track at minimum:
 
-- active SSE connections per pod;
+- active WebSocket connections per pod;
 - Kafka consumer lag per partition;
 - replay fallback rate;
 - dedup-hit rate;
@@ -767,7 +642,7 @@ TaskNotification
   ↓
 Pipe
   ↓
-SSE
+WebSocket
 ```
 
 and:
@@ -781,7 +656,7 @@ Last-Event-ID
     ↓
 replay
     ↓
-live SSE
+live WebSocket
 ```
 
 #### Chaos test
@@ -802,7 +677,7 @@ Kill a Pipe pod while clients are connected and verify that:
 
 #### Processing location
 
-The urgency calculation and `TaskNotification` creation are currently implemented as a **module inside the existing service**.
+The calculation of `TaskNotification` is currently implemented as a **module inside the existing service**.
 
 It is not a separate service at this stage.
 
@@ -814,11 +689,11 @@ The Pipe consumes:
 
 `resonance.task-notifications`
 
-The topic is separate from the raw task-events topic.
+The topic is separate from the `resonance.task-events-notifications` topic.
 
 #### Partition key
 
-`tenant_id:user_id`
+`org_id:user_id`
 
 This provides per-user ordering through Kafka partition ordering.
 
@@ -856,8 +731,43 @@ The per-pod ring buffer is only an optimization for small replay gaps.
 
 ### Open questions
 
-- **Partition count** for `resonance.task-notifications` — proposing 12 to start; needs a real concurrent-user estimate.
-- **Retention window** — 7 days proposed; confirm against expected maximum offline duration.
+- **Partition count** for `resonance.task-notifications` — proposing 12 to start; needs a real concurrent-user estimate. Tracked in [§11](#11--configuration).
+- **Retention window** — 7 days proposed; confirm against expected maximum offline duration. Tracked in [§11](#11--configuration).
 - **HPA target connections/pod** — needs a load test against the real per-connection memory footprint.
 - **Read amplification threshold** — define the Kafka read-volume threshold at which full-topic fan-out should be reconsidered.
 - **Future extraction of Processing Module** — only if scale or ownership makes a dedicated scoring service worthwhile.
+
+---
+
+## 11 — Configuration
+
+The numbers this doc treats as constants — topic retention, partition count, replay buffer size, and so on — should live in one config file instead of being scattered across prose here and hardcoded literals in the service. A single source makes them each swappable per-environment (e.g. shorter retention in staging) without hunting through the doc or the codebase, and without a rebuild.
+
+`teams/relay/src/main/resources/pipe-limits.yaml`, imported the same way `kafka-config.yaml` already is (`spring.config.import`, see `application.yml`):
+
+```yaml
+relay:
+  kafka:
+    topics:
+      task-notifications:
+        partitions: 12
+        retention-days: 7
+  pipe:
+    replay-buffer:
+      capacity-per-user: 200
+    websocket:
+      outbox-capacity: 32
+      heartbeat-interval-seconds: 15
+```
+
+| Constant | Value | Where it's discussed |
+|---|---|---|
+| `kafka.topics.task-notifications.partitions` | 12 *(proposed)* | §02, §10 |
+| `kafka.topics.task-notifications.retention-days` | 7 *(proposed)* | §02, §10 |
+| `pipe.replay-buffer.capacity-per-user` | 200 | §06.1 |
+| `pipe.websocket.outbox-capacity` | 32 | §06.5 |
+| `pipe.websocket.heartbeat-interval-seconds` | 15 | §05, §06.3 |
+
+Moving a value into this file doesn't settle it — partition count and retention stay marked `(proposed)` until §10's open questions are answered. It just gives them, and every other tunable, one place to be found and changed.
+
+Partition count and retention are topic-level settings; they take effect through however the topic gets provisioned (Terraform, an admin script, `kafka-topics.sh`), not through the running service. Reading `pipe-limits.yaml` as the single source for topic provisioning as well as the app's own runtime limits is the point — but wiring provisioning to read from it is separate follow-up work, not covered by this doc.
