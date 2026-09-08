@@ -64,18 +64,12 @@ a `wait-for-<name>` initContainer that blocks until that dependency's
 `host:port` is TCP-reachable.
 
 `name` must match the dependency's actual subchart name (`kafka`,
-`postgresql`, `minio`) - the host isn't a literal in `values.yaml`, it's
-computed at render time as `<release-name>-<name>` (see
-`resonance-flow.waitForDependencies` in `_helpers.tpl`), because Kafka,
-Postgres, and MinIO are Bitnami subcharts that name their own Service
-`<release-name>-<chart-name>` directly (their own chart's fullname logic,
-verified with `helm template`) - not through this chart's own
-`resonance-flow.fullname` helper, and not always under a release literally
-named "resonance-flow" (CI's smoke-test and Postgres-only test-fixture
-installs use other release names, e.g. `inbox`). If a component depends on
-one of these and its `enabled` flag is `false` for the values file in use,
-that component's pod will block in `Init:0/1` forever waiting for a Service
-that was never created.
+`postgresql`, `minio`). The host isn't a literal - it's computed at render
+time as `<release-name>-<name>` (`resonance-flow.subchartHost` in
+`_helpers.tpl`), since Bitnami subcharts name their own Service that way
+regardless of what this release is called. If a component depends on one of
+these and its `enabled` flag is `false`, its pod blocks in `Init:0/1` forever
+waiting for a Service that was never created.
 
 Currently wired up:
 

@@ -25,6 +25,8 @@ env:
   SERVICE_DIR: ${{ inputs.service_dir }}
   CHART_DIR: teams/relay/helm/resonance-flow
   CHART_VALUES: teams/relay/helm/resonance-flow/values.yaml
+  # True on the build+deploy phase (push/workflow_dispatch), not plain PR runs.
+  IS_DEPLOY_RUN: ${{ github.event_name == 'push' || github.event_name == 'workflow_dispatch' }}
 
 jobs:
   test:
@@ -39,39 +41,27 @@ jobs:
 
       - uses: azure/setup-helm@v5
 
-      # Created whenever inbox needs it for a real Postgres (every run, since
-      # its tests need one) or whenever a later step needs it for the smoke
-      # test (push/workflow_dispatch only) - one cluster serves both phases
-      # below instead of a second one being stood up from scratch later.
+      # inbox needs it every run (real Postgres for tests); others only on deploy.
       - name: Create kind cluster
-        if: inputs.service_name == 'inbox' || github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+        if: inputs.service_name == 'inbox' || env.IS_DEPLOY_RUN == 'true'
         uses: helm/kind-action@v1
         with:
           cluster_name: ${{ inputs.service_name }}-cluster
 
       - name: Fetch chart dependencies
-        if: inputs.service_name == 'inbox' || github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+        if: inputs.service_name == 'inbox' || env.IS_DEPLOY_RUN == 'true'
         run: helm dependency build "$CHART_DIR"
 
       - name: Install yq
-        if: inputs.service_name == 'inbox' || github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+        if: inputs.service_name == 'inbox' || env.IS_DEPLOY_RUN == 'true'
         run: |
           sudo curl -sL -o /usr/local/bin/yq https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
           sudo chmod +x /usr/local/bin/yq
 
-      # First half of a single release's lifecycle: install this service's own
-      # component disabled (so only the infra it depends on - here, Postgres -
-      # comes up) under the release name the smoke-test phase will later
-      # `helm upgrade` in place, instead of installing the whole chart a
-      # second time from scratch once the image exists.
-      #
-      # kafka is left at its default (enabled) here even though tests don't
-      # need it: toggling kafka.enabled false->true on the *second* install
-      # trips the Bitnami chart's "you must provide your current passwords
-      # when upgrading" guard, since disabling it here means no Secret with
-      # those passwords ever gets created for the later upgrade to find.
-      # Leaving it enabled throughout avoids the false->true transition
-      # entirely instead of working around that guard.
+      # First half of one release's lifecycle: install with the component itself
+      # disabled (only its infra deps come up); phase two below upgrades it in
+      # place. kafka stays enabled here - disabling then re-enabling on the
+      # second install trips Bitnami's "provide current passwords" guard.
       - name: Deploy chart with ${{ inputs.service_name }} disabled (infra only, for tests)
         if: inputs.service_name == 'inbox'
         run: |
@@ -86,7 +76,8 @@ jobs:
       - name: Port-forward test Postgres to localhost:5432
         if: inputs.service_name == 'inbox'
         run: |
-          kubectl -n inbox port-forward svc/inbox-postgresql 5432:5432 &
+          SERVICE="${{ inputs.service_name }}"
+          kubectl -n "$SERVICE" port-forward svc/${SERVICE}-postgresql 5432:5432 &
           for i in $(seq 1 30); do
             (echo > /dev/tcp/127.0.0.1/5432) >/dev/null 2>&1 && exit 0
             sleep 2
@@ -150,11 +141,11 @@ jobs:
         run: npm run build
 
       - name: Normalize image name to lowercase
-        if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+        if: env.IS_DEPLOY_RUN == 'true'
         run: echo "IMAGE_NAME=$(echo '${{ env.IMAGE_NAME }}' | tr '[:upper:]' '[:lower:]')" >> "$GITHUB_ENV"
 
       - name: Compute image tags (sha + semver, no latest)
-        if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+        if: env.IS_DEPLOY_RUN == 'true'
         id: tags
         run: |
           SHORT_SHA=$(git rev-parse --short=7 HEAD)
@@ -167,10 +158,10 @@ jobs:
           echo "tags=${TAGS}" >> "$GITHUB_OUTPUT"
 
       - uses: docker/setup-buildx-action@v3
-        if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+        if: env.IS_DEPLOY_RUN == 'true'
 
       - name: Build image (local, for smoke test)
-        if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+        if: env.IS_DEPLOY_RUN == 'true'
         uses: docker/build-push-action@v6
         with:
           context: ${{ inputs.service_dir }}
@@ -180,17 +171,13 @@ jobs:
           cache-to: type=gha,mode=max,scope=${{ inputs.service_name }}
 
       - name: Load image into kind
-        if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+        if: env.IS_DEPLOY_RUN == 'true'
         run: kind load docker-image ${{ inputs.service_name }}:local --name ${{ inputs.service_name }}-cluster
 
-      # Second half of the same release's lifecycle: for inbox this is a real
-      # `helm upgrade` turning the component on with the image that didn't
-      # exist during the first install above - the same path ArgoCD takes in
-      # production (upgrading an existing release), not just a fresh install.
-      # For every other service there's no prior install from this job, so
-      # `--install` makes this the one and only install, same as before.
+      # Second half: turns the component on with the now-built image. For inbox
+      # this upgrades the release from phase one; for others it's a fresh install.
       - name: Deploy chart with the built image (smoke test)
-        if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+        if: env.IS_DEPLOY_RUN == 'true'
         run: |
           SERVICE="${{ inputs.service_name }}"
 
@@ -208,7 +195,7 @@ jobs:
             --wait --timeout 420s
 
       - name: Diagnose deploy failure
-        if: failure() && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+        if: failure() && env.IS_DEPLOY_RUN == 'true'
         run: |
           SERVICE="${{ inputs.service_name }}"
           echo "::group::kubectl get pods -o wide"
@@ -230,18 +217,16 @@ jobs:
           done
 
       - name: Smoke test
-        if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+        if: env.IS_DEPLOY_RUN == 'true'
         run: |
-          # Read straight from the chart's own readinessProbe instead of a
-          # second, hand-maintained health_path input per team - one source
-          # of truth for "is this service up" instead of two that can drift.
+          # Single source of truth: the chart's own readinessProbe path.
           HEALTH_PATH=$(yq eval ".components.${{ inputs.service_name }}.readinessProbe.httpGet.path" "$CHART_VALUES")
           kubectl -n ${{ inputs.service_name }} port-forward svc/${{ inputs.service_name }}-resonance-flow-${{ inputs.service_name }} ${{ inputs.container_port }}:80 &
           sleep 5
           curl -sf "http://localhost:${{ inputs.container_port }}${HEALTH_PATH}"
 
       - name: Log in to GHCR
-        if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+        if: env.IS_DEPLOY_RUN == 'true'
         uses: docker/login-action@v3
         with:
           registry: ghcr.io
@@ -249,7 +234,7 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Push image
-        if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+        if: env.IS_DEPLOY_RUN == 'true'
         run: |
           IFS=',' read -ra TAG_LIST <<< "${{ steps.tags.outputs.tags }}"
           for t in "${TAG_LIST[@]}"; do

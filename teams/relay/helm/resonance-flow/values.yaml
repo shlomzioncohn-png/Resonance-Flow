@@ -271,12 +271,7 @@ components:
         path: /actuator/health/liveness
         port: http
       periodSeconds: 5
-      # CI's kind cluster runs Flyway+Hikari+Kafka-consumer bootstrap on a
-      # resource-constrained runner, already sharing the node with Postgres
-      # and Kafka - a live run there took longer than the 200s (40*5s) this
-      # used to allow, so the container got restart-looped before it ever
-      # finished starting. 300s (60*5s) matches the ~186s observed locally
-      # plus real margin for a slower/contended CI node.
+      # 300s budget - CI's constrained runner needs more than the ~186s observed locally.
       failureThreshold: 60
     livenessProbe:
       httpGet:
@@ -297,7 +292,6 @@ components:
     config:
       data:
         datasource:
-          port: 5432
           database: resonance_flow
           username: postgres
           password: postgres
