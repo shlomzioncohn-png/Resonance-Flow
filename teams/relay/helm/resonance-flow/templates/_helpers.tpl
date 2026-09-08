@@ -92,6 +92,24 @@ reachable before its main container starts.
 {{- end }}
 
 {{/*
+Kafka SASL client username / JAAS config string, derived from kafka.sasl.client.users
+and kafka.sasl.client.passwords - the same values that seed the Kafka subchart's own
+auto-generated Secret (see charts/kafka/templates/secrets.yaml). Every component that
+talks to Kafka should render its credentials through these instead of duplicating the
+username/password as its own constant - that duplication is exactly what caused the
+Postgres password to drift out of sync (components.inbox.config.data.datasource.password
+vs postgresql.auth.postgresPassword) before it was caught. Takes the root context ($),
+not a scoped one, since kafka.sasl.client.* lives at the top level of Values.
+*/}}
+{{- define "resonance-flow.kafkaSaslUsername" -}}
+{{- first .Values.kafka.sasl.client.users }}
+{{- end }}
+
+{{- define "resonance-flow.kafkaSaslJaasConfig" -}}
+{{- printf "org.apache.kafka.common.security.plain.PlainLoginModule required username=\"%s\" password=\"%s\";" (first .Values.kafka.sasl.client.users) (first .Values.kafka.sasl.client.passwords) }}
+{{- end }}
+
+{{/*
 Render the env entries for a component whose config is mounted as a file
 at /etc/resonance-flow/config/config.yaml. SPRING_CONFIG_ADDITIONAL_LOCATION
 is what actually makes Spring Boot load the mounted file (processed after

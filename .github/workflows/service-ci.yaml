@@ -204,6 +204,9 @@ jobs:
 
       - uses: azure/setup-helm@v4
 
+      - name: Fetch chart dependencies
+        run: helm dependency build "$CHART_DIR"
+
       - name: Install yq
         run: |
           sudo curl -sL -o /usr/local/bin/yq https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64

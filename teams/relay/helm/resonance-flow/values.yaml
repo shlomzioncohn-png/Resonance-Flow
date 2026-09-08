@@ -283,7 +283,7 @@ components:
       failureThreshold: 3
     readinessProbe:
       httpGet:
-        path: /health
+        path: /health/ready
         port: http
       periodSeconds: 5
       failureThreshold: 3
@@ -347,16 +347,35 @@ components:
 
 kafka:
   enabled: true
+  # bitnami/kafka was pruned from Docker Hub's free tier in 2025; bitnamilegacy/kafka
+  # is the same image content, relocated by Broadcom, kept free/unmaintained.
+  image:
+    registry: docker.io
+    repository: bitnamilegacy/kafka
+  # The client listener defaults to SASL_PLAINTEXT (chart-level, not something we chose here),
+  # but nothing was ever configured to authenticate against it - every consuming service's
+  # client silently failed the handshake and retried forever without ever actually connecting
+  # or crashing (verified locally). Pinning explicit client credentials here (instead of the
+  # chart's own randomly-generated ones) so every component's mounted config can reference the
+  # same known username/password - see components.inbox.config.data.kafka.sasl below.
+  sasl:
+    client:
+      users:
+        - inbox
+      passwords:
+        - "resonance-flow-dev-sasl"
   controller:
     replicaCount: 1
     controllerOnly: false
     resources:
+      # 192Mi was OOMKilling the JVM before it finished KRaft storage formatting on
+      # startup (verified locally - combined broker+controller needs more headroom).
       requests:
         cpu: 100m
         memory: 128Mi
       limits:
-        cpu: 150m
-        memory: 192Mi
+        cpu: 500m
+        memory: 768Mi
   broker:
     replicaCount: 0
 
@@ -376,6 +395,12 @@ minio:
 postgresql:
   enabled: true
   architecture: standalone
+  # Must match components.inbox.config.data.datasource.{password,database} above -
+  # nothing else wires these two together, and the subchart otherwise generates a
+  # random password / only creates the default "postgres" database.
+  auth:
+    postgresPassword: postgres
+    database: resonance_flow
   primary:
     persistence:
       enabled: false
