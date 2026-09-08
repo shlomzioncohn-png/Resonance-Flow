@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useRef, useState } from 'react'
+import { use, useEffect, useRef, useState } from 'react'
 import Link from 'next/link'
 import { useSearchParams } from 'next/navigation'
 import Avatar from '@mui/material/Avatar'
@@ -25,7 +25,8 @@ import { DetailRow, softToneSx, statusTone } from '../../shared'
 import { getTask, type ApiTask } from '@/services/workspaceApi'
 import ChatPanel from './ChatPanel'
 
-export default function TaskDetailsPage({ params }: { params: { taskId: string } }) {
+export default function TaskDetailsPage({ params }: { params: Promise<{ taskId: string }> }) {
+  const { taskId } = use(params)
   const searchParams = useSearchParams()
   const [mode, setMode] = useState<'overview' | 'chat'>(
     searchParams.get('chat') === '1' ? 'chat' : 'overview',
@@ -36,11 +37,11 @@ export default function TaskDetailsPage({ params }: { params: { taskId: string }
 
   useEffect(() => {
     setLoading(true)
-    getTask(params.taskId)
+    getTask(taskId)
       .then(setTask)
       .catch((err) => setError(err instanceof Error ? err.message : 'Failed to load task'))
       .finally(() => setLoading(false))
-  }, [params.taskId])
+  }, [taskId])
 
   const contentRef = useRef<HTMLDivElement>(null)
   const isFirstRender = useRef(true)
