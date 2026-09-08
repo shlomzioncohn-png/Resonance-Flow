@@ -37,27 +37,65 @@ jobs:
     defaults:
       run:
         working-directory: ${{ inputs.service_dir }}
-    # Some services' @SpringBootTest integration tests need a real Postgres reachable at
-    # localhost:5432 (e.g. inbox's StructuredTaskConsumerIntegrationTest) - matches the
-    # host/db/user/password application.yml already defaults to, so no env vars needed on
-    # the test step itself. Kafka-based integration tests don't need this: they spin up an
-    # embedded broker in-process (see kafka-cluster-test-kit usage in those tests).
-    services:
-      postgres:
-        image: postgres:16-alpine
-        env:
-          POSTGRES_USER: postgres
-          POSTGRES_PASSWORD: postgres
-          POSTGRES_DB: resonance_flow
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd pg_isready
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
     steps:
       - uses: actions/checkout@v7
+
+      # inbox's @SpringBootTest integration tests need a real Postgres reachable at
+      # localhost:5432 (e.g. StructuredTaskConsumerIntegrationTest) - matches the
+      # host/db/user/password application.yml already defaults to, so no env vars needed on
+      # the test step itself. No other service's tests touch Postgres (only inbox declares
+      # a `postgres` entry under components.inbox.dependencies in the shared chart), so this
+      # is scoped to inbox specifically rather than every Java service.
+      #
+      # Rather than a hand-picked postgres:<tag> image, deploy the same `postgresql` chart
+      # dependency the shared Helm chart itself declares (teams/relay/helm/resonance-flow's
+      # Chart.yaml/values.yaml), so tests run against the same Postgres version/config the
+      # cluster actually runs - not a second, independently-drifting definition.
+      - name: Set up Helm
+        if: inputs.service_name == 'inbox'
+        uses: azure/setup-helm@v4
+
+      - name: Create kind cluster for test Postgres
+        if: inputs.service_name == 'inbox'
+        uses: helm/kind-action@v1
+        with:
+          cluster_name: ${{ inputs.service_name }}-test-postgres
+
+      - name: Install yq
+        if: inputs.service_name == 'inbox'
+        run: |
+          sudo curl -sL -o /usr/local/bin/yq https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
+          sudo chmod +x /usr/local/bin/yq
+
+      - name: Deploy chart's Postgres dependency into kind
+        if: inputs.service_name == 'inbox'
+        working-directory: ${{ github.workspace }}
+        run: |
+          helm dependency build "$CHART_DIR"
+          COMPONENTS=$(yq eval '.components | keys | .[]' "$CHART_VALUES")
+          NULL_ARGS=()
+          for c in $COMPONENTS; do
+            NULL_ARGS+=(--set "components.${c}=null")
+          done
+          helm upgrade --install ci-postgres "$CHART_DIR" \
+            -f "$CHART_VALUES" \
+            "${NULL_ARGS[@]}" \
+            --set kafka.enabled=false \
+            --set minio.enabled=false \
+            --namespace ci-postgres --create-namespace \
+            --wait --timeout 120s
+
+      - name: Port-forward test Postgres to localhost:5432
+        if: inputs.service_name == 'inbox'
+        working-directory: ${{ github.workspace }}
+        run: |
+          kubectl -n ci-postgres port-forward svc/ci-postgres-postgresql 5432:5432 &
+          for i in $(seq 1 30); do
+            (echo > /dev/tcp/127.0.0.1/5432) >/dev/null 2>&1 && exit 0
+            sleep 2
+          done
+          echo "Postgres port-forward never became reachable" >&2
+          exit 1
 
       - name: Set up Python 3.12
         if: inputs.language == 'python'
