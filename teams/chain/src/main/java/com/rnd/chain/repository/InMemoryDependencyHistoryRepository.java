@@ -12,18 +12,8 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Collectors;
 
 /**
- * In-memory implementation of {@link DependencyHistoryRepository}, backed
- * by a map of all entries plus a dedup index on (source, sourceRef).
- *
- * <p><b>Atomicity:</b> {@link #record} performs its exists-check and
- * insertion into both maps inside a single {@code synchronized} block, so
- * concurrent callers recording the same (source, sourceRef) cannot both
- * observe "it didn't exist yet".
- *
- * <p><b>Complexity:</b> {@link #findByTaskId} is O(n) over the entire
- * history (filter + sort), not O(1) or indexed by task - acceptable
- * temporarily for an in-memory stand-in, but should be revisited once a
- * real DB with an index on task_id is available.
+ * In-memory {@link DependencyHistoryRepository}. record() dedups atomically
+ * under a lock; findByTaskId() is O(n) over all entries, not indexed.
  */
 public class InMemoryDependencyHistoryRepository implements DependencyHistoryRepository {
 

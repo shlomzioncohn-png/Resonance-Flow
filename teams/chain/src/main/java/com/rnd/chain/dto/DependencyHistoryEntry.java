@@ -5,14 +5,8 @@ import java.util.Objects;
 import java.util.UUID;
 
 /**
- * Immutable audit record of a single dependency-graph change (an edge
- * added or removed). Deliberately protocol-agnostic - no dependency on
- * REST/Kafka/persistence types, so the same representation applies
- * regardless of how it was recorded or how it will later be published.
- *
- * <p>This DTO only validates that its fields are structurally present; the
- * business rule that {@code sourceRef} is required for {@code MIND}/
- * {@code SYSTEM} sources is enforced by the service layer, not here.
+ * Immutable, protocol-agnostic audit record of one dependency-graph change.
+ * sourceRef-required-for-MIND/SYSTEM is enforced in the service layer, not here.
  */
 public final class DependencyHistoryEntry {
 
