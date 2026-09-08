@@ -59,6 +59,16 @@ class KafkaEventPublisherTest {
     }
 
     @Test
+    void publish_throwsEventPublishException_whenTopicsMapIsNull() {
+        ChainEventTopicsProperties nullTopics = new ChainEventTopicsProperties(null, null, null);
+        KafkaEventPublisher pub = new KafkaEventPublisher(kafkaTemplate, objectMapper, nullTopics);
+        EventEnvelope<String> event = new EventEnvelope<>("task.scheduling.updated", "corr-1", "payload");
+
+        assertThrows(EventPublishException.class, () -> pub.publish(event));
+        verifyNoInteractions(kafkaTemplate);
+    }
+
+    @Test
     void publish_doesNotThrow_whenKafkaSendFailsAsynchronously() {
         CompletableFuture<SendResult<String, String>> failedFuture = new CompletableFuture<>();
         failedFuture.completeExceptionally(new RuntimeException("Kafka is down"));

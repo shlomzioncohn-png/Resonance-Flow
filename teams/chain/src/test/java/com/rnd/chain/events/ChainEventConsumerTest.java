@@ -107,6 +107,20 @@ class ChainEventConsumerTest {
     }
 
     @Test
+    void onMessage_throwsNonRetryableException_whenPayloadIsMissing() {
+        EventHandler<TestPayload> handler = mockHandler(TEST_EVENT_TYPE);
+        ChainEventConsumer consumer = new ChainEventConsumer(objectMapper, List.of(handler), processedEventStore);
+
+        String message = String.format(
+                "{\"eventId\":\"%s\",\"eventType\":\"%s\",\"occurredAt\":\"%s\"}",
+                UUID.randomUUID(), TEST_EVENT_TYPE, Instant.now());
+
+        assertThrows(NonRetryableEventException.class, () -> consumer.onMessage(message));
+        verify(handler, never()).handle(any());
+        verify(processedEventStore, never()).tryClaim(any());
+    }
+
+    @Test
     void onMessage_throwsNonRetryableException_whenPayloadDoesNotMatchHandlerType() {
         EventHandler<TestPayload> handler = mockHandler(TEST_EVENT_TYPE);
         ChainEventConsumer consumer = new ChainEventConsumer(objectMapper, List.of(handler), processedEventStore);
