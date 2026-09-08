@@ -32,7 +32,30 @@
             <artifactId>spring-boot-starter-test</artifactId>
             <scope>test</scope>
         </dependency>
+
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-actuator</artifactId>
+        </dependency>
+
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-data-jpa</artifactId>
+        </dependency>
+
+        <!-- Placeholder embedded DB: gives Spring Boot a real DataSource so
+             DataSourceAutoConfiguration doesn't fail app startup, and so
+             @Transactional in TaskEligibilityService is a real (currently
+             no-op-in-practice) transaction manager instead of a missing one.
+             No JPA entities/repositories use this yet - swap for the real
+             DB once the team lead's decision lands, see CLAUDE.md. -->
+        <dependency>
+            <groupId>com.h2database</groupId>
+            <artifactId>h2</artifactId>
+            <scope>runtime</scope>
+        </dependency>
     </dependencies>
+
 
     <build>
         <plugins>

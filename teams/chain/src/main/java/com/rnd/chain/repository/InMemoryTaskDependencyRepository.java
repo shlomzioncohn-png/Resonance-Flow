@@ -11,9 +11,13 @@ import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
- * In-memory implementation of {@link TaskDependencyRepository}, backed by
- * a dual adjacency map instead of a single scanned list, so lookups by
- * either side of an edge are a direct map access instead of a linear scan.
+ * In-memory implementation of {@link TaskDependencyRepository}, indexed by task id in both
+ * directions (see code review finding: "TaskEligibilityService cycle-check is O(V*E) instead
+ * of O(V+E), held under the global lock"). The previous implementation stored edges as one
+ * synchronized flat list, so both findByTaskId and findByDependsOnTaskId were a full O(E) linear
+ * scan under a lock - and since TaskEligibilityService.wouldCreateCycle's DFS calls findByTaskId
+ * once per visited node, one cycle check cost O(V*E) total, all of it held under
+ * dependencyGraphLock (a de facto single-writer bottleneck that gets worse as the graph grows).
  *
  * <p><b>Invariant</b> (must hold after every {@link #save} / {@link #delete}):
  * for every dependency edge {@code A -> B} (A depends on B):
@@ -59,14 +63,11 @@ public class InMemoryTaskDependencyRepository implements TaskDependencyRepositor
 
     public InMemoryTaskDependencyRepository(List<TaskDependency> edges) {
         Objects.requireNonNull(edges, "edges must not be null");
-        for (TaskDependency edge : edges) {
-            Objects.requireNonNull(edge, "edges must not contain null elements");
-            UUID taskId = edge.getTaskId();
-            UUID dependsOnTaskId = edge.getDependsOnTaskId();
-            dependenciesByTask.computeIfAbsent(taskId, id -> ConcurrentHashMap.newKeySet())
-                    .add(dependsOnTaskId);
-            dependentsByTask.computeIfAbsent(dependsOnTaskId, id -> ConcurrentHashMap.newKeySet())
-                    .add(taskId);
+        synchronized (writeLock) {
+            for (TaskDependency edge : edges) {
+                Objects.requireNonNull(edge, "edges must not contain null elements");
+                indexEdge(edge.getTaskId(), edge.getDependsOnTaskId());
+            }
         }
     }
 
@@ -93,17 +94,9 @@ public class InMemoryTaskDependencyRepository implements TaskDependencyRepositor
     @Override
     public Optional<TaskDependency> save(TaskDependency dependency) {
         Objects.requireNonNull(dependency, "dependency must not be null");
-        UUID taskId = dependency.getTaskId();
-        UUID dependsOnTaskId = dependency.getDependsOnTaskId();
         synchronized (writeLock) {
-            Set<UUID> dependsOn = dependenciesByTask.computeIfAbsent(taskId, id -> ConcurrentHashMap.newKeySet());
-            boolean added = dependsOn.add(dependsOnTaskId);
-            if (!added) {
-                return Optional.empty();
-            }
-            dependentsByTask.computeIfAbsent(dependsOnTaskId, id -> ConcurrentHashMap.newKeySet())
-                    .add(taskId);
-            return Optional.of(dependency);
+            boolean added = indexEdge(dependency.getTaskId(), dependency.getDependsOnTaskId());
+            return added ? Optional.of(dependency) : Optional.empty();
         }
     }
 
@@ -124,6 +117,19 @@ public class InMemoryTaskDependencyRepository implements TaskDependencyRepositor
             }
             return true;
         }
+    }
+
+    /**
+     * Adds the edge to both adjacency maps. Must run under {@link #writeLock}.
+     *
+     * @return true if this was a new edge (not already present).
+     */
+    private boolean indexEdge(UUID taskId, UUID dependsOnTaskId) {
+        boolean added = dependenciesByTask.computeIfAbsent(taskId, id -> ConcurrentHashMap.newKeySet())
+                .add(dependsOnTaskId);
+        dependentsByTask.computeIfAbsent(dependsOnTaskId, id -> ConcurrentHashMap.newKeySet())
+                .add(taskId);
+        return added;
     }
 
     /**

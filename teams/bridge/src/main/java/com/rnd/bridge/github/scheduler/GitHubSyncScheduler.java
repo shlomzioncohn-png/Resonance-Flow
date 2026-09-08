@@ -8,6 +8,8 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 
+import java.time.Duration;
+
 
 @Service
 public class GitHubSyncScheduler {
@@ -40,6 +42,6 @@ public class GitHubSyncScheduler {
                     gitHubKafkaProducer.publishAll(tasks);
                 })
                 .doOnError(error -> log.error("Scheduled GitHub sync failed", error))
-                .subscribe();
+                .block(Duration.ofMinutes(10));
     }
 }

@@ -57,7 +57,7 @@ export const palette: PaletteOptions = {
   },
   grey: colorTokens.slate,
   background: {
-    default: colorTokens.slate[50],
+    default: '#ffffff',
     paper: '#ffffff',
   },
   text: {

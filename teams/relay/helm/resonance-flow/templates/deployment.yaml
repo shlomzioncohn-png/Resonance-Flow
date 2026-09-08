@@ -1,0 +1,152 @@
+{{- range $componentName, $component := .Values.components }}
+{{- if $component.enabled }}
+---
+apiVersion: apps/v1
+kind: Deployment
+
+metadata:
+  name: {{ include "resonance-flow.fullname" $ }}-{{ $componentName }}
+  labels:
+    {{- include "resonance-flow.labels" $ | nindent 4 }}
+    app.kubernetes.io/component: {{ $componentName }}
+
+spec:
+  replicas: {{ $component.replicaCount }}
+
+  selector:
+    matchLabels:
+      {{- include "resonance-flow.selectorLabels" $ | nindent 6 }}
+      app.kubernetes.io/component: {{ $componentName }}
+
+  template:
+    metadata:
+      {{- with $.Values.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+
+      labels:
+        {{- include "resonance-flow.selectorLabels" $ | nindent 8 }}
+        app.kubernetes.io/component: {{ $componentName }}
+        {{- with $.Values.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+
+    spec:
+      {{- $imagePullSecrets := $.Values.imagePullSecrets }}
+      {{- if $.Values.imagePullSecret.create }}
+      {{- $imagePullSecrets = append $imagePullSecrets (dict "name" (printf "%s-image-pull" (include "resonance-flow.fullname" $))) }}
+      {{- end }}
+      {{- with $imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+
+      serviceAccountName: {{ include "resonance-flow.serviceAccountName" $ }}
+
+      {{- with $.Values.podSecurityContext }}
+      securityContext:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+
+      {{- $dependencies := concat ($.Values.dependencies | default list) ($component.dependencies | default list) }}
+      {{- $rawInitContainers := concat ($.Values.initContainers | default list) ($component.initContainers | default list) }}
+      {{- if or $dependencies $rawInitContainers }}
+      initContainers:
+        {{- if $dependencies }}
+        {{- include "resonance-flow.waitForDependencies" $dependencies | nindent 8 }}
+        {{- end }}
+        {{- with $rawInitContainers }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      {{- end }}
+
+      containers:
+        - name: {{ $componentName }}
+
+          {{- with $.Values.securityContext }}
+          securityContext:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+
+          image: "{{ $component.image.repository }}:{{ $component.image.tag }}"
+          imagePullPolicy: {{ $component.image.pullPolicy }}
+
+          ports:
+            - name: http
+              containerPort: {{ $component.containerPort }}
+              protocol: TCP
+
+          {{- if or $component.config $component.env }}
+          env:
+            {{- if $component.config }}
+            {{- include "resonance-flow.configFilePathEnv" $ | nindent 12 }}
+              {{- end }}
+              {{- range $name, $value := $component.env }}
+            - name: {{ $name }}
+              value: {{ $value | quote }}
+               {{- end }}
+          {{- end }}
+
+          {{- with $component.startupProbe }}
+          startupProbe:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+
+          {{- with $component.livenessProbe }}
+          livenessProbe:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+
+          {{- with $component.readinessProbe }}
+          readinessProbe:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+
+          {{- with $component.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- if or $component.config $.Values.volumeMounts }}
+          volumeMounts:
+            {{- if $component.config }}
+            - name: resonance-flow-config
+              mountPath: /etc/resonance-flow/config/config.yaml
+              subPath: config.yaml
+              readOnly: true
+              {{- end }}
+              {{- with $.Values.volumeMounts }}
+              {{- toYaml . | nindent 12 }}
+              {{- end }}
+          {{- end }}
+
+      {{- if or $component.config $.Values.volumes }}
+      volumes:
+        {{- if $component.config }}
+        - name: resonance-flow-config
+          configMap:
+            name: {{ include "resonance-flow.fullname" $ }}-{{ $componentName }}-config
+          {{- end }}
+          {{- with $.Values.volumes }}
+          {{- toYaml . | nindent 8 }}
+          {{- end }}
+      {{- end }}
+
+      {{- with $.Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+
+      {{- with $.Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+
+      {{- with $.Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+
+{{- end }}
+
+{{- end }}
