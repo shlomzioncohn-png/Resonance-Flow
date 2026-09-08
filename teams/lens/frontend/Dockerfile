@@ -23,22 +23,57 @@ CMD ["npm", "run", "start"]
 FROM node:22-alpine AS development
 WORKDIR /app
 
-# Install dependencies for Playwright
+# Install system dependencies for Playwright (Alpine compatible)
 RUN apk add --no-cache \
-    chromium \
     ca-certificates \
-    fonts-noto-cjk \
-    fonts-noto-color-emoji \
-    fonts-dejavu \
-    fonts-dejavu-sans
+    curl \
+    bash \
+    python3 \
+    make \
+    g++
 
 COPY package*.json ./
-RUN npm ci
+# Configure npm with retry logic for network issues
+RUN npm config set fetch-timeout 120000 && \
+    npm config set fetch-retries 5 && \
+    npm config set fetch-retry-mintimeout 20000 && \
+    npm config set fetch-retry-maxtimeout 120000 && \
+    npm install
 
-# Install Playwright browsers
-RUN npx playwright install chromium --with-deps
+# Install Playwright browsers and system dependencies
+RUN npx playwright install-deps chromium && \
+    npx playwright install chromium
 
 COPY . .
 
 EXPOSE 3000
 CMD ["npm", "run", "dev"]
+
+# Playwright E2E test runner
+FROM node:22-alpine AS playwright
+WORKDIR /app
+
+# Install system dependencies for Playwright (Alpine compatible)
+RUN apk add --no-cache \
+    ca-certificates \
+    curl \
+    bash \
+    python3 \
+    make \
+    g++
+
+COPY package*.json ./
+# Configure npm with retry logic for network issues
+RUN npm config set fetch-timeout 120000 && \
+    npm config set fetch-retries 5 && \
+    npm config set fetch-retry-mintimeout 20000 && \
+    npm config set fetch-retry-maxtimeout 120000 && \
+    npm install
+
+# Install Playwright browsers and system dependencies
+RUN npx playwright install-deps chromium && \
+    npx playwright install chromium
+
+COPY . .
+
+CMD ["npm", "run", "test:e2e"]
