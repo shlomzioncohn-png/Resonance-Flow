@@ -1,9 +1,9 @@
-imagePullSecrets: [] 
+imagePullSecrets: []
 imagePullSecret:
-  create: false 
+  create: false
   registry: ghcr.io
-  username: "" 
-  password: "" 
+  username: ""
+  password: ""
   email: "noreply@kamatech.org"
 nameOverride: ""
 fullnameOverride: ""
@@ -254,7 +254,7 @@ components:
     image:
       repository: "ghcr.io/kamatechorg/resonance-flow/inbox"
       pullPolicy: IfNotPresent
-      tag: "placeholder"
+      tag: "d468121"
     containerPort: 8080
     service:
       type: ClusterIP
@@ -338,7 +338,6 @@ components:
       periodSeconds: 5
       failureThreshold: 3
     env: {}
-
 kafka:
   enabled: true
   # bitnami/kafka was pruned from Docker Hub's free tier in 2025; bitnamilegacy/kafka
@@ -372,7 +371,6 @@ kafka:
         memory: 768Mi
   broker:
     replicaCount: 0
-
 minio:
   enabled: true
   mode: standalone
@@ -385,7 +383,6 @@ minio:
     limits:
       cpu: 150m
       memory: 192Mi
-
 postgresql:
   enabled: true
   architecture: standalone
