@@ -28,6 +28,11 @@ data:
         baseline-on-migrate: true
       kafka:
         bootstrap-servers: {{ $cfg.kafka.bootstrapServers | quote }}
+        security:
+          protocol: SASL_PLAINTEXT
+        properties:
+          sasl.mechanism: "PLAIN"
+          sasl.jaas.config: {{ include "resonance-flow.kafkaSaslJaasConfig" $ | quote }}
         consumer:
           group-id: {{ $cfg.kafka.consumerGroupId | quote }}
           auto-offset-reset: earliest
