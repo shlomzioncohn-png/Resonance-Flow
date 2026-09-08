@@ -78,6 +78,7 @@ class ChainEventConsumerTest {
                 UUID.randomUUID(), Instant.now());
 
         assertThrows(NonRetryableEventException.class, () -> consumer.onMessage(message));
+        verify(handler, never()).handle(any());
     }
 
     @Test
