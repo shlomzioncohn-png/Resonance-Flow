@@ -1,6 +1,105 @@
 server:
   port: ${SERVER_PORT:8080}
 
+management:
+  endpoints:
+    web:
+      base-path: /
+      exposure:
+        include: health
+
 spring:
   application:
     name: bridge
+  kafka:
+    # Team shared / remote environment (do not use unless agreed):
+    #   bootstrap-servers: 3.216.80.66:9092
+    #   topic: bridge.github.tasks
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+    topic: ${KAFKA_TOPIC:bridge.test}
+    producer:
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.springframework.kafka.support.serializer.JsonSerializer
+      acks: all
+      retries: 3
+      properties:
+        spring.json.add.type.headers: false
+
+minio:
+  endpoint: ${MINIO_ENDPOINT:http://localhost:9000}
+  access-key: ${MINIO_ACCESS_KEY:minioadmin}
+  secret-key: ${MINIO_SECRET_KEY:minioadmin}
+  bucket: ${MINIO_BUCKET:bridge-raw}
+
+github:
+  api:
+    base-url: ${GITHUB_API_BASE_URL:https://api.github.com}
+    token: ${GITHUB_TOKEN:}
+  target:
+    owner: ${GITHUB_TARGET_OWNER:KamaTechOrg}
+    repo: ${GITHUB_TARGET_REPO:Resonance-Flow}
+  sync:
+    # Set to true to enable the automatic nightly GitHub to Kafka sync
+    cron:
+      enabled: ${GITHUB_SYNC_CRON_ENABLED:false}
+      expression: ${GITHUB_SYNC_CRON_EXPRESSION:0 0 2 * * ?}
+
+jira:
+  api:
+    base-url: ${JIRA_API_BASE_URL:https://example.atlassian.net}
+    token: ${JIRA_TOKEN:}
+  target:
+    project: ${JIRA_TARGET_PROJECT:}
+  sync:
+    # Set to true to enable the automatic nightly Jira to Kafka sync
+    cron:
+      enabled: ${JIRA_SYNC_CRON_ENABLED:false}
+      expression: ${JIRA_SYNC_CRON_EXPRESSION:0 0 2 * * ?}
+
+bridge:
+  # Shared by every structured lane that publishes a Task via
+  # KafkaPayloadPublisher (see esti/inbox-kafka-ingestion-contract) - one
+  # topic for every source, never a per-lane one.
+  structured-tasks-topic: ${BRIDGE_STRUCTURED_TASKS_TOPIC:bridge.structured.tasks}
+  manual-sync:
+    enabled: false
+  crm:
+    dataset: classpath:crm/synthetic-deals.json
+    # Inbox's tasks.organization_id is NOT NULL, but HubSpot (and this
+    # lane's Deal model) has no concept of it - see DealToTaskMapper's class
+    # Javadoc. Set CRM_ORGANIZATION_ID for a real org; falls back to a
+    # local placeholder for development so the app can start without it.
+    organization-id: ${CRM_ORGANIZATION_ID:local-crm-org}
+    sync:
+      # Set to true to enable the automatic daily HubSpot to Kafka sync.
+      # Off by default, same convention as github.sync.cron - an operator
+      # opts in per environment, not a code change.
+      cron:
+        enabled: ${CRM_SYNC_CRON_ENABLED:false}
+        expression: ${CRM_SYNC_CRON_EXPRESSION:0 0 3 * * ?}
+  intake:
+    raw-landed-topic: ${BRIDGE_RAW_LANDED_TOPIC:bridge.raw.landed}
+    scoping:
+      allowed-domains:
+        - kamatech.org
+      allowed-keywords: [deploy, deadline, meeting, pr, review, task, urgent, project]
+    chat:
+      session-gap-minutes: 45
+    # Per-source fixture/real switch - see plan.md. Each source can go "real" independently;
+    # "real" beans throw UnsupportedOperationException until their connector is implemented.
+    email:
+      mode: fixture
+    drive:
+      mode: fixture
+    calendar:
+      mode: fixture
+    slack:
+      mode: fixture
+    whatsapp:
+      mode: fixture
+      # Only read when mode: real. See plan.md - there's no export API, so this directory is
+      # filled manually from WhatsApp's own "Export Chat" feature.
+      import-dir: ${BRIDGE_WHATSAPP_IMPORT_DIR:}
+      # Local time zone the exporting phone was set to - WhatsApp export timestamps carry no
+      # offset, so this must match the tenant, not be assumed to be UTC.
+      zone-id: ${BRIDGE_WHATSAPP_ZONE_ID:Asia/Jerusalem}

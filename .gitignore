@@ -1,3 +1,49 @@
+# Build output
+target/
+build/
+out/
+dist/
+
+# Logs
+logs/
+
+# Java
+*.class
+*.jar
+*.war
+*.log
+
+# IntelliJ
+.idea/
+*.iml
+*.iws
+*.ipr
+
+# VS Code / Eclipse
+.vscode/
+.classpath
+.project
+.settings/
+
+# Node (Lens)
+node_modules/
+.next/
+
+# Python (Mind)
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# Env & secrets
+.env
+.env.local
+*.pem
+
+# OS
+.DS_Store
+Thumbs.db
+
 # Local Helm values overrides that may contain a personal PAT - never commit these.
 *.local.yaml
 values.local.yaml
