@@ -38,6 +38,14 @@ export function statusTone(status: string): Tone {
   return 'warning' // BLOCKED or unknown
 }
 
+/** Maps a task priority string to a display tone. Handles both API-casing (HIGH/MEDIUM/LOW) and legacy mock casing. */
+export function priorityTone(priority: string): Tone {
+  const normalised = priority.toUpperCase()
+  if (normalised === 'HIGH') return 'error'
+  if (normalised === 'MEDIUM') return 'warning'
+  return 'success' // LOW or unknown
+}
+
 export function DetailRow({ label, value }: { label: string; value: ReactNode }) {
   return (
     <Box>
