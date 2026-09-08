@@ -191,7 +191,7 @@ jobs:
             --set components.${SERVICE}.image.tag=local \
             --set components.${SERVICE}.image.pullPolicy=Never \
             --namespace "$SERVICE" --create-namespace \
-            --wait --timeout 120s
+            --wait --timeout 300s
 
       - name: Smoke test
         run: |
