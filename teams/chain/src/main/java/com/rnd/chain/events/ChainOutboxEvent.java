@@ -155,6 +155,12 @@ public class ChainOutboxEvent {
         return createdAt;
     }
 
+    // Only needed for backdating test fixtures past a retention window -
+    // createdAt is otherwise fixed at creation time by pending() above.
+    void setCreatedAt(Instant createdAt) {
+        this.createdAt = createdAt;
+    }
+
     public Instant getPublishedAt() {
         return publishedAt;
     }
