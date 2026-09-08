@@ -16,9 +16,11 @@ not part of this module yet.
 - Spring Kafka
 - Docker / Docker Compose
 
-No database is configured yet - the DB choice for the project has not been decided. All state
-(including the idempotency store described below) is in-memory only and does not survive a
-restart.
+No database is live yet in any environment - the DB choice for the project's own persistence
+(beyond the outbox groundwork below) has not been decided. All state (including the idempotency
+store described below) is in-memory only and does not survive a restart. Postgres/JPA/Flyway are
+on the classpath (see `pom.xml`) and `spring.autoconfigure.exclude` in `application.yml` disables
+them by default for exactly this reason - see "Outbox groundwork" below.
 
 Task identifiers are `java.util.UUID` for now, pending the Inbox team publishing its own task id
 type (`Task`/`TaskDependency` will switch to that type once it exists).
@@ -41,9 +43,12 @@ src/main/java/com/rnd/chain/
 │   ├── ChainEventTopicsProperties.java / ChainKafkaRetryProperties.java
 │   ├── ChainKafkaErrorHandlingConfig.java
 │   ├── ProcessedEventStore.java / InMemoryProcessedEventStore.java
+│   ├── ChainOutboxEvent.java / ChainOutboxStatus.java / ChainOutboxEventRepository.java
+│   ├── ChainOutboxWorker.java / ChainOutboxCleanupJob.java / ChainOutboxProperties.java
 │   └── payloads/
 └── config/
 src/main/resources/application.yml
+src/main/resources/db/migration/       # Flyway - chain_outbox table
 src/test/java/com/rnd/chain/
 ```
 
@@ -54,9 +59,28 @@ event ID, timestamp, correlation ID, payload).
 
 **Publishing** goes through `EventPublisher` / `KafkaEventPublisher`, which serializes an
 `EventEnvelope` and sends it to the topic configured for its event type under
-`chain.kafka.topics` in `application.yml`. Publishing is currently fire-and-forget - a failed
-publish is logged, not retried or persisted for a later attempt (no Outbox pattern yet; see
-`KafkaEventPublisher`'s TODO for the tradeoff and when this should be revisited).
+`chain.kafka.topics` in `application.yml`. `EventPublisher.publish(event)` itself is still
+fire-and-forget by design - a failed publish is logged, not retried or persisted for a later
+attempt, and business logic is not expected to know or care.
+
+### Outbox groundwork
+
+A future `@Transactional` business service that cannot tolerate `publish()`'s fire-and-forget risk
+(state committed, publish fails, no compensating action) can instead save a `ChainOutboxEvent` via
+`ChainOutboxEventRepository` in the same transaction as its own state change. `ChainOutboxWorker`
+then claims `PENDING` rows (`FOR UPDATE SKIP LOCKED`) on a schedule and publishes each one through
+`KafkaEventPublisher`'s internal synchronous path, marking the row `PUBLISHED` or scheduling a
+backed-off retry - all inside one transaction, so the business write and its outbound event can
+never diverge. `ChainOutboxCleanupJob` periodically deletes old `PUBLISHED`/`FAILED` rows.
+
+This is currently **dormant groundwork, not a live feature**: Chain has no database in production
+and no business entity of its own to write alongside an outbox row yet (see the note above). The
+entity, repository, migration, worker and cleanup job all exist and are tested (Testcontainers -
+see Tests below), but `spring.autoconfigure.exclude` in `application.yml` keeps DataSource/JPA/
+Flyway off by default, so nothing here activates - and `ChainOutboxWorker`/`ChainOutboxCleanupJob`
+are themselves `@ConditionalOnBean(ChainOutboxEventRepository.class)`, so they don't even get
+constructed while that's the case. An environment that does have Postgres clears that exclusion
+and sets `spring.datasource.*` (see `application.yml`'s comment) to turn it on for real.
 
 **Consuming** is handled by `ChainEventConsumer`, which routes each incoming message to the
 `EventHandler<T>` bean registered for its `eventType`. It is disabled by default
@@ -87,6 +111,13 @@ this service running concurrently. See its Javadoc for what a claim does and doe
 | `chain.kafka.retry.max-attempts` | Retries after the initial delivery attempt, before falling back to the DLT | `2` |
 | `chain.kafka.retry.interval-ms` | Milliseconds between retry attempts | `2000` |
 | `chain.events.processed-store` | Which `ProcessedEventStore` implementation is active | `in-memory` |
+| `spring.autoconfigure.exclude` | Set (empty) to turn on DataSource/JPA/Flyway - see "Outbox groundwork" above | DataSource/Hibernate/Flyway autoconfig excluded |
+| `chain.outbox.worker.batch-size` | Max rows `ChainOutboxWorker` claims per poll | `20` |
+| `chain.outbox.worker.poll-interval-ms` | Delay between `ChainOutboxWorker` polls | `5000` |
+| `chain.outbox.worker.max-retries` | Publish attempts before a row is marked `FAILED` | `3` |
+| `chain.outbox.worker.backoff-base-seconds` / `backoff-max-seconds` | Exponential retry backoff bounds | `10` / `120` |
+| `chain.outbox.cleanup.interval-ms` | Delay between `ChainOutboxCleanupJob` runs | `3600000` |
+| `chain.outbox.cleanup.retention-days` | How long `PUBLISHED`/`FAILED` rows are kept before deletion | `7` |
 
 ## Running locally with Maven
 
@@ -135,3 +166,9 @@ mvn test
 
 Kafka-related tests use `@EmbeddedKafka` (`spring-kafka-test`) - no external Kafka broker is
 needed to run the test suite.
+
+The outbox groundwork's `*IntegrationTest` classes under `com.rnd.chain.events`
+(`ChainOutboxEventRepositoryIntegrationTest`, `ChainOutboxCleanupJobIntegrationTest`) use
+Testcontainers to start a real Postgres - **Docker must be running locally** for those two
+specifically; every other test, including `ChainOutboxWorkerTest`'s mocked unit tests, does not
+need it.
