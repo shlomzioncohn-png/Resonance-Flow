@@ -19,11 +19,6 @@ on:
         description: "Local port used for the post-deploy smoke test port-forward"
         required: true
         type: number
-      health_path:
-        description: "HTTP path used for the smoke test health check"
-        required: false
-        type: string
-        default: /health
 
 env:
   IMAGE_NAME: ghcr.io/${{ github.repository }}/${{ inputs.service_name }}
@@ -193,11 +188,20 @@ jobs:
             --namespace "$SERVICE" --create-namespace \
             --wait --timeout 300s
 
+      - name: Install yq
+        run: |
+          sudo curl -sL -o /usr/local/bin/yq https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
+          sudo chmod +x /usr/local/bin/yq
+
       - name: Smoke test
         run: |
+          # Read straight from the chart's own readinessProbe instead of a
+          # second, hand-maintained health_path input per team - one source
+          # of truth for "is this service up" instead of two that can drift.
+          HEALTH_PATH=$(yq eval ".components.${{ inputs.service_name }}.readinessProbe.httpGet.path" "$CHART_VALUES")
           kubectl -n ${{ inputs.service_name }} port-forward svc/${{ inputs.service_name }}-resonance-flow-${{ inputs.service_name }} ${{ inputs.container_port }}:80 &
           sleep 5
-          curl -sf http://localhost:${{ inputs.container_port }}${{ inputs.health_path }}
+          curl -sf "http://localhost:${{ inputs.container_port }}${HEALTH_PATH}"
 
       - name: Log in to GHCR
         uses: docker/login-action@v3
