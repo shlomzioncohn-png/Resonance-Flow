@@ -599,6 +599,10 @@ this plan's current scope — treat that as a possible outcome, not a blocker to
 
 ## 4a. Round 4 Findings (new external review pass, post-#9)
 
+**Status: all 8 findings below (#10-#17) implemented 2026-09-08** - see §8 traceability table
+for per-finding commit/test detail, and README.md's "2026-09-08, PR #114 fifth review round"
+section for the full user-facing summary.
+
 ### Finding #10 — `onConstraintAdded`/`onConstraintStatusChanged` have no protection against duplicate event delivery
 
 **Problem:** Every other counter-mutating path in `TaskEligibilityService` guards against being
@@ -1089,11 +1093,11 @@ running `TaskTest`/`ConstraintTest`'s equals/hashCode assertions immediately aft
 | [MINOR] Global lock trade-off | §4 Finding #7, Phase 3 | *(none — tracked issue)* | N/A | ALREADY ADDRESSED / PARTIALLY VALID |
 | [MINOR] Generic exceptions vs. domain exceptions | §4 Finding #8, §5 D2, Phase 2 | *(none in this PR)* | N/A | PARTIALLY VALID |
 | *(discovered)* Claimed concurrency regression test does not exist | §4 Finding #9, §5 D3, Phase 4 | `TaskEligibilityServiceConcurrencyTest.java`, `README.md` | Is itself the test coverage | CONFIRMED |
-| [MAJOR] `onConstraintAdded`/`onConstraintStatusChanged` no duplicate-delivery protection | §4a Finding #10 | `TaskEligibilityService.java`, `TaskEligibilityServiceTest.java` | New duplicate-delivery no-op tests | CONFIRMED |
-| [MAJOR] No dedicated unit test for `InMemoryTaskDependencyRepository` | §4a Finding #11 | *(new)* `InMemoryTaskDependencyRepositoryTest.java` | Is itself the test coverage | CONFIRMED |
-| [MAJOR] No dedicated unit test for `Task` | §4a Finding #12 | *(new)* `TaskTest.java` | Is itself the test coverage | CONFIRMED |
-| [MINOR] `Constraint.getReason()` returns nullable `Map` instead of signaling absence | §4a Finding #13 | `Constraint.java` | Updated `ConstraintTest` assertion | CONFIRMED (alternate fix chosen) |
-| [MINOR] `Constraint.copyReason` mutability guard misses array values | §4a Finding #14 | `Constraint.java` | New array-rejection test | CONFIRMED |
-| [MINOR] `addDependency` runs cycle-check DFS before cheap duplicate-edge check | §4a Finding #15 | `TaskEligibilityService.java` | Existing tests unchanged | CONFIRMED |
-| [MINOR] No method-level Javadoc on `TaskEligibilityService` public API | §4a Finding #16 | `TaskEligibilityService.java` | N/A — docs only | CONFIRMED |
-| Adopt Lombok on `Task`/`Constraint`/`TaskDependency` | §4a Finding #17 | `pom.xml`, `Task.java`, `Constraint.java`, `TaskDependency.java` | Existing `TaskTest`/`ConstraintTest`/`TaskDependencyTest` | DECIDED (direct request) |
+| [MAJOR] `onConstraintAdded`/`onConstraintStatusChanged` no duplicate-delivery protection | §4a Finding #10 | `TaskEligibilityService.java`, `TaskEligibilityServiceTest.java` | New duplicate-delivery no-op tests | IMPLEMENTED (2026-09-08) |
+| [MAJOR] No dedicated unit test for `InMemoryTaskDependencyRepository` | §4a Finding #11 | *(new)* `InMemoryTaskDependencyRepositoryTest.java` | Is itself the test coverage | IMPLEMENTED (2026-09-08) |
+| [MAJOR] No dedicated unit test for `Task` | §4a Finding #12 | *(new)* `TaskTest.java` | Is itself the test coverage | IMPLEMENTED (2026-09-08) |
+| [MINOR] `Constraint.getReason()` returns nullable `Map` instead of signaling absence | §4a Finding #13 | `Constraint.java` | Updated `ConstraintTest` assertion | IMPLEMENTED (2026-09-08, alternate fix chosen) |
+| [MINOR] `Constraint.copyReason` mutability guard misses array values | §4a Finding #14 | `Constraint.java` | New array-rejection test | IMPLEMENTED (2026-09-08) |
+| [MINOR] `addDependency` runs cycle-check DFS before cheap duplicate-edge check | §4a Finding #15 | `TaskEligibilityService.java` | Existing tests unchanged | IMPLEMENTED (2026-09-08) |
+| [MINOR] No method-level Javadoc on `TaskEligibilityService` public API | §4a Finding #16 | `TaskEligibilityService.java` | N/A — docs only | IMPLEMENTED (2026-09-08) |
+| Adopt Lombok on `Task`/`Constraint`/`TaskDependency` | §4a Finding #17 | `pom.xml`, `Task.java`, `Constraint.java`, `TaskDependency.java` | Existing `TaskTest`/`ConstraintTest`/`TaskDependencyTest` | IMPLEMENTED (2026-09-08, direct request, reverses README's 2026-09-07 "not acted on" note — see CLAUDE.md) |

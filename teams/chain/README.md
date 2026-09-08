@@ -18,6 +18,8 @@ with some of what `TaskEligibilityService.addDependency`/`removeDependency` alre
 
 - Java 11
 - Spring Boot 2.7.18 (Maven)
+- Lombok (`Task`/`Constraint`/`TaskDependency` accessors/equals-hashCode/builder - see the
+  2026-09-08 fixes below for exactly what's hand-written vs. generated, and why)
 - Docker / Docker Compose
 
 A real database has been confirmed for Chain (decision resolved - see [CLAUDE.md](CLAUDE.md)). An in-memory H2 database is configured
@@ -55,9 +57,11 @@ src/test/java/com/rnd/chain/
 ├── dto/
 │   ├── ConstraintTest.java
 │   ├── TaskDependencyTest.java
-│   └── TaskTestFixtures.java   # shared Task.Builder defaults, used by all 3 test classes below
+│   ├── TaskTest.java
+│   └── TaskTestFixtures.java   # shared Task.Builder defaults, used by every test class here
 ├── repository/
-│   └── InMemoryTaskRepositoryTest.java
+│   ├── InMemoryTaskRepositoryTest.java
+│   └── InMemoryTaskDependencyRepositoryTest.java
 └── service/
     ├── TaskEligibilityServiceTest.java
     └── TaskEligibilityServiceConcurrencyTest.java   # multi-threaded, against the real in-memory repos
@@ -289,10 +293,60 @@ on this branch):
 
 A few of this round's comments were discussed and deliberately **not** acted on, each for a
 specific reason rather than being skipped silently: cosmetic getter/setter formatting in
-`Task.java` (not this branch's file - see file-ownership notes above); adding Lombok to
-`Constraint`/`Task` (would create a 6th divergent DTO variant across the unmerged branches that
-also touch `teams/chain/dto`, rather than resolving the inconsistency it's meant to fix); unifying
+`Task.java` (not this branch's file - see file-ownership notes above); unifying
 `Task.copyOf` and `Constraint.copyReason` behind a shared abstraction (no second concrete DTO on
 this branch's near-term horizon to justify the abstraction yet); and the `spring-boot-starter-data-jpa`
 + H2 placeholder dependencies with zero JPA entities (intentional - see "Open items" in
 `CLAUDE.md` and the DB-migration rationale above).
+
+**Update (2026-09-08):** the "not acted on" call above on Lombok was revisited by direct request
+and reversed - see the next section. The DTO-divergence-across-branches risk that motivated the
+original call is still real and is being tracked/handled separately (not by this PR).
+
+## Code review fixes (2026-09-08, PR #114 fifth review round)
+
+Addressed all findings from this round's review comments (discussed and planned one-by-one
+directly with the reviewer before implementation, then implemented as a batch of separate commits
+on this branch - see [PLAN.md](PLAN.md) §4a for the full write-up):
+
+- **`onConstraintAdded`/`onConstraintStatusChanged` now guard against duplicate event delivery.**
+  Every other counter-mutating path in `TaskEligibilityService` already protected itself against
+  being invoked twice for the same logical event (`edgeExists()` for
+  `addDependency`/`removeDependency`, the task's own stored `previousStatus` for
+  `onTaskStatusChanged`); these two had no equivalent - they unconditionally adjusted
+  `openConstraintCount` off caller-supplied booleans, with no per-constraint identity ever
+  consulted. Both methods now take a `constraintId` parameter and track a `Set<UUID>` of
+  currently-open constraint ids per task, so a redelivered "constraint added"/"constraint status
+  changed" event (expected from at-least-once delivery once a real event source is wired) is a
+  no-op instead of permanently inflating or deflating the counter.
+- **Added `InMemoryTaskDependencyRepositoryTest` and `TaskTest`** - the module's only two
+  implementation classes that previously had no dedicated test file (every sibling class -
+  `Constraint`, `TaskDependency`, `InMemoryTaskRepository` - already had one), covering `save`
+  idempotency, `delete`'s empty-map-entry cleanup, `findByTaskId`/`findByDependsOnTaskId`
+  directionality, constructor validation, and `copyOf`'s independence guarantee.
+- **`Constraint.getReason()` now returns an empty map instead of `null`**, matching this module's
+  own "empty collection, never null" convention (`TaskDependencyRepository`/`TaskRepository`'s
+  finder methods) rather than the reviewer's suggested `Optional<Map<...>>`, which Effective Java
+  advises against for collection-typed return values.
+- **`Constraint.copyReason`'s mutability guard now also rejects array values**, not just
+  `Collection`/`Map` - arrays are exactly as mutable and exactly as uncopied by the shallow
+  `new HashMap<>(reason)` copy, but implement neither interface so the existing check missed them.
+- **`addDependency` now checks for a duplicate edge before running the cycle-detection DFS**, not
+  after - an edge that already exists cannot be introducing a new cycle, so the O(V+E) traversal
+  (held under the single-writer `dependencyGraphLock`) is skipped entirely on a duplicate/retried
+  call, exactly the call pattern at-least-once event delivery makes common.
+- **Added method-level Javadoc to all 6 of `TaskEligibilityService`'s public methods**, with an
+  accurate `@throws` list per method (not identical boilerplate across all six) - this class is
+  currently the module's only real API surface (`controller/` is still empty).
+- **Adopted Lombok on `Task`/`Constraint`/`TaskDependency`** (`@Getter`/`@Setter` for the trivial
+  accessors, `@EqualsAndHashCode(onlyExplicitlyIncluded = true)` with the id field explicitly
+  included so equality stays id-only - the per-task locking design leans on this - and `@Builder`
+  on `Task`'s validating constructor so its generated builder still runs the same validation on
+  every `build()`). `getReason`/`setReason`/`copyReason`/`copyOf`/the constructors stay
+  hand-written, since Lombok doesn't produce that behavior.
+  - **Required an explicit `annotationProcessorPaths` entry** for `maven-compiler-plugin` and a
+    pinned newer Lombok version (`1.18.46`, vs. the `1.18.30` Spring Boot 2.7.18 manages) - the
+    parent-managed compiler plugin didn't reliably invoke Lombok's annotation processor via
+    implicit classpath scanning on this machine's JDK.
+
+Full test suite (76 tests, `mvn clean test`) passes.

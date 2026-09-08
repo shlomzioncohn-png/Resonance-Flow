@@ -5,6 +5,13 @@ Implementing dependency update flow: addDependency, removeDependency,
 onTaskStatusChanged, recalculateTaskEligibility, onConstraintAdded,
 onConstraintStatusChanged.
 
+`onConstraintAdded(taskId, constraintId)` and `onConstraintStatusChanged(taskId, constraintId,
+previousStatus, newStatus)` both take a `constraintId` now (2026-09-08, PLAN.md Finding #10) - a
+per-task `Set<UUID>` of currently-open constraint ids (`openConstraintIdsByTask` in
+TaskEligibilityService) makes a redelivered event a no-op instead of double-counting
+openConstraintCount, mirroring the idempotency every other counter-mutating path in this class
+already has (edgeExists() / the task's own stored previousStatus).
+
 ## Key decisions
 - isReady = blockingCount==0 AND openConstraintCount==0
 - Tasks CAN reopen from DONE (confirmed by team lead) - blockingCount
@@ -36,6 +43,17 @@ onConstraintStatusChanged.
   Reconcile the two once #66 merges - probably TaskEligibilityService
   should delegate the raw edge validation/CRUD to TaskDependencyService
   and keep only cycle detection + counters.
+- Task/Constraint/TaskDependency on THIS branch now use Lombok
+  (2026-09-08, PLAN.md Finding #17) for accessors/equals-hashCode/builder
+  - explicitly requested, reversing an earlier same-day decision not to
+  (see README.md's 2026-09-07 fourth-round notes) because it would add a
+  6th divergent DTO variant across the still-unmerged branches that also
+  touch teams/chain/dto. That risk is real and unchanged; it's being
+  tracked/handled separately from this branch, not resolved here. Task's
+  equals/hashCode stays id-only and Constraint's stays constraintId-only
+  (@EqualsAndHashCode(onlyExplicitlyIncluded = true) + explicit
+  @Include) - do not let a future merge silently widen either to
+  all-fields equality, since the per-task locking design leans on it.
 
 ## Open items
 - pom.xml still lacks a real persistence layer, and Task/TaskDependency
