@@ -37,6 +37,25 @@ jobs:
     defaults:
       run:
         working-directory: ${{ inputs.service_dir }}
+    # Some services' @SpringBootTest integration tests need a real Postgres reachable at
+    # localhost:5432 (e.g. inbox's StructuredTaskConsumerIntegrationTest) - matches the
+    # host/db/user/password application.yml already defaults to, so no env vars needed on
+    # the test step itself. Kafka-based integration tests don't need this: they spin up an
+    # embedded broker in-process (see kafka-cluster-test-kit usage in those tests).
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: resonance_flow
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
     steps:
       - uses: actions/checkout@v7
 
