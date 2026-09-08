@@ -40,17 +40,6 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      # inbox's @SpringBootTest integration tests need a real Postgres reachable at
-      # localhost:5432 (e.g. StructuredTaskConsumerIntegrationTest) - matches the
-      # host/db/user/password application.yml already defaults to, so no env vars needed on
-      # the test step itself. No other service's tests touch Postgres (only inbox declares
-      # a `postgres` entry under components.inbox.dependencies in the shared chart), so this
-      # is scoped to inbox specifically rather than every Java service.
-      #
-      # Rather than a hand-picked postgres:<tag> image, deploy the same `postgresql` chart
-      # dependency the shared Helm chart itself declares (teams/relay/helm/resonance-flow's
-      # Chart.yaml/values.yaml), so tests run against the same Postgres version/config the
-      # cluster actually runs - not a second, independently-drifting definition.
       - name: Set up Helm
         if: inputs.service_name == 'inbox'
         uses: azure/setup-helm@v4
@@ -66,26 +55,11 @@ jobs:
         working-directory: ${{ github.workspace }}
         run: |
           helm dependency build "$CHART_DIR"
-          # This release only exists to give the test job a real Postgres - no
-          # component pods, no kafka/minio. Every components.<x>.enabled defaults
-          # true in the base values.yaml, so all seven need disabling explicitly
-          # (this list is fixed, not data-driven per service, unlike the smoke-test
-          # install below - so a static --set list beats re-deriving it with yq).
-          # components.inbox stays a present map with enabled: false rather than
-          # null, since templates/service-inbox/configmap.yaml dereferences
-          # .Values.components.inbox unconditionally (no range/nil-guard) and
-          # --set components.inbox=null crashes the render.
           helm upgrade --install ci-postgres "$CHART_DIR" \
             -f "$CHART_VALUES" \
-            --set components.mind.enabled=false \
-            --set components.lens-bff.enabled=false \
-            --set components.bridge.enabled=false \
-            --set components.lens-frontend.enabled=false \
-            --set components.chain.enabled=false \
+            -f "$CHART_DIR/values/values-inbox.yaml" \
             --set components.inbox.enabled=false \
-            --set components.lens-gateway.enabled=false \
             --set kafka.enabled=false \
-            --set minio.enabled=false \
             --namespace ci-postgres --create-namespace \
             --wait --timeout 120s
 
