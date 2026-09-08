@@ -16,6 +16,7 @@ import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.List;
 
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
@@ -245,18 +246,24 @@ class HubSpotDealRepositoryTest {
     }
 
     @Test
-    void unknownStageIdReferencedByADealFailsLoudlyNamingTheId() {
+    void unknownStageIdReferencedByADealIsSkippedNotFailingTheWholeSync() {
+        // Was "fails loudly naming the id" - AbstractIntakeLane.run()'s
+        // per-record try/catch never sees this (read() runs entirely
+        // outside it), so one deal with a bad stage id used to abort every
+        // deal in the sync, not just itself. fetchSync() now catches this
+        // per record instead.
         enqueuePipeline();
-        String deal = dealJson("D-6", "Bad stage", "1000", null, "2026-08-01T08:00:00Z",
+        String badDeal = dealJson("D-6", "Bad stage", "1000", null, "2026-08-01T08:00:00Z",
                 historyEntry("st-999-does-not-exist", "2026-08-01T08:00:00.000Z"));
-        enqueueJson(dealsPage(null, deal));
+        String goodDeal = dealJson("D-6b", "Good deal alongside it", "2000", null, "2026-08-02T08:00:00Z",
+                historyEntry("st-100", "2026-08-02T08:00:00.000Z"));
+        enqueueJson(dealsPage(null, badDeal, goodDeal));
 
         HubSpotDealRepository repository = newRepository();
 
-        UnknownHubSpotStageException exception =
-                assertThrows(UnknownHubSpotStageException.class, repository::findAll);
-        assertTrue(exception.getMessage().contains("st-999-does-not-exist"));
-        assertTrue(exception.getMessage().contains("D-6"));
+        List<Deal> deals = assertDoesNotThrow(repository::findAll);
+
+        assertEquals(List.of("D-6b"), deals.stream().map(Deal::dealId).toList());
     }
 
     @Test
