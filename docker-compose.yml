@@ -6,7 +6,7 @@
 # 1. Gateway (LENS Team) - Port 8080
 # 2. Frontend (LENS Team) - Port 3000
 # 3. Playwright Tests (LENS Team) - E2E Testing
-# 4. BFF (Sari) - [PENDING - Add when ready]
+# 4. BFF (Sari) - Port 8082
 #
 # Run everything:
 #   docker compose up
@@ -47,6 +47,7 @@ services:
     environment:
       - SERVER_PORT=8080
       - SPRING_PROFILES_ACTIVE=${SPRING_PROFILES_ACTIVE:-local}
+      - BFF_SERVICE_URL=http://host.docker.internal:8082
     networks:
       - resonance-network
     healthcheck:
