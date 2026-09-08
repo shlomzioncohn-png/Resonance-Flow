@@ -254,7 +254,7 @@ components:
     image:
       repository: "ghcr.io/kamatechorg/resonance-flow/inbox"
       pullPolicy: IfNotPresent
-      tag: "d468121"
+      tag: "085a2e7"
     containerPort: 8080
     service:
       type: ClusterIP
