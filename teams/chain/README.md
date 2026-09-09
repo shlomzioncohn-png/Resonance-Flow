@@ -5,10 +5,13 @@ Foundation module for Team Chain (Dependency Graph, Task Selection & Constraints
 `TaskEligibilityService` implements the dependency/constraint update flow (`addDependency`,
 `removeDependency`, `onTaskStatusChanged`, `recalculateTaskEligibility`, `onConstraintAdded`,
 `onConstraintStatusChanged`) against in-memory repositories. It's a registered `@Service` bean -
-`config/RepositoryConfig.java` wires the in-memory `TaskRepository`/`TaskDependencyRepository`
+`config/MockDataConfig.java` wires the in-memory `TaskRepository`/`TaskDependencyRepository`
 implementations as beans (seeded empty) so the whole thing is actually constructible by Spring,
-not just unit-testable. No REST controllers are wired up yet (`controller/` is still empty) -
-this stage is the eligibility engine and its tests.
+not just unit-testable. Each bean is guarded with `@ConditionalOnMissingBean`, so once a real
+DB-backed `TaskRepository`/`TaskDependencyRepository` is registered, it overrides the mock instead
+of colliding with it - no manual removal of this config needed when that lands. No REST
+controllers are wired up yet (`controller/` is still empty) - this stage is the eligibility engine
+and its tests.
 
 `Task`/`TaskDependency`/`TaskStatus` and the `TaskRepository`/`TaskDependencyRepository`
 contracts (with in-memory implementations) come from issue #66's branch
@@ -49,7 +52,7 @@ src/main/java/com/rnd/chain/
 ├── dto/
 │   ├── Task.java, TaskDependency.java, TaskStatus.java, Constraint.java
 └── config/
-    └── RepositoryConfig.java
+    └── MockDataConfig.java
 src/main/resources/application.yml
 src/test/java/com/rnd/chain/
 ├── service/
