@@ -66,17 +66,17 @@ class InMemoryDependencyHistoryRepositoryTest {
     }
 
     @Test
-    void existsBySourceAndSourceRef_falseBeforeRecord_trueAfter() {
-        assertThat(repository.existsBySourceAndSourceRef(DependencyChangeSource.MIND, "evt-1")).isFalse();
+    void findBySourceAndSourceRef_isEmptyBeforeRecord_containsTheEntryAfter() {
+        assertThat(repository.findBySourceAndSourceRef(DependencyChangeSource.MIND, "evt-1")).isEmpty();
 
-        repository.record(newEntry(DependencyChangeSource.MIND, "evt-1", baseTime));
+        DependencyHistoryEntry recorded = repository.record(newEntry(DependencyChangeSource.MIND, "evt-1", baseTime));
 
-        assertThat(repository.existsBySourceAndSourceRef(DependencyChangeSource.MIND, "evt-1")).isTrue();
+        assertThat(repository.findBySourceAndSourceRef(DependencyChangeSource.MIND, "evt-1")).contains(recorded);
     }
 
     @Test
-    void existsBySourceAndSourceRef_isFalse_forNullSourceRef() {
-        assertThat(repository.existsBySourceAndSourceRef(DependencyChangeSource.USER, null)).isFalse();
+    void findBySourceAndSourceRef_isEmpty_forNullSourceRef() {
+        assertThat(repository.findBySourceAndSourceRef(DependencyChangeSource.USER, null)).isEmpty();
     }
 
     // --- findByTaskId: filtering, ordering, pagination ---------------------
@@ -114,16 +114,20 @@ class InMemoryDependencyHistoryRepositoryTest {
     }
 
     @Test
-    void findByTaskId_breaksSameTimestampTiesByIdDescending() {
-        UUID lowerId = UUID.fromString("00000000-0000-0000-0000-000000000001");
+    void findByTaskId_breaksSameTimestampTiesByTrueInsertionOrder_notById() {
+        // Deliberately record the numerically-higher UUID FIRST and the lower one SECOND,
+        // so a (wrong) tiebreak on id would give the opposite order from a (correct)
+        // tiebreak on actual insertion order - this distinguishes the two, unlike a test
+        // where id order happens to match insertion order.
         UUID higherId = UUID.fromString("00000000-0000-0000-0000-000000000002");
-        repository.record(entryWithId(lowerId, DependencyChangeSource.USER, null, baseTime));
+        UUID lowerId = UUID.fromString("00000000-0000-0000-0000-000000000001");
         repository.record(entryWithId(higherId, DependencyChangeSource.USER, null, baseTime));
+        repository.record(entryWithId(lowerId, DependencyChangeSource.USER, null, baseTime));
 
         List<DependencyHistoryEntry> content = repository.findByTaskId(taskId, 0, 20).getContent();
 
         assertThat(content).extracting(DependencyHistoryEntry::getId)
-                .containsExactly(higherId, lowerId);
+                .containsExactly(lowerId, higherId);
     }
 
     @Test
@@ -151,6 +155,19 @@ class InMemoryDependencyHistoryRepositoryTest {
         repository.record(newEntry(DependencyChangeSource.USER, null, baseTime));
 
         PageResponse<DependencyHistoryEntry> page = repository.findByTaskId(taskId, 5, 20);
+
+        assertThat(page.getContent()).isEmpty();
+        assertThat(page.getTotalElements()).isEqualTo(1);
+    }
+
+    @Test
+    void findByTaskId_hugePageNumber_doesNotOverflow_returnsEmptyContentInstead() {
+        repository.record(newEntry(DependencyChangeSource.USER, null, baseTime));
+
+        // page * size = 2_147_483_700, which overflows a 32-bit int (max 2_147_483_647) if
+        // computed naively - must clamp to an empty page like any other out-of-range page,
+        // not throw IndexOutOfBoundsException from a negative, wrapped-around index.
+        PageResponse<DependencyHistoryEntry> page = repository.findByTaskId(taskId, 21_474_837, 100);
 
         assertThat(page.getContent()).isEmpty();
         assertThat(page.getTotalElements()).isEqualTo(1);

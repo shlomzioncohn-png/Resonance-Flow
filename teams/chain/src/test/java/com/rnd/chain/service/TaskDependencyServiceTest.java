@@ -25,6 +25,7 @@ import org.junit.jupiter.api.Test;
 
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicInteger;
 
@@ -39,6 +40,7 @@ class TaskDependencyServiceTest {
     private UUID taskD;
     private UUID unknownTaskId;
 
+    private TaskRepository taskRepository;
     private TaskDependencyRepository taskDependencyRepository;
     private DependencyHistoryRepository historyRepository;
     private TaskDependencyService service;
@@ -51,7 +53,7 @@ class TaskDependencyServiceTest {
         taskD = UUID.randomUUID();
         unknownTaskId = UUID.randomUUID();
 
-        TaskRepository taskRepository = new InMemoryTaskRepository(
+        taskRepository = new InMemoryTaskRepository(
                 List.of(newTask(taskA), newTask(taskB), newTask(taskC), newTask(taskD)));
         taskDependencyRepository = new InMemoryTaskDependencyRepository(List.of());
         historyRepository = new InMemoryDependencyHistoryRepository();
@@ -322,6 +324,42 @@ class TaskDependencyServiceTest {
     }
 
     @Test
+    void addDependency_sourceRefReusedForDifferentTaskPair_throwsInsteadOfFabricatingSuccess() {
+        service.addDependency(taskA, taskB, DependencyChangeSource.MIND, "evt-1");
+
+        assertThatThrownBy(() -> service.addDependency(taskC, taskD, DependencyChangeSource.MIND, "evt-1"))
+                .isInstanceOf(IllegalArgumentException.class);
+
+        assertThat(service.getDependencies(taskC)).isEmpty();
+    }
+
+    @Test
+    void removeDependency_sourceRefReusedForOppositeAction_throwsInsteadOfFabricatingSuccess() {
+        service.addDependency(taskA, taskB, DependencyChangeSource.MIND, "evt-1");
+
+        assertThatThrownBy(() -> service.removeDependency(taskA, taskB, DependencyChangeSource.MIND, "evt-1"))
+                .isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
+    void addDependency_retryAfterTaskWasDeleted_throwsTaskNotFoundException() {
+        service.addDependency(taskA, taskB, DependencyChangeSource.MIND, "evt-1");
+        taskRepository.save(Task.builder()
+                .id(taskA)
+                .ownerId("owner")
+                .status(TaskStatus.ACTIVE)
+                .isReady(true)
+                .blockingCount(0)
+                .openConstraintCount(0)
+                .createdAt(LocalDateTime.now())
+                .deletedAt(LocalDateTime.now())
+                .build());
+
+        assertThatThrownBy(() -> service.addDependency(taskA, taskB, DependencyChangeSource.MIND, "evt-1"))
+                .isInstanceOf(TaskNotFoundException.class);
+    }
+
+    @Test
     void addDependency_concurrentRetriesWithSameSourceRef_allSucceed_oneHistoryEntry() throws InterruptedException {
         int threadCount = 20;
         AtomicInteger successes = new AtomicInteger();
@@ -368,8 +406,8 @@ class TaskDependencyServiceTest {
         }
 
         @Override
-        public boolean existsBySourceAndSourceRef(DependencyChangeSource source, String sourceRef) {
-            return false;
+        public Optional<DependencyHistoryEntry> findBySourceAndSourceRef(DependencyChangeSource source, String sourceRef) {
+            return Optional.empty();
         }
 
         @Override

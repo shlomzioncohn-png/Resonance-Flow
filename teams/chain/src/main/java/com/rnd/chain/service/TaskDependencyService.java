@@ -19,6 +19,7 @@ import java.time.Clock;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.UUID;
 
 /**
@@ -65,8 +66,11 @@ public class TaskDependencyService {
      * history entry for it in the same transaction (see
      * {@link TransactionRunner}). {@code sourceRef} is required for
      * {@code MIND}/{@code SYSTEM} and is the idempotency key: a repeat
-     * call with the same (source, sourceRef) short-circuits and returns
-     * the original result instead of throwing on the now-existing edge.
+     * call with the same (source, sourceRef, taskId, dependsOnTaskId) short-
+     * circuits and returns the original result instead of throwing on the
+     * now-existing edge. Reusing a (source, sourceRef) for a *different*
+     * task pair is treated as a caller bug, not a retry - see
+     * {@link #isMatchingRetry}.
      *
      * <p><b>Known assumption, not fixed here:</b> {@link #requireTaskExists}
      * runs before the atomic {@code save}, but task existence is checked
@@ -74,7 +78,8 @@ public class TaskDependencyService {
      * the edge is saved to. Tracked as issue #243.
      *
      * @see <a href="https://github.com/KamaTechOrg/Resonance-Flow/issues/243">#243</a>
-     * @throws IllegalArgumentException if sourceRef is missing for MIND/SYSTEM
+     * @throws IllegalArgumentException if sourceRef is missing for MIND/SYSTEM,
+     * or was already used for a different taskId/dependsOnTaskId/action
      * @throws InvalidDependencyException  if taskId equals dependsOnTaskId
      * @throws TaskNotFoundException       if either task does not exist
      * @throws DuplicateDependencyException if the edge already exists
@@ -91,17 +96,20 @@ public class TaskDependencyService {
                     "Task " + taskId + " cannot depend on itself");
         }
 
-        if (sourceRef != null && historyRepository.existsBySourceAndSourceRef(source, sourceRef)) {
-            return new TaskDependency(taskId, dependsOnTaskId);
-        }
-
+        // Existence is checked before the idempotency short-circuit (unlike before) so a
+        // retry for a task that was deleted since the original call fails loudly instead
+        // of reporting a fabricated success.
         requireTaskExists(taskId);
         requireTaskExists(dependsOnTaskId);
+
+        if (isMatchingRetry(taskId, dependsOnTaskId, DependencyChangeAction.ADDED, source, sourceRef)) {
+            return new TaskDependency(taskId, dependsOnTaskId);
+        }
 
         return transactionRunner.runInTransaction(() -> {
             // Re-checked under the transaction lock: the outer check above is only a fast
             // path and can race with a concurrent identical retry (see stage-3 concurrency test).
-            if (sourceRef != null && historyRepository.existsBySourceAndSourceRef(source, sourceRef)) {
+            if (isMatchingRetry(taskId, dependsOnTaskId, DependencyChangeAction.ADDED, source, sourceRef)) {
                 return new TaskDependency(taskId, dependsOnTaskId);
             }
             TaskDependency saved = taskDependencyRepository.save(new TaskDependency(taskId, dependsOnTaskId))
@@ -110,6 +118,8 @@ public class TaskDependencyService {
             try {
                 recordHistory(taskId, dependsOnTaskId, DependencyChangeAction.ADDED, source, sourceRef);
             } catch (RuntimeException historyWriteFailed) {
+                // Safe today: no I/O, and the transaction lock rules out any interleaving write -
+                // this delete cannot fail or no-op. Revisit once a real DB replaces this repository.
                 taskDependencyRepository.delete(taskId, dependsOnTaskId);
                 throw historyWriteFailed;
             }
@@ -127,7 +137,8 @@ public class TaskDependencyService {
      * history entry for it in the same transaction. Same idempotency
      * contract as {@link #addDependency(UUID, UUID, DependencyChangeSource, String)}.
      *
-     * @throws IllegalArgumentException if sourceRef is missing for MIND/SYSTEM
+     * @throws IllegalArgumentException if sourceRef is missing for MIND/SYSTEM,
+     * or was already used for a different taskId/dependsOnTaskId/action
      * @throws DependencyNotFoundException if no such edge exists
      */
     public void removeDependency(UUID taskId, UUID dependsOnTaskId,
@@ -137,12 +148,12 @@ public class TaskDependencyService {
         Objects.requireNonNull(source, "source must not be null");
         requireSourceRefIfNeeded(source, sourceRef);
 
-        if (sourceRef != null && historyRepository.existsBySourceAndSourceRef(source, sourceRef)) {
+        if (isMatchingRetry(taskId, dependsOnTaskId, DependencyChangeAction.REMOVED, source, sourceRef)) {
             return;
         }
 
         transactionRunner.runInTransaction(() -> {
-            if (sourceRef != null && historyRepository.existsBySourceAndSourceRef(source, sourceRef)) {
+            if (isMatchingRetry(taskId, dependsOnTaskId, DependencyChangeAction.REMOVED, source, sourceRef)) {
                 return null;
             }
             boolean removed = taskDependencyRepository.delete(taskId, dependsOnTaskId);
@@ -153,6 +164,7 @@ public class TaskDependencyService {
             try {
                 recordHistory(taskId, dependsOnTaskId, DependencyChangeAction.REMOVED, source, sourceRef);
             } catch (RuntimeException historyWriteFailed) {
+                // Safe today: same reasoning as addDependency's compensating delete() above.
                 taskDependencyRepository.save(new TaskDependency(taskId, dependsOnTaskId));
                 throw historyWriteFailed;
             }
@@ -207,6 +219,36 @@ public class TaskDependencyService {
                 .sourceRef(sourceRef)
                 .createdAt(LocalDateTime.now(clock))
                 .build());
+    }
+
+    /**
+     * true if (source, sourceRef) already has a recorded entry matching this exact
+     * (taskId, dependsOnTaskId, action) - a legitimate retry, safe to short-circuit.
+     * Always false if sourceRef is null (no idempotency key to look up).
+     *
+     * @throws IllegalArgumentException if (source, sourceRef) was already recorded
+     * for a *different* taskId/dependsOnTaskId/action - reusing an idempotency key
+     * for a different operation is a caller bug, not a retry, so it must not silently
+     * report success for whatever the caller passed this time.
+     */
+    private boolean isMatchingRetry(UUID taskId, UUID dependsOnTaskId, DependencyChangeAction action,
+                                     DependencyChangeSource source, String sourceRef) {
+        if (sourceRef == null) {
+            return false;
+        }
+        Optional<DependencyHistoryEntry> existing = historyRepository.findBySourceAndSourceRef(source, sourceRef);
+        if (existing.isEmpty()) {
+            return false;
+        }
+        DependencyHistoryEntry entry = existing.get();
+        boolean matches = entry.getAction() == action
+                && entry.getTaskId().equals(taskId)
+                && entry.getDependsOnTaskId().equals(dependsOnTaskId);
+        if (!matches) {
+            throw new IllegalArgumentException("sourceRef " + sourceRef + " for source " + source
+                    + " was already used for a different dependency change");
+        }
+        return true;
     }
 
     /** MIND/SYSTEM are automated, retry-exposed sources - sourceRef is their idempotency key, so it's mandatory. */
