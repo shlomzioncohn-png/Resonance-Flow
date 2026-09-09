@@ -14,6 +14,7 @@ services:
       - DB_PASSWORD=${DB_PASSWORD:-postgres}
       - DB_MIGRATIONS_LOCATION=filesystem:/flyway/migrations
       - KAFKA_BOOTSTRAP_SERVERS=kafka:29092
+      - SCHEMA_REGISTRY_URL=http://schema-registry:8080/apis/ccompat/v6
     volumes:
       - ../../shared/database/migrations:/flyway/migrations:ro
     extra_hosts:
@@ -21,6 +22,8 @@ services:
     depends_on:
       kafka:
         condition: service_healthy
+      schema-registry:
+        condition: service_started
 
   kafka:
     image: apache/kafka:4.2.1
@@ -49,6 +52,12 @@ services:
       timeout: 10s
       retries: 10
       start_period: 20s
+
+  schema-registry:
+    image: apicurio/apicurio-registry-mem:2.5.11.Final
+    container_name: inbox-schema-registry
+    ports:
+      - "${SCHEMA_REGISTRY_PORT:-8081}:8080"
 
   kafka-ui:
     image: provectuslabs/kafka-ui:latest

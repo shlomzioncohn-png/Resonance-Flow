@@ -21,6 +21,7 @@ import org.springframework.kafka.test.EmbeddedKafkaKraftBroker;
 import org.springframework.kafka.test.utils.KafkaTestUtils;
 
 import java.nio.charset.StandardCharsets;
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
@@ -68,7 +69,9 @@ class KafkaEventPublisherIntegrationTest {
         KafkaTemplate<String, Object> kafkaTemplate = new KafkaTemplate<>(producerFactory);
 
         retryScheduler = Executors.newSingleThreadScheduledExecutor();
-        publisher = new KafkaEventPublisher(kafkaTemplate, retryScheduler, 3, 50L, 2.0, 500L);
+        // No ProtoEventMapper registered here, so every event falls back to the JSON template;
+        // the protobuf template argument is required but never exercised in this test.
+        publisher = new KafkaEventPublisher(kafkaTemplate, kafkaTemplate, List.of(), retryScheduler, 3, 50L, 2.0, 500L);
 
         Map<String, Object> consumerProps = KafkaTestUtils.consumerProps("kafka-event-publisher-it", "true", broker);
         DefaultKafkaConsumerFactory<String, String> consumerFactory =

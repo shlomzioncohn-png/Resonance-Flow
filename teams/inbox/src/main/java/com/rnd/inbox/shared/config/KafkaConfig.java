@@ -2,7 +2,10 @@ package com.rnd.inbox.shared.config;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.rnd.inbox.shared.messaging.kafka.TransientProcessingException;
+import io.confluent.kafka.serializers.AbstractKafkaSchemaSerDeConfig;
+import io.confluent.kafka.serializers.protobuf.KafkaProtobufSerializer;
 import org.apache.kafka.common.serialization.StringSerializer;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.kafka.KafkaProperties;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
@@ -63,6 +66,22 @@ public class KafkaConfig {
     @Bean
     public KafkaTemplate<String, Object> jsonKafkaTemplate(ProducerFactory<String, Object> jsonKafkaProducerFactory) {
         return new KafkaTemplate<>(jsonKafkaProducerFactory);
+    }
+
+    @Bean
+    @SuppressWarnings({"unchecked", "rawtypes"})
+    public ProducerFactory<String, Object> protobufKafkaProducerFactory(
+            KafkaProperties kafkaProperties,
+            @Value("${kafka.schema-registry.url}") String schemaRegistryUrl) {
+        Map<String, Object> props = kafkaProperties.buildProducerProperties();
+        props.put(AbstractKafkaSchemaSerDeConfig.SCHEMA_REGISTRY_URL_CONFIG, schemaRegistryUrl);
+        return new DefaultKafkaProducerFactory<>(props, new StringSerializer(), new KafkaProtobufSerializer());
+    }
+
+    @Bean
+    public KafkaTemplate<String, Object> protobufKafkaTemplate(
+            ProducerFactory<String, Object> protobufKafkaProducerFactory) {
+        return new KafkaTemplate<>(protobufKafkaProducerFactory);
     }
 
     @Bean(destroyMethod = "shutdown")
