@@ -1,0 +1,28 @@
+{
+  "_comment": "Best-effort sample shaped after Zoom's documented Dashboard/Report API (GET /metrics/meetings/{meetingId} + GET /report/meetings/{meetingId}/participants combined into one payload, as this lane would receive it in one report-style response). Not captured from a real Zoom account - replace with a real sample if available.",
+  "id": "84756123901",
+  "topic": "Weekly Sync - Resonance Flow",
+  "host_name": "Dana Levi",
+  "start_time": "2026-09-08T09:00:03Z",
+  "end_time": "2026-09-08T09:41:17Z",
+  "participants": [
+    {
+      "id": "16778245",
+      "name": "Dana Levi",
+      "join_time": "2026-09-08T09:00:03Z",
+      "leave_time": "2026-09-08T09:41:17Z"
+    },
+    {
+      "id": "16778391",
+      "name": "Esther Ora",
+      "join_time": "2026-09-08T09:01:12Z",
+      "leave_time": "2026-09-08T09:41:17Z"
+    },
+    {
+      "id": "16778456",
+      "name": "Malki Cohen",
+      "join_time": "2026-09-08T09:02:47Z",
+      "leave_time": "2026-09-08T09:38:02Z"
+    }
+  ]
+}

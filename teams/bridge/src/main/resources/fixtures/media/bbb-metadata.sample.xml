@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Best-effort sample shaped after BigBlueButton's documented recording metadata.xml format.
+  Not captured from a real BBB server - replace with a real sample if available.
+
+  Honesty note (confirmed before building this reader): metadata.xml is meeting-level only -
+  id, name, start/end time, participant count. Per-participant join/leave timestamps are NOT
+  part of this file; BBB reports those separately in events.xml (its learning-analytics
+  export), which this lane does not read. FixtureBbbMeetingMetadataReader therefore returns
+  an empty participants list for BBB rather than fabricating join/leave data that metadata.xml
+  doesn't actually contain.
+-->
+<recording>
+    <id>c1a2b3d4-5e6f-7890-abcd-ef1234567890</id>
+    <meeting id="c1a2b3d4-5e6f-7890-abcd-ef1234567890" name="Weekly Sync - Resonance Flow"/>
+    <start_time>1757321403000</start_time>
+    <end_time>1757323677000</end_time>
+    <participants>3</participants>
+</recording>
