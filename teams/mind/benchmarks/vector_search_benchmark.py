@@ -144,7 +144,7 @@ async def main():
         hits_this_pair = {}
         for k in K_VALUES:
             results = await search(query_vec, k=k)
-            hit = id_b in results
+            hit = id_b in [r[0] for r in results]
             pair_hits[k].append(hit)
             hits_this_pair[k] = hit
         pair_details.append({
