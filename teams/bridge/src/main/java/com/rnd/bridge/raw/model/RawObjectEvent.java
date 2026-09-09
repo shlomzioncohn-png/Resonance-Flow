@@ -24,6 +24,11 @@ import java.util.List;
  * record's own tenantId component; dedupKey() is contentHash — the object_key is always
  * unique per landed instance (random uuid), so it can't detect re-landed identical
  * content the way contentHash does.
+ *
+ * meetingMetadataObjectKey is a MinIO pointer to a landed Zoom/BBB meeting-metadata sidecar
+ * (see media.meeting package) - additive, same technique as transcriptObjectKey. NOT YET part
+ * of Mind's confirmed contract as of this writing; needs the same cross-team heads-up
+ * transcriptObjectKey and SCANNED_DOC got before being relied on as "official."
  */
 @JsonNaming(PropertyNamingStrategies.SnakeCaseStrategy.class)
 public record RawObjectEvent(
@@ -41,7 +46,8 @@ public record RawObjectEvent(
         String transcriptObjectKey,
         Instant sourceTimestamp,
         String correlationId,
-        Integer attachmentIndex) implements BridgePayload {
+        Integer attachmentIndex,
+        String meetingMetadataObjectKey) implements BridgePayload {
 
     private static final String CURRENT_SCHEMA_VERSION = "1.0";
 
@@ -61,7 +67,7 @@ public record RawObjectEvent(
             Integer attachmentIndex) {
         return create(objectKey, sourceType, tenantId, ingestedAt, scopeDecision, contentHash,
                 modality, participants, contentType, sizeBytes, null, sourceTimestamp,
-                correlationId, attachmentIndex);
+                correlationId, attachmentIndex, null);
     }
 
     /**
@@ -84,10 +90,36 @@ public record RawObjectEvent(
             Instant sourceTimestamp,
             String correlationId,
             Integer attachmentIndex) {
+        return create(objectKey, sourceType, tenantId, ingestedAt, scopeDecision, contentHash,
+                modality, participants, contentType, sizeBytes, transcriptObjectKey,
+                sourceTimestamp, correlationId, attachmentIndex, null);
+    }
+
+    /**
+     * Same as the 14-arg {@link #create} but also sets meetingMetadataObjectKey - for the
+     * meeting/doc/audio lane's Zoom/BBB meeting-metadata sidecar (see media.meeting package).
+     */
+    public static RawObjectEvent create(
+            String objectKey,
+            RawSourceType sourceType,
+            String tenantId,
+            Instant ingestedAt,
+            ScopeDecision scopeDecision,
+            String contentHash,
+            Modality modality,
+            List<String> participants,
+            String contentType,
+            Long sizeBytes,
+            String transcriptObjectKey,
+            Instant sourceTimestamp,
+            String correlationId,
+            Integer attachmentIndex,
+            String meetingMetadataObjectKey) {
         return new RawObjectEvent(
                 CURRENT_SCHEMA_VERSION, objectKey, sourceType, tenantId, ingestedAt,
                 scopeDecision, contentHash, modality, participants, contentType, sizeBytes,
-                transcriptObjectKey, sourceTimestamp, correlationId, attachmentIndex);
+                transcriptObjectKey, sourceTimestamp, correlationId, attachmentIndex,
+                meetingMetadataObjectKey);
     }
 
     @Override

@@ -12,6 +12,7 @@ import org.springframework.stereotype.Service;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
+import java.util.List;
 import java.util.UUID;
 
 /**
@@ -42,6 +43,19 @@ public class MediaIntakeService {
     public RawObjectEvent land(byte[] content, String contentHash, String filename, String tenantId,
                                 RawSourceType sourceType, Modality modality, Instant ingestedAt,
                                 String transcriptObjectKey) {
+        return land(content, contentHash, filename, tenantId, sourceType, modality, ingestedAt,
+                transcriptObjectKey, null, null);
+    }
+
+    /**
+     * Same as the 8-arg {@link #land} but also carries the participant names and
+     * meeting-metadata sidecar pointer derived from a landed Zoom/BBB meeting-metadata
+     * sidecar (see media.meeting package) - both null when no such sidecar was found.
+     */
+    public RawObjectEvent land(byte[] content, String contentHash, String filename, String tenantId,
+                                RawSourceType sourceType, Modality modality, Instant ingestedAt,
+                                String transcriptObjectKey, List<String> participants,
+                                String meetingMetadataObjectKey) {
         String contentType = guessContentType(extractExtension(filename));
         String objectKey = buildObjectKey(sourceType, tenantId, ingestedAt, extractExtension(filename));
 
@@ -51,8 +65,8 @@ public class MediaIntakeService {
 
         return RawObjectEvent.create(
                 objectKey, sourceType, tenantId, ingestedAt, ScopeDecision.INCLUDED, contentHash,
-                modality, null, putResult.contentType(), putResult.sizeBytes(), transcriptObjectKey,
-                null, null, ATTACHMENT_INDEX_STANDALONE);
+                modality, participants, putResult.contentType(), putResult.sizeBytes(),
+                transcriptObjectKey, null, null, ATTACHMENT_INDEX_STANDALONE, meetingMetadataObjectKey);
     }
 
     /**
@@ -69,6 +83,30 @@ public class MediaIntakeService {
             case ".vtt" -> "text/vtt";
             case ".srt" -> "application/x-subrip";
             default -> "text/plain";
+        };
+        String objectKey = buildObjectKey(sourceType, tenantId, ingestedAt, extension);
+
+        storageClient.putObject(
+                objectKey, content, contentType,
+                ObjectTags.of(sourceType, tenantId, ingestedAt, ScopeDecision.INCLUDED));
+
+        return objectKey;
+    }
+
+    /**
+     * Lands a Zoom/BBB meeting-metadata sidecar file (see MediaIntakeOrchestrator and
+     * media.meeting) in its source-native format - Zoom's JSON as application/json, BBB's
+     * metadata.xml as application/xml - unconverted, under the same source_type/tenant/date
+     * partition as its recording. No RawObjectEvent/publish of its own - referenced from the
+     * recording's event via meetingMetadataObjectKey, same pattern as landTranscript.
+     */
+    public String landMeetingMetadata(byte[] content, String filename, String tenantId,
+                                       RawSourceType sourceType, Instant ingestedAt) {
+        String extension = extractExtension(filename);
+        String contentType = switch (extension.toLowerCase()) {
+            case ".json" -> "application/json";
+            case ".xml" -> "application/xml";
+            default -> "application/octet-stream";
         };
         String objectKey = buildObjectKey(sourceType, tenantId, ingestedAt, extension);
 
