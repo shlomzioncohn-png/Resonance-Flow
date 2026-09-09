@@ -70,8 +70,10 @@ async def upsert(task_id: str, vector: list[float]) -> None:
     await store.upsert(task_id, vector)
 
 
-async def search(query_vector: list[float], k: int) -> list[str]:
-    """Return the `k` task_ids whose vectors are most similar to `query_vector`."""
+async def search(query_vector: list[float], k: int) -> list[tuple[str, float]]:
+    """Return the `k` (task_id, similarity) pairs most similar to
+    `query_vector`, best match first. similarity is cosine similarity,
+    comparable against DUPLICATE_SIMILARITY_THRESHOLD."""
     store = await _get_store()
     return await store.search(query_vector, k)
 

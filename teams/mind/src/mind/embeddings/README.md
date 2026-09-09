@@ -67,7 +67,7 @@ from mind.embeddings import embed, upsert, search, delete
 vector = embed(task.title + " " + task.description)
 await upsert(task.id, vector)
 
-similar_task_ids = await search(vector, k=5)
+similar = await search(vector, k=5)  # [(task_id, similarity), ...], best match first
 
 await delete(task.id)  # e.g. when the task itself is deleted
 ```
@@ -84,5 +84,6 @@ later, only `pgvector_store.py` + `factory.py` need to change.
   `benchmarks/vector-store-comparison.md`'s "Validation" section: this is
   the dominant cause of near-zero recall on realistic near-duplicate
   detection at scale — not pgvector or its HNSW index.
-- `DUPLICATE_SIMILARITY_THRESHOLD` in `config.py` is an untuned placeholder,
-  and `search()` doesn't return a similarity score to apply it against yet.
+- `DUPLICATE_SIMILARITY_THRESHOLD` in `config.py` is an untuned placeholder
+  -- `search()` now returns a cosine similarity per result, but no caller
+  applies the threshold to it yet.
