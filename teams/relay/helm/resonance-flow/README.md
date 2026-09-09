@@ -59,17 +59,20 @@ dev/test.
 
 If your component needs an infra dependency reachable before its main
 container starts, set `dependencies` (globally or under your
-`components.<name>`) as a list of `{name, port}` entries, and the chart adds
-a `wait-for-<name>` initContainer that blocks until that dependency's
-`host:port` is TCP-reachable.
+`components.<name>`) as a list of `{name, port, host?}` entries, and the
+chart adds a `wait-for-<name>` initContainer that blocks until that
+dependency's `host:port` is TCP-reachable.
 
-`name` must match the dependency's actual subchart name (`kafka`,
-`postgresql`, `minio`). The host isn't a literal - it's computed at render
-time as `<release-name>-<name>` (`resonance-flow.subchartHost` in
-`_helpers.tpl`), since Bitnami subcharts name their own Service that way
-regardless of what this release is called. If a component depends on one of
-these and its `enabled` flag is `false`, its pod blocks in `Init:0/1` forever
-waiting for a Service that was never created.
+By default the host isn't a literal - it's computed at render time as
+`<release-name>-<name>` (`resonance-flow.dependencyHost` in `_helpers.tpl`),
+since our own Kafka/Postgres/MinIO are Bitnami subcharts that name their
+Service that way regardless of what this release is called. If a component
+depends on one of these and its `enabled` flag is `false`, its pod blocks in
+`Init:0/1` forever waiting for a Service that was never created.
+
+Set `host` explicitly to point at an external dependency instead (a managed
+Postgres/Kafka/etc, not one of our own subcharts) - it overrides the computed
+host entirely.
 
 Currently wired up:
 
@@ -84,6 +87,9 @@ components:
     dependencies:
       - name: postgresql
         port: 5432
+      # - name: postgresql
+      #   host: my-managed-instance.rds.amazonaws.com
+      #   port: 5432
 ```
 
 For anything the TCP-reachability check can't express, drop a raw

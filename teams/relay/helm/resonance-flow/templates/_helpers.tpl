@@ -71,17 +71,38 @@ Build and base64-encode a .dockerconfigjson value from imagePullSecret.* values
 {{- end }}
 
 {{/*
-<release-name>-<subchart-name> - the Service hostname Bitnami subcharts
-(kafka/postgresql/minio) name themselves. Centralized so waitForDependencies
-and a component's own connection string don't each re-derive it.
+Resolve one dependency entry's host: an explicit `host` wins (an external
+Postgres/Kafka/whatever, not one of our own subcharts); otherwise it's our
+own Bitnami subchart's Service, <release-name>-<name>.
 */}}
-{{- define "resonance-flow.subchartHost" -}}
-{{- printf "%s-%s" .root.Release.Name .name }}
+{{- define "resonance-flow.dependencyHost" -}}
+{{- if .dep.host }}
+{{- .dep.host }}
+{{- else }}
+{{- printf "%s-%s" .root.Release.Name .dep.name }}
+{{- end }}
 {{- end }}
 
 {{/*
-Look up a named entry's port in a {name, port} list (dependencies' shape),
-so it isn't duplicated as a literal outside its wait-for-<dep> initContainer.
+Look up a named entry's resolved host in a {name, port, host?} list
+(dependencies' shape) - so a component's own connection string doesn't
+re-derive it separately from the wait-for-<dep> initContainer.
+*/}}
+{{- define "resonance-flow.dependencyHostByName" -}}
+{{- $host := "" }}
+{{- $root := .root }}
+{{- range .deps }}
+{{- if eq .name $.name }}
+{{- $host = include "resonance-flow.dependencyHost" (dict "root" $root "dep" .) }}
+{{- end }}
+{{- end }}
+{{- $host }}
+{{- end }}
+
+{{/*
+Look up a named entry's port in a {name, port, host?} list (dependencies'
+shape), so it isn't duplicated as a literal outside its wait-for-<dep>
+initContainer.
 */}}
 {{- define "resonance-flow.dependencyPort" -}}
 {{- $port := "" }}
@@ -94,14 +115,13 @@ so it isn't duplicated as a literal outside its wait-for-<dep> initContainer.
 {{- end }}
 
 {{/*
-One initContainer per {name, port} dependency, blocking until host:port is
-TCP-reachable. Host must be computed (see subchartHost) - a literal only
-works under the one release name it was hardcoded for.
+One initContainer per {name, port, host?} dependency, blocking until
+host:port is TCP-reachable.
 */}}
 {{- define "resonance-flow.waitForDependencies" -}}
 {{- $root := .root }}
 {{- range .deps }}
-{{- $host := include "resonance-flow.subchartHost" (dict "root" $root "name" .name) }}
+{{- $host := include "resonance-flow.dependencyHost" (dict "root" $root "dep" .) }}
 - name: wait-for-{{ .name }}
   image: busybox:1.36
   command:
