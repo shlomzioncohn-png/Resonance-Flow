@@ -63,7 +63,8 @@ class KafkaNotificationReplayService {
                 ConsumerRecords<String, TaskNotification> records = consumer.poll(POLL_TIMEOUT);
                 for (ConsumerRecord<String, TaskNotification> record : records) {
                     TaskNotification value = record.value();
-                    if (value != null && orgId.equals(value.getOrgId()) && userId.equals(value.getUserId())) {
+                    if (value != null && orgId.equals(value.getOrgId()) && userId.equals(value.getUserId())
+                            && value.getPushPolicy() == PushPolicy.ACTIVITY) {
                         replay.add(new ActivityReplayBuffer.Entry(
                                 record.offset(), value, Instant.ofEpochMilli(record.timestamp())));
                     }

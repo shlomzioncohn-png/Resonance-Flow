@@ -7,18 +7,16 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
-import java.util.NavigableMap;
 import java.util.Optional;
-import java.util.TreeMap;
 import java.util.concurrent.ConcurrentHashMap;
 
-// Recent-activity history per user
+// Recent-activity history per user.
 @Component
 class ActivityReplayBuffer {
 
     private final int capacityPerUser;
 
-    private final Map<String, NavigableMap<Long, Entry>> byUser = new ConcurrentHashMap<>();
+    private final Map<String, RingBuffer> byUser = new ConcurrentHashMap<>();
 
     ActivityReplayBuffer(
             @Value("${relay.pipe.replay-buffer.capacity-per-user:200}") int capacityPerUser) {
@@ -32,16 +30,10 @@ class ActivityReplayBuffer {
             long offset,
             Instant recordedAt) {
 
-        NavigableMap<Long, Entry> buffer =
-                byUser.computeIfAbsent(userKey(orgId, userId), key -> new TreeMap<>());
+        RingBuffer buffer =
+                byUser.computeIfAbsent(userKey(orgId, userId), key -> new RingBuffer(capacityPerUser));
 
-        synchronized (buffer) {
-            buffer.put(offset, new Entry(offset, event, recordedAt));
-
-            while (buffer.size() > capacityPerUser) {
-                buffer.pollFirstEntry();
-            }
-        }
+        buffer.add(new Entry(offset, event, recordedAt));
     }
 
     Optional<List<Entry>> replaySince(
@@ -49,21 +41,13 @@ class ActivityReplayBuffer {
             String userId,
             long lastEventId) {
 
-        NavigableMap<Long, Entry> buffer = byUser.get(userKey(orgId, userId));
+        RingBuffer buffer = byUser.get(userKey(orgId, userId));
 
         if (buffer == null) {
             return Optional.empty();
         }
 
-        synchronized (buffer) {
-            if (buffer.isEmpty() || buffer.firstKey() > lastEventId + 1) {
-                return Optional.empty();
-            }
-
-            return Optional.of(
-                    new ArrayList<>(buffer.tailMap(lastEventId, false).values())
-            );
-        }
+        return buffer.replaySince(lastEventId);
     }
 
     List<Entry> since(
@@ -71,23 +55,13 @@ class ActivityReplayBuffer {
             String userId,
             Instant since) {
 
-        NavigableMap<Long, Entry> buffer = byUser.get(userKey(orgId, userId));
+        RingBuffer buffer = byUser.get(userKey(orgId, userId));
 
         if (buffer == null) {
             return List.of();
         }
 
-        synchronized (buffer) {
-            List<Entry> result = new ArrayList<>();
-
-            for (Entry entry : buffer.values()) {
-                if (entry.recordedAt().isAfter(since)) {
-                    result.add(entry);
-                }
-            }
-
-            return result;
-        }
+        return buffer.since(since);
     }
 
     private static String userKey(String orgId, String userId) {
@@ -95,5 +69,51 @@ class ActivityReplayBuffer {
     }
 
     record Entry(long offset, TaskNotification event, Instant recordedAt) {
+    }
+
+    private static final class RingBuffer {
+
+        private final Entry[] entries;
+        private int head = 0;
+        private int size = 0;
+
+        RingBuffer(int capacity) {
+            this.entries = new Entry[capacity];
+        }
+
+        synchronized void add(Entry entry) {
+            entries[(head + size) % entries.length] = entry;
+            if (size < entries.length) {
+                size++;
+            } else {
+                head = (head + 1) % entries.length;
+            }
+        }
+
+        synchronized Optional<List<Entry>> replaySince(long lastEventId) {
+            if (size == 0 || entries[head].offset() > lastEventId + 1) {
+                return Optional.empty();
+            }
+
+            List<Entry> result = new ArrayList<>();
+            for (int i = 0; i < size; i++) {
+                Entry entry = entries[(head + i) % entries.length];
+                if (entry.offset() > lastEventId) {
+                    result.add(entry);
+                }
+            }
+            return Optional.of(result);
+        }
+
+        synchronized List<Entry> since(Instant since) {
+            List<Entry> result = new ArrayList<>();
+            for (int i = 0; i < size; i++) {
+                Entry entry = entries[(head + i) % entries.length];
+                if (entry.recordedAt().isAfter(since)) {
+                    result.add(entry);
+                }
+            }
+            return result;
+        }
     }
 }
