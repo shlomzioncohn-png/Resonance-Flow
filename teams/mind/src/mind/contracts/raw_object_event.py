@@ -11,7 +11,7 @@ from pydantic import (
     field_validator,
 )
 
-from .raw_object_event_enums import (
+from mind.contracts.raw_object_event_enums import (
     Modality,
     ScopeDecision,
     SourceType,
