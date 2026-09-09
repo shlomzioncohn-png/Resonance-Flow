@@ -86,7 +86,6 @@ class ActivityReplayBufferTest {
                 .setOrgId(ORG_ID)
                 .setUserId(USER_ID)
                 .setTaskId(taskId)
-                .setNotificationType(NotificationType.TASK_STATUS_CHANGED)
                 .setPushPolicy(PushPolicy.ACTIVITY)
                 .build();
     }

@@ -13,7 +13,6 @@ final class NotificationPayloads {
         Map<String, Object> payload = new LinkedHashMap<>();
         payload.put("offset", offset);
         payload.put("task_id", event.getTaskId());
-        payload.put("notification_type", event.getNotificationType().name());
         payload.put("urgency_score", event.getUrgencyScore());
         payload.put("effort_estimate_minutes", event.getEffortEstimateMinutes());
         if (!event.getSourceRef().isEmpty()) {
