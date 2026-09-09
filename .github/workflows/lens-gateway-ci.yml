@@ -1,0 +1,43 @@
+name: Lens Gateway CI/CD / ci / test
+
+on:
+  pull_request:
+    paths:
+      - 'teams/lens/gateway/**'
+      - '.github/workflows/lens-gateway-ci.yml'
+
+concurrency:
+  group: lens-gateway-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: teams/lens/gateway
+    
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+          cache: maven
+
+      - name: Build and Test
+        run: mvn clean verify -DskipTests=false
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gateway-test-results
+          path: teams/lens/gateway/target/surefire-reports/
+          retention-days: 30
