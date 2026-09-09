@@ -1,0 +1,22 @@
+components:
+  bridge:
+    enabled: true
+  mind:
+    enabled: false
+  lens-bff:
+    enabled: false
+  lens-frontend:
+    enabled: false
+  chain:
+    enabled: false
+  inbox:
+    enabled: false
+  lens-gateway:
+    enabled: false
+
+kafka:
+  enabled: true
+minio:
+  enabled: true
+postgresql:
+  enabled: false
