@@ -1,0 +1,41 @@
+package com.rnd.chain.exception;
+
+import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.ExceptionHandler;
+import org.springframework.web.bind.annotation.RestControllerAdvice;
+
+/** First @RestControllerAdvice in the repo - a new, minimal error-body convention ({error, message}). */
+@RestControllerAdvice
+public class GlobalExceptionHandler {
+
+    @ExceptionHandler(TaskNotFoundException.class)
+    public ResponseEntity<ErrorResponse> handleNotFound(TaskNotFoundException e) {
+        return status(HttpStatus.NOT_FOUND, e);
+    }
+
+    @ExceptionHandler(DependencyNotFoundException.class)
+    public ResponseEntity<ErrorResponse> handleNotFound(DependencyNotFoundException e) {
+        return status(HttpStatus.NOT_FOUND, e);
+    }
+
+    @ExceptionHandler(DuplicateDependencyException.class)
+    public ResponseEntity<ErrorResponse> handleConflict(DuplicateDependencyException e) {
+        return status(HttpStatus.CONFLICT, e);
+    }
+
+    @ExceptionHandler(InvalidDependencyException.class)
+    public ResponseEntity<ErrorResponse> handleBadRequest(InvalidDependencyException e) {
+        return status(HttpStatus.BAD_REQUEST, e);
+    }
+
+    @ExceptionHandler(IllegalArgumentException.class)
+    public ResponseEntity<ErrorResponse> handleBadRequest(IllegalArgumentException e) {
+        return status(HttpStatus.BAD_REQUEST, e);
+    }
+
+    private static ResponseEntity<ErrorResponse> status(HttpStatus status, Exception e) {
+        return ResponseEntity.status(status)
+                .body(new ErrorResponse(e.getClass().getSimpleName(), e.getMessage()));
+    }
+}
