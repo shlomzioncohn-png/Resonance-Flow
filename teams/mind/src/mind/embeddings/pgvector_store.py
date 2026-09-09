@@ -89,7 +89,7 @@ class PgVectorStore(VectorStore):
             async with conn.cursor() as cur:
                 await cur.execute(f"TRUNCATE TABLE {PG_TABLE};")
 
-    async def search(self, query_vector: list[float], k: int) -> list[str]:
+    async def search(self, query_vector: list[float], k: int) -> list[tuple[str, float]]:
         await self._ensure_ready()
         async with self._pool.connection() as conn:
             async with conn.cursor() as cur:
@@ -109,14 +109,21 @@ class PgVectorStore(VectorStore):
                 # tests/test_vector_store.py, which asserts this directly
                 # instead of just trusting it.
                 await cur.execute("SET LOCAL hnsw.ef_search = %s;", (HNSW_EF_SEARCH,))
+                # `<=>` is pgvector's cosine *distance* (0 = identical);
+                # `1 - distance` converts it to cosine *similarity* so
+                # callers can compare it directly against
+                # config.DUPLICATE_SIMILARITY_THRESHOLD. Ordering by the
+                # `similarity` alias (descending) is equivalent to ordering
+                # by distance ascending, and Postgres allows ORDER BY to
+                # reference a SELECT-list alias directly.
                 await cur.execute(
                     f"""
-                    SELECT task_id
+                    SELECT task_id, 1 - (embedding <=> %s::vector) AS similarity
                     FROM {PG_TABLE}
-                    ORDER BY embedding <=> %s::vector
+                    ORDER BY similarity DESC
                     LIMIT %s;
                     """,
                     (query_vector, k),
                 )
                 rows = await cur.fetchall()
-                return [row[0] for row in rows]
+                return [(row[0], row[1]) for row in rows]

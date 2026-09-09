@@ -101,7 +101,7 @@ await upsert(task.id, vector)
 
 # Searching: is_query=True is required for correct BGE retrieval quality.
 query_vector = embed(user_query_text, is_query=True)
-similar_task_ids = await search(query_vector, k=5)
+similar = await search(query_vector, k=5)  # [(task_id, similarity), ...], best match first
 
 await delete(task.id)  # e.g. when the task itself is deleted
 ```
@@ -112,8 +112,9 @@ later, only `pgvector_store.py` + `factory.py` need to change.
 
 ## Known limitations (flag these in review)
 
-- `DUPLICATE_SIMILARITY_THRESHOLD` in `config.py` is an untuned placeholder,
-  and `search()` doesn't return a similarity score to apply it against yet.
+- `DUPLICATE_SIMILARITY_THRESHOLD` in `config.py` is an untuned placeholder
+  -- `search()` now returns a cosine similarity per result, but no caller
+  applies the threshold to it yet.
 - Real-data coverage is still just the 2-document FUNSD slice from PR #141
   -- enough to validate the pipeline shape end-to-end, not enough for a
   real recall/quality read on production data.
