@@ -1,0 +1,21 @@
+# Source of truth: which .proto file maps to which Schema Registry subject,
+# and the compatibility level the check enforces.
+#
+# Format:
+#   # compatibility: <LEVEL>                          one directive line, default FULL
+#   <file-under-src/main/proto>\t<subject>            one per schema (tab-separated)
+#   lines starting with # are otherwise ignored
+#
+# Single list for both stages:
+#  - CI (pre-merge): seed-registry.sh + check-all-schemas.sh read this file — from
+#    the PR's BASE branch, not the PR itself, so a PR can't weaken its own gate.
+#  - CD (post-merge): relay-schema-sync.yaml copies it into the schema-sync-hook
+#    chart, and configmap.yaml renders the schema list from it.
+# Add a schema here and nowhere else.
+
+# compatibility: FULL
+
+task-event.proto	task-event-value
+task-created-event.proto	task.created-value
+raw-object-event.proto	bridge.raw.landed-value
+github-task.proto	bridge.github.tasks-value

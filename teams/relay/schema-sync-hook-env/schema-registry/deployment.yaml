@@ -1,0 +1,41 @@
+# Minimal Apicurio Schema Registry for this environment.
+# In-memory (no persistence), single replica. This is NOT the production
+# Schema Registry — who runs that, and where, is issue #4. These manifests are
+# the starting point for that decision.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: schema-registry
+  labels:
+    app: schema-registry
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: schema-registry
+  template:
+    metadata:
+      labels:
+        app: schema-registry
+    spec:
+      containers:
+        - name: apicurio
+          image: apicurio/apicurio-registry-mem:2.5.11.Final
+          ports:
+            - containerPort: 8080
+          readinessProbe:
+            # only "Ready" once the ccompat API actually answers, so the
+            # sync-wave gate does not release the hook before the registry is up
+            httpGet:
+              path: /apis/ccompat/v6/subjects
+              port: 8080
+            initialDelaySeconds: 15
+            periodSeconds: 5
+            failureThreshold: 12
+          resources:
+            requests:
+              cpu: 100m
+              memory: 512Mi
+            limits:
+              cpu: "1"
+              memory: 1Gi

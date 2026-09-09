@@ -1,0 +1,25 @@
+name: Bridge CI/CD
+
+on:
+  push:
+    branches: [ "main" ]
+    tags: [ "bridge-v*.*.*" ]
+    paths:
+      - "teams/bridge/**"
+  pull_request:
+    branches: [ "main" ]
+    paths:
+      - "teams/bridge/**"
+  workflow_dispatch: {}
+
+jobs:
+  ci:
+    permissions:
+      contents: write
+      packages: write
+    uses: ./.github/workflows/service-ci.yaml
+    with:
+      service_name: bridge
+      service_dir: teams/bridge
+      language: java
+      container_port: 8080
