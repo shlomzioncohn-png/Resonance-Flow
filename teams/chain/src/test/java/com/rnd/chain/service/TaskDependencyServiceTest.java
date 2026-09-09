@@ -1,19 +1,28 @@
 package com.rnd.chain.service;
 
+import com.rnd.chain.dto.DependencyChangeAction;
+import com.rnd.chain.dto.DependencyChangeSource;
+import com.rnd.chain.dto.DependencyHistoryEntry;
+import com.rnd.chain.dto.PageResponse;
 import com.rnd.chain.dto.Task;
+import com.rnd.chain.dto.TaskDependency;
 import com.rnd.chain.dto.TaskStatus;
 import com.rnd.chain.exception.DependencyNotFoundException;
 import com.rnd.chain.exception.DuplicateDependencyException;
 import com.rnd.chain.exception.InvalidDependencyException;
 import com.rnd.chain.exception.TaskNotFoundException;
+import com.rnd.chain.repository.DependencyHistoryRepository;
+import com.rnd.chain.repository.InMemoryDependencyHistoryRepository;
 import com.rnd.chain.repository.InMemoryTaskDependencyRepository;
 import com.rnd.chain.repository.InMemoryTaskRepository;
+import com.rnd.chain.repository.InMemoryTransactionRunner;
 import com.rnd.chain.repository.TaskDependencyRepository;
 import com.rnd.chain.repository.TaskRepository;
 import com.rnd.chain.testsupport.ConcurrentTestRunner;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
+import java.time.Clock;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.UUID;
@@ -30,6 +39,8 @@ class TaskDependencyServiceTest {
     private UUID taskD;
     private UUID unknownTaskId;
 
+    private TaskDependencyRepository taskDependencyRepository;
+    private DependencyHistoryRepository historyRepository;
     private TaskDependencyService service;
 
     @BeforeEach
@@ -42,10 +53,11 @@ class TaskDependencyServiceTest {
 
         TaskRepository taskRepository = new InMemoryTaskRepository(
                 List.of(newTask(taskA), newTask(taskB), newTask(taskC), newTask(taskD)));
-        TaskDependencyRepository taskDependencyRepository =
-                new InMemoryTaskDependencyRepository(List.of());
+        taskDependencyRepository = new InMemoryTaskDependencyRepository(List.of());
+        historyRepository = new InMemoryDependencyHistoryRepository();
 
-        service = new TaskDependencyService(taskRepository, taskDependencyRepository);
+        service = new TaskDependencyService(taskRepository, taskDependencyRepository,
+                historyRepository, new InMemoryTransactionRunner(), Clock.systemUTC());
     }
 
     // --- constructor -----------------------------------------------------
@@ -200,6 +212,147 @@ class TaskDependencyServiceTest {
 
         assertThat(service.getDependencies(taskA)).containsExactlyInAnyOrder(taskB, taskC);
         assertThat(service.getDependents(taskA)).containsExactly(taskD);
+    }
+
+    // --- history: recorded on success only --------------------------------
+
+    @Test
+    void addDependency_success_recordsOneHistoryEntry_withActionAdded() {
+        service.addDependency(taskA, taskB);
+
+        List<DependencyHistoryEntry> entries = service.getHistory(taskA, 0, 20).getContent();
+        assertThat(entries).hasSize(1);
+        assertThat(entries.get(0).getAction()).isEqualTo(DependencyChangeAction.ADDED);
+    }
+
+    @Test
+    void removeDependency_success_recordsOneHistoryEntry_withActionRemoved() {
+        service.addDependency(taskA, taskB);
+
+        service.removeDependency(taskA, taskB);
+
+        List<DependencyHistoryEntry> entries = service.getHistory(taskA, 0, 20).getContent();
+        assertThat(entries).extracting(DependencyHistoryEntry::getAction)
+                .containsExactly(DependencyChangeAction.REMOVED, DependencyChangeAction.ADDED);
+    }
+
+    @Test
+    void addDependency_failedValidation_recordsNoHistoryEntry() {
+        assertThatThrownBy(() -> service.addDependency(taskA, taskA))
+                .isInstanceOf(InvalidDependencyException.class);
+
+        assertThat(service.getHistory(taskA, 0, 20).getContent()).isEmpty();
+    }
+
+    @Test
+    void addDependency_duplicateEdge_recordsNoAdditionalHistoryEntry() {
+        service.addDependency(taskA, taskB);
+
+        assertThatThrownBy(() -> service.addDependency(taskA, taskB))
+                .isInstanceOf(DuplicateDependencyException.class);
+
+        assertThat(service.getHistory(taskA, 0, 20).getContent()).hasSize(1);
+    }
+
+    // --- rollback: history-write failure undoes the graph mutation ---------
+
+    @Test
+    void addDependency_historyWriteFails_edgeIsRolledBack() {
+        DependencyHistoryRepository failingHistoryRepository = new ThrowingDependencyHistoryRepository();
+        TaskRepository taskRepository = new InMemoryTaskRepository(
+                List.of(newTask(taskA), newTask(taskB)));
+        TaskDependencyService serviceWithFailingHistory = new TaskDependencyService(
+                taskRepository, taskDependencyRepository, failingHistoryRepository,
+                new InMemoryTransactionRunner(), Clock.systemUTC());
+
+        assertThatThrownBy(() -> serviceWithFailingHistory.addDependency(taskA, taskB))
+                .isInstanceOf(RuntimeException.class);
+
+        assertThat(taskDependencyRepository.findByTaskId(taskA)).isEmpty();
+    }
+
+    @Test
+    void removeDependency_historyWriteFails_edgeIsRestored() {
+        service.addDependency(taskA, taskB);
+        DependencyHistoryRepository failingHistoryRepository = new ThrowingDependencyHistoryRepository();
+        TaskRepository taskRepository = new InMemoryTaskRepository(
+                List.of(newTask(taskA), newTask(taskB)));
+        TaskDependencyService serviceWithFailingHistory = new TaskDependencyService(
+                taskRepository, taskDependencyRepository, failingHistoryRepository,
+                new InMemoryTransactionRunner(), Clock.systemUTC());
+
+        assertThatThrownBy(() -> serviceWithFailingHistory.removeDependency(taskA, taskB))
+                .isInstanceOf(RuntimeException.class);
+
+        assertThat(taskDependencyRepository.findByTaskId(taskA))
+                .extracting(TaskDependency::getDependsOnTaskId)
+                .containsExactly(taskB);
+    }
+
+    // --- sourceRef required for MIND/SYSTEM, optional for USER -------------
+
+    @Test
+    void addDependency_mindSourceWithoutSourceRef_throwsIllegalArgumentException() {
+        assertThatThrownBy(() -> service.addDependency(taskA, taskB, DependencyChangeSource.MIND, null))
+                .isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
+    void addDependency_systemSourceWithBlankSourceRef_throwsIllegalArgumentException() {
+        assertThatThrownBy(() -> service.addDependency(taskA, taskB, DependencyChangeSource.SYSTEM, "  "))
+                .isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
+    void addDependency_userSourceWithoutSourceRef_isAllowed() {
+        service.addDependency(taskA, taskB, DependencyChangeSource.USER, null);
+
+        assertThat(service.getDependencies(taskA)).containsExactly(taskB);
+    }
+
+    // --- idempotency retry ---------------------------------------------------
+
+    @Test
+    void addDependency_retryWithSameSourceRef_returnsWithoutDuplicateException() {
+        service.addDependency(taskA, taskB, DependencyChangeSource.MIND, "evt-1");
+
+        service.addDependency(taskA, taskB, DependencyChangeSource.MIND, "evt-1");
+
+        assertThat(service.getHistory(taskA, 0, 20).getContent()).hasSize(1);
+    }
+
+    // --- getHistory ----------------------------------------------------------
+
+    @Test
+    void getHistory_rejectsWhenTaskDoesNotExist() {
+        assertThatThrownBy(() -> service.getHistory(unknownTaskId, 0, 20))
+                .isInstanceOf(TaskNotFoundException.class);
+    }
+
+    @Test
+    void getHistory_isEmptyPage_notError_whenTaskExistsWithNoChanges() {
+        PageResponse<DependencyHistoryEntry> page = service.getHistory(taskA, 0, 20);
+
+        assertThat(page.getContent()).isEmpty();
+        assertThat(page.getTotalElements()).isEqualTo(0);
+    }
+
+    /** Always throws on record() - used to prove the compensating rollback runs. */
+    private static class ThrowingDependencyHistoryRepository implements DependencyHistoryRepository {
+        @Override
+        public DependencyHistoryEntry record(DependencyHistoryEntry entry) {
+            throw new RuntimeException("simulated history write failure");
+        }
+
+        @Override
+        public boolean existsBySourceAndSourceRef(DependencyChangeSource source, String sourceRef) {
+            return false;
+        }
+
+        @Override
+        public PageResponse<DependencyHistoryEntry> findByTaskId(UUID taskId, int page, int size) {
+            return new PageResponse<>(List.of(), page, size, 0, 0);
+        }
     }
 
     private static Task newTask(UUID id) {
