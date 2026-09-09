@@ -1,9 +1,9 @@
-imagePullSecrets: [] 
+imagePullSecrets: []
 imagePullSecret:
-  create: false 
+  create: false
   registry: ghcr.io
-  username: "" 
-  password: "" 
+  username: ""
+  password: ""
   email: "noreply@kamatech.org"
 nameOverride: ""
 fullnameOverride: ""
@@ -51,7 +51,6 @@ volumes: []
 volumeMounts: []
 dependencies:
   - name: kafka
-    host: resonance-flow-kafka.resonance-flow.svc.cluster.local
     port: 9092
 initContainers: []
 nodeSelector: {}
@@ -97,7 +96,6 @@ components:
     env: {}
     dependencies:
       - name: minio
-        host: resonance-flow-minio.resonance-flow.svc.cluster.local
         port: 9000
   lens-bff:
     enabled: true
@@ -175,7 +173,6 @@ components:
     env: {}
     dependencies:
       - name: minio
-        host: resonance-flow-minio.resonance-flow.svc.cluster.local
         port: 9000
   lens-frontend:
     enabled: true
@@ -257,7 +254,7 @@ components:
     image:
       repository: "ghcr.io/kamatechorg/resonance-flow/inbox"
       pullPolicy: IfNotPresent
-      tag: "placeholder"
+      tag: "085a2e7"
     containerPort: 8080
     service:
       type: ClusterIP
@@ -271,37 +268,34 @@ components:
         memory: 512Mi
     startupProbe:
       httpGet:
-        path: /health
+        path: /actuator/health/liveness
         port: http
       periodSeconds: 5
-      failureThreshold: 40
+      # 300s budget - CI's constrained runner needs more than the ~186s observed locally.
+      failureThreshold: 60
     livenessProbe:
       httpGet:
-        path: /health
+        path: /actuator/health/liveness
         port: http
       periodSeconds: 10
       failureThreshold: 3
     readinessProbe:
       httpGet:
-        path: /health/ready
+        path: /actuator/health/readiness
         port: http
       periodSeconds: 5
       failureThreshold: 3
     env: {}
     dependencies:
-      - name: postgres
-        host: resonance-flow-postgresql.resonance-flow.svc.cluster.local
+      - name: postgresql
         port: 5432
     config:
       data:
         datasource:
-          host: resonance-flow-postgresql.resonance-flow.svc.cluster.local
-          port: 5432
           database: resonance_flow
           username: postgres
           password: postgres
         kafka:
-          bootstrapServers: resonance-flow-kafka.resonance-flow.svc.cluster.local:9092
           consumerGroupId: inbox-service
           topics:
             bridgeStructuredTasks: bridge.structured.tasks
@@ -344,7 +338,6 @@ components:
       periodSeconds: 5
       failureThreshold: 3
     env: {}
-
 kafka:
   enabled: true
   # bitnami/kafka was pruned from Docker Hub's free tier in 2025; bitnamilegacy/kafka
@@ -378,7 +371,6 @@ kafka:
         memory: 768Mi
   broker:
     replicaCount: 0
-
 minio:
   enabled: true
   mode: standalone
@@ -391,7 +383,6 @@ minio:
     limits:
       cpu: 150m
       memory: 192Mi
-
 postgresql:
   enabled: true
   architecture: standalone
