@@ -23,6 +23,7 @@ public class DependencyHistoryController {
         this.taskDependencyService = taskDependencyService;
     }
 
+    /** size is capped at 100 (not just validated as positive) to bound how much a single page query can scan. */
     @GetMapping("/{taskId}/dependencies/history")
     public ResponseEntity<PageResponse<DependencyHistoryResponse>> getHistory(
             @PathVariable UUID taskId,

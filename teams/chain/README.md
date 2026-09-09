@@ -65,7 +65,7 @@ src/test/java/com/rnd/chain/
 
 ## Running locally with Maven
 
-Requires a local Maven installation (`mvn`) and JDK 11.
+Requires a local Maven installation (`mvn`) and JDK 21.
 
 ```bash
 mvn spring-boot:run
@@ -135,3 +135,50 @@ should go through `TaskDependencyService` rather than calling the repository dir
 `TaskRepository` / `InMemoryTaskRepository` are also included here (a compatible implementation
 matching the interface used elsewhere in the module) since `TaskDependencyService` needs task
 existence checks and no shared implementation was merged yet at the time this was written.
+
+## Dependency change history (Issue #153)
+
+Every dependency-graph change that actually creates or removes an edge is recorded as a
+`DependencyHistoryEntry` (`dto/`): `id`, `taskId`, `dependsOnTaskId`, `action` (`ADDED`/`REMOVED`),
+`source` (`MIND`/`USER`/`SYSTEM`), `sourceRef` (nullable), `createdAt`. It's a plain DTO with no
+REST/Kafka/Jackson dependency, so the same model applies regardless of how it's read later.
+
+`DependencyHistoryRepository` / `InMemoryDependencyHistoryRepository` persist it, following the same
+interface-plus-in-memory-implementation pattern as `TaskDependencyRepository`, pending a real DB.
+`TransactionRunner` / `InMemoryTransactionRunner` let a graph write and its history entry happen as
+one unit; the in-memory implementation is a global lock only, **not** real ACID rollback -
+`TaskDependencyService` performs its own compensating action (undoing the graph write) if the
+history write fails.
+
+### API
+
+```
+GET /tasks/{taskId}/dependencies/history?page=0&size=20
+```
+
+Returns a `PageResponse<DependencyHistoryResponse>` (`content`, `page`, `size`, `totalElements`,
+`totalPages`), newest first. `page` defaults to 0; `size` defaults to 20 and is capped at 100 (both,
+plus a negative `page`, are rejected with 400). A task with no history yet returns 200 with empty
+`content` - 404 is only for a `taskId` that doesn't exist. This is the first paginated endpoint in
+the repo; the `page`/`size`/`PageResponse` shape is meant for reuse by future endpoints too.
+
+This is also the first `@RestControllerAdvice` in the repo (`GlobalExceptionHandler`, in
+`exception/`): `TaskNotFoundException`/`DependencyNotFoundException` -> 404,
+`DuplicateDependencyException` -> 409, `InvalidDependencyException`/`IllegalArgumentException` -> 400,
+with a `{"error": "...", "message": "..."}` body.
+
+### Idempotency
+
+`addDependency`/`removeDependency` take an optional `(source, sourceRef)` pair (the old 2-argument
+overloads still work, delegating to `source = USER, sourceRef = null`). `sourceRef` is the
+idempotency key: a repeat call with the same `(source, sourceRef)` is treated as a retry and
+returns/no-ops instead of throwing the usual duplicate/not-found exception. It's **required** for
+`MIND`/`SYSTEM` (automated, retry-exposed sources) and **optional** for `USER` (a direct synchronous
+call). **Known limitation:** a `USER` call without a `sourceRef` gets no idempotency protection - a
+double-click or client retry can hit a normal duplicate/not-found error.
+
+### Persistence
+
+Same status as the dependency graph: in-memory, pending a real DB choice. `TransactionRunner` will
+be replaced by a `@Transactional`-based implementation once that happens, and the manual
+compensation in `TaskDependencyService` removed.
