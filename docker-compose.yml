@@ -3,39 +3,14 @@
 # ========================================
 # 
 # Current Services:
-# 1. Gateway (LENS Team) - Port 8080
-# 2. Frontend (LENS Team) - Port 3000
-# 3. Playwright Tests (LENS Team) - E2E Testing
-# 4. BFF (Sari) - Port 8082
-#
-# Run everything:
-#   docker compose up
-#
-# Run only Gateway:
-#   docker compose up gateway
-#
-# Run Frontend + Tests:
-#   docker compose up frontend playwright
+# 1. Gateway (LENS Team) - Routes Frontend ↔ BFF
+# 2. BFF (Sari) - [PENDING - Add when ready]
 #
 # ========================================
 
 services:
   # ========================================
-  # LENS TEAM RESPONSIBILITY
-  # ========================================
-  
-  # API Gateway - Port 8080
-  # ONLY routes between:
-  # - Frontend/External clients
-  # - BFF (Backend for Frontend) by Sari
-  #
-  # Gateway responsibilities:
-  # - Route /api/** to BFF
-  # - Error handling (404 for unknown routes, etc)
-  # - Gateway health endpoint (/health, /health/ready)
-  #
-  # NOTE: BFF is responsible for communicating with
-  #       Bridge, Chain, Inbox, and Mind teams
+  # LENS TEAM - API Gateway (Port 8080)
   # ========================================
   gateway:
     build:
@@ -58,71 +33,6 @@ services:
       start_period: 20s
 
   # ========================================
-  # LENS TEAM - Frontend (Next.js + React)
-  # ========================================
-  # Port 3000 - Development server
-  # 
-  # Features:
-  # - Hot-reload via volumes
-  # - Built-in Playwright Chrome browser
-  # - Connects to Gateway at http://gateway:8080
-  # ========================================
-  frontend:
-    build:
-      context: ./teams/lens/frontend
-      dockerfile: Dockerfile
-      target: development
-    container_name: lens-frontend
-    ports:
-      - "${FRONTEND_PORT:-3000}:3000"
-    environment:
-      - NEXT_PUBLIC_GATEWAY_URL=http://gateway:8080
-      - NODE_ENV=development
-    volumes:
-      - ./teams/lens/frontend:/app
-      - /app/node_modules
-      - /app/.next
-    depends_on:
-      gateway:
-        condition: service_healthy
-    networks:
-      - resonance-network
-    command: npm run dev
-
-  # ========================================
-  # LENS TEAM - Playwright E2E Tests
-  # ========================================
-  # Runs E2E tests against Frontend + Gateway
-  # 
-  # Features:
-  # - VISIBLE + INVISIBLE testing pattern
-  # - Tests UI interactions
-  # - Mocks API responses with page.route()
-  # - Validates correct payloads to Gateway
-  # ========================================
-  playwright:
-    build:
-      context: ./teams/lens/frontend
-      dockerfile: Dockerfile
-      target: playwright
-    container_name: lens-playwright
-    environment:
-      - PLAYWRIGHT_HEADLESS=true
-      - BASE_URL=http://frontend:3000
-    volumes:
-      - ./teams/lens/frontend/tests:/app/tests
-      - ./teams/lens/frontend/playwright.config.ts:/app/playwright.config.ts
-      - ./teams/lens/frontend/test-results:/app/test-results
-    depends_on:
-      frontend:
-        condition: service_started
-    networks:
-      - resonance-network
-    command: npm run test:e2e
-    profiles:
-      - test
-
-  # ========================================
   # NOT IN DOCKER-COMPOSE (Team responsibility)
   # ========================================
   # 
@@ -132,6 +42,7 @@ services:
   # - Chain Team: teams/chain/
   # - Inbox Team: teams/inbox/
   # - Mind Team: teams/mind/
+  # - Lens Frontend: teams/lens/docker-compose.yml
   #
   # These teams will provide their service images
   # for docker-compose when their implementations
