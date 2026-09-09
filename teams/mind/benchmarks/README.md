@@ -6,10 +6,13 @@ documented and reasoned about (e.g. the week-1 vector-store choice, the
 managed-API-vs-local-model spike). Keep raw run outputs here; write the
 resulting decision into the relevant README or an ADR.
 
-- `ocr-asr-benchmark.md` — Tesseract PSM comparison on the FUNSD slice
-  (ASR/Whisper deferred to week 3). Decision also recorded in
+- `ocr-asr-benchmark.md` — OCR: resolved (Tesseract `--psm 11`, 3
+  configs tested). ASR: known risk, blocked on missing AMI data, not
+  benchmarked. Decision also recorded in
   `src/mind/multimodal/README.md`.
-- `ocr_benchmark.py` — reproduces it. Needs `pip install ".[benchmark]"`
-  plus the `tesseract-ocr` system binary (not pip-installable — e.g.
-  `winget install UB-Mannheim.TesseractOCR` on Windows,
-  `apt install tesseract-ocr` on Debian/Ubuntu).
+- `ocr_asr_benchmark.py` — reproduces the OCR half (`python -m
+  benchmarks.ocr_asr_benchmark` from `teams/mind/`; prints an explicit
+  "BLOCKED" notice for the ASR half instead of fake numbers). Needs
+  `pip install ".[benchmark]"` plus the `tesseract-ocr` system binary
+  (not pip-installable — e.g. `winget install UB-Mannheim.TesseractOCR`
+  on Windows, `apt install tesseract-ocr` on Debian/Ubuntu).
