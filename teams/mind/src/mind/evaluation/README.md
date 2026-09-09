@@ -180,6 +180,34 @@ with no change to the harness, and the locked lexical threshold
 (`extraction_eval_design.md` §6 — τ = 0.60, for the `rapidfuzz` backend) can be
 revised as a visible call-site change rather than a silent code edit.
 
+### The extracted-item contract
+
+`evaluate_extraction` compares strings, but a real extracted item is a structured
+object. `extraction_contract.py` pins the shape the eval depends on, as a Pydantic
+model — the same "R1 defines it, the pipeline implements it" pattern as
+`RankingModel`, and in code so the pipeline's output is *checked* against it, not
+just described.
+
+`ExtractedItem` carries only what the eval reads:
+
+| field | required | role |
+|---|---|---|
+| `title` | yes | head of the comparison string |
+| `description` | no | appended to `title` (`title + ". " + description`) when present — design §3.3 |
+| `source_ref` | yes | the meeting-id join key (AMI code verbatim, e.g. `IS1008b`); required here even though `TaskCreationRequested.source_ref` is nullable, because the eval only consumes corpus-loader output |
+| `role_context` | no | reserved for the owner-match secondary diagnostic (design §3.7); not in v1 precision/recall |
+
+`ExtractedItem.to_comparison_text()` produces the string `evaluate_extraction`
+matches. Field names match `TaskCreationRequested`
+(`contracts/task_creation_requested.py`, PR #197) and `extra="ignore"`, so a full
+task payload validates as-is — extraction's classification fields (`tier`,
+`urgency`, `confidence`, `deadline`, …) are deliberately absent: extraction P/R
+measures "did we find the right action items", not "did we classify them right".
+
+**Status: proposed by R1, not yet agreed with Yonit** — pending her confirmation
+that the pipeline output fits this shape (`extraction_eval_design.md`
+§"Meeting IDs", `TODO(Yonit)`).
+
 ### This eval is approximate
 
 It compares free text to free text. A "true positive" means *our rule* — a
