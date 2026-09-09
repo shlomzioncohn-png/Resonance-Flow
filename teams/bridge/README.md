@@ -218,6 +218,21 @@ Per file, before it lands:
    `.txt`) next to a recording is landed alongside it and linked via the recording's
    `transcript_object_key` - it does not get its own `RawObjectEvent`. Both files move to
    `uploaded/` together.
+4. **Meeting-metadata pairing** (`MEETING` only) - a same-basename sidecar carrying the
+   source platform's own meeting report is landed alongside the recording, in its native
+   format (no conversion), and linked via the recording's `meeting_metadata_object_key`:
+   `<basename>.meeting.json` in the Zoom folder (JSON shaped after Zoom's Dashboard/Report
+   API), `<basename>.metadata.xml` in the BBB folder (BigBlueButton's own `metadata.xml`
+   format). It's parsed once (`media/meeting/MeetingMetadataReader` + fixture
+   implementations) purely to fill the recording's `participants` field with names - the
+   landed sidecar bytes themselves are untouched. **`meetingMetadataObjectKey` is not yet in
+   Mind's confirmed contract** - same status as `SCANNED_DOC` before it was confirmed. Note:
+   BBB's `metadata.xml` is meeting-level only - it has no per-participant join/leave data (that
+   lives in BBB's separate `events.xml` export, which this lane doesn't read), so `participants`
+   stays empty for BBB recordings. Zoom's fixture does carry real per-participant join/leave
+   times. Only fixture readers exist today (see `media/meeting/Fixture*MeetingMetadataReader`)
+   - real Zoom/BBB API wiring needs a `meetingId` this lane's manual-folder trigger doesn't
+   have yet.
 
 **Known gaps (tracked in issue #45):**
 - Test samples aren't yet drawn from the real public corpora named in the spec (AMI/ICSI,
