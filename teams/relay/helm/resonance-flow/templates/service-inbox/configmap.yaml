@@ -33,6 +33,11 @@ data:
         properties:
           sasl.mechanism: "PLAIN"
           sasl.jaas.config: {{ include "resonance-flow.kafkaSaslJaasConfig" $ | quote }}
+          # Same wait-for-<dep> host/port helpers as postgresql/kafka above - not consumed by
+          # any producer/consumer yet (both still send/read plain JSON), but the connection
+          # detail lives here per #224's file-mount convention so it's ready the moment the
+          # Protobuf serializer wiring lands (see teams/relay/docs/kafka-producer-consumer-guide.md).
+          schema.registry.url: {{ printf "http://%s:%s/apis/ccompat/v6" (include "resonance-flow.dependencyHostByName" (dict "root" $ "deps" $component.dependencies "name" "schema-registry")) (include "resonance-flow.dependencyPort" (dict "deps" $component.dependencies "name" "schema-registry")) | quote }}
         consumer:
           group-id: {{ $cfg.kafka.consumerGroupId | quote }}
           auto-offset-reset: earliest
