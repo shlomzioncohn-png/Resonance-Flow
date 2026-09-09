@@ -53,8 +53,8 @@ async def test_upsert_is_independent():
     vec = embed("Write release notes for v2.3")
     await upsert(task_id, vec)  # should not raise
     # Searching for the exact vector should surface it.
-    results = await search(vec, k=5)
-    assert task_id in results
+    result_ids = [r[0] for r in await search(vec, k=5)]
+    assert task_id in result_ids
 
 
 async def test_search_is_independent():
@@ -68,10 +68,29 @@ async def test_search_is_independent():
     await upsert(near_id, embed(near_text))
     await upsert(far_id, embed(far_text))
 
-    results = await search(embed(base_text), k=3)
-    assert base_id in results
+    result_ids = [r[0] for r in await search(embed(base_text), k=3)]
+    assert base_id in result_ids
     # The near-duplicate task should rank above the unrelated one.
-    assert results.index(near_id) < results.index(far_id)
+    assert result_ids.index(near_id) < result_ids.index(far_id)
+
+
+async def test_search_returns_similarity_scores_in_descending_order():
+    """search() results are (task_id, similarity) pairs, best match first --
+    comparable directly against config.DUPLICATE_SIMILARITY_THRESHOLD."""
+    near_id, far_id = f"test-{uuid.uuid4()}", f"test-{uuid.uuid4()}"
+    query_text = "Investigate slow database queries in the reports module"
+    await upsert(near_id, embed("Investigate slow database queries in the reporting module"))
+    await upsert(far_id, embed("Order more coffee for the office kitchen"))
+
+    results = await search(embed(query_text), k=2)
+    ids = [r[0] for r in results]
+    similarities = [r[1] for r in results]
+
+    assert ids.index(near_id) < ids.index(far_id)
+    # Best match first: descending similarity.
+    assert similarities == sorted(similarities, reverse=True)
+    # Cosine similarity of unit vectors is bounded in [-1, 1].
+    assert all(-1.0 <= s <= 1.0 for s in similarities)
 
 
 async def test_full_cycle_embed_upsert_search():
@@ -87,7 +106,9 @@ async def test_full_cycle_embed_upsert_search():
     await upsert(task_id, vector)
 
     results = await search(vector, k=1)
-    assert results == [task_id]
+    assert [r[0] for r in results] == [task_id]
+    # Searching for the exact stored vector: similarity to itself is ~1.0.
+    assert results[0][1] == pytest.approx(1.0, abs=1e-6)
 
 
 async def test_delete_removes_a_stored_vector():
@@ -95,11 +116,11 @@ async def test_delete_removes_a_stored_vector():
     task_id = f"test-{uuid.uuid4()}"
     vec = embed("Retire the legacy export endpoint")
     await upsert(task_id, vec)
-    assert task_id in await search(vec, k=5)
+    assert task_id in [r[0] for r in await search(vec, k=5)]
 
     await delete(task_id)
 
-    assert task_id not in await search(vec, k=5)
+    assert task_id not in [r[0] for r in await search(vec, k=5)]
 
 
 async def test_delete_is_a_noop_for_an_unknown_task_id():
@@ -120,7 +141,7 @@ async def test_future_data_source_uses_same_interface():
     await upsert(crm_ticket_id, embed("Customer asking for a refund on order #8831"))
 
     results = await search(embed("Null pointer exception in checkout.py"), k=1)
-    assert results == [github_issue_id]
+    assert [r[0] for r in results] == [github_issue_id]
 
 
 async def test_ef_search_setting_is_actually_applied():

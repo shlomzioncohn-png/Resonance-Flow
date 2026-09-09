@@ -26,10 +26,17 @@ class VectorStore(ABC):
     @abstractmethod
     async def upsert(self, task_id: str, vector: list[float]) -> None:
         """Save or update the vector for a given task_id."""
+        ...
 
     @abstractmethod
-    async def search(self, query_vector: list[float], k: int) -> list[str]:
-        """Return up to k task_ids most similar to query_vector, best match first."""
+    async def search(self, query_vector: list[float], k: int) -> list[tuple[str, float]]:
+        """Return up to k (task_id, similarity) pairs most similar to
+        query_vector, best match first.
+
+        similarity is cosine similarity (1 = identical, -1 = opposite),
+        directly comparable against config.DUPLICATE_SIMILARITY_THRESHOLD.
+        """
+        ...
 
     @abstractmethod
     async def delete(self, task_id: str) -> None:
@@ -38,7 +45,9 @@ class VectorStore(ABC):
         Deleting a task_id that isn't stored is not an error -- same
         no-op-if-absent semantics as SQL's DELETE.
         """
+        ...
 
     @abstractmethod
     async def clear(self) -> None:
         """Remove every stored vector. Intended for test teardown, not production use."""
+        ...
