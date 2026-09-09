@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useRef, useState } from 'react'
+import { use, useEffect, useRef, useState } from 'react'
 import Link from 'next/link'
 import { useSearchParams } from 'next/navigation'
 import Avatar from '@mui/material/Avatar'
@@ -25,7 +25,8 @@ import { DetailRow, softToneSx, statusTone } from '../../shared'
 import { getTask, type ApiTask } from '@/services/workspaceApi'
 import ChatPanel from './ChatPanel'
 
-export default function TaskDetailsPage({ params }: { params: { taskId: string } }) {
+export default function TaskDetailsPage({ params }: { params: Promise<{ taskId: string }> }) {
+  const { taskId } = use(params)
   const searchParams = useSearchParams()
   const [mode, setMode] = useState<'overview' | 'chat'>(
     searchParams.get('chat') === '1' ? 'chat' : 'overview',
@@ -35,12 +36,28 @@ export default function TaskDetailsPage({ params }: { params: { taskId: string }
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
+    // Resets loading synchronously so navigating between two task pages
+    // (taskId changes without the component remounting) shows the spinner
+    // instead of a stale flash of the previous task's content/error while
+    // the new fetch is in flight - the default useState(true) only covers
+    // the very first render, not a later taskId change.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setLoading(true)
-    getTask(params.taskId)
-      .then(setTask)
-      .catch((err) => setError(err instanceof Error ? err.message : 'Failed to load task'))
-      .finally(() => setLoading(false))
-  }, [params.taskId])
+    let ignore = false
+    getTask(taskId)
+      .then((result) => {
+        if (!ignore) setTask(result)
+      })
+      .catch((err) => {
+        if (!ignore) setError(err instanceof Error ? err.message : 'Failed to load task')
+      })
+      .finally(() => {
+        if (!ignore) setLoading(false)
+      })
+    return () => {
+      ignore = true
+    }
+  }, [taskId])
 
   const contentRef = useRef<HTMLDivElement>(null)
   const isFirstRender = useRef(true)

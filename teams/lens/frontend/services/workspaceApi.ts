@@ -57,6 +57,38 @@ export function getTask(taskId: string): Promise<ApiTask> {
   return api.get<ApiTask>(`/api/workspace/tasks/${taskId}`)
 }
 
+// ── Task list ("My Tasks" screen) ──────────────────────────────────────────
+
+export type TaskListFilter = 'all' | 'in_progress' | 'blocked' | 'waiting_on_me'
+
+export interface TaskListParams {
+  filter?: TaskListFilter
+  /** Free-text, matched against task title (case-insensitive). */
+  search?: string
+  /** 0-based page index. */
+  page?: number
+  /** Page size, clamped server-side to 1-100. */
+  size?: number
+}
+
+export interface TaskListResponse {
+  items: ApiTask[]
+  total: number
+  page: number
+  size: number
+}
+
+export function listTasks(params: TaskListParams = {}): Promise<TaskListResponse> {
+  const query = new URLSearchParams()
+  if (params.filter) query.set('filter', params.filter)
+  if (params.search) query.set('search', params.search)
+  if (params.page !== undefined) query.set('page', String(params.page))
+  if (params.size !== undefined) query.set('size', String(params.size))
+
+  const queryString = query.toString()
+  return api.get<TaskListResponse>(`/api/workspace/tasks${queryString ? `?${queryString}` : ''}`)
+}
+
 export type TaskStatus = 'READY' | 'IN_PROGRESS' | 'BLOCKED' | 'COMPLETED'
 
 export function updateTaskStatus(taskId: string, status: TaskStatus): Promise<ApiTask> {
