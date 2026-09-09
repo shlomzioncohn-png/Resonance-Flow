@@ -32,7 +32,7 @@ jobs:
           cache: maven
 
       - name: Build and Test
-        run: mvn clean verify -DskipTests=false
+        run: mvn clean verify -DskipTests=false -Dspring.profiles.active=test
 
       - name: Upload test results
         if: always()

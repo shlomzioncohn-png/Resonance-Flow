@@ -42,8 +42,27 @@ jobs:
       - name: Build
         run: npm run build
 
+      - name: Start dev server
+        run: npm run dev &
+        # Give the server time to start
+      
+      - name: Wait for dev server
+        run: |
+          for i in {1..30}; do
+            if curl -f http://localhost:3000 > /dev/null 2>&1; then
+              echo "Dev server is ready"
+              exit 0
+            fi
+            echo "Waiting for dev server... ($i/30)"
+            sleep 2
+          done
+          echo "Dev server failed to start"
+          exit 1
+
       - name: E2E Tests (Playwright)
         run: npm run test:e2e
+        env:
+          BASE_URL: http://localhost:3000
 
       - name: Upload test results
         if: always()
