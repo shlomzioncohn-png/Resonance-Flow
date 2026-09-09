@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.rnd.inbox.audit.AuditService;
 import com.rnd.inbox.outbox.OutboxEvent;
 import com.rnd.inbox.outbox.OutboxEventRepository;
+import com.rnd.inbox.scheduling.SchedulingEventDto;
 import com.rnd.inbox.shared.event.EventType;
 import com.rnd.inbox.user.User;
 import org.springframework.stereotype.Service;
@@ -116,6 +117,14 @@ public class TaskService {
     public Optional<Task> findExisting(Task incoming) {
         return taskRepository.findByTenant_IdAndSourceTypeAndSourceRef(
                 incoming.getTenant().getId(), incoming.getSourceType(), incoming.getSourceRef());
+    }
+
+    public Task applySchedulingUpdate(SchedulingEventDto event) {
+        return applySchedulingUpdate(
+                UUID.fromString(event.getTaskId()),
+                event.getAvailable(),
+                event.getPriorityScore() != null ? event.getPriorityScore().floatValue() : null,
+                event.getEventId() != null ? UUID.fromString(event.getEventId()) : UUID.randomUUID());
     }
 
     @Transactional

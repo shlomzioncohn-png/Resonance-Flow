@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.rnd.inbox.shared.messaging.kafka.ErrorTopicPublisher;
 import com.rnd.inbox.shared.messaging.kafka.EventProcessingTemplate;
 import com.rnd.inbox.shared.messaging.validation.BeanValidationEventValidator;
+import com.rnd.inbox.task.TaskService;
 import jakarta.validation.Validator;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.springframework.kafka.annotation.KafkaListener;
@@ -18,14 +19,14 @@ public class SchedulingConsumer {
 
     public SchedulingConsumer(ObjectMapper objectMapper, RetryTemplate kafkaRetryTemplate,
             ErrorTopicPublisher errorTopicPublisher, Validator validator,
-            SchedulingPersistenceHandler persistenceHandler) {
+            TaskService taskService) {
         this.template = new EventProcessingTemplate<>(
                 objectMapper,
                 kafkaRetryTemplate,
                 errorTopicPublisher,
                 SchedulingEventDto.class,
                 new BeanValidationEventValidator<>(validator),
-                persistenceHandler::apply,
+                taskService::applySchedulingUpdate,
                 SchedulingEventDto::getEventId);
     }
 

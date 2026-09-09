@@ -7,6 +7,7 @@ import com.rnd.inbox.outbox.OutboxEvent;
 import com.rnd.inbox.outbox.OutboxEventRepository;
 import com.rnd.inbox.outbox.OutboxStatus;
 import com.rnd.inbox.project.Project;
+import com.rnd.inbox.scheduling.SchedulingEventDto;
 import com.rnd.inbox.shared.event.EventType;
 import com.rnd.inbox.tenant.Tenant;
 import com.rnd.inbox.user.User;
@@ -315,6 +316,57 @@ class TaskServiceTest {
                 .isInstanceOf(TaskNotFoundException.class);
 
         verify(outboxEventRepository, never()).save(any());
+    }
+
+    @Test
+    void applySchedulingUpdate_fromASchedulingEvent_materializesBothValuesOnTheTask() {
+        UUID taskId = UUID.randomUUID();
+        Task task = incomingTask();
+        task.setId(taskId);
+        when(taskRepository.findById(taskId)).thenReturn(Optional.of(task));
+        when(taskRepository.saveAndFlush(task)).thenReturn(task);
+
+        UUID eventId = UUID.randomUUID();
+        Task result = taskService.applySchedulingUpdate(schedulingEvent(taskId, eventId, 7.5));
+
+        assertThat(result.isAvailable()).isTrue();
+        assertThat(result.getPriorityScore()).isEqualTo(7.5f);
+        assertThat(capturedOutboxEvent().getCorrelationId()).isEqualTo(eventId);
+    }
+
+    @Test
+    void applySchedulingUpdate_fromASchedulingEventWithoutAScore_leavesTheStoredScoreAlone() {
+        UUID taskId = UUID.randomUUID();
+        Task task = incomingTask();
+        task.setId(taskId);
+        task.setPriorityScore(4.0f);
+        when(taskRepository.findById(taskId)).thenReturn(Optional.of(task));
+        when(taskRepository.saveAndFlush(task)).thenReturn(task);
+
+        Task result = taskService.applySchedulingUpdate(schedulingEvent(taskId, UUID.randomUUID(), null));
+
+        assertThat(result.getPriorityScore()).isEqualTo(4.0f);
+    }
+
+    @Test
+    void applySchedulingUpdate_forATaskThatDoesNotExist_throwsTaskNotFoundExceptionRatherThanFailingOnSave() {
+        UUID taskId = UUID.randomUUID();
+        when(taskRepository.findById(taskId)).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> taskService.applySchedulingUpdate(
+                schedulingEvent(taskId, UUID.randomUUID(), 5.0)))
+                .isInstanceOf(TaskNotFoundException.class);
+
+        verify(outboxEventRepository, never()).save(any());
+    }
+
+    private SchedulingEventDto schedulingEvent(UUID taskId, UUID eventId, Double priorityScore) {
+        SchedulingEventDto event = new SchedulingEventDto();
+        event.setEventId(eventId.toString());
+        event.setTaskId(taskId.toString());
+        event.setAvailable(true);
+        event.setPriorityScore(priorityScore);
+        return event;
     }
 
     private void stubNoExistingTask() {
