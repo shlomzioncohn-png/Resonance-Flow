@@ -120,7 +120,7 @@ public class RealCalendarSourceReader implements CalendarSourceReader {
         return new SourceRecord(
                 RawSourceType.CALENDAR, properties.tenantId(), event.getId(), UUID.randomUUID().toString(),
                 occurredAt, organizer, participants(event, organizer), event.getSummary(), event.getDescription(),
-                event.toString().getBytes(StandardCharsets.UTF_8), null, null, 0, List.of());
+                event.toString().getBytes(StandardCharsets.UTF_8), null, null, 0, List.of(), 0);
     }
 
     /** Organizer plus every attendee - the Calendar equivalent of an email's To/Cc list. */

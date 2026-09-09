@@ -26,7 +26,8 @@ class UnstructuredIntakeLaneConfig {
             ObjectKeyBuilder objectKeyBuilder,
             IntakeLandingService landingService,
             RawObjectValidator validator,
-            KafkaRawObjectPublisher publisher) {
+            KafkaRawObjectPublisher publisher,
+            GroupStateStore groupStateStore) {
         return Arrays.stream(RawSourceType.values())
                 .filter(sourceType -> sourceType != RawSourceType.MEETING)
                 .map(sourceType -> new UnstructuredIntakeLane(
@@ -35,7 +36,8 @@ class UnstructuredIntakeLaneConfig {
                         new UnstructuredPayloadMapper(scopingFilter, objectKeyBuilder, landingService),
                         validator,
                         publisher,
-                        landingService))
+                        landingService,
+                        groupStateStore))
                 .toList();
     }
 }

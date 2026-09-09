@@ -45,7 +45,7 @@ public class FixtureEmailSourceReader implements EmailSourceReader {
             records.add(new SourceRecord(
                     RawSourceType.EMAIL, tenantId, naturalId, correlationId, occurredAt, from, List.of(from),
                     textOrNull(node.get("subject")), textOrNull(node.get("body")),
-                    node.toString().getBytes(StandardCharsets.UTF_8), null, null, 0, List.of()));
+                    node.toString().getBytes(StandardCharsets.UTF_8), null, null, 0, List.of(), 0));
 
             JsonNode attachments = node.get("attachments");
             if (attachments != null) {
@@ -57,7 +57,7 @@ public class FixtureEmailSourceReader implements EmailSourceReader {
                             RawSourceType.EMAIL, tenantId, naturalId + "|attachment-" + index, correlationId,
                             occurredAt, from, List.of(from), null, null, content,
                             textOrNull(attachment.get("mimeType")), textOrNull(attachment.get("filename")), index,
-                            List.of()));
+                            List.of(), 0));
                 }
             }
         }

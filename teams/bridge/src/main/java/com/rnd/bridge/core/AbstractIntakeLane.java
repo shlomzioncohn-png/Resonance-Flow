@@ -36,6 +36,24 @@ public abstract class AbstractIntakeLane<S, O extends BridgePayload> {
     protected void afterMap(S source, O payload, Instant asOf) {
     }
 
+    /**
+     * Optional side-effect hook after a successful publish - e.g. confirming durable state
+     * that was only tentatively persisted before the payload was known to have actually
+     * reached the downstream broker (see UnstructuredIntakeLane's chat-group publish
+     * confirmation). No-op by default. Only reached when payloadPublisher().publish(payload)
+     * returned without throwing - if publish() throws, run()'s catch block below skips this
+     * exactly like a mapping/landing failure would, so nothing here can be mistaken for a
+     * confirmed publish that never actually happened.
+     * run() only increments published AFTER this returns successfully (see run()), so a source
+     * whose afterPublish throws a LaneException is counted as rejected, not as both published
+     * and rejected - implementations that can fail here (anything doing its own I/O, e.g.
+     * UnstructuredIntakeLane's GroupStateStore confirmation) must wrap failures in LaneException
+     * themselves, the same way afterMap does, so errorPolicy() gets a chance to record and
+     * continue instead of an unrelated RuntimeException escaping run() and aborting the batch.
+     */
+    protected void afterPublish(S source, O payload, Instant asOf) {
+    }
+
     protected ErrorPolicy errorPolicy() {
         return ErrorPolicy.RECORD_AND_CONTINUE;
     }
@@ -54,6 +72,7 @@ public abstract class AbstractIntakeLane<S, O extends BridgePayload> {
                     afterMap(source, payload, asOf);
                     payloadValidator().validate(payload);
                     payloadPublisher().publish(payload);
+                    afterPublish(source, payload, asOf);
                     published++;
                 } catch (LaneException e) {
                     rejected++;

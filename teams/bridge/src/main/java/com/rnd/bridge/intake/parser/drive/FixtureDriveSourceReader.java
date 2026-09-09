@@ -49,7 +49,8 @@ public class FixtureDriveSourceReader implements DriveSourceReader {
                     textOrNull(node.get("mimeType")),
                     null,
                     0,
-                    List.of()));
+                    List.of(),
+                    0));
         }
         return records;
     }

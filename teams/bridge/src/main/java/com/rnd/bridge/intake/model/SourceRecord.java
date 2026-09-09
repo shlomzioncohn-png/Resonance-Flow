@@ -36,6 +36,13 @@ import java.util.List;
  * non-chat sources and for chat messages with no stable id (WhatsApp, fixtures) — there is
  * nothing to preserve there yet. Not yet consumed downstream; this is groundwork for future
  * edit/delete handling (see Bridge issue #264), not a schema or contract change.
+ * revision is the persisted GroupState's revision this record's content represents (see
+ * ChatGroupStateReconciler) — 0 for every non-chat source. Carried here (not on
+ * RawObjectEvent — revision stays internal, never on the wire) so
+ * UnstructuredIntakeLane.afterPublish can tell GroupStateStore.confirmPublished exactly which
+ * revision a given Kafka ack belongs to; without it, a stale ack for a since-superseded
+ * revision could incorrectly mark the group's newer, not-yet-actually-published content as
+ * confirmed.
  */
 public record SourceRecord(
         RawSourceType sourceType,
@@ -51,5 +58,6 @@ public record SourceRecord(
         String mimeType,
         String attachmentFilename,
         int attachmentIndex,
-        List<String> sourceMessageIds) {
+        List<String> sourceMessageIds,
+        int revision) {
 }

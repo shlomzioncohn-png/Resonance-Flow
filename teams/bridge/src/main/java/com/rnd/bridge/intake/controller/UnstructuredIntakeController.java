@@ -45,8 +45,19 @@ public class UnstructuredIntakeController {
         // Only reached if run() returned normally (no uncaught exception) - see plan.md "Cursor
         // persistence": update the cursor only after the run has actually gone through, never
         // before. A few rejected records within an otherwise-successful run still advance the
-        // cursor; RawObjectEvent.dedupKey() makes any later reprocessing harmless.
-        cursorStore.save(sourceType, TENANT_ID, new ReadCursor(asOf));
+        // cursor for every source except Slack; RawObjectEvent.dedupKey() makes any later
+        // reprocessing harmless.
+        // Slack is the one exception: its chat groups have their own content-aware publish
+        // confirmation (see ChatGroupStateReconciler/GroupStateStore/UnstructuredIntakeLane's
+        // afterPublish hook), which makes replaying the same window both safe (an already-
+        // confirmed, unchanged group is a cheap no-op) and necessary (an unconfirmed one must
+        // be retried, or it would never be revisited once `since` moves past it - a Slack
+        // reply/edit is the only thing that would otherwise perturb that group again). No
+        // other source has this confirmation mechanism, so freezing their cursor the same way
+        // would just force a full, unconditional re-publish of the whole window on every retry.
+        if (sourceType != RawSourceType.SLACK || result.rejected() == 0) {
+            cursorStore.save(sourceType, TENANT_ID, new ReadCursor(asOf));
+        }
         return result;
     }
 }

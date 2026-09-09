@@ -3,6 +3,7 @@ package com.rnd.bridge.intake.parser;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import com.rnd.bridge.core.ReadCursor;
 import com.rnd.bridge.intake.config.ChatSessionProperties;
 import com.rnd.bridge.intake.model.SourceRecord;
@@ -11,9 +12,15 @@ import com.rnd.bridge.intake.parser.drive.FixtureDriveSourceReader;
 import com.rnd.bridge.intake.parser.email.FixtureEmailSourceReader;
 import com.rnd.bridge.intake.parser.slack.FixtureSlackSourceReader;
 import com.rnd.bridge.intake.parser.whatsapp.FixtureWhatsAppSourceReader;
+import com.rnd.bridge.intake.lane.GroupStateStore;
+import com.rnd.bridge.intake.service.ChatGroupStateReconciler;
 import com.rnd.bridge.intake.service.ChatSessionGrouper;
+import com.rnd.bridge.intake.service.ChatSourceRecordMapper;
 import com.rnd.bridge.raw.model.RawSourceType;
+import com.rnd.bridge.storage.ControlPlaneStateStores;
+import com.rnd.bridge.storage.ObjectStorageClient;
 import java.util.List;
+import java.util.Optional;
 import org.junit.jupiter.api.Test;
 import org.springframework.core.io.support.PathMatchingResourcePatternResolver;
 
@@ -23,7 +30,10 @@ import org.springframework.core.io.support.PathMatchingResourcePatternResolver;
  */
 class SourceRecordLoaderSanityTest {
 
-    private final ObjectMapper objectMapper = new ObjectMapper();
+    private final ObjectMapper objectMapper = new ObjectMapper().registerModule(new JavaTimeModule());
+    private final ChatSessionProperties chatSessionProperties = new ChatSessionProperties(45);
+    private final ChatSessionGrouper chatSessionGrouper = new ChatSessionGrouper(chatSessionProperties);
+    private final ChatSourceRecordMapper chatSourceRecordMapper = new ChatSourceRecordMapper();
 
     private final SourceRecordLoader loader = new SourceRecordLoader(
             new FixtureEmailSourceReader(objectMapper),
@@ -31,7 +41,27 @@ class SourceRecordLoaderSanityTest {
             new FixtureCalendarSourceReader(objectMapper),
             new FixtureSlackSourceReader(objectMapper),
             new FixtureWhatsAppSourceReader(new PathMatchingResourcePatternResolver()),
-            new ChatSessionGrouper(new ChatSessionProperties(45)));
+            chatSessionGrouper,
+            chatSourceRecordMapper,
+            new ChatGroupStateReconciler(
+                    chatSessionProperties, chatSessionGrouper, chatSourceRecordMapper,
+                    new GroupStateStore(noopStorageClient(), ControlPlaneStateStores.inMemory(), objectMapper)));
+
+    // No persisted group state exists in this fixture-driven sanity test - every Slack fixture
+    // read behaves like a brand-new group, matching this test's pre-existing expectations.
+    private static ObjectStorageClient noopStorageClient() {
+        return new ObjectStorageClient() {
+            @Override
+            public PutResult putObject(String objectKey, byte[] content, String contentType, java.util.Map<String, String> tags) {
+                return new PutResult(contentType, content.length);
+            }
+
+            @Override
+            public Optional<byte[]> getObject(String objectKey) {
+                return Optional.empty();
+            }
+        };
+    }
 
     @Test
     void loadsAllFourEmailBodiesPlusTwoAttachmentRecords() {

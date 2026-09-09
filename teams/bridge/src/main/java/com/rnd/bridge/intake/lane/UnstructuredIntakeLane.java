@@ -28,6 +28,7 @@ public final class UnstructuredIntakeLane extends AbstractIntakeLane<SourceRecor
     private final PayloadValidator<RawObjectEvent> payloadValidator;
     private final PayloadPublisher<RawObjectEvent> payloadPublisher;
     private final IntakeLandingService landingService;
+    private final GroupStateStore groupStateStore;
 
     UnstructuredIntakeLane(
             RawSourceType sourceType,
@@ -35,13 +36,15 @@ public final class UnstructuredIntakeLane extends AbstractIntakeLane<SourceRecor
             PayloadMapper<SourceRecord, RawObjectEvent> payloadMapper,
             PayloadValidator<RawObjectEvent> payloadValidator,
             PayloadPublisher<RawObjectEvent> payloadPublisher,
-            IntakeLandingService landingService) {
+            IntakeLandingService landingService,
+            GroupStateStore groupStateStore) {
         this.sourceType = sourceType;
         this.sourceReader = sourceReader;
         this.payloadMapper = payloadMapper;
         this.payloadValidator = payloadValidator;
         this.payloadPublisher = payloadPublisher;
         this.landingService = landingService;
+        this.groupStateStore = groupStateStore;
     }
 
     public RawSourceType sourceType() {
@@ -76,6 +79,49 @@ public final class UnstructuredIntakeLane extends AbstractIntakeLane<SourceRecor
         } catch (RuntimeException e) {
             throw new LaneException(
                     "Failed to land sourceType=" + source.sourceType() + " naturalId=" + source.naturalId(), e);
+        }
+    }
+
+    /**
+     * Confirms a chat group's publish state once its transcript record has actually been
+     * published - see ChatGroupStateReconciler.mergeAndMaybePublish for why a group is only
+     * ever persisted as pending until this fires. Gated on attachmentIndex()==0 (the
+     * transcript/body record, never an attachment) and a non-empty sourceMessageIds (only
+     * chat records built from a persisted group carry one - see SourceRecord's javadoc), so
+     * this is a no-op for every other source and for attachment records.
+     * source.correlationId() is Mind's UUID, not GroupStateStore's own storage key (see
+     * GroupState's javadoc) - so the group is instead resolved back to its internal groupId via
+     * the messageId index, keyed on any one of this record's sourceMessageIds (every message in
+     * a persisted group is indexed to it, including ones landed in earlier runs). ifPresent
+     * rather than orElseThrow: same not-found tolerance GroupStateStore.confirmPublished itself
+     * already has for a group that genuinely isn't there.
+     * Passes source.revision() through so GroupStateStore.confirmPublished only flips the
+     * group published if that's still its current revision - this ack belongs to the specific
+     * revision this SourceRecord was built from, which may no longer be current by the time
+     * the ack comes back (see GroupStateStore.confirmPublished's javadoc).
+     * GroupStateStore's own failures surface as plain RuntimeExceptions (UncheckedIOException,
+     * IllegalStateException - see its and ControlPlaneStateStore's javadoc), not LaneException,
+     * so they're wrapped here the same way afterMap wraps landingService failures: run() only
+     * catches LaneException, and only counts this source as published once afterPublish returns
+     * successfully (see AbstractIntakeLane.run()/afterPublish's javadoc) - without this wrapping,
+     * a transient MinIO failure here would escape run() uncaught and abort the whole batch
+     * instead of being recorded as a single rejected record and retried next run (Slack's cursor
+     * freeze-on-reject already makes that retry both safe and necessary - see
+     * UnstructuredIntakeController).
+     */
+    @Override
+    protected void afterPublish(SourceRecord source, RawObjectEvent payload, Instant asOf) {
+        try {
+            if (source.attachmentIndex() == 0 && !source.sourceMessageIds().isEmpty()) {
+                groupStateStore
+                        .findGroupIdForMessage(source.sourceType(), source.tenantId(), source.sourceMessageIds().get(0))
+                        .ifPresent(groupId -> groupStateStore.confirmPublished(
+                                source.sourceType(), source.tenantId(), groupId, source.revision()));
+            }
+        } catch (RuntimeException e) {
+            throw new LaneException(
+                    "Failed to confirm chat group publish for sourceType=" + source.sourceType()
+                            + " naturalId=" + source.naturalId(), e);
         }
     }
 }
