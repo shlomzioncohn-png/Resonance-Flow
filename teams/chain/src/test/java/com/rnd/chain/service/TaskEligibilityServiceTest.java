@@ -87,6 +87,32 @@ class TaskEligibilityServiceTest {
     }
 
     @Test
+    void alreadyCorrectState_doesNotReplaceStoredTaskInstance() {
+        // Regression test for the code review finding: recalculateTaskEligibility used to write
+        // an unconditional new Task even when nothing had actually changed.
+        UUID taskId = UUID.randomUUID();
+        Fixture fixture = newFixture(List.of(buildTask(taskId, 0, 0, true)), List.of());
+        Task before = fixture.taskRepo().findById(taskId).orElseThrow();
+
+        fixture.service().recalculateTaskEligibility(taskId);
+
+        assertSame(before, fixture.taskRepo().findById(taskId).orElseThrow(),
+                "no-op recalculation must not write a new Task instance");
+    }
+
+    @Test
+    void staleState_recalculation_replacesStoredTaskInstance() {
+        UUID taskId = UUID.randomUUID();
+        Fixture fixture = newFixture(List.of(buildTask(taskId, 1, 0, true)), List.of());
+        Task before = fixture.taskRepo().findById(taskId).orElseThrow();
+
+        fixture.service().recalculateTaskEligibility(taskId);
+
+        assertNotSame(before, fixture.taskRepo().findById(taskId).orElseThrow(),
+                "a real eligibility change must still write a new Task instance");
+    }
+
+    @Test
     void taskNotFound_throwsException() {
         UUID taskId = UUID.randomUUID();
         Fixture fixture = newFixture(List.of(), List.of());
@@ -147,6 +173,26 @@ class TaskEligibilityServiceTest {
         Task task = fixture.taskRepo().findById(taskId).orElseThrow();
         assertEquals(0, task.getBlockingCount());
         assertTrue(task.isReady());
+    }
+
+    @Test
+    void addDependency_targetAlreadyDone_stateAlreadyCorrect_doesNotReplaceStoredTaskInstance() {
+        // Regression test for the code review finding: adding a dependency on an already-DONE
+        // task never changes blockingCount, so when eligibility was already correct beforehand,
+        // no write should happen at all - it used to write unconditionally.
+        UUID taskId = UUID.randomUUID();
+        UUID dependsOnTaskId = UUID.randomUUID();
+        Fixture fixture = newFixture(
+                List.of(buildTask(taskId, 0, 0, true),
+                        buildTask(dependsOnTaskId, 0, 0, true, TaskStatus.DONE)),
+                List.of());
+        Task before = fixture.taskRepo().findById(taskId).orElseThrow();
+
+        fixture.service().addDependency(taskId, dependsOnTaskId);
+
+        assertSame(before, fixture.taskRepo().findById(taskId).orElseThrow(),
+                "adding a dependency on an already-DONE task must not write a new Task instance "
+                        + "when eligibility was already correct");
     }
 
     @Test

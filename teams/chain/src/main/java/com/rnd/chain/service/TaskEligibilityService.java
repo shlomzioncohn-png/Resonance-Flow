@@ -16,8 +16,10 @@ import java.util.Deque;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
+import java.util.function.UnaryOperator;
 
 /**
  * See CLAUDE.md "Open items" for the locking rationale: dependencyGraphLock guards the
@@ -59,6 +61,10 @@ public class TaskEligibilityService {
             .orElseThrow(() -> new IllegalArgumentException("Task not found: " + taskId));
     }
 
+    private static <T> T requireUpdated(Optional<T> updated, UUID taskId) {
+        return updated.orElseThrow(() -> new IllegalArgumentException("Task not found: " + taskId));
+    }
+
     private boolean edgeExists(UUID taskId, UUID dependsOnTaskId) {
         return taskDependencyRepository.findByTaskId(taskId).stream()
             .anyMatch(edge -> edge.getDependsOnTaskId().equals(dependsOnTaskId));
@@ -83,21 +89,52 @@ public class TaskEligibilityService {
 
     /** The single place isReady gets recomputed from blockingCount/openConstraintCount -
      * every mutator that touches either counter goes through this, so isReady can't drift
-     * by a call site forgetting to update it. */
+     * by a call site forgetting to update it. Returns {@code task} itself, unchanged, when the
+     * computed values are already exactly what's stored - restores the no-op-write optimization
+     * the pre-refactor code had. Done here, against the live value {@link TaskRepository#update}
+     * hands the mutator, rather than via a separate pre-read that could race a concurrent change
+     * on the same task. Matters once persistence is a real JPA store: an unchanged returned
+     * instance is exactly what makes Hibernate's own dirty checking skip the UPDATE/version bump. */
     private static Task withCounters(Task task, int blockingCount, int openConstraintCount) {
+        boolean isReady = blockingCount == 0 && openConstraintCount == 0;
+        if (task.getBlockingCount() == blockingCount
+                && task.getOpenConstraintCount() == openConstraintCount
+                && task.isReady() == isReady) {
+            return task;
+        }
         return copyOf(task)
                 .blockingCount(blockingCount)
                 .openConstraintCount(openConstraintCount)
-                .isReady(blockingCount == 0 && openConstraintCount == 0)
+                .isReady(isReady)
                 .build();
+    }
+
+    /** Runs {@code countersMutator} through the atomic {@link TaskRepository#update}, then logs
+     * whether it actually changed anything - {@code countersMutator} is expected to be a
+     * {@link #withCounters} call, which signals "no-op" by returning its input unchanged. */
+    private void updateCounters(UUID taskId, UnaryOperator<Task> countersMutator) {
+        boolean[] changed = {false};
+        Task updated = requireUpdated(taskRepository.update(taskId, task -> {
+            Task result = countersMutator.apply(task);
+            changed[0] = result != task;
+            return result;
+        }), taskId);
+
+        if (changed[0]) {
+            log.info("Task {} eligibility changed: blockingCount={}, openConstraintCount={}, isReady={}",
+                    taskId, updated.getBlockingCount(), updated.getOpenConstraintCount(), updated.isReady());
+        } else {
+            log.debug("Task {} eligibility already correct (blockingCount={}, openConstraintCount={}, isReady={}), "
+                    + "skipping write", taskId, updated.getBlockingCount(), updated.getOpenConstraintCount(),
+                    updated.isReady());
+        }
     }
 
     @Transactional
     public void recalculateTaskEligibility(UUID taskId) {
         Objects.requireNonNull(taskId, "taskId must not be null");
-        taskRepository.update(taskId, task ->
-                        withCounters(task, task.getBlockingCount(), task.getOpenConstraintCount()))
-                .orElseThrow(() -> new IllegalArgumentException("Task not found: " + taskId));
+        updateCounters(taskId, task ->
+                withCounters(task, task.getBlockingCount(), task.getOpenConstraintCount()));
     }
 
     @Transactional
@@ -135,10 +172,9 @@ public class TaskEligibilityService {
             log.info("Dependency change for task {} (delta={}) involves a dependency that is "
                 + "already DONE, blockingCount left unchanged", taskId, delta);
         }
-        taskRepository.update(taskId, task ->
-                        withCounters(task, Math.max(0, task.getBlockingCount() + effectiveDelta),
-                                task.getOpenConstraintCount()))
-                .orElseThrow(() -> new IllegalArgumentException("Task not found: " + taskId));
+        updateCounters(taskId, task ->
+                withCounters(task, Math.max(0, task.getBlockingCount() + effectiveDelta),
+                        task.getOpenConstraintCount()));
     }
 
     // DFS reachability (stack-based push/pop), not BFS - see CLAUDE.md "Key decisions".
@@ -197,9 +233,12 @@ public class TaskEligibilityService {
         log.info("Task {} status changed to {}", taskId, newStatus);
 
         synchronized (dependencyGraphLock) {
-            TaskStatus previousStatus = requireTask(taskId).getStatus();
-            taskRepository.update(taskId, task -> copyOf(task).status(newStatus).build())
-                    .orElseThrow(() -> new IllegalArgumentException("Task not found: " + taskId));
+            Task[] previous = new Task[1];
+            requireUpdated(taskRepository.update(taskId, task -> {
+                previous[0] = task;
+                return copyOf(task).status(newStatus).build();
+            }), taskId);
+            TaskStatus previousStatus = previous[0].getStatus();
 
             if (previousStatus != TaskStatus.DONE && newStatus == TaskStatus.DONE) {
                 adjustDependentsBlockingCount(taskId, -1);
@@ -228,9 +267,8 @@ public class TaskEligibilityService {
     public void onConstraintAdded(UUID taskId) {
         Objects.requireNonNull(taskId, "taskId must not be null");
         log.info("Constraint added on task {}", taskId);
-        taskRepository.update(taskId, task ->
-                        withCounters(task, task.getBlockingCount(), task.getOpenConstraintCount() + 1))
-                .orElseThrow(() -> new IllegalArgumentException("Task not found: " + taskId));
+        updateCounters(taskId, task ->
+                withCounters(task, task.getBlockingCount(), task.getOpenConstraintCount() + 1));
     }
 
     @Transactional
@@ -249,9 +287,8 @@ public class TaskEligibilityService {
         }
 
         int delta = isOpenNow ? 1 : -1;
-        taskRepository.update(taskId, task ->
-                        withCounters(task, task.getBlockingCount(),
-                                Math.max(0, task.getOpenConstraintCount() + delta)))
-                .orElseThrow(() -> new IllegalArgumentException("Task not found: " + taskId));
+        updateCounters(taskId, task ->
+                withCounters(task, task.getBlockingCount(),
+                        Math.max(0, task.getOpenConstraintCount() + delta)));
     }
 }
