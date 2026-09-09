@@ -1,5 +1,10 @@
 package com.rnd.bridge.media;
 
+import com.rnd.bridge.media.meeting.FixtureBbbMeetingMetadataReader;
+import com.rnd.bridge.media.meeting.FixtureZoomMeetingMetadataReader;
+import com.rnd.bridge.media.meeting.MeetingMetadata;
+import com.rnd.bridge.media.meeting.MeetingMetadataReader;
+import com.rnd.bridge.media.meeting.ParticipantActivity;
 import com.rnd.bridge.raw.model.Modality;
 import com.rnd.bridge.raw.model.RawObjectEvent;
 import com.rnd.bridge.raw.model.RawSourceType;
@@ -41,7 +46,12 @@ import java.util.stream.Stream;
  * keyed per source_type/tenant) - a content hash already seen is moved to "uploaded/" but
  * not re-landed/re-published; (3) for a MEETING recording, a same-basename transcript
  * sidecar ({@code .vtt}/{@code .srt}/{@code .txt}) is landed alongside it and linked via
- * transcriptObjectKey; (4) land + publish.
+ * transcriptObjectKey, and a same-basename meeting-metadata sidecar (Zoom:
+ * {@code .meeting.json}, BBB: {@code .metadata.xml}) is landed and linked via
+ * meetingMetadataObjectKey, with its parsed participant names on the event's participants
+ * field; (4) land + publish. Both sidecar kinds are moved to "uploaded/" alongside their
+ * recording even when the recording itself turns out to be a dedup skip, or they'd sit
+ * unmatched forever (same reasoning already applied to transcripts).
  */
 @Service
 public class MediaIntakeOrchestrator {
@@ -50,6 +60,11 @@ public class MediaIntakeOrchestrator {
     private static final String UPLOADED_SUBDIR = "uploaded";
     private static final String REJECTED_SUBDIR = "rejected";
     private static final List<String> TRANSCRIPT_EXTENSIONS = List.of(".vtt", ".srt", ".txt");
+    // Distinct per-source extensions, not a shared list like TRANSCRIPT_EXTENSIONS: each
+    // recordings dir only ever pairs with its own platform's sidecar shape, so there's no
+    // ambiguity to resolve the way multiple possible transcript formats need.
+    private static final String MEETING_METADATA_EXTENSION_ZOOM = ".meeting.json";
+    private static final String MEETING_METADATA_EXTENSION_BBB = ".metadata.xml";
 
     private final MediaIntakeService intakeService;
     private final MediaEventPublisher eventPublisher;
@@ -61,6 +76,8 @@ public class MediaIntakeOrchestrator {
     public MediaIntakeOrchestrator(MediaIntakeService intakeService,
                                     MediaEventPublisher eventPublisher,
                                     MediaDedupIndex dedupIndex,
+                                    FixtureZoomMeetingMetadataReader zoomMeetingMetadataReader,
+                                    FixtureBbbMeetingMetadataReader bbbMeetingMetadataReader,
                                     @Value("${bridge.media.zoom-recordings-dir}") String zoomRecordingsDir,
                                     @Value("${bridge.media.bbb-recordings-dir}") String bbbRecordingsDir,
                                     @Value("${bridge.media.scanned-docs-dir}") String scannedDocsDir,
@@ -73,11 +90,13 @@ public class MediaIntakeOrchestrator {
         this.minFileSizeBytes = minFileSizeBytes;
         this.intakeSources = List.of(
                 new IntakeSource("bridge.media.zoom-recordings-dir", zoomRecordingsDir,
-                        RawSourceType.MEETING, Modality.AUDIO),
+                        RawSourceType.MEETING, Modality.AUDIO,
+                        MEETING_METADATA_EXTENSION_ZOOM, zoomMeetingMetadataReader),
                 new IntakeSource("bridge.media.bbb-recordings-dir", bbbRecordingsDir,
-                        RawSourceType.MEETING, Modality.AUDIO),
+                        RawSourceType.MEETING, Modality.AUDIO,
+                        MEETING_METADATA_EXTENSION_BBB, bbbMeetingMetadataReader),
                 new IntakeSource("bridge.media.scanned-docs-dir", scannedDocsDir,
-                        RawSourceType.SCANNED_DOC, Modality.SCANNED_DOC)
+                        RawSourceType.SCANNED_DOC, Modality.SCANNED_DOC, null, null)
         );
     }
 
@@ -113,12 +132,13 @@ public class MediaIntakeOrchestrator {
             return;
         }
 
-        // Transcript sidecars are consumed by their recording, not processed as their own
-        // top-level upload.
-        Set<Path> transcripts = new HashSet<>();
+        // Transcript and meeting-metadata sidecars are consumed by their recording, not
+        // processed as their own top-level upload.
+        Set<Path> sidecars = new HashSet<>();
         if (source.sourceType() == RawSourceType.MEETING) {
             for (Path file : files) {
-                findTranscript(file, dir).ifPresent(transcripts::add);
+                findTranscript(file, dir).ifPresent(sidecars::add);
+                findMeetingMetadata(file, dir, source).ifPresent(sidecars::add);
             }
         }
 
@@ -126,7 +146,7 @@ public class MediaIntakeOrchestrator {
         Path rejectedDir = dir.resolve(REJECTED_SUBDIR);
 
         for (Path file : files) {
-            if (transcripts.contains(file)) {
+            if (sidecars.contains(file)) {
                 continue;
             }
             upload(file, dir, uploadedDir, rejectedDir, source, uploaded, duplicates, rejected, failed);
@@ -151,16 +171,23 @@ public class MediaIntakeOrchestrator {
             Path transcript = source.sourceType() == RawSourceType.MEETING
                     ? findTranscript(file, dir).orElse(null)
                     : null;
+            Path meetingMetadataFile = source.sourceType() == RawSourceType.MEETING
+                    ? findMeetingMetadata(file, dir, source).orElse(null)
+                    : null;
 
             String contentHash = sha256Hex(content);
             boolean isDuplicate = dedupIndex.checkAndRecord(source.sourceType(), tenantId, contentHash);
             if (isDuplicate) {
                 moveTo(file, uploadedDir);
-                // The sidecar is tied to this specific filename, not to the content hash -
-                // move it out of the way too, or it sits here forever getting re-checked
-                // (and never matched, since it's never itself in seenHashes) on every run.
+                // Sidecars are tied to this specific filename, not to the content hash -
+                // move them out of the way too, or they sit here forever getting re-checked
+                // (and never matched, since the recording is never itself in seenHashes)
+                // on every run.
                 if (transcript != null) {
                     moveTo(transcript, uploadedDir);
+                }
+                if (meetingMetadataFile != null) {
+                    moveTo(meetingMetadataFile, uploadedDir);
                 }
                 log.info("Skipped {} - duplicate of already-landed content", file.getFileName());
                 duplicates.add(file.getFileName().toString());
@@ -177,14 +204,28 @@ public class MediaIntakeOrchestrator {
                             source.sourceType(), ingestedAt);
                 }
 
+                String meetingMetadataObjectKey = null;
+                List<String> participants = null;
+                if (meetingMetadataFile != null) {
+                    byte[] meetingMetadataContent = Files.readAllBytes(meetingMetadataFile);
+                    meetingMetadataObjectKey = intakeService.landMeetingMetadata(
+                            meetingMetadataContent, meetingMetadataFile.getFileName().toString(),
+                            tenantId, source.sourceType(), ingestedAt);
+                    participants = extractParticipantNames(source, meetingMetadataFile);
+                }
+
                 RawObjectEvent event = intakeService.land(
                         content, contentHash, file.getFileName().toString(), tenantId,
-                        source.sourceType(), source.modality(), ingestedAt, transcriptObjectKey);
+                        source.sourceType(), source.modality(), ingestedAt, transcriptObjectKey,
+                        participants, meetingMetadataObjectKey);
                 eventPublisher.publish(event);
 
                 moveTo(file, uploadedDir);
                 if (transcript != null) {
                     moveTo(transcript, uploadedDir);
+                }
+                if (meetingMetadataFile != null) {
+                    moveTo(meetingMetadataFile, uploadedDir);
                 }
 
                 log.info("Uploaded {} as {}", file.getFileName(), event.objectKey());
@@ -226,6 +267,27 @@ public class MediaIntakeOrchestrator {
         return Optional.empty();
     }
 
+    private Optional<Path> findMeetingMetadata(Path recording, Path dir, IntakeSource source) {
+        if (source.meetingMetadataExtension() == null) {
+            return Optional.empty();
+        }
+        String basename = stripExtension(recording.getFileName().toString());
+        Path candidate = dir.resolve(basename + source.meetingMetadataExtension());
+        return !candidate.equals(recording) && Files.isRegularFile(candidate)
+                ? Optional.of(candidate) : Optional.empty();
+    }
+
+    private List<String> extractParticipantNames(IntakeSource source, Path meetingMetadataFile) {
+        try {
+            MeetingMetadata metadata = source.meetingMetadataReader().read(meetingMetadataFile);
+            return metadata.participants().stream().map(ParticipantActivity::name).toList();
+        } catch (Exception e) {
+            log.warn("Failed to parse meeting-metadata sidecar {} - landing it anyway, "
+                    + "participants left unset", meetingMetadataFile, e);
+            return null;
+        }
+    }
+
     private String stripExtension(String filename) {
         int dot = filename.lastIndexOf('.');
         return dot >= 0 ? filename.substring(0, dot) : filename;
@@ -240,7 +302,10 @@ public class MediaIntakeOrchestrator {
         }
     }
 
-    private record IntakeSource(String propertyName, String dir, RawSourceType sourceType, Modality modality) {
+    // meetingMetadataExtension/Reader are null for a source with no meeting-metadata sidecar
+    // convention (scanned-docs).
+    private record IntakeSource(String propertyName, String dir, RawSourceType sourceType, Modality modality,
+                                 String meetingMetadataExtension, MeetingMetadataReader meetingMetadataReader) {
     }
 
     public record IntakeSummary(List<String> uploadedObjectKeys, List<String> duplicateFiles,

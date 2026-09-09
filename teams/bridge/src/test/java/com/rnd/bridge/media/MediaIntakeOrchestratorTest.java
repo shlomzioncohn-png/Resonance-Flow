@@ -9,6 +9,9 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.rnd.bridge.media.meeting.FixtureBbbMeetingMetadataReader;
+import com.rnd.bridge.media.meeting.FixtureZoomMeetingMetadataReader;
 import com.rnd.bridge.raw.model.Modality;
 import com.rnd.bridge.raw.model.RawObjectEvent;
 import com.rnd.bridge.raw.model.RawSourceType;
@@ -42,6 +45,8 @@ class MediaIntakeOrchestratorTest {
         when(dedupIndex.checkAndRecord(any(), any(), any())).thenReturn(false);
         orchestrator = new MediaIntakeOrchestrator(
                 intakeService, eventPublisher, dedupIndex,
+                new FixtureZoomMeetingMetadataReader(new ObjectMapper()),
+                new FixtureBbbMeetingMetadataReader(),
                 zoomDir.toString(), bbbDir.toString(), scannedDocsDir.toString(),
                 "demo-tenant", 1024L);
     }
@@ -73,7 +78,7 @@ class MediaIntakeOrchestratorTest {
         Files.write(zoomDir.resolve("meeting.mp3"), "a".repeat(2000).getBytes());
         RawObjectEvent event = fakeEvent("MEETING/demo-tenant/2026-08-30/x.mp3");
         when(intakeService.land(any(), any(), eq("meeting.mp3"), eq("demo-tenant"),
-                eq(RawSourceType.MEETING), eq(Modality.AUDIO), any(), isNull()))
+                eq(RawSourceType.MEETING), eq(Modality.AUDIO), any(), isNull(), isNull(), isNull()))
                 .thenReturn(event);
 
         MediaIntakeOrchestrator.IntakeSummary summary = orchestrator.runIntake();
@@ -108,7 +113,7 @@ class MediaIntakeOrchestratorTest {
                 .thenReturn(transcriptKey);
         RawObjectEvent event = fakeEvent("MEETING/demo-tenant/2026-08-30/x.mp3");
         when(intakeService.land(any(), any(), eq("meeting.mp3"), eq("demo-tenant"),
-                eq(RawSourceType.MEETING), eq(Modality.AUDIO), any(), eq(transcriptKey)))
+                eq(RawSourceType.MEETING), eq(Modality.AUDIO), any(), eq(transcriptKey), isNull(), isNull()))
                 .thenReturn(event);
 
         MediaIntakeOrchestrator.IntakeSummary summary = orchestrator.runIntake();
@@ -121,11 +126,40 @@ class MediaIntakeOrchestratorTest {
     }
 
     @Test
+    void meetingMetadataSidecarIsLandedLinkedAndParticipantsExtracted() throws Exception {
+        Files.write(zoomDir.resolve("meeting.mp3"), "e".repeat(2000).getBytes());
+        Files.writeString(zoomDir.resolve("meeting.meeting.json"), """
+                {"id": "1", "topic": "Sync", "host_name": "Dana",
+                 "start_time": "2026-09-08T09:00:00Z", "end_time": "2026-09-08T09:30:00Z",
+                 "participants": [
+                   {"id": "a", "name": "Dana Levi", "join_time": "2026-09-08T09:00:00Z", "leave_time": "2026-09-08T09:30:00Z"},
+                   {"id": "b", "name": "Esther Ora", "join_time": "2026-09-08T09:01:00Z", "leave_time": "2026-09-08T09:30:00Z"}
+                 ]}""");
+        String meetingMetadataKey = "MEETING/demo-tenant/2026-08-30/m.json";
+        when(intakeService.landMeetingMetadata(any(), eq("meeting.meeting.json"), eq("demo-tenant"),
+                eq(RawSourceType.MEETING), any()))
+                .thenReturn(meetingMetadataKey);
+        RawObjectEvent event = fakeEvent("MEETING/demo-tenant/2026-08-30/x.mp3");
+        when(intakeService.land(any(), any(), eq("meeting.mp3"), eq("demo-tenant"),
+                eq(RawSourceType.MEETING), eq(Modality.AUDIO), any(), isNull(),
+                eq(java.util.List.of("Dana Levi", "Esther Ora")), eq(meetingMetadataKey)))
+                .thenReturn(event);
+
+        MediaIntakeOrchestrator.IntakeSummary summary = orchestrator.runIntake();
+
+        assertThat(summary.uploadedObjectKeys()).containsExactly(event.objectKey());
+        assertThat(summary.failedFiles()).isEmpty();
+        assertThat(Files.exists(zoomDir.resolve("uploaded").resolve("meeting.meeting.json"))).isTrue();
+        verify(intakeService).landMeetingMetadata(any(), eq("meeting.meeting.json"), eq("demo-tenant"),
+                eq(RawSourceType.MEETING), any());
+    }
+
+    @Test
     void failedLandRollsBackTheDedupClaimSoARetryIsNotBlockedForever() throws Exception {
         byte[] content = "d".repeat(2000).getBytes();
         Files.write(zoomDir.resolve("broken.mp3"), content);
         when(intakeService.land(any(), any(), eq("broken.mp3"), eq("demo-tenant"),
-                eq(RawSourceType.MEETING), eq(Modality.AUDIO), any(), isNull()))
+                eq(RawSourceType.MEETING), eq(Modality.AUDIO), any(), isNull(), isNull(), isNull()))
                 .thenThrow(new IllegalStateException("MinIO unreachable"));
 
         MediaIntakeOrchestrator.IntakeSummary summary = orchestrator.runIntake();
