@@ -31,7 +31,6 @@ class NotificationSyncControllerTest {
                 .setOrgId(ORG_ID)
                 .setUserId(USER_ID)
                 .setTaskId("task-1")
-                .setNotificationType(NotificationType.TASK_CREATED)
                 .setPushPolicy(PushPolicy.ACTIVITY)
                 .build();
         Instant since = Instant.parse("2026-08-30T09:00:00Z");
