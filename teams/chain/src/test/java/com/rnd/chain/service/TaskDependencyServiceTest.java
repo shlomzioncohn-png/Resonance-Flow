@@ -18,6 +18,7 @@ import com.rnd.chain.repository.InMemoryTaskRepository;
 import com.rnd.chain.repository.InMemoryTransactionRunner;
 import com.rnd.chain.repository.TaskDependencyRepository;
 import com.rnd.chain.repository.TaskRepository;
+import com.rnd.chain.repository.TransactionRunner;
 import com.rnd.chain.testsupport.ConcurrentTestRunner;
 import com.rnd.chain.testsupport.IncrementingClock;
 import org.junit.jupiter.api.BeforeEach;
@@ -27,6 +28,9 @@ import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -43,6 +47,7 @@ class TaskDependencyServiceTest {
     private TaskRepository taskRepository;
     private TaskDependencyRepository taskDependencyRepository;
     private DependencyHistoryRepository historyRepository;
+    private TransactionRunner transactionRunner;
     private TaskDependencyService service;
 
     @BeforeEach
@@ -57,9 +62,10 @@ class TaskDependencyServiceTest {
                 List.of(newTask(taskA), newTask(taskB), newTask(taskC), newTask(taskD)));
         taskDependencyRepository = new InMemoryTaskDependencyRepository(List.of());
         historyRepository = new InMemoryDependencyHistoryRepository();
+        transactionRunner = new InMemoryTransactionRunner();
 
         service = new TaskDependencyService(taskRepository, taskDependencyRepository,
-                historyRepository, new InMemoryTransactionRunner(), new IncrementingClock());
+                historyRepository, transactionRunner, new IncrementingClock());
     }
 
     // --- constructor -----------------------------------------------------
@@ -199,6 +205,74 @@ class TaskDependencyServiceTest {
     @Test
     void getDependents_isEmpty_forTaskNothingDependsOn() {
         assertThat(service.getDependents(taskA)).isEmpty();
+    }
+
+    // --- reads wait for in-flight writes, so they can't see a mid-rollback state ---
+
+    @Test
+    void getDependencies_blocksUntilAnInFlightTransactionFinishes() throws InterruptedException {
+        CountDownLatch transactionStarted = new CountDownLatch(1);
+        CountDownLatch releaseTransaction = new CountDownLatch(1);
+
+        Thread holder = new Thread(() -> transactionRunner.runInTransaction(() -> {
+            transactionStarted.countDown();
+            awaitUpTo2Seconds(releaseTransaction);
+            return null;
+        }));
+        holder.start();
+        assertThat(transactionStarted.await(2, TimeUnit.SECONDS)).isTrue();
+
+        AtomicBoolean readReturned = new AtomicBoolean(false);
+        Thread reader = new Thread(() -> {
+            service.getDependencies(taskA);
+            readReturned.set(true);
+        });
+        reader.start();
+
+        Thread.sleep(200);
+        assertThat(readReturned.get()).isFalse();
+
+        releaseTransaction.countDown();
+        reader.join(2000);
+        assertThat(readReturned.get()).isTrue();
+        holder.join(2000);
+    }
+
+    @Test
+    void getDependents_blocksUntilAnInFlightTransactionFinishes() throws InterruptedException {
+        CountDownLatch transactionStarted = new CountDownLatch(1);
+        CountDownLatch releaseTransaction = new CountDownLatch(1);
+
+        Thread holder = new Thread(() -> transactionRunner.runInTransaction(() -> {
+            transactionStarted.countDown();
+            awaitUpTo2Seconds(releaseTransaction);
+            return null;
+        }));
+        holder.start();
+        assertThat(transactionStarted.await(2, TimeUnit.SECONDS)).isTrue();
+
+        AtomicBoolean readReturned = new AtomicBoolean(false);
+        Thread reader = new Thread(() -> {
+            service.getDependents(taskA);
+            readReturned.set(true);
+        });
+        reader.start();
+
+        Thread.sleep(200);
+        assertThat(readReturned.get()).isFalse();
+
+        releaseTransaction.countDown();
+        reader.join(2000);
+        assertThat(readReturned.get()).isTrue();
+        holder.join(2000);
+    }
+
+    private static void awaitUpTo2Seconds(CountDownLatch latch) {
+        try {
+            latch.await(2, TimeUnit.SECONDS);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
     }
 
     /**

@@ -181,9 +181,11 @@ public class TaskDependencyService {
         Objects.requireNonNull(taskId, "taskId must not be null");
         requireTaskExists(taskId);
 
-        return taskDependencyRepository.findByTaskId(taskId).stream()
+        // Reads go through the same transaction lock as writes so they can never
+        // observe a state mid-rollback (see addDependency/removeDependency).
+        return transactionRunner.runInTransaction(() -> taskDependencyRepository.findByTaskId(taskId).stream()
                 .map(TaskDependency::getDependsOnTaskId)
-                .toList();
+                .toList());
     }
 
     /**
@@ -195,9 +197,9 @@ public class TaskDependencyService {
         Objects.requireNonNull(taskId, "taskId must not be null");
         requireTaskExists(taskId);
 
-        return taskDependencyRepository.findByDependsOnTaskId(taskId).stream()
+        return transactionRunner.runInTransaction(() -> taskDependencyRepository.findByDependsOnTaskId(taskId).stream()
                 .map(TaskDependency::getTaskId)
-                .toList();
+                .toList());
     }
 
     /** Empty page (not 404) if the task exists but has no history yet. */
