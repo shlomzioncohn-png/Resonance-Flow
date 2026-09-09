@@ -13,6 +13,8 @@ public interface DependencyHistoryRepository {
     /**
      * Records {@code entry}. If sourceRef is non-null and (source, sourceRef)
      * already exists, this is a no-op - returns the existing entry, not a new one.
+     * Call only via {@code TaskDependencyService}, which pairs this with the
+     * graph write inside one transaction - calling it directly skips that.
      */
     DependencyHistoryEntry record(DependencyHistoryEntry entry);
 

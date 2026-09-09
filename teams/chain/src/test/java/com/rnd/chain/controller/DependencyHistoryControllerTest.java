@@ -1,7 +1,5 @@
 package com.rnd.chain.controller;
 
-import com.rnd.chain.dto.Task;
-import com.rnd.chain.dto.TaskStatus;
 import com.rnd.chain.repository.TaskRepository;
 import com.rnd.chain.service.TaskDependencyService;
 import com.rnd.chain.testsupport.IncrementingClock;
@@ -16,9 +14,9 @@ import org.springframework.context.annotation.Primary;
 import org.springframework.test.web.servlet.MockMvc;
 
 import java.time.Clock;
-import java.time.LocalDateTime;
 import java.util.UUID;
 
+import static com.rnd.chain.testsupport.TaskFixtures.newTask;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -124,18 +122,5 @@ class DependencyHistoryControllerTest {
     void getHistory_rejectsNegativePage() throws Exception {
         mockMvc.perform(get("/tasks/{taskId}/dependencies/history", taskA).param("page", "-1"))
                 .andExpect(status().isBadRequest());
-    }
-
-    private static Task newTask(UUID id) {
-        return Task.builder()
-                .id(id)
-                .ownerId("owner")
-                .status(TaskStatus.ACTIVE)
-                .isReady(true)
-                .blockingCount(0)
-                .openConstraintCount(0)
-                .createdAt(LocalDateTime.now())
-                .updatedAt(LocalDateTime.now())
-                .build();
     }
 }

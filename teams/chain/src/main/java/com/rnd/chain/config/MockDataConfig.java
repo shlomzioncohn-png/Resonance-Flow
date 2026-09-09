@@ -57,6 +57,9 @@ public class MockDataConfig {
         return new InMemoryTransactionRunner();
     }
 
+    // A @SpringBootTest overriding this must use a differently-named @Primary bean, not
+    // just @Bean Clock clock() - @ConditionalOnMissingBean here runs before a nested
+    // @TestConfiguration is parsed, so a same-named bean collides instead of being skipped.
     @Bean
     @ConditionalOnMissingBean(Clock.class)
     public Clock clock() {

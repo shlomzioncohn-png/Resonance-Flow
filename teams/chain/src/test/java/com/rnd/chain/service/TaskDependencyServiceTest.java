@@ -33,6 +33,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 
+import static com.rnd.chain.testsupport.TaskFixtures.newTask;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
@@ -488,17 +489,5 @@ class TaskDependencyServiceTest {
         public PageResponse<DependencyHistoryEntry> findByTaskId(UUID taskId, int page, int size) {
             return new PageResponse<>(List.of(), page, size, 0, 0);
         }
-    }
-
-    private static Task newTask(UUID id) {
-        return Task.builder()
-                .id(id)
-                .ownerId("owner")
-                .status(TaskStatus.ACTIVE)
-                .blockingCount(0)
-                .openConstraintCount(0)
-                .createdAt(LocalDateTime.now())
-                .updatedAt(LocalDateTime.now())
-                .build();
     }
 }

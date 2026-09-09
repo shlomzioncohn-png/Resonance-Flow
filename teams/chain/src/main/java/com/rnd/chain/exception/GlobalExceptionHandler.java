@@ -9,13 +9,8 @@ import org.springframework.web.bind.annotation.RestControllerAdvice;
 @RestControllerAdvice
 public class GlobalExceptionHandler {
 
-    @ExceptionHandler(TaskNotFoundException.class)
-    public ResponseEntity<ErrorResponse> handleNotFound(TaskNotFoundException e) {
-        return status(HttpStatus.NOT_FOUND, e);
-    }
-
-    @ExceptionHandler(DependencyNotFoundException.class)
-    public ResponseEntity<ErrorResponse> handleNotFound(DependencyNotFoundException e) {
+    @ExceptionHandler({TaskNotFoundException.class, DependencyNotFoundException.class})
+    public ResponseEntity<ErrorResponse> handleNotFound(RuntimeException e) {
         return status(HttpStatus.NOT_FOUND, e);
     }
 
@@ -24,13 +19,10 @@ public class GlobalExceptionHandler {
         return status(HttpStatus.CONFLICT, e);
     }
 
-    @ExceptionHandler(InvalidDependencyException.class)
-    public ResponseEntity<ErrorResponse> handleBadRequest(InvalidDependencyException e) {
-        return status(HttpStatus.BAD_REQUEST, e);
-    }
-
-    @ExceptionHandler(IllegalArgumentException.class)
-    public ResponseEntity<ErrorResponse> handleBadRequest(IllegalArgumentException e) {
+    // Also catches IllegalArgumentException from DTO builders (e.g. Task, DependencyHistoryEntry) -
+    // fine while nothing builds those from request input, but revisit if a future endpoint does.
+    @ExceptionHandler({InvalidDependencyException.class, IllegalArgumentException.class})
+    public ResponseEntity<ErrorResponse> handleBadRequest(RuntimeException e) {
         return status(HttpStatus.BAD_REQUEST, e);
     }
 
