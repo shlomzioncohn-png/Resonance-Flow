@@ -12,15 +12,15 @@ import { test, expect } from '@playwright/test'
 
 test.describe('Workspace - Task Recommendation', () => {
   test.beforeEach(async ({ page }) => {
-    await page.goto('/employee')
+    await page.goto('/employee', { waitUntil: 'domcontentloaded' })
     // Wait for page to load
-    await page.waitForLoadState('networkidle', { timeout: 10000 }).catch(() => {})
+    await page.waitForLoadState('networkidle', { timeout: 15000 }).catch(() => {})
   })
 
   test('Happy Path: Form submission works end-to-end', async ({ page }) => {
     // ACT: User fills form and submits
     await page.click('[data-testid="available-time"]')
-    await page.waitForTimeout(200)
+    await page.waitForSelector('[role="option"]', { timeout: 5000 }).catch(() => {})
     await page.click('[role="option"][data-value="45"]')
     await page.click('[data-testid="recommend-btn"]')
 
@@ -35,7 +35,7 @@ test.describe('Workspace - Task Recommendation', () => {
   test('Error Handling: API failures are handled', async ({ page }) => {
     // ACT: User submits
     await page.click('[data-testid="available-time"]')
-    await page.waitForTimeout(200)
+    await page.waitForSelector('[role="option"]', { timeout: 5000 }).catch(() => {})
     await page.click('[role="option"][data-value="30"]')
     await page.click('[data-testid="recommend-btn"]')
 
@@ -50,7 +50,7 @@ test.describe('Workspace - Task Recommendation', () => {
   test('Form Inputs: Different time values work', async ({ page }) => {
     // ACT: Submit with different time value
     await page.click('[data-testid="available-time"]')
-    await page.waitForTimeout(200)
+    await page.waitForSelector('[role="option"]', { timeout: 5000 }).catch(() => {})
     await page.click('[role="option"][data-value="60"]')
     await page.click('[data-testid="recommend-btn"]')
 
@@ -65,14 +65,14 @@ test.describe('Workspace - Task Recommendation', () => {
   test('Filters: Project filter works', async ({ page }) => {
     // ACT: Apply project filter
     await page.click('[data-testid="project-filter"]')
-    await page.waitForTimeout(200)
+    await page.waitForSelector('[role="option"]', { timeout: 5000 }).catch(() => {})
     // Click the first option
     const firstOption = page.locator('[role="option"]').first()
     await firstOption.click()
     
     // Submit recommendation request
     await page.click('[data-testid="available-time"]')
-    await page.waitForTimeout(200)
+    await page.waitForSelector('[role="option"]', { timeout: 5000 }).catch(() => {})
     await page.click('[role="option"][data-value="45"]')
     await page.click('[data-testid="recommend-btn"]')
 
@@ -121,7 +121,7 @@ test.describe('Workspace - Task Recommendation', () => {
     // ACT: Make recommendation request
     console.log('🔵 Clicking available-time dropdown')
     await page.click('[data-testid="available-time"]')
-    await page.waitForTimeout(300)
+    await page.waitForSelector('[role="option"]', { timeout: 5000 }).catch(() => {})
     
     console.log('🔵 Selecting 60 minutes')
     await page.click('[role="option"][data-value="60"]')
@@ -142,7 +142,7 @@ test.describe('Workspace - Task Recommendation', () => {
     // ACT 1: Get recommendation
     console.log('🔵 Getting task recommendation...')
     await page.click('[data-testid="available-time"]')
-    await page.waitForTimeout(200)
+    await page.waitForSelector('[role="option"]', { timeout: 5000 }).catch(() => {})
     await page.click('[role="option"][data-value="45"]')
     await page.click('[data-testid="recommend-btn"]')
 
@@ -184,7 +184,7 @@ test.describe('Workspace - Task Recommendation', () => {
     // ACT 1: Get recommendation
     console.log('🔵 Getting task recommendation...')
     await page.click('[data-testid="available-time"]')
-    await page.waitForTimeout(200)
+    await page.waitForSelector('[role="option"]', { timeout: 5000 }).catch(() => {})
     await page.click('[role="option"][data-value="45"]')
     await page.click('[data-testid="recommend-btn"]')
 
@@ -252,7 +252,7 @@ test.describe('Workspace - Task Recommendation', () => {
         expect(foundFields).toBeGreaterThan(0)
         console.log(`✓ Task details page: Found ${foundFields}/${detailChecks.length} fields`)
       } catch (error) {
-        console.log(`⚠️ Error navigating to task details: ${error.message}`)
+        console.log(`⚠️ Error navigating to task details: ${error instanceof Error ? error.message : String(error)}`)
       }
     } else {
       console.log('⚠️ View details button not found in any format')
