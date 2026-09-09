@@ -99,6 +99,11 @@ public class TaskDependencyService {
         requireTaskExists(dependsOnTaskId);
 
         return transactionRunner.runInTransaction(() -> {
+            // Re-checked under the transaction lock: the outer check above is only a fast
+            // path and can race with a concurrent identical retry (see stage-3 concurrency test).
+            if (sourceRef != null && historyRepository.existsBySourceAndSourceRef(source, sourceRef)) {
+                return new TaskDependency(taskId, dependsOnTaskId);
+            }
             TaskDependency saved = taskDependencyRepository.save(new TaskDependency(taskId, dependsOnTaskId))
                     .orElseThrow(() -> new DuplicateDependencyException(
                             "Task " + taskId + " already depends on " + dependsOnTaskId));
@@ -137,6 +142,9 @@ public class TaskDependencyService {
         }
 
         transactionRunner.runInTransaction(() -> {
+            if (sourceRef != null && historyRepository.existsBySourceAndSourceRef(source, sourceRef)) {
+                return null;
+            }
             boolean removed = taskDependencyRepository.delete(taskId, dependsOnTaskId);
             if (!removed) {
                 throw new DependencyNotFoundException(

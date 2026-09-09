@@ -19,10 +19,10 @@ import com.rnd.chain.repository.InMemoryTransactionRunner;
 import com.rnd.chain.repository.TaskDependencyRepository;
 import com.rnd.chain.repository.TaskRepository;
 import com.rnd.chain.testsupport.ConcurrentTestRunner;
+import com.rnd.chain.testsupport.IncrementingClock;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
-import java.time.Clock;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.UUID;
@@ -57,7 +57,7 @@ class TaskDependencyServiceTest {
         historyRepository = new InMemoryDependencyHistoryRepository();
 
         service = new TaskDependencyService(taskRepository, taskDependencyRepository,
-                historyRepository, new InMemoryTransactionRunner(), Clock.systemUTC());
+                historyRepository, new InMemoryTransactionRunner(), new IncrementingClock());
     }
 
     // --- constructor -----------------------------------------------------
@@ -263,7 +263,7 @@ class TaskDependencyServiceTest {
                 List.of(newTask(taskA), newTask(taskB)));
         TaskDependencyService serviceWithFailingHistory = new TaskDependencyService(
                 taskRepository, taskDependencyRepository, failingHistoryRepository,
-                new InMemoryTransactionRunner(), Clock.systemUTC());
+                new InMemoryTransactionRunner(), new IncrementingClock());
 
         assertThatThrownBy(() -> serviceWithFailingHistory.addDependency(taskA, taskB))
                 .isInstanceOf(RuntimeException.class);
@@ -279,7 +279,7 @@ class TaskDependencyServiceTest {
                 List.of(newTask(taskA), newTask(taskB)));
         TaskDependencyService serviceWithFailingHistory = new TaskDependencyService(
                 taskRepository, taskDependencyRepository, failingHistoryRepository,
-                new InMemoryTransactionRunner(), Clock.systemUTC());
+                new InMemoryTransactionRunner(), new IncrementingClock());
 
         assertThatThrownBy(() -> serviceWithFailingHistory.removeDependency(taskA, taskB))
                 .isInstanceOf(RuntimeException.class);
@@ -319,6 +319,29 @@ class TaskDependencyServiceTest {
         service.addDependency(taskA, taskB, DependencyChangeSource.MIND, "evt-1");
 
         assertThat(service.getHistory(taskA, 0, 20).getContent()).hasSize(1);
+    }
+
+    @Test
+    void addDependency_concurrentRetriesWithSameSourceRef_allSucceed_oneHistoryEntry() throws InterruptedException {
+        int threadCount = 20;
+        AtomicInteger successes = new AtomicInteger();
+
+        ConcurrentTestRunner.run(threadCount, () -> {
+            service.addDependency(taskA, taskB, DependencyChangeSource.MIND, "evt-2");
+            successes.incrementAndGet();
+        });
+
+        assertThat(successes.get()).isEqualTo(threadCount);
+        assertThat(service.getHistory(taskA, 0, 20).getContent()).hasSize(1);
+        assertThat(service.getDependencies(taskA)).containsExactly(taskB);
+    }
+
+    @Test
+    void addDependency_userSourceWithoutSourceRef_hasNoIdempotencyProtection() {
+        service.addDependency(taskA, taskB, DependencyChangeSource.USER, null);
+
+        assertThatThrownBy(() -> service.addDependency(taskA, taskB, DependencyChangeSource.USER, null))
+                .isInstanceOf(DuplicateDependencyException.class);
     }
 
     // --- getHistory ----------------------------------------------------------
