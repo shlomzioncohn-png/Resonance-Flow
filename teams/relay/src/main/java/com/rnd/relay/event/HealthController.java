@@ -8,9 +8,7 @@ import org.springframework.web.bind.annotation.RestController;
 
 import java.util.Map;
 
-// Liveness/readiness probes for the pipe. Design doc §05: readiness means the Kafka consumer
-// has attached and completed at least one poll — this does not measure consumer lag, since
-// there's no lag-measurement infrastructure (actuator/micrometer/AdminClient) in this service.
+// Liveness/readiness probes for the pipe. Design doc §05
 @RestController
 public class HealthController {
 

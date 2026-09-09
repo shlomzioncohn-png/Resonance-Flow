@@ -12,8 +12,7 @@ import java.time.Instant;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
-// Decides, per incoming TaskNotification, whether it reaches the sink as an activity event,
-// gets folded into a debounced refresh signal, or is dropped. See design doc §03 "What gets pushed".
+// design doc §03 "What gets pushed".
 @Component
 public class NotificationRouter {
 
@@ -27,9 +26,7 @@ public class NotificationRouter {
     private final Map<String, Instant> seenEventIds = new ConcurrentHashMap<>();
     private final Map<String, DirtyState> dirtyUsers = new ConcurrentHashMap<>();
 
-    // design doc §09 metrics list: dedup-hit rate, number of PUSH_REFRESH_ONLY messages,
-    // number of emitted refresh signals — their ratio is the refresh-coalescing ratio (left as a
-    // downstream query rather than its own metric, same as the other §09 counters).
+    // design doc §09 metrics list
     private final Counter duplicateEventsCounter;
     private final Counter rollupOnlyMessagesCounter;
     private final Counter refreshSignalsEmittedCounter;

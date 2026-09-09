@@ -104,9 +104,6 @@ class NotificationRouterTest {
     @Test
     void unsetPushPolicyIsIgnored() {
         NotificationRouter router = new NotificationRouter(sink, meterRegistry);
-
-        // Simulates a producer that hasn't started setting push_policy yet — the realistic failure
-        // mode now that delivery is driven by this field instead of inferred from notification_type.
         router.handle(notification(NotificationType.TASK_CREATED, PushPolicy.PUSH_POLICY_UNSPECIFIED, t0), 1L, t0);
         router.tick(t0.plus(NotificationRouter.MAX_DIRTY_AGE));
 

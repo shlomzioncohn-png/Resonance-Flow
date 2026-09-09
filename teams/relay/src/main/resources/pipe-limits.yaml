@@ -9,6 +9,9 @@ relay:
   pipe:
     replay-buffer:
       capacity-per-user: 200
+      # Bounds how long a single reconnect can spend catching up before giving up and
+      # resuming live — a reconnect must not hang the client indefinitely on a Kafka read.
+      max-polls: 20
     websocket:
       outbox-capacity: 32
       heartbeat-interval-seconds: 15

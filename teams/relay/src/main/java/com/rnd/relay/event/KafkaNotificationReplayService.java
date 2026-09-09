@@ -19,38 +19,27 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 
-// Design doc §06 pitfall 1, MISS path: when ActivityReplayBuffer's local ring buffer doesn't cover
-// a reconnecting client's gap (too old, or this pod never saw the user before), fall back to
-// reading the durable history straight from Kafka rather than giving up and resuming live-only.
-//
-// The notification topic is keyed by org_id:user_id (design doc §02.2), so every record for one
-// user is guaranteed to land on a single partition as long as the partition count stays stable.
-// That partition is recomputed here the same way Kafka's own default partitioner would place it
-// (murmur2 hash of the key, mod partition count) instead of needing it recorded anywhere — see
-// org.apache.kafka.clients.producer.internals.DefaultPartitioner for the reference algorithm this
-// mirrors.
+// Design doc §06 pitfall 1
 @Component
 class KafkaNotificationReplayService {
 
     private static final Logger log = LoggerFactory.getLogger(KafkaNotificationReplayService.class);
 
     private static final Duration POLL_TIMEOUT = Duration.ofSeconds(2);
-    // Bounds how long a single reconnect can spend catching up before giving up and resuming live —
-    // a reconnect must not hang the client indefinitely waiting on a Kafka read.
-    private static final int MAX_POLLS = 20;
 
     private final ConsumerFactory<String, TaskNotification> consumerFactory;
     private final String topic;
+    private final int maxPolls;
 
     KafkaNotificationReplayService(
             @Qualifier("notificationReplayConsumerFactory") ConsumerFactory<String, TaskNotification> consumerFactory,
-            @Value("${relay.kafka.task-notification-topic}") String topic) {
+            @Value("${relay.kafka.task-notification-topic}") String topic,
+            @Value("${relay.pipe.replay-buffer.max-polls:20}") int maxPolls) {
         this.consumerFactory = consumerFactory;
         this.topic = topic;
+        this.maxPolls = maxPolls;
     }
 
-    // Never throws — a broker hiccup here should fall through to "resume live only", not break
-    // the reconnect entirely.
     List<ActivityReplayBuffer.Entry> replaySince(String orgId, String userId, long lastOffset) {
         try (Consumer<String, TaskNotification> consumer = consumerFactory.createConsumer()) {
             List<PartitionInfo> partitions = consumer.partitionsFor(topic);
@@ -70,7 +59,7 @@ class KafkaNotificationReplayService {
 
             List<ActivityReplayBuffer.Entry> replay = new ArrayList<>();
             int polls = 0;
-            while (consumer.position(topicPartition) < endOffset && polls++ < MAX_POLLS) {
+            while (consumer.position(topicPartition) < endOffset && polls++ < maxPolls) {
                 ConsumerRecords<String, TaskNotification> records = consumer.poll(POLL_TIMEOUT);
                 for (ConsumerRecord<String, TaskNotification> record : records) {
                     TaskNotification value = record.value();
