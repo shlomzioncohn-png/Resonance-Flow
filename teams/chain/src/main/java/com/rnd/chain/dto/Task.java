@@ -13,7 +13,10 @@ public final class Task {
 
     private final TaskStatus status;
 
-    /** Whether all of this task's dependencies and constraints are satisfied, so it can be worked on. */
+    /** Whether all of this task's dependencies and constraints are satisfied, so it can be worked on.
+     * Invariant: must equal {@code blockingCount == 0 && openConstraintCount == 0}. Not enforced by
+     * this class (a stored field, not derived) - {@code TaskEligibilityService.withCounters} is the
+     * single place responsible for keeping it in sync whenever either counter changes. */
     private final boolean isReady;
 
     /** Number of not-yet-completed tasks that this task depends on (i.e. tasks blocking it). */
@@ -138,6 +141,7 @@ public final class Task {
     public String toString() {
         return "Task{id=" + id
                 + ", status=" + status
+                + ", isReady=" + isReady
                 + ", blockingCount=" + blockingCount
                 + ", openConstraintCount=" + openConstraintCount
                 + ", deletedAt=" + deletedAt
@@ -183,6 +187,9 @@ public final class Task {
             return this;
         }
 
+        /** See the invariant note on {@link Task#isReady}: callers other than
+         * {@code TaskEligibilityService.withCounters} must keep this consistent with
+         * blockingCount/openConstraintCount themselves. */
         public Builder isReady(boolean isReady) {
             this.isReady = isReady;
             return this;
