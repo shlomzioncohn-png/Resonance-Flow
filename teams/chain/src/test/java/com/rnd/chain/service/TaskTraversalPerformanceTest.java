@@ -19,12 +19,12 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * Performance benchmark for TaskTraversalService against a 10,000-task / 20,000-edge graph
- * (Open Question 9): one large connected structure, not many small isolated components, so a
- * single traversal call plausibly touches a large fraction of the graph.
+ * Performance benchmark for TaskTraversalService against a 10,000-task / 20,000-edge graph:
+ * one large connected structure, not many small isolated components, so a single traversal call
+ * plausibly touches a large fraction of the graph.
  *
- * Runs as part of the regular `mvn test` suite - no @Tag, no exclusion, no new profile (Open
- * Question 7).
+ * Runs as part of the regular `mvn test` suite, and asserts on the result (PLAN.md Finding #5) -
+ * no @Tag, no exclusion, no separate profile: a genuine regression fails the build.
  *
  * <p><b>Graph construction</b> (fixed seed = 42, fully deterministic):
  * <ul>
@@ -58,9 +58,10 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * <p><b>Methodology:</b> {@value #WARMUP_ITERATIONS} warm-up iterations (discarded, to let the
  * JIT compile hot paths) followed by {@value #MEASURED_ITERATIONS} measured iterations per
  * traversal type. p95 is the 95th-percentile value of the sorted measured latencies. Every
- * result - and the JVM/OS environment - is printed to test output regardless of pass/fail: this
- * benchmark exists to get real numbers, not to be silently green, so the target is reported,
- * never asserted. InMemoryTaskDependencyRepository (and Task / TaskDependency / TaskStatus)
+ * result - and the JVM/OS environment - is printed to test output regardless of pass/fail, and
+ * p95 is also asserted against the target (PLAN.md Finding #5): this benchmark exists to get
+ * real numbers AND to catch a genuine regression, not to be silently green either way.
+ * InMemoryTaskDependencyRepository (and Task / TaskDependency / TaskStatus)
  * are copied verbatim from chain/ruthHoltzman/dependency-repository-66 (out of scope to modify
  * - see PLAN.md); a miss attributable to that repository is reported as a finding, not "fixed"
  * by touching it. InMemoryTaskDependencyRepository is a dual adjacency map (O(1) average lookup
@@ -209,10 +210,13 @@ class TaskTraversalPerformanceTest {
 
     /**
      * Runs {@code traversal} {@value #WARMUP_ITERATIONS} times (discarded) then
-     * {@value #MEASURED_ITERATIONS} times (measured), prints every sample plus the p95 and
-     * pass/fail against {@value #TARGET_P95_MILLIS}ms - but does not assert on it. Whether a
-     * miss here should fail the build is a separate decision from measuring and reporting it;
-     * see the class Javadoc.
+     * {@value #MEASURED_ITERATIONS} times (measured), prints every sample plus the p95, and
+     * asserts p95 against {@value #TARGET_P95_MILLIS}ms (PLAN.md Finding #5) - a genuine
+     * regression now fails the build instead of only printing "FAIL" to a log nobody reads.
+     * Chosen over tagging-and-excluding this test from the default `mvn test` run: a separate
+     * profile risks the benchmark quietly never being run at all, which would reopen this same
+     * gap in a harder-to-notice way. The generous margin between currently measured p95s and the
+     * 300ms target keeps this from being flaky on a normally-loaded machine.
      */
     private void measureAndReport(String label, Supplier<?> traversal) {
         for (int i = 0; i < WARMUP_ITERATIONS; i++) {
@@ -232,5 +236,9 @@ class TaskTraversalPerformanceTest {
         System.out.printf(
                 "[BENCHMARK] %-50s samples(ms)=%s p95=%dms target=%dms %s%n",
                 label, Arrays.toString(millis), p95, TARGET_P95_MILLIS, pass ? "PASS" : "FAIL");
+
+        assertTrue(pass, () -> String.format(
+                "%s: p95=%dms exceeds target=%dms (samples=%s)",
+                label, p95, TARGET_P95_MILLIS, Arrays.toString(millis)));
     }
 }
