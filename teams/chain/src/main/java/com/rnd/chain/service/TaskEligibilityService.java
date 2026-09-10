@@ -334,7 +334,6 @@ public class TaskEligibilityService {
     public void onTaskStatusChanged(UUID taskId, TaskStatus newStatus) {
         Objects.requireNonNull(taskId, "taskId must not be null");
         Objects.requireNonNull(newStatus, "newStatus must not be null");
-        log.info("Task {} status changed to {}", taskId, newStatus);
 
         // The whole status flip + dependents fan-out runs under the graph lock (not just
         // lockFor(taskId)): it must be serialized against addDependency/removeDependency's "is
@@ -358,6 +357,18 @@ public class TaskEligibilityService {
                 previousStatus = task.getStatus();
                 task.setStatus(newStatus);
                 taskRepository.save(task);
+            }
+
+            // Logged after previousStatus is known, and only at INFO when the status actually
+            // changed - a redelivered/no-op transition (e.g. ACTIVE -> ACTIVE) logs at DEBUG
+            // instead, mirroring recalculateAndSave's isReady-change pattern (review Finding #6).
+            // Trade-off: at the default (INFO) log level, a duplicate/redelivered event is no
+            // longer visible at all - monitoring how often redelivery actually happens now
+            // requires enabling DEBUG for this class.
+            if (previousStatus != newStatus) {
+                log.info("Task {} status changed: {} -> {}", taskId, previousStatus, newStatus);
+            } else {
+                log.debug("Task {} status change to {} is a no-op (already in that status)", taskId, newStatus);
             }
 
             if (previousStatus != TaskStatus.DONE && newStatus == TaskStatus.DONE) {
