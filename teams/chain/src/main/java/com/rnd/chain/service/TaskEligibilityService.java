@@ -481,6 +481,13 @@ public class TaskEligibilityService {
             } else {
                 openIds.remove(constraintId);
                 task.setOpenConstraintCount(Math.max(0, task.getOpenConstraintCount() - 1));
+                // Mirrors InMemoryTaskDependencyRepository.removeFromIndex: drop the outer map
+                // entry once its constraint set is empty, so a task that once had a constraint
+                // doesn't permanently occupy an entry in this map after all its constraints
+                // close (review Finding #2 - unbounded growth otherwise). Safe without extra
+                // locking: this taskId's entry in openConstraintIdsByTask is only ever mutated
+                // under lockFor(taskId), which this method already holds via withTaskLock.
+                openConstraintIdsByTask.computeIfPresent(taskId, (id, ids) -> ids.isEmpty() ? null : ids);
             }
         });
     }
