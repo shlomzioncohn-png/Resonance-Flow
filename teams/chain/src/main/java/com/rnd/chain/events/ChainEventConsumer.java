@@ -57,7 +57,19 @@ public class ChainEventConsumer {
     // ChainEventTopicsProperties's own (also-removed) Java-side default.
     // If the property is ever genuinely missing, this now fails loudly at
     // startup instead of silently joining a third, undocumented group.
-    @KafkaListener(topics = "${chain.kafka.consumed-topics:}",
+    //
+    // topics is a SpEL expression, not a plain "${...}" placeholder, on
+    // purpose: @KafkaListener's topics attribute is a String[], and Spring
+    // does NOT split a single resolved placeholder string on commas -
+    // "${chain.kafka.consumed-topics:}" with a value like "a,b" would
+    // subscribe to one literal (nonexistent) topic named "a,b", not two
+    // topics, despite the property's own plural name. The SpEL split
+    // evaluates to a real array; \\s*,\\s* also trims incidental
+    // whitespace around each comma (a bare .split(",") would otherwise
+    // turn "a, b" into ["a", " b"] - a second, different-and-wrong
+    // literal topic name). Single-topic values are unaffected: split()
+    // on a string with no comma just returns a one-element array.
+    @KafkaListener(topics = "#{'${chain.kafka.consumed-topics:}'.split('\\s*,\\s*')}",
                    groupId = "${chain.kafka.consumer-group-id}")
     public void onMessage(String rawMessage) {
         JsonNode root = parseRoot(rawMessage);

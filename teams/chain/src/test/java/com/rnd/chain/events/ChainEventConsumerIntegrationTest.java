@@ -48,10 +48,20 @@ import static org.junit.jupiter.api.Assertions.*;
         bootstrapServersProperty = "spring.kafka.bootstrap-servers",
         topics = {
                 ChainEventConsumerIntegrationTest.TEST_TOPIC,
-                ChainEventConsumerIntegrationTest.TEST_TOPIC + ".DLT"
+                ChainEventConsumerIntegrationTest.TEST_TOPIC + ".DLT",
+                ChainEventConsumerIntegrationTest.SECOND_TOPIC
         })
+// consumed-topics deliberately names two topics, comma-separated: this is
+// itself a regression test for ChainEventConsumer's @KafkaListener SpEL
+// split. A plain "${chain.kafka.consumed-topics:}" placeholder does NOT
+// split a resolved string on commas (Spring adds it as one literal topic
+// name), so a naive implementation would silently subscribe to nothing
+// real here and every test in this class would fail to receive anything -
+// see onMessage_alsoConsumesFromASecondConfiguredTopic below for the test
+// that specifically targets SECOND_TOPIC.
 @TestPropertySource(properties = {
-        "chain.kafka.consumed-topics=" + ChainEventConsumerIntegrationTest.TEST_TOPIC,
+        "chain.kafka.consumed-topics=" + ChainEventConsumerIntegrationTest.TEST_TOPIC
+                + "," + ChainEventConsumerIntegrationTest.SECOND_TOPIC,
         "chain.kafka.consumer-group-id=chain-event-consumer-it"
 })
 // classMode is deliberately AFTER_EACH_TEST_METHOD, not the default
@@ -67,6 +77,7 @@ import static org.junit.jupiter.api.Assertions.*;
 class ChainEventConsumerIntegrationTest {
 
     static final String TEST_TOPIC = "chain.events.it.test-topic";
+    static final String SECOND_TOPIC = "chain.events.it.second-topic";
     private static final String EVENT_TYPE = "it.test.event";
 
     @Autowired
@@ -201,6 +212,21 @@ class ChainEventConsumerIntegrationTest {
         assertEquals(1, dltRecords.count());
         assertEquals(0, recordingEventHandler.getInvocationCount(),
                 "a malformed event never reaches any handler, retryable or not");
+    }
+
+    @Test
+    void onMessage_alsoConsumesFromASecondConfiguredTopic() {
+        // Proves chain.kafka.consumed-topics' comma-separated value
+        // actually subscribes to both named topics, not just the first -
+        // see the class-level @TestPropertySource comment above.
+        String message = String.format(
+                "{\"eventId\":\"%s\",\"eventType\":\"%s\",\"occurredAt\":\"%s\",\"payload\":%s}",
+                UUID.randomUUID(), EVENT_TYPE, Instant.now(), validPayloadJson());
+        kafkaTemplate.send(SECOND_TOPIC, "key", message);
+
+        await().atMost(Duration.ofMillis(15_000))
+                .alias("expected the event published on " + SECOND_TOPIC + " to reach the handler")
+                .until(() -> recordingEventHandler.getInvocationCount() == 1);
     }
 
     private void publishTestEvent(UUID eventId, String eventType, String payloadJson) {
