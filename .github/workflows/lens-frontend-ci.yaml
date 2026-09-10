@@ -23,4 +23,3 @@ jobs:
       service_dir: teams/lens/frontend
       language: node
       container_port: 8083
-      health_path: /

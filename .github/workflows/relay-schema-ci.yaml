@@ -23,7 +23,7 @@ on:
 
 jobs:
   schema-compat:
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
 
     services:
       schema-registry:
@@ -36,7 +36,7 @@ jobs:
       COMPATIBILITY_LEVEL: FULL
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           # seed-registry.sh reads the base branch's schema files via `git show`
           fetch-depth: 0
@@ -63,9 +63,9 @@ jobs:
   chart-lint:
     # Catches a broken schema-sync-hook chart (templating errors in
     # configmap.yaml / job.yaml) before merge, instead of at ArgoCD sync time.
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: azure/setup-helm@v4
       - name: Lint and render the schema-sync-hook chart
         run: |

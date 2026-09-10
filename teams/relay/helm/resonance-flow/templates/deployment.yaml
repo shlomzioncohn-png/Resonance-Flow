@@ -54,7 +54,7 @@ spec:
       {{- if or $dependencies $rawInitContainers }}
       initContainers:
         {{- if $dependencies }}
-        {{- include "resonance-flow.waitForDependencies" $dependencies | nindent 8 }}
+        {{- include "resonance-flow.waitForDependencies" (dict "root" $ "deps" $dependencies) | nindent 8 }}
         {{- end }}
         {{- with $rawInitContainers }}
         {{- toYaml . | nindent 8 }}

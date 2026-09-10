@@ -12,10 +12,7 @@ services:
       - DB_NAME=${DB_NAME:-resonance_flow}
       - DB_USER=${DB_USER:-postgres}
       - DB_PASSWORD=${DB_PASSWORD:-postgres}
-      - DB_MIGRATIONS_LOCATION=filesystem:/flyway/migrations
       - KAFKA_BOOTSTRAP_SERVERS=kafka:29092
-    volumes:
-      - ../../shared/database/migrations:/flyway/migrations:ro
     extra_hosts:
       - "host.docker.internal:host-gateway"
     depends_on:
