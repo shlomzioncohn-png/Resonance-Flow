@@ -14,19 +14,43 @@ name: Relay / schema compatibility (PR)
 # `git show`), not from the PR, so a PR can't weaken its own gate. The workflow
 # file itself still runs from the PR — it is deliberately thin.
 #
+# No `paths:` filter: schema-compat and chart-lint are Required status checks on
+# every PR (#240). A Required check whose workflow is skipped by a path filter
+# leaves the PR stuck on "Expected — Waiting for status" forever. So the workflow
+# runs on every PR; the `changes` job decides whether there is anything to check,
+# and schema-compat / chart-lint skip when there isn't — a skipped job satisfies
+# a Required status check.
+#
 # The post-merge equivalent is teams/relay/schema-sync-hook, which runs the
 # same check + an actual register inside the cluster via ArgoCD. See
 # teams/relay/ci/README.md.
 on:
   pull_request:
-    paths:
-      - "teams/relay/src/main/proto/**"
-      - "teams/relay/ci/**"
-      - "teams/relay/schema-sync-hook/**"
-      - ".github/workflows/relay-schema-ci.yaml"
 
 jobs:
+  changes:
+    runs-on: self-hosted
+    outputs:
+      relevant: ${{ steps.filter.outputs.relevant }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - name: Did this PR touch relay schema / chart / ci files?
+        id: filter
+        run: |
+          if git diff --name-only "${{ github.event.pull_request.base.sha }}" HEAD \
+             | grep -qE '^teams/relay/(src/main/proto|ci|schema-sync-hook)/|^\.github/workflows/relay-schema-ci\.yaml$'; then
+            echo "relevant=true" >> "$GITHUB_OUTPUT"
+            echo "Relay schema / chart / ci files changed — running the checks."
+          else
+            echo "relevant=false" >> "$GITHUB_OUTPUT"
+            echo "No relay schema / chart / ci changes — schema-compat and chart-lint will skip."
+          fi
+
   schema-compat:
+    needs: changes
+    if: needs.changes.outputs.relevant == 'true'
     runs-on: self-hosted
 
     services:
@@ -64,6 +88,8 @@ jobs:
         run: bash teams/relay/ci/check-all-schemas.sh "${{ github.event.pull_request.base.sha }}"
 
   chart-lint:
+    needs: changes
+    if: needs.changes.outputs.relevant == 'true'
     # Catches a broken schema-sync-hook chart (templating errors in
     # configmap.yaml / job.yaml) before merge, instead of at ArgoCD sync time.
     runs-on: self-hosted

@@ -25,7 +25,6 @@ data:
         username: {{ $cfg.datasource.username | quote }}
         password: {{ $cfg.datasource.password | quote }}
       flyway:
-        locations: "filesystem:../../shared/database/migrations"
         baseline-on-migrate: true
       kafka:
         bootstrap-servers: {{ printf "%s:%s" (include "resonance-flow.dependencyHostByName" (dict "root" $ "deps" $.Values.dependencies "name" "kafka")) (include "resonance-flow.dependencyPort" (dict "deps" $.Values.dependencies "name" "kafka")) | quote }}

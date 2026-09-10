@@ -30,7 +30,7 @@ env:
 
 jobs:
   test:
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     permissions:
       contents: read
       packages: write
@@ -248,7 +248,7 @@ jobs:
   update-manifest:
     needs: test
     if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     permissions:
       contents: write
     concurrency:

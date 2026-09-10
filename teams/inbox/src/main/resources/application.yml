@@ -9,7 +9,6 @@ spring:
     username: ${DB_USER:postgres}
     password: ${DB_PASSWORD:postgres}
   flyway:
-    locations: ${DB_MIGRATIONS_LOCATION:filesystem:../../shared/database/migrations}
     baseline-on-migrate: true
   kafka:
     bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
