@@ -1,15 +1,27 @@
 import json
 import shutil
+from collections import Counter
 from pathlib import Path
 
 import pytest
 
 from mind.evaluation.interfaces import PersonaEvaluationScenario
-from mind.evaluation.personas import PersonaSchemaError, load_personas, validate_personas
-
-REAL_SCHEMA_PATH = (
-    Path(__file__).resolve().parents[1] / "eval" / "personas" / "scenario.schema.json"
+from mind.evaluation.personas import (
+    ALL_ROLES,
+    MAX_SCENARIOS_PER_ROLE,
+    MIN_SCENARIOS_PER_ROLE,
+    PersonaSchemaError,
+    load_personas,
+    validate_personas,
 )
+
+REAL_PERSONAS_DIR = Path(__file__).resolve().parents[1] / "eval" / "personas"
+REAL_SCHEMA_PATH = REAL_PERSONAS_DIR / "scenario.schema.json"
+
+# The committed benchmark is fixed (see eval/personas/README.md). If this number
+# changes, it must change deliberately, with the mentor's sign-off — bump it here
+# in the same commit so the change is visible in review.
+EXPECTED_REAL_SCENARIO_COUNT = 30
 
 
 def make_scenario(
@@ -202,3 +214,41 @@ def test_validate_personas_total_count_out_of_range_is_warning_not_error():
     report = validate_personas([make_scenario_model()])  # 1 total, below MIN (24)
     assert report.ok
     assert any("total" in w and "24-36" in w for w in report.warnings)
+
+
+# -- the real eval/personas/ directory --------------------------------------
+#
+# Every other test in this file builds scenarios in tmp_path; these load the
+# actual committed set, so a bad edit to a real scenario file fails CI here
+# (mirrors the shell snippet in the README's "Contributing a scenario" section).
+
+
+def test_real_persona_set_loads_and_has_the_expected_size():
+    scenarios = load_personas(REAL_PERSONAS_DIR)
+    assert len(scenarios) == EXPECTED_REAL_SCENARIO_COUNT
+    assert all(isinstance(s, PersonaEvaluationScenario) for s in scenarios)
+    assert len({s.scenario_id for s in scenarios}) == len(scenarios)
+
+
+def test_real_persona_set_validates_with_no_errors():
+    report = validate_personas(load_personas(REAL_PERSONAS_DIR))
+    assert report.errors == []
+
+
+def test_real_persona_set_has_no_warnings_other_than_pending_mentor_approval():
+    # Role coverage, per-role counts and the total are all expected to be in
+    # range; the only acceptable warnings are the per-scenario "not yet
+    # mentor_approved" ones, which clear when the mentor signs the set off.
+    report = validate_personas(load_personas(REAL_PERSONAS_DIR))
+    unexpected = [w for w in report.warnings if "mentor_approved" not in w]
+    assert unexpected == []
+
+
+def test_real_persona_set_covers_every_role_within_the_expected_range():
+    scenarios = load_personas(REAL_PERSONAS_DIR)
+    per_role = Counter(s.persona.role for s in scenarios)
+    assert set(per_role) == ALL_ROLES
+    for role in ALL_ROLES:
+        assert MIN_SCENARIOS_PER_ROLE <= per_role[role] <= MAX_SCENARIOS_PER_ROLE, (
+            f"{role}: {per_role[role]}"
+        )

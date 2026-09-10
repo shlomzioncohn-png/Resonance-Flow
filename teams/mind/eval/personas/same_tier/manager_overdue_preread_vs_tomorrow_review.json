@@ -24,8 +24,8 @@
     {
       "task_id": "task_review",
       "title": "Prep for tomorrow's stakeholder review",
-      "description": "You are presenting the migration status to stakeholders at 09:00 tomorrow and the deck is not ready.",
-      "deadline": "2026-09-08T09:00:00",
+      "description": "You present the migration status to stakeholders at 09:00 tomorrow; the deck is not ready and needs to be done by 08:30 to leave time to send it round.",
+      "deadline": "2026-09-08T08:30:00",
       "effort_estimate": 40,
       "tier": "tactical",
       "blocked": false,

@@ -288,6 +288,17 @@ which the model does see:
   frames this for a human reader, but the model only has the raw dates).
 - `deadline: null` = no urgency signal at all. Don't imply urgency for it.
 
+**A deadline past `time_horizon` on a *distractor* is deliberate, not a bug.**
+A few scenarios pair a near-term correct answer with a distractor whose deadline
+falls outside the scenario's `time_horizon` (`ceo_regulator_call_vs_board_prep` —
+`today`, `task_board` two days out; `field_engineer_prod_incident_vs_scheduled_maintenance`
+— `today`, `task_maintenance` a week out). That is the point: the far deadline is
+there so it reads as *not* urgent against the live task. The correct answer's own
+deadline always sits inside `time_horizon`; only the distractor's may fall beyond
+it. A `this_week` scenario whose *correct* answer is due next week is a bug — widen
+`time_horizon` instead (as `manager_blocked_hire_vs_budget_review` does, using
+`this_month`).
+
 **What the model can't see — never the decider:**
 - The model sees one task plus a context carrying only `current_datetime`
   (`score(task, context)`); it never sees `free_time_minutes`, `constraints`,

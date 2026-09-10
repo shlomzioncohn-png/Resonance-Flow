@@ -23,8 +23,8 @@
     },
     {
       "task_id": "task_notes",
-      "title": "Write up Tuesday's 1:1 follow-ups",
-      "description": "Summarize action items from a 1:1 that already happened; useful for the record, nothing waiting on it.",
+      "title": "Write up last Tuesday's 1:1 follow-ups",
+      "description": "Summarize action items from last Tuesday's 1:1, which has already happened; useful for the record, nothing waiting on it.",
       "deadline": null,
       "effort_estimate": 20,
       "tier": "operational",
@@ -34,8 +34,8 @@
     {
       "task_id": "task_sprint",
       "title": "Prepare the sprint planning document",
-      "description": "Scope and priorities for next sprint, due before Friday's 14:00 planning meeting; the whole team's next sprint depends on it being ready.",
-      "deadline": "2026-09-11T14:00:00",
+      "description": "Scope and priorities for next sprint, due by 13:00 Friday so it can be circulated ahead of the 14:00 planning meeting; the whole team's next sprint depends on it being ready.",
+      "deadline": "2026-09-11T13:00:00",
       "effort_estimate": 55,
       "tier": "tactical",
       "blocked": false,
@@ -43,7 +43,7 @@
     }
   ],
   "expected_top_task_id": "task_sprint",
-  "expected_reason": "task_sprint has a hard deadline before Friday's planning meeting and the whole team's next sprint depends on it; task_notes and task_expenses have no deadline and nothing downstream is waiting.",
+  "expected_reason": "task_sprint has a hard deadline on Friday ahead of the planning meeting and the whole team's next sprint depends on it; task_notes and task_expenses have no deadline and nothing downstream is waiting.",
   "source": {
     "type": "synthetic",
     "source_detail": null

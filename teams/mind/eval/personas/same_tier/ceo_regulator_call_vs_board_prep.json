@@ -33,7 +33,7 @@
     }
   ],
   "expected_top_task_id": "task_regulator",
-  "expected_reason": "Both tasks are strategic with hard deadlines, but the regulator responses are due within two hours while the board pack is not due until the evening before Thursday's session.",
+  "expected_reason": "task_regulator and task_board are both strategic with hard deadlines, but task_regulator's responses are due within two hours while task_board's pack is not due until the evening before Thursday's session.",
   "source": {
     "type": "synthetic",
     "source_detail": null

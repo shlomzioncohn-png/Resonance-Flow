@@ -12,9 +12,9 @@
   },
   "tasks": [
     {
-      "task_id": "task_filler_crm",
-      "title": "Clean up stale CRM opportunities",
-      "description": "Archive old pipeline entries that never progressed; housekeeping, no deadline.",
+      "task_id": "task_filler_forecast",
+      "title": "Refresh your quarterly pipeline forecast",
+      "description": "Update the forecast with the latest stage and close-date changes across your open deals; routine, no deadline.",
       "deadline": null,
       "effort_estimate": 15,
       "tier": "tactical",
@@ -43,7 +43,7 @@
     }
   ],
   "expected_top_task_id": "task_renewal",
-  "expected_reason": "Neither task has a deadline. task_renewal protects an at-risk renewal that is a large share of the territory; task_newlogo is speculative outreach with no timeline.",
+  "expected_reason": "None of the three tasks has a deadline. task_renewal protects an at-risk renewal that is a large share of the territory; task_newlogo is speculative outreach with no timeline and task_filler_forecast is routine housekeeping.",
   "source": {
     "type": "synthetic",
     "source_detail": null

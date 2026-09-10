@@ -7,7 +7,7 @@
   "context": {
     "free_time_minutes": 45,
     "current_datetime": "2026-09-07T09:00:00",
-    "time_horizon": "this_week",
+    "time_horizon": "this_month",
     "constraints": []
   },
   "tasks": [

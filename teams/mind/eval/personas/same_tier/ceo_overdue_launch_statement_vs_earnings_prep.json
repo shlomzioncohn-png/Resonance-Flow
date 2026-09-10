@@ -24,8 +24,8 @@
     {
       "task_id": "task_earnings",
       "title": "Prepare for tomorrow's earnings call",
-      "description": "You present quarterly results to analysts at 08:00 tomorrow and the remarks are not finalized.",
-      "deadline": "2026-09-08T08:00:00",
+      "description": "You present quarterly results to analysts at 08:00 tomorrow; the remarks are not finalized and need to be locked by 07:30 for the pre-call run-through.",
+      "deadline": "2026-09-08T07:30:00",
       "effort_estimate": 40,
       "tier": "strategic",
       "blocked": false,

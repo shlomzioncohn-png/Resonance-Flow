@@ -33,7 +33,7 @@
     }
   ],
   "expected_top_task_id": "task_vp",
-  "expected_reason": "task_ma is blocked pending legal's due-diligence memo and cannot move now despite the nearer expiry; task_vp is unblocked and has a firm decision deadline of its own.",
+  "expected_reason": "task_ma is blocked pending legal's due-diligence memo and cannot move now despite the nearer expiry; task_vp is unblocked and needs a decision before the candidate's Monday cutoff.",
   "source": {
     "type": "synthetic",
     "source_detail": null
