@@ -18,6 +18,15 @@ import java.util.concurrent.ConcurrentHashMap;
  * table, Redis, etc.) once the technology is decided, before this goes
  * anywhere near production.
  *
+ * TODO: claims map has no bound. release() only runs on handler failure
+ * (see ChainEventConsumer.dispatch()), so every successfully-processed
+ * event's claim is kept for the JVM's lifetime - under sustained
+ * throughput this grows without limit and can eventually exhaust the
+ * heap (OutOfMemoryError), not just "lose history on restart." This is
+ * this implementation's only failure mode severe enough to take the
+ * process down, so it's worth knowing about even though the whole class
+ * is meant to be temporary.
+ *
  * Guarded by chain.events.processed-store so it cannot silently become the
  * active store in an environment that didn't explicitly ask for it: the
  * default ("in-memory") matches this implementation's name, but a future
