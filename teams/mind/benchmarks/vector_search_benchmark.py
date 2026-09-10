@@ -89,7 +89,7 @@ def percentile(values: list[float], p: float) -> float:
     return values[idx]
 
 
-async def main():
+async def main() -> None:
     random.seed(87)
     print("Resetting table...")
     await clear()
@@ -108,20 +108,31 @@ async def main():
         if (start // BATCH) % 4 == 0:
             print(f"  embedded {start + len(chunk)}/{N_FILLER}")
 
+    # Upserted concurrently in batches, not one `await` per row -- the
+    # pool has up to 5 connections (see PgVectorStore's max_conn) that a
+    # fully sequential loop never uses more than one of at a time. Batched
+    # (rather than one giant gather() of all 10,000) to keep progress
+    # visible and the number of in-flight coroutines bounded.
     print("Upserting filler rows...")
-    for i, (task_id, vector) in enumerate(zip(filler_ids, filler_vectors)):
-        await upsert(task_id, vector)
-        if i % 2000 == 0:
-            print(f"  upserted {i}/{N_FILLER}")
+    for start in range(0, N_FILLER, BATCH):
+        batch_ids = filler_ids[start : start + BATCH]
+        batch_vectors = filler_vectors[start : start + BATCH]
+        await asyncio.gather(
+            *(upsert(task_id, vector) for task_id, vector in zip(batch_ids, batch_vectors))
+        )
+        if (start // BATCH) % 4 == 0:
+            print(f"  upserted {start + len(batch_ids)}/{N_FILLER}")
 
     # --- 2. Load the manually-selected pairs (passage side, is_query=False) ---
     print(f"Loading {len(PAIRS)} manually-selected near-duplicate pairs...")
     pair_rows = []  # (id_a, id_b, text_a, text_b)
+    pair_upserts = []  # (task_id, vector)
     for i, (text_a, text_b) in enumerate(PAIRS):
         id_a, id_b = f"pair-{i}-a", f"pair-{i}-b"
-        await upsert(id_a, embed(text_a))
-        await upsert(id_b, embed(text_b))
+        pair_upserts.append((id_a, embed(text_a)))
+        pair_upserts.append((id_b, embed(text_b)))
         pair_rows.append((id_a, id_b, text_a, text_b))
+    await asyncio.gather(*(upsert(task_id, vector) for task_id, vector in pair_upserts))
 
     total_rows = N_FILLER + 2 * len(PAIRS)
     print(f"Total rows loaded: {total_rows}")
