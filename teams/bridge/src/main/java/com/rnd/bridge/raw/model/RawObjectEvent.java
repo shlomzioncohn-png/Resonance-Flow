@@ -14,13 +14,11 @@ import java.util.List;
  * ("[A-Z_]+/tenant/yyyy-MM-dd/file") are schema-enforced. traceId and language from an
  * earlier schema draft are gone — the current schema has no such fields.
  *
- * correlationId/attachmentIndex are a Bridge-proposed addition (not yet confirmed by
- * Mind, proceeding on Malki's call — see plan.md): they let a body event and its
- * attachment event(s), split from the same logical source item, be linked without Mind
- * having to parse object_key. Nullable so a producer that never splits items (or a
- * consumer that doesn't care) is unaffected. If Mind comes back with a different
- * name/shape, only this file, PointerEventPublisher, and this file's serialization test
- * need to change.
+ * correlationId/attachmentIndex let a body event and its attachment event(s), split from
+ * the same logical source item, be linked without Mind having to parse object_key.
+ * attachmentIndex is confirmed required by Mind's own contract (teams/mind/src/mind/
+ * contracts/raw_object_event.py) - 0 for a standalone item, 1+ for an attachment.
+ * correlationId stays optional (Mind: omitted for standalone items).
  *
  * implements BridgePayload (see core.BridgePayload): tenantId() is satisfied by the
  * record's own tenantId component; dedupKey() is contentHash — the object_key is always
@@ -61,10 +59,35 @@ public record RawObjectEvent(
             Instant sourceTimestamp,
             String correlationId,
             Integer attachmentIndex) {
+        return create(objectKey, sourceType, tenantId, ingestedAt, scopeDecision, contentHash,
+                modality, participants, contentType, sizeBytes, null, sourceTimestamp,
+                correlationId, attachmentIndex);
+    }
+
+    /**
+     * Same as the 13-arg {@link #create} but also sets transcriptObjectKey - for a lane
+     * that lands a platform-generated transcript alongside its primary object (e.g. the
+     * meeting/doc/audio lane's Zoom/BBB transcripts).
+     */
+    public static RawObjectEvent create(
+            String objectKey,
+            RawSourceType sourceType,
+            String tenantId,
+            Instant ingestedAt,
+            ScopeDecision scopeDecision,
+            String contentHash,
+            Modality modality,
+            List<String> participants,
+            String contentType,
+            Long sizeBytes,
+            String transcriptObjectKey,
+            Instant sourceTimestamp,
+            String correlationId,
+            Integer attachmentIndex) {
         return new RawObjectEvent(
                 CURRENT_SCHEMA_VERSION, objectKey, sourceType, tenantId, ingestedAt,
                 scopeDecision, contentHash, modality, participants, contentType, sizeBytes,
-                null, sourceTimestamp, correlationId, attachmentIndex);
+                transcriptObjectKey, sourceTimestamp, correlationId, attachmentIndex);
     }
 
     @Override

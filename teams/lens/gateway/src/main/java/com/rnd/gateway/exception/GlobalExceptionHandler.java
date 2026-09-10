@@ -1,14 +1,18 @@
 package com.rnd.gateway.exception;
-
 import com.rnd.gateway.dto.ErrorResponse;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.web.servlet.NoHandlerFoundException;
+import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.context.request.WebRequest;
+import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.web.server.ResponseStatusException;
+
+import java.util.stream.Collectors;
 
 /**
  * Global exception handler for Gateway.
@@ -22,8 +26,30 @@ public class GlobalExceptionHandler {
     private static final Logger logger = LoggerFactory.getLogger(GlobalExceptionHandler.class);
     
     /**
-     * Handle 404 NOT_FOUND errors.
-     * Triggered when Gateway can't find a route or downstream service returns 404.
+     * Handle 404 NOT_FOUND errors from Spring servlet dispatcher.
+     * Triggered when no handler is found for a request path.
+     * This takes precedence over ResponseStatusException for servlet-level 404s.
+     */
+    @ExceptionHandler(value = {NoHandlerFoundException.class})
+    public ResponseEntity<ErrorResponse> handleNoHandlerFoundException(
+            NoHandlerFoundException ex, WebRequest request) {
+        
+        String path = ex.getRequestURL();
+        logger.warn("No handler found - Path: {}, Method: {}", path, ex.getHttpMethod());
+        
+        ErrorResponse error = new ErrorResponse(
+                "NOT_FOUND",
+                "Route not found. Check the request path and HTTP method.",
+                path
+        );
+        
+        return new ResponseEntity<>(error, HttpStatus.NOT_FOUND);
+    }
+
+    /**
+     * Handle 404 NOT_FOUND errors from downstream services (via ResponseStatusException).
+     * Triggered when Gateway receives 404 from BFF or other ResponseStatusException errors.
+     * NoHandlerFoundException has higher priority for servlet-level 404s.
      */
     @ExceptionHandler(value = {ResponseStatusException.class})
     public ResponseEntity<ErrorResponse> handleResponseStatusException(
@@ -92,6 +118,52 @@ public class GlobalExceptionHandler {
         return new ResponseEntity<>(error, HttpStatus.GATEWAY_TIMEOUT);
     }
     
+    /**
+     * Handle validation errors (400).
+     * Triggered when @Valid fails on request body fields.
+     */
+    @ExceptionHandler(value = {MethodArgumentNotValidException.class})
+    public ResponseEntity<ErrorResponse> handleValidationException(
+            MethodArgumentNotValidException ex, WebRequest request) {
+
+        String path = getRequestPath(request);
+        String details = ex.getBindingResult().getFieldErrors().stream()
+                .map(e -> e.getField() + ": " + e.getDefaultMessage())
+                .collect(Collectors.joining(", "));
+
+        logger.warn("Validation error - Path: {}, Details: {}", path, details);
+
+        ErrorResponse error = new ErrorResponse(
+                "BAD_REQUEST",
+                "Invalid request parameters",
+                path,
+                details
+        );
+
+        return new ResponseEntity<>(error, HttpStatus.BAD_REQUEST);
+    }
+
+    /**
+     * Handle malformed JSON body (400).
+     * Triggered when request body is not valid JSON.
+     */
+    @ExceptionHandler(value = {HttpMessageNotReadableException.class})
+    public ResponseEntity<ErrorResponse> handleHttpMessageNotReadableException(
+            HttpMessageNotReadableException ex, WebRequest request) {
+        
+        String path = getRequestPath(request);
+        logger.warn("Malformed request body - Path: {}, Cause: {}", path, ex.getMostSpecificCause().getMessage());
+        
+        ErrorResponse error = new ErrorResponse(
+                "BAD_REQUEST",
+                "Malformed request body. Request body must be valid JSON.",
+                path,
+                ex.getMostSpecificCause().getMessage()
+        );
+        
+        return new ResponseEntity<>(error, HttpStatus.BAD_REQUEST);
+    }
+
     /**
      * Handle bad request errors (400).
      * Triggered by malformed requests.

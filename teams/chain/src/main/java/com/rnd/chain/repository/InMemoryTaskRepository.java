@@ -16,7 +16,6 @@ import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.UnaryOperator;
-import java.util.stream.Collectors;
 
 /**
  * In-memory implementation of {@link TaskRepository}. Hand-authored for this task: every branch
@@ -50,6 +49,10 @@ import java.util.stream.Collectors;
  * the write (updating {@code tasksById} and re-indexing {@code childrenByParentId} together),
  * so a concurrent {@code findByParentTaskId} never observes a task present in one structure but
  * not yet the other. {@code find*} calls take no lock, same as every other repository here.
+ *
+ * <p>{@code update} leaves a soft-deleted task untouched - the mutator is never applied to it,
+ * matching the interface contract's "equivalent to findById(id).map(mutator).map(save)" (findById
+ * already reports a soft-deleted task as not found, so the mutator would never see it).
  */
 public class InMemoryTaskRepository implements TaskRepository {
 
@@ -60,6 +63,7 @@ public class InMemoryTaskRepository implements TaskRepository {
     public InMemoryTaskRepository(List<Task> tasks) {
         Objects.requireNonNull(tasks, "tasks must not be null");
         for (Task task : tasks) {
+            Objects.requireNonNull(task, "tasks must not contain null elements");
             tasksById.put(task.getId(), task);
             indexChild(task);
         }
@@ -67,17 +71,19 @@ public class InMemoryTaskRepository implements TaskRepository {
 
     @Override
     public Optional<Task> findById(UUID id) {
+        Objects.requireNonNull(id, "id must not be null");
         return Optional.ofNullable(tasksById.get(id))
-                .filter(this::isNotDeleted);
+                .filter(InMemoryTaskRepository::isNotDeleted);
     }
 
     @Override
     public List<Task> findAllById(List<UUID> ids) {
+        Objects.requireNonNull(ids, "ids must not be null");
         return ids.stream()
                 .map(tasksById::get)
                 .filter(Objects::nonNull)
-                .filter(this::isNotDeleted)
-                .collect(Collectors.toList());
+                .filter(InMemoryTaskRepository::isNotDeleted)
+                .toList();
     }
 
     @Override
@@ -120,14 +126,17 @@ public class InMemoryTaskRepository implements TaskRepository {
         Objects.requireNonNull(mutator, "mutator must not be null");
         synchronized (writeLock) {
             Task existing = tasksById.get(id);
-            if (existing == null) {
+            if (existing == null || !isNotDeleted(existing)) {
+                // A soft-deleted task is left untouched (mutator is not applied to it),
+                // matching findById().map(mutator).map(save) semantics.
                 return Optional.empty();
             }
-            Task updated = mutator.apply(existing);
+            Task updated = Objects.requireNonNull(mutator.apply(existing),
+                    "mutator must not return null");
             tasksById.put(id, updated);
             reindexChild(existing, updated);
-            return Optional.ofNullable(updated)
-                    .filter(this::isNotDeleted);
+            return Optional.of(updated)
+                    .filter(InMemoryTaskRepository::isNotDeleted);
         }
     }
 
@@ -165,7 +174,7 @@ public class InMemoryTaskRepository implements TaskRepository {
     /**
      * Soft-deleted tasks (deletedAt != null) are treated as not found.
      */
-    private boolean isNotDeleted(Task task) {
+    private static boolean isNotDeleted(Task task) {
         return task.getDeletedAt() == null;
     }
 }

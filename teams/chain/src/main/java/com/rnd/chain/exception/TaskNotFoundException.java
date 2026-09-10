@@ -4,11 +4,21 @@ import java.util.UUID;
 
 /**
  * Thrown when a traversal is requested for a task id that doesn't exist
- * (or is soft-deleted). Mapped to HTTP 404 by GlobalExceptionHandler.
+ * (or is soft-deleted), or when an operation references a taskId that does
+ * not exist in {@code TaskRepository}. Mapped to HTTP 404 by
+ * GlobalExceptionHandler.
  */
 public class TaskNotFoundException extends NotFoundException {
 
     public TaskNotFoundException(UUID taskId) {
         super("Task not found: " + taskId);
+    }
+
+    public TaskNotFoundException(String message) {
+        super(message);
+    }
+
+    public TaskNotFoundException(String message, Throwable cause) {
+        super(message, cause);
     }
 }
