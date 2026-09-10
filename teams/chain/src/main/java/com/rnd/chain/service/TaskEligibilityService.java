@@ -404,6 +404,14 @@ public class TaskEligibilityService {
     // counter-mutating path in this class guards itself this way (edgeExists() for
     // addDependency/removeDependency, the task's own stored previousStatus for
     // onTaskStatusChanged) and these two methods previously had no equivalent.
+    //
+    // TODO(JPA): this map is an in-memory-only idempotency ledger with no restart story - unlike
+    // every other counter mutation in this class, it isn't backed by persisted state. Once
+    // Task.openConstraintCount is durably persisted (PLAN.md Phase 3) while this map stays a
+    // JVM-local field, a service restart will desynchronize the two: a redelivered "constraint
+    // added" event for a constraint that was already open before the restart would be seen as
+    // new and double-count it. Must be rebuilt from persisted state on startup (or replaced by a
+    // persisted openConstraintIds column/table) before that migration ships.
     private final Map<UUID, Set<UUID>> openConstraintIdsByTask = new ConcurrentHashMap<>();
 
     /**
