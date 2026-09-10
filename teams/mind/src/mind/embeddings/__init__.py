@@ -27,6 +27,7 @@ concurrently.
 
 import asyncio
 
+from mind.embeddings.base import VectorStore
 from mind.embeddings.config import DUPLICATE_SIMILARITY_THRESHOLD
 from mind.embeddings.embeddings import embed
 from mind.embeddings.factory import get_store
@@ -44,7 +45,7 @@ _store = None
 _store_lock = asyncio.Lock()
 
 
-async def _get_store():
+async def _get_store() -> VectorStore:
     # Lazy so `import mind.embeddings` (e.g. from tests that only exercise
     # embed()) never forces a live DB connection.
     #
