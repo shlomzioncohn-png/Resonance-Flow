@@ -160,6 +160,27 @@ class TaskEligibilityServiceTest {
     }
 
     @Test
+    void addDependency_targetAlreadyDone_blockingCountUnchanged() {
+        // Review Finding #4: pins down the "target already DONE" branch with a deterministic
+        // test, rather than relying only on the concurrency test's random interleaving.
+        UUID taskId = UUID.randomUUID();
+        UUID dependsOnTaskId = UUID.randomUUID();
+        Task task = TaskTestFixtures.defaultTask(taskId).blockingCount(0).openConstraintCount(0).isReady(true).build();
+        Task dependsOnTask = TaskTestFixtures.defaultTask(dependsOnTaskId).status(TaskStatus.DONE)
+                .blockingCount(0).openConstraintCount(0).isReady(true).build();
+
+        when(taskDependencyRepository.findByTaskId(dependsOnTaskId)).thenReturn(Collections.emptyList());
+        when(taskRepository.findById(taskId)).thenReturn(Optional.of(task));
+        when(taskRepository.findById(dependsOnTaskId)).thenReturn(Optional.of(dependsOnTask));
+
+        taskEligibilityService.addDependency(taskId, dependsOnTaskId);
+
+        verify(taskDependencyRepository).save(any(TaskDependency.class));
+        assertEquals(0, task.getBlockingCount());
+        assertTrue(task.isReady());
+    }
+
+    @Test
     void addDependency_wouldCreateCycle_throwsAndLeavesStateUnchanged() {
         // A already depends on B (A -> B). Trying to add B -> A would close the cycle.
         UUID taskA = UUID.randomUUID();
@@ -270,6 +291,27 @@ class TaskEligibilityServiceTest {
         verify(taskDependencyRepository).delete(taskId, dependsOnTaskId);
         assertEquals(1, task.getBlockingCount());
         assertFalse(task.isReady());
+    }
+
+    @Test
+    void removeDependency_targetAlreadyDone_blockingCountUnchanged() {
+        // Review Finding #4: pins down the "target already DONE" branch with a deterministic
+        // test, rather than relying only on the concurrency test's random interleaving.
+        UUID taskId = UUID.randomUUID();
+        UUID dependsOnTaskId = UUID.randomUUID();
+        Task task = TaskTestFixtures.defaultTask(taskId).blockingCount(0).openConstraintCount(0).isReady(true).build();
+        Task dependsOnTask = TaskTestFixtures.defaultTask(dependsOnTaskId).status(TaskStatus.DONE)
+                .blockingCount(0).openConstraintCount(0).isReady(true).build();
+
+        when(taskDependencyRepository.existsDependency(taskId, dependsOnTaskId)).thenReturn(true);
+        when(taskRepository.findById(taskId)).thenReturn(Optional.of(task));
+        when(taskRepository.findById(dependsOnTaskId)).thenReturn(Optional.of(dependsOnTask));
+
+        taskEligibilityService.removeDependency(taskId, dependsOnTaskId);
+
+        verify(taskDependencyRepository).delete(taskId, dependsOnTaskId);
+        assertEquals(0, task.getBlockingCount());
+        assertTrue(task.isReady());
     }
 
     @Test
