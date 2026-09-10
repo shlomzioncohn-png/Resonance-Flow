@@ -34,10 +34,15 @@ src/main/java/com/rnd/chain/
 ├── service/                # TaskTraversalService - traversal logic
 ├── repository/             # TaskRepository / TaskDependencyRepository + in-memory impls
 ├── dto/                    # Task, TaskDependency, TaskStatus, TaskResponse, TaskTraceResponse
-├── exception/              # TaskNotFoundException, GlobalExceptionHandler
+├── exception/              # GlobalExceptionHandler, NotFoundException/BadRequestException +
+│                           # TaskNotFoundException/DuplicateDependencyException (adopted from
+│                           # Riki's branch - see the 2026-09-08 fixes below)
 └── config/                 # MockDataConfig - empty-seeded repository beans
 src/main/resources/application.yml
 src/test/java/com/rnd/chain/
+├── controller/ChainControllerTest.java
+├── exception/GlobalExceptionHandlerTest.java
+└── service/TaskTraversalServiceTest.java, TaskTraversalPerformanceTest.java
 ```
 
 ## Graph Traversal API
@@ -105,3 +110,34 @@ docker compose down
 ```bash
 mvn test
 ```
+
+## Code review fixes (2026-09-10, PR #251)
+
+Addressed 5 of 13 findings from this round's review (discussed and planned one-by-one with the
+reviewer before implementation - see [PLAN.md](PLAN.md) for the full write-up, including the 8
+findings deliberately not acted on here, documented-only, or handed off to the branch that
+originated the file in question):
+
+- **`GlobalExceptionHandler.handleValidationError` no longer assumes a field-level error exists.**
+  `MethodArgumentNotValidException` can carry only class-level errors (a cross-field constraint),
+  leaving `getFieldErrors()` empty - the unconditional `.get(0)` would throw
+  `IndexOutOfBoundsException` inside the handler itself, falling through to the generic 500
+  handler instead of the intended 400. Now falls back to `getAllErrors()` (guaranteed non-empty
+  whenever the exception exists) when there's no field-level error.
+- **`InMemoryTaskRepository.childrenByParentId` is no longer keyed by `Optional<UUID>`** - a
+  textbook `Optional` misuse (return-type-only by convention, never a collection key), used only
+  to work around `ConcurrentHashMap`'s no-null-keys restriction. Root tasks turn out to never need
+  indexing at all - nothing in this codebase queries `findByParentTaskId(null)` - so the map is
+  now a plain `Map<UUID, Set<UUID>>` and root tasks are simply not indexed.
+- **Empty adjacency-map entries are now pruned** in both `InMemoryTaskDependencyRepository.delete`
+  and `InMemoryTaskRepository.reindexChild`, instead of leaking one permanent empty-`Set` entry
+  per id ever touched under write churn.
+- **The performance benchmark (`TaskTraversalPerformanceTest`) now asserts its p95 target**
+  instead of only printing pass/fail - it previously ran on every default `mvn test` for zero
+  regression protection, since nothing ever failed the build on a miss.
+- **`TaskTraversalService.collectReachableIds`'s `boolean directOnly` flag is gone**, replaced by
+  two named methods (`collectDirectNeighborIds`/`collectAllReachableIds`) sharing a private
+  BFS-step helper - each of the 6 call sites now reads self-documenting instead of requiring a
+  check of the method signature to know what `true`/`false` meant.
+
+Full test suite (47 tests, `mvn clean test`) passes.
