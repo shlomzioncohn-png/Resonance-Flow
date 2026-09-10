@@ -188,11 +188,16 @@
                 <configuration>
                     <protocArtifact>com.google.protobuf:protoc:${protobuf.version}:exe:${os.detected.classifier}</protocArtifact>
                     <!--
-                        Schemas are owned by Relay, not duplicated here - see
-                        teams/relay/src/main/proto/ and teams/relay/ci/schema-subjects.tsv for
-                        the registered source of truth. Only the ones Inbox actually publishes.
+                        Schemas are owned by Relay - teams/relay/src/main/proto/ and
+                        teams/relay/ci/schema-subjects.tsv are the registered source of truth.
+                        Copied into src/main/proto (only the ones Inbox actually publishes)
+                        instead of referenced via a ../relay relative path: that path doesn't
+                        exist inside the Docker build context (teams/inbox only), the same class
+                        of bug §16 in this module's CLAUDE.md already documents for Flyway
+                        migrations - protoc silently found nothing and the generated classes
+                        never existed, so anything importing them failed to compile.
                     -->
-                    <protoSourceRoot>${project.basedir}/../relay/src/main/proto</protoSourceRoot>
+                    <protoSourceRoot>${project.basedir}/src/main/proto</protoSourceRoot>
                     <!--
                         Each of the three files redeclares the same top-level enums (SourceType,
                         TaskTier, etc. - each was drafted standalone, "copied verbatim" per their
