@@ -1,0 +1,132 @@
+syntax = "proto3";
+
+package com.rnd.inbox.event;
+
+option java_package = "com.rnd.inbox.event";
+option java_multiple_files = true;
+
+import "google/protobuf/timestamp.proto";
+
+// kafkaTopic: task.creation.requested
+// Protobuf translation of the task.creation.requested contract MIND sends to Inbox's
+// TaskCreationRequestConsumer (com.rnd.inbox.taskcreationrequest). Registered here (Relay owns
+// the Schema Registry - see schema-subjects.tsv) so schema compatibility is checked from day one,
+// same as task-created/updated/completed-event.proto. Registering the schema does NOT by itself
+// change what's on the wire: Inbox's consumer still deserializes this topic as plain JSON into
+// TaskCreationRequestEventDto today. Actually switching the consumer to Protobuf is a separate,
+// later step - Inbox's own call, plus confirming the newer fields below with MIND as producer.
+//
+// Nothing here has been registered before this, so field numbering is free; it follows
+// TaskCreationRequestEventDto's declaration order, then the two fields the DTO doesn't have yet
+// (created_by_user_id, assignees).
+//
+// event_id: optional - TaskCreationRequestEventDto.eventId has @ValidUuid only, no @NotBlank.
+//
+// correlation_id: required (@NotBlank @ValidUuid). Unlike task.created, where correlation_id is
+// deliberately left out and stays a Kafka header (see task-created-event.proto), it IS a payload
+// field here, matching TaskCreationRequestEventDto.correlationId.
+//
+// confidence: double, not float - this DTO declares it `Double` (unlike
+// TaskCreatedPayload/Task.java's `Float`), since it's MIND's raw value, not yet mapped onto the
+// Task entity. Required (@NotNull).
+//
+// has_dependencies: bool, not wrapped in optional - @NotNull Boolean on the DTO, always present.
+//
+// tier / role_context / status: optional - none are @NotNull on the DTO. status has no default
+// on the wire; the schema doc's "default NEW" is applied downstream, not encoded here.
+//
+// created_by_user_id / assignees: not on TaskCreationRequestEventDto today - added here per the
+// newer schema doc shape (multiple assignees, each with its own role, instead of one). This is a
+// bigger contract change than field numbering and isn't reflected in the Java DTO/consumer yet -
+// confirm with MIND before Inbox builds against it.
+//
+// assignee_type (USER | TEAM): no equivalent in Java yet. Assignment.java infers which of
+// user/team is set instead of carrying an explicit tag; this adds one since the payload needs to
+// say which id it's giving you before the row exists.
+
+message TaskCreationRequestedEvent {
+  optional string event_id = 1;                    // UUID as string. Optional - see note above.
+  string correlation_id = 2;                        // UUID as string. Required - see note above.
+  string tenant_id = 3;                             // UUID as string. Required.
+  optional string project_id = 4;                   // UUID as string. Nullable.
+  string title = 5;
+  optional string description = 6;
+  SourceType source_type = 7;
+  string source_ref = 8;
+  optional TaskTier tier = 9;
+  optional TaskRoleContext role_context = 10;
+  optional int32 urgency = 11;                      // 1..5.
+  optional int32 effort_estimate_minutes = 12;      // > 0.
+  optional google.protobuf.Timestamp deadline = 13;
+  optional TaskStatus status = 14;                  // Downstream defaults to NEW when unset.
+  double confidence = 15;                           // 0.0..1.0. Required, not nullable - see note above.
+  bool has_dependencies = 16;                       // Required, not nullable - see note above.
+  optional string created_by_user_id = 17;          // UUID as string. Nullable.
+  repeated Assignee assignees = 18;                 // Zero or more - see note above.
+}
+
+message Assignee {
+  AssigneeType assignee_type = 1;                   // Required within each item.
+  string id = 2;                                    // UUID as string. USER -> user id, TEAM -> team id. Required.
+  AssignmentRole assignment_role = 3;                // Required within each item.
+  optional string assigned_by = 4;                  // UUID as string. Nullable within each item.
+}
+
+enum AssigneeType {
+  ASSIGNEE_TYPE_UNSPECIFIED = 0;
+  ASSIGNEE_TYPE_USER = 1;
+  ASSIGNEE_TYPE_TEAM = 2;
+}
+
+enum AssignmentRole {
+  ASSIGNMENT_ROLE_UNSPECIFIED = 0;
+  ASSIGNMENT_ROLE_OWNER = 1;
+  ASSIGNMENT_ROLE_ASSIGNEE = 2;
+  ASSIGNMENT_ROLE_RESPONSIBLE = 3;
+  ASSIGNMENT_ROLE_COLLABORATOR = 4;
+}
+
+enum SourceType {
+  SOURCE_TYPE_UNSPECIFIED = 0;
+  SOURCE_TYPE_GITHUB_ISSUE = 1;
+  SOURCE_TYPE_GITHUB_PR = 2;
+  SOURCE_TYPE_CRM_DEAL = 3;
+  SOURCE_TYPE_EMAIL = 4;
+  SOURCE_TYPE_SLACK = 5;
+  SOURCE_TYPE_WHATSAPP = 6;
+  SOURCE_TYPE_MEETING = 7;
+  SOURCE_TYPE_DOC = 8;
+  SOURCE_TYPE_SCANNED_DOC = 9;
+  SOURCE_TYPE_CALENDAR = 10;
+  SOURCE_TYPE_MANUAL = 11;
+  SOURCE_TYPE_DRIVE = 12;
+}
+
+enum TaskTier {
+  TASK_TIER_UNSPECIFIED = 0;
+  TASK_TIER_OPERATIONAL = 1;
+  TASK_TIER_TACTICAL = 2;
+  TASK_TIER_STRATEGIC = 3;
+}
+
+enum TaskRoleContext {
+  TASK_ROLE_CONTEXT_UNSPECIFIED = 0;
+  TASK_ROLE_CONTEXT_DEVELOPER = 1;
+  TASK_ROLE_CONTEXT_MANAGER = 2;
+  TASK_ROLE_CONTEXT_HIGHER_MANAGER = 3;
+  TASK_ROLE_CONTEXT_FIELD_ENGINEER = 4;
+  TASK_ROLE_CONTEXT_SALESPERSON = 5;
+  TASK_ROLE_CONTEXT_CEO = 6;
+}
+
+enum TaskStatus {
+  TASK_STATUS_UNSPECIFIED = 0;
+  TASK_STATUS_NEW = 1;
+  TASK_STATUS_IN_REVIEW = 2;
+  TASK_STATUS_APPROVED = 3;
+  TASK_STATUS_IN_PROGRESS = 4;
+  TASK_STATUS_SNOOZED = 5;
+  TASK_STATUS_DONE = 6;
+  TASK_STATUS_REJECTED = 7;
+  TASK_STATUS_CANCELLED = 8;
+}
