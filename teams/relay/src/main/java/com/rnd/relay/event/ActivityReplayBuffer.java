@@ -50,7 +50,7 @@ class ActivityReplayBuffer {
         return buffer.replaySince(lastEventId);
     }
 
-    List<Entry> since(
+    Optional<List<Entry>> since(
             String orgId,
             String userId,
             Instant since) {
@@ -58,7 +58,7 @@ class ActivityReplayBuffer {
         RingBuffer buffer = byUser.get(userKey(orgId, userId));
 
         if (buffer == null) {
-            return List.of();
+            return Optional.empty();
         }
 
         return buffer.since(since);
@@ -105,7 +105,11 @@ class ActivityReplayBuffer {
             return Optional.of(result);
         }
 
-        synchronized List<Entry> since(Instant since) {
+        synchronized Optional<List<Entry>> since(Instant since) {
+            if (size == 0 || entries[head].recordedAt().isAfter(since)) {
+                return Optional.empty();
+            }
+
             List<Entry> result = new ArrayList<>();
             for (int i = 0; i < size; i++) {
                 Entry entry = entries[(head + i) % entries.length];
@@ -113,7 +117,7 @@ class ActivityReplayBuffer {
                     result.add(entry);
                 }
             }
-            return result;
+            return Optional.of(result);
         }
     }
 }

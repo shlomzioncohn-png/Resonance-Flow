@@ -16,10 +16,15 @@ import java.util.Map;
 public class NotificationSyncController {
 
     private final ActivityReplayBuffer replayBuffer;
+    private final KafkaNotificationReplayService kafkaReplayService;
     private final HeaderAuthenticationStub authenticationStub;
 
-    public NotificationSyncController(ActivityReplayBuffer replayBuffer, HeaderAuthenticationStub authenticationStub) {
+    public NotificationSyncController(
+            ActivityReplayBuffer replayBuffer,
+            KafkaNotificationReplayService kafkaReplayService,
+            HeaderAuthenticationStub authenticationStub) {
         this.replayBuffer = replayBuffer;
+        this.kafkaReplayService = kafkaReplayService;
         this.authenticationStub = authenticationStub;
     }
 
@@ -29,7 +34,10 @@ public class NotificationSyncController {
             @RequestHeader("X-User-Id") String userId,
             @RequestParam("since") long sinceEpochMillis) {
         AuthenticatedPrincipal principal = authenticationStub.authenticate(orgId, userId);
-        return replayBuffer.since(principal.orgId(), principal.userId(), Instant.ofEpochMilli(sinceEpochMillis)).stream()
+        Instant since = Instant.ofEpochMilli(sinceEpochMillis);
+        List<ActivityReplayBuffer.Entry> entries = replayBuffer.since(principal.orgId(), principal.userId(), since)
+                .orElseGet(() -> kafkaReplayService.replaySince(principal.orgId(), principal.userId(), since));
+        return entries.stream()
                 .map(entry -> NotificationPayloads.toMap(entry.event(), entry.offset()))
                 .toList();
     }
