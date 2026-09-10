@@ -8,47 +8,24 @@ option java_multiple_files = true;
 import "google/protobuf/timestamp.proto";
 
 // kafkaTopic: task.creation.requested
-// Protobuf translation of the task.creation.requested contract MIND sends to Inbox's
-// TaskCreationRequestConsumer (com.rnd.inbox.taskcreationrequest). Registered here (Relay owns
-// the Schema Registry - see schema-subjects.tsv) so schema compatibility is checked from day one,
-// same as task-created/updated/completed-event.proto. Registering the schema does NOT by itself
-// change what's on the wire: Inbox's consumer still deserializes this topic as plain JSON into
-// TaskCreationRequestEventDto today. Actually switching the consumer to Protobuf is a separate,
-// later step - Inbox's own call, plus confirming the newer fields below with MIND as producer.
+// Registered for schema-compat checking only - Inbox's consumer still deserializes this topic as
+// JSON; switching it to Protobuf on the wire is a separate, later step.
 //
-// Nothing here has been registered before this, so field numbering is free; it follows
-// TaskCreationRequestEventDto's declaration order, then the two fields the DTO doesn't have yet
-// (created_by_user_id, assignees).
+// correlation_id is a payload field here, not a Kafka header - unlike task-created, where it's
+// deliberately kept out of the payload (see task-created-event.proto).
 //
-// event_id: optional - TaskCreationRequestEventDto.eventId has @ValidUuid only, no @NotBlank.
+// confidence is double, not float, since it's MIND's raw value, not yet mapped onto Task.java's
+// Float.
 //
-// correlation_id: required (@NotBlank @ValidUuid). Unlike task.created, where correlation_id is
-// deliberately left out and stays a Kafka header (see task-created-event.proto), it IS a payload
-// field here, matching TaskCreationRequestEventDto.correlationId.
-//
-// confidence: double, not float - this DTO declares it `Double` (unlike
-// TaskCreatedPayload/Task.java's `Float`), since it's MIND's raw value, not yet mapped onto the
-// Task entity. Required (@NotNull).
-//
-// has_dependencies: bool, not wrapped in optional - @NotNull Boolean on the DTO, always present.
-//
-// tier / role_context / status: optional - none are @NotNull on the DTO. status has no default
-// on the wire; the schema doc's "default NEW" is applied downstream, not encoded here.
-//
-// created_by_user_id / assignees: not on TaskCreationRequestEventDto today - added here per the
-// newer schema doc shape (multiple assignees, each with its own role, instead of one). This is a
-// bigger contract change than field numbering and isn't reflected in the Java DTO/consumer yet -
-// confirm with MIND before Inbox builds against it.
-//
-// assignee_type (USER | TEAM): no equivalent in Java yet. Assignment.java infers which of
-// user/team is set instead of carrying an explicit tag; this adds one since the payload needs to
-// say which id it's giving you before the row exists.
+// created_by_user_id / assignees / assignee_type aren't on TaskCreationRequestEventDto yet -
+// added per the newer schema doc's multi-assignee shape. Confirm with MIND before Inbox builds
+// against them.
 
 message TaskCreationRequestedEvent {
-  optional string event_id = 1;                    // UUID as string. Optional - see note above.
-  string correlation_id = 2;                        // UUID as string. Required - see note above.
-  string tenant_id = 3;                             // UUID as string. Required.
-  optional string project_id = 4;                   // UUID as string. Nullable.
+  optional string event_id = 1;                    // UUID as string.
+  string correlation_id = 2;                        // UUID as string - see note above.
+  string tenant_id = 3;                             // UUID as string.
+  optional string project_id = 4;                   // UUID as string.
   string title = 5;
   optional string description = 6;
   SourceType source_type = 7;
@@ -59,17 +36,17 @@ message TaskCreationRequestedEvent {
   optional int32 effort_estimate_minutes = 12;      // > 0.
   optional google.protobuf.Timestamp deadline = 13;
   optional TaskStatus status = 14;                  // Downstream defaults to NEW when unset.
-  double confidence = 15;                           // 0.0..1.0. Required, not nullable - see note above.
-  bool has_dependencies = 16;                       // Required, not nullable - see note above.
-  optional string created_by_user_id = 17;          // UUID as string. Nullable.
+  double confidence = 15;                           // 0.0..1.0 - see note above.
+  bool has_dependencies = 16;
+  optional string created_by_user_id = 17;          // UUID as string.
   repeated Assignee assignees = 18;                 // Zero or more - see note above.
 }
 
 message Assignee {
-  AssigneeType assignee_type = 1;                   // Required within each item.
-  string id = 2;                                    // UUID as string. USER -> user id, TEAM -> team id. Required.
-  AssignmentRole assignment_role = 3;                // Required within each item.
-  optional string assigned_by = 4;                  // UUID as string. Nullable within each item.
+  AssigneeType assignee_type = 1;
+  string id = 2;                                    // UUID as string. USER -> user id, TEAM -> team id.
+  AssignmentRole assignment_role = 3;
+  optional string assigned_by = 4;                  // UUID as string.
 }
 
 enum AssigneeType {
