@@ -5,6 +5,7 @@ import com.rnd.chain.dto.ApiError;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
+import org.springframework.validation.FieldError;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
@@ -13,6 +14,8 @@ import javax.servlet.http.HttpServletRequest;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+
+import java.util.List;
 
 @RestControllerAdvice
 public class GlobalExceptionHandler {
@@ -65,10 +68,16 @@ public class GlobalExceptionHandler {
         public ResponseEntity<ApiError> handleValidationError(
                         MethodArgumentNotValidException ex,
                         HttpServletRequest request) {
-                String message = ex.getBindingResult()
-                                .getFieldErrors()
-                                .get(0)
-                                .getDefaultMessage();
+                // MethodArgumentNotValidException can carry only class-level errors
+                // (getGlobalErrors()) with an empty getFieldErrors() list, e.g. a cross-field
+                // constraint annotated on the class rather than on one property. Falling back to
+                // getAllErrors() (field + global combined, guaranteed non-empty whenever this
+                // exception exists at all) avoids an IndexOutOfBoundsException inside this
+                // handler itself on that path.
+                List<FieldError> fieldErrors = ex.getBindingResult().getFieldErrors();
+                String message = fieldErrors.isEmpty()
+                                ? ex.getBindingResult().getAllErrors().get(0).getDefaultMessage()
+                                : fieldErrors.get(0).getDefaultMessage();
 
                 return ResponseEntity
                                 .status(HttpStatus.BAD_REQUEST)
