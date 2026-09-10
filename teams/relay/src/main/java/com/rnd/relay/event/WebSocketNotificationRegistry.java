@@ -74,6 +74,8 @@ public class WebSocketNotificationRegistry implements NotificationSink {
         Connection connection = new Connection(session, orgId, userId, outboxCapacity, deliveryFailuresCounter);
         connection.start();
         connectionsBySessionId.put(session.getId(), connection);
+        connectionsByUser.computeIfAbsent(userKey(orgId, userId), key -> new CopyOnWriteArraySet<>())
+                .add(connection);
 
         if (lastEventId != null) {
             reconnectCounter.increment();
@@ -83,12 +85,7 @@ public class WebSocketNotificationRegistry implements NotificationSink {
                         flushReplay(connection, entries);
                     },
                     () -> replayFromKafka(connection, orgId, userId, lastEventId));
-        }
 
-        connectionsByUser.computeIfAbsent(userKey(orgId, userId), key -> new CopyOnWriteArraySet<>())
-                .add(connection);
-
-        if (lastEventId != null) {
             // A gap of any length may have missed rollup-only changes this pod never retained.
             refresh(orgId, userId);
         }
