@@ -1,0 +1,26 @@
+spring:
+  application:
+    name: gateway
+
+app:
+  dev-mode: true
+  jwt:
+    issuer: test-issuer
+    secret: test-secret
+
+bff:
+  service:
+    url: http://localhost:9999
+  connect-timeout-ms: 2000
+  read-timeout-ms: 10000
+  endpoints:
+    workspace-recommend: /workspace/recommend
+    tasks: /workspace/tasks
+
+server:
+  port: 0
+
+logging:
+  level:
+    root: WARN
+    com.rnd.gateway: DEBUG

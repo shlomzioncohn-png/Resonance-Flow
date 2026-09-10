@@ -71,24 +71,86 @@ Build and base64-encode a .dockerconfigjson value from imagePullSecret.* values
 {{- end }}
 
 {{/*
-Render one initContainer per entry in a list of {name, host, port} dicts,
-each blocking until that host:port is TCP-reachable. Used to make a
-component wait for an infra dependency (Kafka, Postgres, ...) to be
-reachable before its main container starts.
+Resolve one dependency entry's host: an explicit `host` wins (an external
+Postgres/Kafka/whatever, not one of our own subcharts); otherwise it's our
+own Bitnami subchart's Service, <release-name>-<name>.
+*/}}
+{{- define "resonance-flow.dependencyHost" -}}
+{{- if .dep.host }}
+{{- .dep.host }}
+{{- else }}
+{{- printf "%s-%s" .root.Release.Name .dep.name }}
+{{- end }}
+{{- end }}
+
+{{/*
+Look up a named entry's resolved host in a {name, port, host?} list
+(dependencies' shape) - so a component's own connection string doesn't
+re-derive it separately from the wait-for-<dep> initContainer.
+*/}}
+{{- define "resonance-flow.dependencyHostByName" -}}
+{{- $host := "" }}
+{{- $root := .root }}
+{{- range .deps }}
+{{- if eq .name $.name }}
+{{- $host = include "resonance-flow.dependencyHost" (dict "root" $root "dep" .) }}
+{{- end }}
+{{- end }}
+{{- $host }}
+{{- end }}
+
+{{/*
+Look up a named entry's port in a {name, port, host?} list (dependencies'
+shape), so it isn't duplicated as a literal outside its wait-for-<dep>
+initContainer.
+*/}}
+{{- define "resonance-flow.dependencyPort" -}}
+{{- $port := "" }}
+{{- range .deps }}
+{{- if eq .name $.name }}
+{{- $port = .port }}
+{{- end }}
+{{- end }}
+{{- $port }}
+{{- end }}
+
+{{/*
+One initContainer per {name, port, host?} dependency, blocking until
+host:port is TCP-reachable.
 */}}
 {{- define "resonance-flow.waitForDependencies" -}}
-{{- range . }}
+{{- $root := .root }}
+{{- range .deps }}
+{{- $host := include "resonance-flow.dependencyHost" (dict "root" $root "dep" .) }}
 - name: wait-for-{{ .name }}
   image: busybox:1.36
   command:
     - sh
     - -c
     - |
-      until nc -z -w2 {{ .host }} {{ .port }}; do
-        echo "waiting for {{ .name }} ({{ .host }}:{{ .port }})..."
+      until nc -z -w2 {{ $host }} {{ .port }}; do
+        echo "waiting for {{ .name }} ({{ $host }}:{{ .port }})..."
         sleep 2
       done
 {{- end }}
+{{- end }}
+
+{{/*
+Kafka SASL client username / JAAS config string, derived from kafka.sasl.client.users
+and kafka.sasl.client.passwords - the same values that seed the Kafka subchart's own
+auto-generated Secret (see charts/kafka/templates/secrets.yaml). Every component that
+talks to Kafka should render its credentials through these instead of duplicating the
+username/password as its own constant - that duplication is exactly what caused the
+Postgres password to drift out of sync (components.inbox.config.data.datasource.password
+vs postgresql.auth.postgresPassword) before it was caught. Takes the root context ($),
+not a scoped one, since kafka.sasl.client.* lives at the top level of Values.
+*/}}
+{{- define "resonance-flow.kafkaSaslUsername" -}}
+{{- first .Values.kafka.sasl.client.users }}
+{{- end }}
+
+{{- define "resonance-flow.kafkaSaslJaasConfig" -}}
+{{- printf "org.apache.kafka.common.security.plain.PlainLoginModule required username=\"%s\" password=\"%s\";" (first .Values.kafka.sasl.client.users) (first .Values.kafka.sasl.client.passwords) }}
 {{- end }}
 
 {{/*
