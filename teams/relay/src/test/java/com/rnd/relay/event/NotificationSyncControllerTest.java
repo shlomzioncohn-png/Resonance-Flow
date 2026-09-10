@@ -25,7 +25,7 @@ class NotificationSyncControllerTest {
 
     @Test
     void returnsEntriesRecordedSinceTheGivenInstantAsJsonPayloads() {
-        NotificationSyncController controller = new NotificationSyncController(replayBuffer);
+        NotificationSyncController controller = new NotificationSyncController(replayBuffer, new HeaderAuthenticationStub());
         TaskNotification event = TaskNotification.newBuilder()
                 .setEventId(UUID.randomUUID().toString())
                 .setOrgId(ORG_ID)

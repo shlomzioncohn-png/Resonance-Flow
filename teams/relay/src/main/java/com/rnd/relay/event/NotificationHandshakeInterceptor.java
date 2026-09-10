@@ -17,6 +17,12 @@ class NotificationHandshakeInterceptor implements HandshakeInterceptor {
     static final String USER_ID_ATTRIBUTE = "userId";
     static final String LAST_EVENT_ID_ATTRIBUTE = "lastEventId";
 
+    private final HeaderAuthenticationStub authenticationStub;
+
+    NotificationHandshakeInterceptor(HeaderAuthenticationStub authenticationStub) {
+        this.authenticationStub = authenticationStub;
+    }
+
     @Override
     public boolean beforeHandshake(ServerHttpRequest request, ServerHttpResponse response,
             WebSocketHandler wsHandler, Map<String, Object> attributes) {
@@ -26,8 +32,9 @@ class NotificationHandshakeInterceptor implements HandshakeInterceptor {
             response.setStatusCode(HttpStatus.BAD_REQUEST);
             return false;
         }
-        attributes.put(ORG_ID_ATTRIBUTE, orgId);
-        attributes.put(USER_ID_ATTRIBUTE, userId);
+        AuthenticatedPrincipal principal = authenticationStub.authenticate(orgId, userId);
+        attributes.put(ORG_ID_ATTRIBUTE, principal.orgId());
+        attributes.put(USER_ID_ATTRIBUTE, principal.userId());
         String lastEventId = request.getHeaders().getFirst("Last-Event-ID");
         if (lastEventId == null && request instanceof ServletServerHttpRequest servletRequest) {
             lastEventId = servletRequest.getServletRequest().getParameter("lastEventId");

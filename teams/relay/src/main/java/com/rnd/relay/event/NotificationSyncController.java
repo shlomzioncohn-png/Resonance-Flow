@@ -16,9 +16,11 @@ import java.util.Map;
 public class NotificationSyncController {
 
     private final ActivityReplayBuffer replayBuffer;
+    private final HeaderAuthenticationStub authenticationStub;
 
-    public NotificationSyncController(ActivityReplayBuffer replayBuffer) {
+    public NotificationSyncController(ActivityReplayBuffer replayBuffer, HeaderAuthenticationStub authenticationStub) {
         this.replayBuffer = replayBuffer;
+        this.authenticationStub = authenticationStub;
     }
 
     @GetMapping("/sync")
@@ -26,7 +28,8 @@ public class NotificationSyncController {
             @RequestHeader("X-Org-Id") String orgId,
             @RequestHeader("X-User-Id") String userId,
             @RequestParam("since") long sinceEpochMillis) {
-        return replayBuffer.since(orgId, userId, Instant.ofEpochMilli(sinceEpochMillis)).stream()
+        AuthenticatedPrincipal principal = authenticationStub.authenticate(orgId, userId);
+        return replayBuffer.since(principal.orgId(), principal.userId(), Instant.ofEpochMilli(sinceEpochMillis)).stream()
                 .map(entry -> NotificationPayloads.toMap(entry.event(), entry.offset()))
                 .toList();
     }
