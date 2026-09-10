@@ -27,14 +27,24 @@ import java.util.stream.Collectors;
  * That is exactly the bottleneck the Stage 6 benchmark (10,000 tasks / 20,000 edges) measured:
  * a BFS visiting thousands of nodes calling that scan once per node.
  *
- * <p>This version instead indexes children by parentTaskId - a
- * {@code Map<Optional<UUID>, Set<UUID>>} of parent -> child ids, mirroring the dual-adjacency-
- * map pattern ruthHoltzman's {@link InMemoryTaskDependencyRepository} already uses for the
- * dependency axis - so findByParentTaskId is a direct map lookup (O(1) average) plus
- * materializing the matches (O(k), k = number of children), instead of an O(n) scan of the
- * whole task set. {@code Optional<UUID>} (not {@code UUID}) is the map key because
- * {@link ConcurrentHashMap} rejects null keys, and a root task's parentTaskId is legitimately
- * null.
+ * <p>This version instead indexes children by parentTaskId - a {@code Map<UUID, Set<UUID>>} of
+ * parent -> child ids, mirroring the dual-adjacency-map pattern ruthHoltzman's
+ * {@link InMemoryTaskDependencyRepository} already uses for the dependency axis - so
+ * findByParentTaskId is a direct map lookup (O(1) average) plus materializing the matches (O(k),
+ * k = number of children), instead of an O(n) scan of the whole task set.
+ *
+ * <p>Root tasks (parentTaskId == null) are deliberately not indexed at all (PLAN.md Finding #2):
+ * the only production call site (TaskTraversalService.childNeighborIds) always passes a real,
+ * already-validated task id, the interface contract documents "children of the given task" with
+ * no root-listing case, and root detection (ancestor traversal) reads
+ * {@code Task.getParentTaskId() == null} directly, never through this index. So there is nothing
+ * to represent "no parent" as a map key for - {@code findByParentTaskId(null)} short-circuits to
+ * an empty list without touching the map, which also means {@link ConcurrentHashMap}'s no-null-
+ * keys restriction never comes up.
+ *
+ * <p>{@code reindexChild} removes the outer map entry entirely once its child set becomes empty
+ * (PLAN.md Finding #6), rather than leaving an ever-growing set of empty-Set entries behind as
+ * tasks are reparented over the repository's lifetime.
  *
  * <p><b>Atomicity:</b> {@code save}/{@code update} take {@code writeLock} for the duration of
  * the write (updating {@code tasksById} and re-indexing {@code childrenByParentId} together),
@@ -44,7 +54,7 @@ import java.util.stream.Collectors;
 public class InMemoryTaskRepository implements TaskRepository {
 
     private final Map<UUID, Task> tasksById = new ConcurrentHashMap<>();
-    private final Map<Optional<UUID>, Set<UUID>> childrenByParentId = new ConcurrentHashMap<>();
+    private final Map<UUID, Set<UUID>> childrenByParentId = new ConcurrentHashMap<>();
     private final Object writeLock = new Object();
 
     public InMemoryTaskRepository(List<Task> tasks) {
@@ -72,7 +82,13 @@ public class InMemoryTaskRepository implements TaskRepository {
 
     @Override
     public List<Task> findByParentTaskId(UUID parentTaskId) {
-        Set<UUID> childIds = childrenByParentId.getOrDefault(Optional.ofNullable(parentTaskId), Set.of());
+        if (parentTaskId == null) {
+            // Root tasks aren't indexed - see class Javadoc / PLAN.md Finding #2. No caller in
+            // this codebase relies on this today; returning empty here is defensive, not a
+            // behavior anything depends on.
+            return List.of();
+        }
+        Set<UUID> childIds = childrenByParentId.getOrDefault(parentTaskId, Set.of());
         List<Task> result = new ArrayList<>(childIds.size());
         for (UUID childId : childIds) {
             Task child = tasksById.get(childId);
@@ -116,17 +132,31 @@ public class InMemoryTaskRepository implements TaskRepository {
     }
 
     private void indexChild(Task task) {
-        childrenByParentId
-                .computeIfAbsent(Optional.ofNullable(task.getParentTaskId()), key -> ConcurrentHashMap.newKeySet())
+        UUID parentId = task.getParentTaskId();
+        if (parentId == null) {
+            // Root tasks aren't indexed - see class Javadoc / PLAN.md Finding #2.
+            return;
+        }
+        childrenByParentId.computeIfAbsent(parentId, key -> ConcurrentHashMap.newKeySet())
                 .add(task.getId());
     }
 
     /** Must be called while holding {@code writeLock}. */
     private void reindexChild(Task previous, Task updated) {
         if (previous != null) {
-            Set<UUID> oldSiblings = childrenByParentId.get(Optional.ofNullable(previous.getParentTaskId()));
-            if (oldSiblings != null) {
-                oldSiblings.remove(previous.getId());
+            UUID previousParentId = previous.getParentTaskId();
+            if (previousParentId != null) {
+                Set<UUID> oldSiblings = childrenByParentId.get(previousParentId);
+                if (oldSiblings != null) {
+                    oldSiblings.remove(previous.getId());
+                    if (oldSiblings.isEmpty()) {
+                        // Drop the now-empty entry entirely (PLAN.md Finding #6) rather than
+                        // leaking one permanent empty-Set entry per parent id ever touched. The
+                        // two-arg remove is race-safe against a concurrent add landing on this
+                        // same key between the isEmpty() check and the removal.
+                        childrenByParentId.remove(previousParentId, oldSiblings);
+                    }
+                }
             }
         }
         indexChild(updated);
