@@ -1,6 +1,5 @@
 package com.rnd.inbox.shared.config;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
 import com.rnd.inbox.shared.messaging.kafka.TransientProcessingException;
 import io.confluent.kafka.serializers.AbstractKafkaSchemaSerDeConfig;
 import io.confluent.kafka.serializers.protobuf.KafkaProtobufSerializer;
@@ -17,7 +16,6 @@ import org.springframework.kafka.core.DefaultKafkaProducerFactory;
 import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.kafka.core.ProducerFactory;
 import org.springframework.kafka.listener.ContainerProperties;
-import org.springframework.kafka.support.serializer.JsonSerializer;
 import org.springframework.retry.policy.SimpleRetryPolicy;
 import org.springframework.retry.backoff.ExponentialBackOffPolicy;
 import org.springframework.retry.support.RetryTemplate;
@@ -52,20 +50,6 @@ public class KafkaConfig {
     @Bean
     public KafkaTemplate<String, String> kafkaTemplate(ProducerFactory<String, String> inboxKafkaProducerFactory) {
         return new KafkaTemplate<>(inboxKafkaProducerFactory);
-    }
-
-    @Bean
-    public ProducerFactory<String, Object> jsonKafkaProducerFactory(KafkaProperties kafkaProperties,
-                                                                    ObjectMapper objectMapper) {
-        JsonSerializer<Object> valueSerializer = new JsonSerializer<>(objectMapper);
-        valueSerializer.setAddTypeInfo(false);
-        return new DefaultKafkaProducerFactory<>(
-                kafkaProperties.buildProducerProperties(), new StringSerializer(), valueSerializer);
-    }
-
-    @Bean
-    public KafkaTemplate<String, Object> jsonKafkaTemplate(ProducerFactory<String, Object> jsonKafkaProducerFactory) {
-        return new KafkaTemplate<>(jsonKafkaProducerFactory);
     }
 
     @Bean

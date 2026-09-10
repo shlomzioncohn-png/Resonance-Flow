@@ -139,7 +139,7 @@ public class TaskService {
 
         Task saved = taskRepository.saveAndFlush(task);
 
-        outboxEventRepository.save(buildTaskUpdatedOutboxEvent(saved, correlationId));
+        outboxEventRepository.save(buildOutboxEvent(EventType.TASK_UPDATED, TaskUpdatedPayload.from(saved), saved, correlationId));
         auditService.createAuditLog("TASK_SCHEDULING_UPDATED", "Task", saved.getId(), saved.getTenant(),
                 schedulingSnapshot(saved), correlationId);
         return saved;
@@ -157,21 +157,6 @@ public class TaskService {
                 saved.getId(),
                 saved.getId().toString(),
                 payloadMap,
-                correlationId,
-                Instant.now(clock));
-    }
-
-    private OutboxEvent buildTaskUpdatedOutboxEvent(Task saved, UUID correlationId) {
-        Map<String, Object> payload = new LinkedHashMap<>();
-        payload.put("taskId", saved.getId().toString());
-        payload.put("isAvailable", saved.isAvailable());
-        payload.put("priorityScore", saved.getPriorityScore());
-
-        return OutboxEvent.pending(
-                EventType.TASK_UPDATED,
-                saved.getId(),
-                saved.getId().toString(),
-                payload,
                 correlationId,
                 Instant.now(clock));
     }

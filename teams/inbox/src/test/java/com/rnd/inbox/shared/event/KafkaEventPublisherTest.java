@@ -4,6 +4,8 @@ import ch.qos.logback.classic.Level;
 import ch.qos.logback.classic.Logger;
 import ch.qos.logback.classic.spi.ILoggingEvent;
 import ch.qos.logback.core.read.ListAppender;
+import com.google.protobuf.Message;
+import com.google.protobuf.Struct;
 import org.apache.kafka.clients.producer.ProducerRecord;
 import org.apache.kafka.common.errors.SerializationException;
 import org.apache.kafka.common.errors.TimeoutException;
@@ -28,6 +30,7 @@ import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.assertj.core.api.Assertions.catchThrowable;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
@@ -36,14 +39,10 @@ import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
-import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
 class KafkaEventPublisherTest {
-
-    @Mock
-    private KafkaTemplate<String, Object> jsonKafkaTemplate;
 
     @Mock
     private KafkaTemplate<String, Object> protobufKafkaTemplate;
@@ -76,46 +75,61 @@ class KafkaEventPublisherTest {
         return (Logger) LoggerFactory.getLogger(KafkaEventPublisher.class);
     }
 
-    private KafkaEventPublisher newPublisher(int maxAttempts) {
+    private KafkaEventPublisher newPublisher(int maxAttempts, ProtoEventMapper<?>... mappers) {
         return new KafkaEventPublisher(
-                jsonKafkaTemplate, protobufKafkaTemplate, List.of(), retryScheduler, maxAttempts, 10L, 2.0, 100L);
+                protobufKafkaTemplate, List.of(mappers), retryScheduler, maxAttempts, 10L, 2.0, 100L);
+    }
+
+    private ProtoEventMapper<Message> mapperFor(EventType eventType, Message toProtoResult) {
+        @SuppressWarnings("unchecked")
+        ProtoEventMapper<Message> mapper = mock(ProtoEventMapper.class);
+        lenient().when(mapper.supportedType()).thenReturn(eventType);
+        lenient().when(mapper.toProto(any())).thenReturn(toProtoResult);
+        return mapper;
+    }
+
+    private Event<Map<String, Object>> newEvent(EventType eventType, UUID correlationId) {
+        return Event.newEvent(eventType, "inbox", correlationId, Map.of("taskId", "task-1"));
     }
 
     @Test
     void publish_successfulSend_completesResultFutureSuccessfully() {
-        when(jsonKafkaTemplate.send(any(ProducerRecord.class))).thenReturn(succeeded());
+        when(protobufKafkaTemplate.send(any(ProducerRecord.class))).thenReturn(succeeded());
+        KafkaEventPublisher publisher = newPublisher(3, mapperFor(EventType.TASK_CREATED, Struct.getDefaultInstance()));
 
-        Event<String> event = Event.newEvent(EventType.TASK_CREATED, "inbox", null, "payload");
-        CompletableFuture<Void> result = newPublisher(3).publish("task.created", "task-1", event);
+        Event<Map<String, Object>> event = newEvent(EventType.TASK_CREATED, null);
+        CompletableFuture<Void> result = publisher.publish("task.created", "task-1", event);
 
         assertThat(result).isCompleted();
-        verify(jsonKafkaTemplate, times(1)).send(any(ProducerRecord.class));
+        verify(protobufKafkaTemplate, times(1)).send(any(ProducerRecord.class));
     }
 
     @Test
     void publish_retryableFailureThenSuccess_isTreatedAsSuccessAfterRetry() {
-        when(jsonKafkaTemplate.send(any(ProducerRecord.class)))
+        when(protobufKafkaTemplate.send(any(ProducerRecord.class)))
                 .thenReturn(failed(new TimeoutException("broker unavailable")), succeeded());
+        KafkaEventPublisher publisher = newPublisher(3, mapperFor(EventType.TASK_CREATED, Struct.getDefaultInstance()));
 
-        Event<String> event = Event.newEvent(EventType.TASK_CREATED, "inbox", null, "payload");
-        CompletableFuture<Void> result = newPublisher(3).publish("task.created", "task-1", event);
+        Event<Map<String, Object>> event = newEvent(EventType.TASK_CREATED, null);
+        CompletableFuture<Void> result = publisher.publish("task.created", "task-1", event);
 
         assertThat(result).isCompleted();
-        verify(jsonKafkaTemplate, times(2)).send(any(ProducerRecord.class));
+        verify(protobufKafkaTemplate, times(2)).send(any(ProducerRecord.class));
         verify(retryScheduler, times(1)).schedule(any(Runnable.class), anyLong(), eq(TimeUnit.MILLISECONDS));
     }
 
     @Test
     void publish_retryableFailureExhaustsMaxAttempts_completesExceptionallyWithWrappedCause() {
         TimeoutException timeoutException = new TimeoutException("broker unavailable");
-        when(jsonKafkaTemplate.send(any(ProducerRecord.class)))
+        when(protobufKafkaTemplate.send(any(ProducerRecord.class)))
                 .thenReturn(failed(timeoutException), failed(timeoutException), failed(timeoutException));
+        KafkaEventPublisher publisher = newPublisher(3, mapperFor(EventType.TASK_CREATED, Struct.getDefaultInstance()));
 
-        Event<String> event = Event.newEvent(EventType.TASK_CREATED, "inbox", null, "payload");
-        CompletableFuture<Void> result = newPublisher(3).publish("task.created", "task-1", event);
+        Event<Map<String, Object>> event = newEvent(EventType.TASK_CREATED, null);
+        CompletableFuture<Void> result = publisher.publish("task.created", "task-1", event);
 
         assertThat(result).isCompletedExceptionally();
-        verify(jsonKafkaTemplate, times(3)).send(any(ProducerRecord.class));
+        verify(protobufKafkaTemplate, times(3)).send(any(ProducerRecord.class));
         verify(retryScheduler, times(2)).schedule(any(Runnable.class), anyLong(), eq(TimeUnit.MILLISECONDS));
 
         Throwable thrown = catchThrowable(result::join);
@@ -127,11 +141,12 @@ class KafkaEventPublisherTest {
     @Test
     void publish_retryableFailureExhaustsMaxAttempts_logsEventTypeTopicEventIdTaskIdAttemptsAndLastError() {
         TimeoutException timeoutException = new TimeoutException("broker unavailable");
-        when(jsonKafkaTemplate.send(any(ProducerRecord.class)))
+        when(protobufKafkaTemplate.send(any(ProducerRecord.class)))
                 .thenReturn(failed(timeoutException), failed(timeoutException), failed(timeoutException));
+        KafkaEventPublisher publisher = newPublisher(3, mapperFor(EventType.TASK_CREATED, Struct.getDefaultInstance()));
 
-        Event<String> event = Event.newEvent(EventType.TASK_CREATED, "inbox", null, "payload");
-        CompletableFuture<Void> result = newPublisher(3).publish("task.created", "task-1", event);
+        Event<Map<String, Object>> event = newEvent(EventType.TASK_CREATED, null);
+        CompletableFuture<Void> result = publisher.publish("task.created", "task-1", event);
         catchThrowable(result::join);
 
         ILoggingEvent errorLog = logAppender.list.stream()
@@ -152,31 +167,35 @@ class KafkaEventPublisherTest {
 
     @Test
     void publish_nonRetryableFailure_failsImmediatelyWithoutSchedulingRetry() {
-        when(jsonKafkaTemplate.send(any(ProducerRecord.class)))
+        when(protobufKafkaTemplate.send(any(ProducerRecord.class)))
                 .thenReturn(failed(new SerializationException("bad payload")));
+        KafkaEventPublisher publisher = newPublisher(3, mapperFor(EventType.TASK_CREATED, Struct.getDefaultInstance()));
 
-        Event<String> event = Event.newEvent(EventType.TASK_CREATED, "inbox", null, "payload");
-        CompletableFuture<Void> result = newPublisher(3).publish("task.created", "task-1", event);
+        Event<Map<String, Object>> event = newEvent(EventType.TASK_CREATED, null);
+        CompletableFuture<Void> result = publisher.publish("task.created", "task-1", event);
 
         assertThat(result).isCompletedExceptionally();
-        verify(jsonKafkaTemplate, times(1)).send(any(ProducerRecord.class));
-        verifyNoInteractions(retryScheduler);
+        verify(protobufKafkaTemplate, times(1)).send(any(ProducerRecord.class));
+        verify(retryScheduler, times(0)).schedule(any(Runnable.class), anyLong(), any(TimeUnit.class));
     }
 
     @Test
-    void publish_buildsHeadersFromMetadataOnly_notFromPayload() {
+    void publish_buildsHeadersFromMetadata_andSendsTheMappedProtoValue_notTheRawPayload() {
         ArgumentCaptor<ProducerRecord> captor = ArgumentCaptor.forClass(ProducerRecord.class);
-        when(jsonKafkaTemplate.send(captor.capture())).thenReturn(succeeded());
+        when(protobufKafkaTemplate.send(captor.capture())).thenReturn(succeeded());
+        Struct mappedValue = Struct.getDefaultInstance();
+        KafkaEventPublisher publisher = newPublisher(3, mapperFor(EventType.TASK_CREATED, mappedValue));
 
         UUID correlationId = UUID.randomUUID();
-        SamplePayload payload = new SamplePayload("hello");
-        Event<SamplePayload> event = Event.newEvent(EventType.TASK_CREATED, "inbox", correlationId, payload);
+        Map<String, Object> payload = Map.of("taskId", "task-1");
+        Event<Map<String, Object>> event = Event.newEvent(EventType.TASK_CREATED, "inbox", correlationId, payload);
 
-        newPublisher(3).publish("task.created", "task-1", event);
+        publisher.publish("task.created", "task-1", event);
 
         @SuppressWarnings("unchecked")
         ProducerRecord<String, Object> record = captor.getValue();
-        assertThat(record.value()).isSameAs(payload);
+        assertThat(record.value()).isSameAs(mappedValue);
+        assertThat(record.value()).isNotSameAs(payload);
         assertThat(headerValue(record, "event_id")).isEqualTo(event.getEventId().toString());
         assertThat(headerValue(record, "event_type")).isEqualTo("task.created");
         assertThat(headerValue(record, "source_service")).isEqualTo("inbox");
@@ -186,10 +205,11 @@ class KafkaEventPublisherTest {
     @Test
     void publish_omitsCorrelationIdHeader_whenCorrelationIdIsNull() {
         ArgumentCaptor<ProducerRecord> captor = ArgumentCaptor.forClass(ProducerRecord.class);
-        when(jsonKafkaTemplate.send(captor.capture())).thenReturn(succeeded());
+        when(protobufKafkaTemplate.send(captor.capture())).thenReturn(succeeded());
+        KafkaEventPublisher publisher = newPublisher(3, mapperFor(EventType.TASK_CREATED, Struct.getDefaultInstance()));
 
-        Event<String> event = Event.newEvent(EventType.TASK_CREATED, "inbox", null, "payload");
-        newPublisher(3).publish("task.created", "task-1", event);
+        Event<Map<String, Object>> event = newEvent(EventType.TASK_CREATED, null);
+        publisher.publish("task.created", "task-1", event);
 
         @SuppressWarnings("unchecked")
         ProducerRecord<String, Object> record = captor.getValue();
@@ -197,51 +217,45 @@ class KafkaEventPublisherTest {
     }
 
     @Test
-    void publish_worksForDifferentPayloadTypesWithoutAnyCodeChange() {
-        when(jsonKafkaTemplate.send(any(ProducerRecord.class))).thenReturn(succeeded(), succeeded());
+    void publish_dispatchesEachEventTypeThroughItsOwnRegisteredMapper() {
+        when(protobufKafkaTemplate.send(any(ProducerRecord.class))).thenReturn(succeeded(), succeeded());
+        Struct createdValue = Struct.getDefaultInstance();
+        Struct updatedValue = Struct.newBuilder().putFields("marker", com.google.protobuf.Value.newBuilder()
+                .setBoolValue(true).build()).build();
+        KafkaEventPublisher publisher = newPublisher(3,
+                mapperFor(EventType.TASK_CREATED, createdValue), mapperFor(EventType.TASK_UPDATED, updatedValue));
 
-        KafkaEventPublisher publisher = newPublisher(3);
-
-        Event<SamplePayload> created = Event.newEvent(EventType.TASK_CREATED, "inbox", null, new SamplePayload("created"));
-        Event<OtherPayload> updated = Event.newEvent(EventType.TASK_UPDATED, "inbox", null, new OtherPayload(42));
+        Event<Map<String, Object>> created = newEvent(EventType.TASK_CREATED, null);
+        Event<Map<String, Object>> updated = newEvent(EventType.TASK_UPDATED, null);
 
         CompletableFuture<Void> result1 = publisher.publish(EventType.TASK_CREATED.getTopic(), "task-1", created);
         CompletableFuture<Void> result2 = publisher.publish(EventType.TASK_UPDATED.getTopic(), "task-1", updated);
 
         assertThat(result1).isCompleted();
         assertThat(result2).isCompleted();
-        verify(jsonKafkaTemplate, times(2)).send(any(ProducerRecord.class));
+        verify(protobufKafkaTemplate, times(2)).send(any(ProducerRecord.class));
     }
 
     @Test
-    void publish_usesProtobufTemplate_whenMapperRegisteredForEventType() {
-        @SuppressWarnings("unchecked")
-        ProtoEventMapper<com.google.protobuf.Message> mapper = mock(ProtoEventMapper.class);
-        when(mapper.supportedType()).thenReturn(EventType.TASK_CREATED);
-        when(mapper.toProto(any())).thenReturn(com.google.protobuf.Struct.getDefaultInstance());
-        when(protobufKafkaTemplate.send(any(ProducerRecord.class))).thenReturn(succeeded());
+    void publish_throwsIllegalStateException_whenNoMapperRegisteredForEventType() {
+        KafkaEventPublisher publisher = newPublisher(3);
 
-        KafkaEventPublisher publisher = new KafkaEventPublisher(
-                jsonKafkaTemplate, protobufKafkaTemplate, List.of(mapper), retryScheduler, 3, 10L, 2.0, 100L);
+        Event<Map<String, Object>> event = newEvent(EventType.TASK_CREATED, null);
 
-        Event<Map<String, Object>> event = Event.newEvent(EventType.TASK_CREATED, "inbox", null, Map.of("taskId", "abc"));
-        CompletableFuture<Void> result = publisher.publish("task.created", "task-1", event);
-
-        assertThat(result).isCompleted();
-        verify(protobufKafkaTemplate, times(1)).send(any(ProducerRecord.class));
-        verifyNoInteractions(jsonKafkaTemplate);
+        assertThatThrownBy(() -> publisher.publish("task.created", "task-1", event))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("TASK_CREATED");
     }
 
     @Test
-    void publish_usesJsonTemplate_whenNoMapperRegisteredForEventType() {
-        when(jsonKafkaTemplate.send(any(ProducerRecord.class))).thenReturn(succeeded());
+    void publish_throwsIllegalStateException_whenPayloadIsNotAMap() {
+        KafkaEventPublisher publisher = newPublisher(3, mapperFor(EventType.TASK_CREATED, Struct.getDefaultInstance()));
 
-        Event<String> event = Event.newEvent(EventType.TASK_UPDATED, "inbox", null, "payload");
-        CompletableFuture<Void> result = newPublisher(3).publish("task.updated", "task-1", event);
+        Event<String> event = Event.newEvent(EventType.TASK_CREATED, "inbox", null, "not-a-map");
 
-        assertThat(result).isCompleted();
-        verify(jsonKafkaTemplate, times(1)).send(any(ProducerRecord.class));
-        verifyNoInteractions(protobufKafkaTemplate);
+        assertThatThrownBy(() -> publisher.publish("task.created", "task-1", event))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("Map");
     }
 
     private static CompletableFuture<SendResult<String, Object>> succeeded() {
@@ -256,29 +270,5 @@ class KafkaEventPublisherTest {
 
     private static String headerValue(ProducerRecord<String, Object> record, String key) {
         return new String(record.headers().lastHeader(key).value(), StandardCharsets.UTF_8);
-    }
-
-    private static final class SamplePayload {
-        private final String value;
-
-        private SamplePayload(String value) {
-            this.value = value;
-        }
-
-        public String getValue() {
-            return value;
-        }
-    }
-
-    private static final class OtherPayload {
-        private final int count;
-
-        private OtherPayload(int count) {
-            this.count = count;
-        }
-
-        public int getCount() {
-            return count;
-        }
     }
 }
