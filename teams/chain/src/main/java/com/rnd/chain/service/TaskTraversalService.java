@@ -54,7 +54,7 @@ public class TaskTraversalService {
      */
     public List<TaskResponse> getDirectDependencies(UUID taskId) {
         requireTask(taskId);
-        return toResponses(collectReachableIds(taskId, this::dependencyNeighborIds, true));
+        return toResponses(collectDirectNeighborIds(taskId, this::dependencyNeighborIds));
     }
 
     /**
@@ -63,7 +63,7 @@ public class TaskTraversalService {
      */
     public List<TaskResponse> getAllDependencies(UUID taskId) {
         requireTask(taskId);
-        return toResponses(collectReachableIds(taskId, this::dependencyNeighborIds, false));
+        return toResponses(collectAllReachableIds(taskId, this::dependencyNeighborIds));
     }
 
     /**
@@ -71,7 +71,7 @@ public class TaskTraversalService {
      */
     public List<TaskResponse> getDirectDependents(UUID taskId) {
         requireTask(taskId);
-        return toResponses(collectReachableIds(taskId, this::dependentNeighborIds, true));
+        return toResponses(collectDirectNeighborIds(taskId, this::dependentNeighborIds));
     }
 
     /**
@@ -80,7 +80,7 @@ public class TaskTraversalService {
      */
     public List<TaskResponse> getAllDependents(UUID taskId) {
         requireTask(taskId);
-        return toResponses(collectReachableIds(taskId, this::dependentNeighborIds, false));
+        return toResponses(collectAllReachableIds(taskId, this::dependentNeighborIds));
     }
 
     /**
@@ -88,7 +88,7 @@ public class TaskTraversalService {
      */
     public List<TaskResponse> getDirectChildren(UUID taskId) {
         requireTask(taskId);
-        return toResponses(collectReachableIds(taskId, this::childNeighborIds, true));
+        return toResponses(collectDirectNeighborIds(taskId, this::childNeighborIds));
     }
 
     /**
@@ -97,7 +97,7 @@ public class TaskTraversalService {
      */
     public List<TaskResponse> getAllDescendants(UUID taskId) {
         requireTask(taskId);
-        return toResponses(collectReachableIds(taskId, this::childNeighborIds, false));
+        return toResponses(collectAllReachableIds(taskId, this::childNeighborIds));
     }
 
     /**
@@ -189,10 +189,40 @@ public class TaskTraversalService {
     }
 
     /**
-     * Iterative BFS from {@code startTaskId} following {@code neighborFn}. With
-     * {@code directOnly=true}, only the start node's own first-level neighbors are collected
-     * (the BFS stops right after processing the start node, before expanding anything further).
-     * With {@code directOnly=false}, the BFS runs to completion, collecting every node
+     * Expands one node's neighbors via {@code neighborFn}: marks each newly-seen neighbor
+     * visited and appends it to {@code result}. Shared by {@link #collectDirectNeighborIds} and
+     * {@link #collectAllReachableIds} (PLAN.md Finding #10 - replaces the single
+     * {@code collectReachableIds(..., boolean directOnly)} shape, which toggled between two
+     * materially different traversals via a boolean flag).
+     *
+     * @return the newly discovered neighbor ids, for the caller to decide whether to expand
+     * them further.
+     */
+    private List<UUID> expandNeighbors(UUID current, Function<UUID, List<UUID>> neighborFn,
+                                        Set<UUID> visited, List<UUID> result) {
+        List<UUID> discovered = new ArrayList<>();
+        for (UUID neighbor : neighborFn.apply(current)) {
+            if (visited.add(neighbor)) {
+                result.add(neighbor);
+                discovered.add(neighbor);
+            }
+        }
+        return discovered;
+    }
+
+    /**
+     * @return only {@code startTaskId}'s own first-level neighbors via {@code neighborFn}.
+     */
+    private List<UUID> collectDirectNeighborIds(UUID startTaskId, Function<UUID, List<UUID>> neighborFn) {
+        List<UUID> result = new ArrayList<>();
+        Set<UUID> visited = new HashSet<>();
+        visited.add(startTaskId);
+        expandNeighbors(startTaskId, neighborFn, visited, result);
+        return result;
+    }
+
+    /**
+     * Iterative BFS from {@code startTaskId} following {@code neighborFn}, collecting every node
      * transitively reachable from the start node.
      *
      * The visited set (seeded with the start node itself, so it's never included in its own
@@ -201,25 +231,14 @@ public class TaskTraversalService {
      * already visited is never re-expanded. As a direct consequence, {@code neighborFn} is
      * called at most once per unique node reachable from the start node.
      */
-    private List<UUID> collectReachableIds(UUID startTaskId, Function<UUID, List<UUID>> neighborFn, boolean directOnly) {
+    private List<UUID> collectAllReachableIds(UUID startTaskId, Function<UUID, List<UUID>> neighborFn) {
         List<UUID> result = new ArrayList<>();
         Set<UUID> visited = new HashSet<>();
         visited.add(startTaskId);
         Deque<UUID> queue = new ArrayDeque<>();
         queue.add(startTaskId);
         while (!queue.isEmpty()) {
-            UUID current = queue.poll();
-            for (UUID neighbor : neighborFn.apply(current)) {
-                if (visited.add(neighbor)) {
-                    result.add(neighbor);
-                    queue.add(neighbor);
-                }
-            }
-            if (directOnly) {
-                // Only the start node's own neighbors are wanted - the queue may still hold
-                // items added just above, but nothing more is ever polled from it.
-                break;
-            }
+            queue.addAll(expandNeighbors(queue.poll(), neighborFn, visited, result));
         }
         return result;
     }
