@@ -9,6 +9,7 @@ import org.slf4j.LoggerFactory;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
@@ -98,12 +99,26 @@ public class InMemoryTaskDependencyRepository implements TaskDependencyRepositor
                 log.debug("Dependency not found for delete: task {} depends on {} - no-op", taskId, dependsOnTaskId);
                 return false;
             }
+            pruneIfEmpty(dependenciesByTask, taskId, dependsOn);
             Set<UUID> dependents = dependentsByTask.get(dependsOnTaskId);
             if (dependents != null) {
                 dependents.remove(taskId);
+                pruneIfEmpty(dependentsByTask, dependsOnTaskId, dependents);
             }
             log.info("Deleted dependency: task {} depends on {}", taskId, dependsOnTaskId);
             return true;
+        }
+    }
+
+    /**
+     * Drops {@code key} from {@code map} once its edge set is empty (PLAN.md Finding #6), rather
+     * than leaking one permanent empty-Set entry per task id ever touched. The two-arg
+     * {@code remove} is race-safe against a concurrent add landing on this same key between the
+     * emptiness check and the removal.
+     */
+    private static void pruneIfEmpty(Map<UUID, Set<UUID>> map, UUID key, Set<UUID> set) {
+        if (set.isEmpty()) {
+            map.remove(key, set);
         }
     }
 }
