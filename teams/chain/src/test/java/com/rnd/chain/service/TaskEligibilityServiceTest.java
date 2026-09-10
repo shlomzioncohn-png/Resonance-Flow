@@ -181,6 +181,21 @@ class TaskEligibilityServiceTest {
     }
 
     @Test
+    void addDependency_selfDependency_throwsIllegalStateAndNeverSaves() {
+        // Review Finding #5: TaskDependency's own class comment documents that wouldCreateCycle
+        // is the mechanism that rejects taskId == dependsOnTaskId, but no test exercised it.
+        UUID taskId = UUID.randomUUID();
+        Task task = TaskTestFixtures.defaultTask(taskId).blockingCount(0).openConstraintCount(0).isReady(true).build();
+
+        when(taskRepository.findById(taskId)).thenReturn(Optional.of(task));
+
+        assertThrows(IllegalStateException.class,
+                () -> taskEligibilityService.addDependency(taskId, taskId));
+
+        verify(taskDependencyRepository, never()).save(any());
+    }
+
+    @Test
     void addDependency_wouldCreateCycle_throwsAndLeavesStateUnchanged() {
         // A already depends on B (A -> B). Trying to add B -> A would close the cycle.
         UUID taskA = UUID.randomUUID();
@@ -525,6 +540,17 @@ class TaskEligibilityServiceTest {
     }
 
     @Test
+    void onConstraintAdded_taskDoesNotExist_throws() {
+        // Review Finding #5: every other public method that resolves a task via requireTask has
+        // a dedicated *_taskDoesNotExist_throws* test; this one didn't.
+        UUID taskId = UUID.randomUUID();
+        when(taskRepository.findById(taskId)).thenReturn(Optional.empty());
+
+        assertThrows(IllegalArgumentException.class,
+                () -> taskEligibilityService.onConstraintAdded(taskId, UUID.randomUUID()));
+    }
+
+    @Test
     void onConstraintStatusChanged_closingLastConstraint_becomesReady() {
         UUID taskId = UUID.randomUUID();
         UUID constraintId = UUID.randomUUID();
@@ -582,6 +608,18 @@ class TaskEligibilityServiceTest {
                 taskId, UUID.randomUUID(), Constraint.ConstraintStatus.SATISFIED, Constraint.ConstraintStatus.WAIVED);
 
         verify(taskRepository, never()).findById(any());
+    }
+
+    @Test
+    void onConstraintStatusChanged_taskDoesNotExist_throws() {
+        // Review Finding #5: every other public method that resolves a task via requireTask has
+        // a dedicated *_taskDoesNotExist_throws* test; this one didn't.
+        UUID taskId = UUID.randomUUID();
+        when(taskRepository.findById(taskId)).thenReturn(Optional.empty());
+
+        assertThrows(IllegalArgumentException.class,
+                () -> taskEligibilityService.onConstraintStatusChanged(
+                        taskId, UUID.randomUUID(), Constraint.ConstraintStatus.PENDING, Constraint.ConstraintStatus.SATISFIED));
     }
 
     @Test
