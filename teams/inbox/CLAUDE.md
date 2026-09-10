@@ -34,8 +34,8 @@ Where they touch the same subject, the spec wins.
 | `docs/Gong_Technical_Spec_EN_with_Flows.md` | Cross-team data flow: the two ingestion paths, stage-by-stage flow, the topic/API table, audit-trail behaviour, and the lifecycle flow diagrams. |
 
 Entities and enums, living in their owning domain module (§5), are the Java projection of that
-spec. Migrations in `shared/database/migrations` are its physical form. All three must agree — if
-the code and the spec disagree, that is a bug to raise, not a discrepancy to code around.
+spec. Migrations in `src/main/resources/db/migration` are its physical form. All three must agree
+— if the code and the spec disagree, that is a bug to raise, not a discrepancy to code around.
 
 ### Decisions already made — do not re-litigate in code
 
@@ -76,9 +76,9 @@ a schema fact other teams will build on. Record the answer in the spec, then imp
 ## 3. Commands
 
 The database is **shared infrastructure**: one `resonance_flow` instance for the whole project,
-with the schema owned by `shared/database/migrations`. It lives in the **root** compose file, not
-in Inbox's — a per-team Postgres would mean a per-team copy of a schema that is supposed to be
-canonical. Don't add one here.
+with the schema owned by Inbox's own Flyway migrations (`src/main/resources/db/migration`). The
+Postgres instance itself lives in the **root** compose file, not in Inbox's — a per-team Postgres
+would mean a per-team copy of a schema that is supposed to be canonical. Don't add one here.
 
 There are two compose files, and neither alone gives you both Postgres and Kafka:
 
@@ -107,8 +107,8 @@ docker compose down           # stop; add -v to also drop the kafka volume
 Postgres `${DB_PORT:-5432}` · pgAdmin `${PGADMIN_PORT:-5050}`, pre-wired to the local server via
 `shared/database/pgadmin/servers.json` · Kafka UI `${KAFKA_UI_PORT:-8090}`.
 
-Flyway runs from `shared/database/migrations`, mounted read-only into the container — read
-§16 `shared/` before adding a migration.
+Flyway runs from Inbox's own classpath (`src/main/resources/db/migration`) — bundled into the jar,
+so it works identically in local dev, tests, CI and the container.
 
 Local Maven is not guaranteed on every dev machine; if `mvn` is unavailable, build through Docker.
 
@@ -127,7 +127,7 @@ Local Maven is not guaranteed on every dev machine; if `mvn` is unavailable, bui
 | Framework | Spring Boot 3.3.13 (Maven) | Current LTS-track Spring Boot line. Brings Flyway 10, which splits database support into separate modules — see `flyway-database-postgresql` in `pom.xml`. |
 | Web layer | Spring MVC (`spring-boot-starter-web`) | Synchronous REST; no need for WebFlux at our scale. |
 | Persistence | PostgreSQL + Spring Data JPA (Hibernate 5.5) | Decided project-wide. Enum columns map to native PG enums via `shared/model/type/LowercasePostgreSQLEnumType` + `hypersistence-utils`. |
-| Migrations | Flyway, from `shared/database/migrations` | Shared schema — read §16 `shared/` before adding one. |
+| Migrations | Flyway, from `src/main/resources/db/migration` | Canonical schema, owned solely by Inbox — see §1. |
 | Messaging | Kafka (`spring-kafka`) + `spring-retry` | How Bridge/Mind deliver tasks into Inbox — see §10 Event consumption. |
 | Boilerplate | **No Lombok.** Hand-written getters/constructors/`equals`/`hashCode` | Not in `pom.xml`; existing entities are written by hand. Don't add `@Data`/`@Slf4j` — it won't compile. Adding it is a team decision, not a silent one. |
 | Tests | `spring-boot-starter-test` (JUnit 5, Mockito, AssertJ), `spring-kafka-test` | Already on the classpath. |
@@ -409,8 +409,10 @@ point into the same domain and follows the same layering as a controller.
 
 ## 16. Working with `shared/`
 
-- `shared/database/migrations` exists and is consumed by Inbox's Flyway config. A migration there
-  touches **every** team's schema — treat it as a cross-team change: agree it first, and never
+- Flyway migrations used to live in `shared/database/migrations`, but no other team ever actually
+  consumed that path — only Inbox did — and a `filesystem:` path relative to the checkout doesn't
+  resolve inside Inbox's own container (it isn't in the Docker build context). They now live in
+  Inbox's own classpath at `src/main/resources/db/migration`, Flyway's default scan location. Never
   edit a migration that has already been applied; add a new one.
 - Nothing that is only meaningful to Team Inbox belongs in `shared/` — Inbox DTOs, config and
   exception types stay in `teams/inbox`.
