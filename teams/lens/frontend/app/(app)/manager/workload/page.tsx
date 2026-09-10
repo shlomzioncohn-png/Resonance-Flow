@@ -6,7 +6,7 @@ import PageContainer from '@/components/layout/PageContainer'
 import LoadingState from '@/components/feedback/LoadingState'
 import EmptyState from '@/components/feedback/EmptyState'
 import ErrorState from '@/components/feedback/ErrorState'
-import { fetchManagerWorkload, fetchManagerWorkloadWithError } from '@/mocks/managerWorkload'
+import { getManagerWorkload } from '@/services/managerApi'
 
 type Status = 'loading' | 'empty' | 'error'
 
@@ -14,8 +14,9 @@ export default function ManagerWorkloadPage() {
   const [status, setStatus] = useState<Status>('loading')
 
   const fetchWorkload = useCallback((simulateError: boolean) => {
-    const request = simulateError ? fetchManagerWorkloadWithError() : fetchManagerWorkload()
-    return request.then(() => setStatus('empty')).catch(() => setStatus('error'))
+    return getManagerWorkload(simulateError)
+      .then(() => setStatus('empty'))
+      .catch(() => setStatus('error'))
   }, [])
 
   const retry = useCallback(
