@@ -1,3 +1,6 @@
+// For more info, see https://github.com/storybookjs/eslint-plugin-storybook#configuration-flat-config-format
+import storybook from "eslint-plugin-storybook";
+
 import nextConfig from 'eslint-config-next'
 import jsxA11y from 'eslint-plugin-jsx-a11y'
 
@@ -10,6 +13,7 @@ import jsxA11y from 'eslint-plugin-jsx-a11y'
 const eslintConfig = [
   ...nextConfig,
   { rules: jsxA11y.flatConfigs.recommended.rules },
+  ...storybook.configs["flat/recommended"]
 ]
 
 export default eslintConfig

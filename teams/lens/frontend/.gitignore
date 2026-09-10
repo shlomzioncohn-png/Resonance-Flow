@@ -9,3 +9,6 @@ test-results/
 
 # Config files
 .npmrc
+
+*storybook.log
+storybook-static
