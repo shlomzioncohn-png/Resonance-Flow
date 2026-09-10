@@ -182,7 +182,7 @@ so every existing Javadoc `see PLAN.md decision D<n>` reference keeps resolving 
 | D3 | Consumer group id source of truth | `${spring.application.name}` via `application.yml`, not a hardcoded literal. (This round's Finding 3 is cleanup of now-dead fallback literals, not a re-opening of this decision.) |
 | D4 | Repo-wide `.idea/` untracking | Out of scope for this PR — cross-team, root-level concern. **Still open**: a root `.gitignore` now exists (it didn't when D4 was written) but does not exclude `.idea/`, and `.idea/claudeCodeEditorTabs.xml`, `compiler.xml`, `encodings.xml`, `jarRepositories.xml` are still tracked as of this branch's HEAD. Not one of this round's 9 findings, so not actioned here — flagged so it isn't lost. |
 | D5 | `task.scheduling.updated`'s `priorityScore` shape | Unresolved cross-team with Inbox (`Inbox_Kafka_Ingestion_Contract.md` §4 explicitly says so). Chain's `int priorityScore` is infrastructure-ready, not contract-approved. No action for Chain alone to take. |
-| D6 | Outbox reuse for publisher reliability | **Updated in Round 4 (§9).** Reimplementation (not shared-module extraction) is exactly what happened: `ChainOutboxEvent`/`ChainOutboxEventRepository`/`ChainOutboxWorker`/`ChainOutboxCleanupJob` mirror Inbox's own `OutboxEvent`/`OutboxWorker` at the same level, adapted to Chain's `EventEnvelope`/`EventPublisher` shape instead of Inbox's `Event`/`EventType`. Deliberately dormant: no code change activates it until an environment clears `spring.autoconfigure.exclude` and Chain has a real business entity to write alongside an outbox row — see §9. |
+| D6 | Outbox reuse for publisher reliability | Inbox's existing Outbox (`teams/inbox/.../OutboxWorker` etc.) is concretely Inbox-owned (own JPA entity, own event-type enum, own Postgres dependency) with no shared Java module in this repo. Not reusable as-is. Chain stays fire-and-forget, documented via `KafkaEventPublisher`'s TODO, until Chain adopts persistence. **Round 4 attempted a dormant reimplementation proactively (see §9) and it was deliberately reverted** — task #164's scope is Kafka publish/consume infrastructure only; persistence/outbox is a separate decision for whenever Chain actually adopts a database, not something to pre-build speculatively inside this PR. |
 
 **Files Affected:** `teams/chain/PLAN.md` (this file, replacing the old one).
 **Tests:** none applicable (documentation).
@@ -332,11 +332,12 @@ polish, not a correctness gap.
 - **Converging Chain's exception/retry architecture with Inbox's `TransientProcessingException`/
   `RetryTemplate` pattern** (D1) — already decided against, for a consumer that still isn't live in
   any environment (`chain.kafka.consumed-topics` remains unset).
-
-**No longer out of scope as of Round 4 (§9):** an Outbox pattern for `KafkaEventPublisher` (D6) was
-implemented as dormant groundwork, and Testcontainers was introduced for the two new tests that
-specifically need a real Postgres — `@EmbeddedKafka` remains the convention for everything
-Kafka-only.
+- **Implementing an Outbox pattern for `KafkaEventPublisher`** (D6) — Chain has no database yet;
+  reusing Inbox's existing Outbox isn't possible without one. Round 4 built a dormant version of
+  this proactively and then reverted it (see §9, D6) — it's out of scope for task #164 specifically,
+  not just blocked on infrastructure.
+- **Testcontainers, or any integration-test infrastructure change** — `@EmbeddedKafka` is the
+  established, working convention repo-wide for this task's scope.
 
 ---
 
@@ -386,13 +387,12 @@ to run.
 
 ---
 
-## 9. Round 4 — PR Review Findings & Outbox Groundwork
+## 9. Round 4 — PR Review Findings
 
 **Context:** ownership of this PR transferred after Yehudit left the team. This round covers a
-fourth round of PR review (9 findings on `ChainEventConsumer`/`KafkaEventPublisher`/their tests),
-plus outbox groundwork requested proactively ahead of Chain adopting a database, so the transaction
-boundary is right the first time instead of retrofitted later. Every finding was verified against
-the actual code before being actioned, same discipline as Rounds 1–3.
+fourth round of PR review: 9 findings on `ChainEventConsumer`/`KafkaEventPublisher`/their tests.
+Every finding was verified against the actual code before being actioned, same discipline as
+Rounds 1–3.
 
 ### Findings 1–8: review remediation
 
@@ -413,56 +413,18 @@ change for this PR — the ask was to confirm a tracked issue (GitHub/Jira) exis
 this markdown file, separate from the code comment, so it survives this branch merging. **Not
 independently verifiable from the repository** — flagged for the team to confirm or create.
 
-### Outbox groundwork (proactive, not a review finding)
+### Outbox groundwork — built proactively, then reverted (out of scope)
 
-Implemented ahead of Chain adopting a database, mirroring Inbox's own transactional-outbox
-implementation (`Implement-Transactional-Outbox-for-Reliable-Kafka-Publishing(#157)` /
-`yehudit/bridge-outbox-integration`) at the same level, adapted to Chain's `EventEnvelope`/
-`EventPublisher` shape:
+A dormant transactional-outbox subsystem (entity, repository, worker, cleanup job, Flyway
+migration, Postgres/JPA/Testcontainers dependencies — mirroring Inbox's own outbox pattern) was
+built proactively in this round, ahead of Chain adopting a database. It was **reverted in full**
+(commit `a5fc1d1`): task #164's scope is Kafka publish/consume infrastructure only, and
+persistence/outbox is a separate decision for whenever Chain actually adopts a database — not
+something to pre-build speculatively inside this PR, and it added real Docker/Testcontainers
+review and CI overhead for a feature nothing called yet (no business entity exists in Chain's
+database today to write alongside an outbox row).
 
-- **Schema:** `V1__create_chain_outbox_table.sql` (Flyway) — `chain_outbox` table, `VARCHAR` status
-  with a `CHECK` constraint (simpler than Inbox's native Postgres enum type, since Chain doesn't
-  need cross-service enum consistency with Inbox's own `outbox_status`), the same partial indexes
-  Inbox's migration uses for pending-pickup/cleanup/aggregate/correlation lookups.
-- **Entity/repository:** `ChainOutboxEvent` (JSONB payload via Hibernate 6's native
-  `@JdbcTypeCode(SqlTypes.JSON)` — no extra `hypersistence-utils` dependency needed, unlike Inbox's
-  version), `ChainOutboxEventRepository` (`claimPendingBatch` via `FOR UPDATE SKIP LOCKED`, cleanup
-  deletes).
-- **Worker/cleanup:** `ChainOutboxWorker` claims a batch and publishes each row inside one
-  `@Transactional` method, via a new package-private `KafkaEventPublisher.publishAndWait(event)`
-  that blocks on the Kafka send — added specifically so the worker knows the outcome synchronously
-  without changing `EventPublisher.publish()`'s existing fire-and-forget contract for every other
-  caller. `ChainOutboxCleanupJob` deletes old `PUBLISHED`/`FAILED` rows on its own schedule.
-- **Dormant by design:** `spring.autoconfigure.exclude` in `application.yml` keeps DataSource/JPA/
-  Flyway off by default — turning them on unconditionally would have made every `@SpringBootTest`
-  context (including the pre-existing `@EmbeddedKafka` integration tests) require a live Postgres
-  connection just to start. `ChainOutboxWorker`/`ChainOutboxCleanupJob` are additionally
-  `@ConditionalOnBean(ChainOutboxEventRepository.class)` rather than a property flag, since that
-  repository bean itself only exists once JPA is actually autoconfigured — without this, component
-  scanning would still try to construct them and fail the whole application context demanding a
-  repository bean JPA never registered. Verified by running the full existing suite after adding
-  the new dependencies: it failed with exactly that `ApplicationContext` startup error before the
-  `@ConditionalOnBean` guard was added, and passed clean after.
-- **No business entity to wire it to yet:** Chain has no persisted entity of its own in the
-  database today, so there's no real "write business state + outbox row in the same transaction"
-  call site to add — only the mechanism itself, ready for whichever future service needs it.
-- **Tests:** `ChainOutboxWorkerTest` (unit, mocked repository/publisher — claim→publish→status
-  transitions, backoff growth, max-retries→`FAILED`, claim-query-failure doesn't throw) plus two
-  Testcontainers-backed integration tests, `ChainOutboxEventRepositoryIntegrationTest` (real SQL:
-  `SKIP LOCKED` due-row filtering, batch size, JSONB round-trip) and
-  `ChainOutboxCleanupJobIntegrationTest` (retention-based deletion, `PENDING` rows never touched).
-  `PostgresIntegrationTest` pushes both `@Scheduled` beans' intervals to effectively "never" for
-  these tests specifically, since turning JPA on for them also activates the real worker/cleanup
-  beans, which would otherwise race the test's own direct repository calls.
-- **Verification gap, disclosed:** the two Testcontainers tests compile but were **not run** in
-  this environment — Docker Desktop is installed but not running here, and starting it was outside
-  this session's scope. `mvn -pl teams/chain -Dtest=ChainOutboxEventRepositoryIntegrationTest,ChainOutboxCleanupJobIntegrationTest test`
-  with Docker running is the outstanding verification step before relying on them.
-
-**Files affected:** `pom.xml` (JPA/Flyway/Postgres/Testcontainers dependencies);
-`application.yml` (autoconfigure exclusion, datasource/flyway placeholders, `chain.outbox.*`);
-`ChainApplication.java` (`@EnableScheduling`, `ChainOutboxProperties` registration); new
-`db/migration/V1__create_chain_outbox_table.sql`; new `ChainOutboxEvent.java`,
-`ChainOutboxStatus.java`, `ChainOutboxEventRepository.java`, `ChainOutboxProperties.java`,
-`ChainOutboxWorker.java`, `ChainOutboxCleanupJob.java`; `KafkaEventPublisher.java`
-(`publishAndWait`); new test files under `com.rnd.chain.events` and `com.rnd.chain.support`.
+D6 (§2) still reflects the standing decision: Chain stays fire-and-forget until it has persistence.
+If/when Chain adopts a database for real, `a5fc1d1`'s parent commits (`873e5cf`..`2f1965e` on this
+branch's history) are a working reference implementation to reimplement from — not to resurrect
+as-is, since requirements may differ once Chain has a concrete entity to wire it to.
