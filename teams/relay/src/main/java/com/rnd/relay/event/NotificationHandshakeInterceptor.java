@@ -40,7 +40,12 @@ class NotificationHandshakeInterceptor implements HandshakeInterceptor {
             lastEventId = servletRequest.getServletRequest().getParameter("lastEventId");
         }
         if (lastEventId != null) {
-            attributes.put(LAST_EVENT_ID_ATTRIBUTE, Long.parseLong(lastEventId));
+            try {
+                attributes.put(LAST_EVENT_ID_ATTRIBUTE, Long.parseLong(lastEventId));
+            } catch (NumberFormatException e) {
+                response.setStatusCode(HttpStatus.BAD_REQUEST);
+                return false;
+            }
         }
         return true;
     }
