@@ -62,7 +62,10 @@ transactional outbox) is out of scope for this infrastructure layer.
 **Consuming** is handled by `ChainEventConsumer`, which routes each incoming message to the
 `EventHandler<T>` bean registered for its `eventType`. It is disabled by default
 (`@ConditionalOnProperty` on `chain.kafka.consumed-topics`) until a real topic is configured -
-today, Chain doesn't consume from anywhere in any environment.
+today, Chain doesn't consume from anywhere in any environment. `chain.kafka.consumed-topics`
+accepts a comma-separated list (e.g. `mind.dependency.proposed,inbox.task.status.updated`) to
+subscribe to more than one topic at once - needed since Chain consumes from multiple services
+(Mind, Inbox).
 
 **Error handling**: malformed or unroutable messages (bad JSON, missing/invalid fields, a payload
 that doesn't match the target handler's type) fail fast with `NonRetryableEventException` and go
@@ -83,7 +86,8 @@ this service running concurrently. See its Javadoc for what a claim does and doe
 | Property | Purpose | Default |
 | --- | --- | --- |
 | `chain.kafka.topics.<eventType>` | Topic to publish a given event type to | none - required per event type |
-| `chain.kafka.consumed-topics` | Topic(s) `ChainEventConsumer` listens on | unset (consumer disabled) |
+| `chain.kafka.consumed-topics` | Topic(s) `ChainEventConsumer` listens on - comma-separated for more than one | unset (consumer disabled) |
+| `KAFKA_BOOTSTRAP_SERVERS` (env var, not `chain.*`) | Kafka broker(s) address | `localhost:9092` |
 | `chain.kafka.consumer-group-id` | Consumer group ID | `${spring.application.name}` |
 | `chain.kafka.retry.max-attempts` | Retries after the initial delivery attempt, before falling back to the DLT | `2` |
 | `chain.kafka.retry.interval-ms` | Milliseconds between retry attempts | `2000` |
@@ -121,6 +125,8 @@ java -jar target/chain-0.1.0-SNAPSHOT.jar
    ```
 
 The app will be available at http://localhost:8081 (or whatever `SERVER_PORT` is set to in `.env`).
+Set `KAFKA_BOOTSTRAP_SERVERS` in `.env` to point the container at a real broker - `localhost:9092`
+(the default) only works if Kafka runs on the same host network as this container.
 
 To stop:
 

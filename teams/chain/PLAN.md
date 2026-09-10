@@ -428,3 +428,35 @@ D6 (§2) still reflects the standing decision: Chain stays fire-and-forget until
 If/when Chain adopts a database for real, `a5fc1d1`'s parent commits (`873e5cf`..`2f1965e` on this
 branch's history) are a working reference implementation to reimplement from — not to resurrect
 as-is, since requirements may differ once Chain has a concrete entity to wire it to.
+
+---
+
+## 10. Round 5 — Post-Revert Review Findings
+
+**Context:** a fifth review comment (2026-09-09, one day *before* the outbox revert `a5fc1d1`)
+listed 18 findings. Cross-referenced every one against the code as it stands after the revert:
+
+**15 of 18 are moot** — they describe the outbox subsystem (`@ConditionalOnBean` never matching on
+a component-scanned bean so the worker/cleanup jobs were *always* silently inert regardless of
+config; `baseline-on-migrate: true` against a shared DB name skipping the outbox migration;
+unused `messageKey` breaking per-aggregate ordering; backoff overflow; nested properties binding to
+`null`; a divergent JSON (de)serializer; the fire-and-forget/`publishAndWait` interface split;
+holding DB locks through a blocking Kafka send; and five more Minor code-quality items on the same
+package) — all of it deleted by the revert. One of the 15 (Finding #11, "speculative
+infrastructure merged with no call site... hold the outbox package out of this PR") independently
+recommends exactly what the revert did, and Finding #1 (the `@ConditionalOnBean` phase-ordering bug)
+confirms the revert also dodged a real defect the team didn't know about, not only a scope problem.
+
+**3 of 18 are real and unrelated to the outbox** — pre-existing gaps in the original Kafka
+infrastructure (`a4230a0`, issue #113), never touched by Rounds 1–4, surfaced by this round because
+nothing had reviewed those specific lines before:
+
+| # | Finding | Severity | Files | Resolution |
+|---|---|---|---|---|
+| 3 | `bootstrap-servers: localhost:9092` was the only hardcoded value in `application.yml` (every other externalized property uses `${VAR:default}`), and `docker-compose.yml` didn't forward any Kafka-related variable into the container regardless — a deployment that can't reach `localhost:9092` doesn't fail startup (`publish()` is fire-and-forget by design), it silently drops every event | Critical | `application.yml`, `docker-compose.yml`, `.env.example` | Externalized to `${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}`; wired the same variable through `docker-compose.yml`'s `environment:` and documented it in `.env.example` — the placeholder alone doesn't reach a container without this |
+| 5 | `@KafkaListener(topics = "${chain.kafka.consumed-topics:}")` resolves to one literal string; Spring does not split a placeholder-resolved value on commas, so a value like `a,b` subscribed to one nonexistent topic literally named `"a,b"`, not two — despite the property's own plural name, and despite the original task requiring Chain to consume from multiple services (Mind, Inbox) | Critical | `ChainEventConsumer.java`, `ChainEventConsumerIntegrationTest.java` | Switched to a SpEL split: `"#{'${chain.kafka.consumed-topics:}'.split('\\s*,\\s*')}"` — the regex also trims whitespace around each comma, closing a footgun the reviewer's own literal suggestion (`.split(',')`) would not have (`"a, b"` → `["a", " b"]` otherwise). Regression test folded into the existing `ChainEventConsumerIntegrationTest` (now configured with two topics for the whole class) rather than a second `@EmbeddedKafka` `@SpringBootTest` class — two such classes in the same Surefire JVM proved to interfere with each other's broker/consumer lifecycle (confirmed: the second-class version passed reliably alone, failed deterministically once run after the first embedded-Kafka test class) |
+| 13 | `InMemoryProcessedEventStore.claims` is only ever shrunk by `release()` on handler failure; every successful claim is retained for the JVM's lifetime with no TTL/eviction — under sustained throughput this is unbounded growth toward `OutOfMemoryError`, the one failure mode here severe enough to take the process down, not called out alongside the class's existing restart/multi-instance caveats | Minor | `InMemoryProcessedEventStore.java` | Documentation only (chosen over bounding the map): the class is explicitly temporary and will be replaced once Chain picks a persistence technology for its idempotency store (D2) — any bounding logic written now is code with a known short remaining lifetime. Javadoc updated to name the OOM risk explicitly rather than leaving it implicit in "temporary/dev-only" |
+
+**Files affected:** `application.yml`, `docker-compose.yml`, `.env.example`,
+`ChainEventConsumer.java`, `ChainEventConsumerIntegrationTest.java`,
+`InMemoryProcessedEventStore.java`.
