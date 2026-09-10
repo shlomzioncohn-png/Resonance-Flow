@@ -5,6 +5,7 @@ Public interface -- everything else in the app should only ever import
 from this top-level package:
 
     from mind.embeddings import embed, embed_batch, upsert, search, delete, clear
+    # or, from async code: embed_async, embed_batch_async (non-blocking)
 
 Never import `base.py` / `pgvector_store.py` / `factory.py` / `generate.py`
 directly. The concrete vector database is an implementation detail hidden
@@ -27,13 +28,16 @@ concurrently.
 
 import asyncio
 
+from mind.embeddings.base import VectorStore
 from mind.embeddings.config import DUPLICATE_SIMILARITY_THRESHOLD
 from mind.embeddings.factory import get_store
-from mind.embeddings.generate import embed, embed_batch
+from mind.embeddings.generate import embed, embed_async, embed_batch, embed_batch_async
 
 __all__ = [
     "embed",
+    "embed_async",
     "embed_batch",
+    "embed_batch_async",
     "upsert",
     "search",
     "delete",
@@ -45,7 +49,7 @@ _store = None
 _store_lock = asyncio.Lock()
 
 
-async def _get_store():
+async def _get_store() -> VectorStore:
     # Lazy so `import mind.embeddings` (e.g. from tests that only exercise
     # embed()) never forces a live DB connection.
     #

@@ -21,7 +21,7 @@ from mind.embeddings.config import EMBEDDING_DIM, HNSW_EF_SEARCH, PG_DSN, PG_TAB
 
 
 class PgVectorStore(VectorStore):
-    def __init__(self, dsn: str = PG_DSN, min_conn: int = 1, max_conn: int = 5):
+    def __init__(self, dsn: str = PG_DSN, min_conn: int = 1, max_conn: int = 5) -> None:
         # No I/O here. Opening connections and creating the schema are
         # async operations, and __init__ can't be async -- so both happen
         # lazily, once, on first real use (see `_ensure_ready`).

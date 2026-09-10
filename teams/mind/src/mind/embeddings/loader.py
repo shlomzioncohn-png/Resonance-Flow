@@ -25,6 +25,7 @@ import json
 import zipfile
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 from urllib.request import urlopen
 
 DATASETS_DIR = Path(__file__).resolve().parents[3] / "eval" / "datasets"
@@ -38,7 +39,7 @@ class Record:
     text: str
 
 
-def _load_manifest() -> dict:
+def _load_manifest() -> dict[str, Any]:
     with open(MANIFEST_PATH) as f:
         return json.load(f)
 
@@ -55,7 +56,7 @@ def _load_checksums() -> dict[str, str]:
     return checksums
 
 
-def _fetch_missing_files(manifest: dict, checksums: dict[str, str]) -> None:
+def _fetch_missing_files(manifest: dict[str, Any], checksums: dict[str, str]) -> None:
     """Download the source zip once and extract only the files the
     manifest references that aren't already cached locally."""
     needed = [
@@ -87,7 +88,7 @@ def _verify_checksum(path: Path, expected_sha: str) -> None:
         raise ValueError(f"Checksum mismatch for {path}: expected {expected_sha}, got {actual}")
 
 
-def _annotation_to_text(annotation: dict) -> str:
+def _annotation_to_text(annotation: dict[str, Any]) -> str:
     """FUNSD annotation -> plain text: join every non-empty form-field
     text value, in document order."""
     return " ".join(item["text"] for item in annotation["form"] if item["text"].strip())
@@ -103,12 +104,18 @@ def fetch_real_slice() -> list[Record]:
 
     records = []
     for record in manifest["records"]:
-        annotation_path = None
+        annotation_path: Path | None = None
         for rel_path in record["files"]:
             full_path = DATASETS_DIR / rel_path
             _verify_checksum(full_path, checksums[rel_path])
             if rel_path.endswith(".json"):
                 annotation_path = full_path
+
+        if annotation_path is None:
+            raise ValueError(
+                f"Manifest record {record['id']!r} has no .json annotation file "
+                f"in its 'files' list: {record['files']!r}"
+            )
 
         annotation = json.loads(annotation_path.read_text())
         text = _annotation_to_text(annotation)

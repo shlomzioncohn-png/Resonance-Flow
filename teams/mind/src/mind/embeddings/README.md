@@ -29,8 +29,8 @@ Vectors, semantic search, duplicate/related-task detection.
 ## What's here
 
 ```
-__init__.py         the public interface -- embed() / embed_batch() / upsert() / search() / delete() / clear()
-generate.py          embed() / embed_batch() -- the real model, truncation policy
+__init__.py         the public interface -- embed() / embed_batch() (+ async wrappers) / upsert() / search() / delete() / clear()
+generate.py          embed() / embed_batch() + embed_async() / embed_batch_async() -- the real model, truncation policy
 base.py              VectorStore abstract interface (the "contract") -- dependency-free
 pgvector_store.py    the ONLY file that knows about Postgres/pgvector
 factory.py           single switch that picks the backend implementation
@@ -104,6 +104,19 @@ query_vector = embed(user_query_text, is_query=True)
 similar = await search(query_vector, k=5)  # [(task_id, similarity), ...], best match first
 
 await delete(task.id)  # e.g. when the task itself is deleted
+```
+
+`embed()`/`embed_batch()` are plain (non-async) functions -- calling them
+directly from an `async def` route handler blocks the event loop for the
+duration of model inference. Use `embed_async()`/`embed_batch_async()`
+instead from async callers (same signature, offloads to a worker thread
+via `asyncio.to_thread`):
+
+```python
+from mind.embeddings import embed_async, upsert
+
+vector = await embed_async(task.title + " " + task.description)
+await upsert(task.id, vector)
 ```
 
 No caller anywhere else in the codebase should import `pgvector_store.py`

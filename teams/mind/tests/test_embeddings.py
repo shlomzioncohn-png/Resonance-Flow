@@ -3,6 +3,8 @@ Tests for mind.embeddings.generate -- no DB required (embed()/embed_batch()
 never touch pgvector).
 """
 
+import pytest
+
 from mind.embeddings.config import EMBEDDING_DIM
 from mind.embeddings.generate import embed, embed_batch
 
@@ -26,8 +28,6 @@ def test_embed_returns_correct_shape():
 
 
 def test_embed_rejects_non_string():
-    import pytest
-
     with pytest.raises(TypeError):
         embed(12345)
 
@@ -61,7 +61,10 @@ def test_embed_batch_matches_individual_embed():
     # Batched vs. single-item inference can differ by float32 rounding noise
     # (padding/accumulation order) -- not exact equality, but should agree
     # closely.
-    texts = ["Fax cover sheet from the Attorney General's office", "Progress report for Lorillard division"]
+    texts = [
+        "Fax cover sheet from the Attorney General's office",
+        "Progress report for Lorillard division",
+    ]
     batch_vectors = embed_batch(texts)
     assert len(batch_vectors) == 2
     for text, vec in zip(texts, batch_vectors):
