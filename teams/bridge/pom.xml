@@ -18,7 +18,7 @@
     <description>Team Bridge - foundation module (source adapters &amp; communication ingestion)</description>
 
     <properties>
-        <java.version>21</java.version>
+        <java.version>25</java.version>
     </properties>
 
     <dependencies>

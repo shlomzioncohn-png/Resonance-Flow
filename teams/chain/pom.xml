@@ -18,7 +18,7 @@
     <description>Team Chain - foundation module (Dependency Graph &amp; Task Selection)</description>
 
     <properties>
-        <java.version>11</java.version>
+        <java.version>25</java.version>
     </properties>
 
     <dependencies>
