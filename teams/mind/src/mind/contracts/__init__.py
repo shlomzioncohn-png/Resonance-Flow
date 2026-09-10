@@ -1,20 +1,14 @@
 """Public contract exports for MIND."""
 
-from .assignee import (
-    Assignee,
-    AssigneeCandidate,
-)
-from .base_enums import SourceType
-from .raw_object_event import RawObjectEvent
-from .raw_object_event_enums import (
-    Modality,
-    ScopeDecision,
-)
-from .task import Task
-from .task_completed import TaskCompleted
-from .task_created import TaskCreated
-from .task_creation_requested import TaskCreationRequested
-from .task_enums import (
+from mind.contracts.assignee import Assignee, AssigneeCandidate
+from mind.contracts.base_enums import SourceType
+from mind.contracts.raw_object_event import RawObjectEvent
+from mind.contracts.raw_object_event_enums import Modality, ScopeDecision
+from mind.contracts.task import Task
+from mind.contracts.task_completed import TaskCompleted
+from mind.contracts.task_created import TaskCreated
+from mind.contracts.task_creation_requested import TaskCreationRequested
+from mind.contracts.task_enums import (
     AssigneeType,
     ExtractionProvenance,
     RoleContext,

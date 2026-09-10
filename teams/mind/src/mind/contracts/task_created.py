@@ -2,8 +2,7 @@
 
 from pydantic import BaseModel, ConfigDict
 
-from .task import Task
-
+from mind.contracts.task import Task
 
 class TaskCreated(BaseModel):
     """Payload published by Inbox after a Task is created."""

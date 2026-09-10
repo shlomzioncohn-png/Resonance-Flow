@@ -4,8 +4,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from .task_enums import AssigneeType
-
+from mind.contracts.task_enums import AssigneeType
 
 class Assignee(BaseModel):
     """A user or team assigned to a Task."""

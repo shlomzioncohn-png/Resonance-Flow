@@ -9,9 +9,9 @@ from pydantic import (
     Field,
 )
 
-from .assignee import AssigneeCandidate
-from .base_enums import SourceType
-from .task_enums import (
+from mind.contracts.assignee import AssigneeCandidate
+from mind.contracts.base_enums import SourceType
+from mind.contracts.task_enums import (
     RoleContext,
     TaskTier,
 )

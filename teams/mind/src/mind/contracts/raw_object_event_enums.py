@@ -16,3 +16,9 @@ class Modality(str, Enum):
     AUDIO = "AUDIO"
     SCANNED_DOC = "SCANNED_DOC"
     TEXT = "TEXT"
+    
+class ChangeType(str, Enum):
+    """Type of source-object change reported by Bridge."""
+
+    UPSERT = "UPSERT"
+    DELETE_REVIEW = "DELETE_REVIEW"

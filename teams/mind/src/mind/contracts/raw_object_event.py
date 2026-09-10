@@ -1,6 +1,7 @@
 """Contract for raw-object events received from Bridge."""
 
 from datetime import timedelta
+from uuid import UUID
 
 from pydantic import (
     AwareDatetime,
@@ -10,8 +11,9 @@ from pydantic import (
     field_validator,
 )
 
-from .base_enums import SourceType
-from .raw_object_event_enums import (
+from mind.contracts.base_enums import SourceType
+from mind.contracts.raw_object_event_enums import (
+    ChangeType,
     Modality,
     ScopeDecision,
 )
@@ -38,7 +40,23 @@ class RawObjectEvent(BaseModel):
     schema_version: str
     attachment_index: int = Field(ge=0)
     attachment_count: int = Field(ge=0)
-
+    revision: int = Field(ge=0 , 
+         description=(  "Revision of the logical object. "
+             "Starts at 0 and increases when its content changes."
+        ),)
+    change_type: ChangeType = Field(
+        description=(
+            "Type of change represented by this event."
+        ),
+    )
+    change_significance_score: int = Field(
+        ge=0,
+        le=100,
+        description=(
+            "Bridge-provided score indicating how significant "
+            "the change is for reprocessing."
+        ),
+    )
     
     # Optional fields
     participants: list[str] | None = None
@@ -51,8 +69,8 @@ class RawObjectEvent(BaseModel):
     )
     source_timestamp: AwareDatetime | None = None
     modality: Modality = Modality.TEXT
-    # Optional correlation identifier shared by the source body and its attachments.
-    correlation_id: str | None = None
+    correlation_id: UUID | None = Field(default=None, description="Optional correlation identifier shared by the source body and its attachments.")
+
 
     @field_validator("ingested_at", "source_timestamp")
     @classmethod
