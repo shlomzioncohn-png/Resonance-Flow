@@ -8,6 +8,7 @@ import com.rnd.inbox.task.TaskRoleContext;
 import com.rnd.inbox.task.TaskStatus;
 import com.rnd.inbox.task.TaskTier;
 import com.rnd.inbox.tenant.Tenant;
+import com.rnd.inbox.user.User;
 import org.junit.jupiter.api.Test;
 
 import java.time.Clock;
@@ -58,7 +59,7 @@ class TaskCreationRequestMapperTest {
         dto.setEffortEstimateMinutes(45);
         dto.setDeadline("2026-09-02T12:00:00Z");
 
-        Task task = mapper().map(dto, tenantRef, null);
+        Task task = mapper().map(dto, tenantRef, null, null);
 
         assertThat(task.getId()).isNull();
         assertThat(task.getTenant()).isSameAs(tenantRef);
@@ -79,7 +80,7 @@ class TaskCreationRequestMapperTest {
     void mapsTheUnstructuredPathAsMlInferredRatherThanEtl() {
         Tenant tenantRef = tenant();
 
-        Task task = mapper().map(dtoFor(tenantRef.getId()), tenantRef, null);
+        Task task = mapper().map(dtoFor(tenantRef.getId()), tenantRef, null, null);
 
         assertThat(task.getExtractionProvenance()).isEqualTo(TaskExtractionProvenance.ML_INFERRED);
     }
@@ -88,7 +89,7 @@ class TaskCreationRequestMapperTest {
     void defaultsStatusToNewWhenThePayloadOmitsIt() {
         Tenant tenantRef = tenant();
 
-        Task task = mapper().map(dtoFor(tenantRef.getId()), tenantRef, null);
+        Task task = mapper().map(dtoFor(tenantRef.getId()), tenantRef, null, null);
 
         assertThat(task.getStatus()).isEqualTo(TaskStatus.NEW);
     }
@@ -99,7 +100,7 @@ class TaskCreationRequestMapperTest {
         TaskCreationRequestEventDto dto = dtoFor(tenantRef.getId());
         dto.setHasDependencies(false);
 
-        assertThat(mapper().map(dto, tenantRef, null).isAvailable()).isTrue();
+        assertThat(mapper().map(dto, tenantRef, null, null).isAvailable()).isTrue();
     }
 
     @Test
@@ -108,7 +109,7 @@ class TaskCreationRequestMapperTest {
         TaskCreationRequestEventDto dto = dtoFor(tenantRef.getId());
         dto.setHasDependencies(true);
 
-        assertThat(mapper().map(dto, tenantRef, null).isAvailable()).isFalse();
+        assertThat(mapper().map(dto, tenantRef, null, null).isAvailable()).isFalse();
     }
 
     @Test
@@ -120,13 +121,33 @@ class TaskCreationRequestMapperTest {
         TaskCreationRequestEventDto dto = dtoFor(tenantRef.getId());
         dto.setProjectId(projectRef.getId().toString());
 
-        assertThat(mapper().map(dto, tenantRef, projectRef).getProject()).isSameAs(projectRef);
+        assertThat(mapper().map(dto, tenantRef, projectRef, null).getProject()).isSameAs(projectRef);
     }
 
     @Test
     void leavesTheProjectUnsetWhenThePayloadOmitsIt() {
         Tenant tenantRef = tenant();
 
-        assertThat(mapper().map(dtoFor(tenantRef.getId()), tenantRef, null).getProject()).isNull();
+        assertThat(mapper().map(dtoFor(tenantRef.getId()), tenantRef, null, null).getProject()).isNull();
+    }
+
+    @Test
+    void mapsCreatedByWhenACreatorIsProvided() {
+        Tenant tenantRef = tenant();
+        User createdByRef = new User();
+        createdByRef.setId(UUID.randomUUID());
+
+        Task task = mapper().map(dtoFor(tenantRef.getId()), tenantRef, null, createdByRef);
+
+        assertThat(task.getCreatedBy()).isSameAs(createdByRef);
+    }
+
+    @Test
+    void leavesCreatedByUnsetWhenNoCreatorIsProvided() {
+        Tenant tenantRef = tenant();
+
+        Task task = mapper().map(dtoFor(tenantRef.getId()), tenantRef, null, null);
+
+        assertThat(task.getCreatedBy()).isNull();
     }
 }

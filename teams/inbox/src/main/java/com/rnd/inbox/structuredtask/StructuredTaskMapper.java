@@ -39,6 +39,7 @@ public class StructuredTaskMapper {
         task.setAvailable(true);
         task.setExtractionProvenance(TaskExtractionProvenance.ETL);
         task.setConfidence(dto.getConfidence() != null ? dto.getConfidence().floatValue() : null);
+        task.setCreatedBy(references.createdBy());
         Instant now = Instant.now(clock);
         task.setCreatedAt(now);
         task.setUpdatedAt(now);

@@ -8,6 +8,7 @@ import com.rnd.inbox.task.TaskRoleContext;
 import com.rnd.inbox.task.TaskStatus;
 import com.rnd.inbox.task.TaskTier;
 import com.rnd.inbox.tenant.Tenant;
+import com.rnd.inbox.user.User;
 import org.springframework.stereotype.Component;
 
 import java.time.Clock;
@@ -22,10 +23,11 @@ public class TaskCreationRequestMapper {
         this.clock = clock;
     }
 
-    public Task map(TaskCreationRequestEventDto dto, Tenant tenant, Project project) {
+    public Task map(TaskCreationRequestEventDto dto, Tenant tenant, Project project, User createdBy) {
         Task task = new Task();
         task.setTenant(tenant);
         task.setProject(project);
+        task.setCreatedBy(createdBy);
         task.setTitle(dto.getTitle());
         task.setDescription(dto.getDescription());
         task.setSourceType(SourceType.valueOf(dto.getSourceType()));

@@ -10,5 +10,6 @@ public record StructuredTaskReferences(
         Project project,
         User assignee,
         Team assigneeTeam,
-        User assignedBy) {
+        User assignedBy,
+        User createdBy) {
 }

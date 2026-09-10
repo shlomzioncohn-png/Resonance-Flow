@@ -109,6 +109,38 @@ class TaskIngestionServiceTest {
     }
 
     @Test
+    void ingest_structuredTaskEvent_withACreator_resolvesAndSetsCreatedBy() {
+        stubTenant();
+        User createdBy = user();
+        when(userRepository.findById(createdBy.getId())).thenReturn(Optional.of(createdBy));
+        when(taskService.createTask(any(), any(), any())).thenAnswer(i -> i.getArgument(0));
+
+        StructuredTaskEventDto event = structuredTaskEvent();
+        event.setCreatedByUserId(createdBy.getId().toString());
+
+        service.ingest(event);
+
+        ArgumentCaptor<Task> captor = ArgumentCaptor.forClass(Task.class);
+        verify(taskService).createTask(captor.capture(), eq(null), any());
+        assertThat(captor.getValue().getCreatedBy()).isSameAs(createdBy);
+    }
+
+    @Test
+    void ingest_whenTheCreatorDoesNotExist_throwsBeforeAnythingIsSaved() {
+        stubTenant();
+        UUID creatorId = UUID.randomUUID();
+        when(userRepository.findById(creatorId)).thenReturn(Optional.empty());
+
+        StructuredTaskEventDto event = structuredTaskEvent();
+        event.setCreatedByUserId(creatorId.toString());
+
+        assertThatThrownBy(() -> service.ingest(event))
+                .isInstanceOf(UserNotFoundException.class);
+
+        verify(taskService, never()).createTask(any(), any(), any());
+    }
+
+    @Test
     void ingest_whenTheTenantDoesNotExist_throwsBeforeAnythingIsSaved() {
         UUID tenantId = UUID.randomUUID();
         when(tenantRepository.findById(tenantId)).thenReturn(Optional.empty());
@@ -187,6 +219,23 @@ class TaskIngestionServiceTest {
                 eq(UUID.fromString(event.getCorrelationId())));
         assertThat(captor.getValue().getTenant()).isSameAs(tenant);
         assertThat(captor.getValue().getProject()).isSameAs(project);
+    }
+
+    @Test
+    void ingest_taskCreationRequestEvent_withACreator_resolvesAndSetsCreatedBy() {
+        stubTenant();
+        User createdBy = user();
+        when(userRepository.findById(createdBy.getId())).thenReturn(Optional.of(createdBy));
+        when(taskService.createTask(any(), any(), any())).thenAnswer(i -> i.getArgument(0));
+
+        TaskCreationRequestEventDto event = taskCreationRequestEvent();
+        event.setCreatedByUserId(createdBy.getId().toString());
+
+        service.ingest(event);
+
+        ArgumentCaptor<Task> captor = ArgumentCaptor.forClass(Task.class);
+        verify(taskService).createTask(captor.capture(), eq(null), any());
+        assertThat(captor.getValue().getCreatedBy()).isSameAs(createdBy);
     }
 
     @Test

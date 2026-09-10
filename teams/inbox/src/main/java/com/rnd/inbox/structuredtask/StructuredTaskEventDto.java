@@ -75,6 +75,9 @@ public class StructuredTaskEventDto {
     @ValidUuid
     private String assignedByUserId;
 
+    @ValidUuid
+    private String createdByUserId;
+
     public String getEventId() {
         return eventId;
     }
@@ -217,5 +220,13 @@ public class StructuredTaskEventDto {
 
     public void setAssignedByUserId(String assignedByUserId) {
         this.assignedByUserId = assignedByUserId;
+    }
+
+    public String getCreatedByUserId() {
+        return createdByUserId;
+    }
+
+    public void setCreatedByUserId(String createdByUserId) {
+        this.createdByUserId = createdByUserId;
     }
 }

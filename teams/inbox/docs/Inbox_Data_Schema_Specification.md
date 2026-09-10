@@ -186,7 +186,7 @@ Fields are listed with their type, whether they are required, their foreign-key 
 | `effort_estimate_confidence` | REAL | No | CHECK `0..1` | Confidence score for the ML-inferred `effort_estimate_minutes` value. |
 | `suggested_owner_user_id` | UUID | No | FK → `users.id` | ML-suggested owner proposed by Mind. Distinct from `owner_id`, which is the confirmed accountable owner — this is a proposal, not a decision. |
 | `suggested_owner_confidence` | REAL | No | CHECK `0..1` | Confidence score for `suggested_owner_user_id`. |
-| `created_by` | UUID | No | FK → `users.id` | User who manually created the task; NULL for automatically created tasks. |
+| `created_by` | UUID | No | FK → `users.id` | User who created the task. Sent by the originating system on every ingestion path — Bridge (`bridge.*.tasks`) and Mind (`task.creation.requested`) each include the acting user's id, same as manual creation. NULL only when the source has no identifiable user (e.g. a fully automated integration with no acting user). |
 | `created_at` | TIMESTAMPTZ | Yes | DEFAULT `now()` | Creation timestamp. |
 | `updated_at` | TIMESTAMPTZ | Yes | DEFAULT `now()` | Last update timestamp. |
 | `completed_at` | TIMESTAMPTZ | No | — | Completion timestamp. `is_completed` is intentionally not stored because `status = 'done'` is the source of truth. |

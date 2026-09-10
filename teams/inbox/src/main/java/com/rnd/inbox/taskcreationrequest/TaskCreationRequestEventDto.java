@@ -70,6 +70,9 @@ public class TaskCreationRequestEventDto {
     @NotNull
     private Boolean hasDependencies;
 
+    @ValidUuid
+    private String createdByUserId;
+
     public String getEventId() {
         return eventId;
     }
@@ -196,5 +199,13 @@ public class TaskCreationRequestEventDto {
 
     public void setHasDependencies(Boolean hasDependencies) {
         this.hasDependencies = hasDependencies;
+    }
+
+    public String getCreatedByUserId() {
+        return createdByUserId;
+    }
+
+    public void setCreatedByUserId(String createdByUserId) {
+        this.createdByUserId = createdByUserId;
     }
 }

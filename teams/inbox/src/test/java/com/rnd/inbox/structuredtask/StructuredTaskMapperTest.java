@@ -39,7 +39,7 @@ class StructuredTaskMapperTest {
         dto.setUrgency(4);
         dto.setConfidence(0.9);
 
-        Task task = mapper().map(dto, references(tenantRef, null, null, null, null));
+        Task task = mapper().map(dto, references(tenantRef, null, null, null, null, null));
 
         assertThat(task.getId()).isNull();
         assertThat(task.getTenant()).isSameAs(tenantRef);
@@ -65,7 +65,7 @@ class StructuredTaskMapperTest {
         dto.setSourceType("GITHUB_ISSUE");
         dto.setSourceRef("github:owner/repo:issue:42");
 
-        Task task = mapper().map(dto, references(tenantRef, null, null, null, null));
+        Task task = mapper().map(dto, references(tenantRef, null, null, null, null, null));
 
         assertThat(task.getStatus()).isEqualTo(TaskStatus.NEW);
     }
@@ -82,16 +82,47 @@ class StructuredTaskMapperTest {
         dto.setSourceType("GITHUB_ISSUE");
         dto.setSourceRef("github:owner/repo:issue:42");
 
-        Task task = mapper().map(dto, references(tenantRef, projectRef, null, null, null));
+        Task task = mapper().map(dto, references(tenantRef, projectRef, null, null, null, null));
 
         assertThat(task.getProject()).isSameAs(projectRef);
+    }
+
+    @Test
+    void mapsCreatedByWhenTheReferencesCarryACreator() {
+        Tenant tenantRef = tenant();
+        User createdByRef = user();
+
+        StructuredTaskEventDto dto = new StructuredTaskEventDto();
+        dto.setTenantId(tenantRef.getId().toString());
+        dto.setTitle("Fix flaky test");
+        dto.setSourceType("GITHUB_ISSUE");
+        dto.setSourceRef("github:owner/repo:issue:42");
+
+        Task task = mapper().map(dto, references(tenantRef, null, null, null, null, createdByRef));
+
+        assertThat(task.getCreatedBy()).isSameAs(createdByRef);
+    }
+
+    @Test
+    void leavesCreatedByUnsetWhenTheReferencesOmitIt() {
+        Tenant tenantRef = tenant();
+
+        StructuredTaskEventDto dto = new StructuredTaskEventDto();
+        dto.setTenantId(tenantRef.getId().toString());
+        dto.setTitle("Fix flaky test");
+        dto.setSourceType("GITHUB_ISSUE");
+        dto.setSourceRef("github:owner/repo:issue:42");
+
+        Task task = mapper().map(dto, references(tenantRef, null, null, null, null, null));
+
+        assertThat(task.getCreatedBy()).isNull();
     }
 
     @Test
     void mapAssignment_whenNoAssigneeIsPresent_returnsNull() {
         StructuredTaskEventDto dto = new StructuredTaskEventDto();
 
-        Assignment assignment = mapper().mapAssignment(dto, references(tenant(), null, null, null, null));
+        Assignment assignment = mapper().mapAssignment(dto, references(tenant(), null, null, null, null, null));
 
         assertThat(assignment).isNull();
     }
@@ -104,7 +135,7 @@ class StructuredTaskMapperTest {
         dto.setAssigneeUserId(userRef.getId().toString());
         dto.setAssignmentRole("ASSIGNEE");
 
-        Assignment assignment = mapper().mapAssignment(dto, references(tenant(), null, userRef, null, null));
+        Assignment assignment = mapper().mapAssignment(dto, references(tenant(), null, userRef, null, null, null));
 
         assertThat(assignment.getUser()).isSameAs(userRef);
         assertThat(assignment.getTeam()).isNull();
@@ -122,7 +153,7 @@ class StructuredTaskMapperTest {
         dto.setAssigneeTeamId(teamRef.getId().toString());
         dto.setAssignmentRole("OWNER");
 
-        Assignment assignment = mapper().mapAssignment(dto, references(tenant(), null, null, teamRef, null));
+        Assignment assignment = mapper().mapAssignment(dto, references(tenant(), null, null, teamRef, null, null));
 
         assertThat(assignment.getTeam()).isSameAs(teamRef);
         assertThat(assignment.getUser()).isNull();
@@ -140,7 +171,7 @@ class StructuredTaskMapperTest {
         dto.setAssignedByUserId(assignedByRef.getId().toString());
 
         Assignment assignment = mapper()
-                .mapAssignment(dto, references(tenant(), null, userRef, null, assignedByRef));
+                .mapAssignment(dto, references(tenant(), null, userRef, null, assignedByRef, null));
 
         assertThat(assignment.getAssignedBy()).isSameAs(assignedByRef);
     }
@@ -150,8 +181,8 @@ class StructuredTaskMapperTest {
     }
 
     private StructuredTaskReferences references(Tenant tenant, Project project, User assignee, Team assigneeTeam,
-            User assignedBy) {
-        return new StructuredTaskReferences(tenant, project, assignee, assigneeTeam, assignedBy);
+            User assignedBy, User createdBy) {
+        return new StructuredTaskReferences(tenant, project, assignee, assigneeTeam, assignedBy, createdBy);
     }
 
     private Tenant tenant() {

@@ -59,7 +59,8 @@ public class TaskIngestionService {
                 findProject(event.getProjectId()),
                 findUser(event.getAssigneeUserId()),
                 findTeam(event.getAssigneeTeamId()),
-                findUser(event.getAssignedByUserId()));
+                findUser(event.getAssignedByUserId()),
+                findUser(event.getCreatedByUserId()));
 
         Task task = structuredTaskMapper.map(event, references);
         Assignment assignment = structuredTaskMapper.mapAssignment(event, references);
@@ -70,8 +71,9 @@ public class TaskIngestionService {
     public Task ingest(TaskCreationRequestEventDto event) {
         Tenant tenant = requireTenant(event.getTenantId());
         Project project = findProject(event.getProjectId());
+        User createdBy = findUser(event.getCreatedByUserId());
 
-        Task task = taskCreationRequestMapper.map(event, tenant, project);
+        Task task = taskCreationRequestMapper.map(event, tenant, project, createdBy);
 
         return create(task, null, correlationId(event.getCorrelationId()));
     }
