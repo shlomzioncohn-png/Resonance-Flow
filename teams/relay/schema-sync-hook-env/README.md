@@ -6,8 +6,8 @@ wiring that orders them — on a `kind` cluster driven by a real ArgoCD.
 
 It lives in the repo (not throwaway scaffolding). Today it is used to verify
 three runtime behaviours that `helm lint` / `helm template` can't; it is also
-the starting point for a real Schema Registry deployment (issue #4) and for a
-shared schema-CD dev environment.
+the starting point if and when a real Schema Registry is deployed to the
+cluster, and for a shared schema-CD dev environment.
 
 The three behaviours it checks:
 
@@ -18,8 +18,7 @@ The three behaviours it checks:
 3. **A failed Job stalls the sync-wave** — nothing at wave `0` deploys until the
    hook (wave `-1`) is Healthy.
 
-The Schema Registry here is a minimal in-memory Apicurio — not the production
-one (issue #4).
+The Schema Registry here is a minimal in-memory Apicurio — not a production one.
 
 ## Layout
 
@@ -229,8 +228,9 @@ If you ran step A against a different branch, revert those manifest edits too.
 ## Open questions (for the team)
 
 - The `schema-registry/` manifests here are the *only* Schema Registry in the
-  repo. Deciding the real one — own chart, part of `kafka/`, in-mem vs
-  persistent — is issue #4.
+  repo. A real one — own chart, part of `kafka/`, in-mem vs persistent — is
+  still undecided, and not a tracked task yet.
 - `teams/relay/schema-sync-hook/argocd-application.yaml` uses `sync-wave: "-1"`
-  and `project: resonance-flow`. Once a real registry exists, its wave has to
-  sit between the registry and `resonance-flow` (issue #4).
+  and `project: default`. That wave (registry `-2` → hook `-1` →
+  `resonance-flow` `0`) is the decided order, verified here — see that file's
+  header comment.

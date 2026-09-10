@@ -1,7 +1,7 @@
 # Minimal Apicurio Schema Registry for this environment.
 # In-memory (no persistence), single replica. This is NOT the production
-# Schema Registry — who runs that, and where, is issue #4. These manifests are
-# the starting point for that decision.
+# Schema Registry — who runs that, and where, is still undecided. These
+# manifests are the starting point for that decision.
 apiVersion: apps/v1
 kind: Deployment
 metadata:

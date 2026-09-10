@@ -27,15 +27,19 @@ deployed as part of the shared `resonance-flow` Application (all teams'
 services, one Helm release). A hook here would never actually block relay's
 rollout.
 
-**What actually works, and is already used in this repo:** `sync-wave`. Real
-example — `argocd/apps/kafka.yaml` has `sync-wave: "-1"`, `resonance-flow.yaml`
-has `"0"`, so kafka's Application must finish and be healthy before
-resonance-flow starts syncing. `argocd-application.yaml` here follows the same
-pattern instead of a hook.
+**What actually works:** `sync-wave` on separate Applications. The app-of-apps
+root (`../argocd/root-app.yaml`) syncs each child Application in wave order and,
+with `../argocd/argocd-cm-patch.yaml` applied, waits for each to be Healthy
+before the next. `argocd-application.yaml` here is that separate Application, at
+wave `-1`, ahead of `resonance-flow`'s `0`.
+
+This exact ordering — Schema Registry `-2` → this Job `-1` → services `0` — is
+built and verified in [`../schema-sync-hook-env/`](../schema-sync-hook-env/) (the
+#260 e2e run on kind + ArgoCD): the Job doesn't start until the registry's
+readiness probe passes, and wave `0` doesn't sync until the Job succeeds.
 
 Confirmed with Avigail directly: her CI never touches the real cluster's live
-data — only spins up a throwaway local `kind` cluster for smoke tests. No
-existing precedent to reuse there either.
+data — only spins up a throwaway local `kind` cluster for smoke tests.
 
 ## What's a temporary placeholder right now
 
@@ -59,8 +63,14 @@ existing precedent to reuse there either.
   They're included only to prove the list handles more than one schema, not as
   a signal they're ready to actually register.
 
-## Open questions before this can go live
+## What's left before this goes live
 
-- Who deploys Schema Registry for real, and where (own chart? part of `kafka/`?)
-- Once it exists, what sync-wave does it get, so this chart's wave can sit
-  correctly between it and `resonance-flow`'s `"0"`
+- Schema Registry's sync-wave is decided: `-2` (see `argocd-application.yaml`),
+  verified in [`../schema-sync-hook-env/`](../schema-sync-hook-env/). This Job
+  stays at `-1`, `resonance-flow` at `0`.
+- If and when the cluster gets a real Schema Registry, it needs its own
+  Application at wave `-2`.
+  [`../schema-sync-hook-env/schema-registry/`](../schema-sync-hook-env/schema-registry/)
+  is the starting point for those manifests.
+- Then move `argocd-application.yaml` into `../argocd/apps/` (coordinate with the
+  owner of `../argocd/`).
