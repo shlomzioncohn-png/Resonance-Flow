@@ -12,16 +12,6 @@
   },
   "tasks": [
     {
-      "task_id": "task_incident",
-      "title": "Restore Customer A's ingestion pipeline",
-      "description": "Customer A's pipeline has been down 40 minutes and they cannot process orders; an SLA credit triggers if it is not back within the hour.",
-      "deadline": "2026-09-07T12:00:00",
-      "effort_estimate": 45,
-      "tier": "operational",
-      "blocked": false,
-      "parent_task_id": null
-    },
-    {
       "task_id": "task_maintenance",
       "title": "Run the scheduled firmware refresh at Customer B",
       "description": "Routine refresh booked for next Tuesday's maintenance window.",
@@ -37,6 +27,16 @@
       "description": "An overnight disk alert self-resolved; on-call wants a note confirming it was noise.",
       "deadline": null,
       "effort_estimate": 10,
+      "tier": "operational",
+      "blocked": false,
+      "parent_task_id": null
+    },
+    {
+      "task_id": "task_incident",
+      "title": "Restore Customer A's ingestion pipeline",
+      "description": "Customer A's pipeline has been down 40 minutes and they cannot process orders; an SLA credit triggers if it is not back within the hour.",
+      "deadline": "2026-09-07T12:00:00",
+      "effort_estimate": 45,
       "tier": "operational",
       "blocked": false,
       "parent_task_id": null

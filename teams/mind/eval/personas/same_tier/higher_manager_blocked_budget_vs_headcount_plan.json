@@ -24,8 +24,8 @@
     {
       "task_id": "task_headcount",
       "title": "Approve the Q4 headcount plan",
-      "description": "Sign off on which open roles the department fills next quarter; all inputs are in hand and it is needed before the planning review next Friday.",
-      "deadline": "2026-09-12T17:00:00",
+      "description": "Sign off on which open roles the department fills next quarter; all inputs are in hand and it is needed before the planning review this Friday.",
+      "deadline": "2026-09-11T17:00:00",
       "effort_estimate": 40,
       "tier": "strategic",
       "blocked": false,
@@ -33,7 +33,7 @@
     }
   ],
   "expected_top_task_id": "task_headcount",
-  "expected_reason": "task_budget is blocked on the CFO's outstanding figures and cannot be completed now despite the nearer deadline; task_headcount is unblocked with all inputs in hand and a firm deadline next week.",
+  "expected_reason": "task_budget is blocked on the CFO's outstanding figures and cannot be completed now despite the nearer deadline; task_headcount is unblocked with all inputs in hand and a firm deadline this Friday.",
   "source": {
     "type": "synthetic",
     "source_detail": null

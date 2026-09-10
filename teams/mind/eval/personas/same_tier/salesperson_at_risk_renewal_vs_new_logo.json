@@ -24,9 +24,9 @@
     {
       "task_id": "task_renewal",
       "title": "Address the Umbrella account churn risk",
-      "description": "Customer success flagged Umbrella as a churn risk after a rough support quarter; it is a large share of your territory and the renewal is in three weeks. No hard deadline yet.",
+      "description": "Customer success flagged Umbrella as a churn risk after a rough support quarter; it is a large share of your territory and the renewal is in three weeks. Booking the save call and sketching the retention offer is the next step. No hard deadline yet.",
       "deadline": null,
-      "effort_estimate": 45,
+      "effort_estimate": 30,
       "tier": "tactical",
       "blocked": false,
       "parent_task_id": null
@@ -34,9 +34,9 @@
     {
       "task_id": "task_newlogo",
       "title": "Prospect a high-profile new logo",
-      "description": "A well-known brand looks like a plausible fit; purely proactive outreach, no timeline.",
+      "description": "A well-known brand looks like a plausible fit; build the account map and a full outreach sequence from scratch. Purely proactive, no timeline.",
       "deadline": null,
-      "effort_estimate": 40,
+      "effort_estimate": 45,
       "tier": "tactical",
       "blocked": false,
       "parent_task_id": null

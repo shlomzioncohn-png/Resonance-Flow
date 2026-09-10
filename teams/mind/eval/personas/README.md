@@ -183,7 +183,7 @@ against all 30:
 
 | Strategy | Score |
 |---|---|
-| pick the first task (`DummyModel`) | ~37% |
+| pick the first task (`DummyModel`) | ~30% |
 | pick the nearest deadline, ignore `blocked` | ~43% |
 | **skip `blocked`, then nearest deadline** | **~63%** |
 
@@ -231,8 +231,8 @@ improvement. The set was rebuilt to **30 scenarios (5 per role)** so that:
   handling `blocked` is what separates the ~43% and ~63% baselines;
 - **both tasks fit `free_time_minutes`** in every scenario, so Chain's effort
   filter can never eliminate the distractor and hand the model a free answer;
-- the correct answer's **position is shuffled** (index 0 in 11/30, 1 in 15, 2 in
-  4; no "pick task *k*" rule beats ~50%), and no 3-task scenario has it first;
+- the correct answer's **position is shuffled** (index 0 in 9/30, 1 in 15, 2 in
+  6; no "pick task *k*" rule beats ~50%), and no 3-task scenario has it first;
 - **persona ≠ tier** in several scenarios (a CEO doing operational work, a
   Developer doing strategic work), so "role ⇒ tier" is not a shortcut;
 - two scenarios test a **deadline that has already passed**;

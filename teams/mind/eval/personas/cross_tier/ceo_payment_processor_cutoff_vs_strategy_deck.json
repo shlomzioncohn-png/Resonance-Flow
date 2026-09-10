@@ -43,7 +43,7 @@
     }
   ],
   "expected_top_task_id": "task_processor",
-  "expected_reason": "Neither task has a deadline. task_processor has frozen all customer revenue right now and only the CEO can escalate it; task_deck is long-range planning with no time pressure.",
+  "expected_reason": "Neither task has a deadline. task_processor has frozen all customer revenue right now and the description says only one person can escalate it; task_deck is long-range planning with no time pressure.",
   "source": {
     "type": "synthetic",
     "source_detail": null

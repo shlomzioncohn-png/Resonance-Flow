@@ -24,9 +24,9 @@
     {
       "task_id": "task_filler_survey",
       "title": "Draft the quarterly team-health survey",
-      "description": "Put together questions for next month's team-health survey; no fixed date.",
+      "description": "Design the full question set and rating scales for next month's team-health survey; no fixed date.",
       "deadline": null,
-      "effort_estimate": 15,
+      "effort_estimate": 40,
       "tier": "operational",
       "blocked": false,
       "parent_task_id": null
@@ -34,16 +34,16 @@
     {
       "task_id": "task_reorg",
       "title": "Draft the team reorganization proposal",
-      "description": "The VP needs your proposal to make a call at Monday's leadership meeting; it is the biggest structural decision of the quarter. No hard deadline yet, but the decision waits on it.",
-      "deadline": null,
-      "effort_estimate": 50,
+      "description": "The VP needs your proposal to make a call at next Monday's leadership meeting; it is the biggest structural decision of the quarter and must be in their hands by Sunday evening to be read in time.",
+      "deadline": "2026-09-13T20:00:00",
+      "effort_estimate": 35,
       "tier": "strategic",
       "blocked": false,
       "parent_task_id": null
     }
   ],
   "expected_top_task_id": "task_reorg",
-  "expected_reason": "task_status has a deadline but is a routine digest nobody acts on; task_reorg has no deadline yet but a quarter-defining leadership decision on Monday depends on it.",
+  "expected_reason": "task_status has the nearer deadline but is a routine digest nobody acts on; task_reorg's deadline is later, yet a quarter-defining leadership decision on Monday depends on it.",
   "source": {
     "type": "synthetic",
     "source_detail": null

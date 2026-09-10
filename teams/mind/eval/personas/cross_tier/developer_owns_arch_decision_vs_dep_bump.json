@@ -24,8 +24,8 @@
     {
       "task_id": "task_bump",
       "title": "Bump the HTTP client library to the latest minor",
-      "description": "Routine dependency update; no behaviour change expected, no deadline.",
-      "deadline": null,
+      "description": "Routine dependency update; no behaviour change expected. The team wants it in before the end-of-month housekeeping sweep so it doesn't pile up.",
+      "deadline": "2026-09-30T17:00:00",
       "effort_estimate": 20,
       "tier": "operational",
       "blocked": false,
@@ -33,7 +33,7 @@
     }
   ],
   "expected_top_task_id": "task_arch",
-  "expected_reason": "task_arch is a strategic decision only this persona can make, three engineers are blocked until it is done, and it has a deadline before Thursday's planning; task_bump is a routine no-impact update with no deadline.",
+  "expected_reason": "task_arch carries a sign-off the description says only its owner can give, blocks three engineers until it is done, and is due before Thursday's planning; task_bump is a routine no-impact update due weeks out.",
   "source": {
     "type": "synthetic",
     "source_detail": null

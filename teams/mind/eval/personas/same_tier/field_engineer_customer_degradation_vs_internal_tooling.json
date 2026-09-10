@@ -14,9 +14,9 @@
     {
       "task_id": "task_script",
       "title": "Add retry handling to the log-collection script",
-      "description": "Make the internal log-collection script fail less often over VPN; a convenience for the field team.",
+      "description": "Rework the internal log-collection script so it retries and resumes cleanly over flaky VPN links; a convenience for the field team.",
       "deadline": null,
-      "effort_estimate": 35,
+      "effort_estimate": 45,
       "tier": "operational",
       "blocked": false,
       "parent_task_id": null
@@ -24,9 +24,9 @@
     {
       "task_id": "task_degradation",
       "title": "Investigate Customer D's 3x query latency",
-      "description": "Customer D reports query latency up 3x since yesterday; still usable but degrading for their analysts. No deadline set.",
+      "description": "Customer D reports query latency up 3x since yesterday; still usable but degrading for their analysts. Getting an initial diagnosis and a mitigation in place is the immediate need. No deadline set.",
       "deadline": null,
-      "effort_estimate": 40,
+      "effort_estimate": 30,
       "tier": "operational",
       "blocked": false,
       "parent_task_id": null

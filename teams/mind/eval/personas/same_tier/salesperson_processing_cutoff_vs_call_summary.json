@@ -24,8 +24,8 @@
     {
       "task_id": "task_summary",
       "title": "Send the follow-up summary from this morning's call",
-      "description": "The prospect asked for a written recap and next steps by end of day so they can take it to their internal committee tomorrow.",
-      "deadline": "2026-09-07T17:00:00",
+      "description": "The prospect asked for a written recap and next steps; they take it to their internal committee tomorrow afternoon, so they need it first thing tomorrow morning.",
+      "deadline": "2026-09-08T09:00:00",
       "effort_estimate": 20,
       "tier": "tactical",
       "blocked": false,
@@ -33,7 +33,7 @@
     }
   ],
   "expected_top_task_id": "task_orderform",
-  "expected_reason": "Both tasks are tactical with hard deadlines today, but task_orderform's 15:00 processing cutoff is sooner than task_summary's end-of-day.",
+  "expected_reason": "Both tasks are tactical with hard deadlines, but task_orderform's 15:00 processing cutoff is today while task_summary is not needed until tomorrow morning.",
   "source": {
     "type": "synthetic",
     "source_detail": null

@@ -13,9 +13,9 @@
   "tasks": [
     {
       "task_id": "task_escalation",
-      "title": "Join the customer escalation call at 10:00",
-      "description": "A customer's integration broke overnight and their account team asked you to join the 10:00 call to speak to priorities and next steps.",
-      "deadline": "2026-09-07T10:00:00",
+      "title": "Write the priorities brief for the 10:00 escalation call",
+      "description": "A customer's integration broke overnight; their account team needs your written read on priorities and next steps by 09:55 so they can lead the 10:00 escalation call with it.",
+      "deadline": "2026-09-07T09:55:00",
       "effort_estimate": 40,
       "tier": "tactical",
       "blocked": false,
@@ -23,9 +23,9 @@
     },
     {
       "task_id": "task_review",
-      "title": "Chair tomorrow's design review",
-      "description": "You are chairing the notifications-service design review at 14:00 tomorrow; prep the agenda and pre-read.",
-      "deadline": "2026-09-08T14:00:00",
+      "title": "Circulate the pre-read for tomorrow's design review",
+      "description": "You chair the notifications-service design review at 14:00 tomorrow; the agenda and pre-read need to reach attendees by 09:00 tomorrow so they can prepare.",
+      "deadline": "2026-09-08T09:00:00",
       "effort_estimate": 30,
       "tier": "tactical",
       "blocked": false,
@@ -33,7 +33,7 @@
     }
   ],
   "expected_top_task_id": "task_escalation",
-  "expected_reason": "Both tasks are tactical with hard deadlines, but task_escalation's call is within the hour and task_review's is tomorrow afternoon.",
+  "expected_reason": "Both tasks are tactical with hard deadlines, but task_escalation's brief is due within the hour while task_review's pre-read is not due until tomorrow morning.",
   "source": {
     "type": "synthetic",
     "source_detail": null

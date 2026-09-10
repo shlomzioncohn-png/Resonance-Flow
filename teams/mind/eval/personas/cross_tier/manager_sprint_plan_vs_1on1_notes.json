@@ -12,16 +12,6 @@
   },
   "tasks": [
     {
-      "task_id": "task_sprint",
-      "title": "Prepare the sprint planning document",
-      "description": "Scope and priorities for next sprint, due before Friday's 14:00 planning meeting; the whole team's next sprint depends on it being ready.",
-      "deadline": "2026-09-11T14:00:00",
-      "effort_estimate": 55,
-      "tier": "tactical",
-      "blocked": false,
-      "parent_task_id": null
-    },
-    {
       "task_id": "task_expenses",
       "title": "Approve three pending expense reports",
       "description": "Routine manager approvals from last month; no deadline flagged.",
@@ -38,6 +28,16 @@
       "deadline": null,
       "effort_estimate": 20,
       "tier": "operational",
+      "blocked": false,
+      "parent_task_id": null
+    },
+    {
+      "task_id": "task_sprint",
+      "title": "Prepare the sprint planning document",
+      "description": "Scope and priorities for next sprint, due before Friday's 14:00 planning meeting; the whole team's next sprint depends on it being ready.",
+      "deadline": "2026-09-11T14:00:00",
+      "effort_estimate": 55,
+      "tier": "tactical",
       "blocked": false,
       "parent_task_id": null
     }

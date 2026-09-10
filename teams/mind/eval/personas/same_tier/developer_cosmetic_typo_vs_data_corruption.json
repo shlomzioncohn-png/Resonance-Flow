@@ -13,10 +13,10 @@
   "tasks": [
     {
       "task_id": "task_filler_wiki",
-      "title": "Update a stale section of the team wiki",
-      "description": "Refresh a few out-of-date paragraphs on the internal wiki; nobody is waiting on it, no deadline.",
+      "title": "Rewrite the environment-setup section of the team wiki",
+      "description": "Rework the outdated 'local environment setup' guide on the internal wiki end to end; nobody is waiting on it, no deadline.",
       "deadline": null,
-      "effort_estimate": 15,
+      "effort_estimate": 45,
       "tier": "operational",
       "blocked": false,
       "parent_task_id": null
@@ -34,9 +34,9 @@
     {
       "task_id": "task_corruption",
       "title": "Stop the nightly export job corrupting rows",
-      "description": "The customer-data export job has started writing malformed records; every run corrupts more rows and there is no clean rollback. No deadline set, but it worsens each night.",
+      "description": "The customer-data export job has started writing malformed records; every run corrupts more rows and there is no clean rollback. Pausing the job and isolating the bad batch is quick but has not been done. No deadline set, but it worsens each night.",
       "deadline": null,
-      "effort_estimate": 40,
+      "effort_estimate": 20,
       "tier": "operational",
       "blocked": false,
       "parent_task_id": null

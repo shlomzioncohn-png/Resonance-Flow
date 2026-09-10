@@ -24,9 +24,9 @@
     {
       "task_id": "task_backup",
       "title": "Find why last night's backup skipped two sites",
-      "description": "The backup job silently skipped two customer sites overnight and nobody was alerted; data is at risk until it is understood and re-run. No deadline, discovered this morning.",
+      "description": "The backup job silently skipped two customer sites overnight and nobody was alerted; data is at risk until it is understood and re-run. Confirming the scope and kicking off the re-run is the immediate step. No deadline, discovered this morning.",
       "deadline": null,
-      "effort_estimate": 45,
+      "effort_estimate": 30,
       "tier": "tactical",
       "blocked": false,
       "parent_task_id": null
@@ -34,9 +34,9 @@
     {
       "task_id": "task_alert",
       "title": "Silence the flapping capacity alert",
-      "description": "A disk-space alert has been flapping and paging the on-call rotation; the team wants it quietened by end of shift today.",
+      "description": "A disk-space alert has been flapping and paging the on-call rotation; the team wants it root-caused and quietened by end of shift today.",
       "deadline": "2026-09-07T18:00:00",
-      "effort_estimate": 15,
+      "effort_estimate": 40,
       "tier": "operational",
       "blocked": false,
       "parent_task_id": null
