@@ -30,7 +30,7 @@ env:
 
 jobs:
   test:
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     permissions:
       contents: read
       packages: write
@@ -248,7 +248,7 @@ jobs:
   update-manifest:
     needs: test
     if: env.IS_DEPLOY_RUN == 'true'
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     permissions:
       contents: write
       pull-requests: write
