@@ -16,55 +16,44 @@ import java.util.Deque;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
+import java.util.function.UnaryOperator;
 
 /**
- * See CLAUDE.md "Open items" for the locking rationale summarized here: dependencyGraphLock
- * guards the dependency edges plus any DONE-status read that decides whether an edge currently
- * counts against blockingCount; per-task locks (see {@link #lockFor}) guard a single task's
- * counters. dependencyGraphLock is always acquired before any per-task lock, never after, so
- * the two never form a cycle.
+ * See CLAUDE.md "Open items" for the locking rationale: dependencyGraphLock guards the
+ * dependency edges plus any DONE-status read that decides whether an edge currently counts
+ * against blockingCount. Per-task field mutations (blockingCount, openConstraintCount, status,
+ * isReady) no longer need a hand-rolled per-task lock - {@link TaskRepository#update} already
+ * performs an atomic per-id read-modify-write, so a single Task's fields can never be lost to a
+ * race the way a separate findById/mutate/save pair could. dependencyGraphLock is still required
+ * for decisions that span more than one Task/edge at once (cycle detection, and reading a
+ * dependency's DONE status together with creating/removing the edge to it).
  *
  * <p><b>{@code @Transactional} on the methods below does not currently provide atomicity or
  * rollback.</b> Task/TaskDependency live in plain in-memory repositories with no JPA
  * participation - spring-boot-starter-data-jpa and the embedded H2 dependency exist solely so a
  * PlatformTransactionManager bean is available and the annotation doesn't blow up
  * DataSourceAutoConfiguration at startup (see teams/chain/pom.xml). The actual correctness
- * guarantee here comes entirely from the hand-rolled locks described above. This is intentional
- * for now (code review findings raised it twice) - the plan is to re-add real transactional
- * semantics once persistence moves to a real JPA-backed store (e.g. Postgres), at which point
- * this annotation will start meaning what it says.
+ * guarantee here comes entirely from dependencyGraphLock plus TaskRepository#update's per-id
+ * atomicity. This is intentional for now - the plan is to re-add real transactional semantics
+ * once persistence moves to a real JPA-backed store (e.g. Postgres), at which point this
+ * annotation will start meaning what it says.
  */
 @Service
 public class TaskEligibilityService {
 
     private static final Logger log = LoggerFactory.getLogger(TaskEligibilityService.class);
 
-    // Fixed-size lock striping: bounded memory (unlike one lock object per task id kept
-    // forever), at the cost of unrelated tasks occasionally sharing a stripe and serializing
-    // against each other unnecessarily. Fine for the current scale; revisit if it's a
-    // bottleneck.
-    private static final int LOCK_STRIPE_COUNT = 256;
-
     private final TaskRepository taskRepository;
     private final TaskDependencyRepository taskDependencyRepository;
-    private final Object[] taskLockStripes;
     private final Object dependencyGraphLock = new Object();
 
     public TaskEligibilityService(TaskRepository taskRepository,
                                    TaskDependencyRepository taskDependencyRepository) {
         this.taskRepository = taskRepository;
         this.taskDependencyRepository = taskDependencyRepository;
-        this.taskLockStripes = new Object[LOCK_STRIPE_COUNT];
-        for (int i = 0; i < LOCK_STRIPE_COUNT; i++) {
-            taskLockStripes[i] = new Object();
-        }
-    }
-
-    private Object lockFor(UUID taskId) {
-        int stripe = (taskId.hashCode() & 0x7fffffff) % LOCK_STRIPE_COUNT;
-        return taskLockStripes[stripe];
     }
 
     private Task requireTask(UUID taskId) {
@@ -72,29 +61,80 @@ public class TaskEligibilityService {
             .orElseThrow(() -> new IllegalArgumentException("Task not found: " + taskId));
     }
 
+    private static <T> T requireUpdated(Optional<T> updated, UUID taskId) {
+        return updated.orElseThrow(() -> new IllegalArgumentException("Task not found: " + taskId));
+    }
+
     private boolean edgeExists(UUID taskId, UUID dependsOnTaskId) {
         return taskDependencyRepository.findByTaskId(taskId).stream()
             .anyMatch(edge -> edge.getDependsOnTaskId().equals(dependsOnTaskId));
     }
 
-    @Transactional
-    public void recalculateTaskEligibility(UUID taskId) {
-        Objects.requireNonNull(taskId, "taskId must not be null");
-        synchronized (lockFor(taskId)) {
-            Task task = requireTask(taskId);
-            recalculateAndSave(task);
+    /** Copies every field of {@code task} into a new Builder, so callers only need to
+     * override the field(s) they're actually changing before calling build(). */
+    private static Task.Builder copyOf(Task task) {
+        return Task.builder()
+                .id(task.getId())
+                .parentTaskId(task.getParentTaskId())
+                .ownerId(task.getOwnerId())
+                .status(task.getStatus())
+                .blockingCount(task.getBlockingCount())
+                .openConstraintCount(task.getOpenConstraintCount())
+                .estimatedDurationMin(task.getEstimatedDurationMin())
+                .score(task.getScore())
+                .createdAt(task.getCreatedAt())
+                .updatedAt(task.getUpdatedAt())
+                .deletedAt(task.getDeletedAt());
+    }
+
+    /** The single place isReady gets recomputed from blockingCount/openConstraintCount -
+     * every mutator that touches either counter goes through this, so isReady can't drift
+     * by a call site forgetting to update it. Returns {@code task} itself, unchanged, when the
+     * computed values are already exactly what's stored - restores the no-op-write optimization
+     * the pre-refactor code had. Done here, against the live value {@link TaskRepository#update}
+     * hands the mutator, rather than via a separate pre-read that could race a concurrent change
+     * on the same task. Matters once persistence is a real JPA store: an unchanged returned
+     * instance is exactly what makes Hibernate's own dirty checking skip the UPDATE/version bump. */
+    private static Task withCounters(Task task, int blockingCount, int openConstraintCount) {
+        boolean isReady = blockingCount == 0 && openConstraintCount == 0;
+        if (task.getBlockingCount() == blockingCount
+                && task.getOpenConstraintCount() == openConstraintCount
+                && task.isReady() == isReady) {
+            return task;
+        }
+        return copyOf(task)
+                .blockingCount(blockingCount)
+                .openConstraintCount(openConstraintCount)
+                .isReady(isReady)
+                .build();
+    }
+
+    /** Runs {@code countersMutator} through the atomic {@link TaskRepository#update}, then logs
+     * whether it actually changed anything - {@code countersMutator} is expected to be a
+     * {@link #withCounters} call, which signals "no-op" by returning its input unchanged. */
+    private void updateCounters(UUID taskId, UnaryOperator<Task> countersMutator) {
+        boolean[] changed = {false};
+        Task updated = requireUpdated(taskRepository.update(taskId, task -> {
+            Task result = countersMutator.apply(task);
+            changed[0] = result != task;
+            return result;
+        }), taskId);
+
+        if (changed[0]) {
+            log.info("Task {} eligibility changed: blockingCount={}, openConstraintCount={}, isReady={}",
+                    taskId, updated.getBlockingCount(), updated.getOpenConstraintCount(), updated.isReady());
+        } else {
+            log.debug("Task {} eligibility already correct (blockingCount={}, openConstraintCount={}, isReady={}), "
+                    + "skipping write", taskId, updated.getBlockingCount(), updated.getOpenConstraintCount(),
+                    updated.isReady());
         }
     }
 
-    private void recalculateAndSave(Task task) {
-        boolean newIsReady = task.getBlockingCount() == 0 && task.getOpenConstraintCount() == 0;
-        if (task.isReady() != newIsReady) {
-            log.info("Task {} eligibility changed: isReady {} -> {}", task.getId(), task.isReady(), newIsReady);
-            task.setReady(newIsReady);
-            taskRepository.save(task);
-        } else {
-            log.debug("Task {} eligibility unchanged (isReady={})", task.getId(), newIsReady);
-        }
+    @Transactional
+    public void recalculateTaskEligibility(UUID taskId) {
+        Objects.requireNonNull(taskId, "taskId must not be null");
+        updateCounters(taskId, task ->
+                withCounters(task, task.getBlockingCount(), task.getOpenConstraintCount()));
     }
 
     @Transactional
@@ -103,42 +143,15 @@ public class TaskEligibilityService {
         Objects.requireNonNull(dependsOnTaskId, "dependsOnTaskId must not be null");
         log.info("Adding dependency: task {} depends on {}", taskId, dependsOnTaskId);
 
-        // [CRITICAL fix] The counter mutation below used to run in a second, separately
-        // acquired synchronized (lockFor(taskId)) block, after this dependencyGraphLock section
-        // had already been released. dependsOnAlreadyDone/isNewEdge were decided here, under
-        // this lock, but applied later under a different, narrower lock - leaving a gap where a
-        // concurrent removeDependency/onTaskStatusChanged on the same edge (both of which also
-        // take dependencyGraphLock) could act on the real edge/status state in between, making
-        // this method's captured decision stale by the time it finally ran. Nesting the per-task
-        // lock inside this one instead - the same nesting order (graph lock outer, per-task lock
-        // inner) already used safely by adjustDependentsBlockingCount - closes that gap: decide
-        // and act now happen in one uninterrupted critical section.
         synchronized (dependencyGraphLock) {
             if (wouldCreateCycle(taskId, dependsOnTaskId)) {
                 throw new IllegalStateException(
                     "Cannot add dependency: task " + taskId + " -> " + dependsOnTaskId + " would create a cycle");
             }
 
-            // Read under the same lock that onTaskStatusChanged uses for its DONE-transition +
-            // dependents fan-out, so the two can't race: whichever of "edge becomes visible" vs
-            // "status flips to DONE" happens first here is guaranteed to also be what
-            // onTaskStatusChanged (or this check) sees, so the edge is counted exactly once.
-            // requireTask(dependsOnTaskId) also validates it exists - see the [MAJOR fix] below.
             boolean dependsOnAlreadyDone = requireTask(dependsOnTaskId).getStatus() == TaskStatus.DONE;
-
-            // save() on TaskDependencyRepository is idempotent by contract, but it doesn't tell
-            // us whether the edge already existed - we check that ourselves so we only bump
-            // blockingCount for a genuinely new edge.
             boolean isNewEdge = !edgeExists(taskId, dependsOnTaskId);
 
-            // [MAJOR fix] Only reached for a genuinely new edge, and BEFORE the mutation below -
-            // previously taskId's existence wasn't validated until inside adjustBlockingCount,
-            // which only runs after taskDependencyRepository.save() already persisted the edge.
-            // Since there's no real transactional rollback for these in-memory repositories (see
-            // the class Javadoc), a non-existent taskId meant the method threw while a phantom
-            // edge to it stayed permanently saved. Guarded by isNewEdge (not called unconditionally)
-            // so a duplicate-edge call - which never touches taskId's counters - still never
-            // touches taskRepository for taskId either, matching the existing no-op behavior.
             if (isNewEdge) {
                 requireTask(taskId);
             }
@@ -149,33 +162,19 @@ public class TaskEligibilityService {
                 return;
             }
 
-            // [MINOR fix] The nested-lock-and-adjust block below used to be duplicated here and
-            // in removeDependency, differing only in +1/no-clamp vs -1/Math.max-clamp - this is
-            // literally where the original PR #172 bug (and the CRITICAL lock-nesting fix above)
-            // lived, so a future fix applied to only one copy would silently resurrect the same
-            // class of bug in the other. Extracted into adjustBlockingCount so both call the same
-            // code.
             adjustBlockingCount(taskId, dependsOnAlreadyDone, 1);
         }
     }
 
-    // A dependency on an already-completed task will never trigger a future onTaskStatusChanged
-    // transition to decrement it (add) or have already been decremented by one (remove), so
-    // counting it here would leave the dependent permanently stuck / double-decrement it.
-    // blockingCount is left untouched in that case, but eligibility is still recalculated: e.g.
-    // if this is the task's first-ever edge and it started isReady=false by default, nothing else
-    // would ever recompute it.
     private void adjustBlockingCount(UUID taskId, boolean dependsOnIsDone, int delta) {
-        synchronized (lockFor(taskId)) {
-            Task task = requireTask(taskId);
-            if (dependsOnIsDone) {
-                log.info("Dependency change for task {} (delta={}) involves a dependency that is "
-                    + "already DONE, blockingCount left unchanged", taskId, delta);
-            } else {
-                task.setBlockingCount(Math.max(0, task.getBlockingCount() + delta));
-            }
-            recalculateAndSave(task);
+        int effectiveDelta = dependsOnIsDone ? 0 : delta;
+        if (dependsOnIsDone) {
+            log.info("Dependency change for task {} (delta={}) involves a dependency that is "
+                + "already DONE, blockingCount left unchanged", taskId, delta);
         }
+        updateCounters(taskId, task ->
+                withCounters(task, Math.max(0, task.getBlockingCount() + effectiveDelta),
+                        task.getOpenConstraintCount()));
     }
 
     // DFS reachability (stack-based push/pop), not BFS - see CLAUDE.md "Key decisions".
@@ -205,33 +204,14 @@ public class TaskEligibilityService {
         Objects.requireNonNull(dependsOnTaskId, "dependsOnTaskId must not be null");
         log.info("Removing dependency: task {} no longer depends on {}", taskId, dependsOnTaskId);
 
-        // [CRITICAL fix] See addDependency for the full explanation: the counter mutation used
-        // to run in a second, separately acquired synchronized (lockFor(taskId)) block after
-        // dependencyGraphLock had already been released, leaving a gap where a concurrent
-        // addDependency/onTaskStatusChanged on the same edge could act on stale state. Nesting
-        // the per-task lock inside this one closes that gap.
         synchronized (dependencyGraphLock) {
-            // delete() returns void, so we check existence beforehand to know whether the
-            // counter should actually change. Doing the check and the delete under the graph
-            // lock prevents two concurrent removals of the same edge from both seeing
-            // existed=true and double-decrementing.
             boolean existed = edgeExists(taskId, dependsOnTaskId);
 
-            // A missing target task is treated as "not currently DONE" (i.e. safe to decrement)
-            // rather than failing the removal - a dangling edge to a deleted task should still
-            // be cleanable.
             boolean dependsOnCurrentlyDone = existed
                 && taskRepository.findById(dependsOnTaskId)
                     .map(t -> t.getStatus() == TaskStatus.DONE)
                     .orElse(false);
 
-            // [MAJOR fix] Mirrors addDependency: validate taskId exists BEFORE deleting the edge,
-            // not after. Previously requireTask(taskId) only ran inside adjustBlockingCount,
-            // after delete() already removed the edge, so a real edge could be permanently
-            // deleted and the caller still see an exception implying the removal had failed.
-            // Guarded by existed (not called unconditionally) so removing a non-existent edge -
-            // which never touches taskId's counters - still never touches taskRepository for
-            // taskId either, matching the existing no-op behavior.
             if (existed) {
                 requireTask(taskId);
             }
@@ -242,8 +222,6 @@ public class TaskEligibilityService {
                 return;
             }
 
-            // [MINOR fix] See addDependency's adjustBlockingCount extraction: this used to be a
-            // separate, near-identical copy of the same nested-lock-and-adjust block.
             adjustBlockingCount(taskId, dependsOnCurrentlyDone, -1);
         }
     }
@@ -254,17 +232,13 @@ public class TaskEligibilityService {
         Objects.requireNonNull(newStatus, "newStatus must not be null");
         log.info("Task {} status changed to {}", taskId, newStatus);
 
-        // The whole status flip + dependents fan-out runs under the graph lock (not just
-        // lockFor(taskId)): it must be serialized against addDependency/removeDependency's
-        // "is the target already DONE" read, or a concurrent add/remove and a concurrent DONE
-        // transition can each decide the edge is the other's responsibility to count, and it
-        // never gets counted at all.
         synchronized (dependencyGraphLock) {
-            Task task = requireTask(taskId);
-
-            TaskStatus previousStatus = task.getStatus();
-            task.setStatus(newStatus);
-            taskRepository.save(task);
+            Task[] previous = new Task[1];
+            requireUpdated(taskRepository.update(taskId, task -> {
+                previous[0] = task;
+                return copyOf(task).status(newStatus).build();
+            }), taskId);
+            TaskStatus previousStatus = previous[0].getStatus();
 
             if (previousStatus != TaskStatus.DONE && newStatus == TaskStatus.DONE) {
                 adjustDependentsBlockingCount(taskId, -1);
@@ -278,22 +252,10 @@ public class TaskEligibilityService {
         List<TaskDependency> dependents = taskDependencyRepository.findByDependsOnTaskId(taskId);
         log.info("Task {} status change affects {} dependent task(s), delta={}", taskId, dependents.size(), delta);
 
-        if (dependents.isEmpty()) {
-            return;
-        }
-
-        List<UUID> dependentIds = dependents.stream().map(TaskDependency::getTaskId).toList();
-        List<Task> dependentTasks = taskRepository.findAllById(dependentIds);
-
-        // Each dependent is locked individually (nested inside the already-held graph lock)
-        // rather than all at once - the graph is acyclic, so a dependent's lock is never
-        // already held by this same call chain, and no other code path holds a per-task lock
-        // while trying to acquire the graph lock, so this nesting can't deadlock.
-        for (Task dependentTask : dependentTasks) {
-            synchronized (lockFor(dependentTask.getId())) {
-                dependentTask.setBlockingCount(Math.max(0, dependentTask.getBlockingCount() + delta));
-                recalculateAndSave(dependentTask);
-            }
+        for (TaskDependency dependent : dependents) {
+            UUID dependentId = dependent.getTaskId();
+            taskRepository.update(dependentId, task ->
+                    withCounters(task, Math.max(0, task.getBlockingCount() + delta), task.getOpenConstraintCount()));
         }
     }
 
@@ -305,11 +267,8 @@ public class TaskEligibilityService {
     public void onConstraintAdded(UUID taskId) {
         Objects.requireNonNull(taskId, "taskId must not be null");
         log.info("Constraint added on task {}", taskId);
-        synchronized (lockFor(taskId)) {
-            Task task = requireTask(taskId);
-            task.setOpenConstraintCount(task.getOpenConstraintCount() + 1);
-            recalculateAndSave(task);
-        }
+        updateCounters(taskId, task ->
+                withCounters(task, task.getBlockingCount(), task.getOpenConstraintCount() + 1));
     }
 
     @Transactional
@@ -327,11 +286,9 @@ public class TaskEligibilityService {
             return;
         }
 
-        synchronized (lockFor(taskId)) {
-            Task task = requireTask(taskId);
-            int delta = isOpenNow ? 1 : -1;
-            task.setOpenConstraintCount(Math.max(0, task.getOpenConstraintCount() + delta));
-            recalculateAndSave(task);
-        }
+        int delta = isOpenNow ? 1 : -1;
+        updateCounters(taskId, task ->
+                withCounters(task, task.getBlockingCount(),
+                        Math.max(0, task.getOpenConstraintCount() + delta)));
     }
 }

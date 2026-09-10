@@ -5,18 +5,23 @@ Foundation module for Team Chain (Dependency Graph, Task Selection & Constraints
 `TaskEligibilityService` implements the dependency/constraint update flow (`addDependency`,
 `removeDependency`, `onTaskStatusChanged`, `recalculateTaskEligibility`, `onConstraintAdded`,
 `onConstraintStatusChanged`) against in-memory repositories. It's a registered `@Service` bean -
-`config/RepositoryConfig.java` wires the in-memory `TaskRepository`/`TaskDependencyRepository`
+`config/MockDataConfig.java` wires the in-memory `TaskRepository`/`TaskDependencyRepository`
 implementations as beans (seeded empty) so the whole thing is actually constructible by Spring,
-not just unit-testable. No REST controllers are wired up yet (`controller/` is still empty) -
-this stage is the eligibility engine, the Kafka event infrastructure described below, and their
-tests.
+not just unit-testable. Each bean is guarded with `@ConditionalOnMissingBean`, so once a real
+DB-backed `TaskRepository`/`TaskDependencyRepository` is registered, it overrides the mock instead
+of colliding with it - no manual removal of this config needed when that lands. No REST
+controllers are wired up yet (`controller/` is still empty) - this stage is the eligibility engine,
+the Kafka event infrastructure described below, and their tests.
 
 `Task`/`TaskDependency`/`TaskStatus` and the `TaskRepository`/`TaskDependencyRepository`
 contracts (with in-memory implementations) come from issue #66's branch
 (`chain/ruthHoltzman/dependency-repository-66`). That branch also has a `TaskDependencyService`
-(existence/self-dependency/duplicate-edge validation) that isn't merged here yet and overlaps
-with some of what `TaskEligibilityService.addDependency`/`removeDependency` already do
-(cycle detection, `blockingCount`) - reconcile the two once #66 lands.
+(existence/self-dependency/duplicate-edge validation), which now lives alongside
+`TaskEligibilityService` in this module and overlaps with some of what
+`TaskEligibilityService.addDependency`/`removeDependency` already do (cycle detection,
+`blockingCount`) - reconciling the two (having `TaskEligibilityService` delegate raw edge
+validation/CRUD to `TaskDependencyService` and keep only cycle detection + counters) is still an
+open follow-up, not done as part of this merge.
 
 ## Stack
 
@@ -59,7 +64,7 @@ src/main/java/com/rnd/chain/
 │   ├── ProcessedEventStore.java / InMemoryProcessedEventStore.java
 │   └── payloads/
 └── config/
-    └── RepositoryConfig.java
+    └── MockDataConfig.java
 src/main/resources/application.yml
 src/test/java/com/rnd/chain/
 ├── service/
@@ -165,3 +170,30 @@ mvn test
 
 Kafka-related tests use `@EmbeddedKafka` (`spring-kafka-test`) - no external Kafka broker or
 Docker is needed to run the test suite.
+## Dependency graph persistence (Issue #66)
+
+`TaskDependencyRepository` / `InMemoryTaskDependencyRepository` (in `repository/`) are a pure
+CRUD store for dependency edges (`taskId` depends on `dependsOnTaskId`): `findByTaskId`,
+`findByDependsOnTaskId`, `save`, `delete`. `save` is idempotent - saving the same edge twice does
+not create a duplicate row - and `delete` is a no-op if the edge doesn't exist. This layer does not
+validate task existence or reject self-dependencies; it is a thin storage abstraction, currently
+backed by an in-memory dual adjacency map (`ConcurrentHashMap`) until a real DB is chosen.
+
+`TaskDependencyService` (in `service/`) sits on top of it and enforces the business rules from
+issue #66:
+
+```java
+addDependency(taskId, dependsOnTaskId)   // throws InvalidDependencyException on self-dependency,
+                                          // TaskNotFoundException if either task doesn't exist,
+                                          // DuplicateDependencyException if the edge already exists
+removeDependency(taskId, dependsOnTaskId) // throws DependencyNotFoundException if the edge doesn't exist
+getDependencies(taskId)                   // ids of tasks that block taskId (empty list if none)
+getDependents(taskId)                     // ids of tasks that taskId blocks (empty list if none)
+```
+
+Callers that need those business rules enforced (duplicate edges, self-dependency, missing tasks)
+should go through `TaskDependencyService` rather than calling the repository directly.
+
+`TaskRepository` / `InMemoryTaskRepository` are also included here (a compatible implementation
+matching the interface used elsewhere in the module) since `TaskDependencyService` needs task
+existence checks and no shared implementation was merged yet at the time this was written.
