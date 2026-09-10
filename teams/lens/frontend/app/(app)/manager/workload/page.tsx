@@ -2,13 +2,10 @@
 
 import { useCallback, useEffect, useState } from 'react'
 import Button from '@mui/material/Button'
-import Stack from '@mui/material/Stack'
-import Typography from '@mui/material/Typography'
 import PageContainer from '@/components/layout/PageContainer'
 import LoadingState from '@/components/feedback/LoadingState'
 import EmptyState from '@/components/feedback/EmptyState'
 import ErrorState from '@/components/feedback/ErrorState'
-import StatusBadge from '@/components/ui/StatusBadge'
 import { fetchManagerWorkload, fetchManagerWorkloadWithError } from '@/mocks/managerWorkload'
 
 type Status = 'loading' | 'empty' | 'error'
@@ -38,18 +35,6 @@ export default function ManagerWorkloadPage() {
       title="Team workload"
       description="Per-employee and per-project breakdown of active work."
     >
-      <Stack spacing={1} sx={{ mb: 4 }}>
-        <Typography variant="overline" color="text.secondary">
-          Workflow health legend — design system reference
-        </Typography>
-        <Stack direction="row" spacing={1} sx={{ flexWrap: 'wrap' }}>
-          <StatusBadge status="healthy" label="Healthy / Good" />
-          <StatusBadge status="warning" label="At risk / Warning" />
-          <StatusBadge status="critical" label="Critical / Blocked" />
-          <StatusBadge status="neutral" label="Unknown / N/A" />
-        </Stack>
-      </Stack>
-
       {status === 'loading' && <LoadingState message="Loading team workload…" />}
 
       {status === 'empty' && (

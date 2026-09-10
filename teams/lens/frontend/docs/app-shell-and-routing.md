@@ -15,7 +15,7 @@ page uses.
 ```
 app/
 ├── layout.tsx            Root layout: <html>/<body>, ThemeRegistry (MUI theme + SSR cache)
-├── ThemeRegistry.tsx       Wires up the theme from `theme/` (see docs/design-system.md) + emotion SSR cache
+├── theme.ts               MUI theme (palette, typography, component overrides)
 ├── not-found.tsx           Global 404, styled like the public pages (no shell)
 │
 ├── (app)/                  Routes wrapped in the App Shell (Header + Sidebar)
@@ -28,9 +28,9 @@ app/
 │   │   ├── blocked/page.tsx   "/manager/blocked"
 │   │   └── bottlenecks/page.tsx "/manager/bottlenecks"
 │   ├── employee/
-│   │   ├── page.tsx           "/employee"
-│   │   ├── workload/page.tsx  "/employee/workload"
-│   │   └── blocked/page.tsx   "/employee/blocked"
+│   │   ├── page.tsx                     "/employee"                  My Workspace — time-boxed task recommendation
+│   │   ├── tasks/page.tsx               "/employee/tasks"            My Tasks (placeholder)
+│   │   └── tasks/[taskId]/page.tsx      "/employee/tasks/:taskId"    Task Details, drill-down, not in nav
 │   ├── team/[employeeId]/page.tsx     "/team/:employeeId"   drill-down, not in nav
 │   └── projects/[projectId]/page.tsx  "/projects/:projectId" drill-down, not in nav
 │
@@ -57,10 +57,19 @@ navigation, so they get the root layout only, styled to match.
 `AppShell` is only applied by `app/(app)/layout.tsx`. Pages under `(public)/`
 build their own minimal centered layout instead (see `login/page.tsx`).
 
-Every App Shell component reads its colors, spacing, and radii from the LENS
-theme (`@/theme`) rather than hardcoding values — see
-[docs/design-system.md](design-system.md) for the token reference and the
-conventions this follows.
+## Role-scoped navigation (preview only — not real authorization)
+
+`components/layout/RoleProvider` holds a client-side `role: 'manager' | 'employee' | null`
+in React context, persisted to `localStorage` (`RoleProvider.tsx`), and mounted once in
+`app/layout.tsx` so both route groups share it. `/login`'s two cards call `setRole(...)`
+before navigating; the Header's avatar links back to `/login` to switch. `Sidebar` reads
+`useRole()` and filters `navSections` down to just that role's section (no role selected
+yet → the full nav, as before).
+
+This only changes what the Sidebar renders — it is **not** a route guard. Every route
+under `(app)` is still directly reachable by URL regardless of the stored role; real
+authorization (redirecting unauthenticated/wrong-role requests) is still out of scope
+and will replace this preview mechanism, not extend it.
 
 ## Feedback states
 

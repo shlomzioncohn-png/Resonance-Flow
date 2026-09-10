@@ -50,7 +50,7 @@ public class SourceRecordLoader {
             case CALENDAR -> calendarReader.read();
             case SLACK -> chatSessionGrouper.group(slackReader.read());
             case WHATSAPP -> chatSessionGrouper.group(whatsAppReader.read());
-            case MEETING -> throw new IllegalArgumentException(
+            case MEETING, SCANNED_DOC -> throw new IllegalArgumentException(
                     sourceType + " is produced by the meeting/doc/audio lane, not this one");
         };
     }

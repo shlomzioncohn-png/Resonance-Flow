@@ -36,9 +36,8 @@ export const navSections: NavSection[] = [
   {
     label: 'Employee',
     items: [
-      { label: 'Employee overview', href: '/employee', icon: <PersonOutlineIcon fontSize="small" /> },
-      { label: 'My workload', href: '/employee/workload' },
-      { label: 'My blocked work', href: '/employee/blocked' },
+      { label: 'My Workspace', href: '/employee', icon: <PersonOutlineIcon fontSize="small" /> },
+      { label: 'My Tasks', href: '/employee/tasks' },
     ],
   },
 ]
