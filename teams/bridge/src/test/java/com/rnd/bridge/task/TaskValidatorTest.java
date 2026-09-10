@@ -34,6 +34,7 @@ class TaskValidatorTest {
                 "crm:D-1",
                 null,
                 null,
+                null,
                 null);
     }
 
@@ -87,36 +88,36 @@ class TaskValidatorTest {
     private static Task withUrgency(Task t, Integer urgency) {
         return new Task(t.organizationId(), t.projectId(), t.title(), t.description(), t.status(), urgency,
                 t.confidence(), t.tier(), t.extractionProvenance(), t.roleContext(), t.sourceType(), t.sourceRef(),
-                t.effortEstimateMinutes(), t.deadline(), t.snoozedUntil());
+                t.effortEstimateMinutes(), t.deadline(), t.snoozedUntil(), t.completedAt());
     }
 
     private static Task withConfidence(Task t, Double confidence) {
         return new Task(t.organizationId(), t.projectId(), t.title(), t.description(), t.status(), t.urgency(),
                 confidence, t.tier(), t.extractionProvenance(), t.roleContext(), t.sourceType(), t.sourceRef(),
-                t.effortEstimateMinutes(), t.deadline(), t.snoozedUntil());
+                t.effortEstimateMinutes(), t.deadline(), t.snoozedUntil(), t.completedAt());
     }
 
     private static Task withEffortEstimateMinutes(Task t, Integer minutes) {
         return new Task(t.organizationId(), t.projectId(), t.title(), t.description(), t.status(), t.urgency(),
                 t.confidence(), t.tier(), t.extractionProvenance(), t.roleContext(), t.sourceType(), t.sourceRef(),
-                minutes, t.deadline(), t.snoozedUntil());
+                minutes, t.deadline(), t.snoozedUntil(), t.completedAt());
     }
 
     private static Task withStatus(Task t, TaskStatus status) {
         return new Task(t.organizationId(), t.projectId(), t.title(), t.description(), status, t.urgency(),
                 t.confidence(), t.tier(), t.extractionProvenance(), t.roleContext(), t.sourceType(), t.sourceRef(),
-                t.effortEstimateMinutes(), t.deadline(), t.snoozedUntil());
+                t.effortEstimateMinutes(), t.deadline(), t.snoozedUntil(), t.completedAt());
     }
 
     private static Task withSnoozedUntil(Task t, Instant snoozedUntil) {
         return new Task(t.organizationId(), t.projectId(), t.title(), t.description(), t.status(), t.urgency(),
                 t.confidence(), t.tier(), t.extractionProvenance(), t.roleContext(), t.sourceType(), t.sourceRef(),
-                t.effortEstimateMinutes(), t.deadline(), snoozedUntil);
+                t.effortEstimateMinutes(), t.deadline(), snoozedUntil, t.completedAt());
     }
 
     private static Task withTitle(Task t, String title) {
         return new Task(t.organizationId(), t.projectId(), title, t.description(), t.status(), t.urgency(),
                 t.confidence(), t.tier(), t.extractionProvenance(), t.roleContext(), t.sourceType(), t.sourceRef(),
-                t.effortEstimateMinutes(), t.deadline(), t.snoozedUntil());
+                t.effortEstimateMinutes(), t.deadline(), t.snoozedUntil(), t.completedAt());
     }
 }

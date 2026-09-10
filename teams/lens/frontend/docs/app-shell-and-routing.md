@@ -28,9 +28,9 @@ app/
 │   │   ├── blocked/page.tsx   "/manager/blocked"
 │   │   └── bottlenecks/page.tsx "/manager/bottlenecks"
 │   ├── employee/
-│   │   ├── page.tsx           "/employee"
-│   │   ├── workload/page.tsx  "/employee/workload"
-│   │   └── blocked/page.tsx   "/employee/blocked"
+│   │   ├── page.tsx                     "/employee"                  My Workspace — time-boxed task recommendation
+│   │   ├── tasks/page.tsx               "/employee/tasks"            My Tasks (placeholder)
+│   │   └── tasks/[taskId]/page.tsx      "/employee/tasks/:taskId"    Task Details, drill-down, not in nav
 │   ├── team/[employeeId]/page.tsx     "/team/:employeeId"   drill-down, not in nav
 │   └── projects/[projectId]/page.tsx  "/projects/:projectId" drill-down, not in nav
 │

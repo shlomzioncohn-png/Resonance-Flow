@@ -49,27 +49,21 @@ The LENS Gateway is the **single entry point** for external client (Frontend) re
 
 ---
 
-## 2. API Path Structure
+## 2. API Endpoints
 
-All requests follow this pattern:
+The Gateway exposes three endpoints for the Frontend's workspace functionality. All requests are forwarded to the BFF service.
 
-```
-GET/POST/PUT/DELETE  http://gateway:8080/api/{resource}
-                                           ^^  ^^^^^^^^
-                                        version resource
-                                        
-                              ↓ Routes to ↓
-                              
-                     http://bff:8080/{resource}
-```
+### Endpoint Routing Table
 
-### Routing Table
+| Method | Request Path | BFF Forwards To | Handler | Notes |
+|---|---|---|---|---|
+| POST | `/api/workspace/recommend` | `http://bff-service:8080/workspace/recommend` | BFF (Sari) | Get task recommendation for available time |
+| GET | `/api/workspace/tasks/{taskId}` | `http://bff-service:8080/workspace/tasks/{taskId}` | BFF (Sari) | Get full task details by ID |
+| PATCH | `/api/workspace/tasks/{taskId}/status` | `http://bff-service:8080/workspace/tasks/{taskId}/status` | BFF (Sari) | Update task status |
 
-| Request Path | Gateway Forwards To | Who Handles Next | Notes |
-|---|---|---|---|
-| `/api/**` | `http://bff-service:8080/**` | BFF (Sari) | All external requests go to BFF |
+**Current Implementation:** Manual routing via `WorkspaceController.java` — each endpoint explicitly forwards to BFF using `RestTemplate`.
 
-**Path Stripping:** The `/api` prefix is stripped before forwarding. Gateway removes 1 path segment.
+**Future Phases:** Once more team services are ready, BFF will expand to route to Bridge, Chain, Inbox, and Mind services. Gateway's routing layer remains unchanged.
 
 ---
 
@@ -106,15 +100,35 @@ BFF Processes:
 ```
 
 ### Error Response (4xx, 5xx)
+
+**BREAKING CHANGE (Phase 2)**: Error response format changed. Clients expecting numeric HTTP status in response body should update to new format:
+
+```json
+{
+  "status": "ERROR",
+  "errorCode": "BAD_REQUEST",
+  "message": "Invalid request format",
+  "path": "/api/workspace/tasks/123",
+  "timestamp": "2026-08-25T10:30:00Z",
+  "details": "Request body is malformed"
+}
+```
+
+**Old format (no longer used):**
 ```json
 {
   "status": 400,
-  "error": "BAD_REQUEST",
-  "message": "Invalid request format",
-  "path": "/api/dashboard",
-  "timestamp": "2026-08-25T10:30:00Z"
+  "error": "BAD_REQUEST"
 }
 ```
+
+**Frontend action required**: Update error response parsing to expect:
+- `status`: Always the string "ERROR" (not HTTP code)
+- `errorCode`: Machine-readable error type (e.g., "BAD_REQUEST", "NOT_FOUND", "SERVICE_UNAVAILABLE")
+- `message`: Human-readable message
+- `path`: Original request path
+- `timestamp`: ISO-8601 datetime
+- `details`: Optional context (null if not present)
 
 ---
 
@@ -125,16 +139,18 @@ BFF Processes:
 | Unknown route | 404 | `NOT_FOUND` | "Route not found" |
 | BFF unavailable | 503 | `SERVICE_UNAVAILABLE` | "Backend service unavailable" |
 | Request timeout | 504 | `GATEWAY_TIMEOUT` | "Request timeout" |
-| Invalid request | 400 | `BAD_REQUEST` | "Invalid request format" |
+| Invalid request (malformed JSON) | 400 | `BAD_REQUEST` | "Invalid request format" |
 | Authentication required | 401 | `UNAUTHORIZED` | "Authentication required" |
 | Insufficient permissions | 403 | `FORBIDDEN` | "Insufficient permissions" |
 | Internal error | 500 | `INTERNAL_ERROR` | "Internal server error" |
 
-**All errors must include:**
-- `status` (HTTP status code)
-- `error` (error code)
-- `message` (human-readable message)
-- `path` (original request path)
+**All errors return:**
+- `status`: Fixed string "ERROR"
+- `errorCode`: One of the error codes above
+- `message`: Human-readable message
+- `path`: Original request path
+- `timestamp`: ISO-8601 datetime when error occurred
+- `details`: Optional additional context (omitted if null)
 - `timestamp` (ISO 8601)
 
 ---
@@ -208,150 +224,125 @@ Returns gateway readiness status, including BFF availability check.
 
 ## 6. Configuration
 
-Services are configured via **environment variables** or **application.yml**, never hardcoded.
+Gateway configuration is managed via **environment variables** in `application.yml`.
 
-Gateway routes are defined in `application.yml` with downstream service URLs:
+### BFF Service Configuration
 
+| Variable | Default | Purpose |
+|---|---|---|
+| `BFF_SERVICE_URL` | `http://bff-service:8080` | Base URL for BFF service |
+| `BFF_CONNECT_TIMEOUT_MS` | `2000` | Connection timeout (milliseconds) |
+| `BFF_READ_TIMEOUT_MS` | `10000` | Read timeout (milliseconds) |
+| `BFF_ENDPOINT_WORKSPACE_RECOMMEND` | `/workspace/recommend` | BFF endpoint for task recommendations |
+| `BFF_ENDPOINT_TASKS` | `/workspace/tasks` | BFF endpoint for task operations |
+
+### Server Configuration
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `SERVER_PORT` | `8080` | Gateway service port |
+| `SPRING_PROFILES_ACTIVE` | `local` | Active Spring profile (local/prod/etc) |
+
+### How Configuration Works
+
+Example `application.yml`:
 ```yaml
-# application.yml
-spring:
-  cloud:
-    gateway:
-      routes:
-        - id: bridge
-          uri: http://bridge-service:8080
-          predicates:
-            - Path=/api/bridge/**
-          filters:
-            - StripPrefix=2
-        - id: mind
-          uri: http://mind-service:8080
-          predicates:
-            - Path=/api/mind/**
-          filters:
-            - StripPrefix=2
-        - id: inbox
-          uri: http://inbox-service:8080
-          predicates:
-            - Path=/api/inbox/**
-          filters:
-            - StripPrefix=2
-        - id: chain
-          uri: http://chain-service:8080
-          predicates:
-            - Path=/api/chain/**
-          filters:
-            - StripPrefix=2
+bff:
+  service:
+    url: ${BFF_SERVICE_URL:http://bff-service:8080}
+  connect-timeout-ms: ${BFF_CONNECT_TIMEOUT_MS:2000}
+  read-timeout-ms: ${BFF_READ_TIMEOUT_MS:10000}
+  endpoints:
+    workspace-recommend: ${BFF_ENDPOINT_WORKSPACE_RECOMMEND:/workspace/recommend}
+    tasks: ${BFF_ENDPOINT_TASKS:/workspace/tasks}
 ```
 
-**For Docker Compose:**
-- Use service container names (e.g., `http://bridge-service:8080`)
-- Gateway automatically resolves via Docker's internal DNS
+**Benefits:**
+- No code changes needed to adjust BFF URL
+- Supports different environments (local, staging, production)
+- Easy to override without Docker rebuild
 
 ---
 
-## 7. Service Integration Requirements for Each Team
+## 7. Implementation Details
 
-### Your Team's Responsibility
+### Current Architecture
 
-1. **Build your service** on port 8080
-2. **Implement /health endpoint**
-   ```json
-   GET /health
-   Response:
-   {
-     "status": "UP",
-     "service": "{your-service-name}",
-     "version": "0.1.0",
-     "timestamp": "2026-08-25T..."
-   }
-   ```
+The Gateway uses **manual routing** via Spring Boot `RestTemplate`:
 
-3. **Implement /health/ready endpoint** (same format as /health)
+1. **WorkspaceController** receives requests from Frontend
+2. **Extracts user ID** from mock token (TODO: real JWT extraction)
+3. **Builds headers** with X-User-Id
+4. **Forwards to BFF** using `RestTemplate.postForObject()` / `exchange()`
+5. **Returns response** to Frontend unchanged
 
-4. **Register with LENS team**
-   - Provide your service name (e.g., "bridge")
-   - LENS will add a route to Gateway
-
-5. **Test via Gateway**
-   ```bash
-   curl http://localhost:8080/api/{your-service}/health
-   ```
-
-### Request Flow Through Gateway
+### Request Flow
 
 ```
-Client Request
-  ↓
-[Gateway Receives] GET /api/bridge/sources?limit=10
-  ↓
-[Routing Match] /api/bridge/** matches "bridge" route
-  ↓
-[Prefix Strip] Removes /api/bridge (2 path segments)
-  ↓
-[Forward] GET http://bridge-service:8080/sources?limit=10
-  ↓
-[Your Service Processes] Returns response with your status code
-  ↓
-[Gateway Returns] Response to client unchanged
+Frontend
+  │
+  │ POST /api/workspace/recommend
+  │ Content-Type: application/json
+  │ { "availableTime": 45 }
+  │
+  ▼
+WorkspaceController (Gateway)
+  ├─ Extract userId (currently mock)
+  ├─ Build headers (X-User-Id: emp_001)
+  ├─ Construct BFF URL from config
+  │  (bff.service.url + bff.endpoints.workspace-recommend)
+  ├─ Call: POST http://bff-service:8080/workspace/recommend
+  │
+  └─ Return response to Frontend (200 OK or error)
 ```
 
-### Example: Bridge Team Integration
-1. Build Bridge service to listen on port 8080
-2. Implement `/health` and `/health/ready` endpoints
-3. Notify LENS team
-4. LENS adds route to Gateway
-5. You're done! Gateway handles routing
+### Future Extensibility
+
+When more services are ready (Bridge, Chain, Inbox, Mind), the BFF will handle routing to those services. The Gateway's routing logic remains unchanged — it only forwards to BFF.
 
 ---
 
 ## 8. Testing & Verification
 
 ### Manual Testing
+
 ```bash
-# Test routing
-curl http://localhost:8080/api/bridge/health
+# Test workspace endpoint
+curl -X POST http://localhost:8080/api/workspace/recommend \
+  -H "Content-Type: application/json" \
+  -d '{"availableTime": 45}'
 
-# Test unknown route
-curl http://localhost:8080/api/unknown
+# Test get task details
+curl http://localhost:8080/api/workspace/tasks/task_001
 
-# Test error handling
-curl -X POST http://localhost:8080/api/bridge/invalid
+# Test unknown route (should get 404)
+curl http://localhost:8080/api/unknown/endpoint
 ```
 
 ### Docker Compose Testing
-```bash
-docker-compose up --build
-# Verify all services started
-docker-compose logs
-```
 
----
-
-## 9. Testing
-
-### Unit Tests
-- `GatewayHealthTests` - Verify /health and /health/ready endpoints return correct format
-- `GatewayRoutingTests` - Verify routing paths are configured for all services
-- `GatewayErrorHandlingTests` - Verify error handling for unknown routes and malformed requests
-
-### Running Tests
 ```bash
 cd teams/lens/gateway
-mvn test
+docker-compose up --build
+```
+
+Verify Gateway is running:
+```bash
+curl http://localhost:8080/health
 ```
 
 ### Test Coverage
-- Health endpoints (2xx responses)
-- Routing path configuration (4xx/5xx responses)
-- Error handling (400, 404, 503, 504)
-- Query parameter forwarding
+
+- ✅ Workspace recommendation endpoint
+- ✅ Task details retrieval
+- ✅ Task status updates
+- ✅ Error handling for unknown routes (404)
+- ✅ Timeout handling (504)
+- ✅ Service unavailable handling (503)
 
 ---
 
-## 10. Next Steps
-
-## 10. Next Steps
+## 9. Next Steps
 
 1. ✅ Define Gateway Contract (this document)
 2. ✅ Implement Routing with all downstream services
@@ -365,36 +356,24 @@ mvn test
 
 ---
 
-## 11. Consumer Guidelines (for other teams)
+## 10. Consumer Guidelines (for other teams)
 
-### How to integrate with Gateway
+### Future Phase: When More Services are Ready
 
-1. **Ensure your service runs on a known URL** (e.g., `http://your-service:8080`)
-2. **Notify LENS team** of your service URL
-3. **LENS adds route** to Gateway configuration
-4. **Clients use** `/api/{your-service}/your-endpoints`
-5. **Your service** receives requests without `/api/{your-service}` prefix
+When Bridge, Chain, Inbox, or Mind teams are ready, they'll integrate through BFF — not directly with Gateway.
 
-### What Gateway guarantees
-- ✅ Requests forwarded to your service with original method preserved
-- ✅ Query parameters and request body forwarded unchanged
-- ✅ Response status codes preserved (your service's status code returned to client)
-- ✅ Response body forwarded unchanged (no transformation)
-- ✅ Your service receives requests without `/api/{service}` prefix
+**Architecture remains:**
+```
+Frontend → Gateway → BFF → [Bridge/Chain/Inbox/Mind]
+```
 
-### What Gateway does NOT do
-- ❌ Monitor your service health (you maintain your own /health endpoint)
-- ❌ Transform requests/responses (pure routing only)
-- ❌ Handle service-specific authentication (future BFF service)
-- ❌ Aggregate data from multiple services (each service is independent)
+**BFF responsibilities (Sari's team):**
+- Route requests to appropriate team service
+- Orchestrate calls to multiple services
+- Aggregate and transform responses
+- Handle service failures
 
-### Architectural Principle
-**Each service is autonomous:** 
-- Your team owns your service, including its health status
-- Gateway is a transparent routing layer
-- Teams communicate directly (not through Gateway)
-- Each team monitors its own service health
-- ❌ No request/response transformation
-- ❌ No authentication enforcement
-- ❌ No rate limiting
-- ❌ No caching
+**Gateway responsibilities (LENS team):**
+- Route Frontend requests to BFF (unchanged)
+- Error handling (unchanged)
+- Health checking (unchanged)

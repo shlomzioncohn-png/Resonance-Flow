@@ -66,7 +66,7 @@ class GitHubKafkaProducerTest {
     @Test
     void publish_shouldThrowExceptionWhenSourceRefIsNull() {
         Task task = new Task(null, null, "No sourceRef task", null, TaskStatus.NEW, null, null,
-                Tier.TACTICAL, ExtractionProvenance.ETL, null, SourceType.GITHUB_ISSUE, null, null, null, null);
+                Tier.TACTICAL, ExtractionProvenance.ETL, null, SourceType.GITHUB_ISSUE, null, null, null, null, null);
 
         assertThatThrownBy(() -> gitHubKafkaProducer.publish(task))
                 .isInstanceOf(IllegalArgumentException.class)
@@ -82,7 +82,7 @@ class GitHubKafkaProducerTest {
 
     private Task createTask(String sourceRef) {
         return new Task(null, null, "Test Task", "Test description", TaskStatus.NEW, null, null,
-                Tier.TACTICAL, ExtractionProvenance.ETL, null, SourceType.GITHUB_ISSUE, sourceRef, null, null, null);
+                Tier.TACTICAL, ExtractionProvenance.ETL, null, SourceType.GITHUB_ISSUE, sourceRef, null, null, null, null);
     }
 
     private SendResult<String, Task> createSendResult(Task task) {
