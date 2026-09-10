@@ -52,7 +52,22 @@ Revisit this choice if a long-document source becomes an embedding target
 (e.g. full AMI meeting transcripts, which regularly exceed 512 tokens) --
 chunk-and-average (or a long-context model) would then be worth the added
 complexity.
+
+Calling from async code
+------------------------
+`embed()`/`embed_batch()` are plain `def`, not `async def` -- model
+inference is CPU-bound, not I/O, so there's nothing to `await`. But that
+also means they're blocking calls: running one directly inside an
+`async def` route handler (the exact pattern in this package's README)
+would stall the event loop for the duration of inference, the same
+problem `pgvector_store.py` was migrated off psycopg2 to avoid -- just on
+the embedding side instead of the DB side. Use `embed_async()` /
+`embed_batch_async()` below from any `async def` caller instead; they
+offload the same call to a worker thread via `asyncio.to_thread()` so the
+event loop stays free to serve other requests while inference runs.
 """
+
+import asyncio
 
 from sentence_transformers import SentenceTransformer
 
@@ -105,3 +120,16 @@ def embed_batch(texts: list[str], is_query: bool = False) -> list[list[float]]:
         texts = [BGE_QUERY_INSTRUCTION + t for t in texts]
     vectors = _get_model().encode(texts, normalize_embeddings=True)
     return vectors.tolist()
+
+
+async def embed_async(text: str, is_query: bool = False) -> list[float]:
+    """Non-blocking wrapper for embed() -- use this instead of embed()
+    when calling from an `async def` route handler, so the CPU-bound
+    model inference doesn't stall the event loop. See the module
+    docstring's "Calling from async code" section."""
+    return await asyncio.to_thread(embed, text, is_query)
+
+
+async def embed_batch_async(texts: list[str], is_query: bool = False) -> list[list[float]]:
+    """Non-blocking wrapper for embed_batch() -- see embed_async()."""
+    return await asyncio.to_thread(embed_batch, texts, is_query)
