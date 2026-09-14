@@ -317,6 +317,30 @@ class TaskServiceTest {
         verify(outboxEventRepository, never()).save(any());
     }
 
+    @Test
+    void applySchedulingUpdate_writesPendingOutboxEventWithTheFullTaskUpdatedSnapshot() {
+        Task task = incomingTask();
+        task.setId(UUID.randomUUID());
+        when(taskRepository.findById(task.getId())).thenReturn(Optional.of(task));
+        when(taskRepository.saveAndFlush(task)).thenReturn(task);
+
+        taskService.applySchedulingUpdate(task.getId(), true, 7.5f, UUID.randomUUID());
+
+        OutboxEvent event = capturedOutboxEvent();
+        assertThat(event.getEventType()).isEqualTo(EventType.TASK_UPDATED);
+        // Same shape as a title/description update (TaskUpdatedPayload.from) - not the old
+        // partial {taskId, isAvailable, priorityScore} map, which the registered task.updated
+        // proto schema can't represent (no priority_score field, "available" not "isAvailable").
+        assertThat(event.getPayload())
+                .containsEntry("taskId", task.getId().toString())
+                .containsEntry("available", true)
+                .containsEntry("title", "Fix flaky test")
+                .containsEntry("sourceType", "GITHUB_ISSUE")
+                .containsEntry("status", "NEW")
+                .doesNotContainKey("isAvailable")
+                .doesNotContainKey("priorityScore");
+    }
+
     private void stubNoExistingTask() {
         when(taskRepository.findByTenant_IdAndSourceTypeAndSourceRef(
                 tenantId, SourceType.GITHUB_ISSUE, SOURCE_REF))

@@ -246,6 +246,7 @@ jobs:
     runs-on: self-hosted
     permissions:
       contents: write
+      pull-requests: write
     concurrency:
       group: resonance-flow-values-update
       cancel-in-progress: false
@@ -262,14 +263,34 @@ jobs:
           IMAGE_NAME_LC=$(echo "${{ env.IMAGE_NAME }}" | tr '[:upper:]' '[:lower:]')
           yq -i ".components.${{ inputs.service_name }}.image.repository = \"${IMAGE_NAME_LC}\" | .components.${{ inputs.service_name }}.image.tag = \"${{ needs.test.outputs.image_tag }}\"" "$CHART_VALUES"
 
-      - name: Commit and push updated values
+      - name: Commit updated values
+        id: commit
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add "$CHART_VALUES"
           if git diff --cached --quiet; then
-            echo "No changes to commit"
+            echo "changed=false" >> "$GITHUB_OUTPUT"
           else
             git commit -m "chore(${{ inputs.service_name }}): deploy image ${{ needs.test.outputs.image_tag }} [skip ci]"
-            git push origin HEAD:${{ github.ref_name }}
+            echo "changed=true" >> "$GITHUB_OUTPUT"
           fi
+
+      # main's ruleset requires every change to go through a reviewed PR, and
+      # there's no bot bypass configured (deliberately - a bypass broad enough
+      # for the bot would also let every real admin skip review, which defeats
+      # the rule's purpose). So instead of pushing directly, open a new PR for
+      # a human to approve, same as any other change to main.
+      - name: Open a PR with the manifest update
+        if: steps.commit.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          BRANCH="ci/${{ inputs.service_name }}-deploy-${{ needs.test.outputs.image_tag }}"
+          git checkout -b "$BRANCH"
+          git push origin "$BRANCH"
+          gh pr create \
+            --base main \
+            --head "$BRANCH" \
+            --title "chore(${{ inputs.service_name }}): deploy image ${{ needs.test.outputs.image_tag }}" \
+            --body "Automated image tag bump for \`${{ inputs.service_name }}\` to \`${{ needs.test.outputs.image_tag }}\`, triggered by \`${{ github.event_name }}\` on \`${{ github.ref_name }}\`. Needs review/approval per the \`main\` branch ruleset."
