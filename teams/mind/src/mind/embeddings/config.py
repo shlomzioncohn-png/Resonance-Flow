@@ -43,7 +43,11 @@ class Settings(BaseSettings):
     duplicate_similarity_threshold: float = 0.90
 
 
-settings = Settings()
+# mypy can't see that BaseSettings populates required fields (vector_store_dsn)
+# from env vars at runtime, so it flags this as a missing argument. Field stays
+# required (no default) -- this ignore doesn't paper over the fail-fast
+# behavior described above, it just tells mypy the call is intentional.
+settings = Settings()  # type: ignore[call-arg]
 
 PG_DSN = settings.vector_store_dsn
 PG_TABLE = settings.vector_store_table

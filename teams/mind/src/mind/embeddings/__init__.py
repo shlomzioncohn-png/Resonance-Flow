@@ -33,12 +33,12 @@ from mind.embeddings.embeddings import embed
 from mind.embeddings.factory import get_store
 
 __all__ = [
-    "embed",
-    "upsert",
-    "search",
-    "delete",
-    "clear",
     "DUPLICATE_SIMILARITY_THRESHOLD",
+    "clear",
+    "delete",
+    "embed",
+    "search",
+    "upsert",
 ]
 
 _store = None
