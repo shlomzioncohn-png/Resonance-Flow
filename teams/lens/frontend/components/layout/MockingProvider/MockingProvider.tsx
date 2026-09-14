@@ -19,6 +19,17 @@ import { useEffect, useState, type ReactNode } from 'react'
  * entirely: in production the `if` below returns before the import is ever
  * requested, so nothing pulls it in.
  */
+// Module-scoped, not component state: React StrictMode's dev-only
+// mount/cleanup/mount runs this effect twice in immediate succession, and
+// both invocations would otherwise call worker.start() concurrently on the
+// same worker - the second call throws "cannot configure an already
+// enabled network" because the interceptor is already mid-enable from the
+// first. Caching the in-flight/resolved start promise here means every
+// effect run (both StrictMode passes, and any real remount) shares the
+// same single start() call. It naturally resets on a real page navigation,
+// since that re-evaluates this module from scratch.
+let startPromise: Promise<void> | null = null
+
 export function MockingProvider({ children }: { children: ReactNode }) {
   const [ready, setReady] = useState(process.env.NODE_ENV !== 'development')
 
@@ -26,19 +37,22 @@ export function MockingProvider({ children }: { children: ReactNode }) {
     if (process.env.NODE_ENV !== 'development') return
 
     let cancelled = false
-    import('@/mocks/browser').then(({ worker }) =>
-      worker
-        .start({
+
+    if (!startPromise) {
+      startPromise = import('@/mocks/browser').then(({ worker }) =>
+        worker.start({
           // Anything without a matching handler (Next.js's own dev
           // requests, and the real, already-working /api/workspace/*
           // calls) passes straight through untouched, instead of being
           // logged as a warning or blocked as an error.
           onUnhandledRequest: 'bypass',
-        })
-        .then(() => {
-          if (!cancelled) setReady(true)
         }),
-    )
+      )
+    }
+
+    startPromise.then(() => {
+      if (!cancelled) setReady(true)
+    })
     return () => {
       cancelled = true
     }
