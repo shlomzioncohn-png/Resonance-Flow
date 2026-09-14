@@ -248,6 +248,17 @@ components:
       periodSeconds: 5
       failureThreshold: 3
     env: {}
+    dependencies:
+      - name: postgresql
+        port: 5432
+    config:
+      data:
+        datasource:
+          # Own database (see postgresql.primary.initdb.scripts) - not part of Inbox's tasks schema.
+          database: chain
+          username: postgres
+          password: postgres
+        # Kafka pending confirmation from the Chain team on what it consumes/produces (#384).
   inbox:
     enabled: true
     replicaCount: 1
@@ -402,3 +413,8 @@ postgresql:
       limits:
         cpu: 150m
         memory: 192Mi
+    initdb:
+      scripts:
+        # auth.database only creates resonance_flow (Inbox's) - Chain needs its own.
+        create-chain-database.sql: |
+          CREATE DATABASE chain;

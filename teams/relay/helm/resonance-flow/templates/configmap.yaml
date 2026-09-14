@@ -1,5 +1,5 @@
 {{- range $componentName, $component := .Values.components }}
-{{- if and $component.enabled (ne $componentName "inbox") }}
+{{- if and $component.enabled (ne $componentName "inbox") (ne $componentName "chain") }}
 {{- with $component.config }}
 ---
 apiVersion: v1

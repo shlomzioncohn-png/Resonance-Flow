@@ -29,11 +29,20 @@ open follow-up, not done as part of this merge.
 - Spring Boot 3.3.13 (Maven)
 - Docker / Docker Compose
 
-The DB choice for the project has not been decided yet. An in-memory H2 database is configured
-as a placeholder purely so a `DataSource`/transaction manager exists for `@Transactional` -
-`Task`/`TaskDependency` are plain DTOs (not JPA entities) and are **not** persisted to H2; real
-data still lives in the in-memory `TaskRepository`/`TaskDependencyRepository` implementations.
-See [CLAUDE.md](CLAUDE.md) for the full rationale and open items.
+**Postgres has been chosen** as Chain's vector/graph store, superseding the placeholder H2 setup
+below (see issue #384) - its own database (`chain`) on the shared cluster Postgres instance, wired
+in `teams/relay/helm/resonance-flow/values.yaml` (`components.chain.config.data.datasource`) and
+`templates/services/chain/configmap.yaml`, the same file-mount ConfigMap mechanism Inbox uses.
+Kafka topics/consumer wiring is not part of that yet - still pending confirmation from the team on
+what `TaskEligibilityService` actually consumes/produces. Application-side JPA wiring (entities/
+repositories actually backed by Postgres, replacing the in-memory `TaskRepository`/
+`TaskDependencyRepository`) is also still open follow-up work, not done here.
+
+Locally, an in-memory H2 database is still configured as a placeholder purely so a
+`DataSource`/transaction manager exists for `@Transactional` - `Task`/`TaskDependency` are plain
+DTOs (not JPA entities) and are **not** persisted to H2; real data still lives in the in-memory
+`TaskRepository`/`TaskDependencyRepository` implementations. See [CLAUDE.md](CLAUDE.md) for the
+full rationale and open items.
 
 Task identifiers are `java.util.UUID` for now, pending the Inbox team publishing its own task id
 type (`Task`/`TaskDependency` will switch to that type once it exists).
