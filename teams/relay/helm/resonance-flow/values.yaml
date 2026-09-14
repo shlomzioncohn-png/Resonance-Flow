@@ -56,6 +56,22 @@ initContainers: []
 nodeSelector: {}
 tolerations: []
 affinity: {}
+pipeConsumerGroupSweep:
+  enabled: true
+  schedule: "0 * * * *"
+  groupPattern: "pipe-*"
+  image:
+    repository: apache/kafka
+    tag: "4.2.1"
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+    limits:
+      cpu: 200m
+      memory: 256Mi
 components:
   mind:
     enabled: true
