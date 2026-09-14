@@ -419,11 +419,16 @@ kafka:
     resources:
       # 192Mi was OOMKilling the JVM before it finished KRaft storage formatting on
       # startup (verified locally - combined broker+controller needs more headroom).
+      # cpu request bumped from 100m: on the single self-hosted CI runner, that request
+      # gave Kafka almost no guaranteed CPU share against the concurrent Docker/Maven image
+      # build - its readiness probe (tcp :controller) never stabilized within the deploy's
+      # wait/timeout, confirmed on the first run after schema-registry became a 4th
+      # concurrently-running component sharing that same runner.
       requests:
-        cpu: 100m
+        cpu: 300m
         memory: 128Mi
       limits:
-        cpu: 500m
+        cpu: 750m
         memory: 768Mi
   broker:
     replicaCount: 0

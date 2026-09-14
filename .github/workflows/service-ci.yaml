@@ -190,7 +190,7 @@ jobs:
             --set components.${SERVICE}.image.tag=local \
             --set components.${SERVICE}.image.pullPolicy=Never \
             --namespace "$SERVICE" --create-namespace \
-            --wait --timeout 420s
+            --wait --timeout 600s
 
       - name: Diagnose deploy failure
         if: failure() && env.IS_DEPLOY_RUN == 'true'
@@ -205,7 +205,10 @@ jobs:
           echo "::group::kubectl get events (sorted)"
           kubectl -n "$SERVICE" get events --sort-by=.lastTimestamp
           echo "::endgroup::"
-          for pod in $(kubectl -n "$SERVICE" get pods -l app.kubernetes.io/component="$SERVICE" -o jsonpath='{.items[*].metadata.name}'); do
+          # Every pod in the namespace, not just this service's own - a stuck wait-for-*
+          # initContainer means the real failure is almost always in a dependency
+          # (kafka/postgres/schema-registry), not in $SERVICE itself.
+          for pod in $(kubectl -n "$SERVICE" get pods -o jsonpath='{.items[*].metadata.name}'); do
             echo "::group::kubectl logs $pod (current)"
             kubectl -n "$SERVICE" logs "$pod" --all-containers --tail=200 || true
             echo "::endgroup::"
