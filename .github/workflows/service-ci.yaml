@@ -116,6 +116,20 @@ jobs:
           cache: maven
           cache-dependency-path: ${{ inputs.service_dir }}/pom.xml
 
+      # setup-java only installs the JDK, not Maven itself - GitHub-hosted ubuntu-latest
+      # bundles mvn but the self-hosted runner doesn't. Cached under /opt so repeat runs
+      # on the same persistent runner skip the download.
+      - name: Install Maven
+        if: inputs.language == 'java'
+        run: |
+          MAVEN_VERSION=3.9.9
+          MAVEN_HOME="/opt/apache-maven-${MAVEN_VERSION}"
+          if [ ! -x "${MAVEN_HOME}/bin/mvn" ]; then
+            curl -sL "https://dlcdn.apache.org/maven/maven-3/${MAVEN_VERSION}/binaries/apache-maven-${MAVEN_VERSION}-bin.tar.gz" -o /tmp/maven.tar.gz
+            sudo tar -xzf /tmp/maven.tar.gz -C /opt
+          fi
+          echo "${MAVEN_HOME}/bin" >> "$GITHUB_PATH"
+
       - name: Run Java tests
         if: inputs.language == 'java'
         working-directory: ${{ inputs.service_dir }}
