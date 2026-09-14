@@ -26,6 +26,7 @@ import java.util.HexFormat;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
+import java.util.UUID;
 import java.util.stream.Stream;
 
 /**
@@ -196,12 +197,18 @@ public class MediaIntakeOrchestrator {
 
             try {
                 Instant ingestedAt = Instant.now();
+                // Shared by this recording's object_key and its sidecars' object_keys, so
+                // the (up to) 3 files land next to each other when browsing MinIO by name -
+                // object_key's schema-enforced pattern only allows sourceType/tenant/date/file
+                // (no extra subfolder), so a shared filename-stem is the only way to group them.
+                String recordingId = UUID.randomUUID().toString();
+
                 String transcriptObjectKey = null;
                 if (transcript != null) {
                     byte[] transcriptContent = Files.readAllBytes(transcript);
                     transcriptObjectKey = intakeService.landTranscript(
                             transcriptContent, transcript.getFileName().toString(), tenantId,
-                            source.sourceType(), ingestedAt);
+                            source.sourceType(), ingestedAt, recordingId);
                 }
 
                 String meetingMetadataObjectKey = null;
@@ -210,14 +217,14 @@ public class MediaIntakeOrchestrator {
                     byte[] meetingMetadataContent = Files.readAllBytes(meetingMetadataFile);
                     meetingMetadataObjectKey = intakeService.landMeetingMetadata(
                             meetingMetadataContent, meetingMetadataFile.getFileName().toString(),
-                            tenantId, source.sourceType(), ingestedAt);
+                            tenantId, source.sourceType(), ingestedAt, recordingId);
                     participants = extractParticipantNames(source, meetingMetadataFile);
                 }
 
                 RawObjectEvent event = intakeService.land(
                         content, contentHash, file.getFileName().toString(), tenantId,
                         source.sourceType(), source.modality(), ingestedAt, transcriptObjectKey,
-                        participants, meetingMetadataObjectKey);
+                        participants, meetingMetadataObjectKey, recordingId);
                 eventPublisher.publish(event);
 
                 moveTo(file, uploadedDir);

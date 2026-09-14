@@ -44,20 +44,23 @@ public class MediaIntakeService {
                                 RawSourceType sourceType, Modality modality, Instant ingestedAt,
                                 String transcriptObjectKey) {
         return land(content, contentHash, filename, tenantId, sourceType, modality, ingestedAt,
-                transcriptObjectKey, null, null);
+                transcriptObjectKey, null, null, UUID.randomUUID().toString());
     }
 
     /**
      * Same as the 8-arg {@link #land} but also carries the participant names and
      * meeting-metadata sidecar pointer derived from a landed Zoom/BBB meeting-metadata
-     * sidecar (see media.meeting package) - both null when no such sidecar was found.
+     * sidecar (see media.meeting package) - both null when no such sidecar was found - and
+     * recordingId, the shared id this recording's object_key and its sidecars' object_keys
+     * all use (see landTranscript/landMeetingMetadata) so the three land next to each other
+     * when browsing MinIO by name, not scattered among unrelated recordings from the same day.
      */
     public RawObjectEvent land(byte[] content, String contentHash, String filename, String tenantId,
                                 RawSourceType sourceType, Modality modality, Instant ingestedAt,
                                 String transcriptObjectKey, List<String> participants,
-                                String meetingMetadataObjectKey) {
+                                String meetingMetadataObjectKey, String recordingId) {
         String contentType = guessContentType(extractExtension(filename));
-        String objectKey = buildObjectKey(sourceType, tenantId, ingestedAt, extractExtension(filename));
+        String objectKey = buildObjectKey(sourceType, tenantId, ingestedAt, recordingId, extractExtension(filename));
 
         PutResult putResult = storageClient.putObject(
                 objectKey, content, contentType,
@@ -72,19 +75,20 @@ public class MediaIntakeService {
     /**
      * Lands a platform-generated transcript sidecar file (see
      * MediaIntakeOrchestrator.findTranscript) under the same source_type/tenant/date
-     * partition as its recording, tagged the same way. No RawObjectEvent/publish of its
-     * own - it's referenced from the recording's event via transcriptObjectKey, per Mind's
-     * confirmed contract ("MinIO pointer to a platform-generated transcript").
+     * partition as its recording, tagged the same way, and sharing its recordingId (see
+     * {@link #land}) so the two land next to each other in MinIO. No RawObjectEvent/publish
+     * of its own - it's referenced from the recording's event via transcriptObjectKey, per
+     * Mind's confirmed contract ("MinIO pointer to a platform-generated transcript").
      */
     public String landTranscript(byte[] content, String filename, String tenantId,
-                                  RawSourceType sourceType, Instant ingestedAt) {
+                                  RawSourceType sourceType, Instant ingestedAt, String recordingId) {
         String extension = extractExtension(filename);
         String contentType = switch (extension.toLowerCase()) {
             case ".vtt" -> "text/vtt";
             case ".srt" -> "application/x-subrip";
             default -> "text/plain";
         };
-        String objectKey = buildObjectKey(sourceType, tenantId, ingestedAt, extension);
+        String objectKey = buildObjectKey(sourceType, tenantId, ingestedAt, recordingId, extension);
 
         storageClient.putObject(
                 objectKey, content, contentType,
@@ -97,18 +101,19 @@ public class MediaIntakeService {
      * Lands a Zoom/BBB meeting-metadata sidecar file (see MediaIntakeOrchestrator and
      * media.meeting) in its source-native format - Zoom's JSON as application/json, BBB's
      * metadata.xml as application/xml - unconverted, under the same source_type/tenant/date
-     * partition as its recording. No RawObjectEvent/publish of its own - referenced from the
-     * recording's event via meetingMetadataObjectKey, same pattern as landTranscript.
+     * partition as its recording, sharing its recordingId (see {@link #land}) so the two
+     * land next to each other in MinIO. No RawObjectEvent/publish of its own - referenced
+     * from the recording's event via meetingMetadataObjectKey, same pattern as landTranscript.
      */
     public String landMeetingMetadata(byte[] content, String filename, String tenantId,
-                                       RawSourceType sourceType, Instant ingestedAt) {
+                                       RawSourceType sourceType, Instant ingestedAt, String recordingId) {
         String extension = extractExtension(filename);
         String contentType = switch (extension.toLowerCase()) {
             case ".json" -> "application/json";
             case ".xml" -> "application/xml";
             default -> "application/octet-stream";
         };
-        String objectKey = buildObjectKey(sourceType, tenantId, ingestedAt, extension);
+        String objectKey = buildObjectKey(sourceType, tenantId, ingestedAt, recordingId, extension);
 
         storageClient.putObject(
                 objectKey, content, contentType,
@@ -117,9 +122,10 @@ public class MediaIntakeService {
         return objectKey;
     }
 
-    private String buildObjectKey(RawSourceType sourceType, String tenantId, Instant ingestedAt, String extension) {
+    private String buildObjectKey(RawSourceType sourceType, String tenantId, Instant ingestedAt,
+                                   String recordingId, String extension) {
         return "%s/%s/%s/%s%s".formatted(
-                sourceType.name(), tenantId, DATE_FORMAT.format(ingestedAt), UUID.randomUUID(), extension);
+                sourceType.name(), tenantId, DATE_FORMAT.format(ingestedAt), recordingId, extension);
     }
 
     private String extractExtension(String filename) {
