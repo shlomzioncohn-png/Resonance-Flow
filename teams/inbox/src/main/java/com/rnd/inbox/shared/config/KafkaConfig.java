@@ -1,6 +1,5 @@
 package com.rnd.inbox.shared.config;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
 import com.rnd.inbox.shared.messaging.kafka.TransientProcessingException;
 import org.apache.kafka.common.serialization.StringSerializer;
 import org.springframework.boot.autoconfigure.kafka.KafkaProperties;
@@ -14,7 +13,6 @@ import org.springframework.kafka.core.DefaultKafkaProducerFactory;
 import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.kafka.core.ProducerFactory;
 import org.springframework.kafka.listener.ContainerProperties;
-import org.springframework.kafka.support.serializer.JsonSerializer;
 import org.springframework.retry.policy.SimpleRetryPolicy;
 import org.springframework.retry.backoff.ExponentialBackOffPolicy;
 import org.springframework.retry.support.RetryTemplate;
@@ -41,9 +39,14 @@ public class KafkaConfig {
         return factory;
     }
 
+    // Explicit StringSerializer instances, not kafkaProperties.buildProducerProperties() alone -
+    // spring.kafka.producer.value-serializer is KafkaProtobufSerializer (for the Protobuf
+    // producer below), and passing serializer instances is what overrides that shared config
+    // for this plain String producer (used by ErrorTopicPublisher).
     @Bean
     public ProducerFactory<String, String> inboxKafkaProducerFactory(KafkaProperties kafkaProperties) {
-        return new DefaultKafkaProducerFactory<>(kafkaProperties.buildProducerProperties());
+        return new DefaultKafkaProducerFactory<>(
+                kafkaProperties.buildProducerProperties(), new StringSerializer(), new StringSerializer());
     }
 
     @Bean
@@ -51,18 +54,21 @@ public class KafkaConfig {
         return new KafkaTemplate<>(inboxKafkaProducerFactory);
     }
 
+    /**
+     * key/value serializers and schema.registry.url are driven entirely by
+     * spring.kafka.producer.* / spring.kafka.properties.* in application.yml - see
+     * teams/relay/docs/kafka-producer-consumer-guide.md. Kafka instantiates
+     * KafkaProtobufSerializer from those properties via reflection; no serializer instance is
+     * built by hand here.
+     */
     @Bean
-    public ProducerFactory<String, Object> jsonKafkaProducerFactory(KafkaProperties kafkaProperties,
-                                                                    ObjectMapper objectMapper) {
-        JsonSerializer<Object> valueSerializer = new JsonSerializer<>(objectMapper);
-        valueSerializer.setAddTypeInfo(false);
-        return new DefaultKafkaProducerFactory<>(
-                kafkaProperties.buildProducerProperties(), new StringSerializer(), valueSerializer);
+    public ProducerFactory<String, Object> protobufKafkaProducerFactory(KafkaProperties kafkaProperties) {
+        return new DefaultKafkaProducerFactory<>(kafkaProperties.buildProducerProperties());
     }
 
     @Bean
-    public KafkaTemplate<String, Object> jsonKafkaTemplate(ProducerFactory<String, Object> jsonKafkaProducerFactory) {
-        return new KafkaTemplate<>(jsonKafkaProducerFactory);
+    public KafkaTemplate<String, Object> protobufKafkaTemplate(ProducerFactory<String, Object> protobufKafkaProducerFactory) {
+        return new KafkaTemplate<>(protobufKafkaProducerFactory);
     }
 
     @Bean(destroyMethod = "shutdown")
