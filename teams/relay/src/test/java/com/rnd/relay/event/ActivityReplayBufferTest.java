@@ -70,14 +70,23 @@ class ActivityReplayBufferTest {
         buffer.record(ORG_ID, USER_ID, notification("t2"), 11, T0.plusSeconds(5));
         buffer.record(ORG_ID, USER_ID, notification("t3"), 12, T0.plusSeconds(10));
 
-        List<ActivityReplayBuffer.Entry> result = buffer.since(ORG_ID, USER_ID, T0.plusSeconds(5));
+        Optional<List<ActivityReplayBuffer.Entry>> result = buffer.since(ORG_ID, USER_ID, T0.plusSeconds(5));
 
-        assertThat(result.stream().map(ActivityReplayBuffer.Entry::offset).toList()).containsExactly(12L);
+        assertThat(result).isPresent();
+        assertThat(result.get().stream().map(ActivityReplayBuffer.Entry::offset).toList()).containsExactly(12L);
     }
 
     @Test
-    void sinceForUnknownUserIsEmpty() {
+    void sinceForUnknownUserIsAMiss() {
         assertThat(buffer.since(ORG_ID, USER_ID, T0)).isEmpty();
+    }
+
+    @Test
+    void sinceOlderThanTheOldestRetainedEntryIsAMiss() {
+        buffer.record(ORG_ID, USER_ID, notification("t1"), 10, T0);
+
+        // asks for everything after T0 minus 5s, but the buffer's oldest entry is at T0 — a hole
+        assertThat(buffer.since(ORG_ID, USER_ID, T0.minusSeconds(5))).isEmpty();
     }
 
     private static TaskNotification notification(String taskId) {
