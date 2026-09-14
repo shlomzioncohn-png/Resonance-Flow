@@ -32,9 +32,6 @@ spec:
               command: ["/bin/sh", "/scripts/sweep.sh"]
 
               env:
-                # Same dependency lookup the Deployment's wait-for-kafka initContainer
-                # uses, and the same SASL creds every other Kafka client in this chart
-                # renders through - see resonance-flow.kafkaSaslJaasConfig.
                 - name: KAFKA_BOOTSTRAP_SERVERS
                   value: {{ printf "%s:%s" (include "resonance-flow.dependencyHostByName" (dict "root" $ "deps" $.Values.dependencies "name" "kafka")) (include "resonance-flow.dependencyPort" (dict "deps" $.Values.dependencies "name" "kafka")) | quote }}
                 - name: KAFKA_SASL_JAAS_CONFIG
