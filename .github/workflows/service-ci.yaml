@@ -279,6 +279,19 @@ jobs:
             echo "changed=true" >> "$GITHUB_OUTPUT"
           fi
 
+      # gh isn't preinstalled on this self-hosted runner - official install snippet
+      # from https://github.com/cli/cli/blob/trunk/docs/install_linux.md.
+      - name: Install GitHub CLI
+        if: steps.commit.outputs.changed == 'true'
+        run: |
+          (type -p wget >/dev/null || sudo apt-get install wget -y) \
+          && sudo mkdir -p -m 755 /etc/apt/keyrings \
+          && wget -qO- https://cli.github.com/packages/githubcli-archive-keyring.gpg | sudo tee /etc/apt/keyrings/githubcli-archive-keyring.gpg > /dev/null \
+          && sudo chmod go+r /etc/apt/keyrings/githubcli-archive-keyring.gpg \
+          && echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" | sudo tee /etc/apt/sources.list.d/github-cli.list > /dev/null \
+          && sudo apt update \
+          && sudo apt install gh -y
+
       # main's ruleset requires every change to go through a reviewed PR, and
       # there's no bot bypass configured (deliberately - a bypass broad enough
       # for the bot would also let every real admin skip review, which defeats
