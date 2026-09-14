@@ -190,7 +190,7 @@ jobs:
             --set components.${SERVICE}.image.tag=local \
             --set components.${SERVICE}.image.pullPolicy=Never \
             --namespace "$SERVICE" --create-namespace \
-            --wait --timeout 600s
+            --wait --timeout 420s
 
       - name: Diagnose deploy failure
         if: failure() && env.IS_DEPLOY_RUN == 'true'
