@@ -36,7 +36,7 @@ class InMemoryDependencyHistoryRepositoryTest {
         DependencyHistoryEntry second = repository.record(newEntry(DependencyChangeSource.USER, null, baseTime));
 
         assertThat(first.getId()).isNotEqualTo(second.getId());
-        assertThat(repository.findByTaskId(taskId, 0, 20).getTotalElements()).isEqualTo(2);
+        assertThat(repository.findByTaskId(taskId, 0, 20).totalElements()).isEqualTo(2);
     }
 
     @Test
@@ -46,7 +46,7 @@ class InMemoryDependencyHistoryRepositoryTest {
 
         assertThat(second).isEqualTo(first);
         assertThat(second.getCreatedAt()).isEqualTo(first.getCreatedAt());
-        assertThat(repository.findByTaskId(taskId, 0, 20).getTotalElements()).isEqualTo(1);
+        assertThat(repository.findByTaskId(taskId, 0, 20).totalElements()).isEqualTo(1);
     }
 
     @Test
@@ -54,7 +54,7 @@ class InMemoryDependencyHistoryRepositoryTest {
         repository.record(newEntry(DependencyChangeSource.MIND, "evt-1", baseTime));
         repository.record(newEntry(DependencyChangeSource.MIND, "evt-2", baseTime));
 
-        assertThat(repository.findByTaskId(taskId, 0, 20).getTotalElements()).isEqualTo(2);
+        assertThat(repository.findByTaskId(taskId, 0, 20).totalElements()).isEqualTo(2);
     }
 
     @Test
@@ -62,7 +62,7 @@ class InMemoryDependencyHistoryRepositoryTest {
         repository.record(newEntry(DependencyChangeSource.MIND, "evt-1", baseTime));
         repository.record(newEntry(DependencyChangeSource.SYSTEM, "evt-1", baseTime));
 
-        assertThat(repository.findByTaskId(taskId, 0, 20).getTotalElements()).isEqualTo(2);
+        assertThat(repository.findByTaskId(taskId, 0, 20).totalElements()).isEqualTo(2);
     }
 
     @Test
@@ -85,9 +85,9 @@ class InMemoryDependencyHistoryRepositoryTest {
     void findByTaskId_returnsEmptyPage_whenNoEntries() {
         PageResponse<DependencyHistoryEntry> page = repository.findByTaskId(taskId, 0, 20);
 
-        assertThat(page.getContent()).isEmpty();
-        assertThat(page.getTotalElements()).isEqualTo(0);
-        assertThat(page.getTotalPages()).isEqualTo(0);
+        assertThat(page.content()).isEmpty();
+        assertThat(page.totalElements()).isEqualTo(0);
+        assertThat(page.totalPages()).isEqualTo(0);
     }
 
     @Test
@@ -97,8 +97,8 @@ class InMemoryDependencyHistoryRepositoryTest {
 
         PageResponse<DependencyHistoryEntry> page = repository.findByTaskId(taskId, 0, 20);
 
-        assertThat(page.getContent()).hasSize(1);
-        assertThat(page.getContent().get(0).getTaskId()).isEqualTo(taskId);
+        assertThat(page.content()).hasSize(1);
+        assertThat(page.content().get(0).getTaskId()).isEqualTo(taskId);
     }
 
     @Test
@@ -107,7 +107,7 @@ class InMemoryDependencyHistoryRepositoryTest {
         DependencyHistoryEntry middle = repository.record(newEntry(DependencyChangeSource.USER, null, baseTime.plusMinutes(1)));
         DependencyHistoryEntry newest = repository.record(newEntry(DependencyChangeSource.USER, null, baseTime.plusMinutes(2)));
 
-        List<DependencyHistoryEntry> content = repository.findByTaskId(taskId, 0, 20).getContent();
+        List<DependencyHistoryEntry> content = repository.findByTaskId(taskId, 0, 20).content();
 
         assertThat(content).extracting(DependencyHistoryEntry::getId)
                 .containsExactly(newest.getId(), middle.getId(), oldest.getId());
@@ -124,7 +124,7 @@ class InMemoryDependencyHistoryRepositoryTest {
         repository.record(entryWithId(higherId, DependencyChangeSource.USER, null, baseTime));
         repository.record(entryWithId(lowerId, DependencyChangeSource.USER, null, baseTime));
 
-        List<DependencyHistoryEntry> content = repository.findByTaskId(taskId, 0, 20).getContent();
+        List<DependencyHistoryEntry> content = repository.findByTaskId(taskId, 0, 20).content();
 
         assertThat(content).extracting(DependencyHistoryEntry::getId)
                 .containsExactly(lowerId, higherId);
@@ -140,14 +140,14 @@ class InMemoryDependencyHistoryRepositoryTest {
         PageResponse<DependencyHistoryEntry> secondPage = repository.findByTaskId(taskId, 1, 1);
         PageResponse<DependencyHistoryEntry> thirdPage = repository.findByTaskId(taskId, 2, 1);
 
-        assertThat(firstPage.getContent()).hasSize(1);
-        assertThat(firstPage.getTotalElements()).isEqualTo(3);
-        assertThat(firstPage.getTotalPages()).isEqualTo(3);
-        assertThat(secondPage.getContent()).hasSize(1);
-        assertThat(thirdPage.getContent()).hasSize(1);
-        assertThat(firstPage.getContent().get(0).getId())
-                .isNotEqualTo(secondPage.getContent().get(0).getId())
-                .isNotEqualTo(thirdPage.getContent().get(0).getId());
+        assertThat(firstPage.content()).hasSize(1);
+        assertThat(firstPage.totalElements()).isEqualTo(3);
+        assertThat(firstPage.totalPages()).isEqualTo(3);
+        assertThat(secondPage.content()).hasSize(1);
+        assertThat(thirdPage.content()).hasSize(1);
+        assertThat(firstPage.content().get(0).getId())
+                .isNotEqualTo(secondPage.content().get(0).getId())
+                .isNotEqualTo(thirdPage.content().get(0).getId());
     }
 
     @Test
@@ -156,8 +156,8 @@ class InMemoryDependencyHistoryRepositoryTest {
 
         PageResponse<DependencyHistoryEntry> page = repository.findByTaskId(taskId, 5, 20);
 
-        assertThat(page.getContent()).isEmpty();
-        assertThat(page.getTotalElements()).isEqualTo(1);
+        assertThat(page.content()).isEmpty();
+        assertThat(page.totalElements()).isEqualTo(1);
     }
 
     @Test
@@ -169,8 +169,8 @@ class InMemoryDependencyHistoryRepositoryTest {
         // not throw IndexOutOfBoundsException from a negative, wrapped-around index.
         PageResponse<DependencyHistoryEntry> page = repository.findByTaskId(taskId, 21_474_837, 100);
 
-        assertThat(page.getContent()).isEmpty();
-        assertThat(page.getTotalElements()).isEqualTo(1);
+        assertThat(page.content()).isEmpty();
+        assertThat(page.totalElements()).isEqualTo(1);
     }
 
     // --- concurrency --------------------------------------------------------
@@ -186,7 +186,7 @@ class InMemoryDependencyHistoryRepositoryTest {
         });
 
         assertThat(resultIds).hasSize(1);
-        assertThat(repository.findByTaskId(taskId, 0, 20).getTotalElements()).isEqualTo(1);
+        assertThat(repository.findByTaskId(taskId, 0, 20).totalElements()).isEqualTo(1);
     }
 
     private DependencyHistoryEntry newEntry(DependencyChangeSource source, String sourceRef, LocalDateTime createdAt) {

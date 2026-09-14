@@ -30,8 +30,8 @@ class TaskDependencyTest {
 
         TaskDependency dependency = new TaskDependency(taskId, dependsOnTaskId);
 
-        assertThat(dependency.getTaskId()).isEqualTo(taskId);
-        assertThat(dependency.getDependsOnTaskId()).isEqualTo(dependsOnTaskId);
+        assertThat(dependency.taskId()).isEqualTo(taskId);
+        assertThat(dependency.dependsOnTaskId()).isEqualTo(dependsOnTaskId);
     }
 
     @Test

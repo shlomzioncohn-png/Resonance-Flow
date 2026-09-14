@@ -184,7 +184,7 @@ public class TaskDependencyService {
         // Reads go through the same transaction lock as writes so they can never
         // observe a state mid-rollback (see addDependency/removeDependency).
         return transactionRunner.runInTransaction(() -> taskDependencyRepository.findByTaskId(taskId).stream()
-                .map(TaskDependency::getDependsOnTaskId)
+                .map(TaskDependency::dependsOnTaskId)
                 .toList());
     }
 
@@ -198,7 +198,7 @@ public class TaskDependencyService {
         requireTaskExists(taskId);
 
         return transactionRunner.runInTransaction(() -> taskDependencyRepository.findByDependsOnTaskId(taskId).stream()
-                .map(TaskDependency::getTaskId)
+                .map(TaskDependency::taskId)
                 .toList());
     }
 

@@ -14,11 +14,11 @@ class PageResponseTest {
 
         PageResponse<String> mapped = page.map(i -> "v" + i);
 
-        assertThat(mapped.getContent()).containsExactly("v1", "v2", "v3");
-        assertThat(mapped.getPage()).isEqualTo(0);
-        assertThat(mapped.getSize()).isEqualTo(20);
-        assertThat(mapped.getTotalElements()).isEqualTo(3);
-        assertThat(mapped.getTotalPages()).isEqualTo(1);
+        assertThat(mapped.content()).containsExactly("v1", "v2", "v3");
+        assertThat(mapped.page()).isEqualTo(0);
+        assertThat(mapped.size()).isEqualTo(20);
+        assertThat(mapped.totalElements()).isEqualTo(3);
+        assertThat(mapped.totalPages()).isEqualTo(1);
     }
 
     @Test
@@ -27,6 +27,6 @@ class PageResponseTest {
 
         PageResponse<String> mapped = page.map(i -> "v" + i);
 
-        assertThat(mapped.getContent()).isEmpty();
+        assertThat(mapped.content()).isEmpty();
     }
 }

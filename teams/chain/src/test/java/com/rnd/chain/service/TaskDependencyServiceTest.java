@@ -75,7 +75,8 @@ class TaskDependencyServiceTest {
     void constructor_throwsNullPointerException_whenTaskRepositoryIsNull() {
         TaskDependencyRepository taskDependencyRepository = new InMemoryTaskDependencyRepository(List.of());
 
-        assertThatThrownBy(() -> new TaskDependencyService(null, taskDependencyRepository))
+        assertThatThrownBy(() -> new TaskDependencyService(null, taskDependencyRepository,
+                new InMemoryDependencyHistoryRepository(), new InMemoryTransactionRunner(), new IncrementingClock()))
                 .isInstanceOf(NullPointerException.class)
                 .hasMessageContaining("taskRepository");
     }
@@ -84,7 +85,8 @@ class TaskDependencyServiceTest {
     void constructor_throwsNullPointerException_whenTaskDependencyRepositoryIsNull() {
         TaskRepository taskRepository = new InMemoryTaskRepository(List.of());
 
-        assertThatThrownBy(() -> new TaskDependencyService(taskRepository, null))
+        assertThatThrownBy(() -> new TaskDependencyService(taskRepository, null,
+                new InMemoryDependencyHistoryRepository(), new InMemoryTransactionRunner(), new IncrementingClock()))
                 .isInstanceOf(NullPointerException.class)
                 .hasMessageContaining("taskDependencyRepository");
     }
@@ -297,7 +299,7 @@ class TaskDependencyServiceTest {
     void addDependency_success_recordsOneHistoryEntry_withActionAdded() {
         service.addDependency(taskA, taskB);
 
-        List<DependencyHistoryEntry> entries = service.getHistory(taskA, 0, 20).getContent();
+        List<DependencyHistoryEntry> entries = service.getHistory(taskA, 0, 20).content();
         assertThat(entries).hasSize(1);
         assertThat(entries.get(0).getAction()).isEqualTo(DependencyChangeAction.ADDED);
     }
@@ -308,7 +310,7 @@ class TaskDependencyServiceTest {
 
         service.removeDependency(taskA, taskB);
 
-        List<DependencyHistoryEntry> entries = service.getHistory(taskA, 0, 20).getContent();
+        List<DependencyHistoryEntry> entries = service.getHistory(taskA, 0, 20).content();
         assertThat(entries).extracting(DependencyHistoryEntry::getAction)
                 .containsExactly(DependencyChangeAction.REMOVED, DependencyChangeAction.ADDED);
     }
@@ -318,7 +320,7 @@ class TaskDependencyServiceTest {
         assertThatThrownBy(() -> service.addDependency(taskA, taskA))
                 .isInstanceOf(InvalidDependencyException.class);
 
-        assertThat(service.getHistory(taskA, 0, 20).getContent()).isEmpty();
+        assertThat(service.getHistory(taskA, 0, 20).content()).isEmpty();
     }
 
     @Test
@@ -328,7 +330,7 @@ class TaskDependencyServiceTest {
         assertThatThrownBy(() -> service.addDependency(taskA, taskB))
                 .isInstanceOf(DuplicateDependencyException.class);
 
-        assertThat(service.getHistory(taskA, 0, 20).getContent()).hasSize(1);
+        assertThat(service.getHistory(taskA, 0, 20).content()).hasSize(1);
     }
 
     // --- rollback: history-write failure undoes the graph mutation ---------
@@ -362,7 +364,7 @@ class TaskDependencyServiceTest {
                 .isInstanceOf(RuntimeException.class);
 
         assertThat(taskDependencyRepository.findByTaskId(taskA))
-                .extracting(TaskDependency::getDependsOnTaskId)
+                .extracting(TaskDependency::dependsOnTaskId)
                 .containsExactly(taskB);
     }
 
@@ -395,7 +397,7 @@ class TaskDependencyServiceTest {
 
         service.addDependency(taskA, taskB, DependencyChangeSource.MIND, "evt-1");
 
-        assertThat(service.getHistory(taskA, 0, 20).getContent()).hasSize(1);
+        assertThat(service.getHistory(taskA, 0, 20).content()).hasSize(1);
     }
 
     @Test
@@ -445,7 +447,7 @@ class TaskDependencyServiceTest {
         });
 
         assertThat(successes.get()).isEqualTo(threadCount);
-        assertThat(service.getHistory(taskA, 0, 20).getContent()).hasSize(1);
+        assertThat(service.getHistory(taskA, 0, 20).content()).hasSize(1);
         assertThat(service.getDependencies(taskA)).containsExactly(taskB);
     }
 
@@ -469,8 +471,8 @@ class TaskDependencyServiceTest {
     void getHistory_isEmptyPage_notError_whenTaskExistsWithNoChanges() {
         PageResponse<DependencyHistoryEntry> page = service.getHistory(taskA, 0, 20);
 
-        assertThat(page.getContent()).isEmpty();
-        assertThat(page.getTotalElements()).isEqualTo(0);
+        assertThat(page.content()).isEmpty();
+        assertThat(page.totalElements()).isEqualTo(0);
     }
 
     /** Always throws on record() - used to prove the compensating rollback runs. */
