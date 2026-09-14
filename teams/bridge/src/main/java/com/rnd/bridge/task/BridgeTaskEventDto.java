@@ -1,5 +1,7 @@
 package com.rnd.bridge.task;
 
+import com.fasterxml.jackson.databind.PropertyNamingStrategies;
+import com.fasterxml.jackson.databind.annotation.JsonNaming;
 import com.rnd.bridge.task.model.Task;
 
 import java.time.Instant;
@@ -8,7 +10,13 @@ import java.util.UUID;
 /**
  * The wire shape Inbox's Kafka ingestion contract
  * (bridge.structured.tasks, esti/inbox-kafka-ingestion-contract) actually
- * expects: camelCase keys and UPPER_SNAKE_CASE enum values.
+ * expects: snake_case keys (cross-team Kafka JSON convention - see
+ * {@code @JsonNaming} below) and UPPER_SNAKE_CASE enum values.
+ * <p>
+ * {@code @JsonNaming} is on the class, not a global strategy on the shared
+ * ObjectMapper - that mapper also deserializes inbound JSON that is not
+ * snake_case (HubSpot API responses), and a global strategy would silently
+ * corrupt that path instead of failing loudly.
  * <p>
  * {@link Task} is deliberately snake_case with lowercase enums - it is built
  * against Inbox's *database* schema, and {@code TaskSerializationTest} pins
@@ -26,6 +34,7 @@ import java.util.UUID;
  * (that's {@code organizationId + sourceType + sourceRef}), so a fresh UUID
  * per publish attempt - not derived from the {@link Task} - is correct.
  */
+@JsonNaming(PropertyNamingStrategies.SnakeCaseStrategy.class)
 public record BridgeTaskEventDto(
         String eventId,
         String organizationId,

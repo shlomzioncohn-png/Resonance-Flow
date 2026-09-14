@@ -41,12 +41,22 @@ predates this abstraction and does not use it (see §6).
 - `task.model.Task` is the **database-shaped** record: `@JsonNaming(SnakeCaseStrategy)`, enums
   serialize lowercase via `@JsonValue`. This is what Inbox's `tasks` table looks like.
 - `task.BridgeTaskEventDto` is the **Kafka wire shape** (Inbox's ingestion contract, topic
-  `bridge.structured.tasks`): camelCase keys, enums as raw `UPPER_SNAKE_CASE` `Enum.name()`, plus
+  `bridge.structured.tasks`): snake_case keys, enums as raw `UPPER_SNAKE_CASE` `Enum.name()`, plus
   a fresh `eventId` per publish, and it deliberately omits fields `Task` carries that Inbox
-  forbids on the wire (`extractionProvenance`, `completedAt`, `snoozedUntil`).
+  forbids on the wire (`extractionProvenance`, `completedAt`, `snoozedUntil`). Snake_case keys
+  (as of 2026-09-14) come from a cross-team convention that all inter-team Kafka JSON payloads use
+  snake_case field names and `UPPER_SNAKE_CASE` string enums — applied here via its own
+  `@JsonNaming(SnakeCaseStrategy)` on `BridgeTaskEventDto`, deliberately **not** a global naming
+  strategy on the shared `ObjectMapper` bean, because that bean also deserializes inbound HubSpot
+  API responses (`HubSpotClient`), which are camelCase; see
+  `HubSpotDealRecordObjectMapperNamingStrategyTest` for the regression test pinning that.
 
-**Do not conflate these or serialize `Task` directly onto Kafka** — that was `GitHubKafkaProducer`'s
-approach and it does not conform to the contract (§6). Build `BridgeTaskEventDto.from(task)` for
+Both shapes now use snake_case keys, but that's coincidental, not convergence: they still differ
+in enum casing (`Task` lowercase vs. `BridgeTaskEventDto` `UPPER_SNAKE_CASE`) and in field set, and
+remain two deliberately separate shapes for two different readers — Inbox's Postgres schema vs.
+its Kafka ingestion contract. **Do not conflate these or serialize `Task` directly onto Kafka** —
+that was `GitHubKafkaProducer`'s approach and it does not conform to the contract (§6). Build
+`BridgeTaskEventDto.from(task)` for
 anything Kafka-bound.
 
 `organizationId` on `Task` is `null` by default from `AbstractTaskMapper` (no lane has a general
@@ -206,7 +216,7 @@ suite (126 tests, 0 failures — see §7):
 - **Kafka publish path** — `KafkaPayloadPublisher` (kafka profile) builds `BridgeTaskEventDto`
   from `Task` (via `BridgeTaskEventDto.from(task)`) and publishes to
   `${bridge.structured-tasks-topic:bridge.structured.tasks}` — the real Inbox contract shape
-  (camelCase, `UPPER_SNAKE_CASE` enums, fresh `eventId`), **not** the same path
+  (snake_case keys, `UPPER_SNAKE_CASE` enums, fresh `eventId`), **not** the same path
   `GitHubKafkaProducer` uses (§6 — that one is a known, separate gap, untouched).
 - **`.env.example`** documents `CRM_ORGANIZATION_ID` as a per-environment real UUID Inbox
   (Ayala) still needs to hand back for dev/staging/prod — placeholder value is not usable as-is.
