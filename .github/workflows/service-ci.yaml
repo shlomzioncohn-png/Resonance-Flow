@@ -107,33 +107,14 @@ jobs:
         working-directory: ${{ inputs.service_dir }}
         run: pytest --cov=src/${{ inputs.service_name }}
 
-      - name: Set up JDK 21
-        if: inputs.language == 'java'
-        uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: '21'
-          cache: maven
-          cache-dependency-path: ${{ inputs.service_dir }}/pom.xml
-
-      # setup-java only installs the JDK, not Maven itself - GitHub-hosted ubuntu-latest
-      # bundles mvn but the self-hosted runner doesn't. Cached under /opt so repeat runs
-      # on the same persistent runner skip the download.
-      - name: Install Maven
+      - name: Run Java tests (via Docker)
         if: inputs.language == 'java'
         run: |
-          MAVEN_VERSION=3.9.9
-          MAVEN_HOME="/opt/apache-maven-${MAVEN_VERSION}"
-          if [ ! -x "${MAVEN_HOME}/bin/mvn" ]; then
-            curl -sL "https://dlcdn.apache.org/maven/maven-3/${MAVEN_VERSION}/binaries/apache-maven-${MAVEN_VERSION}-bin.tar.gz" -o /tmp/maven.tar.gz
-            sudo tar -xzf /tmp/maven.tar.gz -C /opt
-          fi
-          echo "${MAVEN_HOME}/bin" >> "$GITHUB_PATH"
-
-      - name: Run Java tests
-        if: inputs.language == 'java'
-        working-directory: ${{ inputs.service_dir }}
-        run: mvn -B test
+          docker run --rm --network host \
+            -v "$PWD:/workspace" -w "/workspace/${{ inputs.service_dir }}" \
+            -v "$HOME/.m2:/root/.m2" \
+            maven:3.9.9-eclipse-temurin-21 \
+            mvn -B test
 
       - name: Set up Node 22
         if: inputs.language == 'node'
