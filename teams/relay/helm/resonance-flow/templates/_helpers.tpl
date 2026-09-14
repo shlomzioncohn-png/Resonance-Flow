@@ -72,12 +72,19 @@ Build and base64-encode a .dockerconfigjson value from imagePullSecret.* values
 
 {{/*
 Resolve one dependency entry's host: an explicit `host` wins (an external
-Postgres/Kafka/whatever, not one of our own subcharts); otherwise it's our
-own Bitnami subchart's Service, <release-name>-<name>.
+Postgres/Kafka/whatever, not one of our own subcharts); else, if the name
+matches one of our own components.*, it's that component's own Service,
+<fullname>-<name> (same pattern service.yaml uses) - not the Bitnami
+subchart pattern below, which would silently 404/DNS-fail (verified live:
+wait-for-schema-registry hung forever against "inbox-schema-registry",
+which is nothing - the real Service is "inbox-resonance-flow-schema-registry").
+Otherwise it's a Bitnami subchart's Service, <release-name>-<name>.
 */}}
 {{- define "resonance-flow.dependencyHost" -}}
 {{- if .dep.host }}
 {{- .dep.host }}
+{{- else if hasKey .root.Values.components .dep.name }}
+{{- printf "%s-%s" (include "resonance-flow.fullname" .root) .dep.name }}
 {{- else }}
 {{- printf "%s-%s" .root.Release.Name .dep.name }}
 {{- end }}
