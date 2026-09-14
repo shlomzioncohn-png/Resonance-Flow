@@ -40,17 +40,20 @@ export function MockingProvider({ children }: { children: ReactNode }) {
 
     if (!startPromise) {
       startPromise = import('@/mocks/browser').then(({ worker }) =>
-        worker.start({
-          // Anything without a matching handler (Next.js's own dev
-          // requests, and the real, already-working /api/workspace/*
-          // calls) passes straight through untouched, instead of being
-          // logged as a warning or blocked as an error.
-          onUnhandledRequest: 'bypass',
-        }),
+        worker
+          .start({
+            // Anything without a matching handler (Next.js's own dev
+            // requests, and the real, already-working /api/workspace/*
+            // calls) passes straight through untouched, instead of being
+            // logged as a warning or blocked as an error.
+            onUnhandledRequest: 'bypass',
+          })
+          .then(() => undefined),
       )
     }
+    const started = startPromise
 
-    startPromise.then(() => {
+    started.then(() => {
       if (!cancelled) setReady(true)
     })
     return () => {
