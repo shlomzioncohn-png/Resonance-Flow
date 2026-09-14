@@ -18,6 +18,8 @@ from starlette.middleware.base import RequestResponseEndpoint
 from starlette.responses import Response
 
 from mind import __version__
+from mind.api.debug import router as debug_router
+from mind.api.instrumentation import instrumented_call
 from mind.api.v1 import router as v1_router
 from mind.contracts.errors import register_error_handlers
 from mind.contracts.health import HealthResponse
@@ -41,6 +43,10 @@ register_error_handlers(app)
 # mind.api.v1 and docs/API.md "API versioning plan". /health below
 # stays outside it deliberately (unversioned).
 app.include_router(v1_router)
+
+# /debug/simulate-call and /debug/instrumentation -- temporary, see
+# api/debug.py and api/README.md "Instrumentation".
+app.include_router(debug_router)
 
 _START_TIME = time.time()
 
@@ -72,9 +78,14 @@ async def health() -> HealthResponse:
     other downstream dependency. A 200 here means "the MIND process is up
     and serving HTTP requests" -- nothing more. See docs/API.md for the
     documented response shape and status codes.
+
+    Wrapped in instrumented_call as a trivial end-to-end demonstration
+    of the wrapper -- not because a health check is itself a model
+    call. See api/instrumentation.py.
     """
-    return HealthResponse(
-        status="ok",
-        version=__version__,
-        uptime_seconds=round(time.time() - _START_TIME, 3),
-    )
+    with instrumented_call("health_check"):
+        return HealthResponse(
+            status="ok",
+            version=__version__,
+            uptime_seconds=round(time.time() - _START_TIME, 3),
+        )

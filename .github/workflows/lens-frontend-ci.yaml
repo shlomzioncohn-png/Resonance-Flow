@@ -1,0 +1,73 @@
+name: Lens Frontend CI/CD
+
+on:
+  push:
+    branches: [ "main" ]
+    tags: [ "lens-frontend-v*.*.*" ]
+    paths:
+      - "teams/lens/frontend/**"
+      - "!teams/lens/bff/**"
+      - "resonance-flow/**"
+      - ".github/workflows/lens-frontend-ci.yaml"
+      - ".github/workflows/service-ci.yaml"
+  pull_request:
+    branches: [ "main" ]
+    paths:
+      - "teams/lens/frontend/**"
+      - "!teams/lens/bff/**"
+      - ".github/workflows/lens-frontend-ci.yaml"
+      - ".github/workflows/service-ci.yaml"
+  workflow_dispatch: {}
+
+concurrency:
+  group: lens-frontend-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  ci:
+    permissions:
+      contents: write
+      packages: write
+    uses: ./.github/workflows/service-ci.yaml
+    with:
+      service_name: lens-frontend
+      service_dir: teams/lens
+      language: node
+      container_port: 8083
+      health_path: /
+
+  playwright:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    needs: ci
+    if: always()
+    defaults:
+      run:
+        working-directory: teams/lens/frontend
+    
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: teams/lens/frontend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: E2E Tests (Playwright)
+        run: npm run test:e2e
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: teams/lens/frontend/playwright-report/
+          retention-days: 7

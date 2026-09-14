@@ -34,18 +34,30 @@ const TIME_OPTIONS_MIN = [15, 30, 45, 60, 90]
 
 export default function EmployeeWorkspacePage() {
   const [minutes, setMinutes] = useState(45)
+  const [projectFilter, setProjectFilter] = useState<string>('')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [validationError, setValidationError] = useState<string | null>(null)
   const [recommendation, setRecommendation] = useState<TaskRecommendation | null>(null)
   const [starting, setStarting] = useState(false)
   const [started, setStarted] = useState(false)
 
   const findBestTask = async () => {
+    // Validate input
+    if (!minutes || minutes < 1) {
+      setValidationError('Available time must be at least 1 minute')
+      return
+    }
+    
     setStarted(false)
     setError(null)
+    setValidationError(null)
     setLoading(true)
     try {
-      const result = await recommendTask({ availableTime: minutes })
+      const result = await recommendTask({
+        availableTime: minutes,
+        projectFilter: projectFilter || undefined,
+      })
       setRecommendation(result)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to fetch recommendation')
@@ -103,10 +115,24 @@ export default function EmployeeWorkspacePage() {
                 <TextField
                   select
                   size="small"
+                  label="Project"
+                  value={projectFilter}
+                  onChange={(event) => setProjectFilter(event.target.value)}
+                  sx={{ width: 150, bgcolor: 'background.paper', borderRadius: radiusTokens.sm }}
+                  data-testid="project-filter"
+                >
+                  <MenuItem value="">All Projects</MenuItem>
+                  <MenuItem value="Platform Service">Platform Service</MenuItem>
+                  <MenuItem value="Design System">Design System</MenuItem>
+                </TextField>
+                <TextField
+                  select
+                  size="small"
                   label="I have"
                   value={minutes}
                   onChange={(event) => setMinutes(Number(event.target.value))}
                   sx={{ width: 120, bgcolor: 'background.paper', borderRadius: radiusTokens.sm }}
+                  data-testid="available-time"
                 >
                   {TIME_OPTIONS_MIN.map((option) => (
                     <MenuItem key={option} value={option}>
@@ -119,6 +145,7 @@ export default function EmployeeWorkspacePage() {
                   startIcon={loading ? <CircularProgress size={16} color="inherit" /> : <AutoAwesomeOutlinedIcon />}
                   onClick={findBestTask}
                   disabled={loading}
+                  data-testid="recommend-btn"
                 >
                   {loading ? 'Finding…' : 'Find my best task'}
                 </Button>
@@ -127,9 +154,23 @@ export default function EmployeeWorkspacePage() {
           </CardContent>
         </Card>
 
+        {/* Validation error */}
+        {validationError && (
+          <Card sx={{ border: '1px solid', borderColor: 'warning.main' }} data-testid="validation-error">
+            <CardContent>
+              <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
+                <WarningAmberOutlinedIcon color="warning" />
+                <Typography color="warning.main" variant="body2">
+                  {validationError}
+                </Typography>
+              </Stack>
+            </CardContent>
+          </Card>
+        )}
+
         {/* Error state */}
         {error && (
-          <Card sx={{ border: '1px solid', borderColor: 'error.main' }}>
+          <Card sx={{ border: '1px solid', borderColor: 'error.main' }} data-testid="error-message">
             <CardContent>
               <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
                 <WarningAmberOutlinedIcon color="error" />
@@ -156,6 +197,7 @@ export default function EmployeeWorkspacePage() {
                       size="small"
                       label={`${recommendation.confidenceScore}% match`}
                       sx={softToneSx('success')}
+                      data-testid="confidence-score"
                     />
                   )}
                 </Stack>
@@ -171,11 +213,12 @@ export default function EmployeeWorkspacePage() {
                       spacing={2}
                       sx={{ alignItems: 'center', justifyContent: 'space-between' }}
                     >
-                      <Typography variant="h6">{task.title}</Typography>
+                      <Typography variant="h6" data-testid="recommendation-task-title">{task.title}</Typography>
                       <Chip
                         size="small"
                         label={task.priority}
                         sx={[softToneSx('error'), { fontWeight: 600 }]}
+                        data-testid="task-priority"
                       />
                     </Stack>
                     <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
@@ -189,7 +232,7 @@ export default function EmployeeWorkspacePage() {
                         ) : (
                           <ScheduleOutlinedIcon fontSize="small" color="warning" />
                         )}
-                        <Typography variant="body2">
+                        <Typography variant="body2" data-testid="recommendation-explanation">
                           {recommendation.explanation}
                         </Typography>
                       </Stack>
@@ -213,6 +256,7 @@ export default function EmployeeWorkspacePage() {
                         disabled={started || starting}
                         onClick={startTask}
                         startIcon={starting ? <CircularProgress size={16} color="inherit" /> : (!started && <PlayArrowOutlinedIcon />)}
+                        data-testid="start-task-btn"
                       >
                         {started ? 'Task started' : starting ? 'Starting…' : 'Start task'}
                       </Button>
@@ -299,7 +343,7 @@ export default function EmployeeWorkspacePage() {
                         >
                           <PersonOutlineIcon sx={{ fontSize: 16 }} />
                         </Avatar>
-                        {task.owner}
+                        <span data-testid="task-owner">{task.owner}</span>
                       </Stack>
                     }
                   />

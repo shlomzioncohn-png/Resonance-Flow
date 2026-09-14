@@ -1,8 +1,11 @@
-﻿# Build output
+# Build output
 target/
 build/
 out/
 dist/
+
+# Logs
+logs/
 
 # Java
 *.class
@@ -25,6 +28,9 @@ dist/
 # Node (Lens)
 node_modules/
 .next/
+playwright-report/
+test-results/
+.npmrc
 
 # Python (Mind)
 __pycache__/
@@ -37,6 +43,13 @@ venv/
 .env.local
 *.pem
 
+# Documentation
+DOCKER_FULL_STACK.md
+
 # OS
 .DS_Store
 Thumbs.db
+
+# Local Helm values overrides that may contain a personal PAT - never commit these.
+*.local.yaml
+values.local.yaml
