@@ -56,6 +56,28 @@ initContainers: []
 nodeSelector: {}
 tolerations: []
 affinity: {}
+# Backstop for pipe-design.md §06.7: each Pipe pod's own consumer group
+# (pipe-${POD_NAME}) is deleted on graceful shutdown (ConsumerGroupShutdownHandler),
+# but OOMKill/node-eviction/SIGKILL give it no chance to do that. This sweep
+# catches those orphans - lists pipe-* groups, deletes the ones with no owner
+# (GroupState == EMPTY). Never touches a group with members, so it can't race
+# a pod that's mid-restart.
+pipeConsumerGroupSweep:
+  enabled: true
+  schedule: "0 * * * *"
+  groupPattern: "pipe-*"
+  image:
+    repository: apache/kafka
+    tag: "4.2.1"
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+    limits:
+      cpu: 200m
+      memory: 256Mi
 components:
   mind:
     enabled: true
