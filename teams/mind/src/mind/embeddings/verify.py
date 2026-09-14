@@ -20,10 +20,11 @@ def main() -> int:
     # Plain sync psycopg here (not the async pool pgvector_store.py uses)
     # -- this is a one-off CLI check, not a request-serving hot path, so
     # there's no event loop to protect.
-    with psycopg.connect(PG_DSN) as conn:
-        with conn.cursor() as cur:
-            cur.execute(f"SELECT COUNT(*) FROM {PG_TABLE};")
-            table_count = cur.fetchone()[0]
+    with psycopg.connect(PG_DSN) as conn, conn.cursor() as cur:
+        cur.execute(f"SELECT COUNT(*) FROM {PG_TABLE};")
+        row = cur.fetchone()
+        assert row is not None, "SELECT COUNT(*) always returns exactly one row"
+        table_count = row[0]
 
     print(f"Manifest ({MANIFEST_PATH.name}): {manifest_count} records")
     print(f"Table row count:                {table_count} rows")

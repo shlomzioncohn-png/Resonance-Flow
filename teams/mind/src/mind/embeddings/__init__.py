@@ -34,15 +34,15 @@ from mind.embeddings.factory import get_store
 from mind.embeddings.generate import embed, embed_async, embed_batch, embed_batch_async
 
 __all__ = [
+    "DUPLICATE_SIMILARITY_THRESHOLD",
+    "clear",
+    "delete",
     "embed",
     "embed_async",
     "embed_batch",
     "embed_batch_async",
-    "upsert",
     "search",
-    "delete",
-    "clear",
-    "DUPLICATE_SIMILARITY_THRESHOLD",
+    "upsert",
 ]
 
 _store = None

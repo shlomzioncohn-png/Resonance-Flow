@@ -68,6 +68,7 @@ event loop stays free to serve other requests while inference runs.
 """
 
 import asyncio
+import threading
 
 from sentence_transformers import SentenceTransformer
 
@@ -79,20 +80,31 @@ from mind.embeddings.config import (
 )
 
 _model: SentenceTransformer | None = None
+_model_lock = threading.Lock()
 
 
 def _get_model() -> SentenceTransformer:
     # Lazy-loaded so importing this module (e.g. from tests that only need
     # the interface) doesn't force a model load / weight download.
+    #
+    # threading.Lock, not asyncio.Lock: embed_async()/embed_batch_async()
+    # run this via asyncio.to_thread() on real OS worker threads, not
+    # coroutines on one event loop -- an asyncio.Lock doesn't coordinate
+    # across threads. Without this lock, two concurrent embed_async()
+    # calls could both see `_model is None` and both construct a
+    # SentenceTransformer (each doing the same file I/O / possible
+    # download), silently discarding one instance.
     global _model
     if _model is None:
-        model_source = (
-            str(EMBEDDING_MODEL_LOCAL_DIR)
-            if EMBEDDING_MODEL_LOCAL_DIR.is_dir()
-            else EMBEDDING_MODEL_NAME
-        )
-        _model = SentenceTransformer(model_source)
-        _model.max_seq_length = MAX_SEQ_LENGTH
+        with _model_lock:
+            if _model is None:
+                model_source = (
+                    str(EMBEDDING_MODEL_LOCAL_DIR)
+                    if EMBEDDING_MODEL_LOCAL_DIR.is_dir()
+                    else EMBEDDING_MODEL_NAME
+                )
+                _model = SentenceTransformer(model_source)
+                _model.max_seq_length = MAX_SEQ_LENGTH
     return _model
 
 

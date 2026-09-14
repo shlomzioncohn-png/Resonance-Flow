@@ -160,9 +160,8 @@ async def test_ef_search_setting_is_actually_applied():
     detail (that the setting really reaches the server), not application
     behavior, so it's the one place this file is allowed to know that.
     """
-    async with await psycopg.AsyncConnection.connect(PG_DSN) as conn:
-        async with conn.cursor() as cur:
-            await cur.execute("SET LOCAL hnsw.ef_search = %s;", (HNSW_EF_SEARCH,))
-            await cur.execute("SHOW hnsw.ef_search;")
-            (value,) = await cur.fetchone()
-            assert value == str(HNSW_EF_SEARCH)
+    async with await psycopg.AsyncConnection.connect(PG_DSN) as conn, conn.cursor() as cur:
+        await cur.execute("SET LOCAL hnsw.ef_search = %s;", (HNSW_EF_SEARCH,))
+        await cur.execute("SHOW hnsw.ef_search;")
+        (value,) = await cur.fetchone()
+        assert value == str(HNSW_EF_SEARCH)
