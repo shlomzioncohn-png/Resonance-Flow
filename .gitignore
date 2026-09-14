@@ -4,6 +4,9 @@ build/
 out/
 dist/
 
+# Logs
+logs/
+
 # Java
 *.class
 *.jar

@@ -25,7 +25,7 @@ import org.springframework.kafka.core.KafkaTemplate;
 class CrmLaneConfig {
 
     @Bean
-    DealToTaskMapper dealToTaskMapper(@Value("${bridge.crm.organization-id}") String organizationId) {
+    DealToTaskMapper dealToTaskMapper(@Value("${bridge.crm.organization-id:local-crm-org}") String organizationId) {
         return new DealToTaskMapper(organizationId);
     }
 
