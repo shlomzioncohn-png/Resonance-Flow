@@ -1,6 +1,7 @@
 package com.rnd.inbox.shared.config;
 
 import com.rnd.inbox.shared.messaging.kafka.TransientProcessingException;
+import org.apache.kafka.common.serialization.StringSerializer;
 import org.springframework.boot.autoconfigure.kafka.KafkaProperties;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
@@ -38,9 +39,14 @@ public class KafkaConfig {
         return factory;
     }
 
+    // Explicit StringSerializer instances, not kafkaProperties.buildProducerProperties() alone -
+    // spring.kafka.producer.value-serializer is KafkaProtobufSerializer (for the Protobuf
+    // producer below), and passing serializer instances is what overrides that shared config
+    // for this plain String producer (used by ErrorTopicPublisher).
     @Bean
     public ProducerFactory<String, String> inboxKafkaProducerFactory(KafkaProperties kafkaProperties) {
-        return new DefaultKafkaProducerFactory<>(kafkaProperties.buildProducerProperties());
+        return new DefaultKafkaProducerFactory<>(
+                kafkaProperties.buildProducerProperties(), new StringSerializer(), new StringSerializer());
     }
 
     @Bean
