@@ -1,0 +1,48 @@
+# Moved here from teams/relay/schema-sync-hook/ (2026-09-09) so root-app.yaml
+# (which only scans this directory, non-recursively) actually picks it up.
+#
+# NOT a "hook" — ArgoCD hooks only apply within their own Application, and
+# relay is deployed as part of the shared `resonance-flow` Application. This
+# uses the same mechanism `resonance-flow.yaml` itself is gated by under
+# `root`: a separate Application with its own sync-wave, so ArgoCD waits for
+# an earlier wave to report Healthy (via argocd-cm-patch.yaml) before starting
+# the next one.
+#
+# sync-wave here is "1" — deliberately AFTER resonance-flow's "0", not before
+# it. Schema Registry is no longer a separately-waved dependency (there's no
+# more apps/kafka.yaml-style earlier app for it, see argocd/README.md) — since
+# c3908262 it's a `components.schema-registry` block rendered as part of the
+# resonance-flow Application itself. This Job needs that Deployment to already
+# be Ready, so it must run strictly after resonance-flow's own wave finishes
+# and reports Healthy, not before it.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: schema-sync-hook
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/KamaTechOrg/Resonance-Flow.git
+    targetRevision: main
+    path: teams/relay/schema-sync-hook
+    helm:
+      valueFiles:
+        - values.yaml
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: schema-sync-hook
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+    retry:
+      limit: 5
+      backoff:
+        duration: 5s
+        factor: 2
+        maxDuration: 3m
