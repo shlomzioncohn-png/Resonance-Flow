@@ -250,6 +250,8 @@ jobs:
     permissions:
       contents: write
       pull-requests: write
+      # Needed to push a branch whose tree touches .github/workflows/**.
+      workflows: write
     concurrency:
       group: resonance-flow-values-update
       cancel-in-progress: false
