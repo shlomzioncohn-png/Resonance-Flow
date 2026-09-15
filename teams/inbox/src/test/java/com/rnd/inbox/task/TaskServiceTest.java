@@ -21,6 +21,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
@@ -30,6 +31,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -177,7 +179,7 @@ class TaskServiceTest {
         Assignment assignment = new Assignment();
         assignment.setAssignmentRole(AssignmentRole.ASSIGNEE);
 
-        Task result = taskService.createTask(incoming, assignment, UUID.randomUUID());
+        Task result = taskService.createTask(incoming, List.of(assignment), UUID.randomUUID());
 
         ArgumentCaptor<Assignment> captor = ArgumentCaptor.forClass(Assignment.class);
         verify(assignmentRepository).save(captor.capture());
@@ -186,12 +188,31 @@ class TaskServiceTest {
     }
 
     @Test
-    void createTask_withoutAssignment_neverTouchesTheAssignmentRepository() {
+    void createTask_withMultipleAssignments_savesEachOneLinkedToTheSavedTask() {
+        Task incoming = incomingTask();
+        UUID generatedId = UUID.randomUUID();
+        stubNoExistingTask();
+        stubSaveAssigning(incoming, generatedId);
+        Assignment owner = new Assignment();
+        owner.setAssignmentRole(AssignmentRole.OWNER);
+        Assignment collaborator = new Assignment();
+        collaborator.setAssignmentRole(AssignmentRole.COLLABORATOR);
+
+        Task result = taskService.createTask(incoming, List.of(owner, collaborator), UUID.randomUUID());
+
+        ArgumentCaptor<Assignment> captor = ArgumentCaptor.forClass(Assignment.class);
+        verify(assignmentRepository, times(2)).save(captor.capture());
+        assertThat(captor.getAllValues()).containsExactly(owner, collaborator);
+        assertThat(captor.getAllValues()).allSatisfy(a -> assertThat(a.getTask()).isSameAs(result));
+    }
+
+    @Test
+    void createTask_withoutAssignments_neverTouchesTheAssignmentRepository() {
         Task incoming = incomingTask();
         stubNoExistingTask();
         stubSaveAssigning(incoming, UUID.randomUUID());
 
-        taskService.createTask(incoming, null, UUID.randomUUID());
+        taskService.createTask(incoming, List.of(), UUID.randomUUID());
 
         verify(assignmentRepository, never()).save(any());
     }

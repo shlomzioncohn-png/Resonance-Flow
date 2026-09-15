@@ -3,10 +3,12 @@ package com.rnd.inbox.taskcreationrequest;
 import com.rnd.inbox.shared.messaging.validation.IsoInstant;
 import com.rnd.inbox.shared.messaging.validation.ValidEnum;
 import com.rnd.inbox.shared.messaging.validation.ValidUuid;
+import com.rnd.inbox.task.AssigneeDto;
 import com.rnd.inbox.task.SourceType;
 import com.rnd.inbox.task.TaskRoleContext;
 import com.rnd.inbox.task.TaskStatus;
 import com.rnd.inbox.task.TaskTier;
+import jakarta.validation.Valid;
 import jakarta.validation.constraints.DecimalMax;
 import jakarta.validation.constraints.DecimalMin;
 import jakarta.validation.constraints.Max;
@@ -14,6 +16,8 @@ import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Positive;
+
+import java.util.List;
 
 public class TaskCreationRequestEventDto {
 
@@ -72,6 +76,9 @@ public class TaskCreationRequestEventDto {
 
     @ValidUuid
     private String createdByUserId;
+
+    @Valid
+    private List<AssigneeDto> assignees;
 
     public String getEventId() {
         return eventId;
@@ -207,5 +214,13 @@ public class TaskCreationRequestEventDto {
 
     public void setCreatedByUserId(String createdByUserId) {
         this.createdByUserId = createdByUserId;
+    }
+
+    public List<AssigneeDto> getAssignees() {
+        return assignees;
+    }
+
+    public void setAssignees(List<AssigneeDto> assignees) {
+        this.assignees = assignees;
     }
 }

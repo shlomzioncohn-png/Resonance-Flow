@@ -1,13 +1,10 @@
 package com.rnd.inbox.structuredtask;
 
 import com.rnd.inbox.project.Project;
-import com.rnd.inbox.task.Assignment;
-import com.rnd.inbox.task.AssignmentRole;
 import com.rnd.inbox.task.SourceType;
 import com.rnd.inbox.task.Task;
 import com.rnd.inbox.task.TaskExtractionProvenance;
 import com.rnd.inbox.task.TaskStatus;
-import com.rnd.inbox.team.Team;
 import com.rnd.inbox.tenant.Tenant;
 import com.rnd.inbox.user.User;
 import org.junit.jupiter.api.Test;
@@ -39,7 +36,7 @@ class StructuredTaskMapperTest {
         dto.setUrgency(4);
         dto.setConfidence(0.9);
 
-        Task task = mapper().map(dto, references(tenantRef, null, null, null, null, null));
+        Task task = mapper().map(dto, references(tenantRef, null, null));
 
         assertThat(task.getId()).isNull();
         assertThat(task.getTenant()).isSameAs(tenantRef);
@@ -65,7 +62,7 @@ class StructuredTaskMapperTest {
         dto.setSourceType("GITHUB_ISSUE");
         dto.setSourceRef("github:owner/repo:issue:42");
 
-        Task task = mapper().map(dto, references(tenantRef, null, null, null, null, null));
+        Task task = mapper().map(dto, references(tenantRef, null, null));
 
         assertThat(task.getStatus()).isEqualTo(TaskStatus.NEW);
     }
@@ -82,7 +79,7 @@ class StructuredTaskMapperTest {
         dto.setSourceType("GITHUB_ISSUE");
         dto.setSourceRef("github:owner/repo:issue:42");
 
-        Task task = mapper().map(dto, references(tenantRef, projectRef, null, null, null, null));
+        Task task = mapper().map(dto, references(tenantRef, projectRef, null));
 
         assertThat(task.getProject()).isSameAs(projectRef);
     }
@@ -98,7 +95,7 @@ class StructuredTaskMapperTest {
         dto.setSourceType("GITHUB_ISSUE");
         dto.setSourceRef("github:owner/repo:issue:42");
 
-        Task task = mapper().map(dto, references(tenantRef, null, null, null, null, createdByRef));
+        Task task = mapper().map(dto, references(tenantRef, null, createdByRef));
 
         assertThat(task.getCreatedBy()).isSameAs(createdByRef);
     }
@@ -113,76 +110,17 @@ class StructuredTaskMapperTest {
         dto.setSourceType("GITHUB_ISSUE");
         dto.setSourceRef("github:owner/repo:issue:42");
 
-        Task task = mapper().map(dto, references(tenantRef, null, null, null, null, null));
+        Task task = mapper().map(dto, references(tenantRef, null, null));
 
         assertThat(task.getCreatedBy()).isNull();
-    }
-
-    @Test
-    void mapAssignment_whenNoAssigneeIsPresent_returnsNull() {
-        StructuredTaskEventDto dto = new StructuredTaskEventDto();
-
-        Assignment assignment = mapper().mapAssignment(dto, references(tenant(), null, null, null, null, null));
-
-        assertThat(assignment).isNull();
-    }
-
-    @Test
-    void mapAssignment_withAssigneeUserId_buildsAnAssignmentToThatUser() {
-        User userRef = user();
-
-        StructuredTaskEventDto dto = new StructuredTaskEventDto();
-        dto.setAssigneeUserId(userRef.getId().toString());
-        dto.setAssignmentRole("ASSIGNEE");
-
-        Assignment assignment = mapper().mapAssignment(dto, references(tenant(), null, userRef, null, null, null));
-
-        assertThat(assignment.getUser()).isSameAs(userRef);
-        assertThat(assignment.getTeam()).isNull();
-        assertThat(assignment.getAssignmentRole()).isEqualTo(AssignmentRole.ASSIGNEE);
-        assertThat(assignment.getAssignedAt()).isEqualTo(FIXED_NOW);
-        assertThat(assignment.getAssignedBy()).isNull();
-    }
-
-    @Test
-    void mapAssignment_withAssigneeTeamId_buildsAnAssignmentToThatTeam() {
-        Team teamRef = new Team();
-        teamRef.setId(UUID.randomUUID());
-
-        StructuredTaskEventDto dto = new StructuredTaskEventDto();
-        dto.setAssigneeTeamId(teamRef.getId().toString());
-        dto.setAssignmentRole("OWNER");
-
-        Assignment assignment = mapper().mapAssignment(dto, references(tenant(), null, null, teamRef, null, null));
-
-        assertThat(assignment.getTeam()).isSameAs(teamRef);
-        assertThat(assignment.getUser()).isNull();
-        assertThat(assignment.getAssignmentRole()).isEqualTo(AssignmentRole.OWNER);
-    }
-
-    @Test
-    void mapAssignment_withAssignedByUserId_setsWhoPerformedTheAssignment() {
-        User userRef = user();
-        User assignedByRef = user();
-
-        StructuredTaskEventDto dto = new StructuredTaskEventDto();
-        dto.setAssigneeUserId(userRef.getId().toString());
-        dto.setAssignmentRole("ASSIGNEE");
-        dto.setAssignedByUserId(assignedByRef.getId().toString());
-
-        Assignment assignment = mapper()
-                .mapAssignment(dto, references(tenant(), null, userRef, null, assignedByRef, null));
-
-        assertThat(assignment.getAssignedBy()).isSameAs(assignedByRef);
     }
 
     private StructuredTaskMapper mapper() {
         return new StructuredTaskMapper(clock);
     }
 
-    private StructuredTaskReferences references(Tenant tenant, Project project, User assignee, Team assigneeTeam,
-            User assignedBy, User createdBy) {
-        return new StructuredTaskReferences(tenant, project, assignee, assigneeTeam, assignedBy, createdBy);
+    private StructuredTaskReferences references(Tenant tenant, Project project, User createdBy) {
+        return new StructuredTaskReferences(tenant, project, createdBy);
     }
 
     private Tenant tenant() {

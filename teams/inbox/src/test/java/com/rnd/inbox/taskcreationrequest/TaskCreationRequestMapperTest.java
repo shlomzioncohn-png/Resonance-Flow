@@ -150,4 +150,5 @@ class TaskCreationRequestMapperTest {
 
         assertThat(task.getCreatedBy()).isNull();
     }
+
 }

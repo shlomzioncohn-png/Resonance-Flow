@@ -14,6 +14,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.time.Clock;
 import java.time.Instant;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
@@ -50,11 +51,11 @@ public class TaskService {
 
     @Transactional
     public Task createTask(Task incoming, UUID correlationId) {
-        return createTask(incoming, null, correlationId);
+        return createTask(incoming, List.of(), correlationId);
     }
 
     @Transactional
-    public Task createTask(Task incoming, Assignment assignment, UUID correlationId) {
+    public Task createTask(Task incoming, List<Assignment> assignments, UUID correlationId) {
         Optional<Task> existing = findExisting(incoming);
         if (existing.isPresent()) {
             return existing.get();
@@ -62,7 +63,7 @@ public class TaskService {
 
         Task saved = insertTask(incoming);
 
-        if (assignment != null) {
+        for (Assignment assignment : assignments) {
             assignment.setTask(saved);
             assignmentRepository.save(assignment);
         }

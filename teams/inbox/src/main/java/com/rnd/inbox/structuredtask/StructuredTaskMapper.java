@@ -1,7 +1,5 @@
 package com.rnd.inbox.structuredtask;
 
-import com.rnd.inbox.task.Assignment;
-import com.rnd.inbox.task.AssignmentRole;
 import com.rnd.inbox.task.SourceType;
 import com.rnd.inbox.task.Task;
 import com.rnd.inbox.task.TaskExtractionProvenance;
@@ -44,19 +42,5 @@ public class StructuredTaskMapper {
         task.setCreatedAt(now);
         task.setUpdatedAt(now);
         return task;
-    }
-
-    public Assignment mapAssignment(StructuredTaskEventDto dto, StructuredTaskReferences references) {
-        if (references.assignee() == null && references.assigneeTeam() == null) {
-            return null;
-        }
-
-        Assignment assignment = new Assignment();
-        assignment.setUser(references.assignee());
-        assignment.setTeam(references.assigneeTeam());
-        assignment.setAssignmentRole(AssignmentRole.valueOf(dto.getAssignmentRole()));
-        assignment.setAssignedAt(Instant.now(clock));
-        assignment.setAssignedBy(references.assignedBy());
-        return assignment;
     }
 }

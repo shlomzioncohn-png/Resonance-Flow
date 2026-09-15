@@ -7,6 +7,7 @@ import com.rnd.inbox.structuredtask.StructuredTaskEventDto;
 import com.rnd.inbox.structuredtask.StructuredTaskMapper;
 import com.rnd.inbox.taskcreationrequest.TaskCreationRequestEventDto;
 import com.rnd.inbox.taskcreationrequest.TaskCreationRequestMapper;
+import com.rnd.inbox.team.Team;
 import com.rnd.inbox.team.TeamNotFoundException;
 import com.rnd.inbox.team.TeamRepository;
 import com.rnd.inbox.tenant.Tenant;
@@ -26,6 +27,7 @@ import org.springframework.dao.DataIntegrityViolationException;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -68,6 +70,7 @@ class TaskIngestionServiceTest {
                 taskService,
                 new StructuredTaskMapper(clock),
                 new TaskCreationRequestMapper(clock),
+                new AssignmentMapper(clock),
                 tenantRepository,
                 projectRepository,
                 userRepository,
@@ -85,27 +88,81 @@ class TaskIngestionServiceTest {
         service.ingest(event);
 
         ArgumentCaptor<Task> captor = ArgumentCaptor.forClass(Task.class);
-        verify(taskService).createTask(captor.capture(), eq(null), eq(UUID.fromString(event.getEventId())));
+        verify(taskService).createTask(captor.capture(), eq(List.of()), eq(UUID.fromString(event.getEventId())));
         assertThat(captor.getValue().getTenant()).isSameAs(tenant);
         assertThat(captor.getValue().getTitle()).isEqualTo("Fix flaky test");
     }
 
     @Test
-    void ingest_structuredTaskEvent_withAnAssignee_passesTheAssignmentAlongsideTheTask() {
+    void ingest_structuredTaskEvent_withAssigneesArray_resolvesAndPassesEachAssignment() {
         stubTenant();
-        User assignee = user();
-        when(userRepository.findById(assignee.getId())).thenReturn(Optional.of(assignee));
+        User owner = user();
+        User collaborator = user();
+        when(userRepository.findById(owner.getId())).thenReturn(Optional.of(owner));
+        when(userRepository.findById(collaborator.getId())).thenReturn(Optional.of(collaborator));
         when(taskService.createTask(any(), any(), any())).thenAnswer(i -> i.getArgument(0));
 
         StructuredTaskEventDto event = structuredTaskEvent();
-        event.setAssigneeUserId(assignee.getId().toString());
-        event.setAssignmentRole("ASSIGNEE");
+        event.setAssignees(List.of(
+                assigneeDto("USER", owner.getId(), "OWNER", null),
+                assigneeDto("USER", collaborator.getId(), "COLLABORATOR", null)));
 
         service.ingest(event);
 
-        ArgumentCaptor<Assignment> captor = ArgumentCaptor.forClass(Assignment.class);
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<List<Assignment>> captor = ArgumentCaptor.forClass(List.class);
         verify(taskService).createTask(any(), captor.capture(), any());
-        assertThat(captor.getValue().getUser()).isSameAs(assignee);
+        assertThat(captor.getValue()).hasSize(2);
+    }
+
+    @Test
+    void ingest_structuredTaskEvent_withATeamInTheAssigneesArray_resolvesTheTeam() {
+        stubTenant();
+        Team team = new Team();
+        team.setId(UUID.randomUUID());
+        when(teamRepository.findById(team.getId())).thenReturn(Optional.of(team));
+        when(taskService.createTask(any(), any(), any())).thenAnswer(i -> i.getArgument(0));
+
+        StructuredTaskEventDto event = structuredTaskEvent();
+        event.setAssignees(List.of(assigneeDto("TEAM", team.getId(), "OWNER", null)));
+
+        service.ingest(event);
+
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<List<Assignment>> captor = ArgumentCaptor.forClass(List.class);
+        verify(taskService).createTask(any(), captor.capture(), any());
+        assertThat(captor.getValue().get(0).getTeam()).isSameAs(team);
+        assertThat(captor.getValue().get(0).getUser()).isNull();
+    }
+
+    @Test
+    void ingest_structuredTaskEvent_whenAnAssigneeInTheArrayDoesNotExist_throwsBeforeAnythingIsSaved() {
+        stubTenant();
+        UUID assigneeId = UUID.randomUUID();
+        when(userRepository.findById(assigneeId)).thenReturn(Optional.empty());
+
+        StructuredTaskEventDto event = structuredTaskEvent();
+        event.setAssignees(List.of(assigneeDto("USER", assigneeId, "ASSIGNEE", null)));
+
+        assertThatThrownBy(() -> service.ingest(event))
+                .isInstanceOf(UserNotFoundException.class);
+
+        verify(taskService, never()).createTask(any(), any(), any());
+    }
+
+    @Test
+    void ingest_structuredTaskEvent_whenATeamInTheArrayDoesNotExist_throwsBeforeAnythingIsSaved() {
+        stubTenant();
+        UUID teamId = UUID.randomUUID();
+        when(teamRepository.findById(teamId)).thenReturn(Optional.empty());
+
+        StructuredTaskEventDto event = structuredTaskEvent();
+        event.setAssignees(List.of(assigneeDto("TEAM", teamId, "OWNER", null)));
+
+        assertThatThrownBy(() -> service.ingest(event))
+                .isInstanceOf(TeamNotFoundException.class);
+
+        verify(taskService, never()).createTask(any(), any(), any());
     }
 
     @Test
@@ -121,7 +178,7 @@ class TaskIngestionServiceTest {
         service.ingest(event);
 
         ArgumentCaptor<Task> captor = ArgumentCaptor.forClass(Task.class);
-        verify(taskService).createTask(captor.capture(), eq(null), any());
+        verify(taskService).createTask(captor.capture(), eq(List.of()), any());
         assertThat(captor.getValue().getCreatedBy()).isSameAs(createdBy);
     }
 
@@ -170,38 +227,6 @@ class TaskIngestionServiceTest {
     }
 
     @Test
-    void ingest_whenTheAssigneeDoesNotExist_throwsBeforeAnythingIsSaved() {
-        stubTenant();
-        UUID assigneeId = UUID.randomUUID();
-        when(userRepository.findById(assigneeId)).thenReturn(Optional.empty());
-
-        StructuredTaskEventDto event = structuredTaskEvent();
-        event.setAssigneeUserId(assigneeId.toString());
-        event.setAssignmentRole("ASSIGNEE");
-
-        assertThatThrownBy(() -> service.ingest(event))
-                .isInstanceOf(UserNotFoundException.class);
-
-        verify(taskService, never()).createTask(any(), any(), any());
-    }
-
-    @Test
-    void ingest_whenTheAssigneeTeamDoesNotExist_throwsBeforeAnythingIsSaved() {
-        stubTenant();
-        UUID teamId = UUID.randomUUID();
-        when(teamRepository.findById(teamId)).thenReturn(Optional.empty());
-
-        StructuredTaskEventDto event = structuredTaskEvent();
-        event.setAssigneeTeamId(teamId.toString());
-        event.setAssignmentRole("OWNER");
-
-        assertThatThrownBy(() -> service.ingest(event))
-                .isInstanceOf(TeamNotFoundException.class);
-
-        verify(taskService, never()).createTask(any(), any(), any());
-    }
-
-    @Test
     void ingest_taskCreationRequestEvent_resolvesReferencesAndUsesTheEventsCorrelationId() {
         stubTenant();
         Project project = new Project();
@@ -215,7 +240,7 @@ class TaskIngestionServiceTest {
         service.ingest(event);
 
         ArgumentCaptor<Task> captor = ArgumentCaptor.forClass(Task.class);
-        verify(taskService).createTask(captor.capture(), eq(null),
+        verify(taskService).createTask(captor.capture(), eq(List.of()),
                 eq(UUID.fromString(event.getCorrelationId())));
         assertThat(captor.getValue().getTenant()).isSameAs(tenant);
         assertThat(captor.getValue().getProject()).isSameAs(project);
@@ -234,8 +259,125 @@ class TaskIngestionServiceTest {
         service.ingest(event);
 
         ArgumentCaptor<Task> captor = ArgumentCaptor.forClass(Task.class);
-        verify(taskService).createTask(captor.capture(), eq(null), any());
+        verify(taskService).createTask(captor.capture(), eq(List.of()), any());
         assertThat(captor.getValue().getCreatedBy()).isSameAs(createdBy);
+    }
+
+    @Test
+    void ingest_taskCreationRequestEvent_withAUserAssignee_resolvesAndPassesTheAssignment() {
+        stubTenant();
+        User assignee = user();
+        when(userRepository.findById(assignee.getId())).thenReturn(Optional.of(assignee));
+        when(taskService.createTask(any(), any(), any())).thenAnswer(i -> i.getArgument(0));
+
+        TaskCreationRequestEventDto event = taskCreationRequestEvent();
+        event.setAssignees(List.of(assigneeDto("USER", assignee.getId(), "ASSIGNEE", null)));
+
+        service.ingest(event);
+
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<List<Assignment>> captor = ArgumentCaptor.forClass(List.class);
+        verify(taskService).createTask(any(), captor.capture(), any());
+        assertThat(captor.getValue()).hasSize(1);
+        Assignment assignment = captor.getValue().get(0);
+        assertThat(assignment.getUser()).isSameAs(assignee);
+        assertThat(assignment.getTeam()).isNull();
+        assertThat(assignment.getAssignmentRole()).isEqualTo(AssignmentRole.ASSIGNEE);
+    }
+
+    @Test
+    void ingest_taskCreationRequestEvent_withATeamAssignee_resolvesAndPassesTheAssignment() {
+        stubTenant();
+        Team team = new Team();
+        team.setId(UUID.randomUUID());
+        when(teamRepository.findById(team.getId())).thenReturn(Optional.of(team));
+        when(taskService.createTask(any(), any(), any())).thenAnswer(i -> i.getArgument(0));
+
+        TaskCreationRequestEventDto event = taskCreationRequestEvent();
+        event.setAssignees(List.of(assigneeDto("TEAM", team.getId(), "OWNER", null)));
+
+        service.ingest(event);
+
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<List<Assignment>> captor = ArgumentCaptor.forClass(List.class);
+        verify(taskService).createTask(any(), captor.capture(), any());
+        assertThat(captor.getValue()).hasSize(1);
+        Assignment assignment = captor.getValue().get(0);
+        assertThat(assignment.getTeam()).isSameAs(team);
+        assertThat(assignment.getUser()).isNull();
+        assertThat(assignment.getAssignmentRole()).isEqualTo(AssignmentRole.OWNER);
+    }
+
+    @Test
+    void ingest_taskCreationRequestEvent_withAnAssignedBy_resolvesIt() {
+        stubTenant();
+        User assignee = user();
+        User assignedBy = user();
+        when(userRepository.findById(assignee.getId())).thenReturn(Optional.of(assignee));
+        when(userRepository.findById(assignedBy.getId())).thenReturn(Optional.of(assignedBy));
+        when(taskService.createTask(any(), any(), any())).thenAnswer(i -> i.getArgument(0));
+
+        TaskCreationRequestEventDto event = taskCreationRequestEvent();
+        event.setAssignees(List.of(assigneeDto("USER", assignee.getId(), "ASSIGNEE", assignedBy.getId())));
+
+        service.ingest(event);
+
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<List<Assignment>> captor = ArgumentCaptor.forClass(List.class);
+        verify(taskService).createTask(any(), captor.capture(), any());
+        assertThat(captor.getValue().get(0).getAssignedBy()).isSameAs(assignedBy);
+    }
+
+    @Test
+    void ingest_taskCreationRequestEvent_withMultipleAssignees_passesAllOfThem() {
+        stubTenant();
+        User owner = user();
+        User collaborator = user();
+        when(userRepository.findById(owner.getId())).thenReturn(Optional.of(owner));
+        when(userRepository.findById(collaborator.getId())).thenReturn(Optional.of(collaborator));
+        when(taskService.createTask(any(), any(), any())).thenAnswer(i -> i.getArgument(0));
+
+        TaskCreationRequestEventDto event = taskCreationRequestEvent();
+        event.setAssignees(List.of(
+                assigneeDto("USER", owner.getId(), "OWNER", null),
+                assigneeDto("USER", collaborator.getId(), "COLLABORATOR", null)));
+
+        service.ingest(event);
+
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<List<Assignment>> captor = ArgumentCaptor.forClass(List.class);
+        verify(taskService).createTask(any(), captor.capture(), any());
+        assertThat(captor.getValue()).hasSize(2);
+    }
+
+    @Test
+    void ingest_taskCreationRequestEvent_whenAnAssigneeUserDoesNotExist_throwsBeforeAnythingIsSaved() {
+        stubTenant();
+        UUID assigneeId = UUID.randomUUID();
+        when(userRepository.findById(assigneeId)).thenReturn(Optional.empty());
+
+        TaskCreationRequestEventDto event = taskCreationRequestEvent();
+        event.setAssignees(List.of(assigneeDto("USER", assigneeId, "ASSIGNEE", null)));
+
+        assertThatThrownBy(() -> service.ingest(event))
+                .isInstanceOf(UserNotFoundException.class);
+
+        verify(taskService, never()).createTask(any(), any(), any());
+    }
+
+    @Test
+    void ingest_taskCreationRequestEvent_whenAnAssigneeTeamDoesNotExist_throwsBeforeAnythingIsSaved() {
+        stubTenant();
+        UUID teamId = UUID.randomUUID();
+        when(teamRepository.findById(teamId)).thenReturn(Optional.empty());
+
+        TaskCreationRequestEventDto event = taskCreationRequestEvent();
+        event.setAssignees(List.of(assigneeDto("TEAM", teamId, "OWNER", null)));
+
+        assertThatThrownBy(() -> service.ingest(event))
+                .isInstanceOf(TeamNotFoundException.class);
+
+        verify(taskService, never()).createTask(any(), any(), any());
     }
 
     @Test
@@ -291,6 +433,15 @@ class TaskIngestionServiceTest {
         dto.setSourceRef("slack:T012AB3CD:C024BE91L:1756550400.001900");
         dto.setConfidence(0.87);
         dto.setHasDependencies(false);
+        return dto;
+    }
+
+    private AssigneeDto assigneeDto(String assigneeType, UUID id, String assignmentRole, UUID assignedBy) {
+        AssigneeDto dto = new AssigneeDto();
+        dto.setAssigneeType(assigneeType);
+        dto.setId(id.toString());
+        dto.setAssignmentRole(assignmentRole);
+        dto.setAssignedBy(assignedBy != null ? assignedBy.toString() : null);
         return dto;
     }
 }

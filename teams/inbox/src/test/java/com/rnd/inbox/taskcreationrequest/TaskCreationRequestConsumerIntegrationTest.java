@@ -6,6 +6,9 @@ import com.rnd.inbox.event.TaskCreationRequestedEvent;
 import com.rnd.inbox.outbox.OutboxEvent;
 import com.rnd.inbox.outbox.OutboxEventRepository;
 import com.rnd.inbox.support.PostgresIntegrationTest;
+import com.rnd.inbox.task.Assignment;
+import com.rnd.inbox.task.AssignmentRepository;
+import com.rnd.inbox.task.AssignmentRole;
 import com.rnd.inbox.task.SourceType;
 import com.rnd.inbox.task.Task;
 import com.rnd.inbox.task.TaskExtractionProvenance;
@@ -13,11 +16,16 @@ import com.rnd.inbox.task.TaskRepository;
 import com.rnd.inbox.tenant.Tenant;
 import com.rnd.inbox.tenant.TenantRepository;
 import com.rnd.inbox.tenant.TenantStatus;
+import com.rnd.inbox.user.User;
+import com.rnd.inbox.user.UserRepository;
+import com.rnd.inbox.user.UserRole;
+import com.rnd.inbox.user.UserStatus;
 import io.confluent.kafka.serializers.AbstractKafkaSchemaSerDeConfig;
 import io.confluent.kafka.serializers.protobuf.KafkaProtobufSerializer;
 import org.apache.kafka.clients.consumer.Consumer;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
+import org.apache.kafka.clients.consumer.ConsumerRecords;
 import org.apache.kafka.common.serialization.ByteArraySerializer;
 import org.apache.kafka.common.serialization.StringDeserializer;
 import org.apache.kafka.common.serialization.StringSerializer;
@@ -71,6 +79,12 @@ class TaskCreationRequestConsumerIntegrationTest extends PostgresIntegrationTest
     @Autowired
     private TenantRepository tenantRepository;
 
+    @Autowired
+    private UserRepository userRepository;
+
+    @Autowired
+    private AssignmentRepository assignmentRepository;
+
     private KafkaTemplate<String, TaskCreationRequestedEvent> producer;
     private KafkaTemplate<String, byte[]> rawBytesProducer;
     private Consumer<String, String> errorConsumer;
@@ -109,8 +123,19 @@ class TaskCreationRequestConsumerIntegrationTest extends PostgresIntegrationTest
         return tenantRepository.saveAndFlush(tenant);
     }
 
-    private TaskCreationRequestedEvent validEvent(UUID tenantId, String sourceRef, String correlationId,
-            boolean hasDependencies) {
+    private User persistUser(Tenant tenant) {
+        User user = new User();
+        user.setTenant(tenant);
+        user.setDisplayName("Dana Cohen");
+        user.setRole(UserRole.EMPLOYEE);
+        user.setStatus(UserStatus.ACTIVE);
+        user.setCreatedAt(Instant.now());
+        user.setUpdatedAt(Instant.now());
+        return userRepository.saveAndFlush(user);
+    }
+
+    private TaskCreationRequestedEvent.Builder validEventBuilder(UUID tenantId, String sourceRef,
+            String correlationId, boolean hasDependencies) {
         return TaskCreationRequestedEvent.newBuilder()
                 .setEventId(UUID.randomUUID().toString())
                 .setCorrelationId(correlationId)
@@ -119,8 +144,12 @@ class TaskCreationRequestConsumerIntegrationTest extends PostgresIntegrationTest
                 .setSourceType(com.rnd.inbox.event.SourceType.SOURCE_TYPE_SLACK)
                 .setSourceRef(sourceRef)
                 .setConfidence(0.87)
-                .setHasDependencies(hasDependencies)
-                .build();
+                .setHasDependencies(hasDependencies);
+    }
+
+    private TaskCreationRequestedEvent validEvent(UUID tenantId, String sourceRef, String correlationId,
+            boolean hasDependencies) {
+        return validEventBuilder(tenantId, sourceRef, correlationId, hasDependencies).build();
     }
 
     @Test
@@ -202,7 +231,7 @@ class TaskCreationRequestConsumerIntegrationTest extends PostgresIntegrationTest
 
         producer.send(TOPIC, missingRequiredFields);
 
-        ConsumerRecord<String, String> errorRecord = awaitErrorRecordContaining("failed validation");
+        ConsumerRecord<String, String> errorRecord = awaitErrorContaining(sourceRef);
 
         assertThat(errorRecord.value()).contains("VALIDATION_FAILURE");
         assertThat(taskRepository.findAll().stream().noneMatch(t -> sourceRef.equals(t.getSourceRef()))).isTrue();
@@ -224,9 +253,35 @@ class TaskCreationRequestConsumerIntegrationTest extends PostgresIntegrationTest
 
         producer.send(TOPIC, missingConfidence);
 
-        ConsumerRecord<String, String> errorRecord = awaitErrorRecordContaining("failed validation");
+        ConsumerRecord<String, String> errorRecord = awaitErrorContaining(sourceRef);
 
         assertThat(errorRecord.value()).contains("VALIDATION_FAILURE");
+        assertThat(taskRepository.findAll().stream().noneMatch(t -> sourceRef.equals(t.getSourceRef()))).isTrue();
+    }
+
+    @Test
+    void anEventWithADuplicateAssigneeIsRejectedInsteadOfRetried() {
+        Tenant tenant = persistTenant();
+        String sourceRef = "slack:T012AB3CD:C024BE91L:" + UUID.randomUUID();
+        String assigneeId = UUID.randomUUID().toString();
+
+        TaskCreationRequestedEvent event = validEventBuilder(
+                tenant.getId(), sourceRef, UUID.randomUUID().toString(), false)
+                .addAssignees(com.rnd.inbox.event.Assignee.newBuilder()
+                        .setAssigneeType(com.rnd.inbox.event.AssigneeType.ASSIGNEE_TYPE_USER)
+                        .setId(assigneeId)
+                        .setAssignmentRole(com.rnd.inbox.event.AssignmentRole.ASSIGNMENT_ROLE_OWNER))
+                .addAssignees(com.rnd.inbox.event.Assignee.newBuilder()
+                        .setAssigneeType(com.rnd.inbox.event.AssigneeType.ASSIGNEE_TYPE_USER)
+                        .setId(assigneeId)
+                        .setAssignmentRole(com.rnd.inbox.event.AssignmentRole.ASSIGNMENT_ROLE_COLLABORATOR))
+                .build();
+
+        producer.send(TOPIC, event);
+
+        ConsumerRecord<String, String> errorRecord = awaitErrorContaining(sourceRef);
+
+        assertThat(errorRecord.value()).contains("VALIDATION_FAILURE", "duplicates");
         assertThat(taskRepository.findAll().stream().noneMatch(t -> sourceRef.equals(t.getSourceRef()))).isTrue();
     }
 
@@ -246,17 +301,41 @@ class TaskCreationRequestConsumerIntegrationTest extends PostgresIntegrationTest
 
         producer.send(TOPIC, missingHasDependencies);
 
-        ConsumerRecord<String, String> errorRecord = awaitErrorRecordContaining("failed validation");
+        ConsumerRecord<String, String> errorRecord = awaitErrorContaining(sourceRef);
 
         assertThat(errorRecord.value()).contains("VALIDATION_FAILURE");
         assertThat(taskRepository.findAll().stream().noneMatch(t -> sourceRef.equals(t.getSourceRef()))).isTrue();
     }
 
     @Test
+    void anEventWithAnAssigneeCreatesTheCorrespondingAssignmentRecord() {
+        Tenant tenant = persistTenant();
+        User assignee = persistUser(tenant);
+        String sourceRef = "slack:T012AB3CD:C024BE91L:" + UUID.randomUUID();
+
+        TaskCreationRequestedEvent event = validEventBuilder(
+                tenant.getId(), sourceRef, UUID.randomUUID().toString(), false)
+                .addAssignees(com.rnd.inbox.event.Assignee.newBuilder()
+                        .setAssigneeType(com.rnd.inbox.event.AssigneeType.ASSIGNEE_TYPE_USER)
+                        .setId(assignee.getId().toString())
+                        .setAssignmentRole(com.rnd.inbox.event.AssignmentRole.ASSIGNMENT_ROLE_OWNER))
+                .build();
+
+        producer.send(TOPIC, event);
+
+        Task task = awaitTask(tenant.getId(), sourceRef);
+
+        List<Assignment> assignments = assignmentRepository.findByTask_Id(task.getId());
+        assertThat(assignments).hasSize(1);
+        assertThat(assignments.get(0).getUser().getId()).isEqualTo(assignee.getId());
+        assertThat(assignments.get(0).getAssignmentRole()).isEqualTo(AssignmentRole.OWNER);
+    }
+
+    @Test
     void corruptProtobufBytesAreRoutedToTheErrorTopicAndDoNotBlockLaterMessages() {
         rawBytesProducer.send(TOPIC, "poison-pill-key", "not a valid protobuf message".getBytes());
 
-        ConsumerRecord<String, String> errorRecord = awaitErrorRecordContaining("Malformed protobuf payload");
+        ConsumerRecord<String, String> errorRecord = awaitErrorContaining("Malformed protobuf payload");
         assertThat(errorRecord.value()).contains("VALIDATION_FAILURE");
 
         Tenant tenant = persistTenant();
@@ -288,17 +367,22 @@ class TaskCreationRequestConsumerIntegrationTest extends PostgresIntegrationTest
         assertThat(task.getExtractionProvenance()).isEqualTo(TaskExtractionProvenance.ML_INFERRED);
     }
 
-    private ConsumerRecord<String, String> awaitErrorRecordContaining(String needle) {
-        long deadline = System.currentTimeMillis() + 10000;
+    /**
+     * Several tests here route to the same error topic, and the consumer reads it from the
+     * beginning - so {@code getSingleRecord} would trip over a previous test's record. Match on
+     * the ref this test used instead of assuming the topic holds exactly one message.
+     */
+    private ConsumerRecord<String, String> awaitErrorContaining(String needle) {
+        long deadline = System.currentTimeMillis() + 15000;
         while (System.currentTimeMillis() < deadline) {
-            for (ConsumerRecord<String, String> record
-                    : KafkaTestUtils.getRecords(errorConsumer, Duration.ofSeconds(1))) {
-                if (record.value().contains(needle)) {
+            ConsumerRecords<String, String> records = KafkaTestUtils.getRecords(errorConsumer, Duration.ofSeconds(2));
+            for (ConsumerRecord<String, String> record : records) {
+                if (record.value() != null && record.value().contains(needle)) {
                     return record;
                 }
             }
         }
-        throw new AssertionError("No record containing \"" + needle + "\" appeared on " + ERROR_TOPIC);
+        throw new AssertionError("No error record mentioning " + needle + " arrived within the timeout");
     }
 
     private Task awaitTask(UUID tenantId, String sourceRef) {

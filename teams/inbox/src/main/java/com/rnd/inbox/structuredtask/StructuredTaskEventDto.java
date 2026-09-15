@@ -3,11 +3,12 @@ package com.rnd.inbox.structuredtask;
 import com.rnd.inbox.shared.messaging.validation.IsoInstant;
 import com.rnd.inbox.shared.messaging.validation.ValidEnum;
 import com.rnd.inbox.shared.messaging.validation.ValidUuid;
-import com.rnd.inbox.task.AssignmentRole;
+import com.rnd.inbox.task.AssigneeDto;
 import com.rnd.inbox.task.SourceType;
 import com.rnd.inbox.task.TaskRoleContext;
 import com.rnd.inbox.task.TaskStatus;
 import com.rnd.inbox.task.TaskTier;
+import jakarta.validation.Valid;
 import jakarta.validation.constraints.DecimalMax;
 import jakarta.validation.constraints.DecimalMin;
 import jakarta.validation.constraints.Max;
@@ -15,7 +16,8 @@ import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Positive;
 
-@ConsistentAssignment
+import java.util.List;
+
 public class StructuredTaskEventDto {
 
     @ValidUuid
@@ -64,19 +66,10 @@ public class StructuredTaskEventDto {
     private Double confidence;
 
     @ValidUuid
-    private String assigneeUserId;
-
-    @ValidUuid
-    private String assigneeTeamId;
-
-    @ValidEnum(enumClass = AssignmentRole.class)
-    private String assignmentRole;
-
-    @ValidUuid
-    private String assignedByUserId;
-
-    @ValidUuid
     private String createdByUserId;
+
+    @Valid
+    private List<AssigneeDto> assignees;
 
     public String getEventId() {
         return eventId;
@@ -190,43 +183,19 @@ public class StructuredTaskEventDto {
         this.confidence = confidence;
     }
 
-    public String getAssigneeUserId() {
-        return assigneeUserId;
-    }
-
-    public void setAssigneeUserId(String assigneeUserId) {
-        this.assigneeUserId = assigneeUserId;
-    }
-
-    public String getAssigneeTeamId() {
-        return assigneeTeamId;
-    }
-
-    public void setAssigneeTeamId(String assigneeTeamId) {
-        this.assigneeTeamId = assigneeTeamId;
-    }
-
-    public String getAssignmentRole() {
-        return assignmentRole;
-    }
-
-    public void setAssignmentRole(String assignmentRole) {
-        this.assignmentRole = assignmentRole;
-    }
-
-    public String getAssignedByUserId() {
-        return assignedByUserId;
-    }
-
-    public void setAssignedByUserId(String assignedByUserId) {
-        this.assignedByUserId = assignedByUserId;
-    }
-
     public String getCreatedByUserId() {
         return createdByUserId;
     }
 
     public void setCreatedByUserId(String createdByUserId) {
         this.createdByUserId = createdByUserId;
+    }
+
+    public List<AssigneeDto> getAssignees() {
+        return assignees;
+    }
+
+    public void setAssignees(List<AssigneeDto> assignees) {
+        this.assignees = assignees;
     }
 }

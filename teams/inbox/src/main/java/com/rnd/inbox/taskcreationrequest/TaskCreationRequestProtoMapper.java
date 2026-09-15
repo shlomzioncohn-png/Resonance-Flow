@@ -1,14 +1,19 @@
 package com.rnd.inbox.taskcreationrequest;
 
 import com.google.protobuf.util.Timestamps;
+import com.rnd.inbox.event.Assignee;
+import com.rnd.inbox.event.AssigneeType;
+import com.rnd.inbox.event.AssignmentRole;
 import com.rnd.inbox.event.SourceType;
 import com.rnd.inbox.event.TaskCreationRequestedEvent;
 import com.rnd.inbox.event.TaskRoleContext;
 import com.rnd.inbox.event.TaskStatus;
 import com.rnd.inbox.event.TaskTier;
+import com.rnd.inbox.task.AssigneeDto;
 import org.springframework.stereotype.Component;
 
 import java.time.Instant;
+import java.util.List;
 
 @Component
 public class TaskCreationRequestProtoMapper {
@@ -32,7 +37,29 @@ public class TaskCreationRequestProtoMapper {
         dto.setConfidence(proto.hasConfidence() ? proto.getConfidence() : null);
         dto.setHasDependencies(proto.hasHasDependencies() ? proto.getHasDependencies() : null);
         dto.setCreatedByUserId(proto.hasCreatedByUserId() ? proto.getCreatedByUserId() : null);
+        dto.setAssignees(fromAssignees(proto.getAssigneesList()));
         return dto;
+    }
+
+    private List<AssigneeDto> fromAssignees(List<Assignee> assignees) {
+        return assignees.stream().map(this::fromAssignee).toList();
+    }
+
+    private AssigneeDto fromAssignee(Assignee assignee) {
+        AssigneeDto dto = new AssigneeDto();
+        dto.setAssigneeType(fromAssigneeType(assignee.getAssigneeType()));
+        dto.setId(assignee.getId());
+        dto.setAssignmentRole(fromAssignmentRole(assignee.getAssignmentRole()));
+        dto.setAssignedBy(assignee.hasAssignedBy() ? assignee.getAssignedBy() : null);
+        return dto;
+    }
+
+    private String fromAssigneeType(AssigneeType assigneeType) {
+        return assigneeType.name().substring("ASSIGNEE_TYPE_".length());
+    }
+
+    private String fromAssignmentRole(AssignmentRole assignmentRole) {
+        return assignmentRole.name().substring("ASSIGNMENT_ROLE_".length());
     }
 
     private String fromSourceType(SourceType sourceType) {

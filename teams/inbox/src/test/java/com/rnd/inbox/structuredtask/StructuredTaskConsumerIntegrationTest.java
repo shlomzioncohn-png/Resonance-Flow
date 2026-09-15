@@ -170,6 +170,58 @@ class StructuredTaskConsumerIntegrationTest extends PostgresIntegrationTest {
     }
 
     @Test
+    void anEventWithADuplicateAssigneeIsRejectedInsteadOfRetried() {
+        Tenant tenant = persistTenant();
+        String sourceRef = "github:owner/repo:issue:" + UUID.randomUUID();
+        String assigneeId = UUID.randomUUID().toString();
+        String payload = "{"
+                + "\"eventId\":\"" + UUID.randomUUID() + "\","
+                + "\"tenantId\":\"" + tenant.getId() + "\","
+                + "\"title\":\"Fix flaky test\","
+                + "\"sourceType\":\"GITHUB_ISSUE\","
+                + "\"sourceRef\":\"" + sourceRef + "\","
+                + "\"status\":\"NEW\","
+                + "\"assignees\":["
+                + "  {\"assigneeType\":\"USER\",\"id\":\"" + assigneeId + "\",\"assignmentRole\":\"OWNER\"},"
+                + "  {\"assigneeType\":\"USER\",\"id\":\"" + assigneeId + "\",\"assignmentRole\":\"COLLABORATOR\"}"
+                + "]"
+                + "}";
+
+        producer.send("bridge.structured.tasks", payload);
+
+        ConsumerRecord<String, String> error = awaitErrorContaining(sourceRef);
+
+        assertThat(error.value()).contains("VALIDATION_FAILURE", "duplicates");
+        assertThat(header(error, "x-error-type")).isEqualTo("VALIDATION_FAILURE");
+        assertThat(header(error, "x-retry-count")).isEqualTo("0");
+        assertThat(taskRepository.findAll().stream().noneMatch(t -> sourceRef.equals(t.getSourceRef()))).isTrue();
+    }
+
+    @Test
+    void anEventWithANullAssigneeInTheArrayIsRejectedInsteadOfRetried() {
+        Tenant tenant = persistTenant();
+        String sourceRef = "github:owner/repo:issue:" + UUID.randomUUID();
+        String payload = "{"
+                + "\"eventId\":\"" + UUID.randomUUID() + "\","
+                + "\"tenantId\":\"" + tenant.getId() + "\","
+                + "\"title\":\"Fix flaky test\","
+                + "\"sourceType\":\"GITHUB_ISSUE\","
+                + "\"sourceRef\":\"" + sourceRef + "\","
+                + "\"status\":\"NEW\","
+                + "\"assignees\":[null]"
+                + "}";
+
+        producer.send("bridge.structured.tasks", payload);
+
+        ConsumerRecord<String, String> error = awaitErrorContaining(sourceRef);
+
+        assertThat(error.value()).contains("VALIDATION_FAILURE", "must not be null");
+        assertThat(header(error, "x-error-type")).isEqualTo("VALIDATION_FAILURE");
+        assertThat(header(error, "x-retry-count")).isEqualTo("0");
+        assertThat(taskRepository.findAll().stream().noneMatch(t -> sourceRef.equals(t.getSourceRef()))).isTrue();
+    }
+
+    @Test
     void anEventPointingAtAnUnknownTenantIsRejectedInsteadOfRetried() {
         String sourceRef = "github:owner/repo:issue:" + UUID.randomUUID();
 

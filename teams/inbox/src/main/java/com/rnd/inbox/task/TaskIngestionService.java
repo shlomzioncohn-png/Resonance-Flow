@@ -22,6 +22,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 
+import java.util.List;
 import java.util.UUID;
 
 @Service
@@ -32,6 +33,7 @@ public class TaskIngestionService {
     private final TaskService taskService;
     private final StructuredTaskMapper structuredTaskMapper;
     private final TaskCreationRequestMapper taskCreationRequestMapper;
+    private final AssignmentMapper assignmentMapper;
     private final TenantRepository tenantRepository;
     private final ProjectRepository projectRepository;
     private final UserRepository userRepository;
@@ -40,6 +42,7 @@ public class TaskIngestionService {
     public TaskIngestionService(TaskService taskService,
                                 StructuredTaskMapper structuredTaskMapper,
                                 TaskCreationRequestMapper taskCreationRequestMapper,
+                                AssignmentMapper assignmentMapper,
                                 TenantRepository tenantRepository,
                                 ProjectRepository projectRepository,
                                 UserRepository userRepository,
@@ -47,6 +50,7 @@ public class TaskIngestionService {
         this.taskService = taskService;
         this.structuredTaskMapper = structuredTaskMapper;
         this.taskCreationRequestMapper = taskCreationRequestMapper;
+        this.assignmentMapper = assignmentMapper;
         this.tenantRepository = tenantRepository;
         this.projectRepository = projectRepository;
         this.userRepository = userRepository;
@@ -57,15 +61,12 @@ public class TaskIngestionService {
         StructuredTaskReferences references = new StructuredTaskReferences(
                 requireTenant(event.getTenantId()),
                 findProject(event.getProjectId()),
-                findUser(event.getAssigneeUserId()),
-                findTeam(event.getAssigneeTeamId()),
-                findUser(event.getAssignedByUserId()),
                 findUser(event.getCreatedByUserId()));
 
         Task task = structuredTaskMapper.map(event, references);
-        Assignment assignment = structuredTaskMapper.mapAssignment(event, references);
+        List<Assignment> assignments = mapAssignments(event.getAssignees());
 
-        return create(task, assignment, correlationId(event.getEventId()));
+        return create(task, assignments, correlationId(event.getEventId()));
     }
 
     public Task ingest(TaskCreationRequestEventDto event) {
@@ -74,13 +75,32 @@ public class TaskIngestionService {
         User createdBy = findUser(event.getCreatedByUserId());
 
         Task task = taskCreationRequestMapper.map(event, tenant, project, createdBy);
+        List<Assignment> assignments = mapAssignments(event.getAssignees());
 
-        return create(task, null, correlationId(event.getCorrelationId()));
+        return create(task, assignments, correlationId(event.getCorrelationId()));
     }
 
-    private Task create(Task task, Assignment assignment, UUID correlationId) {
+    private List<Assignment> mapAssignments(List<AssigneeDto> assignees) {
+        if (assignees == null) {
+            return List.of();
+        }
+        return assignees.stream()
+                .map(this::mapAssignment)
+                .toList();
+    }
+
+    private Assignment mapAssignment(AssigneeDto dto) {
+        boolean isTeam = AssigneeType.TEAM.name().equals(dto.getAssigneeType());
+        User user = isTeam ? null : findUser(dto.getId());
+        Team team = isTeam ? findTeam(dto.getId()) : null;
+        User assignedBy = findUser(dto.getAssignedBy());
+
+        return assignmentMapper.mapAssignment(dto, user, team, assignedBy);
+    }
+
+    private Task create(Task task, List<Assignment> assignments, UUID correlationId) {
         try {
-            return taskService.createTask(task, assignment, correlationId);
+            return taskService.createTask(task, assignments, correlationId);
         } catch (DataIntegrityViolationException e) {
             return taskService.findExisting(task).orElseThrow(() -> e);
         }

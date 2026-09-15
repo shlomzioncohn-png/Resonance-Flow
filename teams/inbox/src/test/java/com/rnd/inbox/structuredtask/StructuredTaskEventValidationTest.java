@@ -3,6 +3,7 @@ package com.rnd.inbox.structuredtask;
 import com.rnd.inbox.shared.messaging.kafka.EventValidationException;
 import com.rnd.inbox.shared.messaging.kafka.EventValidator;
 import com.rnd.inbox.shared.messaging.validation.BeanValidationEventValidator;
+import com.rnd.inbox.task.AssigneeDto;
 import com.rnd.inbox.task.SourceType;
 import jakarta.validation.Validation;
 import jakarta.validation.ValidatorFactory;
@@ -12,6 +13,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.EnumSource;
 
+import java.util.List;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -170,11 +172,18 @@ class StructuredTaskEventValidationTest {
         assertThatCode(() -> validator.validate(validEvent())).doesNotThrowAnyException();
     }
 
+    private AssigneeDto assigneeDto(String assigneeType, String id, String assignmentRole) {
+        AssigneeDto dto = new AssigneeDto();
+        dto.setAssigneeType(assigneeType);
+        dto.setId(id);
+        dto.setAssignmentRole(assignmentRole);
+        return dto;
+    }
+
     @Test
     void acceptsAnAssignmentToAUser() {
         StructuredTaskEventDto dto = validEvent();
-        dto.setAssigneeUserId(UUID.randomUUID().toString());
-        dto.setAssignmentRole("ASSIGNEE");
+        dto.setAssignees(List.of(assigneeDto("USER", UUID.randomUUID().toString(), "ASSIGNEE")));
 
         assertThatCode(() -> validator.validate(dto)).doesNotThrowAnyException();
     }
@@ -182,44 +191,52 @@ class StructuredTaskEventValidationTest {
     @Test
     void acceptsAnAssignmentToATeamWithAnAssigner() {
         StructuredTaskEventDto dto = validEvent();
-        dto.setAssigneeTeamId(UUID.randomUUID().toString());
-        dto.setAssignmentRole("OWNER");
-        dto.setAssignedByUserId(UUID.randomUUID().toString());
+        AssigneeDto assignee = assigneeDto("TEAM", UUID.randomUUID().toString(), "OWNER");
+        assignee.setAssignedBy(UUID.randomUUID().toString());
+        dto.setAssignees(List.of(assignee));
 
         assertThatCode(() -> validator.validate(dto)).doesNotThrowAnyException();
     }
 
     @Test
-    void rejectsAnAssignmentWithBothAUserAndATeam() {
+    void acceptsMultipleAssigneesInTheArray() {
         StructuredTaskEventDto dto = validEvent();
-        dto.setAssigneeUserId(UUID.randomUUID().toString());
-        dto.setAssigneeTeamId(UUID.randomUUID().toString());
-        dto.setAssignmentRole("ASSIGNEE");
+        dto.setAssignees(List.of(
+                assigneeDto("USER", UUID.randomUUID().toString(), "OWNER"),
+                assigneeDto("USER", UUID.randomUUID().toString(), "COLLABORATOR")));
 
-        assertRejects(dto, "assigneeUserId");
-    }
-
-    @Test
-    void rejectsAnAssignmentRoleWithoutAnAssignee() {
-        StructuredTaskEventDto dto = validEvent();
-        dto.setAssignmentRole("ASSIGNEE");
-
-        assertRejects(dto, "assigneeUserId");
+        assertThatCode(() -> validator.validate(dto)).doesNotThrowAnyException();
     }
 
     @Test
     void rejectsAnAssigneeWithoutAnAssignmentRole() {
         StructuredTaskEventDto dto = validEvent();
-        dto.setAssigneeUserId(UUID.randomUUID().toString());
+        AssigneeDto assignee = assigneeDto("USER", UUID.randomUUID().toString(), null);
+        dto.setAssignees(List.of(assignee));
 
         assertRejects(dto, "assignmentRole");
     }
 
     @Test
+    void rejectsAnAssigneeWithAnInvalidAssigneeType() {
+        StructuredTaskEventDto dto = validEvent();
+        dto.setAssignees(List.of(assigneeDto("NOT_A_TYPE", UUID.randomUUID().toString(), "ASSIGNEE")));
+
+        assertRejects(dto, "assigneeType");
+    }
+
+    @Test
+    void rejectsAnAssigneeWithAnInvalidId() {
+        StructuredTaskEventDto dto = validEvent();
+        dto.setAssignees(List.of(assigneeDto("USER", "not-a-uuid", "ASSIGNEE")));
+
+        assertRejects(dto, "id");
+    }
+
+    @Test
     void rejectsUnrecognizedAssignmentRole() {
         StructuredTaskEventDto dto = validEvent();
-        dto.setAssigneeUserId(UUID.randomUUID().toString());
-        dto.setAssignmentRole("NOT_A_ROLE");
+        dto.setAssignees(List.of(assigneeDto("USER", UUID.randomUUID().toString(), "NOT_A_ROLE")));
 
         assertRejects(dto, "assignmentRole");
     }
