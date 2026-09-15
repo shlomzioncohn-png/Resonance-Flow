@@ -13,7 +13,12 @@ import org.springframework.web.bind.annotation.RestController;
 
 import java.util.UUID;
 
-/** Kept separate from the WIP ChainController on another branch to avoid a merge conflict; unify once that branch lands. */
+/**
+ * Kept separate from the WIP ChainController on another branch to avoid a merge conflict;
+ * unify once that branch lands - tracked as issue #401.
+ *
+ * @see <a href="https://github.com/KamaTechOrg/Resonance-Flow/issues/401">#401</a>
+ */
 @RestController
 @RequestMapping("/tasks")
 public class DependencyHistoryController {
