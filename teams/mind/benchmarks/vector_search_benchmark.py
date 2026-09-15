@@ -85,7 +85,7 @@ def fake_filler_text() -> str:
 
 def percentile(values: list[float], p: float) -> float:
     values = sorted(values)
-    idx = int(round((p / 100) * (len(values) - 1)))
+    idx = round((p / 100) * (len(values) - 1))
     return values[idx]
 
 
@@ -155,7 +155,7 @@ async def main() -> None:
         hits_this_pair = {}
         for k in K_VALUES:
             results = await search(query_vec, k=k)
-            hit = id_b in [r[0] for r in results]
+            hit = id_b in [r.task_id for r in results]
             pair_hits[k].append(hit)
             hits_this_pair[k] = hit
         pair_details.append({
@@ -199,8 +199,13 @@ async def main() -> None:
         status = "HIT " if d["hit_at_10"] else "MISS"
         print(f"  [{status}] \"{d['text_a']}\" -> \"{d['text_b']}\"")
 
-    with open("vector_search_benchmark_results.json", "w") as f:
-        json.dump(results, f, indent=2)
+    def _write_results() -> None:
+        with open("vector_search_benchmark_results.json", "w") as f:
+            json.dump(results, f, indent=2)
+
+    # Blocking file I/O -- offload to a thread so this async function
+    # never blocks the event loop, even for this one quick write.
+    await asyncio.to_thread(_write_results)
     print("\nWrote vector_search_benchmark_results.json (local reference, gitignored)")
 
 
