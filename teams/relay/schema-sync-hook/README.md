@@ -1,4 +1,4 @@
-# schema-sync-hook (DRAFT — lives under teams/relay/, not yet merged into ArgoCD)
+# schema-sync-hook
 
 A Job that runs inside the cluster, checks every schema in
 `../ci/schema-subjects.tsv` against the **live** Schema Registry, and registers
@@ -12,13 +12,19 @@ is the single source of truth, shared with the pre-merge CI check
 `files/schema-subjects.tsv` and `templates/configmap.yaml` renders both the
 `schemas.tsv` list and the per-schema ConfigMap from it.
 
-## Confirmed dependency: Schema Registry doesn't exist in the real cluster yet
+Wired into ArgoCD as [`../argocd/apps/schema-sync-hook.yaml`](../argocd/apps/schema-sync-hook.yaml)
+(moved there 2026-09-09 so `root-app.yaml` actually picks it up — it used to sit
+in this directory as an inert, unwatched file).
 
-Checked every real infra branch (`avigail/argocd-bootstrap`, `chaya-relay`) —
-Schema Registry has no chart, no Application, no Service anywhere. It only
-exists in `teams/relay/docker-compose.yml` for local dev. Per the team lead,
-it **will** be deployed for real eventually — this chart is preparation for
-that, not usable until Schema Registry actually exists somewhere reachable.
+## Schema Registry is now deployed — as part of `resonance-flow`, not standalone
+
+Resolved in c3908262: Schema Registry is deployed as a `components.schema-registry`
+block in the shared [`resonance-flow`](../helm/resonance-flow) Helm chart —
+same pattern every other team's service uses, in the same release/namespace —
+not as its own chart or Application. `values.yaml`'s `schemaRegistryUrl` here
+points at it via its cross-namespace FQDN accordingly. It's still only reachable
+from inside the cluster; `teams/relay/docker-compose.yml`'s copy remains the
+one used for local dev.
 
 ## Why not a PreSync hook (the earlier version of this chart used one)
 
@@ -28,10 +34,13 @@ services, one Helm release). A hook here would never actually block relay's
 rollout.
 
 **What actually works, and is already used in this repo:** `sync-wave`. Real
-example — `argocd/apps/kafka.yaml` has `sync-wave: "-1"`, `resonance-flow.yaml`
-has `"0"`, so kafka's Application must finish and be healthy before
-resonance-flow starts syncing. `argocd-application.yaml` here follows the same
-pattern instead of a hook.
+example — `argocd/apps/resonance-flow.yaml` has `sync-wave: "0"`; this chart's
+own `argocd/apps/schema-sync-hook.yaml` uses `"1"`, so resonance-flow (which
+now renders Schema Registry itself, see above) must finish and be healthy
+before this Job's Application starts syncing. (There used to be a separate,
+earlier-waved `apps/kafka.yaml` this pattern was modeled on — it no longer
+exists; Kafka is now a subchart dependency of `resonance-flow` itself, see
+`../argocd/README.md`.)
 
 Confirmed with Avigail directly: her CI never touches the real cluster's live
 data — only spins up a throwaway local `kind` cluster for smoke tests. No
@@ -50,17 +59,24 @@ existing precedent to reuse there either.
   and commits the result itself (same pattern as `service-ci.yaml`'s
   `update-manifest` job auto-committing image tag bumps). Nobody should ever
   hand-edit anything under `files/` — it's a generated mirror.
-- **`argocd-application.yaml`** belongs in the real `argocd/apps/` folder
-  (owned by whoever set up `avigail/argocd-bootstrap`), not here — kept
-  alongside the chart for now since everything is standalone.
-- Three of the four schemas in `../ci/schema-subjects.tsv`
+- Three of the six schemas in `../ci/schema-subjects.tsv`
   (`task-created-event.proto`, `raw-object-event.proto`, `github-task.proto`)
   are **still unconfirmed drafts** — Inbox/Bridge haven't signed off on them.
-  They're included only to prove the list handles more than one schema, not as
-  a signal they're ready to actually register.
+  (The other three — `task-event.proto` and the two added 2026-09-09,
+  `task-updated-event.proto` / `task-completed-event.proto` — are mechanical
+  mirrors of already-existing Java payload classes, not independent drafts,
+  but haven't gone through an explicit sign-off round either.) Being in this
+  list is what proves it handles more than one schema, not a signal any of
+  them are ready to actually register against a live FULL-compatibility
+  registry.
 
 ## Open questions before this can go live
 
-- Who deploys Schema Registry for real, and where (own chart? part of `kafka/`?)
-- Once it exists, what sync-wave does it get, so this chart's wave can sit
-  correctly between it and `resonance-flow`'s `"0"`
+- ~~Who deploys Schema Registry for real, and where~~ — **resolved** (c3908262):
+  as `components.schema-registry` inside `resonance-flow` itself.
+- ~~Once it exists, what sync-wave does this chart get~~ — **resolved**:
+  `"1"`, after `resonance-flow`'s `"0"` (see `argocd/apps/schema-sync-hook.yaml`).
+- Still open: none of the schemas above have an unambiguous sign-off record —
+  worth closing out before flipping this Job on for real, since registering
+  against a live FULL-compatibility registry is effectively one-way (see the
+  compatibility notes in `task-created-event.proto`'s own header).

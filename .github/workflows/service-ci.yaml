@@ -107,19 +107,14 @@ jobs:
         working-directory: ${{ inputs.service_dir }}
         run: pytest --cov=src/${{ inputs.service_name }}
 
-      - name: Set up JDK 21
+      - name: Run Java tests (via Docker)
         if: inputs.language == 'java'
-        uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: '21'
-          cache: maven
-          cache-dependency-path: ${{ inputs.service_dir }}/pom.xml
-
-      - name: Run Java tests
-        if: inputs.language == 'java'
-        working-directory: ${{ inputs.service_dir }}
-        run: mvn -B test
+        run: |
+          docker run --rm --network host \
+            -v "$PWD:/workspace" -w "/workspace/${{ inputs.service_dir }}" \
+            -v "$HOME/.m2:/root/.m2" \
+            maven:3.9.9-eclipse-temurin-21 \
+            mvn -B test
 
       - name: Set up Node 22
         if: inputs.language == 'node'
@@ -210,7 +205,10 @@ jobs:
           echo "::group::kubectl get events (sorted)"
           kubectl -n "$SERVICE" get events --sort-by=.lastTimestamp
           echo "::endgroup::"
-          for pod in $(kubectl -n "$SERVICE" get pods -l app.kubernetes.io/component="$SERVICE" -o jsonpath='{.items[*].metadata.name}'); do
+          # Every pod in the namespace, not just this service's own - a stuck wait-for-*
+          # initContainer means the real failure is almost always in a dependency
+          # (kafka/postgres/schema-registry), not in $SERVICE itself.
+          for pod in $(kubectl -n "$SERVICE" get pods -o jsonpath='{.items[*].metadata.name}'); do
             echo "::group::kubectl logs $pod (current)"
             kubectl -n "$SERVICE" logs "$pod" --all-containers --tail=200 || true
             echo "::endgroup::"
@@ -251,6 +249,7 @@ jobs:
     runs-on: self-hosted
     permissions:
       contents: write
+      pull-requests: write
     concurrency:
       group: resonance-flow-values-update
       cancel-in-progress: false
@@ -267,14 +266,47 @@ jobs:
           IMAGE_NAME_LC=$(echo "${{ env.IMAGE_NAME }}" | tr '[:upper:]' '[:lower:]')
           yq -i ".components.${{ inputs.service_name }}.image.repository = \"${IMAGE_NAME_LC}\" | .components.${{ inputs.service_name }}.image.tag = \"${{ needs.test.outputs.image_tag }}\"" "$CHART_VALUES"
 
-      - name: Commit and push updated values
+      - name: Commit updated values
+        id: commit
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add "$CHART_VALUES"
           if git diff --cached --quiet; then
-            echo "No changes to commit"
+            echo "changed=false" >> "$GITHUB_OUTPUT"
           else
             git commit -m "chore(${{ inputs.service_name }}): deploy image ${{ needs.test.outputs.image_tag }} [skip ci]"
-            git push origin HEAD:${{ github.ref_name }}
+            echo "changed=true" >> "$GITHUB_OUTPUT"
           fi
+
+      # gh isn't preinstalled on this self-hosted runner - official install snippet
+      # from https://github.com/cli/cli/blob/trunk/docs/install_linux.md.
+      - name: Install GitHub CLI
+        if: steps.commit.outputs.changed == 'true'
+        run: |
+          (type -p wget >/dev/null || sudo apt-get install wget -y) \
+          && sudo mkdir -p -m 755 /etc/apt/keyrings \
+          && wget -qO- https://cli.github.com/packages/githubcli-archive-keyring.gpg | sudo tee /etc/apt/keyrings/githubcli-archive-keyring.gpg > /dev/null \
+          && sudo chmod go+r /etc/apt/keyrings/githubcli-archive-keyring.gpg \
+          && echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" | sudo tee /etc/apt/sources.list.d/github-cli.list > /dev/null \
+          && sudo apt update \
+          && sudo apt install gh -y
+
+      # main's ruleset requires every change to go through a reviewed PR, and
+      # there's no bot bypass configured (deliberately - a bypass broad enough
+      # for the bot would also let every real admin skip review, which defeats
+      # the rule's purpose). So instead of pushing directly, open a new PR for
+      # a human to approve, same as any other change to main.
+      - name: Open a PR with the manifest update
+        if: steps.commit.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          BRANCH="ci/${{ inputs.service_name }}-deploy-${{ needs.test.outputs.image_tag }}"
+          git checkout -b "$BRANCH"
+          git push origin "$BRANCH"
+          gh pr create \
+            --base main \
+            --head "$BRANCH" \
+            --title "chore(${{ inputs.service_name }}): deploy image ${{ needs.test.outputs.image_tag }}" \
+            --body "Automated image tag bump for \`${{ inputs.service_name }}\` to \`${{ needs.test.outputs.image_tag }}\`, triggered by \`${{ github.event_name }}\` on \`${{ github.ref_name }}\`. Needs review/approval per the \`main\` branch ruleset."
