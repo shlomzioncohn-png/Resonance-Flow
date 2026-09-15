@@ -164,7 +164,7 @@ the repo; the `page`/`size`/`PageResponse` shape is meant for reuse by future en
 
 This is also the first `@RestControllerAdvice` in the repo (`GlobalExceptionHandler`, in
 `exception/`): `TaskNotFoundException`/`DependencyNotFoundException` -> 404,
-`DuplicateDependencyException` -> 409, `InvalidDependencyException`/`IllegalArgumentException` -> 400,
+`DuplicateDependencyException` -> 409, `InvalidDependencyException`/`InvalidRequestException` -> 400,
 with a `{"error": "...", "message": "..."}` body.
 
 ### Idempotency
