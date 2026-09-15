@@ -16,7 +16,7 @@ public class TaskResponse {
     private int blockingCount;
     private int openConstraintCount;
     private Integer estimatedDurationMin;
-    private Integer score;
+    private Double  score;
 
     public TaskResponse() {
     }
@@ -29,7 +29,7 @@ public class TaskResponse {
             int blockingCount,
             int openConstraintCount,
             Integer estimatedDurationMin,
-            Integer score
+            Double score
     ) {
         this.id = id;
         this.parentTaskId = parentTaskId;
@@ -83,7 +83,7 @@ public class TaskResponse {
         return estimatedDurationMin;
     }
 
-    public Integer getScore() {
+    public Double getScore() {
         return score;
     }
 }

@@ -1,174 +1,469 @@
 package com.rnd.chain.service;
 
+import com.rnd.chain.dto.Constraint;
 import com.rnd.chain.dto.Task;
 import com.rnd.chain.dto.TaskDependency;
 import com.rnd.chain.dto.TaskEligibilityResponse;
 import com.rnd.chain.dto.TaskStatus;
+import com.rnd.chain.exception.DependencyNotFoundException;
+import com.rnd.chain.exception.DuplicateDependencyException;
+import com.rnd.chain.exception.InvalidDependencyException;
+import com.rnd.chain.exception.TaskNotFoundException;
 import com.rnd.chain.repository.TaskDependencyRepository;
 import com.rnd.chain.repository.TaskRepository;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
+import java.util.ArrayDeque;
+import java.util.Deque;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Objects;
+import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
+import java.util.function.UnaryOperator;
 
 @Service
 public class TaskEligibilityService {
 
-    private static final Logger log = LoggerFactory.getLogger(TaskEligibilityService.class);
+    private static final Logger log =
+            LoggerFactory.getLogger(TaskEligibilityService.class);
 
     private final TaskRepository taskRepository;
     private final TaskDependencyRepository taskDependencyRepository;
     private final SchedulingUpdateService schedulingUpdateService;
 
+    private final Object dependencyGraphLock = new Object();
+
     public TaskEligibilityService(
             TaskRepository taskRepository,
-            TaskDependencyRepository taskDependencyRepository, SchedulingUpdateService schedulingUpdateService) {
+            TaskDependencyRepository taskDependencyRepository,
+            SchedulingUpdateService schedulingUpdateService) {
+
         this.taskRepository = taskRepository;
         this.taskDependencyRepository = taskDependencyRepository;
         this.schedulingUpdateService = schedulingUpdateService;
-
     }
 
-    public void recalculateTaskEligibility(UUID taskId) {
+    private Task requireTask(UUID taskId) {
 
-        Task task = taskRepository.findById(taskId)
-                .orElseThrow(() -> new IllegalArgumentException(
-                        "Task not found: " + taskId));
+        return taskRepository.findById(taskId)
+                .orElseThrow(() ->
+                        new TaskNotFoundException(taskId));
+    }
 
-        boolean newIsReady = task.getBlockingCount() == 0
-                && task.getOpenConstraintCount() == 0;
+    private static <T> T requireUpdated(
+            Optional<T> updated,
+            UUID taskId) {
 
-        if (task.isReady() != newIsReady) {
+        return updated.orElseThrow(() ->
+                new TaskNotFoundException(taskId));
+    }
+
+    private static Task.Builder copyOf(Task task) {
+
+        return Task.builder()
+                .id(task.getId())
+                .parentTaskId(task.getParentTaskId())
+                .ownerId(task.getOwnerId())
+                .status(task.getStatus())
+                .isReady(task.isReady())
+                .blockingCount(task.getBlockingCount())
+                .openConstraintCount(task.getOpenConstraintCount())
+                .estimatedDurationMin(task.getEstimatedDurationMin())
+                .score(task.getScore())
+                .createdAt(task.getCreatedAt())
+                .updatedAt(task.getUpdatedAt())
+                .deletedAt(task.getDeletedAt());
+    }
+
+    private static Task withCounters(
+            Task task,
+            int blockingCount,
+            int openConstraintCount) {
+
+        boolean isReady =
+                blockingCount == 0
+                        && openConstraintCount == 0;
+
+        if (task.getBlockingCount() == blockingCount
+                && task.getOpenConstraintCount()
+                    == openConstraintCount
+                && task.isReady() == isReady) {
+
+            return task;
+        }
+
+        return copyOf(task)
+                .blockingCount(blockingCount)
+                .openConstraintCount(openConstraintCount)
+                .isReady(isReady)
+                .build();
+    }
+
+    private Task updateCounters(
+            UUID taskId,
+            UnaryOperator<Task> countersMutator) {
+
+        Task[] previous = new Task[1];
+
+        Task updated = requireUpdated(
+                taskRepository.update(
+                        taskId,
+                        task -> {
+                            previous[0] = task;
+                            return countersMutator.apply(task);
+                        }),
+                taskId);
+
+        Task oldTask = previous[0];
+
+        if (updated != oldTask) {
 
             log.info(
-                    "Task {} eligibility changed: isReady {} -> {}",
+                    "Task {} eligibility updated: "
+                            + "blockingCount={}, "
+                            + "openConstraintCount={}, "
+                            + "isReady={}",
                     taskId,
-                    task.isReady(),
-                    newIsReady);
+                    updated.getBlockingCount(),
+                    updated.getOpenConstraintCount(),
+                    updated.isReady());
+        }
 
-            task.setReady(newIsReady);
-            schedulingUpdateService.publishSchedulingUpdate(task);
-            taskRepository.save(task);
+        if (oldTask != null
+                && oldTask.isReady()
+                    != updated.isReady()) {
 
-        } else {
+            schedulingUpdateService
+                    .publishSchedulingUpdate(updated);
+        }
 
-            log.debug(
-                    "Task {} eligibility unchanged (isReady={})",
+        return updated;
+    }
+
+    @Transactional
+    public void recalculateTaskEligibility(UUID taskId) {
+
+        Objects.requireNonNull(
+                taskId,
+                "taskId must not be null");
+
+        updateCounters(
+                taskId,
+                task -> withCounters(
+                        task,
+                        task.getBlockingCount(),
+                        task.getOpenConstraintCount()));
+    }
+
+    @Transactional
+    public TaskDependency addDependency(
+            UUID taskId,
+            UUID dependsOnTaskId) {
+
+        Objects.requireNonNull(
+                taskId,
+                "taskId must not be null");
+
+        Objects.requireNonNull(
+                dependsOnTaskId,
+                "dependsOnTaskId must not be null");
+
+        synchronized (dependencyGraphLock) {
+
+            if (wouldCreateCycle(
                     taskId,
-                    newIsReady);
+                    dependsOnTaskId)) {
+
+                throw new InvalidDependencyException(
+                        "Dependency would create a cycle: "
+                                + taskId
+                                + " -> "
+                                + dependsOnTaskId);
+            }
+
+            Task task = requireTask(taskId);
+            Task dependencyTask =
+                    requireTask(dependsOnTaskId);
+
+            Optional<TaskDependency> saved =
+                    taskDependencyRepository.save(
+                            new TaskDependency(
+                                    taskId,
+                                    dependsOnTaskId));
+
+            TaskDependency dependency =
+                    saved.orElseThrow(() ->
+                            new DuplicateDependencyException(
+                                    "Task "
+                                            + taskId
+                                            + " already depends on "
+                                            + dependsOnTaskId));
+
+            boolean dependencyAlreadyDone =
+                    dependencyTask.getStatus()
+                            == TaskStatus.DONE;
+
+            adjustBlockingCount(
+                    task.getId(),
+                    dependencyAlreadyDone,
+                    1);
+
+            return dependency;
         }
     }
 
-    public void addDependency(
-            UUID taskId,
-            UUID dependsOnTaskId) {
-        log.info(
-                "Adding dependency: task {} depends on {}",
-                taskId,
-                dependsOnTaskId);
-
-        taskDependencyRepository.save(
-                new TaskDependency(
-                        taskId,
-                        dependsOnTaskId));
-
-        Task task = taskRepository.findById(taskId)
-                .orElseThrow(() -> new IllegalArgumentException(
-                        "Task not found: " + taskId));
-
-        task.setBlockingCount(
-                task.getBlockingCount() + 1);
-
-        taskRepository.save(task);
-
-        recalculateTaskEligibility(taskId);
-    }
-
+    @Transactional
     public void removeDependency(
             UUID taskId,
             UUID dependsOnTaskId) {
-        log.info(
-                "Removing dependency: task {} no longer depends on {}",
+
+        Objects.requireNonNull(
                 taskId,
-                dependsOnTaskId);
+                "taskId must not be null");
 
-        taskDependencyRepository.delete(
-                taskId,
-                dependsOnTaskId);
+        Objects.requireNonNull(
+                dependsOnTaskId,
+                "dependsOnTaskId must not be null");
 
-        Task task = taskRepository.findById(taskId)
-                .orElseThrow(() -> new IllegalArgumentException(
-                        "Task not found: " + taskId));
+        synchronized (dependencyGraphLock) {
 
-        task.setBlockingCount(
-                Math.max(
-                        0,
-                        task.getBlockingCount() - 1));
+            requireTask(taskId);
 
-        taskRepository.save(task);
+            Task dependencyTask =
+                    requireTask(dependsOnTaskId);
 
-        recalculateTaskEligibility(taskId);
+            boolean removed =
+                    taskDependencyRepository.delete(
+                            taskId,
+                            dependsOnTaskId);
+
+            if (!removed) {
+                throw new DependencyNotFoundException(
+                        "No dependency from "
+                                + taskId
+                                + " to "
+                                + dependsOnTaskId);
+            }
+
+            boolean dependencyCurrentlyDone =
+                    dependencyTask.getStatus()
+                            == TaskStatus.DONE;
+
+            adjustBlockingCount(
+                    taskId,
+                    dependencyCurrentlyDone,
+                    -1);
+        }
     }
 
+    private void adjustBlockingCount(
+            UUID taskId,
+            boolean dependsOnIsDone,
+            int delta) {
+
+        int effectiveDelta =
+                dependsOnIsDone ? 0 : delta;
+
+        updateCounters(
+                taskId,
+                task -> withCounters(
+                        task,
+                        Math.max(
+                                0,
+                                task.getBlockingCount()
+                                        + effectiveDelta),
+                        task.getOpenConstraintCount()));
+    }
+
+    private boolean wouldCreateCycle(
+            UUID taskId,
+            UUID dependsOnTaskId) {
+
+        Set<UUID> visited =
+                new HashSet<>();
+
+        Deque<UUID> toVisit =
+                new ArrayDeque<>();
+
+        toVisit.push(dependsOnTaskId);
+
+        while (!toVisit.isEmpty()) {
+
+            UUID current =
+                    toVisit.pop();
+
+            if (current.equals(taskId)) {
+                return true;
+            }
+
+            if (!visited.add(current)) {
+                continue;
+            }
+
+            for (TaskDependency dependency :
+                    taskDependencyRepository
+                            .findByTaskId(current)) {
+
+                toVisit.push(
+                        dependency
+                                .getDependsOnTaskId());
+            }
+        }
+
+        return false;
+    }
+
+    @Transactional
     public void onTaskStatusChanged(
             UUID taskId,
             TaskStatus newStatus) {
-        log.info(
-                "Task {} status changed to {}",
+
+        Objects.requireNonNull(
                 taskId,
-                newStatus);
+                "taskId must not be null");
 
-        Task task = taskRepository.findById(taskId)
-                .orElseThrow(() -> new IllegalArgumentException(
-                        "Task not found: " + taskId));
+        Objects.requireNonNull(
+                newStatus,
+                "newStatus must not be null");
 
-        task.setStatus(newStatus);
-        taskRepository.save(task);
+        synchronized (dependencyGraphLock) {
 
-        if (newStatus == TaskStatus.DONE) {
+            Task[] previous = new Task[1];
 
-            List<TaskDependency> dependents = taskDependencyRepository
-                    .findByDependsOnTaskId(taskId);
+            requireUpdated(
+                    taskRepository.update(
+                            taskId,
+                            task -> {
+                                previous[0] = task;
 
-            log.info(
-                    "Task {} completed, recalculating {} dependent task(s)",
-                    taskId,
-                    dependents.size());
+                                return copyOf(task)
+                                        .status(newStatus)
+                                        .build();
+                            }),
+                    taskId);
 
-            for (TaskDependency dependency : dependents) {
+            TaskStatus previousStatus =
+                    previous[0].getStatus();
 
-                UUID dependentTaskId = dependency.getTaskId();
+            if (previousStatus != TaskStatus.DONE
+                    && newStatus == TaskStatus.DONE) {
 
-                Task dependentTask = taskRepository
-                        .findById(dependentTaskId)
-                        .orElseThrow(() -> new IllegalArgumentException(
-                                "Task not found: "
-                                        + dependentTaskId));
+                adjustDependentsBlockingCount(
+                        taskId,
+                        -1);
 
-                dependentTask.setBlockingCount(
-                        Math.max(
-                                0,
-                                dependentTask.getBlockingCount() - 1));
+            } else if (
+                    previousStatus == TaskStatus.DONE
+                            && newStatus
+                                != TaskStatus.DONE) {
 
-                taskRepository.save(dependentTask);
-
-                recalculateTaskEligibility(
-                        dependentTaskId);
+                adjustDependentsBlockingCount(
+                        taskId,
+                        1);
             }
         }
     }
 
-    public TaskEligibilityResponse getTaskEligibility(UUID taskId) {
-        Task task = taskRepository.findById(taskId)
-                .orElseThrow(() -> new IllegalArgumentException(
-                        "Task not found: " + taskId));
+    private void adjustDependentsBlockingCount(
+            UUID taskId,
+            int delta) {
 
-        return new TaskEligibilityResponse(
-                task.getId(),
-                task.isReady(),
-                task.getBlockingCount(),
-                task.getOpenConstraintCount());
+        List<TaskDependency> dependents =
+                taskDependencyRepository
+                        .findByDependsOnTaskId(taskId);
+
+        for (TaskDependency dependent :
+                dependents) {
+
+            updateCounters(
+                    dependent.getTaskId(),
+                    task -> withCounters(
+                            task,
+                            Math.max(
+                                    0,
+                                    task.getBlockingCount()
+                                            + delta),
+                            task.getOpenConstraintCount()));
+        }
     }
+
+    @Transactional
+    public void onConstraintAdded(UUID taskId) {
+
+        Objects.requireNonNull(
+                taskId,
+                "taskId must not be null");
+
+        updateCounters(
+                taskId,
+                task -> withCounters(
+                        task,
+                        task.getBlockingCount(),
+                        task.getOpenConstraintCount()
+                                + 1));
+    }
+
+    @Transactional
+    public void onConstraintStatusChanged(
+            UUID taskId,
+            Constraint.ConstraintStatus previousStatus,
+            Constraint.ConstraintStatus newStatus) {
+
+        Objects.requireNonNull(
+                taskId,
+                "taskId must not be null");
+
+        Objects.requireNonNull(
+                previousStatus,
+                "previousStatus must not be null");
+
+        Objects.requireNonNull(
+                newStatus,
+                "newStatus must not be null");
+
+        boolean wasOpen =
+                previousStatus
+                        == Constraint.ConstraintStatus.PENDING;
+
+        boolean isOpenNow =
+                newStatus
+                        == Constraint.ConstraintStatus.PENDING;
+
+        if (wasOpen == isOpenNow) {
+            return;
+        }
+
+        int delta =
+                isOpenNow ? 1 : -1;
+
+        updateCounters(
+                taskId,
+                task -> withCounters(
+                        task,
+                        task.getBlockingCount(),
+                        Math.max(
+                                0,
+                                task.getOpenConstraintCount()
+                                        + delta)));
+    }
+    public TaskEligibilityResponse getTaskEligibility(UUID taskId) {
+
+    Objects.requireNonNull(
+            taskId,
+            "taskId must not be null");
+
+    Task task = requireTask(taskId);
+
+    return new TaskEligibilityResponse(
+            task.getId(),
+            task.isReady(),
+            task.getBlockingCount(),
+            task.getOpenConstraintCount());
+}
 }
