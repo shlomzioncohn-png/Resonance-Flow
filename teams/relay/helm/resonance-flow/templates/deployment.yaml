@@ -13,6 +13,11 @@ metadata:
 spec:
   replicas: {{ $component.replicaCount }}
 
+  {{- with $component.updateStrategy }}
+  strategy:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+
   selector:
     matchLabels:
       {{- include "resonance-flow.selectorLabels" $ | nindent 6 }}
@@ -43,6 +48,10 @@ spec:
       {{- end }}
 
       serviceAccountName: {{ include "resonance-flow.serviceAccountName" $ }}
+
+      {{- with $component.terminationGracePeriodSeconds }}
+      terminationGracePeriodSeconds: {{ . }}
+      {{- end }}
 
       {{- with $.Values.podSecurityContext }}
       securityContext:
