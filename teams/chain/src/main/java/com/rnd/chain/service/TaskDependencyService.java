@@ -49,6 +49,9 @@ public class TaskDependencyService {
                                   Clock clock) {
         Objects.requireNonNull(taskRepository, "taskRepository must not be null");
         Objects.requireNonNull(taskDependencyRepository, "taskDependencyRepository must not be null");
+        Objects.requireNonNull(historyRepository, "historyRepository must not be null");
+        Objects.requireNonNull(transactionRunner, "transactionRunner must not be null");
+        Objects.requireNonNull(clock, "clock must not be null");
         this.taskRepository = taskRepository;
         this.taskDependencyRepository = taskDependencyRepository;
         this.historyRepository = historyRepository;
