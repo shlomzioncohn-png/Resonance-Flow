@@ -25,24 +25,12 @@ public final class DependencyHistoryEntry {
                                     DependencyChangeSource source,
                                     String sourceRef,
                                     LocalDateTime createdAt) {
-        if (id == null) {
-            throw new IllegalArgumentException("id must not be null");
-        }
-        if (taskId == null) {
-            throw new IllegalArgumentException("taskId must not be null");
-        }
-        if (dependsOnTaskId == null) {
-            throw new IllegalArgumentException("dependsOnTaskId must not be null");
-        }
-        if (action == null) {
-            throw new IllegalArgumentException("action must not be null");
-        }
-        if (source == null) {
-            throw new IllegalArgumentException("source must not be null");
-        }
-        if (createdAt == null) {
-            throw new IllegalArgumentException("createdAt must not be null");
-        }
+        requireNonNull(id, "id");
+        requireNonNull(taskId, "taskId");
+        requireNonNull(dependsOnTaskId, "dependsOnTaskId");
+        requireNonNull(action, "action");
+        requireNonNull(source, "source");
+        requireNonNull(createdAt, "createdAt");
         this.id = id;
         this.taskId = taskId;
         this.dependsOnTaskId = dependsOnTaskId;
@@ -50,6 +38,13 @@ public final class DependencyHistoryEntry {
         this.source = source;
         this.sourceRef = sourceRef;
         this.createdAt = createdAt;
+    }
+
+    private static <T> T requireNonNull(T value, String name) {
+        if (value == null) {
+            throw new IllegalArgumentException(name + " must not be null");
+        }
+        return value;
     }
 
     public UUID getId() {
