@@ -2,6 +2,7 @@ package com.rnd.inbox.user;
 
 import com.rnd.inbox.shared.dto.PageResponseDto;
 import com.rnd.inbox.shared.security.CurrentActor;
+import com.rnd.inbox.shared.security.RequireRole;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.media.Content;
 import io.swagger.v3.oas.annotations.media.Schema;
@@ -38,11 +39,15 @@ public class UserController {
             @ApiResponse(responseCode = "201", description = "User created",
                     content = @Content(schema = @Schema(implementation = UserResponseDto.class))),
             @ApiResponse(responseCode = "401", description = "Missing or unrecognized actor identity"),
-            @ApiResponse(responseCode = "403", description = "Actor cannot create a user in another tenant"),
+            @ApiResponse(responseCode = "403",
+                    description = "Actor's role cannot create users, or not in this tenant "
+                            + "(SYSTEM_ADMIN: any tenant; TENANT_ADMIN: their own tenant only; "
+                            + "TEAM_LEAD/EMPLOYEE: cannot create users)"),
             @ApiResponse(responseCode = "404", description = "Tenant not found"),
             @ApiResponse(responseCode = "409", description = "Email or username already exists")
     })
     @PostMapping
+    @RequireRole({UserRole.SYSTEM_ADMIN, UserRole.TENANT_ADMIN})
     public ResponseEntity<UserResponseDto> createUser(@Valid @RequestBody UserCreateRequestDto request,
                                                         @CurrentActor UUID actorId,
                                                         UriComponentsBuilder uriBuilder) {
@@ -57,7 +62,10 @@ public class UserController {
             @ApiResponse(responseCode = "200", description = "User found",
                     content = @Content(schema = @Schema(implementation = UserResponseDto.class))),
             @ApiResponse(responseCode = "401", description = "Missing or unrecognized actor identity"),
-            @ApiResponse(responseCode = "403", description = "Actor cannot access a user outside their tenant"),
+            @ApiResponse(responseCode = "403",
+                    description = "User is outside the actor's scope "
+                            + "(SYSTEM_ADMIN: everyone; TENANT_ADMIN: their tenant; "
+                            + "TEAM_LEAD: their teams; EMPLOYEE: themselves only)"),
             @ApiResponse(responseCode = "404", description = "User not found")
     })
     @GetMapping("/{id}")
@@ -65,7 +73,8 @@ public class UserController {
         return userService.getUserById(id, actorId);
     }
 
-    @Operation(summary = "List users in the actor's tenant, paginated")
+    @Operation(summary = "List users within the actor's scope, paginated "
+            + "(SYSTEM_ADMIN: everyone; TENANT_ADMIN: their tenant; TEAM_LEAD: their teams; EMPLOYEE: themselves)")
     @ApiResponses({
             @ApiResponse(responseCode = "200", description = "Page of users",
                     content = @Content(schema = @Schema(implementation = PageResponseDto.class))),
@@ -81,7 +90,10 @@ public class UserController {
             @ApiResponse(responseCode = "200", description = "User updated",
                     content = @Content(schema = @Schema(implementation = UserResponseDto.class))),
             @ApiResponse(responseCode = "401", description = "Missing or unrecognized actor identity"),
-            @ApiResponse(responseCode = "403", description = "Actor cannot manage a user outside their tenant"),
+            @ApiResponse(responseCode = "403",
+                    description = "User is outside the actor's scope "
+                            + "(SYSTEM_ADMIN: everyone; TENANT_ADMIN: their tenant; "
+                            + "TEAM_LEAD: their teams; EMPLOYEE: themselves only)"),
             @ApiResponse(responseCode = "404", description = "User not found"),
             @ApiResponse(responseCode = "409", description = "Email or username already exists")
     })
@@ -96,7 +108,10 @@ public class UserController {
             @ApiResponse(responseCode = "200", description = "Status updated",
                     content = @Content(schema = @Schema(implementation = UserResponseDto.class))),
             @ApiResponse(responseCode = "401", description = "Missing or unrecognized actor identity"),
-            @ApiResponse(responseCode = "403", description = "Actor cannot manage a user outside their tenant"),
+            @ApiResponse(responseCode = "403",
+                    description = "User is outside the actor's scope "
+                            + "(SYSTEM_ADMIN: everyone; TENANT_ADMIN: their tenant; "
+                            + "TEAM_LEAD: their teams; EMPLOYEE: themselves only)"),
             @ApiResponse(responseCode = "404", description = "User not found")
     })
     @PatchMapping("/{id}/status")

@@ -62,7 +62,8 @@ class UserServiceTest {
 
     @BeforeEach
     void setUp() {
-        userService = new UserService(userRepository, tenantRepository, userMapper, auditService);
+        userService = new UserService(
+                userRepository, tenantRepository, userMapper, auditService, new UserAuthorization(userRepository));
 
         tenantId = UUID.randomUUID();
         tenant = new Tenant();
@@ -78,6 +79,8 @@ class UserServiceTest {
         actor = new User();
         actor.setId(actorId);
         actor.setTenant(tenant);
+        actor.setRole(UserRole.TENANT_ADMIN);
+        actor.setStatus(UserStatus.ACTIVE);
     }
 
     private UserCreateRequestDto createRequest(String email, String username) {
@@ -86,7 +89,7 @@ class UserServiceTest {
         request.setDisplayName("Yehudit Cohen");
         request.setEmail(email);
         request.setUsername(username);
-        request.setRole("developer");
+        request.setRole("EMPLOYEE");
         return request;
     }
 
@@ -95,7 +98,7 @@ class UserServiceTest {
         request.setDisplayName("Yehudit Cohen");
         request.setEmail(JsonNullable.of(email));
         request.setUsername(JsonNullable.of(username));
-        request.setRole("developer");
+        request.setRole("EMPLOYEE");
         return request;
     }
 
@@ -115,7 +118,7 @@ class UserServiceTest {
         stubActorFound();
         UserCreateRequestDto request = createRequest("yehudit@acme.com", "yehudit");
         UserResponseDto responseDto = new UserResponseDto(userId, "Yehudit Cohen", null, null,
-                "yehudit@acme.com", null, "yehudit", "developer", UserStatus.ACTIVE, null, null, null, null);
+                "yehudit@acme.com", null, "yehudit", UserRole.EMPLOYEE, UserStatus.ACTIVE, null, null, null, null);
 
         when(tenantRepository.findById(tenantId)).thenReturn(Optional.of(tenant));
         when(userRepository.findByEmail("yehudit@acme.com")).thenReturn(Optional.empty());
@@ -170,6 +173,54 @@ class UserServiceTest {
 
         verify(userRepository, never()).save(any());
         verify(auditService, never()).createAuditLog(any(), any(), any(), any(), any(), any(), any());
+    }
+
+    @Test
+    void createUser_whenActorIsSystemAdmin_ignoresTenant() {
+        actor.setRole(UserRole.SYSTEM_ADMIN);
+        actor.setTenant(new Tenant());
+        actor.getTenant().setId(UUID.randomUUID());
+        stubActorFound();
+        UserCreateRequestDto request = createRequest("yehudit@acme.com", "yehudit");
+
+        when(tenantRepository.findById(tenantId)).thenReturn(Optional.of(tenant));
+        when(userMapper.toEntity(request, tenant)).thenReturn(user);
+        when(userRepository.save(user)).thenReturn(user);
+        when(userMapper.toResponseDto(user)).thenReturn(new UserResponseDto(
+                userId, "Yehudit Cohen", null, null, "yehudit@acme.com", null, "yehudit",
+                UserRole.EMPLOYEE, UserStatus.ACTIVE, null, null, null, null));
+
+        userService.createUser(request, actorId);
+
+        verify(userRepository).save(user);
+    }
+
+    @Test
+    void createUser_whenActorIsTeamLead_throwsForbiddenActionExceptionEvenInOwnTenant() {
+        actor.setRole(UserRole.TEAM_LEAD);
+        stubActorFound();
+        UserCreateRequestDto request = createRequest("yehudit@acme.com", "yehudit");
+
+        when(tenantRepository.findById(tenantId)).thenReturn(Optional.of(tenant));
+
+        assertThatThrownBy(() -> userService.createUser(request, actorId))
+                .isInstanceOf(ForbiddenActionException.class);
+
+        verify(userRepository, never()).save(any());
+    }
+
+    @Test
+    void createUser_whenActorIsEmployee_throwsForbiddenActionExceptionEvenInOwnTenant() {
+        actor.setRole(UserRole.EMPLOYEE);
+        stubActorFound();
+        UserCreateRequestDto request = createRequest("yehudit@acme.com", "yehudit");
+
+        when(tenantRepository.findById(tenantId)).thenReturn(Optional.of(tenant));
+
+        assertThatThrownBy(() -> userService.createUser(request, actorId))
+                .isInstanceOf(ForbiddenActionException.class);
+
+        verify(userRepository, never()).save(any());
     }
 
     @Test
@@ -248,7 +299,7 @@ class UserServiceTest {
         when(userMapper.toEntity(request, tenant)).thenReturn(user);
         when(userRepository.save(user)).thenReturn(user);
         when(userMapper.toResponseDto(user)).thenReturn(new UserResponseDto(
-                userId, "Yehudit Cohen", null, null, null, null, null, "developer",
+                userId, "Yehudit Cohen", null, null, null, null, null, UserRole.EMPLOYEE,
                 UserStatus.ACTIVE, null, null, null, null));
 
         userService.createUser(request, actorId);
@@ -262,7 +313,7 @@ class UserServiceTest {
     void getUserById_whenUserExists_returnsUser() {
         stubActorFound();
         UserResponseDto responseDto = new UserResponseDto(userId, "Yehudit Cohen", null, null,
-                null, null, null, "developer", UserStatus.ACTIVE, null, null, null, null);
+                null, null, null, UserRole.EMPLOYEE, UserStatus.ACTIVE, null, null, null, null);
 
         when(userRepository.findById(userId)).thenReturn(Optional.of(user));
         when(userMapper.toResponseDto(user)).thenReturn(responseDto);
@@ -302,11 +353,82 @@ class UserServiceTest {
     }
 
     @Test
+    void getUserById_whenActorIsSystemAdmin_ignoresTenant() {
+        actor.setRole(UserRole.SYSTEM_ADMIN);
+        actor.setTenant(new Tenant());
+        actor.getTenant().setId(UUID.randomUUID());
+        stubActorFound();
+        UserResponseDto responseDto = new UserResponseDto(userId, "Yehudit Cohen", null, null,
+                null, null, null, UserRole.EMPLOYEE, UserStatus.ACTIVE, null, null, null, null);
+
+        when(userRepository.findById(userId)).thenReturn(Optional.of(user));
+        when(userMapper.toResponseDto(user)).thenReturn(responseDto);
+
+        UserResponseDto result = userService.getUserById(userId, actorId);
+
+        assertThat(result).isSameAs(responseDto);
+    }
+
+    @Test
+    void getUserById_whenActorIsTeamLeadAndTargetIsOnTheirTeam_returnsUser() {
+        actor.setRole(UserRole.TEAM_LEAD);
+        stubActorFound();
+        UserResponseDto responseDto = new UserResponseDto(userId, "Yehudit Cohen", null, null,
+                null, null, null, UserRole.EMPLOYEE, UserStatus.ACTIVE, null, null, null, null);
+
+        when(userRepository.findById(userId)).thenReturn(Optional.of(user));
+        when(userRepository.existsInTeamLedBy(userId, actorId)).thenReturn(true);
+        when(userMapper.toResponseDto(user)).thenReturn(responseDto);
+
+        UserResponseDto result = userService.getUserById(userId, actorId);
+
+        assertThat(result).isSameAs(responseDto);
+    }
+
+    @Test
+    void getUserById_whenActorIsTeamLeadAndTargetIsNotOnTheirTeam_throwsForbiddenActionException() {
+        actor.setRole(UserRole.TEAM_LEAD);
+        stubActorFound();
+
+        when(userRepository.findById(userId)).thenReturn(Optional.of(user));
+        when(userRepository.existsInTeamLedBy(userId, actorId)).thenReturn(false);
+
+        assertThatThrownBy(() -> userService.getUserById(userId, actorId))
+                .isInstanceOf(ForbiddenActionException.class);
+    }
+
+    @Test
+    void getUserById_whenActorIsEmployeeAndTargetIsThemselves_returnsUser() {
+        actor.setRole(UserRole.EMPLOYEE);
+        stubActorFound();
+        UserResponseDto responseDto = new UserResponseDto(actorId, "Yehudit Cohen", null, null,
+                null, null, null, UserRole.EMPLOYEE, UserStatus.ACTIVE, null, null, null, null);
+
+        when(userRepository.findById(actorId)).thenReturn(Optional.of(actor));
+        when(userMapper.toResponseDto(actor)).thenReturn(responseDto);
+
+        UserResponseDto result = userService.getUserById(actorId, actorId);
+
+        assertThat(result).isSameAs(responseDto);
+    }
+
+    @Test
+    void getUserById_whenActorIsEmployeeAndTargetIsSomeoneElse_throwsForbiddenActionException() {
+        actor.setRole(UserRole.EMPLOYEE);
+        stubActorFound();
+
+        when(userRepository.findById(userId)).thenReturn(Optional.of(user));
+
+        assertThatThrownBy(() -> userService.getUserById(userId, actorId))
+                .isInstanceOf(ForbiddenActionException.class);
+    }
+
+    @Test
     void updateUser_whenUserExists_updatesAndReturnsUser() {
         stubActorFound();
         UserUpdateRequestDto request = updateRequest("new@acme.com", "newname");
         UserResponseDto responseDto = new UserResponseDto(userId, "Yehudit Cohen", null, null,
-                "new@acme.com", null, "newname", "developer", UserStatus.ACTIVE, null, null, null, null);
+                "new@acme.com", null, "newname", UserRole.EMPLOYEE, UserStatus.ACTIVE, null, null, null, null);
 
         when(userRepository.findById(userId)).thenReturn(Optional.of(user));
         when(userRepository.findByEmail("new@acme.com")).thenReturn(Optional.empty());
@@ -332,7 +454,7 @@ class UserServiceTest {
         user.setEmail("yehudit@acme.com");
         user.setPhone("0501234567");
         user.setUsername("yehudit");
-        user.setRole("developer");
+        user.setRole(UserRole.EMPLOYEE);
         UserUpdateRequestDto request = updateRequest("yehudit@acme.com", "yehudit");
 
         when(userRepository.findById(userId)).thenReturn(Optional.of(user));
@@ -353,7 +475,7 @@ class UserServiceTest {
                 .containsEntry("email", "yehudit@acme.com")
                 .containsEntry("phone", "0501234567")
                 .containsEntry("username", "yehudit")
-                .containsEntry("role", "developer")
+                .containsEntry("role", UserRole.EMPLOYEE)
                 .containsEntry("status", "ACTIVE");
     }
 
@@ -398,6 +520,97 @@ class UserServiceTest {
     }
 
     @Test
+    void updateUser_whenActorIsSystemAdmin_ignoresTenant() {
+        actor.setRole(UserRole.SYSTEM_ADMIN);
+        actor.setTenant(new Tenant());
+        actor.getTenant().setId(UUID.randomUUID());
+        stubActorFound();
+        UserUpdateRequestDto request = updateRequest("new@acme.com", "newname");
+
+        when(userRepository.findById(userId)).thenReturn(Optional.of(user));
+        when(userRepository.findByEmail("new@acme.com")).thenReturn(Optional.empty());
+        when(userRepository.findByUsername("newname")).thenReturn(Optional.empty());
+        when(userRepository.save(user)).thenReturn(user);
+        when(userMapper.toResponseDto(user)).thenReturn(new UserResponseDto(
+                userId, "Yehudit Cohen", null, null, "new@acme.com", null, "newname",
+                UserRole.EMPLOYEE, UserStatus.ACTIVE, null, null, null, null));
+
+        userService.updateUser(userId, request, actorId);
+
+        verify(userMapper).applyUpdate(user, request);
+    }
+
+    @Test
+    void updateUser_whenActorIsTeamLeadAndTargetIsOnTheirTeam_updatesAndReturnsUser() {
+        actor.setRole(UserRole.TEAM_LEAD);
+        stubActorFound();
+        UserUpdateRequestDto request = updateRequest("new@acme.com", "newname");
+
+        when(userRepository.findById(userId)).thenReturn(Optional.of(user));
+        when(userRepository.existsInTeamLedBy(userId, actorId)).thenReturn(true);
+        when(userRepository.findByEmail("new@acme.com")).thenReturn(Optional.empty());
+        when(userRepository.findByUsername("newname")).thenReturn(Optional.empty());
+        when(userRepository.save(user)).thenReturn(user);
+        when(userMapper.toResponseDto(user)).thenReturn(new UserResponseDto(
+                userId, "Yehudit Cohen", null, null, "new@acme.com", null, "newname",
+                UserRole.EMPLOYEE, UserStatus.ACTIVE, null, null, null, null));
+
+        userService.updateUser(userId, request, actorId);
+
+        verify(userMapper).applyUpdate(user, request);
+    }
+
+    @Test
+    void updateUser_whenActorIsTeamLeadAndTargetIsNotOnTheirTeam_throwsForbiddenActionException() {
+        actor.setRole(UserRole.TEAM_LEAD);
+        stubActorFound();
+        UserUpdateRequestDto request = updateRequest("new@acme.com", "newname");
+
+        when(userRepository.findById(userId)).thenReturn(Optional.of(user));
+        when(userRepository.existsInTeamLedBy(userId, actorId)).thenReturn(false);
+
+        assertThatThrownBy(() -> userService.updateUser(userId, request, actorId))
+                .isInstanceOf(ForbiddenActionException.class);
+
+        verify(userMapper, never()).applyUpdate(any(), any());
+        verify(userRepository, never()).save(any());
+    }
+
+    @Test
+    void updateUser_whenActorIsEmployeeAndTargetIsThemselves_updatesAndReturnsUser() {
+        actor.setRole(UserRole.EMPLOYEE);
+        stubActorFound();
+        UserUpdateRequestDto request = updateRequest("new@acme.com", "newname");
+
+        when(userRepository.findById(actorId)).thenReturn(Optional.of(actor));
+        when(userRepository.findByEmail("new@acme.com")).thenReturn(Optional.empty());
+        when(userRepository.findByUsername("newname")).thenReturn(Optional.empty());
+        when(userRepository.save(actor)).thenReturn(actor);
+        when(userMapper.toResponseDto(actor)).thenReturn(new UserResponseDto(
+                actorId, "Yehudit Cohen", null, null, "new@acme.com", null, "newname",
+                UserRole.EMPLOYEE, UserStatus.ACTIVE, null, null, null, null));
+
+        userService.updateUser(actorId, request, actorId);
+
+        verify(userMapper).applyUpdate(actor, request);
+    }
+
+    @Test
+    void updateUser_whenActorIsEmployeeAndTargetIsSomeoneElse_throwsForbiddenActionException() {
+        actor.setRole(UserRole.EMPLOYEE);
+        stubActorFound();
+        UserUpdateRequestDto request = updateRequest("new@acme.com", "newname");
+
+        when(userRepository.findById(userId)).thenReturn(Optional.of(user));
+
+        assertThatThrownBy(() -> userService.updateUser(userId, request, actorId))
+                .isInstanceOf(ForbiddenActionException.class);
+
+        verify(userMapper, never()).applyUpdate(any(), any());
+        verify(userRepository, never()).save(any());
+    }
+
+    @Test
     void updateUser_whenEmailBelongsToAnotherUser_throwsDuplicateEmailException() {
         stubActorFound();
         UserUpdateRequestDto request = updateRequest("taken@acme.com", "newname");
@@ -424,7 +637,7 @@ class UserServiceTest {
         when(userRepository.findByUsername("yehudit")).thenReturn(Optional.of(user));
         when(userRepository.save(user)).thenReturn(user);
         when(userMapper.toResponseDto(user)).thenReturn(new UserResponseDto(
-                userId, "Yehudit Cohen", null, null, "yehudit@acme.com", null, "yehudit", "developer",
+                userId, "Yehudit Cohen", null, null, "yehudit@acme.com", null, "yehudit", UserRole.EMPLOYEE,
                 UserStatus.ACTIVE, null, null, null, null));
 
         userService.updateUser(userId, request, actorId);
@@ -468,7 +681,8 @@ class UserServiceTest {
     }
 
     @Test
-    void listUsers_mapsEachUserAndPreservesPageMetadata() {
+    void listUsers_whenActorIsTenantAdmin_mapsEachUserAndPreservesPageMetadata() {
+        actor.setRole(UserRole.TENANT_ADMIN);
         stubActorFound();
         Pageable pageable = PageRequest.of(0, 2);
         User secondUser = new User();
@@ -477,9 +691,9 @@ class UserServiceTest {
         Page<User> entityPage = new PageImpl<>(List.of(user, secondUser), pageable, 5);
 
         UserResponseDto firstDto = new UserResponseDto(userId, "Yehudit Cohen", null, null,
-                null, null, null, "developer", UserStatus.ACTIVE, null, null, null, null);
+                null, null, null, UserRole.EMPLOYEE, UserStatus.ACTIVE, null, null, null, null);
         UserResponseDto secondDto = new UserResponseDto(secondUser.getId(), "Someone Else", null, null,
-                null, null, null, "developer", UserStatus.ACTIVE, null, null, null, null);
+                null, null, null, UserRole.EMPLOYEE, UserStatus.ACTIVE, null, null, null, null);
 
         when(userRepository.findAllByTenantId(tenantId, pageable)).thenReturn(entityPage);
         when(userMapper.toResponseDto(user)).thenReturn(firstDto);
@@ -492,6 +706,70 @@ class UserServiceTest {
         assertThat(result.getSize()).isEqualTo(2);
         assertThat(result.getTotalElements()).isEqualTo(5);
         assertThat(result.getTotalPages()).isEqualTo(3);
+    }
+
+    @Test
+    void listUsers_whenActorIsSystemAdmin_queriesAcrossAllTenants() {
+        actor.setRole(UserRole.SYSTEM_ADMIN);
+        stubActorFound();
+        Pageable pageable = PageRequest.of(0, 2);
+        Page<User> entityPage = new PageImpl<>(List.of(user), pageable, 1);
+        UserResponseDto dto = new UserResponseDto(userId, "Yehudit Cohen", null, null,
+                null, null, null, UserRole.EMPLOYEE, UserStatus.ACTIVE, null, null, null, null);
+
+        when(userRepository.findAll(pageable)).thenReturn(entityPage);
+        when(userMapper.toResponseDto(user)).thenReturn(dto);
+
+        PageResponseDto<UserResponseDto> result = userService.listUsers(pageable, actorId);
+
+        assertThat(result.getContent()).containsExactly(dto);
+        verify(userRepository, never()).findAllByTenantId(any(), any());
+    }
+
+    @Test
+    void listUsers_whenActorIsTeamLead_queriesByTeamLeadId() {
+        actor.setRole(UserRole.TEAM_LEAD);
+        stubActorFound();
+        Pageable pageable = PageRequest.of(0, 2);
+        Page<User> entityPage = new PageImpl<>(List.of(user), pageable, 1);
+        UserResponseDto dto = new UserResponseDto(userId, "Yehudit Cohen", null, null,
+                null, null, null, UserRole.EMPLOYEE, UserStatus.ACTIVE, null, null, null, null);
+
+        when(userRepository.findAllByTeamLeadId(actorId, pageable)).thenReturn(entityPage);
+        when(userMapper.toResponseDto(user)).thenReturn(dto);
+
+        PageResponseDto<UserResponseDto> result = userService.listUsers(pageable, actorId);
+
+        assertThat(result.getContent()).containsExactly(dto);
+        verify(userRepository, never()).findAllByTenantId(any(), any());
+    }
+
+    @Test
+    void listUsers_whenActorIsEmployee_returnsOnlyThemselvesWithoutAQuery() {
+        actor.setRole(UserRole.EMPLOYEE);
+        stubActorFound();
+        UserResponseDto dto = new UserResponseDto(actorId, "Yehudit Cohen", null, null,
+                null, null, null, UserRole.EMPLOYEE, UserStatus.ACTIVE, null, null, null, null);
+        when(userMapper.toResponseDto(actor)).thenReturn(dto);
+
+        PageResponseDto<UserResponseDto> result = userService.listUsers(PageRequest.of(0, 20), actorId);
+
+        assertThat(result.getContent()).containsExactly(dto);
+        assertThat(result.getTotalElements()).isEqualTo(1);
+        verify(userRepository, never()).findAllByTenantId(any(), any());
+        verify(userRepository, never()).findAllByTeamLeadId(any(), any());
+        verify(userRepository, never()).findAll(any(Pageable.class));
+    }
+
+    @Test
+    void listUsers_whenActorIsEmployee_secondPageIsEmpty() {
+        actor.setRole(UserRole.EMPLOYEE);
+        stubActorFound();
+
+        PageResponseDto<UserResponseDto> result = userService.listUsers(PageRequest.of(1, 20), actorId);
+
+        assertThat(result.getContent()).isEmpty();
+        assertThat(result.getTotalElements()).isEqualTo(1);
     }
 
     @Test
@@ -510,7 +788,7 @@ class UserServiceTest {
         UserStatusUpdateRequestDto request = new UserStatusUpdateRequestDto();
         request.setStatus("SUSPENDED");
         UserResponseDto responseDto = new UserResponseDto(userId, "Yehudit Cohen", null, null,
-                null, null, null, "developer", UserStatus.SUSPENDED, null, null, null, null);
+                null, null, null, UserRole.EMPLOYEE, UserStatus.SUSPENDED, null, null, null, null);
 
         when(userRepository.findById(userId)).thenReturn(Optional.of(user));
         when(userRepository.save(user)).thenReturn(user);
@@ -556,6 +834,96 @@ class UserServiceTest {
         stubActorFound();
         actor.setTenant(new Tenant());
         actor.getTenant().setId(UUID.randomUUID());
+        UserStatusUpdateRequestDto request = new UserStatusUpdateRequestDto();
+        request.setStatus("SUSPENDED");
+
+        when(userRepository.findById(userId)).thenReturn(Optional.of(user));
+
+        assertThatThrownBy(() -> userService.updateStatus(userId, request, actorId))
+                .isInstanceOf(ForbiddenActionException.class);
+
+        verify(userMapper, never()).applyStatusChange(any(), any());
+        verify(userRepository, never()).save(any());
+    }
+
+    @Test
+    void updateStatus_whenActorIsSystemAdmin_ignoresTenant() {
+        actor.setRole(UserRole.SYSTEM_ADMIN);
+        actor.setTenant(new Tenant());
+        actor.getTenant().setId(UUID.randomUUID());
+        stubActorFound();
+        UserStatusUpdateRequestDto request = new UserStatusUpdateRequestDto();
+        request.setStatus("SUSPENDED");
+
+        when(userRepository.findById(userId)).thenReturn(Optional.of(user));
+        when(userRepository.save(user)).thenReturn(user);
+        when(userMapper.toResponseDto(user)).thenReturn(new UserResponseDto(
+                userId, "Yehudit Cohen", null, null, null, null, null,
+                UserRole.EMPLOYEE, UserStatus.SUSPENDED, null, null, null, null));
+
+        userService.updateStatus(userId, request, actorId);
+
+        verify(userMapper).applyStatusChange(user, UserStatus.SUSPENDED);
+    }
+
+    @Test
+    void updateStatus_whenActorIsTeamLeadAndTargetIsOnTheirTeam_updatesStatus() {
+        actor.setRole(UserRole.TEAM_LEAD);
+        stubActorFound();
+        UserStatusUpdateRequestDto request = new UserStatusUpdateRequestDto();
+        request.setStatus("SUSPENDED");
+
+        when(userRepository.findById(userId)).thenReturn(Optional.of(user));
+        when(userRepository.existsInTeamLedBy(userId, actorId)).thenReturn(true);
+        when(userRepository.save(user)).thenReturn(user);
+        when(userMapper.toResponseDto(user)).thenReturn(new UserResponseDto(
+                userId, "Yehudit Cohen", null, null, null, null, null,
+                UserRole.EMPLOYEE, UserStatus.SUSPENDED, null, null, null, null));
+
+        userService.updateStatus(userId, request, actorId);
+
+        verify(userMapper).applyStatusChange(user, UserStatus.SUSPENDED);
+    }
+
+    @Test
+    void updateStatus_whenActorIsTeamLeadAndTargetIsNotOnTheirTeam_throwsForbiddenActionException() {
+        actor.setRole(UserRole.TEAM_LEAD);
+        stubActorFound();
+        UserStatusUpdateRequestDto request = new UserStatusUpdateRequestDto();
+        request.setStatus("SUSPENDED");
+
+        when(userRepository.findById(userId)).thenReturn(Optional.of(user));
+        when(userRepository.existsInTeamLedBy(userId, actorId)).thenReturn(false);
+
+        assertThatThrownBy(() -> userService.updateStatus(userId, request, actorId))
+                .isInstanceOf(ForbiddenActionException.class);
+
+        verify(userMapper, never()).applyStatusChange(any(), any());
+        verify(userRepository, never()).save(any());
+    }
+
+    @Test
+    void updateStatus_whenActorIsEmployeeAndTargetIsThemselves_updatesStatus() {
+        actor.setRole(UserRole.EMPLOYEE);
+        stubActorFound();
+        UserStatusUpdateRequestDto request = new UserStatusUpdateRequestDto();
+        request.setStatus("SUSPENDED");
+
+        when(userRepository.findById(actorId)).thenReturn(Optional.of(actor));
+        when(userRepository.save(actor)).thenReturn(actor);
+        when(userMapper.toResponseDto(actor)).thenReturn(new UserResponseDto(
+                actorId, "Yehudit Cohen", null, null, null, null, null,
+                UserRole.EMPLOYEE, UserStatus.SUSPENDED, null, null, null, null));
+
+        userService.updateStatus(actorId, request, actorId);
+
+        verify(userMapper).applyStatusChange(actor, UserStatus.SUSPENDED);
+    }
+
+    @Test
+    void updateStatus_whenActorIsEmployeeAndTargetIsSomeoneElse_throwsForbiddenActionException() {
+        actor.setRole(UserRole.EMPLOYEE);
+        stubActorFound();
         UserStatusUpdateRequestDto request = new UserStatusUpdateRequestDto();
         request.setStatus("SUSPENDED");
 

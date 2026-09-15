@@ -18,11 +18,14 @@ import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
 
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 
 import static org.hamcrest.Matchers.containsString;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
@@ -46,6 +49,9 @@ class UserControllerTest {
     @MockBean
     private UserService userService;
 
+    @MockBean
+    private UserRepository userRepository;
+
     private UUID userId;
     private UUID tenantId;
     private UUID actorId;
@@ -55,11 +61,21 @@ class UserControllerTest {
         userId = UUID.randomUUID();
         tenantId = UUID.randomUUID();
         actorId = UUID.randomUUID();
+
+        // @RequireRole (createUser) looks the actor up directly via UserRepository, independently
+        // of whatever UserService is stubbed to do — default it to a permitted role (TENANT_ADMIN)
+        // so tests unrelated to the coarse role gate aren't blocked by it. Endpoints without
+        // @RequireRole never touch this stub at all.
+        User actorEntity = new User();
+        actorEntity.setId(actorId);
+        actorEntity.setRole(UserRole.TENANT_ADMIN);
+        actorEntity.setStatus(UserStatus.ACTIVE);
+        when(userRepository.findById(actorId)).thenReturn(Optional.of(actorEntity));
     }
 
     private UserResponseDto sampleUser() {
         return new UserResponseDto(userId, "Yehudit Cohen", null, null, "yehudit@acme.com",
-                null, "yehudit", "developer", UserStatus.ACTIVE,
+                null, "yehudit", UserRole.EMPLOYEE, UserStatus.ACTIVE,
                 new TenantSummaryDto(tenantId, "Acme Inc", "acme"), null, null, null);
     }
 
@@ -67,14 +83,14 @@ class UserControllerTest {
         UserCreateRequestDto request = new UserCreateRequestDto();
         request.setTenantId(tenantId.toString());
         request.setDisplayName("Yehudit Cohen");
-        request.setRole("developer");
+        request.setRole("EMPLOYEE");
         return request;
     }
 
     private UserUpdateRequestDto validUpdateRequest() {
         UserUpdateRequestDto request = new UserUpdateRequestDto();
         request.setDisplayName("Yehudit Cohen");
-        request.setRole("developer");
+        request.setRole("EMPLOYEE");
         return request;
     }
 
@@ -136,6 +152,56 @@ class UserControllerTest {
                         .content(objectMapper.writeValueAsString(validCreateRequest())))
                 .andExpect(status().isForbidden())
                 .andExpect(jsonPath("$.error").value("FORBIDDEN"));
+    }
+
+    @Test
+    void createUser_whenActorRoleIsTeamLead_returns403WithoutCallingService() throws Exception {
+        User actorEntity = new User();
+        actorEntity.setId(actorId);
+        actorEntity.setRole(UserRole.TEAM_LEAD);
+        actorEntity.setStatus(UserStatus.ACTIVE);
+        when(userRepository.findById(actorId)).thenReturn(Optional.of(actorEntity));
+
+        mockMvc.perform(post("/api/v1/users")
+                        .header(ACTOR_HEADER, actorId.toString())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(validCreateRequest())))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.error").value("FORBIDDEN"));
+
+        verify(userService, never()).createUser(any(), any());
+    }
+
+    @Test
+    void createUser_whenActorRoleIsEmployee_returns403WithoutCallingService() throws Exception {
+        User actorEntity = new User();
+        actorEntity.setId(actorId);
+        actorEntity.setRole(UserRole.EMPLOYEE);
+        actorEntity.setStatus(UserStatus.ACTIVE);
+        when(userRepository.findById(actorId)).thenReturn(Optional.of(actorEntity));
+
+        mockMvc.perform(post("/api/v1/users")
+                        .header(ACTOR_HEADER, actorId.toString())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(validCreateRequest())))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.error").value("FORBIDDEN"));
+
+        verify(userService, never()).createUser(any(), any());
+    }
+
+    @Test
+    void createUser_whenActorIdUnknownToRepository_returns401() throws Exception {
+        when(userRepository.findById(actorId)).thenReturn(Optional.empty());
+
+        mockMvc.perform(post("/api/v1/users")
+                        .header(ACTOR_HEADER, actorId.toString())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(validCreateRequest())))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.error").value("UNAUTHENTICATED"));
+
+        verify(userService, never()).createUser(any(), any());
     }
 
     @Test

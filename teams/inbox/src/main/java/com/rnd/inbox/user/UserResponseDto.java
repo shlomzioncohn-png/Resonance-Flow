@@ -15,7 +15,7 @@ public final class UserResponseDto {
     private final String email;
     private final String phone;
     private final String username;
-    private final String role;
+    private final UserRole role;
     private final UserStatus status;
     private final TenantSummaryDto tenant;
     private final Instant createdAt;
@@ -23,7 +23,7 @@ public final class UserResponseDto {
     private final Instant lastLoginAt;
 
     public UserResponseDto(UUID id, String displayName, String firstName, String lastName, String email,
-                            String phone, String username, String role, UserStatus status,
+                            String phone, String username, UserRole role, UserStatus status,
                             TenantSummaryDto tenant, Instant createdAt, Instant updatedAt,
                             Instant lastLoginAt) {
         this.id = id;
@@ -69,7 +69,7 @@ public final class UserResponseDto {
         return username;
     }
 
-    public String getRole() {
+    public UserRole getRole() {
         return role;
     }
 

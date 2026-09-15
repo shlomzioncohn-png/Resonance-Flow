@@ -2,7 +2,6 @@ package com.rnd.inbox.user;
 
 import com.rnd.inbox.audit.AuditService;
 import com.rnd.inbox.shared.dto.PageResponseDto;
-import com.rnd.inbox.shared.exception.ForbiddenActionException;
 import com.rnd.inbox.shared.exception.UnauthenticatedException;
 import com.rnd.inbox.tenant.Tenant;
 import com.rnd.inbox.tenant.TenantNotFoundException;
@@ -10,11 +9,13 @@ import com.rnd.inbox.tenant.TenantRepository;
 import org.hibernate.exception.ConstraintViolationException;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
@@ -25,20 +26,22 @@ public class UserService {
     private final TenantRepository tenantRepository;
     private final UserMapper userMapper;
     private final AuditService auditService;
+    private final UserAuthorization userAuthorization;
 
     public UserService(UserRepository userRepository, TenantRepository tenantRepository,
-                        UserMapper userMapper, AuditService auditService) {
+                        UserMapper userMapper, AuditService auditService, UserAuthorization userAuthorization) {
         this.userRepository = userRepository;
         this.tenantRepository = tenantRepository;
         this.userMapper = userMapper;
         this.auditService = auditService;
+        this.userAuthorization = userAuthorization;
     }
 
     @Transactional
     public UserResponseDto createUser(UserCreateRequestDto request, UUID actorId) {
         User actor = findActorOrThrow(actorId);
         Tenant tenant = findTenantOrThrow(UUID.fromString(request.getTenantId()));
-        assertActorBelongsToTenant(actor, tenant);
+        userAuthorization.assertCanCreateIn(userAuthorization.scopeOf(actor), tenant);
         assertEmailAvailable(request.getEmail(), null);
         assertUsernameAvailable(request.getUsername(), null);
 
@@ -53,7 +56,7 @@ public class UserService {
     public UserResponseDto getUserById(UUID id, UUID actorId) {
         User actor = findActorOrThrow(actorId);
         User user = findUserOrThrow(id);
-        assertActorCanAccessUser(actor, user);
+        userAuthorization.assertWithinScope(userAuthorization.scopeOf(actor), user);
         return userMapper.toResponseDto(user);
     }
 
@@ -61,7 +64,7 @@ public class UserService {
     public UserResponseDto updateUser(UUID id, UserUpdateRequestDto request, UUID actorId) {
         User actor = findActorOrThrow(actorId);
         User user = findUserOrThrow(id);
-        assertActorCanAccessUser(actor, user);
+        userAuthorization.assertWithinScope(userAuthorization.scopeOf(actor), user);
         assertEmailAvailable(request.getEmail().orElse(null), id);
         assertUsernameAvailable(request.getUsername().orElse(null), id);
 
@@ -75,23 +78,31 @@ public class UserService {
     @Transactional(readOnly = true)
     public PageResponseDto<UserResponseDto> listUsers(Pageable pageable, UUID actorId) {
         User actor = findActorOrThrow(actorId);
-        Page<UserResponseDto> responsePage = userRepository
-                .findAllByTenantId(actor.getTenant().getId(), pageable)
-                .map(userMapper::toResponseDto);
-        return PageResponseDto.from(responsePage);
+        Page<User> scopedUsers = switch (userAuthorization.scopeOf(actor)) {
+            case UserScope.All ignored -> userRepository.findAll(pageable);
+            case UserScope.WithinTenant(UUID tenantId) -> userRepository.findAllByTenantId(tenantId, pageable);
+            case UserScope.WithinTeamsLedBy(UUID leaderId) -> userRepository.findAllByTeamLeadId(leaderId, pageable);
+            case UserScope.SelfOnly ignored -> selfOnlyPage(actor, pageable);
+        };
+        return PageResponseDto.from(scopedUsers.map(userMapper::toResponseDto));
     }
 
     @Transactional
     public UserResponseDto updateStatus(UUID id, UserStatusUpdateRequestDto request, UUID actorId) {
         User actor = findActorOrThrow(actorId);
         User user = findUserOrThrow(id);
-        assertActorCanAccessUser(actor, user);
+        userAuthorization.assertWithinScope(userAuthorization.scopeOf(actor), user);
 
         userMapper.applyStatusChange(user, UserStatus.valueOf(request.getStatus()));
         User saved = userRepository.save(user);
         auditService.createAuditLog("USER_STATUS_UPDATED", "User", saved.getId(), saved.getTenant(),
                 actor, auditSnapshot(saved), null);
         return userMapper.toResponseDto(saved);
+    }
+
+    private Page<User> selfOnlyPage(User actor, Pageable pageable) {
+        List<User> content = pageable.getOffset() == 0 ? List.of(actor) : List.of();
+        return new PageImpl<>(content, pageable, 1);
     }
 
     private Tenant findTenantOrThrow(UUID id) {
@@ -120,17 +131,6 @@ public class UserService {
         snapshot.put("role", user.getRole());
         snapshot.put("status", user.getStatus().name());
         return snapshot;
-    }
-
-    private void assertActorCanAccessUser(User actor, User targetUser) {
-        assertActorBelongsToTenant(actor, targetUser.getTenant());
-    }
-
-    private void assertActorBelongsToTenant(User actor, Tenant tenant) {
-        if (!actor.getTenant().getId().equals(tenant.getId())) {
-            throw new ForbiddenActionException(
-                    "Actor " + actor.getId() + " cannot act on tenant " + tenant.getId());
-        }
     }
 
     private User saveUser(User user) {

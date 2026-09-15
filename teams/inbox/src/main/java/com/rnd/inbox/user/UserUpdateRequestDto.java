@@ -1,5 +1,6 @@
 package com.rnd.inbox.user;
 
+import com.rnd.inbox.shared.messaging.validation.ValidEnum;
 import com.rnd.inbox.validation.OptionalNotBlank;
 import jakarta.validation.constraints.Email;
 import jakarta.validation.constraints.Size;
@@ -28,7 +29,7 @@ public class UserUpdateRequestDto {
     private JsonNullable<String> username = JsonNullable.undefined();
 
     @OptionalNotBlank
-    @Size(max = 50)
+    @ValidEnum(enumClass = UserRole.class)
     private String role;
 
     public String getDisplayName() {

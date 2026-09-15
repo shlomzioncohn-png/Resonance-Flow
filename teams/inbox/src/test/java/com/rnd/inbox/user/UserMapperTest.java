@@ -39,7 +39,7 @@ class UserMapperTest {
         request.setEmail("yehudit@acme.com");
         request.setPhone("0501234567");
         request.setUsername("yehudit");
-        request.setRole("developer");
+        request.setRole("EMPLOYEE");
         return request;
     }
 
@@ -54,7 +54,7 @@ class UserMapperTest {
         assertThat(user.getEmail()).isEqualTo("yehudit@acme.com");
         assertThat(user.getPhone()).isEqualTo("0501234567");
         assertThat(user.getUsername()).isEqualTo("yehudit");
-        assertThat(user.getRole()).isEqualTo("developer");
+        assertThat(user.getRole()).isEqualTo(UserRole.EMPLOYEE);
         assertThat(user.getStatus()).isEqualTo(UserStatus.ACTIVE);
         assertThat(user.getCreatedAt()).isEqualTo(FIXED_NOW);
         assertThat(user.getUpdatedAt()).isEqualTo(FIXED_NOW);
@@ -77,14 +77,14 @@ class UserMapperTest {
         request.setEmail(JsonNullable.of("new@acme.com"));
         request.setPhone(JsonNullable.of("0509999999"));
         request.setUsername(JsonNullable.of("newname"));
-        request.setRole("manager");
+        request.setRole("TEAM_LEAD");
 
         userMapper.applyUpdate(user, request);
 
         assertThat(user.getDisplayName()).isEqualTo("New Name");
         assertThat(user.getEmail()).isEqualTo("new@acme.com");
         assertThat(user.getUsername()).isEqualTo("newname");
-        assertThat(user.getRole()).isEqualTo("manager");
+        assertThat(user.getRole()).isEqualTo(UserRole.TEAM_LEAD);
         assertThat(user.getUpdatedAt()).isEqualTo(FIXED_NOW);
 
         // fields applyUpdate must never touch
@@ -100,11 +100,11 @@ class UserMapperTest {
         user.setEmail("existing@acme.com");
         user.setUsername("existingusername");
         user.setPhone("0501111111");
-        user.setRole("developer");
+        user.setRole(UserRole.EMPLOYEE);
 
         UserUpdateRequestDto request = new UserUpdateRequestDto();
         request.setDisplayName("New Name");
-        request.setRole("developer");
+        request.setRole("EMPLOYEE");
         // email, username and phone intentionally left null — not part of this update
 
         userMapper.applyUpdate(user, request);
@@ -154,7 +154,7 @@ class UserMapperTest {
         user.setEmail("yehudit@acme.com");
         user.setPhone("0501234567");
         user.setUsername("yehudit");
-        user.setRole("developer");
+        user.setRole(UserRole.EMPLOYEE);
         user.setStatus(UserStatus.ACTIVE);
         user.setCreatedAt(FIXED_NOW);
         user.setUpdatedAt(FIXED_NOW);
@@ -165,7 +165,7 @@ class UserMapperTest {
         assertThat(dto.getId()).isEqualTo(user.getId());
         assertThat(dto.getDisplayName()).isEqualTo("Yehudit Cohen");
         assertThat(dto.getEmail()).isEqualTo("yehudit@acme.com");
-        assertThat(dto.getRole()).isEqualTo("developer");
+        assertThat(dto.getRole()).isEqualTo(UserRole.EMPLOYEE);
         assertThat(dto.getStatus()).isEqualTo(UserStatus.ACTIVE);
         assertThat(dto.getCreatedAt()).isEqualTo(FIXED_NOW);
         assertThat(dto.getLastLoginAt()).isEqualTo(FIXED_NOW);

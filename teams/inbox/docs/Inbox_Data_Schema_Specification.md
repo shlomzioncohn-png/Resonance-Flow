@@ -30,7 +30,7 @@ Fields are listed with their type, whether they are required, their foreign-key 
 | Topic | Decision |
 |---|---|
 | Team lead | One team lead per team, stored in `teams.team_lead_id`. |
-| Permissions | No granular RBAC/permissions schema at this stage. Keep a basic `users.role`; extend later if required. |
+| Permissions | No granular RBAC/permissions schema. `users.role` is a fixed enum (`system_admin` / `tenant_admin` / `team_lead` / `employee`) — it says which of these four kinds of user someone is, not a permissions model; extend later if a real RBAC schema is required. |
 | OTP storage | Do not assume Redis. Store an OTP hash and expiration in PostgreSQL unless a different architecture is approved. |
 | Task dependencies | Not stored in Inbox. Chain owns the dependency graph. |
 | Availability | `tasks.is_available` is materialized in Inbox and updated from Chain. |
@@ -71,7 +71,7 @@ Fields are listed with their type, whether they are required, their foreign-key 
 | `first_name` | VARCHAR(100) | No | — | User first name. |
 | `last_name` | VARCHAR(100) | No | — | User last name. |
 | `display_name` | VARCHAR(255) | Yes | — | Name displayed in the application. |
-| `role` | VARCHAR(50) | Yes | — | Basic organizational/application role. No granular permissions model at this stage. |
+| `role` | VARCHAR / ENUM | Yes | `system_admin / tenant_admin / team_lead / employee` | Basic organizational/application role. No granular permissions model at this stage. |
 | `status` | VARCHAR(30) | Yes | `pending / active / suspended / disabled` | User lifecycle status. |
 | `created_at` | TIMESTAMPTZ | Yes | DEFAULT `now()` | Creation timestamp. |
 | `updated_at` | TIMESTAMPTZ | Yes | DEFAULT `now()` | Last update timestamp. |

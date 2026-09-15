@@ -25,7 +25,7 @@ public class UserMapper {
         user.setEmail(dto.getEmail());
         user.setPhone(dto.getPhone());
         user.setUsername(dto.getUsername());
-        user.setRole(dto.getRole());
+        user.setRole(UserRole.valueOf(dto.getRole()));
         user.setStatus(UserStatus.ACTIVE);
         Instant now = Instant.now(clock);
         user.setCreatedAt(now);
@@ -53,7 +53,7 @@ public class UserMapper {
             user.setUsername(dto.getUsername().get());
         }
         if (dto.getRole() != null) {
-            user.setRole(dto.getRole());
+            user.setRole(UserRole.valueOf(dto.getRole()));
         }
         user.setUpdatedAt(Instant.now(clock));
     }

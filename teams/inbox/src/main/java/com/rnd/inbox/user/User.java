@@ -51,8 +51,10 @@ public class User {
     @Column
     private String username;
 
-    @Column(nullable = false)
-    private String role;
+    @JdbcType(LowercasePostgreSQLEnumJdbcType.class)
+    @Enumerated(EnumType.STRING)
+    @Column(name = "role", nullable = false, columnDefinition = "user_role")
+    private UserRole role;
 
     @JdbcType(LowercasePostgreSQLEnumJdbcType.class)
     @Enumerated(EnumType.STRING)
@@ -135,11 +137,11 @@ public class User {
         this.username = username;
     }
 
-    public String getRole() {
+    public UserRole getRole() {
         return role;
     }
 
-    public void setRole(String role) {
+    public void setRole(UserRole role) {
         this.role = role;
     }
 

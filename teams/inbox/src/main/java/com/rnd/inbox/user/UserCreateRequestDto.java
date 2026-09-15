@@ -1,5 +1,6 @@
 package com.rnd.inbox.user;
 
+import com.rnd.inbox.shared.messaging.validation.ValidEnum;
 import com.rnd.inbox.shared.messaging.validation.ValidUuid;
 import jakarta.validation.constraints.Email;
 import jakarta.validation.constraints.NotBlank;
@@ -32,7 +33,7 @@ public class UserCreateRequestDto {
     private String username;
 
     @NotBlank
-    @Size(max = 50)
+    @ValidEnum(enumClass = UserRole.class)
     private String role;
 
     public String getTenantId() {
