@@ -29,27 +29,52 @@ Vectors, semantic search, duplicate/related-task detection.
 ## What's here
 
 ```
-__init__.py         the public interface -- embed() / embed_batch() (+ async wrappers) / upsert() / search() / delete() / clear()
+__init__.py         the public interface -- embed() / embed_batch() (+ async wrappers) / upsert() / search() / delete() / clear() / open() / close()
 generate.py          embed() / embed_batch() + embed_async() / embed_batch_async() -- the real model, truncation policy
-base.py              VectorStore abstract interface (the "contract") -- dependency-free
+base.py              VectorStore abstract interface (the "contract") + SearchResult -- dependency-free (besides pydantic)
 pgvector_store.py    the ONLY file that knows about Postgres/pgvector
 factory.py           single switch that picks the backend implementation
-config.py            Pydantic Settings: model name/path/dim, connection DSN, table name, HNSW tuning, duplicate-detection threshold
+config.py            Pydantic Settings (lazy -- see get_settings()): model name/path/dim, connection DSN, table name, HNSW tuning, duplicate-detection threshold
 loader.py            fetches + verifies the real FUNSD manifest slice (see below)
 ingest.py            pipeline: loader -> embed_batch -> upsert(source_ref, vector)
 verify.py            checks table row count == manifest record count
 ```
 
 Nothing outside `__init__.py` should be imported by callers elsewhere in
-the app. `base.py` deliberately has zero backend-specific dependencies
-(only `abc`) so the interface itself can be imported -- for type-checking,
-mocking in tests, or sketching a new backend -- without requiring
-psycopg to be installed; only `pgvector_store.py` (reached through
-`factory.py`) actually imports it.
+the app. `base.py` deliberately has zero *backend-specific* dependencies
+(only `abc` and `pydantic`, already a core project dependency) so the
+interface itself can be imported -- for type-checking, mocking in tests,
+or sketching a new backend -- without requiring psycopg to be installed;
+only `pgvector_store.py` (reached through `factory.py`) actually imports
+it.
 
-`upsert`/`search`/`delete`/`clear` are all `async def` -- the store talks
-to Postgres over psycopg's async API so it doesn't block the event loop
-under FastAPI's `async def` route handlers.
+`upsert`/`search`/`delete`/`clear`/`open`/`close` are all `async def` --
+the store talks to Postgres over psycopg's async API so it doesn't block
+the event loop under FastAPI's `async def` route handlers.
+
+`open()`/`close()` control the backing store's resources (e.g. a
+connection pool) explicitly -- call them from a FastAPI lifespan handler
+so the pool's lifetime is tied to the app's, on a known event loop, from
+the start:
+
+```python
+from contextlib import asynccontextmanager
+from fastapi import FastAPI
+import mind.embeddings
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    await mind.embeddings.open()
+    yield
+    await mind.embeddings.close()
+
+app = FastAPI(lifespan=lifespan)
+```
+
+If you never call `open()`, the store still initializes itself lazily on
+first `upsert`/`search`/`delete`/`clear` -- fine for standalone scripts,
+but for a long-running server prefer the explicit form above (see
+`base.VectorStore.open()`'s docstring for why).
 
 ## Real data: the FUNSD slice (not R2 -- see why)
 
@@ -101,7 +126,7 @@ await upsert(task.id, vector)
 
 # Searching: is_query=True is required for correct BGE retrieval quality.
 query_vector = embed(user_query_text, is_query=True)
-similar = await search(query_vector, k=5)  # [(task_id, similarity), ...], best match first
+similar = await search(query_vector, k=5)  # [SearchResult(task_id=..., similarity=...), ...], best match first
 
 await delete(task.id)  # e.g. when the task itself is deleted
 ```
