@@ -210,7 +210,7 @@ public class TaskDependencyService {
         Objects.requireNonNull(taskId, "taskId must not be null");
         requireTaskExists(taskId);
 
-        return historyRepository.findByTaskId(taskId, page, size);
+        return transactionRunner.runInTransaction(() -> historyRepository.findByTaskId(taskId, page, size));
     }
 
     private void recordHistory(UUID taskId, UUID dependsOnTaskId, DependencyChangeAction action,
