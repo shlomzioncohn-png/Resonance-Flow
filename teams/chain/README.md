@@ -29,14 +29,18 @@ open follow-up, not done as part of this merge.
 - Spring Boot 3.3.13 (Maven)
 - Docker / Docker Compose
 
-**Postgres has been chosen** as Chain's vector/graph store, superseding the placeholder H2 setup
-below (see issue #384) - its own database (`chain`) on the shared cluster Postgres instance, wired
-in `teams/relay/helm/resonance-flow/values.yaml` (`components.chain.config.data.datasource`) and
-`templates/services/chain/configmap.yaml`, the same file-mount ConfigMap mechanism Inbox uses.
-Kafka topics/consumer wiring is not part of that yet - still pending confirmation from the team on
-what `TaskEligibilityService` actually consumes/produces. Application-side JPA wiring (entities/
-repositories actually backed by Postgres, replacing the in-memory `TaskRepository`/
-`TaskDependencyRepository`) is also still open follow-up work, not done here.
+**Postgres has been chosen** (see issue #384) - plain relational tables for the dependency graph,
+no `pgvector`. Own database (`chain`) and own DB user (not the shared postgres superuser) on the
+shared cluster instance, wired in `teams/relay/helm/resonance-flow/values.yaml`
+(`components.chain.config.data.datasource`) and `templates/services/chain/configmap.yaml`, the
+same file-mount ConfigMap mechanism Inbox uses. Flyway is the confirmed migration tool
+(matching Inbox), not yet wired into `pom.xml` - premature before real JPA entities exist.
+
+Kafka topics/consumer wiring is still open: two competing internal designs for the
+dependency/constraint flow need reconciling, and nothing yet defines what event drives a task
+status change reaching Chain. Application-side JPA wiring (entities/repositories actually backed
+by Postgres, replacing the in-memory `TaskRepository`/`TaskDependencyRepository`) is also still
+open follow-up work, not done here.
 
 Locally, an in-memory H2 database is still configured as a placeholder purely so a
 `DataSource`/transaction manager exists for `@Transactional` - `Task`/`TaskDependency` are plain

@@ -254,10 +254,11 @@ components:
     config:
       data:
         datasource:
-          # Own database (see postgresql.primary.initdb.scripts) - not part of Inbox's tasks schema.
+          # Own database, own user (see postgresql.primary.initdb.scripts) - not part of Inbox's
+          # tasks schema, and not the shared postgres superuser.
           database: chain
-          username: postgres
-          password: postgres
+          username: chain
+          password: chain-dev-password
         # Kafka pending confirmation from the Chain team on what it consumes/produces (#384).
   inbox:
     enabled: true
@@ -415,6 +416,9 @@ postgresql:
         memory: 192Mi
     initdb:
       scripts:
-        # auth.database only creates resonance_flow (Inbox's) - Chain needs its own.
+        # auth.database only creates resonance_flow (Inbox's) - Chain needs its own, owned by
+        # its own user (confirmed with the Chain team, #384), not the shared postgres superuser.
+        # Must match components.chain.config.data.datasource.{username,password} above.
         create-chain-database.sql: |
-          CREATE DATABASE chain;
+          CREATE USER chain WITH PASSWORD 'chain-dev-password';
+          CREATE DATABASE chain OWNER chain;

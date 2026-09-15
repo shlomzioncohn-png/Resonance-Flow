@@ -49,12 +49,17 @@ onConstraintStatusChanged.
   No JPA entities/repositories use H2 - real data still lives in the
   in-memory TaskRepository/TaskDependencyRepository, so @Transactional
   does not actually cover Task/TaskDependency mutations yet.
-- Resolved (#384): Postgres is the chosen DB (own `chain` database on the shared cluster
-  instance - see `teams/relay/helm/resonance-flow/templates/services/chain/configmap.yaml`).
-  Only the Postgres side of the chart/config wiring is done so far - Kafka topics are
-  deliberately left unwired pending the team's confirmation of what
-  `TaskEligibilityService` actually consumes/produces, and real JPA entities/repositories
-  replacing the in-memory ones are still open work too.
+- Resolved (#384): Postgres is the chosen DB - own `chain` database, own `chain` DB user
+  (not the shared postgres superuser), on the shared cluster instance. No `pgvector` -
+  plain relational tables for the dependency graph. Migration tool: Flyway, matching
+  Inbox's pattern (not wired into pom.xml yet - premature before real JPA entities
+  exist). No infra beyond Postgres + Kafka needed. See
+  `teams/relay/helm/resonance-flow/templates/services/chain/configmap.yaml`.
+- Still open (#384): Kafka topics/consumer wiring. Two competing internal designs for
+  the dependency/constraint flow need reconciling first, and there's a genuine gap -
+  nothing yet defines what event drives a task status change reaching Chain
+  (`onTaskStatusChanged`'s trigger). Real JPA entities/repositories replacing the
+  in-memory ones are also still open work.
 - Until real JPA-backed repositories exist, TaskEligibilityService ALSO
   uses in-process locking to make read-modify-write on blockingCount /
   openConstraintCount actually atomic - @Transactional alone doesn't
