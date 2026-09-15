@@ -2,15 +2,35 @@
 
 Run: python -m benchmarks.ocr_asr_benchmark (from teams/mind/)
 
-OCR: Tesseract in 3 page-segmentation-mode (PSM) configurations, run on
-the FUNSD Foundation Gate real-data slice (the same 2 documents already
-committed via eval/datasets/.manifest.json -- see eval/datasets/README.md;
-no new data downloaded for this).
+OCR: Tesseract in 3 page-segmentation-mode (PSM) configs, plus PaddleOCR
+in 2 model-size configs (mobile/server) -- all run on the FUNSD
+Foundation Gate real-data slice (the same 2 documents already committed
+via eval/datasets/.manifest.json -- see eval/datasets/README.md; no new
+data downloaded for this).
 
-ASR: BLOCKED. No AMI (or any ASR) sample exists anywhere in this repo or
-on `main` -- checked again right before writing this. There is nothing
-to run Whisper against yet. Documented here as a known risk (see
-ocr-asr-benchmark.md "Known risk"), not silently skipped.
+PaddleOCR requires 4 model packages (mobile+server, det+rec) that
+PaddleOCR/PaddleX normally auto-download from HuggingFace/ModelScope/BOS
+on first use -- all three were blocked on this dev network by a NetFree
+content filter (confirmed: same "418 Blocked by NetFree" response from
+all three hosters). Downloaded manually on an unfiltered network instead
+and placed under the local PaddleX model cache
+(~/.paddlex/official_models/<model_name>/, extracted from the hosters'
+own `<model_name>_infer.tar`) -- see "PaddleOCR -- setup" in
+ocr-asr-benchmark.md for the exact URLs. `enable_mkldnn=False` below
+works around an unrelated NotImplementedError crash in this
+paddlepaddle build's oneDNN/CPU backend; it makes both PaddleOCR configs
+slower than PaddleOCR is capable of on hardware where mkldnn works, so
+its latency numbers are a floor for this machine, not a ceiling for the
+tool.
+
+ASR: BLOCKED. No AMI audio (or any ASR) sample exists anywhere in this
+repo or on any branch -- checked again right before writing this. An
+AMI package does exist on `michal/real-data-slice`, but it's the
+manual-annotation package only (abstractive summaries, XML) -- no
+audio, by design (it's for a different ticket, extraction ground
+truth). There is nothing to run Whisper against yet. Documented here as
+a known risk (see ocr-asr-benchmark.md "Known risk"), not silently
+skipped.
 
 Deliberately rough throughout (see ocr-asr-benchmark.md): wall-clock
 latency, a sampled peak-RSS/CPU-time footprint via psutil (Python's
@@ -25,10 +45,18 @@ import json
 import re
 import shutil
 import subprocess
+import sys
+import threading
 import time
 from pathlib import Path
 
 import psutil
+
+if hasattr(sys.stdout, "reconfigure"):
+    # Windows consoles default to a codepage (e.g. cp1255) that can't
+    # encode every character PaddleOCR/Tesseract output -- avoid a crash
+    # on print() alone.
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
 _HERE = Path(__file__).parent
 DATA_DIR = _HERE.parent / "local-data" / "funsd" / "dataset" / "testing_data"
@@ -46,6 +74,21 @@ OCR_CONFIGS = {
     "psm3_default": ["--psm", "3"],
     "psm6_single_block": ["--psm", "6"],
     "psm11_sparse_text": ["--psm", "11"],
+}
+
+# Two PaddleOCR model-size configs -- the "mobile vs. server model" the
+# issue asked for. Both are PP-OCRv5 (PaddleOCR's current generation);
+# "mobile"/"server" is model capacity, not an actual deploy target --
+# both run on this CPU dev machine.
+PADDLE_CONFIGS = {
+    "paddleocr_mobile": {
+        "text_detection_model_name": "PP-OCRv5_mobile_det",
+        "text_recognition_model_name": "PP-OCRv5_mobile_rec",
+    },
+    "paddleocr_server": {
+        "text_detection_model_name": "PP-OCRv5_server_det",
+        "text_recognition_model_name": "PP-OCRv5_server_rec",
+    },
 }
 
 _WINDOWS_DEFAULT_INSTALL = r"C:\Program Files\Tesseract-OCR\tesseract.exe"
@@ -164,27 +207,140 @@ def run_ocr_benchmark() -> dict[str, dict]:
     return averages
 
 
+def _sample_current_process(stop_event: threading.Event, proc: psutil.Process, peak: list[int]) -> None:
+    while not stop_event.is_set():
+        try:
+            peak[0] = max(peak[0], proc.memory_info().rss)
+        except psutil.NoSuchProcess:
+            break
+        time.sleep(0.05)
+
+
+def run_paddle_ocr(ocr, image_path: Path) -> dict:
+    """Run one already-loaded PaddleOCR pipeline on one image, sampling
+    this process's own memory/CPU while it runs.
+
+    Unlike Tesseract (a separate subprocess we sample from outside),
+    PaddleOCR runs in-process -- so "peak RSS" here is the whole
+    interpreter's memory (already includes the loaded model, numpy,
+    paddle, etc.), not an isolated OCR-only number. Not apples-to-apples
+    with the Tesseract subprocess numbers for that reason; still the
+    right number for capacity planning ("what must this process's host
+    have while OCRing").
+    """
+    proc = psutil.Process()
+    stop_event = threading.Event()
+    peak = [proc.memory_info().rss]
+    sampler = threading.Thread(target=_sample_current_process, args=(stop_event, proc, peak))
+    cpu_before = proc.cpu_times()
+    sampler.start()
+    start = time.perf_counter()
+    results = list(ocr.predict(str(image_path)))
+    duration = time.perf_counter() - start
+    stop_event.set()
+    sampler.join()
+    cpu_after = proc.cpu_times()
+    cpu_time = (cpu_after.user - cpu_before.user) + (cpu_after.system - cpu_before.system)
+
+    texts: list[str] = []
+    for res in results:
+        texts.extend(res.get("rec_texts", []) or [])
+    return {
+        "text": " ".join(texts),
+        "duration_s": duration,
+        "peak_rss_mb": peak[0] / (1024 * 1024),
+        "cpu_time_s": cpu_time,
+    }
+
+
+def run_paddle_benchmark() -> dict[str, dict]:
+    """Benchmark PaddleOCR in the 2 model-size configs in PADDLE_CONFIGS.
+
+    Requires the 4 PP-OCRv5 model packages already present locally under
+    ~/.paddlex/official_models/ -- see the module docstring and
+    ocr-asr-benchmark.md "PaddleOCR -- setup" for why (network block)
+    and exactly how they were placed there.
+    """
+    from paddleocr import PaddleOCR  # heavy, optional import -- see [benchmark] extra
+
+    rows = []
+    for config_name, model_names in PADDLE_CONFIGS.items():
+        print(f"\nLoading {config_name}...")
+        load_start = time.perf_counter()
+        ocr = PaddleOCR(
+            **model_names,
+            use_doc_orientation_classify=False,
+            use_doc_unwarping=False,
+            use_textline_orientation=False,
+            enable_mkldnn=False,  # works around a oneDNN crash on this machine -- see module docstring
+        )
+        load_s = time.perf_counter() - load_start
+        print(f"{config_name}: model load took {load_s:.1f}s (one-time cost -- not counted in per-page latency below)")
+
+        for doc_id in DOCS:
+            image_path = DATA_DIR / "images" / f"{doc_id}.png"
+            gt_words = ground_truth_words(doc_id)
+            result = run_paddle_ocr(ocr, image_path)
+            recall = word_recall(result["text"], gt_words)
+            row = {
+                "config": config_name,
+                "doc": doc_id,
+                "duration_s": round(result["duration_s"], 3),
+                "peak_rss_mb": round(result["peak_rss_mb"], 1),
+                "cpu_time_s": round(result["cpu_time_s"], 3),
+                "word_recall": round(recall, 3),
+                "gt_word_count": len(gt_words),
+            }
+            rows.append(row)
+            print(row)
+
+    print("\n--- PaddleOCR per-config averages ---")
+    averages: dict[str, dict] = {}
+    for config_name in PADDLE_CONFIGS:
+        config_rows = [r for r in rows if r["config"] == config_name]
+        n = len(config_rows)
+        avg = {
+            "duration_s": sum(r["duration_s"] for r in config_rows) / n,
+            "peak_rss_mb": sum(r["peak_rss_mb"] for r in config_rows) / n,
+            "cpu_time_s": sum(r["cpu_time_s"] for r in config_rows) / n,
+            "word_recall": sum(r["word_recall"] for r in config_rows) / n,
+        }
+        averages[config_name] = avg
+        print(
+            f"{config_name}: duration={avg['duration_s']:.3f}s "
+            f"peak_rss={avg['peak_rss_mb']:.1f}MB cpu_time={avg['cpu_time_s']:.3f}s "
+            f"word_recall={avg['word_recall']:.3f}"
+        )
+    return averages
+
+
 def run_asr_benchmark() -> None:
     print("\n--- ASR (Whisper) ---")
     print(
-        "BLOCKED: no AMI (or any ASR) sample exists in this repo or on `main` "
-        "(checked eval/datasets/ -- only FUNSD is there). Nothing to run "
-        "Whisper against. See ocr-asr-benchmark.md 'Known risk'."
+        "BLOCKED: no AMI audio (or any ASR) sample exists in this repo or on "
+        "any branch. `michal/real-data-slice` has an AMI package, but it's "
+        "manual-annotation text only (abstractive summaries, XML) -- no "
+        "audio, by design (ground truth for a different ticket). Nothing to "
+        "run Whisper against. See ocr-asr-benchmark.md 'Known risk'."
     )
 
 
 def main() -> None:
-    ocr_averages = run_ocr_benchmark()
+    tesseract_averages = run_ocr_benchmark()
+    paddle_averages = run_paddle_benchmark()
     run_asr_benchmark()
 
-    best_config = max(ocr_averages, key=lambda c: ocr_averages[c]["word_recall"])
-    best = ocr_averages[best_config]
+    all_averages = {**tesseract_averages, **paddle_averages}
+    best_config = max(all_averages, key=lambda c: all_averages[c]["word_recall"])
+    best = all_averages[best_config]
     print("\n--- Conclusion ---")
     print(
-        f"OCR: use {best_config} -- best word recall "
-        f"({best['word_recall']:.3f}) among {list(ocr_averages)}, "
+        f"OCR: best word recall is {best_config} "
+        f"({best['word_recall']:.3f}) among {list(all_averages)}, "
         f"duration={best['duration_s']:.3f}s, peak_rss={best['peak_rss_mb']:.1f}MB. "
-        "ASR: NO DECISION -- blocked on missing AMI data (known risk, see doc)."
+        "Recall alone doesn't decide this when latency differs by orders of "
+        "magnitude -- see ocr-asr-benchmark.md for the reasoned recommendation.\n"
+        "ASR: NO DECISION -- blocked on missing AMI audio (known risk, see doc)."
     )
 
 

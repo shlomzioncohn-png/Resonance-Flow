@@ -22,12 +22,18 @@ dev = [
     "httpx",  # required by fastapi.testclient.TestClient
 ]
 # Not a runtime dependency of src/mind/ -- extraction/multimodal isn't
-# built yet (Phase 2). Only benchmarks/ocr_benchmark.py needs these;
-# also requires the tesseract-ocr system binary (not pip-installable).
+# built yet (Phase 2). Only benchmarks/ocr_asr_benchmark.py needs these;
+# Tesseract also requires the tesseract-ocr system binary (not
+# pip-installable); PaddleOCR also requires its model weights, which may
+# need manual placement under ~/.paddlex/official_models/ if the
+# auto-download hosters are network-filtered -- see
+# benchmarks/ocr-asr-benchmark.md "PaddleOCR -- setup".
 benchmark = [
     "pytesseract",
     "pillow",
     "psutil",  # cross-platform peak-RSS/CPU sampling; stdlib `resource` is Unix-only
+    "paddleocr",
+    "paddlepaddle",
 ]
 
 [build-system]
