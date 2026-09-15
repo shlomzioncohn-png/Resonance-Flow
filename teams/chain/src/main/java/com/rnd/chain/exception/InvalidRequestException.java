@@ -5,8 +5,9 @@ package com.rnd.chain.exception;
  * (e.g. a missing sourceRef, an out-of-range page/size) - kept distinct
  * from the JDK's own IllegalArgumentException so GlobalExceptionHandler
  * only maps this module's validation errors to 400, not unrelated bugs.
+ * Mapped to HTTP 400 via {@link BadRequestException}.
  */
-public class InvalidRequestException extends RuntimeException {
+public class InvalidRequestException extends BadRequestException {
 
     public InvalidRequestException(String message) {
         super(message);

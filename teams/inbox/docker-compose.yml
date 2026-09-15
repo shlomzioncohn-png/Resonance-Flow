@@ -13,6 +13,9 @@ services:
       - DB_USER=${DB_USER:-postgres}
       - DB_PASSWORD=${DB_PASSWORD:-postgres}
       - KAFKA_BOOTSTRAP_SERVERS=kafka:29092
+      # No local Apicurio/schema-registry container here yet - task.created/updated/completed
+      # publish will fail without one reachable at this URL.
+      - SCHEMA_REGISTRY_URL=${SCHEMA_REGISTRY_URL:-http://localhost:8081/apis/ccompat/v6}
     extra_hosts:
       - "host.docker.internal:host-gateway"
     depends_on:

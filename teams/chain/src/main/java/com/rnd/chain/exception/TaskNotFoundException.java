@@ -1,10 +1,18 @@
 package com.rnd.chain.exception;
 
+import java.util.UUID;
+
 /**
- * Thrown when an operation references a taskId that does not exist
- * (or is soft-deleted) in {@code TaskRepository}.
+ * Thrown when a traversal is requested for a task id that doesn't exist
+ * (or is soft-deleted), or when an operation references a taskId that does
+ * not exist in {@code TaskRepository}. Mapped to HTTP 404 by
+ * GlobalExceptionHandler.
  */
-public class TaskNotFoundException extends RuntimeException {
+public class TaskNotFoundException extends NotFoundException {
+
+    public TaskNotFoundException(UUID taskId) {
+        super("Task not found: " + taskId);
+    }
 
     public TaskNotFoundException(String message) {
         super(message);

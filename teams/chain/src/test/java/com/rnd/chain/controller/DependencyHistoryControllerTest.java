@@ -58,7 +58,7 @@ class DependencyHistoryControllerTest {
 
         mockMvc.perform(get("/tasks/{taskId}/dependencies/history", unknownTaskId))
                 .andExpect(status().isNotFound())
-                .andExpect(jsonPath("$.error").value("TaskNotFoundException"));
+                .andExpect(jsonPath("$.error").value("NOT_FOUND"));
     }
 
     @Test
