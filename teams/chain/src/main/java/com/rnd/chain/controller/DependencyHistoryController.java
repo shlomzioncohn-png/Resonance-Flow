@@ -2,6 +2,7 @@ package com.rnd.chain.controller;
 
 import com.rnd.chain.dto.DependencyHistoryEntry;
 import com.rnd.chain.dto.PageResponse;
+import com.rnd.chain.exception.InvalidRequestException;
 import com.rnd.chain.service.TaskDependencyService;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -31,7 +32,7 @@ public class DependencyHistoryController {
             @RequestParam(defaultValue = "20") int size) {
 
         if (page < 0 || size <= 0 || size > 100) {
-            throw new IllegalArgumentException("page must be >= 0 and size must be in 1..100");
+            throw new InvalidRequestException("page must be >= 0 and size must be in 1..100");
         }
         PageResponse<DependencyHistoryEntry> entries = taskDependencyService.getHistory(taskId, page, size);
         return ResponseEntity.ok(entries.map(DependencyHistoryResponse::from));

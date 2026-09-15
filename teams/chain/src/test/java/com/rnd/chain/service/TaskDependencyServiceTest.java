@@ -10,6 +10,7 @@ import com.rnd.chain.dto.TaskStatus;
 import com.rnd.chain.exception.DependencyNotFoundException;
 import com.rnd.chain.exception.DuplicateDependencyException;
 import com.rnd.chain.exception.InvalidDependencyException;
+import com.rnd.chain.exception.InvalidRequestException;
 import com.rnd.chain.exception.TaskNotFoundException;
 import com.rnd.chain.repository.DependencyHistoryRepository;
 import com.rnd.chain.repository.InMemoryDependencyHistoryRepository;
@@ -371,15 +372,15 @@ class TaskDependencyServiceTest {
     // --- sourceRef required for MIND/SYSTEM, optional for USER -------------
 
     @Test
-    void addDependency_mindSourceWithoutSourceRef_throwsIllegalArgumentException() {
+    void addDependency_mindSourceWithoutSourceRef_throwsInvalidRequestException() {
         assertThatThrownBy(() -> service.addDependency(taskA, taskB, DependencyChangeSource.MIND, null))
-                .isInstanceOf(IllegalArgumentException.class);
+                .isInstanceOf(InvalidRequestException.class);
     }
 
     @Test
-    void addDependency_systemSourceWithBlankSourceRef_throwsIllegalArgumentException() {
+    void addDependency_systemSourceWithBlankSourceRef_throwsInvalidRequestException() {
         assertThatThrownBy(() -> service.addDependency(taskA, taskB, DependencyChangeSource.SYSTEM, "  "))
-                .isInstanceOf(IllegalArgumentException.class);
+                .isInstanceOf(InvalidRequestException.class);
     }
 
     @Test
@@ -405,7 +406,7 @@ class TaskDependencyServiceTest {
         service.addDependency(taskA, taskB, DependencyChangeSource.MIND, "evt-1");
 
         assertThatThrownBy(() -> service.addDependency(taskC, taskD, DependencyChangeSource.MIND, "evt-1"))
-                .isInstanceOf(IllegalArgumentException.class);
+                .isInstanceOf(InvalidRequestException.class);
 
         assertThat(service.getDependencies(taskC)).isEmpty();
     }
@@ -415,7 +416,7 @@ class TaskDependencyServiceTest {
         service.addDependency(taskA, taskB, DependencyChangeSource.MIND, "evt-1");
 
         assertThatThrownBy(() -> service.removeDependency(taskA, taskB, DependencyChangeSource.MIND, "evt-1"))
-                .isInstanceOf(IllegalArgumentException.class);
+                .isInstanceOf(InvalidRequestException.class);
     }
 
     @Test

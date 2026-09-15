@@ -19,9 +19,7 @@ public class GlobalExceptionHandler {
         return status(HttpStatus.CONFLICT, e);
     }
 
-    // Also catches IllegalArgumentException from DTO builders (e.g. Task, DependencyHistoryEntry) -
-    // fine while nothing builds those from request input, but revisit if a future endpoint does.
-    @ExceptionHandler({InvalidDependencyException.class, IllegalArgumentException.class})
+    @ExceptionHandler({InvalidDependencyException.class, InvalidRequestException.class})
     public ResponseEntity<ErrorResponse> handleBadRequest(RuntimeException e) {
         return status(HttpStatus.BAD_REQUEST, e);
     }

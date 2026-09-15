@@ -8,6 +8,7 @@ import com.rnd.chain.dto.TaskDependency;
 import com.rnd.chain.exception.DependencyNotFoundException;
 import com.rnd.chain.exception.DuplicateDependencyException;
 import com.rnd.chain.exception.InvalidDependencyException;
+import com.rnd.chain.exception.InvalidRequestException;
 import com.rnd.chain.exception.TaskNotFoundException;
 import com.rnd.chain.repository.DependencyHistoryRepository;
 import com.rnd.chain.repository.TaskDependencyRepository;
@@ -81,7 +82,7 @@ public class TaskDependencyService {
      * the edge is saved to. Tracked as issue #243.
      *
      * @see <a href="https://github.com/KamaTechOrg/Resonance-Flow/issues/243">#243</a>
-     * @throws IllegalArgumentException if sourceRef is missing for MIND/SYSTEM,
+     * @throws InvalidRequestException if sourceRef is missing for MIND/SYSTEM,
      * or was already used for a different taskId/dependsOnTaskId/action
      * @throws InvalidDependencyException  if taskId equals dependsOnTaskId
      * @throws TaskNotFoundException       if either task does not exist
@@ -140,7 +141,7 @@ public class TaskDependencyService {
      * history entry for it in the same transaction. Same idempotency
      * contract as {@link #addDependency(UUID, UUID, DependencyChangeSource, String)}.
      *
-     * @throws IllegalArgumentException if sourceRef is missing for MIND/SYSTEM,
+     * @throws InvalidRequestException if sourceRef is missing for MIND/SYSTEM,
      * or was already used for a different taskId/dependsOnTaskId/action
      * @throws DependencyNotFoundException if no such edge exists
      */
@@ -231,7 +232,7 @@ public class TaskDependencyService {
      * (taskId, dependsOnTaskId, action) - a legitimate retry, safe to short-circuit.
      * Always false if sourceRef is null (no idempotency key to look up).
      *
-     * @throws IllegalArgumentException if (source, sourceRef) was already recorded
+     * @throws InvalidRequestException if (source, sourceRef) was already recorded
      * for a *different* taskId/dependsOnTaskId/action - reusing an idempotency key
      * for a different operation is a caller bug, not a retry, so it must not silently
      * report success for whatever the caller passed this time.
@@ -250,7 +251,7 @@ public class TaskDependencyService {
                 && entry.getTaskId().equals(taskId)
                 && entry.getDependsOnTaskId().equals(dependsOnTaskId);
         if (!matches) {
-            throw new IllegalArgumentException("sourceRef " + sourceRef + " for source " + source
+            throw new InvalidRequestException("sourceRef " + sourceRef + " for source " + source
                     + " was already used for a different dependency change");
         }
         return true;
@@ -260,7 +261,7 @@ public class TaskDependencyService {
     private static void requireSourceRefIfNeeded(DependencyChangeSource source, String sourceRef) {
         boolean sourceRefRequired = source == DependencyChangeSource.MIND || source == DependencyChangeSource.SYSTEM;
         if (sourceRefRequired && (sourceRef == null || sourceRef.isBlank())) {
-            throw new IllegalArgumentException("sourceRef is required for source " + source);
+            throw new InvalidRequestException("sourceRef is required for source " + source);
         }
     }
 
