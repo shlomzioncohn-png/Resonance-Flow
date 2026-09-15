@@ -1,5 +1,6 @@
 package com.rnd.chain.service;
 
+import com.rnd.chain.dto.Task;
 import com.rnd.chain.dto.TaskDependency;
 import com.rnd.chain.exception.DependencyNotFoundException;
 import com.rnd.chain.exception.DuplicateDependencyException;
@@ -24,18 +25,20 @@ public class TaskDependencyService {
 
     private final TaskRepository taskRepository;
     private final TaskDependencyRepository taskDependencyRepository;
+    private final TaskEligibilityService taskEligibilityService;
 
     public TaskDependencyService(TaskRepository taskRepository,
-                                  TaskDependencyRepository taskDependencyRepository) {
+            TaskDependencyRepository taskDependencyRepository, TaskEligibilityService taskEligibilityService) {
         this.taskRepository = taskRepository;
         this.taskDependencyRepository = taskDependencyRepository;
+        this.taskEligibilityService = taskEligibilityService;
     }
 
     /**
      * Creates a "taskId depends on dependsOnTaskId" edge.
      *
-     * @throws InvalidDependencyException  if taskId equals dependsOnTaskId
-     * @throws TaskNotFoundException       if either task does not exist
+     * @throws InvalidDependencyException   if taskId equals dependsOnTaskId
+     * @throws TaskNotFoundException        if either task does not exist
      * @throws DuplicateDependencyException if the edge already exists
      */
     public TaskDependency addDependency(UUID taskId, UUID dependsOnTaskId) {
@@ -57,7 +60,18 @@ public class TaskDependencyService {
                     "Task " + taskId + " already depends on " + dependsOnTaskId);
         }
 
-        return taskDependencyRepository.save(new TaskDependency(taskId, dependsOnTaskId));
+        TaskDependency dependency = taskDependencyRepository.save(
+                new TaskDependency(taskId, dependsOnTaskId));
+
+        Task task = taskRepository.findById(taskId)
+                .orElseThrow(() -> new TaskNotFoundException(taskId));
+
+        task.setBlockingCount(task.getBlockingCount() + 1);
+        taskRepository.save(task);
+
+        taskEligibilityService.recalculateTaskEligibility(taskId);
+
+        return dependency;
     }
 
     /**
@@ -77,11 +91,20 @@ public class TaskDependencyService {
         }
 
         taskDependencyRepository.delete(taskId, dependsOnTaskId);
+        Task task = taskRepository.findById(taskId)
+                .orElseThrow(() -> new TaskNotFoundException(taskId));
+
+        task.setBlockingCount(
+                Math.max(0, task.getBlockingCount() - 1));
+
+        taskRepository.save(task);
+
+        taskEligibilityService.recalculateTaskEligibility(taskId);
     }
 
     /**
      * @return the ids of the tasks that the given task directly depends
-     * on (what blocks it). Empty list if it has none.
+     *         on (what blocks it). Empty list if it has none.
      * @throws TaskNotFoundException if taskId does not exist
      */
     public List<UUID> getDependencies(UUID taskId) {
@@ -95,7 +118,7 @@ public class TaskDependencyService {
 
     /**
      * @return the ids of the tasks that directly depend on the given
-     * task (what it blocks). Empty list if nothing depends on it.
+     *         task (what it blocks). Empty list if nothing depends on it.
      * @throws TaskNotFoundException if taskId does not exist
      */
     public List<UUID> getDependents(UUID taskId) {

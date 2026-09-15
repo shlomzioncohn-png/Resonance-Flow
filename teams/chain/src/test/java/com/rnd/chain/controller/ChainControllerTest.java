@@ -42,7 +42,12 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
-@WebMvcTest(ChainController.class)
+@WebMvcTest(controllers = {
+        TaskDependencyController.class,
+        DependencyGraphController.class,
+        ConstraintController.class,
+        TaskEligibilityController.class
+})
 class ChainControllerTest {
 
     private static final UUID TASK_ID =

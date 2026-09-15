@@ -10,7 +10,6 @@ import com.rnd.chain.repository.TaskRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
-import com.rnd.chain.repository.ConstraintRepository;
 import com.rnd.chain.dto.Constraint;
 
 import java.util.List;
@@ -72,57 +71,7 @@ public class TaskEligibilityService {
         }
     }
 
-    public void addDependency(
-            UUID taskId,
-            UUID dependsOnTaskId) {
-        log.info(
-                "Adding dependency: task {} depends on {}",
-                taskId,
-                dependsOnTaskId);
-
-        taskDependencyRepository.save(
-                new TaskDependency(
-                        taskId,
-                        dependsOnTaskId));
-
-        Task task = taskRepository.findById(taskId)
-                .orElseThrow(() -> new IllegalArgumentException(
-                        "Task not found: " + taskId));
-
-        task.setBlockingCount(
-                task.getBlockingCount() + 1);
-
-        taskRepository.save(task);
-
-        recalculateTaskEligibility(taskId);
-    }
-
-    public void removeDependency(
-            UUID taskId,
-            UUID dependsOnTaskId) {
-        log.info(
-                "Removing dependency: task {} no longer depends on {}",
-                taskId,
-                dependsOnTaskId);
-
-        taskDependencyRepository.delete(
-                taskId,
-                dependsOnTaskId);
-
-        Task task = taskRepository.findById(taskId)
-                .orElseThrow(() -> new IllegalArgumentException(
-                        "Task not found: " + taskId));
-
-        task.setBlockingCount(
-                Math.max(
-                        0,
-                        task.getBlockingCount() - 1));
-
-        taskRepository.save(task);
-
-        recalculateTaskEligibility(taskId);
-    }
-
+  
     public void onTaskStatusChanged(
             UUID taskId,
             TaskStatus newStatus) {
