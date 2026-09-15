@@ -215,35 +215,15 @@ class TaskDependencyServiceTest {
 
     @Test
     void getDependencies_blocksUntilAnInFlightTransactionFinishes() throws InterruptedException {
-        CountDownLatch transactionStarted = new CountDownLatch(1);
-        CountDownLatch releaseTransaction = new CountDownLatch(1);
-
-        Thread holder = new Thread(() -> transactionRunner.runInTransaction(() -> {
-            transactionStarted.countDown();
-            awaitUpTo2Seconds(releaseTransaction);
-            return null;
-        }));
-        holder.start();
-        assertThat(transactionStarted.await(2, TimeUnit.SECONDS)).isTrue();
-
-        AtomicBoolean readReturned = new AtomicBoolean(false);
-        Thread reader = new Thread(() -> {
-            service.getDependencies(taskA);
-            readReturned.set(true);
-        });
-        reader.start();
-
-        Thread.sleep(200);
-        assertThat(readReturned.get()).isFalse();
-
-        releaseTransaction.countDown();
-        reader.join(2000);
-        assertThat(readReturned.get()).isTrue();
-        holder.join(2000);
+        assertReadBlocksUntilTransactionFinishes(() -> service.getDependencies(taskA));
     }
 
     @Test
     void getDependents_blocksUntilAnInFlightTransactionFinishes() throws InterruptedException {
+        assertReadBlocksUntilTransactionFinishes(() -> service.getDependents(taskA));
+    }
+
+    private void assertReadBlocksUntilTransactionFinishes(Runnable read) throws InterruptedException {
         CountDownLatch transactionStarted = new CountDownLatch(1);
         CountDownLatch releaseTransaction = new CountDownLatch(1);
 
@@ -257,7 +237,7 @@ class TaskDependencyServiceTest {
 
         AtomicBoolean readReturned = new AtomicBoolean(false);
         Thread reader = new Thread(() -> {
-            service.getDependents(taskA);
+            read.run();
             readReturned.set(true);
         });
         reader.start();
