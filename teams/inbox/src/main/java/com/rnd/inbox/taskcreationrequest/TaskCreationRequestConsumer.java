@@ -1,6 +1,6 @@
 package com.rnd.inbox.taskcreationrequest;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
+import com.rnd.inbox.event.TaskCreationRequestedEvent;
 import com.rnd.inbox.shared.messaging.kafka.ErrorTopicPublisher;
 import com.rnd.inbox.shared.messaging.kafka.EventProcessingTemplate;
 import com.rnd.inbox.shared.messaging.validation.BeanValidationEventValidator;
@@ -15,16 +15,15 @@ import org.springframework.stereotype.Component;
 @Component
 public class TaskCreationRequestConsumer {
 
-    private final EventProcessingTemplate<TaskCreationRequestEventDto> template;
+    private final EventProcessingTemplate<TaskCreationRequestedEvent, TaskCreationRequestEventDto> template;
 
-    public TaskCreationRequestConsumer(ObjectMapper objectMapper, RetryTemplate kafkaRetryTemplate,
+    public TaskCreationRequestConsumer(TaskCreationRequestProtoMapper protoMapper, RetryTemplate kafkaRetryTemplate,
             ErrorTopicPublisher errorTopicPublisher, Validator validator,
             TaskIngestionService taskIngestionService) {
         this.template = new EventProcessingTemplate<>(
-                objectMapper,
+                protoMapper::toDto,
                 kafkaRetryTemplate,
                 errorTopicPublisher,
-                TaskCreationRequestEventDto.class,
                 new BeanValidationEventValidator<>(validator),
                 taskIngestionService::ingest,
                 TaskCreationRequestEventDto::getCorrelationId);
@@ -32,8 +31,8 @@ public class TaskCreationRequestConsumer {
 
     @KafkaListener(
             topics = "${inbox.kafka.topics.mind-task-creation-requested:task.creation.requested}",
-            containerFactory = "kafkaListenerContainerFactory")
-    public void onMessage(ConsumerRecord<String, String> record, Acknowledgment acknowledgment) {
+            containerFactory = "taskCreationRequestedContainerFactory")
+    public void onMessage(ConsumerRecord<String, TaskCreationRequestedEvent> record, Acknowledgment acknowledgment) {
         template.process(record, acknowledgment);
     }
 }

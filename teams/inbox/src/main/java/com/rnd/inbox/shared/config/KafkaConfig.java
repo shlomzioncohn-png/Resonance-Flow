@@ -1,8 +1,14 @@
 package com.rnd.inbox.shared.config;
 
+import com.rnd.inbox.event.TaskCreationRequestedEvent;
+import com.rnd.inbox.shared.messaging.kafka.ErrorTopicPublisher;
 import com.rnd.inbox.shared.messaging.kafka.TransientProcessingException;
 import io.confluent.kafka.serializers.AbstractKafkaSchemaSerDeConfig;
+import io.confluent.kafka.serializers.protobuf.KafkaProtobufDeserializer;
+import io.confluent.kafka.serializers.protobuf.KafkaProtobufDeserializerConfig;
 import io.confluent.kafka.serializers.protobuf.KafkaProtobufSerializer;
+import org.apache.kafka.clients.consumer.ConsumerConfig;
+import org.apache.kafka.common.serialization.StringDeserializer;
 import org.apache.kafka.common.serialization.StringSerializer;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.kafka.KafkaProperties;
@@ -16,10 +22,14 @@ import org.springframework.kafka.core.DefaultKafkaProducerFactory;
 import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.kafka.core.ProducerFactory;
 import org.springframework.kafka.listener.ContainerProperties;
+import org.springframework.kafka.listener.DefaultErrorHandler;
+import org.springframework.kafka.support.serializer.ErrorHandlingDeserializer;
 import org.springframework.retry.policy.SimpleRetryPolicy;
 import org.springframework.retry.backoff.ExponentialBackOffPolicy;
 import org.springframework.retry.support.RetryTemplate;
+import org.springframework.util.backoff.FixedBackOff;
 
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
@@ -66,6 +76,44 @@ public class KafkaConfig {
     public KafkaTemplate<String, Object> protobufKafkaTemplate(
             ProducerFactory<String, Object> protobufKafkaProducerFactory) {
         return new KafkaTemplate<>(protobufKafkaProducerFactory);
+    }
+
+    @Bean
+    public ConsumerFactory<String, TaskCreationRequestedEvent> taskCreationRequestedConsumerFactory(
+            KafkaProperties kafkaProperties,
+            @Value("${kafka.schema-registry.url}") String schemaRegistryUrl) {
+        Map<String, Object> props = kafkaProperties.buildConsumerProperties();
+        props.put(ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class);
+        props.put(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG, ErrorHandlingDeserializer.class);
+        props.put(ErrorHandlingDeserializer.VALUE_DESERIALIZER_CLASS, KafkaProtobufDeserializer.class.getName());
+        props.put(AbstractKafkaSchemaSerDeConfig.SCHEMA_REGISTRY_URL_CONFIG, schemaRegistryUrl);
+        props.put(KafkaProtobufDeserializerConfig.SPECIFIC_PROTOBUF_VALUE_TYPE,
+                TaskCreationRequestedEvent.class.getName());
+        return new DefaultKafkaConsumerFactory<>(props);
+    }
+
+    @Bean
+    public ConcurrentKafkaListenerContainerFactory<String, TaskCreationRequestedEvent>
+            taskCreationRequestedContainerFactory(
+                    ConsumerFactory<String, TaskCreationRequestedEvent> taskCreationRequestedConsumerFactory,
+                    ErrorTopicPublisher errorTopicPublisher) {
+        ConcurrentKafkaListenerContainerFactory<String, TaskCreationRequestedEvent> factory =
+                new ConcurrentKafkaListenerContainerFactory<>();
+        factory.setConsumerFactory(taskCreationRequestedConsumerFactory);
+        factory.getContainerProperties().setAckMode(ContainerProperties.AckMode.MANUAL_IMMEDIATE);
+        factory.setCommonErrorHandler(new DefaultErrorHandler(
+                (record, exception) -> errorTopicPublisher.publish(record, null, "VALIDATION_FAILURE",
+                        "Malformed protobuf payload: " + rootCauseMessage(exception), List.of(), 0, null),
+                new FixedBackOff(0L, 0L)));
+        return factory;
+    }
+
+    private String rootCauseMessage(Throwable exception) {
+        Throwable current = exception;
+        while (current.getCause() != null) {
+            current = current.getCause();
+        }
+        return current.getMessage();
     }
 
     @Bean(destroyMethod = "shutdown")

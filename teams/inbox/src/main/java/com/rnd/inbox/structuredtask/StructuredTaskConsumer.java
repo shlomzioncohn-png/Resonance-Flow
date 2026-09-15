@@ -3,6 +3,7 @@ package com.rnd.inbox.structuredtask;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.rnd.inbox.shared.messaging.kafka.ErrorTopicPublisher;
 import com.rnd.inbox.shared.messaging.kafka.EventProcessingTemplate;
+import com.rnd.inbox.shared.messaging.kafka.JsonEventParser;
 import com.rnd.inbox.shared.messaging.validation.BeanValidationEventValidator;
 import com.rnd.inbox.task.TaskIngestionService;
 import jakarta.validation.Validator;
@@ -15,16 +16,15 @@ import org.springframework.stereotype.Component;
 @Component
 public class StructuredTaskConsumer {
 
-    private final EventProcessingTemplate<StructuredTaskEventDto> template;
+    private final EventProcessingTemplate<String, StructuredTaskEventDto> template;
 
     public StructuredTaskConsumer(ObjectMapper objectMapper, RetryTemplate kafkaRetryTemplate,
             ErrorTopicPublisher errorTopicPublisher, Validator validator,
             TaskIngestionService taskIngestionService) {
         this.template = new EventProcessingTemplate<>(
-                objectMapper,
+                new JsonEventParser<>(objectMapper, StructuredTaskEventDto.class),
                 kafkaRetryTemplate,
                 errorTopicPublisher,
-                StructuredTaskEventDto.class,
                 new BeanValidationEventValidator<>(validator),
                 taskIngestionService::ingest,
                 StructuredTaskEventDto::getEventId);

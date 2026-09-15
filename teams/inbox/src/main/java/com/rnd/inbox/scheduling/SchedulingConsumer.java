@@ -3,6 +3,7 @@ package com.rnd.inbox.scheduling;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.rnd.inbox.shared.messaging.kafka.ErrorTopicPublisher;
 import com.rnd.inbox.shared.messaging.kafka.EventProcessingTemplate;
+import com.rnd.inbox.shared.messaging.kafka.JsonEventParser;
 import com.rnd.inbox.shared.messaging.validation.BeanValidationEventValidator;
 import com.rnd.inbox.task.TaskService;
 import jakarta.validation.Validator;
@@ -15,16 +16,15 @@ import org.springframework.stereotype.Component;
 @Component
 public class SchedulingConsumer {
 
-    private final EventProcessingTemplate<SchedulingEventDto> template;
+    private final EventProcessingTemplate<String, SchedulingEventDto> template;
 
     public SchedulingConsumer(ObjectMapper objectMapper, RetryTemplate kafkaRetryTemplate,
             ErrorTopicPublisher errorTopicPublisher, Validator validator,
             TaskService taskService) {
         this.template = new EventProcessingTemplate<>(
-                objectMapper,
+                new JsonEventParser<>(objectMapper, SchedulingEventDto.class),
                 kafkaRetryTemplate,
                 errorTopicPublisher,
-                SchedulingEventDto.class,
                 new BeanValidationEventValidator<>(validator),
                 taskService::applySchedulingUpdate,
                 SchedulingEventDto::getEventId);
