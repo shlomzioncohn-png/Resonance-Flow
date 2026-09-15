@@ -119,14 +119,10 @@ public class TaskDependencyService {
             TaskDependency saved = taskDependencyRepository.save(new TaskDependency(taskId, dependsOnTaskId))
                     .orElseThrow(() -> new DuplicateDependencyException(
                             "Task " + taskId + " already depends on " + dependsOnTaskId));
-            try {
-                recordHistory(taskId, dependsOnTaskId, DependencyChangeAction.ADDED, source, sourceRef);
-            } catch (RuntimeException historyWriteFailed) {
-                // Safe today: no I/O, and the transaction lock rules out any interleaving write -
-                // this delete cannot fail or no-op. Revisit once a real DB replaces this repository.
-                taskDependencyRepository.delete(taskId, dependsOnTaskId);
-                throw historyWriteFailed;
-            }
+            // Safe today: no I/O, and the transaction lock rules out any interleaving write -
+            // this compensating write cannot fail or no-op. Revisit once a real DB replaces this repository.
+            recordHistoryOrCompensate(taskId, dependsOnTaskId, DependencyChangeAction.ADDED, source, sourceRef,
+                    () -> taskDependencyRepository.delete(taskId, dependsOnTaskId));
             return saved;
         });
     }
@@ -165,13 +161,8 @@ public class TaskDependencyService {
                 throw new DependencyNotFoundException(
                         "No dependency from " + taskId + " to " + dependsOnTaskId);
             }
-            try {
-                recordHistory(taskId, dependsOnTaskId, DependencyChangeAction.REMOVED, source, sourceRef);
-            } catch (RuntimeException historyWriteFailed) {
-                // Safe today: same reasoning as addDependency's compensating delete() above.
-                taskDependencyRepository.save(new TaskDependency(taskId, dependsOnTaskId));
-                throw historyWriteFailed;
-            }
+            recordHistoryOrCompensate(taskId, dependsOnTaskId, DependencyChangeAction.REMOVED, source, sourceRef,
+                    () -> taskDependencyRepository.save(new TaskDependency(taskId, dependsOnTaskId)));
             return null;
         });
     }
@@ -212,6 +203,17 @@ public class TaskDependencyService {
         requireTaskExists(taskId);
 
         return transactionRunner.runInTransaction(() -> historyRepository.findByTaskId(taskId, page, size));
+    }
+
+    /** Records the history entry; on failure runs {@code compensate} to undo the edge write, then rethrows. */
+    private void recordHistoryOrCompensate(UUID taskId, UUID dependsOnTaskId, DependencyChangeAction action,
+                                            DependencyChangeSource source, String sourceRef, Runnable compensate) {
+        try {
+            recordHistory(taskId, dependsOnTaskId, action, source, sourceRef);
+        } catch (RuntimeException historyWriteFailed) {
+            compensate.run();
+            throw historyWriteFailed;
+        }
     }
 
     private void recordHistory(UUID taskId, UUID dependsOnTaskId, DependencyChangeAction action,
