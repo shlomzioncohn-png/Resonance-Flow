@@ -27,6 +27,17 @@ def main() -> None:
              "scenario groups (same_tier/, cross_tier/). Loading recurses into the groups; "
              "pass a single group directory to evaluate just that group.",
     )
+    parser.add_argument(
+        "--min-accuracy", type=float, default=None,
+        help="If set, exit 1 when the combined top-1 accuracy falls below this "
+             "fraction (0-1) — a regression gate for CI.",
+    )
+    parser.add_argument(
+        "--max-accuracy", type=float, default=None,
+        help="If set, exit 1 when the combined top-1 accuracy rises above this "
+             "fraction (0-1) — catches the scenario set drifting back toward the "
+             "no-headroom baseline the 2026-09-06 rebuild fixed (see eval/personas/README.md).",
+    )
     args = parser.parse_args()
 
     if args.model == "dummy":
@@ -80,6 +91,23 @@ def main() -> None:
 
     with open("report.json", "w") as f:
         json.dump(output, f, indent=4)
+
+    accuracy = combined_report.top1_accuracy
+    if args.min_accuracy is not None and accuracy < args.min_accuracy:
+        print(
+            f"Combined top-1 accuracy {accuracy:.1%} is below --min-accuracy "
+            f"{args.min_accuracy:.1%} — regression.",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+    if args.max_accuracy is not None and accuracy > args.max_accuracy:
+        print(
+            f"Combined top-1 accuracy {accuracy:.1%} is above --max-accuracy "
+            f"{args.max_accuracy:.1%} — the scenario set no longer has headroom "
+            f"(see 'Cheap-baseline scores' in eval/personas/README.md).",
+            file=sys.stderr,
+        )
+        sys.exit(1)
 
 
 if __name__ == "__main__":

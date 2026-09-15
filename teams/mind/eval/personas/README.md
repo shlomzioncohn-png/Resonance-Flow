@@ -271,6 +271,13 @@ improvement. The set was rebuilt to **30 scenarios (5 per role)** so that:
    must be empty. Warnings about other roles/scenarios not being ready yet are
    expected and fine — that's everyone else's in-progress work, not yours.
 
+   Also run the time_horizon check (see "Deadline proximity" below):
+   ```bash
+   python -m eval.check_time_horizon
+   ```
+   This is the same check CI runs (`make eval-ci`) — catch it locally rather
+   than in review.
+
 ## Scenario-writing conventions
 
 None of these are enforced by the schema or by `validate_personas` — they're
@@ -296,8 +303,15 @@ falls outside the scenario's `time_horizon` (`ceo_regulator_call_vs_board_prep` 
 there so it reads as *not* urgent against the live task. The correct answer's own
 deadline always sits inside `time_horizon`; only the distractor's may fall beyond
 it. A `this_week` scenario whose *correct* answer is due next week is a bug — widen
-`time_horizon` instead (as `manager_blocked_hire_vs_budget_review` does, using
-`this_month`).
+`time_horizon` instead (as `manager_blocked_hire_vs_budget_review` and
+`ceo_blocked_ma_review_vs_vp_offer` do, widening to `this_month`, and
+`field_engineer_cutover_inspection_vs_backlog_patch` does, widening `today` to
+`this_week`).
+
+This is mechanically checked, not just a convention to remember: run
+[`eval/check_time_horizon.py`](../check_time_horizon.py) (`python -m eval.check_time_horizon`
+from `teams/mind/`) to verify every scenario's correct answer has a deadline inside
+its `time_horizon`. `make eval-ci` — what CI actually runs — includes this check.
 
 **What the model can't see — never the decider:**
 - The model sees one task plus a context carrying only `current_datetime`
@@ -364,4 +378,22 @@ report if 100% isn't reached by the Foundation Gate.)*
   review (baseline too high, blocked-distractor pattern, effort/free-time,
   persona↔tier, position bias, deadline-passed) — all 30 are pending a fresh
   review pass.
-- **Notes / pending changes:** _TBD_
+- **Notes / pending changes:** Addressed 2026-09-15 in response to
+  estherora-tem's PR review:
+  - `ceo_blocked_ma_review_vs_vp_offer`'s `expected_reason` corrected, and its
+    `time_horizon` widened `this_week` → `this_month` so the correct answer's
+    own deadline (next Monday) sits inside the window, matching the fix
+    already applied to `manager_blocked_hire_vs_budget_review`.
+  - Same bug found and fixed in `field_engineer_cutover_inspection_vs_backlog_patch`
+    (`today` → `this_week`; correct answer is due the next morning).
+  - `higher_manager_stalled_renewal_vs_market_expansion`'s untouched third task
+    renamed `task_travel_policy` → `task_filler_travel_policy` to match the
+    `task_filler_*` convention for tasks `expected_reason` doesn't need to name.
+  - The time_horizon rule is now mechanically checked (`eval/check_time_horizon.py`,
+    run via `make eval-ci`) instead of relying on someone re-deriving it by hand
+    per file — see "Deadline proximity" below.
+  - `mind-ci.yml`'s eval step (previously `make eval`, which always exits 0 for
+    any load that succeeds) now runs `make eval-ci`: the time_horizon check plus
+    a combined top-1 accuracy gate (`--min-accuracy 0.20 --max-accuracy 0.50`)
+    around the designed ~30% dummy/pick-first baseline — see "Cheap-baseline
+    scores" above.
