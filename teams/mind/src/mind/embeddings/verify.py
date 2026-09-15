@@ -15,6 +15,9 @@ from mind.embeddings.loader import MANIFEST_PATH, _load_manifest
 
 
 def main() -> int:
+    if not PG_DSN:
+        raise RuntimeError("MIND_VECTOR_STORE_DSN is not set. Required to connect to the vector store.")
+
     manifest_count = len(_load_manifest()["records"])
 
     # Plain sync psycopg here (not the async pool pgvector_store.py uses)
