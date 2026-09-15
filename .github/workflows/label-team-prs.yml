@@ -50,7 +50,7 @@ jobs:
               { label: 'BRIDGE', members: [] }, // fill in: BRIDGE team members
               { label: 'MIND',   members: [] }, // fill in: MIND team members
               { label: 'CHAIN',  members: [] }, // fill in: CHAIN team members
-              { label: 'RELAY',  members: ['avigailrapa'] }, // fill in: RELAY team members
+              { label: 'RELAY',  members: ['avigailrapa', 'Ayala679', 'ch-kap219', 'gittyafe'] },
             ];
 
             const author = context.payload.pull_request.user.login;
