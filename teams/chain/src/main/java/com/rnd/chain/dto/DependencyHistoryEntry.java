@@ -1,6 +1,6 @@
 package com.rnd.chain.dto;
 
-import java.time.LocalDateTime;
+import java.time.Instant;
 import java.util.Objects;
 import java.util.UUID;
 
@@ -16,7 +16,7 @@ public final class DependencyHistoryEntry {
     private final DependencyChangeAction action;
     private final DependencyChangeSource source;
     private final String sourceRef;
-    private final LocalDateTime createdAt;
+    private final Instant createdAt;
 
     private DependencyHistoryEntry(UUID id,
                                     UUID taskId,
@@ -24,7 +24,7 @@ public final class DependencyHistoryEntry {
                                     DependencyChangeAction action,
                                     DependencyChangeSource source,
                                     String sourceRef,
-                                    LocalDateTime createdAt) {
+                                    Instant createdAt) {
         requireNonNull(id, "id");
         requireNonNull(taskId, "taskId");
         requireNonNull(dependsOnTaskId, "dependsOnTaskId");
@@ -71,7 +71,7 @@ public final class DependencyHistoryEntry {
         return sourceRef;
     }
 
-    public LocalDateTime getCreatedAt() {
+    public Instant getCreatedAt() {
         return createdAt;
     }
 
@@ -103,7 +103,7 @@ public final class DependencyHistoryEntry {
         private DependencyChangeAction action;
         private DependencyChangeSource source;
         private String sourceRef;
-        private LocalDateTime createdAt;
+        private Instant createdAt;
 
         public Builder id(UUID id) {
             this.id = id;
@@ -135,7 +135,7 @@ public final class DependencyHistoryEntry {
             return this;
         }
 
-        public Builder createdAt(LocalDateTime createdAt) {
+        public Builder createdAt(Instant createdAt) {
             this.createdAt = createdAt;
             return this;
         }

@@ -17,7 +17,7 @@ import com.rnd.chain.repository.TransactionRunner;
 import org.springframework.stereotype.Service;
 
 import java.time.Clock;
-import java.time.LocalDateTime;
+import java.time.Instant;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
@@ -225,7 +225,7 @@ public class TaskDependencyService {
                 .action(action)
                 .source(source)
                 .sourceRef(sourceRef)
-                .createdAt(LocalDateTime.now(clock))
+                .createdAt(Instant.now(clock))
                 .build());
     }
 

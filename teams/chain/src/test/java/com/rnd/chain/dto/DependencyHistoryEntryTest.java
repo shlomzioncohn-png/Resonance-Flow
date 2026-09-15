@@ -2,7 +2,7 @@ package com.rnd.chain.dto;
 
 import org.junit.jupiter.api.Test;
 
-import java.time.LocalDateTime;
+import java.time.Instant;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -106,6 +106,6 @@ class DependencyHistoryEntryTest {
                 .action(DependencyChangeAction.ADDED)
                 .source(DependencyChangeSource.USER)
                 .sourceRef(null)
-                .createdAt(LocalDateTime.now());
+                .createdAt(Instant.now());
     }
 }

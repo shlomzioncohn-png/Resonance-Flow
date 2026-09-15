@@ -5,7 +5,7 @@ import com.rnd.chain.dto.DependencyChangeSource;
 import com.rnd.chain.dto.DependencyHistoryEntry;
 import org.junit.jupiter.api.Test;
 
-import java.time.LocalDateTime;
+import java.time.Instant;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -21,7 +21,7 @@ class DependencyHistoryResponseTest {
                 .action(DependencyChangeAction.ADDED)
                 .source(DependencyChangeSource.MIND)
                 .sourceRef("evt-1")
-                .createdAt(LocalDateTime.now())
+                .createdAt(Instant.now())
                 .build();
 
         DependencyHistoryResponse response = DependencyHistoryResponse.from(entry);

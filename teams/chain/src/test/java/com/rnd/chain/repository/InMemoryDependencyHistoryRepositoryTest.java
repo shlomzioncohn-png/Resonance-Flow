@@ -8,7 +8,7 @@ import com.rnd.chain.testsupport.ConcurrentTestRunner;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
-import java.time.LocalDateTime;
+import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
@@ -19,7 +19,7 @@ class InMemoryDependencyHistoryRepositoryTest {
 
     private final UUID taskId = UUID.randomUUID();
     private final UUID dependsOnTaskId = UUID.randomUUID();
-    private final LocalDateTime baseTime = LocalDateTime.of(2026, 1, 1, 12, 0);
+    private final Instant baseTime = Instant.parse("2026-01-01T12:00:00Z");
 
     private InMemoryDependencyHistoryRepository repository;
 
@@ -42,7 +42,7 @@ class InMemoryDependencyHistoryRepositoryTest {
     @Test
     void record_withSameSourceAndSourceRef_isNoOp_returnsExistingEntry() {
         DependencyHistoryEntry first = repository.record(newEntry(DependencyChangeSource.MIND, "evt-1", baseTime));
-        DependencyHistoryEntry second = repository.record(newEntry(DependencyChangeSource.MIND, "evt-1", baseTime.plusMinutes(1)));
+        DependencyHistoryEntry second = repository.record(newEntry(DependencyChangeSource.MIND, "evt-1", baseTime.plusSeconds(60)));
 
         assertThat(second).isEqualTo(first);
         assertThat(second.getCreatedAt()).isEqualTo(first.getCreatedAt());
@@ -104,8 +104,8 @@ class InMemoryDependencyHistoryRepositoryTest {
     @Test
     void findByTaskId_ordersNewestFirst() {
         DependencyHistoryEntry oldest = repository.record(newEntry(DependencyChangeSource.USER, null, baseTime));
-        DependencyHistoryEntry middle = repository.record(newEntry(DependencyChangeSource.USER, null, baseTime.plusMinutes(1)));
-        DependencyHistoryEntry newest = repository.record(newEntry(DependencyChangeSource.USER, null, baseTime.plusMinutes(2)));
+        DependencyHistoryEntry middle = repository.record(newEntry(DependencyChangeSource.USER, null, baseTime.plusSeconds(60)));
+        DependencyHistoryEntry newest = repository.record(newEntry(DependencyChangeSource.USER, null, baseTime.plusSeconds(120)));
 
         List<DependencyHistoryEntry> content = repository.findByTaskId(taskId, 0, 20).content();
 
@@ -133,7 +133,7 @@ class InMemoryDependencyHistoryRepositoryTest {
     @Test
     void findByTaskId_paginates() {
         for (int i = 0; i < 3; i++) {
-            repository.record(newEntry(DependencyChangeSource.USER, null, baseTime.plusMinutes(i)));
+            repository.record(newEntry(DependencyChangeSource.USER, null, baseTime.plusSeconds(i * 60L)));
         }
 
         PageResponse<DependencyHistoryEntry> firstPage = repository.findByTaskId(taskId, 0, 1);
@@ -189,19 +189,19 @@ class InMemoryDependencyHistoryRepositoryTest {
         assertThat(repository.findByTaskId(taskId, 0, 20).totalElements()).isEqualTo(1);
     }
 
-    private DependencyHistoryEntry newEntry(DependencyChangeSource source, String sourceRef, LocalDateTime createdAt) {
+    private DependencyHistoryEntry newEntry(DependencyChangeSource source, String sourceRef, Instant createdAt) {
         return newEntry(taskId, source, sourceRef, createdAt);
     }
 
-    private DependencyHistoryEntry newEntry(UUID taskId, DependencyChangeSource source, String sourceRef, LocalDateTime createdAt) {
+    private DependencyHistoryEntry newEntry(UUID taskId, DependencyChangeSource source, String sourceRef, Instant createdAt) {
         return entryWithId(UUID.randomUUID(), taskId, source, sourceRef, createdAt);
     }
 
-    private DependencyHistoryEntry entryWithId(UUID id, DependencyChangeSource source, String sourceRef, LocalDateTime createdAt) {
+    private DependencyHistoryEntry entryWithId(UUID id, DependencyChangeSource source, String sourceRef, Instant createdAt) {
         return entryWithId(id, taskId, source, sourceRef, createdAt);
     }
 
-    private DependencyHistoryEntry entryWithId(UUID id, UUID taskId, DependencyChangeSource source, String sourceRef, LocalDateTime createdAt) {
+    private DependencyHistoryEntry entryWithId(UUID id, UUID taskId, DependencyChangeSource source, String sourceRef, Instant createdAt) {
         return DependencyHistoryEntry.builder()
                 .id(id)
                 .taskId(taskId)
