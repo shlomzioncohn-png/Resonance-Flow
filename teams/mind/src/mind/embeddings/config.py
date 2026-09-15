@@ -1,15 +1,33 @@
+from functools import lru_cache
+from pathlib import Path
+
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+# Absolute, not ".env" -- a relative path is resolved against the current
+# working directory, which silently finds nothing if pytest (or anything
+# else) is ever run from somewhere other than teams/mind/.
+_ENV_FILE = Path(__file__).resolve().parents[3] / ".env"
 
 
 class Settings(BaseSettings):
     """Config for this module, read from env vars (or a `.env` file).
 
-    Backed by Pydantic so a missing/malformed value fails fast at import
-    time with a clear error, instead of silently falling back to a
-    hardcoded default (previous behavior defaulted `vector_store_dsn` to
-    `user=postgres password=postgres` -- fine for a laptop, dangerous if
-    it were ever forgotten in a real environment) or blowing up later,
-    deep inside a request, with a confusing psycopg error.
+    `vector_store_dsn` is intentionally `str | None`, not a required
+    field: this class is constructed once, lazily, the first time
+    *anything* in this module needs *any* setting -- including
+    `embedding_dim`, which pure-CPU code (embed()) needs and which has
+    nothing to do with the database. Making the whole class fail without
+    a DSN would mean embed()-only tests (and anything else that never
+    touches the vector store) couldn't run without a database either,
+    defeating the point of this module's lazy-DB-access design (see the
+    package docstring in `__init__.py`).
+
+    Fail-fast for the DSN specifically still happens -- see
+    `pgvector_store.py`'s `_require_dsn()`, called only when something
+    actually tries to talk to Postgres, with a clear error instead of a
+    hardcoded default (`user=postgres password=postgres`, the previous
+    behavior -- fine for a laptop, dangerous if forgotten in a real
+    environment) or a confusing psycopg error deep inside a request.
 
     Field names deliberately don't mention Postgres/pgvector -- this
     module's public interface (`mind.embeddings`) hides which database
@@ -18,9 +36,9 @@ class Settings(BaseSettings):
     actually a libpq DSN.
     """
 
-    model_config = SettingsConfigDict(env_prefix="MIND_", env_file=".env", extra="ignore")
+    model_config = SettingsConfigDict(env_prefix="MIND_", env_file=_ENV_FILE, extra="ignore")
 
-    vector_store_dsn: str
+    vector_store_dsn: str | None = None
     vector_store_table: str = "task_embeddings"
 
     # HNSW query-time accuracy/speed knob (pgvector's default is 40, tuned
@@ -43,14 +61,20 @@ class Settings(BaseSettings):
     duplicate_similarity_threshold: float = 0.90
 
 
-# mypy can't see that BaseSettings populates required fields (vector_store_dsn)
-# from env vars at runtime, so it flags this as a missing argument. Field stays
-# required (no default) -- this ignore doesn't paper over the fail-fast
-# behavior described above, it just tells mypy the call is intentional.
-settings = Settings()  # type: ignore[call-arg]
+@lru_cache
+def get_settings() -> Settings:
+    """Construct (once, cached) and return the Settings.
 
-PG_DSN = settings.vector_store_dsn
-PG_TABLE = settings.vector_store_table
-HNSW_EF_SEARCH = settings.hnsw_ef_search
-EMBEDDING_DIM = settings.embedding_dim
-DUPLICATE_SIMILARITY_THRESHOLD = settings.duplicate_similarity_threshold
+    Lazy on purpose: importing this module -- or `mind.embeddings` as a
+    whole -- must never require a database DSN. Nothing in this file
+    calls this at import time; each field below is read through it only
+    when a caller actually asks for that field.
+    """
+    return Settings()
+
+
+PG_DSN = get_settings().vector_store_dsn
+PG_TABLE = get_settings().vector_store_table
+HNSW_EF_SEARCH = get_settings().hnsw_ef_search
+EMBEDDING_DIM = get_settings().embedding_dim
+DUPLICATE_SIMILARITY_THRESHOLD = get_settings().duplicate_similarity_threshold

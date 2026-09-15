@@ -16,18 +16,55 @@ import asyncio
 
 from psycopg_pool import AsyncConnectionPool
 
-from mind.embeddings.base import VectorStore
-from mind.embeddings.config import EMBEDDING_DIM, HNSW_EF_SEARCH, PG_DSN, PG_TABLE
+from mind.embeddings.base import SearchResult, VectorStore
+from mind.embeddings.config import EMBEDDING_DIM, HNSW_EF_SEARCH, PG_TABLE, get_settings
+
+
+def _require_dsn() -> str:
+    # Deferred fail-fast: config.py's Settings deliberately allows a
+    # missing DSN so *importing* this module (or mind.embeddings as a
+    # whole) never requires a database. This is where that gets enforced
+    # instead -- only once something actually tries to talk to Postgres,
+    # i.e. only when a PgVectorStore is actually constructed.
+    dsn = get_settings().vector_store_dsn
+    if not dsn:
+        raise RuntimeError(
+            "MIND_VECTOR_STORE_DSN is not set. Required to connect to the "
+            "vector store; code that only needs embed() doesn't need it."
+        )
+    return dsn
 
 
 class PgVectorStore(VectorStore):
-    def __init__(self, dsn: str = PG_DSN, min_conn: int = 1, max_conn: int = 5) -> None:
+    def __init__(
+        self,
+        dsn: str | None = None,
+        min_conn: int = 1,
+        max_conn: int = 5,
+        *,
+        pool_timeout: float = 30.0,
+    ) -> None:
         # No I/O here. Opening connections and creating the schema are
         # async operations, and __init__ can't be async -- so both happen
-        # lazily, once, on first real use (see `_ensure_ready`).
-        self._pool = AsyncConnectionPool(dsn, min_size=min_conn, max_size=max_conn, open=False)
+        # lazily, once, on first real use (see `_ensure_ready`), unless
+        # open() is called explicitly first.
+        self._pool = AsyncConnectionPool(
+            dsn or _require_dsn(),
+            min_size=min_conn,
+            max_size=max_conn,
+            timeout=pool_timeout,
+            open=False,
+        )
         self._ready = False
         self._ready_lock = asyncio.Lock()
+
+    async def open(self) -> None:
+        await self._ensure_ready()
+
+    async def close(self) -> None:
+        if self._ready:
+            await self._pool.close()
+            self._ready = False
 
     async def _ensure_ready(self) -> None:
         # Double-checked locking: two concurrent calls on the event loop
@@ -85,7 +122,7 @@ class PgVectorStore(VectorStore):
         async with self._pool.connection() as conn, conn.cursor() as cur:
             await cur.execute(f"TRUNCATE TABLE {PG_TABLE};")
 
-    async def search(self, query_vector: list[float], k: int) -> list[tuple[str, float]]:
+    async def search(self, query_vector: list[float], k: int) -> list[SearchResult]:
         await self._ensure_ready()
         async with self._pool.connection() as conn, conn.cursor() as cur:
             # pgvector's default hnsw.ef_search (40) favors speed over
@@ -94,16 +131,32 @@ class PgVectorStore(VectorStore):
             # (raising it to 400 improves ANN-vs-exact recall@10 from
             # 61% to 86% at negligible extra latency).
             #
-            # SET LOCAL only applies for the current transaction.
-            # psycopg connections default to autocommit=False (like
-            # psycopg2's did), so this SET and the SELECT below share
-            # one transaction and the setting takes effect -- if
-            # autocommit were ever turned on for this pool, SET LOCAL
-            # would become a silent no-op. See
-            # test_ef_search_setting_is_actually_applied in
-            # tests/test_vector_store.py, which asserts this directly
-            # instead of just trusting it.
-            await cur.execute("SET LOCAL hnsw.ef_search = %s;", (HNSW_EF_SEARCH,))
+            # set_config(name, value, is_local=true) -- NOT
+            # "SET LOCAL ... = %s" -- because Postgres does not accept a
+            # bound parameter in a SET statement. psycopg2 got away with
+            # "SET LOCAL ... = %s" because it substituted %s into the SQL
+            # text client-side before sending it; psycopg3 sends the SQL
+            # and the parameter separately (server-side binding), so
+            # Postgres itself would see "SET LOCAL hnsw.ef_search = $1"
+            # and reject it with a syntax error. set_config() is a normal
+            # function call, so it *can* take a bound parameter, and
+            # is_local=true gives the exact same "only this transaction"
+            # semantics SET LOCAL has. See
+            # test_search_issues_set_local_ef_search_before_the_select in
+            # tests/test_vector_store.py, which asserts search() itself
+            # issues this, not just that Postgres would honor it if asked
+            # -- though that test mocks the cursor, so it doesn't by
+            # itself prove Postgres accepts this syntax; that still needs
+            # a real pgvector run before this is trusted.
+            #
+            # Still scoped to one transaction: psycopg connections default
+            # to autocommit=False, so this and the SELECT below run in the
+            # same transaction. If autocommit were ever turned on for this
+            # pool, is_local=true would become a silent no-op.
+            await cur.execute(
+                "SELECT set_config('hnsw.ef_search', %s, true);",
+                (str(HNSW_EF_SEARCH),),
+            )
             # `<=>` is pgvector's cosine *distance* (0 = identical);
             # `1 - distance` converts it to cosine *similarity* so
             # callers can compare it directly against
@@ -121,4 +174,4 @@ class PgVectorStore(VectorStore):
                 (query_vector, k),
             )
             rows = await cur.fetchall()
-            return [(row[0], row[1]) for row in rows]
+            return [SearchResult(task_id=row[0], similarity=row[1]) for row in rows]
