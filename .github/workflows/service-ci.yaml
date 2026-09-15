@@ -254,7 +254,12 @@ jobs:
       group: resonance-flow-values-update
       cancel-in-progress: false
     steps:
+      # A PAT, not GITHUB_TOKEN: Actions-authored pushes/PRs are blocked from
+      # touching workflow files and from opening PRs at all, regardless of the
+      # permissions block above - neither restriction applies to a real token.
       - uses: actions/checkout@v7
+        with:
+          token: ${{ secrets.RELAY_CI_PUSH_TOKEN }}
 
       - name: Install yq
         run: |
@@ -300,7 +305,7 @@ jobs:
       - name: Open a PR with the manifest update
         if: steps.commit.outputs.changed == 'true'
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.RELAY_CI_PUSH_TOKEN }}
         run: |
           BRANCH="ci/${{ inputs.service_name }}-deploy-${{ needs.test.outputs.image_tag }}"
           git checkout -b "$BRANCH"
