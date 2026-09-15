@@ -24,8 +24,8 @@
     {
       "task_id": "task_okr",
       "title": "Review the division's draft Q4 OKRs",
-      "description": "The OKRs lock at Friday's leadership sync; if needed the lock can slip a day, but it is cleaner to have your review in by then.",
-      "deadline": "2026-09-11T10:00:00",
+      "description": "Your review is needed by Thursday evening so it's folded in before OKRs lock at Friday's leadership sync; if needed the lock can slip a day, but it is cleaner to have your review in by then.",
+      "deadline": "2026-09-10T18:00:00",
       "effort_estimate": 45,
       "tier": "strategic",
       "blocked": false,

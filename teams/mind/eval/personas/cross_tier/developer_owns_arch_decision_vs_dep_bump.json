@@ -14,8 +14,8 @@
     {
       "task_id": "task_arch",
       "title": "Approve the payments-service architecture redesign",
-      "description": "You own the payments domain and three engineers are blocked from starting the rebuild until you review and sign off; it must be settled before Thursday's sprint planning so the work can be scoped.",
-      "deadline": "2026-09-10T10:00:00",
+      "description": "You own the payments domain and three engineers are blocked from starting the rebuild until you review and sign off; sprint planning is Thursday at 10:00 and needs your sign-off in hand by end of day Wednesday so the work can be scoped in time.",
+      "deadline": "2026-09-09T17:00:00",
       "effort_estimate": 45,
       "tier": "strategic",
       "blocked": false,
@@ -33,7 +33,7 @@
     }
   ],
   "expected_top_task_id": "task_arch",
-  "expected_reason": "task_arch carries a sign-off the description says only its owner can give, blocks three engineers until it is done, and is due before Thursday's planning; task_bump is a routine no-impact update due weeks out.",
+  "expected_reason": "task_arch carries a sign-off the description says only its owner can give, blocks three engineers until it is done, and is due by Wednesday, ahead of Thursday's sprint planning; task_bump is a routine no-impact update due weeks out.",
   "source": {
     "type": "synthetic",
     "source_detail": null
