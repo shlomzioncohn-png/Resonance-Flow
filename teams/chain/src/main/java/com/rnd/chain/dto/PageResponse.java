@@ -15,6 +15,7 @@ public record PageResponse<T>(List<T> content, int page, int size, long totalEle
 
     public PageResponse {
         Objects.requireNonNull(content, "content must not be null");
+        content = List.copyOf(content);
     }
 
     /** Maps {@code content} element-by-element, keeping page/size/totalElements/totalPages unchanged. */
