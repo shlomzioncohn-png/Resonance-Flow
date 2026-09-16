@@ -66,6 +66,7 @@ jobs:
       packages: write
       pull-requests: write
     uses: ./.github/workflows/service-cd.yaml
+    secrets: inherit
     with:
       service_name: mind
       service_dir: teams/mind

@@ -61,6 +61,7 @@ jobs:
       contents: write
       pull-requests: write
     uses: ./.github/workflows/service-update-manifest.yaml
+    secrets: inherit
     with:
       service_name: ${{ inputs.service_name }}
       image_tag: ${{ needs.build.outputs.image_tag }}
