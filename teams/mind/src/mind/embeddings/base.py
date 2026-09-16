@@ -42,12 +42,9 @@ class VectorStore(ABC):
     async def open(self) -> None:
         """Eagerly initialize the store (open connections, ensure schema).
 
-        Calling this explicitly is optional -- upsert/search/delete/clear
-        all initialize themselves lazily on first use if you don't. Call
-        it explicitly (e.g. from a FastAPI lifespan handler) when you
-        want the store's resources (e.g. a connection pool's background
-        tasks) tied to a known, long-lived event loop from the start,
-        rather than whichever loop happens to make the first call.
+        Optional -- upsert/search/delete/clear initialize lazily on first
+        use otherwise. Call explicitly to tie resources to a known,
+        long-lived event loop (e.g. a FastAPI lifespan handler).
         """
         ...
 

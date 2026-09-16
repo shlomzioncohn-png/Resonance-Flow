@@ -21,11 +21,8 @@ from mind.embeddings.config import EMBEDDING_DIM, HNSW_EF_SEARCH, PG_TABLE, get_
 
 
 def _require_dsn() -> str:
-    # Deferred fail-fast: config.py's Settings deliberately allows a
-    # missing DSN so *importing* this module (or mind.embeddings as a
-    # whole) never requires a database. This is where that gets enforced
-    # instead -- only once something actually tries to talk to Postgres,
-    # i.e. only when a PgVectorStore is actually constructed.
+    # Deferred fail-fast: importing this module never requires a DSN (see
+    # config.Settings); constructing a PgVectorStore does.
     dsn = get_settings().vector_store_dsn
     if not dsn:
         raise RuntimeError(
@@ -44,9 +41,8 @@ class PgVectorStore(VectorStore):
         *,
         pool_timeout: float = 30.0,
     ) -> None:
-        # No I/O here. Opening connections and creating the schema are
-        # async operations, and __init__ can't be async -- so both happen
-        # lazily, once, on first real use (see `_ensure_ready`), unless
+        # No I/O here -- opening the pool and creating the schema are async,
+        # so both happen lazily on first use (see _ensure_ready), unless
         # open() is called explicitly first.
         self._pool = AsyncConnectionPool(
             dsn or _require_dsn(),
@@ -67,10 +63,8 @@ class PgVectorStore(VectorStore):
             self._ready = False
 
     async def _ensure_ready(self) -> None:
-        # Double-checked locking: two concurrent calls on the event loop
-        # (e.g. two requests arriving before the first has finished
-        # opening the pool) could otherwise both see `_ready is False` and
-        # both try to open the pool / create the schema at once.
+        # Double-checked locking: two concurrent callers could otherwise
+        # both see _ready is False and both try to open the pool at once.
         if self._ready:
             return
         async with self._ready_lock:
@@ -125,45 +119,16 @@ class PgVectorStore(VectorStore):
     async def search(self, query_vector: list[float], k: int) -> list[SearchResult]:
         await self._ensure_ready()
         async with self._pool.connection() as conn, conn.cursor() as cur:
-            # pgvector's default hnsw.ef_search (40) favors speed over
-            # recall more than this table's latency budget requires --
-            # see config.HNSW_EF_SEARCH for the measured tradeoff
-            # (raising it to 400 improves ANN-vs-exact recall@10 from
-            # 61% to 86% at negligible extra latency).
-            #
-            # set_config(name, value, is_local=true) -- NOT
-            # "SET LOCAL ... = %s" -- because Postgres does not accept a
-            # bound parameter in a SET statement. psycopg2 got away with
-            # "SET LOCAL ... = %s" because it substituted %s into the SQL
-            # text client-side before sending it; psycopg3 sends the SQL
-            # and the parameter separately (server-side binding), so
-            # Postgres itself would see "SET LOCAL hnsw.ef_search = $1"
-            # and reject it with a syntax error. set_config() is a normal
-            # function call, so it *can* take a bound parameter, and
-            # is_local=true gives the exact same "only this transaction"
-            # semantics SET LOCAL has. See
-            # test_search_issues_set_local_ef_search_before_the_select in
-            # tests/test_vector_store.py, which asserts search() itself
-            # issues this, not just that Postgres would honor it if asked
-            # -- though that test mocks the cursor, so it doesn't by
-            # itself prove Postgres accepts this syntax; that still needs
-            # a real pgvector run before this is trusted.
-            #
-            # Still scoped to one transaction: psycopg connections default
-            # to autocommit=False, so this and the SELECT below run in the
-            # same transaction. If autocommit were ever turned on for this
-            # pool, is_local=true would become a silent no-op.
+            # set_config(), not "SET LOCAL ... = %s": Postgres rejects a
+            # bound parameter inside a SET statement, and set_config() is a
+            # plain function call that accepts one. is_local=true keeps the
+            # same transaction-scoped semantics SET LOCAL would have had.
             await cur.execute(
                 "SELECT set_config('hnsw.ef_search', %s, true);",
                 (str(HNSW_EF_SEARCH),),
             )
-            # `<=>` is pgvector's cosine *distance* (0 = identical);
-            # `1 - distance` converts it to cosine *similarity* so
-            # callers can compare it directly against
-            # config.DUPLICATE_SIMILARITY_THRESHOLD. Ordering by the
-            # `similarity` alias (descending) is equivalent to ordering
-            # by distance ascending, and Postgres allows ORDER BY to
-            # reference a SELECT-list alias directly.
+            # `<=>` is cosine distance; `1 - distance` gives cosine
+            # similarity, comparable against DUPLICATE_SIMILARITY_THRESHOLD.
             await cur.execute(
                 f"""
                     SELECT task_id, 1 - (embedding <=> %s::vector) AS similarity
