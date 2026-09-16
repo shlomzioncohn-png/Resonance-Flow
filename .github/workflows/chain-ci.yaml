@@ -19,6 +19,7 @@ jobs:
       packages: write
       pull-requests: write
     uses: ./.github/workflows/service-ci.yaml
+    secrets: inherit
     with:
       service_name: chain
       service_dir: teams/chain
