@@ -8,13 +8,16 @@ import java.util.UUID;
 /**
  * The wire shape Inbox's Kafka ingestion contract
  * (bridge.structured.tasks, esti/inbox-kafka-ingestion-contract) actually
- * expects: camelCase keys and UPPER_SNAKE_CASE enum values.
+ * expects: snake_case keys and UPPER_SNAKE_CASE enum values.
  * <p>
  * {@link Task} is deliberately snake_case with lowercase enums - it is built
  * against Inbox's *database* schema, and {@code TaskSerializationTest} pins
  * that. This is the same information addressed to a different reader, so it
  * cannot reuse Task's {@code @JsonValue} serialization; enum fields here
- * carry the raw {@code Enum.name()} instead.
+ * carry the raw {@code Enum.name()} instead. The snake_case keys come from
+ * the globally configured naming strategy
+ * ({@code spring.jackson.property-naming-strategy: SNAKE_CASE}), not from
+ * an annotation on this record.
  * <p>
  * Fields the contract says Inbox generates itself and forbids sending - some
  * of which exist on {@code Task} - are deliberately absent: {@code id},

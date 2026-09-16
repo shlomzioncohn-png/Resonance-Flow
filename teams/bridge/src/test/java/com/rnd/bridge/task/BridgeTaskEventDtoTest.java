@@ -2,6 +2,7 @@ package com.rnd.bridge.task;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.PropertyNamingStrategies;
 import com.fasterxml.jackson.databind.SerializationFeature;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import com.rnd.bridge.task.model.ExtractionProvenance;
@@ -26,26 +27,28 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 /**
  * Pins BridgeTaskEventDto's wire shape against the Inbox Kafka ingestion
  * contract (esti/inbox-kafka-ingestion-contract, topic
- * bridge.structured.tasks): camelCase keys, UPPER_SNAKE_CASE enum values,
- * and none of Inbox's self-generated fields - the mirror image of what
+ * bridge.structured.tasks): snake_case keys, UPPER_SNAKE_CASE enum values,
+ * and none of Inbox's self-generated fields - matching what
  * TaskSerializationTest pins for Task itself.
  */
 class BridgeTaskEventDtoTest {
 
-    // Same mapper setup as TaskSerializationTest: mirrors what a correctly
-    // configured Spring Boot ObjectMapper does, not bare Jackson defaults.
+    // Mirrors the globally configured Spring Boot ObjectMapper
+    // (spring.jackson.property-naming-strategy: SNAKE_CASE), not bare
+    // Jackson defaults.
     private static final ObjectMapper MAPPER = new ObjectMapper()
             .registerModule(new JavaTimeModule())
+            .setPropertyNamingStrategy(PropertyNamingStrategies.SNAKE_CASE)
             .disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS);
 
     private static final Set<String> CONTRACT_KEYS = Set.of(
-            "eventId", "organizationId", "projectId", "title", "description", "sourceType",
-            "sourceRef", "tier", "roleContext", "urgency", "effortEstimateMinutes",
+            "event_id", "organization_id", "project_id", "title", "description", "source_type",
+            "source_ref", "tier", "role_context", "urgency", "effort_estimate_minutes",
             "deadline", "status", "confidence");
 
     private static final Set<String> FORBIDDEN_KEYS = Set.of(
-            "id", "correlationId", "isAvailable", "priorityScore", "ownerId", "createdBy",
-            "extractionProvenance", "createdAt", "updatedAt", "completedAt", "snoozedUntil");
+            "id", "correlation_id", "is_available", "priority_score", "owner_id", "created_by",
+            "extraction_provenance", "created_at", "updated_at", "completed_at", "snoozed_until");
 
     private static Task fullyPopulatedTask() {
         return new Task(
@@ -90,10 +93,10 @@ class BridgeTaskEventDtoTest {
     void enumValuesSerializeUpperSnakeCaseNotTasksLowercase() {
         JsonNode json = MAPPER.valueToTree(BridgeTaskEventDto.from(fullyPopulatedTask()));
 
-        assertEquals("CRM_DEAL", json.get("sourceType").asText());
+        assertEquals("CRM_DEAL", json.get("source_type").asText());
         assertEquals("NEW", json.get("status").asText());
         assertEquals("TACTICAL", json.get("tier").asText());
-        assertEquals("SALESPERSON", json.get("roleContext").asText());
+        assertEquals("SALESPERSON", json.get("role_context").asText());
     }
 
     @Test

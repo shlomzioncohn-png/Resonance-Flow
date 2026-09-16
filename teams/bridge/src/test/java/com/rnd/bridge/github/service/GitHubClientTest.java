@@ -5,6 +5,8 @@ import com.rnd.bridge.github.dto.GitHubUser;
 import com.rnd.bridge.github.mapper.GitHubIssueMapper;
 import com.rnd.bridge.github.mapper.GitHubPullRequestMapper;
 import com.rnd.bridge.task.TaskValidator;
+import com.rnd.bridge.task.enrichment.EnrichmentProperties;
+import com.rnd.bridge.task.enrichment.NoOpTaskEnricher;
 import com.rnd.bridge.task.model.SourceType;
 import com.rnd.bridge.task.model.Task;
 import com.rnd.bridge.task.model.TaskStatus;
@@ -44,10 +46,10 @@ class GitHubClientTest {
     private WebClient.ResponseSpec responseSpec;
 
     @Spy
-    private GitHubIssueMapper gitHubIssueMapper;
+    private GitHubIssueMapper gitHubIssueMapper = new GitHubIssueMapper(new EnrichmentProperties(), new NoOpTaskEnricher());
 
     @Spy
-    private GitHubPullRequestMapper gitHubPullRequestMapper;
+    private GitHubPullRequestMapper gitHubPullRequestMapper = new GitHubPullRequestMapper(new EnrichmentProperties(), new NoOpTaskEnricher());
 
     @Spy
     private TaskValidator taskValidator;
