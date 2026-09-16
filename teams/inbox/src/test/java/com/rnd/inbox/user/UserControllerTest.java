@@ -105,7 +105,7 @@ class UserControllerTest {
                 .andExpect(status().isCreated())
                 .andExpect(header().string("Location", containsString("/api/v1/users/" + userId)))
                 .andExpect(jsonPath("$.id").value(userId.toString()))
-                .andExpect(jsonPath("$.displayName").value("Yehudit Cohen"))
+                .andExpect(jsonPath("$.display_name").value("Yehudit Cohen"))
                 .andExpect(jsonPath("$.tenant.name").value("Acme Inc"));
     }
 
@@ -117,7 +117,7 @@ class UserControllerTest {
                         .content(objectMapper.writeValueAsString(new UserCreateRequestDto())))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.error").value("VALIDATION_ERROR"))
-                .andExpect(jsonPath("$.fieldErrors").isArray());
+                .andExpect(jsonPath("$.field_errors").isArray());
     }
 
     @Test
@@ -260,8 +260,8 @@ class UserControllerTest {
         mockMvc.perform(get("/api/v1/users").header(ACTOR_HEADER, actorId.toString()))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.content[0].id").value(userId.toString()))
-                .andExpect(jsonPath("$.totalElements").value(1))
-                .andExpect(jsonPath("$.totalPages").value(1));
+                .andExpect(jsonPath("$.total_elements").value(1))
+                .andExpect(jsonPath("$.total_pages").value(1));
     }
 
     @Test

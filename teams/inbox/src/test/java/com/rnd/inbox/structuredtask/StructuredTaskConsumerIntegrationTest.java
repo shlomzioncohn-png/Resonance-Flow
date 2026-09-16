@@ -90,11 +90,11 @@ class StructuredTaskConsumerIntegrationTest extends PostgresIntegrationTest {
 
     private String validPayload(UUID tenantId, SourceType sourceType, String sourceRef, String eventId) {
         return "{"
-                + "\"eventId\":\"" + eventId + "\","
-                + "\"tenantId\":\"" + tenantId + "\","
+                + "\"event_id\":\"" + eventId + "\","
+                + "\"tenant_id\":\"" + tenantId + "\","
                 + "\"title\":\"Fix flaky test\","
-                + "\"sourceType\":\"" + sourceType.name() + "\","
-                + "\"sourceRef\":\"" + sourceRef + "\","
+                + "\"source_type\":\"" + sourceType.name() + "\","
+                + "\"source_ref\":\"" + sourceRef + "\","
                 + "\"status\":\"NEW\""
                 + "}";
     }
@@ -158,7 +158,7 @@ class StructuredTaskConsumerIntegrationTest extends PostgresIntegrationTest {
     @Test
     void invalidPayloadIsRoutedToTheErrorTopicWithoutBeingSaved() {
         String sourceRef = "github:owner/repo:issue:" + UUID.randomUUID();
-        String invalidPayload = "{\"title\":\"missing required fields\",\"sourceRef\":\"" + sourceRef + "\"}";
+        String invalidPayload = "{\"title\":\"missing required fields\",\"source_ref\":\"" + sourceRef + "\"}";
 
         producer.send("bridge.structured.tasks", invalidPayload);
 
@@ -175,15 +175,15 @@ class StructuredTaskConsumerIntegrationTest extends PostgresIntegrationTest {
         String sourceRef = "github:owner/repo:issue:" + UUID.randomUUID();
         String assigneeId = UUID.randomUUID().toString();
         String payload = "{"
-                + "\"eventId\":\"" + UUID.randomUUID() + "\","
-                + "\"tenantId\":\"" + tenant.getId() + "\","
+                + "\"event_id\":\"" + UUID.randomUUID() + "\","
+                + "\"tenant_id\":\"" + tenant.getId() + "\","
                 + "\"title\":\"Fix flaky test\","
-                + "\"sourceType\":\"GITHUB_ISSUE\","
-                + "\"sourceRef\":\"" + sourceRef + "\","
+                + "\"source_type\":\"GITHUB_ISSUE\","
+                + "\"source_ref\":\"" + sourceRef + "\","
                 + "\"status\":\"NEW\","
                 + "\"assignees\":["
-                + "  {\"assigneeType\":\"USER\",\"id\":\"" + assigneeId + "\",\"assignmentRole\":\"OWNER\"},"
-                + "  {\"assigneeType\":\"USER\",\"id\":\"" + assigneeId + "\",\"assignmentRole\":\"COLLABORATOR\"}"
+                + "  {\"assignee_type\":\"USER\",\"id\":\"" + assigneeId + "\",\"assignment_role\":\"OWNER\"},"
+                + "  {\"assignee_type\":\"USER\",\"id\":\"" + assigneeId + "\",\"assignment_role\":\"COLLABORATOR\"}"
                 + "]"
                 + "}";
 
@@ -202,11 +202,11 @@ class StructuredTaskConsumerIntegrationTest extends PostgresIntegrationTest {
         Tenant tenant = persistTenant();
         String sourceRef = "github:owner/repo:issue:" + UUID.randomUUID();
         String payload = "{"
-                + "\"eventId\":\"" + UUID.randomUUID() + "\","
-                + "\"tenantId\":\"" + tenant.getId() + "\","
+                + "\"event_id\":\"" + UUID.randomUUID() + "\","
+                + "\"tenant_id\":\"" + tenant.getId() + "\","
                 + "\"title\":\"Fix flaky test\","
-                + "\"sourceType\":\"GITHUB_ISSUE\","
-                + "\"sourceRef\":\"" + sourceRef + "\","
+                + "\"source_type\":\"GITHUB_ISSUE\","
+                + "\"source_ref\":\"" + sourceRef + "\","
                 + "\"status\":\"NEW\","
                 + "\"assignees\":[null]"
                 + "}";

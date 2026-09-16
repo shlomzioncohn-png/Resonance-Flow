@@ -111,10 +111,10 @@ class SchedulingConsumerIntegrationTest extends PostgresIntegrationTest {
 
     private String payload(UUID taskId, boolean available, String priorityScoreJson) {
         return "{"
-                + "\"eventId\":\"" + UUID.randomUUID() + "\","
-                + "\"taskId\":\"" + taskId + "\","
-                + "\"isAvailable\":" + available
-                + (priorityScoreJson == null ? "" : ",\"priorityScore\":" + priorityScoreJson)
+                + "\"event_id\":\"" + UUID.randomUUID() + "\","
+                + "\"task_id\":\"" + taskId + "\","
+                + "\"is_available\":" + available
+                + (priorityScoreJson == null ? "" : ",\"priority_score\":" + priorityScoreJson)
                 + "}";
     }
 
@@ -211,7 +211,7 @@ class SchedulingConsumerIntegrationTest extends PostgresIntegrationTest {
     @Test
     void aMessageWithoutIsAvailableIsRejected() {
         Task task = persistTask(false, null);
-        String missingField = "{\"eventId\":\"" + UUID.randomUUID() + "\",\"taskId\":\"" + task.getId() + "\"}";
+        String missingField = "{\"event_id\":\"" + UUID.randomUUID() + "\",\"task_id\":\"" + task.getId() + "\"}";
 
         producer.send(TOPIC, missingField);
 
