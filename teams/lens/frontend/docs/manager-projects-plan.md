@@ -1,5 +1,13 @@
 # Manager / Projects page — work plan
 
+**Update (confirmed with Rachel Zahler, mentor):** this view now lives at `/manager`
+("Manager Dashboard" in the sidebar) instead of a separate `/manager/projects` route —
+there's no separate "Projects" nav entry. Longer-term the plan is two distinct views:
+"Dashboard" = charts/graphs (not yet built), "Projects" = a *table* of project data
+(owner, description, deadline, etc.) as a possible follow-up if time allows — starting
+small with the dashboard/graphs first. What's built below (KPI tiles + a project-card
+grid) is serving as the Manager Dashboard's content for now.
+
 Source: Figma file "Resonance-Flow — Manager Screens" (`fileKey=Imb8m7ETbskrUCoVQtpFLG`),
 frame **"Manager / Projects"** (`nodeId=4:21`) — confirmed against a full-fidelity
 screenshot the user provided directly (mock data: 12 projects, "Sort: Health" filter).
