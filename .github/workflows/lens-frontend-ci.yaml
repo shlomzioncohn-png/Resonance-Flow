@@ -17,7 +17,9 @@ jobs:
     permissions:
       contents: write
       packages: write
+      pull-requests: write
     uses: ./.github/workflows/service-ci.yaml
+    secrets: inherit
     with:
       service_name: lens-frontend
       service_dir: teams/lens/frontend

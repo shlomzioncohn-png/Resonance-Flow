@@ -1,9 +1,15 @@
+// Originally copied from chain/ruthHoltzman/dependency-repository-66; logging added since.
+
 package com.rnd.chain.repository;
 
 import com.rnd.chain.dto.TaskDependency;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
@@ -57,18 +63,19 @@ import java.util.concurrent.ConcurrentHashMap;
  */
 public class InMemoryTaskDependencyRepository implements TaskDependencyRepository {
 
+    private static final Logger log = LoggerFactory.getLogger(InMemoryTaskDependencyRepository.class);
+
     private final ConcurrentHashMap<UUID, Set<UUID>> dependenciesByTask = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<UUID, Set<UUID>> dependentsByTask = new ConcurrentHashMap<>();
     private final Object writeLock = new Object();
 
     public InMemoryTaskDependencyRepository(List<TaskDependency> edges) {
         Objects.requireNonNull(edges, "edges must not be null");
-        synchronized (writeLock) {
-            for (TaskDependency edge : edges) {
-                Objects.requireNonNull(edge, "edges must not contain null elements");
-                indexEdge(edge.getTaskId(), edge.getDependsOnTaskId());
-            }
+        for (TaskDependency edge : edges) {
+            Objects.requireNonNull(edge, "edges must not contain null elements");
+            indexEdge(edge.getTaskId(), edge.getDependsOnTaskId());
         }
+        log.debug("Loaded {} dependency edge(s)", edges.size());
     }
 
     @Override
@@ -94,9 +101,16 @@ public class InMemoryTaskDependencyRepository implements TaskDependencyRepositor
     @Override
     public Optional<TaskDependency> save(TaskDependency dependency) {
         Objects.requireNonNull(dependency, "dependency must not be null");
+        UUID taskId = dependency.getTaskId();
+        UUID dependsOnTaskId = dependency.getDependsOnTaskId();
         synchronized (writeLock) {
-            boolean added = indexEdge(dependency.getTaskId(), dependency.getDependsOnTaskId());
-            return added ? Optional.of(dependency) : Optional.empty();
+            boolean added = indexEdge(taskId, dependsOnTaskId);
+            if (!added) {
+                log.debug("Dependency already exists: task {} depends on {} - no-op", taskId, dependsOnTaskId);
+                return Optional.empty();
+            }
+            log.info("Saved dependency: task {} depends on {}", taskId, dependsOnTaskId);
+            return Optional.of(dependency);
         }
     }
 
@@ -106,15 +120,16 @@ public class InMemoryTaskDependencyRepository implements TaskDependencyRepositor
             Set<UUID> dependsOn = dependenciesByTask.get(taskId);
             boolean removed = dependsOn != null && dependsOn.remove(dependsOnTaskId);
             if (!removed) {
+                log.debug("Dependency not found for delete: task {} depends on {} - no-op", taskId, dependsOnTaskId);
                 return false;
             }
-            removeIfEmpty(dependenciesByTask, taskId, dependsOn);
-
+            pruneIfEmpty(dependenciesByTask, taskId, dependsOn);
             Set<UUID> dependents = dependentsByTask.get(dependsOnTaskId);
             if (dependents != null) {
                 dependents.remove(taskId);
-                removeIfEmpty(dependentsByTask, dependsOnTaskId, dependents);
+                pruneIfEmpty(dependentsByTask, dependsOnTaskId, dependents);
             }
+            log.info("Deleted dependency: task {} depends on {}", taskId, dependsOnTaskId);
             return true;
         }
     }
@@ -133,13 +148,14 @@ public class InMemoryTaskDependencyRepository implements TaskDependencyRepositor
     }
 
     /**
-     * Drops {@code key} from {@code map} once its edge set is empty, so
-     * adjacency-map entries don't accumulate forever for tasks whose edges
-     * have all been removed. Callers must hold {@code writeLock}.
+     * Drops {@code key} from {@code map} once its edge set is empty (PLAN.md Finding #6), rather
+     * than leaking one permanent empty-Set entry per task id ever touched. The two-arg
+     * {@code remove} is race-safe against a concurrent add landing on this same key between the
+     * emptiness check and the removal.
      */
-    private static void removeIfEmpty(ConcurrentHashMap<UUID, Set<UUID>> map, UUID key, Set<UUID> edges) {
-        if (edges.isEmpty()) {
-            map.remove(key);
+    private static void pruneIfEmpty(Map<UUID, Set<UUID>> map, UUID key, Set<UUID> set) {
+        if (set.isEmpty()) {
+            map.remove(key, set);
         }
     }
 }

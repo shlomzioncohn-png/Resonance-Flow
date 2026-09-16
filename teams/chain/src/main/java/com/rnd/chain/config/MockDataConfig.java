@@ -14,9 +14,10 @@ import java.util.List;
 
 /**
  * Wires the in-memory mock repositories as Spring beans, so services
- * such as {@code TaskDependencyService} can be constructed via normal
- * dependency injection - no real DB connection (per current
- * team-lead instruction; no DB technology has been chosen yet).
+ * such as {@code TaskTraversalService} and {@code TaskDependencyService}
+ * can be constructed via normal dependency injection - no real DB
+ * connection (per current team-lead instruction; no DB technology has
+ * been chosen yet).
  *
  * <p>Each bean is guarded with {@link ConditionalOnMissingBean} so a
  * consumer that registers its own {@link TaskRepository}/

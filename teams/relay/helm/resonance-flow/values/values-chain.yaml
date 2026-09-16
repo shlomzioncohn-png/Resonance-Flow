@@ -13,6 +13,8 @@ components:
     enabled: false
   lens-gateway:
     enabled: false
+  schema-registry:
+    enabled: false
 
 # Minio is only used by mind/bridge, so it stays off for a chain-only install.
 kafka:
