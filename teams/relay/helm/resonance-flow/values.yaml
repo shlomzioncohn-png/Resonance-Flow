@@ -254,26 +254,19 @@ components:
     config:
       data:
         datasource:
-          # Own database, own user (see postgresql.primary.initdb.scripts) - not part of Inbox's
-          # tasks schema, and not the shared postgres superuser.
+          # Own database and user - not Inbox's tasks schema or its superuser.
           database: chain
           username: chain
           password: chain-dev-password
         kafka:
           consumerGroupId: chain-service
           topics:
-            # Consumed - drives addDependency.
-            taskDependenciesProposed: task.dependencies.proposed
-            # Consumed - drives removeDependency. PROPOSED (#384), not yet a reviewed contract.
-            taskDependenciesRemoved: task.dependencies.removed
-            # Consumed - drives onTaskStatusChanged. PROPOSED (#384): assumes Inbox's full
-            # 8-value status enum, mapped internally to Chain's 3-value model - not yet
-            # confirmed with Inbox.
+            taskDependenciesProposed: task.dependencies.proposed # drives addDependency
+            taskDependenciesRemoved: task.dependencies.removed # drives removeDependency; PROPOSED
+            # drives onTaskStatusChanged; PROPOSED, assumes Inbox's 8-value status enum
             taskStatusUpdated: task.status.updated
-            # Produced - consumed by Inbox (chainSchedulingUpdated in its own config).
-            taskSchedulingUpdated: task.scheduling.updated
-        # onConstraintAdded/onConstraintStatusChanged stay REST-triggered (Chain's own API,
-        # not Kafka) - #384 confirmed there's no topic for these today.
+            taskSchedulingUpdated: task.scheduling.updated # produced, consumed by Inbox
+        # No topic for onConstraintAdded/onConstraintStatusChanged - still REST-triggered.
   inbox:
     enabled: true
     replicaCount: 1
@@ -430,9 +423,7 @@ postgresql:
         memory: 192Mi
     initdb:
       scripts:
-        # auth.database only creates resonance_flow (Inbox's) - Chain needs its own, owned by
-        # its own user (confirmed with the Chain team, #384), not the shared postgres superuser.
-        # Must match components.chain.config.data.datasource.{username,password} above.
+        # auth.database only creates resonance_flow - Chain needs its own DB/user.
         create-chain-database.sql: |
           CREATE USER chain WITH PASSWORD 'chain-dev-password';
           CREATE DATABASE chain OWNER chain;
