@@ -1,0 +1,460 @@
+imagePullSecrets: []
+imagePullSecret:
+  create: false
+  registry: ghcr.io
+  username: ""
+  password: ""
+  email: "noreply@kamatech.org"
+nameOverride: ""
+fullnameOverride: ""
+serviceAccount:
+  create: true
+  automount: true
+  annotations: {}
+  name: ""
+podAnnotations: {}
+podLabels: {}
+podSecurityContext: {}
+securityContext: {}
+service:
+  type: ClusterIP
+  port: 8082
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+  hosts:
+    - host: chart-example.local
+      paths:
+        - path: /
+          pathType: ImplementationSpecific
+  tls: []
+httpRoute:
+  enabled: false
+  annotations: {}
+  parentRefs:
+    - name: gateway
+      sectionName: http
+  hostnames:
+    - chart-example.local
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /headers
+autoscaling:
+  enabled: false
+  minReplicas: 1
+  maxReplicas: 100
+  targetCPUUtilizationPercentage: 80
+volumes: []
+volumeMounts: []
+dependencies:
+  - name: kafka
+    port: 9092
+initContainers: []
+nodeSelector: {}
+tolerations: []
+affinity: {}
+components:
+  mind:
+    enabled: true
+    replicaCount: 1
+    image:
+      repository: "ghcr.io/kamatechorg/resonance-flow/mind"
+      pullPolicy: IfNotPresent
+      tag: "22a8e01"
+    containerPort: 8000
+    service:
+      type: ClusterIP
+      port: 80
+    resources:
+      requests:
+        cpu: 100m
+        memory: 256Mi
+      limits:
+        cpu: 500m
+        memory: 512Mi
+    startupProbe:
+      httpGet:
+        path: /health
+        port: http
+      periodSeconds: 5
+      failureThreshold: 40
+    livenessProbe:
+      httpGet:
+        path: /health
+        port: http
+      periodSeconds: 10
+      failureThreshold: 3
+    readinessProbe:
+      httpGet:
+        path: /health
+        port: http
+      periodSeconds: 5
+      failureThreshold: 3
+    env: {}
+    dependencies:
+      - name: minio
+        port: 9000
+  lens-bff:
+    enabled: true
+    replicaCount: 1
+    image:
+      repository: "ghcr.io/kamatechorg/resonance-flow/lens-bff"
+      pullPolicy: IfNotPresent
+      tag: "placeholder"
+    containerPort: 8082
+    service:
+      type: ClusterIP
+      port: 80
+    resources:
+      requests:
+        cpu: 100m
+        memory: 256Mi
+      limits:
+        cpu: 500m
+        memory: 512Mi
+    startupProbe:
+      httpGet:
+        path: /health
+        port: http
+      periodSeconds: 5
+      failureThreshold: 40
+    livenessProbe:
+      httpGet:
+        path: /health
+        port: http
+      periodSeconds: 10
+      failureThreshold: 3
+    readinessProbe:
+      httpGet:
+        path: /health
+        port: http
+      periodSeconds: 5
+      failureThreshold: 3
+    env: {}
+  bridge:
+    enabled: true
+    replicaCount: 1
+    image:
+      repository: "ghcr.io/kamatechorg/resonance-flow/bridge"
+      pullPolicy: IfNotPresent
+      tag: "94c3259"
+    containerPort: 8080
+    service:
+      type: ClusterIP
+      port: 80
+    resources:
+      requests:
+        cpu: 100m
+        memory: 256Mi
+      limits:
+        cpu: 500m
+        memory: 512Mi
+    startupProbe:
+      httpGet:
+        path: /health
+        port: http
+      periodSeconds: 5
+      failureThreshold: 40
+    livenessProbe:
+      httpGet:
+        path: /health
+        port: http
+      periodSeconds: 10
+      failureThreshold: 3
+    readinessProbe:
+      httpGet:
+        path: /health
+        port: http
+      periodSeconds: 5
+      failureThreshold: 3
+    env: {}
+    dependencies:
+      - name: minio
+        port: 9000
+  lens-frontend:
+    enabled: true
+    replicaCount: 1
+    image:
+      repository: "ghcr.io/kamatechorg/resonance-flow/lens-frontend"
+      pullPolicy: IfNotPresent
+      tag: "placeholder"
+    containerPort: 80
+    service:
+      type: ClusterIP
+      port: 80
+    resources:
+      requests:
+        cpu: 100m
+        memory: 128Mi
+      limits:
+        cpu: 250m
+        memory: 256Mi
+    startupProbe:
+      httpGet:
+        path: /
+        port: http
+      periodSeconds: 5
+      failureThreshold: 40
+    livenessProbe:
+      httpGet:
+        path: /
+        port: http
+      periodSeconds: 10
+      failureThreshold: 3
+    readinessProbe:
+      httpGet:
+        path: /
+        port: http
+      periodSeconds: 5
+      failureThreshold: 3
+    env: {}
+  chain:
+    enabled: true
+    replicaCount: 1
+    image:
+      repository: "ghcr.io/kamatechorg/resonance-flow/chain"
+      pullPolicy: IfNotPresent
+      tag: "placeholder"
+    containerPort: 8081
+    service:
+      type: ClusterIP
+      port: 80
+    resources:
+      requests:
+        cpu: 100m
+        memory: 256Mi
+      limits:
+        cpu: 500m
+        memory: 512Mi
+    startupProbe:
+      httpGet:
+        path: /health
+        port: http
+      periodSeconds: 5
+      failureThreshold: 40
+    livenessProbe:
+      httpGet:
+        path: /health
+        port: http
+      periodSeconds: 10
+      failureThreshold: 3
+    readinessProbe:
+      httpGet:
+        path: /health
+        port: http
+      periodSeconds: 5
+      failureThreshold: 3
+    env: {}
+  inbox:
+    enabled: true
+    replicaCount: 1
+    image:
+      repository: "ghcr.io/kamatechorg/resonance-flow/inbox"
+      pullPolicy: IfNotPresent
+      tag: "085a2e7"
+    containerPort: 8080
+    service:
+      type: ClusterIP
+      port: 80
+    resources:
+      requests:
+        cpu: 100m
+        memory: 256Mi
+      limits:
+        cpu: 500m
+        memory: 512Mi
+    startupProbe:
+      httpGet:
+        path: /actuator/health/liveness
+        port: http
+      periodSeconds: 5
+      # 300s budget - CI's constrained runner needs more than the ~186s observed locally.
+      failureThreshold: 60
+    livenessProbe:
+      httpGet:
+        path: /actuator/health/liveness
+        port: http
+      periodSeconds: 10
+      failureThreshold: 3
+    readinessProbe:
+      httpGet:
+        path: /actuator/health/readiness
+        port: http
+      periodSeconds: 5
+      failureThreshold: 3
+    env: {}
+    dependencies:
+      - name: postgresql
+        port: 5432
+      - name: schema-registry
+        port: 8080
+    config:
+      data:
+        datasource:
+          database: resonance_flow
+          username: postgres
+          password: postgres
+        kafka:
+          consumerGroupId: inbox-service
+          topics:
+            bridgeStructuredTasks: bridge.structured.tasks
+            chainSchedulingUpdated: task.scheduling.updated
+            mindTaskCreationRequested: task.creation.requested
+  schema-registry:
+    enabled: true
+    replicaCount: 1
+    image:
+      # Same image already used for local dev (teams/relay/docker-compose.yml) and the
+      # draft teams/relay/schema-sync-hook chart - in-memory Apicurio registry, ccompat
+      # (Confluent-compatible) API. Not durable storage - fine for dev/CI, would need a
+      # persistent backend (its own Postgres/Kafka storage) before a real prod rollout.
+      repository: "apicurio/apicurio-registry-mem"
+      pullPolicy: IfNotPresent
+      tag: "2.5.11.Final"
+    containerPort: 8080
+    service:
+      type: ClusterIP
+      port: 8080
+    resources:
+      requests:
+        cpu: 250m
+        memory: 256Mi
+      limits:
+        cpu: 500m
+        memory: 512Mi
+    startupProbe:
+      httpGet:
+        path: /health/live
+        port: http
+      periodSeconds: 5
+      # Quarkus boot under a constrained CPU request measured ~200s+ locally (verified live -
+      # killed with SIGTERM right at the old 40*5s=200s budget, before it finished starting).
+      # 60*5s=300s matches the margin inbox's own startupProbe already carries for the same reason.
+      failureThreshold: 60
+    livenessProbe:
+      httpGet:
+        path: /health/live
+        port: http
+      periodSeconds: 10
+      failureThreshold: 3
+    readinessProbe:
+      httpGet:
+        path: /health/ready
+        port: http
+      periodSeconds: 5
+      failureThreshold: 3
+    env: {}
+  lens-gateway:
+    enabled: true
+    replicaCount: 1
+    image:
+      repository: "ghcr.io/kamatechorg/resonance-flow/lens-gateway"
+      pullPolicy: IfNotPresent
+      tag: "placeholder"
+    containerPort: 8080
+    service:
+      type: ClusterIP
+      port: 80
+    resources:
+      requests:
+        cpu: 100m
+        memory: 256Mi
+      limits:
+        cpu: 500m
+        memory: 512Mi
+    startupProbe:
+      httpGet:
+        path: /health
+        port: http
+      periodSeconds: 5
+      failureThreshold: 40
+    livenessProbe:
+      httpGet:
+        path: /health
+        port: http
+      periodSeconds: 10
+      failureThreshold: 3
+    readinessProbe:
+      httpGet:
+        path: /health
+        port: http
+      periodSeconds: 5
+      failureThreshold: 3
+    env: {}
+kafka:
+  enabled: true
+  # bitnami/kafka was pruned from Docker Hub's free tier in 2025; bitnamilegacy/kafka
+  # is the same image content, relocated by Broadcom, kept free/unmaintained.
+  image:
+    registry: docker.io
+    repository: bitnamilegacy/kafka
+  # The client listener defaults to SASL_PLAINTEXT (chart-level, not something we chose here),
+  # but nothing was ever configured to authenticate against it - every consuming service's
+  # client silently failed the handshake and retried forever without ever actually connecting
+  # or crashing (verified locally). Pinning explicit client credentials here (instead of the
+  # chart's own randomly-generated ones) so every component's mounted config can reference the
+  # same known username/password - see components.inbox.config.data.kafka.sasl below.
+  sasl:
+    client:
+      users:
+        - inbox
+      passwords:
+        - "resonance-flow-dev-sasl"
+  # Single combined controller+broker node (controller.replicaCount: 1, broker.replicaCount: 0
+  # below) - Kafka's built-in defaults for these three (3, 3, 2) can never be satisfied with
+  # only one broker, so __consumer_offsets/__transaction_state auto-creation retries forever
+  # and silently blocks every consumer group from ever getting a partition assignment (verified
+  # locally: a brand new consumer group never received an assignment; broker logs showed
+  # "Sent auto-creation request for Set(__consumer_offsets)..." repeating indefinitely).
+  overrideConfiguration:
+    offsets.topic.replication.factor: "1"
+    transaction.state.log.replication.factor: "1"
+    transaction.state.log.min.isr: "1"
+  controller:
+    replicaCount: 1
+    controllerOnly: false
+    resources:
+      # 192Mi was OOMKilling the JVM before it finished KRaft storage formatting on
+      # startup (verified locally - combined broker+controller needs more headroom).
+      requests:
+        cpu: 100m
+        memory: 128Mi
+      limits:
+        cpu: 500m
+        memory: 768Mi
+  broker:
+    replicaCount: 0
+minio:
+  enabled: true
+  mode: standalone
+  persistence:
+    enabled: false
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 150m
+      memory: 192Mi
+postgresql:
+  enabled: true
+  architecture: standalone
+  # Must match components.inbox.config.data.datasource.{password,database} above -
+  # nothing else wires these two together, and the subchart otherwise generates a
+  # random password / only creates the default "postgres" database.
+  auth:
+    postgresPassword: postgres
+    database: resonance_flow
+  primary:
+    persistence:
+      enabled: false
+    resources:
+      requests:
+        cpu: 100m
+        memory: 128Mi
+      limits:
+        cpu: 150m
+        memory: 192Mi
