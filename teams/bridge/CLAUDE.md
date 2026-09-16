@@ -39,24 +39,27 @@ predates this abstraction and does not use it (see §6).
 ## 4. Task vs. BridgeTaskEventDto — two shapes, on purpose
 
 - `task.model.Task` is the **database-shaped** record: `@JsonNaming(SnakeCaseStrategy)`, enums
-  serialize lowercase via `@JsonValue`. This is what Inbox's `tasks` table looks like.
+  serialize lowercase via `@JsonValue`. This is what Inbox's `tasks` table looks like — except
+  `organization_id`/`organizationId`, which Inbox renamed to `tenant_id` on 2026-09-06 and `Task`
+  deliberately does not mirror (see §6).
 - `task.BridgeTaskEventDto` is the **Kafka wire shape** (Inbox's ingestion contract, topic
-  `bridge.structured.tasks`): snake_case keys, enums as raw `UPPER_SNAKE_CASE` `Enum.name()`, plus
+  `bridge.structured.tasks`): camelCase keys, enums as raw `UPPER_SNAKE_CASE` `Enum.name()`, plus
   a fresh `eventId` per publish, and it deliberately omits fields `Task` carries that Inbox
-  forbids on the wire (`extractionProvenance`, `completedAt`, `snoozedUntil`). Snake_case keys
-  (as of 2026-09-14) come from a cross-team convention that all inter-team Kafka JSON payloads use
-  snake_case field names and `UPPER_SNAKE_CASE` string enums — applied here via its own
-  `@JsonNaming(SnakeCaseStrategy)` on `BridgeTaskEventDto`, deliberately **not** a global naming
-  strategy on the shared `ObjectMapper` bean, because that bean also deserializes inbound HubSpot
-  API responses (`HubSpotClient`), which are camelCase; see
-  `HubSpotDealRecordObjectMapperNamingStrategyTest` for the regression test pinning that.
+  forbids on the wire (`extractionProvenance`, `completedAt`, `snoozedUntil`). Inbox confirmed
+  camelCase directly on 2026-09-15 — they have no `@JsonNaming` and no global Jackson naming
+  strategy, so a snake_case key from us simply doesn't match their field names. The cross-team
+  snake_case convention still stands as the eventual target, not rejected — Inbox just hasn't
+  adopted it on their side yet, and both producer and consumer have to switch in the same moment
+  for it to work. Don't change this DTO's casing unilaterally again until they have. Separately,
+  this DTO's tenant field is named `tenantId`, not `organizationId` like `Task` — Inbox renamed
+  `organization_id` to `tenant_id` across their schema on 2026-09-06 (#255, `9684b8e8`), including
+  the `bridge.structured.tasks` idempotency index, so the dedup key is `(tenant_id, source_type,
+  source_ref)`, not `(organization_id, source_type, source_ref)`. Every message Bridge published
+  between that rename and this fix was silently rejected by Inbox's `@NotBlank` validation on
+  `tenantId` (see §6) — `Task.organizationId` is deliberately NOT renamed to match, see above.
 
-Both shapes now use snake_case keys, but that's coincidental, not convergence: they still differ
-in enum casing (`Task` lowercase vs. `BridgeTaskEventDto` `UPPER_SNAKE_CASE`) and in field set, and
-remain two deliberately separate shapes for two different readers — Inbox's Postgres schema vs.
-its Kafka ingestion contract. **Do not conflate these or serialize `Task` directly onto Kafka** —
-that was `GitHubKafkaProducer`'s approach and it does not conform to the contract (§6). Build
-`BridgeTaskEventDto.from(task)` for
+**Do not conflate these or serialize `Task` directly onto Kafka** — that was `GitHubKafkaProducer`'s
+approach and it does not conform to the contract (§6). Build `BridgeTaskEventDto.from(task)` for
 anything Kafka-bound.
 
 `organizationId` on `Task` is `null` by default from `AbstractTaskMapper` (no lane has a general
@@ -105,12 +108,42 @@ mechanism will fight `@Primary` resolution.
   `messaging/kafka/EventProcessingTemplate.java`) don't exist either. Re-check before trusting
   that claim; don't assume it's been built since.
 - **`organizationId` is one static config value**, not per-tenant (§4).
+- **`bridge.structured.tasks` was silently rejected by Inbox for over a week (2026-09-06 to
+  2026-09-15).** Inbox renamed `organization_id` to `tenant_id` across their schema on 2026-09-06
+  (#255, `9684b8e8`) — `StructuredTaskEventDto.tenantId` is `@NotBlank`, has no `@JsonNaming`, and
+  Inbox has no global Jackson naming strategy, so it matches nothing but a literal `tenantId` key.
+  `BridgeTaskEventDto` kept sending `organizationId` until this was found and fixed, so every CRM
+  and JIRA message in that window failed that validation and was routed to
+  `bridge.structured.tasks.errors` — a real Kafka topic, logged at WARN, but nothing in this repo
+  consumes `.errors` topics, so in practice it was invisible. Fixed by renaming the DTO's field to
+  `tenantId` (§4); `Task.organizationId` was deliberately left alone (§4) since `Task` never goes
+  on the wire directly. Two internal Bridge naming inconsistencies are a deliberate result of that
+  scoping decision, not oversights, and are tracked here together: (1) `Task.organizationId` /
+  `AbstractTaskMapper.organizationId()` still say "organization", not "tenant" (§4); (2)
+  `CRM_ORGANIZATION_ID` / `bridge.crm.organization-id` (`application.yml`, `.env.example`) also
+  still say "organization" - renaming an env var/config key is an operational risk across Helm and
+  every deployed environment for zero correctness gain, since it's a label Bridge picks for its
+  own config, never a wire field. Neither is broken today; both are candidates for a future
+  cleanup pass, not this fix. **`TaskSerializationTest` pins a stale claim about Inbox's schema** — its
+  `INBOX_COLUMN_NAMES` set still asserts `organization_id` as Inbox's real column name, which has
+  been false since the same 2026-09-06 rename. The test still passes because it only checks that
+  `Task.java`'s own (deliberately unrenamed) `organizationId` field serializes to
+  `organization_id` — that's internally consistent and always will be, regardless of what Inbox's
+  actual column is called. A passing `TaskSerializationTest` is not evidence this was ever checked
+  against Inbox's real schema; don't read it as verification of that. No test anywhere in either
+  `teams/bridge` or `teams/inbox` exercises the real seam between Bridge's producer and Inbox's
+  consumer — `StructuredTaskConsumerIntegrationTest` (Inbox) hand-builds its own JSON payload using
+  Inbox's own expected field names, so it's true by construction and would never have caught this.
 
 ## 7. Testing conventions
 
 - Wire-shape/schema tests pin literal JSON key strings and assert the full key set with
   `assertEquals(expectedKeys, actualKeys)`, not just presence — see `TaskSerializationTest` (DB
   shape) and `BridgeTaskEventDtoTest` (Kafka shape) as the two canonical examples.
+- `HubSpotDealRecordObjectMapperNamingStrategyTest` (`@JsonTest`) pins that Bridge's shared,
+  Spring-auto-configured `ObjectMapper` stays on Jackson's default camelCase naming strategy —
+  that bean also deserializes inbound HubSpot API responses (camelCase), so any future per-DTO
+  `@JsonNaming` decision for a Kafka contract must never become a global strategy on this bean.
 - Kafka-touching code is tested with a **mocked `KafkaTemplate`** — no test talks to a real
   broker. `@SpringBootTest`-based tests that boot a real context already pay ~40s in
   `KafkaAdmin` retrying against an absent broker; don't add to that.
@@ -216,7 +249,7 @@ suite (126 tests, 0 failures — see §7):
 - **Kafka publish path** — `KafkaPayloadPublisher` (kafka profile) builds `BridgeTaskEventDto`
   from `Task` (via `BridgeTaskEventDto.from(task)`) and publishes to
   `${bridge.structured-tasks-topic:bridge.structured.tasks}` — the real Inbox contract shape
-  (snake_case keys, `UPPER_SNAKE_CASE` enums, fresh `eventId`), **not** the same path
+  (camelCase, `UPPER_SNAKE_CASE` enums, fresh `eventId`), **not** the same path
   `GitHubKafkaProducer` uses (§6 — that one is a known, separate gap, untouched).
 - **`.env.example`** documents `CRM_ORGANIZATION_ID` as a per-environment real UUID Inbox
   (Ayala) still needs to hand back for dev/staging/prod — placeholder value is not usable as-is.

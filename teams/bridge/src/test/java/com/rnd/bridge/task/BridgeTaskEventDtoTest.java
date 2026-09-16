@@ -26,10 +26,9 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 /**
  * Pins BridgeTaskEventDto's wire shape against the Inbox Kafka ingestion
  * contract (esti/inbox-kafka-ingestion-contract, topic
- * bridge.structured.tasks): snake_case keys (cross-team Kafka JSON naming
- * convention), UPPER_SNAKE_CASE enum values, and none of Inbox's
- * self-generated fields - the mirror image of what TaskSerializationTest
- * pins for Task itself.
+ * bridge.structured.tasks): camelCase keys, UPPER_SNAKE_CASE enum values,
+ * and none of Inbox's self-generated fields - the mirror image of what
+ * TaskSerializationTest pins for Task itself.
  */
 class BridgeTaskEventDtoTest {
 
@@ -40,13 +39,13 @@ class BridgeTaskEventDtoTest {
             .disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS);
 
     private static final Set<String> CONTRACT_KEYS = Set.of(
-            "event_id", "organization_id", "project_id", "title", "description", "source_type",
-            "source_ref", "tier", "role_context", "urgency", "effort_estimate_minutes",
+            "eventId", "tenantId", "projectId", "title", "description", "sourceType",
+            "sourceRef", "tier", "roleContext", "urgency", "effortEstimateMinutes",
             "deadline", "status", "confidence");
 
     private static final Set<String> FORBIDDEN_KEYS = Set.of(
-            "id", "correlation_id", "is_available", "priority_score", "owner_id", "created_by",
-            "extraction_provenance", "created_at", "updated_at", "completed_at", "snoozed_until");
+            "id", "correlationId", "isAvailable", "priorityScore", "ownerId", "createdBy",
+            "extractionProvenance", "createdAt", "updatedAt", "completedAt", "snoozedUntil");
 
     private static Task fullyPopulatedTask() {
         return new Task(
@@ -91,10 +90,10 @@ class BridgeTaskEventDtoTest {
     void enumValuesSerializeUpperSnakeCaseNotTasksLowercase() {
         JsonNode json = MAPPER.valueToTree(BridgeTaskEventDto.from(fullyPopulatedTask()));
 
-        assertEquals("CRM_DEAL", json.get("source_type").asText());
+        assertEquals("CRM_DEAL", json.get("sourceType").asText());
         assertEquals("NEW", json.get("status").asText());
         assertEquals("TACTICAL", json.get("tier").asText());
-        assertEquals("SALESPERSON", json.get("role_context").asText());
+        assertEquals("SALESPERSON", json.get("roleContext").asText());
     }
 
     @Test
