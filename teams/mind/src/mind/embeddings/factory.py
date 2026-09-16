@@ -13,13 +13,8 @@ from mind.embeddings.base import VectorStore
 
 
 def get_store() -> VectorStore:
-    # Imported here, not at module top-level, so that importing `factory`
-    # (or `base`, which it depends on) never requires psycopg to be
-    # installed -- only actually calling get_store() does.
-    #
-    # Constructing PgVectorStore does no I/O (opening the pool and
-    # creating the schema are async and happen lazily on first use), so
-    # this function can stay a plain sync `def`.
+    # Imported here, not at module top-level, so importing `factory` never
+    # requires psycopg -- only calling get_store() does.
     from mind.embeddings.pgvector_store import PgVectorStore
 
     return PgVectorStore()

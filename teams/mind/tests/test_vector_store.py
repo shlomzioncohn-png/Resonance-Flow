@@ -11,34 +11,22 @@ from contextlib import asynccontextmanager
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+from psycopg import sql
 from psycopg_pool import PoolTimeout
 
 import mind.embeddings as mind_embeddings
 from mind.embeddings import clear, delete, embed, search, upsert
-from mind.embeddings.config import EMBEDDING_DIM, HNSW_EF_SEARCH
+from mind.embeddings.config import EMBEDDING_DIM, get_settings
 from mind.embeddings.pgvector_store import PgVectorStore
 
 
 @pytest.fixture(scope="module", autouse=True)
 async def _store_lifecycle():
-    """Open the vector store's connection pool once for this whole test
-    module, not once per test.
-
-    Deliberately scoped to *this* module (not tests/conftest.py, which is
-    shared by every test file) -- a DB-free test file like
-    test_embeddings.py should never be forced to open a real connection
-    just because it happens to share a conftest.py with this one.
-
-    Matches how a real long-lived server uses the pool. Found during
-    PR #140 review: with a fresh event loop per test (pytest-asyncio's
-    default), the pool's background tasks (reconnect, min-size top-up,
-    connection recycling) stayed pinned to the *first* test's loop, which
-    was already closed by the second test -- tests still passed because
-    the pool kept handing out connections it already held, but it was
-    silently running half-dead from test 2 onward, and didn't recover
-    from a simulated backend restart the way a single-loop server does.
-    Requires `asyncio_default_fixture_loop_scope = "session"` in
-    pyproject.toml so this fixture and every async test share one loop.
+    """Open the pool once per module, not once per test -- matches how a
+    real server uses it. Scoped here rather than conftest.py so a DB-free
+    file like test_embeddings.py never needs a real connection. Requires
+    `asyncio_default_fixture_loop_scope = "session"` in pyproject.toml so
+    every async test shares one loop with this fixture.
     """
     await mind_embeddings.open()
     yield
@@ -47,19 +35,9 @@ async def _store_lifecycle():
 
 @pytest.fixture(autouse=True)
 async def clean_store():
-    """Clear the (dedicated test) table before every test.
-
-    Without this, leftover rows from an earlier test can legitimately
-    out-rank a test's own data in a k-limited search -- especially with
-    `hnsw.ef_search` tuned higher for better recall (see
-    config.HNSW_EF_SEARCH), which makes search *more* likely to surface a
-    genuinely-closer leftover row instead of quietly missing it.
-
-    Goes through the public `clear()`, not raw SQL, so this file never
-    needs to know Postgres is involved. Store initialization itself (the
-    connection pool, schema) is handled once per module by
-    `_store_lifecycle` above, not here.
-    """
+    """Clear the (dedicated test) table before every test -- otherwise
+    leftover rows from an earlier test can out-rank a test's own data in
+    a k-limited search."""
     await clear()
     yield
 
@@ -135,7 +113,7 @@ async def test_search_respects_k_limit():
         )
 
     results = await search(query_vec, k=2)
-    assert len(results) <= 2
+    assert len(results) == 2
 
 
 async def test_full_cycle_embed_upsert_search():
@@ -205,17 +183,11 @@ async def test_concurrent_search_and_upsert_calls_all_succeed():
 
 
 async def test_search_raises_when_database_is_unreachable():
-    """This module owns a connection pool now -- a genuinely unreachable
-    database must surface as an error from search(), not hang forever or
-    return a silently-empty result.
-
-    Deliberately targets a closed *local* port (127.0.0.1:1, essentially
-    guaranteed not to have anything listening), not an unroutable address
-    like TEST-NET-1 (192.0.2.1) -- a closed port gets an immediate
-    connection-refused from the OS, while an unroutable address can sit
-    in the OS's own TCP retry/timeout handling for far longer than
-    connect_timeout requests, making the test's runtime depend on
-    platform networking behavior outside this module's control.
+    """A genuinely unreachable database must surface as an error from
+    search(), not hang forever or return a silently-empty result. Targets
+    a closed local port rather than an unroutable address (e.g. TEST-NET-1)
+    so the OS fails the connection immediately instead of retrying past
+    connect_timeout.
     """
     unreachable_store = PgVectorStore(
         dsn="dbname=doesnotexist host=127.0.0.1 port=1 connect_timeout=2",
@@ -237,22 +209,10 @@ async def _fake_async_ctx(value):
 
 
 async def test_search_issues_set_local_ef_search_before_the_select():
-    """Unit test (no real DB) exercising PgVectorStore.search() directly:
-    asserts it actually issues a statement applying hnsw.ef_search before
-    the SELECT.
-
-    This replaces an earlier version of this test that opened its own
-    connection, ran `SET LOCAL` itself, and asserted Postgres honored it
-    -- which doesn't test our code at all (Postgres honoring SET LOCAL is
-    a database feature, not something this codebase implements). That
-    version would still have passed even if search() stopped applying
-    ef_search entirely. This one wraps the cursor search() actually uses
-    and inspects what search() itself sent, so it fails if that line is
-    ever removed or broken -- which is exactly what caught this: the
-    original SQL ("SET LOCAL hnsw.ef_search = %s") is invalid under
-    psycopg3 (Postgres doesn't accept a bound parameter in a SET
-    statement); see pgvector_store.py's search() for the set_config()
-    fix and fuller explanation.
+    """Unit test (no real DB): mocks the cursor and asserts search() itself
+    issues a statement applying hnsw.ef_search before the data query, so
+    the assertion fails if that call is ever removed or broken -- see
+    pgvector_store.py's search() for why it's set_config(), not SET LOCAL.
     """
     store = PgVectorStore.__new__(PgVectorStore)  # skip __init__: no real pool needed
     store._ready = True  # skip _ensure_ready(): no real connection needed
@@ -284,6 +244,29 @@ async def test_search_issues_set_local_ef_search_before_the_select():
     # the SQL text -- that's the fix (set_config, not "SET LOCAL ... %s"),
     # so it must NOT show up in the SQL string itself.
     ef_search_params = calls[ef_search_calls[0]].args[1]
-    assert str(HNSW_EF_SEARCH) in ef_search_params
+    assert str(get_settings().vector_search_effort) in ef_search_params
     assert data_query_calls, "search() never issued the actual data SELECT"
     assert ef_search_calls[0] < data_query_calls[0], "ef_search must be set before the data query"
+
+
+async def test_search_query_can_use_the_hnsw_index():
+    """search()'s ORDER BY must be the raw distance expression, not a
+    computed "similarity" alias -- otherwise Postgres can't match it to the
+    HNSW index and falls back to a full table scan (the actual regression
+    this catches). `enable_seqscan = off` forces Postgres to prove the
+    query SHAPE is index-compatible even on this suite's tiny table, where
+    a scan and an index scan would otherwise return identical results and
+    hide the bug."""
+    store = PgVectorStore()
+    try:
+        await store.open()
+        async with store._pool.connection() as conn, conn.cursor() as cur:
+            await cur.execute("SET LOCAL enable_seqscan = off;")
+            await cur.execute(
+                sql.SQL("EXPLAIN {}").format(store._search_query()),
+                ([0.0] * EMBEDDING_DIM, [0.0] * EMBEDDING_DIM, 1),
+            )
+            plan = "\n".join(row[0] for row in await cur.fetchall())
+        assert "Index Scan" in plan, f"query plan did not use the index:\n{plan}"
+    finally:
+        await store.close()
