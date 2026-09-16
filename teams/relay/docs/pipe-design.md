@@ -6,7 +6,7 @@ How an urgency signal gets from the moment it's computed to the moment it lands 
 
 | | |
 |---|---|
-| Consumes | `resonance.task-events` |
+| Consumes | `resonance.task-events-notifications` |
 | Produces | `resonance.task-notifications` |
 | Serves | LENS (gateway + BFF) |
 | Status | for review |
