@@ -430,6 +430,15 @@ kafka:
 minio:
   enabled: true
   mode: standalone
+  # bitnami/minio (and its console image) were pruned from Docker Hub's free tier in 2025,
+  # same as kafka above - bitnamilegacy/* is the same content, relocated by Broadcom.
+  image:
+    registry: docker.io
+    repository: bitnamilegacy/minio
+  console:
+    image:
+      registry: docker.io
+      repository: bitnamilegacy/minio-object-browser
   persistence:
     enabled: false
   resources:
