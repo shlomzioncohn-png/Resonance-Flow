@@ -320,11 +320,17 @@ falls outside the scenario's `time_horizon` (`ceo_regulator_call_vs_board_prep` 
 — `today`, `task_maintenance` a week out). That is the point: the far deadline is
 there so it reads as *not* urgent against the live task. The correct answer's own
 deadline always sits inside `time_horizon`; only the distractor's may fall beyond
-it. A `this_week` scenario whose *correct* answer is due next week is a bug — widen
-`time_horizon` instead (as `manager_blocked_hire_vs_budget_review` and
-`ceo_blocked_ma_review_vs_vp_offer` do, widening to `this_month`, and
-`field_engineer_cutover_inspection_vs_backlog_patch` does, widening `today` to
-`this_week`).
+it. A `this_week` scenario whose *correct* answer is due next week is a bug —
+either widen `time_horizon` (as `manager_blocked_hire_vs_budget_review` does,
+widening to `this_month` because its correct answer genuinely is a multi-week
+Q3 budget review) or move the deadline itself if the story is really a
+tighter one. `ceo_blocked_ma_review_vs_vp_offer` and
+`field_engineer_cutover_inspection_vs_backlog_patch` both originally widened
+the label instead of fixing the data (`this_week`→`this_month`, `today`→
+`this_week`) to pass the checker; both were revisited and now move the
+deadline itself instead (a vendor-contract deadline moved within the same
+week; a cutover moved from "tomorrow" to "tonight") — see "Review status"
+below.
 
 This is mechanically checked, not just a convention to remember:
 `tests/test_personas.py::test_real_persona_set_correct_answer_deadline_inside_time_horizon`
@@ -482,13 +488,31 @@ report if 100% isn't reached by the Foundation Gate.)*
     one specifically.
 
   **Not changed (mentor flagged as non-blocking, explicitly "not this PR"):**
-  the stakes imbalance in `ceo_blocked_ma_review_vs_vp_offer` (an acquisition
-  term sheet vs. a VP hire decision); the overlap between
-  `developer_prod_crash_vs_backlog_feature` and `developer_login_hotfix_vs_migration`
-  (both "production incident, same-day deadline wins"); the structural echo
-  between `ceo_regulator_call_vs_board_prep` and
-  `higher_manager_regulatory_filing_vs_strategy_section` (both "regulatory item
-  due today with a penalty" vs. "strategic document due later").
+  the overlap between `developer_prod_crash_vs_backlog_feature` and
+  `developer_login_hotfix_vs_migration` (both "production incident, same-day
+  deadline wins"); the structural echo between `ceo_regulator_call_vs_board_prep`
+  and `higher_manager_regulatory_filing_vs_strategy_section` (both "regulatory
+  item due today with a penalty" vs. "strategic document due later").
+
+  **`ceo_blocked_ma_review_vs_vp_offer` revisited (2026-09-16), both of her
+  non-blocking notes on the same file:** (1) the stakes imbalance —
+  `task_ma` was "review the acquisition term sheet"; reframed as "review the
+  renewed vendor contract terms" so the blocked task's stakes are no longer
+  wildly larger than the VP hire decision it loses to. (2) the `this_month`
+  widening from the first review round "fixed the label, not the data" — the
+  persona was still planning her week. Reverted `time_horizon` to `this_week`
+  and moved `task_vp`'s deadline itself (next Monday → the end of the current
+  week) instead; `task_ma` keeps the nearer Friday deadline so the
+  blocked-holds-nearest-deadline pattern is unaffected.
+
+  **`field_engineer_cutover_inspection_vs_backlog_patch` revisited (2026-09-16),
+  same "label not data" note:** the cutover was "tomorrow's 08:00", which is
+  why `today` had to be widened to `this_week` to pass the checker in the
+  first review round. Moved the cutover itself to tonight (18:00, same day as
+  `current_datetime`) and reverted `time_horizon` to `today` instead — the
+  data now matches the label. Her other note on this file (it's the most
+  generic, "deadline vs. no deadline" scenario in the Field Engineer set) was
+  explicitly "fine" as-is, not something to change.
 
   **`current_datetime` diversity (2026-09-16).** The mentor's other set-wide
   observation: all 30 scenarios shared one `current_datetime` (Monday
@@ -501,12 +525,15 @@ report if 100% isn't reached by the Foundation Gate.)*
     `manager_escalation_call_vs_design_review`: `this_week`, shifted +3 days
     (Monday → **Thursday**), so the window has only 3 days left before Sunday
     instead of 6.
-  - `ceo_blocked_ma_review_vs_vp_offer` and `manager_blocked_hire_vs_budget_review`:
-    `this_month`, shifted +14 days (weekday-preserving, so no description text
-    needed to change) — `manager_blocked_hire_vs_budget_review`'s correct
-    answer (`task_budget`) now lands its deadline on **2026-09-30, the last
-    day of the month**, directly exercising `calendar.monthrange`'s last-day
-    calculation in `time_horizon_end`.
+  - `manager_blocked_hire_vs_budget_review`: `this_month`, shifted +14 days
+    (weekday-preserving, so no description text needed to change) — its
+    correct answer (`task_budget`) now lands its deadline on
+    **2026-09-30, the last day of the month**, directly exercising
+    `calendar.monthrange`'s last-day calculation in `time_horizon_end`.
+  - `ceo_blocked_ma_review_vs_vp_offer` was shifted +14 days too, but its
+    `time_horizon` was later reverted from `this_month` back to `this_week`
+    (see the note above) — it still keeps a `current_datetime` other than
+    2026-09-07, just no longer exercises the month-end edge specifically.
   - All four re-verified against every invariant in this file (`make test`,
     `make eval-ci`) — none of the tasks' relative ordering, `blocked` status,
     or tier changed, so every existing test (including the position-

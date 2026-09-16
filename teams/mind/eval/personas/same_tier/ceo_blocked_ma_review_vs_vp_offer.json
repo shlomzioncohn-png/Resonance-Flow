@@ -7,14 +7,14 @@
   "context": {
     "free_time_minutes": 50,
     "current_datetime": "2026-09-21T10:00:00",
-    "time_horizon": "this_month",
+    "time_horizon": "this_week",
     "constraints": []
   },
   "tasks": [
     {
       "task_id": "task_ma",
-      "title": "Review the acquisition term sheet",
-      "description": "The term sheet expires Friday, but your review is on hold until legal delivers the due-diligence memo, which is still in progress.",
+      "title": "Review the renewed vendor contract terms",
+      "description": "The updated terms need your sign-off before the current vendor agreement lapses Friday, but your review is on hold until legal finishes redlining the liability clause, which is still in progress.",
       "deadline": "2026-09-25T17:00:00",
       "effort_estimate": 40,
       "tier": "strategic",
@@ -24,8 +24,8 @@
     {
       "task_id": "task_vp",
       "title": "Make the final call on the VP Sales offer",
-      "description": "The preferred candidate needs a yes or no; their employer has made a counter and they will decide by next Monday.",
-      "deadline": "2026-09-28T17:00:00",
+      "description": "The preferred candidate needs a yes or no; their employer has made a counter and they will decide by the end of the week.",
+      "deadline": "2026-09-27T17:00:00",
       "effort_estimate": 30,
       "tier": "strategic",
       "blocked": false,
@@ -33,7 +33,7 @@
     }
   ],
   "expected_top_task_id": "task_vp",
-  "expected_reason": "task_ma is blocked pending legal's due-diligence memo and cannot move now despite the nearer expiry; task_vp is unblocked and needs a decision before the candidate's Monday cutoff.",
+  "expected_reason": "task_ma is blocked pending legal's redline of the liability clause and cannot move now despite the nearer expiry; task_vp is unblocked and needs a decision before the end of this week.",
   "source": {
     "type": "synthetic",
     "source_detail": null
