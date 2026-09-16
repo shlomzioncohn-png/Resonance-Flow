@@ -32,9 +32,9 @@
       "parent_task_id": null
     },
     {
-      "task_id": "task_newlogo",
-      "title": "Prospect a high-profile new logo",
-      "description": "A well-known brand looks like a plausible fit; build the account map and a full outreach sequence from scratch. Purely proactive, no timeline.",
+      "task_id": "task_outage_followup",
+      "title": "Follow up with EnterpriseCo after their checkout outage",
+      "description": "EnterpriseCo hit a checkout outage yesterday and escalated hard, but support has already assigned a dedicated engineer and is running the account through a formal RCA process; no action is needed from you unless they ask for it.",
       "deadline": null,
       "effort_estimate": 45,
       "tier": "tactical",
@@ -43,7 +43,7 @@
     }
   ],
   "expected_top_task_id": "task_renewal",
-  "expected_reason": "None of the three tasks has a deadline. task_renewal protects an at-risk renewal that is a large share of the territory; task_newlogo is speculative outreach with no timeline and task_filler_forecast is routine housekeeping.",
+  "expected_reason": "None of the three tasks has a hard deadline. task_renewal protects a real, still-unresolved churn risk that only this rep can act on; task_outage_followup sounds urgent but support already owns it and no action is needed here; task_filler_forecast is routine housekeeping.",
   "source": {
     "type": "synthetic",
     "source_detail": null

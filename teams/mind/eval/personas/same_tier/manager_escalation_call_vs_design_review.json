@@ -6,7 +6,7 @@
   },
   "context": {
     "free_time_minutes": 60,
-    "current_datetime": "2026-09-07T09:00:00",
+    "current_datetime": "2026-09-10T09:00:00",
     "time_horizon": "this_week",
     "constraints": []
   },
@@ -15,7 +15,7 @@
       "task_id": "task_escalation",
       "title": "Write the priorities brief for the 10:00 escalation call",
       "description": "A customer's integration broke overnight; their account team needs your written read on priorities and next steps by 09:55 so they can lead the 10:00 escalation call with it.",
-      "deadline": "2026-09-07T09:55:00",
+      "deadline": "2026-09-10T09:55:00",
       "effort_estimate": 40,
       "tier": "tactical",
       "blocked": false,
@@ -25,7 +25,7 @@
       "task_id": "task_review",
       "title": "Circulate the pre-read for tomorrow's design review",
       "description": "You chair the notifications-service design review at 14:00 tomorrow; the agenda and pre-read need to reach attendees by 09:00 tomorrow so they can prepare.",
-      "deadline": "2026-09-08T09:00:00",
+      "deadline": "2026-09-11T09:00:00",
       "effort_estimate": 30,
       "tier": "tactical",
       "blocked": false,
@@ -38,6 +38,6 @@
     "type": "synthetic",
     "source_detail": null
   },
-  "team_lead_approved": false,
+  "team_lead_approved": true,
   "mentor_approved": false
 }

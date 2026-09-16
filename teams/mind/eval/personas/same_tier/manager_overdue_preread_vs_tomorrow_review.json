@@ -13,8 +13,8 @@
   "tasks": [
     {
       "task_id": "task_preread",
-      "title": "Finish the board pre-read memo",
-      "description": "This was due before last Friday's board meeting, which has already happened; the memo is now only useful for the minutes.",
+      "title": "Finish the compliance report for last week's audit",
+      "description": "This was due last Friday for the routine audit cycle, but the auditor emailed this morning asking for it directly ahead of today's follow-up call -- it is now more urgent than when it was merely late.",
       "deadline": "2026-09-04T09:00:00",
       "effort_estimate": 20,
       "tier": "tactical",
@@ -24,7 +24,7 @@
     {
       "task_id": "task_review",
       "title": "Prep for tomorrow's stakeholder review",
-      "description": "You present the migration status to stakeholders at 09:00 tomorrow; the deck is not ready and needs to be done by 08:30 to leave time to send it round.",
+      "description": "You present a routine migration status update to stakeholders at 09:00 tomorrow; it's the standing weekly slot, nothing new to report, and stakeholders said a short delay wouldn't matter.",
       "deadline": "2026-09-08T08:30:00",
       "effort_estimate": 40,
       "tier": "tactical",
@@ -32,8 +32,8 @@
       "parent_task_id": null
     }
   ],
-  "expected_top_task_id": "task_review",
-  "expected_reason": "task_preread's deadline has already passed — the board meeting it was for is over, so it is now low value; task_review has a real deadline tomorrow morning for a meeting that has not happened.",
+  "expected_top_task_id": "task_preread",
+  "expected_reason": "task_preread's original deadline has passed, but the auditor is now asking for it directly ahead of today's follow-up call -- being overdue has made it more urgent, not less; task_review is a routine weekly status slot tomorrow that stakeholders said could slip without consequence.",
   "source": {
     "type": "synthetic",
     "source_detail": null

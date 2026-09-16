@@ -4,8 +4,13 @@ import json
 import sys
 from pathlib import Path
 
+from mind.evaluation.baseline_models import (
+    NearestDeadlineModel,
+    SkipBlockedNearestDeadlineModel,
+)
 from mind.evaluation.dummy_model import DummyModel
 from mind.evaluation.harness import Report, run
+from mind.evaluation.interfaces import RankingModel
 from mind.evaluation.personas import PersonaSchemaError, load_personas, validate_personas
 
 
@@ -20,7 +25,12 @@ def _summary_lines(label: str, report: Report) -> str:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Run evaluation harness on ranking models.")
-    parser.add_argument("--model", type=str, default="dummy", help="Model to evaluate. (e.g. dummy)")
+    parser.add_argument(
+        "--model", type=str, default="dummy",
+        help="Model to evaluate: 'dummy' (constant score, plumbing only), "
+             "'nearest-deadline' or 'skip-blocked-nearest-deadline' (the cheap "
+             "baselines from eval/personas/README.md's 'Cheap-baseline scores' table).",
+    )
     parser.add_argument(
         "--personas", type=str, default="eval/personas",
         help="Path to the personas directory. Contains scenario.schema.json and the "
@@ -35,15 +45,21 @@ def main() -> None:
     parser.add_argument(
         "--max-accuracy", type=float, default=None,
         help="If set, exit 1 when the combined top-1 accuracy rises above this "
-             "fraction (0-1) — catches the scenario set drifting back toward the "
-             "no-headroom baseline the 2026-09-06 rebuild fixed (see eval/personas/README.md).",
+             "fraction (0-1). What that means depends on --model: see the "
+             "make eval-ci target in the Makefile for how each model's ceiling "
+             "is used and why.",
     )
     args = parser.parse_args()
 
-    if args.model == "dummy":
-        model = DummyModel()
-    else:
-        raise ValueError(f"Unknown model: {args.model}")
+    models: dict[str, RankingModel] = {
+        "dummy": DummyModel(),
+        "nearest-deadline": NearestDeadlineModel(),
+        "skip-blocked-nearest-deadline": SkipBlockedNearestDeadlineModel(),
+    }
+    try:
+        model = models[args.model]
+    except KeyError:
+        raise ValueError(f"Unknown model: {args.model!r}. Choices: {sorted(models)}") from None
 
     personas_path = Path(args.personas)
 
@@ -102,9 +118,8 @@ def main() -> None:
         sys.exit(1)
     if args.max_accuracy is not None and accuracy > args.max_accuracy:
         print(
-            f"Combined top-1 accuracy {accuracy:.1%} is above --max-accuracy "
-            f"{args.max_accuracy:.1%} — the scenario set no longer has headroom "
-            f"(see 'Cheap-baseline scores' in eval/personas/README.md).",
+            f"{combined_report.model_name} combined top-1 accuracy {accuracy:.1%} "
+            f"is above --max-accuracy {args.max_accuracy:.1%}.",
             file=sys.stderr,
         )
         sys.exit(1)

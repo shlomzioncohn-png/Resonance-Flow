@@ -191,6 +191,18 @@ No trivial position rule beats ~50%. The ~20-point gap between the last two rows
 is deliberate — it is the headroom a model earns by recognising `blocked`; the
 ~37 points above 63% is the headroom it earns by reading descriptions.
 
+**These two baselines are real code, not just a table.**
+`mind.evaluation.baseline_models.NearestDeadlineModel` and
+`SkipBlockedNearestDeadlineModel` implement the `RankingModel` contract (they
+only need one task plus `current_datetime`, exactly what `score(task, context)`
+already gives them) and reproduce the 43%/63% numbers above. `make eval-ci` runs
+`SkipBlockedNearestDeadlineModel` with `--max-accuracy 0.70` — that is the real
+headroom guard. `DummyModel`, which returns a constant score and so never reads
+`deadline` or `blocked` at all, is run separately with a `min`/`max` band around
+~30% as a *position-bias* guard only — it cannot tell you anything about whether
+a deadline heuristic is near the ceiling, because it never looks at `deadline` in
+the first place. See the `eval-ci` target in the `Makefile` for both.
+
 **Post-mentor-review cleanup (2026-08-31).** The mentor's feedback: (1) the model
 now receives `current_datetime` as context, so deadline-proximity reasoning is
 fair game; (2) scores are calibrated to a global 0–1 scale and cross-tier
@@ -231,11 +243,17 @@ improvement. The set was rebuilt to **30 scenarios (5 per role)** so that:
   handling `blocked` is what separates the ~43% and ~63% baselines;
 - **both tasks fit `free_time_minutes`** in every scenario, so Chain's effort
   filter can never eliminate the distractor and hand the model a free answer;
-- the correct answer's **position is shuffled** (index 0 in 9/30, 1 in 15, 2 in
+- the correct answer's **position is shuffled** (index 0 in 10/30, 1 in 14, 2 in
   6; no "pick task *k*" rule beats ~50%), and no 3-task scenario has it first;
 - **persona ≠ tier** in several scenarios (a CEO doing operational work, a
   Developer doing strategic work), so "role ⇒ tier" is not a shortcut;
-- two scenarios test a **deadline that has already passed**;
+- two scenarios test a **deadline that has already passed** — in opposite
+  directions, so "overdue" is not a shortcut for "deprioritize":
+  `ceo_overdue_launch_statement_vs_earnings_prep` is the case where the thing
+  the deadline was for already happened, so the overdue task really is low
+  value now; `manager_overdue_preread_vs_tomorrow_review` is the case where
+  the overdue task is *still* the most urgent thing on the list, because
+  whatever it feeds is still live;
 - every `deadline` is justified in the task's own `description`;
 - no scheduled-meeting start time is used as a `deadline`.
 
@@ -308,10 +326,20 @@ it. A `this_week` scenario whose *correct* answer is due next week is a bug — 
 `field_engineer_cutover_inspection_vs_backlog_patch` does, widening `today` to
 `this_week`).
 
-This is mechanically checked, not just a convention to remember: run
-[`eval/check_time_horizon.py`](../check_time_horizon.py) (`python -m eval.check_time_horizon`
-from `teams/mind/`) to verify every scenario's correct answer has a deadline inside
-its `time_horizon`. `make eval-ci` — what CI actually runs — includes this check.
+This is mechanically checked, not just a convention to remember:
+`tests/test_personas.py::test_real_persona_set_correct_answer_deadline_inside_time_horizon`
+calls `mind.evaluation.personas.correct_answer_deadline_violates_time_horizon` against
+the real set, so it runs under `make test` (linted and type-checked like any other
+code, unlike a standalone script under `eval/`). `python -m eval.check_time_horizon`
+is a thin CLI wrapper around the same function, kept only so `make eval-ci` has a
+command to run.
+
+Four other set-wide invariants get the same treatment, each next to this one in
+`tests/test_personas.py`: every `blocked`-with-a-deadline task holds the nearest
+deadline in its scenario, every task's `effort_estimate` fits `free_time_minutes`,
+the correct-answer position distribution matches the numbers above, and the same
+task text never carries two different `tier` values across files. All five used to
+be prose only — a scenario edit could silently break one and CI would stay green.
 
 **What the model can't see — never the decider:**
 - The model sees one task plus a context carrying only `current_datetime`
@@ -371,13 +399,19 @@ vs. internal), and `same_tier/manager_status_digest_vs_reorg_proposal.json`
 "Partially approved with a documented plan to close" is the honest state to
 report if 100% isn't reached by the Foundation Gate.)*
 
-**Team-lead / mentor review (PR #198):**
-- **Reviewed by:** estherora-tem
-- **Approved:** 0 / 30 (`team_lead_approved` / `mentor_approved` both `false` on
-  every scenario). The set was rebuilt on 2026-09-06 in response to the mentor's
-  review (baseline too high, blocked-distractor pattern, effort/free-time,
-  persona↔tier, position bias, deadline-passed) — all 30 are pending a fresh
-  review pass.
+**Team-lead review (PR #198):**
+- **Reviewed by:** estherora-tem, team lead. (The mentor is a different person
+  and has not reviewed this set yet — that is a separate, still-pending gate;
+  `mentor_approved` stays `false` on all 30 until then.)
+- **Approved:** 27 / 30 `team_lead_approved` after the 2026-09-15/16
+  scenario-by-scenario sign-off pass (22 outright, 5 with a non-blocking note —
+  see below). The remaining 3 were rewritten per her requested fixes but not
+  yet re-reviewed in their new form, so `team_lead_approved` stays `false` on
+  those until she looks at the rewrite: `manager_blocked_hire_vs_budget_review`,
+  `manager_overdue_preread_vs_tomorrow_review`,
+  `salesperson_at_risk_renewal_vs_new_logo`. The set was rebuilt on 2026-09-06
+  in response to her earlier review (baseline too high, blocked-distractor
+  pattern, effort/free-time, persona↔tier, position bias, deadline-passed).
 - **Notes / pending changes:** Addressed 2026-09-15 in response to
   estherora-tem's PR review:
   - `ceo_blocked_ma_review_vs_vp_offer`'s `expected_reason` corrected, and its
@@ -397,3 +431,83 @@ report if 100% isn't reached by the Foundation Gate.)*
     a combined top-1 accuracy gate (`--min-accuracy 0.20 --max-accuracy 0.50`)
     around the designed ~30% dummy/pick-first baseline — see "Cheap-baseline
     scores" above.
+
+  **Scenario-by-scenario sign-off pass (2026-09-15/16).** estherora-tem reviewed
+  all 30 individually: 22 approved outright, 5 approved with a non-blocking
+  note, 3 not approved. Also flagged: the `--max-accuracy 0.50` gate above did
+  not guard what its comment claimed (`DummyModel` never reads `deadline`/
+  `blocked`, so it cannot detect a set that has lost its headroom — proven with
+  a sabotaged copy of the set that scored 100% on the real heuristic while
+  still passing `make eval-ci`), `eval/check_time_horizon.py` sat outside
+  every quality gate (`make lint`/`make test` don't touch `eval/`) and
+  re-parsed JSON by hand instead of using `load_personas`, and 4 of the 5
+  set-wide invariants this README documents were prose only. Addressed:
+
+  - `manager_blocked_hire_vs_budget_review`: `task_hire`'s blocker changed from
+    "waiting on panel feedback" (something the manager could just chase
+    herself) to the two panel members being unreachable while travelling —
+    genuinely outside her control, matching the pattern in
+    `field_engineer_blocked_rma_vs_runbook_update` and
+    `salesperson_blocked_discount_vs_warm_followup`.
+  - `manager_overdue_preread_vs_tomorrow_review`: rewritten as the "overdue but
+    still the most urgent thing" case (see the deadline-passed bullet above) —
+    the compliance report is overdue, but the auditor is now asking for it
+    directly, so `expected_top_task_id` flips to the overdue task. This was a
+    structural duplicate of `ceo_overdue_launch_statement_vs_earnings_prep`
+    (both "overdue item whose event already happened" vs. "prep for tomorrow");
+    the rewrite removes the duplicate and adds the missing direction at once.
+  - `salesperson_at_risk_renewal_vs_new_logo`: the speculative "new logo"
+    distractor (structurally identical to `higher_manager_stalled_renewal_vs_market_expansion`
+    — an at-risk account vs. speculative growth, both all-null-deadline) was
+    replaced with a task that reads as urgent but whose description says
+    another team already owns it and is actively working it — a dimension the
+    set was missing entirely, not just a reshuffle.
+  - `ceo_payment_processor_cutoff_vs_strategy_deck`: `task_filler_press` tier
+    corrected `strategic` → `operational` (a 15-minute trade-press quote is not
+    strategic-scope work; tier describes the kind of work, not its stakes).
+  - The correct-answer position distribution shifted with the
+    `manager_overdue_preread_vs_tomorrow_review` rewrite: **index 0 in 10/30,
+    1 in 14, 2 in 6** (was 9/15/6) — updated above and in the new position-
+    distribution test.
+  - The real headroom gate now runs
+    `mind.evaluation.baseline_models.SkipBlockedNearestDeadlineModel`
+    (`--max-accuracy 0.70`) instead of leaning on `DummyModel`, which is kept
+    only as a position-bias guard — see "Cheap-baseline scores" above.
+  - The time_horizon check moved into `tests/test_personas.py` (typed, run by
+    `make test`); `eval/check_time_horizon.py` is now a thin wrapper so
+    `make eval-ci` still has a command to run. Four more tests were added for
+    the previously-prose-only invariants (blocked-holds-nearest-deadline,
+    effort-fits-free-time, position distribution, no duplicate task text with
+    a different tier) — see "Deadline proximity" below for the time_horizon
+    one specifically.
+
+  **Not changed (mentor flagged as non-blocking, explicitly "not this PR"):**
+  the stakes imbalance in `ceo_blocked_ma_review_vs_vp_offer` (an acquisition
+  term sheet vs. a VP hire decision); the overlap between
+  `developer_prod_crash_vs_backlog_feature` and `developer_login_hotfix_vs_migration`
+  (both "production incident, same-day deadline wins"); the structural echo
+  between `ceo_regulator_call_vs_board_prep` and
+  `higher_manager_regulatory_filing_vs_strategy_section` (both "regulatory item
+  due today with a penalty" vs. "strategic document due later").
+
+  **`current_datetime` diversity (2026-09-16).** The mentor's other set-wide
+  observation: all 30 scenarios shared one `current_datetime` (Monday
+  2026-09-07), so `this_week`'s Monday-start-week logic and the end-of-month
+  boundary in `this_month` were never exercised near an edge. Fixed by moving
+  four scenarios' `current_datetime` (and every task `deadline` in the same
+  file, by the identical delta, so the relative "today"/"tomorrow"/"Friday"
+  framing in each description stays true):
+  - `salesperson_processing_cutoff_vs_call_summary` and
+    `manager_escalation_call_vs_design_review`: `this_week`, shifted +3 days
+    (Monday → **Thursday**), so the window has only 3 days left before Sunday
+    instead of 6.
+  - `ceo_blocked_ma_review_vs_vp_offer` and `manager_blocked_hire_vs_budget_review`:
+    `this_month`, shifted +14 days (weekday-preserving, so no description text
+    needed to change) — `manager_blocked_hire_vs_budget_review`'s correct
+    answer (`task_budget`) now lands its deadline on **2026-09-30, the last
+    day of the month**, directly exercising `calendar.monthrange`'s last-day
+    calculation in `time_horizon_end`.
+  - All four re-verified against every invariant in this file (`make test`,
+    `make eval-ci`) — none of the tasks' relative ordering, `blocked` status,
+    or tier changed, so every existing test (including the position-
+    distribution and headroom gates) still passes with identical numbers.

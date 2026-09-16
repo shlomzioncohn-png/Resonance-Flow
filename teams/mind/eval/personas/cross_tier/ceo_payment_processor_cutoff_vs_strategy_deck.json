@@ -37,7 +37,7 @@
       "description": "A publication asked for a quote on an industry trend; low stakes, flexible timing.",
       "deadline": null,
       "effort_estimate": 15,
-      "tier": "strategic",
+      "tier": "operational",
       "blocked": false,
       "parent_task_id": null
     }
@@ -48,6 +48,6 @@
     "type": "synthetic",
     "source_detail": null
   },
-  "team_lead_approved": false,
+  "team_lead_approved": true,
   "mentor_approved": false
 }
