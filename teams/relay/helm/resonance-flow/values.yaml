@@ -259,7 +259,21 @@ components:
           database: chain
           username: chain
           password: chain-dev-password
-        # Kafka pending confirmation from the Chain team on what it consumes/produces (#384).
+        kafka:
+          consumerGroupId: chain-service
+          topics:
+            # Consumed - drives addDependency.
+            taskDependenciesProposed: task.dependencies.proposed
+            # Consumed - drives removeDependency. PROPOSED (#384), not yet a reviewed contract.
+            taskDependenciesRemoved: task.dependencies.removed
+            # Consumed - drives onTaskStatusChanged. PROPOSED (#384): assumes Inbox's full
+            # 8-value status enum, mapped internally to Chain's 3-value model - not yet
+            # confirmed with Inbox.
+            taskStatusUpdated: task.status.updated
+            # Produced - consumed by Inbox (chainSchedulingUpdated in its own config).
+            taskSchedulingUpdated: task.scheduling.updated
+        # onConstraintAdded/onConstraintStatusChanged stay REST-triggered (Chain's own API,
+        # not Kafka) - #384 confirmed there's no topic for these today.
   inbox:
     enabled: true
     replicaCount: 1

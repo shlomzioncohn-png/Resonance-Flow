@@ -36,11 +36,27 @@ shared cluster instance, wired in `teams/relay/helm/resonance-flow/values.yaml`
 same file-mount ConfigMap mechanism Inbox uses. Flyway is the confirmed migration tool
 (matching Inbox), not yet wired into `pom.xml` - premature before real JPA entities exist.
 
-Kafka topics/consumer wiring is still open: two competing internal designs for the
-dependency/constraint flow need reconciling, and nothing yet defines what event drives a task
-status change reaching Chain. Application-side JPA wiring (entities/repositories actually backed
-by Postgres, replacing the in-memory `TaskRepository`/`TaskDependencyRepository`) is also still
-open follow-up work, not done here.
+**Kafka topics** (also wired in `components.chain.config.data.kafka` / the same configmap):
+
+| Topic | Direction | Drives |
+|---|---|---|
+| `task.dependencies.proposed` | consume (Mind) | `addDependency` |
+| `task.dependencies.removed` | consume (Mind) | `removeDependency` |
+| `task.status.updated` | consume (Inbox) | `onTaskStatusChanged` |
+| `task.scheduling.updated` | produce | consumed by Inbox |
+
+`task.dependencies.removed` and `task.status.updated` are still **PROPOSED**, not reviewed
+contracts yet - see the draft `.proto` schemas from the Chain team on #384. `task.status.updated`
+in particular assumes Inbox's full 8-value status enum, mapped internally to Chain's simplified
+3-value model - not yet confirmed with Inbox.
+
+`onConstraintAdded`/`onConstraintStatusChanged` stay REST-triggered through Chain's own API for
+now - draft `task.constraints.proposed`/`task.constraints.status.updated` schemas exist in case
+this becomes event-driven later, but there's no topic wired for them today.
+
+Application-side JPA wiring (entities/repositories actually backed by Postgres, replacing the
+in-memory `TaskRepository`/`TaskDependencyRepository`) is also still open follow-up work, not
+done here.
 
 Locally, an in-memory H2 database is still configured as a placeholder purely so a
 `DataSource`/transaction manager exists for `@Transactional` - `Task`/`TaskDependency` are plain

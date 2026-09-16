@@ -55,11 +55,14 @@ onConstraintStatusChanged.
   Inbox's pattern (not wired into pom.xml yet - premature before real JPA entities
   exist). No infra beyond Postgres + Kafka needed. See
   `teams/relay/helm/resonance-flow/templates/services/chain/configmap.yaml`.
-- Still open (#384): Kafka topics/consumer wiring. Two competing internal designs for
-  the dependency/constraint flow need reconciling first, and there's a genuine gap -
-  nothing yet defines what event drives a task status change reaching Chain
-  (`onTaskStatusChanged`'s trigger). Real JPA entities/repositories replacing the
-  in-memory ones are also still open work.
+- Resolved (#384): Kafka topics wired in chart config - consume
+  `task.dependencies.proposed` (addDependency), `task.dependencies.removed`
+  (removeDependency, PROPOSED), `task.status.updated` (onTaskStatusChanged,
+  PROPOSED - assumes Inbox's full 8-value status enum, not yet confirmed with
+  Inbox); produce `task.scheduling.updated`. onConstraintAdded/
+  onConstraintStatusChanged stay REST-triggered - no topic today, draft schemas
+  exist only in case that changes later. Real JPA entities/repositories
+  replacing the in-memory ones are still open work.
 - Until real JPA-backed repositories exist, TaskEligibilityService ALSO
   uses in-process locking to make read-modify-write on blockingCount /
   openConstraintCount actually atomic - @Transactional alone doesn't
