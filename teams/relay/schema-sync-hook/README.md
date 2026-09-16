@@ -55,8 +55,8 @@ data — only spins up a throwaway local `kind` cluster for smoke tests.
   manual discipline:**
   [`.github/workflows/relay-schema-sync.yaml`](../../../.github/workflows/relay-schema-sync.yaml)
   re-copies the real files in here on every push to `main` that touches them,
-  and commits the result itself (same pattern as `service-ci.yaml`'s
-  `update-manifest` job auto-committing image tag bumps). Nobody should ever
+  and commits the result itself (same pattern as `service-update-manifest.yaml`
+  auto-committing image tag bumps). Nobody should ever
   hand-edit anything under `files/` — it's a generated mirror.
 - Three of the six schemas in `../ci/schema-subjects.tsv`
   (`task-created-event.proto`, `raw-object-event.proto`, `github-task.proto`)

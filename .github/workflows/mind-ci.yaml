@@ -12,13 +12,61 @@ on:
       - "teams/mind/**"
   workflow_dispatch: {}
 
+# Cancel an in-progress run when a newer commit is pushed to the same ref —
+# the older run is measuring stale code and just burns Actions minutes.
+concurrency:
+  group: mind-ci-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
+  lint:
+    runs-on: self-hosted
+    timeout-minutes: 15  # a hung `make eval` must not run to the 6h default
+    permissions:
+      contents: read
+    defaults:
+      run:
+        working-directory: teams/mind
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+          cache-dependency-path: teams/mind/pyproject.toml
+
+      - name: Install
+        run: make dev
+
+      - name: Lint (ruff + mypy)
+        run: make lint
+
+      # Smoke-check that run.py still produces a report end-to-end. The real
+      # regression check runs against eval/personas/ — it is switched on in the
+      # PR that lands the persona scenario set.
+      - name: Evaluation harness smoke check
+        run: python -m mind.evaluation.run --model dummy --personas tests/fixtures/personas
+
   ci:
+    needs: lint
+    if: github.event_name == 'pull_request'
+    permissions:
+      contents: read
+    uses: ./.github/workflows/service-ci-python.yaml
+    with:
+      service_name: mind
+      service_dir: teams/mind
+
+  cd:
+    needs: lint
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
     permissions:
       contents: write
       packages: write
       pull-requests: write
-    uses: ./.github/workflows/service-ci.yaml
+    uses: ./.github/workflows/service-cd.yaml
+    secrets: inherit
     with:
       service_name: mind
       service_dir: teams/mind

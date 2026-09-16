@@ -1,0 +1,32 @@
+name: Run Node tests
+description: Installs dependencies, lints, and builds one Node service.
+
+inputs:
+  service_dir:
+    description: "Path to the service, e.g. teams/lens/frontend"
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Set up Node 22
+      uses: actions/setup-node@v4
+      with:
+        node-version: '22'
+        cache: npm
+        cache-dependency-path: ${{ inputs.service_dir }}/package-lock.json
+
+    - name: Install dependencies
+      shell: bash
+      working-directory: ${{ inputs.service_dir }}
+      run: npm ci
+
+    - name: Lint
+      shell: bash
+      working-directory: ${{ inputs.service_dir }}
+      run: npm run lint
+
+    - name: Build frontend
+      shell: bash
+      working-directory: ${{ inputs.service_dir }}
+      run: npm run build

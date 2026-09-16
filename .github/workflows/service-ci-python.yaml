@@ -1,0 +1,24 @@
+name: Service CI - Python (reusable)
+
+on:
+  workflow_call:
+    inputs:
+      service_name:
+        description: "Component name, matches the key under components.<service_name> in teams/relay/helm/resonance-flow/values.yaml"
+        required: true
+        type: string
+      service_dir:
+        description: "Path to the service, e.g. teams/mind"
+        required: true
+        type: string
+
+jobs:
+  test:
+    runs-on: self-hosted
+    permissions:
+      contents: read
+    steps:
+      - uses: ./.github/actions/ci-python
+        with:
+          service_name: ${{ inputs.service_name }}
+          service_dir: ${{ inputs.service_dir }}
