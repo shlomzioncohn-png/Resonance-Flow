@@ -105,9 +105,10 @@ make dev        # from teams/mind/ -- installs everything, including this module
 export MIND_VECTOR_STORE_DSN="dbname=mind user=postgres password=postgres host=localhost port=5432"
 ```
 
-There's no hardcoded fallback for this DSN -- `config.py` fails fast at
-import time if it isn't set, rather than silently connecting with
-guessed/default credentials.
+There's no hardcoded fallback for this DSN -- constructing the vector
+store fails fast if it isn't set, rather than silently connecting with
+guessed/default credentials. Importing `mind.embeddings` itself doesn't
+require it (see `config.Settings`).
 
 ## Run the tests
 

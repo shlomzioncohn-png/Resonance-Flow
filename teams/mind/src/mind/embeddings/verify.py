@@ -9,13 +9,15 @@ Exits 0 on match, 1 on mismatch (so it's usable as a CI gate).
 import sys
 
 import psycopg
+from psycopg import sql
 
-from mind.embeddings.config import PG_DSN, PG_TABLE
+from mind.embeddings.config import get_settings
 from mind.embeddings.loader import MANIFEST_PATH, _load_manifest
 
 
 def main() -> int:
-    if not PG_DSN:
+    dsn = get_settings().vector_store_dsn
+    if not dsn:
         raise RuntimeError("MIND_VECTOR_STORE_DSN is not set. Required to connect to the vector store.")
 
     manifest_count = len(_load_manifest()["records"])
@@ -23,8 +25,12 @@ def main() -> int:
     # Plain sync psycopg here (not the async pool pgvector_store.py uses)
     # -- this is a one-off CLI check, not a request-serving hot path, so
     # there's no event loop to protect.
-    with psycopg.connect(PG_DSN) as conn, conn.cursor() as cur:
-        cur.execute(f"SELECT COUNT(*) FROM {PG_TABLE};")
+    with psycopg.connect(dsn) as conn, conn.cursor() as cur:
+        cur.execute(
+            sql.SQL("SELECT COUNT(*) FROM {table};").format(
+                table=sql.Identifier(get_settings().vector_store_table)
+            )
+        )
         row = cur.fetchone()
         assert row is not None, "SELECT COUNT(*) always returns exactly one row"
         table_count = row[0]

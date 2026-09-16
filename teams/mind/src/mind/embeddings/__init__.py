@@ -25,27 +25,17 @@ backing store talks to Postgres over psycopg's async API so a slow query
 doesn't stall the event loop out from under every other request FastAPI
 is serving concurrently.
 
-Pool lifetime: `open()`/`close()` let a caller (e.g. a FastAPI lifespan
-handler) control exactly when the backing store's resources -- e.g. a
-connection pool's background tasks -- are created and torn down, tied to
-the app's lifetime on a known event loop:
+Pool lifetime: call `open()`/`close()` from a FastAPI lifespan handler to
+tie the backing store's connection pool to the app's own event loop and
+lifetime, rather than letting it lazily initialize on whichever loop
+happens to make the first call:
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         await mind.embeddings.open()
         yield
         await mind.embeddings.close()
-
-If you never call open(), the store still initializes itself lazily on
-first upsert/search/delete/clear -- fine for standalone scripts, but for
-a long-running server prefer calling open() explicitly: a pool created by
-accident on whichever event loop happens to make the first call, instead
-of deliberately on the server's own loop, can end up with its background
-tasks (reconnect, min-size top-up, connection recycling) pinned to the
-wrong loop.
 """
-
-import asyncio
 
 from mind.embeddings.base import SearchResult, VectorStore
 from mind.embeddings.config import DUPLICATE_SIMILARITY_THRESHOLD
@@ -68,26 +58,17 @@ __all__ = [
 ]
 
 _store: VectorStore | None = None
-_store_lock = asyncio.Lock()
 
 
 async def _get_store() -> VectorStore:
-    # Lazy so `import mind.embeddings` (e.g. from tests that only exercise
-    # embed()) never forces a live DB connection.
-    #
-    # Double-checked locking: two coroutines on the event loop could both
-    # await past `_store is None` before either finishes constructing a
-    # store. Without the lock, both could build their own PgVectorStore
-    # (each opening its own connection pool and racing to run the
-    # CREATE EXTENSION/TABLE/INDEX schema setup), and one of those stores
-    # -- and its pool -- would just be silently discarded. The cheap
-    # `if _store is None` check outside the lock keeps the lock itself
-    # off the hot path once `_store` is set.
+    # Lazy so `import mind.embeddings` never forces a live DB connection.
+    # No lock needed: get_store() has no `await` in it, so nothing can
+    # interleave between the check and the assignment on one event loop
+    # (contrast PgVectorStore._ensure_ready, which awaits pool.open() and
+    # genuinely needs one).
     global _store
     if _store is None:
-        async with _store_lock:
-            if _store is None:
-                _store = get_store()
+        _store = get_store()
     return _store
 
 
