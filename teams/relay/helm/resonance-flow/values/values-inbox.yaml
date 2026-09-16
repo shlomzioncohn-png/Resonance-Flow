@@ -13,8 +13,11 @@ components:
     enabled: false
   lens-gateway:
     enabled: false
+  schema-registry:
+    enabled: true
 
-# inbox needs Kafka (event consumers) and Postgres (its own datastore);
+# inbox needs Kafka (event consumers), Postgres (its own datastore), and Schema Registry
+# (task.created's agreed Protobuf contract, once the producer is wired to it - see #227);
 # Minio is only used by mind/bridge, so it stays off for an inbox-only install.
 kafka:
   enabled: true

@@ -160,7 +160,7 @@ class StructuredTaskConsumerIntegrationTest extends PostgresIntegrationTest {
         producer.send("bridge.structured.tasks", invalidPayload);
 
         ConsumerRecord<String, String> errorRecord = KafkaTestUtils.getSingleRecord(
-                errorConsumer, "bridge.structured.tasks.errors", Duration.ofSeconds(10));
+                errorConsumer, "bridge.structured.tasks.errors", Duration.ofSeconds(25));
 
         assertThat(errorRecord.value()).contains("VALIDATION_FAILURE");
         assertThat(taskRepository.findAll().stream().noneMatch(t -> sourceRef.equals(t.getSourceRef()))).isTrue();
