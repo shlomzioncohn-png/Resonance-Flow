@@ -36,8 +36,6 @@ happens to make the first call:
         await mind.embeddings.close()
 """
 
-import asyncio
-
 from mind.embeddings.base import SearchResult, VectorStore
 from mind.embeddings.config import DUPLICATE_SIMILARITY_THRESHOLD
 from mind.embeddings.embeddings import embed
@@ -56,19 +54,17 @@ __all__ = [
 ]
 
 _store: VectorStore | None = None
-_store_lock = asyncio.Lock()
 
 
 async def _get_store() -> VectorStore:
     # Lazy so `import mind.embeddings` never forces a live DB connection.
-    # Double-checked locking: without the lock, two coroutines could both
-    # await past `_store is None` and each construct (and leak) their own
-    # store; the outer check keeps the lock off the hot path once it's set.
+    # No lock needed: get_store() has no `await` in it, so nothing can
+    # interleave between the check and the assignment on one event loop
+    # (contrast PgVectorStore._ensure_ready, which awaits pool.open() and
+    # genuinely needs one).
     global _store
     if _store is None:
-        async with _store_lock:
-            if _store is None:
-                _store = get_store()
+        _store = get_store()
     return _store
 
 

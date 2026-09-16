@@ -11,11 +11,12 @@ from contextlib import asynccontextmanager
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+from psycopg import sql
 from psycopg_pool import PoolTimeout
 
 import mind.embeddings as mind_embeddings
 from mind.embeddings import clear, delete, embed, search, upsert
-from mind.embeddings.config import EMBEDDING_DIM, HNSW_EF_SEARCH
+from mind.embeddings.config import EMBEDDING_DIM, get_settings
 from mind.embeddings.pgvector_store import PgVectorStore
 
 
@@ -121,7 +122,7 @@ async def test_search_respects_k_limit():
         )
 
     results = await search(query_vec, k=2)
-    assert len(results) <= 2
+    assert len(results) == 2
 
 
 async def test_full_cycle_embed_upsert_search():
@@ -252,6 +253,29 @@ async def test_search_issues_set_local_ef_search_before_the_select():
     # the SQL text -- that's the fix (set_config, not "SET LOCAL ... %s"),
     # so it must NOT show up in the SQL string itself.
     ef_search_params = calls[ef_search_calls[0]].args[1]
-    assert str(HNSW_EF_SEARCH) in ef_search_params
+    assert str(get_settings().vector_search_effort) in ef_search_params
     assert data_query_calls, "search() never issued the actual data SELECT"
     assert ef_search_calls[0] < data_query_calls[0], "ef_search must be set before the data query"
+
+
+async def test_search_query_can_use_the_hnsw_index():
+    """search()'s ORDER BY must be the raw distance expression, not a
+    computed "similarity" alias -- otherwise Postgres can't match it to the
+    HNSW index and falls back to a full table scan (the actual regression
+    this catches). `enable_seqscan = off` forces Postgres to prove the
+    query SHAPE is index-compatible even on this suite's tiny table, where
+    a scan and an index scan would otherwise return identical results and
+    hide the bug."""
+    store = PgVectorStore()
+    try:
+        await store.open()
+        async with store._pool.connection() as conn, conn.cursor() as cur:
+            await cur.execute("SET LOCAL enable_seqscan = off;")
+            await cur.execute(
+                sql.SQL("EXPLAIN {}").format(store._search_query()),
+                ([0.0] * EMBEDDING_DIM, [0.0] * EMBEDDING_DIM, 1),
+            )
+            plan = "\n".join(row[0] for row in await cur.fetchall())
+        assert "Index Scan" in plan, f"query plan did not use the index:\n{plan}"
+    finally:
+        await store.close()

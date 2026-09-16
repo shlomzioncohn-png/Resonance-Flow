@@ -27,9 +27,11 @@ class Settings(BaseSettings):
     vector_store_dsn: str | None = None
     vector_store_table: str = "task_embeddings"
 
-    # pgvector defaults to 40 (speed over recall); 400 lifts recall@10 from
-    # 61% to 86% at 10k rows for ~3.5ms extra p95, still well under budget.
-    hnsw_ef_search: int = 400
+    # pgvector's HNSW ef_search defaults to 40 (speed over recall); 400
+    # lifts recall@10 from 61% to 86% at 10k rows for ~3.5ms extra p95,
+    # still well under budget. Named search "effort", not "ef_search" --
+    # this module's public config shouldn't name a pgvector-specific knob.
+    vector_search_effort: int = 400
 
     # Must match whatever embed() in embeddings.py actually returns -- the
     # pgvector column is created as VECTOR(embedding_dim).
@@ -50,8 +52,10 @@ def get_settings() -> Settings:
     return Settings()
 
 
-PG_DSN = get_settings().vector_store_dsn
-PG_TABLE = get_settings().vector_store_table
-HNSW_EF_SEARCH = get_settings().hnsw_ef_search
+# Only fields with no ordering hazard are re-exported eagerly here. DB-facing
+# fields (table name, search effort) are read lazily via get_settings() at
+# the point of use instead -- e.g. vector_store_table must reflect whatever
+# tests/conftest.py sets *before* this module is first imported, and an
+# eager read here would freeze it before that override lands.
 EMBEDDING_DIM = get_settings().embedding_dim
 DUPLICATE_SIMILARITY_THRESHOLD = get_settings().duplicate_similarity_threshold
