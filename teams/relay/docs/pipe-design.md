@@ -312,7 +312,7 @@ The workload therefore uses a normal Kubernetes `Deployment`, not a `StatefulSet
 | Concern | Setting | Why |
 |---|---|---|
 | Workload kind | `Deployment` | Pods are interchangeable |
-| Consumer group id | `pipe-${POD_NAME}-<random>` | Each instance independently consumes the full topic |
+| Consumer group id | `pipe-${INSTANCE_NAME}-<random>` | Each instance independently consumes the full topic |
 | Autoscaling | CPU-based HPA for now; custom-metric HPA on active WebSocket connections/pod as a follow-up | Connections/pod is the real scaling signal for this workload, but needs a custom-metrics adapter (e.g. Prometheus Adapter) plus a load-tested target — see [§10](#10-decisions--open-questions) |
 | Rolling update | `maxUnavailable: 0`, `maxSurge: 25%` | Avoid intentionally reducing capacity |
 | Shutdown | `terminationGracePeriodSeconds: 30` | Stop new connections and drain existing streams |
@@ -322,38 +322,46 @@ The workload therefore uses a normal Kubernetes `Deployment`, not a `StatefulSet
 
 ### Consumer group behavior
 
-Each running instance gets its own consumer group, named after its own pod name plus a short random suffix that the app generates at startup. The pod name is read from the `POD_NAME`
-environment variable, which the Deployment populates via the Kubernetes downward API (`fieldRef: fieldPath: metadata.name`) — an explicit, orchestrator-provided value rather than
-the kernel `$HOSTNAME`, which only happens to match the pod name and isn't guaranteed to (e.g. if `spec.hostname` is ever set explicitly).
+Each running instance gets its own consumer group, named after `INSTANCE_NAME` — a generic
+environment variable the app defines and reads (`relay.pipe.consumer-group-id` in
+`application.yml`) — plus a short random suffix it generates at startup. The app has no opinion
+on what supplies `INSTANCE_NAME` or how; that's deliberate, so this stays the same code whether
+it's run under Kubernetes, plain `docker run`, or a bare JVM. In Kubernetes specifically, the
+Helm chart is what populates it, from that pod's own `metadata.name` via the downward API
+(`fieldRef: fieldPath: metadata.name`) — see [§11](#11--configuration)'s neighbor, the
+`deployment.yaml` template, for that wiring. Using the downward API there rather than the
+kernel `$HOSTNAME` is itself deliberate: `$HOSTNAME` only happens to match the pod name and isn't
+guaranteed to (e.g. if `spec.hostname` is ever set explicitly).
 
-If `POD_NAME` is unset, the config falls back to a fresh random UUID rather than a fixed
+If `INSTANCE_NAME` is unset, the config falls back to a fresh random UUID rather than a fixed
 placeholder — so a plain local run (`mvn spring-boot:run`, `docker compose up`) always gets a
-usable, already-unique id and never fails to start just for lacking a pod name.
+usable, already-unique id and never fails to start just for lacking one.
 
-Inside an actual Kubernetes pod, though, a missing `POD_NAME` means the Deployment's downward-API
-wiring got dropped, and that's worth failing loudly for rather than quietly running on the random
-fallback. `PodNameGuard` (`TaskNotificationConsumer`'s sibling in `event/`) checks this
-specifically: it reads `KUBERNETES_SERVICE_HOST`, which the kubelet sets in every pod regardless
-of this service's own config (the same signal Kubernetes client libraries use to detect
-in-cluster execution), and if that's present while `POD_NAME` is blank, it throws
-`IllegalStateException` during startup with a message naming the missing downward-API wiring —
-failing the deploy with a clear, specific cause instead of a generic "could not resolve
-placeholder" error, and without misfiring for local/CI runs that were never going to have
-`POD_NAME` in the first place.
+Inside an actual Kubernetes cluster, though, a missing `INSTANCE_NAME` means the chart's
+downward-API wiring got dropped, and that's worth failing loudly for rather than quietly running
+on the random fallback. `InstanceNameGuard` (`TaskNotificationConsumer`'s sibling in `event/`)
+checks this specifically: it reads `KUBERNETES_SERVICE_HOST`, which the kubelet sets in every pod
+regardless of this service's own config (the same signal Kubernetes client libraries use to
+detect in-cluster execution — the one piece of Kubernetes-specific awareness this class needs,
+since detecting "am I in a cluster" isn't the same concern as naming this instance), and if
+that's present while `INSTANCE_NAME` is blank, it throws `IllegalStateException` during startup
+with a message naming the gap — failing the deploy with a clear, specific cause instead of a
+generic "could not resolve placeholder" error, and without misfiring for local/CI runs that were
+never going to have `INSTANCE_NAME` in the first place.
 
-A present `POD_NAME` is still not proof the resulting consumer-group id is actually free to use.
-Kubernetes guarantees distinct pod names, but nothing guarantees this pod isn't racing an old
-instance of itself — a slow non-graceful exit whose group hasn't been swept yet (§06.7) — or
-starting up while some other process already holds that exact id. So the same guard also asks the
-broker directly, via `AdminClient.describeConsumerGroups`, whether a group by this pod's id
-already has live members; if it does, `PodNameGuard` throws instead of joining it, since two
-members on one group id would silently split that pod's partition instead of each pod
+A present `INSTANCE_NAME` is still not proof the resulting consumer-group id is actually free to
+use. Kubernetes guarantees distinct pod names, but nothing guarantees this instance isn't racing
+an old instance of itself — a slow non-graceful exit whose group hasn't been swept yet (§06.7) —
+or starting up while some other process already holds that exact id. So the same guard also asks
+the broker directly, via `AdminClient.describeConsumerGroups`, whether a group by this id already
+has live members; if it does, `InstanceNameGuard` throws instead of joining it, since two members
+on one group id would silently split that instance's partition instead of each instance
 independently reading the full topic, defeating the full-fan-out design in §04.
 
 ```text
-Instance A → pipe-<Instance A's pod name>-<random>
-Instance B → pipe-<Instance B's pod name>-<random>
-Instance C → pipe-<Instance C's pod name>-<random>
+Instance A → pipe-<Instance A's INSTANCE_NAME>-<random>
+Instance B → pipe-<Instance B's INSTANCE_NAME>-<random>
+Instance C → pipe-<Instance C's INSTANCE_NAME>-<random>
 ```
 
 These groups are intentionally separate.
@@ -363,9 +371,9 @@ Therefore:
 ```text
 resonance.task-notifications
         │
-        ├── pipe-<Instance A's pod name>-<random> → full topic
-        ├── pipe-<Instance B's pod name>-<random> → full topic
-        └── pipe-<Instance C's pod name>-<random> → full topic
+        ├── pipe-<Instance A's INSTANCE_NAME>-<random> → full topic
+        ├── pipe-<Instance B's INSTANCE_NAME>-<random> → full topic
+        └── pipe-<Instance C's INSTANCE_NAME>-<random> → full topic
 ```
 
 There is no partition ownership relationship such as:
@@ -528,7 +536,7 @@ This keeps Kafka consumption state separate from client delivery state.
 
 ### 7 · Orphaned consumer group metadata — operational cleanliness
 
-**Cause:** Each Pipe pod runs its own throwaway consumer group (`pipe-${POD_NAME}-<random>`).
+**Cause:** Each Pipe pod runs its own throwaway consumer group (`pipe-${INSTANCE_NAME}-<random>`).
 
 On a clean shutdown — rolling deploy, HPA scale-down, manual pod delete — the pod has an opportunity to remove its own group before exiting.
 
@@ -728,18 +736,21 @@ This provides per-user ordering through Kafka partition ordering.
 
 Each running instance has its own consumer group:
 
-`pipe-${POD_NAME}-<random>`
+`pipe-${INSTANCE_NAME}-<random>`
 
-`POD_NAME` is populated via the Kubernetes downward API (`fieldRef: fieldPath: metadata.name`),
-not the kernel `$HOSTNAME` — an explicit, orchestrator-provided value instead of one that only
-happens to match the pod name. The app appends a short random suffix of its own at startup as
-extra headroom, and falls back to a random UUID in place of `POD_NAME` itself if that's ever
-unset — which keeps plain local runs working, but is exactly the case `PodNameGuard` refuses to
-let slide inside a real Kubernetes pod (detected via `KUBERNETES_SERVICE_HOST`): a missing
-`POD_NAME` there means the downward-API wiring is broken, so it fails startup with a specific,
-actionable error rather than letting the pod come up on an unreliable fallback. The same guard
-also checks the id it's about to use isn't already claimed — see
-[§05](#05-scaling-out-in-kubernetes).
+`INSTANCE_NAME` is a generic env var the app defines and reads — it has no built-in notion of
+Kubernetes or pods. In this deployment, the Helm chart is what populates it, from the pod's own
+`metadata.name` via the downward API (`fieldRef: fieldPath: metadata.name`), rather than the
+kernel `$HOSTNAME`, which only happens to match the pod name. That mapping is the chart's
+concern, not the app's — see the `deployment.yaml` template. The app appends a short random
+suffix of its own at startup as extra headroom, and falls back to a random UUID in place of
+`INSTANCE_NAME` itself if that's ever unset — which keeps plain local runs working, but is
+exactly the case `InstanceNameGuard` refuses to let slide inside a real Kubernetes cluster
+(detected via `KUBERNETES_SERVICE_HOST`, the one piece of Kubernetes awareness this class
+needs): a missing `INSTANCE_NAME` there means the chart's downward-API wiring is broken, so it
+fails startup with a specific, actionable error rather than letting the instance come up on an
+unreliable fallback. The same guard also checks the id it's about to use isn't already claimed —
+see [§05](#05-scaling-out-in-kubernetes).
 
 This causes every instance to consume the complete notification topic independently.
 

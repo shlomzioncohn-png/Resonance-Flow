@@ -89,7 +89,10 @@ spec:
           {{- if or $component.config $component.env (eq $componentName "notification-delivery") }}
           env:
             {{- if eq $componentName "notification-delivery" }}
-            - name: POD_NAME
+            {{/* Populates the app's generic INSTANCE_NAME contract (see application.yml /
+                 InstanceNameGuard) with this pod's own name - a Kubernetes concept the chart
+                 knows about so the app itself doesn't have to. */}}
+            - name: INSTANCE_NAME
               valueFrom:
                 fieldRef:
                   fieldPath: metadata.name
