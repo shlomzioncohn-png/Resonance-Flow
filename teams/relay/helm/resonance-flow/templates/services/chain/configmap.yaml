@@ -23,7 +23,7 @@ data:
         # Same host/port helpers as the wait-for-postgresql initContainer.
         url: "jdbc:postgresql://{{ include "resonance-flow.dependencyHostByName" (dict "root" $ "deps" $component.dependencies "name" "postgresql") }}:{{ include "resonance-flow.dependencyPort" (dict "deps" $component.dependencies "name" "postgresql") }}/{{ $cfg.datasource.database }}?stringtype=unspecified"
         username: {{ $cfg.datasource.username | quote }}
-        password: {{ $cfg.datasource.password | quote }}
+        password: "${DB_PASSWORD}"
       kafka:
         bootstrap-servers: {{ printf "%s:%s" (include "resonance-flow.dependencyHostByName" (dict "root" $ "deps" $.Values.dependencies "name" "kafka")) (include "resonance-flow.dependencyPort" (dict "deps" $.Values.dependencies "name" "kafka")) | quote }}
         security:
@@ -50,5 +50,40 @@ data:
     logging:
       file:
         name: logs/chain.log
+
+---
+apiVersion: v1
+kind: ConfigMap
+
+metadata:
+  name: chain-db-init
+  labels:
+    {{- include "resonance-flow.labels" $ | nindent 4 }}
+    app.kubernetes.io/component: chain
+
+data:
+  create-chain-database.sh: |
+    #!/bin/bash
+    set -euo pipefail
+    psql -v ON_ERROR_STOP=1 --username postgres <<-EOSQL
+      CREATE USER {{ $cfg.datasource.username }} WITH PASSWORD '${CHAIN_DB_PASSWORD}';
+      CREATE DATABASE {{ $cfg.datasource.database }} OWNER {{ $cfg.datasource.username }};
+    EOSQL
+
+---
+{{- $secretName := "chain-db-credentials" }}
+{{- $existingSecret := lookup "v1" "Secret" $.Release.Namespace $secretName }}
+apiVersion: v1
+kind: Secret
+
+metadata:
+  name: {{ $secretName }}
+  labels:
+    {{- include "resonance-flow.labels" $ | nindent 4 }}
+    app.kubernetes.io/component: chain
+
+type: Opaque
+data:
+  password: {{ if $existingSecret }}{{ index $existingSecret.data "password" }}{{ else }}{{ randAlphaNum 24 | b64enc }}{{ end }}
 {{- end }}
 {{- end }}

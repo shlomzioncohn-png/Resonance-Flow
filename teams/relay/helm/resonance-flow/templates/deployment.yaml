@@ -84,7 +84,11 @@ spec:
               {{- end }}
               {{- range $name, $value := $component.env }}
             - name: {{ $name }}
+              {{- if kindIs "map" $value }}
+              {{- toYaml $value | nindent 14 }}
+              {{- else }}
               value: {{ $value | quote }}
+              {{- end }}
                {{- end }}
           {{- end }}
 

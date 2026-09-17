@@ -44,6 +44,14 @@ shared cluster instance, wired in `teams/relay/helm/resonance-flow/values.yaml`
 same file-mount ConfigMap mechanism Inbox uses. Flyway is the confirmed migration tool
 (matching Inbox), not yet wired into `pom.xml` - premature before real JPA entities exist.
 
+The DB password is not a `values.yaml` literal - it's an auto-generated `chain-db-credentials`
+Secret (`templates/chain-db-secret.yaml`, kept stable across upgrades via `lookup`), injected as
+`DB_PASSWORD` into Chain's own pod and `CHAIN_DB_PASSWORD` into the Postgres primary (which
+consumes it in the `CREATE USER` init script). Chain's mounted `config.yaml` only ever contains
+the placeholder `${DB_PASSWORD}`, resolved by Spring from that env var - no app-code change
+needed. Inbox's own Postgres password isn't wired this way yet (still `postgresql.auth.postgresPassword`
+as a plaintext value) - same gap, not addressed here.
+
 **Kafka topics** (also wired in `components.chain.config.data.kafka` / the same configmap):
 
 | Topic | Direction | Drives |
