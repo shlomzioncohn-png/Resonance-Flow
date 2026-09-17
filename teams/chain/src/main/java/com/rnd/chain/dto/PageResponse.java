@@ -3,7 +3,6 @@ package com.rnd.chain.dto;
 import java.util.List;
 import java.util.Objects;
 import java.util.function.Function;
-import java.util.stream.Collectors;
 
 /**
  * Generic wrapper for a page of results (offset-based: {@code page}/
@@ -20,7 +19,7 @@ public record PageResponse<T>(List<T> content, int page, int size, long totalEle
 
     /** Maps {@code content} element-by-element, keeping page/size/totalElements/totalPages unchanged. */
     public <R> PageResponse<R> map(Function<T, R> mapper) {
-        List<R> mapped = content.stream().map(mapper).collect(Collectors.toList());
+        List<R> mapped = content.stream().map(mapper).toList();
         return new PageResponse<>(mapped, page, size, totalElements, totalPages);
     }
 }

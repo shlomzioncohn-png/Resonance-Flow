@@ -26,12 +26,12 @@ class DependencyHistoryResponseTest {
 
         DependencyHistoryResponse response = DependencyHistoryResponse.from(entry);
 
-        assertThat(response.id()).isEqualTo(entry.getId());
-        assertThat(response.taskId()).isEqualTo(entry.getTaskId());
-        assertThat(response.dependsOnTaskId()).isEqualTo(entry.getDependsOnTaskId());
-        assertThat(response.action()).isEqualTo(entry.getAction());
-        assertThat(response.source()).isEqualTo(entry.getSource());
-        assertThat(response.sourceRef()).isEqualTo(entry.getSourceRef());
-        assertThat(response.createdAt()).isEqualTo(entry.getCreatedAt());
+        assertThat(response.id()).isEqualTo(entry.id());
+        assertThat(response.taskId()).isEqualTo(entry.taskId());
+        assertThat(response.dependsOnTaskId()).isEqualTo(entry.dependsOnTaskId());
+        assertThat(response.action()).isEqualTo(entry.action());
+        assertThat(response.source()).isEqualTo(entry.source());
+        assertThat(response.sourceRef()).isEqualTo(entry.sourceRef());
+        assertThat(response.createdAt()).isEqualTo(entry.createdAt());
     }
 }

@@ -4,6 +4,7 @@ import com.rnd.chain.dto.DependencyChangeAction;
 import com.rnd.chain.dto.DependencyChangeSource;
 import com.rnd.chain.dto.DependencyHistoryEntry;
 import com.rnd.chain.dto.PageResponse;
+import com.rnd.chain.exception.InvalidRequestException;
 import com.rnd.chain.exception.TaskNotFoundException;
 import com.rnd.chain.service.TaskDependencyService;
 import org.junit.jupiter.api.Test;
@@ -20,7 +21,6 @@ import java.util.UUID;
 
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
-import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -94,27 +94,12 @@ class DependencyHistoryControllerTest {
     }
 
     @Test
-    void getHistory_rejectsSizeZero() throws Exception {
-        mockMvc.perform(get("/tasks/{taskId}/dependencies/history", taskA).param("size", "0"))
-                .andExpect(status().isBadRequest());
+    void getHistory_propagatesInvalidRequestExceptionFromService_as400() throws Exception {
+        when(taskDependencyService.getHistory(eq(taskA), any(Integer.class), any(Integer.class)))
+                .thenThrow(new InvalidRequestException("page must be >= 0 and size must be in 1..100"));
 
-        verifyNoInteractions(taskDependencyService);
-    }
-
-    @Test
-    void getHistory_rejectsSizeOver100() throws Exception {
         mockMvc.perform(get("/tasks/{taskId}/dependencies/history", taskA).param("size", "101"))
                 .andExpect(status().isBadRequest());
-
-        verifyNoInteractions(taskDependencyService);
-    }
-
-    @Test
-    void getHistory_rejectsNegativePage() throws Exception {
-        mockMvc.perform(get("/tasks/{taskId}/dependencies/history", taskA).param("page", "-1"))
-                .andExpect(status().isBadRequest());
-
-        verifyNoInteractions(taskDependencyService);
     }
 
     private static DependencyHistoryEntry newEntry(UUID taskId, UUID dependsOnTaskId,

@@ -13,7 +13,7 @@ public record DependencyHistoryResponse(UUID id, UUID taskId, UUID dependsOnTask
                                          String sourceRef, Instant createdAt) {
 
     public static DependencyHistoryResponse from(DependencyHistoryEntry entry) {
-        return new DependencyHistoryResponse(entry.getId(), entry.getTaskId(), entry.getDependsOnTaskId(),
-                entry.getAction(), entry.getSource(), entry.getSourceRef(), entry.getCreatedAt());
+        return new DependencyHistoryResponse(entry.id(), entry.taskId(), entry.dependsOnTaskId(),
+                entry.action(), entry.source(), entry.sourceRef(), entry.createdAt());
     }
 }

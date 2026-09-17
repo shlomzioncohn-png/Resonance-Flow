@@ -11,44 +11,44 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 class DependencyHistoryEntryTest {
 
     @Test
-    void builder_throwsIllegalArgumentException_whenIdIsNull() {
+    void builder_throwsNullPointerException_whenIdIsNull() {
         assertThatThrownBy(() -> newEntryBuilder().id(null).build())
-                .isInstanceOf(IllegalArgumentException.class)
+                .isInstanceOf(NullPointerException.class)
                 .hasMessageContaining("id");
     }
 
     @Test
-    void builder_throwsIllegalArgumentException_whenTaskIdIsNull() {
+    void builder_throwsNullPointerException_whenTaskIdIsNull() {
         assertThatThrownBy(() -> newEntryBuilder().taskId(null).build())
-                .isInstanceOf(IllegalArgumentException.class)
+                .isInstanceOf(NullPointerException.class)
                 .hasMessageContaining("taskId");
     }
 
     @Test
-    void builder_throwsIllegalArgumentException_whenDependsOnTaskIdIsNull() {
+    void builder_throwsNullPointerException_whenDependsOnTaskIdIsNull() {
         assertThatThrownBy(() -> newEntryBuilder().dependsOnTaskId(null).build())
-                .isInstanceOf(IllegalArgumentException.class)
+                .isInstanceOf(NullPointerException.class)
                 .hasMessageContaining("dependsOnTaskId");
     }
 
     @Test
-    void builder_throwsIllegalArgumentException_whenActionIsNull() {
+    void builder_throwsNullPointerException_whenActionIsNull() {
         assertThatThrownBy(() -> newEntryBuilder().action(null).build())
-                .isInstanceOf(IllegalArgumentException.class)
+                .isInstanceOf(NullPointerException.class)
                 .hasMessageContaining("action");
     }
 
     @Test
-    void builder_throwsIllegalArgumentException_whenSourceIsNull() {
+    void builder_throwsNullPointerException_whenSourceIsNull() {
         assertThatThrownBy(() -> newEntryBuilder().source(null).build())
-                .isInstanceOf(IllegalArgumentException.class)
+                .isInstanceOf(NullPointerException.class)
                 .hasMessageContaining("source");
     }
 
     @Test
-    void builder_throwsIllegalArgumentException_whenCreatedAtIsNull() {
+    void builder_throwsNullPointerException_whenCreatedAtIsNull() {
         assertThatThrownBy(() -> newEntryBuilder().createdAt(null).build())
-                .isInstanceOf(IllegalArgumentException.class)
+                .isInstanceOf(NullPointerException.class)
                 .hasMessageContaining("createdAt");
     }
 
@@ -56,7 +56,7 @@ class DependencyHistoryEntryTest {
     void builder_allowsNullSourceRef() {
         DependencyHistoryEntry entry = newEntryBuilder().sourceRef(null).build();
 
-        assertThat(entry.getSourceRef()).isNull();
+        assertThat(entry.sourceRef()).isNull();
     }
 
     @Test

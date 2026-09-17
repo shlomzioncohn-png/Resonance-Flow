@@ -33,18 +33,18 @@ public class InMemoryDependencyHistoryRepository implements DependencyHistoryRep
     @Override
     public DependencyHistoryEntry record(DependencyHistoryEntry entry) {
         Objects.requireNonNull(entry, "entry must not be null");
-        String sourceRef = entry.getSourceRef();
+        String sourceRef = entry.sourceRef();
         synchronized (writeLock) {
             if (sourceRef != null) {
-                String key = dedupKey(entry.getSource(), sourceRef);
+                String key = dedupKey(entry.source(), sourceRef);
                 UUID existingId = idBySourceRefKey.get(key);
                 if (existingId != null) {
                     return entriesById.get(existingId);
                 }
-                idBySourceRefKey.put(key, entry.getId());
+                idBySourceRefKey.put(key, entry.id());
             }
-            sequenceById.put(entry.getId(), sequenceCounter.incrementAndGet());
-            entriesById.put(entry.getId(), entry);
+            sequenceById.put(entry.id(), sequenceCounter.incrementAndGet());
+            entriesById.put(entry.id(), entry);
             return entry;
         }
     }
@@ -61,9 +61,9 @@ public class InMemoryDependencyHistoryRepository implements DependencyHistoryRep
     @Override
     public PageResponse<DependencyHistoryEntry> findByTaskId(UUID taskId, int page, int size) {
         List<DependencyHistoryEntry> matching = entriesById.values().stream()
-                .filter(entry -> entry.getTaskId().equals(taskId))
-                .sorted(Comparator.comparing(DependencyHistoryEntry::getCreatedAt)
-                        .thenComparing(entry -> sequenceById.get(entry.getId())))
+                .filter(entry -> entry.taskId().equals(taskId))
+                .sorted(Comparator.comparing(DependencyHistoryEntry::createdAt)
+                        .thenComparing(entry -> sequenceById.get(entry.id())))
                 .collect(Collectors.toList())
                 .reversed();
 
@@ -78,6 +78,18 @@ public class InMemoryDependencyHistoryRepository implements DependencyHistoryRep
         List<DependencyHistoryEntry> content = matching.subList(fromIndex, toIndex);
 
         return new PageResponse<>(content, page, size, totalElements, totalPages);
+    }
+
+    @Override
+    public void delete(UUID entryId) {
+        Objects.requireNonNull(entryId, "entryId must not be null");
+        synchronized (writeLock) {
+            DependencyHistoryEntry removed = entriesById.remove(entryId);
+            sequenceById.remove(entryId);
+            if (removed != null && removed.sourceRef() != null) {
+                idBySourceRefKey.remove(dedupKey(removed.source(), removed.sourceRef()), entryId);
+            }
+        }
     }
 
     private static String dedupKey(DependencyChangeSource source, String sourceRef) {
