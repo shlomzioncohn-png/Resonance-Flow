@@ -10,7 +10,11 @@ import java.util.Map;
 
 /**
  * EventPublisher implementation that actually publishes to Kafka.
- * Responsible for: serialization, topic resolution by event type, logging, and error handling.
+ *
+ * Publishes {@code payload} as-is (flat JSON, no envelope) - see EventPublisher's Javadoc for why.
+ * The Kafka message key is whatever the caller passes in (e.g. taskId for task.scheduling.updated,
+ * matching Inbox's own consumer's partition-ordering assumption), never a locally generated event
+ * id.
  *
  * publish() is intentionally fire-and-forget from the caller's point of
  * view - a Kafka send failure is only logged, never surfaced back to
@@ -40,18 +44,18 @@ public class KafkaEventPublisher implements EventPublisher {
     }
 
     @Override
-    public void publish(EventEnvelope<?> event) {
-        String topic = resolveTopic(event.getEventType());
-        String serialized = serialize(event);
+    public void publish(String eventType, String key, Object payload) {
+        String topic = resolveTopic(eventType);
+        String serialized = serialize(payload);
 
-        kafkaTemplate.send(topic, event.getEventId().toString(), serialized)
+        kafkaTemplate.send(topic, key, serialized)
                 .whenComplete((result, ex) -> {
                     if (ex != null) {
-                        log.error("Failed to publish event [{}] of type [{}] to topic [{}]",
-                                event.getEventId(), event.getEventType(), topic, ex);
+                        log.error("Failed to publish [{}] (key={}) to topic [{}]",
+                                payload.getClass().getSimpleName(), key, topic, ex);
                     } else {
-                        log.info("Published event [{}] of type [{}] to topic [{}]",
-                                event.getEventId(), event.getEventType(), topic);
+                        log.info("Published [{}] (key={}) to topic [{}]",
+                                payload.getClass().getSimpleName(), key, topic);
                     }
                 });
     }
@@ -64,12 +68,12 @@ public class KafkaEventPublisher implements EventPublisher {
         return topic;
     }
 
-    private String serialize(EventEnvelope<?> event) {
+    private String serialize(Object payload) {
         try {
-            return objectMapper.writeValueAsString(event);
+            return objectMapper.writeValueAsString(payload);
         } catch (Exception e) {
             throw new EventPublishException(
-                    "Failed to serialize event of type " + event.getEventType(), e);
+                    "Failed to serialize payload of type " + payload.getClass().getName(), e);
         }
     }
 }

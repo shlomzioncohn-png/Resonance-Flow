@@ -1,0 +1,34 @@
+syntax = "proto3";
+
+package com.rnd.mind.event;
+
+option java_package = "com.rnd.mind.event";
+option java_multiple_files = true;
+
+// kafkaTopic: task.dependencies.proposed
+//
+// WORKING DRAFT, not an officially registered schema - no .proto file for this topic exists yet
+// anywhere in teams/relay/src/main/proto (Relay's registered source of truth) or
+// teams/relay/ci/schema-subjects.tsv. Confirmed as Protobuf (not JSON) directly by the team lead,
+// consistent with the org-wide Kafka wire-format decision and with Mind's own confirmation (in
+// the cross-team "final-signing-of-contracts" thread) that they are moving off Pydantic/JSON to
+// Protobuf for their published events.
+//
+// Field shape confirmed from two independent sources: the team lead's answer (via Relay/Avigail),
+// and teams/inbox/docs/Gong_Technical_Spec_EN_with_Flows.md, Stage C / section 6 - both describe
+// exactly "task_id + list of dependency target task_id values", nothing else. Namespaced under
+// com.rnd.mind.event since Mind is the producer/owner (package convention: named for the
+// producing team, per the style already established in teams/relay/src/main/proto).
+//
+// Follow-up, tracked outside #271: get this reviewed and registered by Relay in
+// teams/relay/ci/schema-subjects.tsv once their process can take it - this file should then be
+// replaced with whatever they formally register, not kept as the source of truth long-term.
+message DependencyProposedEvent {
+  string event_id = 1;                    // UUID as string - Mind's own event id, used for
+                                           // Chain-side idempotency (dedupe on redelivery).
+  string task_id = 2;                     // UUID as string - the task the dependencies are on.
+  repeated string dependency_task_ids = 3; // UUID strings - the tasks task_id depends on. Sent as
+                                           // the full, final set per delivery (see
+                                           // Gong_Technical_Spec_EN_with_Flows.md: "arrives with
+                                           // final IDs only - no intermediate state").
+}
