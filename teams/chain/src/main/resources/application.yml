@@ -16,13 +16,15 @@ spring:
     producer:
       key-serializer: org.apache.kafka.common.serialization.StringSerializer
       value-serializer: org.apache.kafka.common.serialization.StringSerializer
-  # Placeholder in-memory DB so a DataSource/PlatformTransactionManager exists
-  # and @Transactional in TaskEligibilityService isn't left without a manager.
-  # No JPA entities use this yet - real data still lives in the in-memory
-  # TaskRepository/TaskDependencyRepository. Replace with the real DB config
-  # once the team lead's decision lands - see teams/chain/CLAUDE.md.
+  # Real Postgres datasource (issue #378) - a dedicated Chain database/user, not Inbox's
+  # resonance_flow. Defaults below are placeholders pending DevOps actually provisioning the
+  # DB/user (see teams/chain/CLAUDE.md) - Task/TaskDependency still live in the in-memory
+  # TaskRepository/TaskDependencyRepository until #377 lands, so only the Constraint migration/
+  # repository actually uses this connection today.
   datasource:
-    url: jdbc:h2:mem:chain;DB_CLOSE_DELAY=-1
+    url: jdbc:postgresql://${DB_HOST:localhost}:${DB_PORT:5432}/${DB_NAME:chain}
+    username: ${DB_USER:chain_user}
+    password: ${DB_PASSWORD:chain_password}
 
 chain:
   kafka:
