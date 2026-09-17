@@ -57,6 +57,8 @@ class RawObjectEvent(BaseModel):
             "the change is for reprocessing."
         ),
     )
+    modality: Modality = Modality.TEXT
+
     
     # Optional fields
     participants: list[str] | None = None
@@ -68,7 +70,6 @@ class RawObjectEvent(BaseModel):
     description="MinIO object key for transcript, e.g. EMAIL/tenant-123/2026-08-20/message.txt"
     )
     source_timestamp: AwareDatetime | None = None
-    modality: Modality = Modality.TEXT
     correlation_id: UUID | None = Field(default=None, description="Optional correlation identifier shared by the source body and its attachments.")
 
 

@@ -13,4 +13,7 @@ class SourceType(str, Enum):
     SCANNED_DOC = "SCANNED_DOC"
     DRIVE = "DRIVE"
     GITHUB_ISSUE = "GITHUB_ISSUE"
+    GITHUB_PR = "GITHUB_PR"
+    CRM_DEAL = "CRM_DEAL"
+    MANUAL = "MANUAL"
     
