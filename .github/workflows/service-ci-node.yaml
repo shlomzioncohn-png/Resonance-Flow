@@ -18,6 +18,9 @@ jobs:
     permissions:
       contents: read
     steps:
+      # local actions need the repo on disk before the runner can even resolve them
+      - uses: actions/checkout@v7
+
       - uses: ./.github/actions/ci-node
         with:
           service_name: ${{ inputs.service_name }}
