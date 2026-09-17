@@ -312,7 +312,7 @@ The workload therefore uses a normal Kubernetes `Deployment`, not a `StatefulSet
 | Concern | Setting | Why |
 |---|---|---|
 | Workload kind | `Deployment` | Pods are interchangeable |
-| Consumer group id | `pipe-${HOSTNAME}` | Each instance independently consumes the full topic |
+| Consumer group id | `pipe-${POD_NAME}-<random>` | Each instance independently consumes the full topic |
 | Autoscaling | CPU-based HPA for now; custom-metric HPA on active WebSocket connections/pod as a follow-up | Connections/pod is the real scaling signal for this workload, but needs a custom-metrics adapter (e.g. Prometheus Adapter) plus a load-tested target — see [§10](#10-decisions--open-questions) |
 | Rolling update | `maxUnavailable: 0`, `maxSurge: 25%` | Avoid intentionally reducing capacity |
 | Shutdown | `terminationGracePeriodSeconds: 30` | Stop new connections and drain existing streams |
@@ -322,17 +322,14 @@ The workload therefore uses a normal Kubernetes `Deployment`, not a `StatefulSet
 
 ### Consumer group behavior
 
-Each running instance gets its own consumer group, named after its own hostname. This is
-runtime-generic, not Kubernetes-specific: every container runtime (Kubernetes, Docker
-Compose, plain `docker run`) gives each instance its own kernel hostname and exposes it to
-the process as `$HOSTNAME`, with no orchestrator-specific wiring required. In Kubernetes,
-that hostname happens to equal the instance's name (`metadata.name`) for a
-Deployment-managed instance.
+Each running instance gets its own consumer group, named after its own pod name plus a short random suffix that the app generates at startup. The pod name is read from the `POD_NAME`
+environment variable, which the Deployment populates via the Kubernetes downward API (`fieldRef: fieldPath: metadata.name`) — an explicit, orchestrator-provided value rather than
+the kernel `$HOSTNAME`, which only happens to match the pod name and isn't guaranteed to (e.g. if `spec.hostname` is ever set explicitly). Outside Kubernetes (local/`docker run`), `POD_NAME` is simply unset and the config falls back to a fixed placeholder; the random suffix is what keeps the group id unique in that case, and generating it in the app rather than relying on the runtime means the fallback needs no special-casing.
 
 ```text
-Instance A → pipe-<Instance A's hostname>
-Instance B → pipe-<Instance B's hostname>
-Instance C → pipe-<Instance C's hostname>
+Instance A → pipe-<Instance A's pod name>-<random>
+Instance B → pipe-<Instance B's pod name>-<random>
+Instance C → pipe-<Instance C's pod name>-<random>
 ```
 
 These groups are intentionally separate.
@@ -342,9 +339,9 @@ Therefore:
 ```text
 resonance.task-notifications
         │
-        ├── pipe-<Instance A's hostname> → full topic
-        ├── pipe-<Instance B's hostname> → full topic
-        └── pipe-<Instance C's hostname> → full topic
+        ├── pipe-<Instance A's pod name>-<random> → full topic
+        ├── pipe-<Instance B's pod name>-<random> → full topic
+        └── pipe-<Instance C's pod name>-<random> → full topic
 ```
 
 There is no partition ownership relationship such as:
@@ -507,7 +504,7 @@ This keeps Kafka consumption state separate from client delivery state.
 
 ### 7 · Orphaned consumer group metadata — operational cleanliness
 
-**Cause:** Each Pipe pod runs its own throwaway consumer group (`pipe-${HOSTNAME}`).
+**Cause:** Each Pipe pod runs its own throwaway consumer group (`pipe-${POD_NAME}-<random>`).
 
 On a clean shutdown — rolling deploy, HPA scale-down, manual pod delete — the pod has an opportunity to remove its own group before exiting.
 
@@ -707,12 +704,12 @@ This provides per-user ordering through Kafka partition ordering.
 
 Each running instance has its own consumer group:
 
-`pipe-${HOSTNAME}`
+`pipe-${POD_NAME}-<random>`
 
-This is runtime-generic, not Kubernetes-specific: every container gets its own kernel
-hostname from the container runtime and exposes it as `$HOSTNAME`, with no
-orchestrator-specific wiring (no Kubernetes downward-API `fieldRef` needed). In Kubernetes
-this happens to equal the instance's name for a Deployment-managed instance — see
+`POD_NAME` is populated via the Kubernetes downward API (`fieldRef: fieldPath: metadata.name`),
+not the kernel `$HOSTNAME` — an explicit, orchestrator-provided value instead of one that only
+happens to match the pod name. The app appends a short random suffix of its own at startup, so
+the group id stays unique even outside Kubernetes, where `POD_NAME` is unset — see
 [§05](#05-scaling-out-in-kubernetes).
 
 This causes every instance to consume the complete notification topic independently.
