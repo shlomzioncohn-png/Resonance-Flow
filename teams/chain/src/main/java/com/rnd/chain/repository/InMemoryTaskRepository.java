@@ -16,6 +16,7 @@ import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.UnaryOperator;
+import java.util.stream.Collectors;
 
 /**
  * In-memory implementation of {@link TaskRepository}. Hand-authored for this task: every branch
@@ -83,7 +84,7 @@ public class InMemoryTaskRepository implements TaskRepository {
                 .map(tasksById::get)
                 .filter(Objects::nonNull)
                 .filter(InMemoryTaskRepository::isNotDeleted)
-                .toList();
+                .collect(Collectors.toList());
     }
 
     @Override

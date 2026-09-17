@@ -6,6 +6,7 @@ import com.rnd.chain.exception.TaskNotFoundException;
 import com.rnd.chain.repository.TaskDependencyRepository;
 import com.rnd.chain.repository.TaskRepository;
 import org.springframework.stereotype.Service;
+import java.util.stream.Collectors;
 
 import java.util.List;
 import java.util.Objects;
@@ -87,7 +88,7 @@ public class TaskDependencyService {
                 .findByTaskId(taskId)
                 .stream()
                 .map(TaskDependency::getDependsOnTaskId)
-                .toList();
+                .collect(Collectors.toList());
     }
 
     public List<UUID> getDependents(UUID taskId) {
@@ -99,7 +100,7 @@ public class TaskDependencyService {
                 .findByDependsOnTaskId(taskId)
                 .stream()
                 .map(TaskDependency::getTaskId)
-                .toList();
+                .collect(Collectors.toList());
     }
 
     private void requireTaskExists(UUID taskId) {

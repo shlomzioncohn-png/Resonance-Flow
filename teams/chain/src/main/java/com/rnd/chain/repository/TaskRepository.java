@@ -48,21 +48,25 @@ public interface TaskRepository {
      */
     Task save(Task task);
 
-    /**
-     * Atomically reads the current task with this id, applies
-     * {@code mutator} to it, and persists the result - equivalent to
-     * {@code findById(id).map(mutator).map(this::save)} but performed as a
-     * single operation under a per-id lock. Use this instead of a separate
-     * findById/save pair whenever the new value depends on the current one
-     * (e.g. decrementing a counter), since two concurrent findById/save
-     * pairs on the same id can otherwise race and silently lose one of the
-     * updates. {@code mutator} must not mutate the task it's given in
-     * place - it must return the new value, per the same save() contract.
-     * {@code mutator} must not return null: implementations must reject a
-     * null result (e.g. by throwing {@link NullPointerException}) rather
-     * than treating it as "delete this task".
-     *
-     * @return the updated task, or empty if no task with this id exists
-     */
+   /**
+ * Atomically reads the current task with this id, applies
+ * {@code mutator} to it, and persists the result - equivalent to
+ * {@code findById(id).map(mutator).map(this::save)}, but performed
+ * atomically by the repository implementation.
+ *
+ * <p>Callers should use this method instead of a separate
+ * findById/save pair whenever the new value depends on the current
+ * value, since separate read-modify-write operations can race and
+ * silently lose updates.
+ *
+ * <p>The concrete locking strategy is implementation-specific.
+ * For example, the current in-memory implementation uses a shared
+ * repository-level write lock.
+ *
+ * <p>{@code mutator} must not mutate the task it receives in place;
+ * it must return a new Task instance. It must also not return null.
+ *
+ * @return the updated task, or empty if no task with this id exists
+ */
     Optional<Task> update(UUID id, UnaryOperator<Task> mutator);
 }
