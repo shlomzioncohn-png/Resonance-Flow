@@ -26,6 +26,7 @@ public final class TaskCreatedPayload {
     private final Float confidence;
     private final Float effortEstimateConfidence;
     private final UUID createdBy;
+    private final UUID ownerId;
     private final Instant createdAt;
     private final Map<String, Object> metadata;
 
@@ -34,7 +35,7 @@ public final class TaskCreatedPayload {
                                 Short urgency, Integer effortEstimateMinutes, Instant deadline, TaskStatus status,
                                 TaskExtractionProvenance extractionProvenance, Float confidence,
                                 Float effortEstimateConfidence,
-                                UUID createdBy, Instant createdAt, Map<String, Object> metadata) {
+                                UUID createdBy, UUID ownerId, Instant createdAt, Map<String, Object> metadata) {
         this.taskId = taskId;
         this.tenantId = tenantId;
         this.projectId = projectId;
@@ -53,6 +54,7 @@ public final class TaskCreatedPayload {
         this.confidence = confidence;
         this.effortEstimateConfidence = effortEstimateConfidence;
         this.createdBy = createdBy;
+        this.ownerId = ownerId;
         this.createdAt = createdAt;
         this.metadata = metadata;
     }
@@ -77,6 +79,7 @@ public final class TaskCreatedPayload {
                 task.getConfidence(),
                 task.getEffortEstimateConfidence(),
                 task.getCreatedBy() != null ? task.getCreatedBy().getId() : null,
+                task.getOwner() != null ? task.getOwner().getId() : null,
                 task.getCreatedAt(),
                 task.getMetadata()
         );
@@ -152,6 +155,10 @@ public final class TaskCreatedPayload {
 
     public UUID getCreatedBy() {
         return createdBy;
+    }
+
+    public UUID getOwnerId() {
+        return ownerId;
     }
 
     public Instant getCreatedAt() {

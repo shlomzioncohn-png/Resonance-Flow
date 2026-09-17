@@ -25,6 +25,7 @@ public final class TaskUpdatedPayload {
     private final Float effortEstimateConfidence;
     private final UUID suggestedOwnerUserId;
     private final Float suggestedOwnerConfidence;
+    private final UUID ownerId;
     private final Instant updatedAt;
 
     private TaskUpdatedPayload(UUID taskId, UUID tenantId, UUID projectId, String title, String description,
@@ -32,7 +33,7 @@ public final class TaskUpdatedPayload {
                                 TaskRoleContext roleContext, Short urgency, Integer effortEstimateMinutes,
                                 Instant deadline, TaskStatus status, TaskExtractionProvenance extractionProvenance,
                                 Float confidence, Float effortEstimateConfidence, UUID suggestedOwnerUserId,
-                                Float suggestedOwnerConfidence, Instant updatedAt) {
+                                Float suggestedOwnerConfidence, UUID ownerId, Instant updatedAt) {
         this.taskId = taskId;
         this.tenantId = tenantId;
         this.projectId = projectId;
@@ -52,6 +53,7 @@ public final class TaskUpdatedPayload {
         this.effortEstimateConfidence = effortEstimateConfidence;
         this.suggestedOwnerUserId = suggestedOwnerUserId;
         this.suggestedOwnerConfidence = suggestedOwnerConfidence;
+        this.ownerId = ownerId;
         this.updatedAt = updatedAt;
     }
 
@@ -76,6 +78,7 @@ public final class TaskUpdatedPayload {
                 task.getEffortEstimateConfidence(),
                 task.getSuggestedOwnerUser() != null ? task.getSuggestedOwnerUser().getId() : null,
                 task.getSuggestedOwnerConfidence(),
+                task.getOwner() != null ? task.getOwner().getId() : null,
                 task.getUpdatedAt()
         );
     }
@@ -154,6 +157,10 @@ public final class TaskUpdatedPayload {
 
     public Float getSuggestedOwnerConfidence() {
         return suggestedOwnerConfidence;
+    }
+
+    public UUID getOwnerId() {
+        return ownerId;
     }
 
     public Instant getUpdatedAt() {

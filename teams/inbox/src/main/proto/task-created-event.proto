@@ -30,6 +30,7 @@ message TaskCreatedEvent {
   optional string created_by = 18;
   google.protobuf.Timestamp created_at = 19;
   optional google.protobuf.Struct metadata = 20;
+  optional string owner_id = 21;
 }
 
 enum SourceType {

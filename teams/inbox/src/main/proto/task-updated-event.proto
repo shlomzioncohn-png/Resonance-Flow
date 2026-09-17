@@ -31,4 +31,5 @@ message TaskUpdatedEvent {
   optional string suggested_owner_user_id = 18;
   optional float suggested_owner_confidence = 19;
   google.protobuf.Timestamp updated_at = 20;
+  optional string owner_id = 21;
 }

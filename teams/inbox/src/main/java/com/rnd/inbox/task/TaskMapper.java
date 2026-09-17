@@ -18,5 +18,6 @@ public class TaskMapper {
         existing.setEffortEstimateConfidence(changes.getEffortEstimateConfidence());
         existing.setSuggestedOwnerUser(changes.getSuggestedOwnerUser());
         existing.setSuggestedOwnerConfidence(changes.getSuggestedOwnerConfidence());
+        existing.setOwner(changes.getOwner());
     }
 }
