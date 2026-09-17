@@ -139,7 +139,7 @@ public class WebSocketNotificationRegistry implements NotificationSink {
 
     @Override
     public void refresh(String orgId, String userId) {
-        deliver(orgId, userId, this::refreshMessage);
+        deliver(orgId, userId, () -> refreshMessage());
     }
 
     // design doc §11 (relay.pipe.websocket.heartbeat-interval-seconds) — see pipe-limits.yaml.
