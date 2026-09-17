@@ -147,6 +147,18 @@
                 <configuration>
                     <protocArtifact>com.google.protobuf:protoc:${protobuf.version}:exe:${os.detected.classifier}</protocArtifact>
                     <protoSourceRoot>${project.basedir}/src/main/proto</protoSourceRoot>
+                    <!-- Only these two are actually used by relay's own Java code (com.rnd.relay.event
+                         package) - the rest (task-created/-updated/-completed/-creation-requested-event,
+                         github-task, raw-object-event) belong to com.rnd.inbox.event and exist here purely
+                         for ci/check-all-schemas.sh to register/validate against the schema registry as
+                         raw .proto text; several of them redeclare the same enum names in that shared
+                         package (documented in task-updated-event.proto as "copied verbatim"), which is
+                         fine for standalone registry validation but makes protoc fail on a package-wide
+                         symbol collision if they're ever compiled together as one Java codegen unit. -->
+                    <includes>
+                        <include>task-event.proto</include>
+                        <include>task-notification.proto</include>
+                    </includes>
                 </configuration>
                 <executions>
                     <execution>
