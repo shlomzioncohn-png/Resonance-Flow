@@ -10,7 +10,6 @@ spring:
   config:
     import:
       - optional:${KAFKA_CONFIG_PATH:classpath:/kafka-config.yaml}
-      # design doc §11 — pipe.* tunables (replay buffer size, outbox capacity, heartbeat interval).
       - optional:${PIPE_LIMITS_PATH:classpath:/pipe-limits.yaml}
   kafka:
     producer:
@@ -37,5 +36,4 @@ relay:
     task-notification-topic: resonance.task-notifications
 
   pipe:
-    # Fresh group id per process so every pod fan-out-consumes the full topic (design doc §05).
-    consumer-group-id: pipe-${random.uuid}
+    consumer-group-id: pipe-${INSTANCE_NAME:${random.uuid}}-${random.int(1000,9999)}
