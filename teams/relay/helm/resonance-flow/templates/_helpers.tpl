@@ -161,6 +161,51 @@ not a scoped one, since kafka.sasl.client.* lives at the top level of Values.
 {{- end }}
 
 {{/*
+Standard ConfigMap header (apiVersion/kind/metadata) for a component's mounted
+config.yaml, named "<fullname>-<component>-config" - identical shape shared by
+every component that mounts one. Takes {root, component}.
+*/}}
+{{- define "resonance-flow.configMapHeader" -}}
+apiVersion: v1
+kind: ConfigMap
+
+metadata:
+  name: {{ include "resonance-flow.fullname" .root }}-{{ .component }}-config
+  labels:
+    {{- include "resonance-flow.labels" .root | nindent 4 }}
+    app.kubernetes.io/component: {{ .component }}
+{{- end }}
+
+{{/*
+Kafka bootstrap-servers + SASL_PLAINTEXT security/properties block, identical
+across every component's mounted config.yaml - only extra client properties
+(e.g. inbox's schema.registry.url) and the producer serializer vary per
+component and stay in the caller. Takes {root}.
+*/}}
+{{- define "resonance-flow.springKafkaBase" -}}
+bootstrap-servers: {{ printf "%s:%s" (include "resonance-flow.dependencyHostByName" (dict "root" .root "deps" .root.Values.dependencies "name" "kafka")) (include "resonance-flow.dependencyPort" (dict "deps" .root.Values.dependencies "name" "kafka")) | quote }}
+security:
+  protocol: SASL_PLAINTEXT
+properties:
+  sasl.mechanism: "PLAIN"
+  sasl.jaas.config: {{ include "resonance-flow.kafkaSaslJaasConfig" .root | quote }}
+{{- end }}
+
+{{/*
+Kafka consumer defaults (offset reset, auto-commit, string (de)serializers),
+identical across every component - only the consumer group id varies. Takes
+{groupId}.
+*/}}
+{{- define "resonance-flow.springKafkaConsumerDefaults" -}}
+consumer:
+  group-id: {{ .groupId | quote }}
+  auto-offset-reset: earliest
+  enable-auto-commit: false
+  key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+  value-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+{{- end }}
+
+{{/*
 Render the env entries for a component whose config is mounted as a file
 at /etc/resonance-flow/config/config.yaml. SPRING_CONFIG_ADDITIONAL_LOCATION
 is what actually makes Spring Boot load the mounted file (processed after
