@@ -37,12 +37,13 @@ repositories are in-memory only.
 - Spring Kafka
 - Docker / Docker Compose
 
-The DB choice for the project has not been decided yet. An in-memory H2 database is configured
-as a placeholder purely so a `DataSource`/transaction manager exists for `@Transactional` -
-`Task`/`TaskDependency` are plain DTOs (not JPA entities) and are **not** persisted to H2; real
-data still lives in the in-memory `TaskRepository`/`TaskDependencyRepository` implementations,
-and the idempotency store described below is in-memory only. None of this state survives a
-restart. See [CLAUDE.md](CLAUDE.md) for the full rationale and open items.
+Postgres, via plain JDBC (`spring-boot-starter-jdbc` + `JdbcTemplate`), not JPA/Hibernate -
+team-lead decision, 2026-09-17: Chain's repositories are already hand-written interfaces, not
+Spring Data, and the operations Chain needs (upsert, atomic counter updates, row locking) are raw
+SQL anyway. So far this only covers `Constraint` (issue #378, see "Constraint persistence" below)
+- `Task`/`TaskDependency` stay in the in-memory `TaskRepository`/`TaskDependencyRepository`
+implementations until issue #377 lands, and the idempotency store described below is in-memory
+only. See [CLAUDE.md](CLAUDE.md) for the full rationale and open items.
 
 Task identifiers are `java.util.UUID` for now, pending the Inbox team publishing its own task id
 type (`Task`/`TaskDependency` will switch to that type once it exists).
@@ -56,7 +57,8 @@ src/main/java/com/rnd/chain/
 ├── service/                # TaskTraversalService (traversal), TaskEligibilityService
 │                           # (dependency/constraint update flow), TaskDependencyService
 │                           # (edge validation/CRUD, issue #66)
-├── repository/             # TaskRepository / TaskDependencyRepository + in-memory impls
+├── repository/             # TaskRepository / TaskDependencyRepository + in-memory impls;
+│                           # ConstraintRepository + PostgresConstraintRepository (issue #378)
 ├── dto/                    # Task, TaskDependency, TaskStatus, Constraint, ApiError,
 │                           # TaskResponse, TaskTraceResponse, ProcessedEvent (idempotency
 │                           # claim record)
@@ -75,6 +77,7 @@ src/main/java/com/rnd/chain/
 │                           # DependencyNotFoundException/InvalidDependencyException (issue #66)
 └── config/                 # MockDataConfig - empty-seeded repository beans
 src/main/resources/application.yml
+src/main/resources/db/migration/  # Flyway - V1__create_task_constraint_table.sql (issue #378)
 src/test/java/com/rnd/chain/
 ├── controller/ChainControllerTest.java
 ├── service/                # TaskTraversalServiceTest, TaskTraversalPerformanceTest,
@@ -82,7 +85,8 @@ src/test/java/com/rnd/chain/
 │                           # (real threads, real in-memory repos, no mocks), TaskDependencyServiceTest
 ├── repository/             # TaskRepositoryContractTest (shared contract, run against every
 │                           # implementation) + InMemoryTaskRepositoryTest,
-│                           # InMemoryTaskDependencyRepositoryTest
+│                           # InMemoryTaskDependencyRepositoryTest, PostgresConstraintRepositoryTest
+│                           # (issue #378 - see that section below for why it can't pass yet)
 ├── dto/TaskTest.java, TaskDependencyTest.java
 ├── events/                 # ChainEventConsumerTest, ChainEventConsumerIntegrationTest
 │                           # (@EmbeddedKafka), EventEnvelopeTest, InMemoryProcessedEventStoreTest,
@@ -235,6 +239,36 @@ should go through `TaskDependencyService` rather than calling the repository dir
 `TaskRepository` / `InMemoryTaskRepository` are also included here (a compatible implementation
 matching the interface used elsewhere in the module) since `TaskDependencyService` needs task
 existence checks.
+
+## Constraint persistence (Issue #378)
+
+`ConstraintRepository` / `PostgresConstraintRepository` (in `repository/`) give `Constraint` a
+real Postgres-backed store: `findByTaskId`, `findById`, `save` (upsert by `constraintId` - a
+redelivered "constraint added" event updates the existing row rather than duplicating it). Plain
+JDBC, not JPA - see "Stack" above. `reason` (`Map<String, Object>`) is stored as `jsonb`, converted
+via Jackson + `PGobject` (`toJsonb`/`fromJsonb`). `type`/`status` are `VARCHAR` + a `CHECK`
+constraint listing the valid enum values, not a native Postgres enum type - works identically
+regardless of persistence technology, and is simpler to extend later (`DROP`/`ADD CONSTRAINT`
+vs. `ALTER TYPE ... ADD VALUE`).
+
+**Depends on issue #377 (Task/TaskDependency Postgres persistence), which is not done yet.**
+`V1__create_task_constraint_table.sql`'s `task_id` column references `task(id)`, a table #377 is
+supposed to create - team decision: build the Constraint side now rather than wait, accepting
+that the migration won't apply (and `PostgresConstraintRepositoryTest` won't pass) until #377
+lands. Verified this is the actual failure mode (`Connection to localhost:5432 refused` locally,
+with no Postgres running yet either) - not a wiring bug.
+
+**Not yet wired into `TaskEligibilityService`.** `onConstraintAdded`/`onConstraintStatusChanged`
+still only mutate `Task.openConstraintCount` in place (see "Key decisions" in
+[CLAUDE.md](CLAUDE.md)) - connecting them to `ConstraintRepository` is blocked on a team-lead
+decision (asked 2026-09-17, pending): whether `openConstraintCount` should be recomputed from a
+real `COUNT(*)` query against `task_constraint` on every change (what #378 asks for explicitly),
+or keep the existing `+1`/`-1` delta pattern (matching how `blockingCount` is designed in #377),
+relying only on the repository's idempotent upsert to prevent double-counting. Already decided regardless of that answer: write to `ConstraintRepository` before updating the
+in-memory `Task` counter, not after - a crash/failure between the two steps is then a harmless
+retry (the upsert is a no-op) rather than a permanently lost `Constraint` row, since the
+alternative order can skip the retry's repository write entirely once the in-memory idempotency
+check already says "seen it."
 
 ## Code review fixes (2026-09-10, PR #251)
 

@@ -14,6 +14,27 @@ onConstraintStatusChanged.
   based push/pop, no depth limit — not optimized yet, revisit only if
   it's a bottleneck)
 - No retry logic (@Retryable) — let exceptions propagate to the caller
+- Constraint persistence (issue #378, 2026-09-17 team-lead decision):
+  Postgres via plain JDBC (JdbcTemplate), not JPA/Hibernate - Chain's
+  repositories are already hand-written interfaces, not Spring Data, and
+  the operations needed (upsert, atomic counter updates, row locking) are
+  raw SQL anyway. Same decision applies to Task/TaskDependency once #377
+  starts. Enums stored as VARCHAR + CHECK, not a native Postgres enum
+  type (works the same regardless of persistence tech, simpler to change
+  later). Table is `task_constraint`, not `constraint` - a reserved SQL
+  keyword - matching this module's own `task_dependency` naming instead
+  of Inbox's plural `tasks` convention.
+- This branch (#378) writes Constraint persistence assuming #377 (Task/
+  TaskDependency Postgres persistence) already landed, rather than
+  building #377's task table ourselves - not our work to do. Accepted
+  consequence: V1__create_task_constraint_table.sql's FK to task(id)
+  won't apply, and PostgresConstraintRepositoryTest won't pass, until
+  #377 actually lands. See README.md "Constraint persistence" for detail.
+- Write order once ConstraintRepository exists: persist to Postgres
+  before updating the in-memory Task counter, never the reverse - the
+  reverse order can silently lose a Constraint row forever on a partial
+  failure (the in-memory idempotency check skips the retry's repository
+  write too), while this order's worst case is just a harmless re-upsert.
 
 ## Real repository contracts (from chain/ruthHoltzman/dependency-repository-66)
 - TaskRepository: findById, findAllById, findByParentTaskId, save
@@ -23,6 +44,12 @@ onConstraintStatusChanged.
 - Proposed addition (pending team approval, NOT YET MERGED):
   incrementBlockingCount/decrementBlockingCount/
   incrementOpenConstraintCount/decrementOpenConstraintCount
+- ConstraintRepository (issue #378, new): findByTaskId, findById,
+  save (upsert by constraintId). Postgres-backed implementation is
+  PostgresConstraintRepository (JDBC) - registered @ConditionalOnMissingBean
+  like TaskRepository/TaskDependencyRepository. No in-memory implementation
+  exists or is planned - unlike Task/TaskDependency, Constraint had no
+  in-memory repository to begin with (per issue #378's own description).
 - Task/TaskDependency/TaskStatus were merged from main (2026-08-27) after
   ruthHoltzman's DTO review landed there: Task now has a required ownerId,
   score is Double (was Integer), and construction is via Task.builder()
@@ -38,6 +65,25 @@ onConstraintStatusChanged.
   and keep only cycle detection + counters.
 
 ## Open items
+- Waiting (asked 2026-09-17) on team-lead answer for issue #378: should
+  openConstraintCount be recomputed from a real COUNT(*) query against
+  task_constraint on every change (what #378 asks for explicitly), or
+  keep the existing +1/-1 delta pattern (matching blockingCount's design
+  in #377), relying only on ConstraintRepository's idempotent upsert to
+  prevent double-counting? Blocks wiring TaskEligibilityService.
+  onConstraintAdded/onConstraintStatusChanged to ConstraintRepository -
+  everything else in #378's scope (repository, migration, tests) is done.
+- Also waiting on team-lead/DevOps for the real Postgres DB name/user for
+  Chain (dedicated DB + non-superuser user, per team-lead's answer to
+  Q8-12) - application.yml/.env.example currently use placeholder values
+  (DB_NAME=chain, DB_USER=chain_user/chain_password) pending that.
+- Deliberately NOT pulling PR #114's onConstraintAdded/onConstraintStatusChanged
+  constraintId signature into this branch ahead of time (would need
+  touching TaskEligibilityService twice - once now, again once the
+  counter-strategy question above is answered, since both changes land in
+  the same methods). Will pick it up naturally via merge/rebase once #114
+  lands in main, or write it directly if the counter-strategy answer comes
+  first.
 - pom.xml still lacks a real persistence layer, and Task/TaskDependency
   are plain DTOs, not JPA entities. @Transactional is kept on
   TaskEligibilityService's public methods deliberately (team decision:
