@@ -177,6 +177,10 @@ components:
       periodSeconds: 5
       failureThreshold: 3
     env: {}
+    config:
+      inbox:
+        service:
+          url: http://resonance-flow-inbox:80
   bridge:
     enabled: true
     replicaCount: 1
