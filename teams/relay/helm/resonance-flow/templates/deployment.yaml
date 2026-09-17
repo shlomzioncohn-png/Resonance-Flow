@@ -86,7 +86,7 @@ spec:
               containerPort: {{ $component.containerPort }}
               protocol: TCP
 
-          {{- if or $component.config $component.env (eq $componentName "notification-delivery") }}
+          {{- if or $component.config $component.secret $component.env (eq $componentName "notification-delivery") }}
           env:
             {{- if eq $componentName "notification-delivery" }}
             {{/* Populates the app's generic INSTANCE_NAME contract (see application.yml /
@@ -99,11 +99,15 @@ spec:
             {{- end }}
             {{- if $component.config }}
             {{- include "resonance-flow.configFilePathEnv" $ | nindent 12 }}
-              {{- end }}
-              {{- range $name, $value := $component.env }}
+            {{- end }}
+            {{- if $component.secret }}
+            - name: SECRETS_FILE_PATH
+              value: "/etc/resonance-flow/secret/secrets.yaml"
+            {{- end }}
+            {{- range $name, $value := $component.env }}
             - name: {{ $name }}
               value: {{ $value | quote }}
-               {{- end }}
+            {{- end }}
           {{- end }}
 
           {{- with $component.startupProbe }}
@@ -125,29 +129,42 @@ spec:
           resources:
             {{- toYaml . | nindent 12 }}
           {{- end }}
-          {{- if or $component.config $.Values.volumeMounts }}
+          {{- if or $component.config $component.secret $.Values.volumeMounts }}
           volumeMounts:
             {{- if $component.config }}
             - name: resonance-flow-config
               mountPath: /etc/resonance-flow/config/config.yaml
               subPath: config.yaml
               readOnly: true
-              {{- end }}
-              {{- with $.Values.volumeMounts }}
-              {{- toYaml . | nindent 12 }}
-              {{- end }}
+            {{- end }}
+            {{- if $component.secret }}
+            # whole Secret as a dir (no subPath): an optional missing Secret then
+            # leaves an empty dir, not a phantom file, and updates propagate.
+            - name: resonance-flow-secret
+              mountPath: /etc/resonance-flow/secret
+              readOnly: true
+            {{- end }}
+            {{- with $.Values.volumeMounts }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
           {{- end }}
 
-      {{- if or $component.config $.Values.volumes }}
+      {{- if or $component.config $component.secret $.Values.volumes }}
       volumes:
         {{- if $component.config }}
         - name: resonance-flow-config
           configMap:
             name: {{ include "resonance-flow.fullname" $ }}-{{ $componentName }}-config
-          {{- end }}
-          {{- with $.Values.volumes }}
-          {{- toYaml . | nindent 8 }}
-          {{- end }}
+        {{- end }}
+        {{- if $component.secret }}
+        - name: resonance-flow-secret
+          secret:
+            secretName: {{ include "resonance-flow.fullname" $ }}-{{ $componentName }}-secret
+            optional: true
+        {{- end }}
+        {{- with $.Values.volumes }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
       {{- end }}
 
       {{- with $.Values.nodeSelector }}

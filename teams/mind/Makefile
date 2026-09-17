@@ -1,4 +1,4 @@
-.PHONY: install dev test lint fmt run eval schema docker-build docker-up
+.PHONY: install dev test lint fmt run eval schema docker-build docker-up proto
 
 install:
 	pip install -e .
@@ -6,10 +6,13 @@ install:
 dev:
 	pip install -e ".[dev]"
 
-test:
+proto:
+	python -m grpc_tools.protoc --proto_path=proto --python_out=src/mind/messaging proto/*.proto
+
+test: proto
 	pytest --cov=src/mind
 
-lint:
+lint: proto
 	ruff check src tests
 	mypy src
 	python -m mind.evaluation.schema --check
@@ -20,7 +23,7 @@ schema:
 fmt:
 	ruff format src tests
 
-run:
+run: proto
 	uvicorn mind.api.main:app --reload --port 8000
 
 eval:

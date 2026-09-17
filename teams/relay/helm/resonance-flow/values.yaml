@@ -113,6 +113,33 @@ components:
     dependencies:
       - name: minio
         port: 9000
+    # Mounted as config.yaml at /etc/resonance-flow/config/ - keys are what MIND reads.
+    config:
+      vector_store:
+        # pgvector needs user/password/db, not an API key.
+        url: ""
+        user: mind
+        db: mind
+      llm:
+        model: ""
+        cache_dir: ./models
+      ocr:
+        provider: local
+      asr:
+        provider: local
+        whisper_model: base
+      object_storage:
+        endpoint: http://resonance-flow-minio.resonance-flow.svc.cluster.local:9000
+        bucket: ""
+      kafka:
+        bootstrap_servers: resonance-flow-kafka.resonance-flow.svc.cluster.local:9092
+        schema_registry_url: http://resonance-flow-schema-registry.resonance-flow.svc.cluster.local:80/apis/ccompat/v6
+        producer:
+          task_creation_requested_topic: task.creation.requested
+      service:
+        log_level: INFO
+    secret:
+      create: true
   lens-bff:
     enabled: true
     replicaCount: 1
@@ -323,10 +350,7 @@ components:
     enabled: true
     replicaCount: 1
     image:
-      # Same image already used for local dev (teams/relay/docker-compose.yml) and the
-      # draft teams/relay/schema-sync-hook chart - in-memory Apicurio registry, ccompat
-      # (Confluent-compatible) API. Not durable storage - fine for dev/CI, would need a
-      # persistent backend (its own Postgres/Kafka storage) before a real prod rollout.
+      # In-memory Apicurio registry - not durable, fine for dev/CI only.
       repository: "apicurio/apicurio-registry-mem"
       pullPolicy: IfNotPresent
       tag: "2.5.11.Final"
@@ -346,9 +370,7 @@ components:
         path: /health/live
         port: http
       periodSeconds: 5
-      # Quarkus boot under a constrained CPU request measured ~200s+ locally (verified live -
-      # killed with SIGTERM right at the old 40*5s=200s budget, before it finished starting).
-      # 60*5s=300s matches the margin inbox's own startupProbe already carries for the same reason.
+      # Quarkus boot measured ~200s+ under a constrained CPU request - needs the margin.
       failureThreshold: 60
     livenessProbe:
       httpGet:
@@ -500,6 +522,13 @@ kafka:
 minio:
   enabled: true
   mode: standalone
+  image:
+    registry: docker.io
+    repository: bitnamilegacy/minio
+  console:
+    image:
+      registry: docker.io
+      repository: bitnamilegacy/minio-object-browser
   persistence:
     enabled: false
   resources:

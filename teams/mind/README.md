@@ -38,7 +38,10 @@ teams/mind/
 │   ├── contracts/      # Pydantic models + the standard error format
 │   └── observability/  # record_call() — tracks time/cost of every model call
 ├── docs/
-│   └── API.md          # the API contract shared with other teams
+│   ├── API.md            # the API contract shared with other teams
+│   └── relay-handoff.md  # what Relay needs to build/run/monitor the image
+├── db/
+│   └── init/            # vector-store (pgvector) bootstrap SQL, runs on first startup
 ├── eval/
 │   ├── personas/       # the fixed scenario set
 │   └── datasets/       # manifests + checksums only, never the corpora
@@ -106,7 +109,11 @@ licensing constraints.
 
 ## Open decisions (track and update as they close)
 
-- Vector store: pgvector / Qdrant / OpenSearch k-NN / Milvus / Chroma+FAISS
+- ~~Vector store: pgvector / Qdrant / OpenSearch k-NN / Milvus / Chroma+FAISS~~
+  Resolved: **pgvector**. Runs as the `vector-store` service in
+  `docker-compose.yml` (`pgvector/pgvector` image); extension enabled by
+  `db/init/01-enable-pgvector.sql`. No application schema yet -- that
+  lands with the real embeddings work.
 - OCR/ASR: managed API vs. local model (e.g. local Whisper)
 - Evaluation metric: top-1 accuracy vs. MRR/nDCG
 - How the score is published to Chain: separate event vs. field on `Task`
@@ -116,19 +123,28 @@ licensing constraints.
 ## Getting started
 
 ```bash
-cp .env.example .env       # fill in as decisions close
+cp .env.example .env       # already filled with working defaults today
 make dev                   # install with dev dependencies
 make lint                  # ruff + mypy
 make test                  # run the test suite
 make eval                  # run the evaluation harness against eval/personas/
 make run                   # run the API locally
-make docker-up             # or run everything via docker compose
+make docker-up             # or run everything via docker compose (API + vector-store)
 ```
 
-Once running, `curl http://localhost:8000/health` should return `200` with
-`{"status": "ok", ...}`. Full API contract (endpoints, error format,
-versioning plan) is in [`docs/API.md`](./docs/API.md) — that's the document
-shared with other teams, in particular Relay.
+`make docker-up` (`docker compose up`) now brings up the full stack —
+the API **and** its `vector-store` (pgvector) dependency — with one
+command, waiting for `vector-store` to report healthy before starting
+`mind`. On a clean checkout: `docker compose down -v && docker compose
+up -d --build`.
+
+Once running, `curl -f http://localhost:8000/health` should return `200`
+with `{"status": "ok", ...}`, and `docker compose ps` should show both
+services as `(healthy)`. Full API contract (endpoints, error format,
+versioning plan) is in [`docs/API.md`](./docs/API.md) — that's the
+document shared with other teams. Everything Relay specifically needs to
+build, run, and monitor the image (ports, env vars, health check
+decoding) is in [`docs/relay-handoff.md`](./docs/relay-handoff.md).
 
 CI ([`mind-ci.yml`](../../.github/workflows/mind-ci.yml)) runs `make dev` /
 `make lint` / `make test` plus a harness smoke check on every PR — see
