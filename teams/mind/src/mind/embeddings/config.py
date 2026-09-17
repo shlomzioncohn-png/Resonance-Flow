@@ -52,10 +52,13 @@ def get_settings() -> Settings:
     return Settings()
 
 
-# Only fields with no ordering hazard are re-exported eagerly here. DB-facing
-# fields (table name, search effort) are read lazily via get_settings() at
-# the point of use instead -- e.g. vector_store_table must reflect whatever
-# tests/conftest.py sets *before* this module is first imported, and an
-# eager read here would freeze it before that override lands.
+# These two calls are themselves what freezes get_settings()'s cache, at
+# this module's own import time -- @lru_cache means every other call
+# anywhere else (e.g. pgvector_store.py's "lazy" reads) just returns this
+# same cached Settings object, not a fresh read. So the ordering
+# dependency on tests/conftest.py setting env vars *before* this module
+# is first imported is exactly as real as it was before this file stopped
+# eagerly exporting PG_TABLE/HNSW_EF_SEARCH -- point-of-use reads
+# elsewhere only avoid the naming leak, they don't add laziness.
 EMBEDDING_DIM = get_settings().embedding_dim
 DUPLICATE_SIMILARITY_THRESHOLD = get_settings().duplicate_similarity_threshold
