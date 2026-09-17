@@ -3,14 +3,7 @@
 {{- with $component.config }}
 {{- $cfg := .data }}
 ---
-apiVersion: v1
-kind: ConfigMap
-
-metadata:
-  name: {{ include "resonance-flow.fullname" $ }}-chain-config
-  labels:
-    {{- include "resonance-flow.labels" $ | nindent 4 }}
-    app.kubernetes.io/component: chain
+{{ include "resonance-flow.configMapHeader" (dict "root" $ "component" "chain") }}
 
 data:
   config.yaml: |
@@ -25,18 +18,8 @@ data:
         username: {{ $cfg.datasource.username | quote }}
         password: "${DB_PASSWORD}"
       kafka:
-        bootstrap-servers: {{ printf "%s:%s" (include "resonance-flow.dependencyHostByName" (dict "root" $ "deps" $.Values.dependencies "name" "kafka")) (include "resonance-flow.dependencyPort" (dict "deps" $.Values.dependencies "name" "kafka")) | quote }}
-        security:
-          protocol: SASL_PLAINTEXT
-        properties:
-          sasl.mechanism: "PLAIN"
-          sasl.jaas.config: {{ include "resonance-flow.kafkaSaslJaasConfig" $ | quote }}
-        consumer:
-          group-id: {{ $cfg.kafka.consumerGroupId | quote }}
-          auto-offset-reset: earliest
-          enable-auto-commit: false
-          key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
-          value-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+        {{- include "resonance-flow.springKafkaBase" (dict "root" $) | nindent 8 }}
+        {{- include "resonance-flow.springKafkaConsumerDefaults" (dict "groupId" $cfg.kafka.consumerGroupId) | nindent 8 }}
         producer:
           key-serializer: org.apache.kafka.common.serialization.StringSerializer
           value-serializer: org.springframework.kafka.support.serializer.JsonSerializer
@@ -50,7 +33,11 @@ data:
     logging:
       file:
         name: logs/chain.log
+{{- end }}
+{{- end }}
 
+{{- if .Values.postgresql.enabled }}
+{{- $datasource := $component.config.data.datasource }}
 ---
 apiVersion: v1
 kind: ConfigMap
@@ -66,8 +53,8 @@ data:
     #!/bin/bash
     set -euo pipefail
     psql -v ON_ERROR_STOP=1 --username postgres <<-EOSQL
-      CREATE USER {{ $cfg.datasource.username }} WITH PASSWORD '${CHAIN_DB_PASSWORD}';
-      CREATE DATABASE {{ $cfg.datasource.database }} OWNER {{ $cfg.datasource.username }};
+      CREATE USER {{ $datasource.username }} WITH PASSWORD '${CHAIN_DB_PASSWORD}';
+      CREATE DATABASE {{ $datasource.database }} OWNER {{ $datasource.username }};
     EOSQL
 
 ---
@@ -85,5 +72,4 @@ metadata:
 type: Opaque
 data:
   password: {{ if $existingSecret }}{{ index $existingSecret.data "password" }}{{ else }}{{ randAlphaNum 24 | b64enc }}{{ end }}
-{{- end }}
 {{- end }}
