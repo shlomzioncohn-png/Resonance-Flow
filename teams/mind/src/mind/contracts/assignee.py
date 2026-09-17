@@ -6,6 +6,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from mind.contracts.task_enums import AssigneeType
 
+
 class Assignee(BaseModel):
     """A user or team assigned to a Task."""
 

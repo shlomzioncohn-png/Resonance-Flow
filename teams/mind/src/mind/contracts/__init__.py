@@ -8,10 +8,10 @@ from mind.contracts.assignee import Assignee, AssigneeCandidate
 from mind.contracts.base_enums import SourceType
 from mind.contracts.raw_object_event import RawObjectEvent
 from mind.contracts.raw_object_event_enums import (
+    ChangeType,
     Modality,
     ScopeDecision,
-    ChangeType,
-    )
+)
 from mind.contracts.task import Task
 from mind.contracts.task_completed import TaskCompleted
 from mind.contracts.task_created import TaskCreated
@@ -28,6 +28,7 @@ __all__ = [
     "Assignee",
     "AssigneeCandidate",
     "AssigneeType",
+    "ChangeType",
     "ExtractionProvenance",
     "Modality",
     "RawObjectEvent",
