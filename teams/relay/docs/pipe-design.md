@@ -324,7 +324,31 @@ The workload therefore uses a normal Kubernetes `Deployment`, not a `StatefulSet
 
 Each running instance gets its own consumer group, named after its own pod name plus a short random suffix that the app generates at startup. The pod name is read from the `POD_NAME`
 environment variable, which the Deployment populates via the Kubernetes downward API (`fieldRef: fieldPath: metadata.name`) — an explicit, orchestrator-provided value rather than
-the kernel `$HOSTNAME`, which only happens to match the pod name and isn't guaranteed to (e.g. if `spec.hostname` is ever set explicitly). Outside Kubernetes (local/`docker run`), `POD_NAME` is simply unset and the config falls back to a fixed placeholder; the random suffix is what keeps the group id unique in that case, and generating it in the app rather than relying on the runtime means the fallback needs no special-casing.
+the kernel `$HOSTNAME`, which only happens to match the pod name and isn't guaranteed to (e.g. if `spec.hostname` is ever set explicitly).
+
+If `POD_NAME` is unset, the config falls back to a fresh random UUID rather than a fixed
+placeholder — so a plain local run (`mvn spring-boot:run`, `docker compose up`) always gets a
+usable, already-unique id and never fails to start just for lacking a pod name.
+
+Inside an actual Kubernetes pod, though, a missing `POD_NAME` means the Deployment's downward-API
+wiring got dropped, and that's worth failing loudly for rather than quietly running on the random
+fallback. `PodNameGuard` (`TaskNotificationConsumer`'s sibling in `event/`) checks this
+specifically: it reads `KUBERNETES_SERVICE_HOST`, which the kubelet sets in every pod regardless
+of this service's own config (the same signal Kubernetes client libraries use to detect
+in-cluster execution), and if that's present while `POD_NAME` is blank, it throws
+`IllegalStateException` during startup with a message naming the missing downward-API wiring —
+failing the deploy with a clear, specific cause instead of a generic "could not resolve
+placeholder" error, and without misfiring for local/CI runs that were never going to have
+`POD_NAME` in the first place.
+
+A present `POD_NAME` is still not proof the resulting consumer-group id is actually free to use.
+Kubernetes guarantees distinct pod names, but nothing guarantees this pod isn't racing an old
+instance of itself — a slow non-graceful exit whose group hasn't been swept yet (§06.7) — or
+starting up while some other process already holds that exact id. So the same guard also asks the
+broker directly, via `AdminClient.describeConsumerGroups`, whether a group by this pod's id
+already has live members; if it does, `PodNameGuard` throws instead of joining it, since two
+members on one group id would silently split that pod's partition instead of each pod
+independently reading the full topic, defeating the full-fan-out design in §04.
 
 ```text
 Instance A → pipe-<Instance A's pod name>-<random>
@@ -708,8 +732,13 @@ Each running instance has its own consumer group:
 
 `POD_NAME` is populated via the Kubernetes downward API (`fieldRef: fieldPath: metadata.name`),
 not the kernel `$HOSTNAME` — an explicit, orchestrator-provided value instead of one that only
-happens to match the pod name. The app appends a short random suffix of its own at startup, so
-the group id stays unique even outside Kubernetes, where `POD_NAME` is unset — see
+happens to match the pod name. The app appends a short random suffix of its own at startup as
+extra headroom, and falls back to a random UUID in place of `POD_NAME` itself if that's ever
+unset — which keeps plain local runs working, but is exactly the case `PodNameGuard` refuses to
+let slide inside a real Kubernetes pod (detected via `KUBERNETES_SERVICE_HOST`): a missing
+`POD_NAME` there means the downward-API wiring is broken, so it fails startup with a specific,
+actionable error rather than letting the pod come up on an unreliable fallback. The same guard
+also checks the id it's about to use isn't already claimed — see
 [§05](#05-scaling-out-in-kubernetes).
 
 This causes every instance to consume the complete notification topic independently.

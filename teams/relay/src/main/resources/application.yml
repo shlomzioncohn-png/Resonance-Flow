@@ -36,4 +36,4 @@ relay:
     task-notification-topic: resonance.task-notifications
 
   pipe:
-    consumer-group-id: pipe-${POD_NAME:local}-${random.int(1000,9999)}
+    consumer-group-id: pipe-${POD_NAME:${random.uuid}}-${random.int(1000,9999)}
