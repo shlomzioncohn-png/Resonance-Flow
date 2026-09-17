@@ -282,7 +282,7 @@ class TaskDependencyServiceTest {
 
         List<DependencyHistoryEntry> entries = service.getHistory(taskA, 0, 20).content();
         assertThat(entries).hasSize(1);
-        assertThat(entries.get(0).getAction()).isEqualTo(DependencyChangeAction.ADDED);
+        assertThat(entries.get(0).action()).isEqualTo(DependencyChangeAction.ADDED);
     }
 
     @Test
@@ -292,7 +292,7 @@ class TaskDependencyServiceTest {
         service.removeDependency(taskA, taskB);
 
         List<DependencyHistoryEntry> entries = service.getHistory(taskA, 0, 20).content();
-        assertThat(entries).extracting(DependencyHistoryEntry::getAction)
+        assertThat(entries).extracting(DependencyHistoryEntry::action)
                 .containsExactly(DependencyChangeAction.REMOVED, DependencyChangeAction.ADDED);
     }
 
@@ -314,10 +314,11 @@ class TaskDependencyServiceTest {
         assertThat(service.getHistory(taskA, 0, 20).content()).hasSize(1);
     }
 
-    // --- rollback: history-write failure undoes the graph mutation ---------
+    // --- history is written before the graph edge, so a history-write failure never
+    // leaves a provisional edge for another service (e.g. TaskEligibilityService) to observe ---
 
     @Test
-    void addDependency_historyWriteFails_edgeIsRolledBack() {
+    void addDependency_historyWriteFails_edgeIsNeverWritten() {
         DependencyHistoryRepository failingHistoryRepository = new ThrowingDependencyHistoryRepository();
         TaskRepository taskRepository = new InMemoryTaskRepository(
                 List.of(newTask(taskA), newTask(taskB)));
@@ -332,7 +333,7 @@ class TaskDependencyServiceTest {
     }
 
     @Test
-    void removeDependency_historyWriteFails_edgeIsRestored() {
+    void removeDependency_historyWriteFails_edgeIsNeverRemoved() {
         service.addDependency(taskA, taskB);
         DependencyHistoryRepository failingHistoryRepository = new ThrowingDependencyHistoryRepository();
         TaskRepository taskRepository = new InMemoryTaskRepository(
@@ -347,6 +348,37 @@ class TaskDependencyServiceTest {
         assertThat(taskDependencyRepository.findByTaskId(taskA))
                 .extracting(TaskDependency::dependsOnTaskId)
                 .containsExactly(taskB);
+    }
+
+    // --- compensation itself failing surfaces the divergence, not the original business error ---
+
+    @Test
+    void addDependency_duplicateEdge_whenCompensationFails_throwsWithOriginalSuppressed() {
+        DependencyHistoryRepository deleteThrowingHistory =
+                new DeleteThrowingDependencyHistoryRepository(new InMemoryDependencyHistoryRepository());
+        TaskDependencyService serviceWithBrokenCompensation = new TaskDependencyService(
+                taskRepository, taskDependencyRepository, deleteThrowingHistory,
+                new InMemoryTransactionRunner(), new IncrementingClock());
+        serviceWithBrokenCompensation.addDependency(taskA, taskB);
+
+        assertThatThrownBy(() -> serviceWithBrokenCompensation.addDependency(taskA, taskB))
+                .isNotInstanceOf(DuplicateDependencyException.class)
+                .satisfies(ex -> assertThat(ex.getSuppressed())
+                        .hasAtLeastOneElementOfType(DuplicateDependencyException.class));
+    }
+
+    @Test
+    void removeDependency_missingEdge_whenCompensationFails_throwsWithOriginalSuppressed() {
+        DependencyHistoryRepository deleteThrowingHistory =
+                new DeleteThrowingDependencyHistoryRepository(new InMemoryDependencyHistoryRepository());
+        TaskDependencyService serviceWithBrokenCompensation = new TaskDependencyService(
+                taskRepository, taskDependencyRepository, deleteThrowingHistory,
+                new InMemoryTransactionRunner(), new IncrementingClock());
+
+        assertThatThrownBy(() -> serviceWithBrokenCompensation.removeDependency(taskA, taskB))
+                .isNotInstanceOf(DependencyNotFoundException.class)
+                .satisfies(ex -> assertThat(ex.getSuppressed())
+                        .hasAtLeastOneElementOfType(DependencyNotFoundException.class));
     }
 
     // --- sourceRef required for MIND/SYSTEM, optional for USER -------------
@@ -456,7 +488,31 @@ class TaskDependencyServiceTest {
         assertThat(page.totalElements()).isEqualTo(0);
     }
 
-    /** Always throws on record() - used to prove the compensating rollback runs. */
+    @Test
+    void getHistory_rejectsNegativePage_beforeTouchingTheRepository() {
+        assertThatThrownBy(() -> service.getHistory(taskA, -1, 20))
+                .isInstanceOf(InvalidRequestException.class);
+    }
+
+    @Test
+    void getHistory_rejectsSizeZero() {
+        assertThatThrownBy(() -> service.getHistory(taskA, 0, 0))
+                .isInstanceOf(InvalidRequestException.class);
+    }
+
+    @Test
+    void getHistory_rejectsSizeOver100() {
+        assertThatThrownBy(() -> service.getHistory(taskA, 0, 101))
+                .isInstanceOf(InvalidRequestException.class);
+    }
+
+    @Test
+    void getHistory_invalidPageSize_takesPrecedenceOverUnknownTask() {
+        assertThatThrownBy(() -> service.getHistory(unknownTaskId, -1, 20))
+                .isInstanceOf(InvalidRequestException.class);
+    }
+
+    /** Always throws on record() - used to prove the graph is never mutated when history recording fails. */
     private static class ThrowingDependencyHistoryRepository implements DependencyHistoryRepository {
         @Override
         public DependencyHistoryEntry record(DependencyHistoryEntry entry) {
@@ -471,6 +527,41 @@ class TaskDependencyServiceTest {
         @Override
         public PageResponse<DependencyHistoryEntry> findByTaskId(UUID taskId, int page, int size) {
             return new PageResponse<>(List.of(), page, size, 0, 0);
+        }
+
+        @Override
+        public void delete(UUID entryId) {
+            throw new AssertionError("should not be called: record() always fails before any graph write happens");
+        }
+    }
+
+    /** Delegates record()/find*() to a real repository, but always throws on delete() -
+     * used to prove a failed compensation surfaces itself instead of the original business error. */
+    private static class DeleteThrowingDependencyHistoryRepository implements DependencyHistoryRepository {
+        private final DependencyHistoryRepository delegate;
+
+        DeleteThrowingDependencyHistoryRepository(DependencyHistoryRepository delegate) {
+            this.delegate = delegate;
+        }
+
+        @Override
+        public DependencyHistoryEntry record(DependencyHistoryEntry entry) {
+            return delegate.record(entry);
+        }
+
+        @Override
+        public Optional<DependencyHistoryEntry> findBySourceAndSourceRef(DependencyChangeSource source, String sourceRef) {
+            return delegate.findBySourceAndSourceRef(source, sourceRef);
+        }
+
+        @Override
+        public PageResponse<DependencyHistoryEntry> findByTaskId(UUID taskId, int page, int size) {
+            return delegate.findByTaskId(taskId, page, size);
+        }
+
+        @Override
+        public void delete(UUID entryId) {
+            throw new RuntimeException("simulated compensation failure");
         }
     }
 }

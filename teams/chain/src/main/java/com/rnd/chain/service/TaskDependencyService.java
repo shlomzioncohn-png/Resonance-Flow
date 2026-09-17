@@ -14,6 +14,8 @@ import com.rnd.chain.repository.DependencyHistoryRepository;
 import com.rnd.chain.repository.TaskDependencyRepository;
 import com.rnd.chain.repository.TaskRepository;
 import com.rnd.chain.repository.TransactionRunner;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
 import java.time.Clock;
@@ -36,6 +38,8 @@ import java.util.UUID;
  */
 @Service
 public class TaskDependencyService {
+
+    private static final Logger log = LoggerFactory.getLogger(TaskDependencyService.class);
 
     private final TaskRepository taskRepository;
     private final TaskDependencyRepository taskDependencyRepository;
@@ -116,14 +120,18 @@ public class TaskDependencyService {
             if (isMatchingRetry(taskId, dependsOnTaskId, DependencyChangeAction.ADDED, source, sourceRef)) {
                 return new TaskDependency(taskId, dependsOnTaskId);
             }
-            TaskDependency saved = taskDependencyRepository.save(new TaskDependency(taskId, dependsOnTaskId))
-                    .orElseThrow(() -> new DuplicateDependencyException(
-                            "Task " + taskId + " already depends on " + dependsOnTaskId));
-            // Safe today: no I/O, and the transaction lock rules out any interleaving write -
-            // this compensating write cannot fail or no-op. Revisit once a real DB replaces this repository.
-            recordHistoryOrCompensate(taskId, dependsOnTaskId, DependencyChangeAction.ADDED, source, sourceRef,
-                    () -> taskDependencyRepository.delete(taskId, dependsOnTaskId));
-            return saved;
+            // History is recorded before the graph edge is written (not after, with the edge
+            // compensated on failure): the edge is what TaskEligibilityService reads outside of
+            // this lock, so once it's written it must be final. If it turns out to be a no-op
+            // (duplicate), the history entry - which nothing else observes - is what gets undone.
+            DependencyHistoryEntry recorded = recordHistory(taskId, dependsOnTaskId,
+                    DependencyChangeAction.ADDED, source, sourceRef);
+            Optional<TaskDependency> saved = taskDependencyRepository.save(new TaskDependency(taskId, dependsOnTaskId));
+            if (saved.isEmpty()) {
+                throw compensateHistory(recorded.id(), new DuplicateDependencyException(
+                        "Task " + taskId + " already depends on " + dependsOnTaskId));
+            }
+            return saved.get();
         });
     }
 
@@ -156,13 +164,15 @@ public class TaskDependencyService {
             if (isMatchingRetry(taskId, dependsOnTaskId, DependencyChangeAction.REMOVED, source, sourceRef)) {
                 return null;
             }
+            // Same ordering as addDependency: history first, edge removal last, so the
+            // edge - once removed - never needs to be un-removed for anyone else to observe.
+            DependencyHistoryEntry recorded = recordHistory(taskId, dependsOnTaskId,
+                    DependencyChangeAction.REMOVED, source, sourceRef);
             boolean removed = taskDependencyRepository.delete(taskId, dependsOnTaskId);
             if (!removed) {
-                throw new DependencyNotFoundException(
-                        "No dependency from " + taskId + " to " + dependsOnTaskId);
+                throw compensateHistory(recorded.id(), new DependencyNotFoundException(
+                        "No dependency from " + taskId + " to " + dependsOnTaskId));
             }
-            recordHistoryOrCompensate(taskId, dependsOnTaskId, DependencyChangeAction.REMOVED, source, sourceRef,
-                    () -> taskDependencyRepository.save(new TaskDependency(taskId, dependsOnTaskId)));
             return null;
         });
     }
@@ -176,9 +186,9 @@ public class TaskDependencyService {
         Objects.requireNonNull(taskId, "taskId must not be null");
         requireTaskExists(taskId);
 
-        // Reads go through the same transaction lock as writes so they can never
-        // observe a state mid-rollback (see addDependency/removeDependency).
-        return transactionRunner.runInTransaction(() -> taskDependencyRepository.findByTaskId(taskId).stream()
+        // Read-only: waits for an in-flight write (so it can never observe a state mid-rollback,
+        // see addDependency/removeDependency) but runs concurrently with other reads.
+        return transactionRunner.runInReadOnlyTransaction(() -> taskDependencyRepository.findByTaskId(taskId).stream()
                 .map(TaskDependency::dependsOnTaskId)
                 .toList());
     }
@@ -192,33 +202,48 @@ public class TaskDependencyService {
         Objects.requireNonNull(taskId, "taskId must not be null");
         requireTaskExists(taskId);
 
-        return transactionRunner.runInTransaction(() -> taskDependencyRepository.findByDependsOnTaskId(taskId).stream()
+        return transactionRunner.runInReadOnlyTransaction(() -> taskDependencyRepository.findByDependsOnTaskId(taskId).stream()
                 .map(TaskDependency::taskId)
                 .toList());
     }
 
-    /** Empty page (not 404) if the task exists but has no history yet. */
+    /**
+     * Empty page (not 404) if the task exists but has no history yet.
+     *
+     * @throws InvalidRequestException if page is negative, or size is not in 1..100
+     */
     public PageResponse<DependencyHistoryEntry> getHistory(UUID taskId, int page, int size) {
         Objects.requireNonNull(taskId, "taskId must not be null");
+        if (page < 0 || size <= 0 || size > 100) {
+            throw new InvalidRequestException("page must be >= 0 and size must be in 1..100");
+        }
         requireTaskExists(taskId);
 
-        return transactionRunner.runInTransaction(() -> historyRepository.findByTaskId(taskId, page, size));
+        return transactionRunner.runInReadOnlyTransaction(() -> historyRepository.findByTaskId(taskId, page, size));
     }
 
-    /** Records the history entry; on failure runs {@code compensate} to undo the edge write, then rethrows. */
-    private void recordHistoryOrCompensate(UUID taskId, UUID dependsOnTaskId, DependencyChangeAction action,
-                                            DependencyChangeSource source, String sourceRef, Runnable compensate) {
+    /**
+     * Deletes the speculatively-recorded history entry that turned out not to match an actual
+     * graph change, and returns {@code original} to throw. If the deletion itself fails, that
+     * failure - not {@code original} - is what gets returned (with {@code original} attached via
+     * {@link Throwable#addSuppressed}) and logged at error level: it means the graph and the
+     * history log may now disagree, which is the more urgent problem to surface.
+     */
+    private RuntimeException compensateHistory(UUID entryId, RuntimeException original) {
         try {
-            recordHistory(taskId, dependsOnTaskId, action, source, sourceRef);
-        } catch (RuntimeException historyWriteFailed) {
-            compensate.run();
-            throw historyWriteFailed;
+            historyRepository.delete(entryId);
+            return original;
+        } catch (RuntimeException compensationFailed) {
+            compensationFailed.addSuppressed(original);
+            log.error("Failed to compensate history entry {} after a no-op graph write - "
+                    + "graph and history may now disagree", entryId, compensationFailed);
+            return compensationFailed;
         }
     }
 
-    private void recordHistory(UUID taskId, UUID dependsOnTaskId, DependencyChangeAction action,
-                                DependencyChangeSource source, String sourceRef) {
-        historyRepository.record(DependencyHistoryEntry.builder()
+    private DependencyHistoryEntry recordHistory(UUID taskId, UUID dependsOnTaskId, DependencyChangeAction action,
+                                                  DependencyChangeSource source, String sourceRef) {
+        return historyRepository.record(DependencyHistoryEntry.builder()
                 .id(UUID.randomUUID())
                 .taskId(taskId)
                 .dependsOnTaskId(dependsOnTaskId)
@@ -249,9 +274,9 @@ public class TaskDependencyService {
             return false;
         }
         DependencyHistoryEntry entry = existing.get();
-        boolean matches = entry.getAction() == action
-                && entry.getTaskId().equals(taskId)
-                && entry.getDependsOnTaskId().equals(dependsOnTaskId);
+        boolean matches = entry.action() == action
+                && entry.taskId().equals(taskId)
+                && entry.dependsOnTaskId().equals(dependsOnTaskId);
         if (!matches) {
             throw new InvalidRequestException("sourceRef " + sourceRef + " for source " + source
                     + " was already used for a different dependency change");

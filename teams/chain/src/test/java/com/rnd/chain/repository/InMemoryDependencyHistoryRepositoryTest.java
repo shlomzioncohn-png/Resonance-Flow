@@ -35,7 +35,7 @@ class InMemoryDependencyHistoryRepositoryTest {
         DependencyHistoryEntry first = repository.record(newEntry(DependencyChangeSource.USER, null, baseTime));
         DependencyHistoryEntry second = repository.record(newEntry(DependencyChangeSource.USER, null, baseTime));
 
-        assertThat(first.getId()).isNotEqualTo(second.getId());
+        assertThat(first.id()).isNotEqualTo(second.id());
         assertThat(repository.findByTaskId(taskId, 0, 20).totalElements()).isEqualTo(2);
     }
 
@@ -45,7 +45,7 @@ class InMemoryDependencyHistoryRepositoryTest {
         DependencyHistoryEntry second = repository.record(newEntry(DependencyChangeSource.MIND, "evt-1", baseTime.plusSeconds(60)));
 
         assertThat(second).isEqualTo(first);
-        assertThat(second.getCreatedAt()).isEqualTo(first.getCreatedAt());
+        assertThat(second.createdAt()).isEqualTo(first.createdAt());
         assertThat(repository.findByTaskId(taskId, 0, 20).totalElements()).isEqualTo(1);
     }
 
@@ -79,6 +79,35 @@ class InMemoryDependencyHistoryRepositoryTest {
         assertThat(repository.findBySourceAndSourceRef(DependencyChangeSource.USER, null)).isEmpty();
     }
 
+    // --- delete: compensates a speculatively-recorded entry ----------------
+
+    @Test
+    void delete_removesTheEntry_notReturnedByFindByTaskIdAfterwards() {
+        DependencyHistoryEntry recorded = repository.record(newEntry(DependencyChangeSource.USER, null, baseTime));
+
+        repository.delete(recorded.id());
+
+        assertThat(repository.findByTaskId(taskId, 0, 20).content()).isEmpty();
+    }
+
+    @Test
+    void delete_freesTheSourceRef_forARetryToReuse() {
+        DependencyHistoryEntry recorded = repository.record(newEntry(DependencyChangeSource.MIND, "evt-1", baseTime));
+        repository.delete(recorded.id());
+
+        DependencyHistoryEntry second = repository.record(newEntry(DependencyChangeSource.MIND, "evt-1", baseTime.plusSeconds(60)));
+
+        assertThat(second.id()).isNotEqualTo(recorded.id());
+        assertThat(repository.findBySourceAndSourceRef(DependencyChangeSource.MIND, "evt-1")).contains(second);
+    }
+
+    @Test
+    void delete_ofUnknownId_isNoOp() {
+        repository.delete(UUID.randomUUID());
+
+        assertThat(repository.findByTaskId(taskId, 0, 20).content()).isEmpty();
+    }
+
     // --- findByTaskId: filtering, ordering, pagination ---------------------
 
     @Test
@@ -98,7 +127,7 @@ class InMemoryDependencyHistoryRepositoryTest {
         PageResponse<DependencyHistoryEntry> page = repository.findByTaskId(taskId, 0, 20);
 
         assertThat(page.content()).hasSize(1);
-        assertThat(page.content().get(0).getTaskId()).isEqualTo(taskId);
+        assertThat(page.content().get(0).taskId()).isEqualTo(taskId);
     }
 
     @Test
@@ -109,8 +138,8 @@ class InMemoryDependencyHistoryRepositoryTest {
 
         List<DependencyHistoryEntry> content = repository.findByTaskId(taskId, 0, 20).content();
 
-        assertThat(content).extracting(DependencyHistoryEntry::getId)
-                .containsExactly(newest.getId(), middle.getId(), oldest.getId());
+        assertThat(content).extracting(DependencyHistoryEntry::id)
+                .containsExactly(newest.id(), middle.id(), oldest.id());
     }
 
     @Test
@@ -126,7 +155,7 @@ class InMemoryDependencyHistoryRepositoryTest {
 
         List<DependencyHistoryEntry> content = repository.findByTaskId(taskId, 0, 20).content();
 
-        assertThat(content).extracting(DependencyHistoryEntry::getId)
+        assertThat(content).extracting(DependencyHistoryEntry::id)
                 .containsExactly(lowerId, higherId);
     }
 
@@ -145,9 +174,9 @@ class InMemoryDependencyHistoryRepositoryTest {
         assertThat(firstPage.totalPages()).isEqualTo(3);
         assertThat(secondPage.content()).hasSize(1);
         assertThat(thirdPage.content()).hasSize(1);
-        assertThat(firstPage.content().get(0).getId())
-                .isNotEqualTo(secondPage.content().get(0).getId())
-                .isNotEqualTo(thirdPage.content().get(0).getId());
+        assertThat(firstPage.content().get(0).id())
+                .isNotEqualTo(secondPage.content().get(0).id())
+                .isNotEqualTo(thirdPage.content().get(0).id());
     }
 
     @Test
@@ -182,7 +211,7 @@ class InMemoryDependencyHistoryRepositoryTest {
 
         ConcurrentTestRunner.run(threadCount, () -> {
             DependencyHistoryEntry result = repository.record(newEntry(DependencyChangeSource.MIND, "evt-race", baseTime));
-            resultIds.put(result.getId(), true);
+            resultIds.put(result.id(), true);
         });
 
         assertThat(resultIds).hasSize(1);

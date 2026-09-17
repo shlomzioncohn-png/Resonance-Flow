@@ -39,7 +39,7 @@ class BridgeTaskEventDtoTest {
             .disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS);
 
     private static final Set<String> CONTRACT_KEYS = Set.of(
-            "eventId", "organizationId", "projectId", "title", "description", "sourceType",
+            "eventId", "tenantId", "projectId", "title", "description", "sourceType",
             "sourceRef", "tier", "roleContext", "urgency", "effortEstimateMinutes",
             "deadline", "status", "confidence");
 

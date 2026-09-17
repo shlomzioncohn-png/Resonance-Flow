@@ -7,72 +7,23 @@ import java.util.UUID;
 /**
  * Immutable, protocol-agnostic audit record of one dependency-graph change.
  * sourceRef-required-for-MIND/SYSTEM is enforced in the service layer, not here.
+ * Identity (equals/hashCode) is by {@code id} alone, not all fields - see below.
  */
-public final class DependencyHistoryEntry {
+public record DependencyHistoryEntry(UUID id,
+                                      UUID taskId,
+                                      UUID dependsOnTaskId,
+                                      DependencyChangeAction action,
+                                      DependencyChangeSource source,
+                                      String sourceRef,
+                                      Instant createdAt) {
 
-    private final UUID id;
-    private final UUID taskId;
-    private final UUID dependsOnTaskId;
-    private final DependencyChangeAction action;
-    private final DependencyChangeSource source;
-    private final String sourceRef;
-    private final Instant createdAt;
-
-    private DependencyHistoryEntry(UUID id,
-                                    UUID taskId,
-                                    UUID dependsOnTaskId,
-                                    DependencyChangeAction action,
-                                    DependencyChangeSource source,
-                                    String sourceRef,
-                                    Instant createdAt) {
-        requireNonNull(id, "id");
-        requireNonNull(taskId, "taskId");
-        requireNonNull(dependsOnTaskId, "dependsOnTaskId");
-        requireNonNull(action, "action");
-        requireNonNull(source, "source");
-        requireNonNull(createdAt, "createdAt");
-        this.id = id;
-        this.taskId = taskId;
-        this.dependsOnTaskId = dependsOnTaskId;
-        this.action = action;
-        this.source = source;
-        this.sourceRef = sourceRef;
-        this.createdAt = createdAt;
-    }
-
-    private static <T> T requireNonNull(T value, String name) {
-        if (value == null) {
-            throw new IllegalArgumentException(name + " must not be null");
-        }
-        return value;
-    }
-
-    public UUID getId() {
-        return id;
-    }
-
-    public UUID getTaskId() {
-        return taskId;
-    }
-
-    public UUID getDependsOnTaskId() {
-        return dependsOnTaskId;
-    }
-
-    public DependencyChangeAction getAction() {
-        return action;
-    }
-
-    public DependencyChangeSource getSource() {
-        return source;
-    }
-
-    public String getSourceRef() {
-        return sourceRef;
-    }
-
-    public Instant getCreatedAt() {
-        return createdAt;
+    public DependencyHistoryEntry {
+        Objects.requireNonNull(id, "id must not be null");
+        Objects.requireNonNull(taskId, "taskId must not be null");
+        Objects.requireNonNull(dependsOnTaskId, "dependsOnTaskId must not be null");
+        Objects.requireNonNull(action, "action must not be null");
+        Objects.requireNonNull(source, "source must not be null");
+        Objects.requireNonNull(createdAt, "createdAt must not be null");
     }
 
     @Override
@@ -80,10 +31,10 @@ public final class DependencyHistoryEntry {
         if (this == o) {
             return true;
         }
-        if (!(o instanceof DependencyHistoryEntry)) {
+        if (!(o instanceof DependencyHistoryEntry other)) {
             return false;
         }
-        return id.equals(((DependencyHistoryEntry) o).id);
+        return id.equals(other.id);
     }
 
     @Override

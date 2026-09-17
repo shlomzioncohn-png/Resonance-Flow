@@ -65,10 +65,14 @@ bridge:
     enabled: false
   crm:
     dataset: classpath:crm/synthetic-deals.json
-    # Inbox's tasks.organization_id is NOT NULL, but HubSpot (and this
+    # Inbox's tasks.tenant_id is NOT NULL, but HubSpot (and this
     # lane's Deal model) has no concept of it - see DealToTaskMapper's class
     # Javadoc. Set CRM_ORGANIZATION_ID for a real org; falls back to a
     # local placeholder for development so the app can start without it.
+    # This key deliberately still says "organization-id", not "tenant-id" -
+    # see teams/bridge/CLAUDE.md §6 (tracked alongside the Task.organizationId
+    # decision, same reasoning: renaming a config key is an operational risk
+    # across every deployed environment, not a wire-format concern).
     organization-id: ${CRM_ORGANIZATION_ID:local-crm-org}
     sync:
       # Set to true to enable the automatic daily HubSpot to Kafka sync.
