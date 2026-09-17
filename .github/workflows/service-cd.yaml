@@ -30,6 +30,9 @@ jobs:
       image_tag: ${{ steps.deploy.outputs.image_tag }}
       image_repository: ${{ steps.deploy.outputs.image_repository }}
     steps:
+      # local actions need the repo on disk before the runner can even resolve them
+      - uses: actions/checkout@v7
+
       - if: inputs.language == 'python'
         uses: ./.github/actions/ci-python
         with:
