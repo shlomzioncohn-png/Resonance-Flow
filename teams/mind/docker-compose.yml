@@ -7,11 +7,30 @@ services:
       - .env
     volumes:
       - ./models:/app/models
-    # Uncomment once the vector store is decided (see README "Open decisions")
-    # depends_on:
-    #   - vector-store
+    depends_on:
+      vector-store:
+        condition: service_healthy
 
-  # vector-store:
-  #   image: <tbd: pgvector | qdrant | opensearch | milvus | chroma>
-  #   ports:
-  #     - "6333:6333"
+  # pgvector: PostgreSQL + a vector similarity search extension. See
+  # README "Open decisions" (resolved) and db/init/ for the extension
+  # bootstrap -- no application schema yet, that lands with the real
+  # embeddings work.
+  vector-store:
+    image: pgvector/pgvector:pg16
+    environment:
+      - POSTGRES_USER=${VECTOR_STORE_USER:-mind}
+      - POSTGRES_PASSWORD=${VECTOR_STORE_PASSWORD:-mind}
+      - POSTGRES_DB=${VECTOR_STORE_DB:-mind}
+    ports:
+      - "5432:5432"
+    volumes:
+      - vector-store-data:/var/lib/postgresql/data
+      - ./db/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${VECTOR_STORE_USER:-mind} -d ${VECTOR_STORE_DB:-mind}"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+volumes:
+  vector-store-data:
