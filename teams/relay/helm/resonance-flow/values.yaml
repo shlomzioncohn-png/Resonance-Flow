@@ -181,6 +181,9 @@ components:
       inbox:
         service:
           url: http://resonance-flow-inbox:80
+      chain:
+        service:
+          url: http://resonance-flow-chain:80
   bridge:
     enabled: true
     replicaCount: 1
