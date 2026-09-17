@@ -1,3 +1,4 @@
+import { alpha } from '@mui/material/styles'
 import type { PaletteOptions } from '@mui/material/styles'
 import { colorTokens, statusTokens } from './tokens'
 
@@ -25,10 +26,19 @@ declare module '@mui/material/styles' {
       critical: StatusPaletteEntry
       neutral: StatusPaletteEntry
     }
+    /** Dark, always-on-dark sidebar surface — independent of light/dark mode. */
+    sidebar: {
+      background: string
+      text: string
+      textActive: string
+      divider: string
+      hover: string
+    }
   }
 
   interface PaletteOptions {
     status?: Palette['status']
+    sidebar?: Palette['sidebar']
   }
 }
 
@@ -67,4 +77,11 @@ export const palette: PaletteOptions = {
   },
   divider: 'rgba(15, 23, 42, 0.08)',
   status: statusTokens,
+  sidebar: {
+    background: colorTokens.slate[950],
+    text: alpha('#ffffff', 0.7),
+    textActive: '#ffffff',
+    divider: alpha('#ffffff', 0.08),
+    hover: alpha('#ffffff', 0.06),
+  },
 }

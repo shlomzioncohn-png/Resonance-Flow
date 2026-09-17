@@ -13,7 +13,7 @@ export interface PageContainerProps {
 
 export default function PageContainer({ title, description, actions, children }: PageContainerProps) {
   return (
-    <Container maxWidth="lg" sx={{ py: { xs: 3, md: 4 } }}>
+    <Container maxWidth={false} sx={{ px: { xs: 2, sm: 3, md: 4 }, py: { xs: 3, md: 4 } }}>
       <Stack
         direction={{ xs: 'column', sm: 'row' }}
         spacing={2}

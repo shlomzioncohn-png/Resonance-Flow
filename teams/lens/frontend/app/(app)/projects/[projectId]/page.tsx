@@ -11,7 +11,7 @@ export default async function ProjectDetailPage({
   return (
     <PageContainer
       title={`Project: ${projectId}`}
-      description="Workload and status detail for this project. Reached from Manager → Workload."
+      description="Workload and status detail for this project. Reached from Manager Dashboard or Manager → Workload."
     >
       <EmptyState
         title="No detail data yet"
