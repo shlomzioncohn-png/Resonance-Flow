@@ -14,7 +14,7 @@ def valid_task_payload() -> dict:
 
     return {
         "id": "11111111-1111-1111-1111-111111111111",
-        "organization_id": (
+        "tenant_id": (
             "22222222-2222-2222-2222-222222222222"
         ),
         "title": "Prepare customer report",

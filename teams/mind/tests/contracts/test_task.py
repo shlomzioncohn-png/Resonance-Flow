@@ -19,7 +19,7 @@ def valid_payload() -> dict:
 
     return {
         "id": "11111111-1111-1111-1111-111111111111",
-        "organization_id": (
+        "tenant_id": (
             "22222222-2222-2222-2222-222222222222"
         ),
         "title": "Prepare customer report",
@@ -41,7 +41,7 @@ def test_accepts_valid_task() -> None:
     assert task.id == UUID(
         "11111111-1111-1111-1111-111111111111"
     )
-    assert task.organization_id == UUID(
+    assert task.tenant_id == UUID(
         "22222222-2222-2222-2222-222222222222"
     )
     assert task.title == "Prepare customer report"
