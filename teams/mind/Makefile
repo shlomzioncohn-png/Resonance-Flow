@@ -38,12 +38,22 @@ eval:
 #  - SkipBlockedNearestDeadlineModel run: the actual headroom guard, because
 #    this model reads deadline and blocked the way a real heuristic would.
 #    Matches the "skip blocked, then nearest deadline" baseline in the README
-#    table (~63% designed). Failing above 70% means the set drifted back
-#    toward the no-headroom 85% baseline the 2026-09-06 rebuild fixed.
+#    table. Gate is 0.68, not the originally-designed 0.63, because the
+#    manager_overdue_preread_vs_tomorrow_review rewrite (2026-09-16, "overdue
+#    but still the most urgent thing") measures 66.7% here for a reason that
+#    isn't cheating: NearestDeadlineModel's score is 0.5 - hours/10_000, so
+#    ANY overdue deadline (hours negative) scores above 0.5 and ANY future
+#    deadline (hours positive) scores below 0.5, regardless of magnitude --
+#    an overdue deadline is mathematically always "nearest" under this
+#    formula. No third task can fix that (verified: adding one due same-day
+#    still loses to the overdue task, since even 1 second overdue outscores
+#    1 minute from now). 0.68 leaves ~1.7 points of margin above the measured
+#    66.7% instead of the ~7 points the original 0.70/63% design had; still
+#    fails well below the no-headroom 85% baseline the 2026-09-06 rebuild fixed.
 eval-ci:
 	python -m eval.check_time_horizon
 	python -m mind.evaluation.run --personas eval/personas --model dummy --min-accuracy 0.20 --max-accuracy 0.50
-	python -m mind.evaluation.run --personas eval/personas --model skip-blocked-nearest-deadline --max-accuracy 0.70
+	python -m mind.evaluation.run --personas eval/personas --model skip-blocked-nearest-deadline --max-accuracy 0.68
 
 docker-build:
 	docker compose build

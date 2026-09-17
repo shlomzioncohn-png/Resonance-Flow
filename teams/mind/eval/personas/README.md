@@ -183,25 +183,35 @@ against all 30:
 
 | Strategy | Score |
 |---|---|
-| pick the first task (`DummyModel`) | ~30% |
-| pick the nearest deadline, ignore `blocked` | ~43% |
-| **skip `blocked`, then nearest deadline** | **~63%** |
+| pick the first task (`DummyModel`) | 33.3% (10/30) |
+| pick the nearest deadline, ignore `blocked` | 46.7% (14/30) |
+| **skip `blocked`, then nearest deadline** | **66.7% (20/30)** |
 
-No trivial position rule beats ~50%. The ~20-point gap between the last two rows
-is deliberate — it is the headroom a model earns by recognising `blocked`; the
-~37 points above 63% is the headroom it earns by reading descriptions.
+(Measured by `mind.evaluation.baseline_models`, not hand-derived — see below.
+Originally designed as ~30%/~43%/~63%; the current numbers are a few points
+higher after the 2026-09-16 review round's rewrites, most notably
+`manager_overdue_preread_vs_tomorrow_review`, which the "skip `blocked`, then
+nearest deadline" baseline now gets right for a reason that isn't cheating —
+see the `eval-ci` target in the `Makefile`.)
+
+No trivial position rule beats ~50%. The ~20-point gap between the last two
+rows is deliberate — it is the headroom a model earns by recognising
+`blocked`; the ~33 points above 66.7% is the headroom it earns by reading
+descriptions.
 
 **These two baselines are real code, not just a table.**
 `mind.evaluation.baseline_models.NearestDeadlineModel` and
 `SkipBlockedNearestDeadlineModel` implement the `RankingModel` contract (they
 only need one task plus `current_datetime`, exactly what `score(task, context)`
-already gives them) and reproduce the 43%/63% numbers above. `make eval-ci` runs
-`SkipBlockedNearestDeadlineModel` with `--max-accuracy 0.70` — that is the real
-headroom guard. `DummyModel`, which returns a constant score and so never reads
-`deadline` or `blocked` at all, is run separately with a `min`/`max` band around
-~30% as a *position-bias* guard only — it cannot tell you anything about whether
-a deadline heuristic is near the ceiling, because it never looks at `deadline` in
-the first place. See the `eval-ci` target in the `Makefile` for both.
+already gives them) and produce the 46.7%/66.7% numbers above. `make eval-ci`
+runs `SkipBlockedNearestDeadlineModel` with `--max-accuracy 0.68` — that is the
+real headroom guard (see the `Makefile` comment for why 0.68 and not the
+originally-designed 0.63). `DummyModel`, which returns a constant score and so
+never reads `deadline` or `blocked` at all, is run separately with a `min`/`max`
+band around 33.3% as a *position-bias* guard only — it cannot tell you anything
+about whether a deadline heuristic is near the ceiling, because it never looks
+at `deadline` in the first place. See the `eval-ci` target in the `Makefile`
+for both.
 
 **Post-mentor-review cleanup (2026-08-31).** The mentor's feedback: (1) the model
 now receives `current_datetime` as context, so deadline-proximity reasoning is
@@ -415,7 +425,7 @@ report if 100% isn't reached by the Foundation Gate.)*
   yet re-reviewed in their new form, so `team_lead_approved` stays `false` on
   those until she looks at the rewrite: `manager_blocked_hire_vs_budget_review`,
   `manager_overdue_preread_vs_tomorrow_review`,
-  `salesperson_at_risk_renewal_vs_new_logo`. The set was rebuilt on 2026-09-06
+  `salesperson_at_risk_renewal_vs_owned_outage`. The set was rebuilt on 2026-09-06
   in response to her earlier review (baseline too high, blocked-distractor
   pattern, effort/free-time, persona↔tier, position bias, deadline-passed).
 - **Notes / pending changes:** Addressed 2026-09-15 in response to
@@ -462,7 +472,7 @@ report if 100% isn't reached by the Foundation Gate.)*
     structural duplicate of `ceo_overdue_launch_statement_vs_earnings_prep`
     (both "overdue item whose event already happened" vs. "prep for tomorrow");
     the rewrite removes the duplicate and adds the missing direction at once.
-  - `salesperson_at_risk_renewal_vs_new_logo`: the speculative "new logo"
+  - `salesperson_at_risk_renewal_vs_owned_outage`: the speculative "new logo"
     distractor (structurally identical to `higher_manager_stalled_renewal_vs_market_expansion`
     — an at-risk account vs. speculative growth, both all-null-deadline) was
     replaced with a task that reads as urgent but whose description says
@@ -501,9 +511,17 @@ report if 100% isn't reached by the Foundation Gate.)*
   wildly larger than the VP hire decision it loses to. (2) the `this_month`
   widening from the first review round "fixed the label, not the data" — the
   persona was still planning her week. Reverted `time_horizon` to `this_week`
-  and moved `task_vp`'s deadline itself (next Monday → the end of the current
-  week) instead; `task_ma` keeps the nearer Friday deadline so the
-  blocked-holds-nearest-deadline pattern is unaffected.
+  and moved `task_vp`'s deadline itself (next Monday → Friday) instead;
+  `task_ma` keeps the nearer deadline that same day (17:00 vs. 20:00), so the
+  blocked-holds-nearest-deadline pattern is unaffected. First pass moved it to
+  Sunday 17:00 -- the last instant still inside `this_week` per the checker --
+  which fixed the checker again instead of the scenario: the description
+  already said "by the end of the week", and in this set "end of the week"
+  is read as Friday, not Sunday afternoon (the same bug flagged earlier on
+  `higher_manager_blocked_budget_vs_headcount_plan`'s Saturday deadline).
+  Corrected the deadline to Friday 20:00; the description text itself didn't
+  need to change -- it was right the whole time, only the date behind it was
+  wrong.
 
   **`field_engineer_cutover_inspection_vs_backlog_patch` revisited (2026-09-16),
   same "label not data" note:** the cutover was "tomorrow's 08:00", which is
@@ -513,6 +531,30 @@ report if 100% isn't reached by the Foundation Gate.)*
   data now matches the label. Her other note on this file (it's the most
   generic, "deadline vs. no deadline" scenario in the Field Engineer set) was
   explicitly "fine" as-is, not something to change.
+
+  **Three more findings (2026-09-16/17):**
+  - `salesperson_at_risk_renewal_vs_owned_outage` (renamed from
+    `...vs_new_logo`): the file/`scenario_id` still said "new logo" after the
+    2026-09-16 re-pointing replaced that task with `task_outage_followup`, so
+    the filename no longer matched `<option_a>_vs_<option_b>` or the actual
+    content. Renamed both.
+  - `manager_overdue_preread_vs_tomorrow_review`: making the overdue task
+    correct (see above) had a side effect — `NearestDeadlineModel`'s formula,
+    `0.5 - hours/10_000`, scores *any* overdue deadline above 0.5 and *any*
+    future deadline below 0.5 regardless of magnitude, so an overdue deadline
+    is mathematically always "nearest". "Skip `blocked`, then nearest
+    deadline" now solves this scenario for the wrong reason, and combined
+    accuracy moved from 63% (design target) to 66.7% (measured) — verified
+    that adding a third task with a same-day future deadline does not change
+    this (even a deadline 1 second overdue outscores one 1 minute away).
+    Since a scenario-content fix isn't possible without changing the formula,
+    lowered `make eval-ci`'s headroom gate from `--max-accuracy 0.70` to
+    `0.68` instead (documented in the `Makefile`) rather than leave the gate
+    silently correct-by-luck at 0.70.
+  - The "Cheap-baseline scores" table above was measured against the
+    now-current set (33.3% / 46.7% / 66.7%) instead of the original design
+    targets (~30% / ~43% / ~63%), which had drifted out of date after the
+    rewrites in this review round.
 
   **`current_datetime` diversity (2026-09-16).** The mentor's other set-wide
   observation: all 30 scenarios shared one `current_datetime` (Monday

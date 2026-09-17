@@ -25,7 +25,7 @@
       "task_id": "task_vp",
       "title": "Make the final call on the VP Sales offer",
       "description": "The preferred candidate needs a yes or no; their employer has made a counter and they will decide by the end of the week.",
-      "deadline": "2026-09-27T17:00:00",
+      "deadline": "2026-09-25T20:00:00",
       "effort_estimate": 30,
       "tier": "strategic",
       "blocked": false,
@@ -33,7 +33,7 @@
     }
   ],
   "expected_top_task_id": "task_vp",
-  "expected_reason": "task_ma is blocked pending legal's redline of the liability clause and cannot move now despite the nearer expiry; task_vp is unblocked and needs a decision before the end of this week.",
+  "expected_reason": "task_ma is blocked pending legal's redline of the liability clause and cannot move now, even though it technically expires first that same day; task_vp is unblocked and needs a decision by the end of the week.",
   "source": {
     "type": "synthetic",
     "source_detail": null
