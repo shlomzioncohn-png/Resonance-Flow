@@ -1,87 +1,218 @@
 package com.rnd.chain.repository;
 
 import com.rnd.chain.dto.TaskDependency;
+import com.rnd.chain.testsupport.ConcurrentTestRunner;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
-import java.lang.reflect.Field;
 import java.util.List;
-import java.util.Map;
+import java.util.Optional;
 import java.util.UUID;
+import java.util.concurrent.atomic.AtomicInteger;
 
-import static org.junit.jupiter.api.Assertions.*;
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class InMemoryTaskDependencyRepositoryTest {
 
-    @Test
-    void save_sameEdgeTwice_isAddedOnlyOnce() {
-        UUID taskId = UUID.randomUUID();
-        UUID dependsOnTaskId = UUID.randomUUID();
-        InMemoryTaskDependencyRepository repo = new InMemoryTaskDependencyRepository(List.of());
+    private final UUID a = UUID.randomUUID();
+    private final UUID b = UUID.randomUUID();
+    private final UUID c = UUID.randomUUID();
 
-        repo.save(new TaskDependency(taskId, dependsOnTaskId));
-        repo.save(new TaskDependency(taskId, dependsOnTaskId));
+    private InMemoryTaskDependencyRepository repository;
 
-        assertEquals(1, repo.findByTaskId(taskId).size());
-    }
-
-    @Test
-    void delete_nonexistentEdge_isNoOp() {
-        InMemoryTaskDependencyRepository repo = new InMemoryTaskDependencyRepository(List.of());
-        UUID taskId = UUID.randomUUID();
-        UUID dependsOnTaskId = UUID.randomUUID();
-
-        assertDoesNotThrow(() -> repo.delete(taskId, dependsOnTaskId));
-        assertTrue(repo.findByTaskId(taskId).isEmpty());
-    }
-
-    @Test
-    void delete_lastEdgeForKey_removesMapEntryEntirely() throws Exception {
-        UUID taskId = UUID.randomUUID();
-        UUID dependsOnTaskId = UUID.randomUUID();
-        InMemoryTaskDependencyRepository repo = new InMemoryTaskDependencyRepository(
-                List.of(new TaskDependency(taskId, dependsOnTaskId)));
-
-        repo.delete(taskId, dependsOnTaskId);
-
-        assertTrue(repo.findByTaskId(taskId).isEmpty());
-        // Observable behavior alone can't distinguish "key removed" from "key present with an
-        // empty Set" (findByTaskId returns an empty list either way) - reach into the private
-        // maps to confirm removeFromIndex actually drops the map entry, per PLAN.md Finding #11.
-        assertMapHasNoEntryFor("dependenciesByTask", repo, taskId);
-        assertMapHasNoEntryFor("dependentsByTask", repo, dependsOnTaskId);
-    }
-
-    @SuppressWarnings("unchecked")
-    private static void assertMapHasNoEntryFor(String fieldName, InMemoryTaskDependencyRepository repo, UUID key)
-            throws Exception {
-        Field field = InMemoryTaskDependencyRepository.class.getDeclaredField(fieldName);
-        field.setAccessible(true);
-        Map<UUID, ?> map = (Map<UUID, ?>) field.get(repo);
-        assertFalse(map.containsKey(key), fieldName + " must not retain an entry for " + key + " once its edge set is empty");
-    }
-
-    @Test
-    void findByTaskId_and_findByDependsOnTaskId_areDirectional() {
-        UUID a = UUID.randomUUID();
-        UUID b = UUID.randomUUID();
-        InMemoryTaskDependencyRepository repo = new InMemoryTaskDependencyRepository(
-                List.of(new TaskDependency(a, b)));
-
-        assertEquals(1, repo.findByTaskId(a).size(), "A depends on B, so findByTaskId(A) must return the edge");
-        assertTrue(repo.findByDependsOnTaskId(a).isEmpty(), "nothing depends on A, so findByDependsOnTaskId(A) must be empty");
-        assertEquals(1, repo.findByDependsOnTaskId(b).size(), "A depends on B, so findByDependsOnTaskId(B) must return the edge");
-        assertTrue(repo.findByTaskId(b).isEmpty(), "B does not depend on anything, so findByTaskId(B) must be empty");
+    @BeforeEach
+    void setUp() {
+        repository = new InMemoryTaskDependencyRepository(List.of());
     }
 
     @Test
     void constructor_seedsFromNonEmptyList() {
-        UUID a = UUID.randomUUID();
-        UUID b = UUID.randomUUID();
-        InMemoryTaskDependencyRepository repo = new InMemoryTaskDependencyRepository(
+        InMemoryTaskDependencyRepository seeded = new InMemoryTaskDependencyRepository(
                 List.of(new TaskDependency(a, b)));
 
-        assertTrue(repo.existsDependency(a, b));
-        assertEquals(1, repo.findByTaskId(a).size());
-        assertEquals(1, repo.findByDependsOnTaskId(b).size());
+        assertThat(seeded.existsDependency(a, b)).isTrue();
+        assertThat(seeded.findByTaskId(a))
+                .extracting(TaskDependency::getDependsOnTaskId)
+                .containsExactly(b);
+        assertThat(seeded.findByDependsOnTaskId(b))
+                .extracting(TaskDependency::getTaskId)
+                .containsExactly(a);
+    }
+
+    @Test
+    void constructor_rejectsNullEdgeInList() {
+        List<TaskDependency> edgesWithNull = new java.util.ArrayList<>();
+        edgesWithNull.add(new TaskDependency(a, b));
+        edgesWithNull.add(null);
+
+        assertThatThrownBy(() -> new InMemoryTaskDependencyRepository(edgesWithNull))
+                .isInstanceOf(NullPointerException.class);
+    }
+
+    @Test
+    void findByTaskId_returnsEmptyList_whenTaskHasNoDependencies() {
+        assertThat(repository.findByTaskId(a)).isEmpty();
+    }
+
+    @Test
+    void findByDependsOnTaskId_returnsEmptyList_whenNothingDependsOnTask() {
+        assertThat(repository.findByDependsOnTaskId(a)).isEmpty();
+    }
+
+    @Test
+    void existsDependency_reflectsSavedEdge_inOneDirectionOnly() {
+        repository.save(new TaskDependency(a, b));
+
+        assertThat(repository.existsDependency(a, b)).isTrue();
+        assertThat(repository.existsDependency(b, a)).isFalse();
+    }
+
+    @Test
+    void existsDependency_falseWhenNeverSaved() {
+        assertThat(repository.existsDependency(a, b)).isFalse();
+    }
+
+    @Test
+    void save_persistsEdge_retrievableFromBothSides() {
+        Optional<TaskDependency> result = repository.save(new TaskDependency(a, b));
+
+        assertThat(result).contains(new TaskDependency(a, b));
+        assertThat(repository.findByTaskId(a))
+                .extracting(TaskDependency::getDependsOnTaskId)
+                .containsExactly(b);
+        assertThat(repository.findByDependsOnTaskId(b))
+                .extracting(TaskDependency::getTaskId)
+                .containsExactly(a);
+    }
+
+    @Test
+    void save_isIdempotent_forTheSameEdgeSavedTwice() {
+        Optional<TaskDependency> first = repository.save(new TaskDependency(a, b));
+        Optional<TaskDependency> second = repository.save(new TaskDependency(a, b));
+
+        assertThat(first).isPresent();
+        assertThat(second).isEmpty();
+        assertThat(repository.findByTaskId(a)).hasSize(1);
+    }
+
+    @Test
+    void save_supportsMultipleDependenciesForSameTask() {
+        repository.save(new TaskDependency(a, b));
+        repository.save(new TaskDependency(a, c));
+
+        assertThat(repository.findByTaskId(a))
+                .extracting(TaskDependency::getDependsOnTaskId)
+                .containsExactlyInAnyOrder(b, c);
+    }
+
+    @Test
+    void delete_removesEdge_andReturnsTrue() {
+        repository.save(new TaskDependency(a, b));
+
+        boolean removed = repository.delete(a, b);
+
+        assertThat(removed).isTrue();
+        assertThat(repository.findByTaskId(a)).isEmpty();
+        assertThat(repository.findByDependsOnTaskId(b)).isEmpty();
+    }
+
+    @Test
+    void delete_onEdgeThatDoesNotExist_isANoOp_andReturnsFalse() {
+        boolean removed = repository.delete(a, b);
+
+        assertThat(removed).isFalse();
+        assertThat(repository.findByTaskId(a)).isEmpty();
+    }
+
+    @Test
+    void delete_onlyRemovesTheMatchingEdge() {
+        repository.save(new TaskDependency(a, b));
+        repository.save(new TaskDependency(a, c));
+
+        repository.delete(a, b);
+
+        assertThat(repository.findByTaskId(a))
+                .extracting(TaskDependency::getDependsOnTaskId)
+                .containsExactly(c);
+    }
+
+    // --- dual-map consistency invariant ---------------------------------
+
+    @Test
+    void save_thenDelete_keepsBothAdjacencyMapsConsistent() {
+        repository.save(new TaskDependency(a, b));
+
+        assertThat(repository.findByTaskId(a))
+                .extracting(TaskDependency::getDependsOnTaskId)
+                .containsExactly(b);
+        assertThat(repository.findByDependsOnTaskId(b))
+                .extracting(TaskDependency::getTaskId)
+                .containsExactly(a);
+
+        repository.delete(a, b);
+
+        assertThat(repository.findByTaskId(a)).isEmpty();
+        assertThat(repository.findByDependsOnTaskId(b)).isEmpty();
+    }
+
+    // --- concurrency -----------------------------------------------------
+
+    @Test
+    void save_underConcurrentDuplicateAttempts_succeedsExactlyOnce() throws InterruptedException {
+        int threadCount = 20;
+        AtomicInteger successes = new AtomicInteger();
+        AtomicInteger noOps = new AtomicInteger();
+
+        ConcurrentTestRunner.run(threadCount, () -> {
+            Optional<TaskDependency> result = repository.save(new TaskDependency(a, b));
+            if (result.isPresent()) {
+                successes.incrementAndGet();
+            } else {
+                noOps.incrementAndGet();
+            }
+        });
+
+        assertThat(successes.get()).isEqualTo(1);
+        assertThat(noOps.get()).isEqualTo(threadCount - 1);
+        assertThat(repository.findByTaskId(a))
+                .extracting(TaskDependency::getDependsOnTaskId)
+                .containsExactly(b);
+    }
+
+    @Test
+    void delete_underConcurrentDuplicateAttempts_succeedsExactlyOnce() throws InterruptedException {
+        repository.save(new TaskDependency(a, b));
+        int threadCount = 20;
+        AtomicInteger successes = new AtomicInteger();
+        AtomicInteger noOps = new AtomicInteger();
+
+        ConcurrentTestRunner.run(threadCount, () -> {
+            boolean removed = repository.delete(a, b);
+            if (removed) {
+                successes.incrementAndGet();
+            } else {
+                noOps.incrementAndGet();
+            }
+        });
+
+        assertThat(successes.get()).isEqualTo(1);
+        assertThat(noOps.get()).isEqualTo(threadCount - 1);
+        assertThat(repository.findByTaskId(a)).isEmpty();
+    }
+
+    @Test
+    void save_concurrentDistinctEdgesWithSameTaskId_hasNoLostUpdates() throws InterruptedException {
+        int edgeCount = 50;
+        UUID[] dependsOnIds = new UUID[edgeCount];
+        for (int i = 0; i < edgeCount; i++) {
+            dependsOnIds[i] = UUID.randomUUID();
+        }
+
+        ConcurrentTestRunner.run(edgeCount, index -> repository.save(new TaskDependency(a, dependsOnIds[index])));
+
+        assertThat(repository.findByTaskId(a))
+                .extracting(TaskDependency::getDependsOnTaskId)
+                .containsExactlyInAnyOrder(dependsOnIds);
     }
 }

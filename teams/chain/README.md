@@ -4,20 +4,29 @@ Foundation module for Team Chain (Dependency Graph, Task Selection & Constraints
 
 `TaskEligibilityService` implements the dependency/constraint update flow (`addDependency`,
 `removeDependency`, `onTaskStatusChanged`, `recalculateTaskEligibility`, `onConstraintAdded`,
-`onConstraintStatusChanged`) against in-memory repositories. No REST controllers are wired up
-yet (`controller/` is still empty) - this stage is the eligibility engine and its tests.
+`onConstraintStatusChanged`) against in-memory repositories. It's a registered `@Service` bean -
+`config/MockDataConfig.java` wires the in-memory `TaskRepository`/`TaskDependencyRepository`
+implementations as beans (seeded empty) so the whole thing is actually constructible by Spring,
+not just unit-testable. Each bean is guarded with `@ConditionalOnMissingBean`, so once a real
+DB-backed `TaskRepository`/`TaskDependencyRepository` is registered, it overrides the mock instead
+of colliding with it - no manual removal of this config needed when that lands. No REST
+controllers are wired up yet (`controller/` is still empty) - this stage is the eligibility engine
+and its tests.
 
 `Task`/`TaskDependency`/`TaskStatus` and the `TaskRepository`/`TaskDependencyRepository`
 contracts (with in-memory implementations) come from issue #66's branch
 (`chain/ruthHoltzman/dependency-repository-66`). That branch also has a `TaskDependencyService`
-(existence/self-dependency/duplicate-edge validation) that isn't merged here yet and overlaps
-with some of what `TaskEligibilityService.addDependency`/`removeDependency` already do
-(cycle detection, `blockingCount`) - reconcile the two once #66 lands.
+(existence/self-dependency/duplicate-edge validation), which now lives alongside
+`TaskEligibilityService` in this module and overlaps with some of what
+`TaskEligibilityService.addDependency`/`removeDependency` already do (cycle detection,
+`blockingCount`) - reconciling the two (having `TaskEligibilityService` delegate raw edge
+validation/CRUD to `TaskDependencyService` and keep only cycle detection + counters) is still an
+open follow-up, not done as part of this merge.
 
 ## Stack
 
-- Java 11
-- Spring Boot 2.7.18 (Maven)
+- Java 25
+- Spring Boot 3.3.13 (Maven)
 - Lombok (`Task`/`Constraint`/`TaskDependency` accessors/equals-hashCode/builder - see the
   2026-09-08 fixes below for exactly what's hand-written vs. generated, and why)
 - Docker / Docker Compose
@@ -43,14 +52,18 @@ src/main/java/com/rnd/chain/
 ├── ChainApplication.java   # Spring Boot entry point
 ├── controller/             # empty - no REST endpoints yet
 ├── service/
-│   └── TaskEligibilityService.java
+│   ├── TaskEligibilityService.java
+│   └── TaskDependencyService.java   # issue #66: self-dependency/existence/duplicate-edge validation
 ├── repository/
 │   ├── TaskRepository.java / InMemoryTaskRepository.java
 │   └── TaskDependencyRepository.java / InMemoryTaskDependencyRepository.java
+├── exception/
+│   ├── TaskNotFoundException.java, DependencyNotFoundException.java
+│   └── InvalidDependencyException.java, DuplicateDependencyException.java
 ├── dto/
 │   ├── Task.java, TaskDependency.java, TaskStatus.java, Constraint.java
 └── config/
-    └── RepositoryConfig.java   # wires the in-memory repos as beans
+    └── MockDataConfig.java   # wires the in-memory repos as beans, @ConditionalOnMissingBean-guarded
 src/main/resources/application.yml
 src/test/java/com/rnd/chain/
 ├── ChainApplicationTests.java
@@ -59,12 +72,20 @@ src/test/java/com/rnd/chain/
 │   ├── TaskDependencyTest.java
 │   ├── TaskTest.java
 │   └── TaskTestFixtures.java   # shared Task.Builder defaults, used by every test class here
+├── exception/
+│   └── ExceptionConstructorTest.java
 ├── repository/
+│   ├── TaskRepositoryContractTest.java   # shared contract, run against every TaskRepository impl
 │   ├── InMemoryTaskRepositoryTest.java
 │   └── InMemoryTaskDependencyRepositoryTest.java
-└── service/
-    ├── TaskEligibilityServiceTest.java
-    └── TaskEligibilityServiceConcurrencyTest.java   # multi-threaded, against the real in-memory repos
+├── service/
+│   ├── TaskEligibilityServiceTest.java
+│   ├── TaskEligibilityServiceConcurrencyTest.java   # multi-threaded, against the real in-memory repos
+│   └── TaskDependencyServiceTest.java
+├── config/
+│   └── MockDataConfigTest.java
+└── testsupport/
+    └── ConcurrentTestRunner.java   # shared multi-threaded test harness
 ```
 
 ## Running locally with Maven
@@ -350,3 +371,31 @@ on this branch - see [PLAN.md](PLAN.md) §4a for the full write-up):
     implicit classpath scanning on this machine's JDK.
 
 Full test suite (76 tests, `mvn clean test`) passes.
+
+## Dependency graph persistence (Issue #66)
+
+`TaskDependencyRepository` / `InMemoryTaskDependencyRepository` (in `repository/`) are a pure
+CRUD store for dependency edges (`taskId` depends on `dependsOnTaskId`): `findByTaskId`,
+`findByDependsOnTaskId`, `save`, `delete`. `save` is idempotent - saving the same edge twice does
+not create a duplicate row - and `delete` is a no-op if the edge doesn't exist. This layer does not
+validate task existence or reject self-dependencies; it is a thin storage abstraction, currently
+backed by an in-memory dual adjacency map (`ConcurrentHashMap`) until a real DB is chosen.
+
+`TaskDependencyService` (in `service/`) sits on top of it and enforces the business rules from
+issue #66:
+
+```java
+addDependency(taskId, dependsOnTaskId)   // throws InvalidDependencyException on self-dependency,
+                                          // TaskNotFoundException if either task doesn't exist,
+                                          // DuplicateDependencyException if the edge already exists
+removeDependency(taskId, dependsOnTaskId) // throws DependencyNotFoundException if the edge doesn't exist
+getDependencies(taskId)                   // ids of tasks that block taskId (empty list if none)
+getDependents(taskId)                     // ids of tasks that taskId blocks (empty list if none)
+```
+
+Callers that need those business rules enforced (duplicate edges, self-dependency, missing tasks)
+should go through `TaskDependencyService` rather than calling the repository directly.
+
+`TaskRepository` / `InMemoryTaskRepository` are also included here (a compatible implementation
+matching the interface used elsewhere in the module) since `TaskDependencyService` needs task
+existence checks and no shared implementation was merged yet at the time this was written.

@@ -26,4 +26,9 @@ public class TaskDependency {
         this.taskId = Objects.requireNonNull(taskId, "taskId must not be null");
         this.dependsOnTaskId = Objects.requireNonNull(dependsOnTaskId, "dependsOnTaskId must not be null");
     }
+
+    @Override
+    public String toString() {
+        return "TaskDependency{taskId=" + taskId + ", dependsOnTaskId=" + dependsOnTaskId + "}";
+    }
 }

@@ -21,30 +21,33 @@ import java.util.UUID;
 @Getter
 @Setter
 @EqualsAndHashCode(onlyExplicitlyIncluded = true)
-public class Task {
+public final class Task {
 
     @EqualsAndHashCode.Include
     private final UUID id;
-    private UUID parentTaskId;
-    private String ownerId;
+    private final UUID parentTaskId;
+    private final String ownerId;
 
-    private TaskStatus status;
+    private final TaskStatus status;
 
-    /** Whether all of this task's dependencies and constraints are satisfied, so it can be worked on. */
-    private boolean isReady;
+    /** Whether all of this task's dependencies and constraints are satisfied, so it can be worked on.
+     * Invariant: must equal {@code blockingCount == 0 && openConstraintCount == 0}. Not enforced by
+     * this class (a stored field, not derived) - {@code TaskEligibilityService.withCounters} is the
+     * single place responsible for keeping it in sync whenever either counter changes. */
+    private final boolean isReady;
 
     /** Number of not-yet-completed tasks that this task depends on (i.e. tasks blocking it). */
-    private int blockingCount;
+    private final int blockingCount;
 
     /** Number of unresolved constraints (e.g. scheduling/resource constraints) still open on this task. */
-    private int openConstraintCount;
+    private final int openConstraintCount;
 
-    private Integer estimatedDurationMin;
-    private Double score;
+    private final Integer estimatedDurationMin;
+    private final Double score;
 
     private final LocalDateTime createdAt;
-    private LocalDateTime updatedAt;
-    private LocalDateTime deletedAt;
+    private final LocalDateTime updatedAt;
+    private final LocalDateTime deletedAt;
 
     @lombok.Builder(builderClassName = "Builder")
     private Task(UUID id,
@@ -70,6 +73,9 @@ public class Task {
         }
         if (openConstraintCount < 0) {
             throw new IllegalArgumentException("openConstraintCount must not be negative");
+        }
+        if (status == null) {
+            throw new IllegalArgumentException("status must not be null");
         }
         this.id = id;
         this.parentTaskId = parentTaskId;
@@ -100,4 +106,14 @@ public class Task {
                 source.deletedAt);
     }
 
+    @Override
+    public String toString() {
+        return "Task{id=" + id
+                + ", status=" + status
+                + ", isReady=" + isReady
+                + ", blockingCount=" + blockingCount
+                + ", openConstraintCount=" + openConstraintCount
+                + ", deletedAt=" + deletedAt
+                + "}";
+    }
 }

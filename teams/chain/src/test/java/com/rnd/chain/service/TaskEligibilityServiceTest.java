@@ -4,116 +4,144 @@ import com.rnd.chain.dto.Constraint;
 import com.rnd.chain.dto.Task;
 import com.rnd.chain.dto.TaskDependency;
 import com.rnd.chain.dto.TaskStatus;
-import com.rnd.chain.dto.TaskTestFixtures;
-import com.rnd.chain.repository.TaskDependencyRepository;
-import com.rnd.chain.repository.TaskRepository;
+import com.rnd.chain.repository.InMemoryTaskDependencyRepository;
+import com.rnd.chain.repository.InMemoryTaskRepository;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.extension.ExtendWith;
-import org.mockito.InjectMocks;
-import org.mockito.Mock;
-import org.mockito.junit.jupiter.MockitoExtension;
 
-import java.util.Collections;
+import java.time.LocalDateTime;
 import java.util.List;
-import java.util.Optional;
 import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.*;
-import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.Mockito.*;
 
-@ExtendWith(MockitoExtension.class)
 class TaskEligibilityServiceTest {
 
-    @Mock
-    private TaskRepository taskRepository;
+    private record Fixture(InMemoryTaskRepository taskRepo,
+                            InMemoryTaskDependencyRepository dependencyRepo,
+                            TaskEligibilityService service) {
+    }
 
-    @Mock
-    private TaskDependencyRepository taskDependencyRepository;
+    private static Fixture newFixture(List<Task> tasks, List<TaskDependency> edges) {
+        InMemoryTaskRepository taskRepo = new InMemoryTaskRepository(tasks);
+        InMemoryTaskDependencyRepository dependencyRepo = new InMemoryTaskDependencyRepository(edges);
+        return new Fixture(taskRepo, dependencyRepo, new TaskEligibilityService(taskRepo, dependencyRepo));
+    }
 
-    @InjectMocks
-    private TaskEligibilityService taskEligibilityService;
+    private static Task buildTask(UUID id, int blockingCount, int openConstraintCount, boolean isReady) {
+        return buildTask(id, blockingCount, openConstraintCount, isReady, TaskStatus.ACTIVE);
+    }
+
+    private static Task buildTask(UUID id, int blockingCount, int openConstraintCount, boolean isReady,
+                                   TaskStatus status) {
+        return Task.builder()
+                .id(id)
+                .ownerId("owner")
+                .status(status)
+                .isReady(isReady)
+                .blockingCount(blockingCount)
+                .openConstraintCount(openConstraintCount)
+                .createdAt(LocalDateTime.now())
+                .updatedAt(LocalDateTime.now())
+                .build();
+    }
 
     @Test
     void noDependencies_becomesReady() {
         UUID taskId = UUID.randomUUID();
-        Task task = TaskTestFixtures.defaultTask(taskId).blockingCount(0).openConstraintCount(0).isReady(false).build();
-        when(taskRepository.findById(taskId)).thenReturn(Optional.of(task));
+        Fixture fixture = newFixture(List.of(buildTask(taskId, 0, 0, false)), List.of());
 
-        taskEligibilityService.recalculateTaskEligibility(taskId);
+        fixture.service().recalculateTaskEligibility(taskId);
 
-        assertTrue(task.isReady());
-        verify(taskRepository).save(task);
+        assertTrue(fixture.taskRepo().findById(taskId).orElseThrow().isReady());
     }
 
     @Test
-    void hasBlocker_staysNotReady() {
+    void hasBlocker_becomesNotReady() {
         UUID taskId = UUID.randomUUID();
-        Task task = TaskTestFixtures.defaultTask(taskId).blockingCount(1).openConstraintCount(0).isReady(false).build();
-        when(taskRepository.findById(taskId)).thenReturn(Optional.of(task));
+        // isReady starts stale (true) so the blocker actually flips it, exercising the recompute.
+        Fixture fixture = newFixture(List.of(buildTask(taskId, 1, 0, true)), List.of());
 
-        taskEligibilityService.recalculateTaskEligibility(taskId);
+        fixture.service().recalculateTaskEligibility(taskId);
 
-        assertFalse(task.isReady());
-        verify(taskRepository).save(task);
+        assertFalse(fixture.taskRepo().findById(taskId).orElseThrow().isReady());
     }
 
     @Test
-    void hasOpenConstraint_staysNotReady() {
+    void hasOpenConstraint_becomesNotReady() {
         UUID taskId = UUID.randomUUID();
-        Task task = TaskTestFixtures.defaultTask(taskId).blockingCount(0).openConstraintCount(1).isReady(false).build();
-        when(taskRepository.findById(taskId)).thenReturn(Optional.of(task));
+        Fixture fixture = newFixture(List.of(buildTask(taskId, 0, 1, true)), List.of());
 
-        taskEligibilityService.recalculateTaskEligibility(taskId);
+        fixture.service().recalculateTaskEligibility(taskId);
 
-        assertFalse(task.isReady());
-        verify(taskRepository).save(task);
+        assertFalse(fixture.taskRepo().findById(taskId).orElseThrow().isReady());
     }
 
     @Test
-    void alreadyCorrectState_stillSavesEveryTime() {
+    void alreadyCorrectState_remainsReady() {
         UUID taskId = UUID.randomUUID();
-        Task task = TaskTestFixtures.defaultTask(taskId).blockingCount(0).openConstraintCount(0).isReady(true).build();
-        when(taskRepository.findById(taskId)).thenReturn(Optional.of(task));
+        Fixture fixture = newFixture(List.of(buildTask(taskId, 0, 0, true)), List.of());
 
-        taskEligibilityService.recalculateTaskEligibility(taskId);
+        fixture.service().recalculateTaskEligibility(taskId);
 
-        verify(taskRepository).save(task);
+        assertTrue(fixture.taskRepo().findById(taskId).orElseThrow().isReady());
+    }
+
+    @Test
+    void alreadyCorrectState_doesNotReplaceStoredTaskInstance() {
+        // Regression test for the code review finding: recalculateTaskEligibility used to write
+        // an unconditional new Task even when nothing had actually changed.
+        UUID taskId = UUID.randomUUID();
+        Fixture fixture = newFixture(List.of(buildTask(taskId, 0, 0, true)), List.of());
+        Task before = fixture.taskRepo().findById(taskId).orElseThrow();
+
+        fixture.service().recalculateTaskEligibility(taskId);
+
+        assertSame(before, fixture.taskRepo().findById(taskId).orElseThrow(),
+                "no-op recalculation must not write a new Task instance");
+    }
+
+    @Test
+    void staleState_recalculation_replacesStoredTaskInstance() {
+        UUID taskId = UUID.randomUUID();
+        Fixture fixture = newFixture(List.of(buildTask(taskId, 1, 0, true)), List.of());
+        Task before = fixture.taskRepo().findById(taskId).orElseThrow();
+
+        fixture.service().recalculateTaskEligibility(taskId);
+
+        assertNotSame(before, fixture.taskRepo().findById(taskId).orElseThrow(),
+                "a real eligibility change must still write a new Task instance");
     }
 
     @Test
     void taskNotFound_throwsException() {
         UUID taskId = UUID.randomUUID();
-        when(taskRepository.findById(taskId)).thenReturn(Optional.empty());
+        Fixture fixture = newFixture(List.of(), List.of());
 
         assertThrows(IllegalArgumentException.class,
-                () -> taskEligibilityService.recalculateTaskEligibility(taskId));
+                () -> fixture.service().recalculateTaskEligibility(taskId));
     }
 
     @Test
     void recalculateTaskEligibility_nullTaskId_throwsNpe() {
+        Fixture fixture = newFixture(List.of(), List.of());
+
         assertThrows(NullPointerException.class,
-                () -> taskEligibilityService.recalculateTaskEligibility(null));
+                () -> fixture.service().recalculateTaskEligibility(null));
     }
 
     @Test
     void addDependency_incrementsBlockingCount_andStaysNotReady() {
         UUID taskId = UUID.randomUUID();
         UUID dependsOnTaskId = UUID.randomUUID();
-        Task task = TaskTestFixtures.defaultTask(taskId).blockingCount(0).openConstraintCount(0).isReady(true).build();
+        Fixture fixture = newFixture(
+                List.of(buildTask(taskId, 0, 0, true), buildTask(dependsOnTaskId, 0, 0, true)), // ACTIVE, not DONE
+                List.of());
 
-        // findByTaskId(dependsOnTaskId) backs wouldCreateCycle's DFS (starts at dependsOnTaskId).
-        // Finding #16: edgeExists now delegates to existsDependency, not findByTaskId(taskId) -
-        // no stub needed for it here, since Mockito's boolean default (false) is already the
-        // "not a duplicate" outcome this test wants.
-        when(taskDependencyRepository.findByTaskId(dependsOnTaskId)).thenReturn(Collections.emptyList());
-        when(taskRepository.findById(taskId)).thenReturn(Optional.of(task));
-        when(taskRepository.findById(dependsOnTaskId))
-                .thenReturn(Optional.of(TaskTestFixtures.defaultTask(dependsOnTaskId).blockingCount(0).openConstraintCount(0).isReady(true).build()));
+        fixture.service().addDependency(taskId, dependsOnTaskId);
 
-        taskEligibilityService.addDependency(taskId, dependsOnTaskId);
-
-        verify(taskDependencyRepository).save(any(TaskDependency.class));
+        assertTrue(fixture.dependencyRepo().findByTaskId(taskId)
+                .contains(new TaskDependency(taskId, dependsOnTaskId)));
+        Task task = fixture.taskRepo().findById(taskId).orElseThrow();
         assertEquals(1, task.getBlockingCount());
         assertFalse(task.isReady());
     }
@@ -124,15 +152,14 @@ class TaskEligibilityServiceTest {
         // restructuring, originally at com.rnd.chain.TaskEligibilityServiceTest (commit a8148d6).
         UUID taskId = UUID.randomUUID();
         UUID dependsOnTaskId = UUID.randomUUID();
-        Task task = TaskTestFixtures.defaultTask(taskId).blockingCount(1).openConstraintCount(0).isReady(false).build(); // already has one blocker
+        Fixture fixture = newFixture(
+                List.of(buildTask(taskId, 1, 0, false), // already has one blocker
+                        buildTask(dependsOnTaskId, 0, 0, true)),
+                List.of());
 
-        when(taskDependencyRepository.findByTaskId(dependsOnTaskId)).thenReturn(Collections.emptyList());
-        when(taskRepository.findById(taskId)).thenReturn(Optional.of(task));
-        when(taskRepository.findById(dependsOnTaskId))
-                .thenReturn(Optional.of(TaskTestFixtures.defaultTask(dependsOnTaskId).blockingCount(0).openConstraintCount(0).isReady(true).build()));
+        fixture.service().addDependency(taskId, dependsOnTaskId);
 
-        taskEligibilityService.addDependency(taskId, dependsOnTaskId);
-
+        Task task = fixture.taskRepo().findById(taskId).orElseThrow();
         assertEquals(2, task.getBlockingCount());
         assertFalse(task.isReady());
     }
@@ -141,43 +168,57 @@ class TaskEligibilityServiceTest {
     void addDependency_duplicate_doesNotInflateBlockingCount() {
         UUID taskId = UUID.randomUUID();
         UUID dependsOnTaskId = UUID.randomUUID();
-        Task task = TaskTestFixtures.defaultTask(taskId).blockingCount(0).openConstraintCount(0).isReady(true).build();
-        Task dependsOnTask = TaskTestFixtures.defaultTask(dependsOnTaskId).blockingCount(0).openConstraintCount(0).isReady(true).build();
+        // taskId's own Task is deliberately NOT seeded: for a duplicate edge, requireTask(taskId)
+        // must never run, so if it did, this would throw instead of completing silently.
+        Fixture fixture = newFixture(
+                List.of(buildTask(dependsOnTaskId, 0, 0, true)),
+                List.of(new TaskDependency(taskId, dependsOnTaskId)));
 
-        // Finding #1: both tasks are now validated to exist before the duplicate-edge check
-        // runs, so both must be stubbed even though this call is expected to be a no-op.
-        when(taskRepository.findById(taskId)).thenReturn(Optional.of(task));
-        when(taskRepository.findById(dependsOnTaskId)).thenReturn(Optional.of(dependsOnTask));
-        // Finding #16: edgeExists now delegates to existsDependency, not findByTaskId(taskId).
-        // Finding #15: isNewEdge is now checked before wouldCreateCycle, so a duplicate edge
-        // never reaches the cycle-check traversal - no findByTaskId(dependsOnTaskId) stub needed.
-        when(taskDependencyRepository.existsDependency(taskId, dependsOnTaskId)).thenReturn(true);
+        assertDoesNotThrow(() -> fixture.service().addDependency(taskId, dependsOnTaskId));
 
-        taskEligibilityService.addDependency(taskId, dependsOnTaskId);
-
-        assertEquals(0, task.getBlockingCount());
-        verify(taskRepository, never()).save(any());
+        assertEquals(1, fixture.dependencyRepo().findByTaskId(taskId).size());
     }
 
     @Test
-    void addDependency_targetAlreadyDone_blockingCountUnchanged() {
-        // Review Finding #4: pins down the "target already DONE" branch with a deterministic
-        // test, rather than relying only on the concurrency test's random interleaving.
+    void addDependency_targetAlreadyDone_doesNotIncrementBlockingCount_butStillRecalculates() {
+        // Adding a dependency on an already-DONE task must not count against blockingCount -
+        // there will be no future status transition to ever decrement it back off - but
+        // eligibility must still be recalculated (e.g. this could be the task's first-ever
+        // edge, and it started isReady=false by default with nothing else to fix that).
         UUID taskId = UUID.randomUUID();
         UUID dependsOnTaskId = UUID.randomUUID();
-        Task task = TaskTestFixtures.defaultTask(taskId).blockingCount(0).openConstraintCount(0).isReady(true).build();
-        Task dependsOnTask = TaskTestFixtures.defaultTask(dependsOnTaskId).status(TaskStatus.DONE)
-                .blockingCount(0).openConstraintCount(0).isReady(true).build();
+        Fixture fixture = newFixture(
+                List.of(buildTask(taskId, 0, 0, false),
+                        buildTask(dependsOnTaskId, 0, 0, true, TaskStatus.DONE)),
+                List.of());
 
-        when(taskDependencyRepository.findByTaskId(dependsOnTaskId)).thenReturn(Collections.emptyList());
-        when(taskRepository.findById(taskId)).thenReturn(Optional.of(task));
-        when(taskRepository.findById(dependsOnTaskId)).thenReturn(Optional.of(dependsOnTask));
+        fixture.service().addDependency(taskId, dependsOnTaskId);
 
-        taskEligibilityService.addDependency(taskId, dependsOnTaskId);
-
-        verify(taskDependencyRepository).save(any(TaskDependency.class));
+        assertTrue(fixture.dependencyRepo().findByTaskId(taskId)
+                .contains(new TaskDependency(taskId, dependsOnTaskId)));
+        Task task = fixture.taskRepo().findById(taskId).orElseThrow();
         assertEquals(0, task.getBlockingCount());
         assertTrue(task.isReady());
+    }
+
+    @Test
+    void addDependency_targetAlreadyDone_stateAlreadyCorrect_doesNotReplaceStoredTaskInstance() {
+        // Regression test for the code review finding: adding a dependency on an already-DONE
+        // task never changes blockingCount, so when eligibility was already correct beforehand,
+        // no write should happen at all - it used to write unconditionally.
+        UUID taskId = UUID.randomUUID();
+        UUID dependsOnTaskId = UUID.randomUUID();
+        Fixture fixture = newFixture(
+                List.of(buildTask(taskId, 0, 0, true),
+                        buildTask(dependsOnTaskId, 0, 0, true, TaskStatus.DONE)),
+                List.of());
+        Task before = fixture.taskRepo().findById(taskId).orElseThrow();
+
+        fixture.service().addDependency(taskId, dependsOnTaskId);
+
+        assertSame(before, fixture.taskRepo().findById(taskId).orElseThrow(),
+                "adding a dependency on an already-DONE task must not write a new Task instance "
+                        + "when eligibility was already correct");
     }
 
     @Test
@@ -185,106 +226,88 @@ class TaskEligibilityServiceTest {
         // Review Finding #5: TaskDependency's own class comment documents that wouldCreateCycle
         // is the mechanism that rejects taskId == dependsOnTaskId, but no test exercised it.
         UUID taskId = UUID.randomUUID();
-        Task task = TaskTestFixtures.defaultTask(taskId).blockingCount(0).openConstraintCount(0).isReady(true).build();
-
-        when(taskRepository.findById(taskId)).thenReturn(Optional.of(task));
+        Fixture fixture = newFixture(List.of(buildTask(taskId, 0, 0, true)), List.of());
 
         assertThrows(IllegalStateException.class,
-                () -> taskEligibilityService.addDependency(taskId, taskId));
+                () -> fixture.service().addDependency(taskId, taskId));
 
-        verify(taskDependencyRepository, never()).save(any());
+        assertTrue(fixture.dependencyRepo().findByTaskId(taskId).isEmpty());
     }
 
     @Test
     void addDependency_wouldCreateCycle_throwsAndLeavesStateUnchanged() {
         // A already depends on B (A -> B). Trying to add B -> A would close the cycle.
+        // No Task is seeded at all: the cycle check only reads the dependency graph, so it must
+        // throw before ever touching taskRepository - IllegalArgumentException ("Task not
+        // found") instead of IllegalStateException would mean that guarantee broke.
         UUID taskA = UUID.randomUUID();
         UUID taskB = UUID.randomUUID();
-
-        // Finding #1: both tasks are now validated to exist before the cycle check runs.
-        when(taskRepository.findById(taskA)).thenReturn(Optional.of(TaskTestFixtures.defaultTask(taskA).blockingCount(0).openConstraintCount(0).isReady(true).build()));
-        when(taskRepository.findById(taskB)).thenReturn(Optional.of(TaskTestFixtures.defaultTask(taskB).blockingCount(0).openConstraintCount(0).isReady(true).build()));
-        when(taskDependencyRepository.findByTaskId(taskA))
-                .thenReturn(List.of(new TaskDependency(taskA, taskB)));
+        Fixture fixture = newFixture(List.of(), List.of(new TaskDependency(taskA, taskB)));
 
         assertThrows(IllegalStateException.class,
-                () -> taskEligibilityService.addDependency(taskB, taskA));
+                () -> fixture.service().addDependency(taskB, taskA));
 
-        verify(taskDependencyRepository, never()).save(any());
+        assertEquals(1, fixture.dependencyRepo().findByTaskId(taskA).size());
+        assertTrue(fixture.dependencyRepo().findByTaskId(taskB).isEmpty());
     }
 
     @Test
-    void addDependency_taskDoesNotExist_throwsAndNeverSaves() {
+    void addDependency_taskNotFound_throwsAndLeavesStateUnchanged() {
+        // Regression test for the code review finding: taskDependencyRepository.save() used to
+        // run before taskId's existence was validated - so a non-existent taskId left a phantom
+        // edge permanently persisted even though the method threw.
         UUID taskId = UUID.randomUUID();
         UUID dependsOnTaskId = UUID.randomUUID();
-
-        when(taskRepository.findById(taskId)).thenReturn(Optional.empty());
+        Fixture fixture = newFixture(List.of(buildTask(dependsOnTaskId, 0, 0, true)), List.of());
 
         assertThrows(IllegalArgumentException.class,
-                () -> taskEligibilityService.addDependency(taskId, dependsOnTaskId));
+                () -> fixture.service().addDependency(taskId, dependsOnTaskId));
 
-        verify(taskDependencyRepository, never()).save(any());
+        assertTrue(fixture.dependencyRepo().findByTaskId(taskId).isEmpty());
     }
 
     @Test
-    void addDependency_dependsOnTaskDoesNotExist_throwsAndNeverSaves() {
+    void addDependency_dependsOnTaskNotFound_throwsAndLeavesStateUnchanged() {
         UUID taskId = UUID.randomUUID();
         UUID dependsOnTaskId = UUID.randomUUID();
-        Task task = TaskTestFixtures.defaultTask(taskId).blockingCount(0).openConstraintCount(0).isReady(true).build();
-
-        when(taskRepository.findById(taskId)).thenReturn(Optional.of(task));
-        when(taskRepository.findById(dependsOnTaskId)).thenReturn(Optional.empty());
+        Fixture fixture = newFixture(List.of(), List.of());
 
         assertThrows(IllegalArgumentException.class,
-                () -> taskEligibilityService.addDependency(taskId, dependsOnTaskId));
+                () -> fixture.service().addDependency(taskId, dependsOnTaskId));
 
-        verify(taskDependencyRepository, never()).save(any());
-    }
-
-    @Test
-    void addDependency_bothTasksDoNotExist_throwsAndNeverSaves() {
-        UUID taskId = UUID.randomUUID();
-        UUID dependsOnTaskId = UUID.randomUUID();
-
-        when(taskRepository.findById(taskId)).thenReturn(Optional.empty());
-
-        assertThrows(IllegalArgumentException.class,
-                () -> taskEligibilityService.addDependency(taskId, dependsOnTaskId));
-
-        verify(taskDependencyRepository, never()).save(any());
-        // taskId is validated first and fails fast - dependsOnTaskId is never even looked up.
-        verify(taskRepository, never()).findById(dependsOnTaskId);
+        assertTrue(fixture.dependencyRepo().findByTaskId(taskId).isEmpty());
     }
 
     @Test
     void addDependency_nullTaskId_throwsNpe() {
         UUID dependsOnTaskId = UUID.randomUUID();
+        Fixture fixture = newFixture(List.of(), List.of());
+
         assertThrows(NullPointerException.class,
-                () -> taskEligibilityService.addDependency(null, dependsOnTaskId));
+                () -> fixture.service().addDependency(null, dependsOnTaskId));
     }
 
     @Test
     void addDependency_nullDependsOnTaskId_throwsNpe() {
         UUID taskId = UUID.randomUUID();
+        Fixture fixture = newFixture(List.of(), List.of());
+
         assertThrows(NullPointerException.class,
-                () -> taskEligibilityService.addDependency(taskId, null));
+                () -> fixture.service().addDependency(taskId, null));
     }
 
     @Test
     void removeDependency_decrementsBlockingCount_becomesReady() {
         UUID taskId = UUID.randomUUID();
         UUID dependsOnTaskId = UUID.randomUUID();
-        Task task = TaskTestFixtures.defaultTask(taskId).blockingCount(1).openConstraintCount(0).isReady(false).build();
+        Fixture fixture = newFixture(
+                List.of(buildTask(taskId, 1, 0, false), buildTask(dependsOnTaskId, 0, 0, true)),
+                List.of(new TaskDependency(taskId, dependsOnTaskId)));
 
-        // Finding #16: edgeExists now delegates to existsDependency, not findByTaskId(taskId).
-        when(taskDependencyRepository.existsDependency(taskId, dependsOnTaskId)).thenReturn(true);
-        when(taskRepository.findById(taskId)).thenReturn(Optional.of(task));
-        when(taskRepository.findById(dependsOnTaskId))
-                .thenReturn(Optional.of(TaskTestFixtures.defaultTask(dependsOnTaskId).blockingCount(0).openConstraintCount(0).isReady(true).build()));
+        fixture.service().removeDependency(taskId, dependsOnTaskId);
 
-        taskEligibilityService.removeDependency(taskId, dependsOnTaskId);
-
-        verify(taskDependencyRepository).delete(taskId, dependsOnTaskId);
+        assertTrue(fixture.dependencyRepo().findByTaskId(taskId).isEmpty());
+        Task task = fixture.taskRepo().findById(taskId).orElseThrow();
         assertEquals(0, task.getBlockingCount());
         assertTrue(task.isReady());
     }
@@ -294,120 +317,107 @@ class TaskEligibilityServiceTest {
         // Restored regression scenario (review finding #9) - see addSecondDependency_multipleBlockers.
         UUID taskId = UUID.randomUUID();
         UUID dependsOnTaskId = UUID.randomUUID();
-        Task task = TaskTestFixtures.defaultTask(taskId).blockingCount(2).openConstraintCount(0).isReady(false).build(); // two blockers
+        Fixture fixture = newFixture(
+                List.of(buildTask(taskId, 2, 0, false), // two blockers
+                        buildTask(dependsOnTaskId, 0, 0, true)),
+                List.of(new TaskDependency(taskId, dependsOnTaskId)));
 
-        when(taskDependencyRepository.existsDependency(taskId, dependsOnTaskId)).thenReturn(true);
-        when(taskRepository.findById(taskId)).thenReturn(Optional.of(task));
-        when(taskRepository.findById(dependsOnTaskId))
-                .thenReturn(Optional.of(TaskTestFixtures.defaultTask(dependsOnTaskId).blockingCount(0).openConstraintCount(0).isReady(true).build()));
+        fixture.service().removeDependency(taskId, dependsOnTaskId);
 
-        taskEligibilityService.removeDependency(taskId, dependsOnTaskId);
-
-        verify(taskDependencyRepository).delete(taskId, dependsOnTaskId);
+        assertTrue(fixture.dependencyRepo().findByTaskId(taskId).isEmpty());
+        Task task = fixture.taskRepo().findById(taskId).orElseThrow();
         assertEquals(1, task.getBlockingCount());
         assertFalse(task.isReady());
     }
 
     @Test
-    void removeDependency_targetAlreadyDone_blockingCountUnchanged() {
-        // Review Finding #4: pins down the "target already DONE" branch with a deterministic
-        // test, rather than relying only on the concurrency test's random interleaving.
+    void removeDependency_targetAlreadyDone_doesNotDecrementBlockingCount() {
+        // Mirrors addDependency: an edge to an already-DONE task never counted against
+        // blockingCount, so removing it must not decrement.
         UUID taskId = UUID.randomUUID();
         UUID dependsOnTaskId = UUID.randomUUID();
-        Task task = TaskTestFixtures.defaultTask(taskId).blockingCount(0).openConstraintCount(0).isReady(true).build();
-        Task dependsOnTask = TaskTestFixtures.defaultTask(dependsOnTaskId).status(TaskStatus.DONE)
-                .blockingCount(0).openConstraintCount(0).isReady(true).build();
+        Fixture fixture = newFixture(
+                List.of(buildTask(taskId, 0, 0, true),
+                        buildTask(dependsOnTaskId, 0, 0, true, TaskStatus.DONE)),
+                List.of(new TaskDependency(taskId, dependsOnTaskId)));
 
-        when(taskDependencyRepository.existsDependency(taskId, dependsOnTaskId)).thenReturn(true);
-        when(taskRepository.findById(taskId)).thenReturn(Optional.of(task));
-        when(taskRepository.findById(dependsOnTaskId)).thenReturn(Optional.of(dependsOnTask));
+        fixture.service().removeDependency(taskId, dependsOnTaskId);
 
-        taskEligibilityService.removeDependency(taskId, dependsOnTaskId);
-
-        verify(taskDependencyRepository).delete(taskId, dependsOnTaskId);
-        assertEquals(0, task.getBlockingCount());
-        assertTrue(task.isReady());
+        assertEquals(0, fixture.taskRepo().findById(taskId).orElseThrow().getBlockingCount());
     }
 
     @Test
     void removeDependency_notFound_doesNotChangeCounter() {
+        // taskId's own Task is deliberately NOT seeded - if requireTask(taskId) ran, this
+        // would throw instead of completing silently.
         UUID taskId = UUID.randomUUID();
         UUID dependsOnTaskId = UUID.randomUUID();
-        Task task = TaskTestFixtures.defaultTask(taskId).blockingCount(0).openConstraintCount(0).isReady(true).build();
+        Fixture fixture = newFixture(List.of(), List.of());
 
-        // Finding #1: taskId is now validated to exist even for a no-op removal.
-        // Finding #16: existsDependency defaults to false when unstubbed, which is already the
-        // "no such edge" outcome this test wants - no explicit stub needed.
-        when(taskRepository.findById(taskId)).thenReturn(Optional.of(task));
-
-        taskEligibilityService.removeDependency(taskId, dependsOnTaskId);
-
-        assertEquals(0, task.getBlockingCount());
-        verify(taskRepository, never()).save(any());
+        assertDoesNotThrow(() -> fixture.service().removeDependency(taskId, dependsOnTaskId));
     }
 
     @Test
-    void removeDependency_taskDoesNotExist_throwsAndNeverDeletes() {
+    void removeDependency_taskNotFound_throwsAndLeavesStateUnchanged() {
+        // Mirrors addDependency_taskNotFound_throwsAndLeavesStateUnchanged: taskId's existence
+        // used to be validated only after delete() already removed the edge - so a real edge
+        // could be permanently removed while the caller still saw an exception implying the
+        // removal had failed.
         UUID taskId = UUID.randomUUID();
         UUID dependsOnTaskId = UUID.randomUUID();
-
-        when(taskRepository.findById(taskId)).thenReturn(Optional.empty());
+        Fixture fixture = newFixture(
+                List.of(buildTask(dependsOnTaskId, 0, 0, true)),
+                List.of(new TaskDependency(taskId, dependsOnTaskId)));
 
         assertThrows(IllegalArgumentException.class,
-                () -> taskEligibilityService.removeDependency(taskId, dependsOnTaskId));
+                () -> fixture.service().removeDependency(taskId, dependsOnTaskId));
 
-        verify(taskDependencyRepository, never()).delete(any(), any());
+        assertEquals(1, fixture.dependencyRepo().findByTaskId(taskId).size());
     }
 
     @Test
     void removeDependency_blockingCountNeverGoesNegative() {
         UUID taskId = UUID.randomUUID();
         UUID dependsOnTaskId = UUID.randomUUID();
-        Task task = TaskTestFixtures.defaultTask(taskId).blockingCount(0).openConstraintCount(0).isReady(true).build();
+        Fixture fixture = newFixture(
+                List.of(buildTask(taskId, 0, 0, true), buildTask(dependsOnTaskId, 0, 0, true)),
+                List.of(new TaskDependency(taskId, dependsOnTaskId)));
 
-        // Finding #16: edgeExists now delegates to existsDependency, not findByTaskId(taskId).
-        // Must stub true, or the decrement branch (the thing this test exists to exercise) is
-        // never reached at all.
-        when(taskDependencyRepository.existsDependency(taskId, dependsOnTaskId)).thenReturn(true);
-        when(taskRepository.findById(taskId)).thenReturn(Optional.of(task));
-        when(taskRepository.findById(dependsOnTaskId))
-                .thenReturn(Optional.of(TaskTestFixtures.defaultTask(dependsOnTaskId).blockingCount(0).openConstraintCount(0).isReady(true).build()));
+        fixture.service().removeDependency(taskId, dependsOnTaskId);
 
-        taskEligibilityService.removeDependency(taskId, dependsOnTaskId);
-
-        assertEquals(0, task.getBlockingCount());
+        assertEquals(0, fixture.taskRepo().findById(taskId).orElseThrow().getBlockingCount());
     }
 
     @Test
     void removeDependency_nullTaskId_throwsNpe() {
         UUID dependsOnTaskId = UUID.randomUUID();
+        Fixture fixture = newFixture(List.of(), List.of());
+
         assertThrows(NullPointerException.class,
-                () -> taskEligibilityService.removeDependency(null, dependsOnTaskId));
+                () -> fixture.service().removeDependency(null, dependsOnTaskId));
     }
 
     @Test
     void removeDependency_nullDependsOnTaskId_throwsNpe() {
         UUID taskId = UUID.randomUUID();
+        Fixture fixture = newFixture(List.of(), List.of());
+
         assertThrows(NullPointerException.class,
-                () -> taskEligibilityService.removeDependency(taskId, null));
+                () -> fixture.service().removeDependency(taskId, null));
     }
 
     @Test
     void completingBlocker_singleDependent_becomesReady() {
         UUID taskB = UUID.randomUUID();
         UUID taskA = UUID.randomUUID();
+        Fixture fixture = newFixture(
+                List.of(buildTask(taskB, 0, 0, true), buildTask(taskA, 1, 0, false)),
+                List.of(new TaskDependency(taskA, taskB)));
 
-        Task b = TaskTestFixtures.defaultTask(taskB).blockingCount(0).openConstraintCount(0).isReady(true).build();
-        Task a = TaskTestFixtures.defaultTask(taskA).blockingCount(1).openConstraintCount(0).isReady(false).build();
+        fixture.service().onTaskStatusChanged(taskB, TaskStatus.DONE);
 
-        when(taskRepository.findById(taskB)).thenReturn(Optional.of(b));
-        when(taskDependencyRepository.findByDependsOnTaskId(taskB))
-                .thenReturn(List.of(new TaskDependency(taskA, taskB)));
-        when(taskRepository.findById(taskA)).thenReturn(Optional.of(a));
-
-        taskEligibilityService.onTaskStatusChanged(taskB, TaskStatus.DONE);
-
-        assertEquals(TaskStatus.DONE, b.getStatus());
+        assertEquals(TaskStatus.DONE, fixture.taskRepo().findById(taskB).orElseThrow().getStatus());
+        Task a = fixture.taskRepo().findById(taskA).orElseThrow();
         assertEquals(0, a.getBlockingCount());
         assertTrue(a.isReady());
     }
@@ -417,21 +427,14 @@ class TaskEligibilityServiceTest {
         UUID taskB = UUID.randomUUID();
         UUID taskA = UUID.randomUUID();
         UUID taskC = UUID.randomUUID();
+        Fixture fixture = newFixture(
+                List.of(buildTask(taskB, 0, 0, true), buildTask(taskA, 1, 0, false), buildTask(taskC, 1, 0, false)),
+                List.of(new TaskDependency(taskA, taskB), new TaskDependency(taskC, taskB)));
 
-        Task b = TaskTestFixtures.defaultTask(taskB).blockingCount(0).openConstraintCount(0).isReady(true).build();
-        Task a = TaskTestFixtures.defaultTask(taskA).blockingCount(1).openConstraintCount(0).isReady(false).build();
-        Task c = TaskTestFixtures.defaultTask(taskC).blockingCount(1).openConstraintCount(0).isReady(false).build();
+        fixture.service().onTaskStatusChanged(taskB, TaskStatus.DONE);
 
-        when(taskRepository.findById(taskB)).thenReturn(Optional.of(b));
-        when(taskDependencyRepository.findByDependsOnTaskId(taskB))
-                .thenReturn(List.of(new TaskDependency(taskA, taskB), new TaskDependency(taskC, taskB)));
-        when(taskRepository.findById(taskA)).thenReturn(Optional.of(a));
-        when(taskRepository.findById(taskC)).thenReturn(Optional.of(c));
-
-        taskEligibilityService.onTaskStatusChanged(taskB, TaskStatus.DONE);
-
-        assertTrue(a.isReady());
-        assertTrue(c.isReady());
+        assertTrue(fixture.taskRepo().findById(taskA).orElseThrow().isReady());
+        assertTrue(fixture.taskRepo().findById(taskC).orElseThrow().isReady());
     }
 
     @Test
@@ -441,74 +444,71 @@ class TaskEligibilityServiceTest {
         UUID taskC = UUID.randomUUID();
         UUID taskB = UUID.randomUUID();
         UUID taskA = UUID.randomUUID();
+        Fixture fixture = newFixture(
+                List.of(buildTask(taskC, 0, 0, true),
+                        buildTask(taskB, 1, 0, false), // B is blocked only by C
+                        buildTask(taskA, 1, 0, false)), // A is blocked only by B
+                List.of(new TaskDependency(taskB, taskC), new TaskDependency(taskA, taskB)));
 
-        Task c = TaskTestFixtures.defaultTask(taskC).blockingCount(0).openConstraintCount(0).isReady(true).build();
-        Task b = TaskTestFixtures.defaultTask(taskB).blockingCount(1).openConstraintCount(0).isReady(false).build(); // B is blocked only by C
+        fixture.service().onTaskStatusChanged(taskC, TaskStatus.DONE);
 
-        when(taskRepository.findById(taskC)).thenReturn(Optional.of(c));
-        when(taskDependencyRepository.findByDependsOnTaskId(taskC))
-                .thenReturn(List.of(new TaskDependency(taskB, taskC)));
-        when(taskRepository.findById(taskB)).thenReturn(Optional.of(b));
-
-        taskEligibilityService.onTaskStatusChanged(taskC, TaskStatus.DONE);
-
-        assertTrue(b.isReady());
-        // A (which depends on B) is never looked up - the fan-out only reaches direct
-        // dependents of C, not transitively past them.
-        verify(taskRepository, never()).findById(taskA);
-        verify(taskDependencyRepository, never()).findByDependsOnTaskId(taskB);
+        assertTrue(fixture.taskRepo().findById(taskB).orElseThrow().isReady());
+        // A depends on B, not C - B becoming ready (not DONE) must not touch A's own counters:
+        // the fan-out only reaches direct dependents of C, never transitively past them.
+        assertEquals(1, fixture.taskRepo().findById(taskA).orElseThrow().getBlockingCount());
+        assertFalse(fixture.taskRepo().findById(taskA).orElseThrow().isReady());
     }
 
     @Test
     void reopeningDoneTask_restoresDependentsBlockingCount() {
         UUID taskB = UUID.randomUUID();
         UUID taskA = UUID.randomUUID();
+        Fixture fixture = newFixture(
+                List.of(buildTask(taskB, 0, 0, true, TaskStatus.DONE),
+                        buildTask(taskA, 0, 0, true)), // A was ready because B was DONE
+                List.of(new TaskDependency(taskA, taskB)));
 
-        Task b = TaskTestFixtures.defaultTask(taskB).blockingCount(0).openConstraintCount(0).isReady(true).build();
-        b.setStatus(TaskStatus.DONE);
-        Task a = TaskTestFixtures.defaultTask(taskA).blockingCount(0).openConstraintCount(0).isReady(true).build(); // A was ready because B was DONE
+        fixture.service().onTaskStatusChanged(taskB, TaskStatus.PENDING);
 
-        when(taskRepository.findById(taskB)).thenReturn(Optional.of(b));
-        when(taskDependencyRepository.findByDependsOnTaskId(taskB))
-                .thenReturn(List.of(new TaskDependency(taskA, taskB)));
-        when(taskRepository.findById(taskA)).thenReturn(Optional.of(a));
-
-        taskEligibilityService.onTaskStatusChanged(taskB, TaskStatus.PENDING);
-
-        assertEquals(TaskStatus.PENDING, b.getStatus());
+        assertEquals(TaskStatus.PENDING, fixture.taskRepo().findById(taskB).orElseThrow().getStatus());
+        Task a = fixture.taskRepo().findById(taskA).orElseThrow();
         assertEquals(1, a.getBlockingCount());
         assertFalse(a.isReady());
     }
 
     @Test
     void statusChangeToNonDone_fromNonDone_doesNotTriggerDependentsRecalculation() {
+        // taskA's blockingCount (5, an arbitrary non-zero value) must come back completely
+        // untouched - proof that adjustDependentsBlockingCount never ran for this transition.
         UUID taskB = UUID.randomUUID();
-        Task b = TaskTestFixtures.defaultTask(taskB).blockingCount(0).openConstraintCount(0).isReady(true).build();
+        UUID taskA = UUID.randomUUID();
+        Fixture fixture = newFixture(
+                List.of(buildTask(taskB, 0, 0, true), buildTask(taskA, 5, 0, false)),
+                List.of(new TaskDependency(taskA, taskB)));
 
-        when(taskRepository.findById(taskB)).thenReturn(Optional.of(b));
+        fixture.service().onTaskStatusChanged(taskB, TaskStatus.PENDING);
 
-        taskEligibilityService.onTaskStatusChanged(taskB, TaskStatus.PENDING);
-
-        assertEquals(TaskStatus.PENDING, b.getStatus());
-        verify(taskDependencyRepository, never()).findByDependsOnTaskId(any());
+        assertEquals(TaskStatus.PENDING, fixture.taskRepo().findById(taskB).orElseThrow().getStatus());
+        assertEquals(5, fixture.taskRepo().findById(taskA).orElseThrow().getBlockingCount());
     }
 
     @Test
     void onTaskStatusChanged_nullTaskId_throwsNpe() {
+        Fixture fixture = newFixture(List.of(), List.of());
+
         assertThrows(NullPointerException.class,
-                () -> taskEligibilityService.onTaskStatusChanged(null, TaskStatus.DONE));
+                () -> fixture.service().onTaskStatusChanged(null, TaskStatus.DONE));
     }
 
     @Test
     void onConstraintAdded_incrementsOpenConstraintCount_andStaysNotReady() {
         UUID taskId = UUID.randomUUID();
         UUID constraintId = UUID.randomUUID();
-        Task task = TaskTestFixtures.defaultTask(taskId).blockingCount(0).openConstraintCount(0).isReady(true).build();
+        Fixture fixture = newFixture(List.of(buildTask(taskId, 0, 0, true)), List.of());
 
-        when(taskRepository.findById(taskId)).thenReturn(Optional.of(task));
+        fixture.service().onConstraintAdded(taskId, constraintId);
 
-        taskEligibilityService.onConstraintAdded(taskId, constraintId);
-
+        Task task = fixture.taskRepo().findById(taskId).orElseThrow();
         assertEquals(1, task.getOpenConstraintCount());
         assertFalse(task.isReady());
     }
@@ -517,26 +517,28 @@ class TaskEligibilityServiceTest {
     void onConstraintAdded_sameConstraintIdTwice_isNoOpSecondTime() {
         UUID taskId = UUID.randomUUID();
         UUID constraintId = UUID.randomUUID();
-        Task task = TaskTestFixtures.defaultTask(taskId).blockingCount(0).openConstraintCount(0).isReady(true).build();
+        Fixture fixture = newFixture(List.of(buildTask(taskId, 0, 0, true)), List.of());
 
-        when(taskRepository.findById(taskId)).thenReturn(Optional.of(task));
+        fixture.service().onConstraintAdded(taskId, constraintId);
+        fixture.service().onConstraintAdded(taskId, constraintId);
 
-        taskEligibilityService.onConstraintAdded(taskId, constraintId);
-        taskEligibilityService.onConstraintAdded(taskId, constraintId);
-
-        assertEquals(1, task.getOpenConstraintCount());
+        assertEquals(1, fixture.taskRepo().findById(taskId).orElseThrow().getOpenConstraintCount());
     }
 
     @Test
     void onConstraintAdded_nullTaskId_throwsNpe() {
+        Fixture fixture = newFixture(List.of(), List.of());
+
         assertThrows(NullPointerException.class,
-                () -> taskEligibilityService.onConstraintAdded(null, UUID.randomUUID()));
+                () -> fixture.service().onConstraintAdded(null, UUID.randomUUID()));
     }
 
     @Test
     void onConstraintAdded_nullConstraintId_throwsNpe() {
+        Fixture fixture = newFixture(List.of(), List.of());
+
         assertThrows(NullPointerException.class,
-                () -> taskEligibilityService.onConstraintAdded(UUID.randomUUID(), null));
+                () -> fixture.service().onConstraintAdded(UUID.randomUUID(), null));
     }
 
     @Test
@@ -544,27 +546,26 @@ class TaskEligibilityServiceTest {
         // Review Finding #5: every other public method that resolves a task via requireTask has
         // a dedicated *_taskDoesNotExist_throws* test; this one didn't.
         UUID taskId = UUID.randomUUID();
-        when(taskRepository.findById(taskId)).thenReturn(Optional.empty());
+        Fixture fixture = newFixture(List.of(), List.of());
 
         assertThrows(IllegalArgumentException.class,
-                () -> taskEligibilityService.onConstraintAdded(taskId, UUID.randomUUID()));
+                () -> fixture.service().onConstraintAdded(taskId, UUID.randomUUID()));
     }
 
     @Test
     void onConstraintStatusChanged_closingLastConstraint_becomesReady() {
         UUID taskId = UUID.randomUUID();
         UUID constraintId = UUID.randomUUID();
-        Task task = TaskTestFixtures.defaultTask(taskId).blockingCount(0).openConstraintCount(0).isReady(false).build();
-
-        when(taskRepository.findById(taskId)).thenReturn(Optional.of(task));
+        Fixture fixture = newFixture(List.of(buildTask(taskId, 0, 0, false)), List.of());
 
         // Seed the tracked-open-constraints set (and the counter) via onConstraintAdded first,
         // so onConstraintStatusChanged's ground-truth check (PLAN.md Finding #10) recognizes
         // this constraintId as currently open and actually decrements on close.
-        taskEligibilityService.onConstraintAdded(taskId, constraintId);
-        taskEligibilityService.onConstraintStatusChanged(
+        fixture.service().onConstraintAdded(taskId, constraintId);
+        fixture.service().onConstraintStatusChanged(
                 taskId, constraintId, Constraint.ConstraintStatus.PENDING, Constraint.ConstraintStatus.SATISFIED);
 
+        Task task = fixture.taskRepo().findById(taskId).orElseThrow();
         assertEquals(0, task.getOpenConstraintCount());
         assertTrue(task.isReady());
     }
@@ -573,13 +574,12 @@ class TaskEligibilityServiceTest {
     void onConstraintStatusChanged_reopeningConstraint_becomesNotReadyAgain() {
         UUID taskId = UUID.randomUUID();
         UUID constraintId = UUID.randomUUID();
-        Task task = TaskTestFixtures.defaultTask(taskId).blockingCount(0).openConstraintCount(0).isReady(true).build();
+        Fixture fixture = newFixture(List.of(buildTask(taskId, 0, 0, true)), List.of());
 
-        when(taskRepository.findById(taskId)).thenReturn(Optional.of(task));
-
-        taskEligibilityService.onConstraintStatusChanged(
+        fixture.service().onConstraintStatusChanged(
                 taskId, constraintId, Constraint.ConstraintStatus.SATISFIED, Constraint.ConstraintStatus.PENDING);
 
+        Task task = fixture.taskRepo().findById(taskId).orElseThrow();
         assertEquals(1, task.getOpenConstraintCount());
         assertFalse(task.isReady());
     }
@@ -588,26 +588,25 @@ class TaskEligibilityServiceTest {
     void onConstraintStatusChanged_sameTransitionReplayed_isNoOpSecondTime() {
         UUID taskId = UUID.randomUUID();
         UUID constraintId = UUID.randomUUID();
-        Task task = TaskTestFixtures.defaultTask(taskId).blockingCount(0).openConstraintCount(0).isReady(true).build();
+        Fixture fixture = newFixture(List.of(buildTask(taskId, 0, 0, true)), List.of());
 
-        when(taskRepository.findById(taskId)).thenReturn(Optional.of(task));
-
-        taskEligibilityService.onConstraintStatusChanged(
+        fixture.service().onConstraintStatusChanged(
                 taskId, constraintId, Constraint.ConstraintStatus.SATISFIED, Constraint.ConstraintStatus.PENDING);
-        taskEligibilityService.onConstraintStatusChanged(
+        fixture.service().onConstraintStatusChanged(
                 taskId, constraintId, Constraint.ConstraintStatus.SATISFIED, Constraint.ConstraintStatus.PENDING);
 
-        assertEquals(1, task.getOpenConstraintCount());
+        assertEquals(1, fixture.taskRepo().findById(taskId).orElseThrow().getOpenConstraintCount());
     }
 
     @Test
     void onConstraintStatusChanged_nonOpenTransition_doesNothing() {
+        // taskId's own Task is deliberately NOT seeded - if the method touched the repository
+        // at all for this non-open-changing transition, this would throw.
         UUID taskId = UUID.randomUUID();
+        Fixture fixture = newFixture(List.of(), List.of());
 
-        taskEligibilityService.onConstraintStatusChanged(
-                taskId, UUID.randomUUID(), Constraint.ConstraintStatus.SATISFIED, Constraint.ConstraintStatus.WAIVED);
-
-        verify(taskRepository, never()).findById(any());
+        assertDoesNotThrow(() -> fixture.service().onConstraintStatusChanged(
+                taskId, UUID.randomUUID(), Constraint.ConstraintStatus.SATISFIED, Constraint.ConstraintStatus.WAIVED));
     }
 
     @Test
@@ -615,25 +614,29 @@ class TaskEligibilityServiceTest {
         // Review Finding #5: every other public method that resolves a task via requireTask has
         // a dedicated *_taskDoesNotExist_throws* test; this one didn't.
         UUID taskId = UUID.randomUUID();
-        when(taskRepository.findById(taskId)).thenReturn(Optional.empty());
+        Fixture fixture = newFixture(List.of(), List.of());
 
         assertThrows(IllegalArgumentException.class,
-                () -> taskEligibilityService.onConstraintStatusChanged(
+                () -> fixture.service().onConstraintStatusChanged(
                         taskId, UUID.randomUUID(), Constraint.ConstraintStatus.PENDING, Constraint.ConstraintStatus.SATISFIED));
     }
 
     @Test
     void onConstraintStatusChanged_nullTaskId_throwsNpe() {
+        Fixture fixture = newFixture(List.of(), List.of());
+
         assertThrows(NullPointerException.class,
-                () -> taskEligibilityService.onConstraintStatusChanged(
+                () -> fixture.service().onConstraintStatusChanged(
                         null, UUID.randomUUID(), Constraint.ConstraintStatus.PENDING, Constraint.ConstraintStatus.SATISFIED));
     }
 
     @Test
     void onConstraintStatusChanged_nullConstraintId_throwsNpe() {
         UUID taskId = UUID.randomUUID();
+        Fixture fixture = newFixture(List.of(), List.of());
+
         assertThrows(NullPointerException.class,
-                () -> taskEligibilityService.onConstraintStatusChanged(
+                () -> fixture.service().onConstraintStatusChanged(
                         taskId, null, Constraint.ConstraintStatus.PENDING, Constraint.ConstraintStatus.SATISFIED));
     }
 }

@@ -158,5 +158,4 @@ class TaskEligibilityServiceConcurrencyTest {
                     "trial " + trial + ": dependent must become ready once target is DONE");
         }
     }
-
 }

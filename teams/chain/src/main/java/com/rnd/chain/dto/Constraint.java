@@ -9,6 +9,7 @@ import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.Objects;
 import java.util.UUID;
 
 // @Getter/@Setter (PLAN.md Finding #17) generate the trivial accessors below; getReason/setReason
@@ -35,6 +36,18 @@ public class Constraint {
     public Constraint(String constraintId, UUID taskId, ConstraintType type,
                        ConstraintStatus status, Map<String, Object> reason,
                        String sourceRef, LocalDateTime createdAt, LocalDateTime updatedAt) {
+        if (constraintId == null) {
+            throw new IllegalArgumentException("constraintId must not be null");
+        }
+        if (taskId == null) {
+            throw new IllegalArgumentException("taskId must not be null");
+        }
+        if (type == null) {
+            throw new IllegalArgumentException("type must not be null");
+        }
+        if (status == null) {
+            throw new IllegalArgumentException("status must not be null");
+        }
         this.constraintId = constraintId;
         this.taskId = taskId;
         this.type = type;
@@ -84,6 +97,25 @@ public class Constraint {
             }
         }
         return Collections.unmodifiableMap(new HashMap<>(reason));
+    }
+
+    // Identity is constraintId alone, matching Task/TaskDependency's equals()/hashCode() pattern
+    // elsewhere in this PR - see code review finding ("Constraint breaks the equals/hashCode +
+    // encapsulation pattern this PR establishes everywhere else").
+    @Override
+    public boolean equals(Object o) {
+        if (this == o) {
+            return true;
+        }
+        if (!(o instanceof Constraint)) {
+            return false;
+        }
+        return constraintId.equals(((Constraint) o).constraintId);
+    }
+
+    @Override
+    public int hashCode() {
+        return Objects.hashCode(constraintId);
     }
 
     public enum ConstraintType { APPROVAL_NEEDED, BLOCKED_BY_INFO, DATE_WINDOW }
