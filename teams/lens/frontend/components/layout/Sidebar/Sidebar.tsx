@@ -1,17 +1,20 @@
 'use client'
 
-import Box from '@mui/material/Box'
-import Drawer from '@mui/material/Drawer'
-import List from '@mui/material/List'
-import ListItemButton from '@mui/material/ListItemButton'
-import ListItemIcon from '@mui/material/ListItemIcon'
-import ListItemText from '@mui/material/ListItemText'
-import Toolbar from '@mui/material/Toolbar'
-import Typography from '@mui/material/Typography'
 import { alpha, useTheme } from '@mui/material/styles'
+import {
+  Box,
+  Drawer,
+  List,
+  ListItemButton,
+  ListItemIcon,
+  ListItemText,
+  Toolbar,
+  Typography,
+} from '@/design-system/components'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import Logo from '../Logo'
+import { useRole } from '../RoleProvider'
 import { navSections } from './navConfig'
 
 export const SIDEBAR_WIDTH = 260
@@ -24,17 +27,21 @@ export interface SidebarProps {
 
 export default function Sidebar({ open, onClose, variant }: SidebarProps) {
   const pathname = usePathname()
+  const { role } = useRole()
   const theme = useTheme()
 
-  // The sidebar is a permanently dark surface regardless of app-wide theme
-  // mode — a deliberate product choice, not a one-off color. It still reads
-  // every color from the theme (the slate scale + alpha of common.white)
-  // instead of hardcoding hex, so a future dark-mode or rebrand only changes
-  // `theme/tokens.ts`.
-  const sidebarText = alpha(theme.palette.common.white, 0.65)
-  const sidebarTextActive = theme.palette.common.white
-  const sidebarDivider = alpha(theme.palette.common.white, 0.08)
-  const sidebarHover = alpha(theme.palette.common.white, 0.06)
+  const sidebarBg = theme.palette.sidebar.background
+  const sidebarText = theme.palette.sidebar.text
+  const sidebarTextActive = theme.palette.sidebar.textActive
+  const sidebarDivider = theme.palette.sidebar.divider
+  const sidebarHover = theme.palette.sidebar.hover
+
+  const visibleSections =
+    role === 'manager'
+      ? navSections.filter((section) => section.label !== 'Employee')
+      : role === 'employee'
+        ? navSections.filter((section) => section.label === 'Employee')
+        : navSections
 
   const content = (
     <Box
@@ -44,7 +51,7 @@ export default function Sidebar({ open, onClose, variant }: SidebarProps) {
         height: '100%',
         display: 'flex',
         flexDirection: 'column',
-        bgcolor: 'grey.900',
+        bgcolor: sidebarBg,
         color: sidebarText,
       }}
     >
@@ -53,15 +60,18 @@ export default function Sidebar({ open, onClose, variant }: SidebarProps) {
       </Toolbar>
 
       <Box sx={{ flexGrow: 1, overflowY: 'auto', px: 1.5, pb: 2 }}>
-        {navSections.map((section, index) => (
+        {visibleSections.map((section, index) => (
           <Box key={section.label} sx={{ mt: index === 0 ? 0.5 : 2.5 }}>
             <Typography
-              variant="overline"
+              variant="caption"
               sx={{
                 display: 'block',
                 px: 1.5,
                 mb: 0.5,
                 color: alpha(theme.palette.common.white, 0.35),
+                fontWeight: 700,
+                letterSpacing: '0.08em',
+                textTransform: 'uppercase',
               }}
             >
               {section.label}
@@ -77,6 +87,7 @@ export default function Sidebar({ open, onClose, variant }: SidebarProps) {
                     selected={selected}
                     onClick={variant === 'temporary' ? onClose : undefined}
                     sx={{
+                      borderRadius: 1.5,
                       mb: 0.25,
                       pl: item.icon ? 1.5 : 4.5,
                       color: selected ? sidebarTextActive : sidebarText,
@@ -97,12 +108,7 @@ export default function Sidebar({ open, onClose, variant }: SidebarProps) {
                       primary={item.label}
                       slotProps={{
                         primary: {
-                          sx: {
-                            fontSize: 14,
-                            fontWeight: selected
-                              ? theme.typography.subtitle2.fontWeight
-                              : theme.typography.body2.fontWeight,
-                          },
+                          sx: { fontSize: 14, fontWeight: selected ? 600 : 500 },
                         },
                       }}
                     />

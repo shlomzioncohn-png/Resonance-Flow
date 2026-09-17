@@ -1,9 +1,17 @@
-"""Public contract exports for MIND."""
+"""Public contract exports for MIND.
+
+This package exposes the shared models used across MIND and at
+cross-team boundaries.
+"""
 
 from mind.contracts.assignee import Assignee, AssigneeCandidate
 from mind.contracts.base_enums import SourceType
 from mind.contracts.raw_object_event import RawObjectEvent
-from mind.contracts.raw_object_event_enums import Modality, ScopeDecision
+from mind.contracts.raw_object_event_enums import (
+    Modality,
+    ScopeDecision,
+    ChangeType,
+    )
 from mind.contracts.task import Task
 from mind.contracts.task_completed import TaskCompleted
 from mind.contracts.task_created import TaskCreated

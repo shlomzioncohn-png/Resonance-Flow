@@ -12,7 +12,7 @@ import java.time.Instant;
  * the answer isn't Bridge, it doesn't belong here.
  * <p>
  * Fields removed on that basis so far: id, version, created_at/updated_at,
- * dependency_task_id, is_available, completed_at, created_by.
+ * dependency_task_id, is_available, created_by.
  * <p>
  * {@code @JsonNaming} is on the class rather than relying on a globally
  * configured mapper, so Task carries its own wire contract with Inbox
@@ -37,7 +37,13 @@ public record Task(
         // TIMESTAMPTZ. The date-to-instant conversion (presumably
         // start-of-day UTC) isn't decided yet - not building it until it is.
         Instant deadline,
-        Instant snoozedUntil) implements BridgePayload {
+        Instant snoozedUntil,
+        // Set only when status = DONE and the source actually recorded a
+        // completion date - e.g. a CRM deal's close date. A DONE task with
+        // no completedAt is legitimate (see DealToTaskMapper for the
+        // CLOSED_WON-with-no-close-date case), so nothing enforces the two
+        // together.
+        Instant completedAt) implements BridgePayload {
 
     @Override
     public String tenantId() {

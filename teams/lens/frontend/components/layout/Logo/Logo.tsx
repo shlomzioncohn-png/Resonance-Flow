@@ -15,7 +15,7 @@ export default function Logo({ variant = 'dark' }: LogoProps) {
         sx={{
           width: 32,
           height: 32,
-          borderRadius: (theme) => `${theme.custom.radius.sm}px`,
+          borderRadius: '9px',
           bgcolor: 'primary.main',
           color: 'primary.contrastText',
           display: 'grid',
