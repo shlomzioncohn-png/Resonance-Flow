@@ -419,15 +419,15 @@ report if 100% isn't reached by the Foundation Gate.)*
 - **Reviewed by:** estherora-tem, team lead. (The mentor is a different person
   and has not reviewed this set yet — that is a separate, still-pending gate;
   `mentor_approved` stays `false` on all 30 until then.)
-- **Approved:** 27 / 30 `team_lead_approved` after the 2026-09-15/16
+- **Approved:** 30 / 30 `team_lead_approved`. 27 from the 2026-09-15/16
   scenario-by-scenario sign-off pass (22 outright, 5 with a non-blocking note —
-  see below). The remaining 3 were rewritten per her requested fixes but not
-  yet re-reviewed in their new form, so `team_lead_approved` stays `false` on
-  those until she looks at the rewrite: `manager_blocked_hire_vs_budget_review`,
+  see below); the remaining 3 (`manager_blocked_hire_vs_budget_review`,
   `manager_overdue_preread_vs_tomorrow_review`,
-  `salesperson_at_risk_renewal_vs_owned_outage`. The set was rebuilt on 2026-09-06
-  in response to her earlier review (baseline too high, blocked-distractor
-  pattern, effort/free-time, persona↔tier, position bias, deadline-passed).
+  `salesperson_at_risk_renewal_vs_owned_outage`) were rewritten per her
+  requested fixes and approved on re-review (2026-09-17). The set was rebuilt
+  on 2026-09-06 in response to her earlier review (baseline too high,
+  blocked-distractor pattern, effort/free-time, persona↔tier, position bias,
+  deadline-passed).
 - **Notes / pending changes:** Addressed 2026-09-15 in response to
   estherora-tem's PR review:
   - `ceo_blocked_ma_review_vs_vp_offer`'s `expected_reason` corrected, and its
