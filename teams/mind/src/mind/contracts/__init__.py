@@ -4,8 +4,8 @@ This package exposes the shared models used across MIND and at
 cross-team boundaries.
 """
 
-from .raw_object_event import RawObjectEvent
-from .raw_object_event_enums import (
+from mind.contracts.raw_object_event import RawObjectEvent
+from mind.contracts.raw_object_event_enums import (
     Modality,
     ScopeDecision,
     SourceType,

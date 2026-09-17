@@ -21,7 +21,7 @@ load the *previous* schema versions from Git into it, then run the exact same
 dry-run check the cluster hook runs. Same tool, same semantics, just earlier.
 
 The ephemeral-infra-in-CI idea is borrowed from the team's smoke tests
-([`service-ci.yaml`](../../../.github/workflows/service-ci.yaml)), which spin up
+([`setup-service-infra`](../../../.github/actions/setup-service-infra)), which spin up
 a kind cluster per run. A Schema Registry has no Helm chart yet, and needs no
 Kubernetes, so a plain service container is enough here.
 
