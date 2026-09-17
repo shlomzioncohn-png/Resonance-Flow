@@ -39,21 +39,32 @@ public class PostgresDependencyHistoryRepository implements DependencyHistoryRep
     @Transactional
     public DependencyHistoryEntry record(DependencyHistoryEntry entry) {
         Objects.requireNonNull(entry, "entry must not be null");
-        DependencyHistoryEntity entity = new DependencyHistoryEntity(entry.getId(), entry.getTaskId(),
-                entry.getDependsOnTaskId(), entry.getAction(), entry.getSource(), entry.getSourceRef(),
-                entry.getCreatedAt());
+        DependencyHistoryEntity entity = new DependencyHistoryEntity(entry.id(), entry.taskId(),
+                entry.dependsOnTaskId(), entry.action(), entry.source(), entry.sourceRef(),
+                entry.createdAt());
         try {
             entityManager.persist(entity);
             entityManager.flush();
             return entry;
         } catch (PersistenceException e) {
             DataAccessException translated = EntityManagerFactoryUtils.convertJpaAccessExceptionIfPossible(e);
-            if (translated instanceof DataIntegrityViolationException && entry.getSourceRef() != null) {
+            if (translated instanceof DataIntegrityViolationException && entry.sourceRef() != null) {
                 // (source, sourceRef) already recorded - report the existing entry, not a new one.
-                return findBySourceAndSourceRef(entry.getSource(), entry.getSourceRef())
+                return findBySourceAndSourceRef(entry.source(), entry.sourceRef())
                         .orElseThrow(() -> translated);
             }
             throw translated != null ? translated : e;
+        }
+    }
+
+    @Override
+    @Transactional
+    public void delete(UUID entryId) {
+        Objects.requireNonNull(entryId, "entryId must not be null");
+        // deleteById() throws EmptyResultDataAccessException if absent - the interface requires
+        // a no-op instead, so existence is checked first.
+        if (jpaRepository.existsById(entryId)) {
+            jpaRepository.deleteById(entryId);
         }
     }
 

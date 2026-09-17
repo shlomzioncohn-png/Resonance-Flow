@@ -4,6 +4,7 @@ import com.rnd.chain.dto.DependencyHistoryEntry;
 import com.rnd.chain.dto.PageResponse;
 import com.rnd.chain.dto.Task;
 import com.rnd.chain.dto.TaskDependency;
+import com.rnd.chain.exception.DuplicateDependencyException;
 import com.rnd.chain.repository.DependencyHistoryRepository;
 import com.rnd.chain.repository.PostgresTaskDependencyRepository;
 import com.rnd.chain.repository.PostgresTaskRepository;
@@ -14,15 +15,11 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Clock;
-import java.util.Optional;
 import java.util.UUID;
 
 import static com.rnd.chain.testsupport.TaskFixtures.newTask;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
-import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.when;
 
 /** Proves the real wiring (Postgres repositories + {@link com.rnd.chain.repository.JpaTransactionRunner})
  * behaves the same as the in-memory pair {@link TaskDependencyServiceTest} already covers -
@@ -65,22 +62,25 @@ class TaskDependencyServicePostgresIntegrationTest {
     }
 
     @Test
-    void addDependency_compensatingActionRemovesEdge_whenHistoryWriteFails() {
-        DependencyHistoryRepository throwingHistoryRepository = mock(DependencyHistoryRepository.class);
-        when(throwingHistoryRepository.findBySourceAndSourceRef(any(), any())).thenReturn(Optional.empty());
-        when(throwingHistoryRepository.record(any())).thenThrow(new RuntimeException("simulated history write failure"));
-
+    void addDependency_compensatesSpeculativeHistoryEntry_whenEdgeWriteIsANoOp() {
+        // Current ordering (post round-2 review on #373): history is recorded speculatively
+        // BEFORE the edge write, since the edge - once written - is what TaskEligibilityService
+        // reads outside this lock and must be final. If the edge write turns out to be a no-op
+        // (duplicate), it's the speculative history entry that gets compensated (deleted), not
+        // the edge - proven here against the real Postgres-backed repositories, no mocks needed.
         TaskDependencyService service = new TaskDependencyService(
-                taskRepository, taskDependencyRepository, throwingHistoryRepository, transactionRunner, clock);
+                taskRepository, taskDependencyRepository, historyRepository, transactionRunner, clock);
         Task a = taskRepository.save(newTask(UUID.randomUUID()));
         Task b = taskRepository.save(newTask(UUID.randomUUID()));
+        service.addDependency(a.getId(), b.getId());
+        assertThat(service.getHistory(a.getId(), 0, 10).content()).hasSize(1);
 
         assertThatThrownBy(() -> service.addDependency(a.getId(), b.getId()))
-                .isInstanceOf(RuntimeException.class)
-                .hasMessage("simulated history write failure");
+                .isInstanceOf(DuplicateDependencyException.class);
 
-        // recordHistoryOrCompensate's manual compensating delete still runs against the real
-        // Postgres-backed repository - no dangling edge, same as the in-memory pair.
-        assertThat(taskDependencyRepository.findByTaskId(a.getId())).isEmpty();
+        // The edge from the first call is untouched, and no phantom second ADDED entry survives.
+        assertThat(taskDependencyRepository.findByTaskId(a.getId()))
+                .containsExactly(new TaskDependency(a.getId(), b.getId()));
+        assertThat(service.getHistory(a.getId(), 0, 10).content()).hasSize(1);
     }
 }

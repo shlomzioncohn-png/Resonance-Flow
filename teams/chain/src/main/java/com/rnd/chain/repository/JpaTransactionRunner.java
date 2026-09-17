@@ -14,13 +14,21 @@ import java.util.function.Supplier;
 public class JpaTransactionRunner implements TransactionRunner {
 
     private final TransactionTemplate transactionTemplate;
+    private final TransactionTemplate readOnlyTransactionTemplate;
 
     public JpaTransactionRunner(PlatformTransactionManager transactionManager) {
         this.transactionTemplate = new TransactionTemplate(transactionManager);
+        this.readOnlyTransactionTemplate = new TransactionTemplate(transactionManager);
+        this.readOnlyTransactionTemplate.setReadOnly(true);
     }
 
     @Override
     public <T> T runInTransaction(Supplier<T> action) {
         return transactionTemplate.execute(status -> action.get());
+    }
+
+    @Override
+    public <T> T runInReadOnlyTransaction(Supplier<T> action) {
+        return readOnlyTransactionTemplate.execute(status -> action.get());
     }
 }

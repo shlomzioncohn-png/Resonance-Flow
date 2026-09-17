@@ -55,7 +55,7 @@ class PostgresDependencyHistoryRepositoryTest {
         DependencyHistoryEntry recordedFirst = repository.record(first);
         DependencyHistoryEntry recordedSecond = repository.record(second);
 
-        assertThat(recordedSecond.getId()).isEqualTo(recordedFirst.getId());
+        assertThat(recordedSecond.id()).isEqualTo(recordedFirst.id());
         assertThat(repository.findByTaskId(taskId, 0, 10).totalElements()).isEqualTo(1);
     }
 
@@ -76,7 +76,7 @@ class PostgresDependencyHistoryRepositoryTest {
         repository.record(newer);
 
         PageResponse<DependencyHistoryEntry> page = repository.findByTaskId(taskId, 0, 10);
-        assertThat(page.content()).extracting(DependencyHistoryEntry::getId)
-                .containsExactly(newer.getId(), older.getId());
+        assertThat(page.content()).extracting(DependencyHistoryEntry::id)
+                .containsExactly(newer.id(), older.id());
     }
 }
