@@ -10,13 +10,17 @@ data:
     server:
       port: {{ $component.containerPort }}
     spring:
+      config:
+        # Binds the chain-db-credentials Secret's "password" file to the ${password}
+        # placeholder below - the Secret is mounted as a file, not passed as an env var.
+        import: "optional:configtree:/etc/resonance-flow/secrets/chain-db/"
       application:
         name: chain
       datasource:
         # Same host/port helpers as the wait-for-postgresql initContainer.
         url: "jdbc:postgresql://{{ include "resonance-flow.dependencyHostByName" (dict "root" $ "deps" $component.dependencies "name" "postgresql") }}:{{ include "resonance-flow.dependencyPort" (dict "deps" $component.dependencies "name" "postgresql") }}/{{ $cfg.datasource.database }}?stringtype=unspecified"
         username: {{ $cfg.datasource.username | quote }}
-        password: "${DB_PASSWORD}"
+        password: "${password}"
       kafka:
         {{- include "resonance-flow.springKafkaBase" (dict "root" $) | nindent 8 }}
         {{- include "resonance-flow.springKafkaConsumerDefaults" (dict "groupId" $cfg.kafka.consumerGroupId) | nindent 8 }}

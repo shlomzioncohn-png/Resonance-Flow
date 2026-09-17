@@ -171,13 +171,16 @@ components:
     service: *defaultService
     resources: *defaultResources
     <<: *defaultHealthProbes
-    # Password is DB_PASSWORD below, from the chain-db-credentials Secret - not a literal here.
-    env:
-      DB_PASSWORD:
-        valueFrom:
-          secretKeyRef:
-            name: chain-db-credentials
-            key: password
+    # Password comes from the chain-db-credentials Secret, mounted as a file below -
+    # not a literal here, not an env var.
+    volumeMounts:
+      - name: chain-db-credentials
+        mountPath: /etc/resonance-flow/secrets/chain-db
+        readOnly: true
+    volumes:
+      - name: chain-db-credentials
+        secret:
+          secretName: chain-db-credentials
     dependencies:
       - name: postgresql
         port: 5432
