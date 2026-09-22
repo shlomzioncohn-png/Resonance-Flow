@@ -279,6 +279,11 @@ call, which correctly reports "already there," and the counter update proceeds c
 retry. The reverse order is worse: skipping the repository call once a caller believes an event
 was "already handled" can permanently lose a `Constraint` row, not just delay a counter update.
 
+`onConstraintAdded` also validates the task exists (and isn't soft-deleted) before writing -
+`task_constraint`'s FK enforces existence at the DB level, but not soft-delete (a soft-deleted
+task still has a row); `TaskRepository#findById` already treats a soft-deleted task as not found,
+so calling it first is what actually satisfies #378's "non-existing, **non-deleted** task" wording.
+
 ## Code review fixes (2026-09-10, PR #251)
 
 Addressed 5 of 13 findings from this round's review (discussed and planned one-by-one with the

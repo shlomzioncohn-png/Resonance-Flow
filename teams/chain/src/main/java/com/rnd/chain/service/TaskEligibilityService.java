@@ -278,12 +278,25 @@ public class TaskEligibilityService {
     // repository write entirely on retry, once an in-memory idempotency check says "already
     // seen" - a permanently lost Constraint row, not just a delayed counter update.
 
+    /**
+     * Persists {@code constraint} and, if it's genuinely new, increments {@code taskId}'s
+     * {@code openConstraintCount}.
+     *
+     * @throws NullPointerException if constraint is null
+     * @throws IllegalArgumentException if {@code constraint.getTaskId()} does not reference an
+     * existing, non-deleted task - checked before writing, so a rejected call never leaves an
+     * orphaned constraint row behind it (the DB's own FK enforces existence, but not soft-delete
+     * - {@link TaskRepository#findById} already treats a soft-deleted task as not found, per its
+     * own contract, so this check is what actually closes the "non-deleted" half of #378's data
+     * integrity requirement).
+     */
     @Transactional
     public void onConstraintAdded(Constraint constraint) {
         Objects.requireNonNull(constraint, "constraint must not be null");
         UUID taskId = constraint.getTaskId();
         log.info("Constraint {} added on task {}", constraint.getConstraintId(), taskId);
 
+        requireTask(taskId);
         boolean wasInserted = constraintRepository.save(constraint);
         if (!wasInserted) {
             log.debug("Constraint {} already existed on task {} - duplicate add, no-op",

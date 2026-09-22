@@ -18,6 +18,8 @@ import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 class TaskEligibilityServiceTest {
@@ -409,6 +411,20 @@ class TaskEligibilityServiceTest {
         Task task = fixture.taskRepo().findById(taskId).orElseThrow();
         assertEquals(1, task.getOpenConstraintCount());
         assertFalse(task.isReady());
+    }
+
+    @Test
+    void onConstraintAdded_taskDoesNotExist_throwsAndNeverSaves() {
+        // taskId's own Task is deliberately NOT seeded - covers both a genuinely missing task
+        // and a soft-deleted one, since TaskRepository#findById treats both as not found.
+        UUID taskId = UUID.randomUUID();
+        Fixture fixture = newFixture(List.of(), List.of());
+        Constraint constraint = buildConstraint(UUID.randomUUID().toString(), taskId,
+                Constraint.ConstraintStatus.PENDING);
+
+        assertThrows(IllegalArgumentException.class, () -> fixture.service().onConstraintAdded(constraint));
+
+        verify(fixture.constraintRepo(), never()).save(any());
     }
 
     @Test
