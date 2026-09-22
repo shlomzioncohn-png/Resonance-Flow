@@ -47,7 +47,7 @@ apiVersion: v1
 kind: ConfigMap
 
 metadata:
-  name: chain-db-init
+  name: {{ include "resonance-flow.fullname" $ }}-chain-db-init
   labels:
     {{- include "resonance-flow.labels" $ | nindent 4 }}
     app.kubernetes.io/component: chain
@@ -67,18 +67,22 @@ data:
     EOSQL
 
 ---
-{{- $secretName := "chain-db-credentials" }}
-{{- $existingSecret := lookup "v1" "Secret" $.Release.Namespace $secretName }}
 apiVersion: v1
 kind: Secret
 
 metadata:
-  name: {{ $secretName }}
+  name: {{ include "resonance-flow.fullname" $ }}-chain-db-credentials
   labels:
     {{- include "resonance-flow.labels" $ | nindent 4 }}
     app.kubernetes.io/component: chain
 
+# lookup can't tell an existing password from a first install under ArgoCD (it
+# renders via `helm template`, never against the live cluster, so this would
+# always fall through to "generate new") - randAlphaNum here always runs, and
+# the Application's ignoreDifferences on this Secret's data.password (see
+# argocd/apps/resonance-flow.yaml) keeps selfHeal from overwriting the live
+# value with a fresh random one on every sync.
 type: Opaque
 data:
-  password: {{ if $existingSecret }}{{ index $existingSecret.data "password" }}{{ else }}{{ randAlphaNum 24 | b64enc }}{{ end }}
+  password: {{ randAlphaNum 24 | b64enc }}
 {{- end }}

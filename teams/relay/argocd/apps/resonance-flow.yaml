@@ -17,6 +17,16 @@ spec:
   destination:
     server: https://kubernetes.default.svc
     namespace: resonance-flow
+  # helm template has no live cluster to check against, so Chain's DB credentials
+  # Secret re-renders a fresh random password every sync - without this, selfHeal
+  # would push that new value live and break Chain's DB connection every sync.
+  ignoreDifferences:
+    - group: ""
+      kind: Secret
+      name: resonance-flow-chain-db-credentials
+      namespace: resonance-flow
+      jsonPointers:
+        - /data/password
   syncPolicy:
     automated:
       prune: true

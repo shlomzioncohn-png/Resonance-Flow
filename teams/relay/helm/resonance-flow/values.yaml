@@ -215,7 +215,9 @@ components:
     resources: *defaultResources
     <<: *defaultHealthProbes
     # Password comes from the chain-db-credentials Secret, mounted as a file below -
-    # not a literal here, not an env var.
+    # not a literal here, not an env var. secretName must match the fullname-prefixed
+    # name templates/services/chain/configmap.yaml renders (fullname resolves to the
+    # fixed "resonance-flow" release name this chart is always installed as).
     volumeMounts:
       - name: chain-db-credentials
         mountPath: /etc/resonance-flow/secrets/chain-db
@@ -223,7 +225,7 @@ components:
     volumes:
       - name: chain-db-credentials
         secret:
-          secretName: chain-db-credentials
+          secretName: resonance-flow-chain-db-credentials
     dependencies:
       - name: postgresql
         port: 5432
@@ -457,10 +459,12 @@ postgresql:
         cpu: 150m
         memory: 192Mi
     initdb:
-      scriptsConfigMap: chain-db-init
+      # Both names below must match the fullname-prefixed names
+      # templates/services/chain/configmap.yaml renders.
+      scriptsConfigMap: resonance-flow-chain-db-init
     extraEnvVars:
       - name: CHAIN_DB_PASSWORD
         valueFrom:
           secretKeyRef:
-            name: chain-db-credentials
+            name: resonance-flow-chain-db-credentials
             key: password
