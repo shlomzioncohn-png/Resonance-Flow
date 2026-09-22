@@ -57,6 +57,15 @@ public class MediaIntakeService {
      * sidecars' object_keys all use (see landTranscript/landMeetingMetadata) so the three land
      * next to each other when browsing MinIO by name, not scattered among unrelated
      * recordings from the same day.
+     * <p>
+     * correlationId is left null (see the 12-arg create() below) rather than repurposed as
+     * recordingId - correlationId's documented meaning (see RawObjectEvent's javadoc) is
+     * linking a body event to separately-published attachment events, which this lane doesn't
+     * have (transcript/metadata are pointer fields on this one event, not events of their
+     * own). Considered reusing it so a consumer could find all 3 landed objects for one
+     * recording via an explicit field instead of parsing object_key's filename stem, but
+     * repurposing an already-defined field's meaning without Mind's sign-off is worse than
+     * living without that lookup for now - see plan.md.
      */
     public RawObjectEvent land(byte[] content, String contentHash, String filename, String tenantId,
                                 RawSourceType sourceType, Modality modality, Instant ingestedAt,
