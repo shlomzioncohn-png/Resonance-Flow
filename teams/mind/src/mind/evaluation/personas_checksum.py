@@ -34,9 +34,16 @@ def compute_personas_checksum(personas_dir: str | Path) -> str:
 
     Recurses (same_tier/, cross_tier/, any future group), skips the generated
     `scenario.schema.json`, and hashes each file's path (relative to
-    `personas_dir`, so it also catches renames/moves) together with its bytes,
-    in a fixed sorted order so the result doesn't depend on filesystem
-    iteration order.
+    `personas_dir`, so it also catches renames/moves) together with its
+    content, in a fixed sorted order so the result doesn't depend on
+    filesystem iteration order.
+
+    Content is read as text and line endings are normalized to `\n` before
+    hashing (`newline=""` + a `\r\n`/`\r` -> `\n` pass) so the checksum is the
+    same whether the file was checked out with git's autocrlf turned on
+    (Windows, `\r\n`) or off (CI/Linux, `\n`) — otherwise this would fail on
+    every PR just from checking the branch out on a different OS, with no
+    scenario content actually different.
     """
     personas_path = Path(personas_dir)
     if not personas_path.is_dir():
@@ -48,9 +55,11 @@ def compute_personas_checksum(personas_dir: str | Path) -> str:
     )
     for scenario_path in scenario_files:
         relative = scenario_path.relative_to(personas_path).as_posix()
+        content = scenario_path.read_text(encoding="utf-8", newline="")
+        normalized = content.replace("\r\n", "\n").replace("\r", "\n")
         digest.update(relative.encode("utf-8"))
         digest.update(b"\0")
-        digest.update(scenario_path.read_bytes())
+        digest.update(normalized.encode("utf-8"))
         digest.update(b"\0")
 
     return digest.hexdigest()
