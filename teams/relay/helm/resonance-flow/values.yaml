@@ -458,8 +458,6 @@ components:
         port: http
       periodSeconds: 10
       failureThreshold: 3
-    # /readyz (not /healthz) - don't route clients before the Kafka consumer has attached
-    # and been assigned partitions (see HealthController.java).
     readinessProbe:
       httpGet:
         path: /readyz
@@ -467,6 +465,16 @@ components:
       periodSeconds: 5
       failureThreshold: 3
     env: {}
+    dependencies:
+      - name: schema-registry
+        port: 8080
+    # Non-empty so deployment.yaml's generic `if $component.config` check injects
+    # CONFIG_FILE_PATH / SPRING_CONFIG_ADDITIONAL_LOCATION - the actual config.yaml content
+    # is rendered dynamically in templates/service-notification-delivery/configmap.yaml
+    # (it needs the dependencyHostByName/kafkaSaslJaasConfig helpers computed at render
+    # time, which this static value can't provide), not from this value directly.
+    config:
+      managed: true
     # Interim CPU-based HPA (templates/pipe-hpa.yaml). §10 open question: the real scaling
     # signal is active WebSocket connections/pod, but that needs a custom-metrics adapter
     # (e.g. Prometheus Adapter) plus a load-tested target-per-pod value. Swap this for a
