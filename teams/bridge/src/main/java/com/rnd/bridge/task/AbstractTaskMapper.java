@@ -43,11 +43,17 @@ public abstract class AbstractTaskMapper<S> implements PayloadMapper<S, Task> {
     protected abstract RoleContext roleContext();
 
     /**
-     * Inbox's {@code tasks.organization_id} is NOT NULL, but no lane has a
+     * Inbox's {@code tasks.tenant_id} is NOT NULL, but no lane has a
      * general-purpose source for it - a subclass overrides this only once it
      * has an actual value to supply (e.g. a configured account id), never a
      * made-up one. Defaults to null, which is the cross-team contract gap
      * for every lane that doesn't override it.
+     * <p>
+     * Named {@code organizationId()}, not {@code tenantId()}, to match
+     * {@link com.rnd.bridge.task.model.Task#organizationId()} - Task is
+     * deliberately not renamed alongside Inbox's organization-to-tenant
+     * rename, see {@code CLAUDE.md} §4/§6. {@code BridgeTaskEventDto.from()}
+     * is what actually renames this value onto the wire as {@code tenantId}.
      */
     protected String organizationId() {
         return null;

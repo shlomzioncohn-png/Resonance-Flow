@@ -33,5 +33,12 @@ packages = ["src/mind"]
 line-length = 100
 src = ["src", "tests"]
 
+[tool.ruff.lint]
+# TID252 (flake8-tidy-imports): use absolute imports, not relative ("from .x").
+extend-select = ["TID252"]
+
+[tool.ruff.lint.flake8-tidy-imports]
+ban-relative-imports = "all"
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]

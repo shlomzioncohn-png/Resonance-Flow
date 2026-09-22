@@ -75,10 +75,14 @@ bridge:
     enabled: false
   crm:
     dataset: classpath:crm/synthetic-deals.json
-    # Inbox's tasks.organization_id is NOT NULL, but HubSpot (and this
+    # Inbox's tasks.tenant_id is NOT NULL, but HubSpot (and this
     # lane's Deal model) has no concept of it - see DealToTaskMapper's class
     # Javadoc. Set CRM_ORGANIZATION_ID for a real org; falls back to a
     # local placeholder for development so the app can start without it.
+    # This key deliberately still says "organization-id", not "tenant-id" -
+    # see teams/bridge/CLAUDE.md §6 (tracked alongside the Task.organizationId
+    # decision, same reasoning: renaming a config key is an operational risk
+    # across every deployed environment, not a wire-format concern).
     organization-id: ${CRM_ORGANIZATION_ID:local-crm-org}
     sync:
       # Set to true to enable the automatic daily HubSpot to Kafka sync.
@@ -141,3 +145,15 @@ llm:
     enabled: ${LLM_CONSUMER_ENABLED:false}
     input-topic: ${LLM_CONSUMER_INPUT_TOPIC:bridge.tasks.to-enrich}
     group-id: ${LLM_CONSUMER_GROUP_ID:bridge-llm-enricher}
+  media:
+    # Meeting/doc/audio hand-off (Esther) - local folders to read test files from, one per
+    # source, not committed; set your own in .env. Shares minio.* and
+    # bridge.intake.raw-landed-topic above with the Unstructured-intake lane.
+    zoom-recordings-dir: ${BRIDGE_MEDIA_ZOOM_RECORDINGS_DIR:}
+    bbb-recordings-dir: ${BRIDGE_MEDIA_BBB_RECORDINGS_DIR:}
+    scanned-docs-dir: ${BRIDGE_MEDIA_SCANNED_DOCS_DIR:}
+    tenant-id: ${BRIDGE_MEDIA_TENANT_ID:demo-tenant}
+    # Files at or below this size never land - a conservative proxy for "empty/corrupt
+    # recording", not real audio-duration filtering (that needs a codec-aware library this
+    # lane doesn't depend on). Tune based on what garbage actually shows up in practice.
+    min-file-size-bytes: ${BRIDGE_MEDIA_MIN_FILE_SIZE_BYTES:1024}

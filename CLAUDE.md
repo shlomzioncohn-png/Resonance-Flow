@@ -102,9 +102,6 @@ repo yet. Don't assume it's there — check first:
 
 - No root-level `docker-compose.yml` exists yet. `teams/inbox/CLAUDE.md` describes one providing
   the shared Postgres instance; only per-team `teams/*/docker-compose.yml` files exist today.
-- `shared/database/migrations` (the Flyway migration source mounted by
-  `teams/inbox/docker-compose.yml`, and where any cross-team schema migration would need to be
-  agreed and added) does not exist at the repo root yet either.
 - Kafka for local dev currently only exists inside `teams/inbox/docker-compose.yml`
   (single-node, KRaft mode). Other teams that need a broker (bridge, relay) don't have one wired
   into their own compose files yet.

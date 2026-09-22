@@ -42,13 +42,14 @@ class BridgeTaskEventDtoTest {
             .disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS);
 
     private static final Set<String> CONTRACT_KEYS = Set.of(
-            "event_id", "organization_id", "project_id", "title", "description", "source_type",
+            "event_id", "tenant_id", "project_id", "title", "description", "source_type",
             "source_ref", "tier", "role_context", "urgency", "effort_estimate_minutes",
             "deadline", "status", "confidence");
 
     private static final Set<String> FORBIDDEN_KEYS = Set.of(
             "id", "correlation_id", "is_available", "priority_score", "owner_id", "created_by",
-            "extraction_provenance", "created_at", "updated_at", "completed_at", "snoozed_until");
+            "extraction_provenance", "created_at", "updated_at", "completed_at", "snoozed_until",
+            "organization_id");
 
     private static Task fullyPopulatedTask() {
         return new Task(

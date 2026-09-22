@@ -18,7 +18,7 @@ permissions:
 
 jobs:
   test:
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     timeout-minutes: 15  # a hung `make eval` must not run to the 6h default
     defaults:
       run:
@@ -41,8 +41,5 @@ jobs:
       - name: Tests
         run: make test
 
-      # Smoke-check that run.py still produces a report end-to-end. The real
-      # regression check runs against eval/personas/ — it is switched on in the
-      # PR that lands the persona scenario set.
-      - name: Evaluation harness smoke check
-        run: python -m mind.evaluation.run --model dummy --personas tests/fixtures/personas
+      - name: Evaluation harness against eval/personas (regression check)
+        run: make eval-ci

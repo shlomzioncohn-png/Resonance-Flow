@@ -70,7 +70,7 @@ public class TaskEnrichmentConsumer {
 
     private Task toTask(BridgeTaskEventDto event) {
         return new Task(
-                event.organizationId(),
+                event.tenantId(), // BridgeTaskEventDto.tenantId -> Task.organizationId, see BridgeTaskEventDto javadoc
                 event.projectId(),
                 event.title(),
                 event.description(),
