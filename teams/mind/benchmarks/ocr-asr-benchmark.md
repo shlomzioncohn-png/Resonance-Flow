@@ -1,5 +1,11 @@
 # MIND — OCR / ASR Local-Model Benchmark & Recommendation
 
+**Decision: OCR uses Tesseract (`--psm 11`), not PaddleOCR.** PaddleOCR
+(mobile and server, PP-OCRv5) was benchmarked as the alternative the
+mentor asked for and did not win — see "OCR — final decision" below for
+the full reasoning (cost/accuracy tradeoff, and PaddleOCR landing at
+the same accuracy ceiling as Tesseract once measured correctly).
+
 ## Purpose
 
 Not "which config looks better" — a final, number-backed decision for
@@ -139,15 +145,46 @@ difficulty of this proxy/sample (dense, scattered form text; a rough
 word-overlap metric) more than a weak tool choice — a heavier local
 model does not unlock materially higher accuracy here.
 
+Two follow-ups after the mentor asked to verify this isn't just an
+overly strict metric:
+- **Character-level similarity** (per-GT-word best character similarity
+  to any OCR word, `char_similarity_score()` in the script): `psm11`
+  scores **91.2%** by this measure vs. its own 64.7% word-recall — see
+  the per-config numbers the script now prints alongside word_recall.
+- **Every one of the 98 word_recall misses classified by cause**: see
+  [`word-recall-error-analysis.md`](./word-recall-error-analysis.md).
+  Headline: 59.2% of misses are cases where OCR's output was actually
+  correct (digits merged with an adjacent field, or a GT/OCR
+  word-boundary mismatch) — not recognition failures. Only 20.4%
+  (`different_word`) is OCR confidently producing a different, wrong
+  token, which is the category actually worth watching once extraction
+  exists.
+
 ## OCR — final decision
 
-**Use `tesseract --psm 11` (sparse text) as the default.** It is
-essentially tied with the best PaddleOCR result (64.7% vs. 66.5% —
-2.1 points) at a small fraction of the cost (~80x less latency, ~16x
-less memory than `paddleocr_mobile`). For a pipeline that needs to
-process pages at any real volume, that cost difference is decisive on
-its own; 2 points of recall does not offset an 80x latency multiplier
-absent a specific accuracy-critical use case.
+**Use `tesseract --psm 11` (sparse text) as the default — real accuracy
+is ~91%, not 64.7%.** The headline number to use going forward is the
+**91.2% character-level similarity**, not the 64.7% word-recall exact
+match. The 27-point gap between them is not Tesseract being wrong 27%
+more often — the error analysis
+([word-recall-error-analysis.md](./word-recall-error-analysis.md))
+shows **59.2% of the 98 "missed" words are cases where Tesseract's
+output was actually correct**: digits it read right but merged with an
+adjacent field (28.6%), or a word/segmentation-boundary mismatch
+against FUNSD's own annotations (30.6%) — including at least one case
+(`comunication` vs. `communication`) where the **FUNSD ground truth
+itself is misspelled** and Tesseract's reading is the more correct one.
+In other words, a meaningful share of the "low" 64.7% figure is
+dataset/metric noise, not a tool-quality problem — switching OCR tools
+would not fix it (PaddleOCR, tested as the alternative, landed at the
+same ceiling — see above).
+
+It is also essentially tied with the best PaddleOCR result (64.7% vs.
+66.5% word-recall — 2.1 points) at a small fraction of the cost (~80x
+less latency, ~16x less memory than `paddleocr_mobile`). For a
+pipeline that needs to process pages at any real volume, that cost
+difference is decisive on its own; 2 points of recall does not offset
+an 80x latency multiplier absent a specific accuracy-critical use case.
 
 **If a use case ever needs the extra ~2 points badly enough to accept
 ~40s/page and ~570MB, `paddleocr_mobile` is the fallback — not
@@ -162,6 +199,42 @@ a tool.
   memory, ~0.45s CPU time per FUNSD-sized page.
 - `paddleocr_mobile` (accuracy fallback): ~40s latency, ~570MB peak
   memory, ~110s CPU time per page.
+
+## OCR — handling the real residual errors: per-word confidence
+
+The remaining ~9% (100% - 91.2% character similarity) is not evenly
+"maybe wrong" — Tesseract already scores its own confidence per
+recognized word (0-100, from its `tsv` output mode; no new tool or
+model needed), and that confidence turns out to predict the errors
+found above. Tested via `benchmarks/analyze_confidence.py`
+(`python -m benchmarks.analyze_confidence`):
+
+| Group | n | avg. Tesseract confidence |
+|---|---:|---:|
+| Correctly-recalled words (word_recall hits) | 586 | **80.4** |
+| `segmentation` misses | 33 | 63.8 |
+| `digit_merge` misses | 22 | 61.9 |
+| `char_misread` misses | 17 | 53.0 |
+| `not_detected` misses | 3 | 47.2 |
+| **`different_word` misses (the risky category)** | 19 | **46.3** |
+
+Every miss category scores meaningfully below the 80.4 average for
+correct words, and `different_word` — the category flagged above as
+the one actually worth worrying about for extraction — scores lowest
+of all (46.3, ~34 points below correct words).
+
+**Recommendation:** the multimodal OCR interface should return, per
+recognized word, both the text **and** Tesseract's confidence score
+(already computed internally — this is a change to what we read out of
+Tesseract's output, not a new capability to build). Extraction (once
+built, Phase 2) can then discount or flag low-confidence words instead
+of trusting every word equally — a threshold around 60-65 would catch
+most `char_misread`/`different_word`/`not_detected` cases while keeping
+nearly all correct words (80.4 avg) and most `digit_merge`/
+`segmentation` cases (which don't need special handling anyway, since
+their content is already correct). Exact threshold needs tuning once
+extraction exists to measure against real downstream impact, not
+picked from this n=98 sample alone.
 
 All figures are on this dev machine (CPU only, no load, no mkldnn for
 PaddleOCR) — a shared/production host, or one where the mkldnn crash

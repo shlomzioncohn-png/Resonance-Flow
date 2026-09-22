@@ -85,7 +85,12 @@ licensing constraints.
   `docker-compose.yml` (`pgvector/pgvector` image); extension enabled by
   `db/init/01-enable-pgvector.sql`. No application schema yet -- that
   lands with the real embeddings work.
-- OCR/ASR: managed API vs. local model (e.g. local Whisper)
+- ~~OCR: managed API vs. local model~~ Resolved: **local Tesseract**
+  (`--psm 11`), not PaddleOCR (benchmarked as the alternative and lost
+  on cost/accuracy tradeoff). See `benchmarks/ocr-asr-benchmark.md`.
+- ASR: managed API vs. local model (e.g. local Whisper) — still open,
+  blocked on missing AMI audio data, see `benchmarks/ocr-asr-benchmark.md`
+  "Known risk".
 - Evaluation metric: top-1 accuracy vs. MRR/nDCG
 - How the score is published to Chain: separate event vs. field on `Task`
 - Which real dataset slice to validate against first: FUNSD vs. AMI

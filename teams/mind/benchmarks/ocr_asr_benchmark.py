@@ -34,13 +34,22 @@ skipped.
 
 Deliberately rough throughout (see ocr-asr-benchmark.md): wall-clock
 latency, a sampled peak-RSS/CPU-time footprint via psutil (Python's
-stdlib `resource` module doesn't exist on Windows), and a word-overlap
-accuracy proxy against FUNSD's ground truth -- not a real OCR metric
-(CER/WER), just "did the same words come out".
+stdlib `resource` module doesn't exist on Windows), and two accuracy
+proxies against FUNSD's ground truth -- neither is a real OCR metric
+(no CER/WER with proper alignment, no position matching):
+- word_recall: exact-match, "did the same word come out at all."
+- char_similarity: per-GT-word best character-level similarity
+  (difflib.SequenceMatcher ratio) to *any* word OCR produced -- added
+  after word_recall alone made 3 near-miss configs (e.g. `street` read
+  as `sireet`) look like outright failures instead of near-hits. Not a
+  substitute for real CER (no positional alignment -- deliberately, so
+  it still means something for psm11's "no particular order" output),
+  just a second, more forgiving lens on the same output.
 """
 
 from __future__ import annotations
 
+import difflib
 import json
 import re
 import shutil
@@ -164,6 +173,27 @@ def word_recall(ocr_text: str, gt_words: list[str]) -> float:
     return len(gt_set & ocr_words) / len(gt_set)
 
 
+def char_similarity_score(ocr_text: str, gt_words: list[str]) -> float:
+    """Average, over every GT word, of its best character-level
+    similarity (difflib ratio, 0-1) to any single word OCR produced.
+
+    Gives partial credit for near-misses that word_recall scores as a
+    complete failure (`street` read as `sireet` -> ~0.83, not 0). Not
+    positional -- doesn't assume matching order between GT and OCR
+    output -- which is what makes it usable for psm11 ("no particular
+    order") too, unlike a proper aligned CER."""
+    ocr_words = [_normalize(w) for w in ocr_text.split() if _normalize(w)]
+    if not gt_words:
+        return 0.0
+    if not ocr_words:
+        return 0.0
+    scores = [
+        max(difflib.SequenceMatcher(None, gt_word, ocr_word).ratio() for ocr_word in ocr_words)
+        for gt_word in gt_words
+    ]
+    return sum(scores) / len(scores)
+
+
 def run_ocr_benchmark() -> dict[str, dict]:
     tesseract_cmd = find_tesseract()
     print(f"tesseract: {tesseract_cmd}\n")
@@ -175,6 +205,7 @@ def run_ocr_benchmark() -> dict[str, dict]:
             gt_words = ground_truth_words(doc_id)
             result = run_ocr(tesseract_cmd, image_path, psm_args)
             recall = word_recall(result["text"], gt_words)
+            char_sim = char_similarity_score(result["text"], gt_words)
             row = {
                 "config": config_name,
                 "doc": doc_id,
@@ -182,6 +213,7 @@ def run_ocr_benchmark() -> dict[str, dict]:
                 "peak_rss_mb": round(result["peak_rss_mb"], 1),
                 "cpu_time_s": round(result["cpu_time_s"], 3),
                 "word_recall": round(recall, 3),
+                "char_similarity": round(char_sim, 3),
                 "gt_word_count": len(gt_words),
             }
             rows.append(row)
@@ -197,12 +229,13 @@ def run_ocr_benchmark() -> dict[str, dict]:
             "peak_rss_mb": sum(r["peak_rss_mb"] for r in config_rows) / n,
             "cpu_time_s": sum(r["cpu_time_s"] for r in config_rows) / n,
             "word_recall": sum(r["word_recall"] for r in config_rows) / n,
+            "char_similarity": sum(r["char_similarity"] for r in config_rows) / n,
         }
         averages[config_name] = avg
         print(
             f"{config_name}: duration={avg['duration_s']:.3f}s "
             f"peak_rss={avg['peak_rss_mb']:.1f}MB cpu_time={avg['cpu_time_s']:.3f}s "
-            f"word_recall={avg['word_recall']:.3f}"
+            f"word_recall={avg['word_recall']:.3f} char_similarity={avg['char_similarity']:.3f}"
         )
     return averages
 
@@ -282,6 +315,7 @@ def run_paddle_benchmark() -> dict[str, dict]:
             gt_words = ground_truth_words(doc_id)
             result = run_paddle_ocr(ocr, image_path)
             recall = word_recall(result["text"], gt_words)
+            char_sim = char_similarity_score(result["text"], gt_words)
             row = {
                 "config": config_name,
                 "doc": doc_id,
@@ -289,6 +323,7 @@ def run_paddle_benchmark() -> dict[str, dict]:
                 "peak_rss_mb": round(result["peak_rss_mb"], 1),
                 "cpu_time_s": round(result["cpu_time_s"], 3),
                 "word_recall": round(recall, 3),
+                "char_similarity": round(char_sim, 3),
                 "gt_word_count": len(gt_words),
             }
             rows.append(row)
@@ -304,12 +339,13 @@ def run_paddle_benchmark() -> dict[str, dict]:
             "peak_rss_mb": sum(r["peak_rss_mb"] for r in config_rows) / n,
             "cpu_time_s": sum(r["cpu_time_s"] for r in config_rows) / n,
             "word_recall": sum(r["word_recall"] for r in config_rows) / n,
+            "char_similarity": sum(r["char_similarity"] for r in config_rows) / n,
         }
         averages[config_name] = avg
         print(
             f"{config_name}: duration={avg['duration_s']:.3f}s "
             f"peak_rss={avg['peak_rss_mb']:.1f}MB cpu_time={avg['cpu_time_s']:.3f}s "
-            f"word_recall={avg['word_recall']:.3f}"
+            f"word_recall={avg['word_recall']:.3f} char_similarity={avg['char_similarity']:.3f}"
         )
     return averages
 
@@ -336,10 +372,11 @@ def main() -> None:
     print("\n--- Conclusion ---")
     print(
         f"OCR: best word recall is {best_config} "
-        f"({best['word_recall']:.3f}) among {list(all_averages)}, "
-        f"duration={best['duration_s']:.3f}s, peak_rss={best['peak_rss_mb']:.1f}MB. "
-        "Recall alone doesn't decide this when latency differs by orders of "
-        "magnitude -- see ocr-asr-benchmark.md for the reasoned recommendation.\n"
+        f"({best['word_recall']:.3f}, char_similarity={best['char_similarity']:.3f}) "
+        f"among {list(all_averages)}, duration={best['duration_s']:.3f}s, "
+        f"peak_rss={best['peak_rss_mb']:.1f}MB. Recall alone doesn't decide this "
+        "when latency differs by orders of magnitude -- see "
+        "ocr-asr-benchmark.md for the reasoned recommendation.\n"
         "ASR: NO DECISION -- blocked on missing AMI audio (known risk, see doc)."
     )
 
