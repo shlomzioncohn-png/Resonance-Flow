@@ -1,0 +1,24 @@
+name: Notification Delivery CI/CD
+
+on:
+  push:
+    branches: [ "main" ]
+    tags: [ "notification-delivery-v*.*.*" ]
+    paths:
+      - "teams/relay/src/**"
+  pull_request:
+    branches: [ "main" ]
+    paths:
+      - "teams/relay/src/**"
+  workflow_dispatch: {}
+
+jobs:
+  ci:
+    if: github.event_name == 'pull_request'
+    permissions:
+      contents: read
+    uses: ./.github/workflows/service-ci-java.yaml
+    with:
+      service_name: notification-delivery
+      service_dir: teams/relay
+
