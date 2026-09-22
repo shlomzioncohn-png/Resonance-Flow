@@ -91,6 +91,52 @@ class TaskUpdatedEventHandlerTest {
     }
 
     @Test
+    void onMessage_transitioningToCancelled_releasesDependents_sameAsDone() {
+        UUID blocker = UUID.randomUUID();
+        UUID dependent = UUID.randomUUID();
+        Fixture fixture = newFixture(
+                List.of(buildTask(blocker, TaskStatus.ACTIVE, BASE_TIME),
+                        Task.builder().id(dependent).ownerId("owner").status(TaskStatus.PENDING)
+                                .isReady(false).blockingCount(1).openConstraintCount(0)
+                                .createdAt(BASE_TIME).updatedAt(BASE_TIME).build()),
+                List.of(new TaskDependency(dependent, blocker)));
+
+        fixture.handler().onMessage(TaskUpdatedEvent.newBuilder()
+                .setTaskId(blocker.toString())
+                .setStatus(com.rnd.inbox.event.TaskStatus.TASK_STATUS_CANCELLED)
+                .setUpdatedAt(timestamp(BASE_TIME.plusMinutes(5)))
+                .build());
+
+        Task dependentAfter = fixture.taskRepo().findById(dependent).orElseThrow();
+        assertEquals(0, dependentAfter.getBlockingCount(),
+                "an abandoned (cancelled) blocker must release its dependents, same as a completed one");
+        assertTrue(dependentAfter.isReady());
+    }
+
+    @Test
+    void onMessage_transitioningToRejected_releasesDependents_sameAsDone() {
+        UUID blocker = UUID.randomUUID();
+        UUID dependent = UUID.randomUUID();
+        Fixture fixture = newFixture(
+                List.of(buildTask(blocker, TaskStatus.ACTIVE, BASE_TIME),
+                        Task.builder().id(dependent).ownerId("owner").status(TaskStatus.PENDING)
+                                .isReady(false).blockingCount(1).openConstraintCount(0)
+                                .createdAt(BASE_TIME).updatedAt(BASE_TIME).build()),
+                List.of(new TaskDependency(dependent, blocker)));
+
+        fixture.handler().onMessage(TaskUpdatedEvent.newBuilder()
+                .setTaskId(blocker.toString())
+                .setStatus(com.rnd.inbox.event.TaskStatus.TASK_STATUS_REJECTED)
+                .setUpdatedAt(timestamp(BASE_TIME.plusMinutes(5)))
+                .build());
+
+        Task dependentAfter = fixture.taskRepo().findById(dependent).orElseThrow();
+        assertEquals(0, dependentAfter.getBlockingCount(),
+                "an abandoned (rejected) blocker must release its dependents, same as a completed one");
+        assertTrue(dependentAfter.isReady());
+    }
+
+    @Test
     void onMessage_withAnOlderOrEqualTimestamp_isANoOp() {
         UUID taskId = UUID.randomUUID();
         Fixture fixture = newFixture(List.of(buildTask(taskId, TaskStatus.ACTIVE, BASE_TIME)), List.of());
