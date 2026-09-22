@@ -3,6 +3,7 @@ package com.rnd.inbox.user;
 import com.rnd.inbox.audit.AuditService;
 import com.rnd.inbox.shared.dto.PageResponseDto;
 import com.rnd.inbox.shared.exception.UnauthenticatedException;
+import com.rnd.inbox.shared.security.ActorScope;
 import com.rnd.inbox.tenant.Tenant;
 import com.rnd.inbox.tenant.TenantNotFoundException;
 import com.rnd.inbox.tenant.TenantRepository;
@@ -79,10 +80,10 @@ public class UserService {
     public PageResponseDto<UserResponseDto> listUsers(Pageable pageable, UUID actorId) {
         User actor = findActorOrThrow(actorId);
         Page<User> scopedUsers = switch (userAuthorization.scopeOf(actor)) {
-            case UserScope.All ignored -> userRepository.findAll(pageable);
-            case UserScope.WithinTenant(UUID tenantId) -> userRepository.findAllByTenantId(tenantId, pageable);
-            case UserScope.WithinTeamsLedBy(UUID leaderId) -> userRepository.findAllByTeamLeadId(leaderId, pageable);
-            case UserScope.SelfOnly ignored -> selfOnlyPage(actor, pageable);
+            case ActorScope.All ignored -> userRepository.findAll(pageable);
+            case ActorScope.WithinTenant(UUID tenantId) -> userRepository.findAllByTenantId(tenantId, pageable);
+            case ActorScope.WithinTeamsLedBy(UUID leaderId) -> userRepository.findAllByTeamLeadId(leaderId, pageable);
+            case ActorScope.SelfOnly ignored -> selfOnlyPage(actor, pageable);
         };
         return PageResponseDto.from(scopedUsers.map(userMapper::toResponseDto));
     }

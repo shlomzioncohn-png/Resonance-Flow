@@ -100,6 +100,10 @@ public class Task {
     private Float effortEstimateConfidence;
 
     @ManyToOne
+    @JoinColumn(name = "owner_id")
+    private User owner;
+
+    @ManyToOne
     @JoinColumn(name = "suggested_owner_user_id")
     private User suggestedOwnerUser;
 
@@ -281,6 +285,14 @@ public class Task {
 
     public void setEffortEstimateConfidence(Float effortEstimateConfidence) {
         this.effortEstimateConfidence = effortEstimateConfidence;
+    }
+
+    public User getOwner() {
+        return owner;
+    }
+
+    public void setOwner(User owner) {
+        this.owner = owner;
     }
 
     public User getSuggestedOwnerUser() {

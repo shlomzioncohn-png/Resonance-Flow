@@ -29,10 +29,14 @@ user/{UserNotFoundException,DuplicateEmailException,DuplicateUsernameException}.
 user/UserRole.java                          (only if the entity needs its own enum — see below)
 user/UserMapper.java
 user/UserService.java
-user/UserAuthorization.java, user/UserScope.java   (the role-scoping pattern — see below)
+user/UserAuthorization.java   (the role-scoping pattern — see below; scopeOf returns the
+    shared shared/security/ActorScope.java, not a User-specific type)
 user/UserController.java
 user/{UserCreateRequestDto,UserUpdateRequestDto,UserStatusUpdateRequestDto,UserResponseDto}.java
 src/test/java/.../user/{UserServiceTest,UserAuthorizationTest,UserMapperTest,UserControllerTest}.java
+tenant/*, task/* (the coarse-vs-fine and AdminOrTenantScopePolicy examples referenced throughout)
+team/{TeamAuthorization,TeamService,TeamController}.java +
+    team/{TeamMemberService,TeamMemberController}.java (the sub-resource Controller/Service split)
 ```
 
 Also re-read `CLAUDE.md` (§5-§14) — it governs layering, naming, REST rules, validation,
@@ -60,7 +64,17 @@ shared/security/CurrentActor.java, shared/security/CurrentActorArgumentResolver.
     shared/security/ActorHeaderExtractor.java (shared X-Actor-Id parsing)
 shared/security/RequireRole.java, shared/security/RoleAuthorizationInterceptor.java (the coarse,
     controller-level role gate — see "Actor, Audit, and Role-based Authorization" below; distinct
-    from the per-entity {Entity}Scope/{Entity}Authorization fine-grained scoping)
+    from the per-entity {Entity}Authorization fine-grained scoping)
+shared/security/ActorScope.java (the sealed interface of scope variants — All/WithinTenant/
+    WithinTeamsLedBy/SelfOnly — every {Entity}Authorization.scopeOf(actor) returns. It only ever
+    carries data read off the actor's own row (their tenant id, their own id), never anything
+    about the target entity, which is why it's shared instead of redefined per entity — see
+    "Role-based authorization" below for what's still per-entity and what isn't)
+shared/security/AdminOrTenantScopePolicy.java (a generic, reusable {Entity}Authorization body for
+    the single most common Q6 answer: SYSTEM_ADMIN touches everything, every other role is limited
+    to their own tenant, no finer split. Tenant, Task and Team all turned out to need exactly this
+    — check whether it fits before hand-writing scopeOf/assertWithinScope/assertCanCreateIn; see
+    "Role-based authorization" below for how an {Entity}Authorization delegates to it)
 shared/config/WebMvcConfig.java (registers both the actor-argument resolver and the role
     interceptor — it is constructor-injected with UserRepository for the latter; any
     @WebMvcTest slice that @Imports it now needs @MockBean UserRepository too, not just the
@@ -175,8 +189,10 @@ complete) — that still interrupts the pass.
    {entity}/{Entity}ResponseDto.java
    {relatedEntity}/{RelatedEntity}SummaryDto.java  (only per Q4, and only if it doesn't already exist)
 4. {entity}/{Entity}Mapper.java
-5. {entity}/{Entity}Scope.java, {entity}/{Entity}Authorization.java   (only if Q6 says this entity
-   needs role scoping — see "Role-based authorization" below; skip entirely otherwise)
+5. {entity}/{Entity}Authorization.java   (only if Q6 says this entity needs role scoping — see
+   "Role-based authorization" below; skip entirely otherwise. Reuses shared/security/ActorScope.java
+   — a new {entity}/{Entity}Scope.java is needed only in the rare case where ActorScope's four
+   variants genuinely can't express this entity's boundary, per Q6)
 6. {entity}/{Entity}Service.java
 7. {entity}/{Entity}Controller.java (apply `@RequireRole(...)` per the Q9 decision, per endpoint —
    most endpoints will have none)
@@ -262,6 +278,14 @@ complete) — that still interrupts the pass.
   `getConstraintName()` against the actual DB constraint name from the migration. An unrecognized
   constraint name should be rethrown as-is, not guessed at — see `User.saveUser` /
   `translateUniqueConstraintViolation` / `extractConstraintName` for the exact shape to copy.
+- `assertXAvailable` takes an `excludingId` parameter (like `User.assertEmailAvailable`) **only
+  when the same check runs from both create and update** — on update, the field's own current
+  owner legitimately "finds itself" and that's not a conflict, so the check must exclude it. A
+  field that's create-only (immutable after creation — `Tenant.slug`, once Q1/Q8-style decisions
+  rule out ever editing it) is never checked from an update path at all, so there is no "finding
+  itself" scenario to exclude — copying the `excludingId` parameter onto a create-only check
+  anyway is dead complexity (it would always be compared against `null`, always true, always a
+  no-op). Add the parameter only once a second, update-side caller actually exists.
 
 **Swagger**
 - Success responses (2xx) get an explicit `@Content(schema = @Schema(implementation = ...))`
@@ -291,7 +315,12 @@ other entity's authorization is built on. **Never invent a second role enum for 
 - `@CurrentActor UUID actorId` is a controller-method parameter on **every** endpoint that needs
   an identity — that now includes plain `GET`s, not just `create`/`update`, whenever the entity
   has role scoping (Q6). An endpoint with no scoping at all (e.g. a global read-only lookup table)
-  can skip it.
+  can skip it. An endpoint gated **only** by `@RequireRole` with no fine-grained check at all and no
+  audit entry to write (e.g. `Tenant.listTenants`, `@RequireRole(SYSTEM_ADMIN)` with every
+  `SYSTEM_ADMIN` seeing the identical full list) can skip both `@CurrentActor` on the Controller
+  method *and* an `actorId` parameter on the Service method — the 401 for a missing/invalid actor
+  still happens, because `RoleAuthorizationInterceptor` resolves and checks the header itself in
+  `preHandle`, independently of whether the method declares a `@CurrentActor` parameter.
 - The Service resolves the actor via
   `userRepository.findById(actorId).orElseThrow(() -> new UnauthenticatedException(...))`
   **before** any other logic (fail-fast) — copy `User.findActorOrThrow` verbatim, don't
@@ -334,21 +363,65 @@ is not a safety net you can rely on to fail closed).
 
 **Role-based authorization (only if Q6 said this entity needs it)**
 
-Follow `UserScope`/`UserAuthorization` exactly:
-- `{Entity}Scope`: a `sealed interface` of `record`s, **pure data, no methods** — it describes
-  *what the actor is limited to*, not how to act on it. What "belongs to the actor" means depends
-  on the operation (list vs. check-one-existing vs. create), and that differs by entity, so don't
-  copy `User`'s four variants (`All`/`WithinTenant`/`WithinTeamsLedBy`/`SelfOnly`) blindly — derive
-  them from what Q6 actually decided for this entity. (A `Task` scoped by ownership might look
-  different from one scoped by team assignment, for instance.)
+Split what `scopeOf` returns from how it's checked — they don't vary the same way per entity:
+
+- **What the actor's boundary *is*** (`scopeOf(User actor)`'s return value) is `ActorScope`
+  (`shared/security/ActorScope.java`) — reused as-is, not redefined per entity. It's a `sealed
+  interface` of `record`s, **pure data, no methods**: `All()`, `WithinTenant(UUID tenantId)`,
+  `WithinTeamsLedBy(UUID leaderId)`, `SelfOnly(UUID userId)`. Every variant is built purely from
+  the *actor's own* row (their role, their tenant id, their own id) — it never references the
+  target entity at all, which is exactly why it doesn't need to be redefined per entity. `Tenant`
+  proved this out: `TenantAuthorization.scopeOf` maps `TENANT_ADMIN`, `TEAM_LEAD` *and* `EMPLOYEE`
+  all to the same `WithinTenant(actor.getTenant().getId())` — three roles, one shared variant,
+  because for *this* entity all three mean the same thing ("only their own tenant"). Map each role
+  to whichever `ActorScope` variant matches what Q6 decided for *this* entity — don't assume `User`'s
+  exact per-role mapping carries over (`User` gives `TEAM_LEAD` a team-based scope; `Tenant` doesn't,
+  because "led-teams" isn't a meaningful boundary for the tenant entity itself).
+- **How a scope is checked against a target** (`assertWithinScope(scope, target)`,
+  `assertCanCreateIn(scope, ...)`) genuinely differs per entity, because it reads the *target's*
+  own fields — `User`'s target has `.getTenant().getId()`; `Tenant`'s target compares its *own*
+  `.getId()` directly (it has no `tenant_id` — it *is* the tenant); some future entity might check
+  two relationships at once. This part stays in `{Entity}Authorization`, hand-written per entity.
+- Only build a **new** `{Entity}Scope` type (instead of reusing `ActorScope`) if this entity's
+  boundary genuinely can't be expressed by the four existing variants — rare; check with a concrete
+  example before assuming it's needed.
+- **Before hand-writing `{Entity}Authorization`, check whether `AdminOrTenantScopePolicy<T>`
+  (`shared/security/`) already fits.** If Q6's answer is exactly "SYSTEM_ADMIN sees/touches
+  everything, every other role is limited to their own tenant, nothing finer" — the same rule
+  `Tenant`, `Task` and `Team` all landed on independently — `{Entity}Authorization` should be a
+  thin wrapper that constructs and delegates to it, not a fresh copy of the same `scopeOf`/
+  `assertWithinScope`/`assertCanCreateIn` switch:
+  ```java
+  @Component
+  public class {Entity}Authorization {
+      private final AdminOrTenantScopePolicy<{Entity}> delegate =
+              new AdminOrTenantScopePolicy<>(t -> t.getTenant().getId(), {Entity}::getId);
+      public ActorScope scopeOf(User actor) { return delegate.scopeOf(actor); }
+      public void assertWithinScope(ActorScope scope, {Entity} target) { delegate.assertWithinScope(scope, target); }
+      public void assertCanCreateIn(ActorScope scope, Tenant tenant) { delegate.assertCanCreateIn(scope, tenant); }
+      // omit assertCanCreateIn entirely if create has no "destination" to scope against, as with Tenant
+  }
+  ```
+  A wrapper is still required (not calling `AdminOrTenantScopePolicy` directly from the Service) —
+  Spring can't autowire a bare generic type without a `@Bean` method per instantiation, and the
+  wrapper keeps the same constructor-injected, independently-testable shape as every other
+  `{Entity}Authorization`. Only fall back to a hand-written body when Q6's answer is genuinely
+  richer than this (e.g. `User`'s `TEAM_LEAD`/`EMPLOYEE` split).
 - `{Entity}Authorization` (a `@Component`, constructor-injected into `{Entity}Service` the same
   way `{Entity}Mapper`/`AuditService` are): `scopeOf(User actor)` — the **only** place that
   switches on `UserRole` — plus whichever of `assertWithinScope(scope, target)` (existing-record
   checks: get/update/status) and `assertCanCreateIn(scope, ...)` (creation-destination check,
   shape depends on what "destination" means for this entity — a tenant, a team, something else)
-  the entity's endpoints actually need. Every switch over the sealed `{Entity}Scope` is exhaustive
-  by construction (the compiler enforces it, no `default` branch) — keep it that way; don't add
-  one just to silence a warning.
+  the entity's endpoints actually need — build only the ones an endpoint actually calls (`Tenant`
+  needed no `assertCanCreateIn` at all: creating a tenant has no "destination" to scope against,
+  so `@RequireRole(SYSTEM_ADMIN)` alone was sufficient for `create`, and likewise for any endpoint
+  where the only role that can ever call it has `ActorScope.All` — the fine-grained check would be
+  a guaranteed-pass no-op, not real protection, so skip it rather than write dead code). Every
+  switch over `ActorScope` is exhaustive by construction (the compiler enforces it, no `default`
+  branch) — keep it that way, even when a variant can never actually reach this entity's
+  `assertWithinScope` in practice (e.g. `Tenant` never produces `WithinTeamsLedBy`/`SelfOnly` from
+  `scopeOf`, but the switch must still handle them — throwing `ForbiddenActionException` is the
+  right defensive default for a case that "shouldn't happen").
 - Any scope variant backed by a real relationship (e.g. "on a team led by X") gets a **query-level**
   repository method — an `EXISTS`-shaped check for `assertWithinScope`
   (`{Entity}Repository.existsInXLedBy(...)`, mirroring `UserRepository.existsInTeamLedBy`) and a
@@ -365,6 +438,28 @@ Follow `UserScope`/`UserAuthorization` exactly:
 **REST**
 - `/api/v1/{entities}` — plural, kebab-case.
 - Non-CRUD actions (like a status change) are a sub-resource path (`/{id}/status`), never a verb.
+
+**Sub-resources with real complexity get their own Controller/Service pair**
+- A status change (`/{id}/status`) is still part of `{Entity}Controller`/`{Entity}Service` — one
+  extra endpoint, not a second responsibility.
+- A genuine child collection with its own request/response DTOs and its own business rules —
+  `Team`'s `team_members` is the concrete example — earns a **separate** `{Child}Controller`/
+  `{Child}Service` pair (e.g. `TeamMemberController`/`TeamMemberService`) instead of growing
+  `{Entity}Controller`/`{Entity}Service` to do two jobs (CLAUDE.md §17). Both pairs stay in the
+  *same* top-level package as the parent entity (`team/`, not a new `teammember/`) — this is
+  about splitting a responsibility, not about `{Child}` needing a different feature area; it
+  matches where the child's own entity classes (e.g. `TeamMember`, `TeamMemberId`) already lived
+  before this skill touched them. `{Child}Controller` keeps the parent's base path
+  (`@RequestMapping("/api/v1/teams")`) since the child is addressed only through the parent
+  (`/teams/{id}/members`), never as an independent resource.
+- If the parent's own create/update needs to also touch the child collection (e.g. appointing a
+  `Team`'s lead should also make them a member), the parent Service calls a method on the child
+  Service (`teamMemberService.ensureMembership(team, lead)`) rather than reaching into the child's
+  Repository directly — a normal cross-service call within one feature area (CLAUDE.md §7/§8), not
+  a layering violation. Give that cross-service method package-private visibility if it's only
+  ever called from within the same package, not a public endpoint of its own.
+- Ask whether a child collection warrants this split during Step 1/2 discovery (it's a natural
+  companion to Q3, "which endpoints make sense") rather than deciding it silently mid-build.
 
 **Tests**
 - Naming: `methodName_condition_expectedResult`.

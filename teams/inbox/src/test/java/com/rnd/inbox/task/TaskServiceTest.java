@@ -7,16 +7,28 @@ import com.rnd.inbox.outbox.OutboxEvent;
 import com.rnd.inbox.outbox.OutboxEventRepository;
 import com.rnd.inbox.outbox.OutboxStatus;
 import com.rnd.inbox.project.Project;
+import com.rnd.inbox.project.ProjectRepository;
 import com.rnd.inbox.scheduling.SchedulingEventDto;
+import com.rnd.inbox.shared.dto.PageResponseDto;
 import com.rnd.inbox.shared.event.EventType;
+import com.rnd.inbox.shared.exception.ForbiddenActionException;
+import com.rnd.inbox.shared.exception.UnauthenticatedException;
 import com.rnd.inbox.tenant.Tenant;
+import com.rnd.inbox.tenant.TenantRepository;
 import com.rnd.inbox.user.User;
+import com.rnd.inbox.user.UserRepository;
+import com.rnd.inbox.user.UserRole;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.openapitools.jackson.nullable.JsonNullable;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageImpl;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
 
 import java.time.Clock;
 import java.time.Instant;
@@ -30,6 +42,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -56,6 +69,18 @@ class TaskServiceTest {
     @Mock
     private TaskMapper taskMapper;
 
+    @Mock
+    private TenantRepository tenantRepository;
+
+    @Mock
+    private ProjectRepository projectRepository;
+
+    @Mock
+    private UserRepository userRepository;
+
+    @Mock
+    private TaskRestMapper taskRestMapper;
+
     private final ObjectMapper objectMapper = new ObjectMapper().registerModule(new JavaTimeModule());
     private final Clock clock = Clock.fixed(NOW, ZoneOffset.UTC);
 
@@ -72,7 +97,12 @@ class TaskServiceTest {
                 assignmentRepository,
                 taskMapper,
                 objectMapper,
-                clock);
+                clock,
+                tenantRepository,
+                projectRepository,
+                userRepository,
+                new TaskAuthorization(),
+                taskRestMapper);
         tenantId = UUID.randomUUID();
         tenant = new Tenant();
         tenant.setId(tenantId);
@@ -229,7 +259,7 @@ class TaskServiceTest {
         assertThat(result).isSameAs(task);
         verify(taskRepository).save(task);
         verify(auditService).createAuditLog(eq("TASK_UPDATED"), eq("Task"), eq(task.getId()), eq(tenant),
-                any(), eq(correlationId));
+                isNull(), any(), eq(correlationId));
     }
 
     @Test
@@ -428,5 +458,223 @@ class TaskServiceTest {
         task.setCreatedBy(createdBy);
         task.setCreatedAt(NOW);
         return task;
+    }
+
+    // ---- REST-facing methods ----
+
+    // TaskResponseDto is final - constructed for real rather than mocked, per this codebase's
+    // convention (mocking a final DTO depends on a Mockito setting that isn't a safe assumption).
+    private TaskResponseDto sampleTaskResponseDto() {
+        return new TaskResponseDto(UUID.randomUUID(), null, null, "Fix flaky test", null, null, null, null, null,
+                null, null, null, TaskStatus.NEW, false, null, null, null, null, null, null, null, null, null,
+                NOW, NOW, null, null);
+    }
+
+    private User actorWithRole(UserRole role) {
+        User actor = new User();
+        actor.setId(UUID.randomUUID());
+        actor.setTenant(tenant);
+        actor.setRole(role);
+        return actor;
+    }
+
+    @Test
+    void createTaskFromRequest_whenOwnerOmitted_defaultsOwnerToActor() {
+        User actor = actorWithRole(UserRole.EMPLOYEE);
+        when(userRepository.findById(actor.getId())).thenReturn(Optional.of(actor));
+        when(tenantRepository.findById(tenantId)).thenReturn(Optional.of(tenant));
+
+        TaskCreateRequestDto request = new TaskCreateRequestDto();
+        request.setTenantId(tenantId.toString());
+        request.setTitle("Fix flaky test");
+
+        Task built = new Task();
+        built.setTenant(tenant);
+        built.setSourceType(SourceType.MANUAL);
+        built.setStatus(TaskStatus.NEW);
+        when(taskRestMapper.toEntity(request, tenant, null, actor, actor)).thenReturn(built);
+        stubSaveAssigning(built, UUID.randomUUID());
+        TaskResponseDto responseDto = new TaskResponseDto(UUID.randomUUID(), null, null, "Fix flaky test",
+                null, null, null, null, null, null, null, null, TaskStatus.NEW, false, null, null, null, null,
+                actor.getId(), null, null, null, actor.getId(), NOW, NOW, null, null);
+        when(taskRestMapper.toResponseDto(built)).thenReturn(responseDto);
+
+        TaskResponseDto result = taskService.createTaskFromRequest(request, actor.getId());
+
+        assertThat(result).isSameAs(responseDto);
+        verify(auditService).createAuditLog(eq("TASK_CREATED"), eq("Task"), any(), eq(tenant),
+                eq(actor), any(), isNull());
+    }
+
+    @Test
+    void createTaskFromRequest_whenActorDoesNotExist_throwsUnauthenticatedException() {
+        UUID actorId = UUID.randomUUID();
+        when(userRepository.findById(actorId)).thenReturn(Optional.empty());
+
+        TaskCreateRequestDto request = new TaskCreateRequestDto();
+        request.setTenantId(tenantId.toString());
+        request.setTitle("Fix flaky test");
+
+        assertThatThrownBy(() -> taskService.createTaskFromRequest(request, actorId))
+                .isInstanceOf(UnauthenticatedException.class);
+    }
+
+    @Test
+    void createTaskFromRequest_whenActorIsTenantAdminOfAnotherTenant_throwsForbiddenActionException() {
+        User actor = actorWithRole(UserRole.TENANT_ADMIN);
+        actor.setTenant(new Tenant());
+        actor.getTenant().setId(UUID.randomUUID());
+        when(userRepository.findById(actor.getId())).thenReturn(Optional.of(actor));
+        when(tenantRepository.findById(tenantId)).thenReturn(Optional.of(tenant));
+
+        TaskCreateRequestDto request = new TaskCreateRequestDto();
+        request.setTenantId(tenantId.toString());
+        request.setTitle("Fix flaky test");
+
+        assertThatThrownBy(() -> taskService.createTaskFromRequest(request, actor.getId()))
+                .isInstanceOf(ForbiddenActionException.class);
+
+        verify(taskRepository, never()).saveAndFlush(any());
+    }
+
+    @Test
+    void getTaskById_whenActorIsSystemAdmin_returnsAnyTask() {
+        User actor = actorWithRole(UserRole.SYSTEM_ADMIN);
+        when(userRepository.findById(actor.getId())).thenReturn(Optional.of(actor));
+        Task task = new Task();
+        task.setTenant(tenant);
+        UUID taskId = UUID.randomUUID();
+        when(taskRepository.findById(taskId)).thenReturn(Optional.of(task));
+        TaskResponseDto responseDto = sampleTaskResponseDto();
+        when(taskRestMapper.toResponseDto(task)).thenReturn(responseDto);
+
+        TaskResponseDto result = taskService.getTaskById(taskId, actor.getId());
+
+        assertThat(result).isSameAs(responseDto);
+    }
+
+    @Test
+    void getTaskById_whenActorIsEmployeeOfAnotherTenant_throwsForbiddenActionException() {
+        User actor = actorWithRole(UserRole.EMPLOYEE);
+        actor.setTenant(new Tenant());
+        actor.getTenant().setId(UUID.randomUUID());
+        when(userRepository.findById(actor.getId())).thenReturn(Optional.of(actor));
+        Task task = new Task();
+        task.setTenant(tenant);
+        UUID taskId = UUID.randomUUID();
+        when(taskRepository.findById(taskId)).thenReturn(Optional.of(task));
+
+        assertThatThrownBy(() -> taskService.getTaskById(taskId, actor.getId()))
+                .isInstanceOf(ForbiddenActionException.class);
+    }
+
+    @Test
+    void getTaskById_whenTaskNotFound_throwsTaskNotFoundException() {
+        User actor = actorWithRole(UserRole.SYSTEM_ADMIN);
+        when(userRepository.findById(actor.getId())).thenReturn(Optional.of(actor));
+        UUID taskId = UUID.randomUUID();
+        when(taskRepository.findById(taskId)).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> taskService.getTaskById(taskId, actor.getId()))
+                .isInstanceOf(TaskNotFoundException.class);
+    }
+
+    @Test
+    void listTasks_whenActorIsSystemAdmin_returnsEveryTask() {
+        User actor = actorWithRole(UserRole.SYSTEM_ADMIN);
+        when(userRepository.findById(actor.getId())).thenReturn(Optional.of(actor));
+        Pageable pageable = PageRequest.of(0, 20);
+        Task task = new Task();
+        Page<Task> page = new PageImpl<>(List.of(task), pageable, 1);
+        when(taskRepository.findAll(pageable)).thenReturn(page);
+        TaskResponseDto responseDto = sampleTaskResponseDto();
+        when(taskRestMapper.toResponseDto(task)).thenReturn(responseDto);
+
+        PageResponseDto<TaskResponseDto> result = taskService.listTasks(pageable, actor.getId());
+
+        assertThat(result.getContent()).containsExactly(responseDto);
+    }
+
+    @Test
+    void listTasks_whenActorIsTenantAdmin_returnsOnlyOwnTenantTasks() {
+        User actor = actorWithRole(UserRole.TENANT_ADMIN);
+        when(userRepository.findById(actor.getId())).thenReturn(Optional.of(actor));
+        Pageable pageable = PageRequest.of(0, 20);
+        Task task = new Task();
+        Page<Task> page = new PageImpl<>(List.of(task), pageable, 1);
+        when(taskRepository.findAllByTenant_Id(tenantId, pageable)).thenReturn(page);
+        TaskResponseDto responseDto = sampleTaskResponseDto();
+        when(taskRestMapper.toResponseDto(task)).thenReturn(responseDto);
+
+        PageResponseDto<TaskResponseDto> result = taskService.listTasks(pageable, actor.getId());
+
+        assertThat(result.getContent()).containsExactly(responseDto);
+        verify(taskRepository, never()).findAll(pageable);
+    }
+
+    @Test
+    void updateTaskFromRequest_whenActorIsEmployeeOfAnotherTenant_throwsForbiddenActionException() {
+        User actor = actorWithRole(UserRole.EMPLOYEE);
+        actor.setTenant(new Tenant());
+        actor.getTenant().setId(UUID.randomUUID());
+        when(userRepository.findById(actor.getId())).thenReturn(Optional.of(actor));
+        Task task = new Task();
+        task.setTenant(tenant);
+        UUID taskId = UUID.randomUUID();
+        when(taskRepository.findById(taskId)).thenReturn(Optional.of(task));
+
+        TaskUpdateRequestDto request = new TaskUpdateRequestDto();
+        request.setTitle("New title");
+
+        assertThatThrownBy(() -> taskService.updateTaskFromRequest(taskId, request, actor.getId()))
+                .isInstanceOf(ForbiddenActionException.class);
+
+        verify(taskRepository, never()).save(any());
+    }
+
+    @Test
+    void updateTaskFromRequest_whenTaskNotFound_throwsTaskNotFoundException() {
+        User actor = actorWithRole(UserRole.SYSTEM_ADMIN);
+        when(userRepository.findById(actor.getId())).thenReturn(Optional.of(actor));
+        UUID taskId = UUID.randomUUID();
+        when(taskRepository.findById(taskId)).thenReturn(Optional.empty());
+
+        TaskUpdateRequestDto request = new TaskUpdateRequestDto();
+        request.setTitle("New title");
+
+        assertThatThrownBy(() -> taskService.updateTaskFromRequest(taskId, request, actor.getId()))
+                .isInstanceOf(TaskNotFoundException.class);
+    }
+
+    @Test
+    void updateTaskStatus_toSnoozedWithoutSnoozedUntil_throwsInvalidTaskStatusTransitionException() {
+        User actor = actorWithRole(UserRole.SYSTEM_ADMIN);
+        when(userRepository.findById(actor.getId())).thenReturn(Optional.of(actor));
+        Task task = new Task();
+        task.setTenant(tenant);
+        UUID taskId = UUID.randomUUID();
+        when(taskRepository.findById(taskId)).thenReturn(Optional.of(task));
+
+        TaskStatusUpdateRequestDto request = new TaskStatusUpdateRequestDto();
+        request.setStatus("SNOOZED");
+
+        assertThatThrownBy(() -> taskService.updateTaskStatus(taskId, request, actor.getId()))
+                .isInstanceOf(InvalidTaskStatusTransitionException.class);
+
+        verify(taskRepository, never()).save(any());
+    }
+
+    @Test
+    void updateTaskStatus_whenTaskNotFound_throwsTaskNotFoundException() {
+        User actor = actorWithRole(UserRole.SYSTEM_ADMIN);
+        when(userRepository.findById(actor.getId())).thenReturn(Optional.of(actor));
+        UUID taskId = UUID.randomUUID();
+        when(taskRepository.findById(taskId)).thenReturn(Optional.empty());
+
+        TaskStatusUpdateRequestDto request = new TaskStatusUpdateRequestDto();
+        request.setStatus("DONE");
+
+        assertThatThrownBy(() -> taskService.updateTaskStatus(taskId, request, actor.getId()))
+                .isInstanceOf(TaskNotFoundException.class);
     }
 }
