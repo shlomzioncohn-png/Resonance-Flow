@@ -4,6 +4,7 @@ import com.rnd.bridge.intake.model.ChatMessage;
 import com.rnd.bridge.intake.model.GroupState;
 import com.rnd.bridge.intake.model.MessageSnapshot;
 import com.rnd.bridge.intake.model.SourceRecord;
+import com.rnd.bridge.raw.model.ChangeType;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
@@ -91,10 +92,12 @@ public class ChatSourceRecordMapper {
                         attachment.content(),
                         attachment.mimeType(),
                         attachment.filename(),
+                        attachment.fileId(),
                         attachmentIndex,
                         attachmentCount,
                         ownerMessageId,
-                        0));
+                        0,
+                        ChangeType.UPSERT));
             }
         }
         return records;
@@ -167,10 +170,12 @@ public class ChatSourceRecordMapper {
                         attachment.content(),
                         attachment.mimeType(),
                         attachment.filename(),
+                        attachment.fileId(),
                         attachmentIndex,
                         attachmentCount,
                         ownerMessageId,
-                        mergedGroup.revision()));
+                        mergedGroup.revision(),
+                        ChangeType.UPSERT));
             }
         }
         return records;

@@ -22,12 +22,12 @@ import org.junit.jupiter.api.Test;
 class RealSlackSourceReaderTest {
 
     private final RealSlackSourceReader reader =
-            new RealSlackSourceReader(new SlackApiProperties("xoxb-fake", "kamatech", List.of("C123")));
+            new RealSlackSourceReader(new SlackApiProperties("xoxb-fake", "kamatech", List.of("C123"), null));
 
     @Test
     void failsFastWhenBotTokenIsNotConfigured() {
         assertThatThrownBy(() -> new RealSlackSourceReader(
-                        new SlackApiProperties(null, "kamatech", List.of("C123"))))
+                        new SlackApiProperties(null, "kamatech", List.of("C123"), null)))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("bot-token");
     }
@@ -35,7 +35,7 @@ class RealSlackSourceReaderTest {
     @Test
     void failsFastWhenNoChannelsAreConfigured() {
         assertThatThrownBy(() -> new RealSlackSourceReader(
-                        new SlackApiProperties("xoxb-fake", "kamatech", List.of())))
+                        new SlackApiProperties("xoxb-fake", "kamatech", List.of(), null)))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("channels");
     }

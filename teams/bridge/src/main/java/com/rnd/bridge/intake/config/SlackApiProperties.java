@@ -10,8 +10,14 @@ import org.springframework.boot.context.properties.bind.DefaultValue;
  * explicit list of channel IDs to read (the bot must be invited to each one first); Slack has no
  * "read every channel" mode without a much broader scope, so this mirrors the fixture reader's
  * one-channel-at-a-time shape instead of trying to auto-discover channels.
+ *
+ * signingSecret is the Slack app's Signing Secret (from the app's Basic Information page),
+ * used by SlackSignatureVerifier to authenticate inbound Events API requests — unrelated to
+ * botToken, which authenticates outbound calls to Slack's Web API. Only read once the Events
+ * API endpoint is in use; the polling reader above never touches it.
  */
 @ConfigurationProperties(prefix = "bridge.intake.slack")
 public record SlackApiProperties(
-        String botToken, @DefaultValue("kamatech") String tenantId, List<String> channels) {
+        String botToken, @DefaultValue("kamatech") String tenantId, List<String> channels,
+        String signingSecret) {
 }

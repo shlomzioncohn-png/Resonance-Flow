@@ -13,6 +13,11 @@ import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.Test;
 
 class GroupStateStoreTest {
@@ -26,7 +31,7 @@ class GroupStateStoreTest {
             new ObjectMapper().registerModule(new JavaTimeModule()));
 
     private static final GroupState EMPTY =
-            new GroupState("g1", RawSourceType.SLACK, "kamatech", "chat-a", null, "c1", List.of(), false, 0);
+            new GroupState("g1", RawSourceType.SLACK, "kamatech", "chat-a", null, "c1", List.of(), false, 0, null);
 
     @Test
     void loadReturnsEmptyWhenNothingSavedYet() {
@@ -38,8 +43,8 @@ class GroupStateStoreTest {
     void saveThenLoadRoundTripsTheGroup() {
         GroupState state = new GroupState(
                 "g1", RawSourceType.SLACK, "kamatech", "chat-a", null, "c1",
-                List.of(new MessageSnapshot("m1", "ruth", Instant.parse("2026-08-18T09:00:00Z"), "hi")),
-                true, 0);
+                List.of(new MessageSnapshot("m1", "ruth", Instant.parse("2026-08-18T09:00:00Z"), "hi", 0)),
+                true, 0, null);
 
         store.save(state);
 
@@ -51,9 +56,9 @@ class GroupStateStoreTest {
         GroupState state = new GroupState(
                 "g1", RawSourceType.SLACK, "kamatech", "chat-a", null, "c1",
                 List.of(
-                        new MessageSnapshot("m1", "ruth", Instant.parse("2026-08-18T09:00:00Z"), "hi"),
-                        new MessageSnapshot("m2", "malki", Instant.parse("2026-08-18T09:01:00Z"), "hey")),
-                true, 0);
+                        new MessageSnapshot("m1", "ruth", Instant.parse("2026-08-18T09:00:00Z"), "hi", 0),
+                        new MessageSnapshot("m2", "malki", Instant.parse("2026-08-18T09:01:00Z"), "hey", 0)),
+                true, 0, null);
 
         store.save(state);
 
@@ -66,8 +71,8 @@ class GroupStateStoreTest {
         GroupState result = store.update(RawSourceType.SLACK, "kamatech", "g1", EMPTY, current -> new GroupState(
                 current.groupId(), current.sourceType(), current.tenantId(), current.chatId(), current.threadId(),
                 current.correlationId(),
-                List.of(new MessageSnapshot("m1", "ruth", Instant.parse("2026-08-18T09:00:00Z"), "hi")),
-                false, 0));
+                List.of(new MessageSnapshot("m1", "ruth", Instant.parse("2026-08-18T09:00:00Z"), "hi", 0)),
+                false, 0, null));
 
         assertThat(result.messages()).hasSize(1);
         assertThat(store.load(RawSourceType.SLACK, "kamatech", "g1")).contains(result);
@@ -78,16 +83,16 @@ class GroupStateStoreTest {
         store.update(RawSourceType.SLACK, "kamatech", "g1", EMPTY, current -> new GroupState(
                 current.groupId(), current.sourceType(), current.tenantId(), current.chatId(), current.threadId(),
                 current.correlationId(),
-                List.of(new MessageSnapshot("m1", "ruth", Instant.parse("2026-08-18T09:00:00Z"), "hi")),
-                false, 0));
+                List.of(new MessageSnapshot("m1", "ruth", Instant.parse("2026-08-18T09:00:00Z"), "hi", 0)),
+                false, 0, null));
 
         GroupState result = store.update(RawSourceType.SLACK, "kamatech", "g1", EMPTY, current -> new GroupState(
                 current.groupId(), current.sourceType(), current.tenantId(), current.chatId(), current.threadId(),
                 current.correlationId(),
                 List.of(
                         current.messages().get(0),
-                        new MessageSnapshot("m2", "malki", Instant.parse("2026-08-18T09:01:00Z"), "hey")),
-                false, 0));
+                        new MessageSnapshot("m2", "malki", Instant.parse("2026-08-18T09:01:00Z"), "hey", 0)),
+                false, 0, null));
 
         assertThat(result.messages()).extracting(MessageSnapshot::messageId).containsExactly("m1", "m2");
     }
@@ -97,8 +102,8 @@ class GroupStateStoreTest {
         store.update(RawSourceType.SLACK, "kamatech", "g1", EMPTY, current -> new GroupState(
                 current.groupId(), current.sourceType(), current.tenantId(), current.chatId(), current.threadId(),
                 current.correlationId(),
-                List.of(new MessageSnapshot("m1", "ruth", Instant.parse("2026-08-18T09:00:00Z"), "hi")),
-                false, 0));
+                List.of(new MessageSnapshot("m1", "ruth", Instant.parse("2026-08-18T09:00:00Z"), "hi", 0)),
+                false, 0, null));
 
         assertThat(store.findGroupIdForMessage(RawSourceType.SLACK, "kamatech", "m1")).contains("g1");
     }
@@ -108,8 +113,8 @@ class GroupStateStoreTest {
         store.update(RawSourceType.SLACK, "kamatech", "g1", EMPTY, current -> new GroupState(
                 current.groupId(), current.sourceType(), current.tenantId(), current.chatId(), current.threadId(),
                 current.correlationId(),
-                List.of(new MessageSnapshot("m1", "ruth", Instant.parse("2026-08-18T09:00:00Z"), "hi")),
-                false, 0));
+                List.of(new MessageSnapshot("m1", "ruth", Instant.parse("2026-08-18T09:00:00Z"), "hi", 0)),
+                false, 0, null));
 
         store.confirmPublished(RawSourceType.SLACK, "kamatech", "g1", 0);
 
@@ -141,15 +146,15 @@ class GroupStateStoreTest {
         store.update(RawSourceType.SLACK, "kamatech", "g1", EMPTY, current -> new GroupState(
                 current.groupId(), current.sourceType(), current.tenantId(), current.chatId(), current.threadId(),
                 current.correlationId(),
-                List.of(new MessageSnapshot("m1", "ruth", Instant.parse("2026-08-18T09:00:00Z"), "hi")),
-                false, 0));
+                List.of(new MessageSnapshot("m1", "ruth", Instant.parse("2026-08-18T09:00:00Z"), "hi", 0)),
+                false, 0, null));
 
         // 2. the group is updated to revision 1 before the ack for revision 0 arrives.
         store.update(RawSourceType.SLACK, "kamatech", "g1", EMPTY, current -> new GroupState(
                 current.groupId(), current.sourceType(), current.tenantId(), current.chatId(), current.threadId(),
                 current.correlationId(),
-                List.of(new MessageSnapshot("m1", "ruth", Instant.parse("2026-08-18T09:00:00Z"), "hi (edited)")),
-                false, 1));
+                List.of(new MessageSnapshot("m1", "ruth", Instant.parse("2026-08-18T09:00:00Z"), "hi (edited)", 0)),
+                false, 1, null));
 
         // 3. the stale ack for revision 0 arrives.
         store.confirmPublished(RawSourceType.SLACK, "kamatech", "g1", 0);
@@ -158,5 +163,170 @@ class GroupStateStoreTest {
         GroupState state = store.load(RawSourceType.SLACK, "kamatech", "g1").orElseThrow();
         assertThat(state.revision()).isEqualTo(1);
         assertThat(state.published()).isFalse();
+    }
+
+    private void putGroupAtRevision(int revision, boolean published) {
+        store.update(RawSourceType.SLACK, "kamatech", "g1", EMPTY, current -> new GroupState(
+                current.groupId(), current.sourceType(), current.tenantId(), current.chatId(), current.threadId(),
+                current.correlationId(),
+                List.of(new MessageSnapshot("m1", "ruth", Instant.parse("2026-08-18T09:00:00Z"), "hi", 0)),
+                published, revision, null));
+    }
+
+    @Test
+    void claimForPublicationSucceedsForAnUnpublishedCurrentRevision() {
+        putGroupAtRevision(0, false);
+
+        boolean claimed = store.claimForPublication(RawSourceType.SLACK, "kamatech", "g1", 0);
+
+        assertThat(claimed).isTrue();
+    }
+
+    @Test
+    void claimForPublicationCannotClaimTheSameRevisionTwice() {
+        putGroupAtRevision(0, false);
+
+        boolean firstClaim = store.claimForPublication(RawSourceType.SLACK, "kamatech", "g1", 0);
+        boolean secondClaim = store.claimForPublication(RawSourceType.SLACK, "kamatech", "g1", 0);
+
+        assertThat(firstClaim).isTrue();
+        assertThat(secondClaim).isFalse();
+    }
+
+    @Test
+    void claimForPublicationCannotClaimAnAlreadyPublishedRevision() {
+        putGroupAtRevision(0, true);
+
+        boolean claimed = store.claimForPublication(RawSourceType.SLACK, "kamatech", "g1", 0);
+
+        assertThat(claimed).isFalse();
+    }
+
+    @Test
+    void claimForPublicationCannotClaimAStaleExpectedRevision() {
+        putGroupAtRevision(1, false);
+
+        boolean claimed = store.claimForPublication(RawSourceType.SLACK, "kamatech", "g1", 0);
+
+        assertThat(claimed).isFalse();
+    }
+
+    @Test
+    void claimForPublicationPersistsTheClaim() {
+        putGroupAtRevision(0, false);
+
+        store.claimForPublication(RawSourceType.SLACK, "kamatech", "g1", 0);
+
+        GroupState state = store.load(RawSourceType.SLACK, "kamatech", "g1").orElseThrow();
+        assertThat(state.claimedRevision()).isEqualTo(0);
+    }
+
+    @Test
+    void confirmPublishedWorksForTheClaimedExpectedRevision() {
+        putGroupAtRevision(0, false);
+        store.claimForPublication(RawSourceType.SLACK, "kamatech", "g1", 0);
+
+        store.confirmPublished(RawSourceType.SLACK, "kamatech", "g1", 0);
+
+        GroupState state = store.load(RawSourceType.SLACK, "kamatech", "g1").orElseThrow();
+        assertThat(state.published()).isTrue();
+    }
+
+    @Test
+    void staleConfirmCannotMarkANewerRevisionPublished() {
+        putGroupAtRevision(0, false);
+        store.claimForPublication(RawSourceType.SLACK, "kamatech", "g1", 0);
+        // revision moves on before the (stale) confirm for revision 0 arrives.
+        putGroupAtRevision(1, false);
+
+        store.confirmPublished(RawSourceType.SLACK, "kamatech", "g1", 0);
+
+        GroupState state = store.load(RawSourceType.SLACK, "kamatech", "g1").orElseThrow();
+        assertThat(state.revision()).isEqualTo(1);
+        assertThat(state.published()).isFalse();
+    }
+
+    @Test
+    void confirmAttachmentPublishedRecordsTheFileIdOnThatMessagesSnapshot() {
+        store.update(RawSourceType.SLACK, "kamatech", "g1", EMPTY, current -> new GroupState(
+                current.groupId(), current.sourceType(), current.tenantId(), current.chatId(), current.threadId(),
+                current.correlationId(),
+                List.of(new MessageSnapshot("m1", "ruth", Instant.parse("2026-08-18T09:00:00Z"), "hi", 1)),
+                false, 0, null));
+
+        store.confirmAttachmentPublished(RawSourceType.SLACK, "kamatech", "g1", "m1", "F1");
+
+        GroupState state = store.load(RawSourceType.SLACK, "kamatech", "g1").orElseThrow();
+        assertThat(state.messages().get(0).confirmedAttachmentFileIds()).containsExactly("F1");
+    }
+
+    @Test
+    void confirmAttachmentPublishedAccumulatesMultipleFileIdsOnTheSameMessage() {
+        store.update(RawSourceType.SLACK, "kamatech", "g1", EMPTY, current -> new GroupState(
+                current.groupId(), current.sourceType(), current.tenantId(), current.chatId(), current.threadId(),
+                current.correlationId(),
+                List.of(new MessageSnapshot("m1", "ruth", Instant.parse("2026-08-18T09:00:00Z"), "hi", 2)),
+                false, 0, null));
+
+        store.confirmAttachmentPublished(RawSourceType.SLACK, "kamatech", "g1", "m1", "F1");
+        store.confirmAttachmentPublished(RawSourceType.SLACK, "kamatech", "g1", "m1", "F2");
+
+        GroupState state = store.load(RawSourceType.SLACK, "kamatech", "g1").orElseThrow();
+        assertThat(state.messages().get(0).confirmedAttachmentFileIds()).containsExactlyInAnyOrder("F1", "F2");
+    }
+
+    @Test
+    void confirmAttachmentPublishedIsANoOpWhenTheGroupDoesNotExist() {
+        store.confirmAttachmentPublished(RawSourceType.SLACK, "kamatech", "does-not-exist", "m1", "F1");
+
+        assertThat(store.load(RawSourceType.SLACK, "kamatech", "does-not-exist")).isEmpty();
+    }
+
+    @Test
+    void confirmAttachmentPublishedIsANoOpWhenTheMessageIsNotInTheGroup() {
+        store.update(RawSourceType.SLACK, "kamatech", "g1", EMPTY, current -> new GroupState(
+                current.groupId(), current.sourceType(), current.tenantId(), current.chatId(), current.threadId(),
+                current.correlationId(),
+                List.of(new MessageSnapshot("m1", "ruth", Instant.parse("2026-08-18T09:00:00Z"), "hi", 0)),
+                false, 0, null));
+
+        store.confirmAttachmentPublished(RawSourceType.SLACK, "kamatech", "g1", "does-not-exist", "F1");
+
+        GroupState state = store.load(RawSourceType.SLACK, "kamatech", "g1").orElseThrow();
+        assertThat(state.messages().get(0).confirmedAttachmentFileIds()).isEmpty();
+    }
+
+    @Test
+    void concurrentClaimAttemptsResultInOnlyOneSuccessfulClaim() throws InterruptedException {
+        putGroupAtRevision(0, false);
+        int attempts = 20;
+        ExecutorService executor = Executors.newFixedThreadPool(attempts);
+        CountDownLatch ready = new CountDownLatch(attempts);
+        CountDownLatch start = new CountDownLatch(1);
+        AtomicInteger successCount = new AtomicInteger();
+
+        try {
+            for (int i = 0; i < attempts; i++) {
+                executor.submit(() -> {
+                    ready.countDown();
+                    try {
+                        start.await();
+                    } catch (InterruptedException e) {
+                        Thread.currentThread().interrupt();
+                        return;
+                    }
+                    if (store.claimForPublication(RawSourceType.SLACK, "kamatech", "g1", 0)) {
+                        successCount.incrementAndGet();
+                    }
+                });
+            }
+            ready.await();
+            start.countDown();
+        } finally {
+            executor.shutdown();
+            executor.awaitTermination(10, TimeUnit.SECONDS);
+        }
+
+        assertThat(successCount.get()).isEqualTo(1);
     }
 }

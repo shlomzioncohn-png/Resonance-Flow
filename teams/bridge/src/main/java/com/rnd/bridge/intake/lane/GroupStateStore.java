@@ -8,9 +8,12 @@ import com.rnd.bridge.storage.ControlPlaneStateStore;
 import com.rnd.bridge.storage.ObjectStorageClient;
 import java.io.IOException;
 import java.io.UncheckedIOException;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Function;
 import java.util.function.UnaryOperator;
 import org.springframework.stereotype.Component;
 
@@ -43,7 +46,15 @@ public class GroupStateStore {
      * untouched, only when nothing is persisted at that key yet.
      */
     private static final GroupState MISSING_GROUP_SENTINEL =
-            new GroupState(null, null, null, null, null, null, List.of(), false, -1);
+            new GroupState(null, null, null, null, null, null, List.of(), false, -1, null);
+
+    /**
+     * Reference sentinel for "no current-chat pointer persisted yet" - same reference-identity
+     * convention as {@link #MISSING_GROUP_SENTINEL}, distinguishing a genuinely missing pointer
+     * from a legitimate {@link OpenChatPointer} by identity alone (see
+     * {@link #resolveOpenChatGroupAndMerge}).
+     */
+    private static final OpenChatPointer NO_OPEN_CHAT_POINTER = new OpenChatPointer(null);
 
     private final ObjectStorageClient storageClient;
     private final ControlPlaneStateStore controlPlaneStateStore;
@@ -118,8 +129,140 @@ public class GroupStateStore {
             }
             return new GroupState(
                     current.groupId(), current.sourceType(), current.tenantId(), current.chatId(),
-                    current.threadId(), current.correlationId(), current.messages(), true, current.revision());
+                    current.threadId(), current.correlationId(), current.messages(), true, current.revision(), null);
         });
+    }
+
+    /**
+     * Marks one specific attachment (identified by its owning message's id plus Slack's own
+     * stable file id - see ChatMessage.Attachment.fileId/SourceRecord.attachmentFileId) as
+     * confirmed published, so a later Slack retry or an unrelated edit of the same message can
+     * recognize it was already published and skip republishing it (see
+     * ChatGroupStateReconciler.alreadyConfirmed/MessageSnapshot.confirmedAttachmentFileIds).
+     * Deliberately not revision-guarded like confirmPublished: unlike the transcript (one value
+     * per group, which a stale ack could otherwise misattribute to a newer revision), a specific
+     * attachment's own confirmation state is independent of the group's current revision - it
+     * marks "this file, on this message, was published", which stays true regardless of what the
+     * group's transcript later becomes. If the message no longer exists in the group (already
+     * scoped out, e.g. by whatever future delete handling lands), or already lists this fileId,
+     * this is a no-op - update()'s mutator returns the same messages list unchanged so no write
+     * happens.
+     * Same not-found tolerance as confirmPublished for a group that genuinely isn't there.
+     */
+    public void confirmAttachmentPublished(
+            RawSourceType sourceType, String tenantId, String groupId, String messageId, String fileId) {
+        if (load(sourceType, tenantId, groupId).isEmpty()) {
+            return;
+        }
+        update(sourceType, tenantId, groupId, MISSING_GROUP_SENTINEL, current -> {
+            if (current == MISSING_GROUP_SENTINEL) {
+                return current;
+            }
+            List<MessageSnapshot> updatedMessages = current.messages().stream()
+                    .map(snapshot -> snapshot.messageId().equals(messageId)
+                            && !snapshot.confirmedAttachmentFileIds().contains(fileId)
+                                    ? withConfirmedAttachment(snapshot, fileId)
+                                    : snapshot)
+                    .toList();
+            if (updatedMessages.equals(current.messages())) {
+                return current;
+            }
+            return new GroupState(
+                    current.groupId(), current.sourceType(), current.tenantId(), current.chatId(),
+                    current.threadId(), current.correlationId(), updatedMessages, current.published(),
+                    current.revision(), current.claimedRevision());
+        });
+    }
+
+    private static MessageSnapshot withConfirmedAttachment(MessageSnapshot snapshot, String fileId) {
+        List<String> confirmed = new ArrayList<>(snapshot.confirmedAttachmentFileIds());
+        confirmed.add(fileId);
+        return new MessageSnapshot(
+                snapshot.messageId(), snapshot.sender(), snapshot.timestamp(), snapshot.text(),
+                snapshot.attachmentCount(), confirmed);
+    }
+
+    /**
+     * Atomically claims expectedRevision for publication - the guard that stops two concurrent
+     * execution paths (e.g. a timer callback and startup recovery, once those land) from both
+     * publishing the same time-gap session. Returns true only if expectedRevision is still the
+     * group's current revision, that revision is not already published, and it is not already
+     * claimed (by this or a prior caller) - i.e. exactly one caller ever wins a given revision's
+     * claim. On success the claim is persisted as claimedRevision before this method returns.
+     * The check-and-flip runs atomically via update() so a concurrent mergeAndMaybePublish or
+     * another claimForPublication call for the same key can't land in between.
+     * Deliberately does not hold any lock past this call: the caller is expected to release
+     * (implicitly, by this method returning) before doing the actual Kafka publish, then call
+     * confirmPublished(expectedRevision) once that publish succeeds - see this class's and
+     * confirmPublished's javadoc for why the persisted claim, not a held lock, is what prevents
+     * a second publish attempt in between.
+     * A no-op (returns false) if the group isn't found at all, same reasoning as
+     * confirmPublished's precheck.
+     */
+    public boolean claimForPublication(RawSourceType sourceType, String tenantId, String groupId, int expectedRevision) {
+        if (load(sourceType, tenantId, groupId).isEmpty()) {
+            return false;
+        }
+        boolean[] claimed = {false};
+        update(sourceType, tenantId, groupId, MISSING_GROUP_SENTINEL, current -> {
+            if (current == MISSING_GROUP_SENTINEL
+                    || current.revision() != expectedRevision
+                    || current.published()
+                    || (current.claimedRevision() != null && current.claimedRevision() == expectedRevision)) {
+                return current;
+            }
+            claimed[0] = true;
+            return new GroupState(
+                    current.groupId(), current.sourceType(), current.tenantId(), current.chatId(),
+                    current.threadId(), current.correlationId(), current.messages(), current.published(),
+                    current.revision(), expectedRevision);
+        });
+        return claimed[0];
+    }
+
+    /**
+     * Atomically resolves the currently-open non-thread time-gap group for
+     * (sourceType, tenantId, chatId) and lets resolveAndMerge decide what to do with it - all
+     * inside ONE lock, held for the chat pointer's own object key
+     * ({@code _open_chat_index/{sourceType}/{tenantId}/{chatId}.json}). This is what closes the
+     * race {@link ChatGroupStateReconciler#reconcileNonThreadedMessage} otherwise has for a
+     * genuinely-new (never-indexed) message: a per-group lock alone is not enough, because for a
+     * brand new message nobody yet knows which groupId to lock on - the decision itself ("is
+     * there still an open group for this chat, or do I mint one") is exactly what must be
+     * serialized per chat, not per group.
+     * resolveAndMerge receives the candidate GroupState already loaded from whatever pointer was
+     * persisted (empty if there is no pointer, or the pointer refers to a group that no longer
+     * exists - both treated identically, as "no current candidate", never as an error: the
+     * pointer is only ever a hint, and a stale one self-heals here rather than needing a
+     * separate repair path). It must return the GroupState it actually merged the incoming
+     * message into (via {@link #update}, using whatever groupId it decided on - reusing the
+     * candidate's, or a freshly minted one) - that update() call acquires the group's own lock
+     * (a different key), which nests safely under this method's chat-pointer lock without any
+     * risk of the reverse order, since nothing else in this class ever holds a group lock before
+     * attempting to acquire a chat-pointer lock.
+     * The chat pointer is refreshed to point at whatever groupId resolveAndMerge actually used
+     * only AFTER that GroupState update has already durably persisted (see this method's own
+     * body) - never the reverse. If the process crashes after the GroupState write but before
+     * this pointer write, the pointer is simply left stale/missing, which the next call here
+     * self-heals exactly like a first-time-ever call would (see above) - it is never treated as
+     * corruption.
+     */
+    public GroupState resolveOpenChatGroupAndMerge(
+            RawSourceType sourceType, String tenantId, String chatId,
+            Function<Optional<GroupState>, GroupState> resolveAndMerge) {
+        AtomicReference<GroupState> merged = new AtomicReference<>();
+        controlPlaneStateStore.update(
+                openChatIndexKey(sourceType, tenantId, chatId), OpenChatPointer.class, NO_OPEN_CHAT_POINTER,
+                currentPointer -> {
+                    Optional<GroupState> candidate = currentPointer == NO_OPEN_CHAT_POINTER
+                            || currentPointer.groupId() == null
+                            ? Optional.empty()
+                            : load(sourceType, tenantId, currentPointer.groupId());
+                    GroupState result = resolveAndMerge.apply(candidate);
+                    merged.set(result);
+                    return new OpenChatPointer(result.groupId());
+                });
+        return merged.get();
     }
 
     /** Writes the group itself and one messageId -> groupId index entry per message it contains. */
@@ -147,6 +290,10 @@ public class GroupStateStore {
         return "_message_index/%s/%s/%s.json".formatted(sourceType.name(), tenantId, messageId);
     }
 
+    private String openChatIndexKey(RawSourceType sourceType, String tenantId, String chatId) {
+        return "_open_chat_index/%s/%s/%s.json".formatted(sourceType.name(), tenantId, chatId);
+    }
+
     private <T> T readValue(byte[] bytes, Class<T> type) {
         try {
             return objectMapper.readValue(bytes, type);
@@ -164,5 +311,14 @@ public class GroupStateStore {
     }
 
     private record GroupPointer(String groupId) {
+    }
+
+    /**
+     * Persisted hint for "which group is currently open for this chat" - deliberately holds
+     * nothing but groupId (no lastActivityAt/revision/published copy): GroupState remains the
+     * only source of truth for all of that, so this can never drift out of sync with it - see
+     * {@link #resolveOpenChatGroupAndMerge}, the only place this is read or written.
+     */
+    public record OpenChatPointer(String groupId) {
     }
 }

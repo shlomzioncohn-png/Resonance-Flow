@@ -31,6 +31,13 @@ import java.util.List;
  * GroupStateStore.confirmPublished(expectedRevision) is the guard that stops a stale Kafka ACK
  * for an old revision from marking a since-superseded (edited) revision as published - see its
  * javadoc.
+ * claimedRevision is the revision currently claimed for publication by
+ * GroupStateStore.claimForPublication, or null if no claim is outstanding. It exists so two
+ * concurrent execution paths (a timer callback and startup recovery, once those land) cannot
+ * both decide to publish the same revision: only one atomic update can observe
+ * claimedRevision != expectedRevision and win the claim. Cleared back to null once that
+ * revision is either confirmed published or superseded by a new merge - see
+ * GroupStateStore.claimForPublication and confirmPublished's javadoc.
  */
 public record GroupState(
         String groupId,
@@ -41,5 +48,6 @@ public record GroupState(
         String correlationId,
         List<MessageSnapshot> messages,
         boolean published,
-        int revision) {
+        int revision,
+        Integer claimedRevision) {
 }

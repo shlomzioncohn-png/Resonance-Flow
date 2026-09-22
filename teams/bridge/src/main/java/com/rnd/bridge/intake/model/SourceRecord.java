@@ -29,6 +29,16 @@ import java.util.List;
  * mimeType/attachmentFilename are both null for plain body/transcript records. When this
  * record represents an attachment (or a Drive file, which IS its own content), mimeType
  * drives Modality derivation and attachmentFilename becomes part of the object key.
+ * attachmentFileId is Slack's own stable per-file id (see ChatMessage.Attachment.fileId) -
+ * null for a body/transcript record, for any non-Slack attachment, and for a Slack attachment
+ * from a source with no such id. It is Bridge-internal bookkeeping only (like sourceMessageIds
+ * below), never mapped onto RawObjectEvent/the wire: UnstructuredIntakeLane.afterPublish reads
+ * it (together with sourceMessageIds) to tell GroupStateStore.confirmAttachmentPublished exactly
+ * which attachment a given Kafka publish was for, so a later retry/edit of the same message can
+ * recognize this specific attachment was already published and skip republishing it - see
+ * MessageSnapshot.confirmedAttachmentFileIds. Deliberately NOT attachmentIndex (below), whose
+ * job is purely to keep this record's object key unique among sibling attachments - a position
+ * can shift if an edit reorders or drops a file, but a fileId never does.
  * attachmentIndex is 0 for body/transcript records, 1-based for attachment records (the
  * position of this attachment among its siblings sharing the same correlationId).
  * ObjectKeyBuilder includes it in the object key so two attachments on the same message
@@ -74,14 +84,16 @@ public record SourceRecord(
         byte[] rawContent,
         String mimeType,
         String attachmentFilename,
+        String attachmentFileId,
         int attachmentIndex,
         int attachmentCount,
         List<String> sourceMessageIds,
         int revision,
         ChangeType changeType) {
 
-    /** Convenience constructor for every case except Calendar's cancellation path - defaults
-     * changeType to UPSERT, the only value any other source/case ever needs. */
+    /** Convenience constructor for every case except a Slack attachment record (which needs
+     * attachmentFileId - see below) and Calendar's cancellation path - defaults attachmentFileId
+     * to null and changeType to UPSERT, the only values any other source/case ever needs. */
     public SourceRecord(
             RawSourceType sourceType,
             String tenantId,
@@ -100,7 +112,32 @@ public record SourceRecord(
             List<String> sourceMessageIds,
             int revision) {
         this(sourceType, tenantId, naturalId, correlationId, occurredAt, sender, participants, subject, body,
-                rawContent, mimeType, attachmentFilename, attachmentIndex, attachmentCount, sourceMessageIds,
+                rawContent, mimeType, attachmentFilename, null, attachmentIndex, attachmentCount, sourceMessageIds,
                 revision, ChangeType.UPSERT);
+    }
+
+    /** Convenience constructor for Calendar's cancellation path - same attachmentFileId default
+     * as above (Calendar attachments aren't implemented yet), explicit changeType. */
+    public SourceRecord(
+            RawSourceType sourceType,
+            String tenantId,
+            String naturalId,
+            String correlationId,
+            Instant occurredAt,
+            String sender,
+            List<String> participants,
+            String subject,
+            String body,
+            byte[] rawContent,
+            String mimeType,
+            String attachmentFilename,
+            int attachmentIndex,
+            int attachmentCount,
+            List<String> sourceMessageIds,
+            int revision,
+            ChangeType changeType) {
+        this(sourceType, tenantId, naturalId, correlationId, occurredAt, sender, participants, subject, body,
+                rawContent, mimeType, attachmentFilename, null, attachmentIndex, attachmentCount, sourceMessageIds,
+                revision, changeType);
     }
 }

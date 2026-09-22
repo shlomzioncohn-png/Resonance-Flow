@@ -247,7 +247,7 @@ public class RealSlackSourceReader implements SlackSourceReader {
                         "Failed to download Slack file " + file.getName() + ": HTTP " + response.statusCode());
             }
             try (InputStream body = response.body()) {
-                return new ChatMessage.Attachment(file.getName(), file.getMimetype(), body.readAllBytes());
+                return new ChatMessage.Attachment(file.getId(), file.getName(), file.getMimetype(), body.readAllBytes());
             }
         } catch (IOException e) {
             throw new UncheckedIOException("Failed to download Slack file: " + file.getName(), e);

@@ -122,10 +122,58 @@ Real sources need something to actually call `run(sourceType)` periodically — 
 trigger stays for ad hoc/debug use, but the default becomes a `@Scheduled` poll (interval
 configurable, e.g. every 5–15 minutes) that calls the same `run(sourceType)` path per source.
 
-Considered and rejected for now: push/webhooks (Gmail Push via Google Pub/Sub, Slack Events
-API) — near-real-time, but needs a publicly reachable endpoint plus subscription/renewal
-management, which is meaningfully more infrastructure than this stage needs. Revisit only if
-polling latency becomes an actual problem.
+Considered and rejected for now (revisited since for Slack — see "Slack real-time ingestion"
+below): push/webhooks (Gmail Push via Google Pub/Sub, Slack Events API) — near-real-time, but
+needs a publicly reachable endpoint plus subscription/renewal management, which was meaningfully
+more infrastructure than this stage needed at the time. Gmail/Calendar/Drive still poll only;
+revisit those only if polling latency becomes an actual problem.
+
+### Slack real-time ingestion (Events API)
+
+Implemented, alongside (not instead of) Slack's own polling path above — `POST
+/api/bridge/slack/events` (`SlackEventsController`), signature-verified via
+`SlackSignatureVerifier`, parsed by `SlackEventMessageParser` into the same `ChatMessage` shape
+`RealSlackSourceReader` produces. Two message events are supported: a plain new "message" (no
+`subtype`), and `message_changed` (an edit) — the parser reads the edited content from the
+event's nested `message` object, using `message.ts` (the ORIGINAL message's stable id, not the
+edit notification's own top-level `ts`) as `ChatMessage.id`, so it resolves to the same group as
+the message being edited. `message_deleted` and every other `subtype` are still acknowledged
+with 200 but not reconciled — not implemented yet (see below).
+
+- **Non-thread messages** go through `ChatGroupStateReconciler.reconcileNonThreadedMessage`:
+  merged into a persisted `GroupState` (time-gap session, same `session-gap-minutes` grouping as
+  the polling path) but the transcript itself is withheld — only this message's own new
+  attachment records publish immediately. `SlackSessionScheduler` (re)schedules an inactivity
+  timer off `GroupState`'s own message timestamps every time a message lands, superseding any
+  earlier timer for that group; when the timer fires it reloads the group fresh, claims it via
+  `GroupStateStore.claimForPublication` (revision-guarded, so two competing publish attempts for
+  the same revision can't both win), publishes the transcript, and only marks it published via
+  `GroupStateStore.confirmPublished` once Kafka has actually acknowledged it
+  (`UnstructuredIntakeLane.afterPublish`) — never on the strength of having built the record.
+- **Threaded messages** (`threadId() != null`) keep the batch/poll path's existing immediate
+  merge-and-publish behavior (`ChatGroupStateReconciler.group`) unchanged — no delayed-transcript
+  session, no scheduler involvement.
+- **Publication failures are surfaced to Slack**: `SlackEventsController` inspects the
+  `IntakeResult` from the lane run and returns a non-2xx status if anything was rejected
+  (validation/MinIO/Kafka failure), instead of always acking 200 — Slack then retries the
+  delivery. This is safe because `GroupState` is already durably persisted (MinIO control-plane)
+  before this response is returned, and a redelivery re-resolves to the same group by messageId
+  rather than creating a duplicate one.
+- **Attachments are retry-safe**: each attachment carries Slack's own stable `File.getId()`
+  through as `ChatMessage.Attachment.fileId`/`SourceRecord.attachmentFileId` (not
+  `attachmentIndex`, which is just a position and can shift if an edit reorders/removes files).
+  Once an attachment's publish actually succeeds, `UnstructuredIntakeLane.afterPublish` records
+  it via `GroupStateStore.confirmAttachmentPublished`, keyed on `(messageId, fileId)` and carried
+  forward across edits/re-reads (`MessageSnapshot.confirmedAttachmentFileIds`) — a Slack retry or
+  an unrelated edit of the same message never republishes an attachment that already landed.
+
+Not yet implemented: `message_deleted` handling (no reconciliation logic exists for it at any
+layer, not just a blocked parser filter — deleting a `MessageSnapshot` from a `GroupState` isn't
+built), startup/stale-claim recovery (an in-flight `claimedRevision`/scheduler timer is lost on
+process restart — the next edit or a future recovery pass would need to pick it back up), a
+fast/async ACK (the whole webhook request, including any attachment download, still runs
+synchronously before responding to Slack), and LLM-based semantic session grouping (grouping is
+still purely time-gap/thread based).
 
 ### No intermediate datastore for payloads
 
@@ -203,10 +251,13 @@ will make them matter more:
 Go real one source at a time via the per-source config flag, easiest first:
 1. **WhatsApp** — done. No OAuth needed, but also no live API; stays a manual file-drop even as
    "real" (real export file instead of a fixture file).
-2. **Slack** — done, including cursor since-filtering (see "Cursor persistence" above). One OAuth
-   bot token (`channels:history`/`groups:history`/`files:read`/`users:read`), no per-user consent
-   flow. Sender names are resolved via `users.info` (cached per run) since
-   `conversations.history` only ever returns a raw user id.
+2. **Slack** — done, including cursor since-filtering (see "Cursor persistence" above) and,
+   separately, real-time ingestion via the Events API (see "Slack real-time ingestion" above,
+   runs alongside the polling path). One OAuth bot token (`channels:history`/`groups:history`/
+   `files:read`/`users:read`), no per-user consent flow. Sender names are resolved via
+   `users.info` (cached per run) since `conversations.history` only ever returns a raw user id —
+   the real-time path uses the raw Slack user id as sender instead (see
+   `SlackEventMessageParser`'s javadoc).
 3. **Gmail / Calendar / Drive** — need a Google OAuth setup before the first real call can be
    made. Personal Gmail accounts (no Workspace admin) can't use a service account with
    domain-wide delegation — that only works for a Workspace-managed domain. For a personal

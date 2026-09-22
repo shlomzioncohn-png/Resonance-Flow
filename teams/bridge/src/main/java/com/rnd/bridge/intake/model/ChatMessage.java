@@ -39,7 +39,22 @@ public record ChatMessage(
         this(sourceType, tenantId, chatId, sender, timestamp, text, attachments, null, null);
     }
 
-    /** filename/mimeType/content of a chat message's attached file. */
-    public record Attachment(String filename, String mimeType, byte[] content) {
+    /**
+     * filename/mimeType/content of a chat message's attached file. fileId is Slack's own stable
+     * file id (File.getId() - e.g. "F0123ABC"), present for every real Slack attachment; null
+     * for sources with no such stable id (WhatsApp export, fixtures). Unlike attachmentIndex
+     * (position within a message's file list, used only for ordering/object-key uniqueness -
+     * see SourceRecord), fileId never changes across a retry or an unrelated edit of the same
+     * message, so it - paired with the owning message's id - is what GroupStateStore uses to
+     * recognize "this exact attachment was already published" (see
+     * ChatGroupStateReconciler.mergeSnapshots and UnstructuredIntakeLane.afterPublish).
+     */
+    public record Attachment(String fileId, String filename, String mimeType, byte[] content) {
+
+        /** Convenience constructor for sources with no stable per-attachment id (WhatsApp export,
+         * fixtures) - see fileId's javadoc above. */
+        public Attachment(String filename, String mimeType, byte[] content) {
+            this(null, filename, mimeType, content);
+        }
     }
 }

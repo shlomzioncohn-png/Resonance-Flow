@@ -120,6 +120,17 @@ public final class UnstructuredIntakeLane extends AbstractIntakeLane<SourceRecor
                         .findGroupIdForMessage(source.sourceType(), source.tenantId(), source.sourceMessageIds().get(0))
                         .ifPresent(groupId -> groupStateStore.confirmPublished(
                                 source.sourceType(), source.tenantId(), groupId, source.revision()));
+            } else if (source.attachmentIndex() > 0
+                    && source.attachmentFileId() != null
+                    && !source.sourceMessageIds().isEmpty()) {
+                // Mirrors the transcript confirmation above, at per-attachment granularity - see
+                // GroupStateStore.confirmAttachmentPublished's javadoc for why this is keyed on
+                // Slack's own stable file id rather than this record's attachmentIndex.
+                String messageId = source.sourceMessageIds().get(0);
+                groupStateStore
+                        .findGroupIdForMessage(source.sourceType(), source.tenantId(), messageId)
+                        .ifPresent(groupId -> groupStateStore.confirmAttachmentPublished(
+                                source.sourceType(), source.tenantId(), groupId, messageId, source.attachmentFileId()));
             }
         } catch (RuntimeException e) {
             throw new LaneException(
