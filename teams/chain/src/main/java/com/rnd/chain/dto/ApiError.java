@@ -1,40 +1,31 @@
 package com.rnd.chain.dto;
 
-import java.time.LocalDateTime;
+import java.time.Instant;
 
+/**
+ * Uniform error body for every failed request, matching the shape already
+ * established (unused so far) on the Riki-Kaplan branch: status/error/
+ * message/path, plus a timestamp of when the error was built.
+ */
 public class ApiError {
 
+    private final Instant timestamp;
     private final int status;
-    private final String message;
-    private final LocalDateTime timestamp;
     private final String error;
+    private final String message;
     private final String path;
 
     public ApiError(int status, String error, String message, String path) {
+        this.timestamp = Instant.now();
         this.status = status;
-        this.message = message;
-        this.timestamp = LocalDateTime.now();
         this.error = error;
+        this.message = message;
         this.path = path;
     }
 
-    public int getStatus() {
-        return status;
-    }
-
-    public String getMessage() {
-        return message;
-    }
-
-    public LocalDateTime getTimestamp() {
-        return timestamp;
-    }
-
-    public String getError() {
-        return error;
-    }
-
-    public String getPath() {
-        return path;
-    }
+    public Instant getTimestamp() { return timestamp; }
+    public int getStatus() { return status; }
+    public String getError() { return error; }
+    public String getMessage() { return message; }
+    public String getPath() { return path; }
 }

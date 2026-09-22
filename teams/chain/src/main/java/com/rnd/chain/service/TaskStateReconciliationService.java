@@ -35,48 +35,62 @@ public class TaskStateReconciliationService {
         this.constraintRepository = constraintRepository;
     }
 
-    public boolean reconcileTaskState(UUID taskId) {
+   public boolean reconcileTaskState(UUID taskId) {
 
-        Task task = taskRepository.findById(taskId)
-                .orElseThrow(() -> new TaskNotFoundException(taskId));
+    Task task = taskRepository.findById(taskId)
+            .orElseThrow(() -> new TaskNotFoundException(taskId));
 
-        int actualBlockingCount = calculateBlockingCount(taskId);
-        int actualOpenConstraintCount = calculateOpenConstraintCount(taskId);
+    int actualBlockingCount = calculateBlockingCount(taskId);
+    int actualOpenConstraintCount = calculateOpenConstraintCount(taskId);
 
-        boolean actualIsReady = actualBlockingCount == 0 &&
-                actualOpenConstraintCount == 0;
+    boolean actualIsReady =
+            actualBlockingCount == 0 && actualOpenConstraintCount == 0;
 
-        boolean hasInconsistency = task.getBlockingCount() != actualBlockingCount ||
-                task.getOpenConstraintCount() != actualOpenConstraintCount ||
-                task.isReady() != actualIsReady;
-        log.warn(
-                "Task {} reconciliation found inconsistency: " +
-                        "storedBlockingCount={}, actualBlockingCount={}, " +
-                        "storedOpenConstraintCount={}, actualOpenConstraintCount={}, " +
-                        "storedReady={}, actualReady={}",
-                taskId,
-                task.getBlockingCount(),
-                actualBlockingCount,
-                task.getOpenConstraintCount(),
-                actualOpenConstraintCount,
-                task.isReady(),
-                actualIsReady);
+    boolean hasInconsistency =
+            task.getBlockingCount() != actualBlockingCount ||
+            task.getOpenConstraintCount() != actualOpenConstraintCount ||
+            task.isReady() != actualIsReady;
 
-        if (!hasInconsistency) {
-            log.debug("Task {} reconciliation found no inconsistency", taskId);
-            return false;
-        }
-
-        task.setBlockingCount(actualBlockingCount);
-        task.setOpenConstraintCount(actualOpenConstraintCount);
-        task.setReady(actualIsReady);
-        task.setUpdatedAt(LocalDateTime.now());
-
-        taskRepository.save(task);
-        log.info("Task {} reconciliation corrected persisted state", taskId);
-
-        return true;
+    if (!hasInconsistency) {
+        log.debug("Task {} reconciliation found no inconsistency", taskId);
+        return false;
     }
+
+    log.warn(
+            "Task {} reconciliation found inconsistency: " +
+                    "storedBlockingCount={}, actualBlockingCount={}, " +
+                    "storedOpenConstraintCount={}, actualOpenConstraintCount={}, " +
+                    "storedReady={}, actualReady={}",
+            taskId,
+            task.getBlockingCount(),
+            actualBlockingCount,
+            task.getOpenConstraintCount(),
+            actualOpenConstraintCount,
+            task.isReady(),
+            actualIsReady
+    );
+
+    taskRepository.update(taskId, currentTask ->
+            Task.builder()
+                    .id(currentTask.getId())
+                    .parentTaskId(currentTask.getParentTaskId())
+                    .ownerId(currentTask.getOwnerId())
+                    .status(currentTask.getStatus())
+                    .isReady(actualIsReady)
+                    .blockingCount(actualBlockingCount)
+                    .openConstraintCount(actualOpenConstraintCount)
+                    .estimatedDurationMin(currentTask.getEstimatedDurationMin())
+                    .score(currentTask.getScore())
+                    .createdAt(currentTask.getCreatedAt())
+                    .updatedAt(LocalDateTime.now())
+                    .deletedAt(currentTask.getDeletedAt())
+                    .build()
+    ).orElseThrow(() -> new TaskNotFoundException(taskId));
+
+    log.info("Task {} reconciliation corrected persisted state", taskId);
+
+    return true;
+}
 
     private int calculateBlockingCount(UUID taskId) {
 

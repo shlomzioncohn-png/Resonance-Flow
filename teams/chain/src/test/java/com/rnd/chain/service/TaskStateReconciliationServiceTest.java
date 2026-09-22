@@ -1,3 +1,4 @@
+
 package com.rnd.chain.service;
 
 import com.rnd.chain.dto.Constraint;
@@ -9,13 +10,17 @@ import com.rnd.chain.repository.TaskDependencyRepository;
 import com.rnd.chain.repository.TaskRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.mockito.Mockito;
 
 import java.time.LocalDateTime;
+import java.util.Arrays;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.function.UnaryOperator;
+import java.util.stream.Collectors;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
@@ -26,388 +31,255 @@ class TaskStateReconciliationServiceTest {
     private TaskRepository taskRepository;
     private TaskDependencyRepository taskDependencyRepository;
     private ConstraintRepository constraintRepository;
-
     private TaskStateReconciliationService service;
 
+    private Map<UUID, Task> tasks;
+
     @BeforeEach
+    @SuppressWarnings("unchecked")
     void setUp() {
-        taskRepository = Mockito.mock(TaskRepository.class);
-        taskDependencyRepository = Mockito.mock(TaskDependencyRepository.class);
-        constraintRepository = Mockito.mock(ConstraintRepository.class);
+        taskRepository = mock(TaskRepository.class);
+        taskDependencyRepository = mock(TaskDependencyRepository.class);
+        constraintRepository = mock(ConstraintRepository.class);
+        tasks = new HashMap<>();
 
         service = new TaskStateReconciliationService(
                 taskRepository,
                 taskDependencyRepository,
-                constraintRepository);
+                constraintRepository
+        );
+
+        when(taskRepository.findById(any(UUID.class)))
+                .thenAnswer(invocation ->
+                        Optional.ofNullable(tasks.get(invocation.getArgument(0))));
+
+        when(taskRepository.findAllById(anyList()))
+                .thenAnswer(invocation -> {
+                    List<UUID> ids = invocation.getArgument(0);
+                    return ids.stream()
+                            .map(tasks::get)
+                            .filter(task -> task != null)
+                            .collect(Collectors.toList());
+                });
+
+        // Simulates the repository's atomic update of an immutable Task.
+        when(taskRepository.update(any(UUID.class), any()))
+                .thenAnswer(invocation -> {
+                    UUID id = invocation.getArgument(0);
+                    UnaryOperator<Task> mutator = invocation.getArgument(1);
+
+                    Task current = tasks.get(id);
+                    if (current == null) {
+                        return Optional.empty();
+                    }
+
+                    Task updated = mutator.apply(current);
+                    tasks.put(id, updated);
+                    return Optional.of(updated);
+                });
+
+        when(taskDependencyRepository.findByTaskId(any(UUID.class)))
+                .thenReturn(Collections.emptyList());
+
+        when(constraintRepository.findByTaskId(any(UUID.class)))
+                .thenReturn(Collections.emptyList());
     }
 
     @Test
-    void reconcileTaskState_whenStateIsAlreadyCorrect_shouldNotSave() {
-        UUID taskId = UUID.randomUUID();
+    void correctState_shouldNotUpdate() {
+        Task task = createTask(TaskStatus.ACTIVE, true, 0, 0);
 
-        Task task = createTask(
-                taskId,
-                true,
-                0,
-                0);
+        assertFalse(service.reconcileTaskState(task.getId()));
 
-        when(taskRepository.findById(taskId))
-                .thenReturn(Optional.of(task));
-
-        when(taskDependencyRepository.findByTaskId(taskId))
-                .thenReturn(Collections.emptyList());
-
-        when(constraintRepository.findByTaskId(taskId))
-                .thenReturn(Collections.emptyList());
-
-        boolean changed = service.reconcileTaskState(taskId);
-
-        assertFalse(changed);
-
-        verify(taskRepository, never()).save(any(Task.class));
+        verify(taskRepository, never()).update(any(UUID.class), any());
     }
 
     @Test
-    void reconcileTaskState_whenBlockingCountIsWrong_shouldCorrectAndSave() {
-        UUID taskId = UUID.randomUUID();
-        UUID blockerId = UUID.randomUUID();
+    void incorrectBlockingCount_shouldBeCorrected() {
+        Task task = createTask(TaskStatus.ACTIVE, true, 0, 0);
+        Task blocker = createTask(TaskStatus.ACTIVE, false, 0, 0);
 
-        Task task = createTask(
-                taskId,
-                true,
-                0,
-                0);
+        setDependencies(task, blocker);
 
-        Task blocker = createTask(
-                blockerId,
-                false,
-                0,
-                0);
+        assertTrue(service.reconcileTaskState(task.getId()));
 
-        blocker.setStatus(TaskStatus.ACTIVE);
+        Task updated = tasks.get(task.getId());
+        assertEquals(1, updated.getBlockingCount());
+        assertFalse(updated.isReady());
 
-        TaskDependency dependency = new TaskDependency(taskId, blockerId);
-
-        when(taskRepository.findById(taskId))
-                .thenReturn(Optional.of(task));
-
-        when(taskDependencyRepository.findByTaskId(taskId))
-                .thenReturn(List.of(dependency));
-
-        when(taskRepository.findAllById(List.of(blockerId)))
-                .thenReturn(List.of(blocker));
-
-        when(constraintRepository.findByTaskId(taskId))
-                .thenReturn(Collections.emptyList());
-
-        boolean changed = service.reconcileTaskState(taskId);
-
-        assertTrue(changed);
-        assertEquals(1, task.getBlockingCount());
-        assertFalse(task.isReady());
-
-        verify(taskRepository).save(task);
+        verify(taskRepository, times(1))
+                .update(eq(task.getId()), any());
     }
 
     @Test
-    void reconcileTaskState_whenOpenConstraintCountIsWrong_shouldCorrectAndSave() {
-        UUID taskId = UUID.randomUUID();
+    void incorrectOpenConstraintCount_shouldBeCorrected() {
+        Task task = createTask(TaskStatus.ACTIVE, true, 0, 0);
 
-        Task task = createTask(
-                taskId,
-                true,
-                0,
-                0);
+        when(constraintRepository.findByTaskId(task.getId()))
+                .thenReturn(Collections.singletonList(
+                        createConstraint(
+                                task.getId(),
+                                Constraint.ConstraintStatus.PENDING
+                        )
+                ));
 
-        Constraint constraint = new Constraint(
-                "constraint-1",
-                taskId,
-                Constraint.ConstraintType.APPROVAL_NEEDED,
-                Constraint.ConstraintStatus.PENDING,
-                Collections.emptyMap(),
-                "test",
-                LocalDateTime.now(),
-                LocalDateTime.now());
+        assertTrue(service.reconcileTaskState(task.getId()));
 
-        when(taskRepository.findById(taskId))
-                .thenReturn(Optional.of(task));
+        Task updated = tasks.get(task.getId());
+        assertEquals(1, updated.getOpenConstraintCount());
+        assertFalse(updated.isReady());
+    }
 
-        when(taskDependencyRepository.findByTaskId(taskId))
-                .thenReturn(Collections.emptyList());
+    @Test
+    void incorrectReadyFlag_shouldBeCorrected() {
+        Task task = createTask(TaskStatus.ACTIVE, false, 0, 0);
 
-        when(constraintRepository.findByTaskId(taskId))
-                .thenReturn(List.of(constraint));
+        assertTrue(service.reconcileTaskState(task.getId()));
 
-        boolean changed = service.reconcileTaskState(taskId);
+        assertTrue(tasks.get(task.getId()).isReady());
+    }
 
-        assertTrue(changed);
-        assertEquals(1, task.getOpenConstraintCount());
-        assertFalse(task.isReady());
+    @Test
+    void multipleBlockers_shouldCountOnlyUnfinishedTasks() {
+        Task task = createTask(TaskStatus.ACTIVE, true, 0, 0);
+        Task active = createTask(TaskStatus.ACTIVE, false, 0, 0);
+        Task done = createTask(TaskStatus.DONE, false, 0, 0);
+        Task pending = createTask(TaskStatus.PENDING, false, 0, 0);
 
-        verify(taskRepository).save(task);
+        setDependencies(task, active, done, pending);
+
+        assertTrue(service.reconcileTaskState(task.getId()));
+
+        Task updated = tasks.get(task.getId());
+        assertEquals(2, updated.getBlockingCount());
+        assertFalse(updated.isReady());
+    }
+
+    @Test
+    void multipleConstraints_shouldCountOnlyPendingConstraints() {
+        Task task = createTask(TaskStatus.ACTIVE, true, 0, 0);
+
+        when(constraintRepository.findByTaskId(task.getId()))
+                .thenReturn(Arrays.asList(
+                        createConstraint(
+                                task.getId(),
+                                Constraint.ConstraintStatus.PENDING
+                        ),
+                        createConstraint(
+                                task.getId(),
+                                Constraint.ConstraintStatus.SATISFIED
+                        ),
+                        createConstraint(
+                                task.getId(),
+                                Constraint.ConstraintStatus.WAIVED
+                        )
+                ));
+
+        assertTrue(service.reconcileTaskState(task.getId()));
+
+        Task updated = tasks.get(task.getId());
+        assertEquals(1, updated.getOpenConstraintCount());
+        assertFalse(updated.isReady());
+    }
+
+    @Test
+    void dependencyAndConstraint_shouldReconcileBoth() {
+        Task task = createTask(TaskStatus.ACTIVE, true, 0, 0);
+        Task blocker = createTask(TaskStatus.ACTIVE, false, 0, 0);
+
+        setDependencies(task, blocker);
+
+        when(constraintRepository.findByTaskId(task.getId()))
+                .thenReturn(Collections.singletonList(
+                        createConstraint(
+                                task.getId(),
+                                Constraint.ConstraintStatus.PENDING
+                        )
+                ));
+
+        assertTrue(service.reconcileTaskState(task.getId()));
+
+        Task updated = tasks.get(task.getId());
+        assertEquals(1, updated.getBlockingCount());
+        assertEquals(1, updated.getOpenConstraintCount());
+        assertFalse(updated.isReady());
+    }
+
+    @Test
+    void runningTwice_shouldBeIdempotent() {
+        Task task = createTask(TaskStatus.ACTIVE, true, 0, 0);
+        Task blocker = createTask(TaskStatus.ACTIVE, false, 0, 0);
+
+        setDependencies(task, blocker);
+
+        assertTrue(service.reconcileTaskState(task.getId()));
+        assertFalse(service.reconcileTaskState(task.getId()));
+
+        assertEquals(1, tasks.get(task.getId()).getBlockingCount());
+
+        verify(taskRepository, times(1))
+                .update(eq(task.getId()), any());
+    }
+
+    @Test
+    void batch_shouldContinueAfterMissingTask() {
+        Task first = createTask(TaskStatus.ACTIVE, true, 0, 0);
+        UUID missingId = UUID.randomUUID();
+        Task third = createTask(TaskStatus.ACTIVE, true, 0, 0);
+
+        service.reconcileTasks(
+                Arrays.asList(first.getId(), missingId, third.getId())
+        );
+
+        verify(taskRepository).findById(first.getId());
+        verify(taskRepository).findById(missingId);
+        verify(taskRepository).findById(third.getId());
     }
 
     private Task createTask(
-            UUID id,
+            TaskStatus status,
             boolean isReady,
             int blockingCount,
             int openConstraintCount) {
-        return new Task(
-                id,
-                null,
-                TaskStatus.ACTIVE,
-                isReady,
-                blockingCount,
-                openConstraintCount,
-                null,
-                null,
-                LocalDateTime.now(),
-                LocalDateTime.now(),
-                null);
+
+        Task task = Task.builder()
+                .id(UUID.randomUUID())
+                .ownerId("test-owner")
+                .status(status)
+                .isReady(isReady)
+                .blockingCount(blockingCount)
+                .openConstraintCount(openConstraintCount)
+                .createdAt(LocalDateTime.now())
+                .updatedAt(LocalDateTime.now())
+                .build();
+
+        tasks.put(task.getId(), task);
+        return task;
     }
 
-    @Test
-    void reconcileTaskState_whenReadyFlagIsWrong_shouldCorrectAndSave() {
-        UUID taskId = UUID.randomUUID();
+    private void setDependencies(Task task, Task... blockers) {
+        List<TaskDependency> dependencies = Arrays.stream(blockers)
+                .map(blocker ->
+                        new TaskDependency(task.getId(), blocker.getId()))
+                .collect(Collectors.toList());
 
-        Task task = createTask(
-                taskId,
-                false,
-                0,
-                0);
-
-        when(taskRepository.findById(taskId))
-                .thenReturn(Optional.of(task));
-
-        when(taskDependencyRepository.findByTaskId(taskId))
-                .thenReturn(Collections.emptyList());
-
-        when(constraintRepository.findByTaskId(taskId))
-                .thenReturn(Collections.emptyList());
-
-        boolean changed = service.reconcileTaskState(taskId);
-
-        assertTrue(changed);
-        assertTrue(task.isReady());
-
-        verify(taskRepository).save(task);
-    }
-
-    @Test
-    void reconcileTaskState_withMultipleBlockers_shouldCountOnlyBlockingTasks() {
-        UUID taskId = UUID.randomUUID();
-        UUID blocker1Id = UUID.randomUUID();
-        UUID blocker2Id = UUID.randomUUID();
-        UUID blocker3Id = UUID.randomUUID();
-
-        Task task = createTask(taskId, true, 0, 0);
-
-        Task blocker1 = createTask(blocker1Id, false, 0, 0);
-        blocker1.setStatus(TaskStatus.ACTIVE);
-
-        Task blocker2 = createTask(blocker2Id, false, 0, 0);
-        blocker2.setStatus(TaskStatus.DONE);
-
-        Task blocker3 = createTask(blocker3Id, false, 0, 0);
-        blocker3.setStatus(TaskStatus.PENDING);
-
-        List<TaskDependency> dependencies = List.of(
-                new TaskDependency(taskId, blocker1Id),
-                new TaskDependency(taskId, blocker2Id),
-                new TaskDependency(taskId, blocker3Id));
-
-        when(taskRepository.findById(taskId))
-                .thenReturn(Optional.of(task));
-
-        when(taskDependencyRepository.findByTaskId(taskId))
+        when(taskDependencyRepository.findByTaskId(task.getId()))
                 .thenReturn(dependencies);
-
-        when(taskRepository.findAllById(
-                List.of(blocker1Id, blocker2Id, blocker3Id))).thenReturn(List.of(blocker1, blocker2, blocker3));
-
-        when(constraintRepository.findByTaskId(taskId))
-                .thenReturn(Collections.emptyList());
-
-        boolean changed = service.reconcileTaskState(taskId);
-
-        assertTrue(changed);
-        assertEquals(2, task.getBlockingCount());
-        assertFalse(task.isReady());
-
-        verify(taskRepository).save(task);
     }
 
-    @Test
-    void reconcileTaskState_withMultipleConstraints_shouldCountOnlyPendingConstraints() {
-        UUID taskId = UUID.randomUUID();
+    private Constraint createConstraint(
+            UUID taskId,
+            Constraint.ConstraintStatus status) {
 
-        Task task = createTask(taskId, true, 0, 0);
-
-        Constraint pending = new Constraint(
-                "constraint-1",
+        return new Constraint(
+                UUID.randomUUID().toString(),
                 taskId,
                 Constraint.ConstraintType.APPROVAL_NEEDED,
-                Constraint.ConstraintStatus.PENDING,
+                status,
                 Collections.emptyMap(),
                 "test",
                 LocalDateTime.now(),
-                LocalDateTime.now());
-
-        Constraint satisfied = new Constraint(
-                "constraint-2",
-                taskId,
-                Constraint.ConstraintType.BLOCKED_BY_INFO,
-                Constraint.ConstraintStatus.SATISFIED,
-                Collections.emptyMap(),
-                "test",
-                LocalDateTime.now(),
-                LocalDateTime.now());
-
-        Constraint waived = new Constraint(
-                "constraint-3",
-                taskId,
-                Constraint.ConstraintType.DATE_WINDOW,
-                Constraint.ConstraintStatus.WAIVED,
-                Collections.emptyMap(),
-                "test",
-                LocalDateTime.now(),
-                LocalDateTime.now());
-
-        when(taskRepository.findById(taskId))
-                .thenReturn(Optional.of(task));
-
-        when(taskDependencyRepository.findByTaskId(taskId))
-                .thenReturn(Collections.emptyList());
-
-        when(constraintRepository.findByTaskId(taskId))
-                .thenReturn(List.of(pending, satisfied, waived));
-
-        boolean changed = service.reconcileTaskState(taskId);
-
-        assertTrue(changed);
-        assertEquals(1, task.getOpenConstraintCount());
-        assertFalse(task.isReady());
-
-        verify(taskRepository).save(task);
-    }
-
-    @Test
-    void reconcileTasks_whenOneTaskFails_shouldContinueWithOtherTasks() {
-        UUID task1Id = UUID.randomUUID();
-        UUID task2Id = UUID.randomUUID();
-        UUID task3Id = UUID.randomUUID();
-
-        Task task1 = createTask(task1Id, true, 0, 0);
-        Task task3 = createTask(task3Id, true, 0, 0);
-
-        when(taskRepository.findById(task1Id))
-                .thenReturn(Optional.of(task1));
-
-        when(taskRepository.findById(task2Id))
-                .thenReturn(Optional.empty());
-
-        when(taskRepository.findById(task3Id))
-                .thenReturn(Optional.of(task3));
-
-        when(taskDependencyRepository.findByTaskId(task1Id))
-                .thenReturn(Collections.emptyList());
-
-        when(taskDependencyRepository.findByTaskId(task3Id))
-                .thenReturn(Collections.emptyList());
-
-        when(constraintRepository.findByTaskId(task1Id))
-                .thenReturn(Collections.emptyList());
-
-        when(constraintRepository.findByTaskId(task3Id))
-                .thenReturn(Collections.emptyList());
-
-        service.reconcileTasks(List.of(
-                task1Id,
-                task2Id,
-                task3Id));
-
-        verify(taskRepository).findById(task1Id);
-        verify(taskRepository).findById(task2Id);
-        verify(taskRepository).findById(task3Id);
-    }
-
-    @Test
-    void reconcileTaskState_withDependencyAndConstraint_shouldReconcileBoth() {
-        UUID taskId = UUID.randomUUID();
-        UUID blockerId = UUID.randomUUID();
-
-        Task task = createTask(taskId, true, 0, 0);
-
-        Task blocker = createTask(blockerId, false, 0, 0);
-        blocker.setStatus(TaskStatus.ACTIVE);
-
-        TaskDependency dependency = new TaskDependency(taskId, blockerId);
-
-        Constraint constraint = new Constraint(
-                "constraint-1",
-                taskId,
-                Constraint.ConstraintType.APPROVAL_NEEDED,
-                Constraint.ConstraintStatus.PENDING,
-                Collections.emptyMap(),
-                "test",
-                LocalDateTime.now(),
-                LocalDateTime.now());
-
-        when(taskRepository.findById(taskId))
-                .thenReturn(Optional.of(task));
-
-        when(taskDependencyRepository.findByTaskId(taskId))
-                .thenReturn(List.of(dependency));
-
-        when(taskRepository.findAllById(List.of(blockerId)))
-                .thenReturn(List.of(blocker));
-
-        when(constraintRepository.findByTaskId(taskId))
-                .thenReturn(List.of(constraint));
-
-        boolean changed = service.reconcileTaskState(taskId);
-
-        assertTrue(changed);
-        assertEquals(1, task.getBlockingCount());
-        assertEquals(1, task.getOpenConstraintCount());
-        assertFalse(task.isReady());
-
-        verify(taskRepository).save(task);
-    }
-
-    @Test
-    void reconcileTaskState_whenRunTwice_shouldBeIdempotent() {
-        UUID taskId = UUID.randomUUID();
-        UUID blockerId = UUID.randomUUID();
-
-        Task task = createTask(taskId, true, 0, 0);
-
-        Task blocker = createTask(blockerId, false, 0, 0);
-        blocker.setStatus(TaskStatus.ACTIVE);
-
-        TaskDependency dependency = new TaskDependency(taskId, blockerId);
-
-        when(taskRepository.findById(taskId))
-                .thenReturn(Optional.of(task));
-
-        when(taskDependencyRepository.findByTaskId(taskId))
-                .thenReturn(List.of(dependency));
-
-        when(taskRepository.findAllById(List.of(blockerId)))
-                .thenReturn(List.of(blocker));
-
-        when(constraintRepository.findByTaskId(taskId))
-                .thenReturn(Collections.emptyList());
-
-        boolean firstRun = service.reconcileTaskState(taskId);
-        boolean secondRun = service.reconcileTaskState(taskId);
-
-        assertTrue(firstRun);
-        assertFalse(secondRun);
-
-        assertEquals(1, task.getBlockingCount());
-        assertFalse(task.isReady());
-
-        verify(taskRepository, times(1)).save(task);
+                LocalDateTime.now()
+        );
     }
 }

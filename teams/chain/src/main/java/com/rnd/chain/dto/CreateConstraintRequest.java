@@ -1,6 +1,5 @@
 package com.rnd.chain.dto;
-
-import javax.validation.constraints.NotNull;
+import jakarta.validation.constraints.NotNull;
 import java.util.Map;
 
 public class CreateConstraintRequest {

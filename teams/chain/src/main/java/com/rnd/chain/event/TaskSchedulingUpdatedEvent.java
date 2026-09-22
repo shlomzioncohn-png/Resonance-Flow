@@ -13,12 +13,12 @@ public class TaskSchedulingUpdatedEvent {
     private final boolean isAvailable;
 
     @JsonProperty("priority_score")
-    private final Integer priorityScore;
+    private final Double priorityScore;
 
     public TaskSchedulingUpdatedEvent(
             UUID taskId,
             boolean isAvailable,
-            Integer priorityScore) {
+            Double priorityScore) {
 
         this.taskId = taskId;
         this.isAvailable = isAvailable;
@@ -33,7 +33,7 @@ public class TaskSchedulingUpdatedEvent {
         return isAvailable;
     }
 
-    public Integer getPriorityScore() {
+    public Double getPriorityScore() {
         return priorityScore;
     }
 }

@@ -1,8 +1,17 @@
 package com.rnd.chain.exception;
-//InvalidDependency - A depends on A
-public class InvalidDependencyException extends BadRequestException {
+
+/**
+ * Thrown when a dependency edge would be invalid regardless of what
+ * already exists in storage - currently: a task depending on itself
+ * (taskId equals dependsOnTaskId).
+ */
+public class InvalidDependencyException extends RuntimeException {
 
     public InvalidDependencyException(String message) {
         super(message);
+    }
+
+    public InvalidDependencyException(String message, Throwable cause) {
+        super(message, cause);
     }
 }

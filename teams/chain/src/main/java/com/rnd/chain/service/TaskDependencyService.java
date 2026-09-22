@@ -1,6 +1,5 @@
 package com.rnd.chain.service;
 
-import com.rnd.chain.dto.Task;
 import com.rnd.chain.dto.TaskDependency;
 import com.rnd.chain.exception.DependencyNotFoundException;
 import com.rnd.chain.exception.DuplicateDependencyException;
@@ -13,32 +12,49 @@ import org.springframework.stereotype.Service;
 import java.util.List;
 import java.util.Objects;
 import java.util.UUID;
-import java.util.stream.Collectors;
 
 /**
  * Enforces the business rules around the dependency graph on top of the
  * plain-CRUD {@link TaskDependencyRepository}: both tasks must exist, a
  * task cannot depend on itself, and a given edge cannot be added twice.
+ *
+ * <p><b>Known limitation, out of scope for this class:</b>
+ * {@link #addDependency}/{@link #removeDependency} don't update
+ * {@code Task.blockingCount}/{@code isReady} - keeping those in sync is
+ * left to whichever service owns task-readiness/eligibility.
  */
 @Service
 public class TaskDependencyService {
 
     private final TaskRepository taskRepository;
     private final TaskDependencyRepository taskDependencyRepository;
-    private final TaskEligibilityService taskEligibilityService;
 
     public TaskDependencyService(TaskRepository taskRepository,
-            TaskDependencyRepository taskDependencyRepository, TaskEligibilityService taskEligibilityService) {
+                                  TaskDependencyRepository taskDependencyRepository) {
+        Objects.requireNonNull(taskRepository, "taskRepository must not be null");
+        Objects.requireNonNull(taskDependencyRepository, "taskDependencyRepository must not be null");
         this.taskRepository = taskRepository;
         this.taskDependencyRepository = taskDependencyRepository;
-        this.taskEligibilityService = taskEligibilityService;
     }
 
     /**
      * Creates a "taskId depends on dependsOnTaskId" edge.
      *
-     * @throws InvalidDependencyException   if taskId equals dependsOnTaskId
-     * @throws TaskNotFoundException        if either task does not exist
+     * <p>The existence check and the edge creation are atomic (see
+     * {@link TaskDependencyRepository#save}): concurrent callers racing to
+     * add the same edge are guaranteed a deterministic outcome - exactly
+     * one succeeds, the rest get {@link DuplicateDependencyException}.
+     *
+     * <p><b>Known assumption, not fixed here:</b> {@link #requireTaskExists}
+     * runs before the atomic {@code save}, but task existence is checked
+     * against a different repository ({@link TaskRepository}) than the one
+     * the edge is saved to. If a task is concurrently soft-deleted between
+     * that check and the save, this is a TOCTOU window this method does not
+     * close. Tracked as issue #243.
+     *
+     * @see <a href="https://github.com/KamaTechOrg/Resonance-Flow/issues/243">#243</a>
+     * @throws InvalidDependencyException  if taskId equals dependsOnTaskId
+     * @throws TaskNotFoundException       if either task does not exist
      * @throws DuplicateDependencyException if the edge already exists
      */
     public TaskDependency addDependency(UUID taskId, UUID dependsOnTaskId) {
@@ -53,25 +69,9 @@ public class TaskDependencyService {
         requireTaskExists(taskId);
         requireTaskExists(dependsOnTaskId);
 
-        boolean alreadyExists = taskDependencyRepository.findByTaskId(taskId).stream()
-                .anyMatch(edge -> edge.getDependsOnTaskId().equals(dependsOnTaskId));
-        if (alreadyExists) {
-            throw new DuplicateDependencyException(
-                    "Task " + taskId + " already depends on " + dependsOnTaskId);
-        }
-
-        TaskDependency dependency = taskDependencyRepository.save(
-                new TaskDependency(taskId, dependsOnTaskId));
-
-        Task task = taskRepository.findById(taskId)
-                .orElseThrow(() -> new TaskNotFoundException(taskId));
-
-        task.setBlockingCount(task.getBlockingCount() + 1);
-        taskRepository.save(task);
-
-        taskEligibilityService.recalculateTaskEligibility(taskId);
-
-        return dependency;
+        return taskDependencyRepository.save(new TaskDependency(taskId, dependsOnTaskId))
+                .orElseThrow(() -> new DuplicateDependencyException(
+                        "Task " + taskId + " already depends on " + dependsOnTaskId));
     }
 
     /**
@@ -83,28 +83,16 @@ public class TaskDependencyService {
         Objects.requireNonNull(taskId, "taskId must not be null");
         Objects.requireNonNull(dependsOnTaskId, "dependsOnTaskId must not be null");
 
-        boolean exists = taskDependencyRepository.findByTaskId(taskId).stream()
-                .anyMatch(edge -> edge.getDependsOnTaskId().equals(dependsOnTaskId));
-        if (!exists) {
+        boolean removed = taskDependencyRepository.delete(taskId, dependsOnTaskId);
+        if (!removed) {
             throw new DependencyNotFoundException(
                     "No dependency from " + taskId + " to " + dependsOnTaskId);
         }
-
-        taskDependencyRepository.delete(taskId, dependsOnTaskId);
-        Task task = taskRepository.findById(taskId)
-                .orElseThrow(() -> new TaskNotFoundException(taskId));
-
-        task.setBlockingCount(
-                Math.max(0, task.getBlockingCount() - 1));
-
-        taskRepository.save(task);
-
-        taskEligibilityService.recalculateTaskEligibility(taskId);
     }
 
     /**
      * @return the ids of the tasks that the given task directly depends
-     *         on (what blocks it). Empty list if it has none.
+     * on (what blocks it). Empty list if it has none.
      * @throws TaskNotFoundException if taskId does not exist
      */
     public List<UUID> getDependencies(UUID taskId) {
@@ -113,12 +101,12 @@ public class TaskDependencyService {
 
         return taskDependencyRepository.findByTaskId(taskId).stream()
                 .map(TaskDependency::getDependsOnTaskId)
-                .collect(Collectors.toList());
+                .toList();
     }
 
     /**
      * @return the ids of the tasks that directly depend on the given
-     *         task (what it blocks). Empty list if nothing depends on it.
+     * task (what it blocks). Empty list if nothing depends on it.
      * @throws TaskNotFoundException if taskId does not exist
      */
     public List<UUID> getDependents(UUID taskId) {
@@ -127,7 +115,7 @@ public class TaskDependencyService {
 
         return taskDependencyRepository.findByDependsOnTaskId(taskId).stream()
                 .map(TaskDependency::getTaskId)
-                .collect(Collectors.toList());
+                .toList();
     }
 
     private void requireTaskExists(UUID taskId) {

@@ -1,0 +1,27 @@
+name: Chain CI/CD
+
+on:
+  push:
+    branches: [ "main" ]
+    tags: [ "chain-v*.*.*" ]
+    paths:
+      - "teams/chain/**"
+  pull_request:
+    branches: [ "main" ]
+    paths:
+      - "teams/chain/**"
+  workflow_dispatch: {}
+
+jobs:
+  ci:
+    permissions:
+      contents: write
+      packages: write
+      pull-requests: write
+    uses: ./.github/workflows/service-ci.yaml
+    secrets: inherit
+    with:
+      service_name: chain
+      service_dir: teams/chain
+      language: java
+      container_port: 8081
