@@ -2,7 +2,7 @@ name: Notification Delivery CI/CD
 
 on:
   push:
-    branches: [ "main", "Gitty/pipe-ci" ]
+    branches: [ "main" ]
     tags: [ "notification-delivery-v*.*.*" ]
     paths:
       - "teams/relay/src/**"
