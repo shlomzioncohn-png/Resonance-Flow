@@ -13,6 +13,11 @@ metadata:
 spec:
   replicas: {{ $component.replicaCount }}
 
+  {{- with $component.updateStrategy }}
+  strategy:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+
   selector:
     matchLabels:
       {{- include "resonance-flow.selectorLabels" $ | nindent 6 }}
@@ -43,6 +48,10 @@ spec:
       {{- end }}
 
       serviceAccountName: {{ include "resonance-flow.serviceAccountName" $ }}
+
+      {{- with $component.terminationGracePeriodSeconds }}
+      terminationGracePeriodSeconds: {{ . }}
+      {{- end }}
 
       {{- with $.Values.podSecurityContext }}
       securityContext:
@@ -77,8 +86,17 @@ spec:
               containerPort: {{ $component.containerPort }}
               protocol: TCP
 
-          {{- if or $component.config $component.secret $component.env }}
+          {{- if or $component.config $component.secret $component.env (eq $componentName "notification-delivery") }}
           env:
+            {{- if eq $componentName "notification-delivery" }}
+            {{/* Populates the app's generic INSTANCE_NAME contract (see application.yml /
+                 InstanceNameGuard) with this pod's own name - a Kubernetes concept the chart
+                 knows about so the app itself doesn't have to. */}}
+            - name: INSTANCE_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            {{- end }}
             {{- if $component.config }}
             {{- include "resonance-flow.configFilePathEnv" $ | nindent 12 }}
             {{- end }}

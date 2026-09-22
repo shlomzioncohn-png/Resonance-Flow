@@ -1,5 +1,9 @@
 package com.rnd.bridge.jira.service;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.SerializationFeature;
+import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import com.rnd.bridge.task.BridgeTaskEventDto;
 import com.rnd.bridge.task.TaskValidator;
 import com.rnd.bridge.task.model.ExtractionProvenance;
@@ -20,6 +24,8 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.kafka.support.SendResult;
 
+import java.util.Set;
+import java.util.TreeSet;
 import java.util.concurrent.CompletableFuture;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -31,6 +37,17 @@ import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
 class JiraKafkaProducerTest {
+
+    // Same mapper setup as BridgeTaskEventDtoTest: mirrors what a correctly
+    // configured Spring Boot ObjectMapper does, not bare Jackson defaults.
+    private static final ObjectMapper MAPPER = new ObjectMapper()
+            .registerModule(new JavaTimeModule())
+            .disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS);
+
+    private static final Set<String> CONTRACT_KEYS = Set.of(
+            "eventId", "tenantId", "projectId", "title", "description", "sourceType",
+            "sourceRef", "tier", "roleContext", "urgency", "effortEstimateMinutes",
+            "deadline", "status", "confidence");
 
     @Mock
     private KafkaTemplate<String, BridgeTaskEventDto> kafkaTemplate;
@@ -82,6 +99,41 @@ class JiraKafkaProducerTest {
         assertThatThrownBy(() -> jiraKafkaProducer.publish(null))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessage("Task and sourceRef must not be null");
+    }
+
+    @Test
+    void publish_serializesToTheExactContractKeySet() {
+        Task task = createTask("jira:PROJ-3");
+        when(kafkaTemplate.send(anyString(), anyString(), any(BridgeTaskEventDto.class)))
+                .thenReturn(CompletableFuture.completedFuture(createSendResult(task)));
+
+        jiraKafkaProducer.publish(task);
+
+        ArgumentCaptor<BridgeTaskEventDto> eventCaptor = ArgumentCaptor.forClass(BridgeTaskEventDto.class);
+        verify(kafkaTemplate).send(anyString(), anyString(), eventCaptor.capture());
+
+        JsonNode json = MAPPER.valueToTree(eventCaptor.getValue());
+        Set<String> actualKeys = new TreeSet<>();
+        json.fieldNames().forEachRemaining(actualKeys::add);
+
+        assertThat(actualKeys).isEqualTo(new TreeSet<>(CONTRACT_KEYS));
+    }
+
+    @Test
+    void publish_serializesEnumsAsUpperSnakeCaseNotTasksLowercase() {
+        Task task = createTask("jira:PROJ-4");
+        when(kafkaTemplate.send(anyString(), anyString(), any(BridgeTaskEventDto.class)))
+                .thenReturn(CompletableFuture.completedFuture(createSendResult(task)));
+
+        jiraKafkaProducer.publish(task);
+
+        ArgumentCaptor<BridgeTaskEventDto> eventCaptor = ArgumentCaptor.forClass(BridgeTaskEventDto.class);
+        verify(kafkaTemplate).send(anyString(), anyString(), eventCaptor.capture());
+
+        JsonNode json = MAPPER.valueToTree(eventCaptor.getValue());
+        assertThat(json.get("sourceType").asText()).isEqualTo("JIRA_ISSUE");
+        assertThat(json.get("status").asText()).isEqualTo("NEW");
+        assertThat(json.get("tier").asText()).isEqualTo("TACTICAL");
     }
 
     private Task createTask(String sourceRef) {

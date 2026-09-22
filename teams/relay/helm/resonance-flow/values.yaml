@@ -16,37 +16,6 @@ podAnnotations: {}
 podLabels: {}
 podSecurityContext: {}
 securityContext: {}
-service:
-  type: ClusterIP
-  port: 8082
-ingress:
-  enabled: false
-  className: ""
-  annotations: {}
-  hosts:
-    - host: chart-example.local
-      paths:
-        - path: /
-          pathType: ImplementationSpecific
-  tls: []
-httpRoute:
-  enabled: false
-  annotations: {}
-  parentRefs:
-    - name: gateway
-      sectionName: http
-  hostnames:
-    - chart-example.local
-  rules:
-    - matches:
-        - path:
-            type: PathPrefix
-            value: /headers
-autoscaling:
-  enabled: false
-  minReplicas: 1
-  maxReplicas: 100
-  targetCPUUtilizationPercentage: 80
 volumes: []
 volumeMounts: []
 dependencies:
@@ -436,6 +405,60 @@ components:
       notificationDelivery:
         service:
           url: http://resonance-flow-notification-delivery:80
+  notification-delivery:
+    enabled: true
+    replicaCount: 1
+    image:
+      repository: "ghcr.io/kamatechorg/resonance-flow/notification-delivery"
+      pullPolicy: IfNotPresent
+      tag: "placeholder"
+    containerPort: 8082
+    service:
+      type: ClusterIP
+      port: 80
+    resources:
+      requests:
+        cpu: 100m
+        memory: 256Mi
+      limits:
+        cpu: 500m
+        memory: 512Mi
+    terminationGracePeriodSeconds: 30
+    updateStrategy:
+      type: RollingUpdate
+      rollingUpdate:
+        maxUnavailable: 0
+        maxSurge: 25%
+    startupProbe:
+      httpGet:
+        path: /healthz
+        port: http
+      periodSeconds: 5
+      failureThreshold: 40
+    livenessProbe:
+      httpGet:
+        path: /healthz
+        port: http
+      periodSeconds: 10
+      failureThreshold: 3
+    # /readyz (not /healthz) - don't route clients before the Kafka consumer has attached
+    # and been assigned partitions (see HealthController.java).
+    readinessProbe:
+      httpGet:
+        path: /readyz
+        port: http
+      periodSeconds: 5
+      failureThreshold: 3
+    env: {}
+    # Interim CPU-based HPA (templates/pipe-hpa.yaml). §10 open question: the real scaling
+    # signal is active WebSocket connections/pod, but that needs a custom-metrics adapter
+    # (e.g. Prometheus Adapter) plus a load-tested target-per-pod value. Swap this for a
+    # custom-metric HPA once both exist.
+    autoscaling:
+      enabled: true
+      minReplicas: 2
+      maxReplicas: 10
+      targetCPUUtilizationPercentage: 70
 kafka:
   enabled: true
   # bitnami/kafka was pruned from Docker Hub's free tier in 2025; bitnamilegacy/kafka
