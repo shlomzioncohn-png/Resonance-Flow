@@ -12,16 +12,20 @@ import org.springframework.kafka.support.SendResult;
 import org.springframework.stereotype.Component;
 
 import java.nio.charset.StandardCharsets;
+import java.util.List;
+import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
+import java.util.stream.Collectors;
 
 @Component
 public class KafkaEventPublisher implements EventPublisher {
 
     private static final Logger log = LoggerFactory.getLogger(KafkaEventPublisher.class);
 
-    private final KafkaTemplate<String, Object> kafkaTemplate;
+    private final KafkaTemplate<String, Object> protobufKafkaTemplate;
+    private final Map<EventType, ProtoEventMapper<?>> protoMappersByType;
     private final ScheduledExecutorService retryScheduler;
     private final int maxAttempts;
     private final long initialBackoffMs;
@@ -29,13 +33,16 @@ public class KafkaEventPublisher implements EventPublisher {
     private final long maxBackoffMs;
 
     public KafkaEventPublisher(
-            KafkaTemplate<String, Object> kafkaTemplate,
+            @Qualifier("protobufKafkaTemplate") KafkaTemplate<String, Object> protobufKafkaTemplate,
+            List<ProtoEventMapper<?>> protoMappers,
             @Qualifier("retryScheduler") ScheduledExecutorService retryScheduler,
             @Value("${kafka.producer.retry.max-attempts:3}") int maxAttempts,
             @Value("${kafka.producer.retry.initial-backoff-ms:200}") long initialBackoffMs,
             @Value("${kafka.producer.retry.backoff-multiplier:2.0}") double backoffMultiplier,
             @Value("${kafka.producer.retry.max-backoff-ms:5000}") long maxBackoffMs) {
-        this.kafkaTemplate = kafkaTemplate;
+        this.protobufKafkaTemplate = protobufKafkaTemplate;
+        this.protoMappersByType = protoMappers.stream()
+                .collect(Collectors.toMap(ProtoEventMapper::supportedType, m -> m));
         this.retryScheduler = retryScheduler;
         this.maxAttempts = maxAttempts;
         this.initialBackoffMs = initialBackoffMs;
@@ -53,7 +60,7 @@ public class KafkaEventPublisher implements EventPublisher {
 
     private <T> void attemptSend(ProducerRecord<String, Object> record, Event<T> event, String topic, String key,
                                   int attempt, CompletableFuture<Void> resultFuture) {
-        CompletableFuture<SendResult<String, Object>> future = kafkaTemplate.send(record);
+        CompletableFuture<SendResult<String, Object>> future = protobufKafkaTemplate.send(record);
 
         future.whenComplete((sendResult, ex) -> {
             if (ex == null) {
@@ -100,7 +107,7 @@ public class KafkaEventPublisher implements EventPublisher {
     }
 
     private <T> ProducerRecord<String, Object> buildRecord(String topic, String key, Event<T> event) {
-        ProducerRecord<String, Object> record = new ProducerRecord<>(topic, key, event.getPayload());
+        ProducerRecord<String, Object> record = new ProducerRecord<>(topic, key, toProtoValue(event));
         Headers headers = record.headers();
         headers.add("event_id", event.getEventId().toString().getBytes(StandardCharsets.UTF_8));
         headers.add("event_type", event.getEventType().getTopic().getBytes(StandardCharsets.UTF_8));
@@ -110,5 +117,20 @@ public class KafkaEventPublisher implements EventPublisher {
             headers.add("correlation_id", event.getCorrelationId().toString().getBytes(StandardCharsets.UTF_8));
         }
         return record;
+    }
+
+    private <T> Object toProtoValue(Event<T> event) {
+        ProtoEventMapper<?> mapper = protoMappersByType.get(event.getEventType());
+        if (mapper == null) {
+            throw new IllegalStateException(
+                    "No ProtoEventMapper registered for event type " + event.getEventType());
+        }
+        if (!(event.getPayload() instanceof Map)) {
+            throw new IllegalStateException("Expected a Map<String, Object> payload for event type "
+                    + event.getEventType() + " but got " + event.getPayload().getClass());
+        }
+        @SuppressWarnings("unchecked")
+        Map<String, Object> payloadMap = (Map<String, Object>) event.getPayload();
+        return mapper.toProto(payloadMap);
     }
 }

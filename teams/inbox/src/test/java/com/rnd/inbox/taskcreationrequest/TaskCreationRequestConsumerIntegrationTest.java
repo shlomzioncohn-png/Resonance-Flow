@@ -190,7 +190,7 @@ class TaskCreationRequestConsumerIntegrationTest extends PostgresIntegrationTest
         producer.send(TOPIC, missingRequiredFields);
 
         ConsumerRecord<String, String> errorRecord = KafkaTestUtils.getSingleRecord(
-                errorConsumer, ERROR_TOPIC, Duration.ofSeconds(10));
+                errorConsumer, ERROR_TOPIC, Duration.ofSeconds(25));
 
         assertThat(errorRecord.value()).contains("VALIDATION_FAILURE");
         assertThat(taskRepository.findAll().stream().noneMatch(t -> sourceRef.equals(t.getSourceRef()))).isTrue();

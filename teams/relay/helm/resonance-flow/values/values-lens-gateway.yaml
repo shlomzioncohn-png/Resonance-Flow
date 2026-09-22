@@ -13,6 +13,8 @@ components:
     enabled: false
   inbox:
     enabled: false
+  schema-registry:
+    enabled: false
 
 kafka:
   enabled: true

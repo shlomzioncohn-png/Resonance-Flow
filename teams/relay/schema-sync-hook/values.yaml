@@ -8,10 +8,15 @@ image:
 nameOverride: ""
 fullnameOverride: ""
 
-# The internal, in-cluster address — only reachable because this Job runs inside
-# the cluster, same as Schema Registry itself. NOT the same value used for local
-# testing (localhost) or from outside the cluster.
-schemaRegistryUrl: "http://schema-registry:8080/apis/ccompat/v6"
+# The internal, in-cluster address. Since c3908262, Schema Registry is deployed
+# as a `components.schema-registry` block inside the shared resonance-flow
+# Helm release/namespace, NOT this chart's own namespace (schema-sync-hook) —
+# so a bare Service name won't resolve; this needs the cross-namespace FQDN.
+# Service name comes from resonance-flow.fullname + "-schema-registry" (see
+# ../helm/resonance-flow/templates/service.yaml + _helpers.tpl) — verify this
+# still matches if that chart's release/component naming ever changes.
+# NOT the same value used for local testing (localhost) or from outside the cluster.
+schemaRegistryUrl: "http://resonance-flow-schema-registry.resonance-flow.svc.cluster.local:8080/apis/ccompat/v6"
 
 # Which schemas this hook checks + registers is NOT configured here — it comes
 # from teams/relay/ci/schema-subjects.tsv (copied in as files/schema-subjects.tsv
