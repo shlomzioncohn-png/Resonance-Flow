@@ -1,10 +1,15 @@
 {{- if .Values.pipeConsumerGroupSweep.enabled }}
 {{- $sweep := .Values.pipeConsumerGroupSweep }}
+{{- /* CronJob names are capped at 52 chars by Kubernetes (stricter than the
+   chart's normal 63-char fullname truncation) - trunc the release/component
+   prefix so the fixed "-pipe-consumer-group-sweep" suffix (26 chars) always
+   fits, regardless of how long an individual component's name is. */ -}}
+{{- $sweepName := printf "%s-pipe-consumer-group-sweep" (include "resonance-flow.fullname" $ | trunc 25 | trimSuffix "-") }}
 apiVersion: batch/v1
 kind: CronJob
 
 metadata:
-  name: {{ include "resonance-flow.fullname" $ }}-pipe-consumer-group-sweep
+  name: {{ $sweepName }}
   labels:
     {{- include "resonance-flow.labels" $ | nindent 4 }}
     app.kubernetes.io/component: pipe-consumer-group-sweep
@@ -51,6 +56,6 @@ spec:
           volumes:
             - name: sweep-script
               configMap:
-                name: {{ include "resonance-flow.fullname" $ }}-pipe-consumer-group-sweep
+                name: {{ $sweepName }}
                 defaultMode: 0755
 {{- end }}
