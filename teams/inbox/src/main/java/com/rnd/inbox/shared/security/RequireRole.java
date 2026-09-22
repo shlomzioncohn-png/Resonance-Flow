@@ -1,6 +1,6 @@
 package com.rnd.inbox.shared.security;
 
-import com.rnd.inbox.user.UserRole;
+import com.rnd.inbox.user.model.UserRole;
 
 import java.lang.annotation.ElementType;
 import java.lang.annotation.Retention;

@@ -1,8 +1,12 @@
 package com.rnd.inbox.shared.security;
 
+import com.rnd.inbox.task.model.Task;
+import com.rnd.inbox.task.security.TaskAuthorization;
+import com.rnd.inbox.tenant.security.TenantAuthorization;
+import com.rnd.inbox.user.security.UserAuthorization;
 import com.rnd.inbox.shared.exception.ForbiddenActionException;
-import com.rnd.inbox.tenant.Tenant;
-import com.rnd.inbox.user.User;
+import com.rnd.inbox.tenant.model.Tenant;
+import com.rnd.inbox.user.model.User;
 
 import java.util.UUID;
 import java.util.function.Function;

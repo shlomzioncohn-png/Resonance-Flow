@@ -1,5 +1,7 @@
 package com.rnd.inbox.shared.security;
 
+import com.rnd.inbox.tenant.model.Tenant;
+import com.rnd.inbox.user.model.User;
 import java.util.UUID;
 
 /**

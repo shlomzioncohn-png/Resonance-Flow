@@ -1,8 +1,8 @@
 package com.rnd.inbox.taskselection;
 
-import com.rnd.inbox.task.Task;
-import com.rnd.inbox.task.TaskRepository;
-import com.rnd.inbox.task.TaskStatus;
+import com.rnd.inbox.task.model.Task;
+import com.rnd.inbox.task.repository.TaskRepository;
+import com.rnd.inbox.task.model.TaskStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
