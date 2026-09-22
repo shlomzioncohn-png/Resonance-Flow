@@ -79,7 +79,8 @@ class MediaIntakeOrchestratorTest {
         Files.write(zoomDir.resolve("meeting.mp3"), "a".repeat(2000).getBytes());
         RawObjectEvent event = fakeEvent("MEETING/demo-tenant/2026-08-30/x.mp3");
         when(intakeService.land(any(), any(), eq("meeting.mp3"), eq("demo-tenant"),
-                eq(RawSourceType.MEETING), eq(Modality.AUDIO), any(), isNull(), isNull(), isNull(), any()))
+                eq(RawSourceType.MEETING), eq(Modality.AUDIO), any(), isNull(), isNull(), isNull(),
+                isNull(), any()))
                 .thenReturn(event);
 
         MediaIntakeOrchestrator.IntakeSummary summary = orchestrator.runIntake();
@@ -114,7 +115,8 @@ class MediaIntakeOrchestratorTest {
                 .thenReturn(transcriptKey);
         RawObjectEvent event = fakeEvent("MEETING/demo-tenant/2026-08-30/x.mp3");
         when(intakeService.land(any(), any(), eq("meeting.mp3"), eq("demo-tenant"),
-                eq(RawSourceType.MEETING), eq(Modality.AUDIO), any(), eq(transcriptKey), isNull(), isNull(), any()))
+                eq(RawSourceType.MEETING), eq(Modality.AUDIO), any(), eq(transcriptKey), isNull(),
+                isNull(), isNull(), any()))
                 .thenReturn(event);
 
         MediaIntakeOrchestrator.IntakeSummary summary = orchestrator.runIntake();
@@ -140,10 +142,12 @@ class MediaIntakeOrchestratorTest {
         when(intakeService.landMeetingMetadata(any(), eq("meeting.meeting.json"), eq("demo-tenant"),
                 eq(RawSourceType.MEETING), any(), any()))
                 .thenReturn(meetingMetadataKey);
+        Instant meetingStartedAt = Instant.parse("2026-09-08T09:00:00Z");
         RawObjectEvent event = fakeEvent("MEETING/demo-tenant/2026-08-30/x.mp3");
         when(intakeService.land(any(), any(), eq("meeting.mp3"), eq("demo-tenant"),
                 eq(RawSourceType.MEETING), eq(Modality.AUDIO), any(), isNull(),
-                eq(java.util.List.of("Dana Levi", "Esther Ora")), eq(meetingMetadataKey), any()))
+                eq(java.util.List.of("Dana Levi", "Esther Ora")), eq(meetingMetadataKey),
+                eq(meetingStartedAt), any()))
                 .thenReturn(event);
 
         MediaIntakeOrchestrator.IntakeSummary summary = orchestrator.runIntake();
@@ -162,7 +166,8 @@ class MediaIntakeOrchestratorTest {
         ArgumentCaptor<String> landRecordingId = ArgumentCaptor.forClass(String.class);
         verify(intakeService).land(any(), any(), eq("meeting.mp3"), eq("demo-tenant"),
                 eq(RawSourceType.MEETING), eq(Modality.AUDIO), any(), isNull(),
-                eq(java.util.List.of("Dana Levi", "Esther Ora")), eq(meetingMetadataKey), landRecordingId.capture());
+                eq(java.util.List.of("Dana Levi", "Esther Ora")), eq(meetingMetadataKey),
+                eq(meetingStartedAt), landRecordingId.capture());
         assertThat(landRecordingId.getValue()).isEqualTo(metadataRecordingId.getValue());
     }
 
@@ -171,7 +176,8 @@ class MediaIntakeOrchestratorTest {
         byte[] content = "d".repeat(2000).getBytes();
         Files.write(zoomDir.resolve("broken.mp3"), content);
         when(intakeService.land(any(), any(), eq("broken.mp3"), eq("demo-tenant"),
-                eq(RawSourceType.MEETING), eq(Modality.AUDIO), any(), isNull(), isNull(), isNull(), any()))
+                eq(RawSourceType.MEETING), eq(Modality.AUDIO), any(), isNull(), isNull(), isNull(),
+                isNull(), any()))
                 .thenThrow(new IllegalStateException("MinIO unreachable"));
 
         MediaIntakeOrchestrator.IntakeSummary summary = orchestrator.runIntake();

@@ -44,21 +44,25 @@ public class MediaIntakeService {
                                 RawSourceType sourceType, Modality modality, Instant ingestedAt,
                                 String transcriptObjectKey) {
         return land(content, contentHash, filename, tenantId, sourceType, modality, ingestedAt,
-                transcriptObjectKey, null, null, UUID.randomUUID().toString());
+                transcriptObjectKey, null, null, null, UUID.randomUUID().toString());
     }
 
     /**
      * Same as the 8-arg {@link #land} but also carries the participant names and
      * meeting-metadata sidecar pointer derived from a landed Zoom/BBB meeting-metadata
-     * sidecar (see media.meeting package) - both null when no such sidecar was found - and
-     * recordingId, the shared id this recording's object_key and its sidecars' object_keys
-     * all use (see landTranscript/landMeetingMetadata) so the three land next to each other
-     * when browsing MinIO by name, not scattered among unrelated recordings from the same day.
+     * sidecar (see media.meeting package) - both null when no such sidecar was found -
+     * sourceTimestamp (the meeting's own start time, per that same sidecar - null when there
+     * isn't one, distinct from ingestedAt which is when Bridge landed it, not when the
+     * meeting happened) - and recordingId, the shared id this recording's object_key and its
+     * sidecars' object_keys all use (see landTranscript/landMeetingMetadata) so the three land
+     * next to each other when browsing MinIO by name, not scattered among unrelated
+     * recordings from the same day.
      */
     public RawObjectEvent land(byte[] content, String contentHash, String filename, String tenantId,
                                 RawSourceType sourceType, Modality modality, Instant ingestedAt,
                                 String transcriptObjectKey, List<String> participants,
-                                String additionalMetadataObjectKey, String recordingId) {
+                                String additionalMetadataObjectKey, Instant sourceTimestamp,
+                                String recordingId) {
         String contentType = guessContentType(extractExtension(filename));
         String objectKey = buildObjectKey(sourceType, tenantId, ingestedAt, recordingId, extractExtension(filename));
 
@@ -69,7 +73,8 @@ public class MediaIntakeService {
         return RawObjectEvent.create(
                 objectKey, sourceType, tenantId, ingestedAt, ScopeDecision.INCLUDED, contentHash,
                 modality, participants, putResult.contentType(), putResult.sizeBytes(),
-                transcriptObjectKey, null, null, ATTACHMENT_INDEX_STANDALONE, additionalMetadataObjectKey);
+                transcriptObjectKey, sourceTimestamp, null, ATTACHMENT_INDEX_STANDALONE,
+                additionalMetadataObjectKey);
     }
 
     /**

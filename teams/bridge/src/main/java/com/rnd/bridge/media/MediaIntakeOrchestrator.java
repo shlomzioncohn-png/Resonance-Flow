@@ -213,18 +213,24 @@ public class MediaIntakeOrchestrator {
 
                 String additionalMetadataObjectKey = null;
                 List<String> participants = null;
+                Instant sourceTimestamp = null;
                 if (meetingMetadataFile != null) {
                     byte[] meetingMetadataContent = Files.readAllBytes(meetingMetadataFile);
                     additionalMetadataObjectKey = intakeService.landMeetingMetadata(
                             meetingMetadataContent, meetingMetadataFile.getFileName().toString(),
                             tenantId, source.sourceType(), ingestedAt, recordingId);
-                    participants = extractParticipantNames(source, meetingMetadataFile);
+                    MeetingMetadata meetingMetadata = readMeetingMetadata(source, meetingMetadataFile);
+                    if (meetingMetadata != null) {
+                        participants = meetingMetadata.participants().stream()
+                                .map(ParticipantActivity::name).toList();
+                        sourceTimestamp = meetingMetadata.startedAt();
+                    }
                 }
 
                 RawObjectEvent event = intakeService.land(
                         content, contentHash, file.getFileName().toString(), tenantId,
                         source.sourceType(), source.modality(), ingestedAt, transcriptObjectKey,
-                        participants, additionalMetadataObjectKey, recordingId);
+                        participants, additionalMetadataObjectKey, sourceTimestamp, recordingId);
                 eventPublisher.publish(event);
 
                 moveTo(file, uploadedDir);
@@ -284,13 +290,17 @@ public class MediaIntakeOrchestrator {
                 ? Optional.of(candidate) : Optional.empty();
     }
 
-    private List<String> extractParticipantNames(IntakeSource source, Path meetingMetadataFile) {
+    /**
+     * Parsed once and reused for both participants and sourceTimestamp (the meeting's own
+     * start time) - a single failure-to-parse affects both the same way: sidecar still lands,
+     * both fields left unset.
+     */
+    private MeetingMetadata readMeetingMetadata(IntakeSource source, Path meetingMetadataFile) {
         try {
-            MeetingMetadata metadata = source.meetingMetadataReader().read(meetingMetadataFile);
-            return metadata.participants().stream().map(ParticipantActivity::name).toList();
+            return source.meetingMetadataReader().read(meetingMetadataFile);
         } catch (Exception e) {
             log.warn("Failed to parse meeting-metadata sidecar {} - landing it anyway, "
-                    + "participants left unset", meetingMetadataFile, e);
+                    + "participants/sourceTimestamp left unset", meetingMetadataFile, e);
             return null;
         }
     }
