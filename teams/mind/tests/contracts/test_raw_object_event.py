@@ -38,6 +38,10 @@ def test_accepts_valid_raw_object_event() -> None:
         ),
         "schema_version": "1.0",
         "attachment_index": 0,
+        "attachment_count": 1,
+        "revision": 0,
+        "change_type": "UPSERT",
+        "change_significance_score": 100,
         "correlation_id": "550e8400-e29b-41d4-a716-446655440000",
         "transcript_object_key": (
             "MEETING/tenant-123/2026-08-20/transcript.txt"
@@ -46,23 +50,32 @@ def test_accepts_valid_raw_object_event() -> None:
 
     event = RawObjectEvent.model_validate(payload)
 
-    assert event.object_key == "EMAIL/tenant-123/2026-08-20/message.eml"
+    assert event.object_key == (
+        "EMAIL/tenant-123/2026-08-20/message.eml"
+    )
     assert event.source_type.value == "EMAIL"
     assert event.tenant_id == "tenant-123"
     assert event.scope_decision.value == "INCLUDED"
+
     assert event.attachment_index == 0
+    assert event.attachment_count == 1
+
+    assert event.revision == 0
+    assert event.change_type.value == "UPSERT"
+    assert event.change_significance_score == 100
+
     assert str(event.correlation_id) == (
         "550e8400-e29b-41d4-a716-446655440000"
     )
+
     assert event.transcript_object_key == (
         "MEETING/tenant-123/2026-08-20/transcript.txt"
     )
-
-
+    
 def test_rejects_invalid_source_type() -> None:
     payload = {
         "object_key": "EMAIL/tenant-123/2026-08-20/message.eml",
-        "source_type": "FACEBOOK",
+        "source_type": "FACEBOOK",  # Invalid source type
         "tenant_id": "tenant-123",
         "ingested_at": "2026-08-20T12:30:00Z",
         "scope_decision": "INCLUDED",
