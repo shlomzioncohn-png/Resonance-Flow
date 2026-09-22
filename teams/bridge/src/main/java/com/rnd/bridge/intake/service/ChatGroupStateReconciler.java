@@ -111,7 +111,7 @@ public class ChatGroupStateReconciler {
             String groupId = thread.getKey();
             List<ChatMessage> incoming = thread.getValue();
             ChatMessage first = incoming.get(0);
-            GroupState emptyValue = newGroupState(groupId, first.sourceType(), first.tenantId(), first.chatId(), groupId);
+            GroupState emptyValue = newThreadGroupState(first.sourceType(), first.tenantId(), first.chatId(), groupId);
             records.addAll(mergeAndMaybePublish(first.sourceType(), first.tenantId(), groupId, emptyValue, incoming));
         }
         return records;
@@ -468,5 +468,63 @@ public class ChatGroupStateReconciler {
         return new GroupState(
                 groupId, sourceType, tenantId, chatId, threadId, UUID.randomUUID().toString(), List.of(), false, -1,
                 null);
+    }
+
+    /**
+     * The "nothing persisted yet" value for a thread group, seeded with a copy of its root
+     * message's snapshot when that root was already ingested separately - the live Slack root ->
+     * first-reply case: the root arrives with no thread_ts, is ingested into its own non-thread
+     * group by reconcileNonThreadedMessage, and only becomes a thread's identity once the first
+     * reply names it via thread_ts. Without this, reconcileThreaded would mint a brand-new,
+     * root-less thread group for that first reply, permanently splitting the conversation.
+     * Only does the extra lookup when this thread group doesn't already exist
+     * (groupStateStore.load(threadId) empty) - for every later message in an already-created
+     * thread this returns a plain not-actually-used empty value instead (mergeIntoGroupState's
+     * ControlPlaneStateStore.update only ever consults emptyValue when nothing is persisted at
+     * the key yet), so the root is looked up and copied exactly once, at thread creation, never
+     * on every subsequent reply/edit.
+     * The root's own messageId always equals the thread's groupId (see GroupState's javadoc), so
+     * groupStateStore.findGroupIdForMessage(threadId) resolves to the root's CURRENT group - if
+     * that is a different group than this thread's own groupId, the root was split off exactly
+     * as above and its snapshot is copied in; if it resolves to threadId itself, or to nothing at
+     * all, this is an ordinary thread (e.g. the batch/poll path, where ChatSessionGrouper already
+     * grouped the root and its replies together from the very first run - see
+     * RealSlackSourceReader's hasReplies handling) and there is nothing to migrate.
+     * The copied snapshot drops confirmedAttachmentFileIds (see withoutConfirmedAttachments) -
+     * "confirmed" there means confirmed published under the ORIGINAL group's correlationId, not
+     * this new thread's, so nothing has actually been confirmed published for this group yet.
+     * The original group is only ever read here (groupStateStore.load, not update) - never
+     * modified, never locked - so it truly stays untouched by this migration, exactly as the
+     * design requires. GroupStateStore.writeMessageIndex separately guarantees that persisting
+     * this seeded thread group can never overwrite the root's existing index entry (still
+     * pointing at the original group) - see that method's javadoc.
+     */
+    private GroupState newThreadGroupState(
+            RawSourceType sourceType, String tenantId, String chatId, String threadId) {
+        if (groupStateStore.load(sourceType, tenantId, threadId).isPresent()) {
+            return newGroupState(threadId, sourceType, tenantId, chatId, threadId);
+        }
+        List<MessageSnapshot> seedMessages = migratedRootSnapshot(sourceType, tenantId, threadId)
+                .map(List::of)
+                .orElse(List.of());
+        return new GroupState(
+                threadId, sourceType, tenantId, chatId, threadId, UUID.randomUUID().toString(), seedMessages, false,
+                -1, null);
+    }
+
+    private Optional<MessageSnapshot> migratedRootSnapshot(RawSourceType sourceType, String tenantId, String threadId) {
+        return groupStateStore.findGroupIdForMessage(sourceType, tenantId, threadId)
+                .filter(rootGroupId -> !rootGroupId.equals(threadId))
+                .flatMap(rootGroupId -> groupStateStore.load(sourceType, tenantId, rootGroupId))
+                .flatMap(rootGroup -> rootGroup.messages().stream()
+                        .filter(snapshot -> snapshot.messageId().equals(threadId))
+                        .findFirst())
+                .map(this::withoutConfirmedAttachments);
+    }
+
+    private MessageSnapshot withoutConfirmedAttachments(MessageSnapshot snapshot) {
+        return new MessageSnapshot(
+                snapshot.messageId(), snapshot.sender(), snapshot.timestamp(), snapshot.text(),
+                snapshot.attachmentCount());
     }
 }

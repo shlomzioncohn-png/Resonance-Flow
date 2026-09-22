@@ -279,9 +279,27 @@ public class GroupStateStore {
         writeMessageIndex(state);
     }
 
+    /**
+     * Skips the one message whose id equals the group's own groupId - for a threaded group that
+     * is always exactly the thread's root (see GroupState's javadoc: groupId equals threadId for
+     * threaded groups, and a message's threadId is that root's own ts), never any other member.
+     * This matters for the live Slack root -> first-reply case (see
+     * ChatGroupStateReconciler.newThreadGroupState): when a root that was already ingested into
+     * its own non-thread group is copied into a newly-created thread group, that thread group's
+     * own persist must never re-point the root's existing index entry at itself - the original
+     * non-thread group must stay that messageId's permanent index owner. Harmless for the
+     * ordinary case where a thread's root and replies were always grouped together from the
+     * start (e.g. the batch/poll path) - there is no other group's index entry to protect there,
+     * and nothing ever looks up a threaded message's own root by messageId anyway (both
+     * ChatGroupStateReconciler edit-detection paths only consult the index for threadId()==null
+     * messages).
+     */
     private void writeMessageIndex(GroupState state) {
         GroupPointer pointer = new GroupPointer(state.groupId());
         for (MessageSnapshot message : state.messages()) {
+            if (message.messageId().equals(state.groupId())) {
+                continue;
+            }
             storageClient.putObject(
                     messageIndexKey(state.sourceType(), state.tenantId(), message.messageId()),
                     writeValue(pointer), "application/json", Map.of());

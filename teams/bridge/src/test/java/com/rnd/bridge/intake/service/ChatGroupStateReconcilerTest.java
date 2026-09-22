@@ -166,6 +166,103 @@ class ChatGroupStateReconcilerTest {
         assertThat(state.correlationId()).isEqualTo(correlationId);
     }
 
+    /**
+     * The live Slack root -> first-reply scenario: the root is posted before it has any replies
+     * (no thread_ts yet), so it's ingested via reconcileNonThreadedMessage into its own
+     * non-thread group - exactly as SlackEventsController.reconcileAndPublish routes a
+     * threadId()==null message. The first reply then arrives with thread_ts equal to the root's
+     * own ts, going through reconciler.group() as a threaded message.
+     */
+    @Test
+    void liveRootThenFirstReplyMigratesTheRootIntoTheNewThreadGroupWithoutTouchingTheOriginalGroup() {
+        ChatGroupStateReconciler.RealtimeReconcileResult rootResult = reconciler.reconcileNonThreadedMessage(
+                message("chat-a", "malki", "2026-08-18T09:00:00Z", "root question", "r1"));
+        String originalGroupId = rootResult.groupState().groupId();
+        assertThat(originalGroupId).isNotEqualTo("r1"); // minted UUID, not the root's own ts
+
+        List<SourceRecord> records = reconciler.group(List.of(
+                threadMessage("chat-a", "ruth", "2026-08-18T09:05:00Z", "reply", "reply1", "r1")));
+
+        assertThat(records).hasSize(1);
+        assertThat(records.get(0).body()).contains("root question").contains("reply");
+
+        GroupState threadGroup = groupStateStore.load(RawSourceType.SLACK, "kamatech", "r1").orElseThrow();
+        assertThat(threadGroup.messages()).extracting(MessageSnapshot::messageId).containsExactly("r1", "reply1");
+        assertThat(threadGroup.messages().get(0).text()).isEqualTo("root question");
+
+        // The original group is genuinely untouched - still just the root, same groupId.
+        GroupState originalGroup = groupStateStore.load(RawSourceType.SLACK, "kamatech", originalGroupId).orElseThrow();
+        assertThat(originalGroup.messages()).extracting(MessageSnapshot::messageId).containsExactly("r1");
+        assertThat(originalGroup.messages().get(0).text()).isEqualTo("root question");
+
+        // The root's index entry still points at the original group, not the new thread group -
+        // the thread's own copy must never claim ownership of it.
+        assertThat(groupStateStore.findGroupIdForMessage(RawSourceType.SLACK, "kamatech", "r1"))
+                .contains(originalGroupId);
+    }
+
+    @Test
+    void migratedRootDoesNotCarryForwardItsOriginalGroupsConfirmedAttachments() {
+        ChatMessage.Attachment attachment = new ChatMessage.Attachment("F1", "a.txt", "text/plain", "a".getBytes());
+        ChatMessage rootWithAttachment = new ChatMessage(
+                RawSourceType.SLACK, "kamatech", "chat-a", "malki", Instant.parse("2026-08-18T09:00:00Z"),
+                "root with a file", List.of(attachment), "r1", null);
+
+        ChatGroupStateReconciler.RealtimeReconcileResult rootResult =
+                reconciler.reconcileNonThreadedMessage(rootWithAttachment);
+        String originalGroupId = rootResult.groupState().groupId();
+        groupStateStore.confirmAttachmentPublished(RawSourceType.SLACK, "kamatech", originalGroupId, "r1", "F1");
+
+        reconciler.group(List.of(threadMessage("chat-a", "ruth", "2026-08-18T09:05:00Z", "reply", "reply1", "r1")));
+
+        GroupState threadGroup = groupStateStore.load(RawSourceType.SLACK, "kamatech", "r1").orElseThrow();
+        MessageSnapshot migratedRoot = threadGroup.messages().stream()
+                .filter(m -> m.messageId().equals("r1")).findFirst().orElseThrow();
+        assertThat(migratedRoot.confirmedAttachmentFileIds()).isEmpty();
+        assertThat(migratedRoot.attachmentCount()).isEqualTo(1);
+
+        // The original group's own confirmation state is unaffected by the copy.
+        GroupState originalGroup = groupStateStore.load(RawSourceType.SLACK, "kamatech", originalGroupId).orElseThrow();
+        assertThat(originalGroup.messages().get(0).confirmedAttachmentFileIds()).containsExactly("F1");
+    }
+
+    @Test
+    void editingTheRootAfterThreadingUpdatesTheThreadCopyNotTheOriginalGroup() {
+        ChatGroupStateReconciler.RealtimeReconcileResult rootResult = reconciler.reconcileNonThreadedMessage(
+                message("chat-a", "malki", "2026-08-18T09:00:00Z", "root question", "r1"));
+        String originalGroupId = rootResult.groupState().groupId();
+
+        reconciler.group(List.of(threadMessage("chat-a", "ruth", "2026-08-18T09:05:00Z", "reply", "reply1", "r1")));
+
+        // Once a message has replies, Slack itself reports the parent's own thread_ts as equal
+        // to its own ts (see RealSlackSourceReader's hasReplies handling), so a live edit of the
+        // root now arrives as a threaded message rather than a non-thread one.
+        reconciler.group(List.of(threadMessage(
+                "chat-a", "malki", "2026-08-18T09:00:00Z", "root question (edited)", "r1", "r1")));
+
+        GroupState threadGroup = groupStateStore.load(RawSourceType.SLACK, "kamatech", "r1").orElseThrow();
+        MessageSnapshot rootInThread = threadGroup.messages().stream()
+                .filter(m -> m.messageId().equals("r1")).findFirst().orElseThrow();
+        assertThat(rootInThread.text()).isEqualTo("root question (edited)");
+
+        GroupState originalGroup = groupStateStore.load(RawSourceType.SLACK, "kamatech", originalGroupId).orElseThrow();
+        assertThat(originalGroup.messages().get(0).text()).isEqualTo("root question");
+    }
+
+    @Test
+    void retryOfTheFirstReplyDoesNotDuplicateTheMigratedRootOrTheReply() {
+        reconciler.reconcileNonThreadedMessage(message("chat-a", "malki", "2026-08-18T09:00:00Z", "root question", "r1"));
+
+        reconciler.group(List.of(threadMessage("chat-a", "ruth", "2026-08-18T09:05:00Z", "reply", "reply1", "r1")));
+        // Slack redelivers the same reply event (e.g. SlackEventsController returned non-2xx for
+        // an unrelated record in the same batch).
+        reconciler.group(List.of(threadMessage("chat-a", "ruth", "2026-08-18T09:05:00Z", "reply", "reply1", "r1")));
+
+        GroupState threadGroup = groupStateStore.load(RawSourceType.SLACK, "kamatech", "r1").orElseThrow();
+        assertThat(threadGroup.messages()).extracting(MessageSnapshot::messageId).containsExactly("r1", "reply1");
+        assertThat(threadGroup.revision()).isZero();
+    }
+
     @Test
     void existingMessageIdIsMatchedToItsGroupRatherThanCreatingANewGroup() {
         List<SourceRecord> run1 = reconciler.group(List.of(

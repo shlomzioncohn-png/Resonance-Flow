@@ -66,6 +66,28 @@ class GroupStateStoreTest {
         assertThat(store.findGroupIdForMessage(RawSourceType.SLACK, "kamatech", "m2")).contains("g1");
     }
 
+    /**
+     * For a threaded group, groupId always equals threadId, which always equals the thread
+     * root's own messageId (see GroupState's javadoc). A thread group must never claim index
+     * ownership of that messageId - it stays whatever it already was (unset here, but see
+     * ChatGroupStateReconciler.newThreadGroupState for the live root -> first-reply case where
+     * it's the root's ORIGINAL non-thread group that must keep owning it).
+     */
+    @Test
+    void saveNeverIndexesAMessageWhoseIdEqualsItsOwnGroupId() {
+        GroupState threadGroup = new GroupState(
+                "r1", RawSourceType.SLACK, "kamatech", "chat-a", "r1", "c1",
+                List.of(
+                        new MessageSnapshot("r1", "malki", Instant.parse("2026-08-18T09:00:00Z"), "root", 0),
+                        new MessageSnapshot("reply1", "ruth", Instant.parse("2026-08-18T09:05:00Z"), "reply", 0)),
+                true, 0, null);
+
+        store.save(threadGroup);
+
+        assertThat(store.findGroupIdForMessage(RawSourceType.SLACK, "kamatech", "r1")).isEmpty();
+        assertThat(store.findGroupIdForMessage(RawSourceType.SLACK, "kamatech", "reply1")).contains("r1");
+    }
+
     @Test
     void updateStartsFromEmptyValueWhenNothingPersistedYet() {
         GroupState result = store.update(RawSourceType.SLACK, "kamatech", "g1", EMPTY, current -> new GroupState(
