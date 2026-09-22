@@ -39,7 +39,8 @@ class SearchResult(BaseModel):
 class VectorStore(ABC):
     @abstractmethod
     async def open(self) -> None:
-        """Eagerly initialize the store (open connections, ensure schema).
+        """Eagerly initialize the store (open connections, confirm the
+        schema has already been migrated).
 
         Optional -- upsert/search/delete/clear initialize lazily on first
         use otherwise. Call explicitly to tie resources to a known,

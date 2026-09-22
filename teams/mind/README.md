@@ -123,15 +123,22 @@ make dev                   # install with dev dependencies
 make lint                  # ruff + mypy
 make test                  # run the test suite
 make eval                  # run the evaluation harness against eval/personas/
+make migrate                # apply database migrations (alembic upgrade head)
 make run                   # run the API locally
 make docker-up             # or run everything via docker compose (API + vector-store)
 ```
 
+`make migrate` must run (once, after `vector-store` is up) before `make
+run`/`make test` against a fresh database -- the app itself no longer
+creates its own schema (see [`migrations/`](./migrations) and issue
+#441); it only checks the schema is already there, and fails fast with a
+clear message if it isn't.
+
 `make docker-up` (`docker compose up`) now brings up the full stack —
-the API **and** its `vector-store` (pgvector) dependency — with one
-command, waiting for `vector-store` to report healthy before starting
-`mind`. On a clean checkout: `docker compose down -v && docker compose
-up -d --build`.
+migrations, the API, **and** its `vector-store` (pgvector) dependency —
+with one command: `vector-store` becomes healthy, a one-shot `migrate`
+service runs against it and exits, then `mind` starts. On a clean
+checkout: `docker compose down -v && docker compose up -d --build`.
 
 Once running, `curl -f http://localhost:8000/health` should return `200`
 with `{"status": "ok", ...}`, and `docker compose ps` should show both
