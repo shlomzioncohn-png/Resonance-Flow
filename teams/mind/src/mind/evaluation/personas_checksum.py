@@ -38,12 +38,13 @@ def compute_personas_checksum(personas_dir: str | Path) -> str:
     content, in a fixed sorted order so the result doesn't depend on
     filesystem iteration order.
 
-    Content is read as text and line endings are normalized to `\n` before
-    hashing (`newline=""` + a `\r\n`/`\r` -> `\n` pass) so the checksum is the
-    same whether the file was checked out with git's autocrlf turned on
-    (Windows, `\r\n`) or off (CI/Linux, `\n`) — otherwise this would fail on
-    every PR just from checking the branch out on a different OS, with no
-    scenario content actually different.
+    Content is read as text (Python's default universal-newline translation
+    already turns `\r\n`/`\r` into `\n`) and explicitly normalized again as a
+    belt-and-suspenders pass before hashing, so the checksum is the same
+    whether the file was checked out with git's autocrlf turned on (Windows,
+    `\r\n`) or off (CI/Linux, `\n`) — otherwise this would fail on every PR
+    just from checking the branch out on a different OS, with no scenario
+    content actually different.
     """
     personas_path = Path(personas_dir)
     if not personas_path.is_dir():
@@ -55,7 +56,7 @@ def compute_personas_checksum(personas_dir: str | Path) -> str:
     )
     for scenario_path in scenario_files:
         relative = scenario_path.relative_to(personas_path).as_posix()
-        content = scenario_path.read_text(encoding="utf-8", newline="")
+        content = scenario_path.read_text(encoding="utf-8")
         normalized = content.replace("\r\n", "\n").replace("\r", "\n")
         digest.update(relative.encode("utf-8"))
         digest.update(b"\0")
