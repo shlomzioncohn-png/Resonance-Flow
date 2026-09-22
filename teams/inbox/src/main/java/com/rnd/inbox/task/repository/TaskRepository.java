@@ -2,6 +2,8 @@ package com.rnd.inbox.task.repository;
 import com.rnd.inbox.task.assignment.Assignment;
 import com.rnd.inbox.task.model.SourceType;
 import com.rnd.inbox.task.model.Task;
+import com.rnd.inbox.task.model.TaskStatus;
+import com.rnd.inbox.task.model.TaskTier;
 import com.rnd.inbox.team.member.TeamMember;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;

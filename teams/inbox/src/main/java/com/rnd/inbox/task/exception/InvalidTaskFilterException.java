@@ -1,4 +1,4 @@
-package com.rnd.inbox.task;
+package com.rnd.inbox.task.exception;
 
 import com.rnd.inbox.shared.exception.InboxException;
 

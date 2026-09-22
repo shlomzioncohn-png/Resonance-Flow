@@ -1,4 +1,8 @@
-package com.rnd.inbox.task;
+package com.rnd.inbox.task.dto;
+
+import com.rnd.inbox.task.model.SourceType;
+import com.rnd.inbox.task.model.TaskStatus;
+import com.rnd.inbox.task.model.TaskTier;
 
 import java.time.Instant;
 
