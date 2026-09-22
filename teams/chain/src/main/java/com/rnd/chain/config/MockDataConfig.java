@@ -6,28 +6,30 @@ import com.rnd.chain.repository.DependencyHistoryRepository;
 import com.rnd.chain.repository.InMemoryDependencyHistoryRepository;
 import com.rnd.chain.repository.InMemoryTaskDependencyRepository;
 import com.rnd.chain.repository.InMemoryTaskRepository;
-import com.rnd.chain.repository.InMemoryTransactionRunner;
 import com.rnd.chain.repository.TaskDependencyRepository;
 import com.rnd.chain.repository.TaskRepository;
-import com.rnd.chain.repository.TransactionRunner;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
-import java.time.Clock;
 import java.util.List;
 
 /**
  * Wires the in-memory mock repositories as Spring beans, so services
  * such as {@code TaskTraversalService} and {@code TaskDependencyService}
- * can be constructed via normal dependency injection - no real DB
- * connection (per current team-lead instruction; no DB technology has
- * been chosen yet).
+ * can be constructed via normal dependency injection when no real
+ * {@code DataSource} is wired. A real Postgres-backed alternative for each
+ * of these now exists ({@code Postgres*Repository}, see {@code CLAUDE.md}'s
+ * "Open items"); these mocks remain only as the {@link ConditionalOnMissingBean}
+ * fallback for that case.
  *
  * <p>Each bean is guarded with {@link ConditionalOnMissingBean} so a
  * consumer that registers its own {@link TaskRepository}/
  * {@link TaskDependencyRepository} (e.g. a real DB-backed implementation,
  * or a test double) is not overridden by this mock.
+ *
+ * <p>General-purpose infrastructure beans (not mock data) live in
+ * {@link InfrastructureConfig} instead.
  */
 @Configuration
 public class MockDataConfig {
@@ -50,20 +52,5 @@ public class MockDataConfig {
     @ConditionalOnMissingBean(DependencyHistoryRepository.class)
     public DependencyHistoryRepository dependencyHistoryRepository() {
         return new InMemoryDependencyHistoryRepository();
-    }
-
-    @Bean
-    @ConditionalOnMissingBean(TransactionRunner.class)
-    public TransactionRunner transactionRunner() {
-        return new InMemoryTransactionRunner();
-    }
-
-    // A @SpringBootTest overriding this must use a differently-named @Primary bean, not
-    // just @Bean Clock clock() - @ConditionalOnMissingBean here runs before a nested
-    // @TestConfiguration is parsed, so a same-named bean collides instead of being skipped.
-    @Bean
-    @ConditionalOnMissingBean(Clock.class)
-    public Clock clock() {
-        return Clock.systemUTC();
     }
 }
