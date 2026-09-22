@@ -46,6 +46,7 @@ import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
@@ -580,36 +581,65 @@ class TaskServiceTest {
     }
 
     @Test
-    void listTasks_whenActorIsSystemAdmin_returnsEveryTask() {
+    void listTasks_whenActorIsSystemAdmin_passesNullTenantId() {
         User actor = actorWithRole(UserRole.SYSTEM_ADMIN);
         when(userRepository.findById(actor.getId())).thenReturn(Optional.of(actor));
         Pageable pageable = PageRequest.of(0, 20);
         Task task = new Task();
         Page<Task> page = new PageImpl<>(List.of(task), pageable, 1);
-        when(taskRepository.findAll(pageable)).thenReturn(page);
+        when(taskRepository.findFiltered(
+                eq(true), isNull(), isNull(), isNull(), isNull(), isNull(), isNull(), isNull(), isNull(), isNull(),
+                eq(pageable)))
+                .thenReturn(page);
         TaskResponseDto responseDto = sampleTaskResponseDto();
         when(taskRestMapper.toResponseDto(task)).thenReturn(responseDto);
 
-        PageResponseDto<TaskResponseDto> result = taskService.listTasks(pageable, actor.getId());
+        PageResponseDto<TaskResponseDto> result = taskService.listTasks(new TaskFilterDto(), pageable, actor.getId());
 
         assertThat(result.getContent()).containsExactly(responseDto);
     }
 
     @Test
-    void listTasks_whenActorIsTenantAdmin_returnsOnlyOwnTenantTasks() {
+    void listTasks_whenActorIsTenantAdmin_passesOwnTenantId() {
         User actor = actorWithRole(UserRole.TENANT_ADMIN);
         when(userRepository.findById(actor.getId())).thenReturn(Optional.of(actor));
         Pageable pageable = PageRequest.of(0, 20);
         Task task = new Task();
         Page<Task> page = new PageImpl<>(List.of(task), pageable, 1);
-        when(taskRepository.findAllByTenant_Id(tenantId, pageable)).thenReturn(page);
+        when(taskRepository.findFiltered(
+                eq(false), eq(tenantId), isNull(), isNull(), isNull(), isNull(), isNull(), isNull(), isNull(),
+                isNull(), eq(pageable)))
+                .thenReturn(page);
         TaskResponseDto responseDto = sampleTaskResponseDto();
         when(taskRestMapper.toResponseDto(task)).thenReturn(responseDto);
 
-        PageResponseDto<TaskResponseDto> result = taskService.listTasks(pageable, actor.getId());
+        PageResponseDto<TaskResponseDto> result = taskService.listTasks(new TaskFilterDto(), pageable, actor.getId());
 
         assertThat(result.getContent()).containsExactly(responseDto);
-        verify(taskRepository, never()).findAll(pageable);
+    }
+
+    @Test
+    void listTasks_whenOnlyDeadlineFromProvided_throwsInvalidTaskFilterException() {
+        User actor = actorWithRole(UserRole.TENANT_ADMIN);
+        TaskFilterDto filter = new TaskFilterDto();
+        filter.setDeadlineFrom(Instant.now());
+
+        assertThatThrownBy(() -> taskService.listTasks(filter, PageRequest.of(0, 20), actor.getId()))
+                .isInstanceOf(InvalidTaskFilterException.class);
+        verifyNoInteractions(taskRepository);
+    }
+
+    @Test
+    void listTasks_whenNoDeadlineCombinedWithDeadlineRange_throwsInvalidTaskFilterException() {
+        User actor = actorWithRole(UserRole.TENANT_ADMIN);
+        TaskFilterDto filter = new TaskFilterDto();
+        filter.setDeadlineFrom(Instant.now());
+        filter.setDeadlineTo(Instant.now());
+        filter.setNoDeadline(true);
+
+        assertThatThrownBy(() -> taskService.listTasks(filter, PageRequest.of(0, 20), actor.getId()))
+                .isInstanceOf(InvalidTaskFilterException.class);
+        verifyNoInteractions(taskRepository);
     }
 
     @Test

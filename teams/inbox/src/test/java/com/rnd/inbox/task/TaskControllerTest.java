@@ -188,7 +188,7 @@ class TaskControllerTest {
     @Test
     void listTasks_returns200WithPageResponse() throws Exception {
         PageResponseDto<TaskResponseDto> page = new PageResponseDto<>(List.of(sampleTask()), 0, 20, 1, 1);
-        when(taskService.listTasks(any(), eq(actorId))).thenReturn(page);
+        when(taskService.listTasks(any(), any(), eq(actorId))).thenReturn(page);
 
         mockMvc.perform(get("/api/v1/tasks").header(ACTOR_HEADER, actorId.toString()))
                 .andExpect(status().isOk())

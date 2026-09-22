@@ -68,16 +68,19 @@ public class TaskController {
         return taskService.getTaskById(id, actorId);
     }
 
-    @Operation(summary = "List tasks within the actor's scope, paginated "
+    @Operation(summary = "List tasks within the actor's scope, paginated, with optional filters "
             + "(SYSTEM_ADMIN: every tenant; everyone else: their own tenant only)")
     @ApiResponses({
             @ApiResponse(responseCode = "200", description = "Page of tasks",
                     content = @Content(schema = @Schema(implementation = PageResponseDto.class))),
+            @ApiResponse(responseCode = "400", description = "deadlineFrom/deadlineTo not both provided, "
+                    + "or noDeadline combined with a deadline range"),
             @ApiResponse(responseCode = "401", description = "Missing or unrecognized actor identity")
     })
     @GetMapping
-    public PageResponseDto<TaskResponseDto> listTasks(Pageable pageable, @CurrentActor UUID actorId) {
-        return taskService.listTasks(pageable, actorId);
+    public PageResponseDto<TaskResponseDto> listTasks(
+            TaskFilterDto filter, Pageable pageable, @CurrentActor UUID actorId) {
+        return taskService.listTasks(filter, pageable, actorId);
     }
 
     @Operation(summary = "Update a task's details")

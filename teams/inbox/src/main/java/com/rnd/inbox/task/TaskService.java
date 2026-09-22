@@ -105,17 +105,55 @@ public class TaskService {
     }
 
     @Transactional(readOnly = true)
-    public PageResponseDto<TaskResponseDto> listTasks(Pageable pageable, UUID actorId) {
+    public PageResponseDto<TaskResponseDto> listTasks(TaskFilterDto filter, Pageable pageable, UUID actorId) {
+        validateFilter(filter);
         User actor = findActorOrThrow(actorId);
-        Page<Task> tasks = switch (taskAuthorization.scopeOf(actor)) {
-            case ActorScope.All ignored -> taskRepository.findAll(pageable);
-            case ActorScope.WithinTenant(UUID tenantId) -> taskRepository.findAllByTenant_Id(tenantId, pageable);
+        // bypassTenantScope comes only from this explicit role check - never from tenantId
+        // possibly being null - so a bug that left tenantId null for a non-admin fails closed
+        // (matches nothing) instead of silently granting cross-tenant access.
+        boolean bypassTenantScope;
+        UUID tenantId;
+        switch (taskAuthorization.scopeOf(actor)) {
+            case ActorScope.All ignored -> {
+                bypassTenantScope = true;
+                tenantId = null;
+            }
+            case ActorScope.WithinTenant(UUID id) -> {
+                bypassTenantScope = false;
+                tenantId = id;
+            }
             case ActorScope.WithinTeamsLedBy ignored ->
                     throw new ForbiddenActionException("Actor has no valid scope for tasks");
             case ActorScope.SelfOnly ignored ->
                     throw new ForbiddenActionException("Actor has no valid scope for tasks");
-        };
+        }
+        Page<Task> tasks = taskRepository.findFiltered(
+                bypassTenantScope,
+                tenantId,
+                filter.getTitle(),
+                filter.getDescription(),
+                filter.getStatus(),
+                filter.getAvailable(),
+                filter.getSource(),
+                filter.getDeadlineFrom(),
+                filter.getDeadlineTo(),
+                filter.getNoDeadline(),
+                pageable);
         return PageResponseDto.from(tasks.map(taskRestMapper::toResponseDto));
+    }
+
+    // Both-or-neither (a range needs both ends), and noDeadline=true is mutually exclusive with
+    // the range (asking for "no deadline at all" and "deadline within this range" in the same
+    // request is self-contradictory).
+    private void validateFilter(TaskFilterDto filter) {
+        boolean hasFrom = filter.getDeadlineFrom() != null;
+        boolean hasTo = filter.getDeadlineTo() != null;
+        if (hasFrom != hasTo) {
+            throw new InvalidTaskFilterException("deadlineFrom and deadlineTo must both be provided, or both omitted");
+        }
+        if (Boolean.TRUE.equals(filter.getNoDeadline()) && (hasFrom || hasTo)) {
+            throw new InvalidTaskFilterException("noDeadline cannot be combined with deadlineFrom/deadlineTo");
+        }
     }
 
     @Transactional

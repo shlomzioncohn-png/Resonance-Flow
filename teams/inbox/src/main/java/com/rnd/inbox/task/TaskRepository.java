@@ -6,6 +6,7 @@ import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
+import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -15,7 +16,37 @@ public interface TaskRepository extends JpaRepository<Task, UUID> {
     Optional<Task> findByTenant_IdAndSourceTypeAndSourceRef(
             UUID tenantId, SourceType sourceType, String sourceRef);
 
-    Page<Task> findAllByTenant_Id(UUID tenantId, Pageable pageable);
+    // Every user-facing filter param is optional (null = "don't filter on this"). tenantId scope
+    // is deliberately NOT expressed the same way: bypassTenantScope is a plain boolean, set only
+    // from an explicit SYSTEM_ADMIN role check in TaskService (never from a possibly-null field),
+    // so a bug that left tenantId null for a non-admin fails closed (matches nothing) instead of
+    // silently granting cross-tenant access the way "tenantId IS NULL -> see everything" would.
+    // Validated by TaskFilterService before this is called: deadlineFrom/deadlineTo are
+    // both-or-neither, and noDeadline (when true) is mutually exclusive with them.
+    @Query("""
+            SELECT t FROM Task t
+            WHERE (:bypassTenantScope = TRUE OR t.tenant.id = :tenantId)
+              AND (:title IS NULL OR LOWER(t.title) LIKE LOWER(CONCAT('%', :title, '%')))
+              AND (:description IS NULL OR LOWER(t.description) LIKE LOWER(CONCAT('%', :description, '%')))
+              AND (:status IS NULL OR t.status = :status)
+              AND (:available IS NULL OR t.available = :available)
+              AND (:source IS NULL OR t.sourceType = :source)
+              AND (:deadlineFrom IS NULL OR t.deadline >= :deadlineFrom)
+              AND (:deadlineTo IS NULL OR t.deadline <= :deadlineTo)
+              AND (:noDeadline IS NULL OR :noDeadline = FALSE OR t.deadline IS NULL)
+            """)
+    Page<Task> findFiltered(
+            @Param("bypassTenantScope") boolean bypassTenantScope,
+            @Param("tenantId") UUID tenantId,
+            @Param("title") String title,
+            @Param("description") String description,
+            @Param("status") TaskStatus status,
+            @Param("available") Boolean available,
+            @Param("source") SourceType source,
+            @Param("deadlineFrom") Instant deadlineFrom,
+            @Param("deadlineTo") Instant deadlineTo,
+            @Param("noDeadline") Boolean noDeadline,
+            Pageable pageable);
 
     @Query("""
             SELECT DISTINCT t FROM Task t
