@@ -87,8 +87,9 @@ src/test/java/com/rnd/chain/
 │                           # (real threads, real in-memory repos, no mocks), TaskDependencyServiceTest
 ├── repository/             # TaskRepositoryContractTest (shared contract, run against every
 │                           # implementation) + InMemoryTaskRepositoryTest,
-│                           # InMemoryTaskDependencyRepositoryTest, PostgresConstraintRepositoryTest
-│                           # (issue #378 - see that section below for why it can't pass yet)
+│                           # InMemoryTaskDependencyRepositoryTest, PostgresConstraintRepositoryTest,
+│                           # PostgresConstraintRepositoryConcurrencyTest (issue #378 - see that
+│                           # section below for why neither can pass yet)
 ├── dto/TaskTest.java, TaskDependencyTest.java
 ├── events/                 # ChainEventConsumerTest, ChainEventConsumerIntegrationTest
 │                           # (@EmbeddedKafka), EventEnvelopeTest, InMemoryProcessedEventStoreTest,
