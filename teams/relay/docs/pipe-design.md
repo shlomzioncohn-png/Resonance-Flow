@@ -2,11 +2,11 @@
 
 **Backend design doc · v1**
 
-How an urgency signal gets from the moment it's computed to the moment it lands on a user's screen — without Redis, without losing anything when a pod dies, and without a reconnect storm taking the service down with it.
+How an urgency signal gets from the moment it's computed to the moment it lands on a user's screen — without Redis, without losing anything when an instance dies, and without a reconnect storm taking the service down with it.
 
 | | |
 |---|---|
-| Consumes | `resonance.task-events` |
+| Consumes | `resonance.task-events-notifications` |
 | Produces | `resonance.task-notifications` |
 | Serves | LENS (gateway + BFF) |
 | Status | for review |
@@ -45,7 +45,7 @@ The current flow has two Kafka stages:
 
 The Pipe itself is deliberately kept separate from the task-processing logic. Its responsibility starts at `resonance.task-events-notifications` and ends at the client's WebSocket connection.
 
-This design intentionally avoids Redis. Kafka provides the durable replay source, while full-topic fan-out removes the need for cross-pod routing.
+This design intentionally avoids Redis. Kafka provides the durable replay source, while full-topic fan-out removes the need for cross-instance routing.
 
 ---
 
@@ -87,12 +87,12 @@ The transport is based on WebSockets, despite the current traffic being primaril
                └────┬──────────────────┬─────────────┬───┘
                     │                  │             │
                     │  3. Full Fan-Out (Consumers)   │
-                    ▼                  ▼             ▼        
-                  Pod A           Pod B           Pod C
-                  full topic      full topic      full topic
-                        │              │              │
-                        ▼              ▼              ▼
-                  local map        local map        local map
+                    ▼                  ▼             ▼
+              Instance A         Instance B        Instance C
+              full topic         full topic        full topic
+                    │                  │                  │
+                    ▼                  ▼                  ▼
+              local map          local map          local map
                         │
                         ├── match ───────▶ WS ──▶ LENS
                         │
@@ -101,7 +101,7 @@ The transport is based on WebSockets, despite the current traffic being primaril
 
 A REST poll endpoint covers clients that cannot hold a long-lived WebSocket connection.
 
-For reconnects, the client supplies the last received event ID (e.g., via a reconnection message payload or query parameter), and the receiving pod can recover missed events from its local ring buffer or directly from Kafka.
+For reconnects, the client supplies the last received event ID (e.g., via a reconnection message payload or query parameter), and the receiving instance can recover missed events from its local ring buffer or directly from Kafka.
 
 ---
 
@@ -214,19 +214,19 @@ A hard ceiling is applied so a continuously changing user still receives a bound
 
 ### The problem
 
-At any moment there can be thousands of live WebSocket connections spread across many pods behind one Gateway/LB.
+At any moment there can be thousands of live WebSocket connections spread across many instances behind one Gateway/LB.
 
-A Kafka notification is addressed to a specific user, but that user's browser can be connected to any Pipe pod.
+A Kafka notification is addressed to a specific user, but that user's browser can be connected to any Pipe instance.
 
-The design therefore needs to deliver the notification to the correct connection without requiring pods to know about each other.
+The design therefore needs to deliver the notification to the correct connection without requiring instances to know about each other.
 
 To see the decision table with the options and trade-offs go to `kafka-relay-consumption-strategy.md`
 
-#### full fan-out per pod — chosen
+#### full fan-out per instance — chosen
 
-Every Pipe pod independently consumes the entire `resonance.task-notifications` topic.
+Every Pipe instance independently consumes the entire `resonance.task-notifications` topic.
 
-Each pod maintains only its own local connection map:
+Each instance maintains only its own local connection map:
 
 ```text
 user_id → active WebSocket connection
@@ -234,12 +234,12 @@ user_id → active WebSocket connection
 
 When a message arrives:
 
-- if the user exists in the local map, the pod pushes the notification;
-- if the user does not exist in the local map, the pod drops the notification.
+- if the user exists in the local map, the instance pushes the notification;
+- if the user does not exist in the local map, the instance drops the notification.
 
-There is no pod-to-pod forwarding.
+There is no instance-to-instance forwarding.
 
-There is no shared user-to-pod registry.
+There is no shared user-to-instance registry.
 
 There is no sticky routing requirement.
 
@@ -250,9 +250,9 @@ Redis would normally provide two capabilities:
 | Redis job | Replacement |
 |---|---|
 | Replay buffer | Kafka retention |
-| Pub/sub routing between pods | Full-topic fan-out |
+| Pub/sub routing between instances | Full-topic fan-out |
 
-Kafka already retains the durable notification history, and every Pipe pod independently receives every notification.
+Kafka already retains the durable notification history, and every Pipe instance independently receives every notification.
 
 Therefore Redis is not required for either replay or routing.
 
@@ -260,44 +260,44 @@ Therefore Redis is not required for either replay or routing.
 
 1. The Processing Module creates a `TaskNotification`.
 2. The service publishes it to `resonance.task-notifications`, keyed by `org_id:user_id`.
-3. **Every Pipe pod** consumes that same Kafka record using its own consumer group.
-4. Each pod checks its own local `user_id → WebSocket connection` map.
-5. A pod with no matching connection drops the message.
-6. The pod holding the user's connection pushes the event to the client.
+3. **Every Pipe instance** consumes that same Kafka record using its own consumer group.
+4. Each instance checks its own local `user_id → WebSocket connection` map.
+5. An instance with no matching connection drops the message.
+6. The instance holding the user's connection pushes the event to the client.
 
 ```text
 Kafka: resonance.task-notifications
-                  │
-        ┌─────────┼─────────┬─────────┐
-        ▼         ▼         ▼         ▼
-      Pod A     Pod B     Pod C     Pod D
-        │         │         │         │
-     no match   User X    no match   no match
-        │         │         │         │
-       drop      push       drop      drop
-                  │
-                  ▼
-              User X
-                  │
-                  ▼
-                  WS
+                       │
+        ┌──────────────┼──────────────┬──────────────┐
+        ▼               ▼              ▼               ▼
+   Instance A       Instance B     Instance C      Instance D
+        │               │              │               │
+     no match         User X        no match         no match
+        │               │              │               │
+       drop             push           drop            drop
+                         │
+                         ▼
+                     User X
+                         │
+                         ▼
+                         WS
 ```
 
 ### What this model does not need
 
-- a shared cache between pods;
+- a shared cache between instances;
 - a shared pub/sub bus;
-- a `which pod is user X on` registry;
-- direct pod-to-pod communication;
+- a `which instance is user X on` registry;
+- direct instance-to-instance communication;
 - sticky Gateway routing.
 
 ### Accepted trade-off
 
-N pods each reading the full topic means N× read amplification against Kafka.
+N instances each reading the full topic means N× read amplification against Kafka.
 
 This is an intentional trade-off.
 
-The system pays additional Kafka read volume in exchange for eliminating cross-pod coordination and shared routing state.
+The system pays additional Kafka read volume in exchange for eliminating cross-instance coordination and shared routing state.
 
 If the notification volume eventually makes this expensive, the fallback is partition ownership / conventional consumer-group scaling. That optimization is deferred until measured traffic justifies the added complexity.
 
@@ -312,21 +312,56 @@ The workload therefore uses a normal Kubernetes `Deployment`, not a `StatefulSet
 | Concern | Setting | Why |
 |---|---|---|
 | Workload kind | `Deployment` | Pods are interchangeable |
-| Consumer group id | `pipe-${POD_NAME}` | Each pod independently consumes the full topic |
-| Autoscaling | HPA on active WebSocket connections/pod | Connection-bound workload |
+| Consumer group id | `pipe-${INSTANCE_NAME}-<random>` | Each instance independently consumes the full topic |
+| Autoscaling | CPU-based HPA for now; custom-metric HPA on active WebSocket connections/pod as a follow-up | Connections/pod is the real scaling signal for this workload, but needs a custom-metrics adapter (e.g. Prometheus Adapter) plus a load-tested target — see [§10](#10-decisions--open-questions) |
 | Rolling update | `maxUnavailable: 0`, `maxSurge: 25%` | Avoid intentionally reducing capacity |
 | Shutdown | `terminationGracePeriodSeconds: 30` | Stop new connections and drain existing streams |
-| Readiness probe | Consumer-attached check | Do not route clients before Kafka consumption is active |
-| Ingress / LB timeout | > 60s idle timeout | Must exceed the 15s heartbeat interval |
+| Readiness probe | `GET /readyz` | Do not route clients before Kafka consumption is active |
+| Liveness probe | `GET /healthz` | Process up |
+| Ingress / LB timeout | > 60s idle timeout | Must exceed the 15s heartbeat interval; depends on the ingress controller/cloud LB in use, not settable on the Deployment itself |
 
 ### Consumer group behavior
 
-Each pod gets its own consumer group:
+Each running instance gets its own consumer group, named after `INSTANCE_NAME` — a generic
+environment variable the app defines and reads (`relay.pipe.consumer-group-id` in
+`application.yml`) — plus a short random suffix it generates at startup. The app has no opinion
+on what supplies `INSTANCE_NAME` or how; that's deliberate, so this stays the same code whether
+it's run under Kubernetes, plain `docker run`, or a bare JVM. In Kubernetes specifically, the
+Helm chart is what populates it, from that pod's own `metadata.name` via the downward API
+(`fieldRef: fieldPath: metadata.name`) — see [§11](#11--configuration)'s neighbor, the
+`deployment.yaml` template, for that wiring. Using the downward API there rather than the
+kernel `$HOSTNAME` is itself deliberate: `$HOSTNAME` only happens to match the pod name and isn't
+guaranteed to (e.g. if `spec.hostname` is ever set explicitly).
+
+If `INSTANCE_NAME` is unset, the config falls back to a fresh random UUID rather than a fixed
+placeholder — so a plain local run (`mvn spring-boot:run`, `docker compose up`) always gets a
+usable, already-unique id and never fails to start just for lacking one.
+
+Inside an actual Kubernetes cluster, though, a missing `INSTANCE_NAME` means the chart's
+downward-API wiring got dropped, and that's worth failing loudly for rather than quietly running
+on the random fallback. `InstanceNameGuard` (`TaskNotificationConsumer`'s sibling in `event/`)
+checks this specifically: it reads `KUBERNETES_SERVICE_HOST`, which the kubelet sets in every pod
+regardless of this service's own config (the same signal Kubernetes client libraries use to
+detect in-cluster execution — the one piece of Kubernetes-specific awareness this class needs,
+since detecting "am I in a cluster" isn't the same concern as naming this instance), and if
+that's present while `INSTANCE_NAME` is blank, it throws `IllegalStateException` during startup
+with a message naming the gap — failing the deploy with a clear, specific cause instead of a
+generic "could not resolve placeholder" error, and without misfiring for local/CI runs that were
+never going to have `INSTANCE_NAME` in the first place.
+
+A present `INSTANCE_NAME` is still not proof the resulting consumer-group id is actually free to
+use. Kubernetes guarantees distinct pod names, but nothing guarantees this instance isn't racing
+an old instance of itself — a slow non-graceful exit whose group hasn't been swept yet (§06.7) —
+or starting up while some other process already holds that exact id. So the same guard also asks
+the broker directly, via `AdminClient.describeConsumerGroups`, whether a group by this id already
+has live members; if it does, `InstanceNameGuard` throws instead of joining it, since two members
+on one group id would silently split that instance's partition instead of each instance
+independently reading the full topic, defeating the full-fan-out design in §04.
 
 ```text
-Pod A → pipe-pod-a
-Pod B → pipe-pod-b
-Pod C → pipe-pod-c
+Instance A → pipe-<Instance A's INSTANCE_NAME>-<random>
+Instance B → pipe-<Instance B's INSTANCE_NAME>-<random>
+Instance C → pipe-<Instance C's INSTANCE_NAME>-<random>
 ```
 
 These groups are intentionally separate.
@@ -336,19 +371,19 @@ Therefore:
 ```text
 resonance.task-notifications
         │
-        ├── pipe-pod-a → full topic
-        ├── pipe-pod-b → full topic
-        └── pipe-pod-c → full topic
+        ├── pipe-<Instance A's INSTANCE_NAME>-<random> → full topic
+        ├── pipe-<Instance B's INSTANCE_NAME>-<random> → full topic
+        └── pipe-<Instance C's INSTANCE_NAME>-<random> → full topic
 ```
 
 There is no partition ownership relationship such as:
 
 ```text
-partition 0 → Pod A
-partition 1 → Pod B
+partition 0 → Instance A
+partition 1 → Instance B
 ```
 
-Every pod independently reads the entire topic.
+Every instance independently reads the entire topic.
 
 ### Why this survives a pod dying mid-stream
 
@@ -379,7 +414,7 @@ Client reconnect
       │
       │ Last-Event-ID
       ▼
-Any Pipe Pod
+Any Pipe Instance
       │
       ├── local ring buffer
       │       │
@@ -394,13 +429,13 @@ The local ring buffer is an optimization for small gaps.
 
 Kafka retention is the durable recovery mechanism.
 
-The pod can seek to the partition offset immediately after the client's last received event, replay forward, and then resume live consumption.
+The instance can seek to the partition offset immediately after the client's last received event, replay forward, and then resume live consumption.
 
 After replay, the connection rejoins the normal live WebSocket path.
 
 ### 2 · Reconnect thundering herd — availability
 
-**Cause:** A pod restart or network problem drops many connections at once.
+**Cause:** An instance restart or network problem drops many connections at once.
 
 **Fix:**
 
@@ -501,7 +536,7 @@ This keeps Kafka consumption state separate from client delivery state.
 
 ### 7 · Orphaned consumer group metadata — operational cleanliness
 
-**Cause:** Each Pipe pod runs its own throwaway consumer group (`pipe-${POD_NAME}`).
+**Cause:** Each Pipe pod runs its own throwaway consumer group (`pipe-${INSTANCE_NAME}-<random>`).
 
 On a clean shutdown — rolling deploy, HPA scale-down, manual pod delete — the pod has an opportunity to remove its own group before exiting.
 
@@ -558,14 +593,14 @@ Browser
 Gateway / LB
    │
    ▼
-Any Pipe Pod
+Any Pipe Instance
    │
    ├── register user_id → WebSocket connection
    │
    └── start delivery (bidirectional; pings/pongs for keepalive)
 ```
 
-The Gateway does not need to know which pod previously served the user.
+The Gateway does not need to know which instance previously served the user.
 
 ---
 
@@ -699,21 +734,35 @@ This provides per-user ordering through Kafka partition ordering.
 
 #### Consumer groups
 
-Each Pipe pod has its own consumer group:
+Each running instance has its own consumer group:
 
-`pipe-${POD_NAME}`
+`pipe-${INSTANCE_NAME}-<random>`
 
-This causes every pod to consume the complete notification topic independently.
+`INSTANCE_NAME` is a generic env var the app defines and reads — it has no built-in notion of
+Kubernetes or pods. In this deployment, the Helm chart is what populates it, from the pod's own
+`metadata.name` via the downward API (`fieldRef: fieldPath: metadata.name`), rather than the
+kernel `$HOSTNAME`, which only happens to match the pod name. That mapping is the chart's
+concern, not the app's — see the `deployment.yaml` template. The app appends a short random
+suffix of its own at startup as extra headroom, and falls back to a random UUID in place of
+`INSTANCE_NAME` itself if that's ever unset — which keeps plain local runs working, but is
+exactly the case `InstanceNameGuard` refuses to let slide inside a real Kubernetes cluster
+(detected via `KUBERNETES_SERVICE_HOST`, the one piece of Kubernetes awareness this class
+needs): a missing `INSTANCE_NAME` there means the chart's downward-API wiring is broken, so it
+fails startup with a specific, actionable error rather than letting the instance come up on an
+unreliable fallback. The same guard also checks the id it's about to use isn't already claimed —
+see [§05](#05-scaling-out-in-kubernetes).
+
+This causes every instance to consume the complete notification topic independently.
 
 #### Routing
 
 No sticky routing is required.
 
-The Gateway can establish a connection to any Pipe pod.
+The Gateway can establish a connection to any Pipe instance.
 
 #### Shared state
 
-No Redis, shared registry, or pod-to-pod routing is required.
+No Redis, shared registry, or instance-to-instance routing is required.
 
 #### Recovery
 
@@ -725,7 +774,7 @@ Consumer-group offsets are not used as the client recovery mechanism.
 
 Kafka retention is the durable source of notification history.
 
-The per-pod ring buffer is only an optimization for small replay gaps.
+The per-instance ring buffer is only an optimization for small replay gaps.
 
 ---
 
