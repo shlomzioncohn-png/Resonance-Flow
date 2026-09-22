@@ -3,6 +3,8 @@ package com.rnd.bridge.crm.repository.hubspot;
 import com.rnd.bridge.crm.model.Deal;
 import com.rnd.bridge.crm.model.DealStage;
 import com.rnd.bridge.crm.repository.DealRepository;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Primary;
@@ -89,6 +91,8 @@ import java.util.Optional;
 @Primary
 public class HubSpotDealRepository implements DealRepository {
 
+    private static final Logger log = LoggerFactory.getLogger(HubSpotDealRepository.class);
+
     private final HubSpotClient client;
     private final Clock clock;
     private final Map<String, DealStage> stageMapping;
@@ -170,7 +174,21 @@ public class HubSpotDealRepository implements DealRepository {
 
         List<Deal> deals = new ArrayList<>();
         for (HubSpotDealRecord record : client.fetchAllDeals()) {
-            deals.addAll(toDealHistory(record));
+            // toDealHistory() parses this one record's date/amount/stage
+            // history - each of those is a claim about HubSpot's response
+            // shape, not something this lane controls. read() runs entirely
+            // outside AbstractIntakeLane's per-record try/catch (see its
+            // Javadoc), so an uncaught failure here would abort the whole
+            // sync instead of skipping one deal. Catching broadly and by
+            // record, not by exception type, is deliberate: any parsing
+            // rule added to toDealHistory() later - a new field, a new
+            // format assumption - gets this same per-record safety net
+            // without a matching catch clause added here.
+            try {
+                deals.addAll(toDealHistory(record));
+            } catch (RuntimeException e) {
+                log.warn("Skipping HubSpot deal {} - failed to parse: {}", record.id(), e.getMessage());
+            }
         }
         deals.sort(Comparator.comparing(Deal::stageChangedAt).thenComparing(Deal::dealId));
         List<Deal> allDeals = Collections.unmodifiableList(deals);
