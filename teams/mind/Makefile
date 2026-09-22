@@ -13,6 +13,7 @@ lint:
 	ruff check src tests
 	mypy src
 	python -m mind.evaluation.schema --check
+	python -m mind.evaluation.personas_checksum --check
 
 schema:
 	python -m mind.evaluation.schema
