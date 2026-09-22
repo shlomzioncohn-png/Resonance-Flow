@@ -8,6 +8,7 @@ import com.fasterxml.jackson.databind.PropertyNamingStrategies;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.rnd.bridge.intake.config.SlackApiProperties;
 import com.rnd.bridge.intake.model.ChatMessage;
+import com.rnd.bridge.intake.parser.slack.SlackUserNameResolver;
 import com.rnd.bridge.raw.model.RawSourceType;
 import com.slack.api.model.File;
 import com.slack.api.model.Message;
@@ -44,9 +45,9 @@ import org.springframework.stereotype.Component;
  * messages, channel joins, etc.) returns {@link Optional#empty()} rather than throwing: Slack
  * must still receive its ack for those, they are just not fed into reconciliation. Expanding
  * support to those subtypes is out of scope for this step (see SlackEventsController).
- * userName resolution (Slack's users.info lookup, done by RealSlackSourceReader for the polling
- * path) is deliberately not done here - the real-time path uses the raw Slack user id as sender.
- * Revisit if/when a real display name is actually needed downstream for this path.
+ * userName resolution uses the same shared {@link SlackUserNameResolver} as
+ * {@code RealSlackSourceReader}'s polling path, so both paths agree on a resolved display name
+ * for the same user and share one lookup cache instead of each paying for its own users.info call.
  */
 @Component
 class SlackEventMessageParser {
@@ -61,10 +62,12 @@ class SlackEventMessageParser {
             .configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
 
     private final SlackApiProperties properties;
+    private final SlackUserNameResolver userNameResolver;
     private final HttpClient httpClient = HttpClient.newHttpClient();
 
-    SlackEventMessageParser(SlackApiProperties properties) {
+    SlackEventMessageParser(SlackApiProperties properties, SlackUserNameResolver userNameResolver) {
         this.properties = properties;
+        this.userNameResolver = userNameResolver;
     }
 
     Optional<ChatMessage> parse(JsonNode event) {
@@ -100,6 +103,13 @@ class SlackEventMessageParser {
         try {
             ObjectNode toMap = messageNode.deepCopy();
             toMap.put("channel", channelSource.get("channel").asText());
+            // Real Slack messages carry a "blocks" (Block Kit) array whose elements are a
+            // polymorphic LayoutBlock hierarchy - deserializable via the SDK's own Gson setup,
+            // but not via this plain Jackson mapper (no @JsonTypeInfo/@JsonSubTypes here), so
+            // treeToValue would throw on any real payload. Not read by this class (only
+            // channel/user/ts/text/thread_ts/files are), so it's dropped before mapping rather
+            // than fought with a custom polymorphic deserializer.
+            toMap.remove("blocks");
             message = SLACK_EVENT_MAPPER.treeToValue(toMap, Message.class);
         } catch (JsonProcessingException e) {
             return Optional.empty();
@@ -111,7 +121,7 @@ class SlackEventMessageParser {
                 RawSourceType.SLACK,
                 properties.tenantId(),
                 message.getChannel(),
-                message.getUser() == null ? "unknown" : message.getUser(),
+                userNameResolver.resolveUserName(message.getUser()),
                 Instant.ofEpochMilli(epochMillis),
                 message.getText(),
                 resolveAttachments(message.getFiles()),

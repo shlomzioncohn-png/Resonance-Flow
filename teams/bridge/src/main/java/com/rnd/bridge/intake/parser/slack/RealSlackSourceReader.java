@@ -8,13 +8,10 @@ import com.slack.api.methods.MethodsClient;
 import com.slack.api.methods.SlackApiException;
 import com.slack.api.methods.request.conversations.ConversationsHistoryRequest;
 import com.slack.api.methods.request.conversations.ConversationsRepliesRequest;
-import com.slack.api.methods.request.users.UsersInfoRequest;
 import com.slack.api.methods.response.conversations.ConversationsHistoryResponse;
 import com.slack.api.methods.response.conversations.ConversationsRepliesResponse;
-import com.slack.api.methods.response.users.UsersInfoResponse;
 import com.slack.api.model.File;
 import com.slack.api.model.Message;
-import com.slack.api.model.User;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.UncheckedIOException;
@@ -27,8 +24,6 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Optional;
-import java.util.concurrent.ConcurrentHashMap;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
 
@@ -49,11 +44,11 @@ public class RealSlackSourceReader implements SlackSourceReader {
     private final HttpClient httpClient = HttpClient.newHttpClient();
     // conversations.history only ever returns the sender as a user id (Uxxxxxxxx) - ids are
     // permanent, display names aren't, so Slack makes you look names up separately via
-    // users.info. Cached per read() call since the same handful of people post repeatedly in
-    // a channel; there's no cross-run cache since a user could rename between polls.
-    private final Map<String, String> userNameCache = new ConcurrentHashMap<>();
+    // users.info. Resolution/caching is delegated to the shared SlackUserNameResolver, reused by
+    // the live Events API path too - see its javadoc.
+    private final SlackUserNameResolver userNameResolver;
 
-    public RealSlackSourceReader(SlackApiProperties properties) {
+    public RealSlackSourceReader(SlackApiProperties properties, SlackUserNameResolver userNameResolver) {
         if (properties.botToken() == null || properties.botToken().isBlank()) {
             throw new IllegalStateException(
                     "bridge.intake.slack.bot-token must be set when bridge.intake.slack.mode=real");
@@ -64,6 +59,7 @@ public class RealSlackSourceReader implements SlackSourceReader {
         }
         this.properties = properties;
         this.methods = Slack.getInstance().methods(properties.botToken());
+        this.userNameResolver = userNameResolver;
     }
 
     @Override
@@ -177,49 +173,12 @@ public class RealSlackSourceReader implements SlackSourceReader {
                 RawSourceType.SLACK,
                 properties.tenantId(),
                 channelId,
-                resolveUserName(message.getUser()),
+                userNameResolver.resolveUserName(message.getUser()),
                 Instant.ofEpochMilli(epochMillis),
                 message.getText(),
                 resolveAttachments(message.getFiles()),
                 message.getTs(),
                 threadId);
-    }
-
-    // Falls back to the raw id (userId itself, or "unknown" if even that is missing - e.g. a
-    // bot-posted message) rather than failing the whole read over one lookup, matching how the
-    // rest of this reader treats a single bad item.
-    private String resolveUserName(String userId) {
-        if (userId == null) {
-            return "unknown";
-        }
-        return userNameCache.computeIfAbsent(userId, this::lookupUserName);
-    }
-
-    private String lookupUserName(String userId) {
-        try {
-            UsersInfoResponse response =
-                    methods.usersInfo(UsersInfoRequest.builder().user(userId).build());
-            if (!response.isOk() || response.getUser() == null) {
-                return userId;
-            }
-            return displayName(response.getUser()).orElse(userId);
-        } catch (IOException | SlackApiException e) {
-            return userId;
-        }
-    }
-
-    private Optional<String> displayName(User user) {
-        if (user.getProfile() != null && notBlank(user.getProfile().getRealName())) {
-            return Optional.of(user.getProfile().getRealName());
-        }
-        if (notBlank(user.getRealName())) {
-            return Optional.of(user.getRealName());
-        }
-        return notBlank(user.getName()) ? Optional.of(user.getName()) : Optional.empty();
-    }
-
-    private static boolean notBlank(String value) {
-        return value != null && !value.isBlank();
     }
 
     private List<ChatMessage.Attachment> resolveAttachments(List<File> files) {

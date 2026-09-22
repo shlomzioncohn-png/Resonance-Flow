@@ -2,10 +2,19 @@ package com.rnd.bridge.intake.parser.slack;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
 import com.rnd.bridge.intake.config.SlackApiProperties;
 import com.rnd.bridge.intake.model.ChatMessage;
+import com.slack.api.methods.MethodsClient;
+import com.slack.api.methods.request.users.UsersInfoRequest;
+import com.slack.api.methods.response.users.UsersInfoResponse;
 import com.slack.api.model.Message;
+import com.slack.api.model.User;
 import java.util.List;
 import org.junit.jupiter.api.Test;
 
@@ -14,20 +23,23 @@ import org.junit.jupiter.api.Test;
  * Slack Web API at all - both are checked eagerly in the constructor (unlike
  * RealWhatsAppSourceReader, which defers its checks to read()) because building the
  * MethodsClient itself requires the token up front.
- * toChatMessage()/hasReplies() are exercised directly against plain Message POJOs (no mocking
- * library in this project) rather than through read(), which would need a real/mocked Slack
- * network client - user is left unset on every test Message so resolveUserName() takes its
- * null-user "unknown" fallback instead of calling users.info over the network.
+ * toChatMessage()/hasReplies() are exercised directly against plain Message POJOs rather than
+ * through read(), which would need a real/mocked Slack network client. userNameResolver here
+ * wraps a mocked MethodsClient (SlackUserNameResolver's test-only seam) so resolution/caching can
+ * be verified without a real bot token or network access - see SlackUserNameResolverTest for the
+ * resolver's own fallback-chain coverage in isolation.
  */
 class RealSlackSourceReaderTest {
 
-    private final RealSlackSourceReader reader =
-            new RealSlackSourceReader(new SlackApiProperties("xoxb-fake", "kamatech", List.of("C123"), null));
+    private final MethodsClient methods = mock(MethodsClient.class);
+    private final SlackUserNameResolver userNameResolver = new SlackUserNameResolver(methods);
+    private final RealSlackSourceReader reader = new RealSlackSourceReader(
+            new SlackApiProperties("xoxb-fake", "kamatech", List.of("C123"), null), userNameResolver);
 
     @Test
     void failsFastWhenBotTokenIsNotConfigured() {
         assertThatThrownBy(() -> new RealSlackSourceReader(
-                        new SlackApiProperties(null, "kamatech", List.of("C123"), null)))
+                        new SlackApiProperties(null, "kamatech", List.of("C123"), null), userNameResolver))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("bot-token");
     }
@@ -35,7 +47,7 @@ class RealSlackSourceReaderTest {
     @Test
     void failsFastWhenNoChannelsAreConfigured() {
         assertThatThrownBy(() -> new RealSlackSourceReader(
-                        new SlackApiProperties("xoxb-fake", "kamatech", List.of(), null)))
+                        new SlackApiProperties("xoxb-fake", "kamatech", List.of(), null), userNameResolver))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("channels");
     }
@@ -77,5 +89,43 @@ class RealSlackSourceReaderTest {
 
         assertThat(root.threadId()).isEqualTo(reply.threadId()).isEqualTo("1700000000.000100");
         assertThat(root.id()).isNotEqualTo(reply.id());
+    }
+
+    @Test
+    void toChatMessageResolvesTheSendersDisplayNameThroughTheSharedResolver() throws Exception {
+        Message message = message("1700000000.000100", null, null, "hi");
+        message.setUser("U1");
+        User user = new User();
+        User.Profile profile = new User.Profile();
+        profile.setRealName("Alice Example");
+        user.setProfile(profile);
+        UsersInfoResponse response = new UsersInfoResponse();
+        response.setOk(true);
+        response.setUser(user);
+        when(methods.usersInfo(any(UsersInfoRequest.class))).thenReturn(response);
+
+        ChatMessage chatMessage = reader.toChatMessage("C123", message, null);
+
+        assertThat(chatMessage.sender()).isEqualTo("Alice Example");
+    }
+
+    @Test
+    void toChatMessageCachesAResolvedSenderAcrossMessagesFromTheSameUser() throws Exception {
+        User user = new User();
+        user.setName("bob");
+        UsersInfoResponse response = new UsersInfoResponse();
+        response.setOk(true);
+        response.setUser(user);
+        when(methods.usersInfo(any(UsersInfoRequest.class))).thenReturn(response);
+
+        Message first = message("1700000000.000100", null, null, "hi");
+        first.setUser("U2");
+        Message second = message("1700000000.000200", null, null, "hi again");
+        second.setUser("U2");
+
+        assertThat(reader.toChatMessage("C123", first, null).sender()).isEqualTo("bob");
+        assertThat(reader.toChatMessage("C123", second, null).sender()).isEqualTo("bob");
+
+        verify(methods, times(1)).usersInfo(any(UsersInfoRequest.class));
     }
 }

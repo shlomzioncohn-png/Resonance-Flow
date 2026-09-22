@@ -15,6 +15,7 @@ import com.rnd.bridge.intake.model.ChatMessage;
 import com.rnd.bridge.intake.model.GroupState;
 import com.rnd.bridge.intake.model.MessageSnapshot;
 import com.rnd.bridge.intake.model.SourceRecord;
+import com.rnd.bridge.intake.parser.slack.SlackUserNameResolver;
 import com.rnd.bridge.intake.service.ChatGroupStateReconciler;
 import com.rnd.bridge.intake.service.SlackSessionScheduler;
 import com.rnd.bridge.raw.model.RawSourceType;
@@ -58,8 +59,18 @@ class SlackEventsControllerTest {
     // exist specifically to prove realistic Slack JSON produces a ChatMessage the reconciler can
     // actually match by messageId, which SlackEventMessageParserTest alone doesn't demonstrate
     // (it never goes through this controller's routing/scheduling).
-    private final SlackEventMessageParser realEventMessageParser =
-            new SlackEventMessageParser(new SlackApiProperties("xoxb-fake", "kamatech", List.of("chat-a"), "shh"));
+    private final SlackUserNameResolver realParserUserNameResolver = mockPassThroughResolver();
+    private final SlackEventMessageParser realEventMessageParser = new SlackEventMessageParser(
+            new SlackApiProperties("xoxb-fake", "kamatech", List.of("chat-a"), "shh"), realParserUserNameResolver);
+
+    private static SlackUserNameResolver mockPassThroughResolver() {
+        SlackUserNameResolver resolver = mock(SlackUserNameResolver.class);
+        when(resolver.resolveUserName(any())).thenAnswer(invocation -> {
+            String userId = invocation.getArgument(0);
+            return userId == null ? "unknown" : userId;
+        });
+        return resolver;
+    }
     private final SlackEventsController controllerWithRealParser = new SlackEventsController(
             verifier, new ObjectMapper(), realEventMessageParser, reconciler, sessionScheduler, List.of(slackLane));
 
