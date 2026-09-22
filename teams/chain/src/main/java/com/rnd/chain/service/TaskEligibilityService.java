@@ -67,7 +67,7 @@ public class TaskEligibilityService {
 
     private boolean edgeExists(UUID taskId, UUID dependsOnTaskId) {
         return taskDependencyRepository.findByTaskId(taskId).stream()
-            .anyMatch(edge -> edge.getDependsOnTaskId().equals(dependsOnTaskId));
+            .anyMatch(edge -> edge.dependsOnTaskId().equals(dependsOnTaskId));
     }
 
     /** Copies every field of {@code task} into a new Builder, so callers only need to
@@ -192,7 +192,7 @@ public class TaskEligibilityService {
                 continue;
             }
             for (TaskDependency dep : taskDependencyRepository.findByTaskId(current)) {
-                toVisit.push(dep.getDependsOnTaskId());
+                toVisit.push(dep.dependsOnTaskId());
             }
         }
         return false;
@@ -253,7 +253,7 @@ public class TaskEligibilityService {
         log.info("Task {} status change affects {} dependent task(s), delta={}", taskId, dependents.size(), delta);
 
         for (TaskDependency dependent : dependents) {
-            UUID dependentId = dependent.getTaskId();
+            UUID dependentId = dependent.taskId();
             taskRepository.update(dependentId, task ->
                     withCounters(task, Math.max(0, task.getBlockingCount() + delta), task.getOpenConstraintCount()));
         }

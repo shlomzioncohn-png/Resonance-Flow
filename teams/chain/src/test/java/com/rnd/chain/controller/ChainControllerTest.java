@@ -140,10 +140,12 @@ class ChainControllerTest {
 
     @Test
     void traversal_whenTaskIdIsNotAValidUuid_returnsBadRequest() throws Exception {
+        // Message comes from GlobalExceptionHandler.handleTypeMismatch, shared across all
+        // controllers - it names the actual offending parameter, not a hardcoded "task ID".
         mockMvc.perform(get("/tasks/not-a-valid-uuid/ancestors"))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.status").value(400))
-                .andExpect(jsonPath("$.message").value("Invalid task ID"));
+                .andExpect(jsonPath("$.message").value("Invalid value for parameter 'id'"));
     }
 
     private static TaskResponse sampleResponse(UUID id) {
