@@ -1,6 +1,6 @@
 package com.rnd.inbox.taskselection;
 
-import com.rnd.inbox.task.Task;
+import com.rnd.inbox.task.model.Task;
 import org.springframework.stereotype.Component;
 
 import java.time.Instant;

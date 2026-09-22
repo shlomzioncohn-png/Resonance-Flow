@@ -2,7 +2,7 @@ package com.rnd.inbox.shared.config;
 
 import com.rnd.inbox.shared.security.CurrentActorArgumentResolver;
 import com.rnd.inbox.shared.security.RoleAuthorizationInterceptor;
-import com.rnd.inbox.user.UserRepository;
+import com.rnd.inbox.user.repository.UserRepository;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.web.method.support.HandlerMethodArgumentResolver;
 import org.springframework.web.servlet.config.annotation.InterceptorRegistry;

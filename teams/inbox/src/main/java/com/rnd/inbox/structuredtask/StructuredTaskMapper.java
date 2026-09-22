@@ -1,11 +1,11 @@
 package com.rnd.inbox.structuredtask;
 
-import com.rnd.inbox.task.SourceType;
-import com.rnd.inbox.task.Task;
-import com.rnd.inbox.task.TaskExtractionProvenance;
-import com.rnd.inbox.task.TaskRoleContext;
-import com.rnd.inbox.task.TaskStatus;
-import com.rnd.inbox.task.TaskTier;
+import com.rnd.inbox.task.model.SourceType;
+import com.rnd.inbox.task.model.Task;
+import com.rnd.inbox.task.model.TaskExtractionProvenance;
+import com.rnd.inbox.task.security.TaskRoleContext;
+import com.rnd.inbox.task.model.TaskStatus;
+import com.rnd.inbox.task.model.TaskTier;
 import org.springframework.stereotype.Component;
 
 import java.time.Clock;

@@ -1,7 +1,7 @@
 package com.rnd.inbox.shared.messaging.kafka;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.rnd.inbox.tenant.TenantNotFoundException;
+import com.rnd.inbox.tenant.exception.TenantNotFoundException;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;

@@ -2,9 +2,9 @@ package com.rnd.inbox.shared.security;
 
 import com.rnd.inbox.shared.exception.ForbiddenActionException;
 import com.rnd.inbox.shared.exception.UnauthenticatedException;
-import com.rnd.inbox.user.User;
-import com.rnd.inbox.user.UserRepository;
-import com.rnd.inbox.user.UserRole;
+import com.rnd.inbox.user.model.User;
+import com.rnd.inbox.user.repository.UserRepository;
+import com.rnd.inbox.user.model.UserRole;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import org.springframework.web.method.HandlerMethod;

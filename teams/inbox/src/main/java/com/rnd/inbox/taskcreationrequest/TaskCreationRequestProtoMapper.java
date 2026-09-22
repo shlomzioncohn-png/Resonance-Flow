@@ -9,7 +9,7 @@ import com.rnd.inbox.event.TaskCreationRequestedEvent;
 import com.rnd.inbox.event.TaskRoleContext;
 import com.rnd.inbox.event.TaskStatus;
 import com.rnd.inbox.event.TaskTier;
-import com.rnd.inbox.task.AssigneeDto;
+import com.rnd.inbox.task.assignment.AssigneeDto;
 import org.springframework.stereotype.Component;
 
 import java.time.Instant;

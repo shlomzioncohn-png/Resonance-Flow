@@ -4,7 +4,7 @@ import com.rnd.inbox.event.SchedulingUpdatedEvent;
 import com.rnd.inbox.shared.messaging.kafka.ErrorTopicPublisher;
 import com.rnd.inbox.shared.messaging.kafka.EventProcessingTemplate;
 import com.rnd.inbox.shared.messaging.validation.BeanValidationEventValidator;
-import com.rnd.inbox.task.TaskService;
+import com.rnd.inbox.task.service.TaskService;
 import jakarta.validation.Validator;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.springframework.kafka.annotation.KafkaListener;

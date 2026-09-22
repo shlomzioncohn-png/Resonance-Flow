@@ -1,12 +1,12 @@
 package com.rnd.inbox.structuredtask;
 
 import com.rnd.inbox.project.Project;
-import com.rnd.inbox.task.SourceType;
-import com.rnd.inbox.task.Task;
-import com.rnd.inbox.task.TaskExtractionProvenance;
-import com.rnd.inbox.task.TaskStatus;
-import com.rnd.inbox.tenant.Tenant;
-import com.rnd.inbox.user.User;
+import com.rnd.inbox.task.model.SourceType;
+import com.rnd.inbox.task.model.Task;
+import com.rnd.inbox.task.model.TaskExtractionProvenance;
+import com.rnd.inbox.task.model.TaskStatus;
+import com.rnd.inbox.tenant.model.Tenant;
+import com.rnd.inbox.user.model.User;
 import org.junit.jupiter.api.Test;
 
 import java.time.Clock;
