@@ -2,18 +2,26 @@
 
 Handoff document for whoever authors the `.proto` for this topic, per
 `teams/relay/docs/kafka-producer-consumer-guide.md` §2/§6 ("bring field names, types, and the
-topic name — you don't write the `.proto` yourself"). This is a from-scratch schema: `main` has no
-`schema-subjects.tsv` row and no `.proto` for `bridge.structured.tasks` today (verified
-2026-09-15), so nothing here is constrained by an already-registered version — field numbers below
-are proposed, not fixed.
+topic name — you don't write the `.proto` yourself"). This is still a from-scratch schema: `main`
+has no `schema-subjects.tsv` row and no `.proto` for `bridge.structured.tasks` (re-verified
+2026-09-22, against `main` post-#227), so nothing here is constrained by an already-registered
+version — field numbers below are proposed, not fixed.
+
+**Re-verified 2026-09-22, after #227 merged (Inbox's own producers for `task.created`/`updated`/
+`completed` are now genuinely on Protobuf, via a real deployed Apicurio Schema Registry chart
+component, not just prepped on an unmerged branch).** That merge changed a lot elsewhere in the
+repo but nothing about this specific topic: `bridge.structured.tasks` still has no `.proto` and no
+registry entry, and Inbox's consumer of it (`StructuredTaskConsumer`) is byte-for-byte unchanged -
+still a raw `String` `@KafkaListener` deserializing plain JSON via `EventProcessingTemplate`. See
+the resolved/updated open questions below for exactly what did and didn't change.
 
 Source of truth: `teams/bridge/src/main/java/com/rnd/bridge/task/BridgeTaskEventDto.java` as it
-exists on branch `ruth/crm-per-record-parse-fix` today. The wire format is plain camelCase JSON —
-Inbox confirmed this directly on 2026-09-15 (they have no `@JsonNaming` and no global Jackson
-naming strategy on their side either). Whatever the current or future JSON casing convention turns
-out to be, it's orthogonal to this document: Protobuf field naming is independent of JSON casing
-debates entirely, per Relay's own point that wire-level field naming doesn't apply to a binary,
-number-keyed format.
+exists on `main` today (not a feature branch anymore - the tenantId fix and this spec doc's own
+commit are both merged). The wire format is plain camelCase JSON — Inbox confirmed this directly
+on 2026-09-15 (they have no `@JsonNaming` and no global Jackson naming strategy on their side
+either). Whatever the current or future JSON casing convention turns out to be, it's orthogonal to
+this document: Protobuf field naming is independent of JSON casing debates entirely, per Relay's
+own point that wire-level field naming doesn't apply to a binary, number-keyed format.
 
 **Topic:** `bridge.structured.tasks`
 **Producers:** Bridge CRM lane (`CrmLaneConfig` → `KafkaPayloadPublisher`) and Bridge JIRA lane
@@ -205,7 +213,36 @@ every lane must supply one before this field can be added.
    — that's an internal Bridge naming inconsistency, not a wire-contract question, and doesn't
    affect this proto spec.
 2. `SourceType.JIRA_ISSUE` is unrecognized by Inbox's consumer today — pre-existing, orthogonal to Protobuf.
-3. Cutover strategy for the topic (dual-format transition period vs. hard cutover).
-4. `schema-subjects.tsv` has no row for this topic yet — needs a Relay-side addition once the `.proto` is authored.
-5. The registry has not been proven against a real deployed Apicurio instance anywhere in this repo (only `MockSchemaRegistryClient`, on the unmerged `avigail/issue-227-schema-registry-verification` branch, for a different set of topics).
+3. Cutover strategy for the topic (dual-format transition period vs. hard cutover). **Still open,
+   and now has a concrete precedent to weigh:** Inbox's own #227 migration for `task.created`/
+   `updated`/`completed` just switched those topics to Protobuf directly (see
+   `teams/inbox/src/main/java/com/rnd/inbox/shared/config/KafkaConfig.java`) rather than running a
+   dual-format transition period — worth asking Inbox how they handled (or didn't need to handle)
+   in-flight consumers during that cutover, since `bridge.structured.tasks` has the same
+   one-producer/one-consumer shape they did.
+4. `schema-subjects.tsv` has no row for this topic yet — needs a Relay-side addition once the `.proto` is authored. Still true as of 2026-09-22 (re-verified against current `main`; the 7 existing rows are unchanged, none of them ours).
+5. ~~The registry has not been proven against a real deployed Apicurio instance anywhere in this repo.~~
+   **Partially resolved 2026-09-22.** The *mechanism* is now proven for real: `.github/workflows/relay-schema-ci.yaml`
+   stands up an actual `apicurio/apicurio-registry-mem` container on every relay-schema-touching PR
+   ("the same Apicurio image prod uses," per that workflow's own comment) and runs real
+   seed-then-compat-check scripts against it — not a mock, and not unmerged. What's still open:
+   this gate only triggers on changes under `teams/relay/(src/main/proto|ci|schema-sync-hook)/`, so
+   it has never run for `bridge.structured.tasks` specifically, since no `.proto` for this topic
+   exists to trigger it. Separately, Inbox's own Java-level integration test
+   (`ProtoEventPublishingIntegrationTest`) still uses `MockSchemaRegistryClient`, not this real
+   registry - that's a narrower, still-open gap in their test suite, not the registry-mechanism
+   question this item originally asked about.
 6. Whether `occurred_at` should be optional for lanes without a natural "changed at" timestamp.
+7. **New, from comparing against Inbox's merged `KafkaConfig`:** should `BridgeTaskKafkaConfig`
+   align with how Inbox wired its own Protobuf template? Answer worked out in review: no
+   realignment needed. Inbox's `protobufKafkaTemplate` (`KafkaTemplate<String, Object>`) and its
+   `kafkaTemplate` (`KafkaTemplate<String, String>`, for `ErrorTopicPublisher`) are two fully
+   concrete, mutually-exclusive types, and `KafkaEventPublisher` still needs an explicit
+   `@Qualifier("protobufKafkaTemplate")` to pick the right one — the same mechanism
+   `BridgeTaskKafkaConfig` relies on, independently confirming it's the right call, not a
+   deviation. Inbox never needed a wildcard (`KafkaTemplate<?, ?>`) default bean because they only
+   ever have two producer-side types to juggle; Bridge's `kafkaTemplate` bean has to be a genuine
+   wildcard specifically because GitHub (`Task`), Media/Pointer (`Object`) and the dedicated
+   `BridgeTaskEventDto` template are three distinct concrete types sharing what used to be one
+   autoconfigured bean. Different shape of problem, same underlying Spring DI mechanism, not a
+   pattern mismatch to fix.
