@@ -97,7 +97,8 @@ public class ChatSourceRecordMapper {
                         attachmentCount,
                         ownerMessageId,
                         0,
-                        ChangeType.UPSERT));
+                        ChangeType.UPSERT,
+                        null));
             }
         }
         return records;
@@ -109,9 +110,12 @@ public class ChatSourceRecordMapper {
      * every message ever accumulated into {@code mergedGroup} (old + new), but attachments are
      * only emitted for {@code newMessagesThisBatch}: a message read in an earlier run already
      * had its attachments landed then, so re-emitting them here would just duplicate them.
-     * Uses mergedGroup.correlationId() — the stable UUID Mind receives — not mergedGroup.groupId()
-     * (Bridge's own internal identity, a threadId or minted session UUID that's never sent
-     * downstream); see GroupState's javadoc.
+     * Uses mergedGroup.correlationId() as the wire-facing correlationId — the stable UUID Mind
+     * receives — never mergedGroup.groupId() (Bridge's own internal identity, a threadId or
+     * minted session UUID that's never sent downstream); see GroupState's javadoc. groupId IS
+     * still carried onto each built SourceRecord's own groupId field, though - Bridge-internal
+     * bookkeeping only (see SourceRecord's javadoc), letting UnstructuredIntakeLane.afterPublish
+     * confirm the exact group these records came from without a reverse messageId-index lookup.
      */
     public List<SourceRecord> toSourceRecords(GroupState mergedGroup, List<ChatMessage> newMessagesThisBatch) {
         List<MessageSnapshot> allMessages = mergedGroup.messages();
@@ -150,7 +154,8 @@ public class ChatSourceRecordMapper {
                 0,
                 attachmentCount,
                 sessionMessageIds,
-                mergedGroup.revision()));
+                mergedGroup.revision(),
+                mergedGroup.groupId()));
 
         int attachmentIndex = 0;
         for (ChatMessage message : newMessagesThisBatch) {
@@ -175,7 +180,7 @@ public class ChatSourceRecordMapper {
                         attachmentCount,
                         ownerMessageId,
                         mergedGroup.revision(),
-                        ChangeType.UPSERT));
+                        mergedGroup.groupId()));
             }
         }
         return records;

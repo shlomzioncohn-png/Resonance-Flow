@@ -70,6 +70,19 @@ import java.util.List;
  * no notion of "cancellation" — it only tracks etag changes; deciding changeType is entirely
  * this field's job). The convenience constructor below defaults to UPSERT precisely so every
  * other reader/mapper never has to think about this field at all.
+ * groupId is ChatGroupStateReconciler's own internal GroupState.groupId (a Slack threadId or a
+ * minted time-gap session UUID - see GroupState's javadoc) that produced this record - Bridge-
+ * internal bookkeeping only, like sourceMessageIds/attachmentFileId above, never mapped onto
+ * RawObjectEvent/the wire. Null for every non-chat source and for the stateless chat path
+ * (WhatsApp/fixtures, ChatSourceRecordMapper.toSourceRecords(List) - there is no persisted
+ * GroupState to report an id for there). UnstructuredIntakeLane.afterPublish reads it directly to
+ * know exactly which GroupState to confirm, instead of reverse-resolving one through
+ * GroupStateStore's messageId index - that index exists purely for recognizing an edit/re-read of
+ * a message already landed under some group (see GroupStateStore's class javadoc), not for
+ * answering "which group produced this specific SourceRecord", and using it for the latter used to
+ * silently break for a thread's root message, which GroupStateStore.writeMessageIndex deliberately
+ * never indexes (see its javadoc) - see ChatGroupStateReconcilerTest/ChatEditWireContractTest for
+ * the regression this was fixed for.
  */
 public record SourceRecord(
         RawSourceType sourceType,
@@ -89,11 +102,13 @@ public record SourceRecord(
         int attachmentCount,
         List<String> sourceMessageIds,
         int revision,
-        ChangeType changeType) {
+        ChangeType changeType,
+        String groupId) {
 
     /** Convenience constructor for every case except a Slack attachment record (which needs
      * attachmentFileId - see below) and Calendar's cancellation path - defaults attachmentFileId
-     * to null and changeType to UPSERT, the only values any other source/case ever needs. */
+     * to null, changeType to UPSERT, and groupId to null (no persisted GroupState behind this
+     * record - see groupId's javadoc), the only values any other source/case ever needs. */
     public SourceRecord(
             RawSourceType sourceType,
             String tenantId,
@@ -113,11 +128,12 @@ public record SourceRecord(
             int revision) {
         this(sourceType, tenantId, naturalId, correlationId, occurredAt, sender, participants, subject, body,
                 rawContent, mimeType, attachmentFilename, null, attachmentIndex, attachmentCount, sourceMessageIds,
-                revision, ChangeType.UPSERT);
+                revision, ChangeType.UPSERT, null);
     }
 
-    /** Convenience constructor for Calendar's cancellation path - same attachmentFileId default
-     * as above (Calendar attachments aren't implemented yet), explicit changeType. */
+    /** Convenience constructor for Calendar's cancellation path - same attachmentFileId/groupId
+     * defaults as above (Calendar attachments aren't implemented yet, and Calendar never has a
+     * chat GroupState), explicit changeType. */
     public SourceRecord(
             RawSourceType sourceType,
             String tenantId,
@@ -138,6 +154,60 @@ public record SourceRecord(
             ChangeType changeType) {
         this(sourceType, tenantId, naturalId, correlationId, occurredAt, sender, participants, subject, body,
                 rawContent, mimeType, attachmentFilename, null, attachmentIndex, attachmentCount, sourceMessageIds,
-                revision, changeType);
+                revision, changeType, null);
+    }
+
+    /** Convenience constructor for a chat transcript record built from a persisted GroupState -
+     * same shape as the first convenience constructor (no attachmentFileId, always UPSERT) but
+     * with a real groupId (see its javadoc) instead of defaulting it to null. */
+    public SourceRecord(
+            RawSourceType sourceType,
+            String tenantId,
+            String naturalId,
+            String correlationId,
+            Instant occurredAt,
+            String sender,
+            List<String> participants,
+            String subject,
+            String body,
+            byte[] rawContent,
+            String mimeType,
+            String attachmentFilename,
+            int attachmentIndex,
+            int attachmentCount,
+            List<String> sourceMessageIds,
+            int revision,
+            String groupId) {
+        this(sourceType, tenantId, naturalId, correlationId, occurredAt, sender, participants, subject, body,
+                rawContent, mimeType, attachmentFilename, null, attachmentIndex, attachmentCount, sourceMessageIds,
+                revision, ChangeType.UPSERT, groupId);
+    }
+
+    /** Convenience constructor for a Slack attachment record built from a persisted GroupState -
+     * the one case that needs both attachmentFileId (see its javadoc) and a real groupId (see
+     * groupId's javadoc), but never a non-UPSERT changeType (Calendar is the only source with a
+     * cancellation path, and it has no attachments yet). */
+    public SourceRecord(
+            RawSourceType sourceType,
+            String tenantId,
+            String naturalId,
+            String correlationId,
+            Instant occurredAt,
+            String sender,
+            List<String> participants,
+            String subject,
+            String body,
+            byte[] rawContent,
+            String mimeType,
+            String attachmentFilename,
+            String attachmentFileId,
+            int attachmentIndex,
+            int attachmentCount,
+            List<String> sourceMessageIds,
+            int revision,
+            String groupId) {
+        this(sourceType, tenantId, naturalId, correlationId, occurredAt, sender, participants, subject, body,
+                rawContent, mimeType, attachmentFilename, attachmentFileId, attachmentIndex, attachmentCount,
+                sourceMessageIds, revision, ChangeType.UPSERT, groupId);
     }
 }

@@ -89,15 +89,20 @@ public final class UnstructuredIntakeLane extends AbstractIntakeLane<SourceRecor
      * Confirms a chat group's publish state once its transcript record has actually been
      * published - see ChatGroupStateReconciler.mergeAndMaybePublish for why a group is only
      * ever persisted as pending until this fires. Gated on attachmentIndex()==0 (the
-     * transcript/body record, never an attachment) and a non-empty sourceMessageIds (only
-     * chat records built from a persisted group carry one - see SourceRecord's javadoc), so
-     * this is a no-op for every other source and for attachment records.
-     * source.correlationId() is Mind's UUID, not GroupStateStore's own storage key (see
-     * GroupState's javadoc) - so the group is instead resolved back to its internal groupId via
-     * the messageId index, keyed on any one of this record's sourceMessageIds (every message in
-     * a persisted group is indexed to it, including ones landed in earlier runs). ifPresent
-     * rather than orElseThrow: same not-found tolerance GroupStateStore.confirmPublished itself
-     * already has for a group that genuinely isn't there.
+     * transcript/body record, never an attachment) and a non-null source.groupId() (only chat
+     * records built from a persisted group carry one - see SourceRecord's javadoc), so this is a
+     * no-op for every other source and for attachment records.
+     * source.groupId() is ChatGroupStateReconciler's own internal GroupState.groupId, carried
+     * straight through from the GroupState that produced this record (see SourceRecord's
+     * javadoc) - not reverse-resolved through GroupStateStore's messageId index. That index is
+     * for recognizing an edit/re-read of an already-landed message (see GroupStateStore's class
+     * javadoc), not for answering "which group produced this SourceRecord": resolving via the
+     * index used to break for a thread's root message specifically, since
+     * GroupStateStore.writeMessageIndex deliberately never indexes it (see that method's
+     * javadoc) - a thread transcript's sourceMessageIds is always root-first (sorted by
+     * timestamp), so looking the confirmation target up via sourceMessageIds().get(0) silently
+     * never resolved for any thread with a reply, leaving the group's published flag stuck at
+     * false and every later edit permanently collapsing onto revision 0 instead of advancing.
      * Passes source.revision() through so GroupStateStore.confirmPublished only flips the
      * group published if that's still its current revision - this ack belongs to the specific
      * revision this SourceRecord was built from, which may no longer be current by the time
@@ -115,22 +120,23 @@ public final class UnstructuredIntakeLane extends AbstractIntakeLane<SourceRecor
     @Override
     protected void afterPublish(SourceRecord source, RawObjectEvent payload, Instant asOf) {
         try {
-            if (source.attachmentIndex() == 0 && !source.sourceMessageIds().isEmpty()) {
-                groupStateStore
-                        .findGroupIdForMessage(source.sourceType(), source.tenantId(), source.sourceMessageIds().get(0))
-                        .ifPresent(groupId -> groupStateStore.confirmPublished(
-                                source.sourceType(), source.tenantId(), groupId, source.revision()));
+            if (source.attachmentIndex() == 0 && source.groupId() != null) {
+                groupStateStore.confirmPublished(
+                        source.sourceType(), source.tenantId(), source.groupId(), source.revision());
             } else if (source.attachmentIndex() > 0
                     && source.attachmentFileId() != null
+                    && source.groupId() != null
                     && !source.sourceMessageIds().isEmpty()) {
                 // Mirrors the transcript confirmation above, at per-attachment granularity - see
                 // GroupStateStore.confirmAttachmentPublished's javadoc for why this is keyed on
-                // Slack's own stable file id rather than this record's attachmentIndex.
+                // Slack's own stable file id rather than this record's attachmentIndex. The
+                // owning message id itself still comes from sourceMessageIds (an attachment
+                // record's single element, always that specific message's own id, never the
+                // group's root) - only the GROUP identity now comes from source.groupId()
+                // instead of a reverse messageId-index lookup.
                 String messageId = source.sourceMessageIds().get(0);
-                groupStateStore
-                        .findGroupIdForMessage(source.sourceType(), source.tenantId(), messageId)
-                        .ifPresent(groupId -> groupStateStore.confirmAttachmentPublished(
-                                source.sourceType(), source.tenantId(), groupId, messageId, source.attachmentFileId()));
+                groupStateStore.confirmAttachmentPublished(
+                        source.sourceType(), source.tenantId(), source.groupId(), messageId, source.attachmentFileId());
             }
         } catch (RuntimeException e) {
             throw new LaneException(

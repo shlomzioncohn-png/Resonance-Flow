@@ -25,7 +25,6 @@ import com.rnd.bridge.raw.model.ScopeDecision;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.List;
-import java.util.Optional;
 import java.util.stream.Stream;
 import org.junit.jupiter.api.Test;
 
@@ -43,13 +42,12 @@ class UnstructuredIntakeLaneTest {
             ScopeDecision.INCLUDED, "sha256:" + "0".repeat(64), null, List.of("hadas@kamatech.org"),
             "application/json", 2L, Instant.parse("2026-08-18T09:15:00Z"), "corr-1", 0, 0, 0, ChangeType.UPSERT);
 
-    // A chat transcript record (attachmentIndex 0, non-empty sourceMessageIds) - the shape that
-    // actually reaches the GroupStateStore confirmation branch inside afterPublish, unlike
-    // RECORD above.
+    // A chat transcript record (attachmentIndex 0, non-null groupId) - the shape that actually
+    // reaches the GroupStateStore confirmation branch inside afterPublish, unlike RECORD above.
     private static final SourceRecord SLACK_RECORD = new SourceRecord(
             RawSourceType.SLACK, "kamatech", "chat-a|2026-08-18T09:00:00Z", "corr-2",
             Instant.parse("2026-08-18T09:00:00Z"), "ruth", List.of("ruth"), null, "ruth: hi",
-            "ruth: hi".getBytes(StandardCharsets.UTF_8), null, null, 0, 0, List.of("m1"), 0);
+            "ruth: hi".getBytes(StandardCharsets.UTF_8), null, null, 0, 0, List.of("m1"), 0, "g1");
 
     private static final RawObjectEvent SLACK_EVENT = RawObjectEvent.create(
             "SLACK/kamatech/2026-08-18/x.json", RawSourceType.SLACK, "kamatech", Instant.parse("2026-08-18T09:00:00Z"),
@@ -134,11 +132,11 @@ class UnstructuredIntakeLaneTest {
     void chatGroupConfirmationSucceedingCountsTheRecordAsPublishedNotRejected() {
         when(sourceReader.read(any())).thenReturn(Stream.of(SLACK_RECORD));
         when(payloadMapper.map(any(), any())).thenReturn(SLACK_EVENT);
-        when(groupStateStore.findGroupIdForMessage(RawSourceType.SLACK, "kamatech", "m1"))
-                .thenReturn(Optional.of("g1"));
 
         IntakeResult result = slackLane.run(ReadCursor.full(), Instant.now());
 
+        // "g1" comes straight from SLACK_RECORD.groupId() now - no findGroupIdForMessage stub
+        // needed, since afterPublish no longer reverse-resolves it through the messageId index.
         verify(groupStateStore).confirmPublished(RawSourceType.SLACK, "kamatech", "g1", 0);
         assertThat(result).isEqualTo(new IntakeResult(1, 1, 0, List.of()));
     }
@@ -156,8 +154,6 @@ class UnstructuredIntakeLaneTest {
     void chatGroupConfirmationFailureAfterKafkaPublishIsRejectedNotPublished() {
         when(sourceReader.read(any())).thenReturn(Stream.of(SLACK_RECORD));
         when(payloadMapper.map(any(), any())).thenReturn(SLACK_EVENT);
-        when(groupStateStore.findGroupIdForMessage(RawSourceType.SLACK, "kamatech", "m1"))
-                .thenReturn(Optional.of("g1"));
         doThrow(new IllegalStateException("MinIO unreachable"))
                 .when(groupStateStore).confirmPublished(RawSourceType.SLACK, "kamatech", "g1", 0);
 

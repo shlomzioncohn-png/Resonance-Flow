@@ -32,7 +32,6 @@ import com.rnd.bridge.raw.model.ScopeDecision;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.List;
-import java.util.Optional;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
@@ -66,12 +65,12 @@ class UnstructuredIntakeControllerTest {
             ScopeDecision.INCLUDED, "sha256:" + "0".repeat(64), null, List.of("hadas@kamatech.org"),
             "application/json", 2L, Instant.parse("2026-08-18T09:15:00Z"), "corr-1", 0, 0, 0, ChangeType.UPSERT);
 
-    // A chat transcript record (attachmentIndex 0, non-empty sourceMessageIds) - the shape that
-    // actually reaches UnstructuredIntakeLane.afterPublish's GroupStateStore confirmation branch.
+    // A chat transcript record (attachmentIndex 0, non-null groupId) - the shape that actually
+    // reaches UnstructuredIntakeLane.afterPublish's GroupStateStore confirmation branch.
     private static final SourceRecord SLACK_RECORD = new SourceRecord(
             RawSourceType.SLACK, "kamatech", "chat-a|2026-08-18T09:00:00Z", "corr-2",
             Instant.parse("2026-08-18T09:00:00Z"), "ruth", List.of("ruth"), null, "ruth: hi",
-            "ruth: hi".getBytes(StandardCharsets.UTF_8), null, null, 0, 0, List.of("m1"), 0);
+            "ruth: hi".getBytes(StandardCharsets.UTF_8), null, null, 0, 0, List.of("m1"), 0, "g1");
 
     private static final RawObjectEvent SLACK_EVENT = RawObjectEvent.create(
             "SLACK/kamatech/2026-08-18/x.json", RawSourceType.SLACK, "kamatech", Instant.parse("2026-08-18T09:00:00Z"),
@@ -155,8 +154,6 @@ class UnstructuredIntakeControllerTest {
         when(cursorStore.load(RawSourceType.SLACK, "kamatech")).thenReturn(ReadCursor.full());
         when(sourceReader.read(any())).thenReturn(Stream.of(SLACK_RECORD));
         when(payloadMapper.map(any(), any())).thenReturn(SLACK_EVENT);
-        when(groupStateStore.findGroupIdForMessage(RawSourceType.SLACK, "kamatech", "m1"))
-                .thenReturn(Optional.of("g1"));
         doThrow(new IllegalStateException("MinIO unreachable"))
                 .when(groupStateStore).confirmPublished(RawSourceType.SLACK, "kamatech", "g1", 0);
 
