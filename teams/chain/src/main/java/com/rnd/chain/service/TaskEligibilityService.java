@@ -4,6 +4,7 @@ import com.rnd.chain.dto.Constraint;
 import com.rnd.chain.dto.Task;
 import com.rnd.chain.dto.TaskDependency;
 import com.rnd.chain.dto.TaskStatus;
+import com.rnd.chain.repository.ConstraintRepository;
 import com.rnd.chain.repository.TaskDependencyRepository;
 import com.rnd.chain.repository.TaskRepository;
 import org.slf4j.Logger;
@@ -11,10 +12,12 @@ import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.LocalDateTime;
 import java.util.ArrayDeque;
 import java.util.Deque;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
@@ -48,12 +51,15 @@ public class TaskEligibilityService {
 
     private final TaskRepository taskRepository;
     private final TaskDependencyRepository taskDependencyRepository;
+    private final ConstraintRepository constraintRepository;
     private final Object dependencyGraphLock = new Object();
 
     public TaskEligibilityService(TaskRepository taskRepository,
-                                   TaskDependencyRepository taskDependencyRepository) {
+                                   TaskDependencyRepository taskDependencyRepository,
+                                   ConstraintRepository constraintRepository) {
         this.taskRepository = taskRepository;
         this.taskDependencyRepository = taskDependencyRepository;
+        this.constraintRepository = constraintRepository;
     }
 
     private Task requireTask(UUID taskId) {
@@ -259,30 +265,52 @@ public class TaskEligibilityService {
         }
     }
 
-    // Constraint-related methods below still assume Constraint status transitions
-    // and a caller-supplied previousStatus - no ConstraintRepository has been shared yet,
-    // so these remain as designed earlier.
+    // Constraint-related methods below persist through ConstraintRepository (issue #378) and
+    // derive whether openConstraintCount actually needs adjusting from what Postgres itself
+    // reports about the write (was this row new / what was its status before), not from a
+    // caller-supplied previousStatus or an in-memory idempotency ledger - see
+    // ConstraintRepository's Javadoc and teams/chain/CLAUDE.md "Key decisions" (2026-09-22).
+    //
+    // Write order is deliberate: ConstraintRepository first, then the in-memory Task counter.
+    // If the process fails between the two, a redelivered event re-runs the (idempotent)
+    // repository call, which correctly reports "already there" / the real previous status, and
+    // the counter update proceeds correctly on retry. The reverse order can silently skip the
+    // repository write entirely on retry, once an in-memory idempotency check says "already
+    // seen" - a permanently lost Constraint row, not just a delayed counter update.
 
     @Transactional
-    public void onConstraintAdded(UUID taskId) {
-        Objects.requireNonNull(taskId, "taskId must not be null");
-        log.info("Constraint added on task {}", taskId);
+    public void onConstraintAdded(Constraint constraint) {
+        Objects.requireNonNull(constraint, "constraint must not be null");
+        UUID taskId = constraint.getTaskId();
+        log.info("Constraint {} added on task {}", constraint.getConstraintId(), taskId);
+
+        boolean wasInserted = constraintRepository.save(constraint);
+        if (!wasInserted) {
+            log.debug("Constraint {} already existed on task {} - duplicate add, no-op",
+                    constraint.getConstraintId(), taskId);
+            return;
+        }
         updateCounters(taskId, task ->
                 withCounters(task, task.getBlockingCount(), task.getOpenConstraintCount() + 1));
     }
 
     @Transactional
-    public void onConstraintStatusChanged(UUID taskId,
-                                           Constraint.ConstraintStatus previousStatus,
-                                           Constraint.ConstraintStatus newStatus) {
+    public void onConstraintStatusChanged(UUID taskId, String constraintId,
+                                           Constraint.ConstraintStatus newStatus,
+                                           Map<String, Object> reason) {
         Objects.requireNonNull(taskId, "taskId must not be null");
-        Objects.requireNonNull(previousStatus, "previousStatus must not be null");
+        Objects.requireNonNull(constraintId, "constraintId must not be null");
         Objects.requireNonNull(newStatus, "newStatus must not be null");
-        log.info("Constraint on task {} changed: {} -> {}", taskId, previousStatus, newStatus);
+        log.info("Constraint {} on task {} changing to {}", constraintId, taskId, newStatus);
+
+        Constraint.ConstraintStatus previousStatus =
+                constraintRepository.updateStatus(constraintId, newStatus, reason, LocalDateTime.now());
 
         boolean wasOpen = previousStatus == Constraint.ConstraintStatus.PENDING;
         boolean isOpenNow = newStatus == Constraint.ConstraintStatus.PENDING;
         if (wasOpen == isOpenNow) {
+            log.debug("Constraint {} on task {} already reflects the {} -> {} transition - "
+                    + "duplicate event, no-op", constraintId, taskId, previousStatus, newStatus);
             return;
         }
 

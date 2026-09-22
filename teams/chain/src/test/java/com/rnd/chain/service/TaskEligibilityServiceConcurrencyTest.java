@@ -2,6 +2,7 @@ package com.rnd.chain.service;
 
 import com.rnd.chain.dto.Task;
 import com.rnd.chain.dto.TaskStatus;
+import com.rnd.chain.repository.ConstraintRepository;
 import com.rnd.chain.repository.InMemoryTaskDependencyRepository;
 import com.rnd.chain.repository.InMemoryTaskRepository;
 import org.junit.jupiter.api.Test;
@@ -18,6 +19,7 @@ import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
 import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.Mockito.mock;
 
 /**
  * Exercises TaskEligibilityService against the real in-memory repositories (not mocks) under
@@ -81,7 +83,9 @@ class TaskEligibilityServiceConcurrencyTest {
 
         InMemoryTaskRepository taskRepository = new InMemoryTaskRepository(allTasks);
         InMemoryTaskDependencyRepository dependencyRepository = new InMemoryTaskDependencyRepository(List.of());
-        TaskEligibilityService service = new TaskEligibilityService(taskRepository, dependencyRepository);
+        // Not exercised by this class - none of these tests touch constraint methods.
+        TaskEligibilityService service =
+                new TaskEligibilityService(taskRepository, dependencyRepository, mock(ConstraintRepository.class));
 
         List<Runnable> jobs = blockerIds.stream()
                 .<Runnable>map(blockerId -> () -> service.addDependency(hubId, blockerId))
@@ -107,7 +111,9 @@ class TaskEligibilityServiceConcurrencyTest {
 
         InMemoryTaskRepository taskRepository = new InMemoryTaskRepository(allTasks);
         InMemoryTaskDependencyRepository dependencyRepository = new InMemoryTaskDependencyRepository(List.of());
-        TaskEligibilityService service = new TaskEligibilityService(taskRepository, dependencyRepository);
+        // Not exercised by this class - none of these tests touch constraint methods.
+        TaskEligibilityService service =
+                new TaskEligibilityService(taskRepository, dependencyRepository, mock(ConstraintRepository.class));
 
         for (UUID blockerId : blockerIds) {
             service.addDependency(hubId, blockerId);
@@ -138,7 +144,9 @@ class TaskEligibilityServiceConcurrencyTest {
             InMemoryTaskRepository taskRepository = new InMemoryTaskRepository(
                     List.of(buildTask(dependentId), buildTask(blockerId)));
             InMemoryTaskDependencyRepository dependencyRepository = new InMemoryTaskDependencyRepository(List.of());
-            TaskEligibilityService service = new TaskEligibilityService(taskRepository, dependencyRepository);
+            // Not exercised by this class - none of these tests touch constraint methods.
+        TaskEligibilityService service =
+                new TaskEligibilityService(taskRepository, dependencyRepository, mock(ConstraintRepository.class));
 
             runConcurrently(List.of(
                     () -> service.addDependency(dependentId, blockerId),

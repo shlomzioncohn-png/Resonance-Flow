@@ -75,7 +75,9 @@ src/main/java/com/rnd/chain/
 │                           # TaskNotFoundException/DuplicateDependencyException (adopted from
 │                           # Riki's branch - see the 2026-09-08 fixes below), plus
 │                           # DependencyNotFoundException/InvalidDependencyException (issue #66)
-└── config/                 # MockDataConfig - empty-seeded repository beans
+└── config/                 # MockDataConfig - empty-seeded repository beans;
+                            # ConstraintRepositoryConfig - the real Postgres-backed
+                            # ConstraintRepository bean (issue #378)
 src/main/resources/application.yml
 src/main/resources/db/migration/  # Flyway - V1__create_task_constraint_table.sql (issue #378)
 src/test/java/com/rnd/chain/
@@ -243,13 +245,14 @@ existence checks.
 ## Constraint persistence (Issue #378)
 
 `ConstraintRepository` / `PostgresConstraintRepository` (in `repository/`) give `Constraint` a
-real Postgres-backed store: `findByTaskId`, `findById`, `save` (upsert by `constraintId` - a
-redelivered "constraint added" event updates the existing row rather than duplicating it). Plain
-JDBC, not JPA - see "Stack" above. `reason` (`Map<String, Object>`) is stored as `jsonb`, converted
-via Jackson + `PGobject` (`toJsonb`/`fromJsonb`). `type`/`status` are `VARCHAR` + a `CHECK`
-constraint listing the valid enum values, not a native Postgres enum type - works identically
-regardless of persistence technology, and is simpler to extend later (`DROP`/`ADD CONSTRAINT`
-vs. `ALTER TYPE ... ADD VALUE`).
+real Postgres-backed store: `findByTaskId`, `findById`, `save`, `updateStatus`. Plain JDBC, not
+JPA - see "Stack" above. `reason` (`Map<String, Object>`) is stored as `jsonb`, converted via
+Jackson + `PGobject` (`toJsonb`/`fromJsonb`). `type`/`status` are `VARCHAR` + a `CHECK` constraint
+listing the valid enum values, not a native Postgres enum type - works identically regardless of
+persistence technology, and is simpler to extend later (`DROP`/`ADD CONSTRAINT` vs.
+`ALTER TYPE ... ADD VALUE`). Registered as a bean via `config/ConstraintRepositoryConfig.java` (a
+`@Bean` factory method, not `@Repository` directly on the class - the latter was tried first and
+silently failed to self-register; see [CLAUDE.md](CLAUDE.md) "Open items").
 
 **Depends on issue #377 (Task/TaskDependency Postgres persistence), which is not done yet.**
 `V1__create_task_constraint_table.sql`'s `task_id` column references `task(id)`, a table #377 is
@@ -258,17 +261,23 @@ that the migration won't apply (and `PostgresConstraintRepositoryTest` won't pas
 lands. Verified this is the actual failure mode (`Connection to localhost:5432 refused` locally,
 with no Postgres running yet either) - not a wiring bug.
 
-**Not yet wired into `TaskEligibilityService`.** `onConstraintAdded`/`onConstraintStatusChanged`
-still only mutate `Task.openConstraintCount` in place (see "Key decisions" in
-[CLAUDE.md](CLAUDE.md)) - connecting them to `ConstraintRepository` is blocked on a team-lead
-decision (asked 2026-09-17, pending): whether `openConstraintCount` should be recomputed from a
-real `COUNT(*)` query against `task_constraint` on every change (what #378 asks for explicitly),
-or keep the existing `+1`/`-1` delta pattern (matching how `blockingCount` is designed in #377),
-relying only on the repository's idempotent upsert to prevent double-counting. Already decided regardless of that answer: write to `ConstraintRepository` before updating the
-in-memory `Task` counter, not after - a crash/failure between the two steps is then a harmless
-retry (the upsert is a no-op) rather than a permanently lost `Constraint` row, since the
-alternative order can skip the retry's repository write entirely once the in-memory idempotency
-check already says "seen it."
+**Wired into `TaskEligibilityService`** (2026-09-22). `onConstraintAdded`/`onConstraintStatusChanged`
+persist through `ConstraintRepository` and derive whether `Task.openConstraintCount` actually needs
+adjusting from a DB-verified fact about the write itself, not a `SELECT COUNT(*)`, not the
+`+1`/`-1` delta pattern `blockingCount` uses, and not an in-memory idempotency ledger:
+
+- `save` reports whether Postgres genuinely inserted a new row, via `RETURNING (xmax = 0)` -
+  Postgres's own signal for "this row is new, not the result of the `ON CONFLICT` branch" - at no
+  extra query cost, since it rides along on the write that already has to happen.
+- `updateStatus` atomically returns the row's status immediately before this call (a CTE under
+  `FOR UPDATE`, read and written in one statement), so a redelivered status-change event is
+  detected from real state instead of a caller-supplied `previousStatus`.
+
+Write order is Postgres first, then the in-memory `Task` counter, never the reverse - a
+crash/failure between the two steps means a redelivered event re-runs the (idempotent) repository
+call, which correctly reports "already there," and the counter update proceeds correctly on
+retry. The reverse order is worse: skipping the repository call once a caller believes an event
+was "already handled" can permanently lose a `Constraint` row, not just delay a counter update.
 
 ## Code review fixes (2026-09-10, PR #251)
 

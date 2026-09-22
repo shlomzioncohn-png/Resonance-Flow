@@ -38,12 +38,12 @@ class PostgresConstraintRepositoryTest {
     }
 
     @Test
-    void save_newConstraint_isRetrievableByIdAndByTaskId() {
+    void save_newConstraint_returnsTrueAndIsRetrievableByIdAndByTaskId() {
         UUID taskId = UUID.randomUUID();
         Constraint constraint = newConstraint(UUID.randomUUID().toString(), taskId,
             Constraint.ConstraintStatus.PENDING, Map.of("note", "needs manager sign-off"));
 
-        constraintRepository.save(constraint);
+        assertThat(constraintRepository.save(constraint)).isTrue();
 
         // Constraint.equals() is constraintId-only (see its Javadoc), so field-by-field
         // assertions here, not a bare .contains(constraint), actually verify the round trip.
@@ -86,14 +86,17 @@ class PostgresConstraintRepositoryTest {
     }
 
     @Test
-    void save_sameConstraintIdRedelivered_upsertsInsteadOfDuplicating() {
+    void save_sameConstraintIdRedelivered_returnsFalseAndUpsertsInsteadOfDuplicating() {
         String constraintId = UUID.randomUUID().toString();
         UUID taskId = UUID.randomUUID();
         Constraint original = newConstraint(constraintId, taskId, Constraint.ConstraintStatus.PENDING, null);
-        constraintRepository.save(original);
+        assertThat(constraintRepository.save(original)).isTrue();
 
         // Same constraintId, same content - simulates a redelivered "constraint added" event.
-        constraintRepository.save(newConstraint(constraintId, taskId, Constraint.ConstraintStatus.PENDING, null));
+        // false is exactly the signal TaskEligibilityService.onConstraintAdded relies on to
+        // avoid double-counting openConstraintCount.
+        assertThat(constraintRepository.save(
+                newConstraint(constraintId, taskId, Constraint.ConstraintStatus.PENDING, null))).isFalse();
 
         assertThat(constraintRepository.findByTaskId(taskId)).hasSize(1);
     }
@@ -104,9 +107,11 @@ class PostgresConstraintRepositoryTest {
         UUID taskId = UUID.randomUUID();
         constraintRepository.save(newConstraint(constraintId, taskId, Constraint.ConstraintStatus.PENDING, null));
 
-        constraintRepository.save(newConstraint(constraintId, taskId, Constraint.ConstraintStatus.SATISFIED,
-            Map.of("resolvedBy", "user-7")));
+        boolean secondSaveWasInsert = constraintRepository.save(
+            newConstraint(constraintId, taskId, Constraint.ConstraintStatus.SATISFIED,
+                Map.of("resolvedBy", "user-7")));
 
+        assertThat(secondSaveWasInsert).isFalse();
         assertThat(constraintRepository.findByTaskId(taskId)).hasSize(1);
         assertThat(constraintRepository.findById(constraintId))
             .get()
@@ -121,6 +126,58 @@ class PostgresConstraintRepositoryTest {
 
         assertThatThrownBy(() -> constraintRepository.save(constraint))
             .isInstanceOf(DataIntegrityViolationException.class);
+    }
+
+    @Test
+    void updateStatus_existingConstraint_returnsPreviousStatusAndPersistsNewOne() {
+        String constraintId = UUID.randomUUID().toString();
+        UUID taskId = UUID.randomUUID();
+        constraintRepository.save(newConstraint(constraintId, taskId, Constraint.ConstraintStatus.PENDING, null));
+
+        Constraint.ConstraintStatus previous = constraintRepository.updateStatus(
+            constraintId, Constraint.ConstraintStatus.SATISFIED,
+            Map.of("resolvedBy", "user-7"), LocalDateTime.now());
+
+        assertThat(previous).isEqualTo(Constraint.ConstraintStatus.PENDING);
+        assertThat(constraintRepository.findById(constraintId))
+            .get()
+            .extracting(Constraint::getStatus)
+            .isEqualTo(Constraint.ConstraintStatus.SATISFIED);
+    }
+
+    @Test
+    void updateStatus_reopening_returnsPreviousClosedStatus() {
+        String constraintId = UUID.randomUUID().toString();
+        UUID taskId = UUID.randomUUID();
+        constraintRepository.save(newConstraint(constraintId, taskId, Constraint.ConstraintStatus.SATISFIED, null));
+
+        Constraint.ConstraintStatus previous = constraintRepository.updateStatus(
+            constraintId, Constraint.ConstraintStatus.PENDING, null, LocalDateTime.now());
+
+        assertThat(previous).isEqualTo(Constraint.ConstraintStatus.SATISFIED);
+    }
+
+    @Test
+    void updateStatus_redeliveredTransition_returnsTheAlreadyAppliedStatus() {
+        // Simulates a redelivered status-change event: the DB already reflects the target
+        // state, so the caller (TaskEligibilityService) can detect "nothing actually changed"
+        // from the returned value being equal to newStatus, instead of trusting a
+        // caller-supplied previousStatus.
+        String constraintId = UUID.randomUUID().toString();
+        UUID taskId = UUID.randomUUID();
+        constraintRepository.save(newConstraint(constraintId, taskId, Constraint.ConstraintStatus.SATISFIED, null));
+
+        Constraint.ConstraintStatus previous = constraintRepository.updateStatus(
+            constraintId, Constraint.ConstraintStatus.SATISFIED, null, LocalDateTime.now());
+
+        assertThat(previous).isEqualTo(Constraint.ConstraintStatus.SATISFIED);
+    }
+
+    @Test
+    void updateStatus_constraintDoesNotExist_throws() {
+        assertThatThrownBy(() -> constraintRepository.updateStatus(
+                UUID.randomUUID().toString(), Constraint.ConstraintStatus.SATISFIED, null, LocalDateTime.now()))
+            .isInstanceOf(IllegalStateException.class);
     }
 
     @Test
