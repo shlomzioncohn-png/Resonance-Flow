@@ -37,8 +37,8 @@ public class ChainEventProcessingTemplate {
      * Runs {@code action} only if {@code eventId} is not already claimed - a duplicate delivery
      * is logged and skipped, action is never invoked twice for the same id. On any
      * RuntimeException from {@code action}, releases the claim (so a retry or later redelivery
-     * can attempt it again) before rethrowing, so ChainKafkaErrorHandlingConfig's error handler
-     * (or a topic-based non-blocking retry) can act on it. See ProcessedEventStore's Javadoc for
+     * can attempt it again) before rethrowing, so the caller's own {@code @RetryableTopic}
+     * non-blocking retry can act on it. See ProcessedEventStore's Javadoc for
      * exactly what a claim does and doesn't guarantee.
      */
     public void processClaimed(UUID eventId, String eventType, Runnable action) {

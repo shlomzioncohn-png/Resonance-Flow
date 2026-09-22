@@ -39,12 +39,9 @@ chain:
     # Schema Registry (Apicurio, ccompat API) - needed because task.created/task.updated/
     # task.dependencies.proposed are all Protobuf, validated against it.
     schema-registry-url: ${SCHEMA_REGISTRY_URL:http://localhost:8081/apis/ccompat/v6}
-    retry:
-      # Explicit on purpose, matching ChainKafkaErrorHandlingConfig's
-      # previously-hardcoded FixedBackOff(2000L, 2L) exactly - values here
-      # can be tuned per environment without a code change.
-      max-attempts: 2
-      interval-ms: 2000
+    # chain.kafka.retry.* (the old blocking FixedBackOff policy) was removed along with
+    # ChainKafkaErrorHandlingConfig/ChainKafkaRetryProperties - retry/backoff for each handler is
+    # now configured directly on its own @RetryableTopic annotation instead of one shared policy.
   events:
     # Explicit on purpose, even though "in-memory" is also the default:
     # InMemoryProcessedEventStore only activates for this exact value, so
