@@ -82,9 +82,9 @@ metadata:
 # lookup can't tell an existing password from a first install under ArgoCD (it
 # renders via `helm template`, never against the live cluster, so this would
 # always fall through to "generate new") - randAlphaNum here always runs, and
-# the Application's ignoreDifferences on this Secret's data.password (see
-# argocd/apps/resonance-flow.yaml) keeps selfHeal from overwriting the live
-# value with a fresh random one on every sync.
+# the Application's ignoreDifferences + RespectIgnoreDifferences=true on this
+# Secret's data.password (see argocd/apps/resonance-flow.yaml) keeps every
+# sync, not just selfHeal, from overwriting the live value with a fresh one.
 type: Opaque
 data:
   password: {{ randAlphaNum 24 | b64enc }}

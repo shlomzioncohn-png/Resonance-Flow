@@ -6,7 +6,14 @@ imagePullSecret:
   password: ""
   email: "noreply@kamatech.org"
 nameOverride: ""
-fullnameOverride: ""
+# Pinned, not "": Chain's DB Secret/ConfigMap names are hardcoded in this file
+# (volumeMounts, postgresql.initdb.scriptsConfigMap, extraEnvVars secretKeyRef)
+# because values.yaml can't call the resonance-flow.fullname template itself.
+# This override guarantees fullname is always "resonance-flow" so those
+# literals can't drift from what configmap.yaml actually renders - installing
+# under any other release name broke that wiring (verified against a real
+# cluster, see PR #417 review).
+fullnameOverride: "resonance-flow"
 serviceAccount:
   create: true
   automount: true
