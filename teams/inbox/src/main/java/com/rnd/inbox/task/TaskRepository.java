@@ -26,11 +26,13 @@ public interface TaskRepository extends JpaRepository<Task, UUID> {
     @Query("""
             SELECT t FROM Task t
             WHERE (:bypassTenantScope = TRUE OR t.tenant.id = :tenantId)
-              AND (:title IS NULL OR LOWER(t.title) LIKE LOWER(CONCAT('%', :title, '%')))
-              AND (:description IS NULL OR LOWER(t.description) LIKE LOWER(CONCAT('%', :description, '%')))
+              AND (:search IS NULL
+                   OR LOWER(t.title) LIKE LOWER(CONCAT('%', :search, '%'))
+                   OR LOWER(t.description) LIKE LOWER(CONCAT('%', :search, '%')))
               AND (:status IS NULL OR t.status = :status)
               AND (:available IS NULL OR t.available = :available)
               AND (:source IS NULL OR t.sourceType = :source)
+              AND (:tier IS NULL OR t.tier = :tier)
               AND (:deadlineFrom IS NULL OR t.deadline >= :deadlineFrom)
               AND (:deadlineTo IS NULL OR t.deadline <= :deadlineTo)
               AND (:noDeadline IS NULL OR :noDeadline = FALSE OR t.deadline IS NULL)
@@ -38,11 +40,11 @@ public interface TaskRepository extends JpaRepository<Task, UUID> {
     Page<Task> findFiltered(
             @Param("bypassTenantScope") boolean bypassTenantScope,
             @Param("tenantId") UUID tenantId,
-            @Param("title") String title,
-            @Param("description") String description,
+            @Param("search") String search,
             @Param("status") TaskStatus status,
             @Param("available") Boolean available,
             @Param("source") SourceType source,
+            @Param("tier") TaskTier tier,
             @Param("deadlineFrom") Instant deadlineFrom,
             @Param("deadlineTo") Instant deadlineTo,
             @Param("noDeadline") Boolean noDeadline,

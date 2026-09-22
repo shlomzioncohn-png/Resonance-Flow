@@ -130,11 +130,11 @@ public class TaskService {
         Page<Task> tasks = taskRepository.findFiltered(
                 bypassTenantScope,
                 tenantId,
-                filter.getTitle(),
-                filter.getDescription(),
+                filter.getSearch(),
                 filter.getStatus(),
                 filter.getAvailable(),
                 filter.getSource(),
+                filter.getTier(),
                 filter.getDeadlineFrom(),
                 filter.getDeadlineTo(),
                 filter.getNoDeadline(),
