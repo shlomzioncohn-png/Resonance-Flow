@@ -1,0 +1,27 @@
+name: Lens BFF CI/CD
+
+on:
+  push:
+    branches: [ "main" ]
+    tags: [ "lens-bff-v*.*.*" ]
+    paths:
+      - "teams/lens/bff/**"
+  pull_request:
+    branches: [ "main" ]
+    paths:
+      - "teams/lens/bff/**"
+  workflow_dispatch: {}
+
+jobs:
+  ci:
+    permissions:
+      contents: write
+      packages: write
+      pull-requests: write
+    uses: ./.github/workflows/service-ci.yaml
+    secrets: inherit
+    with:
+      service_name: lens-bff
+      service_dir: teams/lens/bff
+      language: java
+      container_port: 8082

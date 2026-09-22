@@ -3,7 +3,7 @@ name = "mind"
 version = "0.1.0"
 description = "MIND — extraction, embeddings, and scoring for Resonance Flow (Team MIND, KamaTech x Gong Bootcamp)"
 readme = "README.md"
-requires-python = ">=3.11"
+requires-python = ">=3.12"
 license = { text = "Proprietary" }
 dependencies = [
     # core
@@ -25,6 +25,7 @@ dev = [
     "pytest-cov",
     "ruff",
     "mypy",
+    "httpx",  # required by fastapi.testclient.TestClient
 ]
 
 [build-system]
@@ -37,6 +38,13 @@ packages = ["src/mind"]
 [tool.ruff]
 line-length = 100
 src = ["src", "tests"]
+
+[tool.ruff.lint]
+# TID252 (flake8-tidy-imports): use absolute imports, not relative ("from .x").
+extend-select = ["TID252"]
+
+[tool.ruff.lint.flake8-tidy-imports]
+ban-relative-imports = "all"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

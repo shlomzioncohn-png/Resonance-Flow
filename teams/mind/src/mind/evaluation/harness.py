@@ -1,0 +1,100 @@
+"""The evaluation harness: run a ranking model against the persona scenario set.
+
+`run(model, scenarios)` is the entry point named in the R1 role spec
+(`run(model, scenarios) -> report`). It is deliberately the only place that
+turns per-task scores into a ranking: a `RankingModel` only ever scores one
+`Task` at a time (plus a `ScoreContext` carrying the current time — see
+`interfaces.RankingModel`) and never picks a winner itself — keeping the model
+contract identical to the system-wide boundary with Chain ("MIND scores, it does
+not decide").
+"""
+
+from dataclasses import dataclass
+
+from mind.evaluation.interfaces import (
+    PersonaEvaluationScenario,
+    RankingModel,
+    ScoreContext,
+)
+from mind.evaluation.metrics import top1_accuracy
+
+
+@dataclass
+class CandidateScore:
+    """One candidate task's score within a scenario."""
+
+    task_id: str
+    score: float
+    reasoning: str | None = None
+
+
+@dataclass
+class ScenarioResult:
+    """The outcome of running the model against a single scenario."""
+
+    scenario_id: str
+    expected_top_task_id: str  # the scenario's labelled correct answer
+    predicted_top_task_id: str  # the task the model scored highest
+    passed: bool  # predicted_top_task_id == expected_top_task_id
+    candidates: list[CandidateScore]  # every candidate's score, not just the winner
+
+
+@dataclass
+class Report:
+    """Aggregate result of one harness run.
+
+    - `model_name`: the RankingModel implementation's class name.
+    - `total_scenarios`: how many scenarios were evaluated.
+    - `correct_top1`: of those, how many the model got right
+      (`predicted_top_task_id == expected_top_task_id`).
+    - `top1_accuracy`: `correct_top1 / total_scenarios` (0.0 if no scenarios).
+    - `scenario_results`: per-scenario detail, in input order.
+    """
+
+    model_name: str
+    total_scenarios: int
+    correct_top1: int
+    top1_accuracy: float
+    scenario_results: list[ScenarioResult]
+
+
+def run(model: RankingModel, scenarios: list[PersonaEvaluationScenario]) -> Report:
+    """Score every scenario with `model` and return an aggregate `Report`.
+
+    For each scenario: build a `ScoreContext` fixed to the scenario's
+    `current_datetime`, call `model.score(task, context)` once per candidate
+    task, take the highest-scoring task as the model's prediction (ties break
+    toward the first task in file order), and compare it to
+    `expected_top_task_id`. The `Report` carries top-1 accuracy plus every
+    candidate's raw score (and reasoning), so a later switch to a graded metric
+    (MRR/nDCG) needs no re-run.
+    """
+    predictions: list[str] = []
+    scenario_results: list[ScenarioResult] = []
+
+    for scenario in scenarios:
+        context = ScoreContext(current_datetime=scenario.context.current_datetime)
+        scored = [(task, model.score(task, context)) for task in scenario.tasks]
+        best_task, _ = max(scored, key=lambda pair: pair[1].score)
+
+        predictions.append(best_task.task_id)
+        scenario_results.append(
+            ScenarioResult(
+                scenario_id=scenario.scenario_id,
+                expected_top_task_id=scenario.expected_top_task_id,
+                predicted_top_task_id=best_task.task_id,
+                passed=best_task.task_id == scenario.expected_top_task_id,
+                candidates=[
+                    CandidateScore(task_id=t.task_id, score=r.score, reasoning=r.reasoning)
+                    for t, r in scored
+                ],
+            )
+        )
+
+    return Report(
+        model_name=model.__class__.__name__,
+        total_scenarios=len(scenarios),
+        correct_top1=sum(r.passed for r in scenario_results),
+        top1_accuracy=top1_accuracy(predictions, scenarios),
+        scenario_results=scenario_results,
+    )
