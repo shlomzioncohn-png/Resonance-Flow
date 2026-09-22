@@ -18,10 +18,8 @@ import java.util.List;
  * Wires the in-memory mock repositories as Spring beans, so services
  * such as {@code TaskTraversalService} and {@code TaskDependencyService}
  * can be constructed via normal dependency injection when no real
- * {@code DataSource} is wired. A real Postgres-backed alternative for each
- * of these now exists ({@code Postgres*Repository}, see {@code CLAUDE.md}'s
- * "Open items"); these mocks remain only as the {@link ConditionalOnMissingBean}
- * fallback for that case.
+ * {@code DataSource} is wired for this module yet (see {@code CLAUDE.md}'s
+ * "Open items" for current status).
  *
  * <p>Each bean is guarded with {@link ConditionalOnMissingBean} so a
  * consumer that registers its own {@link TaskRepository}/
