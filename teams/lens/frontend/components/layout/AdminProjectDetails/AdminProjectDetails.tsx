@@ -18,7 +18,7 @@ import EditIcon from '@mui/icons-material/Edit'
 import ArchiveIcon from '@mui/icons-material/Archive'
 import DeleteIcon from '@mui/icons-material/Delete'
 import StatusBadge from '@/components/ui/StatusBadge/StatusBadge'
-import StatCard from '@/components/ui/StatCard/StatCard'
+import KpiTile from '@/components/ui/KpiTile/KpiTile'
 import ProcessStatus from '@/components/layout/ProcessStatus/ProcessStatus'
 import ActivityFeed from '@/components/layout/ActivityFeed/ActivityFeed'
 import type { Activity } from '@/components/layout/ActivityFeed/ActivityFeed'
@@ -59,15 +59,23 @@ const getWorkloadColor = (workload?: string): 'success' | 'warning' | 'error' =>
   return 'error'
 }
 
+const getStatusLabel = (status: string): string => {
+  if (status === 'healthy') return 'Healthy'
+  if (status === 'warning') return 'At Risk'
+  return 'Critical'
+}
+
 /**
  * Admin Project Details Component
  *
  * Full project dashboard showing:
  * - Project header with status and dates
- * - Statistics cards (Total, In Progress, Blocked, Completed, % Complete)
+ * - KPI tiles (Total, In Progress, Blocked, Completed, % Complete)
  * - Process status visualization (Planning, In Progress, Review, Testing, Done)
  * - Team members table with roles and workload
  * - Recent activity feed
+ * 
+ * Styled consistently with Manager Dashboard
  */
 export default function AdminProjectDetails({
   projectId,
@@ -95,37 +103,26 @@ export default function AdminProjectDetails({
       <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', lg: '1fr 320px' }, gap: 3 }}>
         {/* Main Content */}
         <Box>
-          {/* Header Section */}
-          <Box sx={{ mb: 3 }}>
-            <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', mb: 2 }}>
-              <Box>
-                <Typography variant="h4" component="h1" sx={{ mb: 0.5, fontWeight: 600 }}>
-                  {projectName}
-                </Typography>
-                <Typography variant="body2" color="textSecondary" sx={{ mb: 1 }}>
-                  ID: {projectId}
-                </Typography>
-                <Typography variant="body1" sx={{ mb: 1.5 }}>
-                  {description}
-                </Typography>
-                <Stack direction="row" spacing={1.5} sx={{ alignItems: 'center' }}>
-                  <StatusBadge
-                    status={status}
-                    label={status === 'healthy' ? 'Healthy' : status === 'warning' ? 'At Risk' : 'Critical'}
-                  />
-                  {startDate && (
-                    <Typography variant="caption" color="textSecondary">
-                      Start: {startDate}
-                    </Typography>
-                  )}
-                  {endDate && (
-                    <Typography variant="caption" color="textSecondary">
-                      End: {endDate}
-                    </Typography>
-                  )}
-                </Stack>
+          {/* Header with Status and Actions */}
+          <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', mb: 3 }}>
+            <Box>
+              <Typography variant="h4" component="h1" sx={{ mb: 1, fontWeight: 600 }}>
+                {projectName}
+              </Typography>
+              <Typography variant="body2" color="textSecondary" sx={{ mb: 1 }}>
+                {description}
+              </Typography>
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, mb: 1 }}>
+                <StatusBadge status={status} label={getStatusLabel(status)} />
+                {startDate && endDate && (
+                  <Typography variant="body2" color="textSecondary">
+                    {startDate} – {endDate}
+                  </Typography>
+                )}
               </Box>
-              <Stack direction="row" spacing={1}>
+            </Box>
+            <Stack direction="row" spacing={1}>
+              {onEdit && (
                 <Button
                   variant="outlined"
                   size="small"
@@ -134,6 +131,8 @@ export default function AdminProjectDetails({
                 >
                   Edit
                 </Button>
+              )}
+              {onArchive && (
                 <Button
                   variant="outlined"
                   size="small"
@@ -143,6 +142,8 @@ export default function AdminProjectDetails({
                 >
                   Archive
                 </Button>
+              )}
+              {onDelete && (
                 <Button
                   variant="outlined"
                   size="small"
@@ -152,94 +153,89 @@ export default function AdminProjectDetails({
                 >
                   Delete
                 </Button>
-              </Stack>
-            </Box>
+              )}
+            </Stack>
           </Box>
 
-          {/* Statistics Section */}
-          <Box sx={{ display: 'flex', gap: 1.5, overflowX: 'auto', pb: 1, mb: 3 }}>
-            <Box sx={{ flex: '0 0 calc(20% - 12px)', minWidth: '120px' }}>
-              <StatCard label="Total Tasks" value={totalTasks} />
-            </Box>
-            <Box sx={{ flex: '0 0 calc(20% - 12px)', minWidth: '120px' }}>
-              <StatCard label="In Progress" value={inProgressTasks} color="warning" />
-            </Box>
-            <Box sx={{ flex: '0 0 calc(20% - 12px)', minWidth: '120px' }}>
-              <StatCard label="Blocked" value={blockedTasks} color="error" />
-            </Box>
-            <Box sx={{ flex: '0 0 calc(20% - 12px)', minWidth: '120px' }}>
-              <StatCard label="Completed" value={completedTasks} color="success" />
-            </Box>
-            <Box sx={{ flex: '0 0 calc(20% - 12px)', minWidth: '120px' }}>
-              <StatCard label="% Complete" value={`${progressPercentageCalc}%`} color="info" />
-            </Box>
-          </Box>
+          {/* KPI Tiles - Horizontal Layout (Manager Dashboard Style) */}
+          <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2} sx={{ mb: 4, overflowX: 'auto', pb: 1 }}>
+            <KpiTile value={totalTasks} label="Total Tasks" tone="neutral" />
+            <KpiTile value={inProgressTasks} label="In Progress" tone="warning" />
+            <KpiTile value={blockedTasks} label="Blocked" tone="critical" />
+            <KpiTile value={completedTasks} label="Completed" tone="healthy" />
+            <KpiTile value={progressPercentageCalc} label="% Complete" tone="neutral" />
+          </Stack>
 
-          {/* Process Status */}
-          <Box sx={{ mb: 3 }}>
+          {/* Process Status Section */}
+          <Box sx={{ mb: 4 }}>
             <ProcessStatus stages={processStages} />
           </Box>
 
-          {/* Team Table */}
+          {/* Team Members Section */}
           <Card>
-            <TableContainer>
-              <Table>
-                <TableHead>
-                  <TableRow sx={{ bgcolor: '#f9fafb' }}>
-                    <TableCell sx={{ fontWeight: 600, color: '#374151' }}>Member</TableCell>
-                    <TableCell sx={{ fontWeight: 600, color: '#374151' }}>Role</TableCell>
-                    <TableCell align="center" sx={{ fontWeight: 600, color: '#374151' }}>Active Tasks</TableCell>
-                    <TableCell align="right" sx={{ fontWeight: 600, color: '#374151' }}>Workload</TableCell>
-                  </TableRow>
-                </TableHead>
-                <TableBody>
-                  {team.length > 0 ? (
-                    team.map((member) => (
-                      <TableRow key={member.id} hover sx={{ '&:last-child td': { border: 0 } }}>
-                        <TableCell>
-                          <Stack direction="row" spacing={1.5} sx={{ alignItems: 'center' }}>
-                            <Avatar src={member.avatar} alt={member.name} sx={{ width: 36, height: 36 }}>
-                              {member.name.charAt(0)}
-                            </Avatar>
-                            <Typography variant="body2" sx={{ fontWeight: 500 }}>{member.name}</Typography>
-                          </Stack>
-                        </TableCell>
-                        <TableCell>
-                          <Typography variant="body2" color="textSecondary">{member.role}</Typography>
-                        </TableCell>
-                        <TableCell align="center">
-                          <Typography variant="body2" sx={{ fontWeight: 500, color: '#f97316' }}>
-                            {member.activeTasks || 0}
+            <CardContent>
+              <Typography variant="h6" sx={{ fontWeight: 600, mb: 2 }}>
+                Team
+              </Typography>
+              <TableContainer>
+                <Table>
+                  <TableHead>
+                    <TableRow sx={{ bgcolor: '#f9fafb' }}>
+                      <TableCell sx={{ fontWeight: 600, color: '#374151' }}>Member</TableCell>
+                      <TableCell sx={{ fontWeight: 600, color: '#374151' }}>Role</TableCell>
+                      <TableCell align="center" sx={{ fontWeight: 600, color: '#374151' }}>Active Tasks</TableCell>
+                      <TableCell align="right" sx={{ fontWeight: 600, color: '#374151' }}>Workload</TableCell>
+                    </TableRow>
+                  </TableHead>
+                  <TableBody>
+                    {team.length > 0 ? (
+                      team.map((member) => (
+                        <TableRow key={member.id} hover sx={{ '&:last-child td': { border: 0 } }}>
+                          <TableCell>
+                            <Stack direction="row" spacing={1.5} sx={{ alignItems: 'center' }}>
+                              <Avatar src={member.avatar} alt={member.name} sx={{ width: 36, height: 36 }}>
+                                {member.name.charAt(0)}
+                              </Avatar>
+                              <Typography variant="body2" sx={{ fontWeight: 500 }}>{member.name}</Typography>
+                            </Stack>
+                          </TableCell>
+                          <TableCell>
+                            <Typography variant="body2" color="textSecondary">{member.role}</Typography>
+                          </TableCell>
+                          <TableCell align="center">
+                            <Typography variant="body2" sx={{ fontWeight: 500, color: '#f97316' }}>
+                              {member.activeTasks || 0}
+                            </Typography>
+                          </TableCell>
+                          <TableCell align="right">
+                            <Chip
+                              label={member.workload || 'Available'}
+                              size="small"
+                              color={getWorkloadColor(member.workload)}
+                              variant="outlined"
+                            />
+                          </TableCell>
+                        </TableRow>
+                      ))
+                    ) : (
+                      <TableRow>
+                        <TableCell colSpan={4} align="center" sx={{ py: 3 }}>
+                          <Typography variant="body2" color="textSecondary">
+                            No team members assigned yet.
                           </Typography>
                         </TableCell>
-                        <TableCell align="right">
-                          <Chip
-                            label={member.workload || 'Available'}
-                            size="small"
-                            color={getWorkloadColor(member.workload)}
-                            variant="outlined"
-                          />
-                        </TableCell>
                       </TableRow>
-                    ))
-                  ) : (
-                    <TableRow>
-                      <TableCell colSpan={4} align="center" sx={{ py: 3 }}>
-                        <Typography variant="body2" color="textSecondary">
-                          No team members assigned yet.
-                        </Typography>
-                      </TableCell>
-                    </TableRow>
-                  )}
-                </TableBody>
-              </Table>
-            </TableContainer>
+                    )}
+                  </TableBody>
+                </Table>
+              </TableContainer>
+            </CardContent>
           </Card>
         </Box>
 
         {/* Sidebar - Recent Activity */}
         <Box>
-          <ActivityFeed activities={recentActivities} maxItems={10} />
+          <ActivityFeed activities={recentActivities} title="Recent Activity" maxItems={10} />
         </Box>
       </Box>
     </Box>

@@ -97,7 +97,7 @@ export default function AdminProjectDetailsPage() {
       projectId={project.projectId}
       projectName={project.projectName}
       description={project.description}
-      status={project.status}
+      status={project.status as 'healthy' | 'warning' | 'critical'}
       startDate={project.startDate}
       endDate={project.endDate}
       totalTasks={project.totalTasks}
@@ -105,9 +105,25 @@ export default function AdminProjectDetailsPage() {
       blockedTasks={project.blockedTasks}
       completedTasks={project.completedTasks}
       progressPercentage={project.progressPercentage}
-      processStages={project.processStages}
-      team={project.team}
-      recentActivities={project.recentActivities}
+      processStages={(project.processStages as Array<{ name: string; count: number }>).map((stage) => ({
+        ...stage,
+      }))}
+      team={(project.team as Array<{ id: string; name: string; role: string; avatar?: string; activeTasks?: number; workload?: 'Available' | 'At Capacity' | 'Overloaded' }>).map((member) => ({
+        id: member.id,
+        name: member.name,
+        role: member.role,
+        avatar: member.avatar,
+        activeTasks: member.activeTasks,
+        workload: member.workload as 'Available' | 'At Capacity' | 'Overloaded' | undefined,
+      }))}
+      recentActivities={(project.recentActivities as Array<{ id: string; actor: { name: string; avatar?: string }; action: string; description: string; timestamp: string; type?: 'success' | 'warning' | 'error' | 'info' }>).map((activity) => ({
+        id: activity.id,
+        actor: activity.actor,
+        action: activity.action,
+        description: activity.description,
+        timestamp: activity.timestamp,
+        type: activity.type as 'default' | 'success' | 'warning' | 'error' | undefined,
+      }))}
       onEdit={handleEdit}
       onArchive={handleArchive}
       onDelete={handleDelete}
