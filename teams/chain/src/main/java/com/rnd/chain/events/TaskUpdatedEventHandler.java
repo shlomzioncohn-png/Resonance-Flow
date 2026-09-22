@@ -59,7 +59,8 @@ public class TaskUpdatedEventHandler {
             backoff = @Backoff(delay = 2000),
             dltStrategy = DltStrategy.FAIL_ON_ERROR,
             dltTopicSuffix = ".errors",
-            include = ChainTransientProcessingException.class)
+            include = ChainTransientProcessingException.class,
+            kafkaTemplate = "taskUpdatedEventKafkaTemplate")
     @KafkaListener(
             topics = "${chain.kafka.topics.task-updated:task.updated}",
             groupId = "${chain.kafka.consumer-group-id}",

@@ -51,7 +51,8 @@ public class DependencyProposedEventHandler {
             backoff = @Backoff(delay = 5000),
             dltStrategy = DltStrategy.FAIL_ON_ERROR,
             dltTopicSuffix = ".errors",
-            include = ChainTransientProcessingException.class)
+            include = ChainTransientProcessingException.class,
+            kafkaTemplate = "dependencyProposedEventKafkaTemplate")
     @KafkaListener(
             topics = "${chain.kafka.topics.dependencies-proposed:task.dependencies.proposed}",
             groupId = "${chain.kafka.consumer-group-id}",
