@@ -31,7 +31,7 @@ data:
       kafka:
         topics:
           task-dependencies-proposed: {{ $cfg.kafka.topics.taskDependenciesProposed | quote }}
-          task-dependencies-removed: {{ $cfg.kafka.topics.taskDependenciesRemoved | quote }}
+          # task-dependencies-removed omitted - see values.yaml note (removeDependency is REST-only, not Kafka)
           task-status-updated: {{ $cfg.kafka.topics.taskStatusUpdated | quote }}
           task-scheduling-updated: {{ $cfg.kafka.topics.taskSchedulingUpdated | quote }}
     logging:
