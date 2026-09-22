@@ -7,6 +7,7 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
 import com.rnd.bridge.core.error.LaneException;
+import com.rnd.bridge.raw.model.ChangeType;
 import com.rnd.bridge.raw.model.RawObjectEvent;
 import com.rnd.bridge.raw.model.RawSourceType;
 import com.rnd.bridge.raw.model.ScopeDecision;
@@ -29,7 +30,7 @@ class KafkaRawObjectPublisherTest {
     private static final RawObjectEvent EVENT = RawObjectEvent.create(
             "SLACK/kamatech/2026-08-18/x.json", RawSourceType.SLACK, "kamatech", Instant.parse("2026-08-18T09:15:00Z"),
             ScopeDecision.INCLUDED, "sha256:" + "0".repeat(64), null, List.of("ruth"), "application/json", 2L,
-            Instant.parse("2026-08-18T09:15:00Z"), "corr-1", 0);
+            Instant.parse("2026-08-18T09:15:00Z"), "corr-1", 0, 0, 0, ChangeType.UPSERT);
 
     @SuppressWarnings("unchecked")
     private final KafkaTemplate<String, Object> kafkaTemplate = mock(KafkaTemplate.class);

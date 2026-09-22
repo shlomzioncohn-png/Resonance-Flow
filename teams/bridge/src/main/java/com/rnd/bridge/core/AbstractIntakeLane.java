@@ -59,27 +59,40 @@ public abstract class AbstractIntakeLane<S, O extends BridgePayload> {
     }
 
     public final IntakeResult run(ReadCursor cursor, Instant asOf) {
+        try (Stream<S> sources = sourceReader().read(cursor)) {
+            return run(sources, asOf);
+        }
+    }
+
+    /**
+     * Same read/map/validate/publish loop as {@link #run(ReadCursor, Instant)}, but against an
+     * already-obtained Stream instead of one this method fetches itself via sourceReader().read.
+     * Exists for callers that must read from the source themselves outside the generic
+     * SourceReader/ReadCursor contract - e.g. UnstructuredIntakeController's Calendar path,
+     * which needs the incremental-sync token tied to its own single read() call (see
+     * CalendarReadResult) rather than the token being silently dropped inside a reader this
+     * method would otherwise call on the caller's behalf.
+     */
+    public final IntakeResult run(Stream<S> sources, Instant asOf) {
         int read = 0;
         int published = 0;
         int rejected = 0;
         List<LaneException> errors = new ArrayList<>();
 
-        try (Stream<S> sources = sourceReader().read(cursor)) {
-            for (S source : (Iterable<S>) sources::iterator) {
-                read++;
-                try {
-                    O payload = payloadMapper().map(source, asOf);
-                    afterMap(source, payload, asOf);
-                    payloadValidator().validate(payload);
-                    payloadPublisher().publish(payload);
-                    afterPublish(source, payload, asOf);
-                    published++;
-                } catch (LaneException e) {
-                    rejected++;
-                    errors.add(e);
-                    if (errorPolicy().shouldAbort(e)) {
-                        break;
-                    }
+        for (S source : (Iterable<S>) sources::iterator) {
+            read++;
+            try {
+                O payload = payloadMapper().map(source, asOf);
+                afterMap(source, payload, asOf);
+                payloadValidator().validate(payload);
+                payloadPublisher().publish(payload);
+                afterPublish(source, payload, asOf);
+                published++;
+            } catch (LaneException e) {
+                rejected++;
+                errors.add(e);
+                if (errorPolicy().shouldAbort(e)) {
+                    break;
                 }
             }
         }

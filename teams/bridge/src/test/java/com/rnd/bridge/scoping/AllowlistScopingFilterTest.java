@@ -24,11 +24,11 @@ class AllowlistScopingFilterTest {
         SourceRecord personalEmail = new SourceRecord(
                 RawSourceType.EMAIL, "kamatech", "id-1", "corr-1", Instant.now(),
                 "mom@gmail.com", List.of("mom@gmail.com"), "ארוחת ערב בשישי", "בואי נקבע ארוחת ערב",
-                "{}".getBytes(StandardCharsets.UTF_8), null, null, 0, List.of(), 0);
+                "{}".getBytes(StandardCharsets.UTF_8), null, null, 0, 0, List.of(), 0);
         SourceRecord recordWithNoSignal = new SourceRecord(
                 RawSourceType.DRIVE, "kamatech", "id-2", "corr-2", Instant.now(),
                 "malki@kamatech.org", List.of("malki@kamatech.org"), "IMG_2043.jpg", null,
-                "{}".getBytes(StandardCharsets.UTF_8), "image/jpeg", null, 0, List.of(), 0);
+                "{}".getBytes(StandardCharsets.UTF_8), "image/jpeg", null, 0, 0, List.of(), 0);
 
         assertThat(service.decide(personalEmail)).isEqualTo(ScopeDecision.INCLUDED);
         assertThat(service.decide(recordWithNoSignal)).isEqualTo(ScopeDecision.INCLUDED);

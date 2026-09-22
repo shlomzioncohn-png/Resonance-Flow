@@ -29,6 +29,7 @@ public final class UnstructuredIntakeLane extends AbstractIntakeLane<SourceRecor
     private final PayloadPublisher<RawObjectEvent> payloadPublisher;
     private final IntakeLandingService landingService;
     private final GroupStateStore groupStateStore;
+    private final CalendarEventStateStore calendarEventStateStore;
 
     UnstructuredIntakeLane(
             RawSourceType sourceType,
@@ -37,7 +38,8 @@ public final class UnstructuredIntakeLane extends AbstractIntakeLane<SourceRecor
             PayloadValidator<RawObjectEvent> payloadValidator,
             PayloadPublisher<RawObjectEvent> payloadPublisher,
             IntakeLandingService landingService,
-            GroupStateStore groupStateStore) {
+            GroupStateStore groupStateStore,
+            CalendarEventStateStore calendarEventStateStore) {
         this.sourceType = sourceType;
         this.sourceReader = sourceReader;
         this.payloadMapper = payloadMapper;
@@ -45,6 +47,7 @@ public final class UnstructuredIntakeLane extends AbstractIntakeLane<SourceRecor
         this.payloadPublisher = payloadPublisher;
         this.landingService = landingService;
         this.groupStateStore = groupStateStore;
+        this.calendarEventStateStore = calendarEventStateStore;
     }
 
     public RawSourceType sourceType() {
@@ -122,6 +125,32 @@ public final class UnstructuredIntakeLane extends AbstractIntakeLane<SourceRecor
             throw new LaneException(
                     "Failed to confirm chat group publish for sourceType=" + source.sourceType()
                             + " naturalId=" + source.naturalId(), e);
+        }
+        confirmCalendarEventPublish(source);
+    }
+
+    /**
+     * Confirms a Calendar event's persisted state once its SourceRecord has actually been
+     * published - the Calendar analog of the chat-group confirmation above (see
+     * CalendarEventStateReconciler/CalendarEventStateStore for the identity/revision side of
+     * this). source.naturalId() is event.getId() for every Calendar record (see
+     * RealCalendarSourceReader.toSourceRecord/FixtureCalendarSourceReader - Calendar attachments
+     * aren't implemented yet, so attachmentIndex is always 0 and naturalId is never suffixed).
+     * source.revision() is passed through as the expected revision so a stale ack for a
+     * since-superseded revision can never mark a newer, not-yet-published one as confirmed - same
+     * expected-revision guard as GroupStateStore.confirmPublished, for the same reason.
+     * Gated on sourceType() rather than a Calendar-specific SourceReader/record type, matching
+     * how the chat-group branch above is gated on sourceMessageIds() - so this stays a no-op for
+     * every other source without needing a source-specific SourceRecord subtype.
+     */
+    private void confirmCalendarEventPublish(SourceRecord source) {
+        try {
+            if (source.sourceType() == RawSourceType.CALENDAR) {
+                calendarEventStateStore.confirmPublished(source.tenantId(), source.naturalId(), source.revision());
+            }
+        } catch (RuntimeException e) {
+            throw new LaneException(
+                    "Failed to confirm Calendar event publish for naturalId=" + source.naturalId(), e);
         }
     }
 }

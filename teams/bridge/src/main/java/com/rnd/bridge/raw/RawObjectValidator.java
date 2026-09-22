@@ -23,6 +23,8 @@ public final class RawObjectValidator implements PayloadValidator<RawObjectEvent
         requireNonNull(event.ingestedAt(), "ingestedAt");
         requireNonNull(event.scopeDecision(), "scopeDecision");
         requireNonNull(event.contentHash(), "contentHash");
+        requireNonNull(event.correlationId(), "correlationId");
+        requireNonNull(event.modality(), "modality");
     }
 
     private static void requireNonNull(Object value, String field) {

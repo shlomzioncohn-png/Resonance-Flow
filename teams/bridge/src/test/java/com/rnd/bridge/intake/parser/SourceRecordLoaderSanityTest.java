@@ -12,7 +12,9 @@ import com.rnd.bridge.intake.parser.drive.FixtureDriveSourceReader;
 import com.rnd.bridge.intake.parser.email.FixtureEmailSourceReader;
 import com.rnd.bridge.intake.parser.slack.FixtureSlackSourceReader;
 import com.rnd.bridge.intake.parser.whatsapp.FixtureWhatsAppSourceReader;
+import com.rnd.bridge.intake.lane.CalendarEventStateStore;
 import com.rnd.bridge.intake.lane.GroupStateStore;
+import com.rnd.bridge.intake.service.CalendarEventStateReconciler;
 import com.rnd.bridge.intake.service.ChatGroupStateReconciler;
 import com.rnd.bridge.intake.service.ChatSessionGrouper;
 import com.rnd.bridge.intake.service.ChatSourceRecordMapper;
@@ -38,7 +40,8 @@ class SourceRecordLoaderSanityTest {
     private final SourceRecordLoader loader = new SourceRecordLoader(
             new FixtureEmailSourceReader(objectMapper),
             new FixtureDriveSourceReader(objectMapper),
-            new FixtureCalendarSourceReader(objectMapper),
+            new FixtureCalendarSourceReader(objectMapper, new CalendarEventStateReconciler(
+                    new CalendarEventStateStore(noopStorageClient(), ControlPlaneStateStores.inMemory(), objectMapper))),
             new FixtureSlackSourceReader(objectMapper),
             new FixtureWhatsAppSourceReader(new PathMatchingResourcePatternResolver()),
             chatSessionGrouper,
@@ -72,6 +75,8 @@ class SourceRecordLoaderSanityTest {
         assertThat(bodies).hasSize(4);
         assertThat(bodies.get(0).sender()).isEqualTo("hadas@kamatech.org");
         assertThat(bodies.get(0).subject()).isEqualTo("PR review needed");
+        // The three attachment-less emails must report 0, not just leave it unset.
+        assertThat(bodies.get(0).attachmentCount()).isZero();
     }
 
     @Test
@@ -81,6 +86,8 @@ class SourceRecordLoaderSanityTest {
         SourceRecord image = records.stream().filter(r -> r.naturalId().equals("9f8e7d6c5b")).findFirst().orElseThrow();
         assertThat(image.body()).isNull();
         assertThat(image.mimeType()).isEqualTo("image/jpeg");
+        // Drive attachments aren't supported yet - every Drive record is attachment-free.
+        assertThat(image.attachmentCount()).isZero();
     }
 
     @Test
@@ -103,6 +110,10 @@ class SourceRecordLoaderSanityTest {
         assertThat(pdfAttachment.naturalId()).isNotEqualTo(audioAttachment.naturalId());
         assertThat(pdfAttachment.rawContent()).isNotEmpty();
         assertThat(body.mimeType()).isNull();
+        // Body and both attachments must all agree on the same total of 2.
+        assertThat(body.attachmentCount()).isEqualTo(2);
+        assertThat(pdfAttachment.attachmentCount()).isEqualTo(2);
+        assertThat(audioAttachment.attachmentCount()).isEqualTo(2);
     }
 
     @Test
@@ -123,6 +134,13 @@ class SourceRecordLoaderSanityTest {
         assertThat(agenda.mimeType()).isEqualTo("application/pdf");
         assertThat(agenda.correlationId()).isEqualTo(sprintReview.correlationId());
         assertThat(agenda.rawContent()).isNotEmpty();
+        assertThat(sprintReview.attachmentCount()).isEqualTo(1);
+        assertThat(agenda.attachmentCount()).isEqualTo(1);
+        // The other calendar event has no attachment of its own.
+        SourceRecord otherEvent = bodies.stream()
+                .filter(r -> !"Sprint review meeting".equals(r.subject()))
+                .findFirst().orElseThrow();
+        assertThat(otherEvent.attachmentCount()).isZero();
     }
 
     @Test
@@ -153,6 +171,8 @@ class SourceRecordLoaderSanityTest {
         assertThat(attachment.mimeType()).isEqualTo("image/jpeg");
         assertThat(attachment.correlationId()).isEqualTo(firstSession.correlationId());
         assertThat(attachment.rawContent()).isNotEmpty();
+        assertThat(firstSession.attachmentCount()).isEqualTo(1);
+        assertThat(attachment.attachmentCount()).isEqualTo(1);
     }
 
     @Test
@@ -169,6 +189,7 @@ class SourceRecordLoaderSanityTest {
         assertThat(family.body()).contains("אמא: מי מביא עוגה?");
         assertThat(family.body()).contains("מלכי: אני אביא");
         assertThat(family.mimeType()).isNull();
+        assertThat(family.attachmentCount()).isZero();
 
         SourceRecord workBody = records.stream()
                 .filter(s -> s.naturalId().startsWith("whatsapp-work-sample|") && s.attachmentFilename() == null)
@@ -180,5 +201,7 @@ class SourceRecordLoaderSanityTest {
         assertThat(workAttachment.attachmentFilename()).isEqualTo("voice-note.opus");
         assertThat(workAttachment.correlationId()).isEqualTo(workBody.correlationId());
         assertThat(workAttachment.rawContent()).isNotEmpty();
+        assertThat(workBody.attachmentCount()).isEqualTo(1);
+        assertThat(workAttachment.attachmentCount()).isEqualTo(1);
     }
 }

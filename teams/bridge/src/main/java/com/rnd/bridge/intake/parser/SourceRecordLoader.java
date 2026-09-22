@@ -67,7 +67,7 @@ public class SourceRecordLoader {
             // Slack and Calendar honor the cursor today (stage 2, per plan.md "Cursor
             // persistence") - Email/Drive/WhatsApp still read everything every run until their
             // Real reader adds since-filtering of its own.
-            case CALENDAR -> calendarReader.read(cursor);
+            case CALENDAR -> calendarReader.read(cursor).records();
             case SLACK -> chatGroupStateReconciler.group(slackReader.read(cursor.since()));
             case WHATSAPP -> chatSessionGrouper.groupIntoSessions(whatsAppReader.read()).stream()
                     .flatMap(session -> chatSourceRecordMapper.toSourceRecords(session).stream())

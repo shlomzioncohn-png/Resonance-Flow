@@ -22,7 +22,7 @@ class ObjectKeyBuilderSanityTest {
         SourceRecord record = new SourceRecord(
                 RawSourceType.DRIVE, "kamatech", "9f8e7d6c5b", "corr-1",
                 Instant.parse("2026-08-16T20:00:00Z"), "malki@kamatech.org", List.of("malki@kamatech.org"),
-                "IMG_2043.jpg", null, "{}".getBytes(StandardCharsets.UTF_8), "image/jpeg", null, 0, List.of(), 0);
+                "IMG_2043.jpg", null, "{}".getBytes(StandardCharsets.UTF_8), "image/jpeg", null, 0, 0, List.of(), 0);
 
         String key = builder.build(record, INGESTED_AT);
 
@@ -37,7 +37,7 @@ class ObjectKeyBuilderSanityTest {
                 RawSourceType.EMAIL, "kamatech", "id-1|attachment-1", "corr-1",
                 Instant.parse("2026-08-18T11:00:00Z"), "ruth@kamatech.org", List.of("ruth@kamatech.org"),
                 null, null, "fake-pdf".getBytes(StandardCharsets.UTF_8), "application/pdf",
-                "deal-invoice-scan.pdf", 1, List.of(), 0);
+                "deal-invoice-scan.pdf", 1, 1, List.of(), 0);
 
         String key = builder.build(record, INGESTED_AT);
 
@@ -51,11 +51,11 @@ class ObjectKeyBuilderSanityTest {
         SourceRecord first = new SourceRecord(
                 RawSourceType.EMAIL, "kamatech", "id-1|attachment-1", "corr-2",
                 Instant.parse("2026-08-18T11:00:00Z"), "ruth@kamatech.org", List.of("ruth@kamatech.org"),
-                null, null, "fake-a".getBytes(StandardCharsets.UTF_8), "application/pdf", "invoice.pdf", 1, List.of(), 0);
+                null, null, "fake-a".getBytes(StandardCharsets.UTF_8), "application/pdf", "invoice.pdf", 1, 2, List.of(), 0);
         SourceRecord second = new SourceRecord(
                 RawSourceType.EMAIL, "kamatech", "id-1|attachment-2", "corr-2",
                 Instant.parse("2026-08-18T11:00:00Z"), "ruth@kamatech.org", List.of("ruth@kamatech.org"),
-                null, null, "fake-b".getBytes(StandardCharsets.UTF_8), "application/pdf", "invoice.pdf", 2, List.of(), 0);
+                null, null, "fake-b".getBytes(StandardCharsets.UTF_8), "application/pdf", "invoice.pdf", 2, 2, List.of(), 0);
 
         assertThat(builder.build(first, INGESTED_AT)).isNotEqualTo(builder.build(second, INGESTED_AT));
     }

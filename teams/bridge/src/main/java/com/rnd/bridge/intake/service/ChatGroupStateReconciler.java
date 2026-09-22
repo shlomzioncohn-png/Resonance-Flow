@@ -235,7 +235,8 @@ public class ChatGroupStateReconciler {
             byId.put(snapshot.messageId(), snapshot);
         }
         for (ChatMessage message : incoming) {
-            byId.put(message.id(), new MessageSnapshot(message.id(), message.sender(), message.timestamp(), message.text()));
+            byId.put(message.id(), new MessageSnapshot(
+                    message.id(), message.sender(), message.timestamp(), message.text(), message.attachments().size()));
         }
         return byId.values().stream()
                 .sorted((a, b) -> a.timestamp().compareTo(b.timestamp()))

@@ -18,6 +18,7 @@ import com.rnd.bridge.core.SourceReader;
 import com.rnd.bridge.core.error.LaneException;
 import com.rnd.bridge.intake.model.SourceRecord;
 import com.rnd.bridge.intake.service.IntakeLandingService;
+import com.rnd.bridge.raw.model.ChangeType;
 import com.rnd.bridge.raw.model.RawObjectEvent;
 import com.rnd.bridge.raw.model.RawSourceType;
 import com.rnd.bridge.raw.model.ScopeDecision;
@@ -35,12 +36,12 @@ class UnstructuredIntakeLaneTest {
     private static final SourceRecord RECORD = new SourceRecord(
             RawSourceType.EMAIL, "kamatech", "id-1", "corr-1", Instant.parse("2026-08-18T09:15:00Z"),
             "hadas@kamatech.org", List.of("hadas@kamatech.org"), "subject", "body",
-            "{}".getBytes(StandardCharsets.UTF_8), null, null, 0, List.of(), 0);
+            "{}".getBytes(StandardCharsets.UTF_8), null, null, 0, 0, List.of(), 0);
 
     private static final RawObjectEvent EVENT = RawObjectEvent.create(
             "EMAIL/kamatech/2026-08-18/x.json", RawSourceType.EMAIL, "kamatech", Instant.parse("2026-08-18T09:15:00Z"),
             ScopeDecision.INCLUDED, "sha256:" + "0".repeat(64), null, List.of("hadas@kamatech.org"),
-            "application/json", 2L, Instant.parse("2026-08-18T09:15:00Z"), "corr-1", 0);
+            "application/json", 2L, Instant.parse("2026-08-18T09:15:00Z"), "corr-1", 0, 0, 0, ChangeType.UPSERT);
 
     // A chat transcript record (attachmentIndex 0, non-empty sourceMessageIds) - the shape that
     // actually reaches the GroupStateStore confirmation branch inside afterPublish, unlike
@@ -48,12 +49,26 @@ class UnstructuredIntakeLaneTest {
     private static final SourceRecord SLACK_RECORD = new SourceRecord(
             RawSourceType.SLACK, "kamatech", "chat-a|2026-08-18T09:00:00Z", "corr-2",
             Instant.parse("2026-08-18T09:00:00Z"), "ruth", List.of("ruth"), null, "ruth: hi",
-            "ruth: hi".getBytes(StandardCharsets.UTF_8), null, null, 0, List.of("m1"), 0);
+            "ruth: hi".getBytes(StandardCharsets.UTF_8), null, null, 0, 0, List.of("m1"), 0);
 
     private static final RawObjectEvent SLACK_EVENT = RawObjectEvent.create(
             "SLACK/kamatech/2026-08-18/x.json", RawSourceType.SLACK, "kamatech", Instant.parse("2026-08-18T09:00:00Z"),
             ScopeDecision.INCLUDED, "sha256:" + "1".repeat(64), null, List.of("ruth"), "text/plain", 8L,
-            Instant.parse("2026-08-18T09:00:00Z"), "corr-2", 0);
+            Instant.parse("2026-08-18T09:00:00Z"), "corr-2", 0, 0, 0, ChangeType.UPSERT);
+
+    // A Calendar record at revision 1 (naturalId is event.getId() - see
+    // RealCalendarSourceReader.toSourceRecord) - the shape that reaches
+    // CalendarEventStateStore.confirmPublished inside afterPublish.
+    private static final SourceRecord CALENDAR_RECORD = new SourceRecord(
+            RawSourceType.CALENDAR, "kamatech", "evt-1", "corr-3", Instant.parse("2026-08-19T13:00:00Z"),
+            "hadas@kamatech.org", List.of("hadas@kamatech.org"), "meeting", "body",
+            "{}".getBytes(StandardCharsets.UTF_8), null, null, 0, 0, List.of(), 1);
+
+    private static final RawObjectEvent CALENDAR_EVENT = RawObjectEvent.create(
+            "CALENDAR/kamatech/2026-08-19/x.json", RawSourceType.CALENDAR, "kamatech",
+            Instant.parse("2026-08-19T13:00:00Z"), ScopeDecision.INCLUDED, "sha256:" + "2".repeat(64), null,
+            List.of("hadas@kamatech.org"), "application/json", 2L, Instant.parse("2026-08-19T13:00:00Z"), "corr-3",
+            0, 0, 1, ChangeType.UPSERT);
 
     @SuppressWarnings("unchecked")
     private final SourceReader<SourceRecord> sourceReader = mock(SourceReader.class);
@@ -65,16 +80,21 @@ class UnstructuredIntakeLaneTest {
     private final PayloadPublisher<RawObjectEvent> payloadPublisher = mock(PayloadPublisher.class);
     private final IntakeLandingService landingService = mock(IntakeLandingService.class);
     private final GroupStateStore groupStateStore = mock(GroupStateStore.class);
+    private final CalendarEventStateStore calendarEventStateStore = mock(CalendarEventStateStore.class);
 
     private final UnstructuredIntakeLane lane = new UnstructuredIntakeLane(
             RawSourceType.EMAIL, sourceReader, payloadMapper, payloadValidator, payloadPublisher, landingService,
-            groupStateStore);
+            groupStateStore, calendarEventStateStore);
 
     // afterPublish keys strictly off source.sourceType()/tenantId(), not the lane's own
     // declared sourceType - but a dedicated SLACK-typed lane keeps these tests' intent explicit.
     private final UnstructuredIntakeLane slackLane = new UnstructuredIntakeLane(
             RawSourceType.SLACK, sourceReader, payloadMapper, payloadValidator, payloadPublisher, landingService,
-            groupStateStore);
+            groupStateStore, calendarEventStateStore);
+
+    private final UnstructuredIntakeLane calendarLane = new UnstructuredIntakeLane(
+            RawSourceType.CALENDAR, sourceReader, payloadMapper, payloadValidator, payloadPublisher, landingService,
+            groupStateStore, calendarEventStateStore);
 
     @Test
     void afterMapLandsUsingTheMappedPayloadsObjectKeyAndScopeDecision() {
@@ -150,6 +170,34 @@ class UnstructuredIntakeLaneTest {
         assertThat(result.published()).isZero(); // not double-counted despite the Kafka success
         assertThat(result.rejected()).isEqualTo(1);
         assertThat(result.errors()).hasSize(1);
+        assertThat(result.errors().get(0)).isInstanceOf(LaneException.class);
+    }
+
+    @Test
+    void calendarEventConfirmationSucceedingCountsTheRecordAsPublishedNotRejected() {
+        when(sourceReader.read(any())).thenReturn(Stream.of(CALENDAR_RECORD));
+        when(payloadMapper.map(any(), any())).thenReturn(CALENDAR_EVENT);
+
+        IntakeResult result = calendarLane.run(ReadCursor.full(), Instant.now());
+
+        verify(calendarEventStateStore).confirmPublished("kamatech", "evt-1", 1);
+        assertThat(result).isEqualTo(new IntakeResult(1, 1, 0, List.of()));
+    }
+
+    /** Mirrors chatGroupConfirmationFailureAfterKafkaPublishIsRejectedNotPublished, for Calendar's
+     * own confirmation path instead of the chat-group one. */
+    @Test
+    void calendarEventConfirmationFailureAfterKafkaPublishIsRejectedNotPublished() {
+        when(sourceReader.read(any())).thenReturn(Stream.of(CALENDAR_RECORD));
+        when(payloadMapper.map(any(), any())).thenReturn(CALENDAR_EVENT);
+        doThrow(new IllegalStateException("MinIO unreachable"))
+                .when(calendarEventStateStore).confirmPublished("kamatech", "evt-1", 1);
+
+        IntakeResult result = calendarLane.run(ReadCursor.full(), Instant.now());
+
+        verify(payloadPublisher).publish(CALENDAR_EVENT); // Kafka publish itself genuinely succeeded
+        assertThat(result.published()).isZero();
+        assertThat(result.rejected()).isEqualTo(1);
         assertThat(result.errors().get(0)).isInstanceOf(LaneException.class);
     }
 }

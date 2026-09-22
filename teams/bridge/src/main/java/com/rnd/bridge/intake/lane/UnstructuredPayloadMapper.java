@@ -20,6 +20,12 @@ import java.time.Instant;
  * itself ({@link IntakeLandingService#resolveContentType} is a pure function, and sizeBytes
  * is just the raw content's length), so they don't need to wait on the actual MinIO put.
  * Landing the bytes is a separate side effect - see {@link UnstructuredIntakeLane#afterMap}.
+ * revision is carried straight through from record.revision() (see RawObjectEvent's javadoc);
+ * changeType is carried straight through from record.changeType() too - every source except
+ * Calendar's cancelled-event path only ever produces UPSERT (SourceRecord's convenience
+ * constructor defaults to it), so this mapper stays a pure pass-through rather than deciding
+ * changeType itself. See RealCalendarSourceReader.toCancelledSourceRecord for the one case that
+ * sets DELETE_REVIEW.
  * Failures are wrapped in LaneException: AbstractIntakeLane's template method only catches
  * LaneException per record, so an unwrapped RuntimeException here would abort the whole run
  * instead of being recorded and skipped.
@@ -59,7 +65,10 @@ final class UnstructuredPayloadMapper implements PayloadMapper<SourceRecord, Raw
                     (long) record.rawContent().length,
                     record.occurredAt(),
                     record.correlationId(),
-                    record.attachmentIndex());
+                    record.attachmentIndex(),
+                    record.attachmentCount(),
+                    record.revision(),
+                    record.changeType());
         } catch (RuntimeException e) {
             throw new LaneException(
                     "Failed to map sourceType=" + record.sourceType() + " naturalId=" + record.naturalId(), e);
@@ -84,7 +93,7 @@ final class UnstructuredPayloadMapper implements PayloadMapper<SourceRecord, Raw
     private Modality deriveModality(SourceRecord record) {
         String mimeType = record.mimeType();
         if (mimeType == null) {
-            return null;
+            return Modality.TEXT;
         }
         if (mimeType.startsWith("audio/")) {
             return Modality.AUDIO;
@@ -92,6 +101,6 @@ final class UnstructuredPayloadMapper implements PayloadMapper<SourceRecord, Raw
         if (mimeType.startsWith("image/") || mimeType.equals("application/pdf")) {
             return Modality.SCANNED_DOC;
         }
-        return null;
+        return Modality.TEXT;
     }
 }

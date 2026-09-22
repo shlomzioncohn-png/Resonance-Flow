@@ -97,11 +97,12 @@ public class RealEmailSourceReader implements EmailSourceReader {
         StringBuilder plainTextBody = new StringBuilder();
         List<MessagePart> attachmentParts = new ArrayList<>();
         collectBodyAndAttachments(payload, plainTextBody, attachmentParts);
+        int attachmentCount = attachmentParts.size();
 
         records.add(new SourceRecord(
                 RawSourceType.EMAIL, properties.tenantId(), naturalId, correlationId, occurredAt, from,
                 participants, subject, plainTextBody.isEmpty() ? null : plainTextBody.toString(),
-                message.toString().getBytes(StandardCharsets.UTF_8), null, null, 0, List.of(), 0));
+                message.toString().getBytes(StandardCharsets.UTF_8), null, null, 0, attachmentCount, List.of(), 0));
 
         int index = 0;
         for (MessagePart attachment : attachmentParts) {
@@ -109,7 +110,7 @@ public class RealEmailSourceReader implements EmailSourceReader {
             records.add(new SourceRecord(
                     RawSourceType.EMAIL, properties.tenantId(), naturalId + "|attachment-" + index, correlationId,
                     occurredAt, from, participants, null, null, attachmentBytes(gmail, message.getId(), attachment),
-                    attachment.getMimeType(), attachment.getFilename(), index, List.of(), 0));
+                    attachment.getMimeType(), attachment.getFilename(), index, attachmentCount, List.of(), 0));
         }
         return records;
     }

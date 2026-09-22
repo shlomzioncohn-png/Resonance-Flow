@@ -25,6 +25,7 @@ import com.rnd.bridge.intake.service.ChatGroupStateReconciler;
 import com.rnd.bridge.intake.service.ChatSessionGrouper;
 import com.rnd.bridge.intake.service.ChatSourceRecordMapper;
 import com.rnd.bridge.intake.service.IntakeLandingService;
+import com.rnd.bridge.raw.model.ChangeType;
 import com.rnd.bridge.raw.model.RawObjectEvent;
 import com.rnd.bridge.raw.model.RawSourceType;
 import com.rnd.bridge.raw.model.ScopeDecision;
@@ -71,10 +72,11 @@ class ChatGroupPublishConfirmationTest {
     @SuppressWarnings("unchecked")
     private final PayloadPublisher<RawObjectEvent> payloadPublisher = mock(PayloadPublisher.class);
     private final IntakeLandingService landingService = mock(IntakeLandingService.class);
+    private final CalendarEventStateStore calendarEventStateStore = mock(CalendarEventStateStore.class);
 
     private final UnstructuredIntakeLane lane = new UnstructuredIntakeLane(
             RawSourceType.SLACK, sourceReader, payloadMapper, payloadValidator, payloadPublisher, landingService,
-            groupStateStore);
+            groupStateStore, calendarEventStateStore);
 
     private ChatMessage messageWithAttachment(String isoTimestamp, String text, String id) {
         ChatMessage.Attachment attachment =
@@ -89,7 +91,7 @@ class ChatGroupPublishConfirmationTest {
                 "SLACK/kamatech/2026-08-18/" + record.naturalId() + ".json", record.sourceType(), record.tenantId(),
                 Instant.parse("2026-08-18T09:00:00Z"), ScopeDecision.INCLUDED, "sha256:" + "0".repeat(64), null,
                 record.participants(), "application/json", 2L, record.occurredAt(), record.correlationId(),
-                record.attachmentIndex());
+                record.attachmentIndex(), record.attachmentCount(), record.revision(), ChangeType.UPSERT);
     }
 
     private SourceRecord transcriptOf(List<SourceRecord> records) {

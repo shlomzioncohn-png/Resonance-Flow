@@ -48,6 +48,11 @@ public class ChatSourceRecordMapper {
                 .map(ChatMessage::id)
                 .filter(id -> id != null)
                 .toList();
+        // Every message in this session is available right here in one pass, so the total is
+        // always fully known before any record is built - unlike the persisted-group path below.
+        int attachmentCount = sessionMessages.stream()
+                .mapToInt(m -> m.attachments().size())
+                .sum();
 
         List<SourceRecord> records = new ArrayList<>();
         records.add(new SourceRecord(
@@ -64,6 +69,7 @@ public class ChatSourceRecordMapper {
                 null,
                 null,
                 0,
+                attachmentCount,
                 sessionMessageIds,
                 0));
 
@@ -86,6 +92,7 @@ public class ChatSourceRecordMapper {
                         attachment.mimeType(),
                         attachment.filename(),
                         attachmentIndex,
+                        attachmentCount,
                         ownerMessageId,
                         0));
             }
@@ -115,6 +122,13 @@ public class ChatSourceRecordMapper {
                 .collect(Collectors.joining("\n"));
         String naturalId = mergedGroup.chatId() + "|" + first.timestamp();
         List<String> sessionMessageIds = allMessages.stream().map(MessageSnapshot::messageId).toList();
+        // Summed from the persisted snapshots, not from newMessagesThisBatch: a message merged
+        // in an earlier run (and never re-emitted as a SourceRecord since) still contributes its
+        // attachmentCount here, because MessageSnapshot carries it forward across runs - see
+        // MessageSnapshot's javadoc for why that's necessary.
+        int attachmentCount = allMessages.stream()
+                .mapToInt(MessageSnapshot::attachmentCount)
+                .sum();
 
         List<SourceRecord> records = new ArrayList<>();
         records.add(new SourceRecord(
@@ -131,6 +145,7 @@ public class ChatSourceRecordMapper {
                 null,
                 null,
                 0,
+                attachmentCount,
                 sessionMessageIds,
                 mergedGroup.revision()));
 
@@ -153,6 +168,7 @@ public class ChatSourceRecordMapper {
                         attachment.mimeType(),
                         attachment.filename(),
                         attachmentIndex,
+                        attachmentCount,
                         ownerMessageId,
                         mergedGroup.revision()));
             }
