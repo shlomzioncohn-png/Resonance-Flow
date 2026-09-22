@@ -1,3 +1,4 @@
+
 package com.rnd.chain.controller;
 
 import com.rnd.chain.dto.AddDependencyRequest;
@@ -5,8 +6,6 @@ import com.rnd.chain.dto.TaskDependency;
 import com.rnd.chain.service.TaskDependencyService;
 
 import io.swagger.v3.oas.annotations.Operation;
-import io.swagger.v3.oas.annotations.responses.ApiResponse;
-import io.swagger.v3.oas.annotations.responses.ApiResponses;
 import io.swagger.v3.oas.annotations.tags.Tag;
 
 import jakarta.validation.Valid;
@@ -44,24 +43,6 @@ public class TaskDependencyController {
             summary = "Add task dependency",
             description = "Creates a dependency between a task and another task"
     )
-    @ApiResponses({
-            @ApiResponse(
-                    responseCode = "201",
-                    description = "Dependency created successfully"
-            ),
-            @ApiResponse(
-                    responseCode = "400",
-                    description = "Invalid dependency request"
-            ),
-            @ApiResponse(
-                    responseCode = "404",
-                    description = "Task not found"
-            ),
-            @ApiResponse(
-                    responseCode = "409",
-                    description = "Dependency already exists"
-            )
-    })
     @PostMapping("/{taskId}/dependencies")
     public ResponseEntity<TaskDependency> addDependency(
             @PathVariable UUID taskId,
@@ -87,16 +68,6 @@ public class TaskDependencyController {
             summary = "Remove task dependency",
             description = "Removes an existing dependency between two tasks"
     )
-    @ApiResponses({
-            @ApiResponse(
-                    responseCode = "204",
-                    description = "Dependency removed successfully"
-            ),
-            @ApiResponse(
-                    responseCode = "404",
-                    description = "Dependency not found"
-            )
-    })
     @DeleteMapping("/{taskId}/dependencies/{dependsOnTaskId}")
     public ResponseEntity<Void> removeDependency(
             @PathVariable UUID taskId,
@@ -115,16 +86,6 @@ public class TaskDependencyController {
             summary = "Get task dependencies",
             description = "Returns the tasks that the specified task directly depends on"
     )
-    @ApiResponses({
-            @ApiResponse(
-                    responseCode = "200",
-                    description = "Dependencies returned successfully"
-            ),
-            @ApiResponse(
-                    responseCode = "404",
-                    description = "Task not found"
-            )
-    })
     @GetMapping("/{taskId}/dependencies")
     public ResponseEntity<List<UUID>> getDependencies(
             @PathVariable UUID taskId) {
@@ -139,16 +100,6 @@ public class TaskDependencyController {
             summary = "Get task dependents",
             description = "Returns the tasks that directly depend on the specified task"
     )
-    @ApiResponses({
-            @ApiResponse(
-                    responseCode = "200",
-                    description = "Dependents returned successfully"
-            ),
-            @ApiResponse(
-                    responseCode = "404",
-                    description = "Task not found"
-            )
-    })
     @GetMapping("/{taskId}/dependents")
     public ResponseEntity<List<UUID>> getDependents(
             @PathVariable UUID taskId) {

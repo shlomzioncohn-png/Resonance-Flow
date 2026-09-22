@@ -1,3 +1,4 @@
+
 package com.rnd.chain.controller;
 
 import com.rnd.chain.dto.Task;
@@ -5,8 +6,6 @@ import com.rnd.chain.dto.TaskAvailability;
 import com.rnd.chain.service.DependencyGraphService;
 
 import io.swagger.v3.oas.annotations.Operation;
-import io.swagger.v3.oas.annotations.responses.ApiResponse;
-import io.swagger.v3.oas.annotations.responses.ApiResponses;
 import io.swagger.v3.oas.annotations.tags.Tag;
 
 import org.springframework.http.ResponseEntity;
@@ -38,16 +37,6 @@ public class DependencyGraphController {
             summary = "Get task blockers",
             description = "Returns the blocking tasks and open constraints for the specified task"
     )
-    @ApiResponses({
-            @ApiResponse(
-                    responseCode = "200",
-                    description = "Blockers returned successfully"
-            ),
-            @ApiResponse(
-                    responseCode = "404",
-                    description = "Task not found"
-            )
-    })
     @GetMapping("/{taskId}/blockers")
     public ResponseEntity<TaskAvailability> getBlockers(
             @PathVariable UUID taskId) {
@@ -62,16 +51,6 @@ public class DependencyGraphController {
             summary = "Get task ancestors",
             description = "Returns all ancestor tasks in the task hierarchy"
     )
-    @ApiResponses({
-            @ApiResponse(
-                    responseCode = "200",
-                    description = "Ancestors returned successfully"
-            ),
-            @ApiResponse(
-                    responseCode = "404",
-                    description = "Task not found"
-            )
-    })
     @GetMapping("/{taskId}/ancestors")
     public ResponseEntity<List<Task>> getAncestors(
             @PathVariable UUID taskId) {
@@ -86,16 +65,6 @@ public class DependencyGraphController {
             summary = "Get task descendants",
             description = "Returns all descendant tasks in the task hierarchy"
     )
-    @ApiResponses({
-            @ApiResponse(
-                    responseCode = "200",
-                    description = "Descendants returned successfully"
-            ),
-            @ApiResponse(
-                    responseCode = "404",
-                    description = "Task not found"
-            )
-    })
     @GetMapping("/{taskId}/descendants")
     public ResponseEntity<List<Task>> getDescendants(
             @PathVariable UUID taskId) {

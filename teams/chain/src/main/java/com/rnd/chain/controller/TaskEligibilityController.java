@@ -1,11 +1,10 @@
+
 package com.rnd.chain.controller;
 
 import com.rnd.chain.dto.TaskEligibilityResponse;
 import com.rnd.chain.service.TaskEligibilityService;
 
 import io.swagger.v3.oas.annotations.Operation;
-import io.swagger.v3.oas.annotations.responses.ApiResponse;
-import io.swagger.v3.oas.annotations.responses.ApiResponses;
 import io.swagger.v3.oas.annotations.tags.Tag;
 
 import org.springframework.http.ResponseEntity;
@@ -36,16 +35,6 @@ public class TaskEligibilityController {
             summary = "Get task eligibility",
             description = "Returns the current readiness and blocking state of the specified task"
     )
-    @ApiResponses({
-            @ApiResponse(
-                    responseCode = "200",
-                    description = "Eligibility returned successfully"
-            ),
-            @ApiResponse(
-                    responseCode = "404",
-                    description = "Task not found"
-            )
-    })
     @GetMapping("/{taskId}/eligibility")
     public ResponseEntity<TaskEligibilityResponse> getTaskEligibility(
             @PathVariable UUID taskId) {

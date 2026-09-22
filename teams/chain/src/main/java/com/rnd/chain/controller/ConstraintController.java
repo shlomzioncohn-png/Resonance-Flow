@@ -1,3 +1,4 @@
+
 package com.rnd.chain.controller;
 
 import com.rnd.chain.dto.Constraint;
@@ -6,8 +7,6 @@ import com.rnd.chain.dto.UpdateConstraintStatusRequest;
 import com.rnd.chain.service.ConstraintService;
 
 import io.swagger.v3.oas.annotations.Operation;
-import io.swagger.v3.oas.annotations.responses.ApiResponse;
-import io.swagger.v3.oas.annotations.responses.ApiResponses;
 import io.swagger.v3.oas.annotations.tags.Tag;
 
 import jakarta.validation.Valid;
@@ -45,20 +44,6 @@ public class ConstraintController {
             summary = "Create task constraint",
             description = "Creates a new constraint for the specified task"
     )
-    @ApiResponses({
-            @ApiResponse(
-                    responseCode = "201",
-                    description = "Constraint created successfully"
-            ),
-            @ApiResponse(
-                    responseCode = "400",
-                    description = "Invalid constraint request"
-            ),
-            @ApiResponse(
-                    responseCode = "404",
-                    description = "Task not found"
-            )
-    })
     @PostMapping("/{taskId}/constraints")
     public ResponseEntity<Constraint> createConstraint(
             @PathVariable UUID taskId,
@@ -86,16 +71,6 @@ public class ConstraintController {
             summary = "Get task constraints",
             description = "Returns all constraints associated with the specified task"
     )
-    @ApiResponses({
-            @ApiResponse(
-                    responseCode = "200",
-                    description = "Constraints returned successfully"
-            ),
-            @ApiResponse(
-                    responseCode = "404",
-                    description = "Task not found"
-            )
-    })
     @GetMapping("/{taskId}/constraints")
     public ResponseEntity<List<Constraint>> getTaskConstraints(
             @PathVariable UUID taskId) {
@@ -110,20 +85,6 @@ public class ConstraintController {
             summary = "Update constraint status",
             description = "Updates the status of an existing task constraint"
     )
-    @ApiResponses({
-            @ApiResponse(
-                    responseCode = "200",
-                    description = "Constraint updated successfully"
-            ),
-            @ApiResponse(
-                    responseCode = "400",
-                    description = "Invalid status request"
-            ),
-            @ApiResponse(
-                    responseCode = "404",
-                    description = "Constraint not found"
-            )
-    })
     @PatchMapping("/{taskId}/constraints/{constraintId}")
     public ResponseEntity<Constraint> updateConstraintStatus(
             @PathVariable UUID taskId,
