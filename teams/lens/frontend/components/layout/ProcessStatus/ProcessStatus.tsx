@@ -42,7 +42,7 @@ export default function ProcessStatus({
         <Typography variant="h6" sx={{ mb: 3 }}>
           {title}
         </Typography>
-        <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(120px, 1fr))', gap: 2 }}>
+        <Box sx={{ display: 'flex', gap: 1.5, overflowX: 'auto', pb: 1 }}>
           {stages.map((stage, index) => {
             const bgColor = stage.color || defaultColors[index % defaultColors.length]
             const isLight = index === 0
@@ -55,6 +55,8 @@ export default function ProcessStatus({
                   bgcolor: isLight ? bgColor : `${bgColor}15`,
                   border: `2px solid ${bgColor}`,
                   textAlign: 'center',
+                  minWidth: '140px',
+                  flex: '0 0 140px',
                 }}
               >
                 <CardContent sx={{ py: 2, '&:last-child': { pb: 2 } }}>
@@ -92,11 +94,22 @@ export default function ProcessStatus({
                   <Typography
                     variant="h4"
                     sx={{
-                      color: bgColor,
+                      color: isLight ? '#000' : bgColor,
                       fontWeight: 'bold',
+                      mb: 0.5,
                     }}
                   >
                     {stage.count}
+                  </Typography>
+                  <Typography
+                    variant="caption"
+                    sx={{
+                      display: 'block',
+                      color: isLight ? '#999' : '#999',
+                      fontSize: '0.75rem',
+                    }}
+                  >
+                    tasks
                   </Typography>
                 </CardContent>
               </Card>

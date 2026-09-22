@@ -51,6 +51,10 @@ export const Error: Story = {
 }
 
 export const Grid: Story = {
+  args: {
+    label: 'Total Tasks',
+    value: '64',
+  },
   render: () => (
     <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: 2 }}>
       <StatCard label="Total Tasks" value="64" />

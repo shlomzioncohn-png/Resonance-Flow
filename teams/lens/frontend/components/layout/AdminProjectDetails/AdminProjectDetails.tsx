@@ -157,12 +157,22 @@ export default function AdminProjectDetails({
           </Box>
 
           {/* Statistics Section */}
-          <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: 1.5, mb: 3 }}>
-            <StatCard label="Total Tasks" value={totalTasks} />
-            <StatCard label="In Progress" value={inProgressTasks} color="warning" />
-            <StatCard label="Blocked" value={blockedTasks} color="error" />
-            <StatCard label="Completed" value={completedTasks} color="success" />
-            <StatCard label="% Complete" value={`${progressPercentageCalc}%`} color="info" />
+          <Box sx={{ display: 'flex', gap: 1.5, overflowX: 'auto', pb: 1, mb: 3 }}>
+            <Box sx={{ flex: '0 0 calc(20% - 12px)', minWidth: '120px' }}>
+              <StatCard label="Total Tasks" value={totalTasks} />
+            </Box>
+            <Box sx={{ flex: '0 0 calc(20% - 12px)', minWidth: '120px' }}>
+              <StatCard label="In Progress" value={inProgressTasks} color="warning" />
+            </Box>
+            <Box sx={{ flex: '0 0 calc(20% - 12px)', minWidth: '120px' }}>
+              <StatCard label="Blocked" value={blockedTasks} color="error" />
+            </Box>
+            <Box sx={{ flex: '0 0 calc(20% - 12px)', minWidth: '120px' }}>
+              <StatCard label="Completed" value={completedTasks} color="success" />
+            </Box>
+            <Box sx={{ flex: '0 0 calc(20% - 12px)', minWidth: '120px' }}>
+              <StatCard label="% Complete" value={`${progressPercentageCalc}%`} color="info" />
+            </Box>
           </Box>
 
           {/* Process Status */}

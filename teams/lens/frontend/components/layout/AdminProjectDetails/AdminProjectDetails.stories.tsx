@@ -1,5 +1,12 @@
+'use client'
+
 import type { Meta, StoryObj } from '@storybook/react'
+import { useEffect, useState } from 'react'
+import Box from '@mui/material/Box'
+import CircularProgress from '@mui/material/CircularProgress'
+import Alert from '@mui/material/Alert'
 import AdminProjectDetails from './AdminProjectDetails'
+import { getProjectDetails } from '@/services/adminProjectsApi'
 
 const meta = {
   title: 'Admin/ProjectDetails',
@@ -17,6 +24,63 @@ const meta = {
 
 export default meta
 type Story = StoryObj<typeof meta>
+
+/**
+ * Wrapper component that fetches data from API
+ */
+function ProjectDetailsStory({ projectId }: { projectId: string }) {
+  const [state, setState] = useState<'loading' | 'loaded' | 'error'>('loading')
+  const [project, setProject] = useState<any>(null)
+  const [error, setError] = useState<string | null>(null)
+
+  useEffect(() => {
+    getProjectDetails(projectId)
+      .then((data) => {
+        setProject(data)
+        setState('loaded')
+      })
+      .catch((err) => {
+        setError(err.message)
+        setState('error')
+      })
+  }, [projectId])
+
+  if (state === 'loading') {
+    return (
+      <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '400px' }}>
+        <CircularProgress />
+      </Box>
+    )
+  }
+
+  if (state === 'error') {
+    return <Alert severity="error">{error}</Alert>
+  }
+
+  if (!project) return null
+
+  return (
+    <AdminProjectDetails
+      projectId={project.projectId}
+      projectName={project.projectName}
+      description={project.description}
+      status={project.status}
+      startDate={project.startDate}
+      endDate={project.endDate}
+      totalTasks={project.totalTasks}
+      inProgressTasks={project.inProgressTasks}
+      blockedTasks={project.blockedTasks}
+      completedTasks={project.completedTasks}
+      progressPercentage={project.progressPercentage}
+      processStages={project.processStages}
+      team={project.team}
+      recentActivities={project.recentActivities}
+      onEdit={() => alert('Edit clicked')}
+      onArchive={() => alert('Archive clicked')}
+      onDelete={() => alert('Delete clicked')}
+    />
+  )
+}
 
 const mockTeam = [
   {
