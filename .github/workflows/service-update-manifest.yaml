@@ -1,0 +1,84 @@
+name: Service update manifest (reusable)
+
+on:
+  workflow_call:
+    inputs:
+      service_name:
+        description: "Component name, matches the key under components.<service_name> in teams/relay/helm/resonance-flow/values.yaml"
+        required: true
+        type: string
+      image_tag:
+        description: "Image tag to bump this component to (short git SHA)"
+        required: true
+        type: string
+      image_repository:
+        description: "Lowercased ghcr.io repository path the image was pushed to"
+        required: true
+        type: string
+
+env:
+  CHART_VALUES: teams/relay/helm/resonance-flow/values.yaml
+
+jobs:
+  update-manifest:
+    runs-on: self-hosted
+    permissions:
+      contents: write
+      pull-requests: write
+    concurrency:
+      group: resonance-flow-values-update
+      cancel-in-progress: false
+    steps:
+      # A PAT, not GITHUB_TOKEN: Actions-authored pushes/PRs are blocked from
+      # touching workflow files and from opening PRs at all, regardless of the
+      # permissions block above - neither restriction applies to a real token.
+      - uses: actions/checkout@v7
+        with:
+          token: ${{ secrets.RELAY_CI_PUSH_TOKEN }}
+
+      - name: Install yq
+        run: |
+          sudo curl -sL -o /usr/local/bin/yq https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
+          sudo chmod +x /usr/local/bin/yq
+
+      - name: Update chart values with new image tag
+        run: |
+          yq -i ".components.${{ inputs.service_name }}.image.repository = \"${{ inputs.image_repository }}\" | .components.${{ inputs.service_name }}.image.tag = \"${{ inputs.image_tag }}\"" "$CHART_VALUES"
+
+      - name: Commit updated values
+        id: commit
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add "$CHART_VALUES"
+          if git diff --cached --quiet; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          else
+            git commit -m "chore(${{ inputs.service_name }}): deploy image ${{ inputs.image_tag }} [skip ci]"
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Install GitHub CLI
+        if: steps.commit.outputs.changed == 'true'
+        run: |
+          (type -p wget >/dev/null || sudo apt-get install wget -y) \
+          && sudo mkdir -p -m 755 /etc/apt/keyrings \
+          && wget -qO- https://cli.github.com/packages/githubcli-archive-keyring.gpg | sudo tee /etc/apt/keyrings/githubcli-archive-keyring.gpg > /dev/null \
+          && sudo chmod go+r /etc/apt/keyrings/githubcli-archive-keyring.gpg \
+          && echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" | sudo tee /etc/apt/sources.list.d/github-cli.list > /dev/null \
+          && sudo apt update \
+          && sudo apt install gh -y
+
+      - name: Open a PR with the manifest update
+        if: steps.commit.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.RELAY_CI_PUSH_TOKEN }}
+        run: |
+          BRANCH="ci/${{ inputs.service_name }}-deploy-${{ inputs.image_tag }}"
+          git checkout -b "$BRANCH"
+          git push origin "$BRANCH"
+          gh pr create \
+            --base main \
+            --head "$BRANCH" \
+            --title "chore(${{ inputs.service_name }}): deploy image ${{ inputs.image_tag }}" \
+            --body "Automated image tag bump for \`${{ inputs.service_name }}\` to \`${{ inputs.image_tag }}\`, triggered by \`${{ github.event_name }}\` on \`${{ github.ref_name }}\`. Needs review/approval per the \`main\` branch ruleset."

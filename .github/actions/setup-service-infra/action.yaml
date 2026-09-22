@@ -1,0 +1,65 @@
+name: Set up per-service test infra
+description: >
+  Spins up a kind cluster, installs the shared Helm chart with the component itself
+  disabled (only its infra deps come up), and port-forwards Postgres if the service
+  declares it. Shared by every service-ci-<language>.yaml and service-cd-<language>.yaml
+  so there is exactly one kind cluster per job, whichever phase that job runs.
+
+inputs:
+  service_name:
+    description: "Component name, matches the key under components.<service_name> in teams/relay/helm/resonance-flow/values.yaml"
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - uses: azure/setup-helm@v5
+
+    - name: Create kind cluster
+      uses: helm/kind-action@v1
+      with:
+        cluster_name: ${{ inputs.service_name }}-cluster
+
+    - name: Set chart paths
+      shell: bash
+      run: |
+        echo "CHART_DIR=teams/relay/helm/resonance-flow" >> "$GITHUB_ENV"
+        echo "CHART_VALUES=teams/relay/helm/resonance-flow/values.yaml" >> "$GITHUB_ENV"
+
+    - name: Fetch chart dependencies
+      shell: bash
+      run: helm dependency build "$CHART_DIR"
+
+    - name: Install yq
+      shell: bash
+      run: |
+        sudo curl -sL -o /usr/local/bin/yq https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
+        sudo chmod +x /usr/local/bin/yq
+
+    - name: Deploy chart with ${{ inputs.service_name }} disabled (infra only, for tests)
+      shell: bash
+      run: |
+        SERVICE="${{ inputs.service_name }}"
+        helm upgrade --install "$SERVICE" "$CHART_DIR" \
+          -f "$CHART_VALUES" \
+          -f "$CHART_DIR/values/values-${SERVICE}.yaml" \
+          --set components.${SERVICE}.enabled=false \
+          --namespace "$SERVICE" --create-namespace \
+          --wait --timeout 300s
+
+    - name: Port-forward test Postgres to localhost:5432
+      shell: bash
+      run: |
+        SERVICE="${{ inputs.service_name }}"
+        NEEDS_PG=$(yq eval ".postgresql.enabled // false" "$CHART_DIR/values/values-${SERVICE}.yaml")
+        if [ "$NEEDS_PG" != "true" ]; then
+          echo "values-${SERVICE}.yaml doesn't enable postgresql - skipping"
+          exit 0
+        fi
+        kubectl -n "$SERVICE" port-forward svc/${SERVICE}-postgresql 5432:5432 &
+        for i in $(seq 1 30); do
+          (echo > /dev/tcp/127.0.0.1/5432) >/dev/null 2>&1 && exit 0
+          sleep 2
+        done
+        echo "Postgres port-forward never became reachable" >&2
+        exit 1

@@ -43,8 +43,7 @@ exists; Kafka is now a subchart dependency of `resonance-flow` itself, see
 `../argocd/README.md`.)
 
 Confirmed with Avigail directly: her CI never touches the real cluster's live
-data — only spins up a throwaway local `kind` cluster for smoke tests. No
-existing precedent to reuse there either.
+data — only spins up a throwaway local `kind` cluster for smoke tests.
 
 ## What's a temporary placeholder right now
 
@@ -56,8 +55,8 @@ existing precedent to reuse there either.
   manual discipline:**
   [`.github/workflows/relay-schema-sync.yaml`](../../../.github/workflows/relay-schema-sync.yaml)
   re-copies the real files in here on every push to `main` that touches them,
-  and commits the result itself (same pattern as `service-ci.yaml`'s
-  `update-manifest` job auto-committing image tag bumps). Nobody should ever
+  and commits the result itself (same pattern as `service-update-manifest.yaml`
+  auto-committing image tag bumps). Nobody should ever
   hand-edit anything under `files/` — it's a generated mirror.
 - Three of the six schemas in `../ci/schema-subjects.tsv`
   (`task-created-event.proto`, `raw-object-event.proto`, `github-task.proto`)
@@ -70,7 +69,7 @@ existing precedent to reuse there either.
   them are ready to actually register against a live FULL-compatibility
   registry.
 
-## Open questions before this can go live
+## What's left before this goes live
 
 - ~~Who deploys Schema Registry for real, and where~~ — **resolved** (c3908262):
   as `components.schema-registry` inside `resonance-flow` itself.
