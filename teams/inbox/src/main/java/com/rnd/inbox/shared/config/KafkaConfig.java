@@ -1,5 +1,7 @@
 package com.rnd.inbox.shared.config;
 
+import com.rnd.inbox.event.SchedulingUpdatedEvent;
+import com.rnd.inbox.event.StructuredTaskEvent;
 import com.rnd.inbox.event.TaskCreationRequestedEvent;
 import com.rnd.inbox.shared.messaging.kafka.ErrorTopicPublisher;
 import com.rnd.inbox.shared.messaging.kafka.TransientProcessingException;
@@ -37,20 +39,6 @@ import java.util.concurrent.ScheduledExecutorService;
 @Configuration
 @EnableConfigurationProperties(KafkaRetryProperties.class)
 public class KafkaConfig {
-
-    @Bean
-    public ConsumerFactory<String, String> inboxKafkaConsumerFactory(KafkaProperties kafkaProperties) {
-        return new DefaultKafkaConsumerFactory<>(kafkaProperties.buildConsumerProperties());
-    }
-
-    @Bean
-    public ConcurrentKafkaListenerContainerFactory<String, String> kafkaListenerContainerFactory(
-            ConsumerFactory<String, String> inboxKafkaConsumerFactory) {
-        ConcurrentKafkaListenerContainerFactory<String, String> factory = new ConcurrentKafkaListenerContainerFactory<>();
-        factory.setConsumerFactory(inboxKafkaConsumerFactory);
-        factory.getContainerProperties().setAckMode(ContainerProperties.AckMode.MANUAL_IMMEDIATE);
-        return factory;
-    }
 
     @Bean
     public ProducerFactory<String, String> inboxKafkaProducerFactory(KafkaProperties kafkaProperties) {
@@ -114,6 +102,64 @@ public class KafkaConfig {
             current = current.getCause();
         }
         return current.getMessage();
+    }
+
+    @Bean
+    public ConsumerFactory<String, StructuredTaskEvent> structuredTaskConsumerFactory(
+            KafkaProperties kafkaProperties,
+            @Value("${kafka.schema-registry.url}") String schemaRegistryUrl) {
+        Map<String, Object> props = kafkaProperties.buildConsumerProperties();
+        props.put(ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class);
+        props.put(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG, ErrorHandlingDeserializer.class);
+        props.put(ErrorHandlingDeserializer.VALUE_DESERIALIZER_CLASS, KafkaProtobufDeserializer.class.getName());
+        props.put(AbstractKafkaSchemaSerDeConfig.SCHEMA_REGISTRY_URL_CONFIG, schemaRegistryUrl);
+        props.put(KafkaProtobufDeserializerConfig.SPECIFIC_PROTOBUF_VALUE_TYPE,
+                StructuredTaskEvent.class.getName());
+        return new DefaultKafkaConsumerFactory<>(props);
+    }
+
+    @Bean
+    public ConcurrentKafkaListenerContainerFactory<String, StructuredTaskEvent> structuredTaskContainerFactory(
+            ConsumerFactory<String, StructuredTaskEvent> structuredTaskConsumerFactory,
+            ErrorTopicPublisher errorTopicPublisher) {
+        ConcurrentKafkaListenerContainerFactory<String, StructuredTaskEvent> factory =
+                new ConcurrentKafkaListenerContainerFactory<>();
+        factory.setConsumerFactory(structuredTaskConsumerFactory);
+        factory.getContainerProperties().setAckMode(ContainerProperties.AckMode.MANUAL_IMMEDIATE);
+        factory.setCommonErrorHandler(new DefaultErrorHandler(
+                (record, exception) -> errorTopicPublisher.publish(record, null, "VALIDATION_FAILURE",
+                        "Malformed protobuf payload: " + rootCauseMessage(exception), List.of(), 0, null),
+                new FixedBackOff(0L, 0L)));
+        return factory;
+    }
+
+    @Bean
+    public ConsumerFactory<String, SchedulingUpdatedEvent> schedulingUpdatedConsumerFactory(
+            KafkaProperties kafkaProperties,
+            @Value("${kafka.schema-registry.url}") String schemaRegistryUrl) {
+        Map<String, Object> props = kafkaProperties.buildConsumerProperties();
+        props.put(ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class);
+        props.put(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG, ErrorHandlingDeserializer.class);
+        props.put(ErrorHandlingDeserializer.VALUE_DESERIALIZER_CLASS, KafkaProtobufDeserializer.class.getName());
+        props.put(AbstractKafkaSchemaSerDeConfig.SCHEMA_REGISTRY_URL_CONFIG, schemaRegistryUrl);
+        props.put(KafkaProtobufDeserializerConfig.SPECIFIC_PROTOBUF_VALUE_TYPE,
+                SchedulingUpdatedEvent.class.getName());
+        return new DefaultKafkaConsumerFactory<>(props);
+    }
+
+    @Bean
+    public ConcurrentKafkaListenerContainerFactory<String, SchedulingUpdatedEvent> schedulingUpdatedContainerFactory(
+            ConsumerFactory<String, SchedulingUpdatedEvent> schedulingUpdatedConsumerFactory,
+            ErrorTopicPublisher errorTopicPublisher) {
+        ConcurrentKafkaListenerContainerFactory<String, SchedulingUpdatedEvent> factory =
+                new ConcurrentKafkaListenerContainerFactory<>();
+        factory.setConsumerFactory(schedulingUpdatedConsumerFactory);
+        factory.getContainerProperties().setAckMode(ContainerProperties.AckMode.MANUAL_IMMEDIATE);
+        factory.setCommonErrorHandler(new DefaultErrorHandler(
+                (record, exception) -> errorTopicPublisher.publish(record, null, "VALIDATION_FAILURE",
+                        "Malformed protobuf payload: " + rootCauseMessage(exception), List.of(), 0, null),
+                new FixedBackOff(0L, 0L)));
+        return factory;
     }
 
     @Bean(destroyMethod = "shutdown")
