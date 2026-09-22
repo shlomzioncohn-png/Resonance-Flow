@@ -9,7 +9,29 @@ import java.util.List;
  * MeetingMetadataReader. Only used to derive RawObjectEvent.participants (names) here in
  * Bridge; the sidecar file itself is landed as-is in its native format, untouched by this
  * model - Bridge doesn't interpret meeting content beyond that one flat name list.
+ * <p>
+ * hostEmail, not hostName: Zoom's Report API (GET /report/meetings/{meetingId}) has no
+ * display-name field for the meeting's host - only a user_email field. A display name would
+ * need a separate Users API call this lane doesn't make. BBB has neither, so it's always
+ * null there.
+ * <p>
+ * uuid, dept, durationMinutes, totalMinutes, participantsCount, type, customKeys, and
+ * trackingFields are Zoom-only fields from GET /report/meetings/{meetingId} - BBB has none
+ * of these, so they're always null there.
  */
-public record MeetingMetadata(String meetingId, String topic, String hostName, Instant startedAt,
-                               Instant endedAt, List<ParticipantActivity> participants) {
+public record MeetingMetadata(String meetingId, String topic, String hostEmail, Instant startedAt,
+                               Instant endedAt, List<ParticipantActivity> participants,
+                               String uuid, String dept, Integer durationMinutes,
+                               Integer totalMinutes, Integer participantsCount, Integer type,
+                               List<CustomField> customKeys, List<CustomField> trackingFields) {
+
+    public MeetingMetadata(String meetingId, String topic, String hostEmail, Instant startedAt,
+                            Instant endedAt, List<ParticipantActivity> participants) {
+        this(meetingId, topic, hostEmail, startedAt, endedAt, participants,
+                null, null, null, null, null, null, null, null);
+    }
+
+    /** A single key/value pair - shared shape for Zoom's custom_keys and tracking_fields arrays. */
+    public record CustomField(String key, String value) {
+    }
 }

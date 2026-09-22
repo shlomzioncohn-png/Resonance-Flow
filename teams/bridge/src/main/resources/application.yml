@@ -115,3 +115,9 @@ bridge:
     # recording", not real audio-duration filtering (that needs a codec-aware library this
     # lane doesn't depend on). Tune based on what garbage actually shows up in practice.
     min-file-size-bytes: ${BRIDGE_MEDIA_MIN_FILE_SIZE_BYTES:1024}
+    zoom:
+      # Not consumed by MediaIntakeOrchestrator yet - see ZoomCloudRecordingClient's javadoc
+      # for why (no meetingId source). "real" bean is a throw-stub like bridge.intake.*.mode's -
+      # see RealZoomCloudRecordingClient's javadoc for what implementing it actually needs
+      # (Server-to-Server OAuth app credentials, added here once that work starts).
+      mode: fixture

@@ -58,7 +58,7 @@ public class MediaIntakeService {
     public RawObjectEvent land(byte[] content, String contentHash, String filename, String tenantId,
                                 RawSourceType sourceType, Modality modality, Instant ingestedAt,
                                 String transcriptObjectKey, List<String> participants,
-                                String meetingMetadataObjectKey, String recordingId) {
+                                String additionalMetadataObjectKey, String recordingId) {
         String contentType = guessContentType(extractExtension(filename));
         String objectKey = buildObjectKey(sourceType, tenantId, ingestedAt, recordingId, extractExtension(filename));
 
@@ -69,7 +69,7 @@ public class MediaIntakeService {
         return RawObjectEvent.create(
                 objectKey, sourceType, tenantId, ingestedAt, ScopeDecision.INCLUDED, contentHash,
                 modality, participants, putResult.contentType(), putResult.sizeBytes(),
-                transcriptObjectKey, null, null, ATTACHMENT_INDEX_STANDALONE, meetingMetadataObjectKey);
+                transcriptObjectKey, null, null, ATTACHMENT_INDEX_STANDALONE, additionalMetadataObjectKey);
     }
 
     /**
@@ -103,7 +103,7 @@ public class MediaIntakeService {
      * metadata.xml as application/xml - unconverted, under the same source_type/tenant/date
      * partition as its recording, sharing its recordingId (see {@link #land}) so the two
      * land next to each other in MinIO. No RawObjectEvent/publish of its own - referenced
-     * from the recording's event via meetingMetadataObjectKey, same pattern as landTranscript.
+     * from the recording's event via additionalMetadataObjectKey, same pattern as landTranscript.
      */
     public String landMeetingMetadata(byte[] content, String filename, String tenantId,
                                        RawSourceType sourceType, Instant ingestedAt, String recordingId) {

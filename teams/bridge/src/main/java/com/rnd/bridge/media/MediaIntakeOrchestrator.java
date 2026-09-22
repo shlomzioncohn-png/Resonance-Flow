@@ -49,7 +49,7 @@ import java.util.stream.Stream;
  * sidecar ({@code .vtt}/{@code .srt}/{@code .txt}) is landed alongside it and linked via
  * transcriptObjectKey, and a same-basename meeting-metadata sidecar (Zoom:
  * {@code .meeting.json}, BBB: {@code .metadata.xml}) is landed and linked via
- * meetingMetadataObjectKey, with its parsed participant names on the event's participants
+ * additionalMetadataObjectKey, with its parsed participant names on the event's participants
  * field; (4) land + publish. Both sidecar kinds are moved to "uploaded/" alongside their
  * recording even when the recording itself turns out to be a dedup skip, or they'd sit
  * unmatched forever (same reasoning already applied to transcripts).
@@ -211,11 +211,11 @@ public class MediaIntakeOrchestrator {
                             source.sourceType(), ingestedAt, recordingId);
                 }
 
-                String meetingMetadataObjectKey = null;
+                String additionalMetadataObjectKey = null;
                 List<String> participants = null;
                 if (meetingMetadataFile != null) {
                     byte[] meetingMetadataContent = Files.readAllBytes(meetingMetadataFile);
-                    meetingMetadataObjectKey = intakeService.landMeetingMetadata(
+                    additionalMetadataObjectKey = intakeService.landMeetingMetadata(
                             meetingMetadataContent, meetingMetadataFile.getFileName().toString(),
                             tenantId, source.sourceType(), ingestedAt, recordingId);
                     participants = extractParticipantNames(source, meetingMetadataFile);
@@ -224,7 +224,7 @@ public class MediaIntakeOrchestrator {
                 RawObjectEvent event = intakeService.land(
                         content, contentHash, file.getFileName().toString(), tenantId,
                         source.sourceType(), source.modality(), ingestedAt, transcriptObjectKey,
-                        participants, meetingMetadataObjectKey, recordingId);
+                        participants, additionalMetadataObjectKey, recordingId);
                 eventPublisher.publish(event);
 
                 moveTo(file, uploadedDir);

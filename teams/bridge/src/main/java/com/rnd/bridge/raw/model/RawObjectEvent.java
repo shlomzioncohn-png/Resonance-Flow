@@ -25,9 +25,11 @@ import java.util.List;
  * unique per landed instance (random uuid), so it can't detect re-landed identical
  * content the way contentHash does.
  *
- * meetingMetadataObjectKey is a MinIO pointer to a landed Zoom/BBB meeting-metadata sidecar
- * (see media.meeting package) - additive, same technique as transcriptObjectKey. NOT YET part
- * of Mind's confirmed contract as of this writing; needs the same cross-team heads-up
+ * additionalMetadataObjectKey is a MinIO pointer to a landed source-native metadata sidecar
+ * (today: the Zoom/BBB meeting-metadata sidecar, see media.meeting package) - additive, same
+ * technique as transcriptObjectKey. Named generically (not meetingMetadataObjectKey) since
+ * any source, not just MEETING, could eventually have its own such sidecar. NOT YET part of
+ * Mind's confirmed contract as of this writing; needs the same cross-team heads-up
  * transcriptObjectKey and SCANNED_DOC got before being relied on as "official."
  */
 @JsonNaming(PropertyNamingStrategies.SnakeCaseStrategy.class)
@@ -47,7 +49,7 @@ public record RawObjectEvent(
         Instant sourceTimestamp,
         String correlationId,
         Integer attachmentIndex,
-        String meetingMetadataObjectKey) implements BridgePayload {
+        String additionalMetadataObjectKey) implements BridgePayload {
 
     private static final String CURRENT_SCHEMA_VERSION = "1.0";
 
@@ -96,7 +98,7 @@ public record RawObjectEvent(
     }
 
     /**
-     * Same as the 14-arg {@link #create} but also sets meetingMetadataObjectKey - for the
+     * Same as the 14-arg {@link #create} but also sets additionalMetadataObjectKey - for the
      * meeting/doc/audio lane's Zoom/BBB meeting-metadata sidecar (see media.meeting package).
      */
     public static RawObjectEvent create(
@@ -114,12 +116,12 @@ public record RawObjectEvent(
             Instant sourceTimestamp,
             String correlationId,
             Integer attachmentIndex,
-            String meetingMetadataObjectKey) {
+            String additionalMetadataObjectKey) {
         return new RawObjectEvent(
                 CURRENT_SCHEMA_VERSION, objectKey, sourceType, tenantId, ingestedAt,
                 scopeDecision, contentHash, modality, participants, contentType, sizeBytes,
                 transcriptObjectKey, sourceTimestamp, correlationId, attachmentIndex,
-                meetingMetadataObjectKey);
+                additionalMetadataObjectKey);
     }
 
     @Override

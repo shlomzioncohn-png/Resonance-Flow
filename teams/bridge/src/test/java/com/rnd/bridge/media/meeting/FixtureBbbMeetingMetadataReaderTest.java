@@ -26,11 +26,11 @@ class FixtureBbbMeetingMetadataReaderTest {
 
         MeetingMetadata metadata = reader.read(sidecar);
 
-        assertThat(metadata.meetingId()).isEqualTo("c1a2b3d4-5e6f-7890-abcd-ef1234567890");
-        assertThat(metadata.topic()).isEqualTo("Weekly Sync - Resonance Flow");
-        assertThat(metadata.startedAt()).isEqualTo(Instant.ofEpochMilli(1757321403000L));
-        assertThat(metadata.endedAt()).isEqualTo(Instant.ofEpochMilli(1757323677000L));
-        // metadata.xml has no per-participant join/leave data - see class Javadoc.
+        assertThat(metadata.meetingId()).isEqualTo("c637ba21adcd0191f48f5c4bf23fab0f96ed5c18");
+        assertThat(metadata.topic()).isEqualTo("Fred's Room");
+        assertThat(metadata.startedAt()).isEqualTo(Instant.ofEpochMilli(1530718721124L));
+        assertThat(metadata.endedAt()).isEqualTo(Instant.ofEpochMilli(1530718810456L));
+        // getRecordings only gives a participant COUNT, not per-person data - see class Javadoc.
         assertThat(metadata.participants()).isEmpty();
     }
 }

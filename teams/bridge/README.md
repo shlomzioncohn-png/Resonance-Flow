@@ -218,21 +218,60 @@ Per file, before it lands:
    `.txt`) next to a recording is landed alongside it and linked via the recording's
    `transcript_object_key` - it does not get its own `RawObjectEvent`. Both files move to
    `uploaded/` together.
+
+   For real Zoom, that `.vtt` is what Zoom's own Cloud Recording API returns: `GET
+   /meetings/{meetingId}/recordings` lists every asset for a meeting in one `recording_files[]`
+   array, and the transcript is the entry with `file_type: "TRANSCRIPT"`,
+   `file_extension: "VTT"`, `recording_type: "audio_transcript"` - see
+   `fixtures/media/zoom-cloud-recording.sample.json` for the full shape (reference only, not
+   read by any code yet - field names are the publicly documented API, not live-verified this
+   session, so treat values as illustrative). Fetching it for real means downloading that
+   entry's `download_url` (needs the OAuth token attached, or it 404s), and hits the same
+   blocker as the Real* meeting-metadata reader below: this lane's manual-folder trigger has no
+   `meetingId` to call the API with.
+
+   The seam for that real call already exists: `media/meeting/zoom/ZoomCloudRecordingClient`
+   (+ DTOs `ZoomRecordingFile`/`ZoomRecordingsResponse` matching the documented response shape)
+   is ready to implement against, gated behind `bridge.media.zoom.mode: real`
+   (`application.yml`/`.env`) - same convention as `bridge.intake.*.mode: real` elsewhere in
+   this repo: `RealZoomCloudRecordingClient` is a throw-stub, not a working implementation, on
+   purpose (see its javadoc for exactly what filling it in needs - Server-to-Server OAuth,
+   the two Zoom hosts involved, etc.) - untested network/auth code that nothing ever calls is a
+   false sense of "ready", so that part is written up rather than shipped unverified.
+   `fetchRecordings` is scoped to return the whole response (every `recording_files[]` entry
+   plus meeting-level fields like `password`/`share_url`/`total_size`), not just the transcript
+   entry - `findTranscript` is a convenience default method on top of it - so a future
+   "additional info" sidecar built from this endpoint won't be working off a pre-filtered
+   subset once it's implemented.
 4. **Meeting-metadata pairing** (`MEETING` only) - a same-basename sidecar carrying the
    source platform's own meeting report is landed alongside the recording, in its native
-   format (no conversion), and linked via the recording's `meeting_metadata_object_key`:
-   `<basename>.meeting.json` in the Zoom folder (JSON shaped after Zoom's Dashboard/Report
-   API), `<basename>.metadata.xml` in the BBB folder (BigBlueButton's own `metadata.xml`
-   format). It's parsed once (`media/meeting/MeetingMetadataReader` + fixture
-   implementations) purely to fill the recording's `participants` field with names - the
-   landed sidecar bytes themselves are untouched. **`meetingMetadataObjectKey` is not yet in
-   Mind's confirmed contract** - same status as `SCANNED_DOC` before it was confirmed. Note:
-   BBB's `metadata.xml` is meeting-level only - it has no per-participant join/leave data (that
-   lives in BBB's separate `events.xml` export, which this lane doesn't read), so `participants`
-   stays empty for BBB recordings. Zoom's fixture does carry real per-participant join/leave
-   times. Only fixture readers exist today (see `media/meeting/Fixture*MeetingMetadataReader`)
-   - real Zoom/BBB API wiring needs a `meetingId` this lane's manual-folder trigger doesn't
-   have yet.
+   format (no conversion), and linked via the recording's `additional_metadata_object_key`:
+   `<basename>.meeting.json` in the Zoom folder, `<basename>.metadata.xml` in the BBB folder.
+   Both fixtures are field-for-field copies of each platform's own **officially documented**
+   API response shape (Zoom's Dashboard/Report API; BBB's `GET getRecordings` - verified
+   live against https://docs.bigbluebutton.org/development/api/#get-getrecordings, not from
+   memory), with fabricated example values where we have no live API access yet. It's parsed
+   once (`media/meeting/MeetingMetadataReader` + fixture implementations) purely to fill the
+   recording's `participants` field with names - the landed sidecar bytes themselves are
+   untouched. **`additionalMetadataObjectKey` is not yet in Mind's confirmed contract** - same
+   status as `SCANNED_DOC` before it was confirmed. Named generically (not
+   `meetingMetadataObjectKey`) since any source, not just `MEETING`, could eventually land its
+   own such sidecar - see `RawObjectEvent`'s javadoc.
+
+   Note: BBB's `getRecordings` only returns a participant **count** (`<participants>3</participants>`),
+   never a per-person list - BBB has no public documented endpoint for that. The only place
+   BBB exposes real per-participant join/leave is its "Learning Analytics Dashboard" data,
+   reachable either through an **internal, undocumented** API call (`learningDashboard` -
+   explicitly listed under BBB's own "Internal API calls", not the public developer surface)
+   or a **server-to-server callback** (`meta_analytics-callback-url`, which BBB itself calls
+   when a meeting ends) - neither is a regular request-response API call this lane's
+   local-folder trigger could make. So `participants` stays genuinely empty for BBB
+   recordings - not a parsing gap. Zoom's Report API, by contrast, does return real
+   per-participant join/leave times in a normal API call, so Zoom's fixture carries them.
+
+   Only fixture readers exist today (see `media/meeting/Fixture*MeetingMetadataReader`) - real
+   Zoom API wiring needs a `meetingId` this lane's manual-folder trigger doesn't have yet, and
+   real BBB per-participant data would need callback infrastructure this lane doesn't have.
 
 **Known gaps (tracked in issue #45):**
 - Test samples aren't yet drawn from the real public corpora named in the spec (AMI/ICSI,

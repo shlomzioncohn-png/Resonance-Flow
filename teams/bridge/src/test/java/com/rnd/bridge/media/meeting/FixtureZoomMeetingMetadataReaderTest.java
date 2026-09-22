@@ -27,9 +27,9 @@ class FixtureZoomMeetingMetadataReaderTest {
 
         MeetingMetadata metadata = reader.read(sidecar);
 
-        assertThat(metadata.meetingId()).isEqualTo("84756123901");
+        assertThat(metadata.meetingId()).isEqualTo("3927350525");
         assertThat(metadata.topic()).isEqualTo("Weekly Sync - Resonance Flow");
-        assertThat(metadata.hostName()).isEqualTo("Dana Levi");
+        assertThat(metadata.hostEmail()).isEqualTo("dana.levi@example.com");
         assertThat(metadata.startedAt()).isEqualTo(Instant.parse("2026-09-08T09:00:03Z"));
         assertThat(metadata.endedAt()).isEqualTo(Instant.parse("2026-09-08T09:41:17Z"));
         assertThat(metadata.participants()).hasSize(3);

@@ -13,14 +13,18 @@ import org.w3c.dom.NodeList;
 import org.xml.sax.SAXException;
 
 /**
- * Parses a BBB-shaped meeting-metadata sidecar - metadata.xml, matching BigBlueButton's
- * documented recording metadata format (see fixtures/media/bbb-metadata.sample.xml).
+ * Parses a BBB-shaped meeting-metadata sidecar - one {@code <recording>} element in the exact
+ * shape BigBlueButton's documented {@code GET getRecordings} API call returns (see
+ * fixtures/media/bbb-metadata.sample.xml, field-for-field copied from BBB's own documented
+ * example response at https://docs.bigbluebutton.org/development/api/#get-getrecordings,
+ * fetched and verified live - not from memory).
  * <p>
- * metadata.xml is meeting-level only (id, name, start/end time, participant count) - it does
- * NOT carry per-participant join/leave timestamps; BBB reports those separately in events.xml,
- * which this lane doesn't read (confirmed before building this reader - see plan). Returning
- * an empty participants list here is therefore accurate to the source file, not a gap: there is
- * nothing to fabricate.
+ * {@code <participants>} here is a COUNT ("3"), not a per-person list - BBB's public,
+ * documented API has no per-participant join/leave endpoint. The only place BBB exposes that
+ * is "Learning Analytics Dashboard" data, reachable only via an internal, undocumented API call
+ * or a server-to-server callback this lane's local-folder trigger has no way to receive.
+ * Returning an empty participants list here is accurate to the source, not a gap - there is
+ * genuinely nothing to parse.
  * <p>
  * No Real* counterpart yet - same reasoning as the Zoom reader.
  */
@@ -33,16 +37,15 @@ public class FixtureBbbMeetingMetadataReader implements MeetingMetadataReader {
         try {
             doc = DocumentBuilderFactory.newInstance().newDocumentBuilder().parse(sidecarFile.toFile());
         } catch (ParserConfigurationException | SAXException e) {
-            throw new IOException("Failed to parse BBB metadata.xml: " + sidecarFile, e);
+            throw new IOException("Failed to parse BBB getRecordings-shaped XML: " + sidecarFile, e);
         }
 
         Element recording = doc.getDocumentElement();
-        Element meeting = firstElement(recording, "meeting");
 
-        String meetingId = meeting != null ? meeting.getAttribute("id") : textOrNull(recording, "id");
-        String topic = meeting != null ? meeting.getAttribute("name") : null;
-        Instant startedAt = epochMillisOrNull(textOrNull(recording, "start_time"));
-        Instant endedAt = epochMillisOrNull(textOrNull(recording, "end_time"));
+        String meetingId = textOrNull(recording, "meetingID");
+        String topic = textOrNull(recording, "name");
+        Instant startedAt = epochMillisOrNull(textOrNull(recording, "startTime"));
+        Instant endedAt = epochMillisOrNull(textOrNull(recording, "endTime"));
 
         return new MeetingMetadata(meetingId, topic, null, startedAt, endedAt, List.of());
     }

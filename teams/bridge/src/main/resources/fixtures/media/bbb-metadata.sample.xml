@@ -1,19 +1,51 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!--
-  Best-effort sample shaped after BigBlueButton's documented recording metadata.xml format.
-  Not captured from a real BBB server - replace with a real sample if available.
+  One <recording> element, matching (field-for-field) the OFFICIAL documented example response
+  for BigBlueButton's GET getRecordings API call - see
+  https://docs.bigbluebutton.org/development/api/#get-getrecordings (fetched and verified live
+  against that page - not from memory). Values below are that page's own example values, not
+  fabricated. In production this lane would call getRecordings for one meeting and land the
+  single <recording> block it gets back for that meeting, in this same shape.
 
-  Honesty note (confirmed before building this reader): metadata.xml is meeting-level only -
-  id, name, start/end time, participant count. Per-participant join/leave timestamps are NOT
-  part of this file; BBB reports those separately in events.xml (its learning-analytics
-  export), which this lane does not read. FixtureBbbMeetingMetadataReader therefore returns
-  an empty participants list for BBB rather than fabricating join/leave data that metadata.xml
-  doesn't actually contain.
+  Honesty note (unchanged from before): <participants> here is a COUNT ("3"), not a per-person
+  list - BBB's public, documented API has no per-participant join/leave endpoint. The only place
+  BBB exposes that is "Learning Analytics Dashboard" data, which is either an INTERNAL,
+  undocumented API call (learningDashboard, listed under "Internal API calls" in BBB's own
+  docs - not part of the public developer-facing surface) or a server-to-server callback
+  (meta_analytics-callback-url, pushed by the BBB server when a meeting ends) - neither is a
+  regular API call this lane could make the way it calls getRecordings. So participants stays
+  empty in MeetingMetadata for BBB - there is genuinely nothing to parse here, not a gap in our
+  parsing.
 -->
 <recording>
-    <id>c1a2b3d4-5e6f-7890-abcd-ef1234567890</id>
-    <meeting id="c1a2b3d4-5e6f-7890-abcd-ef1234567890" name="Weekly Sync - Resonance Flow"/>
-    <start_time>1757321403000</start_time>
-    <end_time>1757323677000</end_time>
+    <recordID>ffbfc4cc24428694e8b53a4e144f414052431693-1530718721124</recordID>
+    <meetingID>c637ba21adcd0191f48f5c4bf23fab0f96ed5c18</meetingID>
+    <internalMeetingID>ffbfc4cc24428694e8b53a4e144f414052431693-1530718721124</internalMeetingID>
+    <name>Fred's Room</name>
+    <isBreakout>false</isBreakout>
+    <published>true</published>
+    <state>published</state>
+    <startTime>1530718721124</startTime>
+    <endTime>1530718810456</endTime>
     <participants>3</participants>
+    <metadata>
+        <isBreakout>false</isBreakout>
+        <meetingName>Fred's Room</meetingName>
+        <gl-listed>false</gl-listed>
+        <meetingId>c637ba21adcd0191f48f5c4bf23fab0f96ed5c18</meetingId>
+    </metadata>
+    <playback>
+        <format>
+            <type>podcast</type>
+            <url>https://demo.bigbluebutton.org/podcast/ffbfc4cc24428694e8b53a4e144f414052431693-1530718721124/audio.ogg</url>
+            <processingTime>0</processingTime>
+            <length>0</length>
+        </format>
+        <format>
+            <type>presentation</type>
+            <url>https://demo.bigbluebutton.org/playback/presentation/2.0/playback.html?meetingId=ffbfc4cc24428694e8b53a4e144f414052431693-1530718721124</url>
+            <processingTime>7177</processingTime>
+            <length>0</length>
+        </format>
+    </playback>
 </recording>
