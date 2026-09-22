@@ -23,6 +23,25 @@ jobs:
     defaults:
       run:
         working-directory: teams/mind
+    # A temporary vector-store container for this CI run only -- the same
+    # image and schema-bootstrap the app manages itself, not a shared or
+    # persistent database. This is local/Compose-shaped wiring only; in
+    # production MIND_VECTOR_STORE__DSN arrives as a whole Secret, not
+    # composed from separate env vars in YAML.
+    services:
+      vector-store:
+        image: pgvector/pgvector:0.8.1-pg16
+        env:
+          POSTGRES_USER: mind
+          POSTGRES_PASSWORD: mind
+          POSTGRES_DB: mind
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U mind -d mind"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      MIND_VECTOR_STORE__DSN: postgresql://mind:mind@localhost:5432/mind
+      MIND_ENVIRONMENT: ci
     steps:
       - uses: actions/checkout@v4
 

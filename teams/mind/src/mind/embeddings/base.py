@@ -15,10 +15,9 @@ same contract.
 
 pgvector is the team's chosen backend -- see
 `../../../benchmarks/vector-store-comparison.md` for the comparison and
-decision. Anything else the app wants to use later implements this class;
-the rest of the app never sees this class directly, only the module-level
-functions in `mind/embeddings/__init__.py`, which delegate to whichever
-implementation `factory.py` hands back.
+decision. Anything else the app wants to use later implements this class
+too; callers construct whichever implementation they need directly (see
+`pgvector_store.PgVectorStore`).
 """
 
 from abc import ABC, abstractmethod
@@ -33,7 +32,7 @@ class SearchResult(BaseModel):
     similarity: float = Field(
         ge=-1.0,
         le=1.0,
-        description="Cosine similarity, comparable to config.DUPLICATE_SIMILARITY_THRESHOLD",
+        description="Cosine similarity, comparable to Settings.duplicate_similarity_threshold",
     )
 
 

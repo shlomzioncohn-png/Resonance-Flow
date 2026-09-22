@@ -40,29 +40,39 @@ next step — track it here when it happens.
 
 Source of truth: `.env.example` in this directory.
 
-**Required today: none.** `/health` — the only endpoint that exists
-right now — deliberately touches no downstream dependency, and no code
-in `src/mind/` currently reads any environment variable (verified:
-`grep -r os.environ\|os.getenv src/` finds nothing). The container runs
-correctly with `.env` copied verbatim from `.env.example`, blanks
-included.
+**Required now: `MIND_ENVIRONMENT`, `POSTGRES_USER`/`POSTGRES_PASSWORD`/
+`POSTGRES_DB`.** The app now opens a real vector-store connection pool at
+startup (a FastAPI `lifespan` handler, not lazily on first request), so
+`mind.config.Settings` validates these eagerly -- **the process refuses
+to start at all if they're missing**, not just the routes that use them.
+This is a real change from earlier: previously nothing read env vars at
+startup.
 
-Everything below is reserved for features landing in Phase 2
-(extraction, embeddings/search, OCR/ASR) — safe to leave blank or at
-its default until MIND's code actually starts reading it. This table
-will need a real "required" column once that happens.
+`docker-compose.yml` computes `MIND_VECTOR_STORE__DSN` for the `mind`
+service from `POSTGRES_USER`/`PASSWORD`/`DB`, pointed at the
+`vector-store` service by name -- you only need to set the three
+`POSTGRES_*` vars yourself; the DSN itself isn't something you set by
+hand in Compose. Running the `mind` image outside Compose (no
+`vector-store` service next to it) means setting
+`MIND_VECTOR_STORE__DSN` directly instead, as a single connection
+string -- see `.env.example`'s comment on why Compose builds one and a
+standalone run needs one supplied directly.
 
 | Variable | Default | For |
 |---|---|---|
-| `VECTOR_STORE_URL` | `postgresql://mind:mind@vector-store:5432/mind` | Connection string for the pgvector service (see `docker-compose.yml`). |
-| `VECTOR_STORE_USER` / `VECTOR_STORE_PASSWORD` / `VECTOR_STORE_DB` | `mind` / `mind` / `mind` | Also configure the `vector-store` container itself (Postgres env vars) — keep these three in sync with the values embedded in `VECTOR_STORE_URL`. |
+| `MIND_ENVIRONMENT` | *(required, no default)* | `local` / `ci` / `staging` / `production` -- fails fast on anything else. |
+| `POSTGRES_USER` / `POSTGRES_PASSWORD` / `POSTGRES_DB` | *(required, no default)* | Configure the `vector-store` container itself, and are interpolated into `MIND_VECTOR_STORE__DSN` for the `mind` service -- see above. |
+| `MIND_VECTOR_STORE__TABLE` | `task_embeddings` | Vector-store table name. |
+| `MIND_VECTOR_STORE__SEARCH_EFFORT` | `400` | HNSW query-time accuracy/speed knob (pgvector's `hnsw.ef_search`). |
+| `MIND_VECTOR_STORE__EMBEDDING_DIM` | `256` | Must match whatever `embed()` actually returns -- the pgvector column is created at this width. |
+| `MIND_DUPLICATE_SIMILARITY_THRESHOLD` | `0.90` | Untuned placeholder -- see `src/mind/embeddings/README.md` "Known limitations". |
 | `LLM_API_KEY` / `LLM_MODEL` | blank | Not used yet — MIND runs local models only (see team README "Important Updates"). |
 | `MODEL_CACHE_DIR` | `./models` | Where local model weights get mounted (see `docker-compose.yml`'s `models` volume). Never bake weights into the image. |
 | `OCR_PROVIDER` / `ASR_PROVIDER` | `local` | Which provider extraction uses once built. |
 | `WHISPER_MODEL` | `base` | Local Whisper size, once ASR is built. |
 | `OBJECT_STORAGE_*` | blank | Bridge handoff credentials — not used until MIND reads from Bridge's object storage. |
 | `MIND_API_PORT` | `8000` | Documented for completeness; the port MIND actually binds to today is hardcoded to `8000` in the `Dockerfile` (`EXPOSE`/`CMD`) and `docker-compose.yml`. Changing this variable alone does not currently move the port — flagged here as a known gap, not a working override. |
-| `LOG_LEVEL` | `INFO` | Documented for completeness; not yet wired to `logging.basicConfig()` in `api/main.py`, which hardcodes `INFO`. Same gap as `MIND_API_PORT` above. |
+| `MIND_LOG_LEVEL` | `INFO` | Documented for completeness; not yet wired to `logging.basicConfig()` in `api/main.py`, which hardcodes `INFO`. Same gap as `MIND_API_PORT` above. |
 
 ## Health check
 

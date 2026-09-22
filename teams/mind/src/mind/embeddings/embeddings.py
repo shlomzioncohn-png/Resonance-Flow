@@ -12,7 +12,12 @@ caller only ever sees `list[float]` of length EMBEDDING_DIM.
 
 from sklearn.feature_extraction.text import HashingVectorizer
 
-from mind.embeddings.config import EMBEDDING_DIM
+# A plain constant, not read from mind.config.Settings: this dimension is
+# inherent to this hashing vectorizer, needed to build it at import time,
+# and importing mind.config.Settings requires a DSN. Must match
+# VectorStoreSettings.embedding_dim's default -- both describe the same
+# fixed fact about this placeholder implementation.
+EMBEDDING_DIM = 256
 
 _vectorizer = HashingVectorizer(
     n_features=EMBEDDING_DIM,

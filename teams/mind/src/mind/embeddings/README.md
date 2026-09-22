@@ -19,21 +19,23 @@ Vectors, semantic search, duplicate/related-task detection.
 ## What's here
 
 ```
-__init__.py         the public interface -- embed() / upsert() / search() / delete() / clear() / open() / close()
-embeddings.py       embed() -- the (placeholder) text vectorizer
-base.py             VectorStore abstract interface (the "contract") + SearchResult -- dependency-free (besides pydantic)
-pgvector_store.py   the ONLY file that knows about Postgres/pgvector
-factory.py          single switch that picks the backend implementation
-config.py           Pydantic Settings (lazy -- see get_settings()): connection DSN, table name, HNSW tuning, duplicate-detection threshold
+__init__.py         the public interface -- embed(), SearchResult, VectorStore
+embeddings.py        embed() -- the (placeholder) text vectorizer
+base.py               VectorStore abstract interface (the "contract") + SearchResult -- dependency-free (besides pydantic)
+pgvector_store.py    the ONLY file that knows about Postgres/pgvector
 ```
 
+Config lives one level up, at `mind.config` (`Settings`/`VectorStoreSettings`)
+-- it's app-wide, not specific to this module.
+
 Nothing outside `__init__.py` should be imported by callers elsewhere in
-the app. `base.py` deliberately has zero *backend-specific* dependencies
-(only `abc` and `pydantic`, already a core project dependency) so the
-interface itself can be imported -- for type-checking, mocking in tests,
-or sketching a new backend -- without requiring psycopg to be installed;
-only `pgvector_store.py` (reached through `factory.py`) actually imports
-it.
+the app, except `PgVectorStore` itself, which callers construct directly
+(see "Using the interface" below) -- there's no factory/singleton
+indirection. `base.py` deliberately has zero *backend-specific*
+dependencies (only `abc` and `pydantic`, already a core project
+dependency) so the interface itself can be imported -- for type-checking,
+mocking in tests, or sketching a new backend -- without requiring
+psycopg to be installed; only `pgvector_store.py` actually imports it.
 
 `upsert`/`search`/`delete`/`clear`/`open`/`close` are all `async def` --
 the store talks to Postgres over psycopg's async API so it doesn't block
@@ -42,18 +44,23 @@ the event loop under FastAPI's `async def` route handlers.
 `open()`/`close()` control the backing store's resources (e.g. a
 connection pool) explicitly -- call them from a FastAPI lifespan handler
 so the pool's lifetime is tied to the app's, on a known event loop, from
-the start:
+the start (see `api/main.py` for the real one):
 
 ```python
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
-import mind.embeddings
+from mind.config import get_settings
+from mind.embeddings.pgvector_store import PgVectorStore
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    await mind.embeddings.open()
-    yield
-    await mind.embeddings.close()
+    store = PgVectorStore(get_settings().vector_store)
+    try:
+        await store.open()
+        app.state.vector_store = store
+        yield
+    finally:
+        await store.close()
 
 app = FastAPI(lifespan=lifespan)
 ```
@@ -71,13 +78,15 @@ package installed with its normal dependencies:
 
 ```bash
 make dev        # from teams/mind/ -- installs everything, including this module's deps
-export MIND_VECTOR_STORE_DSN="dbname=mind user=postgres password=postgres host=localhost port=5432"
+export MIND_ENVIRONMENT=local
+export MIND_VECTOR_STORE__DSN="postgresql://mind:mind@localhost:5432/mind"
 ```
 
-There's no hardcoded fallback for this DSN -- constructing the vector
-store fails fast if it isn't set, rather than silently connecting with
+`mind.config.Settings` fails fast if `MIND_ENVIRONMENT` or
+`MIND_VECTOR_STORE__DSN` aren't set, rather than silently connecting with
 guessed/default credentials. Importing `mind.embeddings` itself doesn't
-require it (see `config.Settings`).
+require either -- only constructing a `PgVectorStore` (or calling
+`mind.config.get_settings()`) does.
 
 ## Run the tests
 
@@ -88,19 +97,23 @@ pytest          # from teams/mind/ -- picks up tests/test_vector_store.py automa
 ## Using the interface elsewhere in the app
 
 ```python
-from mind.embeddings import embed, upsert, search, delete
+from mind.config import get_settings
+from mind.embeddings import embed
+from mind.embeddings.pgvector_store import PgVectorStore
+
+store = PgVectorStore(get_settings().vector_store)  # or reuse app.state.vector_store
 
 vector = embed(task.title + " " + task.description)
-await upsert(task.id, vector)
+await store.upsert(task.id, vector)
 
-similar = await search(vector, k=5)  # [SearchResult(task_id=..., similarity=...), ...], best match first
+similar = await store.search(vector, k=5)  # [SearchResult(task_id=..., similarity=...), ...], best match first
 
-await delete(task.id)  # e.g. when the task itself is deleted
+await store.delete(task.id)  # e.g. when the task itself is deleted
 ```
 
-No caller anywhere else in the codebase should import `pgvector_store.py`
-directly, or know that Postgres is involved at all. If we switch databases
-later, only `pgvector_store.py` + `factory.py` need to change.
+No caller anywhere else in the codebase should know that Postgres is
+involved. If we switch databases later, only `pgvector_store.py` (a new
+sibling implementing `base.VectorStore`) needs to change.
 
 ## Known limitations (flag these in review)
 
@@ -110,6 +123,6 @@ later, only `pgvector_store.py` + `factory.py` need to change.
   `benchmarks/vector-store-comparison.md`'s "Validation" section: this is
   the dominant cause of near-zero recall on realistic near-duplicate
   detection at scale — not pgvector or its HNSW index.
-- `DUPLICATE_SIMILARITY_THRESHOLD` in `config.py` is an untuned placeholder
-  -- `search()` now returns a cosine similarity per result, but no caller
-  applies the threshold to it yet.
+- `Settings.duplicate_similarity_threshold` (`mind.config`) is an untuned
+  placeholder -- `search()` now returns a cosine similarity per result,
+  but no caller applies the threshold to it yet.
