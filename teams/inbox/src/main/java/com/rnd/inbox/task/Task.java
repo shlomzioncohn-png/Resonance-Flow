@@ -111,10 +111,6 @@ public class Task {
     private Float suggestedOwnerConfidence;
 
     @ManyToOne
-    @JoinColumn(name = "owner_id")
-    private User owner;
-
-    @ManyToOne
     @JoinColumn(name = "created_by", nullable = true)
     private User createdBy;
 
@@ -309,14 +305,6 @@ public class Task {
 
     public void setSuggestedOwnerConfidence(Float suggestedOwnerConfidence) {
         this.suggestedOwnerConfidence = suggestedOwnerConfidence;
-    }
-
-    public User getOwner() {
-        return owner;
-    }
-
-    public void setOwner(User owner) {
-        this.owner = owner;
     }
 
     public User getCreatedBy() {
