@@ -1,4 +1,4 @@
-package com.rnd.relay.event;
+package com.rnd.relay.notification_delivery;
 
 import java.util.LinkedHashMap;
 import java.util.Map;

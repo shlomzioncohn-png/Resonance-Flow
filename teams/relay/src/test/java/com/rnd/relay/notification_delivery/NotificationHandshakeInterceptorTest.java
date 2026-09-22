@@ -1,4 +1,4 @@
-package com.rnd.relay.event;
+package com.rnd.relay.notification_delivery;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.http.server.ServerHttpRequest;

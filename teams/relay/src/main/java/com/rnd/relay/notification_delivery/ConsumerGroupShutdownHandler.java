@@ -1,4 +1,4 @@
-package com.rnd.relay.event;
+package com.rnd.relay.notification_delivery;
 
 import jakarta.annotation.PreDestroy;
 import org.apache.kafka.clients.admin.Admin;

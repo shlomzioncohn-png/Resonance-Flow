@@ -1,4 +1,4 @@
-package com.rnd.relay.event;
+package com.rnd.relay.notification_delivery;
 
 import org.apache.kafka.clients.admin.Admin;
 import org.apache.kafka.clients.admin.ConsumerGroupDescription;

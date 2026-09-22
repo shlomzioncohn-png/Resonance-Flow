@@ -1,4 +1,4 @@
-package com.rnd.relay.event;
+package com.rnd.relay.notification_delivery;
 
 import io.confluent.kafka.serializers.protobuf.KafkaProtobufDeserializer;
 import io.confluent.kafka.serializers.protobuf.KafkaProtobufDeserializerConfig;
