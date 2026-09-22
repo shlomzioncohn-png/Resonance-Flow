@@ -429,6 +429,13 @@ components:
       periodSeconds: 5
       failureThreshold: 3
     env: {}
+    dependencies:
+      - name: notification-delivery
+        port: 80
+    config:
+      notificationDelivery:
+        service:
+          url: http://resonance-flow-notification-delivery:80
 kafka:
   enabled: true
   # bitnami/kafka was pruned from Docker Hub's free tier in 2025; bitnamilegacy/kafka
