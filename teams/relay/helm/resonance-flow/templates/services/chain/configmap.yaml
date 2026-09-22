@@ -29,11 +29,14 @@ data:
           value-serializer: org.springframework.kafka.support.serializer.JsonSerializer
     chain:
       kafka:
+        # Map keys are the literal eventType strings KafkaEventPublisher.resolveTopic()
+        # looks up (see KafkaEventPublisherTest) - must be dot-case, matching
+        # application.yml's local default, not kebab-case.
         topics:
-          task-dependencies-proposed: {{ $cfg.kafka.topics.taskDependenciesProposed | quote }}
-          # task-dependencies-removed omitted - see values.yaml note (removeDependency is REST-only, not Kafka)
-          task-status-updated: {{ $cfg.kafka.topics.taskStatusUpdated | quote }}
-          task-scheduling-updated: {{ $cfg.kafka.topics.taskSchedulingUpdated | quote }}
+          task.dependencies.proposed: {{ $cfg.kafka.topics.taskDependenciesProposed | quote }}
+          # task.dependencies.removed omitted - see values.yaml note (removeDependency is REST-only, not Kafka)
+          task.status.updated: {{ $cfg.kafka.topics.taskStatusUpdated | quote }}
+          task.scheduling.updated: {{ $cfg.kafka.topics.taskSchedulingUpdated | quote }}
     logging:
       file:
         name: logs/chain.log
