@@ -468,11 +468,6 @@ components:
     dependencies:
       - name: schema-registry
         port: 8080
-    # Non-empty so deployment.yaml's generic `if $component.config` check injects
-    # CONFIG_FILE_PATH / SPRING_CONFIG_ADDITIONAL_LOCATION - the actual config.yaml content
-    # is rendered dynamically in templates/service-notification-delivery/configmap.yaml
-    # (it needs the dependencyHostByName/kafkaSaslJaasConfig helpers computed at render
-    # time, which this static value can't provide), not from this value directly.
     config:
       managed: true
     # Interim CPU-based HPA (templates/pipe-hpa.yaml). §10 open question: the real scaling
