@@ -37,4 +37,41 @@ class FixtureZoomMeetingMetadataReaderTest {
         assertThat(metadata.participants().get(1).joinedAt()).isEqualTo(Instant.parse("2026-09-08T09:01:12Z"));
         assertThat(metadata.participants().get(1).leftAt()).isEqualTo(Instant.parse("2026-09-08T09:41:17Z"));
     }
+
+    @Test
+    void malformedTimestampDegradesToNullInsteadOfLosingParticipants() throws Exception {
+        Path sidecar = tempDir.resolve("meeting.meeting.json");
+        Files.writeString(sidecar, """
+                {"id": "1", "topic": "Sync", "user_email": "dana@example.com",
+                 "start_time": "not-a-real-timestamp", "end_time": "2026-09-08T09:30:00Z",
+                 "participants": [
+                   {"id": "a", "name": "Dana Levi", "join_time": "2026-09-08T09:00:00Z", "leave_time": "2026-09-08T09:30:00Z"}
+                 ]}""");
+
+        MeetingMetadata metadata = reader.read(sidecar);
+
+        assertThat(metadata.startedAt()).isNull();
+        assertThat(metadata.endedAt()).isEqualTo(Instant.parse("2026-09-08T09:30:00Z"));
+        assertThat(metadata.participants()).hasSize(1);
+        assertThat(metadata.participants().get(0).name()).isEqualTo("Dana Levi");
+    }
+
+    @Test
+    void oneParticipantsUnparsableFieldDegradesToNullNotTheWholeList() throws Exception {
+        Path sidecar = tempDir.resolve("meeting.meeting.json");
+        Files.writeString(sidecar, """
+                {"id": "1", "topic": "Sync", "user_email": "dana@example.com",
+                 "start_time": "2026-09-08T09:00:00Z", "end_time": "2026-09-08T09:30:00Z",
+                 "participants": [
+                   {"id": "a", "name": "Dana Levi", "join_time": "not-a-real-timestamp", "leave_time": "2026-09-08T09:30:00Z"},
+                   {"id": "b", "name": "Esther Ora", "join_time": "2026-09-08T09:01:00Z", "leave_time": "2026-09-08T09:30:00Z"}
+                 ]}""");
+
+        MeetingMetadata metadata = reader.read(sidecar);
+
+        assertThat(metadata.startedAt()).isEqualTo(Instant.parse("2026-09-08T09:00:00Z"));
+        assertThat(metadata.participants()).hasSize(2);
+        assertThat(metadata.participants().get(0).joinedAt()).isNull();
+        assertThat(metadata.participants().get(1).name()).isEqualTo("Esther Ora");
+    }
 }
