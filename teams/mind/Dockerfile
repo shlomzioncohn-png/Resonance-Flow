@@ -49,13 +49,6 @@ RUN useradd --create-home --uid 1000 --shell /usr/sbin/nologin mind
 COPY --from=builder --chown=mind:mind /opt/venv /opt/venv
 ENV PATH="/opt/venv/bin:$PATH"
 
-# alembic.ini/migrations/ aren't part of the pip-installed package (they
-# live beside pyproject.toml, not under src/mind/), so the venv copy
-# above doesn't carry them -- needed here so the `migrate` service
-# (docker-compose.yml) can run `alembic upgrade head` from this same image.
-COPY --chown=mind:mind alembic.ini ./
-COPY --chown=mind:mind migrations ./migrations
-
 USER mind
 
 EXPOSE 8000

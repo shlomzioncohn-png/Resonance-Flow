@@ -23,10 +23,9 @@ jobs:
     defaults:
       run:
         working-directory: teams/mind
-    # A temporary vector-store container for this CI run only, migrated by
-    # `make migrate` below (see migrations/) -- not a shared or persistent
-    # database, and not schema-bootstrapped by the app itself anymore
-    # (issue #441). This is local/Compose-shaped wiring only; in
+    # A temporary vector-store container for this CI run only -- the same
+    # image and schema-bootstrap the app manages itself, not a shared or
+    # persistent database. This is local/Compose-shaped wiring only; in
     # production MIND_VECTOR_STORE__DSN arrives as a whole Secret, not
     # composed from separate env vars in YAML.
     services:
@@ -57,24 +56,6 @@ jobs:
 
       - name: Lint (ruff + mypy)
         run: make lint
-
-      # docker-compose.yml gets this for free from db/init/ (mounted as
-      # docker-entrypoint-initdb.d); this services: container has no
-      # equivalent init-script mount, so it's a superuser one-off step
-      # here instead -- migration 0001 assumes the extension already
-      # exists and deliberately doesn't create it (see its docstring).
-      - name: Enable pgvector extension
-        run: |
-          python <<'PY'
-          import os
-          import psycopg
-
-          with psycopg.connect(os.environ["MIND_VECTOR_STORE__DSN"], autocommit=True) as conn:
-              conn.execute("CREATE EXTENSION IF NOT EXISTS vector;")
-          PY
-
-      - name: Run migrations
-        run: make migrate
 
       - name: Tests
         run: make test

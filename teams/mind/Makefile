@@ -1,13 +1,10 @@
-.PHONY: install dev test lint fmt run eval eval-ci schema migrate docker-build docker-up
+.PHONY: install dev test lint fmt run eval eval-ci schema docker-build docker-up
 
 install:
 	pip install -e .
 
 dev:
 	pip install -e ".[dev]"
-
-migrate:
-	alembic upgrade head
 
 test:
 	pytest --cov=src/mind
