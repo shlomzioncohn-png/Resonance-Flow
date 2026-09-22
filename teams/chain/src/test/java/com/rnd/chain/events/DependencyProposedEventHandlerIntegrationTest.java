@@ -130,7 +130,7 @@ class DependencyProposedEventHandlerIntegrationTest {
         producer.send(TOPIC, taskId.toString(), DependencyProposedEvent.newBuilder()
                 .setEventId(UUID.randomUUID().toString())
                 .setTaskId(taskId.toString())
-                .addDependencyTaskIds(depId.toString())
+                .addDependencies(com.rnd.mind.event.Dependency.newBuilder().setDependsOnTaskId(depId.toString()).build())
                 .build());
 
         awaitUntil("blockingCount to become 1", () ->
@@ -148,7 +148,7 @@ class DependencyProposedEventHandlerIntegrationTest {
         DependencyProposedEvent event = DependencyProposedEvent.newBuilder()
                 .setEventId(eventId)
                 .setTaskId(taskId.toString())
-                .addDependencyTaskIds(depId.toString())
+                .addDependencies(com.rnd.mind.event.Dependency.newBuilder().setDependsOnTaskId(depId.toString()).build())
                 .build();
 
         producer.send(TOPIC, taskId.toString(), event);
@@ -194,7 +194,7 @@ class DependencyProposedEventHandlerIntegrationTest {
         producer.send(TOPIC, taskId.toString(), DependencyProposedEvent.newBuilder()
                 .setEventId(UUID.randomUUID().toString())
                 .setTaskId(taskId.toString())
-                .addDependencyTaskIds(depId.toString())
+                .addDependencies(com.rnd.mind.event.Dependency.newBuilder().setDependsOnTaskId(depId.toString()).build())
                 .build());
 
         // Give the first attempt a moment to fail with ReferencedTaskNotFoundException, then let

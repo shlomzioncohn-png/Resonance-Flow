@@ -15,9 +15,15 @@ import java.util.UUID;
  * Consumes task.dependencies.proposed (Mind, Protobuf) to feed
  * {@link TaskEligibilityService#addDependency}.
  *
- * Idempotency: this topic's events carry their own event_id (Mind's own, per the team lead) -
- * dedupe via {@link ChainEventProcessingTemplate#processClaimed}, same as any other Mind-originated
- * event.
+ * Idempotency: dedupe via {@link ChainEventProcessingTemplate#processClaimed} on event_id, same as
+ * any other Mind-originated event - per the team lead's statement that Mind events carry their own
+ * event_id. NOT YET CONFIRMED end-to-end though: Mind's actual draft schema (see
+ * dependency-proposed-event.proto's header) doesn't show an event_id field - the user is actively
+ * working to get Mind to add one. If it turns out not to materialize, this needs a different
+ * idempotency strategy - but note {@code TaskEligibilityService.addDependency} is already
+ * naturally idempotent per-edge (re-adding an existing edge is a documented no-op), so even
+ * without an event_id, redelivery can't corrupt state - it would only lose the "duplicate
+ * detected" observability this event_id-based claim otherwise gives for free.
  *
  * Out-of-order handling - INTERIM approach, not the target design:
  * The implementation plan's real design is an upsert-placeholder: if a dependency references a
@@ -63,8 +69,10 @@ public class DependencyProposedEventHandler {
         UUID taskId = parseUuid(event.getTaskId(), "task_id");
 
         template.processClaimed(eventId, "task.dependencies.proposed", () -> {
-            for (String rawDependsOnTaskId : event.getDependencyTaskIdsList()) {
-                UUID dependsOnTaskId = parseUuid(rawDependsOnTaskId, "dependency_task_ids");
+            // confidence (Dependency.getConfidence()) is deliberately never read - confirmed to
+            // have no effect on Chain's side, every entry is applied unconditionally.
+            for (com.rnd.mind.event.Dependency dependency : event.getDependenciesList()) {
+                UUID dependsOnTaskId = parseUuid(dependency.getDependsOnTaskId(), "dependencies[].depends_on_task_id");
                 addDependency(taskId, dependsOnTaskId);
             }
         });

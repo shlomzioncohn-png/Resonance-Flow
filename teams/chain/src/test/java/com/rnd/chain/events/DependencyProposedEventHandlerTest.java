@@ -51,8 +51,8 @@ class DependencyProposedEventHandlerTest {
         fixture.handler().onMessage(DependencyProposedEvent.newBuilder()
                 .setEventId(UUID.randomUUID().toString())
                 .setTaskId(taskId.toString())
-                .addDependencyTaskIds(dep1.toString())
-                .addDependencyTaskIds(dep2.toString())
+                .addDependencies(com.rnd.mind.event.Dependency.newBuilder().setDependsOnTaskId(dep1.toString()).build())
+                .addDependencies(com.rnd.mind.event.Dependency.newBuilder().setDependsOnTaskId(dep2.toString()).build())
                 .build());
 
         Task after = fixture.taskRepo().findById(taskId).orElseThrow();
@@ -68,7 +68,7 @@ class DependencyProposedEventHandlerTest {
         DependencyProposedEvent event = DependencyProposedEvent.newBuilder()
                 .setEventId(UUID.randomUUID().toString())
                 .setTaskId(taskId.toString())
-                .addDependencyTaskIds(dep.toString())
+                .addDependencies(com.rnd.mind.event.Dependency.newBuilder().setDependsOnTaskId(dep.toString()).build())
                 .build();
 
         fixture.handler().onMessage(event);
@@ -87,7 +87,7 @@ class DependencyProposedEventHandlerTest {
         DependencyProposedEvent event = DependencyProposedEvent.newBuilder()
                 .setEventId(UUID.randomUUID().toString())
                 .setTaskId(taskId.toString())
-                .addDependencyTaskIds(unknownDep.toString())
+                .addDependencies(com.rnd.mind.event.Dependency.newBuilder().setDependsOnTaskId(unknownDep.toString()).build())
                 .build();
 
         assertThrows(ReferencedTaskNotFoundException.class, () -> fixture.handler().onMessage(event));
@@ -108,7 +108,7 @@ class DependencyProposedEventHandlerTest {
         DependencyProposedEvent event = DependencyProposedEvent.newBuilder()
                 .setEventId(UUID.randomUUID().toString())
                 .setTaskId(taskA.toString())
-                .addDependencyTaskIds(taskB.toString())
+                .addDependencies(com.rnd.mind.event.Dependency.newBuilder().setDependsOnTaskId(taskB.toString()).build())
                 .build();
 
         assertThrows(NonRetryableEventException.class, () -> handler.onMessage(event));
@@ -132,7 +132,7 @@ class DependencyProposedEventHandlerTest {
         DependencyProposedEvent event = DependencyProposedEvent.newBuilder()
                 .setEventId(UUID.randomUUID().toString())
                 .setTaskId(taskId.toString())
-                .addDependencyTaskIds("not-a-uuid")
+                .addDependencies(com.rnd.mind.event.Dependency.newBuilder().setDependsOnTaskId("not-a-uuid").build())
                 .build();
 
         assertThrows(NonRetryableEventException.class, () -> fixture.handler().onMessage(event));
