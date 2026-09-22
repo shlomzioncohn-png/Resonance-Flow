@@ -195,13 +195,24 @@ public class ChatGroupStateReconciler {
      *   no-op. Revision untouched.
      * - unchanged content, not yet confirmed: a retry, not a content change - rebuild and
      *   republish (transcript included) at the same revision.
-     * - changed content: always advances the revision, whether or not the version being
-     *   replaced had already been confirmed published - an edit arriving while the previous
-     *   candidate is still in flight (unconfirmed) is still a genuinely new version, and must
-     *   not share its revision number with that still-unconfirmed candidate. Sharing it would
-     *   let a later stale ACK for the old candidate incorrectly confirm the edited content
-     *   instead (see ChatGroupStateReconcilerTest.anEditArrivingBeforeThePreviousAckGetsAHigherRevision
-     *   and its stale-ACK sibling).
+     * - changed content: advances the revision only if the version being replaced was already
+     *   confirmed published OR is currently claimed for publication (see
+     *   GroupStateStore.claimForPublication) - any number of edits against a version that has
+     *   never been confirmed published and is not currently claimed instead collapse onto that
+     *   same revision number, since there is no outstanding confirmed-or-in-flight candidate yet
+     *   whose identity a new version would need to avoid colliding with. Once a version has been
+     *   confirmed published, or claimed and therefore possibly already in flight to Kafka, the
+     *   next content change is a genuinely new version and must not share its revision number
+     *   with that now-superseded candidate - sharing it would let a later stale ACK for the old
+     *   (confirmed, or claimed-then-in-flight) candidate incorrectly confirm the edited content
+     *   instead (see
+     *   ChatGroupStateReconcilerTest.theStaleAckForThePreEditRevisionCannotMarkTheEditedRevisionPublished
+     *   for the post-publish case and
+     *   SlackSessionSchedulerPublishConfirmationTest.editArrivingWhileRIsInFlightGetsItsOwnScheduleAndIsUnaffectedByRsStaleConfirm
+     *   for the claimed-but-not-yet-confirmed case). claimedRevision itself is still always
+     *   cleared on any content change regardless of which branch this is (see below) - the two
+     *   are separate concerns: this decides whether the number moves, that decides whether an
+     *   outstanding claim survives.
      */
     private List<SourceRecord> mergeAndMaybePublish(
             RawSourceType sourceType, String tenantId, String groupId, GroupState emptyValue,
@@ -273,7 +284,10 @@ public class ChatGroupStateReconciler {
                 confirmedUnchanged.set(true);
                 return current;
             }
-            int revision = contentUnchanged ? current.revision() : current.revision() + 1;
+            boolean supersedesAnOutstandingVersion = current.published() || current.claimedRevision() != null;
+            int revision = contentUnchanged
+                    ? current.revision()
+                    : supersedesAnOutstandingVersion ? current.revision() + 1 : Math.max(current.revision(), 0);
             Integer claimedRevision = contentUnchanged ? current.claimedRevision() : null;
             return new GroupState(
                     current.groupId(), current.sourceType(), current.tenantId(), current.chatId(),
@@ -446,8 +460,9 @@ public class ChatGroupStateReconciler {
     /** Mints a fresh correlationId for a genuinely new group - see GroupState's javadoc for why
      * this only ever happens here (once), never on an update to an already-persisted group.
      * Starts at revision -1 (not yet a real version) so the first merge in mergeAndMaybePublish
-     * - a content change from nothing to something - advances it to revision 0, the same path
-     * every later edit takes rather than a special-cased starting value. */
+     * - a content change from nothing to something, against an unpublished (nonexistent)
+     * version - lands at revision 0 via the same unpublished-collapse rule any later pre-publish
+     * edit uses (see mergeIntoGroupState), rather than a special-cased starting value. */
     private GroupState newGroupState(
             String groupId, RawSourceType sourceType, String tenantId, String chatId, String threadId) {
         return new GroupState(

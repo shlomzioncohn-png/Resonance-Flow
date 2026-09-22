@@ -22,11 +22,16 @@ import java.util.List;
  * messages is the full accumulated set for this group (old + new across every run that has
  * touched it so far), always kept sorted by source timestamp.
  * published means this group's current content has been landed/published at least once.
- * revision is the logical content version of this group - it increments on every actual
- * content change (any edit that produces a different merged message set), regardless of
- * whether the version being replaced was ever confirmed published; an unchanged retry
- * (identical content re-read) never advances it. A newly created group starts at -1 (see
- * ChatGroupStateReconciler.newGroupState) so its first real merge lands at revision 0.
+ * revision is the logical content version of this group - it only advances when a content
+ * change (any edit that produces a different merged message set) supersedes a version that was
+ * already confirmed published OR is currently claimed for publication (claimedRevision != null,
+ * i.e. possibly already in flight to Kafka); any number of content changes against a version
+ * that is neither confirmed published nor claimed collapse onto that same revision number
+ * instead of each minting a new one, and an unchanged retry (identical content re-read) never
+ * advances it either. A newly created group starts at -1 (see
+ * ChatGroupStateReconciler.newGroupState) so its first real merge - always against an
+ * unpublished, unclaimed (nonexistent) version - lands at revision 0, the same as any later
+ * content change that lands while unpublished and unclaimed.
  * Internal bookkeeping only - never exposed on RawObjectEvent/the wire.
  * GroupStateStore.confirmPublished(expectedRevision) is the guard that stops a stale Kafka ACK
  * for an old revision from marking a since-superseded (edited) revision as published - see its

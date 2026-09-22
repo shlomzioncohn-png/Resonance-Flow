@@ -198,35 +198,113 @@ class ChatGroupStateReconcilerTest {
     }
 
     @Test
-    void anEditArrivingBeforeThePreviousAckGetsAHigherRevision() {
+    void anEditArrivingBeforeTheFirstPublishStaysAtRevisionZero() {
         reconciler.group(List.of(message("chat-a", "ruth", "2026-08-18T09:00:00Z", "hi", "m1")));
         String groupId = groupStateStore.findGroupIdForMessage(RawSourceType.SLACK, "kamatech", "m1").orElseThrow();
-        // No confirmPublished call - the revision 0 candidate's Kafka ack has not come back yet.
+        // No confirmPublished call - revision 0 has never been confirmed published yet.
         assertThat(groupStateStore.load(RawSourceType.SLACK, "kamatech", groupId).orElseThrow().published())
                 .isFalse();
 
         reconciler.group(List.of(message("chat-a", "ruth", "2026-08-18T09:00:00Z", "hi (edited)", "m1")));
 
         GroupState state = groupStateStore.load(RawSourceType.SLACK, "kamatech", groupId).orElseThrow();
-        // A genuine content change is a new logical version regardless of whether the version
-        // it replaced was ever confirmed - it must not keep sharing revision 0's number.
+        // A content change against a version that was never confirmed published collapses onto
+        // that same revision number - there is no confirmed candidate yet to avoid colliding with.
+        assertThat(state.revision()).isZero();
+        assertThat(state.messages().get(0).text()).isEqualTo("hi (edited)");
+        assertThat(state.published()).isFalse();
+    }
+
+    @Test
+    void multipleEditsBeforeTheFirstPublishAllStayAtRevisionZero() {
+        reconciler.group(List.of(message("chat-a", "ruth", "2026-08-18T09:00:00Z", "hi", "m1")));
+        String groupId = groupStateStore.findGroupIdForMessage(RawSourceType.SLACK, "kamatech", "m1").orElseThrow();
+
+        reconciler.group(List.of(message("chat-a", "ruth", "2026-08-18T09:00:00Z", "hi (edit 1)", "m1")));
+        reconciler.group(List.of(message("chat-a", "ruth", "2026-08-18T09:00:00Z", "hi (edit 2)", "m1")));
+        reconciler.group(List.of(message("chat-a", "ruth", "2026-08-18T09:00:00Z", "hi (edit 3)", "m1")));
+
+        GroupState state = groupStateStore.load(RawSourceType.SLACK, "kamatech", groupId).orElseThrow();
+        // No number of content changes before the first confirmed publish may advance revision
+        // past 0 - each one collapses onto the same still-unpublished version.
+        assertThat(state.revision()).isZero();
+        assertThat(state.messages().get(0).text()).isEqualTo("hi (edit 3)");
+        assertThat(state.published()).isFalse();
+    }
+
+    @Test
+    void multipleEditsAfterAConfirmedPublishStayAtTheSameNextRevision() {
+        reconciler.group(List.of(message("chat-a", "ruth", "2026-08-18T09:00:00Z", "hi", "m1")));
+        String groupId = groupStateStore.findGroupIdForMessage(RawSourceType.SLACK, "kamatech", "m1").orElseThrow();
+        groupStateStore.confirmPublished(RawSourceType.SLACK, "kamatech", groupId, 0);
+
+        // Three separate content changes against the same confirmed revision 0.
+        reconciler.group(List.of(message("chat-a", "ruth", "2026-08-18T09:00:00Z", "hi (edit 1)", "m1")));
+        reconciler.group(List.of(message("chat-a", "ruth", "2026-08-18T09:00:00Z", "hi (edit 2)", "m1")));
+        reconciler.group(List.of(message("chat-a", "ruth", "2026-08-18T09:00:00Z", "hi (edit 3)", "m1")));
+
+        GroupState state = groupStateStore.load(RawSourceType.SLACK, "kamatech", groupId).orElseThrow();
+        // The first edit after a confirmed publish advances revision exactly once, to 1; further
+        // edits before THAT revision is itself confirmed must not keep incrementing it.
+        assertThat(state.revision()).isEqualTo(1);
+        assertThat(state.messages().get(0).text()).isEqualTo("hi (edit 3)");
+        assertThat(state.published()).isFalse();
+    }
+
+    @Test
+    void anEditAfterAConfirmedPublishAdvancesRevisionExactlyOnce() {
+        reconciler.group(List.of(message("chat-a", "ruth", "2026-08-18T09:00:00Z", "hi", "m1")));
+        String groupId = groupStateStore.findGroupIdForMessage(RawSourceType.SLACK, "kamatech", "m1").orElseThrow();
+        groupStateStore.confirmPublished(RawSourceType.SLACK, "kamatech", groupId, 0);
+
+        reconciler.group(List.of(message("chat-a", "ruth", "2026-08-18T09:00:00Z", "hi (edited)", "m1")));
+
+        GroupState state = groupStateStore.load(RawSourceType.SLACK, "kamatech", groupId).orElseThrow();
         assertThat(state.revision()).isEqualTo(1);
         assertThat(state.messages().get(0).text()).isEqualTo("hi (edited)");
         assertThat(state.published()).isFalse();
     }
 
     @Test
+    void anEditWhileClaimedAdvancesRevisionAndInvalidatesTheClaim() {
+        reconciler.group(List.of(message("chat-a", "ruth", "2026-08-18T09:00:00Z", "hi", "m1")));
+        String groupId = groupStateStore.findGroupIdForMessage(RawSourceType.SLACK, "kamatech", "m1").orElseThrow();
+        // Revision 0 is claimed for publication (e.g. the session-gap timer firing) before it
+        // has actually been confirmed published - it may already be in flight to Kafka.
+        assertThat(groupStateStore.claimForPublication(RawSourceType.SLACK, "kamatech", groupId, 0)).isTrue();
+
+        // A content change arrives before that claim is confirmed. Unlike an edit against a
+        // never-claimed, never-published version, this one must still advance to a new revision
+        // number (not collapse onto 0) - otherwise a later stale ack for the claimed revision 0
+        // publish could incorrectly confirm this edited content as published. The outstanding
+        // claim itself is also invalidated.
+        reconciler.group(List.of(message("chat-a", "ruth", "2026-08-18T09:00:00Z", "hi (edited)", "m1")));
+
+        GroupState state = groupStateStore.load(RawSourceType.SLACK, "kamatech", groupId).orElseThrow();
+        assertThat(state.revision()).isEqualTo(1);
+        assertThat(state.claimedRevision()).isNull();
+        // A fresh claim against the current (edited) content, at its new revision, must succeed.
+        assertThat(groupStateStore.claimForPublication(RawSourceType.SLACK, "kamatech", groupId, 1)).isTrue();
+        // The stale claimed revision (0) can no longer be claimed or confirmed.
+        assertThat(groupStateStore.claimForPublication(RawSourceType.SLACK, "kamatech", groupId, 0)).isFalse();
+    }
+
+    @Test
     void theStaleAckForThePreEditRevisionCannotMarkTheEditedRevisionPublished() {
         reconciler.group(List.of(message("chat-a", "ruth", "2026-08-18T09:00:00Z", "hi", "m1")));
         String groupId = groupStateStore.findGroupIdForMessage(RawSourceType.SLACK, "kamatech", "m1").orElseThrow();
+        // Revision 0 is confirmed published first, so the next content change is a genuinely
+        // new version rather than collapsing onto revision 0.
+        groupStateStore.confirmPublished(RawSourceType.SLACK, "kamatech", groupId, 0);
 
-        // The edit lands before revision 0's ack comes back, advancing to revision 1 (still
-        // unconfirmed) - see anEditArrivingBeforeThePreviousAckGetsAHigherRevision.
+        // The edit lands after revision 0 was confirmed, advancing to revision 1 (still
+        // unconfirmed) - see anEditAfterAConfirmedPublishAdvancesRevisionExactlyOnce.
         reconciler.group(List.of(message("chat-a", "ruth", "2026-08-18T09:00:00Z", "hi (edited)", "m1")));
         assertThat(groupStateStore.load(RawSourceType.SLACK, "kamatech", groupId).orElseThrow().revision())
                 .isEqualTo(1);
 
-        // The stale ack for revision 0 - the pre-edit candidate - finally arrives.
+        // A stale ack for revision 0 - already confirmed once - arrives again (e.g. duplicate
+        // Kafka callback).
         groupStateStore.confirmPublished(RawSourceType.SLACK, "kamatech", groupId, 0);
 
         GroupState state = groupStateStore.load(RawSourceType.SLACK, "kamatech", groupId).orElseThrow();
@@ -650,7 +728,9 @@ class ChatGroupStateReconcilerTest {
                 message("chat-a", "ruth", "2026-08-18T09:00:00Z", "hi (edited)", "m1"));
 
         assertThat(result.groupState().groupId()).isEqualTo(groupId);
-        assertThat(result.groupState().revision()).isEqualTo(1);
+        // Neither message was ever confirmed published, so the edit collapses onto revision 0
+        // instead of minting a new one.
+        assertThat(result.groupState().revision()).isZero();
         assertThat(result.groupState().messages().get(0).text()).isEqualTo("hi (edited)");
     }
 
@@ -665,7 +745,9 @@ class ChatGroupStateReconcilerTest {
         ChatGroupStateReconciler.RealtimeReconcileResult redelivered = reconciler.reconcileNonThreadedMessage(
                 message("chat-a", "ruth", "2026-08-18T09:00:00Z", "hi (edited)", "m1"));
 
-        assertThat(redelivered.groupState().revision()).isEqualTo(1);
+        // Still unpublished throughout, so every version - including the redelivery - stays at
+        // revision 0.
+        assertThat(redelivered.groupState().revision()).isZero();
         assertThat(redelivered.groupState().messages().get(0).text()).isEqualTo("hi (edited)");
     }
 
@@ -699,7 +781,9 @@ class ChatGroupStateReconcilerTest {
 
         assertThat(second.groupState().groupId()).isEqualTo(first.groupState().groupId());
         assertThat(second.groupState().messages()).extracting(MessageSnapshot::messageId).containsExactly("m1", "m2");
-        assertThat(second.groupState().revision()).isEqualTo(1);
+        // Never confirmed published, so the second message extending the session collapses onto
+        // revision 0 rather than minting a new one.
+        assertThat(second.groupState().revision()).isZero();
     }
 
     @Test
@@ -981,8 +1065,11 @@ class ChatGroupStateReconcilerTest {
 
         assertThat(edit.groupState().groupId()).isEqualTo(xGroupId);
         assertThat(edit.groupState().messages().get(0).text()).isEqualTo("A (edited)");
-        // This edit is a content change, so it still bumps the revision and clears the claim -
-        // the same pre-existing mergeIntoGroupState behavior, untouched by this step (see
+        // The revision is currently claimed (possibly already in flight to Kafka), so the edit
+        // must still advance to a new revision number rather than collapsing onto it - otherwise
+        // a later stale ack for the claimed revision could incorrectly confirm this edited
+        // content. It also still invalidates the outstanding claim, the same pre-existing
+        // mergeIntoGroupState behavior, untouched by this step (see
         // ChatGroupStateReconciler.mergeIntoCurrentChatGroup's javadoc: flagged, not redesigned).
         assertThat(edit.groupState().revision()).isEqualTo(1);
         assertThat(edit.groupState().claimedRevision()).isNull();

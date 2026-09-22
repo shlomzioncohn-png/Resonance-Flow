@@ -109,8 +109,14 @@ public class GroupStateStore {
      * ChatGroupStateReconcilerTest.concurrentUpdatesToTheSameGroupDoNotLoseMessages's sibling
      * concern, but for publish confirmation instead of the merge itself): if the current
      * revision no longer matches, marking it published now would incorrectly claim a NEWER,
-     * not-yet-actually-published revision was confirmed. The check-and-flip runs atomically via
-     * update() so a concurrent mergeAndMaybePublish can't land between the check and the write.
+     * not-yet-actually-published revision was confirmed. This still works with revision numbers
+     * that collapse across multiple pre-publish edits (see ChatGroupStateReconciler.
+     * mergeIntoGroupState): an edit landing while a revision is actively claimed for publication
+     * always advances to a new revision number rather than collapsing (see that method's
+     * javadoc), so a stale ack for the claimed revision still mismatches the edited content's now
+     * newly-advanced revision, exactly as before.
+     * The check-and-flip runs atomically via update() so a concurrent mergeAndMaybePublish can't
+     * land between the check and the write.
      * A no-op if the group isn't found at all (shouldn't happen in practice - the record being
      * confirmed was built from this exact group a moment earlier in the same run), checked
      * before taking the lock: update()'s underlying ControlPlaneStateStore.update always
