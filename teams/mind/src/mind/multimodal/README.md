@@ -43,6 +43,34 @@ Local OCR + ASR preprocessing.
   memory, ~0.45s CPU time per page on a dev machine (no GPU, no load).
   See `benchmarks/ocr-asr-benchmark.md` for the full comparison and
   reasoning.
+- **OCR: built (`ocr.py`).** `extract_text(content: bytes, *, filename:
+  str = "") -> OCRResult` -- takes raw file bytes (image or PDF; PDFs are
+  rasterized page-by-page via `pypdfium2` before OCR), runs
+  `tesseract --psm 11` in TSV mode, and returns an `OCRResult`:
+  - `success: bool` -- `False` for a corrupted file, empty input, or a
+    scan Tesseract couldn't read at all (never an exception).
+  - `text: str`
+  - `low_confidence_words: list[LowConfidenceWord]` (`text`, `confidence`)
+    -- words Tesseract itself scored below `LOW_CONFIDENCE_THRESHOLD`
+    (**60**, tuned against the confidence-by-miss-category numbers above;
+    see the constant's docstring in `ocr.py` for the exact reasoning).
+  - `error: str | None` -- set when `success` is `False`.
+
+  The call is wrapped in `instrumented_call("tesseract-psm11-ocr")`
+  (`src/mind/api/instrumentation.py`), so latency/cost are recorded like
+  every other call in the service.
+
+  **This signature is a working draft, not yet confirmed with R2** --
+  she calls this from her `bridge.raw.landed` consumer (#349) once
+  `RawObjectEvent.source_type` (`src/mind/contracts/raw_object_event.py`)
+  has a value for "scanned document", which it does not yet (see #188).
+  Update this section once the signature is agreed.
+
+  Tests: `tests/test_ocr_pipeline.py` (clean scan, PDF input, corrupted
+  file, corrupted PDF, unreadable/blank scan, empty input, low-confidence
+  words). Tests that need the `tesseract` binary skip on a machine
+  without it; the FUNSD-backed tests additionally skip if `local-data/`
+  isn't populated.
 - **ASR: known risk, not just "open"** — no decision exists, and it
   cannot exist yet: there is no AMI audio (or any audio) sample
   anywhere in this repo, on any branch, to benchmark Whisper against

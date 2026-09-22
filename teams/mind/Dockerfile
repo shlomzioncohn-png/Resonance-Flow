@@ -29,6 +29,15 @@ FROM python:3.12-slim AS runtime
 
 WORKDIR /app
 
+# tesseract-ocr is a system binary, not pip-installable (see pyproject.toml)
+# -- src/mind/multimodal/ocr.py shells out to it via PATH. tesseract-ocr-eng
+# is named explicitly rather than relying on --install-recommends, since
+# Tesseract's own English traineddata is a separate package on Debian.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    tesseract-ocr \
+    tesseract-ocr-eng \
+    && rm -rf /var/lib/apt/lists/*
+
 COPY --from=builder /opt/venv /opt/venv
 ENV PATH="/opt/venv/bin:$PATH"
 

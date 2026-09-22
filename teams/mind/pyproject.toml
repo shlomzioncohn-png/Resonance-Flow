@@ -10,7 +10,12 @@ dependencies = [
     "pydantic>=2.0",
     "fastapi",
     "uvicorn",
-    # add as decided: vector-store client, OCR/ASR libs, LLM client, etc.
+    # OCR (src/mind/multimodal/ocr.py) -- tesseract --psm 11, the decision
+    # made in benchmarks/ocr-asr-benchmark.md. Also requires the
+    # tesseract-ocr system binary (not pip-installable).
+    "pillow",
+    "pypdfium2",  # rasterizes PDF pages to images for the OCR pipeline
+    # add as decided: vector-store client, ASR libs, LLM client, etc.
 ]
 
 [project.optional-dependencies]
@@ -21,13 +26,11 @@ dev = [
     "mypy",
     "httpx",  # required by fastapi.testclient.TestClient
 ]
-# Not a runtime dependency of src/mind/ -- extraction/multimodal isn't
-# built yet (Phase 2). Only benchmarks/ocr_asr_benchmark.py needs these;
-# Tesseract also requires the tesseract-ocr system binary (not
-# pip-installable); PaddleOCR also requires its model weights, which may
-# need manual placement under ~/.paddlex/official_models/ if the
-# auto-download hosters are network-filtered -- see
-# benchmarks/ocr-asr-benchmark.md "PaddleOCR -- setup".
+# Not a runtime dependency of src/mind/ -- only benchmarks/ocr_asr_benchmark.py
+# needs these. pytesseract/pillow/psutil compare against PaddleOCR; PaddleOCR
+# also requires its model weights, which may need manual placement under
+# ~/.paddlex/official_models/ if the auto-download hosters are
+# network-filtered -- see benchmarks/ocr-asr-benchmark.md "PaddleOCR -- setup".
 benchmark = [
     "pytesseract",
     "pillow",
@@ -46,6 +49,12 @@ packages = ["src/mind"]
 [tool.ruff]
 line-length = 100
 src = ["src", "tests"]
+
+[tool.mypy]
+# No stubs/py.typed marker published for this dependency.
+[[tool.mypy.overrides]]
+module = "pypdfium2.*"
+ignore_missing_imports = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
