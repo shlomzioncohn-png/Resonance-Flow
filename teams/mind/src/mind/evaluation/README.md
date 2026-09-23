@@ -12,7 +12,7 @@ The harness is designed to:
 
 - **Immutable Scenarios:** Scores a ranking model against `eval/personas/` — a fixed scenario set, never touched mid-comparison.
 - **Foundation Gate:** Must be runnable by someone outside the MIND team.
-- **Lifecycle:** Used for both the baseline (week 6) and the stretch-goal comparison (week 7, demo day week 9).
+- **Lifecycle:** Used to score the baseline (week 5; R2 publishes those scores to Chain in week 6) and for the stretch-goal comparison (week 7, demo day week 9).
 
 ## The Model Interface (Contract) — closed, approved
 
@@ -122,8 +122,8 @@ The harness evaluates models using **Top-1 Accuracy** (`metrics.top1_accuracy`).
 **Decision status: closed (final).** Top-1 was chosen over MRR / nDCG with the
 mentor; each scenario carries exactly one labelled correct answer
 (`expected_top_task_id`), which is what top-1 needs and what MRR/nDCG-with-graded-
-labels would not have. This will not change once baseline-vs-stretch scoring
-starts (week 6). See also the "Open decisions" table in `teams/mind/CLAUDE.md`.
+labels would not have. This will not change once baseline scoring starts
+(week 5). See also the "Open decisions" table in `teams/mind/CLAUDE.md`.
 
 For each scenario, the metric checks whether the task the model scored highest matches
 that scenario's `expected_top_task_id`. The final number is the proportion of scenarios
@@ -132,3 +132,22 @@ where the model picked the correct top-priority task.
 To keep the door open for a future switch to a different metric without re-running every
 model, the harness report keeps every candidate's score and reasoning per scenario
 (`ScenarioResult.candidates`), not just the winner.
+
+## Baseline score
+
+The number the week-7 stretch is measured against (#486). Once recorded, an
+entry here is not overwritten; a re-run gets its own dated entry.
+
+### 2026-09-23: no week-5 baseline number exists yet
+
+- **Checked:** `origin/main` @ `c7e6c507` (2026-09-23).
+- **Finding:** `src/mind/scoring/` contains only `README.md` and `__init__.py`,
+  with no ranking model. The harness has only ever scored `DummyModel` and the
+  heuristics in `baseline_models.py`, none of which is the baseline.
+- **Why:** the segmented-ranking model (#354) has not merged. It is open as
+  PR #498, which also depends on `ScoreResult.factors` (PR #497, open).
+- **Consequence:** there is no week-5 baseline number anywhere, so #428 step 3
+  ("re-confirm the baseline number") has nothing to confirm yet.
+- **Next:** measured over all 30 scenarios in `eval/personas/` once #354 lands
+  (expected start of week 7, 2026-10-04), then recorded here with the model
+  commit and the persona-set version.
