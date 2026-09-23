@@ -30,6 +30,8 @@ dev = [
 # benchmarks/ocr-asr-benchmark.md "PaddleOCR -- setup".
 benchmark = [
     "psutil",  # cross-platform peak-RSS/CPU sampling; stdlib `resource` is Unix-only
+    "types-psutil",  # mypy stub for psutil -- see [tool.mypy] override below for paddleocr,
+                     # which has no stub package to install
     "paddleocr",
     "paddlepaddle",
 ]
@@ -43,7 +45,15 @@ packages = ["src/mind"]
 
 [tool.ruff]
 line-length = 100
-src = ["src", "tests"]
+src = ["src", "tests", "benchmarks"]
+
+# paddleocr ships no type stubs and no py.typed marker -- no stub package
+# exists to install (unlike psutil's types-psutil above), so this is the
+# standard mypy way to silence "missing library stubs" for it specifically,
+# not a blanket ignore for the whole benchmarks/ tree.
+[[tool.mypy.overrides]]
+module = "paddleocr"
+ignore_missing_imports = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

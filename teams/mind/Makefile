@@ -10,8 +10,8 @@ test:
 	pytest --cov=src/mind
 
 lint:
-	ruff check src tests
-	mypy src
+	ruff check src tests benchmarks
+	mypy src benchmarks
 
 fmt:
 	ruff format src tests
