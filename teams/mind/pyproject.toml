@@ -29,8 +29,6 @@ dev = [
 # auto-download hosters are network-filtered -- see
 # benchmarks/ocr-asr-benchmark.md "PaddleOCR -- setup".
 benchmark = [
-    "pytesseract",
-    "pillow",
     "psutil",  # cross-platform peak-RSS/CPU sampling; stdlib `resource` is Unix-only
     "paddleocr",
     "paddlepaddle",
