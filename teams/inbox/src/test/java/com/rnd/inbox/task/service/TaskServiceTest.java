@@ -606,8 +606,8 @@ class TaskServiceTest {
         Task task = new Task();
         Page<Task> page = new PageImpl<>(List.of(task), pageable, 1);
         when(taskRepository.findFiltered(
-                eq(true), isNull(), isNull(), isNull(), isNull(), isNull(), isNull(), isNull(), isNull(), isNull(),
-                eq(pageable)))
+                eq(true), isNull(), eq(false), isNull(), eq(false), isNull(), eq(false), isNull(), eq(false),
+                isNull(), eq(false), isNull(), eq(false), isNull(), eq(false), isNull(), eq(false), eq(pageable)))
                 .thenReturn(page);
         TaskResponseDto responseDto = sampleTaskResponseDto();
         when(taskRestMapper.toResponseDto(task)).thenReturn(responseDto);
@@ -625,8 +625,8 @@ class TaskServiceTest {
         Task task = new Task();
         Page<Task> page = new PageImpl<>(List.of(task), pageable, 1);
         when(taskRepository.findFiltered(
-                eq(false), eq(tenantId), isNull(), isNull(), isNull(), isNull(), isNull(), isNull(), isNull(),
-                isNull(), eq(pageable)))
+                eq(false), eq(tenantId), eq(false), isNull(), eq(false), isNull(), eq(false), isNull(), eq(false),
+                isNull(), eq(false), isNull(), eq(false), isNull(), eq(false), isNull(), eq(false), eq(pageable)))
                 .thenReturn(page);
         TaskResponseDto responseDto = sampleTaskResponseDto();
         when(taskRestMapper.toResponseDto(task)).thenReturn(responseDto);

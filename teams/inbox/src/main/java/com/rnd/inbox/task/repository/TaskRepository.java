@@ -28,31 +28,56 @@ public interface TaskRepository extends JpaRepository<Task, UUID> {
     // silently granting cross-tenant access the way "tenantId IS NULL -> see everything" would.
     // Validated by TaskFilterService before this is called: deadlineFrom/deadlineTo are
     // both-or-neither, and noDeadline (when true) is mutually exclusive with them.
+    //
+    // searchPattern is already "%lowercased-search%" by the time it gets here (built in
+    // TaskService), not assembled in SQL via CONCAT/'%'||param||'%'. Discovered by an integration
+    // test against real Postgres: Hibernate compiles JPQL CONCAT to Postgres's `||` operator,
+    // and `'%' || ? || '%'` left Postgres unable to infer the parameter's type, resolving it to
+    // bytea instead of text ("function lower(bytea) does not exist"). A query that's never
+    // actually run against a real DB can't catch this - it parses and validates fine, only live
+    // SQL execution reveals Postgres's own operator type-inference failing on it.
+    //
+    // Every optional filter needs a plain boolean "has-value" flag (like bypassTenantScope)
+    // instead of its own bare "$n IS NULL" check - including hasSearch, which looked safe in
+    // isolation but wasn't: pgjdbc only switches a query from the simple protocol (values
+    // inlined as literals, no type inference needed) to a server-side prepared statement (which
+    // requires Postgres to infer each parameter's type up front) after ~5 executions of the same
+    // SQL on one connection. A test run alone never crosses that threshold; the full suite does,
+    // and only then does "? IS NULL" with no other type context in the statement fail with
+    // "could not determine data type of parameter $n". Every field here gets the same safe
+    // has-flag pattern uniformly rather than trusting any of them to be a genuine exception.
     @Query("""
             SELECT t FROM Task t
             WHERE (:bypassTenantScope = TRUE OR t.tenant.id = :tenantId)
-              AND (:search IS NULL
-                   OR LOWER(t.title) LIKE LOWER(CONCAT('%', :search, '%'))
-                   OR LOWER(t.description) LIKE LOWER(CONCAT('%', :search, '%')))
-              AND (:status IS NULL OR t.status = :status)
-              AND (:available IS NULL OR t.available = :available)
-              AND (:source IS NULL OR t.sourceType = :source)
-              AND (:tier IS NULL OR t.tier = :tier)
-              AND (:deadlineFrom IS NULL OR t.deadline >= :deadlineFrom)
-              AND (:deadlineTo IS NULL OR t.deadline <= :deadlineTo)
-              AND (:noDeadline IS NULL OR :noDeadline = FALSE OR t.deadline IS NULL)
+              AND (:hasSearch = FALSE
+                   OR LOWER(t.title) LIKE :searchPattern
+                   OR LOWER(t.description) LIKE :searchPattern)
+              AND (:hasStatus = FALSE OR t.status = :status)
+              AND (:hasAvailable = FALSE OR t.isAvailable = :available)
+              AND (:hasSource = FALSE OR t.sourceType = :source)
+              AND (:hasTier = FALSE OR t.tier = :tier)
+              AND (:hasDeadlineFrom = FALSE OR t.deadline >= :deadlineFrom)
+              AND (:hasDeadlineTo = FALSE OR t.deadline <= :deadlineTo)
+              AND (:hasNoDeadline = FALSE OR t.deadline IS NULL)
             """)
     Page<Task> findFiltered(
             @Param("bypassTenantScope") boolean bypassTenantScope,
             @Param("tenantId") UUID tenantId,
-            @Param("search") String search,
+            @Param("hasSearch") boolean hasSearch,
+            @Param("searchPattern") String searchPattern,
+            @Param("hasStatus") boolean hasStatus,
             @Param("status") TaskStatus status,
+            @Param("hasAvailable") boolean hasAvailable,
             @Param("available") Boolean available,
+            @Param("hasSource") boolean hasSource,
             @Param("source") SourceType source,
+            @Param("hasTier") boolean hasTier,
             @Param("tier") TaskTier tier,
+            @Param("hasDeadlineFrom") boolean hasDeadlineFrom,
             @Param("deadlineFrom") Instant deadlineFrom,
+            @Param("hasDeadlineTo") boolean hasDeadlineTo,
             @Param("deadlineTo") Instant deadlineTo,
-            @Param("noDeadline") Boolean noDeadline,
+            @Param("hasNoDeadline") boolean hasNoDeadline,
             Pageable pageable);
 
     @Query("""

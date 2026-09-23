@@ -146,17 +146,25 @@ public class TaskService {
             case ActorScope.SelfOnly ignored ->
                     throw new ForbiddenActionException("Actor has no valid scope for tasks");
         }
+        String searchPattern = filter.getSearch() != null ? "%" + filter.getSearch().toLowerCase() + "%" : null;
         Page<Task> tasks = taskRepository.findFiltered(
                 bypassTenantScope,
                 tenantId,
-                filter.getSearch(),
+                searchPattern != null,
+                searchPattern,
+                filter.getStatus() != null,
                 filter.getStatus(),
+                filter.getAvailable() != null,
                 filter.getAvailable(),
+                filter.getSource() != null,
                 filter.getSource(),
+                filter.getTier() != null,
                 filter.getTier(),
+                filter.getDeadlineFrom() != null,
                 filter.getDeadlineFrom(),
+                filter.getDeadlineTo() != null,
                 filter.getDeadlineTo(),
-                filter.getNoDeadline(),
+                Boolean.TRUE.equals(filter.getNoDeadline()),
                 pageable);
         return PageResponseDto.from(tasks.map(taskRestMapper::toResponseDto));
     }
