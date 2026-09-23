@@ -1,232 +1,74 @@
 package com.rnd.chain.controller;
 
-import com.rnd.chain.dto.AddDependencyRequest;
-import com.rnd.chain.dto.Constraint;
-import com.rnd.chain.dto.CreateConstraintRequest;
-import com.rnd.chain.dto.Task;
-import com.rnd.chain.dto.TaskAvailability;
-import com.rnd.chain.dto.TaskDependency;
-import com.rnd.chain.dto.TaskEligibilityResponse;
-import com.rnd.chain.dto.UpdateConstraintStatusRequest;
-
-import com.rnd.chain.service.ConstraintService;
-import com.rnd.chain.service.DependencyGraphService;
-import com.rnd.chain.service.TaskDependencyService;
-import com.rnd.chain.service.TaskEligibilityService;
-
-import javax.validation.Valid;
-
+import com.rnd.chain.dto.TaskResponse;
+import com.rnd.chain.dto.TaskTraceResponse;
+import com.rnd.chain.service.TaskTraversalService;
 import org.springframework.http.ResponseEntity;
-import org.springframework.web.bind.annotation.*;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RestController;
 
-import java.net.URI;
 import java.util.List;
 import java.util.UUID;
 
+/**
+ * Graph traversal endpoints for Chain: same-tier dependency traversal, parent/child hierarchy
+ * traversal, and cross-tier trace. Every route here is read-only (GET) - nothing in this
+ * controller creates, modifies, or deletes a task or a dependency edge.
+ *
+ * Route naming mirrors TaskResponse/TaskTraceResponse's own field vocabulary: a bare path is
+ * the direct/one-level relationship, "/transitive" is the full closure over that same relation.
+ * Ancestors has no "/transitive" variant since there's only one parent per task - the ancestor
+ * chain already is the transitive closure, and its first entry already is the direct parent.
+ */
 @RestController
 @RequestMapping("/tasks")
 public class ChainController {
 
-    private final TaskDependencyService taskDependencyService;
-    private final DependencyGraphService dependencyGraphService;
-    private final ConstraintService constraintService;
-    private final TaskEligibilityService taskEligibilityService;
+    private final TaskTraversalService taskTraversalService;
 
-    public ChainController(
-            TaskDependencyService taskDependencyService,
-            DependencyGraphService dependencyGraphService,
-            ConstraintService constraintService,
-            TaskEligibilityService taskEligibilityService
-    ) {
-        this.taskDependencyService = taskDependencyService;
-        this.dependencyGraphService = dependencyGraphService;
-        this.constraintService = constraintService;
-        this.taskEligibilityService = taskEligibilityService;
+    public ChainController(TaskTraversalService taskTraversalService) {
+        this.taskTraversalService = taskTraversalService;
     }
 
-    // =========================================================
-    // Stage 1 - Dependency Management
-    // =========================================================
-
-    // 1. Add dependency
-    @PostMapping("/{taskId}/dependencies")
-    public ResponseEntity<TaskDependency> addDependency(
-            @PathVariable UUID taskId,
-            @Valid @RequestBody AddDependencyRequest request
-    ) {
-
-        TaskDependency createdDependency =
-                taskDependencyService.addDependency(
-                        taskId,
-                        request.getDependsOnTaskId()
-                );
-
-        URI location = URI.create(
-                "/tasks/"
-                        + taskId
-                        + "/dependencies/"
-                        + createdDependency.getDependsOnTaskId()
-        );
-
-        return ResponseEntity
-                .created(location)
-                .body(createdDependency);
+    @GetMapping("/{id}/dependencies")
+    public ResponseEntity<List<TaskResponse>> getDirectDependencies(@PathVariable UUID id) {
+        return ResponseEntity.ok(taskTraversalService.getDirectDependencies(id));
     }
 
-    // 2. Remove dependency
-    @DeleteMapping("/{taskId}/dependencies/{dependsOnTaskId}")
-    public ResponseEntity<Void> removeDependency(
-            @PathVariable UUID taskId,
-            @PathVariable UUID dependsOnTaskId
-    ) {
-
-        taskDependencyService.removeDependency(
-                taskId,
-                dependsOnTaskId
-        );
-
-        return ResponseEntity
-                .noContent()
-                .build();
+    @GetMapping("/{id}/dependencies/transitive")
+    public ResponseEntity<List<TaskResponse>> getAllDependencies(@PathVariable UUID id) {
+        return ResponseEntity.ok(taskTraversalService.getAllDependencies(id));
     }
 
-    // 3. Get direct dependencies
-    @GetMapping("/{taskId}/dependencies")
-    public ResponseEntity<List<UUID>> getDependencies(
-            @PathVariable UUID taskId
-    ) {
-
-        List<UUID> dependencies =
-                taskDependencyService.getDependencies(taskId);
-
-        return ResponseEntity.ok(dependencies);
+    @GetMapping("/{id}/dependents")
+    public ResponseEntity<List<TaskResponse>> getDirectDependents(@PathVariable UUID id) {
+        return ResponseEntity.ok(taskTraversalService.getDirectDependents(id));
     }
 
-    // 4. Get dependents
-    @GetMapping("/{taskId}/dependents")
-    public ResponseEntity<List<UUID>> getDependents(
-            @PathVariable UUID taskId
-    ) {
-
-        List<UUID> dependents =
-                taskDependencyService.getDependents(taskId);
-
-        return ResponseEntity.ok(dependents);
+    @GetMapping("/{id}/dependents/transitive")
+    public ResponseEntity<List<TaskResponse>> getAllDependents(@PathVariable UUID id) {
+        return ResponseEntity.ok(taskTraversalService.getAllDependents(id));
     }
 
-    // =========================================================
-    // Stage 2 - Dependency Traversal
-    // =========================================================
-
-    // 5. Get direct blockers and open constraints
-    @GetMapping("/{taskId}/blockers")
-    public ResponseEntity<TaskAvailability> getBlockers(
-            @PathVariable UUID taskId
-    ) {
-
-        TaskAvailability blockers =
-                dependencyGraphService.getBlockers(taskId);
-
-        return ResponseEntity.ok(blockers);
+    @GetMapping("/{id}/ancestors")
+    public ResponseEntity<List<TaskResponse>> getAncestors(@PathVariable UUID id) {
+        return ResponseEntity.ok(taskTraversalService.getAncestors(id));
     }
 
-    // 6. Get all ancestors
-    @GetMapping("/{taskId}/ancestors")
-    public ResponseEntity<List<Task>> getAncestors(
-            @PathVariable UUID taskId
-    ) {
-
-        List<Task> ancestors =
-                dependencyGraphService.getAncestors(taskId);
-
-        return ResponseEntity.ok(ancestors);
+    @GetMapping("/{id}/children")
+    public ResponseEntity<List<TaskResponse>> getDirectChildren(@PathVariable UUID id) {
+        return ResponseEntity.ok(taskTraversalService.getDirectChildren(id));
     }
 
-    // 7. Get all descendants
-    @GetMapping("/{taskId}/descendants")
-    public ResponseEntity<List<Task>> getDescendants(
-            @PathVariable UUID taskId
-    ) {
-
-        List<Task> descendants =
-                dependencyGraphService.getDescendants(taskId);
-
-        return ResponseEntity.ok(descendants);
+    @GetMapping("/{id}/descendants")
+    public ResponseEntity<List<TaskResponse>> getAllDescendants(@PathVariable UUID id) {
+        return ResponseEntity.ok(taskTraversalService.getAllDescendants(id));
     }
 
-    // =========================================================
-    // Stage 3 - Constraint Management
-    // =========================================================
-
-    // 8. Create constraint
-    @PostMapping("/{taskId}/constraints")
-    public ResponseEntity<Constraint> createConstraint(
-            @PathVariable UUID taskId,
-            @Valid @RequestBody CreateConstraintRequest request
-    ) {
-
-        Constraint createdConstraint =
-                constraintService.createConstraint(
-                        taskId,
-                        request.getType(),
-                        request.getReason(),
-                        request.getSourceRef()
-                );
-
-        URI location = URI.create(
-                "/tasks/"
-                        + taskId
-                        + "/constraints/"
-                        + createdConstraint.getConstraintId()
-        );
-
-        return ResponseEntity
-                .created(location)
-                .body(createdConstraint);
-    }
-
-    // 9. Get task constraints
-    @GetMapping("/{taskId}/constraints")
-    public ResponseEntity<List<Constraint>> getTaskConstraints(
-            @PathVariable UUID taskId
-    ) {
-
-        List<Constraint> constraints =
-                constraintService.getTaskConstraints(taskId);
-
-        return ResponseEntity.ok(constraints);
-    }
-
-    // 10. Update constraint status
-    @PatchMapping("/{taskId}/constraints/{constraintId}")
-    public ResponseEntity<Constraint> updateConstraintStatus(
-            @PathVariable UUID taskId,
-            @PathVariable String constraintId,
-            @Valid @RequestBody UpdateConstraintStatusRequest request
-    ) {
-
-        Constraint updatedConstraint =
-                constraintService.updateConstraintStatus(
-                        constraintId,
-                        request.getStatus()
-                );
-
-        return ResponseEntity.ok(updatedConstraint);
-    }
-
-    // =========================================================
-    // Stage 4 - Task Eligibility
-    // =========================================================
-
-    // 11. Get task eligibility
-    @GetMapping("/{taskId}/eligibility")
-    public ResponseEntity<TaskEligibilityResponse> getTaskEligibility(
-            @PathVariable UUID taskId
-    ) {
-
-        TaskEligibilityResponse eligibility =
-                taskEligibilityService.getTaskEligibility(taskId);
-
-        return ResponseEntity.ok(eligibility);
+    @GetMapping("/{id}/trace")
+    public ResponseEntity<TaskTraceResponse> getTrace(@PathVariable UUID id) {
+        return ResponseEntity.ok(taskTraversalService.getTrace(id));
     }
 }
