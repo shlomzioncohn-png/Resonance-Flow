@@ -17,11 +17,18 @@ import java.util.Map;
  * of the DTO rather than sharing a library module. See
  * docs/workspace-screen-integration-plan.md.
  *
- * Two groups of fields below on purpose: the original frontend-facing ones
- * (status/priority/effortEstimate/dueDate/owner/project) are untouched, so
- * Gateway and lens-frontend keep working exactly as before. Everything from
- * `inboxStatus` down is additive — the real `tasks` table columns
- * (shared/database/migrations), surfaced as-is so the schema the code
+ * STATUS MODEL CHANGE (see docs/employee-workspace-api-contract.md §5.0):
+ * This DTO now surfaces the full 8-value status enum directly (NEW, IN_REVIEW,
+ * APPROVED, IN_PROGRESS, SNOOZED, DONE, REJECTED, CANCELLED) with no
+ * simplification or mapping. The `status` field is the canonical representation;
+ * `inboxStatus` is kept as a synonym for backward compatibility during transition.
+ *
+ * AVAILABILITY: The `isAvailable` field (Boolean, from Chain via Inbox)
+ * indicates whether there are technical blockers preventing work, independent
+ * of the `status` value. A task with status=APPROVED and isAvailable=false
+ * exists — it means it's approved but blocked by unresolved dependencies.
+ *
+ * Real schema fields below are surfaced as-is so the schema the code
  * actually works against is visible (e.g. in Swagger), without breaking the
  * existing contract. See com.rnd.bff.client.InboxClient#toTaskDTO for where
  * these are populated and InboxTaskRecord for the internal source of truth.
@@ -37,7 +44,11 @@ public class TaskDTO {
     private String title;
     private String description;
 
-    /** READY / IN_PROGRESS / BLOCKED / COMPLETED */
+    /**
+     * The real `tasks.status` value — one of 8 canonical values:
+     * NEW, IN_REVIEW, APPROVED, IN_PROGRESS, SNOOZED, DONE, REJECTED, CANCELLED.
+     * No simplification or mapping applied (see class javadoc for status model change).
+     */
     private String status;
 
     /** LOW / MEDIUM / HIGH */
@@ -86,14 +97,19 @@ public class TaskDTO {
     private Double effortEstimateConfidence;
 
     /**
-     * The real `tasks.status` value (new/in_review/approved/in_progress/
-     * snoozed/done/rejected/cancelled) — see `status` above for the
-     * simplified equivalent and com.rnd.bff.client.InboxClient#toFrontendStatus
-     * for how the two relate.
+     * The real `tasks.status` value — synonym for `status` above, kept for
+     * backward compatibility during status model transition. Both point to the
+     * same canonical 8-value enum (NEW, IN_REVIEW, APPROVED, IN_PROGRESS,
+     * SNOOZED, DONE, REJECTED, CANCELLED).
      */
     private String inboxStatus;
 
-    /** Real `is_available` column. */
+    /**
+     * Real `is_available` column (Boolean). Indicates whether there are
+     * technical blockers preventing work (computed by Chain, materialized
+     * by Inbox). Independent of status — a task can be APPROVED but
+     * isAvailable=false if dependencies are unresolved.
+     */
     private Boolean isAvailable;
 
     /** Real `priority_score` column (1-10) — `priority` above is derived from this. */

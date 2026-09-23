@@ -20,12 +20,11 @@ import java.util.Map;
  * Internally, the mock is seeded as InboxTaskRecord — every field named and
  * typed after the real `tasks` table (shared/database/migrations) — and
  * only translated to TaskDTO (the BFF's frontend-facing contract) at the
- * method boundary. TaskDTO carries both: its original simplified fields
- * (status/priority/...), untouched, and the real schema fields added
- * alongside them (inboxStatus/priorityScore/tenantId/...), so Gateway and
- * lens-frontend are unaffected while the real schema is still visible (e.g.
- * in Swagger). See toTaskDTO()/toFrontendStatus() for the one place the two
- * status vocabularies don't map 1:1, and the judgment calls that involves.
+ * method boundary. TaskDTO carries both the real schema fields and is
+ * designed to surface the full 8-value status enum directly, with no
+ * simplification or mapping. This ensures the API is a transparent window
+ * into the canonical data model (see docs/employee-workspace-api-contract.md
+ * §5.0 for the status model change).
  *
  * Ignores userId for now (single mock tenant) — every method still takes it
  * so callers don't change when Inbox becomes real and starts scoping by user.
@@ -54,6 +53,7 @@ public class InboxClient {
     private final Map<String, InboxTaskRecord> tasksById = new LinkedHashMap<>();
 
     public InboxClient() {
+        // task_001: NEW status, high priority, available
         seed(InboxTaskRecord.builder()
                 .id("task_001")
                 .tenantId(TENANT_ID)
@@ -68,7 +68,7 @@ public class InboxClient {
                 .effortEstimateMinutes(35)
                 .effortEstimateConfidence(0.85)
                 .deadline(LocalDateTime.of(2026, 8, 30, 17, 0))
-                .status("approved")
+                .status("new")
                 .isAvailable(true)
                 .priorityScore(8.0)
                 .extractionProvenance("ml_inferred")
@@ -81,6 +81,7 @@ public class InboxClient {
                 .owner("Alex Morgan")
                 .project("Platform Service")
                 .build());
+        // task_002: IN_REVIEW status, snoozed/unavailable
         seed(InboxTaskRecord.builder()
                 .id("task_002")
                 .tenantId(TENANT_ID)
@@ -95,10 +96,9 @@ public class InboxClient {
                 .effortEstimateMinutes(60)
                 .effortEstimateConfidence(0.70)
                 .deadline(LocalDateTime.of(2026, 9, 6, 17, 0))
-                .status("snoozed")
+                .status("in_review")
                 .isAvailable(false)
                 .priorityScore(8.0)
-                .snoozedUntil(LocalDateTime.of(2026, 9, 10, 9, 0))
                 .extractionProvenance("etl")
                 .suggestedOwnerUserId(OWNER_USER_ID)
                 .suggestedOwnerConfidence(0.80)
@@ -109,6 +109,7 @@ public class InboxClient {
                 .project("Customer Success")
                 .constraints(List.of("approval_needed"))
                 .build());
+        // task_003: APPROVED status, snoozed/unavailable with deadline
         seed(InboxTaskRecord.builder()
                 .id("task_003")
                 .tenantId(TENANT_ID)
@@ -123,7 +124,7 @@ public class InboxClient {
                 .effortEstimateMinutes(90)
                 .effortEstimateConfidence(0.60)
                 .deadline(LocalDateTime.of(2026, 9, 7, 17, 0))
-                .status("snoozed")
+                .status("approved")
                 .isAvailable(false)
                 .priorityScore(5.0)
                 .snoozedUntil(LocalDateTime.of(2026, 9, 11, 9, 0))
@@ -137,6 +138,7 @@ public class InboxClient {
                 .project("Customer Success")
                 .constraints(List.of("waiting_for_customer"))
                 .build());
+        // task_004: IN_PROGRESS status, available
         seed(InboxTaskRecord.builder()
                 .id("task_004")
                 .tenantId(TENANT_ID)
@@ -159,6 +161,7 @@ public class InboxClient {
                 .owner("Alex Morgan")
                 .project("Platform Service")
                 .build());
+        // task_005: DONE status (completed), available
         seed(InboxTaskRecord.builder()
                 .id("task_005")
                 .tenantId(TENANT_ID)
@@ -173,7 +176,7 @@ public class InboxClient {
                 .effortEstimateMinutes(20)
                 .effortEstimateConfidence(0.80)
                 .deadline(LocalDateTime.of(2026, 9, 6, 12, 0))
-                .status("approved")
+                .status("done")
                 .isAvailable(true)
                 .priorityScore(8.0)
                 .extractionProvenance("ml_inferred")
@@ -183,9 +186,11 @@ public class InboxClient {
                 .createdBy(OWNER_USER_ID)
                 .createdAt(LocalDateTime.of(2026, 9, 3, 8, 0))
                 .updatedAt(LocalDateTime.of(2026, 9, 3, 8, 0))
+                .completedAt(LocalDateTime.of(2026, 9, 5, 14, 30))
                 .owner("Alex Morgan")
                 .project("Auth Service")
                 .build());
+        // task_006: SNOOZED status (explicitly paused), unavailable
         seed(InboxTaskRecord.builder()
                 .id("task_006")
                 .tenantId(TENANT_ID)
@@ -198,15 +203,68 @@ public class InboxClient {
                 .urgency(3)
                 .effortEstimateMinutes(50)
                 .deadline(LocalDateTime.of(2026, 9, 15, 17, 0))
-                .status("in_progress")
-                .isAvailable(true)
-                .priorityScore(5.0)
+                .status("snoozed")
+                .isAvailable(false)
+                .priorityScore(3.0)
+                .snoozedUntil(LocalDateTime.of(2026, 9, 18, 9, 0))
                 .extractionProvenance("manual")
                 .createdBy(OWNER_USER_ID)
                 .createdAt(LocalDateTime.of(2026, 8, 28, 10, 0))
                 .updatedAt(LocalDateTime.of(2026, 9, 2, 10, 0))
                 .owner("Alex Morgan")
                 .project("Billing")
+                .build());
+        // task_007: REJECTED status (not approved), unavailable
+        seed(InboxTaskRecord.builder()
+                .id("task_007")
+                .tenantId(TENANT_ID)
+                .projectId(PROJECT_PLATFORM_SERVICE)
+                .title("Implement new caching layer")
+                .description("Add Redis caching to improve API response times.")
+                .sourceType("github_issue")
+                .sourceRef("ISSUE-445")
+                .tier("tactical")
+                .roleContext("developer")
+                .urgency(2)
+                .effortEstimateMinutes(120)
+                .effortEstimateConfidence(0.75)
+                .deadline(LocalDateTime.of(2026, 10, 1, 17, 0))
+                .status("rejected")
+                .isAvailable(false)
+                .priorityScore(4.0)
+                .extractionProvenance("ml_inferred")
+                .confidence(0.80)
+                .suggestedOwnerUserId(OWNER_USER_ID)
+                .suggestedOwnerConfidence(0.70)
+                .createdBy(OWNER_USER_ID)
+                .createdAt(LocalDateTime.of(2026, 8, 15, 14, 0))
+                .updatedAt(LocalDateTime.of(2026, 9, 8, 11, 30))
+                .owner("Alex Morgan")
+                .project("Platform Service")
+                .constraints(List.of("out_of_scope"))
+                .build());
+        // task_008: CANCELLED status (cancelled before completion), unavailable
+        seed(InboxTaskRecord.builder()
+                .id("task_008")
+                .tenantId(TENANT_ID)
+                .projectId(PROJECT_CUSTOMER_SUCCESS)
+                .title("Schedule Q4 planning meeting")
+                .description("Coordinate with team leads for Q4 planning session.")
+                .sourceType("manual")
+                .tier("operational")
+                .roleContext("manager")
+                .urgency(1)
+                .effortEstimateMinutes(30)
+                .deadline(LocalDateTime.of(2026, 9, 30, 17, 0))
+                .status("cancelled")
+                .isAvailable(false)
+                .priorityScore(1.0)
+                .extractionProvenance("manual")
+                .createdBy(OWNER_USER_ID)
+                .createdAt(LocalDateTime.of(2026, 8, 10, 9, 0))
+                .updatedAt(LocalDateTime.of(2026, 9, 9, 16, 0))
+                .owner("Alex Morgan")
+                .project("Customer Success")
                 .build());
     }
 
@@ -235,11 +293,10 @@ public class InboxClient {
         if (record == null) {
             return null;
         }
-        // newStatus is one of TaskDTO's 4 values here (TaskStatusUpdateDTO's
-        // @Pattern already rejects anything else before this is called) -
-        // translate it back to the real vocabulary so the record stays a
-        // consistent, real-shaped source of truth in both directions.
-        record.setStatus(toInboxStatus(newStatus));
+        // newStatus is one of the 8 real status values (TaskStatusUpdateDTO's
+        // @Pattern already validates this before this is called).
+        // Store it as-is, converting only to lowercase for consistency with Inbox schema.
+        record.setStatus(newStatus.toLowerCase());
         return toTaskDTO(record);
     }
 
@@ -252,7 +309,9 @@ public class InboxClient {
                 .id(record.getId())
                 .title(record.getTitle())
                 .description(record.getDescription())
-                .status(toFrontendStatus(record.getStatus()))
+                // Status is no longer simplified: pass through all 8 real values directly.
+                // See docs/employee-workspace-api-contract.md §5.0 for the status model change.
+                .status(toUpperCase(record.getStatus()))
                 .priority(toFrontendPriority(record.getPriorityScore()))
                 .effortEstimate(record.getEffortEstimateMinutes())
                 .dueDate(record.getDeadline())
@@ -287,42 +346,6 @@ public class InboxClient {
     }
 
     /**
-     * Real `task_status` (shared/database/migrations/V1__init_schema.sql) has
-     * 8 values; TaskDTO's status has 4 (READY/IN_PROGRESS/BLOCKED/COMPLETED).
-     * Two judgment calls here, neither confirmed with Inbox yet — flag both
-     * if this mapping matters for a real decision:
-     *
-     * - There is no "blocked" value in the real enum at all. `snoozed` (a
-     *   task explicitly paused, per its `snoozed_until` column) is the
-     *   closest real concept to TaskDTO's BLOCKED, so it's mapped there.
-     *   Chain-reported dependency blockers are a separate mechanism (see
-     *   WorkspaceService, which overlays `constraints`/`dependencies`
-     *   independently of status) — this mapping is only about the task's
-     *   own status column.
-     * - `rejected` and `cancelled` are both terminal-but-not-done states
-     *   with no TaskDTO equivalent; mapped to COMPLETED (closed) rather than
-     *   invented as a 5th frontend status.
-     */
-    private static String toFrontendStatus(String inboxStatus) {
-        return switch (inboxStatus) {
-            case "in_progress" -> "IN_PROGRESS";
-            case "snoozed" -> "BLOCKED";
-            case "done", "rejected", "cancelled" -> "COMPLETED";
-            default -> "READY"; // new, in_review, approved
-        };
-    }
-
-    /** Inverse of toFrontendStatus() for updateStatus() — see its javadoc. */
-    private static String toInboxStatus(String frontendStatus) {
-        return switch (frontendStatus) {
-            case "IN_PROGRESS" -> "in_progress";
-            case "BLOCKED" -> "snoozed";
-            case "COMPLETED" -> "done";
-            default -> "approved"; // READY
-        };
-    }
-
-    /**
      * Real `priority_score` is a REAL column, 1-10 (see
      * chk_tasks_priority_score_range). TaskDTO's priority is a 3-bucket
      * LOW/MEDIUM/HIGH string. Thresholds below are an unconfirmed judgment
@@ -339,5 +362,10 @@ public class InboxClient {
             return "MEDIUM";
         }
         return "LOW";
+    }
+
+    /** Utility to convert status to uppercase (no transformation of values). */
+    private static String toUpperCase(String status) {
+        return status == null ? null : status.toUpperCase();
     }
 }

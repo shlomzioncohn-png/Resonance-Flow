@@ -18,10 +18,11 @@ import java.util.Map;
  * Field names and types below intentionally mirror the DB columns 1:1
  * (tenantId <-> tenant_id, priorityScore <-> priority_score, etc.), using
  * the real Postgres enum vocabulary as plain strings (status, sourceType,
- * tier, roleContext, extractionProvenance) rather than TaskDTO's simplified
- * ones. See InboxClient's toTaskDTO()/toFrontendStatus() for how the two
- * relate, including the one place they don't map 1:1: there is no "blocked"
- * value in the real `task_status` enum at all.
+ * tier, roleContext, extractionProvenance). Status values are one of the 8
+ * canonical enums: new, in_review, approved, in_progress, snoozed, done,
+ * rejected, cancelled. These are passed through to TaskDTO without
+ * simplification or mapping (see docs/employee-workspace-api-contract.md
+ * §5.0 for the status model change).
  *
  * owner/project stay plain display strings (not resolved from
  * suggestedOwnerUserId/projectId below) — resolving those needs a join to

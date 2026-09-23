@@ -27,13 +27,14 @@ import lombok.NoArgsConstructor;
 public class TaskStatusUpdateDTO {
 
     /**
-     * New status for the task.
-     * Allowed values: READY, IN_PROGRESS, BLOCKED, COMPLETED
+     * New status for the task. Must be one of the 8 canonical values:
+     * NEW, IN_REVIEW, APPROVED, IN_PROGRESS, SNOOZED, DONE, REJECTED, CANCELLED.
+     * See docs/employee-workspace-api-contract.md §5.0 for the status model change.
      */
     @NotBlank(message = "status is required")
     @Pattern(
-        regexp = "READY|IN_PROGRESS|BLOCKED|COMPLETED",
-        message = "status must be one of: READY, IN_PROGRESS, BLOCKED, COMPLETED"
+        regexp = "NEW|IN_REVIEW|APPROVED|IN_PROGRESS|SNOOZED|DONE|REJECTED|CANCELLED",
+        message = "status must be one of: NEW, IN_REVIEW, APPROVED, IN_PROGRESS, SNOOZED, DONE, REJECTED, CANCELLED"
     )
     private String status;
 }

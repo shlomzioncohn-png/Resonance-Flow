@@ -144,8 +144,11 @@ Response — `TaskDetailDTO` (extends `TaskDTO`, see §5.2 for new fields):
   "id": "task_review_api",
   "title": "Review API changes",
   "description": "Review the latest API changes and update integration tests accordingly.",
-  "status": "READY",
+  "status": "APPROVED",
+  "inboxStatus": "approved",
+  "isAvailable": true,
   "priority": "HIGH",
+  "priorityScore": 8.0,
   "effortEstimate": 35,
   "dueDate": "2026-08-30T17:00:00",
   "owner": "Alex Morgan",
@@ -180,22 +183,22 @@ screenshot:
 
 `reason` enum (`BlockReason`) — matches the six dropdown rows exactly:
 
-| Value | Screenshot label |
-|---|---|
-| `WAITING_FOR_MANAGER_APPROVAL` | Waiting for manager approval |
-| `WAITING_FOR_CUSTOMER` | Waiting for customer |
-| `BLOCKED_BY_ANOTHER_TASK` | Blocked by another task |
-| `WAITING_FOR_INFORMATION` | Waiting for information |
-| `EXTERNAL_DEPENDENCY` | External dependency |
-| `OTHER` | Other reason |
+| Value | Screenshot label | Resulting `status` | Resulting `isAvailable` |
+|---|---|---|---|
+| `WAITING_FOR_MANAGER_APPROVAL` | Waiting for manager approval | `SNOOZED` | `false` |
+| `WAITING_FOR_CUSTOMER` | Waiting for customer | `SNOOZED` | `false` |
+| `BLOCKED_BY_ANOTHER_TASK` | Blocked by another task | `SNOOZED` | `false` |
+| `WAITING_FOR_INFORMATION` | Waiting for information | `SNOOZED` | `false` |
+| `EXTERNAL_DEPENDENCY` | External dependency | `SNOOZED` | `false` |
+| `OTHER` | Other reason | `SNOOZED` | `false` |
 
 `note` is free text, required when `reason = OTHER`. `blockingTaskId` is set
 when `reason = BLOCKED_BY_ANOTHER_TASK` (links to the blocking task). Returns
-the updated `TaskDetailDTO` (`status` → `BLOCKED`, `constraints` populated).
+the updated `TaskDetailDTO` (`status` → `SNOOZED`, `isAvailable` → `false`, `constraints` populated).
 
 ### 4.5 `GET /v1/tasks?filter=`
 
-`filter` ∈ `all | in_progress | blocked | waiting_on_me` (default `all`).
+`filter` ∈ `all | new | in_review | approved | in_progress | snoozed | done | rejected | cancelled` (default `all`).
 Response:
 
 ```json
@@ -213,21 +216,72 @@ echo the `X-User-*` headers rather than calling a downstream service.
 
 ---
 
-## 5. DTOs
+## 5. DTOs — Status Model Change
+
+### 5.0 Important: Real vs. Simplified Statuses (Status Model Transition)
+
+**This contract represents a change in the status model.** Prior versions
+simplified the 8 real Inbox statuses (NEW, IN_REVIEW, APPROVED, IN_PROGRESS,
+SNOOZED, DONE, REJECTED, CANCELLED) to 4 frontend values (READY/IN_PROGRESS/
+BLOCKED/COMPLETED). **This version adopts the 8 real statuses directly.**
+
+**Why:**
+- No information loss — the UI/BFF work with the actual data structure
+- `isAvailable` (independent of status) clarifies technical blockers
+- Chain can compute and communicate blocker state via `isAvailable`
+- Future status additions don't require API rework
+
+**Migration for clients:**
+- If you were checking `status === "READY"`, now check `isAvailable === true`
+  and status is one of: NEW, IN_REVIEW, APPROVED
+- If you were checking `status === "BLOCKED"`, now check `isAvailable === false`
+- If you were checking `status === "IN_PROGRESS"` or `status === "COMPLETED"`,
+  check the same 8-value enum directly
 
 ### 5.1 As attached (no structural change, see §3 for the `userId` caveat)
 
 `WorkspaceRequestDTO`, `TaskRecommendationDTO` — used as-is.
 
-### 5.2 `TaskDTO` — two fields proposed as additions
+### 5.2 `TaskDTO` — real task data with 8 statuses and is_available field
 
-The attached `TaskDTO` covers everything **except** the "unblocks N tasks"
-badge, which needs the *outgoing* edge (tasks that depend on this one), not
-just `dependencies` (the *incoming* edge):
+**Status values** (canonical 8-value enum from Inbox):
+- `NEW` — Task created, not yet reviewed or approved
+- `IN_REVIEW` — Under review, decision pending
+- `APPROVED` — Approved and ready to work on
+- `IN_PROGRESS` — Currently being worked on
+- `SNOOZED` — Explicitly paused by user or system
+- `DONE` — Completed successfully
+- `REJECTED` — Not approved, rejected after review
+- `CANCELLED` — Cancelled before completion
 
-| New field | Type | Why |
-|---|---|---|
-| `blocksTaskIds` | `List<String>` | IDs of tasks waiting on this one; badge shows `blocksTaskIds.size()` ("Unblocks 2 tasks") |
+**Availability**: `isAvailable` is a boolean field computed and materialized by Chain. It indicates whether there are no technical blockers preventing work (independent of status). A task with `status=APPROVED` and `isAvailable=false` exists — it means it's approved but blocked by unresolved dependencies/constraints.
+
+**Fields in TaskDTO:**
+
+| Field | Type | Nullable | Notes |
+|---|---|---|---|
+| `status` | String (enum) | No | One of the 8 values above |
+| `inboxStatus` | String (enum) | No | Synonym for `status`; kept for backward compatibility during transition |
+| `isAvailable` | Boolean | No | Whether the task can be worked on (no blockers) — computed by Chain, materialized by Inbox |
+| `dependencies` | `List<String>` | Yes | Task IDs this task depends on (incoming edges, blocking it) |
+| `constraints` | `List<String>` | Yes | Constraint labels, e.g., "approval_needed" |
+| `blocksTaskIds` | `List<String>` | Yes | Task IDs waiting on this one (outgoing edges) |
+
+**Example:**
+```json
+{
+  "id": "task_001",
+  "title": "Review API changes",
+  "status": "APPROVED",
+  "inboxStatus": "approved",
+  "isAvailable": true,
+  "priority": "HIGH",
+  "priorityScore": 8.0,
+  "dependencies": [],
+  "constraints": [],
+  "blocksTaskIds": ["task_002", "task_003"]
+}
+```
 
 ### 5.3 `TaskDetailDTO` — new, extends `TaskDTO`
 

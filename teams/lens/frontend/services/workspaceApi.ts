@@ -18,7 +18,11 @@ export interface ApiTask {
   id: string
   title: string
   description: string
-  /** READY | IN_PROGRESS | BLOCKED | COMPLETED */
+  /**
+   * One of 8 canonical statuses: NEW, IN_REVIEW, APPROVED, IN_PROGRESS,
+   * SNOOZED, DONE, REJECTED, CANCELLED.
+   * See docs/employee-workspace-api-contract.md §5.0 for status model.
+   */
   status: string
   /** LOW | MEDIUM | HIGH */
   priority: string
@@ -32,6 +36,8 @@ export interface ApiTask {
   dependencies?: string[]
   /** Blocker labels, e.g. "approval_needed" */
   constraints?: string[]
+  /** Whether the task is available (no blockers) - computed by Chain */
+  isAvailable?: boolean
 }
 
 // ── Recommendation response ────────────────────────────────────────────────
@@ -59,7 +65,14 @@ export function getTask(taskId: string): Promise<ApiTask> {
 
 // ── Task list ("My Tasks" screen) ──────────────────────────────────────────
 
-export type TaskListFilter = 'all' | 'in_progress' | 'blocked' | 'waiting_on_me'
+/**
+ * Filter values for task list.
+ * Note: The backend supports filtering by individual status values
+ * (new, in_review, approved, in_progress, snoozed, done, rejected, cancelled)
+ * in addition to these common aggregate filters.
+ * See docs/employee-workspace-api-contract.md §4.5.
+ */
+export type TaskListFilter = 'all' | 'new' | 'in_review' | 'approved' | 'in_progress' | 'snoozed' | 'done' | 'rejected' | 'cancelled'
 
 export interface TaskListParams {
   filter?: TaskListFilter
@@ -89,7 +102,7 @@ export function listTasks(params: TaskListParams = {}): Promise<TaskListResponse
   return api.get<TaskListResponse>(`/api/workspace/tasks${queryString ? `?${queryString}` : ''}`)
 }
 
-export type TaskStatus = 'READY' | 'IN_PROGRESS' | 'BLOCKED' | 'COMPLETED'
+export type TaskStatus = 'NEW' | 'IN_REVIEW' | 'APPROVED' | 'IN_PROGRESS' | 'SNOOZED' | 'DONE' | 'REJECTED' | 'CANCELLED'
 
 export function updateTaskStatus(taskId: string, status: TaskStatus): Promise<ApiTask> {
   return api.patch<ApiTask>(`/api/workspace/tasks/${taskId}/status`, { status })
