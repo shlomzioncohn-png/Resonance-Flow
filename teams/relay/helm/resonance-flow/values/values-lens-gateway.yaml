@@ -1,6 +1,8 @@
 components:
   lens-gateway:
     enabled: true
+  notification-delivery:
+    enabled: false
   mind:
     enabled: false
   lens-bff:
