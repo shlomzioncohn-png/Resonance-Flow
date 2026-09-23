@@ -5,14 +5,9 @@ import com.rnd.chain.dto.DependencyHistoryEntry;
 import com.rnd.chain.dto.PageResponse;
 import com.rnd.chain.repository.entity.DependencyHistoryEntity;
 import com.rnd.chain.repository.jpa.SpringDataDependencyHistoryJpaRepository;
-import jakarta.persistence.EntityManager;
-import jakarta.persistence.PersistenceException;
-import org.springframework.dao.DataAccessException;
-import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
-import org.springframework.orm.jpa.EntityManagerFactoryUtils;
 import org.springframework.stereotype.Repository;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -21,40 +16,30 @@ import java.util.Optional;
 import java.util.UUID;
 
 /** Postgres-backed {@link DependencyHistoryRepository}. Dedup on (source, sourceRef) is enforced
- * by {@code uq_dependency_history_source_source_ref} (V2 migration) - the same PK-conflict-as-
- * signal approach {@link PostgresTaskDependencyRepository#save} uses. */
+ * by {@code uq_dependency_history_source_source_ref} (V2 migration) via an insert-then-read-back
+ * upsert. */
 @Repository
 public class PostgresDependencyHistoryRepository implements DependencyHistoryRepository {
 
     private final SpringDataDependencyHistoryJpaRepository jpaRepository;
-    private final EntityManager entityManager;
 
-    public PostgresDependencyHistoryRepository(SpringDataDependencyHistoryJpaRepository jpaRepository,
-                                                EntityManager entityManager) {
+    public PostgresDependencyHistoryRepository(SpringDataDependencyHistoryJpaRepository jpaRepository) {
         this.jpaRepository = jpaRepository;
-        this.entityManager = entityManager;
     }
 
     @Override
     @Transactional
     public DependencyHistoryEntry record(DependencyHistoryEntry entry) {
         Objects.requireNonNull(entry, "entry must not be null");
-        DependencyHistoryEntity entity = new DependencyHistoryEntity(entry.id(), entry.taskId(),
-                entry.dependsOnTaskId(), entry.action(), entry.source(), entry.sourceRef(),
-                entry.createdAt());
-        try {
-            entityManager.persist(entity);
-            entityManager.flush();
+        jpaRepository.insertIgnoringConflict(entry.id(), entry.taskId(), entry.dependsOnTaskId(),
+                entry.action().name(), entry.source().name(), entry.sourceRef(), entry.createdAt());
+        if (entry.sourceRef() == null) {
             return entry;
-        } catch (PersistenceException e) {
-            DataAccessException translated = EntityManagerFactoryUtils.convertJpaAccessExceptionIfPossible(e);
-            if (translated instanceof DataIntegrityViolationException && entry.sourceRef() != null) {
-                // (source, sourceRef) already recorded - report the existing entry, not a new one.
-                return findBySourceAndSourceRef(entry.source(), entry.sourceRef())
-                        .orElseThrow(() -> translated);
-            }
-            throw translated != null ? translated : e;
         }
+        // Read back whichever row now owns (source, sourceRef) - the new one, or a pre-existing one.
+        return findBySourceAndSourceRef(entry.source(), entry.sourceRef())
+                .orElseThrow(() -> new IllegalStateException("dependency history entry missing immediately "
+                        + "after insert for source=" + entry.source() + " sourceRef=" + entry.sourceRef()));
     }
 
     @Override
