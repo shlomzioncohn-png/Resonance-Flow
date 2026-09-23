@@ -305,10 +305,7 @@ components:
         port: 8080
     config:
       data:
-        datasource:
-          database: resonance_flow
-          username: postgres
-          password: postgres
+        # datasource credentials come from postgresql.auth below - no copy here.
         kafka:
           consumerGroupId: inbox-service
           topics:
@@ -457,7 +454,7 @@ kafka:
   # client silently failed the handshake and retried forever without ever actually connecting
   # or crashing (verified locally). Pinning explicit client credentials here (instead of the
   # chart's own randomly-generated ones) so every component's mounted config can reference the
-  # same known username/password - see components.inbox.config.data.kafka.sasl below.
+  # same known username/password - see resonance-flow.kafkaSaslJaasConfig in _helpers.tpl.
   sasl:
     client:
       users:
@@ -510,9 +507,9 @@ minio:
 postgresql:
   enabled: true
   architecture: standalone
-  # Must match components.inbox.config.data.datasource.{password,database} above -
-  # nothing else wires these two together, and the subchart otherwise generates a
-  # random password / only creates the default "postgres" database.
+  # Also inbox's datasource credentials (service-inbox/configmap.yaml reads them from
+  # here). Pinned: the subchart otherwise generates a random password and only creates
+  # the default "postgres" database.
   auth:
     postgresPassword: postgres
     database: resonance_flow
