@@ -16,6 +16,8 @@ import com.rnd.chain.repository.TaskRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+import com.rnd.chain.dto.TaskEligibilityResponse;
 
 import java.util.ArrayDeque;
 import java.util.Deque;

@@ -1,3 +1,4 @@
+
 package com.rnd.chain.service;
 
 import com.rnd.chain.dto.Constraint;
@@ -5,7 +6,6 @@ import com.rnd.chain.exception.ConstraintNotFoundException;
 import com.rnd.chain.exception.TaskNotFoundException;
 import com.rnd.chain.repository.ConstraintRepository;
 import com.rnd.chain.repository.TaskRepository;
-
 import org.springframework.stereotype.Service;
 
 import java.time.LocalDateTime;
@@ -26,14 +26,9 @@ public class ConstraintService {
             TaskRepository taskRepository,
             TaskEligibilityService taskEligibilityService) {
 
-        this.constraintRepository =
-                constraintRepository;
-
-        this.taskRepository =
-                taskRepository;
-
-        this.taskEligibilityService =
-                taskEligibilityService;
+        this.constraintRepository = constraintRepository;
+        this.taskRepository = taskRepository;
+        this.taskEligibilityService = taskEligibilityService;
     }
 
     public Constraint createConstraint(
@@ -42,89 +37,69 @@ public class ConstraintService {
             Map<String, Object> reason,
             String sourceRef) {
 
-        Objects.requireNonNull(
-                taskId,
-                "taskId must not be null");
-
-        Objects.requireNonNull(
-                type,
-                "type must not be null");
+        Objects.requireNonNull(taskId, "taskId must not be null");
+        Objects.requireNonNull(type, "type must not be null");
 
         taskRepository.findById(taskId)
-                .orElseThrow(() ->
-                        new TaskNotFoundException(taskId));
+                .orElseThrow(() -> new TaskNotFoundException(taskId));
 
-        LocalDateTime now =
-                LocalDateTime.now();
+        LocalDateTime now = LocalDateTime.now();
 
-        Constraint constraint =
-                new Constraint(
-                        UUID.randomUUID().toString(),
-                        taskId,
-                        type,
-                        Constraint.ConstraintStatus.PENDING,
-                        reason,
-                        sourceRef,
-                        now,
-                        now);
+        Constraint constraint = new Constraint(
+                UUID.randomUUID().toString(),
+                taskId,
+                type,
+                Constraint.ConstraintStatus.PENDING,
+                reason,
+                sourceRef,
+                now,
+                now
+        );
 
         constraintRepository.save(constraint);
 
-        taskEligibilityService
-                .onConstraintAdded(taskId);
+        taskEligibilityService.onConstraintAdded(taskId);
 
         return constraint;
     }
 
     public Constraint updateConstraintStatus(
+            UUID taskId,
             String constraintId,
             Constraint.ConstraintStatus newStatus) {
 
-        Objects.requireNonNull(
-                constraintId,
-                "constraintId must not be null");
+        Objects.requireNonNull(taskId, "taskId must not be null");
+        Objects.requireNonNull(constraintId, "constraintId must not be null");
+        Objects.requireNonNull(newStatus, "newStatus must not be null");
 
-        Objects.requireNonNull(
-                newStatus,
-                "newStatus must not be null");
+        Constraint constraint = constraintRepository.findById(constraintId)
+                .filter(c -> c.getTaskId().equals(taskId))
+                .orElseThrow(() ->
+                        new ConstraintNotFoundException(constraintId));
 
-        Constraint constraint =
-                constraintRepository
-                        .findById(constraintId)
-                        .orElseThrow(() ->
-                                new ConstraintNotFoundException(
-                                        constraintId));
-
-        Constraint.ConstraintStatus previousStatus =
-                constraint.getStatus();
+        Constraint.ConstraintStatus previousStatus = constraint.getStatus();
 
         constraint.setStatus(newStatus);
-        constraint.setUpdatedAt(
-                LocalDateTime.now());
+        constraint.setUpdatedAt(LocalDateTime.now());
 
         constraintRepository.save(constraint);
 
-        taskEligibilityService
-                .onConstraintStatusChanged(
-                        constraint.getTaskId(),
-                        previousStatus,
-                        newStatus);
+        taskEligibilityService.onConstraintStatusChanged(
+                taskId,
+                previousStatus,
+                newStatus
+        );
 
         return constraint;
     }
 
-    public List<Constraint> getTaskConstraints(
-            UUID taskId) {
+    public List<Constraint> getTaskConstraints(UUID taskId) {
 
-        Objects.requireNonNull(
-                taskId,
-                "taskId must not be null");
+        Objects.requireNonNull(taskId, "taskId must not be null");
 
         taskRepository.findById(taskId)
-                .orElseThrow(() ->
-                        new TaskNotFoundException(taskId));
+                .orElseThrow(() -> new TaskNotFoundException(taskId));
 
-        return constraintRepository
-                .findByTaskId(taskId);
+        return constraintRepository.findByTaskId(taskId);
     }
 }

@@ -1,0 +1,12 @@
+package com.rnd.chain;
+
+import org.junit.jupiter.api.Test;
+import org.springframework.boot.test.context.SpringBootTest;
+
+@SpringBootTest
+class ChainApplicationIntegrationTest {
+
+    @Test
+    void contextLoadsWithRealRepositories() {
+    }
+}

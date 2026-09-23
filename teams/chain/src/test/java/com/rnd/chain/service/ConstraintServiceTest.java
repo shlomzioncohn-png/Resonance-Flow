@@ -1,3 +1,4 @@
+
 package com.rnd.chain.service;
 
 import com.rnd.chain.dto.Constraint;
@@ -40,11 +41,11 @@ class ConstraintServiceTest {
 
     @BeforeEach
     void setUp() {
-        constraintService =
-                new ConstraintService(
-                        constraintRepository,
-                        taskRepository,
-                        taskEligibilityService);
+        constraintService = new ConstraintService(
+                constraintRepository,
+                taskRepository,
+                taskEligibilityService
+        );
     }
 
     @Test
@@ -56,12 +57,12 @@ class ConstraintServiceTest {
         when(taskRepository.findById(taskId))
                 .thenReturn(Optional.of(task));
 
-        Constraint created =
-                constraintService.createConstraint(
-                        taskId,
-                        Constraint.ConstraintType.APPROVAL_NEEDED,
-                        Map.of("approver", "manager"),
-                        "email-123");
+        Constraint created = constraintService.createConstraint(
+                taskId,
+                Constraint.ConstraintType.APPROVAL_NEEDED,
+                Map.of("approver", "manager"),
+                "email-123"
+        );
 
         assertNotNull(created);
         assertNotNull(created.getConstraintId());
@@ -69,13 +70,11 @@ class ConstraintServiceTest {
 
         assertEquals(
                 Constraint.ConstraintStatus.PENDING,
-                created.getStatus());
+                created.getStatus()
+        );
 
-        verify(constraintRepository)
-                .save(created);
-
-        verify(taskEligibilityService)
-                .onConstraintAdded(taskId);
+        verify(constraintRepository).save(created);
+        verify(taskEligibilityService).onConstraintAdded(taskId);
     }
 
     @Test
@@ -92,13 +91,12 @@ class ConstraintServiceTest {
                         taskId,
                         Constraint.ConstraintType.APPROVAL_NEEDED,
                         Map.of(),
-                        "email-123"));
+                        "email-123"
+                )
+        );
 
-        verify(constraintRepository, never())
-                .save(any());
-
-        verify(taskEligibilityService, never())
-                .onConstraintAdded(any());
+        verify(constraintRepository, never()).save(any());
+        verify(taskEligibilityService, never()).onConstraintAdded(any());
     }
 
     @Test
@@ -106,36 +104,39 @@ class ConstraintServiceTest {
 
         UUID taskId = UUID.randomUUID();
 
-        Constraint constraint =
-                createConstraint(
-                        "constraint-1",
-                        taskId,
-                        Constraint.ConstraintStatus.PENDING);
+        Constraint constraint = createConstraint(
+                "constraint-1",
+                taskId,
+                Constraint.ConstraintStatus.PENDING
+        );
 
         when(constraintRepository.findById("constraint-1"))
                 .thenReturn(Optional.of(constraint));
 
-        Constraint updated =
-                constraintService.updateConstraintStatus(
-                        "constraint-1",
-                        Constraint.ConstraintStatus.SATISFIED);
+        Constraint updated = constraintService.updateConstraintStatus(
+                taskId,
+                "constraint-1",
+                Constraint.ConstraintStatus.SATISFIED
+        );
 
         assertEquals(
                 Constraint.ConstraintStatus.SATISFIED,
-                updated.getStatus());
+                updated.getStatus()
+        );
 
-        verify(constraintRepository)
-                .save(constraint);
+        verify(constraintRepository).save(constraint);
 
-        verify(taskEligibilityService)
-                .onConstraintStatusChanged(
-                        taskId,
-                        Constraint.ConstraintStatus.PENDING,
-                        Constraint.ConstraintStatus.SATISFIED);
+        verify(taskEligibilityService).onConstraintStatusChanged(
+                taskId,
+                Constraint.ConstraintStatus.PENDING,
+                Constraint.ConstraintStatus.SATISFIED
+        );
     }
 
     @Test
     void updateConstraintStatus_whenConstraintMissing_shouldThrow() {
+
+        UUID taskId = UUID.randomUUID();
 
         when(constraintRepository.findById("missing"))
                 .thenReturn(Optional.empty());
@@ -143,12 +144,41 @@ class ConstraintServiceTest {
         assertThrows(
                 ConstraintNotFoundException.class,
                 () -> constraintService.updateConstraintStatus(
+                        taskId,
                         "missing",
-                        Constraint.ConstraintStatus.SATISFIED));
+                        Constraint.ConstraintStatus.SATISFIED
+                )
+        );
 
-        verify(constraintRepository, never())
-                .save(any());
+        verify(constraintRepository, never()).save(any());
+        verifyNoInteractions(taskEligibilityService);
+    }
 
+    @Test
+    void updateConstraintStatus_whenConstraintBelongsToDifferentTask_shouldThrowNotFound() {
+
+        UUID requestedTaskId = UUID.randomUUID();
+        UUID actualTaskId = UUID.randomUUID();
+
+        Constraint constraint = createConstraint(
+                "constraint-1",
+                actualTaskId,
+                Constraint.ConstraintStatus.PENDING
+        );
+
+        when(constraintRepository.findById("constraint-1"))
+                .thenReturn(Optional.of(constraint));
+
+        assertThrows(
+                ConstraintNotFoundException.class,
+                () -> constraintService.updateConstraintStatus(
+                        requestedTaskId,
+                        "constraint-1",
+                        Constraint.ConstraintStatus.SATISFIED
+                )
+        );
+
+        verify(constraintRepository, never()).save(any());
         verifyNoInteractions(taskEligibilityService);
     }
 
@@ -156,20 +186,19 @@ class ConstraintServiceTest {
     void getTaskConstraints_shouldReturnRepositoryResult() {
 
         UUID taskId = UUID.randomUUID();
-
         Task task = createTask(taskId);
 
-        Constraint first =
-                createConstraint(
-                        "c1",
-                        taskId,
-                        Constraint.ConstraintStatus.PENDING);
+        Constraint first = createConstraint(
+                "c1",
+                taskId,
+                Constraint.ConstraintStatus.PENDING
+        );
 
-        Constraint second =
-                createConstraint(
-                        "c2",
-                        taskId,
-                        Constraint.ConstraintStatus.SATISFIED);
+        Constraint second = createConstraint(
+                "c2",
+                taskId,
+                Constraint.ConstraintStatus.SATISFIED
+        );
 
         when(taskRepository.findById(taskId))
                 .thenReturn(Optional.of(task));
@@ -184,8 +213,7 @@ class ConstraintServiceTest {
         assertEquals(first, result.get(0));
         assertEquals(second, result.get(1));
 
-        verify(constraintRepository)
-                .findByTaskId(taskId);
+        verify(constraintRepository).findByTaskId(taskId);
     }
 
     @Test
@@ -198,16 +226,15 @@ class ConstraintServiceTest {
 
         assertThrows(
                 TaskNotFoundException.class,
-                () -> constraintService.getTaskConstraints(taskId));
+                () -> constraintService.getTaskConstraints(taskId)
+        );
 
-        verify(constraintRepository, never())
-                .findByTaskId(any());
+        verify(constraintRepository, never()).findByTaskId(any());
     }
 
     private Task createTask(UUID id) {
 
-        LocalDateTime now =
-                LocalDateTime.now();
+        LocalDateTime now = LocalDateTime.now();
 
         return Task.builder()
                 .id(id)
@@ -230,8 +257,7 @@ class ConstraintServiceTest {
             UUID taskId,
             Constraint.ConstraintStatus status) {
 
-        LocalDateTime now =
-                LocalDateTime.now();
+        LocalDateTime now = LocalDateTime.now();
 
         return new Constraint(
                 id,
@@ -241,6 +267,7 @@ class ConstraintServiceTest {
                 Map.of("approver", "manager"),
                 "test-source",
                 now,
-                now);
+                now
+        );
     }
 }
