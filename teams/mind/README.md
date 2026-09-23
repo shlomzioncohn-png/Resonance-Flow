@@ -87,9 +87,11 @@ licensing constraints.
   lands with the real embeddings work.
 - ~~OCR: managed API vs. local model~~ Resolved: **local Tesseract**
   (`--psm 11`), not PaddleOCR (benchmarked as the alternative and lost
-  on cost/accuracy tradeoff). See `benchmarks/ocr-asr-benchmark.md`.
-- ASR: managed API vs. local model (e.g. local Whisper) — still open,
-  blocked on missing AMI audio data, see `benchmarks/ocr-asr-benchmark.md`
+  on cost/accuracy tradeoff). See
+  [`benchmarks/ocr-asr-benchmark.md`](./benchmarks/ocr-asr-benchmark.md).
+- ASR: **blocked**, not resolved — no AMI audio (or any audio) sample
+  exists anywhere in this repo to benchmark Whisper against. See
+  [`benchmarks/ocr-asr-benchmark.md`](./benchmarks/ocr-asr-benchmark.md)
   "Known risk".
 - Evaluation metric: top-1 accuracy vs. MRR/nDCG
 - How the score is published to Chain: separate event vs. field on `Task`
