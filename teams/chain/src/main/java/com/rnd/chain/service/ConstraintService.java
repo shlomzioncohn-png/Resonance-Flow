@@ -1,3 +1,4 @@
+
 package com.rnd.chain.service;
 
 import com.rnd.chain.dto.Constraint;
@@ -16,74 +17,89 @@ import java.util.UUID;
 @Service
 public class ConstraintService {
 
-        private final ConstraintRepository constraintRepository;
-        private final TaskRepository taskRepository;
-        private final TaskEligibilityService taskEligibilityService;
+    private final ConstraintRepository constraintRepository;
+    private final TaskRepository taskRepository;
+    private final TaskEligibilityService taskEligibilityService;
 
-        public ConstraintService(
-                        ConstraintRepository constraintRepository,
-                        TaskRepository taskRepository,
-                        TaskEligibilityService taskEligibilityService) {
-                this.constraintRepository = constraintRepository;
-                this.taskRepository = taskRepository;
-                this.taskEligibilityService = taskEligibilityService;
-        }
+    public ConstraintService(
+            ConstraintRepository constraintRepository,
+            TaskRepository taskRepository,
+            TaskEligibilityService taskEligibilityService) {
 
-        public Constraint createConstraint(
-                        UUID taskId,
-                        Constraint.ConstraintType type,
-                        Map<String, Object> reason,
-                        String sourceRef) {
-                Objects.requireNonNull(taskId, "taskId must not be null");
-                Objects.requireNonNull(type, "type must not be null");
+        this.constraintRepository = constraintRepository;
+        this.taskRepository = taskRepository;
+        this.taskEligibilityService = taskEligibilityService;
+    }
 
-                taskRepository.findById(taskId)
-                                .orElseThrow(() -> new TaskNotFoundException(taskId));
+    public Constraint createConstraint(
+            UUID taskId,
+            Constraint.ConstraintType type,
+            Map<String, Object> reason,
+            String sourceRef) {
 
-                LocalDateTime now = LocalDateTime.now();
+        Objects.requireNonNull(taskId, "taskId must not be null");
+        Objects.requireNonNull(type, "type must not be null");
 
-                Constraint constraint = new Constraint(
-                                UUID.randomUUID().toString(),
-                                taskId,
-                                type,
-                                Constraint.ConstraintStatus.PENDING,
-                                reason,
-                                sourceRef,
-                                now,
-                                now);
+        taskRepository.findById(taskId)
+                .orElseThrow(() -> new TaskNotFoundException(taskId));
 
-                constraintRepository.save(constraint);
-                taskEligibilityService.recalculateTaskEligibility(taskId);
-                return constraint;
-        }
+        LocalDateTime now = LocalDateTime.now();
 
-        public Constraint updateConstraintStatus(
-                        UUID taskId,
-                        String constraintId,
-                        Constraint.ConstraintStatus newStatus) {
-                Objects.requireNonNull(constraintId, "constraintId must not be null");
-                Objects.requireNonNull(newStatus, "newStatus must not be null");
+        Constraint constraint = new Constraint(
+                UUID.randomUUID().toString(),
+                taskId,
+                type,
+                Constraint.ConstraintStatus.PENDING,
+                reason,
+                sourceRef,
+                now,
+                now
+        );
 
-                Constraint constraint = constraintRepository.findById(constraintId)
-                                .filter(c -> c.getTaskId().equals(taskId))
-                                .orElseThrow(() -> new ConstraintNotFoundException(constraintId));
+        constraintRepository.save(constraint);
 
-                constraint.setStatus(newStatus);
-                constraint.setUpdatedAt(LocalDateTime.now());
+        taskEligibilityService.onConstraintAdded(taskId);
 
-                constraintRepository.save(constraint);
+        return constraint;
+    }
 
-                taskEligibilityService.recalculateTaskEligibility(constraint.getTaskId());
-                return constraint;
-        }
+    public Constraint updateConstraintStatus(
+            UUID taskId,
+            String constraintId,
+            Constraint.ConstraintStatus newStatus) {
 
-        public List<Constraint> getTaskConstraints(UUID taskId) {
-                Objects.requireNonNull(taskId, "taskId must not be null");
+        Objects.requireNonNull(taskId, "taskId must not be null");
+        Objects.requireNonNull(constraintId, "constraintId must not be null");
+        Objects.requireNonNull(newStatus, "newStatus must not be null");
 
-                taskRepository.findById(taskId)
-                                .orElseThrow(() -> new TaskNotFoundException(taskId));
+        Constraint constraint = constraintRepository.findById(constraintId)
+                .filter(c -> c.getTaskId().equals(taskId))
+                .orElseThrow(() ->
+                        new ConstraintNotFoundException(constraintId));
 
-                return constraintRepository.findByTaskId(taskId);
-        }
+        Constraint.ConstraintStatus previousStatus = constraint.getStatus();
 
+        constraint.setStatus(newStatus);
+        constraint.setUpdatedAt(LocalDateTime.now());
+
+        constraintRepository.save(constraint);
+
+        taskEligibilityService.onConstraintStatusChanged(
+                taskId,
+                previousStatus,
+                newStatus
+        );
+
+        return constraint;
+    }
+
+    public List<Constraint> getTaskConstraints(UUID taskId) {
+
+        Objects.requireNonNull(taskId, "taskId must not be null");
+
+        taskRepository.findById(taskId)
+                .orElseThrow(() -> new TaskNotFoundException(taskId));
+
+        return constraintRepository.findByTaskId(taskId);
+    }
 }

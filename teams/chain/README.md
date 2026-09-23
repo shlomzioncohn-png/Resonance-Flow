@@ -1,4 +1,3 @@
-# Team Chain - Service
 
 Foundation module for Team Chain (Dependency Graph, Task Selection & Constraints).
 
