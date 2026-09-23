@@ -42,6 +42,10 @@ import java.util.List;
  * same value, including for a Slack group whose messages/attachments span more than one
  * intake run (see MessageSnapshot.attachmentCount and ChatSourceRecordMapper).
  *
+ * attachmentIndex is confirmed required by Mind's own contract (teams/mind/src/mind/
+ * contracts/raw_object_event.py) - 0 for a standalone item, 1+ for an attachment.
+ * correlationId stays optional (Mind: omitted for standalone items).
+ *
  * implements BridgePayload (see core.BridgePayload): tenantId() is satisfied by the
  * record's own tenantId component; dedupKey() is contentHash — the object_key is always
  * unique per landed instance (random uuid), so it can't detect re-landed identical
@@ -87,10 +91,39 @@ public record RawObjectEvent(
             int attachmentCount,
             int revision,
             ChangeType changeType) {
+        return create(objectKey, sourceType, tenantId, ingestedAt, scopeDecision, contentHash,
+                modality, participants, contentType, sizeBytes, null, sourceTimestamp,
+                correlationId, attachmentIndex, attachmentCount, revision, changeType);
+    }
+
+    /**
+     * Same as the 16-arg {@link #create} but also sets transcriptObjectKey - for a lane
+     * that lands a platform-generated transcript alongside its primary object (e.g. the
+     * meeting/doc/audio lane's Zoom/BBB transcripts).
+     */
+    public static RawObjectEvent create(
+            String objectKey,
+            RawSourceType sourceType,
+            String tenantId,
+            Instant ingestedAt,
+            ScopeDecision scopeDecision,
+            String contentHash,
+            Modality modality,
+            List<String> participants,
+            String contentType,
+            Long sizeBytes,
+            String transcriptObjectKey,
+            Instant sourceTimestamp,
+            String correlationId,
+            Integer attachmentIndex,
+            int attachmentCount,
+            int revision,
+            ChangeType changeType) {
         return new RawObjectEvent(
                 CURRENT_SCHEMA_VERSION, objectKey, sourceType, tenantId, ingestedAt,
                 scopeDecision, contentHash, modality, participants, contentType, sizeBytes,
-                null, sourceTimestamp, correlationId, attachmentIndex, attachmentCount, revision, changeType);
+                transcriptObjectKey, sourceTimestamp, correlationId, attachmentIndex, attachmentCount, revision,
+                changeType);
     }
 
     @Override

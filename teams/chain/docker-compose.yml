@@ -1,0 +1,10 @@
+services:
+  chain:
+    build: .
+    container_name: chain-service
+    ports:
+      - "${SERVER_PORT:-8081}:8081"
+    environment:
+      - SERVER_PORT=${SERVER_PORT:-8081}
+      - SPRING_PROFILES_ACTIVE=${SPRING_PROFILES_ACTIVE:-local}
+      - KAFKA_BOOTSTRAP_SERVERS=${KAFKA_BOOTSTRAP_SERVERS:-localhost:9092}

@@ -1,0 +1,47 @@
+server:
+  port: ${SERVER_PORT:8081}
+
+management:
+  endpoints:
+    web:
+      base-path: /
+      exposure:
+        include: health
+
+spring:
+  application:
+    name: chain
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+    producer:
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.apache.kafka.common.serialization.StringSerializer
+  # Placeholder in-memory DB so a DataSource/PlatformTransactionManager exists
+  # and @Transactional in TaskEligibilityService isn't left without a manager.
+  # No JPA entities use this yet - real data still lives in the in-memory
+  # TaskRepository/TaskDependencyRepository. Replace with the real DB config
+  # once the team lead's decision lands - see teams/chain/CLAUDE.md.
+  datasource:
+    url: jdbc:h2:mem:chain;DB_CLOSE_DELAY=-1
+
+chain:
+  kafka:
+    topics:
+      task.scheduling.updated: task.scheduling.updated
+    # Left unset on purpose: ChainEventConsumer stays disabled
+    # (@ConditionalOnProperty) until the first approved cross-team
+    # contract exists and a real topic is configured here.
+    # consumed-topics: <topic-name>
+    consumer-group-id: ${spring.application.name}
+    retry:
+      # Explicit on purpose, matching ChainKafkaErrorHandlingConfig's
+      # previously-hardcoded FixedBackOff(2000L, 2L) exactly - values here
+      # can be tuned per environment without a code change.
+      max-attempts: 2
+      interval-ms: 2000
+  events:
+    # Explicit on purpose, even though "in-memory" is also the default:
+    # InMemoryProcessedEventStore only activates for this exact value, so
+    # an environment that meant to run a persistent store but forgot to
+    # set this fails fast instead of silently falling back to it.
+    processed-store: in-memory
