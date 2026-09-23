@@ -116,6 +116,8 @@ nothing (no cached layers, no old containers/volumes):
 
 ```bash
 cd teams/mind
+cp .env.example .env        # .env is gitignored -- a fresh clone has none;
+                             # docker compose's env_file: .env fails outright without this
 docker compose down -v      # full cleanup -- no old state
 docker compose up -d --build
 sleep 5
