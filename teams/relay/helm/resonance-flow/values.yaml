@@ -398,9 +398,6 @@ components:
       periodSeconds: 5
       failureThreshold: 3
     env: {}
-    dependencies:
-      - name: notification-delivery
-        port: 80
     config:
       notificationDelivery:
         service:
