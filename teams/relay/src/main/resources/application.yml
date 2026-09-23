@@ -33,6 +33,7 @@ management:
 relay:
   kafka:
     task-event-topic: task-event
+    task-events-notification-topic: resonance.task-events-notifications
     task-notification-topic: resonance.task-notifications
 
   pipe:
