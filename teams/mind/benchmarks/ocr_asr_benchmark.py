@@ -144,9 +144,21 @@ def load_manifest() -> dict[str, dict[str, Path]]:
     hardcoding paths/doc ids here -- keeps working if the data moves
     (review feedback on PR #345). Cached: every benchmark loop iteration
     calls this, but the manifest/checksums only need reading once.
+
+    Raises a RuntimeError pointing to eval/datasets/README.md (with the
+    manifest's own source_url) if the manifest exists but the actual
+    data files don't -- they're gitignored, not committed, so a fresh
+    clone genuinely won't have them. Same style as find_tesseract()'s
+    error: fail with a pointer to the fix, not a bare traceback.
     """
     datasets_dir = _PROJECT_ROOT / "eval" / "datasets"
-    manifest = json.loads((datasets_dir / ".manifest.json").read_text(encoding="utf-8"))
+    manifest_path = datasets_dir / ".manifest.json"
+    if not manifest_path.exists():
+        raise RuntimeError(
+            f"{manifest_path} not found -- see eval/datasets/README.md for what "
+            "data this benchmark needs."
+        )
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     checksums = _load_checksums(datasets_dir / ".sha256")
 
     docs: dict[str, dict[str, Path]] = {}
@@ -154,6 +166,14 @@ def load_manifest() -> dict[str, dict[str, Path]]:
         entry: dict[str, Path] = {}
         for rel_path in record["files"]:
             path = _PROJECT_ROOT / rel_path
+            if not path.exists():
+                raise RuntimeError(
+                    f"{rel_path} not found. This benchmark needs the FUNSD real-data "
+                    "slice downloaded locally -- it's gitignored, not committed. See "
+                    f"eval/datasets/README.md, and download from "
+                    f"{manifest.get('source_url', '(no source_url in manifest)')} "
+                    "(eval/datasets/.manifest.json's own source_url)."
+                )
             _verify_checksum(path, checksums[rel_path])
             key = "image" if path.suffix == ".png" else "annotation"
             entry[key] = path
