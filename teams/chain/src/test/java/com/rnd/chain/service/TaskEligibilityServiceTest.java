@@ -4,11 +4,11 @@ import com.rnd.chain.dto.Constraint;
 import com.rnd.chain.dto.Task;
 import com.rnd.chain.dto.TaskDependency;
 import com.rnd.chain.dto.TaskStatus;
+import com.rnd.chain.dto.TaskTestFixtures;
 import com.rnd.chain.repository.InMemoryTaskDependencyRepository;
 import com.rnd.chain.repository.InMemoryTaskRepository;
 import org.junit.jupiter.api.Test;
 
-import java.time.LocalDateTime;
 import java.util.List;
 import java.util.UUID;
 
@@ -33,15 +33,11 @@ class TaskEligibilityServiceTest {
 
     private static Task buildTask(UUID id, int blockingCount, int openConstraintCount, boolean isReady,
                                    TaskStatus status) {
-        return Task.builder()
-                .id(id)
-                .ownerId("owner")
+        return TaskTestFixtures.defaultTask(id)
                 .status(status)
                 .isReady(isReady)
                 .blockingCount(blockingCount)
                 .openConstraintCount(openConstraintCount)
-                .createdAt(LocalDateTime.now())
-                .updatedAt(LocalDateTime.now())
                 .build();
     }
 
