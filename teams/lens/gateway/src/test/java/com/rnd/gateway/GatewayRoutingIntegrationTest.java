@@ -22,6 +22,7 @@ import static org.hamcrest.Matchers.*;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.*;
+import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.jwt;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 
@@ -82,7 +83,7 @@ class GatewayRoutingIntegrationTest {
                 .thenReturn(recommendation);
 
         // Test
-        mockMvc.perform(post("/api/workspace/recommend")
+        mockMvc.perform(post("/api/workspace/recommend").with(jwt())
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"availableTime\": 45}"))
                 .andExpect(status().isOk())
@@ -119,7 +120,7 @@ class GatewayRoutingIntegrationTest {
                 .thenReturn(org.springframework.http.ResponseEntity.ok(taskList));
 
         // Test
-        mockMvc.perform(get("/api/workspace/tasks?filter=all&page=0&size=20"))
+        mockMvc.perform(get("/api/workspace/tasks?filter=all&page=0&size=20").with(jwt()))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.items").isArray())
                 .andExpect(jsonPath("$.items[0].id").value("task_001"))
@@ -151,7 +152,7 @@ class GatewayRoutingIntegrationTest {
                 .thenReturn(org.springframework.http.ResponseEntity.ok(task));
 
         // Test
-        mockMvc.perform(get("/api/workspace/tasks/task_001"))
+        mockMvc.perform(get("/api/workspace/tasks/task_001").with(jwt()))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.id").value("task_001"))
                 .andExpect(jsonPath("$.title").value("Review API changes"));
@@ -172,7 +173,7 @@ class GatewayRoutingIntegrationTest {
                         new SocketTimeoutException("Read timed out")));
 
         // Test
-        mockMvc.perform(post("/api/workspace/recommend")
+        mockMvc.perform(post("/api/workspace/recommend").with(jwt())
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"availableTime\": 45}"))
                 .andExpect(status().isGatewayTimeout())
@@ -192,7 +193,7 @@ class GatewayRoutingIntegrationTest {
                 .thenThrow(new ResourceAccessException("Connection refused"));
 
         // Test
-        mockMvc.perform(get("/api/workspace/tasks"))
+        mockMvc.perform(get("/api/workspace/tasks").with(jwt()))
                 .andExpect(status().isServiceUnavailable())
                 .andExpect(jsonPath("$.status").value("ERROR"))
                 .andExpect(jsonPath("$.errorCode").value("SERVICE_UNAVAILABLE"));
@@ -208,7 +209,7 @@ class GatewayRoutingIntegrationTest {
                 .thenReturn(null);
 
         // Test
-        mockMvc.perform(post("/api/workspace/recommend")
+        mockMvc.perform(post("/api/workspace/recommend").with(jwt())
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"availableTime\": 45}"))
                 .andExpect(status().isServiceUnavailable())
@@ -221,7 +222,7 @@ class GatewayRoutingIntegrationTest {
 
     @Test
     void recommend_whenAvailableTimeIsMissing_returns400BadRequest() throws Exception {
-        mockMvc.perform(post("/api/workspace/recommend")
+        mockMvc.perform(post("/api/workspace/recommend").with(jwt())
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{}"))
                 .andExpect(status().isBadRequest())
@@ -231,7 +232,7 @@ class GatewayRoutingIntegrationTest {
 
     @Test
     void recommend_whenAvailableTimeIsZero_returns400BadRequest() throws Exception {
-        mockMvc.perform(post("/api/workspace/recommend")
+        mockMvc.perform(post("/api/workspace/recommend").with(jwt())
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"availableTime\": 0}"))
                 .andExpect(status().isBadRequest())
@@ -240,7 +241,7 @@ class GatewayRoutingIntegrationTest {
 
     @Test
     void recommend_whenAvailableTimeIsNegative_returns400BadRequest() throws Exception {
-        mockMvc.perform(post("/api/workspace/recommend")
+        mockMvc.perform(post("/api/workspace/recommend").with(jwt())
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"availableTime\": -100}"))
                 .andExpect(status().isBadRequest())
@@ -262,7 +263,7 @@ class GatewayRoutingIntegrationTest {
                 .thenThrow(new ResourceAccessException("Connection refused"));
 
         // Test
-        mockMvc.perform(get("/api/workspace/tasks"))
+        mockMvc.perform(get("/api/workspace/tasks").with(jwt()))
                 .andExpect(jsonPath("$.status").value("ERROR"))
                 .andExpect(jsonPath("$.errorCode").exists())
                 .andExpect(jsonPath("$.message").exists())
@@ -280,7 +281,7 @@ class GatewayRoutingIntegrationTest {
                 .thenThrow(new RuntimeException("Internal database error"));
 
         // Test - verify no stack trace in response
-        mockMvc.perform(post("/api/workspace/recommend")
+        mockMvc.perform(post("/api/workspace/recommend").with(jwt())
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"availableTime\": 45}"))
                 .andExpect(status().isServiceUnavailable())

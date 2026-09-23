@@ -1,12 +1,18 @@
 spring:
   application:
     name: gateway
+  # Most tests authenticate with spring-security-test's jwt() post-processor,
+  # which skips real decoding, so these URLs are never called.
+  # SecurityJwtValidationTests overrides them with a real JWKS stub.
+  security:
+    oauth2:
+      resourceserver:
+        jwt:
+          issuer-uri: http://test-issuer/realms/lens
+          jwk-set-uri: http://localhost:9998/realms/lens/protocol/openid-connect/certs
 
 app:
   dev-mode: true
-  jwt:
-    issuer: test-issuer
-    secret: test-secret
 
 bff:
   service:

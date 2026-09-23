@@ -10,18 +10,26 @@ spring:
   web:
     resources:
       add-mappings: false
+  # Every /api/** request must carry a Keycloak-issued JWT (see SecurityConfig).
+  # issuer-uri  — must equal the token's "iss" claim, i.e. the URL the browser
+  #               uses to reach Keycloak (KC_HOSTNAME in docker-compose).
+  # jwk-set-uri — where the Gateway fetches Keycloak's public signing keys. Inside
+  #               docker this is the internal hostname, which differs from issuer-uri.
+  #               Keys are fetched lazily on the first request, so the Gateway can
+  #               start before Keycloak is up.
+  security:
+    oauth2:
+      resourceserver:
+        jwt:
+          issuer-uri: ${KEYCLOAK_ISSUER_URI:http://localhost:8180/realms/lens}
+          jwk-set-uri: ${KEYCLOAK_JWK_SET_URI:http://localhost:8180/realms/lens/protocol/openid-connect/certs}
 
 # Application mode configuration
 app:
-  # dev-mode: set to true ONLY in local/dev environments
-  # In production, this MUST be false to force JWT extraction
+  # dev-mode: set to true ONLY in local/dev environments.
+  # While true, WorkspaceController still forwards a mock userId to BFF —
+  # extracting it from the JWT is the next step (Auth stage 2).
   dev-mode: ${APP_DEV_MODE:true}
-  
-  # JWT Configuration (required when dev-mode=false)
-  # If dev-mode=false but these are not set, startup validation will fail
-  jwt:
-    issuer: ${APP_JWT_ISSUER:}
-    secret: ${APP_JWT_SECRET:}
 
 # BFF service configuration
 # Override BFF_SERVICE_URL to point at a different BFF without recompiling

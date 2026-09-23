@@ -1,5 +1,29 @@
 services:
   # ========================================
+  # Keycloak - Identity provider (Port 8180)
+  # ========================================
+  # Dev mode (in-memory DB): the "lens" realm, its roles, clients and test
+  # users are re-imported from keycloak/realm-lens.json on every start.
+  # Admin console: http://localhost:8180 (admin / admin)
+  keycloak:
+    image: quay.io/keycloak/keycloak:26.0.7
+    container_name: lens-keycloak
+    command: start-dev --import-realm
+    ports:
+      - "${KEYCLOAK_PORT:-8180}:8080"
+    environment:
+      - KC_BOOTSTRAP_ADMIN_USERNAME=admin
+      - KC_BOOTSTRAP_ADMIN_PASSWORD=admin
+      # Tokens are always issued with iss=http://localhost:8180/realms/lens (the
+      # URL the browser uses), even when fetched from inside the docker network.
+      - KC_HOSTNAME=http://localhost:${KEYCLOAK_PORT:-8180}
+      - KC_HOSTNAME_BACKCHANNEL_DYNAMIC=true
+    volumes:
+      - ./keycloak/realm-lens.json:/opt/keycloak/data/import/realm-lens.json:ro
+    networks:
+      - lens-network
+
+  # ========================================
   # Gateway - Spring Boot (Port 8080)
   # ========================================
   gateway:
@@ -13,6 +37,12 @@ services:
       - SERVER_PORT=8080
       - SPRING_PROFILES_ACTIVE=${SPRING_PROFILES_ACTIVE:-local}
       - BFF_SERVICE_URL=http://host.docker.internal:8082
+      # Must match the token's "iss" claim (Keycloak's public URL)
+      - KEYCLOAK_ISSUER_URI=http://localhost:${KEYCLOAK_PORT:-8180}/realms/lens
+      # Signing keys are fetched over the internal docker network
+      - KEYCLOAK_JWK_SET_URI=http://keycloak:8080/realms/lens/protocol/openid-connect/certs
+    depends_on:
+      - keycloak
     networks:
       - lens-network
     healthcheck:

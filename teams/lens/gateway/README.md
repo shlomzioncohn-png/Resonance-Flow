@@ -75,7 +75,7 @@ The initial design considered Spring Cloud Gateway but was replaced with manual 
 - Java 21
 - Spring Boot 3.4.0
 - Spring Security (for authentication & authorization)
-- JWT for token-based authentication (Phase 2)
+- Spring Security OAuth2 Resource Server — validates Keycloak-issued JWTs (see [Authentication](#authentication-keycloak))
 - **Lombok 1.18.30** (reduces boilerplate code)
 - Docker / Docker Compose
 
@@ -161,7 +161,7 @@ All DTOs in the Gateway use Lombok:
 ```
 src/main/java/com/rnd/gateway/
 ├── GatewayApplication.java   # Spring Boot entry point
-├── config/                   # SecurityConfig (permitAll for now — JWT is a TODO)
+├── config/                   # SecurityConfig (JWT required on /api/**), SecurityErrorHandler (JSON 401/403)
 ├── controller/                # WorkspaceController, HealthController
 ├── dto/                       # Request/response DTOs
 └── exception/                 # GlobalExceptionHandler + typed exceptions
@@ -170,6 +170,54 @@ src/main/resources/
 └── application-local.yml    # Local-profile overrides (disables Spring Security's default login)
 src/test/java/com/rnd/gateway/
 ```
+
+## Authentication (Keycloak)
+
+The Gateway is the single authentication point of the system. Every `/api/**`
+request must send `Authorization: Bearer <access token>`, issued by the `lens`
+Keycloak realm. The Gateway validates the token's **signature** (Keycloak's
+public keys, fetched from its JWKS endpoint), **expiry** and **issuer**.
+Anything else — no token, malformed, forged, tampered, expired, or from another
+issuer — gets a JSON `401 UNAUTHORIZED` and **never reaches the BFF**.
+
+`/health`, `/health/ready` and Swagger stay public.
+
+> Still mocked (Auth stage 2): the userId forwarded to BFF as `X-User-Id` is
+> still `emp_001`, not the token's `sub`, and roles aren't enforced yet.
+
+### Local Keycloak
+
+`docker compose up keycloak` (from `teams/lens/`) starts Keycloak on
+http://localhost:8180 (admin console: `admin` / `admin`). The realm is
+imported from [`../keycloak/realm-lens.json`](../keycloak/realm-lens.json) on
+every start (dev mode, in-memory DB — changes made in the console are lost on restart;
+edit the JSON instead).
+
+| User | Password | Realm role |
+|------|----------|------------|
+| `manager1` | `manager1` | `manager` |
+| `employee1` | `employee1` | `employee` |
+
+| Client | Purpose |
+|--------|---------|
+| `lens-frontend` | Browser login for the Next.js app (Auth stage 3) |
+| `lens-dev-cli` | Local testing only — lets you get a token with curl |
+
+### Testing with curl
+
+```bash
+TOKEN=$(curl -s http://localhost:8180/realms/lens/protocol/openid-connect/token \
+  -d grant_type=password -d client_id=lens-dev-cli \
+  -d username=employee1 -d password=employee1 | jq -r .access_token)
+
+curl -i http://localhost:8080/api/workspace/tasks -H "Authorization: Bearer $TOKEN"  # 200
+curl -i http://localhost:8080/api/workspace/tasks                                     # 401
+```
+
+Tokens live 5 minutes. Automated coverage of every rejection case is in
+`SecurityJwtValidationTests`.
+
+---
 
 ## Gateway Routes
 
@@ -460,6 +508,13 @@ Configure Gateway behavior via environment variables. All defaults allow local D
 | `BFF_ENDPOINT_WORKSPACE_RECOMMEND` | `/workspace/recommend` | Workspace recommendation endpoint | `/api/v1/workspace/recommend` |
 | `BFF_ENDPOINT_TASKS` | `/workspace/tasks` | Task operations endpoint | `/api/v1/tasks` |
 
+### Authentication Configuration
+
+| Variable | Default | Purpose |
+|----------|---------|---------|
+| `KEYCLOAK_ISSUER_URI` | `http://localhost:8180/realms/lens` | Must equal the token's `iss` claim (Keycloak's public URL) |
+| `KEYCLOAK_JWK_SET_URI` | `http://localhost:8180/realms/lens/protocol/openid-connect/certs` | Where the Gateway fetches signing keys. In docker-compose: `http://keycloak:8080/...` |
+
 ### Server Configuration
 
 | Variable | Default | Purpose |
@@ -497,5 +552,5 @@ SPRING_PROFILES_ACTIVE=local
 - 🕐 Phase 2 Enhancement: Health Check endpoints (implemented, awaiting tech lead approval)
 - 🔄 Phase 3: BFF Implementation (Sari) — Orchestrates Bridge, Chain, Inbox, Mind
 - 🔄 Phase 4: Frontend Development
-- 🔄 Phase 5: Authentication & Authorization (JWT tokens)
+- 🔄 Phase 5: Authentication & Authorization (Keycloak) — stage 1 done: JWT validation at the Gateway; next: userId/role to BFF, frontend login, OTP
 - 🔄 Phase 6: Rate limiting & Circuit breakers
