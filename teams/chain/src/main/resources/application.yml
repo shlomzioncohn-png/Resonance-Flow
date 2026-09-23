@@ -38,7 +38,7 @@ chain:
     consumer-group-id: ${KAFKA_CONSUMER_GROUP_ID:chain-service}
     # Schema Registry (Apicurio, ccompat API) - needed because task.created/task.updated/
     # task.dependencies.proposed are all Protobuf, validated against it.
-    schema-registry-url: ${SCHEMA_REGISTRY_URL:http://localhost:8081/apis/ccompat/v6}
+    schema-registry-url: ${SCHEMA_REGISTRY_URL:http://localhost:8082/apis/ccompat/v6}
     # chain.kafka.retry.* (the old blocking FixedBackOff policy) was removed along with
     # ChainKafkaErrorHandlingConfig/ChainKafkaRetryProperties - retry/backoff for each handler is
     # now configured directly on its own @RetryableTopic annotation instead of one shared policy.
