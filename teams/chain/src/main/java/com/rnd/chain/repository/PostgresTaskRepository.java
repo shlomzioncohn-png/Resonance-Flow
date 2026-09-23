@@ -48,22 +48,22 @@ public class PostgresTaskRepository implements TaskRepository {
     }
 
     @Override
+    @Transactional
     public Task save(Task task) {
         Objects.requireNonNull(task, "task must not be null");
         jpaRepository.upsert(task.getId(), task.getParentTaskId(), task.getOwnerId(),
                 task.getStatus().name(), task.isReady(), task.getBlockingCount(),
                 task.getOpenConstraintCount(), task.getEstimatedDurationMin(), task.getScore(),
                 task.getCreatedAt(), task.getUpdatedAt(), task.getDeletedAt());
-        // @Modifying is a row-count-only native statement (no RETURNING) - the read-back is the
-        // decided way this method returns the persisted Task (PERSISTENCE_PLAN.md §4).
-        return jpaRepository.findByIdAndDeletedAtIsNull(task.getId())
+        // Read-back after the row-count-only native upsert; unlike findByIdAndDeletedAtIsNull(),
+        // findById() also returns soft-deleted rows.
+        return jpaRepository.findById(task.getId())
                 .map(PostgresTaskRepository::toDto)
                 .orElseThrow(() -> new IllegalStateException("Task " + task.getId() + " missing immediately after save"));
     }
 
-    /** Pessimistic row lock is the sole correctness mechanism here - it alone serializes every
-     * update() call for a given id (PERSISTENCE_PLAN.md §4). Must run inside a transaction so the
-     * lock is held from findByIdForUpdate through the dirty-checked flush at commit. */
+    /** Locks the row with findByIdForUpdate, applies mutator, and lets the dirty-checked flush at
+     * commit persist the result. */
     @Override
     @Transactional
     public Optional<Task> update(UUID id, UnaryOperator<Task> mutator) {
