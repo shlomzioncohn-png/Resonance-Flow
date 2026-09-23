@@ -25,7 +25,7 @@ open follow-up, not done as part of this merge.
 
 ## Stack
 
-- Java 25
+- Java 21
 - Spring Boot 3.3.13 (Maven)
 - Lombok (`Task`/`Constraint`/`TaskDependency` accessors/equals-hashCode/builder - see the
   2026-09-08 fixes below for exactly what's hand-written vs. generated, and why)
@@ -371,6 +371,52 @@ on this branch - see [PLAN.md](PLAN.md) §4a for the full write-up):
     implicit classpath scanning on this machine's JDK.
 
 Full test suite (76 tests, `mvn clean test`) passes.
+
+## Code review fixes (2026-09-23, PR #114 sixth review round)
+
+Addressed the findings from this round that belong on this branch (discussed and triaged
+one-by-one with the reviewer first):
+
+- **Removed the dead `@EqualsAndHashCode(onlyExplicitlyIncluded = true)` / `@EqualsAndHashCode.Include`
+  annotations from `Constraint`.** Lombok skips generating `equals`/`hashCode` whenever hand-written
+  ones already exist in the class, and `Constraint` has had hand-written id-only `equals`/`hashCode`
+  since the 2026-09-06 round - the annotations, added two days later when Lombok landed on the
+  DTOs, never produced any bytecode. Equality is now documented as hand-written by design (matching
+  `getReason`/`setReason`'s pattern), not Lombok-generated.
+- **`TaskEligibilityServiceTest`'s `buildTask` now delegates to `TaskTestFixtures.defaultTask(...)`**
+  instead of duplicating the `Task.builder()` construction inline. `TaskTestFixtures`'s Javadoc
+  previously claimed to have consolidated this exact helper, but `TaskEligibilityServiceTest` had
+  kept its own independent copy (30+ call sites use its compact positional-args form, which is
+  worth keeping - only the construction underneath it was duplicated). The Javadoc now states
+  precisely which classes call `defaultTask` directly, which one delegates to it, and which one
+  (`InMemoryTaskRepositoryTest`) uses neither.
+- **`wouldCreateCycle`'s DFS no longer takes `InMemoryTaskDependencyRepository`'s internal read
+  lock on every visited node.** The whole traversal already runs inside
+  `TaskEligibilityService.dependencyGraphLock`, which is exclusive with every write this
+  repository ever makes, so that per-node lock acquire/release was always uncontended overhead.
+  Added `TaskDependencyRepository#findByTaskIdUnderExternalLock` - a `default` interface method
+  (so a future JPA-backed implementation doesn't need to know about it at all) that
+  `InMemoryTaskDependencyRepository` overrides to skip its own locking, documented with the
+  exclusivity contract the override relies on.
+- **`InMemoryTaskDependencyRepository`'s `find...` methods now pre-size their result list**
+  (`Collectors.toCollection(() -> new ArrayList<>(ids.size()))` via a shared `toTaskDependencyList`
+  helper) instead of `Collectors.toList()`, which gives the JDK no capacity hint and could grow/copy
+  the list internally as elements accumulate.
+- **Fixed a stale "Java 25" claim in this file's Stack section** (see below) - the actual
+  `pom.xml` on this branch is Java 21 / Spring Boot 3.3.13. A separate commit
+  (`03c9838b`, "[MINOR] Bump java.version to 25...") did briefly bump this module to 25, but that
+  change did not survive the subsequent merge from `main` - `git blame` on `pom.xml`'s
+  `java.version` line attributes it to the earlier Java 21 upgrade, not that commit.
+
+Findings from this round **not** addressed on this branch, each for a specific reason:
+- The `openConstraintIdsByTask` undercount-on-restart scenario and its inline
+  "prune empty map entry" duplication (vs. `InMemoryTaskDependencyRepository.removeIfEmpty`) - both
+  are being resolved by removing `openConstraintIdsByTask` entirely on a separate local branch
+  (`constraint-persistent-378`), not by patching it here.
+- The dead `@Setter` on `Task` (all 12 fields are `final`, so it generates nothing) - that DTO is
+  owned by a teammate; flagged to her directly rather than edited here.
+- The Java-25/Spring-Boot-2.7.18 compatibility concern - doesn't describe this branch's actual
+  `pom.xml` (see the Stack-section fix above), so there's nothing to remediate here.
 
 ## Dependency graph persistence (Issue #66)
 
