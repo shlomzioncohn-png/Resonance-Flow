@@ -11,6 +11,8 @@ import java.io.IOException;
 import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
@@ -26,6 +28,8 @@ import org.springframework.stereotype.Component;
  */
 @Component
 public class SlackUserNameResolver {
+
+    private static final Logger log = LoggerFactory.getLogger(SlackUserNameResolver.class);
 
     private final MethodsClient methods;
     private final Map<String, String> userNameCache = new ConcurrentHashMap<>();
@@ -56,10 +60,14 @@ public class SlackUserNameResolver {
             UsersInfoResponse response =
                     methods.usersInfo(UsersInfoRequest.builder().user(userId).build());
             if (!response.isOk() || response.getUser() == null) {
+                log.warn("Slack users.info failed for user {}: {}", userId, response.getError());
                 return userId;
             }
-            return displayName(response.getUser()).orElse(userId);
+            String resolved = displayName(response.getUser()).orElse(userId);
+            log.debug("Resolved Slack user {} to {}", userId, resolved);
+            return resolved;
         } catch (IOException | SlackApiException e) {
+            log.warn("Slack users.info threw for user {}", userId, e);
             return userId;
         }
     }
@@ -78,3 +86,4 @@ public class SlackUserNameResolver {
         return value != null && !value.isBlank();
     }
 }
+
