@@ -4,7 +4,7 @@ Week 7 needs to answer the mentor's question — known in advance (see
 `teams/mind/CLAUDE.md` Part 3, "Stretch scoring"): *"show me one scenario where
 the hierarchy stretch goal changed the recommendation vs. the baseline, and one
 where it didn't — why?"* `diff_reports` takes the baseline `Report` (R2's
-segmented ranking model, week 6) and the stretch `Report` (R3's hierarchical
+segmented ranking model, scored in week 5) and the stretch `Report` (R3's hierarchical
 propagation model, week 7) — both produced by `harness.run` against the same
 `eval/personas/` set — and turns them into the evidence that question needs,
 so week 7 is "plug in the model and read the diff" instead of inventing the
