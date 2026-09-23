@@ -101,7 +101,7 @@ jobs:
       - name: Fetch chart dependencies
         run: helm dependency build "$CHART_DIR"
 
-      # Phase 1: infra only, MIND's image isn't built yet (two-phase, like service-ci.yaml).
+      # Phase 1: infra only, MIND's image isn't built yet (two-phase, like setup-service-infra + deploy-service).
       - name: Deploy chart with MIND disabled (infra only)
         run: |
           helm upgrade --install "$RELEASE" "$CHART_DIR" \

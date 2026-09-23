@@ -1,11 +1,17 @@
 name: Install yq
 description: Installs mikefarah/yq on the (self-hosted) runner, which doesn't ship it.
 
+inputs:
+  version:
+    description: "yq release tag - pinned so a new release can't change CI behavior unannounced"
+    required: false
+    default: v4.53.6
+
 runs:
   using: composite
   steps:
-    - name: Install yq
+    - name: Install yq ${{ inputs.version }}
       shell: bash
       run: |
-        sudo curl -sL -o /usr/local/bin/yq https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
+        sudo curl -fsSL -o /usr/local/bin/yq "https://github.com/mikefarah/yq/releases/download/${{ inputs.version }}/yq_linux_amd64"
         sudo chmod +x /usr/local/bin/yq
