@@ -50,6 +50,8 @@ proxies against FUNSD's ground truth -- neither is a real OCR metric
 from __future__ import annotations
 
 import difflib
+import functools
+import hashlib
 import json
 import re
 import shutil
@@ -68,8 +70,7 @@ if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
 _HERE = Path(__file__).parent
-DATA_DIR = _HERE.parent / "local-data" / "funsd" / "dataset" / "testing_data"
-DOCS = ["82092117", "82200067_0069"]
+_PROJECT_ROOT = _HERE.parent
 
 # Three PSM configs (issue asked for at least 2; a third closes the
 # "does accuracy keep improving, or does it plateau/regress" question
@@ -112,12 +113,60 @@ def find_tesseract() -> str:
     raise RuntimeError("tesseract not found on PATH or at the default Windows install path")
 
 
+def _load_checksums(sha256_path: Path) -> dict[str, str]:
+    """relative path (as written in the file) -> expected sha256, from a
+    standard `sha256sum`-format file (`<hex digest>  <path>` per line)."""
+    checksums: dict[str, str] = {}
+    for line in sha256_path.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        digest, rel_path = line.split(None, 1)
+        checksums[rel_path.strip()] = digest
+    return checksums
+
+
+def _verify_checksum(path: Path, expected_sha256: str) -> None:
+    actual = hashlib.sha256(path.read_bytes()).hexdigest()
+    if actual != expected_sha256:
+        raise RuntimeError(
+            f"checksum mismatch for {path}: expected {expected_sha256}, got {actual} "
+            "-- the committed data slice doesn't match eval/datasets/.sha256"
+        )
+
+
+@functools.lru_cache(maxsize=1)
+def load_manifest() -> dict[str, dict[str, Path]]:
+    """doc_id -> {"image": Path, "annotation": Path}.
+
+    Reads paths from eval/datasets/.manifest.json and verifies each
+    file's checksum against eval/datasets/.sha256, instead of
+    hardcoding paths/doc ids here -- keeps working if the data moves
+    (review feedback on PR #345). Cached: every benchmark loop iteration
+    calls this, but the manifest/checksums only need reading once.
+    """
+    datasets_dir = _PROJECT_ROOT / "eval" / "datasets"
+    manifest = json.loads((datasets_dir / ".manifest.json").read_text(encoding="utf-8"))
+    checksums = _load_checksums(datasets_dir / ".sha256")
+
+    docs: dict[str, dict[str, Path]] = {}
+    for record in manifest["records"]:
+        entry: dict[str, Path] = {}
+        for rel_path in record["files"]:
+            path = _PROJECT_ROOT / rel_path
+            _verify_checksum(path, checksums[rel_path])
+            key = "image" if path.suffix == ".png" else "annotation"
+            entry[key] = path
+        docs[record["id"]] = entry
+    return docs
+
+
 def _normalize(word: str) -> str:
     return re.sub(r"[^\w]", "", word).lower()
 
 
 def ground_truth_words(doc_id: str) -> list[str]:
-    path = DATA_DIR / "annotations" / f"{doc_id}.json"
+    path = load_manifest()[doc_id]["annotation"]
     with path.open(encoding="utf-8") as f:
         data = json.load(f)
     words: list[str] = []
@@ -200,10 +249,9 @@ def run_ocr_benchmark() -> dict[str, dict]:
 
     rows = []
     for config_name, psm_args in OCR_CONFIGS.items():
-        for doc_id in DOCS:
-            image_path = DATA_DIR / "images" / f"{doc_id}.png"
+        for doc_id, paths in load_manifest().items():
             gt_words = ground_truth_words(doc_id)
-            result = run_ocr(tesseract_cmd, image_path, psm_args)
+            result = run_ocr(tesseract_cmd, paths["image"], psm_args)
             recall = word_recall(result["text"], gt_words)
             char_sim = char_similarity_score(result["text"], gt_words)
             row = {
@@ -310,10 +358,9 @@ def run_paddle_benchmark() -> dict[str, dict]:
         load_s = time.perf_counter() - load_start
         print(f"{config_name}: model load took {load_s:.1f}s (one-time cost -- not counted in per-page latency below)")
 
-        for doc_id in DOCS:
-            image_path = DATA_DIR / "images" / f"{doc_id}.png"
+        for doc_id, paths in load_manifest().items():
             gt_words = ground_truth_words(doc_id)
-            result = run_paddle_ocr(ocr, image_path)
+            result = run_paddle_ocr(ocr, paths["image"])
             recall = word_recall(result["text"], gt_words)
             char_sim = char_similarity_score(result["text"], gt_words)
             row = {

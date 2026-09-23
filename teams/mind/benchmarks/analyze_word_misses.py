@@ -52,7 +52,7 @@ import sys
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
-from benchmarks.ocr_asr_benchmark import DATA_DIR, DOCS, find_tesseract, run_ocr
+from benchmarks.ocr_asr_benchmark import find_tesseract, load_manifest, run_ocr
 
 _CATEGORY_ORDER = ["digit_merge", "segmentation", "char_misread", "different_word", "not_detected"]
 
@@ -71,7 +71,7 @@ def _normalize(word: str) -> str:
 
 def gt_word_pairs(doc_id: str) -> list[tuple[str, str]]:
     """(original_text, normalized_text) for every GT word, in document order."""
-    path = DATA_DIR / "annotations" / f"{doc_id}.json"
+    path = load_manifest()[doc_id]["annotation"]
     data = json.loads(path.read_text(encoding="utf-8"))
     pairs = []
     for block in data["form"]:
@@ -95,7 +95,7 @@ def classify(gt_norm: str, ocr_norm_tokens: list[str], best_match: str | None, b
 
 
 def analyze_doc(tesseract_cmd: str, doc_id: str) -> list[dict]:
-    image_path = DATA_DIR / "images" / f"{doc_id}.png"
+    image_path = load_manifest()[doc_id]["image"]
     result = run_ocr(tesseract_cmd, image_path, ["--psm", "11"])
     ocr_raw_tokens = result["text"].split()
     ocr_norm_tokens = [_normalize(w) for w in ocr_raw_tokens if _normalize(w)]
@@ -125,11 +125,12 @@ def analyze_doc(tesseract_cmd: str, doc_id: str) -> list[dict]:
 
 def main() -> None:
     tesseract_cmd = find_tesseract()
+    doc_ids = list(load_manifest())
     all_rows: list[dict] = []
-    for doc_id in DOCS:
+    for doc_id in doc_ids:
         all_rows.extend(analyze_doc(tesseract_cmd, doc_id))
 
-    print(f"Total word_recall misses across {len(DOCS)} documents (psm11): {len(all_rows)}\n")
+    print(f"Total word_recall misses across {len(doc_ids)} documents (psm11): {len(all_rows)}\n")
 
     print("--- Breakdown by category ---")
     for cat in _CATEGORY_ORDER:

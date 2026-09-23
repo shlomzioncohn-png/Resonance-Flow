@@ -28,7 +28,7 @@ if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
 from benchmarks.analyze_word_misses import analyze_doc, gt_word_pairs
-from benchmarks.ocr_asr_benchmark import DATA_DIR, DOCS, find_tesseract
+from benchmarks.ocr_asr_benchmark import find_tesseract, load_manifest
 
 
 def _normalize(word: str) -> str:
@@ -65,9 +65,8 @@ def main() -> None:
     hit_confidences: list[float] = []
     miss_confidences: dict[str, list[float]] = {}
 
-    for doc_id in DOCS:
-        image_path = DATA_DIR / "images" / f"{doc_id}.png"
-        conf_by_word = tesseract_confidences(tesseract_cmd, image_path)
+    for doc_id, paths in load_manifest().items():
+        conf_by_word = tesseract_confidences(tesseract_cmd, paths["image"])
 
         misses = {row["gt_word"]: row for row in analyze_doc(tesseract_cmd, doc_id)}
         miss_gt_norms = {_normalize(orig) for orig in misses}
