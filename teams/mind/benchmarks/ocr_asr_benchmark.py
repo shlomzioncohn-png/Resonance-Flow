@@ -60,9 +60,18 @@ import sys
 import threading
 import time
 from pathlib import Path
+from typing import TYPE_CHECKING
 
-import psutil
 from pydantic import BaseModel
+
+if TYPE_CHECKING:
+    # psutil is the optional [benchmark] extra (see module docstring) --
+    # imported lazily inside the functions that actually use it, so the
+    # rest of this module (word_recall, char_similarity_score, etc.) stays
+    # importable without it. This TYPE_CHECKING-only import exists purely
+    # so mypy/ruff can resolve the `psutil.Process` type hint below without
+    # requiring psutil to be installed to import this module at runtime.
+    import psutil
 
 if hasattr(sys.stdout, "reconfigure"):
     # Windows consoles default to a codepage (e.g. cp1255) that can't
@@ -254,6 +263,8 @@ def run_ocr(tesseract_cmd: str, image_path: Path, psm_args: list[str]) -> OCRRun
     fast run) -- adequate for this week's comparison, not a substitute
     for a real profiler.
     """
+    import psutil  # optional [benchmark] extra -- see module docstring
+
     cmd = [tesseract_cmd, str(image_path), "stdout", *psm_args]
     start = time.perf_counter()
     proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
@@ -358,6 +369,8 @@ def run_ocr_benchmark() -> dict[str, ConfigAverages]:
 
 
 def _sample_current_process(stop_event: threading.Event, proc: psutil.Process, peak: list[int]) -> None:
+    import psutil  # optional [benchmark] extra -- see module docstring
+
     while not stop_event.is_set():
         try:
             peak[0] = max(peak[0], proc.memory_info().rss)
@@ -378,6 +391,8 @@ def run_paddle_ocr(ocr, image_path: Path) -> OCRRunResult:
     right number for capacity planning ("what must this process's host
     have while OCRing").
     """
+    import psutil  # optional [benchmark] extra -- see module docstring
+
     proc = psutil.Process()
     stop_event = threading.Event()
     peak = [proc.memory_info().rss]

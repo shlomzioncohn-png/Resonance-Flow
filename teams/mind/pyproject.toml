@@ -23,6 +23,14 @@ dev = [
     "ruff",
     "mypy",
     "types-PyYAML",
+    "types-psutil",  # CI's `make lint` runs `mypy ... benchmarks`, so this
+                     # stub needs to be here, not in [benchmark] below --
+                     # CI installs `.[dev]` only, never `.[benchmark]`
+                     # (that extra stays heavy/optional on purpose: paddleocr,
+                     # paddlepaddle). The stub alone (no runtime psutil
+                     # needed) is enough for mypy to resolve the import --
+                     # verified locally: mypy passes on benchmarks/ with
+                     # types-psutil installed and psutil itself uninstalled.
     "httpx",  # required by fastapi.testclient.TestClient
     "grpcio-tools==1.71.0",  # protoc, for `make proto`
 ]
@@ -35,8 +43,6 @@ dev = [
 # benchmarks/ocr-asr-benchmark.md "PaddleOCR -- setup".
 benchmark = [
     "psutil",  # cross-platform peak-RSS/CPU sampling; stdlib `resource` is Unix-only
-    "types-psutil",  # mypy stub for psutil -- see [tool.mypy] override below for paddleocr,
-                     # which has no stub package to install
     "paddleocr",
     "paddlepaddle",
 ]
