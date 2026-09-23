@@ -1,0 +1,4 @@
+# Subchart dependencies are fetched from Chart.lock (`helm dependency build`),
+# never committed.
+charts/
+*.tgz

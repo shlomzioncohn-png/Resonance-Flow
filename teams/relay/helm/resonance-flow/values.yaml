@@ -25,6 +25,22 @@ initContainers: []
 nodeSelector: {}
 tolerations: []
 affinity: {}
+pipeConsumerGroupSweep:
+  enabled: true
+  schedule: "0 * * * *"
+  groupPattern: "pipe-*"
+  image:
+    repository: apache/kafka
+    tag: "4.2.1"
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+    limits:
+      cpu: 200m
+      memory: 256Mi
 components:
   mind:
     enabled: true
@@ -66,6 +82,33 @@ components:
     dependencies:
       - name: minio
         port: 9000
+    # Mounted as config.yaml at /etc/resonance-flow/config/ - keys are what MIND reads.
+    config:
+      vector_store:
+        # pgvector needs user/password/db, not an API key.
+        url: ""
+        user: mind
+        db: mind
+      llm:
+        model: ""
+        cache_dir: ./models
+      ocr:
+        provider: local
+      asr:
+        provider: local
+        whisper_model: base
+      object_storage:
+        endpoint: http://resonance-flow-minio.resonance-flow.svc.cluster.local:9000
+        bucket: ""
+      kafka:
+        bootstrap_servers: resonance-flow-kafka.resonance-flow.svc.cluster.local:9092
+        schema_registry_url: http://resonance-flow-schema-registry.resonance-flow.svc.cluster.local:80/apis/ccompat/v6
+        producer:
+          task_creation_requested_topic: task.creation.requested
+      service:
+        log_level: INFO
+    secret:
+      create: true
   lens-bff:
     enabled: true
     replicaCount: 1
@@ -276,10 +319,7 @@ components:
     enabled: true
     replicaCount: 1
     image:
-      # Same image already used for local dev (teams/relay/docker-compose.yml) and the
-      # draft teams/relay/schema-sync-hook chart - in-memory Apicurio registry, ccompat
-      # (Confluent-compatible) API. Not durable storage - fine for dev/CI, would need a
-      # persistent backend (its own Postgres/Kafka storage) before a real prod rollout.
+      # In-memory Apicurio registry - not durable, fine for dev/CI only.
       repository: "apicurio/apicurio-registry-mem"
       pullPolicy: IfNotPresent
       tag: "2.5.11.Final"
@@ -299,9 +339,7 @@ components:
         path: /health/live
         port: http
       periodSeconds: 5
-      # Quarkus boot under a constrained CPU request measured ~200s+ locally (verified live -
-      # killed with SIGTERM right at the old 40*5s=200s budget, before it finished starting).
-      # 60*5s=300s matches the margin inbox's own startupProbe already carries for the same reason.
+      # Quarkus boot measured ~200s+ under a constrained CPU request - needs the margin.
       failureThreshold: 60
     livenessProbe:
       httpGet:
@@ -353,6 +391,60 @@ components:
       periodSeconds: 5
       failureThreshold: 3
     env: {}
+  notification-delivery:
+    enabled: true
+    replicaCount: 1
+    image:
+      repository: "ghcr.io/kamatechorg/resonance-flow/notification-delivery"
+      pullPolicy: IfNotPresent
+      tag: "placeholder"
+    containerPort: 8082
+    service:
+      type: ClusterIP
+      port: 80
+    resources:
+      requests:
+        cpu: 100m
+        memory: 256Mi
+      limits:
+        cpu: 500m
+        memory: 512Mi
+    terminationGracePeriodSeconds: 30
+    updateStrategy:
+      type: RollingUpdate
+      rollingUpdate:
+        maxUnavailable: 0
+        maxSurge: 25%
+    startupProbe:
+      httpGet:
+        path: /healthz
+        port: http
+      periodSeconds: 5
+      failureThreshold: 40
+    livenessProbe:
+      httpGet:
+        path: /healthz
+        port: http
+      periodSeconds: 10
+      failureThreshold: 3
+    # /readyz (not /healthz) - don't route clients before the Kafka consumer has attached
+    # and been assigned partitions (see HealthController.java).
+    readinessProbe:
+      httpGet:
+        path: /readyz
+        port: http
+      periodSeconds: 5
+      failureThreshold: 3
+    env: {}
+    # Interim CPU-based HPA (templates/pipe-hpa.yaml). §10 open question: the real scaling
+    # signal is active WebSocket connections/pod, but that needs a custom-metrics adapter
+    # (e.g. Prometheus Adapter) plus a load-tested target-per-pod value. Swap this for a
+    # custom-metric HPA once both exist.
+    autoscaling:
+      enabled: true
+      minReplicas: 2
+      maxReplicas: 10
+      targetCPUUtilizationPercentage: 70
 kafka:
   enabled: true
   # bitnami/kafka was pruned from Docker Hub's free tier in 2025; bitnamilegacy/kafka
@@ -399,8 +491,6 @@ kafka:
 minio:
   enabled: true
   mode: standalone
-  # bitnami/minio (and its console image) were pruned from Docker Hub's free tier in 2025,
-  # same as kafka above - bitnamilegacy/* is the same content, relocated by Broadcom.
   image:
     registry: docker.io
     repository: bitnamilegacy/minio

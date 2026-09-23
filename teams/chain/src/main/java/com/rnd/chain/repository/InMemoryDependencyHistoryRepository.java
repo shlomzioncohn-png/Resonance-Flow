@@ -19,14 +19,19 @@ import java.util.stream.Collectors;
  *
  * <p>Ordering does not rely on {@code createdAt} alone: two entries recorded in
  * the same millisecond would otherwise tie, and {@code Clock} resolution can't
- * be trusted to always tell them apart. Each entry also gets a monotonically
- * increasing sequence number at insertion time, used only as the tiebreaker.
+ * be trusted to always tell them apart. Each entry is stored together with a
+ * monotonically increasing sequence number, used only as the tiebreaker - the two
+ * are kept in a single map entry (not two separate maps) so findByTaskId() can read
+ * an entry's sequence without ever observing one without the other, and therefore
+ * needs no lock of its own.
  */
 public class InMemoryDependencyHistoryRepository implements DependencyHistoryRepository {
 
-    private final ConcurrentHashMap<UUID, DependencyHistoryEntry> entriesById = new ConcurrentHashMap<>();
+    private record Sequenced(DependencyHistoryEntry entry, long sequence) {
+    }
+
+    private final ConcurrentHashMap<UUID, Sequenced> entriesById = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<String, UUID> idBySourceRefKey = new ConcurrentHashMap<>();
-    private final ConcurrentHashMap<UUID, Long> sequenceById = new ConcurrentHashMap<>();
     private final AtomicLong sequenceCounter = new AtomicLong();
     private final Object writeLock = new Object();
 
@@ -39,12 +44,11 @@ public class InMemoryDependencyHistoryRepository implements DependencyHistoryRep
                 String key = dedupKey(entry.source(), sourceRef);
                 UUID existingId = idBySourceRefKey.get(key);
                 if (existingId != null) {
-                    return entriesById.get(existingId);
+                    return entriesById.get(existingId).entry();
                 }
                 idBySourceRefKey.put(key, entry.id());
             }
-            sequenceById.put(entry.id(), sequenceCounter.incrementAndGet());
-            entriesById.put(entry.id(), entry);
+            entriesById.put(entry.id(), new Sequenced(entry, sequenceCounter.incrementAndGet()));
             return entry;
         }
     }
@@ -55,15 +59,23 @@ public class InMemoryDependencyHistoryRepository implements DependencyHistoryRep
             return Optional.empty();
         }
         UUID existingId = idBySourceRefKey.get(dedupKey(source, sourceRef));
-        return existingId == null ? Optional.empty() : Optional.ofNullable(entriesById.get(existingId));
+        if (existingId == null) {
+            return Optional.empty();
+        }
+        Sequenced found = entriesById.get(existingId);
+        return found == null ? Optional.empty() : Optional.of(found.entry());
     }
 
     @Override
     public PageResponse<DependencyHistoryEntry> findByTaskId(UUID taskId, int page, int size) {
+        // No lock: entriesById's values are immutable Sequenced records, each inserted as a
+        // single atomic put in record()/removed as a single atomic remove() in delete() - so a
+        // concurrent write can never be observed here half-applied.
         List<DependencyHistoryEntry> matching = entriesById.values().stream()
-                .filter(entry -> entry.taskId().equals(taskId))
-                .sorted(Comparator.comparing(DependencyHistoryEntry::createdAt)
-                        .thenComparing(entry -> sequenceById.get(entry.id())))
+                .filter(s -> s.entry().taskId().equals(taskId))
+                .sorted(Comparator.comparing((Sequenced s) -> s.entry().createdAt())
+                        .thenComparing(Sequenced::sequence))
+                .map(Sequenced::entry)
                 .collect(Collectors.toList())
                 .reversed();
 
@@ -84,10 +96,9 @@ public class InMemoryDependencyHistoryRepository implements DependencyHistoryRep
     public void delete(UUID entryId) {
         Objects.requireNonNull(entryId, "entryId must not be null");
         synchronized (writeLock) {
-            DependencyHistoryEntry removed = entriesById.remove(entryId);
-            sequenceById.remove(entryId);
-            if (removed != null && removed.sourceRef() != null) {
-                idBySourceRefKey.remove(dedupKey(removed.source(), removed.sourceRef()), entryId);
+            Sequenced removed = entriesById.remove(entryId);
+            if (removed != null && removed.entry().sourceRef() != null) {
+                idBySourceRefKey.remove(dedupKey(removed.entry().source(), removed.entry().sourceRef()), entryId);
             }
         }
     }
