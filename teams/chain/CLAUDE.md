@@ -48,7 +48,6 @@ onConstraintStatusChanged.
   are mapped to/from them entirely inside the adapters. The H2 placeholder
   is gone; `MockDataConfig`'s in-memory beans remain only as the
   `@ConditionalOnMissingBean` fallback when no real `DataSource` is wired.
-  Full design: [PERSISTENCE_PLAN.md](PERSISTENCE_PLAN.md).
 - `TaskRepository#update()`'s atomicity is now real: `PostgresTaskRepository`
   uses a pessimistic row lock (`SELECT ... FOR UPDATE`) as the sole
   correctness mechanism for `blockingCount`/`openConstraintCount` under

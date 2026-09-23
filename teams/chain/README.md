@@ -29,7 +29,7 @@ no branch had an indexed `findByParentTaskId`. That branch also contributed `Tas
 validation/CRUD to `TaskDependencyService` and keep only cycle detection + counters) is still an
 open follow-up, not done as part of this merge. **Postgres-backed implementations now exist**
 (`Postgres*Repository` in `repository/`) alongside the in-memory ones - see "Dependency graph
-persistence" below and [PERSISTENCE_PLAN.md](PERSISTENCE_PLAN.md) for the full design.
+persistence" below.
 
 ## Stack
 
@@ -45,7 +45,6 @@ shared cluster/local Postgres instance (not the shared `postgres` superuser, not
 DTOs, mapped to/from JPA entities entirely inside the `Postgres*Repository` adapters - no entity
 ever crosses a service boundary. `MockDataConfig`'s in-memory beans back off automatically
 (`@ConditionalOnMissingBean`) once a real `DataSource` is reachable. See
-[PERSISTENCE_PLAN.md](PERSISTENCE_PLAN.md) for the full design and
 [CLAUDE.md](CLAUDE.md) for prior rationale/open items. The idempotency store described below is
 still in-memory only, unaffected by this.
 
@@ -238,8 +237,7 @@ not create a duplicate row - and `delete` is a no-op if the edge doesn't exist. 
 validate task existence or reject self-dependencies; those are enforced at the DB level (FK +
 `chk_task_dependency_no_self_reference` CHECK, V1 migration) for `PostgresTaskDependencyRepository`,
 the real implementation backing this in production - `InMemoryTaskDependencyRepository` remains as
-`MockDataConfig`'s fallback when no `DataSource` is configured. See
-[PERSISTENCE_PLAN.md](PERSISTENCE_PLAN.md) for the full schema/adapter design.
+`MockDataConfig`'s fallback when no `DataSource` is configured.
 
 `TaskDependencyService` (in `service/`) sits on top of it and enforces the business rules from
 issue #66:
@@ -274,8 +272,7 @@ table, V2 migration). `TransactionRunner` / `InMemoryTransactionRunner` let a gr
 history entry happen as one unit; `JpaTransactionRunner` (backed by a real `PlatformTransactionManager`)
 gives this actual ACID rollback in production. `TaskDependencyService`'s own compensating action
 (undoing the graph write if the history write fails) is kept regardless - still correct, and now
-largely redundant with the real rollback rather than the sole safety net. See
-[PERSISTENCE_PLAN.md](PERSISTENCE_PLAN.md) §5 for the full transaction-strategy writeup.
+largely redundant with the real rollback rather than the sole safety net.
 
 ### API
 
