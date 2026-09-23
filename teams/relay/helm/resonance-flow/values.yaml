@@ -221,6 +221,14 @@ components:
     service: *defaultService
     resources: *defaultResources
     <<: *defaultHealthProbes
+    # Generates chain-db-credentials' random password - true only for a genuinely
+    # fresh install (every CI kind cluster is one). Once a real/persistent cluster
+    # has bootstrapped, flip this to false in that cluster's own values override
+    # and leave it false from then on, so later syncs stop re-rendering a new
+    # password (see templates/services/chain/configmap.yaml for why that alone
+    # isn't enough - the Secret also needs its resource-policy/Prune annotations
+    # to survive not being re-rendered).
+    createDbPassword: true
     # Password comes from the chain-db-credentials Secret, mounted as a file below -
     # not a literal here, not an env var. secretName must match the fullname-prefixed
     # name templates/services/chain/configmap.yaml renders (fullname resolves to the
