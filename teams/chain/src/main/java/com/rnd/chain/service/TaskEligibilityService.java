@@ -10,6 +10,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import com.rnd.chain.dto.TaskEligibilityResponse;
 
 import java.util.ArrayDeque;
 import java.util.Deque;
@@ -291,4 +292,16 @@ public class TaskEligibilityService {
                 withCounters(task, task.getBlockingCount(),
                         Math.max(0, task.getOpenConstraintCount() + delta)));
     }
+    public TaskEligibilityResponse getTaskEligibility(UUID taskId) {
+    Objects.requireNonNull(taskId, "taskId must not be null");
+
+    Task task = requireTask(taskId);
+
+    return new TaskEligibilityResponse(
+            task.getId(),
+            task.isReady(),
+            task.getBlockingCount(),
+            task.getOpenConstraintCount()
+    );
+}
 }
