@@ -98,3 +98,36 @@ def run(model: RankingModel, scenarios: list[PersonaEvaluationScenario]) -> Repo
         top1_accuracy=top1_accuracy(predictions, scenarios),
         scenario_results=scenario_results,
     )
+
+
+def split_by_role(
+    scenarios: list[PersonaEvaluationScenario], report: Report
+) -> dict[str, Report]:
+    """Split an existing `report` into one `Report` per `persona.role`, keyed and
+    ordered by role name.
+
+    Built from the report's own `scenario_results` instead of re-running the
+    model, so the per-role numbers always add up to the combined one.
+    `scenarios` must be the list `report` was run on, in the same order. A role
+    with no scenario gets no entry (`validate_personas` warns about that
+    separately).
+    """
+    by_role: dict[str, list[ScenarioResult]] = {}
+    for scenario, result in zip(scenarios, report.scenario_results, strict=True):
+        if scenario.scenario_id != result.scenario_id:
+            raise ValueError(
+                f"scenarios and report are out of order: {scenario.scenario_id!r} "
+                f"vs {result.scenario_id!r}"
+            )
+        by_role.setdefault(scenario.persona.role, []).append(result)
+
+    return {
+        role: Report(
+            model_name=report.model_name,
+            total_scenarios=len(results),
+            correct_top1=sum(r.passed for r in results),
+            top1_accuracy=sum(r.passed for r in results) / len(results),
+            scenario_results=results,
+        )
+        for role, results in sorted(by_role.items())
+    }

@@ -2,14 +2,21 @@ import argparse
 import dataclasses
 import json
 import sys
+from datetime import UTC, datetime
 from pathlib import Path
 
 from mind.evaluation.baseline_models import (
     NearestDeadlineModel,
     SkipBlockedNearestDeadlineModel,
 )
+from mind.evaluation.baseline_record import (
+    BaselineRecordError,
+    Provenance,
+    build_baseline_record,
+    write_baseline_record,
+)
 from mind.evaluation.dummy_model import DummyModel
-from mind.evaluation.harness import Report, run
+from mind.evaluation.harness import Report, run, split_by_role
 from mind.evaluation.interfaces import RankingModel
 from mind.evaluation.personas import PersonaSchemaError, load_personas, validate_personas
 
@@ -49,7 +56,26 @@ def main() -> None:
              "make eval-ci target in the Makefile for how each model's ceiling "
              "is used and why.",
     )
+    parser.add_argument(
+        "--record-baseline", type=Path, default=None, metavar="PATH",
+        help="Also write the score, labelled with --model-commit and "
+             "--persona-set-commit, to PATH (e.g. "
+             "eval/baselines/baseline_score_<date>.json). Fails if PATH already "
+             "exists. See the 'Baseline score' section in the README.",
+    )
+    parser.add_argument(
+        "--model-commit", type=str, default=None, metavar="SHA",
+        help="With --record-baseline (required there): the commit holding the "
+             "scored model's code.",
+    )
+    parser.add_argument(
+        "--persona-set-commit", type=str, default=None, metavar="SHA",
+        help="With --record-baseline (required there): the last commit that "
+             "touched the persona set (git log -1 --format=%%H -- eval/personas).",
+    )
     args = parser.parse_args()
+    if args.record_baseline is None and (args.model_commit or args.persona_set_commit):
+        parser.error("--model-commit / --persona-set-commit only apply with --record-baseline")
 
     models: dict[str, RankingModel] = {
         "dummy": DummyModel(),
@@ -62,6 +88,27 @@ def main() -> None:
         raise ValueError(f"Unknown model: {args.model!r}. Choices: {sorted(models)}") from None
 
     personas_path = Path(args.personas)
+
+    # Checked before scoring, so a baseline run that can't be recorded fails fast.
+    provenance: Provenance | None = None
+    if args.record_baseline is not None:
+        try:
+            if args.model_commit is None or args.persona_set_commit is None:
+                raise BaselineRecordError(
+                    "--record-baseline needs both --model-commit and --persona-set-commit"
+                )
+            if args.record_baseline.exists():
+                raise BaselineRecordError(
+                    f"{args.record_baseline} already exists; a recorded baseline is "
+                    "never overwritten. Record a re-run to a new, dated file instead."
+                )
+            provenance = Provenance(
+                model_commit=args.model_commit,
+                persona_set_commit=args.persona_set_commit,
+            )
+        except BaselineRecordError as e:
+            print(f"Cannot record baseline: {e}", file=sys.stderr)
+            sys.exit(1)
 
     try:
         all_scenarios = load_personas(personas_path)
@@ -86,11 +133,16 @@ def main() -> None:
         group_dir.name: run(model, load_personas(group_dir)) for group_dir in group_dirs
     }
     combined_report = run(model, all_scenarios)
+    # Per role, so a model that is bad for one role can't hide inside the aggregate.
+    role_reports = split_by_role(all_scenarios, combined_report)
 
     print("\n=== Evaluation Summary ===")
     print(f"Model: {combined_report.model_name}\n")
     for name, report in group_reports.items():
         print(_summary_lines(f"[{name}]", report))
+        print()
+    for role, report in role_reports.items():
+        print(_summary_lines(f"[role: {role}]", report))
         print()
     print(_summary_lines("[combined]", combined_report))
     print("===========================\n")
@@ -99,6 +151,7 @@ def main() -> None:
         "model_name": combined_report.model_name,
         "combined": dataclasses.asdict(combined_report),
         "groups": {name: dataclasses.asdict(r) for name, r in group_reports.items()},
+        "roles": {role: dataclasses.asdict(r) for role, r in role_reports.items()},
     }
 
     print("--- Evaluation Report (full detail, also written to report.json) ---")
@@ -107,6 +160,23 @@ def main() -> None:
 
     with open("report.json", "w") as f:
         json.dump(output, f, indent=4)
+
+    if args.record_baseline is not None and provenance is not None:
+        record = build_baseline_record(
+            recorded_on=datetime.now(UTC).date(),
+            provenance=provenance,
+            personas_path=personas_path,
+            scenarios=all_scenarios,
+            combined=combined_report,
+            groups=group_reports,
+            roles=role_reports,
+        )
+        try:
+            write_baseline_record(args.record_baseline, record)
+        except BaselineRecordError as e:
+            print(f"Cannot record baseline: {e}", file=sys.stderr)
+            sys.exit(1)
+        print(f"Baseline recorded to {args.record_baseline} (commit it).\n")
 
     accuracy = combined_report.top1_accuracy
     if args.min_accuracy is not None and accuracy < args.min_accuracy:

@@ -72,9 +72,11 @@ Replace `dummy` with the name of the model you want to evaluate.
 scenario files live in two subdirectories — `same_tier/` and `cross_tier/` (see
 `eval/personas/README.md`) — and `load_personas` recurses into both;
 `scenario.schema.json` at the root is skipped. `make eval` scores each group
-separately and prints a combined number too, and `report.json` carries all
-three. Pass a single group dir (`--personas eval/personas/same_tier`) to score
-just that group. Loading goes through
+separately, breaks the result down per `persona.role`, and prints a combined
+number too; `report.json` carries all of them (`combined`, `groups`, `roles`).
+The per-role numbers are split out of the combined run, not re-scored, so
+they always add up to it. Pass a single group dir
+(`--personas eval/personas/same_tier`) to score just that group. Loading goes through
 `mind.evaluation.personas.load_personas`/`validate_personas` (the coverage /
 count checks run against the combined set). `load_personas`
 parses each file into a `PersonaEvaluationScenario` (Pydantic); a structurally
@@ -137,6 +139,35 @@ model, the harness report keeps every candidate's score and reasoning per scenar
 
 The number the week-7 stretch is measured against (#486). Once recorded, an
 entry here is not overwritten; a re-run gets its own dated entry.
+
+### How a baseline is recorded
+
+`report.json` is not the record: it is gitignored and rewritten on every run.
+The baseline is written to its own committed file:
+
+```bash
+git rev-parse HEAD                                 # -> <model-sha>
+git log -1 --format=%H -- eval/personas            # -> <persona-set-sha>
+python -m mind.evaluation.run --model <model> \
+    --record-baseline eval/baselines/baseline_score_<YYYY-MM-DD>.json \
+    --model-commit <model-sha> --persona-set-commit <persona-set-sha>
+```
+
+The file carries the date, the model name, `model_commit`, the metric, the
+persona set (path, `commit`, scenario count, how many are
+`team_lead_approved` / `mentor_approved`), the combined / per-group / per-role
+results, and every scenario's prediction with all candidate scores (for the
+manual spot-check and the week-7 comparison).
+
+- **It is never overwritten.** If the file exists, the run fails before
+  scoring; a re-run goes to a new, dated file.
+- **Both commits are required and must look like a git sha** (7-40 lowercase
+  hex), so a forgotten argument, a branch name or a stray paste fails instead
+  of being recorded. That is a shape check only: it cannot tell a swapped pair
+  or a wrong sha, so take each one from the git command above.
+- **Run from a clean working tree.** The sha only describes what was scored if
+  nothing under `src/` or `eval/personas/` is uncommitted; the tool does not
+  check this.
 
 ### 2026-09-23: no week-5 baseline number exists yet
 
