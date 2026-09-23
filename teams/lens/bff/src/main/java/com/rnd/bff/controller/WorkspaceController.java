@@ -1,5 +1,6 @@
 package com.rnd.bff.controller;
 
+import com.rnd.bff.dto.EmployeeTaskDTO;
 import com.rnd.bff.dto.TaskDTO;
 import com.rnd.bff.dto.TaskListResponseDTO;
 import com.rnd.bff.dto.TaskRecommendationDTO;
@@ -105,5 +106,19 @@ public class WorkspaceController {
                 userId, taskId, body.getStatus());
 
         return ResponseEntity.ok(workspaceService.updateTaskStatus(userId, taskId, body.getStatus()));
+    }
+
+    /**
+     * My Workspace's chat/blocking-dependency demo task.
+     *
+     * GET /workspace/employee-task
+     */
+    @Operation(summary = "Get my current task", description = "The employee's current task for the My Workspace demo.")
+    @GetMapping("/workspace/employee-task")
+    public ResponseEntity<EmployeeTaskDTO> getMyTask(@RequestHeader("X-User-Id") String userId) {
+
+        logger.info("Employee task request - userId: {}", userId);
+
+        return ResponseEntity.ok(workspaceService.getMyTask(userId));
     }
 }

@@ -10,6 +10,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.rnd.bff.client.ChainClient;
+import com.rnd.bff.client.EmployeeClient;
 import com.rnd.bff.client.InboxClient;
 import com.rnd.bff.client.MindClient;
 import com.rnd.bff.dto.TaskStatusUpdateDTO;
@@ -28,7 +29,7 @@ import org.springframework.test.web.servlet.MockMvc;
 // exercising them for real is cheap and verifies the actual response shape,
 // not a stubbed stand-in.
 @WebMvcTest(WorkspaceController.class)
-@Import({WorkspaceService.class, InboxClient.class, ChainClient.class, MindClient.class})
+@Import({WorkspaceService.class, InboxClient.class, ChainClient.class, MindClient.class, EmployeeClient.class})
 class WorkspaceControllerTest {
 
     @Autowired private MockMvc mockMvc;
@@ -216,6 +217,25 @@ class WorkspaceControllerTest {
     void listTasks_missingUserIdHeader_returns400() throws Exception {
         mockMvc
                 .perform(get("/workspace/tasks"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.errorCode", is("BAD_REQUEST")));
+    }
+
+    @Test
+    void getMyTask_returnsTheMockEmployeeTask() throws Exception {
+        mockMvc
+                .perform(get("/workspace/employee-task").header("X-User-Id", "emp_001"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.id", is("task-1")))
+                .andExpect(jsonPath("$.title", is("Review API changes")))
+                .andExpect(jsonPath("$.status", is("Blocked")))
+                .andExpect(jsonPath("$.blockedBy[0].id", is("task-0")));
+    }
+
+    @Test
+    void getMyTask_missingUserIdHeader_returns400() throws Exception {
+        mockMvc
+                .perform(get("/workspace/employee-task"))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.errorCode", is("BAD_REQUEST")));
     }

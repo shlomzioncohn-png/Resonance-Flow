@@ -16,6 +16,7 @@ bff:
   endpoints:
     workspace-recommend: /workspace/recommend
     tasks: /workspace/tasks
+    employee-task: /workspace/employee-task
 
 server:
   port: 0

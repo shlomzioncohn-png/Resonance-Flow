@@ -1,10 +1,9 @@
 /**
  * Employee API — typed wrapper around the employee's own task record (My
- * Workspace's chat/blocking-dependency demo). No Mind/Chain/Inbox endpoint
- * exists for this yet (see docs/employee-ui-design.md §4.B), so in
- * development this request is answered by an MSW handler
- * (mocks/handlers.ts) instead of a real backend - see that file for why
- * that's a real fetch() call and not just an imported constant.
+ * Workspace's chat/blocking-dependency demo). No Mind/Chain/Inbox service
+ * owns this data yet (see docs/employee-ui-design.md §4.B), so it's mocked
+ * one layer down, at the BFF (com.rnd.bff.client.EmployeeClient) — this call
+ * is real, straight through the Gateway, same as services/workspaceApi.ts.
  */
 import { api } from './api'
 
@@ -34,5 +33,5 @@ export interface EmployeeTask {
 }
 
 export function getMyTask(): Promise<EmployeeTask> {
-  return api.get<EmployeeTask>('/api/employee/task')
+  return api.get<EmployeeTask>('/api/workspace/employee-task')
 }

@@ -219,6 +219,29 @@ class GatewayRoutingTests {
     }
 
     // -------------------------------------------------------------------------
+    // Employee task (My Workspace demo)
+    // -------------------------------------------------------------------------
+
+    @Test
+    @Order(15)
+    @DisplayName("GET /api/workspace/employee-task routes to BFF /workspace/employee-task")
+    void testEmployeeTaskRoutesToBff() throws Exception {
+        mockBff.enqueue(new MockResponse()
+                .setResponseCode(200)
+                .setHeader("Content-Type", "application/json")
+                .setBody("{\"id\":\"task-1\",\"title\":\"Review API changes\",\"status\":\"Blocked\"}"));
+
+        mockMvc.perform(get("/api/workspace/employee-task"))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.id").value("task-1"));
+
+        RecordedRequest recorded = takeRequest();
+        assertThat(recorded.getPath()).isEqualTo("/workspace/employee-task");
+        assertThat(recorded.getMethod()).isEqualTo("GET");
+        assertThat(recorded.getHeader("X-User-Id")).isNotNull().isNotEmpty();
+    }
+
+    // -------------------------------------------------------------------------
     // BFF unavailable — must run last: it permanently shuts down the shared
     // mockBff instance that every other test in this class depends on.
     // -------------------------------------------------------------------------

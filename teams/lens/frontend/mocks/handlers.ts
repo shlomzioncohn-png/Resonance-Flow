@@ -10,38 +10,16 @@
  * Replaces the old static mocks (app/(app)/employee/mockTask.ts,
  * mocks/managerWorkload.ts): the DATA is the same, but it's now served
  * through a real network round-trip instead of imported as a plain object,
- * so the calling code (services/employeeApi.ts, services/managerApi.ts)
- * is real code that will work unchanged against a real backend later.
+ * so the calling code (services/managerApi.ts) is real code that will work
+ * unchanged against a real backend later. services/employeeApi.ts used to be
+ * mocked here too, until the BFF grew a real (BFF-side-mocked) endpoint for
+ * it — see com.rnd.bff.client.EmployeeClient.
  */
 import { delay, http, HttpResponse } from 'msw'
-import type { EmployeeTask } from '@/services/employeeApi'
 import type { WorkloadEntry } from '@/services/managerApi'
 import type { Project } from '@/services/projectsApi'
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? 'http://localhost:8080'
-
-// Same seed data app/(app)/employee/mockTask.ts used to export as INITIAL_TASK.
-const MOCK_TASK: EmployeeTask = {
-  id: 'task-1',
-  title: 'Review API changes',
-  team: 'Platform Service',
-  priority: 'High',
-  status: 'Blocked',
-  description: 'Review the latest API changes and update integration tests accordingly.',
-  owner: 'Rachel',
-  due: 'Today, 5:00 PM',
-  estimatedMinutes: 35,
-  createdAt: 'May 10, 9:15 AM',
-  source: 'GitHub — PR #4821',
-  sprint: 'Sprint 24 (May 6 – May 20)',
-  tags: ['backend', 'api', 'testing'],
-  blockedBy: [{ id: 'task-0', title: 'Update API specification', owner: 'Alex Morgan' }],
-  blocks: [
-    { id: 'task-2', title: 'Run regression tests', owner: 'Taylor Smith' },
-    { id: 'task-3', title: 'Update client SDK', owner: 'Sam Cohen' },
-  ],
-  blockingReason: 'Waiting for the API specification to be finalized.',
-}
 
 // Same 12 seed projects the Manager/Projects design was reviewed against —
 // health tones interleaved rather than grouped, matching the Figma mock.
@@ -61,11 +39,6 @@ const MOCK_PROJECTS: Project[] = [
 ]
 
 export const handlers = [
-  http.get(`${API_BASE_URL}/api/employee/task`, async () => {
-    await delay(300)
-    return HttpResponse.json(MOCK_TASK)
-  }),
-
   http.get(`${API_BASE_URL}/api/manager/workload`, async ({ request }) => {
     await delay(700)
 

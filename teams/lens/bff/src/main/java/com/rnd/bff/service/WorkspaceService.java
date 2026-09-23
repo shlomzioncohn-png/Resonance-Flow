@@ -1,8 +1,10 @@
 package com.rnd.bff.service;
 
 import com.rnd.bff.client.ChainClient;
+import com.rnd.bff.client.EmployeeClient;
 import com.rnd.bff.client.InboxClient;
 import com.rnd.bff.client.MindClient;
+import com.rnd.bff.dto.EmployeeTaskDTO;
 import com.rnd.bff.dto.TaskDTO;
 import com.rnd.bff.dto.TaskDependenciesDTO;
 import com.rnd.bff.dto.TaskListResponseDTO;
@@ -33,11 +35,17 @@ public class WorkspaceService {
     private final InboxClient inboxClient;
     private final ChainClient chainClient;
     private final MindClient mindClient;
+    private final EmployeeClient employeeClient;
 
-    public WorkspaceService(InboxClient inboxClient, ChainClient chainClient, MindClient mindClient) {
+    public WorkspaceService(
+            InboxClient inboxClient,
+            ChainClient chainClient,
+            MindClient mindClient,
+            EmployeeClient employeeClient) {
         this.inboxClient = inboxClient;
         this.chainClient = chainClient;
         this.mindClient = mindClient;
+        this.employeeClient = employeeClient;
     }
 
     public TaskRecommendationDTO recommend(WorkspaceRequestDTO request, String userId) {
@@ -275,5 +283,10 @@ public class WorkspaceService {
             throw new TaskNotFoundException(taskId);
         }
         return updated;
+    }
+
+    /** My Workspace's chat/blocking-dependency demo — see EmployeeClient's javadoc. */
+    public EmployeeTaskDTO getMyTask(String userId) {
+        return employeeClient.getMyTask(userId);
     }
 }

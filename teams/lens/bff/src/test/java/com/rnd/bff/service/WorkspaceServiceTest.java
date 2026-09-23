@@ -8,6 +8,7 @@ import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.when;
 
 import com.rnd.bff.client.ChainClient;
+import com.rnd.bff.client.EmployeeClient;
 import com.rnd.bff.client.InboxClient;
 import com.rnd.bff.client.MindClient;
 import com.rnd.bff.dto.TaskDTO;
@@ -37,12 +38,13 @@ class WorkspaceServiceTest {
     @Mock private InboxClient inboxClient;
     @Mock private ChainClient chainClient;
     @Mock private MindClient mindClient;
+    @Mock private EmployeeClient employeeClient;
 
     private WorkspaceService workspaceService;
 
     @BeforeEach
     void setUp() {
-        workspaceService = new WorkspaceService(inboxClient, chainClient, mindClient);
+        workspaceService = new WorkspaceService(inboxClient, chainClient, mindClient, employeeClient);
     }
 
     private static TaskDTO task(String id, String priority, Integer effortEstimate) {

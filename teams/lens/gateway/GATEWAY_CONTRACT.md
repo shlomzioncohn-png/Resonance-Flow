@@ -51,7 +51,7 @@ The LENS Gateway is the **single entry point** for external client (Frontend) re
 
 ## 2. API Endpoints
 
-The Gateway exposes three endpoints for the Frontend's workspace functionality. All requests are forwarded to the BFF service.
+The Gateway exposes four endpoints for the Frontend's workspace functionality. All requests are forwarded to the BFF service.
 
 ### Endpoint Routing Table
 
@@ -60,6 +60,7 @@ The Gateway exposes three endpoints for the Frontend's workspace functionality. 
 | POST | `/api/workspace/recommend` | `http://bff-service:8080/workspace/recommend` | BFF (Sari) | Get task recommendation for available time |
 | GET | `/api/workspace/tasks/{taskId}` | `http://bff-service:8080/workspace/tasks/{taskId}` | BFF (Sari) | Get full task details by ID |
 | PATCH | `/api/workspace/tasks/{taskId}/status` | `http://bff-service:8080/workspace/tasks/{taskId}/status` | BFF (Sari) | Update task status |
+| GET | `/api/workspace/employee-task` | `http://bff-service:8080/workspace/employee-task` | BFF (Sari) | Get the employee's current task (My Workspace demo); mocked at the BFF, no downstream service owns this yet |
 
 **Current Implementation:** Manual routing via `WorkspaceController.java` — each endpoint explicitly forwards to BFF using `RestTemplate`.
 
