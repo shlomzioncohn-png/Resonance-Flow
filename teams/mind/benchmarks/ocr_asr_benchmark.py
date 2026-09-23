@@ -62,6 +62,7 @@ import time
 from pathlib import Path
 
 import psutil
+from pydantic import BaseModel
 
 if hasattr(sys.stdout, "reconfigure"):
     # Windows consoles default to a codepage (e.g. cp1255) that can't
@@ -104,6 +105,54 @@ PADDLE_CONFIGS = {
 _WINDOWS_DEFAULT_INSTALL = r"C:\Program Files\Tesseract-OCR\tesseract.exe"
 
 
+# Pydantic models instead of ad-hoc dicts for every function's return shape
+# (review feedback on PR #345) -- so the fields, types, and their meaning
+# are visible at the call site instead of only in the function body.
+
+
+class DocPaths(BaseModel):
+    """Local filesystem paths for one FUNSD record, from load_manifest()."""
+
+    image: Path
+    annotation: Path
+
+
+class OCRRunResult(BaseModel):
+    """What one OCR call produced -- shared by run_ocr() (Tesseract
+    subprocess) and run_paddle_ocr() (in-process PaddleOCR), so both can
+    feed the same word_recall()/char_similarity_score() and BenchmarkRow."""
+
+    text: str
+    duration_s: float
+    peak_rss_mb: float
+    cpu_time_s: float
+
+
+class BenchmarkRow(BaseModel):
+    """One (config, document) measurement -- the raw row each benchmark
+    loop iteration produces, before averaging into ConfigAverages."""
+
+    config: str
+    doc: str
+    duration_s: float
+    peak_rss_mb: float
+    cpu_time_s: float
+    word_recall: float
+    char_similarity: float
+    gt_word_count: int
+
+
+class ConfigAverages(BaseModel):
+    """BenchmarkRow's numeric fields, averaged across all documents for
+    one config -- what run_ocr_benchmark()/run_paddle_benchmark() return."""
+
+    duration_s: float
+    peak_rss_mb: float
+    cpu_time_s: float
+    word_recall: float
+    char_similarity: float
+
+
 def find_tesseract() -> str:
     found = shutil.which("tesseract")
     if found:
@@ -136,7 +185,7 @@ def _verify_checksum(path: Path, expected_sha256: str) -> None:
 
 
 @functools.lru_cache(maxsize=1)
-def load_manifest() -> dict[str, dict[str, Path]]:
+def load_manifest() -> dict[str, DocPaths]:
     """doc_id -> {"image": Path, "annotation": Path}.
 
     Reads paths from eval/datasets/.manifest.json and verifies each
@@ -161,9 +210,9 @@ def load_manifest() -> dict[str, dict[str, Path]]:
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     checksums = _load_checksums(datasets_dir / ".sha256")
 
-    docs: dict[str, dict[str, Path]] = {}
+    docs: dict[str, DocPaths] = {}
     for record in manifest["records"]:
-        entry: dict[str, Path] = {}
+        found: dict[str, Path] = {}
         for rel_path in record["files"]:
             path = _PROJECT_ROOT / rel_path
             if not path.exists():
@@ -176,8 +225,8 @@ def load_manifest() -> dict[str, dict[str, Path]]:
                 )
             _verify_checksum(path, checksums[rel_path])
             key = "image" if path.suffix == ".png" else "annotation"
-            entry[key] = path
-        docs[record["id"]] = entry
+            found[key] = path
+        docs[record["id"]] = DocPaths(**found)
     return docs
 
 
@@ -186,7 +235,7 @@ def _normalize(word: str) -> str:
 
 
 def ground_truth_words(doc_id: str) -> list[str]:
-    path = load_manifest()[doc_id]["annotation"]
+    path = load_manifest()[doc_id].annotation
     with path.open(encoding="utf-8") as f:
         data = json.load(f)
     words: list[str] = []
@@ -198,7 +247,7 @@ def ground_truth_words(doc_id: str) -> list[str]:
     return words
 
 
-def run_ocr(tesseract_cmd: str, image_path: Path, psm_args: list[str]) -> dict:
+def run_ocr(tesseract_cmd: str, image_path: Path, psm_args: list[str]) -> OCRRunResult:
     """Run tesseract as a subprocess and sample its memory/CPU while it runs.
 
     Sampling every 10ms is rough (may miss a very brief true peak on a
@@ -223,12 +272,12 @@ def run_ocr(tesseract_cmd: str, image_path: Path, psm_args: list[str]) -> dict:
     duration = time.perf_counter() - start
     if proc.returncode != 0:
         raise RuntimeError(f"tesseract failed: {stderr.decode(errors='replace')}")
-    return {
-        "text": stdout.decode("utf-8", errors="replace"),
-        "duration_s": duration,
-        "peak_rss_mb": peak_rss / (1024 * 1024),
-        "cpu_time_s": cpu_time,
-    }
+    return OCRRunResult(
+        text=stdout.decode("utf-8", errors="replace"),
+        duration_s=duration,
+        peak_rss_mb=peak_rss / (1024 * 1024),
+        cpu_time_s=cpu_time,
+    )
 
 
 def word_recall(ocr_text: str, gt_words: list[str]) -> float:
@@ -263,47 +312,47 @@ def char_similarity_score(ocr_text: str, gt_words: list[str]) -> float:
     return sum(scores) / len(scores)
 
 
-def run_ocr_benchmark() -> dict[str, dict]:
+def run_ocr_benchmark() -> dict[str, ConfigAverages]:
     tesseract_cmd = find_tesseract()
     print(f"tesseract: {tesseract_cmd}\n")
 
-    rows = []
+    rows: list[BenchmarkRow] = []
     for config_name, psm_args in OCR_CONFIGS.items():
         for doc_id, paths in load_manifest().items():
             gt_words = ground_truth_words(doc_id)
-            result = run_ocr(tesseract_cmd, paths["image"], psm_args)
-            recall = word_recall(result["text"], gt_words)
-            char_sim = char_similarity_score(result["text"], gt_words)
-            row = {
-                "config": config_name,
-                "doc": doc_id,
-                "duration_s": round(result["duration_s"], 3),
-                "peak_rss_mb": round(result["peak_rss_mb"], 1),
-                "cpu_time_s": round(result["cpu_time_s"], 3),
-                "word_recall": round(recall, 3),
-                "char_similarity": round(char_sim, 3),
-                "gt_word_count": len(gt_words),
-            }
+            result = run_ocr(tesseract_cmd, paths.image, psm_args)
+            recall = word_recall(result.text, gt_words)
+            char_sim = char_similarity_score(result.text, gt_words)
+            row = BenchmarkRow(
+                config=config_name,
+                doc=doc_id,
+                duration_s=round(result.duration_s, 3),
+                peak_rss_mb=round(result.peak_rss_mb, 1),
+                cpu_time_s=round(result.cpu_time_s, 3),
+                word_recall=round(recall, 3),
+                char_similarity=round(char_sim, 3),
+                gt_word_count=len(gt_words),
+            )
             rows.append(row)
-            print(row)
+            print(row.model_dump())
 
     print("\n--- OCR per-config averages ---")
-    averages: dict[str, dict] = {}
+    averages: dict[str, ConfigAverages] = {}
     for config_name in OCR_CONFIGS:
-        config_rows = [r for r in rows if r["config"] == config_name]
+        config_rows = [r for r in rows if r.config == config_name]
         n = len(config_rows)
-        avg = {
-            "duration_s": sum(r["duration_s"] for r in config_rows) / n,
-            "peak_rss_mb": sum(r["peak_rss_mb"] for r in config_rows) / n,
-            "cpu_time_s": sum(r["cpu_time_s"] for r in config_rows) / n,
-            "word_recall": sum(r["word_recall"] for r in config_rows) / n,
-            "char_similarity": sum(r["char_similarity"] for r in config_rows) / n,
-        }
+        avg = ConfigAverages(
+            duration_s=sum(r.duration_s for r in config_rows) / n,
+            peak_rss_mb=sum(r.peak_rss_mb for r in config_rows) / n,
+            cpu_time_s=sum(r.cpu_time_s for r in config_rows) / n,
+            word_recall=sum(r.word_recall for r in config_rows) / n,
+            char_similarity=sum(r.char_similarity for r in config_rows) / n,
+        )
         averages[config_name] = avg
         print(
-            f"{config_name}: duration={avg['duration_s']:.3f}s "
-            f"peak_rss={avg['peak_rss_mb']:.1f}MB cpu_time={avg['cpu_time_s']:.3f}s "
-            f"word_recall={avg['word_recall']:.3f} char_similarity={avg['char_similarity']:.3f}"
+            f"{config_name}: duration={avg.duration_s:.3f}s "
+            f"peak_rss={avg.peak_rss_mb:.1f}MB cpu_time={avg.cpu_time_s:.3f}s "
+            f"word_recall={avg.word_recall:.3f} char_similarity={avg.char_similarity:.3f}"
         )
     return averages
 
@@ -317,7 +366,7 @@ def _sample_current_process(stop_event: threading.Event, proc: psutil.Process, p
         time.sleep(0.05)
 
 
-def run_paddle_ocr(ocr, image_path: Path) -> dict:
+def run_paddle_ocr(ocr, image_path: Path) -> OCRRunResult:
     """Run one already-loaded PaddleOCR pipeline on one image, sampling
     this process's own memory/CPU while it runs.
 
@@ -346,15 +395,15 @@ def run_paddle_ocr(ocr, image_path: Path) -> dict:
     texts: list[str] = []
     for res in results:
         texts.extend(res.get("rec_texts", []) or [])
-    return {
-        "text": " ".join(texts),
-        "duration_s": duration,
-        "peak_rss_mb": peak[0] / (1024 * 1024),
-        "cpu_time_s": cpu_time,
-    }
+    return OCRRunResult(
+        text=" ".join(texts),
+        duration_s=duration,
+        peak_rss_mb=peak[0] / (1024 * 1024),
+        cpu_time_s=cpu_time,
+    )
 
 
-def run_paddle_benchmark() -> dict[str, dict]:
+def run_paddle_benchmark() -> dict[str, ConfigAverages]:
     """Benchmark PaddleOCR in the 2 model-size configs in PADDLE_CONFIGS.
 
     Requires the 4 PP-OCRv5 model packages already present locally under
@@ -364,7 +413,7 @@ def run_paddle_benchmark() -> dict[str, dict]:
     """
     from paddleocr import PaddleOCR  # heavy, optional import -- see [benchmark] extra
 
-    rows = []
+    rows: list[BenchmarkRow] = []
     for config_name, model_names in PADDLE_CONFIGS.items():
         print(f"\nLoading {config_name}...")
         load_start = time.perf_counter()
@@ -380,39 +429,39 @@ def run_paddle_benchmark() -> dict[str, dict]:
 
         for doc_id, paths in load_manifest().items():
             gt_words = ground_truth_words(doc_id)
-            result = run_paddle_ocr(ocr, paths["image"])
-            recall = word_recall(result["text"], gt_words)
-            char_sim = char_similarity_score(result["text"], gt_words)
-            row = {
-                "config": config_name,
-                "doc": doc_id,
-                "duration_s": round(result["duration_s"], 3),
-                "peak_rss_mb": round(result["peak_rss_mb"], 1),
-                "cpu_time_s": round(result["cpu_time_s"], 3),
-                "word_recall": round(recall, 3),
-                "char_similarity": round(char_sim, 3),
-                "gt_word_count": len(gt_words),
-            }
+            result = run_paddle_ocr(ocr, paths.image)
+            recall = word_recall(result.text, gt_words)
+            char_sim = char_similarity_score(result.text, gt_words)
+            row = BenchmarkRow(
+                config=config_name,
+                doc=doc_id,
+                duration_s=round(result.duration_s, 3),
+                peak_rss_mb=round(result.peak_rss_mb, 1),
+                cpu_time_s=round(result.cpu_time_s, 3),
+                word_recall=round(recall, 3),
+                char_similarity=round(char_sim, 3),
+                gt_word_count=len(gt_words),
+            )
             rows.append(row)
-            print(row)
+            print(row.model_dump())
 
     print("\n--- PaddleOCR per-config averages ---")
-    averages: dict[str, dict] = {}
+    averages: dict[str, ConfigAverages] = {}
     for config_name in PADDLE_CONFIGS:
-        config_rows = [r for r in rows if r["config"] == config_name]
+        config_rows = [r for r in rows if r.config == config_name]
         n = len(config_rows)
-        avg = {
-            "duration_s": sum(r["duration_s"] for r in config_rows) / n,
-            "peak_rss_mb": sum(r["peak_rss_mb"] for r in config_rows) / n,
-            "cpu_time_s": sum(r["cpu_time_s"] for r in config_rows) / n,
-            "word_recall": sum(r["word_recall"] for r in config_rows) / n,
-            "char_similarity": sum(r["char_similarity"] for r in config_rows) / n,
-        }
+        avg = ConfigAverages(
+            duration_s=sum(r.duration_s for r in config_rows) / n,
+            peak_rss_mb=sum(r.peak_rss_mb for r in config_rows) / n,
+            cpu_time_s=sum(r.cpu_time_s for r in config_rows) / n,
+            word_recall=sum(r.word_recall for r in config_rows) / n,
+            char_similarity=sum(r.char_similarity for r in config_rows) / n,
+        )
         averages[config_name] = avg
         print(
-            f"{config_name}: duration={avg['duration_s']:.3f}s "
-            f"peak_rss={avg['peak_rss_mb']:.1f}MB cpu_time={avg['cpu_time_s']:.3f}s "
-            f"word_recall={avg['word_recall']:.3f} char_similarity={avg['char_similarity']:.3f}"
+            f"{config_name}: duration={avg.duration_s:.3f}s "
+            f"peak_rss={avg.peak_rss_mb:.1f}MB cpu_time={avg.cpu_time_s:.3f}s "
+            f"word_recall={avg.word_recall:.3f} char_similarity={avg.char_similarity:.3f}"
         )
     return averages
 
@@ -433,15 +482,15 @@ def main() -> None:
     paddle_averages = run_paddle_benchmark()
     run_asr_benchmark()
 
-    all_averages = {**tesseract_averages, **paddle_averages}
-    best_config = max(all_averages, key=lambda c: all_averages[c]["word_recall"])
+    all_averages: dict[str, ConfigAverages] = {**tesseract_averages, **paddle_averages}
+    best_config = max(all_averages, key=lambda c: all_averages[c].word_recall)
     best = all_averages[best_config]
     print("\n--- Conclusion ---")
     print(
         f"OCR: best word recall is {best_config} "
-        f"({best['word_recall']:.3f}, char_similarity={best['char_similarity']:.3f}) "
-        f"among {list(all_averages)}, duration={best['duration_s']:.3f}s, "
-        f"peak_rss={best['peak_rss_mb']:.1f}MB. Recall alone doesn't decide this "
+        f"({best.word_recall:.3f}, char_similarity={best.char_similarity:.3f}) "
+        f"among {list(all_averages)}, duration={best.duration_s:.3f}s, "
+        f"peak_rss={best.peak_rss_mb:.1f}MB. Recall alone doesn't decide this "
         "when latency differs by orders of magnitude -- see "
         "ocr-asr-benchmark.md for the reasoned recommendation.\n"
         "ASR: NO DECISION -- blocked on missing AMI audio (known risk, see doc)."

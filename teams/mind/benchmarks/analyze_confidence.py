@@ -66,9 +66,9 @@ def main() -> None:
     miss_confidences: dict[str, list[float]] = {}
 
     for doc_id, paths in load_manifest().items():
-        conf_by_word = tesseract_confidences(tesseract_cmd, paths["image"])
+        conf_by_word = tesseract_confidences(tesseract_cmd, paths.image)
 
-        misses = {row["gt_word"]: row for row in analyze_doc(tesseract_cmd, doc_id)}
+        misses = {row.gt_word: row for row in analyze_doc(tesseract_cmd, doc_id)}
         miss_gt_norms = {_normalize(orig) for orig in misses}
 
         for gt_orig, gt_norm in gt_word_pairs(doc_id):
@@ -78,9 +78,9 @@ def main() -> None:
                 hit_confidences.extend(conf_by_word[gt_norm])
 
         for row in misses.values():
-            brought_norm = _normalize(row["ocr_brought"])
+            brought_norm = _normalize(row.ocr_brought)
             if brought_norm in conf_by_word:
-                miss_confidences.setdefault(row["category"], []).extend(conf_by_word[brought_norm])
+                miss_confidences.setdefault(row.category, []).extend(conf_by_word[brought_norm])
 
     def avg(xs: list[float]) -> float:
         return sum(xs) / len(xs) if xs else float("nan")
