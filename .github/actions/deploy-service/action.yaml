@@ -3,7 +3,8 @@ description: >
   Builds the service's image, loads it into the already-running kind cluster, upgrades
   the chart to enable the component with that image, smoke-tests it, then pushes the
   image to GHCR. Assumes setup-service-infra already ran in this job (same kind cluster,
-  same namespace, component installed disabled, $CHART_DIR/$CHART_VALUES exported).
+  same namespace, component installed disabled, $CHART_DIR/$CHART_VALUES/$CHART_ALL_OFF
+  exported).
 
 inputs:
   service_name:
@@ -70,6 +71,7 @@ runs:
         SERVICE="${{ inputs.service_name }}"
         helm upgrade --install "$SERVICE" "$CHART_DIR" \
           -f "$CHART_VALUES" \
+          -f "$CHART_ALL_OFF" \
           -f "$CHART_DIR/values/values-${SERVICE}.yaml" \
           --set components.${SERVICE}.image.repository="$SERVICE" \
           --set components.${SERVICE}.image.tag=local \
