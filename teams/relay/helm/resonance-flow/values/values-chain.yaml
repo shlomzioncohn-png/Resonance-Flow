@@ -1,6 +1,11 @@
 components:
   chain:
     enabled: true
+    # Explicit, not inherited from values.yaml's default: this file deploys onto a
+    # brand-new kind cluster every CI run, which always needs the password generated -
+    # must stay true here regardless of what a real cluster's values.yaml is set to
+    # after its own first bootstrap (see values.yaml's comment on this same key).
+    createDbPassword: true
   mind:
     enabled: false
   lens-bff:
