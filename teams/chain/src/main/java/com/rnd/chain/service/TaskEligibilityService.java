@@ -31,15 +31,9 @@ import java.util.function.UnaryOperator;
  * for decisions that span more than one Task/edge at once (cycle detection, and reading a
  * dependency's DONE status together with creating/removing the edge to it).
  *
- * <p><b>{@code @Transactional} on the methods below does not currently provide atomicity or
- * rollback.</b> Task/TaskDependency live in plain in-memory repositories with no JPA
- * participation - spring-boot-starter-data-jpa and the embedded H2 dependency exist solely so a
- * PlatformTransactionManager bean is available and the annotation doesn't blow up
- * DataSourceAutoConfiguration at startup (see teams/chain/pom.xml). The actual correctness
- * guarantee here comes entirely from dependencyGraphLock plus TaskRepository#update's per-id
- * atomicity. This is intentional for now - the plan is to re-add real transactional semantics
- * once persistence moves to a real JPA-backed store (e.g. Postgres), at which point this
- * annotation will start meaning what it says.
+ * <p>{@code @Transactional} on the methods below now provides real atomicity and rollback -
+ * {@link #onTaskStatusChanged} holds a row lock on the changed task and every one of its
+ * dependents simultaneously until it returns, so they all commit or roll back together.
  */
 @Service
 public class TaskEligibilityService {
@@ -252,11 +246,9 @@ public class TaskEligibilityService {
         List<TaskDependency> dependents = taskDependencyRepository.findByDependsOnTaskId(taskId);
         log.info("Task {} status change affects {} dependent task(s), delta={}", taskId, dependents.size(), delta);
 
-        for (TaskDependency dependent : dependents) {
-            UUID dependentId = dependent.taskId();
-            taskRepository.update(dependentId, task ->
-                    withCounters(task, Math.max(0, task.getBlockingCount() + delta), task.getOpenConstraintCount()));
-        }
+        List<UUID> dependentIds = dependents.stream().map(TaskDependency::taskId).toList();
+        taskRepository.updateAll(dependentIds, task ->
+                withCounters(task, Math.max(0, task.getBlockingCount() + delta), task.getOpenConstraintCount()));
     }
 
     // Constraint-related methods below still assume Constraint status transitions

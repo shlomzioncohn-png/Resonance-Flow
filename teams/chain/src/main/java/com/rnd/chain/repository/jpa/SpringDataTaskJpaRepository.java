@@ -27,19 +27,13 @@ public interface SpringDataTaskJpaRepository extends JpaRepository<TaskEntity, U
     @Query("select t from TaskEntity t where t.id = :id")
     Optional<TaskEntity> findByIdForUpdate(@Param("id") UUID id);
 
-    /**
-     * Native upsert: {@code save()}'s contract is an unconditional overwrite, which
-     * {@code entityManager.merge} cannot give safely for a client-assigned-id, {@code @Version}-
-     * annotated entity Hibernate never loaded (see PERSISTENCE_PLAN.md §4). {@code version} is only
-     * ever incremented here, never read/compared - save() must never throw
-     * OptimisticLockException, unlike update()'s pessimistic-lock path.
-     *
-     * <p>{@code clearAutomatically = true}: this bypasses Hibernate's persistence context
-     * entirely (a native INSERT, not a managed-entity write), so any stale TaskEntity already
-     * cached for this id in the current session must be evicted - otherwise the immediate
-     * findByIdAndDeletedAtIsNull read-back in PostgresTaskRepository.save() could return the
-     * cached pre-upsert instance instead of hitting the database.
-     */
+    /** Bulk form of {@link #findByIdForUpdate}. */
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("select t from TaskEntity t where t.id in :ids")
+    List<TaskEntity> findByIdInForUpdate(@Param("ids") List<UUID> ids);
+
+    /** Native upsert. {@code clearAutomatically = true} evicts any TaskEntity for this id already
+     * cached in the persistence context. */
     @Modifying(clearAutomatically = true)
     @Query(value = """
         INSERT INTO task (id, parent_task_id, owner_id, status, is_ready, blocking_count,
