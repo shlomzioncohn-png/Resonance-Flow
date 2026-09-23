@@ -1,0 +1,13 @@
+{
+  "Servers": {
+    "1": {
+      "Name": "Resonance Flow (local)",
+      "Group": "Servers",
+      "Host": "postgres",
+      "Port": 5432,
+      "MaintenanceDB": "resonance_flow",
+      "Username": "postgres",
+      "SSLMode": "prefer"
+    }
+  }
+}
