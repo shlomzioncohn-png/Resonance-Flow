@@ -31,11 +31,7 @@ runs:
       shell: bash
       run: helm dependency build "$CHART_DIR"
 
-    - name: Install yq
-      shell: bash
-      run: |
-        sudo curl -sL -o /usr/local/bin/yq https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
-        sudo chmod +x /usr/local/bin/yq
+    - uses: ./.github/actions/install-yq
 
     # Opt-in, not opt-out: values-<service>.yaml only enables what it needs, so a
     # component added to values.yaml later can't leak into every other team's CI.
