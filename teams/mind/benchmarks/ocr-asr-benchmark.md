@@ -275,3 +275,12 @@ Once AMI data exists, benchmark Whisper (at least 2 sizes, e.g.
 `tiny`/`base`, plus a third per the same "don't stop at two" reasoning
 above) the same way this document does for OCR, and replace this
 section with a final decision.
+
+**Test the English-only (`.en`) variants, not just the standard
+multilingual models** (`tiny.en`/`base.en`/`small.en`/`medium.en` --
+no `.en` variant exists for `large`) -- MIND's app is English-only
+(same reasoning as the data policy above: Enron/SAMSum/CRM data is all
+English), and Whisper's `.en` models are trained specifically for
+English, typically scoring better than the multilingual model of the
+same size on English audio. Include at least one `.en` config in
+whatever sizes get benchmarked, not only the multilingual default.
