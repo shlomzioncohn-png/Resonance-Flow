@@ -26,6 +26,7 @@ class CandidateScore:
     task_id: str
     score: float
     reasoning: str | None = None
+    factors: dict[str, float] | None = None
 
 
 @dataclass
@@ -66,7 +67,7 @@ def run(model: RankingModel, scenarios: list[PersonaEvaluationScenario]) -> Repo
     task, take the highest-scoring task as the model's prediction (ties break
     toward the first task in file order), and compare it to
     `expected_top_task_id`. The `Report` carries top-1 accuracy plus every
-    candidate's raw score (and reasoning), so a later switch to a graded metric
+    candidate's raw score (and reasoning/factors), so a later switch to a graded metric
     (MRR/nDCG) needs no re-run.
     """
     predictions: list[str] = []
@@ -85,7 +86,12 @@ def run(model: RankingModel, scenarios: list[PersonaEvaluationScenario]) -> Repo
                 predicted_top_task_id=best_task.task_id,
                 passed=best_task.task_id == scenario.expected_top_task_id,
                 candidates=[
-                    CandidateScore(task_id=t.task_id, score=r.score, reasoning=r.reasoning)
+                    CandidateScore(
+                        task_id=t.task_id,
+                        score=r.score,
+                        reasoning=r.reasoning,
+                        factors=r.factors,
+                    )
                     for t, r in scored
                 ],
             )

@@ -26,7 +26,7 @@ which Pydantic (raise-or-nothing) cannot represent.
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Literal, Protocol, runtime_checkable
+from typing import Annotated, Literal, Protocol, runtime_checkable
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -292,6 +292,11 @@ class PersonaEvaluationScenario(BaseModel):
         return self
 
 
+# NaN/inf are rejected: `score` is already bounded to [0, 1], but factors are
+# free-scale, and a NaN would reach report.json as the non-standard JSON `NaN`.
+FactorValue = Annotated[float, Field(allow_inf_nan=False)]
+
+
 class ScoreResult(BaseModel):
     """What a ranking model returns for one task."""
 
@@ -312,6 +317,19 @@ class ScoreResult(BaseModel):
         description=(
             "Optional short explanation for the score — compared against a "
             "scenario's expected_reason in later analysis, not by the harness."
+        ),
+    )
+    factors: dict[str, FactorValue] | None = Field(
+        default=None,
+        description=(
+            "Optional breakdown of the signals behind `score`, keyed by factor name "
+            "(e.g. deadline proximity, blocked penalty, impact). Values are finite "
+            "floats on whatever scale the model uses internally; they are NOT "
+            "required to sum to `score`, since a model may combine them "
+            "non-additively. Copied into the harness report as-is, never used for "
+            "ranking. Exists so a later explanation step can be built from the "
+            "factors that actually produced the score, instead of "
+            "reverse-engineering the formula."
         ),
     )
 

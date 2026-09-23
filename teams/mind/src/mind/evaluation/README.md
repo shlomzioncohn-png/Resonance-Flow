@@ -38,7 +38,11 @@ class RankingModel(Protocol):
 - `ScoreResult`: `score` (float on a global **0-1** scale — each tier may be
   scored by its own rule, but results are calibrated onto one scale so tiers are
   comparable) and an optional `reasoning` string (kept in the report for later
-  comparison against `expected_reason`, not used by the harness).
+  comparison against `expected_reason`, not used by the harness), plus optional
+  `factors` — a `{name: float}` breakdown of the signals behind the score
+  (finite values, any scale, not required to sum to `score`). Copied into
+  `report.json` per candidate, never used for ranking; it's there so an
+  explanation step can be built from the real inputs to the score.
 
 `score()` still never sees `persona`, `free_time_minutes`, `constraints`, or the
 sibling tasks.

@@ -32,6 +32,21 @@ def test_dummy_model_score_returns_score_result_in_range():
     assert 0.0 <= result.score <= 1.0
 
 
+def test_score_result_factors_default_to_none():
+    assert ScoreResult(score=0.5).factors is None
+
+
+def test_score_result_accepts_factors():
+    result = ScoreResult(score=0.5, factors={"deadline_proximity": 0.8, "blocked_penalty": -0.3})
+    assert result.factors == {"deadline_proximity": 0.8, "blocked_penalty": -0.3}
+
+
+@pytest.mark.parametrize("bad", [float("nan"), float("inf"), float("-inf")])
+def test_score_result_rejects_non_finite_factors(bad):
+    with pytest.raises(ValidationError):
+        ScoreResult(score=0.5, factors={"deadline_proximity": bad})
+
+
 def _scenario_kwargs(**overrides):
     kwargs = {
         "scenario_id": "developer_late_pr_review",
