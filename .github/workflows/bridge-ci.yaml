@@ -34,4 +34,3 @@ jobs:
       service_name: bridge
       service_dir: teams/bridge
       language: java
-      container_port: 8080
