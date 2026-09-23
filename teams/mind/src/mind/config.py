@@ -36,7 +36,15 @@ class Settings(BaseSettings):
         env_prefix="MIND_",
         env_nested_delimiter="__",
         env_file=_ENV_FILE,
-        extra="forbid",
+        # "ignore", not "forbid": pydantic-settings' env_prefix only decides
+        # which vars *map onto* a field -- it doesn't filter which vars from
+        # `.env` get considered at all. That file also carries vars this
+        # model was never meant to own (POSTGRES_USER, OCR_PROVIDER, ...,
+        # consumed directly by docker-compose.yml or by other modules), so
+        # "forbid" here rejected the whole file. VectorStoreSettings below
+        # keeps "forbid": it only ever sees the already-prefix-stripped
+        # MIND_VECTOR_STORE__* namespace, which it does fully own.
+        extra="ignore",
     )
 
     environment: Literal["local", "ci", "staging", "production"]

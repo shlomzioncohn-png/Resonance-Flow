@@ -118,14 +118,21 @@ licensing constraints.
 ## Getting started
 
 ```bash
-cp .env.example .env       # already filled with working defaults today
-make dev                   # install with dev dependencies
-make lint                  # ruff + mypy
-make test                  # run the test suite
-make eval                  # run the evaluation harness against eval/personas/
-make run                   # run the API locally
-make docker-up             # or run everything via docker compose (API + vector-store)
+cp .env.example .env             # already filled with working defaults today
+make dev                         # install with dev dependencies
+make lint                        # ruff + mypy
+docker compose up vector-store -d # bring up just the DB -- make test/make run need it
+make test                        # run the test suite
+make eval                        # run the evaluation harness against eval/personas/
+make run                         # run the API locally
+make docker-up                   # or run everything via docker compose (API + vector-store)
 ```
+
+`make test` and `make run` connect to Postgres over `MIND_VECTOR_STORE__DSN`
+(already set in `.env.example` against `localhost:5432`), so the
+`vector-store` container above must be up first even when you're running
+`mind` itself outside Docker. `make docker-up` doesn't need that step --
+it brings up `vector-store` itself.
 
 `make docker-up` (`docker compose up`) now brings up the full stack —
 the API **and** its `vector-store` (pgvector) dependency — with one

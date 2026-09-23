@@ -15,6 +15,10 @@ dependencies = [
     "psycopg[binary,pool]>=3.1",
     "scikit-learn>=1.4",
     "numpy>=1.26",
+    # messaging (src/mind/messaging)
+    "confluent-kafka[protobuf,schemaregistry]>=2.5,<2.11",
+    "protobuf>=5",
+    "pyyaml",
     # add as decided: OCR/ASR libs, LLM client, etc.
 ]
 
@@ -25,7 +29,10 @@ dev = [
     "pytest-cov",
     "ruff",
     "mypy",
+    "types-PyYAML",
     "httpx",  # required by fastapi.testclient.TestClient
+    "grpcio-tools==1.71.0",  # protoc, for `make proto`
+    "python-dotenv",  # tests/conftest.py loads .env for os.environ-reading fixtures
 ]
 
 [build-system]
@@ -38,6 +45,14 @@ packages = ["src/mind"]
 [tool.ruff]
 line-length = 100
 src = ["src", "tests"]
+extend-exclude = ["*_pb2.py"]
+
+[tool.mypy]
+exclude = ["_pb2\\.py$"]
+
+[[tool.mypy.overrides]]
+module = "confluent_kafka.*"
+ignore_missing_imports = true
 
 [tool.ruff.lint]
 # TID252 (flake8-tidy-imports): use absolute imports, not relative ("from .x").
