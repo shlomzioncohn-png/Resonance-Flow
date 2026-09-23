@@ -2,6 +2,7 @@ package com.rnd.chain.repository;
 
 import com.rnd.chain.dto.TaskDependency;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -11,6 +12,7 @@ import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.locks.ReadWriteLock;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
+import java.util.function.Function;
 import java.util.stream.Collectors;
 
 /**
@@ -80,12 +82,27 @@ public class InMemoryTaskDependencyRepository implements TaskDependencyRepositor
         Objects.requireNonNull(taskId, "taskId must not be null");
         lock.readLock().lock();
         try {
-            return dependenciesByTask.getOrDefault(taskId, Set.of()).stream()
-                    .map(dependsOnTaskId -> new TaskDependency(taskId, dependsOnTaskId))
-                    .collect(Collectors.toList());
+            return toTaskDependencyList(dependenciesByTask.getOrDefault(taskId, Set.of()),
+                    dependsOnTaskId -> new TaskDependency(taskId, dependsOnTaskId));
         } finally {
             lock.readLock().unlock();
         }
+    }
+
+    /**
+     * Overrides the interface default to skip {@link #lock} entirely - safe only because every
+     * caller of this method already runs inside {@code TaskEligibilityService}'s
+     * {@code dependencyGraphLock}, which is exclusive with every write this repository ever
+     * makes ({@link #save}/{@link #delete} are only ever invoked from inside that same lock).
+     * See the interface Javadoc ({@link TaskDependencyRepository#findByTaskIdUnderExternalLock})
+     * for the full contract this override relies on. Avoids an uncontended (but not free)
+     * read-lock acquire/release on every node a cycle-detection DFS visits (review finding).
+     */
+    @Override
+    public List<TaskDependency> findByTaskIdUnderExternalLock(UUID taskId) {
+        Objects.requireNonNull(taskId, "taskId must not be null");
+        return toTaskDependencyList(dependenciesByTask.getOrDefault(taskId, Set.of()),
+                dependsOnTaskId -> new TaskDependency(taskId, dependsOnTaskId));
     }
 
     @Override
@@ -93,9 +110,8 @@ public class InMemoryTaskDependencyRepository implements TaskDependencyRepositor
         Objects.requireNonNull(taskId, "taskId must not be null");
         lock.readLock().lock();
         try {
-            return dependentsByTask.getOrDefault(taskId, Set.of()).stream()
-                    .map(dependentTaskId -> new TaskDependency(dependentTaskId, taskId))
-                    .collect(Collectors.toList());
+            return toTaskDependencyList(dependentsByTask.getOrDefault(taskId, Set.of()),
+                    dependentTaskId -> new TaskDependency(dependentTaskId, taskId));
         } finally {
             lock.readLock().unlock();
         }
@@ -145,6 +161,13 @@ public class InMemoryTaskDependencyRepository implements TaskDependencyRepositor
         } finally {
             lock.writeLock().unlock();
         }
+    }
+
+    /** Shared by every {@code find...} method: maps each id in {@code ids} through {@code toEdge}
+     * into a pre-sized {@link ArrayList} (review finding - {@code Collectors.toList()} gives no
+     * capacity hint, so the result would otherwise grow/copy internally as elements accumulate). */
+    private static List<TaskDependency> toTaskDependencyList(Set<UUID> ids, Function<UUID, TaskDependency> toEdge) {
+        return ids.stream().map(toEdge).collect(Collectors.toCollection(() -> new ArrayList<>(ids.size())));
     }
 
     /** Must run under {@link #lock}'s write lock: drops {@code key} from {@code map} once its

@@ -232,7 +232,13 @@ public class TaskEligibilityService {
             if (!visited.add(current)) {
                 continue;
             }
-            for (TaskDependency dep : taskDependencyRepository.findByTaskId(current)) {
+            // findByTaskIdUnderExternalLock, not findByTaskId: this whole DFS already runs
+            // inside dependencyGraphLock (see callers of wouldCreateCycle), which is exclusive
+            // with every write this repository ever makes - so the repository's own per-call
+            // locking would be uncontended overhead here, paid once per visited node (review
+            // finding). See TaskDependencyRepository#findByTaskIdUnderExternalLock's Javadoc for
+            // the exclusivity contract this relies on.
+            for (TaskDependency dep : taskDependencyRepository.findByTaskIdUnderExternalLock(current)) {
                 toVisit.push(dep.getDependsOnTaskId());
             }
         }

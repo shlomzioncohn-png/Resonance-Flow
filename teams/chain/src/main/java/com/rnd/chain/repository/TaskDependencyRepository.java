@@ -28,6 +28,25 @@ public interface TaskDependencyRepository {
     List<TaskDependency> findByTaskId(UUID taskId);
 
     /**
+     * Same as {@link #findByTaskId(UUID)}, but may be called only from a context that already
+     * holds external synchronization equivalent to this repository's own write-exclusivity
+     * guarantee (e.g. {@code TaskEligibilityService}'s {@code dependencyGraphLock}, which every
+     * edge mutation and every cycle-detection traversal already runs under). The default
+     * implementation is simply {@link #findByTaskId(UUID)} - safe to call from anywhere, at the
+     * cost of this repository's normal internal locking. An implementation MAY override this to
+     * skip that internal locking on this path once it's certain the caller-provided exclusivity
+     * makes it redundant here (see {@code InMemoryTaskDependencyRepository} for the motivating
+     * case: a cycle-detection DFS that calls this once per visited graph node, entirely inside
+     * that external lock).
+     *
+     * <p><b>Calling this from outside that guarantee is unsafe</b> - unlike
+     * {@link #findByTaskId}, it does not protect itself against a concurrent write.
+     */
+    default List<TaskDependency> findByTaskIdUnderExternalLock(UUID taskId) {
+        return findByTaskId(taskId);
+    }
+
+    /**
      * @return all dependency edges where the given task is the blocking
      * side (i.e. edges representing "X depends on this task"). Empty
      * list, never null, if nothing depends on the task.
