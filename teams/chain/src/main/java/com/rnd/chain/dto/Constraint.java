@@ -1,6 +1,5 @@
 package com.rnd.chain.dto;
 
-import lombok.EqualsAndHashCode;
 import lombok.Getter;
 import lombok.Setter;
 
@@ -16,14 +15,14 @@ import java.util.UUID;
 // stay hand-written (Lombok skips generating an accessor when one with that name already exists)
 // because they must keep running copyReason's defensive-copy/validation and getReason's
 // empty-map-not-null behavior (Finding #13) - neither is something @Getter/@Setter produce.
-// @EqualsAndHashCode(onlyExplicitlyIncluded = true) + @Include on constraintId only: this MUST
-// stay id-only equality (the locking design elsewhere in this module leans on it), not the
-// all-fields default @Data/@EqualsAndHashCode would otherwise generate.
+// equals()/hashCode() are hand-written below, not Lombok-generated - for the same reason as
+// getReason/setReason: this class needs to control its own semantics rather than take Lombok's
+// default. They stay id-only (constraintId alone) since the locking design elsewhere in this
+// module leans on that. No @EqualsAndHashCode annotation here: Lombok skips generating
+// equals/hashCode whenever hand-written ones already exist in the class, so one was never used.
 @Getter
 @Setter
-@EqualsAndHashCode(onlyExplicitlyIncluded = true)
 public class Constraint {
-    @EqualsAndHashCode.Include
     private final String constraintId;
     private final UUID taskId; // pending Inbox publishing its own task id type
     private final ConstraintType type;
