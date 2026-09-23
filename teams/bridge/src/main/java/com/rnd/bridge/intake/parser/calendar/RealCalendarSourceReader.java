@@ -27,6 +27,7 @@ import java.util.ArrayList;
 import java.util.List;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
+import org.springframework.beans.factory.annotation.Autowired;
 
 /**
  * Reads real Google Calendar events via events.list. Calendar attachments are Drive file
@@ -64,6 +65,7 @@ public class RealCalendarSourceReader implements CalendarSourceReader {
     private final CalendarEventStateReconciler eventStateReconciler;
     private Calendar client;
 
+    @Autowired
     public RealCalendarSourceReader(
             GoogleCredentialsProvider credentialsProvider, CalendarImportProperties properties,
             CalendarEventStateReconciler eventStateReconciler) {
@@ -219,3 +221,4 @@ public class RealCalendarSourceReader implements CalendarSourceReader {
         return Instant.ofEpochMilli(dateTime.getValue());
     }
 }
+
