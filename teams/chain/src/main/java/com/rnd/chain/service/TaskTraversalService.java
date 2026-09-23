@@ -157,7 +157,7 @@ public class TaskTraversalService {
     private List<UUID> dependencyNeighborIds(UUID taskId) {
         List<UUID> ids = new ArrayList<>();
         for (TaskDependency dependency : taskDependencyRepository.findByTaskId(taskId)) {
-            ids.add(dependency.getDependsOnTaskId());
+            ids.add(dependency.dependsOnTaskId());
         }
         return ids;
     }
@@ -165,7 +165,7 @@ public class TaskTraversalService {
     private List<UUID> dependentNeighborIds(UUID taskId) {
         List<UUID> ids = new ArrayList<>();
         for (TaskDependency dependency : taskDependencyRepository.findByDependsOnTaskId(taskId)) {
-            ids.add(dependency.getTaskId());
+            ids.add(dependency.taskId());
         }
         return ids;
     }

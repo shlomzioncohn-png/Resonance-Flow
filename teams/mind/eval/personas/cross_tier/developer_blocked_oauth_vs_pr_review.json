@@ -1,0 +1,43 @@
+{
+  "scenario_id": "developer_blocked_oauth_vs_pr_review",
+  "persona": {
+    "role": "Developer",
+    "department": null
+  },
+  "context": {
+    "free_time_minutes": 30,
+    "current_datetime": "2026-09-07T09:00:00",
+    "time_horizon": "today",
+    "constraints": []
+  },
+  "tasks": [
+    {
+      "task_id": "task_pr",
+      "title": "Review PR #512: payment-webhook retries",
+      "description": "A teammate's retry-logic PR is waiting on review; they cannot move to their next task until it is approved and they need it merged today, so it should be done before 16:00.",
+      "deadline": "2026-09-07T16:00:00",
+      "effort_estimate": 20,
+      "tier": "operational",
+      "blocked": false,
+      "parent_task_id": null
+    },
+    {
+      "task_id": "task_oauth",
+      "title": "Continue the OAuth refresh-token flow",
+      "description": "Implementation is paused waiting on the security team to approve the token-rotation design; they said they would review it by 11:00 but nothing has come back.",
+      "deadline": "2026-09-07T11:00:00",
+      "effort_estimate": 25,
+      "tier": "tactical",
+      "blocked": true,
+      "parent_task_id": null
+    }
+  ],
+  "expected_top_task_id": "task_pr",
+  "expected_reason": "task_oauth is blocked on the security team's outstanding approval and cannot be worked on now, even though its deadline is nearer; task_pr is unblocked and unblocks a teammate who cannot proceed until it is reviewed.",
+  "source": {
+    "type": "synthetic",
+    "source_detail": null
+  },
+  "team_lead_approved": true,
+  "mentor_approved": false
+}

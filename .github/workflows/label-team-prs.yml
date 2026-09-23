@@ -7,6 +7,8 @@ on:
 jobs:
   add-label:
     runs-on: self-hosted
+    # Labeling is cosmetic - a GitHub API hiccup here must not fail PR checks.
+    continue-on-error: true
     steps:
       - name: Ensure labels exist
         uses: actions/github-script@v7
@@ -50,7 +52,7 @@ jobs:
               { label: 'BRIDGE', members: [] }, // fill in: BRIDGE team members
               { label: 'MIND',   members: [] }, // fill in: MIND team members
               { label: 'CHAIN',  members: [] }, // fill in: CHAIN team members
-              { label: 'RELAY',  members: [] }, // fill in: RELAY team members
+              { label: 'RELAY',  members: ['avigailrapa', 'Ayala679', 'ch-kap219', 'gittyafe'] },
             ];
 
             const author = context.payload.pull_request.user.login;

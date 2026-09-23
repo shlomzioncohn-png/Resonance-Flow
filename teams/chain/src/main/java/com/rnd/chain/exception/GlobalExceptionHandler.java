@@ -64,6 +64,20 @@ public class GlobalExceptionHandler {
                         ex.getMessage(),
                         request.getRequestURI()));
     }
+        // A request parameter/path variable couldn't be converted to its declared type.
+        // Example: taskId cannot be converted to UUID, or page/size cannot be converted to int.
+        @ExceptionHandler(MethodArgumentTypeMismatchException.class)
+        public ResponseEntity<ApiError> handleTypeMismatch(
+                        MethodArgumentTypeMismatchException ex,
+                        HttpServletRequest request) {
+                return ResponseEntity
+                                .status(HttpStatus.BAD_REQUEST)
+                                .body(new ApiError(
+                                                HttpStatus.BAD_REQUEST.value(),
+                                                "TYPE_MISMATCH",
+                                                "Invalid value for parameter '" + ex.getName() + "'",
+                                                request.getRequestURI()));
+        }
 
     @ExceptionHandler(MethodArgumentNotValidException.class)
     public ResponseEntity<ApiError> handleValidationError(
