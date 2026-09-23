@@ -5,6 +5,3 @@ target/
 .vscode/
 .env
 .DS_Store
-
-# Provisional/copied proto schemas - kept local only until Relay's official process
-src/main/proto/
