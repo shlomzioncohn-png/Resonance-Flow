@@ -7,8 +7,9 @@ import org.springframework.transaction.support.TransactionTemplate;
 import java.util.function.Supplier;
 
 /** Real ACID transaction boundary, replacing {@link InMemoryTransactionRunner}'s single-lock,
- * no-rollback stand-in - exactly what {@link TransactionRunner}'s own Javadoc asks for. Backed by
- * the {@link PlatformTransactionManager} Spring Boot auto-configures once a real DataSource
+ * no-rollback stand-in. Provides {@link TransactionRunner}'s isolation guarantee at the row/
+ * constraint level via Postgres itself, not via global exclusivity. Backed by the
+ * {@link PlatformTransactionManager} Spring Boot auto-configures once a real DataSource
  * exists - no manual bean needed. */
 @Component
 public class JpaTransactionRunner implements TransactionRunner {
