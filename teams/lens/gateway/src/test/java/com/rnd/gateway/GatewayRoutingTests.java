@@ -242,6 +242,46 @@ class GatewayRoutingTests {
     }
 
     // -------------------------------------------------------------------------
+    // Manager Dashboard (workload + projects)
+    // -------------------------------------------------------------------------
+
+    @Test
+    @Order(16)
+    @DisplayName("GET /api/manager/workload routes to BFF /manager/workload")
+    void testManagerWorkloadRoutesToBff() throws Exception {
+        mockBff.enqueue(new MockResponse()
+                .setResponseCode(200)
+                .setHeader("Content-Type", "application/json")
+                .setBody("[]"));
+
+        mockMvc.perform(get("/api/manager/workload"))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.length()").value(0));
+
+        RecordedRequest recorded = takeRequest();
+        assertThat(recorded.getPath()).isEqualTo("/manager/workload");
+        assertThat(recorded.getMethod()).isEqualTo("GET");
+    }
+
+    @Test
+    @Order(17)
+    @DisplayName("GET /api/manager/projects routes to BFF /manager/projects")
+    void testManagerProjectsRoutesToBff() throws Exception {
+        mockBff.enqueue(new MockResponse()
+                .setResponseCode(200)
+                .setHeader("Content-Type", "application/json")
+                .setBody("[{\"id\":\"p1\",\"name\":\"Checkout Revamp\"}]"));
+
+        mockMvc.perform(get("/api/manager/projects"))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$[0].id").value("p1"));
+
+        RecordedRequest recorded = takeRequest();
+        assertThat(recorded.getPath()).isEqualTo("/manager/projects");
+        assertThat(recorded.getMethod()).isEqualTo("GET");
+    }
+
+    // -------------------------------------------------------------------------
     // BFF unavailable — must run last: it permanently shuts down the shared
     // mockBff instance that every other test in this class depends on.
     // -------------------------------------------------------------------------

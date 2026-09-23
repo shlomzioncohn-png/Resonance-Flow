@@ -1,8 +1,8 @@
 /**
  * Manager API — typed wrapper around the team-workload breakdown. No
- * Inbox/Chain-backed workload source exists yet, so in development this
- * request is answered by an MSW handler (mocks/handlers.ts) instead of a
- * real backend.
+ * Inbox/Chain-backed workload source exists yet, so it's mocked one layer
+ * down, at the BFF (com.rnd.bff.client.ManagerClient) — this call is real,
+ * straight through the Gateway, same as services/workspaceApi.ts.
  */
 import { api } from './api'
 
