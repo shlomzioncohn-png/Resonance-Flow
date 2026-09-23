@@ -6,6 +6,7 @@ import com.rnd.chain.repository.jpa.SpringDataTaskJpaRepository;
 import org.springframework.stereotype.Repository;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
@@ -91,20 +92,23 @@ public class PostgresTaskRepository implements TaskRepository {
     /** Bulk form of {@link #update} - locks every matching row in one round trip. */
     @Override
     @Transactional
-    public void updateAll(List<UUID> ids, UnaryOperator<Task> mutator) {
+    public List<Task> updateAll(List<UUID> ids, UnaryOperator<Task> mutator) {
         Objects.requireNonNull(ids, "ids must not be null");
         Objects.requireNonNull(mutator, "mutator must not be null");
         if (ids.isEmpty()) {
-            return;
+            return List.of();
         }
+        List<Task> updated = new ArrayList<>();
         for (TaskEntity entity : jpaRepository.findByIdInForUpdate(ids)) {
             if (entity.getDeletedAt() != null) {
                 // Same as update(): a soft-deleted task is left untouched.
                 continue;
             }
-            Task updated = Objects.requireNonNull(mutator.apply(toDto(entity)), "mutator must not return null");
-            copyOnto(entity, updated);
+            Task updatedTask = Objects.requireNonNull(mutator.apply(toDto(entity)), "mutator must not return null");
+            copyOnto(entity, updatedTask);
+            updated.add(toDto(entity));
         }
+        return updated;
     }
 
     private static Task toDto(TaskEntity entity) {

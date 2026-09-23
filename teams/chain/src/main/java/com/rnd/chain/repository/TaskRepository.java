@@ -73,6 +73,8 @@ public interface TaskRepository {
      * a soft-deleted task, are silently skipped (the mutator is never applied to them), matching
      * {@link #update}'s per-id semantics. {@code mutator} must not mutate the task it's given in
      * place, and must not return null - same contract as {@link #update}.
+     *
+     * @return the updated tasks (post-mutation), for every id that existed and wasn't soft-deleted
      */
-    void updateAll(List<UUID> ids, UnaryOperator<Task> mutator);
+    List<Task> updateAll(List<UUID> ids, UnaryOperator<Task> mutator);
 }

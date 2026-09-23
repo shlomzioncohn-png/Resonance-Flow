@@ -142,12 +142,14 @@ public class InMemoryTaskRepository implements TaskRepository {
 
     /** No batching benefit in memory - each id just goes through {@link #update} in turn. */
     @Override
-    public void updateAll(List<UUID> ids, UnaryOperator<Task> mutator) {
+    public List<Task> updateAll(List<UUID> ids, UnaryOperator<Task> mutator) {
         Objects.requireNonNull(ids, "ids must not be null");
         Objects.requireNonNull(mutator, "mutator must not be null");
+        List<Task> updated = new ArrayList<>();
         for (UUID id : ids) {
-            update(id, mutator);
+            update(id, mutator).ifPresent(updated::add);
         }
+        return updated;
     }
 
     private void indexChild(Task task) {
