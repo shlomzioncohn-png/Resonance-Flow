@@ -4,6 +4,7 @@ import com.rnd.chain.dto.Task;
 import com.rnd.chain.dto.TaskStatus;
 import com.rnd.chain.repository.entity.TaskEntity;
 import com.rnd.chain.repository.jpa.SpringDataTaskJpaRepository;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -16,9 +17,8 @@ import java.util.UUID;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
 
-/** Proves the native {@code INSERT ... ON CONFLICT} upsert (PERSISTENCE_PLAN.md §4) directly,
- * against real PostgreSQL - replaces reliance on an unverified entityManager.merge()-is-upsert
- * assumption (Round 1 design audit finding #2). */
+/** Proves the native {@code INSERT ... ON CONFLICT} upsert directly, against real PostgreSQL. */
+@Tag("postgres")
 @SpringBootTest
 @Transactional
 class PostgresTaskRepositoryTest {

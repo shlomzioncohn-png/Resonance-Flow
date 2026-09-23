@@ -6,6 +6,7 @@ import com.rnd.chain.dto.TaskStatus;
 import com.rnd.chain.repository.entity.TaskDependencyEntity;
 import com.rnd.chain.repository.entity.TaskDependencyId;
 import com.rnd.chain.repository.jpa.SpringDataTaskDependencyJpaRepository;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -21,12 +22,13 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /**
- * Covers PERSISTENCE_PLAN.md §7's five dependency-edge cases against real PostgreSQL. The two
- * DataIntegrityViolation cases and the soft-deleted-trigger case each end their test method with
- * the exception assertion itself - Postgres marks a transaction "aborted" after any constraint/
- * trigger error, so no further statement is attempted in the same test method afterward; the
- * shared @Transactional rollback (the one statement Postgres still allows) is what cleans up.
+ * Covers five dependency-edge cases against real PostgreSQL. The two DataIntegrityViolation cases
+ * and the soft-deleted-trigger case each end their test method with the exception assertion
+ * itself - Postgres marks a transaction "aborted" after any constraint/trigger error, so no
+ * further statement is attempted in the same test method afterward; the shared @Transactional
+ * rollback (the one statement Postgres still allows) is what cleans up.
  */
+@Tag("postgres")
 @SpringBootTest
 @Transactional
 class PostgresTaskDependencyRepositoryTest {

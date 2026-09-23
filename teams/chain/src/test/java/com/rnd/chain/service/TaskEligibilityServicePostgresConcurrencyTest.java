@@ -6,6 +6,7 @@ import com.rnd.chain.repository.PostgresTaskDependencyRepository;
 import com.rnd.chain.repository.PostgresTaskRepository;
 import com.rnd.chain.repository.jpa.SpringDataTaskJpaRepository;
 import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -27,12 +28,13 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * Same scenarios as {@link TaskEligibilityServiceConcurrencyTest}, run against the real
- * Postgres-backed repositories instead of the in-memory pair - PERSISTENCE_PLAN.md §8 checkpoint
- * 6. Deliberately NOT @Transactional: each thread must open its own independent transaction/
- * connection for TaskRepository#update's pessimistic row lock to actually contend for real,
- * which is the whole point of this test (a shared test-transaction would serialize everything
- * trivially and prove nothing). Rows are cleaned up manually in @AfterEach instead.
+ * Postgres-backed repositories instead of the in-memory pair. Deliberately NOT @Transactional:
+ * each thread must open its own independent transaction/connection for TaskRepository#update's
+ * pessimistic row lock to actually contend for real, which is the whole point of this test (a
+ * shared test-transaction would serialize everything trivially and prove nothing). Rows are
+ * cleaned up manually in @AfterEach instead.
  */
+@Tag("postgres")
 @SpringBootTest
 class TaskEligibilityServicePostgresConcurrencyTest {
 

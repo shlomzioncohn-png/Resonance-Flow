@@ -9,6 +9,7 @@ import com.rnd.chain.repository.DependencyHistoryRepository;
 import com.rnd.chain.repository.PostgresTaskDependencyRepository;
 import com.rnd.chain.repository.PostgresTaskRepository;
 import com.rnd.chain.repository.TransactionRunner;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -22,8 +23,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Proves the real wiring (Postgres repositories + {@link com.rnd.chain.repository.JpaTransactionRunner})
- * behaves the same as the in-memory pair {@link TaskDependencyServiceTest} already covers -
- * PERSISTENCE_PLAN.md §8 checkpoint 5. */
+ * behaves the same as the in-memory pair {@link TaskDependencyServiceTest} already covers. */
+@Tag("postgres")
 @SpringBootTest
 @Transactional
 class TaskDependencyServicePostgresIntegrationTest {
