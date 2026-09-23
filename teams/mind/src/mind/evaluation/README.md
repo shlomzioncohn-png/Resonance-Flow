@@ -169,6 +169,11 @@ manual spot-check and the week-7 comparison).
   nothing under `src/` or `eval/personas/` is uncommitted; the tool does not
   check this.
 
+`baseline_record.load_baseline_record(path)` reads a record back into the
+`Report` it was written from, so the week-7 comparison (#487) diffs the stretch
+run against the recorded baseline instead of a re-run. It refuses a record whose
+per-scenario results don't add up to its own totals.
+
 ### 2026-09-23: no week-5 baseline number exists yet
 
 - **Checked:** `origin/main` @ `c7e6c507` (2026-09-23).

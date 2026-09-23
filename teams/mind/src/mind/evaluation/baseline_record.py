@@ -17,7 +17,7 @@ from datetime import date
 from pathlib import Path
 from typing import Any
 
-from mind.evaluation.harness import Report
+from mind.evaluation.harness import CandidateScore, Report, ScenarioResult
 from mind.evaluation.interfaces import PersonaEvaluationScenario
 
 METRIC = "top-1 accuracy"
@@ -110,3 +110,53 @@ def write_baseline_record(path: Path, record: dict[str, Any]) -> None:
             f"{path} already exists; a recorded baseline is never overwritten. "
             "Record a re-run to a new, dated file instead."
         ) from None
+
+
+def load_baseline_record(path: Path) -> Report:
+    """Read a recorded baseline back into the combined `Report` it was written from.
+
+    This is what the week-7 comparison (#487) diffs the stretch run against:
+    the frozen, committed number, not a fresh re-run of the baseline model.
+    Refuses a record whose per-scenario results don't add up to its own
+    totals, so a hand-edited or truncated file can't be compared silently.
+    """
+    try:
+        record = json.loads(path.read_text(encoding="utf-8"))
+        results = [
+            ScenarioResult(
+                scenario_id=r["scenario_id"],
+                expected_top_task_id=r["expected_top_task_id"],
+                predicted_top_task_id=r["predicted_top_task_id"],
+                passed=r["passed"],
+                candidates=[CandidateScore(**c) for c in r["candidates"]],
+            )
+            for r in record["scenario_results"]
+        ]
+        combined = record["combined"]
+        report = Report(
+            model_name=record["model_name"],
+            total_scenarios=combined["total_scenarios"],
+            correct_top1=combined["correct_top1"],
+            top1_accuracy=combined["top1_accuracy"],
+            scenario_results=results,
+        )
+    except (OSError, json.JSONDecodeError, KeyError, TypeError) as e:
+        raise BaselineRecordError(f"{path} is not a readable baseline record: {e!r}") from e
+
+    for r in results:
+        if r.passed != (r.predicted_top_task_id == r.expected_top_task_id):
+            raise BaselineRecordError(
+                f"{path}: {r.scenario_id} is marked passed={r.passed} but predicted "
+                f"{r.predicted_top_task_id!r} vs expected {r.expected_top_task_id!r}"
+            )
+    if report.total_scenarios != len(results):
+        raise BaselineRecordError(
+            f"{path}: total_scenarios is {report.total_scenarios} but the record "
+            f"holds {len(results)} scenario results"
+        )
+    if report.correct_top1 != sum(r.passed for r in results):
+        raise BaselineRecordError(
+            f"{path}: correct_top1 is {report.correct_top1} but "
+            f"{sum(r.passed for r in results)} scenario results are marked passed"
+        )
+    return report

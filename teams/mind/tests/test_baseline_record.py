@@ -12,6 +12,7 @@ from mind.evaluation.baseline_record import (
     BaselineRecordError,
     Provenance,
     build_baseline_record,
+    load_baseline_record,
     write_baseline_record,
 )
 from mind.evaluation.dummy_model import DummyModel
@@ -149,3 +150,80 @@ def test_provenance_rejects_anything_that_is_not_a_commit_sha(bad):
         Provenance(model_commit=bad, persona_set_commit="b" * 40)
     with pytest.raises(BaselineRecordError, match="is not a git commit sha"):
         Provenance(model_commit="a" * 40, persona_set_commit=bad)
+
+
+# -- load_baseline_record --------------------------------------------------------
+
+
+def _write_real_record(path: Path):
+    """Record SkipBlockedNearestDeadlineModel on the real set (non-trivial scores,
+    passes and misses both present) and return the Report it was built from."""
+    scenarios = load_personas(REAL_PERSONAS_DIR)
+    combined = run(SkipBlockedNearestDeadlineModel(), scenarios)
+    write_baseline_record(
+        path,
+        build_baseline_record(
+            recorded_on=date(2026, 10, 4),
+            provenance=FAKE_PROVENANCE,
+            personas_path=Path("eval/personas"),
+            scenarios=scenarios,
+            combined=combined,
+            groups={},
+            roles=split_by_role(scenarios, combined),
+        ),
+    )
+    return combined
+
+
+def _tamper(path: Path, edit) -> None:
+    record = json.loads(path.read_text(encoding="utf-8"))
+    edit(record)
+    path.write_text(json.dumps(record), encoding="utf-8")
+
+
+def test_load_gives_back_exactly_the_report_that_was_recorded(tmp_path):
+    path = tmp_path / "baseline_score.json"
+    original = _write_real_record(path)
+
+    assert load_baseline_record(path) == original
+
+
+def test_load_rejects_a_record_whose_totals_do_not_match_its_scenarios(tmp_path):
+    path = tmp_path / "baseline_score.json"
+    _write_real_record(path)
+    _tamper(path, lambda r: r["combined"].update(correct_top1=r["combined"]["correct_top1"] + 1))
+
+    with pytest.raises(BaselineRecordError, match="correct_top1"):
+        load_baseline_record(path)
+
+
+def test_load_rejects_a_truncated_record(tmp_path):
+    path = tmp_path / "baseline_score.json"
+    _write_real_record(path)
+    _tamper(path, lambda r: r["scenario_results"].pop())
+
+    with pytest.raises(BaselineRecordError, match="total_scenarios"):
+        load_baseline_record(path)
+
+
+def test_load_rejects_a_scenario_whose_passed_flag_contradicts_its_prediction(tmp_path):
+    path = tmp_path / "baseline_score.json"
+    _write_real_record(path)
+
+    def flip_first_miss(record):
+        miss = next(r for r in record["scenario_results"] if not r["passed"])
+        miss["passed"] = True
+        record["combined"]["correct_top1"] += 1  # totals still add up
+
+    _tamper(path, flip_first_miss)
+
+    with pytest.raises(BaselineRecordError, match="marked passed=True"):
+        load_baseline_record(path)
+
+
+def test_load_rejects_a_file_that_is_not_a_baseline_record(tmp_path):
+    path = tmp_path / "baseline_score.json"
+    path.write_text(json.dumps({"combined": {}}), encoding="utf-8")
+
+    with pytest.raises(BaselineRecordError, match="not a readable baseline record"):
+        load_baseline_record(path)
