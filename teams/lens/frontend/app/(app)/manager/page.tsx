@@ -168,7 +168,7 @@ export default function ManagerDashboardPage() {
                   inProgressCount={project.inProgressCount}
                   blockedCount={project.blockedCount}
                   lastUpdatedAt={project.lastUpdatedAt}
-                  href={`/projects/${project.id}`}
+                  href={`/manager/projects/${project.id}`}
                 />
               ))}
             </Box>

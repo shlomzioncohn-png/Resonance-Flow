@@ -27,7 +27,7 @@ app:
 # Override BFF_SERVICE_URL to point at a different BFF without recompiling
 bff:
   service:
-    url: ${BFF_SERVICE_URL:http://bff-service:8080}
+    url: ${BFF_SERVICE_URL:http://localhost:8082}
   connect-timeout-ms: ${BFF_CONNECT_TIMEOUT_MS:2000}
   read-timeout-ms: ${BFF_READ_TIMEOUT_MS:10000}
   # BFF endpoint paths — change here if BFF renames a route, no code changes needed

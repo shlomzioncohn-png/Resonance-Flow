@@ -6,7 +6,7 @@ import { MockingProvider } from '@/components/layout/MockingProvider'
 import './globals.css'
 
 export const metadata: Metadata = {
-  title: 'LENS',
+  title: 'Resonance Flow',
   description: 'Resonance Flow LENS frontend',
 }
 
