@@ -83,7 +83,7 @@ class BridgeTaskEventDtoInboxContractTest {
      * Keys that Bridge sends but Inbox's StructuredTaskEventDto does not have.
      * These are excluded from the contract check above.
      */
-    private static final Set<String> BRIDGE_SPECIFIC_KEYS = Set.of("event_id");
+    private static final Set<String> BRIDGE_SPECIFIC_KEYS = Set.of("event_id", "tenant_id");
 
     /**
      * Mirrors {@code @ValidEnum(enumClass = SourceType.class, allowed =
