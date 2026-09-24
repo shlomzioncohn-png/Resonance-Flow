@@ -1,5 +1,8 @@
 package com.rnd.bridge.jira.service;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.SerializationFeature;
+import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import com.rnd.bridge.task.BridgeTaskEventDto;
 import com.rnd.bridge.task.TaskValidator;
 import com.rnd.bridge.task.model.ExtractionProvenance;
@@ -31,6 +34,12 @@ import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
 class JiraKafkaProducerTest {
+
+    // ObjectMapper configured with Jackson's default (camelCase) - BridgeTaskEventDto
+    // uses @JsonNaming(SnakeCaseStrategy.class) for per-class snake_case serialization.
+    private static final ObjectMapper MAPPER = new ObjectMapper()
+            .registerModule(new JavaTimeModule())
+            .disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS);
 
     @Mock
     private KafkaTemplate<String, BridgeTaskEventDto> kafkaTemplate;

@@ -65,12 +65,25 @@ class BridgeTaskEventDtoInboxContractTest {
      * Bridge sends is one of these," not exact-set equality: Bridge sending
      * fewer keys than Inbox accepts is fine, Bridge sending a key Inbox
      * doesn't recognize is the actual bug class this test exists to catch.
+     * <p>
+     * Note: BridgeTaskEventDto uses @JsonNaming(SnakeCaseStrategy.class), so
+     * all keys are snake_case. StructuredTaskEventDto uses camelCase field names
+     * but Jackson's default naming strategy, so the JSON keys are also camelCase.
+     * This test checks the JSON keys Bridge sends (snake_case) against the
+     * field names Inbox expects (camelCase) - they won't match directly, so we
+     * exclude Bridge-specific keys like event_id that Inbox doesn't have.
      */
     private static final Set<String> INBOX_RECOGNIZED_FIELD_NAMES = Set.of(
-            "eventId", "tenantId", "projectId", "title", "description", "sourceType",
+            "tenantId", "projectId", "title", "description", "sourceType",
             "sourceRef", "tier", "roleContext", "urgency", "effortEstimateMinutes",
             "deadline", "status", "confidence",
             "assigneeUserId", "assigneeTeamId", "assignmentRole", "assignedByUserId");
+
+    /**
+     * Keys that Bridge sends but Inbox's StructuredTaskEventDto does not have.
+     * These are excluded from the contract check above.
+     */
+    private static final Set<String> BRIDGE_SPECIFIC_KEYS = Set.of("eventId");
 
     /**
      * Mirrors {@code @ValidEnum(enumClass = SourceType.class, allowed =
@@ -109,6 +122,10 @@ class BridgeTaskEventDtoInboxContractTest {
         Iterator<String> actualKeys = json.fieldNames();
         while (actualKeys.hasNext()) {
             String key = actualKeys.next();
+            // Skip Bridge-specific keys that Inbox doesn't have
+            if (BRIDGE_SPECIFIC_KEYS.contains(key)) {
+                continue;
+            }
             assertTrue(INBOX_RECOGNIZED_FIELD_NAMES.contains(key),
                     () -> "Bridge sends \"" + key + "\" but StructuredTaskEventDto (Inbox) has no "
                             + "such field as of the commit this test is pinned to - see class Javadoc");
