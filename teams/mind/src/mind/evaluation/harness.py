@@ -9,32 +9,38 @@ contract identical to the system-wide boundary with Chain ("MIND scores, it does
 not decide").
 """
 
-from dataclasses import dataclass
-from typing import Any
+from pydantic import BaseModel, ConfigDict
 
 from mind.evaluation.interfaces import (
     PersonaEvaluationScenario,
     RankingModel,
     ScoreContext,
+    ScoreFactors,
 )
 from mind.evaluation.metrics import top1_accuracy
 
+# The report models are Pydantic, not dataclasses, so a report read back from
+# JSON (`Report.model_validate(...)`) is validated exactly like one built by
+# `run()`: unknown fields, NaN/inf and malformed factors fail on load.
+_REPORT_CONFIG = ConfigDict(extra="forbid", allow_inf_nan=False)
 
-@dataclass
-class CandidateScore:
+
+class CandidateScore(BaseModel):
     """One candidate task's score within a scenario."""
+
+    model_config = _REPORT_CONFIG
 
     task_id: str
     score: float
     reasoning: str | None = None
-    # `ScoreFactors.model_dump()`: a plain dict (so `dataclasses.asdict` + `json`
-    # can write it) and a fresh copy, not a reference to the model's own object.
-    factors: dict[str, Any] | None = None
+    # A deep copy of the model's `ScoreFactors`, not a reference to its object.
+    factors: ScoreFactors | None = None
 
 
-@dataclass
-class ScenarioResult:
+class ScenarioResult(BaseModel):
     """The outcome of running the model against a single scenario."""
+
+    model_config = _REPORT_CONFIG
 
     scenario_id: str
     expected_top_task_id: str  # the scenario's labelled correct answer
@@ -43,8 +49,7 @@ class ScenarioResult:
     candidates: list[CandidateScore]  # every candidate's score, not just the winner
 
 
-@dataclass
-class Report:
+class Report(BaseModel):
     """Aggregate result of one harness run.
 
     - `model_name`: the RankingModel implementation's class name.
@@ -55,11 +60,28 @@ class Report:
     - `scenario_results`: per-scenario detail, in input order.
     """
 
+    model_config = _REPORT_CONFIG
+
     model_name: str
     total_scenarios: int
     correct_top1: int
     top1_accuracy: float
     scenario_results: list[ScenarioResult]
+
+
+class EvaluationOutput(BaseModel):
+    """The whole of report.json: one combined report plus one per scenario group.
+
+    - `model_name`: the RankingModel implementation's class name.
+    - `combined`: the report over every loaded scenario.
+    - `groups`: one report per scenario group (e.g. `same_tier`, `cross_tier`).
+    """
+
+    model_config = _REPORT_CONFIG
+
+    model_name: str
+    combined: Report
+    groups: dict[str, Report]
 
 
 def run(model: RankingModel, scenarios: list[PersonaEvaluationScenario]) -> Report:
@@ -93,7 +115,9 @@ def run(model: RankingModel, scenarios: list[PersonaEvaluationScenario]) -> Repo
                         task_id=t.task_id,
                         score=r.score,
                         reasoning=r.reasoning,
-                        factors=r.factors.model_dump() if r.factors is not None else None,
+                        factors=(
+                            r.factors.model_copy(deep=True) if r.factors is not None else None
+                        ),
                     )
                     for t, r in scored
                 ],

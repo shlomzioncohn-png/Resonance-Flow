@@ -47,10 +47,18 @@ class RankingModel(Protocol):
   - `blocked`: whether the model applied a blocked adjustment to this score.
   - `base_score`: the score before that adjustment, when the model has one.
 
-  Written into `report.json` per candidate (as a plain dict), never used for
-  ranking; it's there so an explanation step can be built from the real inputs
-  to the score. `report.json` refuses NaN/inf anywhere — `run.py` fails rather
-  than write invalid JSON.
+  Carried per candidate into the report (a copy, not the model's object), never
+  used for ranking; it's there so an explanation step can be built from the
+  real inputs to the score.
+
+The report itself is Pydantic too, all in `harness.py`: `report.json` is an
+`EvaluationOutput` (`model_name`, `combined`, `groups`), each report a `Report`
+→ `ScenarioResult` → `CandidateScore`. So the file read back with
+`EvaluationOutput.model_validate_json(...)` is validated the same way as a report
+built by `run()`: unknown fields, NaN/inf and malformed factors fail on load.
+`run.py` also refuses to write NaN/inf to `report.json` rather than produce
+invalid JSON (it uses `json.dumps(..., allow_nan=False)`, not `model_dump_json()`,
+which would silently write NaN as `null`).
 
 `score()` still never sees `persona`, `free_time_minutes`, `constraints`, or the
 sibling tasks.
