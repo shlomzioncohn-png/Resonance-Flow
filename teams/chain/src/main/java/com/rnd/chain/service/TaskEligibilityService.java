@@ -307,6 +307,23 @@ public class TaskEligibilityService {
                 withCounters(task, task.getBlockingCount(), task.getOpenConstraintCount() + 1));
     }
 
+    /**
+     * Transitions {@code constraintId}'s status and, if this actually crosses the open/closed
+     * (PENDING) boundary, adjusts {@code taskId}'s {@code openConstraintCount} accordingly.
+     * Idempotent: the previous status comes from {@link ConstraintRepository#updateStatus}
+     * (Postgres itself), not a caller-supplied claim, so a redelivered event that repeats a
+     * transition already applied is a no-op instead of double-adjusting the counter.
+     *
+     * <p><b>Known gap (PR #468 review):</b> {@code constraintId} is not currently verified to
+     * belong to {@code taskId} - {@link ConstraintRepository#updateStatus} operates on
+     * {@code constraintId} alone. A caller passing a mismatched {@code taskId} can adjust the
+     * wrong task's counter, or mutate a constraint whose real owning task doesn't exist / is
+     * soft-deleted, with nothing here to catch it. Tracked as a follow-up.
+     *
+     * @throws NullPointerException if any argument is null
+     * @throws IllegalStateException if no constraint with this id exists (see
+     * {@link ConstraintRepository#updateStatus})
+     */
     @Transactional
     public void onConstraintStatusChanged(UUID taskId, String constraintId,
                                            Constraint.ConstraintStatus newStatus,

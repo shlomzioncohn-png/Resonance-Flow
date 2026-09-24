@@ -74,6 +74,39 @@ onConstraintStatusChanged.
   and keep only cycle detection + counters.
 
 ## Open items
+- PR #468 review (2026-09-23, leaRevivo) findings addressed 2026-09-24:
+  - Critical: `PostgresConstraintRepositoryTest`/`PostgresConstraintRepositoryConcurrencyTest`
+    were committed active with no exclusion, and `values-chain.yaml`'s `postgresql.enabled`
+    is still `false` - so CI's `mvn -B test` (same job as the Postgres port-forward step, which
+    is a no-op without that flag) had nothing on 5432 and would fail for the whole team on
+    every push to `teams/chain/**`, not just locally. Fixed with `@Disabled(...)` on both
+    classes. **Also found while fixing this** (not called out by the review, but the same root
+    cause): `ChainApplicationTests` and `ChainEventConsumerIntegrationTest` - two *pre-existing*
+    tests unrelated to Constraint - were *also* newly broken by this branch, because
+    `@SpringBootTest` boots the whole context, and Flyway migrates eagerly at startup once a
+    real Postgres `DataSource` + `flyway-core` are on the classpath, not lazily on first use.
+    Fixed at the root: `spring.flyway.enabled: false` by default (application.yml), with the two
+    Postgres-backed test classes opting back in individually via
+    `@TestPropertySource(properties = "spring.flyway.enabled=true")` - the same
+    per-test-class-override pattern `ChainEventConsumerIntegrationTest` already used for
+    `chain.kafka.consumed-topics`. Verified: `ChainApplicationTests`/
+    `ChainEventConsumerIntegrationTest` pass again; the two Postgres tests report `Skipped`, not
+    `Errors`. (The remaining local test failures, `ChainControllerTest`/`KafkaEventPublisherTest`,
+    are an unrelated Mockito/ByteBuddy-vs-JDK25 issue specific to a local JDK newer than the
+    project's Java 21 - confirmed CI itself runs `mvn -B test` inside a `maven:...-temurin-21`
+    Docker image, per `teams/chain/Dockerfile`, so this doesn't reproduce in CI at all.)
+  - Major: `onConstraintStatusChanged` never verifies `constraintId` actually belongs to
+    `taskId` - `ConstraintRepository#updateStatus` operates on `constraintId` alone, so a caller
+    passing a mismatched `taskId` could adjust the wrong task's counter, or mutate a constraint
+    whose real owning task doesn't exist/is soft-deleted, uncaught. **Not yet fixed** - two
+    options on the table: (a) `updateStatus` also returns the constraint's real `task_id` for the
+    caller to compare, or (b) `updateStatus` takes `taskId` too and checks it inside the SQL
+    itself (`WHERE constraint_id = ? AND task_id = ?`, throwing if zero rows match) - leaning
+    toward (b), atomic, no extra round trip. Documented as a known gap in
+    `onConstraintStatusChanged`'s Javadoc in the meantime.
+  - Minor (both fixed): a formatting slip in `TaskEligibilityServiceConcurrencyTest` (one of
+    three mechanically-updated constructor calls was indented to the wrong block), and
+    `onConstraintStatusChanged` was missing the Javadoc `onConstraintAdded` got.
 - RESOLVED (2026-09-22): openConstraintCount's counter-strategy question
   (recompute-via-query vs keep the +1/-1 delta pattern) - decided on a
   third option, neither of the original two. `ConstraintRepository.save`

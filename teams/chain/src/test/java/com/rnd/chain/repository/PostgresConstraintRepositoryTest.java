@@ -2,10 +2,12 @@ package com.rnd.chain.repository;
 
 import com.rnd.chain.dto.Constraint;
 
+import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.test.context.TestPropertySource;
 
 import java.time.LocalDateTime;
 import java.util.List;
@@ -23,8 +25,22 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
  * {@code task(id)}, which doesn't exist until issue #377 lands - so Flyway fails at context
  * startup today, and every test here fails with it. Written now, ready to run the moment #377's
  * migration creates the task table - see the migration file's own comment and #378's plan.
+ *
+ * <p>{@code @Disabled} on purpose (PR #468 review, Critical finding): CI's {@code mvn -B test}
+ * runs in the same job as the Postgres port-forward step, which only happens when
+ * {@code values-chain.yaml}'s {@code postgresql.enabled} is {@code true} - it isn't yet, so an
+ * active {@code @SpringBootTest} here fails the whole team's CI on every push to
+ * {@code teams/chain/**}, not just locally. Remove this annotation once #377 lands and a real
+ * Postgres is reachable in CI.
+ *
+ * <p>{@code spring.flyway.enabled} is off by default (see application.yml) precisely so a
+ * full-context test that isn't this one doesn't also need a live Postgres - this class opts
+ * back in via {@link TestPropertySource}, since it's exactly the one that needs Flyway to
+ * actually run.
  */
 @SpringBootTest
+@TestPropertySource(properties = "spring.flyway.enabled=true")
+@Disabled("blocked on #377 - task(id) table doesn't exist yet, and no Postgres is reachable in CI (values-chain.yaml postgresql.enabled is still false)")
 class PostgresConstraintRepositoryTest {
 
     @Autowired

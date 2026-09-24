@@ -145,8 +145,8 @@ class TaskEligibilityServiceConcurrencyTest {
                     List.of(buildTask(dependentId), buildTask(blockerId)));
             InMemoryTaskDependencyRepository dependencyRepository = new InMemoryTaskDependencyRepository(List.of());
             // Not exercised by this class - none of these tests touch constraint methods.
-        TaskEligibilityService service =
-                new TaskEligibilityService(taskRepository, dependencyRepository, mock(ConstraintRepository.class));
+            TaskEligibilityService service =
+                    new TaskEligibilityService(taskRepository, dependencyRepository, mock(ConstraintRepository.class));
 
             runConcurrently(List.of(
                     () -> service.addDependency(dependentId, blockerId),

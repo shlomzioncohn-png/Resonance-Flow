@@ -3,9 +3,11 @@ package com.rnd.chain.repository;
 import com.rnd.chain.dto.Constraint;
 import com.rnd.chain.testsupport.ConcurrentTestRunner;
 
+import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.test.context.TestPropertySource;
 
 import java.time.LocalDateTime;
 import java.util.Queue;
@@ -25,8 +27,15 @@ import static org.assertj.core.api.Assertions.assertThat;
  * this class verifies is that {@link ConstraintRepository} itself reports that DB-verified fact
  * correctly even when multiple threads race on the exact same {@code constraintId}, which a
  * single-threaded test can't exercise.
+ *
+ * <p>{@code @Disabled} for the same reason as {@link PostgresConstraintRepositoryTest} (PR #468
+ * review, Critical finding) - remove once #377 lands and a real Postgres is reachable in CI.
+ * {@code spring.flyway.enabled} is off by default (see application.yml); this class opts back
+ * in, same reasoning as {@link PostgresConstraintRepositoryTest}.
  */
 @SpringBootTest
+@TestPropertySource(properties = "spring.flyway.enabled=true")
+@Disabled("blocked on #377 - task(id) table doesn't exist yet, and no Postgres is reachable in CI (values-chain.yaml postgresql.enabled is still false)")
 class PostgresConstraintRepositoryConcurrencyTest {
 
     private static final int THREAD_COUNT = 16;

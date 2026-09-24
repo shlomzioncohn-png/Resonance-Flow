@@ -25,6 +25,16 @@ spring:
     url: jdbc:postgresql://${DB_HOST:localhost}:${DB_PORT:5432}/${DB_NAME:chain}
     username: ${DB_USER:chain_user}
     password: ${DB_PASSWORD:chain_password}
+  # Off by default (PR #468 review, Critical finding): Flyway migrates eagerly at context
+  # startup, not lazily on first DB use - so with this left enabled, EVERY @SpringBootTest
+  # (ChainApplicationTests, ChainEventConsumerIntegrationTest included, neither of which has
+  # anything to do with persistence) would require a live, reachable Postgres just to boot,
+  # which neither local dev nor CI (values-chain.yaml's postgresql.enabled is still false) has
+  # today. Postgres-backed tests opt in individually via
+  # @TestPropertySource(properties = "spring.flyway.enabled=true") - see
+  # PostgresConstraintRepositoryTest/PostgresConstraintRepositoryConcurrencyTest.
+  flyway:
+    enabled: false
 
 chain:
   kafka:
