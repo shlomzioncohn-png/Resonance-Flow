@@ -52,7 +52,7 @@ public class DependencyGraphService {
             blockingTasks = List.of();
         } else {
             List<UUID> blockerIds = edges.stream()
-                    .map(TaskDependency::getDependsOnTaskId)
+                    .map(TaskDependency::dependsOnTaskId)
                     .collect(Collectors.toList());
 
             blockingTasks =

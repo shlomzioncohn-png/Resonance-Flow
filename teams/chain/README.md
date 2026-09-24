@@ -26,8 +26,9 @@ no branch had an indexed `findByParentTaskId`. That branch also contributed `Tas
 `TaskEligibilityService.addDependency`/`removeDependency` already do (cycle detection,
 `blockingCount`) - reconciling the two (having `TaskEligibilityService` delegate raw edge
 validation/CRUD to `TaskDependencyService` and keep only cycle detection + counters) is still an
-open follow-up, not done as part of this merge. No real database is wired up yet; these
-repositories are in-memory only.
+open follow-up, not done as part of this merge. **Postgres-backed implementations now exist**
+(`Postgres*Repository` in `repository/`) alongside the in-memory ones - see "Dependency graph
+persistence" below.
 
 ## Stack
 
@@ -36,12 +37,15 @@ repositories are in-memory only.
 - Spring Kafka
 - Docker / Docker Compose
 
-The DB choice for the project has not been decided yet. An in-memory H2 database is configured
-as a placeholder purely so a `DataSource`/transaction manager exists for `@Transactional` -
-`Task`/`TaskDependency` are plain DTOs (not JPA entities) and are **not** persisted to H2; real
-data still lives in the in-memory `TaskRepository`/`TaskDependencyRepository` implementations,
-and the idempotency store described below is in-memory only. None of this state survives a
-restart. See [CLAUDE.md](CLAUDE.md) for the full rationale and open items.
+**PostgreSQL** is the chosen DB (issue #384) - own `chain` database and own `chain` DB user on the
+shared cluster/local Postgres instance (not the shared `postgres` superuser, not Inbox's
+`resonance_flow` database - see PR #417). Flyway owns the schema
+(`src/main/resources/db/migration/`); `Task`/`TaskDependency`/`DependencyHistoryEntry` stay plain
+DTOs, mapped to/from JPA entities entirely inside the `Postgres*Repository` adapters - no entity
+ever crosses a service boundary. `MockDataConfig`'s in-memory beans back off automatically
+(`@ConditionalOnMissingBean`) once a real `DataSource` is reachable. See
+[CLAUDE.md](CLAUDE.md) for prior rationale/open items. The idempotency store described below is
+still in-memory only, unaffected by this.
 
 Task identifiers are `java.util.UUID` for now, pending the Inbox team publishing its own task id
 type (`Task`/`TaskDependency` will switch to that type once it exists).
@@ -55,7 +59,10 @@ src/main/java/com/rnd/chain/
 ├── service/                # TaskTraversalService (traversal), TaskEligibilityService
 │                           # (dependency/constraint update flow), TaskDependencyService
 │                           # (edge validation/CRUD, issue #66)
-├── repository/             # TaskRepository / TaskDependencyRepository + in-memory impls
+├── repository/             # TaskRepository / TaskDependencyRepository / DependencyHistoryRepository
+│                           # / TransactionRunner + in-memory impls, Postgres*Repository /
+│                           # JpaTransactionRunner (real impls), entity/ (JPA entities), jpa/
+│                           # (Spring Data interfaces)
 ├── dto/                    # Task, TaskDependency, TaskStatus, Constraint, ApiError,
 │                           # TaskResponse, TaskTraceResponse, ProcessedEvent (idempotency
 │                           # claim record)
@@ -74,14 +81,20 @@ src/main/java/com/rnd/chain/
 │                           # DependencyNotFoundException/InvalidDependencyException (issue #66)
 └── config/                 # MockDataConfig - empty-seeded repository beans
 src/main/resources/application.yml
+src/main/resources/db/migration/  # Flyway migrations (V1 schema, V2 dependency_history)
 src/test/java/com/rnd/chain/
 ├── controller/ChainControllerTest.java
 ├── service/                # TaskTraversalServiceTest, TaskTraversalPerformanceTest,
-│                           # TaskEligibilityServiceTest, TaskEligibilityServiceConcurrencyTest
-│                           # (real threads, real in-memory repos, no mocks), TaskDependencyServiceTest
+│                           # TaskEligibilityServiceTest, TaskEligibilityServiceConcurrencyTest /
+│                           # TaskEligibilityServicePostgresConcurrencyTest (real threads, no
+│                           # mocks), TaskDependencyServiceTest / TaskDependencyServicePostgresIntegrationTest
 ├── repository/             # TaskRepositoryContractTest (shared contract, run against every
 │                           # implementation) + InMemoryTaskRepositoryTest,
-│                           # InMemoryTaskDependencyRepositoryTest
+│                           # InMemoryTaskDependencyRepositoryTest, InMemoryDependencyHistoryRepositoryTest,
+│                           # InMemoryTransactionRunnerTest, and the Postgres-backed equivalents
+│                           # (PostgresTaskRepositoryContractTest/Test, PostgresTaskDependencyRepositoryTest,
+│                           # PostgresDependencyHistoryRepositoryTest - need a real Postgres reachable, see
+│                           # "Tests" below)
 ├── dto/TaskTest.java, TaskDependencyTest.java
 ├── events/                 # ChainEventConsumerTest, ChainEventConsumerIntegrationTest
 │                           # (@EmbeddedKafka), EventEnvelopeTest, InMemoryProcessedEventStoreTest,
@@ -207,14 +220,23 @@ mvn test
 Kafka-related tests use `@EmbeddedKafka` (`spring-kafka-test`) - no external Kafka broker or
 Docker is needed to run the test suite.
 
+**A real Postgres reachable at `DB_HOST`/`DB_PORT`/`DB_NAME`/`DB_USER`/`DB_PASSWORD` (defaults:
+`localhost`/`5432`/`chain`/`chain`/`chain`) is now required for the full suite** - any
+`@SpringBootTest` (including `ChainApplicationTests`) fails context startup without one, since
+Flyway/Hibernate need a live connection. Bring one up via `docker compose up postgres` from the
+repo root (creates the `chain` database/user on first init - see
+`shared/database/init/create-chain-database.sh`), or point at any reachable Postgres instance.
+
 ## Dependency graph persistence (Issue #66)
 
 `TaskDependencyRepository` / `InMemoryTaskDependencyRepository` (in `repository/`) are a pure
 CRUD store for dependency edges (`taskId` depends on `dependsOnTaskId`): `findByTaskId`,
 `findByDependsOnTaskId`, `save`, `delete`. `save` is idempotent - saving the same edge twice does
 not create a duplicate row - and `delete` is a no-op if the edge doesn't exist. This layer does not
-validate task existence or reject self-dependencies; it is a thin storage abstraction, currently
-backed by an in-memory dual adjacency map (`ConcurrentHashMap`) until a real DB is chosen.
+validate task existence or reject self-dependencies; those are enforced at the DB level (FK +
+`chk_task_dependency_no_self_reference` CHECK, V1 migration) for `PostgresTaskDependencyRepository`,
+the real implementation backing this in production - `InMemoryTaskDependencyRepository` remains as
+`MockDataConfig`'s fallback when no `DataSource` is configured.
 
 `TaskDependencyService` (in `service/`) sits on top of it and enforces the business rules from
 issue #66:
@@ -243,11 +265,13 @@ Every dependency-graph change that actually creates or removes an edge is record
 REST/Kafka/Jackson dependency, so the same model applies regardless of how it's read later.
 
 `DependencyHistoryRepository` / `InMemoryDependencyHistoryRepository` persist it, following the same
-interface-plus-in-memory-implementation pattern as `TaskDependencyRepository`, pending a real DB.
-`TransactionRunner` / `InMemoryTransactionRunner` let a graph write and its history entry happen as
-one unit; the in-memory implementation is a global lock only, **not** real ACID rollback -
-`TaskDependencyService` performs its own compensating action (undoing the graph write) if the
-history write fails.
+interface-plus-in-memory-implementation pattern as `TaskDependencyRepository` -
+`PostgresDependencyHistoryRepository` is the real, Postgres-backed implementation (`dependency_history`
+table, V2 migration). `TransactionRunner` / `InMemoryTransactionRunner` let a graph write and its
+history entry happen as one unit; `JpaTransactionRunner` (backed by a real `PlatformTransactionManager`)
+gives this actual ACID rollback in production. `TaskDependencyService`'s own compensating action
+(undoing the graph write if the history write fails) is kept regardless - still correct, and now
+largely redundant with the real rollback rather than the sole safety net.
 
 ### API
 
@@ -278,9 +302,9 @@ double-click or client retry can hit a normal duplicate/not-found error.
 
 ### Persistence
 
-Same status as the dependency graph: in-memory, pending a real DB choice. `TransactionRunner` will
-be replaced by a `@Transactional`-based implementation once that happens, and the manual
-compensation in `TaskDependencyService` removed.
+Same status as the dependency graph: Postgres-backed in production (`PostgresDependencyHistoryRepository`
++ `JpaTransactionRunner`), in-memory only as `MockDataConfig`'s fallback. The manual compensating
+action in `TaskDependencyService` was **not** removed - see "Dependency graph persistence" above.
 
 ## Code review fixes (2026-09-10, PR #251)
 
