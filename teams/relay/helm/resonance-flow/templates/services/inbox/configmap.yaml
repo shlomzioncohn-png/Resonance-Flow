@@ -3,14 +3,7 @@
 {{- with $component.config }}
 {{- $cfg := .data }}
 ---
-apiVersion: v1
-kind: ConfigMap
-
-metadata:
-  name: {{ include "resonance-flow.fullname" $ }}-inbox-config
-  labels:
-    {{- include "resonance-flow.labels" $ | nindent 4 }}
-    app.kubernetes.io/component: inbox
+{{ include "resonance-flow.configMapHeader" (dict "root" $ "component" "inbox") }}
 
 data:
   config.yaml: |
@@ -27,22 +20,11 @@ data:
       flyway:
         baseline-on-migrate: true
       kafka:
-        bootstrap-servers: {{ printf "%s:%s" (include "resonance-flow.dependencyHostByName" (dict "root" $ "deps" $.Values.dependencies "name" "kafka")) (include "resonance-flow.dependencyPort" (dict "deps" $.Values.dependencies "name" "kafka")) | quote }}
-        security:
-          protocol: SASL_PLAINTEXT
-        properties:
-          sasl.mechanism: "PLAIN"
-          sasl.jaas.config: {{ include "resonance-flow.kafkaSaslJaasConfig" $ | quote }}
-          # Same wait-for-<dep> host/port helpers as postgresql/kafka above. Consumed by the
-          # producer's KafkaProtobufSerializer below (task.created/updated/completed - see #227
-          # and teams/relay/docs/kafka-producer-consumer-guide.md).
+        {{- include "resonance-flow.springKafkaBase" (dict "root" $) | nindent 8 }}
+          # Extends springKafkaBase's properties map. Consumed by the producer's
+          # KafkaProtobufSerializer below (see #227 and teams/relay/docs/kafka-producer-consumer-guide.md).
           schema.registry.url: {{ printf "http://%s:%s/apis/ccompat/v6" (include "resonance-flow.dependencyHostByName" (dict "root" $ "deps" $component.dependencies "name" "schema-registry")) (include "resonance-flow.dependencyPort" (dict "deps" $component.dependencies "name" "schema-registry")) | quote }}
-        consumer:
-          group-id: {{ $cfg.kafka.consumerGroupId | quote }}
-          auto-offset-reset: earliest
-          enable-auto-commit: false
-          key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
-          value-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+        {{- include "resonance-flow.springKafkaConsumerDefaults" (dict "groupId" $cfg.kafka.consumerGroupId) | nindent 8 }}
         producer:
           key-serializer: org.apache.kafka.common.serialization.StringSerializer
           value-serializer: io.confluent.kafka.serializers.protobuf.KafkaProtobufSerializer
