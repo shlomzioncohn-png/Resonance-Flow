@@ -292,9 +292,35 @@ class PersonaEvaluationScenario(BaseModel):
         return self
 
 
-# NaN/inf are rejected: `score` is already bounded to [0, 1], but factors are
-# free-scale, and a NaN would reach report.json as the non-standard JSON `NaN`.
-FactorValue = Annotated[float, Field(allow_inf_nan=False)]
+class ScoreFactors(BaseModel):
+    """The contributions behind one `ScoreResult.score`.
+
+    Deliberately generic: the contract is shared by every ranking model, so it
+    does not name any model's factors. Each model owns its own fixed factor
+    vocabulary (and the test that its keys stay inside it) in its own package.
+    NaN/inf are rejected here; `run.py` also refuses to write them to report.json.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True, allow_inf_nan=False)
+
+    contributions: dict[Annotated[str, Field(min_length=1)], float] = Field(
+        min_length=1,
+        description=(
+            "Named contributions that produced the score, keyed by factor name. Each "
+            "model owns its own factor vocabulary (a fixed set, enforced in that "
+            "model's package, not here); a model with one rule per tier may return "
+            "different keys per tier. Any finite value, negative allowed (e.g. an "
+            "explicit penalty). Not required to sum to `score`."
+        ),
+    )
+    blocked: bool = Field(
+        default=False,
+        description="True when the model applied a blocked adjustment to this score.",
+    )
+    base_score: float | None = Field(
+        default=None,
+        description="The score before any blocked adjustment, when the model has one.",
+    )
 
 
 class ScoreResult(BaseModel):
@@ -319,17 +345,13 @@ class ScoreResult(BaseModel):
             "scenario's expected_reason in later analysis, not by the harness."
         ),
     )
-    factors: dict[str, FactorValue] | None = Field(
+    factors: ScoreFactors | None = Field(
         default=None,
         description=(
-            "Optional breakdown of the signals behind `score`, keyed by factor name "
-            "(e.g. deadline proximity, blocked penalty, impact). Values are finite "
-            "floats on whatever scale the model uses internally; they are NOT "
-            "required to sum to `score`, since a model may combine them "
-            "non-additively. Copied into the harness report as-is, never used for "
-            "ranking. Exists so a later explanation step can be built from the "
-            "factors that actually produced the score, instead of "
-            "reverse-engineering the formula."
+            "Optional breakdown of what produced `score`; None means no breakdown. "
+            "Written into the harness report per candidate, never used for ranking. "
+            "Exists so a later explanation step can be built from the factors that "
+            "actually produced the score, instead of reverse-engineering the formula."
         ),
     )
 

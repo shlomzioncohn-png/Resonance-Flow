@@ -39,10 +39,18 @@ class RankingModel(Protocol):
   scored by its own rule, but results are calibrated onto one scale so tiers are
   comparable) and an optional `reasoning` string (kept in the report for later
   comparison against `expected_reason`, not used by the harness), plus optional
-  `factors` — a `{name: float}` breakdown of the signals behind the score
-  (finite values, any scale, not required to sum to `score`). Copied into
-  `report.json` per candidate, never used for ranking; it's there so an
-  explanation step can be built from the real inputs to the score.
+  `factors` (`ScoreFactors`, `None` = no breakdown) — what produced the score:
+  - `contributions`: `{name: float}`, at least one entry, finite values (negative
+    allowed), not required to sum to `score`. The contract names no factors:
+    each model owns its own fixed vocabulary, and the test that keeps its keys
+    inside it, in its own package.
+  - `blocked`: whether the model applied a blocked adjustment to this score.
+  - `base_score`: the score before that adjustment, when the model has one.
+
+  Written into `report.json` per candidate (as a plain dict), never used for
+  ranking; it's there so an explanation step can be built from the real inputs
+  to the score. `report.json` refuses NaN/inf anywhere — `run.py` fails rather
+  than write invalid JSON.
 
 `score()` still never sees `persona`, `free_time_minutes`, `constraints`, or the
 sibling tasks.

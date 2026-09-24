@@ -8,6 +8,7 @@ from mind.evaluation.interfaces import (
     PersonaEvaluationScenario,
     RankingModel,
     ScoreContext,
+    ScoreFactors,
     ScoreResult,
     Task,
 )
@@ -37,14 +38,50 @@ def test_score_result_factors_default_to_none():
 
 
 def test_score_result_accepts_factors():
-    result = ScoreResult(score=0.5, factors={"deadline_proximity": 0.8, "blocked_penalty": -0.3})
-    assert result.factors == {"deadline_proximity": 0.8, "blocked_penalty": -0.3}
+    factors = ScoreFactors(
+        contributions={"time_pressure": 0.47, "penalty": -0.1}, blocked=True, base_score=0.8
+    )
+    result = ScoreResult(score=0.2, factors=factors)
+    assert result.factors is not None
+    assert result.factors.contributions == {"time_pressure": 0.47, "penalty": -0.1}
+    assert result.factors.blocked is True
+    assert result.factors.base_score == 0.8
+
+
+def test_score_factors_defaults():
+    factors = ScoreFactors(contributions={"impact": 0.5})
+    assert factors.blocked is False
+    assert factors.base_score is None
 
 
 @pytest.mark.parametrize("bad", [float("nan"), float("inf"), float("-inf")])
-def test_score_result_rejects_non_finite_factors(bad):
+def test_score_factors_reject_non_finite_values(bad):
     with pytest.raises(ValidationError):
-        ScoreResult(score=0.5, factors={"deadline_proximity": bad})
+        ScoreFactors(contributions={"impact": bad})
+    with pytest.raises(ValidationError):
+        ScoreFactors(contributions={"impact": 0.5}, base_score=bad)
+
+
+def test_score_factors_reject_empty_contributions():
+    # "No breakdown" has exactly one spelling: ScoreResult.factors=None.
+    with pytest.raises(ValidationError):
+        ScoreFactors(contributions={})
+
+
+def test_score_factors_reject_empty_factor_name():
+    with pytest.raises(ValidationError):
+        ScoreFactors(contributions={"": 1.0})
+
+
+def test_score_factors_reject_unknown_field():
+    with pytest.raises(ValidationError, match="surprise"):
+        ScoreFactors.model_validate({"contributions": {"impact": 0.5}, "surprise": 1})
+
+
+def test_score_factors_are_frozen():
+    factors = ScoreFactors(contributions={"impact": 0.5})
+    with pytest.raises(ValidationError):
+        factors.blocked = True  # type: ignore[misc]
 
 
 def _scenario_kwargs(**overrides):

@@ -10,6 +10,7 @@ not decide").
 """
 
 from dataclasses import dataclass
+from typing import Any
 
 from mind.evaluation.interfaces import (
     PersonaEvaluationScenario,
@@ -26,7 +27,9 @@ class CandidateScore:
     task_id: str
     score: float
     reasoning: str | None = None
-    factors: dict[str, float] | None = None
+    # `ScoreFactors.model_dump()`: a plain dict (so `dataclasses.asdict` + `json`
+    # can write it) and a fresh copy, not a reference to the model's own object.
+    factors: dict[str, Any] | None = None
 
 
 @dataclass
@@ -67,8 +70,8 @@ def run(model: RankingModel, scenarios: list[PersonaEvaluationScenario]) -> Repo
     task, take the highest-scoring task as the model's prediction (ties break
     toward the first task in file order), and compare it to
     `expected_top_task_id`. The `Report` carries top-1 accuracy plus every
-    candidate's raw score (and reasoning/factors), so a later switch to a graded metric
-    (MRR/nDCG) needs no re-run.
+    candidate's raw score (and reasoning and factors), so a later switch to a
+    graded metric (MRR/nDCG) needs no re-run.
     """
     predictions: list[str] = []
     scenario_results: list[ScenarioResult] = []
@@ -90,7 +93,7 @@ def run(model: RankingModel, scenarios: list[PersonaEvaluationScenario]) -> Repo
                         task_id=t.task_id,
                         score=r.score,
                         reasoning=r.reasoning,
-                        factors=r.factors,
+                        factors=r.factors.model_dump() if r.factors is not None else None,
                     )
                     for t, r in scored
                 ],

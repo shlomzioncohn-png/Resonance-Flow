@@ -1,18 +1,28 @@
 from mind.evaluation.dummy_model import DummyModel
 from mind.evaluation.harness import Report, run
-from mind.evaluation.interfaces import ScoreContext, ScoreResult, Task
+from mind.evaluation.interfaces import ScoreContext, ScoreFactors, ScoreResult, Task
 from mind.evaluation.placeholder_scenarios import PLACEHOLDER_SCENARIOS
 
 
 class _ExplainingModel:
-    """Returns reasoning + factors derived from the task, to check the harness copies them."""
+    """Returns reasoning + factors derived from the task, to check the harness carries them.
+
+    Keeps every result it returns, so a test can check the report holds a copy.
+    """
+
+    def __init__(self) -> None:
+        self.results: dict[str, ScoreResult] = {}
 
     def score(self, task: Task, context: ScoreContext) -> ScoreResult:
-        return ScoreResult(
+        result = ScoreResult(
             score=0.5,
             reasoning=f"why {task.task_id}",
-            factors={"blocked_penalty": -1.0 if task.blocked else 0.0},
+            factors=ScoreFactors(
+                contributions={"impact": 0.25}, blocked=task.blocked, base_score=0.5
+            ),
         )
+        self.results[task.task_id] = result
+        return result
 
 
 def test_run_returns_valid_report():
@@ -38,7 +48,22 @@ def test_candidates_carry_the_models_reasoning_and_factors():
         for candidate, task in zip(result.candidates, scenario.tasks, strict=True):
             assert candidate.task_id == task.task_id
             assert candidate.reasoning == f"why {task.task_id}"
-            assert candidate.factors == {"blocked_penalty": -1.0 if task.blocked else 0.0}
+            assert candidate.factors == {
+                "contributions": {"impact": 0.25},
+                "blocked": task.blocked,
+                "base_score": 0.5,
+            }
+
+
+def test_candidate_factors_are_a_copy_not_the_models_object():
+    model = _ExplainingModel()
+    report = run(model, PLACEHOLDER_SCENARIOS[:1])
+
+    for candidate in report.scenario_results[0].candidates:
+        factors = model.results[candidate.task_id].factors
+        assert factors is not None
+        assert candidate.factors is not None
+        assert candidate.factors["contributions"] is not factors.contributions
 
 
 def test_candidate_factors_are_none_when_the_model_sets_none():

@@ -2,6 +2,7 @@ import argparse
 import dataclasses
 import json
 import sys
+from collections.abc import Mapping
 from pathlib import Path
 
 from mind.evaluation.baseline_models import (
@@ -21,6 +22,13 @@ def _summary_lines(label: str, report: Report) -> str:
         f"  Top-1 accuracy:      {report.top1_accuracy:.1%} "
         f"({report.correct_top1}/{report.total_scenarios})"
     )
+
+
+def _report_json(output: Mapping[str, object]) -> str:
+    """Serialize the report. A NaN/inf anywhere raises here instead of reaching
+    report.json as a bare `NaN` — which is not valid JSON (jq reads it as null,
+    JavaScript's JSON.parse throws)."""
+    return json.dumps(output, indent=4, allow_nan=False)
 
 
 def main() -> None:
@@ -101,12 +109,13 @@ def main() -> None:
         "groups": {name: dataclasses.asdict(r) for name, r in group_reports.items()},
     }
 
+    report_text = _report_json(output)
     print("--- Evaluation Report (full detail, also written to report.json) ---")
-    print(json.dumps(output, indent=4))
+    print(report_text)
     print("----------------------------------------------------------------------\n")
 
     with open("report.json", "w") as f:
-        json.dump(output, f, indent=4)
+        f.write(report_text)
 
     accuracy = combined_report.top1_accuracy
     if args.min_accuracy is not None and accuracy < args.min_accuracy:
