@@ -19,7 +19,7 @@ BASE_REF="${1:?usage: check-all-schemas.sh <git-ref>}"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(git -C "$SCRIPT_DIR" rev-parse --show-toplevel)"
-PROTO_DIR="${REPO_ROOT}/teams/relay/src/main/proto"
+PROTO_DIR="${REPO_ROOT}/shared/proto"
 
 # Schema list + compatibility level, read from BASE_REF (not this PR).
 source "${SCRIPT_DIR}/_load-schema-policy.sh"

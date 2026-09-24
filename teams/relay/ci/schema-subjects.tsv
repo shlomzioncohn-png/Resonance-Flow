@@ -3,7 +3,7 @@
 #
 # Format:
 #   # compatibility: <LEVEL>                          one directive line, default FULL
-#   <file-under-src/main/proto>\t<subject>            one per schema (tab-separated)
+#   <file-under-shared/proto>\t<subject>              one per schema (tab-separated)
 #   lines starting with # are otherwise ignored
 #
 # Single list for both stages:

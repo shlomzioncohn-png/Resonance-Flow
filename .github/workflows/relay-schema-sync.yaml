@@ -6,7 +6,7 @@ on:
   push:
     branches: ["main"]
     paths:
-      - "teams/relay/src/main/proto/**"
+      - "shared/proto/**"
       - "teams/relay/ci/**"
       - ".github/workflows/relay-schema-sync.yaml"
 
@@ -21,7 +21,7 @@ jobs:
       - name: Copy real schema + CI files into the hook chart
         run: |
           mkdir -p teams/relay/schema-sync-hook/files/schemas teams/relay/schema-sync-hook/files/ci
-          cp teams/relay/src/main/proto/*.proto teams/relay/schema-sync-hook/files/schemas/
+          cp shared/proto/*.proto teams/relay/schema-sync-hook/files/schemas/
           # only the two scripts the chart actually mounts — not seed-registry.sh /
           # check-all-schemas.sh, which are CI-only
           cp teams/relay/ci/check-schema-compatibility.sh teams/relay/ci/register-schema.sh teams/relay/schema-sync-hook/files/ci/
