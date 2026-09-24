@@ -79,9 +79,13 @@ components:
       periodSeconds: 5
       failureThreshold: 3
     env: {}
+    # A list set in values-<service>.yaml replaces this one wholesale (Helm merges
+    # maps, not lists) - repeat every entry there, don't just add yours.
     dependencies:
       - name: minio
         port: 9000
+      - name: postgresql
+        port: 5432
     # Mounted as config.yaml at /etc/resonance-flow/config/ - keys are what MIND reads.
     config:
       vector_store:
@@ -516,13 +520,43 @@ postgresql:
   auth:
     postgresPassword: postgres
     database: resonance_flow
+  # Pinned: the pgvector overlay below is built for PG 18 and must match its major.
+  image:
+    digest: "sha256:7d77a46bbf200709237318c27dec0eaeae2520e403dd18fdebde2be7a6b04993"  # PG 18.6, pgvector 0.8.6
   primary:
     persistence:
       enabled: false
+    # Bitnami's own vector.so crashes (SIGILL) building HNSW indexes on non-AVX-512 CPUs
+    # (#490); overlay the official portable build. Its version must match Bitnami's
+    # bundled vector--*.sql / .control (0.8.6), which stay in place.
+    initContainers:
+      - name: copy-pgvector
+        image: pgvector/pgvector:0.8.6-pg18-bookworm  # bookworm: same glibc as Bitnami's debian-12
+        command: ["cp", "/usr/lib/postgresql/18/lib/vector.so", "/pgvector/vector.so"]
+        securityContext:
+          runAsUser: 1001
+          runAsNonRoot: true
+          readOnlyRootFilesystem: true
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop: ["ALL"]
+        volumeMounts:
+          - name: pgvector
+            mountPath: /pgvector
+    extraVolumes:
+      - name: pgvector
+        emptyDir: {}
+    extraVolumeMounts:
+      - name: pgvector
+        mountPath: /opt/bitnami/postgresql/lib/vector.so
+        subPath: vector.so
+        readOnly: true
+    # HNSW index builds use maintenance_work_mem (64MB default) on top of
+    # shared_buffers (128MB) - 192Mi left no headroom and OOMKills instead of erroring.
     resources:
       requests:
         cpu: 100m
-        memory: 128Mi
+        memory: 256Mi
       limits:
-        cpu: 150m
-        memory: 192Mi
+        cpu: 250m
+        memory: 512Mi
