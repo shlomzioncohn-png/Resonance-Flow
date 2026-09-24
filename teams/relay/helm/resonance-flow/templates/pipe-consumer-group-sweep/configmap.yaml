@@ -1,10 +1,9 @@
 {{- if .Values.pipeConsumerGroupSweep.enabled }}
-{{- $sweepName := printf "%s-pipe-consumer-group-sweep" (include "resonance-flow.fullname" $ | trunc 25 | trimSuffix "-") }}
 apiVersion: v1
 kind: ConfigMap
 
 metadata:
-  name: {{ $sweepName }}
+  name: {{ include "resonance-flow.fullname" $ }}-pipe-consumer-group-sweep
   labels:
     {{- include "resonance-flow.labels" $ | nindent 4 }}
     app.kubernetes.io/component: pipe-consumer-group-sweep
