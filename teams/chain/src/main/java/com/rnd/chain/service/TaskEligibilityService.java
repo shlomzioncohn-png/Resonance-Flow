@@ -21,8 +21,10 @@ import com.rnd.chain.dto.TaskEligibilityResponse;
 
 import java.util.ArrayDeque;
 import java.util.Deque;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
@@ -30,6 +32,20 @@ import java.util.UUID;
 import java.util.function.UnaryOperator;
 import java.util.concurrent.atomic.AtomicReference;
 
+/**
+ * See CLAUDE.md "Open items" for the locking rationale: dependencyGraphLock guards the
+ * dependency edges plus any DONE-status read that decides whether an edge currently counts
+ * against blockingCount. Per-task field mutations (blockingCount, openConstraintCount, status,
+ * isReady) no longer need a hand-rolled per-task lock - {@link TaskRepository#update} already
+ * performs an atomic per-id read-modify-write, so a single Task's fields can never be lost to a
+ * race the way a separate findById/mutate/save pair could. dependencyGraphLock is still required
+ * for decisions that span more than one Task/edge at once (cycle detection, and reading a
+ * dependency's DONE status together with creating/removing the edge to it).
+ *
+ * <p>{@code @Transactional} on the methods below now provides real atomicity and rollback -
+ * {@link #onTaskStatusChanged} holds a row lock on the changed task and every one of its
+ * dependents simultaneously until it returns, so they all commit or roll back together.
+ */
 @Service
 public class TaskEligibilityService {
 
@@ -356,16 +372,21 @@ public class TaskEligibilityService {
                 taskDependencyRepository
                         .findByDependsOnTaskId(taskId);
 
-        for (TaskDependency dependent : dependents) {
+        List<UUID> dependentIds = dependents.stream().map(TaskDependency::taskId).toList();
 
-            updateCounters(
-                    dependent.taskId(),
-                    task -> withCounters(
-                            task,
-                            Math.max(
-                                    0,
-                                    task.getBlockingCount() + delta),
-                            task.getOpenConstraintCount()));
+        Map<UUID, Boolean> previousReadiness = new HashMap<>();
+        List<Task> updated = taskRepository.updateAll(dependentIds, task -> {
+            previousReadiness.put(task.getId(), task.isReady());
+            return withCounters(
+                    task,
+                    Math.max(0, task.getBlockingCount() + delta),
+                    task.getOpenConstraintCount());
+        });
+
+        for (Task task : updated) {
+            if (previousReadiness.get(task.getId()) != task.isReady()) {
+                schedulingUpdateService.publishSchedulingUpdate(task);
+            }
         }
     }
 
