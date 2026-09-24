@@ -64,45 +64,22 @@ data:
     else
       export PGPASSWORD="$POSTGRES_PASSWORD"
     fi
-    psql -v ON_ERROR_STOP=1 --username postgres <<-EOSQL
-      CREATE USER {{ $datasource.username }} WITH PASSWORD '${CHAIN_DB_PASSWORD}';
-      CREATE DATABASE {{ $datasource.database }} OWNER {{ $datasource.username }};
+    # Mounted from the optional chain-db-credentials Secret (values.yaml's
+    # postgresql.primary.extraVolumes). No exit here: Bitnami sources non-executable
+    # init scripts, so exit would abort its whole init.
+    CHAIN_DB_PASSWORD_FILE=/etc/resonance-flow/secrets/chain-db/password
+    if [ -s "$CHAIN_DB_PASSWORD_FILE" ]; then
+      # :'chain_pw' makes psql quote it as a literal - never spliced into the SQL text.
+      psql -v ON_ERROR_STOP=1 -v chain_pw="$(cat "$CHAIN_DB_PASSWORD_FILE")" --username postgres <<-'EOSQL'
+        CREATE USER {{ $datasource.username }} WITH PASSWORD :'chain_pw';
+        CREATE DATABASE {{ $datasource.database }} OWNER {{ $datasource.username }};
     EOSQL
+    else
+      echo "chain-db-credentials not provided - skipping Chain's database" >&2
+    fi
 
----
-apiVersion: v1
-kind: Secret
-
-metadata:
-  name: {{ include "resonance-flow.fullname" $ }}-chain-db-credentials
-  # Both annotations are unconditional - they must apply even when
-  # createDbPassword is false below, otherwise this Secret would be pruned the
-  # moment a sync/reinstall runs with the flag off, taking the live password
-  # with it. resource-policy:keep covers plain `helm upgrade --install` (e.g.
-  # setup-service-infra's kind-cluster deploy); ArgoCD does NOT honor that
-  # annotation for its own pruning (argoproj/argo-cd#17819/#11227, still open
-  # upstream), so Prune=false/Delete=false is required separately for the
-  # ArgoCD path.
-  annotations:
-    helm.sh/resource-policy: keep
-    argocd.argoproj.io/sync-options: Prune=false,Delete=false
-  labels:
-    {{- include "resonance-flow.labels" $ | nindent 4 }}
-    app.kubernetes.io/component: chain
-
-# lookup can't tell an existing password from a first install under ArgoCD (it
-# renders via `helm template`, never against the live cluster) - so instead of
-# generating on every render, components.chain.createDbPassword gates
-# randAlphaNum: true only for a genuinely fresh install (every CI kind cluster
-# is one), flipped to false in values once a real cluster has bootstrapped so
-# later syncs stop rendering a new password at all. The Application's
-# ignoreDifferences + RespectIgnoreDifferences=true on this Secret's
-# data.password (see argocd/apps/resonance-flow.yaml) still matters even with
-# the flag off, since omitting the key here is itself a diff from the live
-# Secret's existing data.password.
-type: Opaque
-data:
-  {{- if $component.createDbPassword }}
-  password: {{ randAlphaNum 24 | b64enc }}
-  {{- end }}
+# Helm never creates or touches chain-db-credentials' data - it can't tell a
+# live password from none under an offline render, so writing here risks
+# overwriting or deleting the real value. Provided externally; referenced by
+# name only, here and in values.yaml's postgresql.primary.extraVolumes.
 {{- end }}

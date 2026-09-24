@@ -17,27 +17,14 @@ spec:
   destination:
     server: https://kubernetes.default.svc
     namespace: resonance-flow
-  # helm template has no live cluster to check against, so Chain's DB credentials
-  # Secret re-renders a fresh random password every sync. Paired with
-  # RespectIgnoreDifferences=true below (this alone only silences selfHeal,
-  # it doesn't stop a real sync from re-applying the rendered password).
-  ignoreDifferences:
-    - group: ""
-      kind: Secret
-      name: resonance-flow-chain-db-credentials
-      namespace: resonance-flow
-      jsonPointers:
-        - /data/password
+  # Chain's DB credentials Secret isn't rendered by this chart - it's created
+  # externally, so there's nothing here for ArgoCD to diff or prune.
   syncPolicy:
     automated:
       prune: true
       selfHeal: true
     syncOptions:
       - CreateNamespace=true
-      # ignoreDifferences above only stops selfHeal from firing on password
-      # drift - without this, any sync for an unrelated reason still applies
-      # the freshly re-rendered manifest and overwrites the live password.
-      - RespectIgnoreDifferences=true
     retry:
       limit: 5
       backoff:
