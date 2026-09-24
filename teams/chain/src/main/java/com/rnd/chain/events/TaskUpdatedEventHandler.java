@@ -3,7 +3,6 @@ package com.rnd.chain.events;
 import com.google.protobuf.Timestamp;
 import com.rnd.chain.dto.Task;
 import com.rnd.chain.dto.TaskStatus;
-import com.rnd.chain.repository.TaskRepository;
 import com.rnd.chain.service.TaskEligibilityService;
 import com.rnd.inbox.event.TaskUpdatedEvent;
 import org.springframework.kafka.annotation.KafkaListener;
@@ -18,7 +17,7 @@ import java.time.ZoneOffset;
 import java.util.UUID;
 
 /**
- * Consumes task.updated (Inbox, Protobuf) to feed {@link TaskEligibilityService#onTaskStatusChanged}.
+ * Consumes task.updated (Inbox, Protobuf) to feed {@link TaskEligibilityService#onTaskStatusChangedIfNewer}.
  *
  * Idempotency - state-based, last-write-wins (confirmed by the team lead): task.updated carries
  * no event id in its body, so there is no claim table to dedupe against here (contrast with
@@ -28,6 +27,13 @@ import java.util.UUID;
  * Nothing in the current codebase ever set Task.updatedAt before this handler existed (verified:
  * every TaskEligibilityService mutator preserves it unchanged via copyOf), so repurposing it as
  * "the updated_at last received from Inbox" doesn't collide with any other writer.
+ *
+ * Atomicity (PR #467 review): the staleness check, the status write, and the {@code updatedAt}
+ * stamp all happen inside {@link TaskEligibilityService#onTaskStatusChangedIfNewer}'s single
+ * {@code dependencyGraphLock} critical section - not three separate calls from here - so a
+ * redelivered/out-of-order event racing a newer one for the same task can't interleave between
+ * them. See that method's Javadoc for how this is meant to carry over once persistence is a real
+ * transactional store.
  *
  * OPEN DISCREPANCY (see the implementation plan, section 7): task-created-event.proto's header
  * comment states Inbox's standing convention is that every event carries an event_id as a Kafka
@@ -42,14 +48,11 @@ import java.util.UUID;
 @Component
 public class TaskUpdatedEventHandler {
 
-    private final TaskRepository taskRepository;
     private final TaskEligibilityService taskEligibilityService;
     private final ChainEventProcessingTemplate template;
 
-    public TaskUpdatedEventHandler(TaskRepository taskRepository,
-                                    TaskEligibilityService taskEligibilityService,
+    public TaskUpdatedEventHandler(TaskEligibilityService taskEligibilityService,
                                     ChainEventProcessingTemplate template) {
-        this.taskRepository = taskRepository;
         this.taskEligibilityService = taskEligibilityService;
         this.template = template;
     }
@@ -75,37 +78,18 @@ public class TaskUpdatedEventHandler {
     }
 
     private void apply(UUID taskId, TaskStatus newStatus, LocalDateTime eventUpdatedAt) {
-        Task current = taskRepository.findById(taskId).orElse(null);
-        if (current != null && current.getUpdatedAt() != null && !eventUpdatedAt.isAfter(current.getUpdatedAt())) {
-            return; // stale or duplicate snapshot - already applied (or superseded), no-op
-        }
-
         try {
-            taskEligibilityService.onTaskStatusChanged(taskId, newStatus);
+            taskEligibilityService.onTaskStatusChangedIfNewer(taskId, newStatus, eventUpdatedAt);
         } catch (IllegalArgumentException e) {
             throw new ReferencedTaskNotFoundException(
                     "task.updated referenced a task Chain hasn't seen yet: " + taskId, e);
+        } catch (RuntimeException e) {
+            // Same reasoning as TaskCreatedEventHandler#persist: an unexpected failure here (e.g.
+            // a bug in the repository) must not fall outside @RetryableTopic's allow-list, or it
+            // skips retry entirely and lands straight on .errors looking like nothing happened.
+            throw new ChainTransientProcessingException(
+                    "Failed to apply task.updated for task " + taskId, e);
         }
-
-        // onTaskStatusChanged preserves updatedAt (see TaskEligibilityService.copyOf) - stamp the
-        // event's own updated_at afterwards so the next redelivery/older event can be compared
-        // against it. A second, separate atomic update() call: not perfectly one transaction with
-        // the status change, but each call is individually atomic per-id, and nothing else in the
-        // codebase currently writes updatedAt, so there's no real contention window here.
-        taskRepository.update(taskId, task -> Task.builder()
-                .id(task.getId())
-                .parentTaskId(task.getParentTaskId())
-                .ownerId(task.getOwnerId())
-                .status(task.getStatus())
-                .isReady(task.isReady())
-                .blockingCount(task.getBlockingCount())
-                .openConstraintCount(task.getOpenConstraintCount())
-                .estimatedDurationMin(task.getEstimatedDurationMin())
-                .score(task.getScore())
-                .createdAt(task.getCreatedAt())
-                .updatedAt(eventUpdatedAt)
-                .deletedAt(task.getDeletedAt())
-                .build());
     }
 
     private static UUID parseUuid(String raw, String fieldName) {

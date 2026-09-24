@@ -11,6 +11,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.LocalDateTime;
 import java.util.ArrayDeque;
 import java.util.Deque;
 import java.util.HashSet;
@@ -239,6 +240,47 @@ public class TaskEligibilityService {
                 return copyOf(task).status(newStatus).build();
             }), taskId);
             TaskStatus previousStatus = previous[0].getStatus();
+
+            if (previousStatus != TaskStatus.DONE && newStatus == TaskStatus.DONE) {
+                adjustDependentsBlockingCount(taskId, -1);
+            } else if (previousStatus == TaskStatus.DONE && newStatus != TaskStatus.DONE) {
+                adjustDependentsBlockingCount(taskId, +1);
+            }
+        }
+    }
+
+    /**
+     * Same status-change effect as {@link #onTaskStatusChanged}, but for a producer (task.updated)
+     * whose events carry no id of their own and must instead be ordered by an {@code updatedAt}
+     * timestamp on the event itself - staleness check, status write, and the {@code updatedAt}
+     * stamp all happen inside one {@code dependencyGraphLock} critical section, so a redelivered/
+     * out-of-order event racing a newer one for the same task can't interleave between them
+     * (PR #467 review: the previous two-call version - read-and-compare, then a separate
+     * {@code updatedAt}-stamping {@link TaskRepository#update} - had exactly that window). Once
+     * persistence is a real transactional store, this critical section is what becomes
+     * "{@code SELECT ... FOR UPDATE}, compare, single combined {@code UPDATE}, commit" -
+     * {@code dependencyGraphLock} already stands in for the row lock.
+     *
+     * @throws IllegalArgumentException if no task with {@code taskId} exists
+     */
+    @Transactional
+    public void onTaskStatusChangedIfNewer(UUID taskId, TaskStatus newStatus, LocalDateTime eventUpdatedAt) {
+        Objects.requireNonNull(taskId, "taskId must not be null");
+        Objects.requireNonNull(newStatus, "newStatus must not be null");
+        Objects.requireNonNull(eventUpdatedAt, "eventUpdatedAt must not be null");
+
+        synchronized (dependencyGraphLock) {
+            Task current = requireTask(taskId);
+            if (current.getUpdatedAt() != null && !eventUpdatedAt.isAfter(current.getUpdatedAt())) {
+                log.debug("Task {} status update ignored: event updatedAt {} is not newer than stored {}",
+                        taskId, eventUpdatedAt, current.getUpdatedAt());
+                return; // stale or duplicate snapshot - already applied (or superseded), no-op
+            }
+
+            log.info("Task {} status changed to {}", taskId, newStatus);
+            TaskStatus previousStatus = current.getStatus();
+            requireUpdated(taskRepository.update(taskId, task ->
+                    copyOf(task).status(newStatus).updatedAt(eventUpdatedAt).build()), taskId);
 
             if (previousStatus != TaskStatus.DONE && newStatus == TaskStatus.DONE) {
                 adjustDependentsBlockingCount(taskId, -1);

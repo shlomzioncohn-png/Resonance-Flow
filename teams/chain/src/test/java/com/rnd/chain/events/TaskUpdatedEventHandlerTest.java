@@ -48,7 +48,7 @@ class TaskUpdatedEventHandlerTest {
         InMemoryTaskDependencyRepository dependencyRepo = new InMemoryTaskDependencyRepository(edges);
         TaskEligibilityService eligibilityService = new TaskEligibilityService(taskRepo, dependencyRepo);
         ChainEventProcessingTemplate template = new ChainEventProcessingTemplate(new InMemoryProcessedEventStore());
-        return new Fixture(taskRepo, new TaskUpdatedEventHandler(taskRepo, eligibilityService, template));
+        return new Fixture(taskRepo, new TaskUpdatedEventHandler(eligibilityService, template));
     }
 
     @Test
