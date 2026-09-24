@@ -4,11 +4,11 @@ on:
   push:
     branches: [ "main", "relay-team" ]
     paths:
-      - "teams/relay/notification_delivery/main/java/pipe/**"
+      - "teams/relay/notification_delivery/**"
   pull_request:
     branches: [ "main", "relay-team" ]
     paths:
-      - "teams/relay/notification_delivery/main/java/pipe/**"
+      - "teams/relay/notification_delivery/**"
   workflow_dispatch: {}
 
 jobs:
@@ -34,3 +34,4 @@ jobs:
       service_dir: teams/relay/notification_delivery
       language: java
       container_port: 8082
+      extra_build_contexts: shared=shared

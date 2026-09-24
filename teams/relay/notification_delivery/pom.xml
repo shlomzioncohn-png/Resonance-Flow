@@ -21,6 +21,7 @@
         <java.version>21</java.version>
         <protobuf.version>3.25.3</protobuf.version>
         <confluent.version>7.1.15</confluent.version>
+        <proto.root>${project.basedir}/../../../shared/proto</proto.root>
     </properties>
 
     <repositories>
@@ -145,7 +146,7 @@
                 <version>0.6.1</version>
                 <configuration>
                     <protocArtifact>com.google.protobuf:protoc:${protobuf.version}:exe:${os.detected.classifier}</protocArtifact>
-                    <protoSourceRoot>${project.basedir}/../../../shared/proto</protoSourceRoot>
+                    <protoSourceRoot>${proto.root}</protoSourceRoot>
                     <!-- Only these two are actually used by relay's own Java code (com.rnd.relay.event
                          package) - the rest (task-created/-updated/-completed/-creation-requested-event,
                          github-task, raw-object-event) belong to com.rnd.inbox.event and exist here purely

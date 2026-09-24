@@ -1,6 +1,9 @@
 services:
   relay:
-    build: .
+    build:
+      context: .
+      additional_contexts:
+        shared: ../../../shared
     container_name: relay-service
     ports:
       - "${SERVER_PORT:-8082}:8082"
