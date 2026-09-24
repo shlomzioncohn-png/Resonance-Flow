@@ -22,7 +22,7 @@ spring:
       value-deserializer: org.springframework.kafka.support.serializer.ErrorHandlingDeserializer
       properties:
         spring.deserializer.value.delegate.class: io.confluent.kafka.serializers.protobuf.KafkaProtobufDeserializer
-        specific.protobuf.value.type: com.rnd.relay.event.TaskEvent
+        specific.protobuf.value.type: com.rnd.relay.event.TaskNotification
 
 management:
   endpoints:
@@ -32,7 +32,6 @@ management:
 
 relay:
   kafka:
-    task-event-topic: task-event
     task-events-notification-topic: resonance.task-events-notifications
     task-notification-topic: resonance.task-notifications
 

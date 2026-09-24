@@ -21,9 +21,8 @@ import org.springframework.kafka.support.serializer.ErrorHandlingDeserializer;
 import java.util.HashMap;
 import java.util.Map;
 
-// application.yml's spring.kafka.consumer.* properties already pin the auto-configured listener
-// factory's protobuf type to TaskEvent, so TaskNotification needs its own factory rather than
-// sharing it.
+// Explicit TaskNotification factories (rather than the auto-configured ones) so the listener
+// factory can attach Micrometer metrics and the replay consumer can run without a group id.
 @Configuration
 public class NotificationKafkaConfig {
 
