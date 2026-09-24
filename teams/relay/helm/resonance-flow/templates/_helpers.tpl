@@ -24,6 +24,17 @@ If release name contains chart name it will be used as a full name.
 {{- end }}
 
 {{/*
+Name for the pipe-consumer-group-sweep CronJob and its ConfigMap. CronJob
+names are capped at 52 chars, not the usual 63 (a Job name it spawns gets an
+11-char timestamp suffix appended, and Job names are capped at 63) - trunc 63
+via resonance-flow.fullname isn't enough on its own, e.g. lens-gateway and
+lens-frontend overflow 52 while lens-bff, being shorter, happens not to.
+*/}}
+{{- define "resonance-flow.pipeConsumerGroupSweepFullname" -}}
+{{- printf "%s-pipe-consumer-group-sweep" (include "resonance-flow.fullname" .) | trunc 52 | trimSuffix "-" }}
+{{- end }}
+
+{{/*
 Create chart name and version as used by the chart label.
 */}}
 {{- define "resonance-flow.chart" -}}
