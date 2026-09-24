@@ -42,7 +42,7 @@ import java.util.UUID;
  * {@code CLAUDE.md} §6). {@link Task#organizationId()} is deliberately NOT
  * renamed to match - see {@code CLAUDE.md} §4/§6 for why.
  */
-@JsonNaming(PropertyNamingStrategies.SnakeCase.class)
+@JsonNaming(PropertyNamingStrategies.SnakeCaseStrategy.class)
 public record BridgeTaskEventDto(
         String eventId,
         String tenantId,
