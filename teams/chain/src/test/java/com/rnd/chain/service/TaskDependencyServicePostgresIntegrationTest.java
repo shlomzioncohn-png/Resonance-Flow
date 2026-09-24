@@ -44,10 +44,14 @@ class TaskDependencyServicePostgresIntegrationTest {
     @Autowired
     private Clock clock;
 
+    @Autowired
+    private TaskEligibilityService taskEligibilityService;
+
     @Test
     void addDependencyThenRemoveDependency_recordHistoryInTheSameTransaction() {
         TaskDependencyService service = new TaskDependencyService(
-                taskRepository, taskDependencyRepository, historyRepository, transactionRunner, clock);
+                taskRepository, taskDependencyRepository, historyRepository, transactionRunner, clock,
+                taskEligibilityService);
         Task a = taskRepository.save(newTask(UUID.randomUUID()));
         Task b = taskRepository.save(newTask(UUID.randomUUID()));
 
@@ -70,7 +74,8 @@ class TaskDependencyServicePostgresIntegrationTest {
         // (duplicate), it's the speculative history entry that gets compensated (deleted), not
         // the edge - proven here against the real Postgres-backed repositories, no mocks needed.
         TaskDependencyService service = new TaskDependencyService(
-                taskRepository, taskDependencyRepository, historyRepository, transactionRunner, clock);
+                taskRepository, taskDependencyRepository, historyRepository, transactionRunner, clock,
+                taskEligibilityService);
         Task a = taskRepository.save(newTask(UUID.randomUUID()));
         Task b = taskRepository.save(newTask(UUID.randomUUID()));
         service.addDependency(a.getId(), b.getId());
