@@ -521,8 +521,9 @@ postgresql:
     postgresPassword: postgres
     database: resonance_flow
   # Pinned: the pgvector overlay below is built for PG 18 and must match its major.
+  # From bitnami/postgresql:latest, built 2026-09-20 (PG 18.6, pgvector 0.8.6).
   image:
-    digest: "sha256:7d77a46bbf200709237318c27dec0eaeae2520e403dd18fdebde2be7a6b04993"  # PG 18.6, pgvector 0.8.6
+    digest: "sha256:7d77a46bbf200709237318c27dec0eaeae2520e403dd18fdebde2be7a6b04993"
   primary:
     persistence:
       enabled: false
@@ -531,7 +532,8 @@ postgresql:
     # bundled vector--*.sql / .control (0.8.6), which stay in place.
     initContainers:
       - name: copy-pgvector
-        image: pgvector/pgvector:0.8.6-pg18-bookworm  # bookworm: same glibc as Bitnami's debian-12
+        # vector.so needs only GLIBC_2.14; Bitnami's image (Photon OS 5) has 2.43.
+        image: pgvector/pgvector:0.8.6-pg18-bookworm@sha256:2ba9ca5f2e7daa0f0e7723cba1ee9167bab54efd3640516a44ac1a928dd67e7a
         command: ["cp", "/usr/lib/postgresql/18/lib/vector.so", "/pgvector/vector.so"]
         securityContext:
           runAsUser: 1001
