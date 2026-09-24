@@ -5,10 +5,12 @@ on:
     branches: [ "main", "relay-team" ]
     paths:
       - "teams/relay/notification_delivery/**"
+      - "shared/proto/task-notification.proto"
   pull_request:
     branches: [ "main", "relay-team" ]
     paths:
       - "teams/relay/notification_delivery/**"
+      - "shared/proto/task-notification.proto"
   workflow_dispatch: {}
 
 jobs:
