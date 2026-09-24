@@ -75,7 +75,7 @@ echo "==> Fetching chart dependencies"
 helm dependency build "$CHART_DIR"
 
 echo "==> Deploying lens-bff + inbox + chain (+ postgres/schema-registry/kafka) with local images"
-helm upgrade --install lens-bff-verify "$CHART_DIR" \
+helm upgrade --install resonance-flow "$CHART_DIR" \
   -f "$CHART_VALUES" \
   -f "$CHART_DIR/values/values-lens-bff.yaml" \
   --set components.lens-bff.image.repository=lens-bff \
