@@ -9,8 +9,8 @@ accuracy number already published against the old content.
 
 `compute_personas_checksum` hashes the combined content of every scenario file
 (not `scenario.schema.json` — that's a generated artifact, not part of the
-approved set). `tests/test_personas_checksum.py` asserts the result against a
-checksum recorded in code, the same way `tests/test_schema_snapshot.py` pins
+approved set). `tests/test_personas_checksum.py` asserts the result against the
+checksum recorded in `eval/personas/personas.sha256`, the same way `tests/test_schema_snapshot.py` pins
 `scenario.schema.json` against the models it's generated from. When the set
 legitimately changes, recompute and update the stored checksum in the same PR
 that changes the scenarios — a diff a reviewer will see.
@@ -23,9 +23,8 @@ import hashlib
 import sys
 from pathlib import Path
 
-from mind.evaluation.personas import SCHEMA_FILENAME
+from mind.evaluation.personas import PERSONAS_DIR, SCHEMA_FILENAME
 
-PERSONAS_DIR = Path(__file__).resolve().parents[3] / "eval" / "personas"
 CHECKSUM_PATH = PERSONAS_DIR / "personas.sha256"
 
 
@@ -38,13 +37,8 @@ def compute_personas_checksum(personas_dir: str | Path) -> str:
     content, in a fixed sorted order so the result doesn't depend on
     filesystem iteration order.
 
-    Content is read as text (Python's default universal-newline translation
-    already turns `\r\n`/`\r` into `\n`) and explicitly normalized again as a
-    belt-and-suspenders pass before hashing, so the checksum is the same
-    whether the file was checked out with git's autocrlf turned on (Windows,
-    `\r\n`) or off (CI/Linux, `\n`) — otherwise this would fail on every PR
-    just from checking the branch out on a different OS, with no scenario
-    content actually different.
+    `read_text` already normalizes line endings to `\n`, so the checksum is the
+    same on a Windows (CRLF) and a Linux (LF) checkout.
     """
     personas_path = Path(personas_dir)
     if not personas_path.is_dir():
@@ -57,10 +51,9 @@ def compute_personas_checksum(personas_dir: str | Path) -> str:
     for scenario_path in scenario_files:
         relative = scenario_path.relative_to(personas_path).as_posix()
         content = scenario_path.read_text(encoding="utf-8")
-        normalized = content.replace("\r\n", "\n").replace("\r", "\n")
         digest.update(relative.encode("utf-8"))
         digest.update(b"\0")
-        digest.update(normalized.encode("utf-8"))
+        digest.update(content.encode("utf-8"))
         digest.update(b"\0")
 
     return digest.hexdigest()

@@ -51,6 +51,34 @@ def test_checksum_ignores_the_generated_schema_file(tmp_path):
     assert before == after
 
 
+def _two_scenario_dir(tmp_path):
+    group = tmp_path / "same_tier"
+    group.mkdir()
+    (group / "first.json").write_text('{"tier": "operational"}', encoding="utf-8")
+    (group / "second.json").write_text('{"tier": "tactical"}', encoding="utf-8")
+    return group
+
+
+def test_checksum_changes_if_a_scenario_file_is_renamed_or_moved(tmp_path):
+    group = _two_scenario_dir(tmp_path)
+    before = compute_personas_checksum(tmp_path)
+
+    (group / "first.json").rename(group / "renamed.json")  # same content, new path
+    after = compute_personas_checksum(tmp_path)
+
+    assert before != after
+
+
+def test_checksum_changes_if_a_scenario_file_is_deleted(tmp_path):
+    group = _two_scenario_dir(tmp_path)
+    before = compute_personas_checksum(tmp_path)
+
+    (group / "second.json").unlink()
+    after = compute_personas_checksum(tmp_path)
+
+    assert before != after
+
+
 def test_personas_dir_points_at_the_real_eval_personas_directory():
     assert PERSONAS_DIR.is_dir()
     assert (PERSONAS_DIR / "same_tier").is_dir()

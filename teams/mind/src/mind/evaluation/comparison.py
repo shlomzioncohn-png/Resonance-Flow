@@ -14,7 +14,7 @@ comparison under a deadline.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Literal
+from typing import Literal, get_args
 
 from mind.evaluation.harness import Report, ScenarioResult
 
@@ -22,11 +22,8 @@ ScenarioChangeDirection = Literal[
     "wrong_to_right", "right_to_wrong", "wrong_to_different_wrong"
 ]
 
-_ALL_DIRECTIONS: tuple[ScenarioChangeDirection, ...] = (
-    "wrong_to_right",
-    "right_to_wrong",
-    "wrong_to_different_wrong",
-)
+# Read from the Literal itself, so adding a direction there can't be missed here.
+_ALL_DIRECTIONS: tuple[ScenarioChangeDirection, ...] = get_args(ScenarioChangeDirection)
 
 
 @dataclass
@@ -39,9 +36,9 @@ class ScenarioDiff:
       baseline had correct), or `wrong_to_different_wrong` (both wrong, but a
       different task) — the direction, not just the fact, is what answers the
       mentor. `None` when `changed` is False.
-    - `score_deltas`: `stretch score - baseline score`, per task_id shared by
-      both runs' candidate lists — "how much the scores moved", not just which
-      task ended up on top.
+    - `score_deltas`: `stretch score - baseline score`, per task_id (both runs
+      must have scored the same tasks) — "how much the scores moved", not just
+      which task ended up on top.
     """
 
     scenario_id: str
@@ -69,7 +66,7 @@ class ComparisonReport:
     baseline_accuracy: float
     stretch_accuracy: float
     changed_count: int
-    direction_counts: dict[str, int]
+    direction_counts: dict[ScenarioChangeDirection, int]
     scenario_diffs: list[ScenarioDiff]
 
 
@@ -96,6 +93,17 @@ def _score_by_task(result: ScenarioResult) -> dict[str, float]:
     return {c.task_id: c.score for c in result.candidates}
 
 
+def _by_scenario_id(report: Report, label: str) -> dict[str, ScenarioResult]:
+    """Index a report by `scenario_id`, refusing duplicates: a dict would keep
+    only the last one and silently compare fewer scenarios than the report holds."""
+    by_id: dict[str, ScenarioResult] = {}
+    for result in report.scenario_results:
+        if result.scenario_id in by_id:
+            raise ValueError(f"{label} report has scenario_id {result.scenario_id!r} twice")
+        by_id[result.scenario_id] = result
+    return by_id
+
+
 def diff_reports(baseline: Report, stretch: Report) -> ComparisonReport:
     """Per-scenario baseline-vs-stretch diff, matched by `scenario_id`.
 
@@ -103,10 +111,14 @@ def diff_reports(baseline: Report, stretch: Report) -> ComparisonReport:
     `Report` objects don't need to have been produced in the same order. Both
     reports must cover exactly the same `scenario_id` set — comparing
     partially-overlapping sets would silently understate "what changed", so a
-    mismatch raises `ValueError` instead of comparing whatever overlaps.
+    mismatch raises `ValueError` instead of comparing whatever overlaps. The
+    same holds inside a scenario: both reports must carry the same
+    `expected_top_task_id` and have scored the same tasks, or it isn't the same
+    scenario, and that raises `ValueError` too — as does a `scenario_id` that
+    appears twice in one report.
     """
-    baseline_by_id = {r.scenario_id: r for r in baseline.scenario_results}
-    stretch_by_id = {r.scenario_id: r for r in stretch.scenario_results}
+    baseline_by_id = _by_scenario_id(baseline, "baseline")
+    stretch_by_id = _by_scenario_id(stretch, "stretch")
 
     if baseline_by_id.keys() != stretch_by_id.keys():
         only_baseline = sorted(baseline_by_id.keys() - stretch_by_id.keys())
@@ -116,7 +128,7 @@ def diff_reports(baseline: Report, stretch: Report) -> ComparisonReport:
             f"only in baseline: {only_baseline}; only in stretch: {only_stretch}"
         )
 
-    direction_counts: dict[str, int] = {d: 0 for d in _ALL_DIRECTIONS}
+    direction_counts: dict[ScenarioChangeDirection, int] = {d: 0 for d in _ALL_DIRECTIONS}
     scenario_diffs: list[ScenarioDiff] = []
 
     for scenario_id in sorted(baseline_by_id):
@@ -124,7 +136,7 @@ def diff_reports(baseline: Report, stretch: Report) -> ComparisonReport:
         stretch_result = stretch_by_id[scenario_id]
 
         if base_result.expected_top_task_id != stretch_result.expected_top_task_id:
-            raise AssertionError(
+            raise ValueError(
                 f"{scenario_id}: baseline expects {base_result.expected_top_task_id!r} "
                 f"but stretch expects {stretch_result.expected_top_task_id!r} — the same "
                 "scenario_id must mean the same scenario in both reports"
@@ -141,7 +153,12 @@ def diff_reports(baseline: Report, stretch: Report) -> ComparisonReport:
 
         base_scores = _score_by_task(base_result)
         stretch_scores = _score_by_task(stretch_result)
-        shared_tasks = base_scores.keys() & stretch_scores.keys()
+        if base_scores.keys() != stretch_scores.keys():
+            raise ValueError(
+                f"{scenario_id}: baseline and stretch scored different task sets — "
+                f"only in baseline: {sorted(base_scores.keys() - stretch_scores.keys())}; "
+                f"only in stretch: {sorted(stretch_scores.keys() - base_scores.keys())}"
+            )
 
         scenario_diffs.append(
             ScenarioDiff(
@@ -151,7 +168,7 @@ def diff_reports(baseline: Report, stretch: Report) -> ComparisonReport:
                 stretch_predicted_top_task_id=stretch_result.predicted_top_task_id,
                 changed=top_changed,
                 direction=direction,
-                score_deltas={t: stretch_scores[t] - base_scores[t] for t in shared_tasks},
+                score_deltas={t: stretch_scores[t] - base_scores[t] for t in base_scores},
             )
         )
 

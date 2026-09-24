@@ -210,7 +210,7 @@ def test_mismatched_scenario_sets_raise():
         diff_reports(BASELINE_REPORT, lopsided_stretch)
 
 
-def test_mismatched_expected_top_task_id_for_same_scenario_id_is_a_bug():
+def test_mismatched_expected_top_task_id_for_same_scenario_id_raises():
     inconsistent_baseline = Report(
         model_name="SegmentedRankingBaseline",
         total_scenarios=1,
@@ -242,5 +242,46 @@ def test_mismatched_expected_top_task_id_for_same_scenario_id_is_a_bug():
         ],
     )
 
-    with pytest.raises(AssertionError, match="same scenario_id must mean the same scenario"):
+    with pytest.raises(ValueError, match="same scenario_id must mean the same scenario"):
         diff_reports(inconsistent_baseline, inconsistent_stretch)
+
+
+def _single_scenario_report(model_name: str, task_ids: list[str]) -> Report:
+    return Report(
+        model_name=model_name,
+        total_scenarios=1,
+        correct_top1=1,
+        top1_accuracy=1.0,
+        scenario_results=[
+            ScenarioResult(
+                scenario_id="s1",
+                expected_top_task_id="a",
+                predicted_top_task_id="a",
+                passed=True,
+                candidates=[
+                    CandidateScore(task_id=t, score=1.0 if t == "a" else 0.0) for t in task_ids
+                ],
+            ),
+        ],
+    )
+
+
+def test_duplicate_scenario_id_in_one_report_raises():
+    doubled = Report(
+        model_name=STRETCH_REPORT.model_name,
+        total_scenarios=5,
+        correct_top1=STRETCH_REPORT.correct_top1 + 1,
+        top1_accuracy=(STRETCH_REPORT.correct_top1 + 1) / 5,
+        scenario_results=[*STRETCH_REPORT.scenario_results, STRETCH_REPORT.scenario_results[0]],
+    )
+
+    with pytest.raises(ValueError, match="stretch report has scenario_id 's1' twice"):
+        diff_reports(BASELINE_REPORT, doubled)
+
+
+def test_mismatched_task_sets_for_same_scenario_id_raise():
+    baseline = _single_scenario_report("SegmentedRankingBaseline", ["a", "b"])
+    stretch = _single_scenario_report("HierarchicalPropagationStretch", ["a", "c"])
+
+    with pytest.raises(ValueError, match=r"different task sets .*\['b'\].*\['c'\]"):
+        diff_reports(baseline, stretch)
