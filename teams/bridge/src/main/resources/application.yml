@@ -11,10 +11,6 @@ management:
 spring:
   application:
     name: bridge
-  jackson:
-    # Global wire contract: every JSON payload (Kafka, REST) uses snake_case keys.
-    # Enums keep Jackson's default Enum.name() serialization (UPPER_SNAKE_CASE).
-    property-naming-strategy: SNAKE_CASE
   kafka:
     # Team shared / remote environment (do not use unless agreed):
     #   bootstrap-servers: 3.216.80.66:9092

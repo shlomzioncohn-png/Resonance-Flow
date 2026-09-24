@@ -1,5 +1,7 @@
 package com.rnd.bridge.task;
 
+import com.fasterxml.jackson.databind.PropertyNamingStrategies;
+import com.fasterxml.jackson.databind.annotation.JsonNaming;
 import com.rnd.bridge.task.model.Task;
 
 import java.time.Instant;
@@ -15,9 +17,9 @@ import java.util.UUID;
  * that. This is the same information addressed to a different reader, so it
  * cannot reuse Task's {@code @JsonValue} serialization; enum fields here
  * carry the raw {@code Enum.name()} instead. The snake_case keys come from
- * the globally configured naming strategy
- * ({@code spring.jackson.property-naming-strategy: SNAKE_CASE}), not from
- * an annotation on this record.
+ * the {@code @JsonNaming} annotation on this record, not from a global
+ * configuration, so the shared ObjectMapper stays on Jackson's default
+ * camelCase strategy for HubSpot's API responses.
  * <p>
  * Fields the contract says Inbox generates itself and forbids sending - some
  * of which exist on {@code Task} - are deliberately absent: {@code id},
@@ -40,6 +42,7 @@ import java.util.UUID;
  * {@code CLAUDE.md} §6). {@link Task#organizationId()} is deliberately NOT
  * renamed to match - see {@code CLAUDE.md} §4/§6 for why.
  */
+@JsonNaming(PropertyNamingStrategies.SnakeCase.class)
 public record BridgeTaskEventDto(
         String eventId,
         String tenantId,

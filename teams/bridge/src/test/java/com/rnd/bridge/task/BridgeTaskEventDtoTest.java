@@ -2,7 +2,6 @@ package com.rnd.bridge.task;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.PropertyNamingStrategies;
 import com.fasterxml.jackson.databind.SerializationFeature;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import com.rnd.bridge.task.model.ExtractionProvenance;
@@ -33,12 +32,12 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  */
 class BridgeTaskEventDtoTest {
 
-    // Mirrors the globally configured Spring Boot ObjectMapper
-    // (spring.jackson.property-naming-strategy: SNAKE_CASE), not bare
-    // Jackson defaults.
+    // Mirrors Jackson's default (camelCase) ObjectMapper with the
+    // @JsonNaming annotation applied to BridgeTaskEventDto - this is what
+    // Spring Boot's shared ObjectMapper does in production (no global
+    // naming strategy, per-class annotation only).
     private static final ObjectMapper MAPPER = new ObjectMapper()
             .registerModule(new JavaTimeModule())
-            .setPropertyNamingStrategy(PropertyNamingStrategies.SNAKE_CASE)
             .disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS);
 
     private static final Set<String> CONTRACT_KEYS = Set.of(
