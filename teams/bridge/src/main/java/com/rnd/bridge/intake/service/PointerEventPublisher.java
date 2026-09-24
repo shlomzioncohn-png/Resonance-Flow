@@ -9,6 +9,7 @@ import com.rnd.bridge.storage.ObjectStorageClient.PutResult;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.time.Instant;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.stereotype.Service;
@@ -36,7 +37,7 @@ public class PointerEventPublisher {
     private final String topic;
 
     public PointerEventPublisher(
-            KafkaTemplate<String, Object> kafkaTemplate,
+            @Qualifier("kafkaTemplate") KafkaTemplate<String, Object> kafkaTemplate,
             RawObjectValidator validator,
             @Value("${bridge.intake.raw-landed-topic}") String topic) {
         this.kafkaTemplate = kafkaTemplate;

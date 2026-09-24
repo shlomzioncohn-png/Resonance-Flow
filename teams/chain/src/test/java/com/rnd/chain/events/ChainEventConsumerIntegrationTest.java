@@ -7,6 +7,7 @@ import org.apache.kafka.clients.consumer.ConsumerRecords;
 import org.apache.kafka.common.serialization.StringDeserializer;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -42,6 +43,7 @@ import static org.junit.jupiter.api.Assertions.*;
  * ChainEventConsumer's @ConditionalOnProperty bean for this test only -
  * it stays unset in application.yml itself (see that file's comment).
  */
+@Tag("postgres")
 @SpringBootTest
 @EmbeddedKafka(
         partitions = 1,

@@ -65,4 +65,16 @@ public interface TaskRepository {
      * @return the updated task, or empty if no task with this id exists
      */
     Optional<Task> update(UUID id, UnaryOperator<Task> mutator);
+
+    /**
+     * The bulk equivalent of calling {@link #update} once per id with the same {@code mutator} -
+     * every id that exists and isn't soft-deleted is atomically read, mutated, and persisted as a
+     * single operation, instead of one round-trip/lock per id. Ids that don't exist, or belong to
+     * a soft-deleted task, are silently skipped (the mutator is never applied to them), matching
+     * {@link #update}'s per-id semantics. {@code mutator} must not mutate the task it's given in
+     * place, and must not return null - same contract as {@link #update}.
+     *
+     * @return the updated tasks (post-mutation), for every id that existed and wasn't soft-deleted
+     */
+    List<Task> updateAll(List<UUID> ids, UnaryOperator<Task> mutator);
 }

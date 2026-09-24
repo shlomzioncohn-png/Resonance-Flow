@@ -7,29 +7,35 @@ on:
 jobs:
   add-label:
     runs-on: self-hosted
+    # Labeling is cosmetic - a GitHub API hiccup here must not fail PR checks.
+    continue-on-error: true
+    # Repo default token is read-only; creating/adding labels needs write.
+    permissions:
+      issues: write
+      pull-requests: write
     steps:
       - name: Ensure labels exist
         uses: actions/github-script@v7
         with:
           script: |
             const teams = [
-              { label: 'LENS',   color: '0e8a16' },
-              { label: 'INBOX',  color: '1d76db' },
-              { label: 'BRIDGE', color: '5319e7' },
-              { label: 'MIND',   color: 'b60205' },
-              { label: 'CHAIN',  color: 'fbca04' },
-              { label: 'RELAY',  color: '0052cc' },
+              { label: 'Lens',   color: '0e8a16' },
+              { label: 'Inbox',  color: '1d76db' },
+              { label: 'Bridge', color: '5319e7' },
+              { label: 'Mind',   color: 'b60205' },
+              { label: 'Chain',  color: 'fbca04' },
+              { label: 'Relay',  color: '0052cc' },
             ];
 
-            // Fetch existing labels so we don't try to create duplicates
+            // Label names are case-insensitive on GitHub, so compare lowercased
             const existingLabels = await github.paginate(
               github.rest.issues.listLabelsForRepo,
               { owner: context.repo.owner, repo: context.repo.repo }
             );
-            const existingNames = new Set(existingLabels.map(l => l.name));
+            const existingNames = new Set(existingLabels.map(l => l.name.toLowerCase()));
 
             for (const team of teams) {
-              if (!existingNames.has(team.label)) {
+              if (!existingNames.has(team.label.toLowerCase())) {
                 await github.rest.issues.createLabel({
                   owner: context.repo.owner,
                   repo: context.repo.repo,
@@ -45,12 +51,12 @@ jobs:
         with:
           script: |
             const teams = [
-              { label: 'LENS',   members: ['Dvori-558', 'elisheva-666', 'sarisholomon', 'mali8573'] },
-              { label: 'INBOX',  members: [] }, // fill in: INBOX team members
-              { label: 'BRIDGE', members: [] }, // fill in: BRIDGE team members
-              { label: 'MIND',   members: [] }, // fill in: MIND team members
-              { label: 'CHAIN',  members: [] }, // fill in: CHAIN team members
-              { label: 'RELAY',  members: [] }, // fill in: RELAY team members
+              { label: 'Lens',   members: ['Dvori-558', 'elisheva-666', 'sarisholomon', 'mali8573'] },
+              { label: 'Inbox',  members: [] }, // fill in: INBOX team members
+              { label: 'Bridge', members: [] }, // fill in: BRIDGE team members
+              { label: 'Mind',   members: [] }, // fill in: MIND team members
+              { label: 'Chain',  members: [] }, // fill in: CHAIN team members
+              { label: 'Relay',  members: ['avigailrapa', 'Ayala679', 'ch-kap219', 'gittyafe'] },
             ];
 
             const author = context.payload.pull_request.user.login;

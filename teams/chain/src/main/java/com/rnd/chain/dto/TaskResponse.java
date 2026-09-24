@@ -1,4 +1,5 @@
 package com.rnd.chain.dto;
+import com.fasterxml.jackson.annotation.JsonProperty;
 
 import java.util.UUID;
 
@@ -65,6 +66,7 @@ public class TaskResponse {
         return status;
     }
 
+    @JsonProperty("isReady")
     public boolean isReady() {
         return isReady;
     }
