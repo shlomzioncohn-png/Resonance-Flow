@@ -37,12 +37,50 @@ repositories are in-memory only.
 - Spring Kafka
 - Docker / Docker Compose
 
-The DB choice for the project has not been decided yet. An in-memory H2 database is configured
-as a placeholder purely so a `DataSource`/transaction manager exists for `@Transactional` -
-`Task`/`TaskDependency` are plain DTOs (not JPA entities) and are **not** persisted to H2; real
-data still lives in the in-memory `TaskRepository`/`TaskDependencyRepository` implementations,
-and the idempotency store described below is in-memory only. None of this state survives a
-restart. See [CLAUDE.md](CLAUDE.md) for the full rationale and open items.
+**Postgres has been chosen** (see issue #384) - plain relational tables for the dependency graph,
+no `pgvector`. Own database (`chain`) and own DB user (not the shared postgres superuser) on the
+shared cluster instance, wired in `teams/relay/helm/resonance-flow/values.yaml`
+(`components.chain.config.data.datasource`) and `templates/services/chain/configmap.yaml`, the
+same file-mount ConfigMap mechanism Inbox uses. Flyway is the confirmed migration tool
+(matching Inbox), not yet wired into `pom.xml` - premature before real JPA entities exist.
+
+The DB password is not a `values.yaml` literal - it's an auto-generated `chain-db-credentials`
+Secret (`templates/services/chain/configmap.yaml`, kept stable across upgrades via `lookup`),
+mounted as a file into both Chain's own pod (at `/etc/resonance-flow/secrets/chain-db/password`)
+and the Postgres primary as `CHAIN_DB_PASSWORD` (which consumes it in the `CREATE USER` init
+script). Chain's mounted `config.yaml` uses Spring's `configtree:` support
+(`spring.config.import`) to bind that file to the `${password}` placeholder - not an env var, no
+app-code change needed. Inbox's own Postgres password isn't wired this way yet (still
+`postgresql.auth.postgresPassword` as a plaintext value) - same gap, not addressed here.
+
+**Kafka topics** (also wired in `components.chain.config.data.kafka` / the same configmap):
+
+| Topic | Direction | Drives |
+|---|---|---|
+| `task.dependencies.proposed` | consume (Mind) | `addDependency` |
+| `task.dependencies.removed` | consume (Mind) | `removeDependency` |
+| `task.status.updated` | consume (Inbox) | `onTaskStatusChanged` |
+| `task.scheduling.updated` | produce | consumed by Inbox |
+
+`task.dependencies.removed` and `task.status.updated` are still **PROPOSED**, not reviewed
+contracts yet - see the draft `.proto` schemas from the Chain team on #384. `task.status.updated`
+in particular assumes Inbox's full 8-value status enum, mapped internally to Chain's simplified
+3-value model - not yet confirmed with Inbox.
+
+`onConstraintAdded`/`onConstraintStatusChanged` stay REST-triggered through Chain's own API for
+now - draft `task.constraints.proposed`/`task.constraints.status.updated` schemas exist in case
+this becomes event-driven later, but there's no topic wired for them today.
+
+Application-side JPA wiring (entities/repositories actually backed by Postgres, replacing the
+in-memory `TaskRepository`/`TaskDependencyRepository`) is also still open follow-up work, not
+done here.
+
+Locally, an in-memory H2 database is still configured as a placeholder purely so a
+`DataSource`/transaction manager exists for `@Transactional` - `Task`/`TaskDependency` are plain
+DTOs (not JPA entities) and are **not** persisted to H2; real data still lives in the in-memory
+`TaskRepository`/`TaskDependencyRepository` implementations, and the idempotency store described
+below is in-memory only too. None of this state survives a restart. See [CLAUDE.md](CLAUDE.md)
+for the full rationale and open items.
 
 Task identifiers are `java.util.UUID` for now, pending the Inbox team publishing its own task id
 type (`Task`/`TaskDependency` will switch to that type once it exists).
