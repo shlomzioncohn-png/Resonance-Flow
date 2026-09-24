@@ -36,6 +36,19 @@ onConstraintStatusChanged.
   Reconcile the two once #66 merges - probably TaskEligibilityService
   should delegate the raw edge validation/CRUD to TaskDependencyService
   and keep only cycle detection + counters.
+  - 2026-09-22, PR #373 round-3 review (leaRevivo): this note predates
+    #373's TransactionRunner/DependencyHistoryRepository work, so it only
+    covers validation/CRUD delegation - it does NOT yet capture that
+    TaskEligibilityService.addDependency/removeDependency also write to
+    TaskDependencyRepository directly, bypassing TransactionRunner and
+    DependencyHistoryRepository entirely. Dormant today (nothing wires
+    TaskEligibilityService's addDependency/removeDependency to an
+    endpoint), but whoever reconciles the two services must also route
+    TaskEligibilityService's edge writes through TaskDependencyService/
+    TransactionRunner - otherwise the audit-history feature silently
+    misses changes made through that path. Tracked alongside issue #401
+    (controller-level unification; the natural place this would first get
+    wired to a live endpoint).
 
 ## Open items
 - pom.xml still lacks a real persistence layer, and Task/TaskDependency

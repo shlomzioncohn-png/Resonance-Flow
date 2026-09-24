@@ -8,6 +8,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.validation.BeanPropertyBindingResult;
 import org.springframework.validation.ObjectError;
 import org.springframework.web.bind.MethodArgumentNotValidException;
+import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 
 import jakarta.servlet.http.HttpServletRequest;
 import java.lang.reflect.Method;
@@ -60,6 +61,21 @@ class GlobalExceptionHandlerTest {
 
         assertEquals(HttpStatus.BAD_REQUEST, response.getStatusCode());
         assertEquals("must not be null", response.getBody().getMessage());
+    }
+
+    @Test
+    void handleTypeMismatch_usesTheActualParameterName_notAHardcodedOne() throws NoSuchMethodException {
+        Method dummyMethod = GlobalExceptionHandlerTest.class.getDeclaredMethod("dummyTarget", Object.class);
+        MethodArgumentTypeMismatchException ex = new MethodArgumentTypeMismatchException(
+                "abc", Integer.class, "size", new MethodParameter(dummyMethod, 0), new NumberFormatException());
+
+        HttpServletRequest request = mock(HttpServletRequest.class);
+        when(request.getRequestURI()).thenReturn("/tasks/some-endpoint/dependencies/history");
+
+        ResponseEntity<ApiError> response = handler.handleTypeMismatch(ex, request);
+
+        assertEquals(HttpStatus.BAD_REQUEST, response.getStatusCode());
+        assertEquals("Invalid value for parameter 'size'", response.getBody().getMessage());
     }
 
     private void dummyTarget(Object target) {

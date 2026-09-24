@@ -20,6 +20,8 @@ components:
     enabled: false
   lens-gateway:
     enabled: false
+  notification-delivery:
+    enabled: false
 
 kafka:
   enabled: true

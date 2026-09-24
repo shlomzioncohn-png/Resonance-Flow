@@ -73,7 +73,7 @@ public class InMemoryTaskDependencyRepository implements TaskDependencyRepositor
         Objects.requireNonNull(edges, "edges must not be null");
         for (TaskDependency edge : edges) {
             Objects.requireNonNull(edge, "edges must not contain null elements");
-            indexEdge(edge.getTaskId(), edge.getDependsOnTaskId());
+            indexEdge(edge.taskId(), edge.dependsOnTaskId());
         }
         log.debug("Loaded {} dependency edge(s)", edges.size());
     }
@@ -101,8 +101,8 @@ public class InMemoryTaskDependencyRepository implements TaskDependencyRepositor
     @Override
     public Optional<TaskDependency> save(TaskDependency dependency) {
         Objects.requireNonNull(dependency, "dependency must not be null");
-        UUID taskId = dependency.getTaskId();
-        UUID dependsOnTaskId = dependency.getDependsOnTaskId();
+        UUID taskId = dependency.taskId();
+        UUID dependsOnTaskId = dependency.dependsOnTaskId();
         synchronized (writeLock) {
             boolean added = indexEdge(taskId, dependsOnTaskId);
             if (!added) {

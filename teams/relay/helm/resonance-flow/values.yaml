@@ -7,7 +7,7 @@ imagePullSecret:
   email: "noreply@kamatech.org"
 nameOverride: ""
 # Pinned, not "": Chain's DB Secret/ConfigMap names are hardcoded in this file
-# (volumeMounts, postgresql.initdb.scriptsConfigMap, extraEnvVars secretKeyRef)
+# (volumes, postgresql.initdb.scriptsConfigMap, postgresql.primary.extraVolumes)
 # because values.yaml can't call the resonance-flow.fullname template itself.
 # This override guarantees fullname is always "resonance-flow" so those
 # literals can't drift from what configmap.yaml actually renders - installing
@@ -23,37 +23,6 @@ podAnnotations: {}
 podLabels: {}
 podSecurityContext: {}
 securityContext: {}
-service:
-  type: ClusterIP
-  port: 8082
-ingress:
-  enabled: false
-  className: ""
-  annotations: {}
-  hosts:
-    - host: chart-example.local
-      paths:
-        - path: /
-          pathType: ImplementationSpecific
-  tls: []
-httpRoute:
-  enabled: false
-  annotations: {}
-  parentRefs:
-    - name: gateway
-      sectionName: http
-  hostnames:
-    - chart-example.local
-  rules:
-    - matches:
-        - path:
-            type: PathPrefix
-            value: /headers
-autoscaling:
-  enabled: false
-  minReplicas: 1
-  maxReplicas: 100
-  targetCPUUtilizationPercentage: 80
 volumes: []
 volumeMounts: []
 dependencies:
@@ -386,8 +355,6 @@ components:
         port: http
       periodSeconds: 10
       failureThreshold: 3
-    # /readyz (not /healthz) - don't route clients before the Kafka consumer has attached
-    # and been assigned partitions (see HealthController.java).
     readinessProbe:
       httpGet:
         path: /readyz
@@ -395,6 +362,11 @@ components:
       periodSeconds: 5
       failureThreshold: 3
     env: {}
+    dependencies:
+      - name: schema-registry
+        port: 8080
+    config:
+      managed: true
     # Interim CPU-based HPA (templates/pipe-hpa.yaml). §10 open question: the real scaling
     # signal is active WebSocket connections/pod, but that needs a custom-metrics adapter
     # (e.g. Prometheus Adapter) plus a load-tested target-per-pod value. Swap this for a
