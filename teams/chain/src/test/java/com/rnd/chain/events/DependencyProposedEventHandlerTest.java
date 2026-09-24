@@ -115,6 +115,35 @@ class DependencyProposedEventHandlerTest {
     }
 
     @Test
+    void onMessage_withOneCycleAmongSeveralDependencies_appliesNoneOfThem() {
+        // Regression test for the PR #467 review finding: A already depends on B (A -> B).
+        // Proposing B depends on [C (valid), A (would close a cycle)] - the valid entry (C) comes
+        // first, so the old per-entry-applied-immediately code would have already added it before
+        // ever reaching the cycle at the second entry.
+        UUID taskA = UUID.randomUUID();
+        UUID taskB = UUID.randomUUID();
+        UUID taskC = UUID.randomUUID();
+        InMemoryTaskRepository taskRepo = new InMemoryTaskRepository(List.of(buildTask(taskB), buildTask(taskC)));
+        InMemoryTaskDependencyRepository dependencyRepo =
+                new InMemoryTaskDependencyRepository(List.of(new TaskDependency(taskA, taskB)));
+        TaskEligibilityService eligibilityService = new TaskEligibilityService(taskRepo, dependencyRepo);
+        ChainEventProcessingTemplate template = new ChainEventProcessingTemplate(new InMemoryProcessedEventStore());
+        DependencyProposedEventHandler handler = new DependencyProposedEventHandler(eligibilityService, template);
+
+        DependencyProposedEvent event = DependencyProposedEvent.newBuilder()
+                .setEventId(UUID.randomUUID().toString())
+                .setTaskId(taskB.toString())
+                .addDependencies(com.rnd.mind.event.Dependency.newBuilder().setDependsOnTaskId(taskC.toString()).build())
+                .addDependencies(com.rnd.mind.event.Dependency.newBuilder().setDependsOnTaskId(taskA.toString()).build())
+                .build();
+
+        assertThrows(NonRetryableEventException.class, () -> handler.onMessage(event));
+
+        assertTrue(dependencyRepo.findByTaskId(taskB).isEmpty(),
+                "the valid entry (C) earlier in the batch must not be applied when a later entry fails");
+    }
+
+    @Test
     void onMessage_withAnInvalidEventId_throwsNonRetryableEventException() {
         Fixture fixture = newFixture(List.of());
         DependencyProposedEvent event = DependencyProposedEvent.newBuilder()

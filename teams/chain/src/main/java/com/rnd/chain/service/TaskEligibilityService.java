@@ -13,6 +13,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
 import java.util.ArrayDeque;
+import java.util.ArrayList;
 import java.util.Deque;
 import java.util.HashSet;
 import java.util.List;
@@ -138,6 +139,38 @@ public class TaskEligibilityService {
                 withCounters(task, task.getBlockingCount(), task.getOpenConstraintCount()));
     }
 
+    /** One dependency edge that has passed cycle/existence validation and is ready to be
+     * written - see {@link #validateEdge}/{@link #applyEdge}. */
+    private record PendingEdge(UUID dependsOnTaskId, boolean isNewEdge, boolean dependsOnAlreadyDone) {
+    }
+
+    /** Cycle/existence checks only - no writes. Split out from the old addDependency body so
+     * {@link #addDependencies} can validate every entry in a batch before applying any of them. */
+    private PendingEdge validateEdge(UUID taskId, UUID dependsOnTaskId) {
+        if (wouldCreateCycle(taskId, dependsOnTaskId)) {
+            throw new IllegalStateException(
+                "Cannot add dependency: task " + taskId + " -> " + dependsOnTaskId + " would create a cycle");
+        }
+
+        boolean dependsOnAlreadyDone = requireTask(dependsOnTaskId).getStatus() == TaskStatus.DONE;
+        boolean isNewEdge = !edgeExists(taskId, dependsOnTaskId);
+        if (isNewEdge) {
+            requireTask(taskId);
+        }
+        return new PendingEdge(dependsOnTaskId, isNewEdge, dependsOnAlreadyDone);
+    }
+
+    /** Writes one already-validated edge - no cycle/existence checks, see {@link #validateEdge}. */
+    private void applyEdge(UUID taskId, PendingEdge edge) {
+        taskDependencyRepository.save(new TaskDependency(taskId, edge.dependsOnTaskId()));
+        if (!edge.isNewEdge()) {
+            log.warn("Dependency {} -> {} already existed, blockingCount left unchanged",
+                    taskId, edge.dependsOnTaskId());
+            return;
+        }
+        adjustBlockingCount(taskId, edge.dependsOnAlreadyDone(), 1);
+    }
+
     @Transactional
     public void addDependency(UUID taskId, UUID dependsOnTaskId) {
         Objects.requireNonNull(taskId, "taskId must not be null");
@@ -145,25 +178,48 @@ public class TaskEligibilityService {
         log.info("Adding dependency: task {} depends on {}", taskId, dependsOnTaskId);
 
         synchronized (dependencyGraphLock) {
-            if (wouldCreateCycle(taskId, dependsOnTaskId)) {
-                throw new IllegalStateException(
-                    "Cannot add dependency: task " + taskId + " -> " + dependsOnTaskId + " would create a cycle");
+            applyEdge(taskId, validateEdge(taskId, dependsOnTaskId));
+        }
+    }
+
+    /**
+     * Same effect as calling {@link #addDependency} once per id, but validates every entry
+     * against the current graph state before applying any of them, so one invalid entry (a
+     * cycle, or a dependency target Chain hasn't seen yet) fails the whole batch with zero
+     * partial effect - instead of earlier entries silently landing and the rest being dropped
+     * (PR #467 review, on the Kafka handler that batches a task.dependencies.proposed event's
+     * array through this method).
+     *
+     * <p>Safe to validate up front: {@link #wouldCreateCycle} only ever traverses edges that
+     * already exist in the graph before this call - every same-batch edge is {@code taskId -> X},
+     * and the DFS returns as soon as it reaches {@code taskId}, before it could ever traverse
+     * back out through such an edge. So no entry's validation result depends on whether an
+     * earlier entry in the same batch has been applied yet. Held under one
+     * {@code dependencyGraphLock} acquisition for the whole batch, so no concurrent writer can
+     * invalidate an already-validated entry between the validate and apply phases either.
+     *
+     * <p>{@code dependsOnTaskIds} is de-duplicated first - two identical ids in one batch are one
+     * edge, not two (this graph has no multi-edges), and validating a duplicate twice against the
+     * not-yet-applied graph would otherwise double-count its blockingCount adjustment.
+     */
+    @Transactional
+    public void addDependencies(UUID taskId, List<UUID> dependsOnTaskIds) {
+        Objects.requireNonNull(taskId, "taskId must not be null");
+        Objects.requireNonNull(dependsOnTaskIds, "dependsOnTaskIds must not be null");
+        List<UUID> distinctIds = dependsOnTaskIds.stream()
+                .peek(id -> Objects.requireNonNull(id, "dependsOnTaskIds must not contain null elements"))
+                .distinct()
+                .toList();
+        log.info("Adding {} distinct dependency(ies) for task {}", distinctIds.size(), taskId);
+
+        synchronized (dependencyGraphLock) {
+            List<PendingEdge> validated = new ArrayList<>(distinctIds.size());
+            for (UUID dependsOnTaskId : distinctIds) {
+                validated.add(validateEdge(taskId, dependsOnTaskId));
             }
-
-            boolean dependsOnAlreadyDone = requireTask(dependsOnTaskId).getStatus() == TaskStatus.DONE;
-            boolean isNewEdge = !edgeExists(taskId, dependsOnTaskId);
-
-            if (isNewEdge) {
-                requireTask(taskId);
+            for (PendingEdge edge : validated) {
+                applyEdge(taskId, edge);
             }
-            taskDependencyRepository.save(new TaskDependency(taskId, dependsOnTaskId));
-
-            if (!isNewEdge) {
-                log.warn("Dependency {} -> {} already existed, blockingCount left unchanged", taskId, dependsOnTaskId);
-                return;
-            }
-
-            adjustBlockingCount(taskId, dependsOnAlreadyDone, 1);
         }
     }
 

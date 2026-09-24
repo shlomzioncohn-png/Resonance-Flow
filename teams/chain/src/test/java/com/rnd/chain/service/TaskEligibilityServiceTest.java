@@ -240,6 +240,77 @@ class TaskEligibilityServiceTest {
     }
 
     @Test
+    void addDependencies_appliesEveryValidEntry() {
+        UUID taskId = UUID.randomUUID();
+        UUID depA = UUID.randomUUID();
+        UUID depB = UUID.randomUUID();
+        Fixture fixture = newFixture(
+                List.of(buildTask(taskId, 0, 0, true), buildTask(depA, 0, 0, true), buildTask(depB, 0, 0, true)),
+                List.of());
+
+        fixture.service().addDependencies(taskId, List.of(depA, depB));
+
+        assertEquals(2, fixture.dependencyRepo().findByTaskId(taskId).size());
+        Task task = fixture.taskRepo().findById(taskId).orElseThrow();
+        assertEquals(2, task.getBlockingCount());
+        assertFalse(task.isReady());
+    }
+
+    @Test
+    void addDependencies_oneCycleAmongValidEntries_appliesNoneOfThem() {
+        // Regression test for the PR #467 review finding: A already depends on B (A -> B).
+        // Proposing B depends on [C (valid), A (would close a cycle)] - the valid entry (C) comes
+        // first in the list, so the old per-entry-applied-immediately code would have already
+        // added it before ever reaching the cycle at the second entry.
+        UUID taskA = UUID.randomUUID();
+        UUID taskB = UUID.randomUUID();
+        UUID taskC = UUID.randomUUID();
+        Fixture fixture = newFixture(
+                List.of(buildTask(taskB, 0, 0, true), buildTask(taskC, 0, 0, true)),
+                List.of(new TaskDependency(taskA, taskB)));
+
+        assertThrows(IllegalStateException.class,
+                () -> fixture.service().addDependencies(taskB, List.of(taskC, taskA)));
+
+        assertTrue(fixture.dependencyRepo().findByTaskId(taskB).isEmpty(),
+                "the valid entry earlier in the batch must not be applied when a later entry fails");
+        assertEquals(0, fixture.taskRepo().findById(taskB).orElseThrow().getBlockingCount());
+    }
+
+    @Test
+    void addDependencies_oneMissingDependsOnTaskAmongValidEntries_appliesNoneOfThem() {
+        // Same all-or-nothing guarantee, but for the "referenced task doesn't exist yet" failure
+        // mode instead of a cycle.
+        UUID taskId = UUID.randomUUID();
+        UUID validDep = UUID.randomUUID();
+        UUID missingDep = UUID.randomUUID();
+        Fixture fixture = newFixture(
+                List.of(buildTask(taskId, 0, 0, true), buildTask(validDep, 0, 0, true)),
+                List.of());
+
+        assertThrows(IllegalArgumentException.class,
+                () -> fixture.service().addDependencies(taskId, List.of(validDep, missingDep)));
+
+        assertTrue(fixture.dependencyRepo().findByTaskId(taskId).isEmpty(),
+                "the valid entry earlier in the batch must not be applied when a later entry fails");
+    }
+
+    @Test
+    void addDependencies_duplicateIdInSameBatch_countsOnce() {
+        UUID taskId = UUID.randomUUID();
+        UUID dependsOnTaskId = UUID.randomUUID();
+        Fixture fixture = newFixture(
+                List.of(buildTask(taskId, 0, 0, true), buildTask(dependsOnTaskId, 0, 0, true)),
+                List.of());
+
+        fixture.service().addDependencies(taskId, List.of(dependsOnTaskId, dependsOnTaskId));
+
+        assertEquals(1, fixture.dependencyRepo().findByTaskId(taskId).size());
+        assertEquals(1, fixture.taskRepo().findById(taskId).orElseThrow().getBlockingCount(),
+                "a duplicate id within one batch must count as a single edge, not double the blockingCount");
+    }
+
+    @Test
     void removeDependency_decrementsBlockingCount_becomesReady() {
         UUID taskId = UUID.randomUUID();
         UUID dependsOnTaskId = UUID.randomUUID();
