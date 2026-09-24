@@ -15,7 +15,7 @@ from psycopg import sql
 from psycopg_pool import PoolTimeout
 
 import mind.embeddings as mind_embeddings
-from mind.embeddings import clear, delete, embed, search, upsert
+from mind.embeddings import clear, delete, embed, search, search_text, upsert
 from mind.embeddings.config import EMBEDDING_DIM, get_settings
 from mind.embeddings.pgvector_store import PgVectorStore
 
@@ -75,7 +75,7 @@ async def test_search_is_independent():
     await upsert(near_id, embed(near_text))
     await upsert(far_id, embed(far_text))
 
-    result_ids = [r.task_id for r in await search(embed(base_text), k=3)]
+    result_ids = [r.task_id for r in await search_text(base_text, k=3)]
     assert base_id in result_ids
     # The near-duplicate task should rank above the unrelated one.
     assert result_ids.index(near_id) < result_ids.index(far_id)
@@ -90,7 +90,7 @@ async def test_search_returns_similarity_scores_in_descending_order():
     await upsert(near_id, embed("Investigate slow database queries in the reporting module"))
     await upsert(far_id, embed("Order more coffee for the office kitchen"))
 
-    results = await search(embed(query_text), k=2)
+    results = await search_text(query_text, k=2)
     ids = [r.task_id for r in results]
     similarities = [r.similarity for r in results]
 
@@ -163,7 +163,7 @@ async def test_future_data_source_uses_same_interface():
     await upsert(github_issue_id, embed("Null pointer exception in checkout.py line 42"))
     await upsert(crm_ticket_id, embed("Customer asking for a refund on order #8831"))
 
-    results = await search(embed("Null pointer exception in checkout.py"), k=1)
+    results = await search_text("Null pointer exception in checkout.py", k=1)
     assert [r.task_id for r in results] == [github_issue_id]
 
 

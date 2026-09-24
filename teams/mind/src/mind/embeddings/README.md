@@ -29,7 +29,7 @@ Vectors, semantic search, duplicate/related-task detection.
 ## What's here
 
 ```
-__init__.py         the public interface -- embed() / embed_batch() (+ async wrappers) / upsert() / search() / delete() / clear() / open() / close()
+__init__.py         the public interface -- embed() / embed_batch() (+ async wrappers) / upsert() / search() / search_text() / delete() / clear() / open() / close()
 generate.py          embed() / embed_batch() + embed_async() / embed_batch_async() -- the real model, truncation policy
 base.py              VectorStore abstract interface (the "contract") + SearchResult -- dependency-free (besides pydantic)
 pgvector_store.py    the ONLY file that knows about Postgres/pgvector
@@ -119,18 +119,27 @@ pytest          # from teams/mind/ -- picks up tests/test_vector_store.py and te
 ## Using the interface elsewhere in the app
 
 ```python
-from mind.embeddings import embed, upsert, search, delete
+from mind.embeddings import embed, upsert, search_text, delete
 
 # Indexing a record: is_query defaults to False.
 vector = embed(task.title + " " + task.description)
 await upsert(task.id, vector)
 
-# Searching: is_query=True is required for correct BGE retrieval quality.
-query_vector = embed(user_query_text, is_query=True)
-similar = await search(query_vector, k=5)  # [SearchResult(task_id=..., similarity=...), ...], best match first
+# Searching by natural-language query text: search_text(), not
+# search(embed(text, is_query=True)) -- composing those by hand means
+# remembering the is_query flag yourself, and forgetting it doesn't raise,
+# it just silently inflates the similarity score. search_text() embeds the
+# query correctly and searches in one call.
+similar = await search_text(user_query_text, k=5)  # [SearchResult(task_id=..., similarity=...), ...], best match first
 
 await delete(task.id)  # e.g. when the task itself is deleted
 ```
+
+Passage-to-passage comparisons -- e.g. duplicate/related-task detection,
+comparing one stored task's embedding against the others -- should NOT use
+`search_text()`. Embed both sides as passages (`is_query=False`, the
+default) and call `search()` directly with the resulting vector; the query
+instruction prefix is for query-vs-corpus lookup, not passage-vs-passage.
 
 `embed()`/`embed_batch()` are plain (non-async) functions -- calling them
 directly from an `async def` route handler blocks the event loop for the

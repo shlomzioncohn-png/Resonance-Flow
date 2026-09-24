@@ -4,8 +4,18 @@ Vectors, semantic search, duplicate/related-task detection.
 Public interface -- everything else in the app should only ever import
 from this top-level package:
 
-    from mind.embeddings import embed, embed_batch, upsert, search, delete, clear, open, close
+    from mind.embeddings import embed, embed_batch, upsert, search, search_text, delete, clear, open, close
     # or, from async code: embed_async, embed_batch_async (non-blocking)
+
+Searching by natural-language query text: use `search_text()`, not
+`search(embed(query))`. BGE is asymmetric -- a query needs the instruction
+prefix `embed()`'s `is_query=True` adds, and a caller composing `embed()` +
+`search()` by hand can forget that flag with no error, just a silently
+inflated similarity score (see `generate.py`'s module docstring). Passage-
+to-passage comparisons (e.g. duplicate/related-task detection, comparing
+one stored task's embedding against the others) should NOT use
+`search_text()` -- embed both sides as passages (`is_query=False`, the
+default) and call `search()` directly with the resulting vector.
 
 Never import `base.py` / `pgvector_store.py` / `factory.py` / `generate.py`
 directly. The concrete vector database is an implementation detail hidden
@@ -54,6 +64,7 @@ __all__ = [
     "embed_batch_async",
     "open",
     "search",
+    "search_text",
     "upsert",
 ]
 
@@ -98,9 +109,31 @@ async def upsert(task_id: str, vector: list[float]) -> None:
 async def search(query_vector: list[float], k: int) -> list[SearchResult]:
     """Return the `k` results most similar to `query_vector`, best match
     first. Each result's `.similarity` is cosine similarity, comparable
-    against DUPLICATE_SIMILARITY_THRESHOLD."""
+    against DUPLICATE_SIMILARITY_THRESHOLD.
+
+    For callers that already have a vector to search with -- e.g.
+    passage-to-passage comparisons like duplicate/related-task detection,
+    where neither side should get the query instruction prefix. Callers
+    searching by natural-language query text should use `search_text()`
+    instead, not `embed(text, is_query=True)` + this."""
     store = await _get_store()
     return await store.search(query_vector, k)
+
+
+async def search_text(query: str, k: int) -> list[SearchResult]:
+    """Search by natural-language query text -- embeds `query` as a query
+    (not a passage) and searches with the result. Use this instead of
+    `search(embed(query))`: composing those by hand means remembering
+    `embed(..., is_query=True)` yourself, and forgetting it doesn't raise
+    -- it just silently inflates the similarity score (see generate.py's
+    module docstring's "Query/passage asymmetry" section), which matters
+    because DUPLICATE_SIMILARITY_THRESHOLD compares against this exact
+    number.
+
+    Not for passage-to-passage comparisons (e.g. duplicate detection) --
+    those should call `search()` directly with a passage-mode vector."""
+    vector = await embed_async(query, is_query=True)
+    return await search(vector, k)
 
 
 async def delete(task_id: str) -> None:

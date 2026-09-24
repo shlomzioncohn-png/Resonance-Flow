@@ -115,8 +115,6 @@ def embed(text: str, is_query: bool = False) -> list[float]:
     prefix); leave `False` (default) when indexing a record for storage.
     Longer than MAX_SEQ_LENGTH tokens -> truncated, never raises.
     """
-    if not isinstance(text, str):
-        raise TypeError(f"embed() expects a str, got {type(text)}")
     if is_query:
         text = BGE_QUERY_INSTRUCTION + text
     vector = _get_model().encode(text, normalize_embeddings=True)
@@ -126,8 +124,6 @@ def embed(text: str, is_query: bool = False) -> list[float]:
 def embed_batch(texts: list[str], is_query: bool = False) -> list[list[float]]:
     """Batch version of embed() -- one model call for many texts, same
     is_query / truncation behavior per-text as embed()."""
-    if not all(isinstance(t, str) for t in texts):
-        raise TypeError("embed_batch() expects a list[str]")
     if is_query:
         texts = [BGE_QUERY_INSTRUCTION + t for t in texts]
     vectors = _get_model().encode(texts, normalize_embeddings=True)

@@ -7,7 +7,7 @@ Run:  python -m mind.embeddings.ingest
 
 import asyncio
 
-from mind.embeddings import embed_batch, upsert
+from mind.embeddings import embed_batch_async, upsert
 from mind.embeddings.loader import fetch_real_slice
 
 
@@ -19,7 +19,7 @@ async def main() -> None:
     print(f"Loaded {len(records)} real records from the FUNSD manifest slice.")
 
     texts = [r.text for r in records]
-    vectors = embed_batch(texts)
+    vectors = await embed_batch_async(texts)
     print(f"Embedded {len(vectors)} records (dim={len(vectors[0])}).")
 
     await asyncio.gather(

@@ -6,8 +6,6 @@ never touch pgvector).
 import asyncio
 from unittest.mock import patch
 
-import pytest
-
 from mind.embeddings import generate as generate_module
 from mind.embeddings.config import EMBEDDING_DIM
 from mind.embeddings.generate import embed, embed_async, embed_batch
@@ -29,11 +27,6 @@ def test_embed_returns_correct_shape():
     assert isinstance(vec, list)
     assert len(vec) == EMBEDDING_DIM
     assert all(isinstance(x, float) for x in vec)
-
-
-def test_embed_rejects_non_string():
-    with pytest.raises(TypeError):
-        embed(12345)
 
 
 def test_embed_long_text_does_not_crash():

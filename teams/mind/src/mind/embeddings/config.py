@@ -7,13 +7,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 # working directory, which silently finds nothing if pytest (or anything
 # else) is ever run from somewhere other than teams/mind/.
 _ENV_FILE = Path(__file__).resolve().parents[3] / ".env"
-
-# Local copy of the model weights (models/ is gitignored -- never
-# committed). If this directory exists, generate.py loads the model
-# straight from disk with no network call at all. Falls back to
-# EMBEDDING_MODEL_NAME (a Hugging Face Hub id, downloaded and cached by
-# sentence-transformers) if it doesn't -- see generate.py.
-EMBEDDING_MODEL_LOCAL_DIR = Path(__file__).resolve().parents[3] / "models" / "bge-small-en-v1.5"
+_MODELS_DIR = Path(__file__).resolve().parents[3] / "models"
 
 
 class Settings(BaseSettings):
@@ -73,6 +67,16 @@ def get_settings() -> Settings:
 # tests/conftest.py sets *before* this module is first imported, and an
 # eager read here would freeze it before that override lands.
 EMBEDDING_MODEL_NAME = get_settings().embedding_model_name
+# Local copy of the model weights (models/ is gitignored -- never
+# committed). If this directory exists, generate.py loads the model
+# straight from disk with no network call at all. Falls back to
+# EMBEDDING_MODEL_NAME (downloaded and cached by sentence-transformers) if
+# it doesn't -- see generate.py. Derived from EMBEDDING_MODEL_NAME (the
+# part after the last "/", matching a Hub id's "org/name" shape) rather
+# than hardcoded, so setting MIND_EMBEDDING_MODEL_NAME to a different
+# model doesn't silently keep loading whatever local folder happens to
+# already exist.
+EMBEDDING_MODEL_LOCAL_DIR = _MODELS_DIR / EMBEDDING_MODEL_NAME.rsplit("/", 1)[-1]
 EMBEDDING_DIM = get_settings().embedding_dim
 MAX_SEQ_LENGTH = get_settings().max_seq_length
 BGE_QUERY_INSTRUCTION = get_settings().bge_query_instruction
