@@ -42,10 +42,24 @@ base                         0.4727 + 0.2500 + 0.0750       = 0.7977
 not blocked        final =   0.30 + 0.70 x 0.7977           = 0.8584
 ```
 
-The three contributions are exactly what is returned in `ScoreResult.factors`,
-alongside `blocked_gate`. They are *weighted* contributions, not raw feature
-values, so the largest one is genuinely the dominant reason for the score —
-which is what #358's explanations will need.
+The three contributions are what is returned in `ScoreResult.factors`, a
+`ScoreFactors` carrying `contributions` (the weighted values above), `blocked`
+(whether a blocked adjustment was applied) and `base_score` (the score before
+that adjustment). They are *weighted* contributions, not raw feature values, so
+the largest one is genuinely the dominant reason for the score — which is what
+#358's explanations will need. In `report.json` it lands as:
+
+```json
+"factors": {"contributions": {"time_pressure": 0.4727, "impact": 0.25, "quick_win": 0.075},
+            "blocked": false, "base_score": 0.7977}
+```
+
+`contributions` is a free mapping in the shared contract, deliberately: it
+serves every ranking model, and one model's vocabulary should not be frozen into
+a file all of them depend on. The vocabulary is pinned on the producing side
+instead, in [`factors.py`](./factors.py), and a test asserts that every key this
+package emits is a member of it — without that, #358's "the explanation's factors
+match the score's factors" check would be comparing two free-form strings.
 
 ## The three rules
 

@@ -44,7 +44,9 @@ def main() -> None:
     for result in report.scenario_results:
         print(f"{'PASS' if result.passed else 'FAIL'}  {result.scenario_id}")
         if not result.passed:
-            print(f"      expected {result.expected_top_task_id}, got {result.predicted_top_task_id}")
+            print(
+                f"      expected {result.expected_top_task_id}, got {result.predicted_top_task_id}"
+            )
         for candidate in sorted(result.candidates, key=lambda c: -c.score):
             print(f"      {candidate.score:.3f}  {candidate.task_id:22} {candidate.reasoning}")
     print(

@@ -12,6 +12,7 @@ from itertools import product
 import pytest
 
 from mind.evaluation.interfaces import ScoreContext, Task, Tier
+from mind.scoring.factors import FACTOR_NAMES, Factor
 from mind.scoring.segmented_model import (
     BLOCKED_CEILING,
     TIER_RULES,
@@ -51,6 +52,13 @@ def make_task(
     )
 
 
+def contributions_of(task: Task) -> dict[str, float]:
+    """The weighted contributions this model reported for `task`."""
+    factors = MODEL.score(task, CONTEXT).factors
+    assert factors is not None
+    return factors.contributions
+
+
 # --- the rules are genuinely one per tier ------------------------------------
 
 
@@ -61,12 +69,20 @@ def test_each_tier_weights_sum_to_one() -> None:
 
 
 def test_tiers_use_different_feature_sets() -> None:
-    """`factors` names exactly the features that tier's rule actually used."""
-    used = {tier: set(MODEL.score(make_task(tier=tier), CONTEXT).factors or {}) for tier in TIERS}
+    """`contributions` names exactly the features that tier's rule actually used."""
+    used = {tier: set(contributions_of(make_task(tier=tier))) for tier in TIERS}
 
-    assert used["operational"] == {"time_pressure", "impact", "quick_win", "blocked_gate"}
-    assert used["tactical"] == {"time_pressure", "impact", "quick_win", "blocked_gate"}
-    assert used["strategic"] == {"time_pressure", "impact", "initiative", "blocked_gate"}
+    assert used["operational"] == {"time_pressure", "impact", "quick_win"}
+    assert used["tactical"] == {"time_pressure", "impact", "quick_win"}
+    assert used["strategic"] == {"time_pressure", "impact", "initiative"}
+
+
+def test_factor_names_come_from_the_fixed_vocabulary() -> None:
+    """No free-form keys: #358 matches explanation factors against these names."""
+    for tier, blocked in product(TIERS, (True, False)):
+        names = set(contributions_of(make_task(tier=tier, blocked=blocked)))
+
+        assert names <= FACTOR_NAMES, (tier, blocked, names - FACTOR_NAMES)
 
 
 def test_deadline_weighs_less_as_the_tier_gets_more_strategic() -> None:
@@ -76,12 +92,11 @@ def test_deadline_weighs_less_as_the_tier_gets_more_strategic() -> None:
     answer has to move. If it did not, the three rules would be one rule.
     """
     soon = NOW + timedelta(hours=2)
-    contributions = [
-        (MODEL.score(make_task(tier=tier, deadline=soon), CONTEXT).factors or {})["time_pressure"]
-        for tier in TIERS
+    weighted = [
+        contributions_of(make_task(tier=tier, deadline=soon))["time_pressure"] for tier in TIERS
     ]
 
-    assert contributions[0] > contributions[1] > contributions[2]
+    assert weighted[0] > weighted[1] > weighted[2]
 
 
 def test_impact_weighs_more_as_the_tier_gets_more_strategic() -> None:
@@ -90,12 +105,9 @@ def test_impact_weighs_more_as_the_tier_gets_more_strategic() -> None:
         "title": "Customer production outage",
         "description": "A customer production system is down and the SLA is at risk.",
     }
-    contributions = [
-        (MODEL.score(make_task(tier=tier, **wording), CONTEXT).factors or {})["impact"]
-        for tier in TIERS
-    ]
+    weighted = [contributions_of(make_task(tier=tier, **wording))["impact"] for tier in TIERS]
 
-    assert contributions[0] < contributions[1] < contributions[2]
+    assert weighted[0] < weighted[1] < weighted[2]
 
 
 def test_swapping_operational_and_strategic_inputs_changes_the_answer() -> None:
@@ -117,6 +129,25 @@ def test_swapping_operational_and_strategic_inputs_changes_the_answer() -> None:
 
     assert op_chore > st_chore  # the deadline is worth more to the operational rule
     assert st_heavy > op_heavy  # the wording is worth more to the strategic rule
+
+
+# --- what the factors report -------------------------------------------------
+
+
+def test_factors_report_the_blocked_adjustment_and_the_pre_band_score() -> None:
+    """`blocked` records that the model adjusted, and `base_score` what it adjusted."""
+    startable = MODEL.score(make_task(blocked=False), CONTEXT)
+    blocked = MODEL.score(make_task(blocked=True), CONTEXT)
+
+    assert startable.factors is not None
+    assert blocked.factors is not None
+    assert startable.factors.blocked is False
+    assert blocked.factors.blocked is True
+
+    for result in (startable, blocked):
+        factors = result.factors
+        assert factors is not None
+        assert factors.base_score == pytest.approx(sum(factors.contributions.values()))
 
 
 # --- determinism -------------------------------------------------------------
@@ -144,11 +175,10 @@ def test_same_input_scores_identically_on_repeated_runs() -> None:
 @pytest.mark.parametrize("tier", TIERS)
 def test_missing_deadline_is_defined_and_not_treated_as_zero(tier: Tier) -> None:
     """`deadline is None` reads as that tier's stated fallback, never as 0.0."""
-    result = MODEL.score(make_task(tier=tier, deadline=None), CONTEXT)
-    contribution = (result.factors or {})["time_pressure"]
+    contribution = contributions_of(make_task(tier=tier, deadline=None))["time_pressure"]
     rule = TIER_RULES[tier]
 
-    assert contribution == pytest.approx(rule.weights["time_pressure"] * rule.missing_deadline)
+    assert contribution == pytest.approx(rule.weights[Factor.TIME_PRESSURE] * rule.missing_deadline)
     assert contribution > 0.0
 
 
