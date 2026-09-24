@@ -78,7 +78,8 @@ Currently wired up:
 
 - **Kafka** - every component depends on it, so it's set globally
   (`dependencies` in `values.yaml`).
-- **Postgres** - only `inbox` uses it.
+- **Postgres** - `inbox` and `chain` use it (Chain with its own database and
+  user - see [Chain's DB credentials](#chains-db-credentials-componentschain)).
 - **MinIO** - `bridge` and `mind` use it.
 
 ```yaml
@@ -103,8 +104,14 @@ file in a ConfigMap (`templates/configmap.yaml`), mounted at
 `/etc/resonance-flow/config/config.yaml` (`CONFIG_FILE_PATH`). Spring Boot
 services also get `SPRING_CONFIG_ADDITIONAL_LOCATION` pointed at it; other
 services read the file themselves. So the `config` keys are the config-file
-keys the service reads. (`inbox` is the exception - it needs a Spring-shaped
-file, from `templates/service-inbox/configmap.yaml` instead.)
+keys the service reads. (`inbox`, `chain` and `notification-delivery` are the
+exception - they need a Spring-shaped file with values computed at render time
+(Kafka/Postgres hosts, SASL config), so each renders its own ConfigMap from
+`templates/services/<name>/configmap.yaml` (`notification-delivery`:
+`templates/service-notification-delivery/configmap.yaml`) instead. Shared
+pieces come from `_helpers.tpl`: `resonance-flow.configMapHeader`,
+`resonance-flow.springKafkaBase` and `resonance-flow.springKafkaConsumerDefaults`
+- use them for any new Spring component rather than copying the Kafka block.)
 
 Secrets never go in `config` (a plain ConfigMap, readable by anyone with
 access). A `components.<name>.secret` block renders a `Secret`, mounted as a
@@ -117,6 +124,24 @@ empty — the loader must handle a missing file):
   outside the chart (`kubectl` / sealed-secrets / external-secrets).
 - `secret.create: true` - the chart renders it, values from
   `secret.data.*` (via `--set` for local testing, never committed).
+
+### Chain's DB credentials (`components.chain`)
+
+Chain gets its own Postgres database and user (`chain`), not Inbox's. The
+password lives only in the `resonance-flow-chain-db-credentials` Secret (key
+`password`), which the chart **never creates** - it's provided externally
+(CI's `setup-service-infra` action generates it with `openssl rand`). Create it
+before installing with Chain enabled:
+
+```bash
+kubectl -n resonance-flow create secret generic resonance-flow-chain-db-credentials   --from-literal=password="$(openssl rand -base64 24)"
+```
+
+It's mounted as a file, never an env var: into Chain's pod (read via Spring
+`configtree`) and, `optional: true`, into Postgres, whose init script
+(`templates/services/chain/configmap.yaml`) creates the user/database from it.
+Without the Secret, Postgres still starts and just skips Chain's database.
+The init script runs only on a fresh Postgres volume.
 
 ### MIND (`components.mind`)
 
