@@ -132,8 +132,10 @@ The run exits `0` on success. Several `[persona set warning] ... not yet
 mentor_approved` lines are **expected** — they just mean the scenarios haven't
 been through mentor sign-off yet; the run still completes and reports a score.
 Only a non-zero exit code, or text under "Persona set validation FAILED", means
-something is actually broken. A "missing role" / "expected 4-6" warning would
-mean the set is incomplete — there should be none.
+something is actually broken. When running the default `eval/personas` set, a
+"missing role" / "expected 4-6" warning would mean the set is incomplete — there
+should be none. (Those coverage warnings *are* expected when you point
+`--personas` at `eval/real_slice` — see **Real data slice** below.)
 
 ## Metric
 
@@ -152,3 +154,174 @@ where the model picked the correct top-priority task.
 To keep the door open for a future switch to a different metric without re-running every
 model, the harness report keeps every candidate's score and reasoning per scenario
 (`ScenarioResult.candidates`), not just the winner.
+
+## Real data slice
+
+The Foundation Gate requires the harness to run on a small slice of a **real**
+dataset, not only hand-written scenarios. That slice lives in `eval/real_slice/`,
+kept separate from `eval/personas/` on purpose: the persona set is fixed and
+mentor-approved so week-6 and week-7 scores stay comparable against it, whereas
+the real slice exists only to prove the harness survives real data. The two are
+never mixed.
+
+```bash
+python -m mind.evaluation.run --personas eval/real_slice
+```
+
+### Corpus
+
+**AMI Meeting Corpus**, manual-annotations package `ami_public_manual_1.6.2`
+(text only — no audio downloaded), licensed **CC BY 4.0**. The reproducible
+pointer is committed as `eval/datasets/ami.manifest.json` +
+`eval/datasets/ami.sha256`; the corpus files themselves stay out of git (under
+`local-data/`). To regenerate the slice, download the package named in the
+manifest and unzip it to `local-data/ami/ami_public_manual_1.6.2/`.
+
+Action items come from the abstractive-summary layer: each
+`abstractive/<meeting>.abssumm.xml` has an `<actions>` block whose `<sentence>`
+elements are the human-annotated action items. Those sentences become a
+scenario's `tasks`. All three scenarios use persona role **Manager** — the AMI
+Project Manager is the participant who leaves a meeting owning the action-item
+list — and are `mentor_approved: false` / `team_lead_approved: false`, which is
+expected: the real slice is not part of the graded set.
+
+### Meetings used
+
+| Scenario | AMI meeting | Items | Chosen top task | Why (model-visible signals only) |
+|---|---|---|---|---|
+| `manager_ami_ib4003_office_move` | IB4003 — AMI office-move meeting | 8 | `task_walls_feasibility` | The proposal-merge task is `blocked`; the follow-up meeting is a calendar event; the walls question is the open prerequisite the seating plan depends on. |
+| `manager_ami_is1008b_functional_design` | IS1008b — remote-control design project, functional-design meeting | 4 | `task_research_vr_help` | Two of the three concept-prep tasks (UI, marketing) are independent; the third (components-concept) is treated as blocked on this same research — an inferred dependency, not one AMI states outright. Completing this one resolves that blocker. |
+| `manager_ami_is1008d_budget_close` | IS1008d — same project, final meeting | 4 | `task_negotiate_cost` | Two of the four tasks are `blocked` by their own text ("after production has begun"); of the rest, the budget negotiation outranks routine reporting. |
+
+### What broke on real data, and what was fixed
+
+Nothing in the harness *crashed*, but real data exposed several rough edges:
+
+1. **Annotation sentences are not self-contained.** AMI action items use
+   pronouns referring to earlier sentences ("*He* will also present the new
+   promotion plan…"), future-tense assignments naming other roles ("The
+   Industrial Designer will…"), and sometimes no terminal punctuation ("The team
+   will meet next Tuesday at two o'clock"). The schema's `description` is meant
+   to let a task be judged in isolation.
+   *Fixed:* each `description` quotes the action sentence verbatim, then adds one
+   clause of meeting context and resolves the pronoun — meaning unchanged.
+
+2. **AMI action items carry no deadlines and no explicit priority.** The ground
+   truth cannot lean on deadline proximity the way a hand-written scenario can.
+   *Fixed:* every `expected_reason` is grounded in `blocked`, `tier`, and
+   importance stated in the description. `current_datetime` for all three
+   scenarios uses the **real** meeting date from `corpusResources/meetings.xml`
+   in the package (`dateOnly` per meeting: IB4003 `02-11-2004`; IS1008b/IS1008d
+   `10-12-2004`), not an invented one — there was no consistent date scheme
+   elsewhere in the repo for staying synthetic to protect (checked: `eval/personas/`'s
+   30 scenarios are all dated 2026, this slice was already the outlier before
+   this fix). One deadline was made concrete: IB4003's "next Tuesday at two
+   o'clock" resolves against the real date without inventing anything, because
+   `02-11-2004` is itself a Tuesday — "next Tuesday" is `2004-11-09`.
+
+3. **The XML declares `encoding="ISO-8859-1"`, but that header is wrong for
+   this corpus.** Verified against all 5,080 XML files in the package: zero
+   fail a plain UTF-8 read. 63 files contain non-ASCII bytes, and every one of
+   them is `\xc2\xa0` — a non-breaking space encoded in UTF-8 — under a header
+   that still claims ISO-8859-1. Honoring the declared encoding, which is what
+   an earlier version of this note told #176 to do, decodes `\xc2\xa0` as two
+   Latin-1 characters (`Â` + a non-breaking space) — corruption, introduced on
+   purpose by following the header.
+   *Fixed:* the note for #176 is the reverse of what it said before — do not
+   trust the declared encoding on this corpus; read every file as UTF-8. Also
+   normalize non-breaking spaces (`\xa0`) to regular spaces before any string
+   comparison: an invisible non-breaking space is not equal to a normal space,
+   so left unnormalized it silently turns a true positive into a false
+   negative in the matching rule. Nothing needed for this slice itself (its
+   three files are pure ASCII); recorded here as the corrected caveat for
+   #176.
+
+4. **`validate_personas` coverage warnings fire on the slice.** Running
+   `--personas eval/real_slice` prints `no scenario yet for role(s): …`,
+   `Manager: has 3 scenario(s), expected 4-6`, and `3 scenario(s) total,
+   expected 24-36`. These check the *persona set's* completeness and do not
+   apply here. They are warnings only — exit code is still `0` and a score is
+   still printed. Not treated as failures for the slice; documented rather than
+   silenced, to avoid a harness code change.
+
+5. **The grouped report is empty for a flat folder.** `run.py` splits its report
+   by subdirectory (`same_tier/`, `cross_tier/` in the persona set);
+   `eval/real_slice/` is flat, so `report.json` carries `"groups": {}` and only
+   the combined report is meaningful. Expected for the slice.
+
+6. **The schema requires `effort_estimate` and `tier` on every task; AMI
+   supplies neither.** Every value across all three scenarios (15-120 minutes,
+   `operational`/`tactical`) is invented — the same kind of gap as the missing
+   deadlines and priority in item 2, but for two structurally required fields.
+   The two carry different risk. `effort_estimate` is safe: the schema
+   requires a correct answer to never hinge on comparing it against
+   `free_time_minutes`, so an invented value cannot move the ground truth.
+   `tier` is **not** safe: the ranking model does see `tier`, and
+   `expected_reason` is allowed to lean on it, so an invented `tier` can
+   change which answer is correct. The tiers used here were chosen to match
+   each task's real scope (presentation/reporting prep = `operational`,
+   negotiation and cost decisions = `tactical`), not tuned toward a
+   particular answer, but there is no way to verify that choice against AMI
+   itself — it is not in the annotation.
+
+**Note on `manager_ami_is1008b_functional_design` specifically:** after the
+`blocked` fix above (see the self-contradiction fix in the scenario file),
+its three unblocked tasks are identical in every structured, model-visible
+field (`blocked=False`, `tier=operational`, `deadline=None`). The only field
+that differs is `effort_estimate` (45 vs. 90 vs. 90) — exactly the field item
+6 says a correct answer must never hinge on. The real distinguishing signal
+lives only in the free-text `description`, which is allowed for a model that
+reads it, but a deterministic feature-based model (e.g. the week-5
+`skip-blocked-nearest-deadline` baseline) does not read description text at
+all. This scenario is therefore a **description-level scenario**: unsolvable
+by design for a features-only model, not a ranking bug if one misses it.
+
+**The same gap exists in `manager_ami_is1008d_budget_close`.** Its two
+unblocked candidates, `task_negotiate_cost` and `task_present_promo_plan`,
+are also identical in `blocked` (`False`) and `tier` (both `tactical`) and
+`deadline` (both `None`) — only `effort_estimate` (90 vs. 45) differs. Unlike
+the IS1008b case, the distinguishing text here is not an inference: the LCD
+contingency in `task_negotiate_cost`'s description is directly backed by
+AMI's own `<decisions>` layer, and `task_present_promo_plan` self-describes
+as routine reporting. So the description-level signal is honest, but it is
+still description-level — a features-only model has the same "unsolvable by
+design" gap here as in IS1008b, for the same reason.
+
+### Result
+
+`python -m mind.evaluation.run --personas eval/real_slice` loads all three
+scenarios, runs the `dummy` model, prints **Top-1 accuracy 66.7% (2/3)** and
+exits `0`. That number is not a model result — `dummy` scores every task equally
+and the harness breaks ties toward the first-listed task — it only confirms the
+harness ingests real-corpus scenarios and produces a report end to end.
+
+With the real `skip-blocked-nearest-deadline` baseline (`--model
+skip-blocked-nearest-deadline`; landed on `main` after this branch was cut,
+picked up by rebasing this branch onto `main` on 2026-09-24), the slice scores
+**33.3% (1/3)** — worse than dummy, and every one of the three results is
+explained by the model's scoring formula (`blocked` -> `0.0`, no deadline ->
+a flat `0.01`, a deadline -> always higher than `0.01`), not by the model
+understanding anything about the slice:
+
+- `manager_ami_ib4003_office_move`: **miss.** The model picks
+  `task_followup_meeting` — the only task with a deadline — over the correct
+  `task_walls_feasibility`, which has none. This is the scenario's intended
+  trap: the deadline belongs to a fixed calendar event, not prioritizable
+  work, and only the `description` says so. A model that reads `deadline`
+  alone, with no text, falls for it.
+- `manager_ami_is1008b_functional_design`: **miss**, exactly as the
+  description-level-scenario note above predicts. All unblocked candidates
+  score the same flat `0.01` (no deadline), so the harness's tie-break
+  (first-listed task) decides, landing on `task_ui_concept`, not the
+  correct answer.
+- `manager_ami_is1008d_budget_close`: **hit** — by the same tie-break
+  mechanism, not signal comprehension. `task_negotiate_cost` and
+  `task_present_promo_plan` also tie at `0.01`; `task_negotiate_cost` happens
+  to be listed first, so it wins. Not evidence the model understood the
+  budget dependency.
+
+So the one correct prediction is a tie-break coincidence, the same mechanism
+that drove `dummy`'s 66.7%. This is the answer the rebase was meant to
+establish: the real-data slice does not yet measure ranking quality for any
+model that has actually been run against it — it proves only that the harness
+pipes real AMI data through any `RankingModel` implementation end to end.
