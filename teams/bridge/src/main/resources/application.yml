@@ -24,6 +24,12 @@ spring:
       retries: 3
       properties:
         spring.json.add.type.headers: false
+    consumer:
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: org.springframework.kafka.support.serializer.JsonDeserializer
+      properties:
+        spring.json.trusted.packages: com.rnd.bridge
+        spring.json.value.default.type: com.rnd.bridge.task.BridgeTaskEventDto
 
 minio:
   endpoint: ${MINIO_ENDPOINT:http://localhost:9000}
@@ -111,11 +117,38 @@ bridge:
     # Meeting/doc/audio hand-off (Esther) - local folders to read test files from, one per
     # source, not committed; set your own in .env. Shares minio.* and
     # bridge.intake.raw-landed-topic above with the Unstructured-intake lane.
-    zoom-recordings-dir: ${BRIDGE_MEDIA_ZOOM_RECORDINGS_DIR:}
-    bbb-recordings-dir: ${BRIDGE_MEDIA_BBB_RECORDINGS_DIR:}
-    scanned-docs-dir: ${BRIDGE_MEDIA_SCANNED_DOCS_DIR:}
+    zoom-recordings-dir: ${BRIDGE_MEDIA_ZOOM_RECORDINGS_DIR:./temp/zoom}
+    bbb-recordings-dir: ${BRIDGE_MEDIA_BBB_RECORDINGS_DIR:./temp/bbb}
+    scanned-docs-dir: ${BRIDGE_MEDIA_SCANNED_DOCS_DIR:./temp/docs}
     tenant-id: ${BRIDGE_MEDIA_TENANT_ID:demo-tenant}
     # Files at or below this size never land - a conservative proxy for "empty/corrupt
     # recording", not real audio-duration filtering (that needs a codec-aware library this
     # lane doesn't depend on). Tune based on what garbage actually shows up in practice.
     min-file-size-bytes: ${BRIDGE_MEDIA_MIN_FILE_SIZE_BYTES:1024}
+llm:
+  enrichment:
+    # Master switch for the rule-based task enrichment engine.
+    enabled: ${LLM_ENRICHMENT_ENABLED:false}
+    # Only these source types are enriched; all others are skipped entirely.
+    supported-sources: ${LLM_ENRICHMENT_SUPPORTED_SOURCES:GITHUB_ISSUE,JIRA_ISSUE}
+    # Keyword -> urgency level (1..5). Overrides the built-in defaults when set.
+    urgency-keywords:
+      blocker: 5
+      critical: 5
+      asap: 5
+      urgent: 5
+      "production down": 5
+      "high priority": 4
+      important: 4
+      "needed soon": 4
+      medium: 3
+      todo: 3
+      needed: 3
+      low: 1
+      whenever: 1
+      "nice to have": 1
+  consumer:
+    # Separate switch for the automatic Kafka enrichment channel.
+    enabled: ${LLM_CONSUMER_ENABLED:false}
+    input-topic: ${LLM_CONSUMER_INPUT_TOPIC:bridge.tasks.to-enrich}
+    group-id: ${LLM_CONSUMER_GROUP_ID:bridge-llm-enricher}
