@@ -1,6 +1,13 @@
 components:
   bridge:
     enabled: true
+    secretEnv:
+      MINIO_ACCESS_KEY:
+        name: bridge-minio
+        key: root-user
+      MINIO_SECRET_KEY:
+        name: bridge-minio
+        key: root-password
   notification-delivery:
     enabled: false
   mind:

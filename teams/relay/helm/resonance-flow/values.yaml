@@ -186,12 +186,13 @@ components:
         port: http
       periodSeconds: 5
       failureThreshold: 3
-      env: {}
+    env: {}
+    config:
       spring:
         kafka:
           bootstrap-servers: "bridge-kafka:9092"
-# GitHub currently publishes to bridge.github.tasks.
-# Issue #275 will decide whether to use the shared topic instead.
+          # GitHub currently publishes to bridge.github.tasks.
+          # Issue #275 will decide whether to use the shared topic instead.
           topic: "bridge.github.tasks"
           properties:
             security.protocol: "SASL_PLAINTEXT"

@@ -77,17 +77,23 @@ spec:
               containerPort: {{ $component.containerPort }}
               protocol: TCP
 
-          {{- if or $component.config $component.env }}
+          {{- if or $component.config $component.env $component.secretEnv }}
           env:
             {{- if $component.config }}
             {{- include "resonance-flow.configFilePathEnv" $ | nindent 12 }}
-              {{- end }}
-              {{- range $name, $value := $component.env }}
+            {{- end }}
+            {{- range $name, $value := $component.env }}
             - name: {{ $name }}
               value: {{ $value | quote }}
-               {{- end }}
+            {{- end }}
+            {{- range $name, $secret := $component.secretEnv }}
+            - name: {{ $name }}
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $secret.name }}
+                  key: {{ $secret.key }}
+            {{- end }}
           {{- end }}
-
           {{- with $component.startupProbe }}
           startupProbe:
             {{- toYaml . | nindent 12 }}
