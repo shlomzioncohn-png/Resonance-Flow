@@ -2,8 +2,7 @@
 
 Run: python -m benchmarks.analyze_confidence (from teams/mind/)
 
-The mentor's proposal for handling the residual ~9% character-level
-error (100% - the 91.2% char_similarity score): have OCR emit a
+The mentor's proposal for handling the residual OCR errors: have OCR emit a
 per-word confidence alongside each recognized word, so extraction can
 treat low-confidence words differently (flag, re-check, discount) instead
 of trusting every word equally. Tesseract already computes this -- no
@@ -19,7 +18,6 @@ usable mitigation -- not just a nice API shape.
 
 from __future__ import annotations
 
-import re
 import subprocess
 import sys
 from pathlib import Path
@@ -27,12 +25,9 @@ from pathlib import Path
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
-from benchmarks.analyze_word_misses import analyze_doc, gt_word_pairs
-from benchmarks.ocr_asr_benchmark import DATA_DIR, DOCS, find_tesseract
-
-
-def _normalize(word: str) -> str:
-    return re.sub(r"[^\w]", "", word).lower()
+from benchmarks.aligned_metrics import normalize
+from benchmarks.analyze_word_misses import MissRow, analyze_doc, gt_word_pairs
+from benchmarks.ocr_asr_benchmark import CHOSEN_PSM_ARGS, find_tesseract, load_manifest
 
 
 def tesseract_confidences(tesseract_cmd: str, image_path: Path) -> dict[str, list[float]]:
@@ -41,7 +36,7 @@ def tesseract_confidences(tesseract_cmd: str, image_path: Path) -> dict[str, lis
     A list, not a single value, because the same normalized word can
     appear more than once on a page with different confidences.
     """
-    cmd = [tesseract_cmd, str(image_path), "stdout", "--psm", "11", "tsv"]
+    cmd = [tesseract_cmd, str(image_path), "stdout", *CHOSEN_PSM_ARGS, "tsv"]
     proc = subprocess.run(cmd, capture_output=True, check=True)
     lines = proc.stdout.decode("utf-8", errors="replace").splitlines()
     conf_by_word: dict[str, list[float]] = {}
@@ -52,11 +47,51 @@ def tesseract_confidences(tesseract_cmd: str, image_path: Path) -> dict[str, lis
         level, conf_str, text = fields[0], fields[10], fields[11]
         if level != "5":  # level 5 = individual recognized word
             continue
-        norm = _normalize(text)
+        norm = normalize(text)
         conf = float(conf_str)
         if norm and conf >= 0:
             conf_by_word.setdefault(norm, []).append(conf)
     return conf_by_word
+
+
+def collect_confidences(
+    gt_pairs: list[tuple[str, str]],
+    misses: list[MissRow],
+    conf_by_word: dict[str, list[float]],
+) -> tuple[list[float], dict[str, list[float]]]:
+    """Split one page's confidences into hits and per-category misses.
+
+    `misses` is a *list*, one row per missed ground-truth word occurrence. It
+    used to be a dict keyed by the GT word text, so a word missed twice on a
+    page (form documents repeat "date", "name", "5"...) overwrote itself and
+    lost a row -- 11 of 98 rows on the FUNSD slice, which also fed the
+    per-category counts in the decision doc (review feedback on PR #345).
+
+    Both returned collections count *confidence values*, not miss rows: a row
+    contributes every confidence Tesseract gave the token it produced, so a
+    token that appears several times on the page adds several values.
+    """
+    miss_gt_norms = {normalize(row.gt_word) for row in misses}
+
+    hits: list[float] = []
+    for _, gt_norm in gt_pairs:
+        if gt_norm in miss_gt_norms:
+            continue  # a miss -- counted via its row below
+        if gt_norm in conf_by_word:
+            hits.extend(conf_by_word[gt_norm])
+
+    by_category: dict[str, list[float]] = {}
+    for row in misses:
+        brought_norm = normalize(row.ocr_brought)
+        if brought_norm in conf_by_word:
+            by_category.setdefault(row.category, []).extend(conf_by_word[brought_norm])
+    return hits, by_category
+
+
+# The cut-off other code (PR #509) uses to call a word low-confidence; printed
+# here as a share per group so a threshold can be checked against the
+# distribution, not just the averages.
+REFERENCE_THRESHOLD = 60.0
 
 
 def main() -> None:
@@ -65,32 +100,51 @@ def main() -> None:
     hit_confidences: list[float] = []
     miss_confidences: dict[str, list[float]] = {}
 
-    for doc_id in DOCS:
-        image_path = DATA_DIR / "images" / f"{doc_id}.png"
-        conf_by_word = tesseract_confidences(tesseract_cmd, image_path)
-
-        misses = {row["gt_word"]: row for row in analyze_doc(tesseract_cmd, doc_id)}
-        miss_gt_norms = {_normalize(orig) for orig in misses}
-
-        for gt_orig, gt_norm in gt_word_pairs(doc_id):
-            if gt_norm in miss_gt_norms:
-                continue  # handled via the miss table below
-            if gt_norm in conf_by_word:
-                hit_confidences.extend(conf_by_word[gt_norm])
-
-        for row in misses.values():
-            brought_norm = _normalize(row["ocr_brought"])
-            if brought_norm in conf_by_word:
-                miss_confidences.setdefault(row["category"], []).extend(conf_by_word[brought_norm])
+    for doc_id, paths in load_manifest().items():
+        conf_by_word = tesseract_confidences(tesseract_cmd, paths.image)
+        hits, by_category = collect_confidences(
+            gt_word_pairs(doc_id), analyze_doc(tesseract_cmd, doc_id), conf_by_word
+        )
+        hit_confidences.extend(hits)
+        for category, confs in by_category.items():
+            miss_confidences.setdefault(category, []).extend(confs)
 
     def avg(xs: list[float]) -> float:
         return sum(xs) / len(xs) if xs else float("nan")
 
-    print(f"Correctly-recalled words (word_recall hits): n={len(hit_confidences)}, avg confidence={avg(hit_confidences):.1f}")
+    def below(xs: list[float]) -> float:
+        return sum(x < REFERENCE_THRESHOLD for x in xs) / len(xs) if xs else float("nan")
+
+    print(
+        f"Correctly-recalled words (word_recall hits): n={len(hit_confidences)}, "
+        f"avg confidence={avg(hit_confidences):.1f}, "
+        f"share below {REFERENCE_THRESHOLD:.0f}: {below(hit_confidences):.0%}"
+    )
     print()
-    print("Confidence of the token Tesseract actually produced, for each miss category:")
+    print("Confidence of the token Tesseract actually produced, for each miss category")
+    print("(n = confidence values, not miss rows):")
     for category, confs in miss_confidences.items():
-        print(f"  {category:16} n={len(confs):3d}  avg confidence={avg(confs):.1f}")
+        print(
+            f"  {category:16} n={len(confs):3d}  avg confidence={avg(confs):.1f}  "
+            f"share below {REFERENCE_THRESHOLD:.0f}: {below(confs):.0%}"
+        )
+
+    # Averages alone hide how much the distributions overlap. For a few cut-offs:
+    # how many correctly-read words would be flagged (false flags) vs. how many
+    # of the real-error values (char_misread + different_word + not_detected --
+    # excluding digit_merge/segmentation, whose content is mostly correct).
+    real_errors = [
+        c
+        for cat in ("char_misread", "different_word", "not_detected")
+        for c in miss_confidences.get(cat, [])
+    ]
+    print(f"\nFlagging words below a cut-off (hits n={len(hit_confidences)}, "
+          f"real-error values n={len(real_errors)}):")
+    print(f"  {'cut-off':>8} {'correct words flagged':>22} {'real errors caught':>20}")
+    for cutoff in (40.0, 50.0, 60.0, 70.0, 80.0):
+        false_flags = sum(c < cutoff for c in hit_confidences) / len(hit_confidences)
+        caught = sum(c < cutoff for c in real_errors) / len(real_errors)
+        print(f"  {cutoff:>8.0f} {false_flags:>21.0%} {caught:>19.0%}")
 
 
 if __name__ == "__main__":

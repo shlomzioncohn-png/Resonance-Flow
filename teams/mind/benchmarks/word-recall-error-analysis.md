@@ -2,9 +2,20 @@
 
 ## Purpose
 
-Direct follow-up to the mentor's question after seeing 64.7% word
-recall vs. 91.2% character similarity: is the 64.7% ceiling mostly real
-OCR failures, or mostly an artifact of exact-match, word-level scoring?
+> **Read this as a heuristic explanation of why exact-match fails, not as
+> an accuracy measurement.** It was written alongside a "91.2% character
+> similarity" figure that has since been retracted (no zero point; rewards
+> output volume — see `ocr-asr-benchmark.md`). The classifier below also
+> matches each missed word to its best match *anywhere* in the OCR output
+> with loose thresholds, so its "59% aren't real errors" headline is not
+> trustworthy as stated; it should be redone with box-based matching (the
+> aligned scorer in `aligned_metrics.py` already pairs words by position —
+> 73% of unmatched GT words turned out to have an OCR box on them, which is
+> the same merge/split phenomenon seen here, but measured by position).
+
+Direct follow-up to the mentor's question about the 64.7% word recall: is
+the 64.7% ceiling mostly real OCR failures, or mostly an artifact of
+exact-match, word-level scoring?
 Every word_recall **miss** across both FUNSD documents (98 total, with
 `--psm 11`) was pulled and classified by cause. Script:
 `benchmarks/analyze_word_misses.py` (`python -m

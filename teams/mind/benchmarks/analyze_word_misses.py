@@ -46,17 +46,28 @@ from __future__ import annotations
 
 import difflib
 import json
-import re
 import sys
+from typing import Literal
+
+from pydantic import BaseModel
 
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
-from benchmarks.ocr_asr_benchmark import DATA_DIR, DOCS, find_tesseract, run_ocr
+from benchmarks.aligned_metrics import normalize
+from benchmarks.ocr_asr_benchmark import CHOSEN_PSM_ARGS, find_tesseract, load_manifest, run_ocr
 
-_CATEGORY_ORDER = ["digit_merge", "segmentation", "char_misread", "different_word", "not_detected"]
+Category = Literal["digit_merge", "segmentation", "char_misread", "different_word", "not_detected"]
 
-_CATEGORY_LABEL = {
+_CATEGORY_ORDER: list[Category] = [
+    "digit_merge",
+    "segmentation",
+    "char_misread",
+    "different_word",
+    "not_detected",
+]
+
+_CATEGORY_LABEL: dict[Category, str] = {
     "digit_merge": "Digits merged with an adjacent field (content correct, tokenization wrong)",
     "segmentation": "GT/OCR word-boundary mismatch (OCR's content is right)",
     "char_misread": "Character-level OCR misread (real recognition error)",
@@ -65,24 +76,32 @@ _CATEGORY_LABEL = {
 }
 
 
-def _normalize(word: str) -> str:
-    return re.sub(r"[^\w]", "", word).lower()
+class MissRow(BaseModel):
+    """One word_recall miss, classified -- what analyze_doc() returns and
+    main() prints/tallies. `category` is a Literal, not a bare str, so a
+    typo in a category name fails at construction, not silently at
+    lookup (review feedback on PR #345 -- typed returns over dicts)."""
 
+    doc: str
+    gt_word: str
+    ocr_brought: str
+    similarity: float
+    category: Category
 
 def gt_word_pairs(doc_id: str) -> list[tuple[str, str]]:
     """(original_text, normalized_text) for every GT word, in document order."""
-    path = DATA_DIR / "annotations" / f"{doc_id}.json"
+    path = load_manifest()[doc_id].annotation
     data = json.loads(path.read_text(encoding="utf-8"))
     pairs = []
     for block in data["form"]:
         for w in block["words"]:
-            norm = _normalize(w["text"])
+            norm = normalize(w["text"])
             if norm:
                 pairs.append((w["text"], norm))
     return pairs
 
 
-def classify(gt_norm: str, ocr_norm_tokens: list[str], best_match: str | None, best_ratio: float) -> str:
+def classify(gt_norm: str, ocr_norm_tokens: list[str], best_match: str | None, best_ratio: float) -> Category:
     if gt_norm.isdigit() and any(tok != gt_norm and tok.isdigit() and gt_norm in tok for tok in ocr_norm_tokens):
         return "digit_merge"
     if best_match and len(gt_norm) <= 5 and (gt_norm in best_match or best_match in gt_norm) and best_ratio >= 0.4:
@@ -94,14 +113,14 @@ def classify(gt_norm: str, ocr_norm_tokens: list[str], best_match: str | None, b
     return "not_detected"
 
 
-def analyze_doc(tesseract_cmd: str, doc_id: str) -> list[dict]:
-    image_path = DATA_DIR / "images" / f"{doc_id}.png"
-    result = run_ocr(tesseract_cmd, image_path, ["--psm", "11"])
-    ocr_raw_tokens = result["text"].split()
-    ocr_norm_tokens = [_normalize(w) for w in ocr_raw_tokens if _normalize(w)]
+def analyze_doc(tesseract_cmd: str, doc_id: str) -> list[MissRow]:
+    image_path = load_manifest()[doc_id].image
+    result = run_ocr(tesseract_cmd, image_path, CHOSEN_PSM_ARGS)
+    ocr_raw_tokens = result.text.split()
+    ocr_norm_tokens = [normalize(w) for w in ocr_raw_tokens if normalize(w)]
     ocr_norm_set = set(ocr_norm_tokens)
 
-    rows = []
+    rows: list[MissRow] = []
     for gt_orig, gt_norm in gt_word_pairs(doc_id):
         if gt_norm in ocr_norm_set:
             continue  # word_recall hit -- not a miss, nothing to classify
@@ -112,28 +131,29 @@ def analyze_doc(tesseract_cmd: str, doc_id: str) -> list[dict]:
                 best_match, best_ratio = tok, ratio
         category = classify(gt_norm, ocr_norm_tokens, best_match, best_ratio)
         rows.append(
-            {
-                "doc": doc_id,
-                "gt_word": gt_orig,
-                "ocr_brought": best_match or "(nothing close)",
-                "similarity": round(best_ratio, 2),
-                "category": category,
-            }
+            MissRow(
+                doc=doc_id,
+                gt_word=gt_orig,
+                ocr_brought=best_match or "(nothing close)",
+                similarity=round(best_ratio, 2),
+                category=category,
+            )
         )
     return rows
 
 
 def main() -> None:
     tesseract_cmd = find_tesseract()
-    all_rows: list[dict] = []
-    for doc_id in DOCS:
+    doc_ids = list(load_manifest())
+    all_rows: list[MissRow] = []
+    for doc_id in doc_ids:
         all_rows.extend(analyze_doc(tesseract_cmd, doc_id))
 
-    print(f"Total word_recall misses across {len(DOCS)} documents (psm11): {len(all_rows)}\n")
+    print(f"Total word_recall misses across {len(doc_ids)} documents (psm11): {len(all_rows)}\n")
 
     print("--- Breakdown by category ---")
     for cat in _CATEGORY_ORDER:
-        cat_rows = [r for r in all_rows if r["category"] == cat]
+        cat_rows = [r for r in all_rows if r.category == cat]
         pct = 100 * len(cat_rows) / len(all_rows) if all_rows else 0
         print(f"{cat:16} {len(cat_rows):3d}/{len(all_rows)} ({pct:4.1f}%)  -- {_CATEGORY_LABEL[cat]}")
 
@@ -142,9 +162,9 @@ def main() -> None:
     print("-" * 70)
     for cat in _CATEGORY_ORDER:
         for r in all_rows:
-            if r["category"] != cat:
+            if r.category != cat:
                 continue
-            print(f"{r['gt_word']:<20} {r['ocr_brought']:<20} {r['similarity']:>4.2f}  {r['category']}")
+            print(f"{r.gt_word:<20} {r.ocr_brought:<20} {r.similarity:>4.2f}  {r.category}")
 
 
 if __name__ == "__main__":
