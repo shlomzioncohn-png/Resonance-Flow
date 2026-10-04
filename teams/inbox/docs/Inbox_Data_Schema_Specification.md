@@ -168,7 +168,7 @@ Fields are listed with their type, whether they are required, their foreign-key 
 | `project_id` | UUID | No | FK → `projects.id` | Project associated with the task. |
 | `title` | TEXT | Yes | — | Short task title. |
 | `description` | TEXT | No | — | Detailed task description. |
-| `source_type` | VARCHAR / ENUM | Yes | `github_issue / github_pr / crm_deal / email / slack / whatsapp / meeting / doc / scanned_doc / calendar / manual` | Original source of the task. |
+| `source_type` | VARCHAR / ENUM | Yes | `github_issue / github_pr / crm_deal / email / slack / whatsapp / meeting / doc / scanned_doc / calendar / manual / jira_issue` | Original source of the task. |
 | `source_ref` | TEXT | No | — | Reference to the original source, such as URL, message ID, or issue ID. |
 | `correlation_id` | UUID | No | — | Request/response correlation value used by Mind on the unstructured creation path (`task.creation.requested` → `task.created`). NULL for tasks created via the structured path (Bridge) or manually. Technical field, not a business attribute. |
 | `tier` | VARCHAR / ENUM | No | `operational / tactical / strategic` | Task level used by Mind for tier-specific classification/ranking. May be NULL before classification. |

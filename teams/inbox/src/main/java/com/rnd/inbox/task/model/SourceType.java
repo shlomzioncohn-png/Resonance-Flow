@@ -11,5 +11,6 @@ public enum SourceType {
     SCANNED_DOC,
     CALENDAR,
     MANUAL,
-    DRIVE
+    DRIVE,
+    JIRA_ISSUE
 }
