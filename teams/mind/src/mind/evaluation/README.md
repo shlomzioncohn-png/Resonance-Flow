@@ -153,9 +153,12 @@ Given `extracted` action items and `annotated` (reference) ones, both as strings
 - **recall** = `TP / len(annotated)` — of the real action items, how many were found.
 - **f1** — harmonic mean. Micro-F1 over the whole slice is the number CI will
   regress on (`extraction_eval_design.md` §3.5).
+- **counts** — `n_extracted` and `n_annotated` (the denominators above) and
+  `true_positives` (the numerator), so a report is readable on its own.
 
-The report also carries the matched pairs, the missed annotations, and the false
-positives — the raw evidence, kept for "why did this run score that?" analysis in
+The report (`ExtractionEvalReport`, a frozen pydantic model — `model_dump()` gives
+the JSON the CLI writes) also carries the matched pairs, the missed annotations,
+and the false positives — the raw evidence, kept for "why did this run score that?" analysis in
 later weeks, the same requirement `ScenarioResult.candidates` exists for above.
 
 ### The matching rule
@@ -185,6 +188,14 @@ with no change to the harness, and the locked lexical threshold
 (`extraction_eval_design.md` §6 — τ = 0.60, for the `rapidfuzz` backend) can be
 revised as a visible call-site change rather than a silent code edit.
 
+**A bad score fails loudly.** `evaluate_extraction` raises `ValueError` if
+`threshold`, or any score `similarity` returns, is not a real number in `[0, 1]`
+(NaN, infinity, out of range, `None`, a string, a `bool`). This matters most for
+NaN: `nan < threshold` is `False`, so without the check a NaN score is matched as
+if it had cleared the bar and the eval reports a *perfect* run instead of
+failing. It also catches an embedding backend whose cosine in `[-1, 1]` was not
+rescaled to `[0, 1]`.
+
 ### This eval is approximate
 
 It compares free text to free text. A "true positive" means *our rule* — a
@@ -199,9 +210,15 @@ differences on a fixed reference, not to certify absolute extraction quality.
 ```bash
 python -m mind.evaluation.run_extraction_eval                   # the bundled hand-built fixture
 python -m mind.evaluation.run_extraction_eval --input pair.json
+python -m mind.evaluation.run_extraction_eval --threshold 0.6   # default: PLACEHOLDER_THRESHOLD (0.5)
 ```
 
-`pair.json` is `{"extracted": [...], "annotated": [...]}`. With no `--input`, the
+`pair.json` is `{"extracted": [...], "annotated": [...]}` — exactly those two keys,
+lists of strings only (validated by the `ExtractionEvalInput` pydantic model; an
+unknown key or a non-string item is rejected with the offending location, e.g.
+`extracted.1`). A bad input file or an invalid `--threshold` prints the error to
+stderr and exits with code 1. The full report is also written to
+`extraction_report.json` in the working directory (gitignored). With no `--input`, the
 fixture in `extraction_fixture.py` runs — three true positives, one false
 positive, one false negative, precision = recall = 0.75, worked out by hand in
 that file's docstring. The similarity the CLI uses is a pure-Python Jaccard placeholder
@@ -213,7 +230,8 @@ string match); it is not this eval.
 ### Current status
 
 **Fixture-validated, not yet run against real pipeline output** — see
-[Cross-team: should the Task model / API error format be shared contracts? #21](https://github.com/KamaTechOrg/Resonance-Flow/issues/21).
+[Cross-team: should the Task model / API error format be shared contracts? #21](https://github.com/KamaTechOrg/Resonance-Flow/issues/21)
+(tracking issues for this eval: #176 design, #177 implementation).
 The extracted side needs Yonit's extraction pipeline and Michal's ASR to be
 producing output; the annotated side (AMI action items) wires in via a manifest
 edit, not a code change (`extraction_eval_design.md` §"Scope").
