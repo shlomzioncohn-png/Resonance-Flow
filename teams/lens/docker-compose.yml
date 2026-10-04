@@ -1,0 +1,76 @@
+services:
+  # ========================================
+  # Frontend - Next.js (Port 3000)
+  # ========================================
+  lens-frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: lens-frontend
+    ports:
+      - "${FRONTEND_PORT:-3000}:3000"
+    environment:
+      - NODE_ENV=production
+    networks:
+      - lens-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    depends_on:
+      - gateway
+
+  # ========================================
+  # Gateway - Spring Boot (Port 8080)
+  # ========================================
+  gateway:
+    build:
+      context: ./gateway
+      dockerfile: Dockerfile
+    container_name: gateway-service
+    ports:
+      - "${GATEWAY_PORT:-8080}:8080"
+    environment:
+      - SERVER_PORT=8080
+      - SPRING_PROFILES_ACTIVE=${SPRING_PROFILES_ACTIVE:-local}
+      - BFF_SERVICE_URL=${BFF_SERVICE_URL:-http://bff-service:8082}
+      - BFF_CONNECT_TIMEOUT_MS=${BFF_CONNECT_TIMEOUT_MS:-2000}
+      - BFF_READ_TIMEOUT_MS=${BFF_READ_TIMEOUT_MS:-10000}
+    networks:
+      - lens-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    depends_on:
+      - bff-service
+
+  # ========================================
+  # BFF - Spring Boot (Port 8082)
+  # ========================================
+  bff-service:
+    build:
+      context: ./bff
+      dockerfile: Dockerfile
+    container_name: bff-service
+    ports:
+      - "${BFF_PORT:-8082}:8082"
+    environment:
+      - SERVER_PORT=8082
+      - SPRING_PROFILES_ACTIVE=${SPRING_PROFILES_ACTIVE:-local}
+    networks:
+      - lens-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8082/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+
+networks:
+  lens-network:
+    driver: bridge

@@ -1,0 +1,79 @@
+apiVersion: batch/v1
+kind: Job
+
+metadata:
+  name: {{ include "schema-sync-hook.fullname" . }}
+  annotations:
+    # A Job's pod template is immutable, so ArgoCD can't patch an existing Job
+    # when the template changes (below) — it would fail to sync. Replace=true +
+    # Force=true makes ArgoCD delete and recreate it (kubectl replace --force).
+    argocd.argoproj.io/sync-options: Replace=true,Force=true
+  labels:
+    {{- include "schema-sync-hook.labels" . | nindent 4 }}
+
+spec:
+  backoffLimit: 0
+  template:
+    metadata:
+      annotations:
+        # Hash of the schema list + every .proto. Any schema change changes this,
+        # which changes the (immutable) pod template, so ArgoCD recreates the Job
+        # (via the Replace/Force option above) and it re-runs with the new schemas.
+        # Without this a .proto-only change updates the ConfigMaps but never
+        # re-triggers the Job.
+        checksum/schemas: {{ printf "%s%s" (.Files.Get "files/schema-subjects.tsv") ((.Files.Glob "files/schemas/*.proto").AsConfig) | sha256sum }}
+      labels:
+        {{- include "schema-sync-hook.selectorLabels" . | nindent 8 }}
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: schema-sync
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+
+          env:
+            - name: SCHEMA_REGISTRY_URL
+              value: {{ .Values.schemaRegistryUrl | quote }}
+
+          # alpine ships without bash/curl/jq — install them at start, then run
+          # the real orchestrator script.
+          command: ["/bin/sh", "-c"]
+          args:
+            - apk add --no-cache bash curl jq >/dev/null && bash /scripts/run-all.sh
+
+          volumeMounts:
+            - name: scripts
+              mountPath: /scripts
+            - name: schema-list
+              mountPath: /schema-list
+            - name: schemas
+              mountPath: /schema
+
+          {{- with .Values.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+
+      volumes:
+        - name: scripts
+          configMap:
+            name: {{ include "schema-sync-hook.fullname" . }}
+            defaultMode: 0755
+            items:
+              - key: run-all.sh
+                path: run-all.sh
+              - key: check-schema-compatibility.sh
+                path: check-schema-compatibility.sh
+              - key: register-schema.sh
+                path: register-schema.sh
+        - name: schema-list
+          configMap:
+            name: {{ include "schema-sync-hook.fullname" . }}
+            items:
+              - key: schemas.tsv
+                path: schemas.tsv
+              - key: compatibility-level
+                path: compatibility-level
+        - name: schemas
+          configMap:
+            name: {{ include "schema-sync-hook.fullname" . }}-schemas

@@ -1,0 +1,9 @@
+apiVersion: v2
+name: schema-sync-hook
+description: ArgoCD PreSync hook that checks schema compatibility against the live
+  Schema Registry (from inside the cluster) and registers it only if compatible —
+  runs right before the relay Deployment itself is synced.
+
+type: application
+version: 0.1.0
+appVersion: "1.0.0"

@@ -1,0 +1,39 @@
+server:
+  port: ${SERVER_PORT:8082}
+  shutdown: graceful
+
+spring:
+  application:
+    name: relay
+  lifecycle:
+    timeout-per-shutdown-phase: 30s
+  config:
+    import:
+      - optional:${KAFKA_CONFIG_PATH:classpath:/kafka-config.yaml}
+      - optional:${PIPE_LIMITS_PATH:classpath:/pipe-limits.yaml}
+  kafka:
+    producer:
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: io.confluent.kafka.serializers.protobuf.KafkaProtobufSerializer
+    consumer:
+      group-id: relay
+      auto-offset-reset: latest
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: org.springframework.kafka.support.serializer.ErrorHandlingDeserializer
+      properties:
+        spring.deserializer.value.delegate.class: io.confluent.kafka.serializers.protobuf.KafkaProtobufDeserializer
+        specific.protobuf.value.type: com.rnd.relay.event.TaskEvent
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,metrics
+
+relay:
+  kafka:
+    task-event-topic: task-event
+    task-notification-topic: resonance.task-notifications
+
+  pipe:
+    consumer-group-id: pipe-${INSTANCE_NAME:${random.uuid}}-${random.int(1000,9999)}
