@@ -206,6 +206,24 @@
                     </execution>
                 </executions>
             </plugin>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-surefire-plugin</artifactId>
+                <configuration>
+                    <!--
+                        PR #467 review: multiple @EmbeddedKafka @SpringBootTest classes (now 3,
+                        plus the embedded-broker tests already in the suite) proved to interfere
+                        with each other's broker/consumer lifecycle when reusing one JVM fork
+                        across test classes - see PLAN.md's Round 5, Finding 5 for the originally
+                        diagnosed case (confirmed deterministic, not flaky: the second class
+                        passed reliably alone, failed once run after the first in the same fork).
+                        reuseForks=false gives every test class its own fresh JVM, closing this
+                        off at the process level regardless of the exact resource that leaks
+                        between classes - at the cost of a JVM startup per class, not per run.
+                    -->
+                    <reuseForks>false</reuseForks>
+                </configuration>
+            </plugin>
         </plugins>
     </build>
 </project>
