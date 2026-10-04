@@ -40,10 +40,12 @@ dev = [
     "grpcio-tools==1.71.0",  # protoc, for `make proto`
 ]
 # Not a runtime dependency of src/mind/ -- only benchmarks/ocr_asr_benchmark.py
-# needs these. pytesseract/pillow/psutil compare against PaddleOCR; PaddleOCR
-# also requires its model weights, which may need manual placement under
-# ~/.paddlex/official_models/ if the auto-download hosters are
-# network-filtered -- see benchmarks/ocr-asr-benchmark.md "PaddleOCR -- setup".
+# needs these (psutil for peak-RSS sampling, PaddleOCR as the comparison
+# engine). Tesseract itself, the chosen OCR, is a system binary and runtime
+# dependency -- see above. PaddleOCR also requires its model weights, which
+# may need manual placement under ~/.paddlex/official_models/ if the
+# auto-download hosters are network-filtered -- see
+# benchmarks/ocr-asr-benchmark.md "PaddleOCR -- setup".
 benchmark = [
     "psutil",  # cross-platform peak-RSS/CPU sampling; stdlib `resource` is Unix-only
     "paddleocr",
