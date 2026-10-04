@@ -1,0 +1,17 @@
+# CI applies an all-components-off overlay first (setup-service-infra), so only
+# list what this service needs enabled - everything else is already off.
+components:
+  inbox:
+    enabled: true
+  schema-registry:
+    enabled: true
+
+# inbox needs Kafka (event consumers), Postgres (its own datastore), and Schema Registry
+# (task.created's agreed Protobuf contract, once the producer is wired to it - see #227);
+# Minio is only used by mind/bridge, so it stays off for an inbox-only install.
+kafka:
+  enabled: true
+minio:
+  enabled: false
+postgresql:
+  enabled: true

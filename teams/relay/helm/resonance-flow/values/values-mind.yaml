@@ -1,0 +1,47 @@
+components:
+  mind:
+    enabled: true
+    image:
+      repository: mind
+      tag: local
+      pullPolicy: Never
+  schema-registry:
+    enabled: true
+  lens-bff:
+    enabled: false
+  bridge:
+    enabled: false
+  lens-frontend:
+    enabled: false
+  chain:
+    enabled: false
+  inbox:
+    enabled: false
+  lens-gateway:
+    enabled: false
+  notification-delivery:
+    enabled: false
+
+kafka:
+  enabled: true
+  image:
+    registry: docker.io
+    repository: bitnamilegacy/kafka
+    tag: 4.0.0-debian-12-r10
+  controller:
+    persistence:
+      enabled: false
+  listeners:
+    client:
+      protocol: PLAINTEXT
+    controller:
+      protocol: PLAINTEXT
+    interbroker:
+      protocol: PLAINTEXT
+  overrideConfiguration:
+    offsets.topic.replication.factor: 1
+minio:
+  enabled: true
+# pgvector (official vector.so overlaid on Bitnami's, #490) for the vector-store tests.
+postgresql:
+  enabled: true

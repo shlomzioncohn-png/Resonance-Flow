@@ -1,0 +1,52 @@
+{{- if .Values.pipeConsumerGroupSweep.enabled }}
+apiVersion: v1
+kind: ConfigMap
+
+metadata:
+  name: {{ include "resonance-flow.fullname" $ }}-pipe-consumer-group-sweep
+  labels:
+    {{- include "resonance-flow.labels" $ | nindent 4 }}
+    app.kubernetes.io/component: pipe-consumer-group-sweep
+
+data:
+  sweep.sh: |
+    #!/bin/sh
+    set -eu
+
+    # kafka-consumer-groups.sh needs the SASL creds in a properties file, not
+    # as CLI flags.
+    CONF=/tmp/sweep-client.properties
+    cat > "$CONF" <<EOF
+    security.protocol=SASL_PLAINTEXT
+    sasl.mechanism=PLAIN
+    sasl.jaas.config=${KAFKA_SASL_JAAS_CONFIG}
+    EOF
+
+    BIN=/opt/kafka/bin/kafka-consumer-groups.sh
+    BS="$KAFKA_BOOTSTRAP_SERVERS"
+    PATTERN="${GROUP_PATTERN:-pipe-*}"
+    REGEX="^$(echo "$PATTERN" | sed 's/\*/.*/')$"
+
+    groups=$("$BIN" --bootstrap-server "$BS" --command-config "$CONF" --list | grep -E "$REGEX" || true)
+
+    if [ -z "$groups" ]; then
+      echo "no groups matching '$PATTERN' found"
+      exit 0
+    fi
+
+    echo "$groups" | while IFS= read -r g; do
+      [ -z "$g" ] && continue
+
+      # --describe --state on a group with zero members can legitimately fail
+      # (already expired between --list and here) - treat that as "already
+      # gone", not an error.
+      state=$("$BIN" --bootstrap-server "$BS" --command-config "$CONF" --describe --group "$g" --state 2>/dev/null | awk 'NR==2{print $4}')
+
+      if [ "$state" = "Empty" ]; then
+        echo "deleting orphaned empty group: $g"
+        "$BIN" --bootstrap-server "$BS" --command-config "$CONF" --delete --group "$g" || true
+      else
+        echo "skipping $g (state=${state:-unknown})"
+      fi
+    done
+{{- end }}

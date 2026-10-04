@@ -1,0 +1,75 @@
+name: Label team PRs
+
+on:
+  pull_request:
+    types: [opened]
+
+jobs:
+  add-label:
+    runs-on: self-hosted
+    # Labeling is cosmetic - a GitHub API hiccup here must not fail PR checks.
+    continue-on-error: true
+    # Repo default token is read-only; creating/adding labels needs write.
+    permissions:
+      issues: write
+      pull-requests: write
+    steps:
+      - name: Ensure labels exist
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const teams = [
+              { label: 'Lens',   color: '0e8a16' },
+              { label: 'Inbox',  color: '1d76db' },
+              { label: 'Bridge', color: '5319e7' },
+              { label: 'Mind',   color: 'b60205' },
+              { label: 'Chain',  color: 'fbca04' },
+              { label: 'Relay',  color: '0052cc' },
+            ];
+
+            // Label names are case-insensitive on GitHub, so compare lowercased
+            const existingLabels = await github.paginate(
+              github.rest.issues.listLabelsForRepo,
+              { owner: context.repo.owner, repo: context.repo.repo }
+            );
+            const existingNames = new Set(existingLabels.map(l => l.name.toLowerCase()));
+
+            for (const team of teams) {
+              if (!existingNames.has(team.label.toLowerCase())) {
+                await github.rest.issues.createLabel({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  name: team.label,
+                  color: team.color,
+                });
+                console.log(`Created missing label: ${team.label}`);
+              }
+            }
+
+      - name: Add label based on team
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const teams = [
+              { label: 'Lens',   members: ['Dvori-558', 'elisheva-666', 'sarisholomon', 'mali8573'] },
+              { label: 'Inbox',  members: [] }, // fill in: INBOX team members
+              { label: 'Bridge', members: [] }, // fill in: BRIDGE team members
+              { label: 'Mind',   members: [] }, // fill in: MIND team members
+              { label: 'Chain',  members: [] }, // fill in: CHAIN team members
+              { label: 'Relay',  members: ['avigailrapa', 'Ayala679', 'ch-kap219', 'gittyafe'] },
+            ];
+
+            const author = context.payload.pull_request.user.login;
+            const matchedTeam = teams.find(team => team.members.includes(author));
+
+            if (matchedTeam) {
+              await github.rest.issues.addLabels({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.payload.pull_request.number,
+                labels: [matchedTeam.label]
+              });
+              console.log(`Added label "${matchedTeam.label}" for ${author}`);
+            } else {
+              console.log(`No team match found for ${author}, skipping.`);
+            }

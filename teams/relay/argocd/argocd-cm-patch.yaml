@@ -1,0 +1,61 @@
+# ArgoCD removed its built-in health check for the `argoproj.io/Application`
+# CRD in 1.8 (https://github.com/argoproj/argo-cd/issues/3781). Without it,
+# ArgoCD has no way to tell whether a child Application (e.g.
+# `resonance-flow`) is actually Healthy, so the sync-wave annotations on
+# apps/resonance-flow.yaml ("0") and apps/schema-sync-hook.yaml ("1") never
+# gate anything - `root` creates both Applications back-to-back regardless.
+# (Originally written for the since-removed apps/kafka.yaml; the examples
+# below still describe that case.)
+#
+# This restores that health check, with one deviation from the script in
+# the ArgoCD docs (https://argo-cd.readthedocs.io/en/stable/operator-manual/health/):
+# a freshly-created child Application reports its own health as "Missing"
+# for the first instant, before its controller has even started
+# reconciling it. ArgoCD's wave engine (gitops-engine's
+# syncContext.getOperationPhase) switches on health.Status but has no case
+# for "Missing" - it falls through to the pre-switch default of
+# OperationSucceeded, so a script that copies "Missing" through verbatim
+# (as the docs' script does) marks the wave-gate task done instantly and
+# defeats the gate. Confirmed live on a kind cluster (issues #180, #186):
+# with the docs' verbatim script, kafka's Application object briefly
+# reports "Missing" right after creation, root's wave-gate reads that as
+# "succeeded", and resonance-flow gets synced before kafka is anywhere
+# close to Healthy. Mapping "Missing" to "Progressing" here closes that
+# gap.
+#
+# Apply alongside root-app.yaml against a cluster that already has the
+# argocd-cm ConfigMap (kubectl apply merges this into the existing keys,
+# it does not replace the whole ConfigMap):
+#
+#   kubectl apply -f teams/relay/argocd/argocd-cm-patch.yaml
+#   kubectl apply -f teams/relay/argocd/root-app.yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: argocd-cm
+  namespace: argocd
+  labels:
+    app.kubernetes.io/name: argocd-cm
+    app.kubernetes.io/part-of: argocd
+data:
+  resource.customizations.health.argoproj.io_Application: |
+    hs = {}
+    hs.status = "Progressing"
+    hs.message = ""
+    if obj.status ~= nil then
+      if obj.status.health ~= nil then
+        if obj.status.health.status == "Missing" then
+          -- Transient state right after the child Application is created,
+          -- before its own controller has reconciled it. Treating this as
+          -- "Progressing" (rather than passing it through verbatim) keeps
+          -- the sync-wave gate closed - see comment above for why.
+          hs.status = "Progressing"
+        else
+          hs.status = obj.status.health.status
+        end
+        if obj.status.health.message ~= nil then
+          hs.message = obj.status.health.message
+        end
+      end
+    end
+    return hs

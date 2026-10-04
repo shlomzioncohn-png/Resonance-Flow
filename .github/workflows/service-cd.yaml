@@ -1,0 +1,66 @@
+name: Service CD (reusable)
+
+on:
+  workflow_call:
+    inputs:
+      service_name:
+        description: "Component name, matches the key under components.<service_name> in teams/relay/helm/resonance-flow/values.yaml"
+        required: true
+        type: string
+      service_dir:
+        description: "Path to the service, e.g. teams/bridge"
+        required: true
+        type: string
+      language:
+        description: "python, java, or node"
+        required: true
+        type: string
+
+jobs:
+  build:
+    runs-on: self-hosted
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      image_tag: ${{ steps.deploy.outputs.image_tag }}
+      image_repository: ${{ steps.deploy.outputs.image_repository }}
+    steps:
+      # local actions need the repo on disk before the runner can even resolve them
+      - uses: actions/checkout@v7
+
+      - if: inputs.language == 'python'
+        uses: ./.github/actions/ci-python
+        with:
+          service_name: ${{ inputs.service_name }}
+          service_dir: ${{ inputs.service_dir }}
+
+      - if: inputs.language == 'java'
+        uses: ./.github/actions/ci-java
+        with:
+          service_name: ${{ inputs.service_name }}
+          service_dir: ${{ inputs.service_dir }}
+
+      - if: inputs.language == 'node'
+        uses: ./.github/actions/ci-node
+        with:
+          service_name: ${{ inputs.service_name }}
+          service_dir: ${{ inputs.service_dir }}
+
+      - id: deploy
+        uses: ./.github/actions/deploy-service
+        with:
+          service_name: ${{ inputs.service_name }}
+          service_dir: ${{ inputs.service_dir }}
+
+  update-manifest:
+    needs: build
+    permissions:
+      contents: write
+      pull-requests: write
+    uses: ./.github/workflows/service-update-manifest.yaml
+    secrets: inherit
+    with:
+      service_name: ${{ inputs.service_name }}
+      image_tag: ${{ needs.build.outputs.image_tag }}
+      image_repository: ${{ needs.build.outputs.image_repository }}

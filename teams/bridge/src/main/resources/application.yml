@@ -12,10 +12,24 @@ spring:
   application:
     name: bridge
   kafka:
+    # Team shared / remote environment (do not use unless agreed):
+    #   bootstrap-servers: 3.216.80.66:9092
+    #   topic: bridge.github.tasks
     bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+    topic: ${KAFKA_TOPIC:bridge.test}
     producer:
       key-serializer: org.apache.kafka.common.serialization.StringSerializer
       value-serializer: org.springframework.kafka.support.serializer.JsonSerializer
+      acks: all
+      retries: 3
+      properties:
+        spring.json.add.type.headers: false
+    consumer:
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: org.springframework.kafka.support.serializer.JsonDeserializer
+      properties:
+        spring.json.trusted.packages: com.rnd.bridge
+        spring.json.value.default.type: com.rnd.bridge.task.BridgeTaskEventDto
 
 minio:
   endpoint: ${MINIO_ENDPOINT:http://localhost:9000}
@@ -23,7 +37,56 @@ minio:
   secret-key: ${MINIO_SECRET_KEY:minioadmin}
   bucket: ${MINIO_BUCKET:bridge-raw}
 
+github:
+  api:
+    base-url: ${GITHUB_API_BASE_URL:https://api.github.com}
+    token: ${GITHUB_TOKEN:}
+  target:
+    owner: ${GITHUB_TARGET_OWNER:KamaTechOrg}
+    repo: ${GITHUB_TARGET_REPO:Resonance-Flow}
+  sync:
+    # Set to true to enable the automatic nightly GitHub to Kafka sync
+    cron:
+      enabled: ${GITHUB_SYNC_CRON_ENABLED:false}
+      expression: ${GITHUB_SYNC_CRON_EXPRESSION:0 0 2 * * ?}
+
+jira:
+  api:
+    base-url: ${JIRA_API_BASE_URL:https://example.atlassian.net}
+    token: ${JIRA_TOKEN:}
+  target:
+    project: ${JIRA_TARGET_PROJECT:}
+  sync:
+    # Set to true to enable the automatic nightly Jira to Kafka sync
+    cron:
+      enabled: ${JIRA_SYNC_CRON_ENABLED:false}
+      expression: ${JIRA_SYNC_CRON_EXPRESSION:0 0 2 * * ?}
+
 bridge:
+  # Shared by every structured lane that publishes a Task via
+  # KafkaPayloadPublisher (see esti/inbox-kafka-ingestion-contract) - one
+  # topic for every source, never a per-lane one.
+  structured-tasks-topic: ${BRIDGE_STRUCTURED_TASKS_TOPIC:bridge.structured.tasks}
+  manual-sync:
+    enabled: false
+  crm:
+    dataset: classpath:crm/synthetic-deals.json
+    # Inbox's tasks.tenant_id is NOT NULL, but HubSpot (and this
+    # lane's Deal model) has no concept of it - see DealToTaskMapper's class
+    # Javadoc. Set CRM_ORGANIZATION_ID for a real org; falls back to a
+    # local placeholder for development so the app can start without it.
+    # This key deliberately still says "organization-id", not "tenant-id" -
+    # see teams/bridge/CLAUDE.md §6 (tracked alongside the Task.organizationId
+    # decision, same reasoning: renaming a config key is an operational risk
+    # across every deployed environment, not a wire-format concern).
+    organization-id: ${CRM_ORGANIZATION_ID:local-crm-org}
+    sync:
+      # Set to true to enable the automatic daily HubSpot to Kafka sync.
+      # Off by default, same convention as github.sync.cron - an operator
+      # opts in per environment, not a code change.
+      cron:
+        enabled: ${CRM_SYNC_CRON_ENABLED:false}
+        expression: ${CRM_SYNC_CRON_EXPRESSION:0 0 3 * * ?}
   intake:
     raw-landed-topic: ${BRIDGE_RAW_LANDED_TOPIC:bridge.raw.landed}
     scoping:
@@ -34,14 +97,35 @@ bridge:
       session-gap-minutes: 45
     # Per-source fixture/real switch - see plan.md. Each source can go "real" independently;
     # "real" beans throw UnsupportedOperationException until their connector is implemented.
+    # Shared by every real Google reader (Calendar/Gmail/Drive) - see intake.google.
+    # GoogleCredentialsProvider. Personal Gmail account -> OAuth2 user-consent flow, not a
+    # service account: client-secrets-path is the OAuth Client ID JSON from Google Cloud
+    # Console (Desktop app type), tokens-directory caches the refresh token after the one-time
+    # browser consent so later runs don't need a browser.
+    google:
+      client-secrets-path: ${BRIDGE_GOOGLE_CLIENT_SECRETS_PATH:}
+      tokens-directory: ${BRIDGE_GOOGLE_TOKENS_DIR:}
     email:
       mode: fixture
     drive:
       mode: fixture
     calendar:
       mode: fixture
+      # Only read when mode: real. "primary" means the calendar of whichever Google account
+      # completes the OAuth consent.
+      calendar-id: ${BRIDGE_CALENDAR_ID:primary}
     slack:
       mode: fixture
+      # Only read when mode: real. Bot User OAuth Token (xoxb-...) from a Slack app installed
+      # with channels:history/groups:history/files:read scopes - see plan.md.
+      bot-token: ${BRIDGE_SLACK_BOT_TOKEN:}
+      tenant-id: kamatech
+      # Channel IDs (Cxxxxxxxx) the bot has been invited to - no config here means "read every
+      # channel", Slack has no such mode without a much broader scope.
+      channels: ${BRIDGE_SLACK_CHANNELS:}
+      # Slack app's Signing Secret (Basic Information page) - verifies X-Slack-Signature on
+      # inbound Events API requests. Only used by SlackEventsController, not by polling.
+      signing-secret: ${BRIDGE_SLACK_SIGNING_SECRET:}
     whatsapp:
       mode: fixture
       # Only read when mode: real. See plan.md - there's no export API, so this directory is
@@ -50,3 +134,42 @@ bridge:
       # Local time zone the exporting phone was set to - WhatsApp export timestamps carry no
       # offset, so this must match the tenant, not be assumed to be UTC.
       zone-id: ${BRIDGE_WHATSAPP_ZONE_ID:Asia/Jerusalem}
+  media:
+    # Meeting/doc/audio hand-off (Esther) - local folders to read test files from, one per
+    # source, not committed; set your own in .env. Shares minio.* and
+    # bridge.intake.raw-landed-topic above with the Unstructured-intake lane.
+    zoom-recordings-dir: ${BRIDGE_MEDIA_ZOOM_RECORDINGS_DIR:./temp/zoom}
+    bbb-recordings-dir: ${BRIDGE_MEDIA_BBB_RECORDINGS_DIR:./temp/bbb}
+    scanned-docs-dir: ${BRIDGE_MEDIA_SCANNED_DOCS_DIR:./temp/docs}
+    tenant-id: ${BRIDGE_MEDIA_TENANT_ID:demo-tenant}
+    # Files at or below this size never land - a conservative proxy for "empty/corrupt
+    # recording", not real audio-duration filtering (that needs a codec-aware library this
+    # lane doesn't depend on). Tune based on what garbage actually shows up in practice.
+    min-file-size-bytes: ${BRIDGE_MEDIA_MIN_FILE_SIZE_BYTES:1024}
+llm:
+  enrichment:
+    # Master switch for the rule-based task enrichment engine.
+    enabled: ${LLM_ENRICHMENT_ENABLED:false}
+    # Only these source types are enriched; all others are skipped entirely.
+    supported-sources: ${LLM_ENRICHMENT_SUPPORTED_SOURCES:GITHUB_ISSUE,JIRA_ISSUE}
+    # Keyword -> urgency level (1..5). Overrides the built-in defaults when set.
+    urgency-keywords:
+      blocker: 5
+      critical: 5
+      asap: 5
+      urgent: 5
+      "production down": 5
+      "high priority": 4
+      important: 4
+      "needed soon": 4
+      medium: 3
+      todo: 3
+      needed: 3
+      low: 1
+      whenever: 1
+      "nice to have": 1
+  consumer:
+    # Separate switch for the automatic Kafka enrichment channel.
+    enabled: ${LLM_CONSUMER_ENABLED:false}
+    input-topic: ${LLM_CONSUMER_INPUT_TOPIC:bridge.tasks.to-enrich}
+    group-id: ${LLM_CONSUMER_GROUP_ID:bridge-llm-enricher}

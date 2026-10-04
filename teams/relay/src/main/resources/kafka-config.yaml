@@ -1,0 +1,7 @@
+spring:
+  kafka:
+    bootstrap-servers: kafka:29092
+    properties:
+      security.protocol: PLAINTEXT
+      sasl.jaas.config:
+      schema.registry.url: http://schema-registry:8080/apis/ccompat/v6

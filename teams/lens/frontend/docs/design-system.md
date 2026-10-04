@@ -234,6 +234,14 @@ is the theme's first real consumer and demonstrates the conventions above:
 This is a baseline, not a full audit — a dedicated accessibility pass is
 planned for Phase 2 per the LENS roadmap.
 
+### Enforcement: ESLint
+
+`eslint.config.mjs` layers `eslint-plugin-jsx-a11y`'s full `recommended` rule
+set on top of `eslint-config-next`'s (Next only enables a small subset, as
+warnings). Run `npm run lint` before committing — this is a real gate, not
+advisory: an accessibility regression (a missing `alt`, an interactive `div`,
+an unlabeled control) fails the same way a type error would.
+
 ## Extending the theme
 
 - New raw value → `theme/tokens.ts`.

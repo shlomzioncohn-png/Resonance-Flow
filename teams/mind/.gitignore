@@ -7,6 +7,10 @@ venv/
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
+.coverage
+
+# Generated from proto/*.proto by `make proto` — never commit
+src/mind/messaging/*_pb2.py
 
 # Local model weights — never commit
 models/*
@@ -21,6 +25,9 @@ models/*
 .DS_Store
 .vscode/
 !.vscode/extensions.json
+
+# Personal AI-assistant notes — local only, never shared via git
+CLAUDE.md
 
 # Local-only Docker build workaround for this machine's network TLS
 # interception (NetFree). Machine-specific, never shared -- the real
@@ -40,6 +47,9 @@ eval/datasets/*
 !eval/datasets/README.md
 !eval/datasets/*.manifest.json
 !eval/datasets/*.sha256
+
+# Harness run output (mind.evaluation.run writes report.json to the cwd)
+report.json
 
 # Local raw datasets — never commit
 local-data/

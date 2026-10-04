@@ -1,0 +1,36 @@
+name: Chain CI/CD
+
+on:
+  push:
+    branches: [ "main" ]
+    tags: [ "chain-v*.*.*" ]
+    paths:
+      - "teams/chain/**"
+  pull_request:
+    branches: [ "main" ]
+    paths:
+      - "teams/chain/**"
+  workflow_dispatch: {}
+
+jobs:
+  ci:
+    if: github.event_name == 'pull_request'
+    permissions:
+      contents: read
+    uses: ./.github/workflows/service-ci-java.yaml
+    with:
+      service_name: chain
+      service_dir: teams/chain
+
+  cd:
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    permissions:
+      contents: write
+      packages: write
+      pull-requests: write
+    uses: ./.github/workflows/service-cd.yaml
+    secrets: inherit
+    with:
+      service_name: chain
+      service_dir: teams/chain
+      language: java
