@@ -89,6 +89,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - uses: ./.github/actions/free-runner-disk
+
       - uses: azure/setup-helm@v5
 
       # No working-directory override on this or the helm/kubectl steps below -
