@@ -35,14 +35,18 @@ class InboxClientTest {
                 inboxClient.getTasksForUser("any-user").stream()
                         .collect(java.util.stream.Collectors.toMap(TaskDTO::getId, t -> t));
 
-        assertThat(byId).hasSize(6);
+        assertThat(byId).hasSize(8);
 
-        assertStatusAndPriority(byId.get("task_001"), "READY", "HIGH", "approved", 8.0);
-        assertStatusAndPriority(byId.get("task_002"), "BLOCKED", "HIGH", "snoozed", 8.0);
-        assertStatusAndPriority(byId.get("task_003"), "BLOCKED", "MEDIUM", "snoozed", 5.0);
+        // One task per status (8-status model), priority bucketed from priority_score:
+        // >= 7 HIGH, >= 4 MEDIUM, else LOW.
+        assertStatusAndPriority(byId.get("task_001"), "NEW", "HIGH", "new", 8.0);
+        assertStatusAndPriority(byId.get("task_002"), "IN_REVIEW", "HIGH", "in_review", 8.0);
+        assertStatusAndPriority(byId.get("task_003"), "APPROVED", "MEDIUM", "approved", 5.0);
         assertStatusAndPriority(byId.get("task_004"), "IN_PROGRESS", "LOW", "in_progress", 2.0);
-        assertStatusAndPriority(byId.get("task_005"), "READY", "HIGH", "approved", 8.0);
-        assertStatusAndPriority(byId.get("task_006"), "IN_PROGRESS", "MEDIUM", "in_progress", 5.0);
+        assertStatusAndPriority(byId.get("task_005"), "DONE", "HIGH", "done", 8.0);
+        assertStatusAndPriority(byId.get("task_006"), "SNOOZED", "LOW", "snoozed", 3.0);
+        assertStatusAndPriority(byId.get("task_007"), "REJECTED", "MEDIUM", "rejected", 4.0);
+        assertStatusAndPriority(byId.get("task_008"), "CANCELLED", "LOW", "cancelled", 1.0);
     }
 
     private void assertStatusAndPriority(
@@ -72,7 +76,9 @@ class InboxClientTest {
         assertThat(task.getTier()).isEqualTo("strategic");
         assertThat(task.getUrgency()).isEqualTo(5);
         assertThat(task.getIsAvailable()).isFalse();
-        assertThat(task.getSnoozedUntil()).isNotNull();
+        // task_002 is IN_REVIEW, not snoozed - snoozedUntil is only set on task_006
+        assertThat(task.getSnoozedUntil()).isNull();
+        assertThat(inboxClient.getTaskById("any-user", "task_006").getSnoozedUntil()).isNotNull();
         assertThat(task.getExtractionProvenance()).isEqualTo("etl");
         assertThat(task.getSuggestedOwnerUserId()).isEqualTo("66666666-6666-6666-6666-666666666666");
         assertThat(task.getCreatedAt()).isNotNull();
@@ -85,8 +91,9 @@ class InboxClientTest {
     }
 
     @Test
-    void updateStatus_roundTripsAllFourFrontendValues() {
-        for (String status : List.of("READY", "IN_PROGRESS", "BLOCKED", "COMPLETED")) {
+    void updateStatus_roundTripsAllEightStatuses() {
+        for (String status : List.of(
+                "NEW", "IN_REVIEW", "APPROVED", "IN_PROGRESS", "SNOOZED", "DONE", "REJECTED", "CANCELLED")) {
             TaskDTO updated = inboxClient.updateStatus("any-user", "task_001", status);
             assertThat(updated.getStatus()).isEqualTo(status);
             // getTaskById after updateStatus reflects the same value - proves
