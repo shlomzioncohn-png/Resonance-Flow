@@ -86,7 +86,7 @@ distinguish "not set" from "set to the zero value." Going field by field against
   has no native UUID type, so id fields are declared as `string` directly." No wrapper type needed.
 - **Timestamps** (`deadline`, new `occurred_at`): `google.protobuf.Timestamp`, not an ISO-8601
   string. Two reasons: (1) it's the idiomatic proto3 choice and every existing schema in
-  `teams/relay/src/main/proto/` already uses it for every `Instant`-typed field; (2) as a
+  `shared/proto/` already uses it for every `Instant`-typed field; (2) as a
   *message*-typed field, `google.protobuf.Timestamp` gets automatic wire presence for free —
   proto3 always distinguishes "message not set" from "message set to its zero value" for
   non-scalar fields, so `deadline` doesn't need (and by convention shouldn't use) the `optional`
@@ -226,7 +226,7 @@ every lane must supply one before this field can be added.
    stands up an actual `apicurio/apicurio-registry-mem` container on every relay-schema-touching PR
    ("the same Apicurio image prod uses," per that workflow's own comment) and runs real
    seed-then-compat-check scripts against it — not a mock, and not unmerged. What's still open:
-   this gate only triggers on changes under `teams/relay/(src/main/proto|ci|schema-sync-hook)/`, so
+   this gate only triggers on changes under `shared/proto/` or `teams/relay/(ci|schema-sync-hook)/`, so
    it has never run for `bridge.structured.tasks` specifically, since no `.proto` for this topic
    exists to trigger it. Separately, Inbox's own Java-level integration test
    (`ProtoEventPublishingIntegrationTest`) still uses `MockSchemaRegistryClient`, not this real

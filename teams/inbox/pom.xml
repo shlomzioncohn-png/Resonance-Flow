@@ -188,7 +188,7 @@
                 <configuration>
                     <protocArtifact>com.google.protobuf:protoc:${protobuf.version}:exe:${os.detected.classifier}</protocArtifact>
                     <!--
-                        Schemas are owned by Relay - teams/relay/src/main/proto/ and
+                        Schemas are owned by Relay - shared/proto/ and
                         teams/relay/ci/schema-subjects.tsv are the registered source of truth.
                         Copied into src/main/proto (only the ones Inbox actually publishes)
                         instead of referenced via a ../relay relative path: that path doesn't
