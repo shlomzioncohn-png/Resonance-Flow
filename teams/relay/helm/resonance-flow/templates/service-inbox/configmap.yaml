@@ -1,0 +1,49 @@
+{{- $component := .Values.components.inbox }}
+{{- if $component.enabled }}
+{{- with $component.config }}
+{{- $cfg := .data }}
+{{- $pg := $.Values.postgresql.auth }}
+---
+apiVersion: v1
+kind: ConfigMap
+
+metadata:
+  name: {{ include "resonance-flow.fullname" $ }}-inbox-config
+  labels:
+    {{- include "resonance-flow.labels" $ | nindent 4 }}
+    app.kubernetes.io/component: inbox
+
+# Only deploy-specific overrides - everything else keeps application.yml's defaults
+# (this file is layered on top of it via SPRING_CONFIG_ADDITIONAL_LOCATION).
+data:
+  config.yaml: |
+    server:
+      port: {{ $component.containerPort }}
+    spring:
+      datasource:
+        # Same host/port helper as the wait-for-postgresql initContainer; credentials read
+        # straight from the postgresql subchart so the two can't drift apart.
+        url: "jdbc:postgresql://{{ include "resonance-flow.dependencyAddress" (dict "root" $ "deps" $component.dependencies "name" "postgresql") }}/{{ $pg.database }}?stringtype=unspecified"
+        # The subchart's superuser - auth.postgresPassword is its password.
+        username: "postgres"
+        password: {{ $pg.postgresPassword | quote }}
+      kafka:
+        bootstrap-servers: {{ include "resonance-flow.dependencyAddress" (dict "root" $ "deps" $.Values.dependencies "name" "kafka") | quote }}
+        security:
+          protocol: SASL_PLAINTEXT
+        properties:
+          sasl.mechanism: "PLAIN"
+          sasl.jaas.config: {{ include "resonance-flow.kafkaSaslJaasConfig" $ | quote }}
+          # Consumed by the producer's KafkaProtobufSerializer (task.created/updated/completed -
+          # see #227 and teams/relay/docs/kafka-producer-consumer-guide.md).
+          schema.registry.url: {{ printf "http://%s/apis/ccompat/v6" (include "resonance-flow.dependencyAddress" (dict "root" $ "deps" $component.dependencies "name" "schema-registry")) | quote }}
+        consumer:
+          group-id: {{ $cfg.kafka.consumerGroupId | quote }}
+    inbox:
+      kafka:
+        topics:
+          bridge-structured-tasks: {{ $cfg.kafka.topics.bridgeStructuredTasks | quote }}
+          chain-scheduling-updated: {{ $cfg.kafka.topics.chainSchedulingUpdated | quote }}
+          mind-task-creation-requested: {{ $cfg.kafka.topics.mindTaskCreationRequested | quote }}
+{{- end }}
+{{- end }}

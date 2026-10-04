@@ -28,7 +28,7 @@ export const theme = createTheme({
       contrastText: '#ffffff',
     },
     background: {
-      default: '#f5f6f8',
+      default: '#ffffff',
       paper: '#ffffff',
     },
     text: {
@@ -57,7 +57,7 @@ export const theme = createTheme({
     MuiCssBaseline: {
       styleOverrides: {
         body: {
-          backgroundColor: '#f5f6f8',
+          backgroundColor: '#ffffff',
         },
       },
     },

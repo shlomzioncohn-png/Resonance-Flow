@@ -32,7 +32,8 @@ class TaskSerializationTest {
     private static final Set<String> INBOX_COLUMN_NAMES = Set.of(
             "organization_id", "project_id", "title", "description", "status",
             "urgency", "confidence", "tier", "extraction_provenance", "role_context",
-            "source_type", "source_ref", "effort_estimate_minutes", "deadline", "snoozed_until");
+            "source_type", "source_ref", "effort_estimate_minutes", "deadline", "snoozed_until",
+            "completed_at");
 
     private static Task fullyPopulatedTask() {
         return new Task(
@@ -50,7 +51,8 @@ class TaskSerializationTest {
                 "crm:D-1",
                 30,
                 Instant.parse("2026-08-24T09:00:00Z"),
-                Instant.parse("2026-08-25T09:00:00Z"));
+                Instant.parse("2026-08-25T09:00:00Z"),
+                Instant.parse("2026-08-23T09:00:00Z"));
     }
 
     @Test
@@ -72,6 +74,7 @@ class TaskSerializationTest {
         assertTrue(json.has("effort_estimate_minutes"));
         assertTrue(json.has("deadline"));
         assertTrue(json.has("snoozed_until"));
+        assertTrue(json.has("completed_at"));
     }
 
     @Test
@@ -106,5 +109,9 @@ class TaskSerializationTest {
         assertTrue(json.get("snoozed_until").isTextual(),
                 () -> "snoozed_until should be an ISO-8601 string, not an object: " + json.get("snoozed_until"));
         assertEquals("2026-08-25T09:00:00Z", json.get("snoozed_until").asText());
+
+        assertTrue(json.get("completed_at").isTextual(),
+                () -> "completed_at should be an ISO-8601 string, not an object: " + json.get("completed_at"));
+        assertEquals("2026-08-23T09:00:00Z", json.get("completed_at").asText());
     }
 }

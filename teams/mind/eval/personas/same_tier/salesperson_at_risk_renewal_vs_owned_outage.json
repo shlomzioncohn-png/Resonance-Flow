@@ -1,0 +1,53 @@
+{
+  "scenario_id": "salesperson_at_risk_renewal_vs_owned_outage",
+  "persona": {
+    "role": "Salesperson",
+    "department": null
+  },
+  "context": {
+    "free_time_minutes": 45,
+    "current_datetime": "2026-09-07T09:00:00",
+    "time_horizon": "this_week",
+    "constraints": []
+  },
+  "tasks": [
+    {
+      "task_id": "task_filler_forecast",
+      "title": "Refresh your quarterly pipeline forecast",
+      "description": "Update the forecast with the latest stage and close-date changes across your open deals; routine, no deadline.",
+      "deadline": null,
+      "effort_estimate": 15,
+      "tier": "tactical",
+      "blocked": false,
+      "parent_task_id": null
+    },
+    {
+      "task_id": "task_renewal",
+      "title": "Address the Umbrella account churn risk",
+      "description": "Customer success flagged Umbrella as a churn risk after a rough support quarter; it is a large share of your territory and the renewal is in three weeks. Booking the save call and sketching the retention offer is the next step. No hard deadline yet.",
+      "deadline": null,
+      "effort_estimate": 30,
+      "tier": "tactical",
+      "blocked": false,
+      "parent_task_id": null
+    },
+    {
+      "task_id": "task_outage_followup",
+      "title": "Follow up with EnterpriseCo after their checkout outage",
+      "description": "EnterpriseCo hit a checkout outage yesterday and escalated hard, but support has already assigned a dedicated engineer and is running the account through a formal RCA process; no action is needed from you unless they ask for it.",
+      "deadline": null,
+      "effort_estimate": 45,
+      "tier": "tactical",
+      "blocked": false,
+      "parent_task_id": null
+    }
+  ],
+  "expected_top_task_id": "task_renewal",
+  "expected_reason": "None of the three tasks has a hard deadline. task_renewal protects a real, still-unresolved churn risk that only this rep can act on; task_outage_followup sounds urgent but support already owns it and no action is needed here; task_filler_forecast is routine housekeeping.",
+  "source": {
+    "type": "synthetic",
+    "source_detail": null
+  },
+  "team_lead_approved": true,
+  "mentor_approved": false
+}

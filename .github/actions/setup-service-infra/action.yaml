@@ -1,0 +1,95 @@
+name: Set up per-service test infra
+description: >
+  Spins up a kind cluster, installs the shared Helm chart with the component itself
+  disabled (only its infra deps come up), and port-forwards Postgres if the service
+  declares it, exporting PG*/TEST_DATABASE_URL. Shared by every service-ci-<language>.yaml
+  and service-cd.yaml so there is exactly one kind cluster per job, whichever phase that
+  job runs.
+
+inputs:
+  service_name:
+    description: "Component name, matches the key under components.<service_name> in teams/relay/helm/resonance-flow/values.yaml"
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - uses: azure/setup-helm@v5
+
+    - name: Create kind cluster
+      uses: helm/kind-action@v1
+      with:
+        cluster_name: ${{ inputs.service_name }}-cluster
+
+    - name: Set chart paths
+      shell: bash
+      run: |
+        echo "CHART_DIR=teams/relay/helm/resonance-flow" >> "$GITHUB_ENV"
+        echo "CHART_VALUES=teams/relay/helm/resonance-flow/values.yaml" >> "$GITHUB_ENV"
+        echo "CHART_ALL_OFF=$RUNNER_TEMP/components-all-off.yaml" >> "$GITHUB_ENV"
+
+    - name: Fetch chart dependencies
+      shell: bash
+      run: helm dependency build "$CHART_DIR"
+
+    - uses: ./.github/actions/install-yq
+
+    # Opt-in, not opt-out: values-<service>.yaml only enables what it needs, so a
+    # component added to values.yaml later can't leak into every other team's CI.
+    - name: Build all-components-off overlay
+      shell: bash
+      run: |
+        yq '{"components": (.components | map_values({"enabled": false}))}' "$CHART_VALUES" > "$CHART_ALL_OFF"
+
+    - name: Deploy chart with ${{ inputs.service_name }} disabled (infra only, for tests)
+      shell: bash
+      run: |
+        SERVICE="${{ inputs.service_name }}"
+        helm upgrade --install "$SERVICE" "$CHART_DIR" \
+          -f "$CHART_VALUES" \
+          -f "$CHART_ALL_OFF" \
+          -f "$CHART_DIR/values/values-${SERVICE}.yaml" \
+          --set components.${SERVICE}.enabled=false \
+          --namespace "$SERVICE" --create-namespace \
+          --wait --timeout 300s
+
+    - name: Port-forward test Postgres to localhost:5432
+      shell: bash
+      run: |
+        SERVICE="${{ inputs.service_name }}"
+        NEEDS_PG=$(yq eval ".postgresql.enabled // false" "$CHART_DIR/values/values-${SERVICE}.yaml")
+        if [ "$NEEDS_PG" != "true" ]; then
+          echo "values-${SERVICE}.yaml doesn't enable postgresql - skipping"
+          exit 0
+        fi
+        # By label, not a hand-built name; the subchart also has a headless "-hl" Service.
+        SVC=$(kubectl -n "$SERVICE" get svc \
+          -l "app.kubernetes.io/instance=$SERVICE,app.kubernetes.io/name=postgresql,app.kubernetes.io/component=primary" \
+          -o jsonpath='{.items[?(@.spec.clusterIP!="None")].metadata.name}')
+        # From the live Secret/values, so it can't drift from what was installed.
+        PG_PASSWORD=$(kubectl -n "$SERVICE" get secret "$SVC" -o jsonpath='{.data.postgres-password}' | base64 -d)
+        PG_DATABASE=$(helm get values "$SERVICE" -n "$SERVICE" --all -o yaml | yq eval '.postgresql.auth.database // ""' -)
+        if [ -z "$SVC" ] || [ -z "$PG_PASSWORD" ] || [ -z "$PG_DATABASE" ]; then
+          echo "Couldn't resolve Postgres Service/password/database (svc='$SVC', db='$PG_DATABASE')" >&2
+          exit 1
+        fi
+        echo "::add-mask::$PG_PASSWORD"
+        PG_PASSWORD_URI=$(PW="$PG_PASSWORD" yq -n 'strenv(PW) | @uri')
+        kubectl -n "$SERVICE" port-forward "svc/$SVC" 5432:5432 &
+        for i in $(seq 1 30); do
+          if (echo > /dev/tcp/127.0.0.1/5432) >/dev/null 2>&1; then
+            # libpq's standard PG* vars + a URL (password URL-encoded) for the test step.
+            {
+              echo "PGHOST=127.0.0.1"
+              echo "PGPORT=5432"
+              echo "PGUSER=postgres"
+              echo "PGPASSWORD=$PG_PASSWORD"
+              echo "PGDATABASE=$PG_DATABASE"
+              echo "TEST_DATABASE_URL=postgresql://postgres:$PG_PASSWORD_URI@127.0.0.1:5432/$PG_DATABASE"
+            } >> "$GITHUB_ENV"
+            exit 0
+          fi
+          sleep 2
+        done
+        echo "Postgres port-forward to svc/$SVC never became reachable" >&2
+        exit 1

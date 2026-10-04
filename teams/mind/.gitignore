@@ -9,6 +9,9 @@ venv/
 .ruff_cache/
 .coverage
 
+# Generated from proto/*.proto by `make proto` — never commit
+src/mind/messaging/*_pb2.py
+
 # Local model weights — never commit
 models/*
 !models/.gitkeep

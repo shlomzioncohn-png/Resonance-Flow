@@ -7,3 +7,13 @@ services:
     environment:
       - SERVER_PORT=${SERVER_PORT:-8081}
       - SPRING_PROFILES_ACTIVE=${SPRING_PROFILES_ACTIVE:-local}
+      - KAFKA_BOOTSTRAP_SERVERS=${KAFKA_BOOTSTRAP_SERVERS:-localhost:9092}
+      # Own database + own DB user on the shared root docker-compose's postgres service - see
+      # PR #417. Reaches it the same way teams/inbox/docker-compose.yml does when run standalone.
+      - DB_HOST=host.docker.internal
+      - DB_PORT=${DB_PORT:-5432}
+      - DB_NAME=${DB_NAME:-chain}
+      - DB_USER=${DB_USER:-chain}
+      - DB_PASSWORD=${CHAIN_DB_PASSWORD:-chain}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"

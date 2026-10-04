@@ -2,6 +2,8 @@ package com.rnd.bridge.github.mapper;
 
 import com.rnd.bridge.github.dto.GitHubIssue;
 import com.rnd.bridge.task.AbstractTaskMapper;
+import com.rnd.bridge.task.enrichment.EnrichmentProperties;
+import com.rnd.bridge.task.enrichment.TaskEnricher;
 import com.rnd.bridge.task.model.RoleContext;
 import com.rnd.bridge.task.model.SourceType;
 import com.rnd.bridge.task.model.TaskStatus;
@@ -13,6 +15,10 @@ import java.time.Instant;
 
 @Component
 public class GitHubPullRequestMapper extends AbstractTaskMapper<GitHubIssue> {
+
+    public GitHubPullRequestMapper(EnrichmentProperties enrichmentProperties, TaskEnricher taskEnricher) {
+        super(enrichmentProperties, taskEnricher);
+    }
 
     @Override
     protected SourceType sourceType() {
@@ -69,6 +75,15 @@ public class GitHubPullRequestMapper extends AbstractTaskMapper<GitHubIssue> {
 
     @Override
     protected Instant toSnoozedUntil(GitHubIssue pr) {
+        return null;
+    }
+
+    @Override
+    protected Instant toCompletedAt(GitHubIssue pr) {
+        // No business completion date to map: closed_at is when the PR was
+        // closed in GitHub, not the same thing as a business completion
+        // date. Deciding whether/how to map it is for the GitHub lane's
+        // owner, not assumed here.
         return null;
     }
 }

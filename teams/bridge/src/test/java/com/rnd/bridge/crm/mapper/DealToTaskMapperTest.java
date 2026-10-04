@@ -3,6 +3,8 @@ package com.rnd.bridge.crm.mapper;
 import com.rnd.bridge.crm.model.Deal;
 import com.rnd.bridge.crm.model.DealStage;
 import com.rnd.bridge.crm.repository.JsonDealRepository;
+import com.rnd.bridge.task.enrichment.EnrichmentProperties;
+import com.rnd.bridge.task.enrichment.NoOpTaskEnricher;
 import com.rnd.bridge.task.model.ExtractionProvenance;
 import com.rnd.bridge.task.model.RoleContext;
 import com.rnd.bridge.task.model.SourceType;
@@ -17,7 +19,6 @@ import org.springframework.core.io.DefaultResourceLoader;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.time.LocalDate;
-import java.time.LocalTime;
 import java.time.ZoneOffset;
 import java.time.temporal.ChronoUnit;
 import java.util.List;
@@ -32,7 +33,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class DealToTaskMapperTest {
 
     private static final Instant AS_OF = Instant.parse("2026-08-23T00:00:00Z");
-    private static final DealToTaskMapper MAPPER = new DealToTaskMapper();
+    private static final String ORGANIZATION_ID = "org-test-0000";
+    private static final DealToTaskMapper MAPPER = new DealToTaskMapper(ORGANIZATION_ID, new EnrichmentProperties(), new NoOpTaskEnricher());
 
     private static JsonDealRepository repository() {
         return new JsonDealRepository(new DefaultResourceLoader(), "classpath:crm/synthetic-deals.json");
@@ -138,12 +140,12 @@ class DealToTaskMapperTest {
         assertEquals(TaskStatus.NEW, task.status());
         assertEquals(5, task.urgency()); // NEGOTIATION base 4 + close-in-3-days bonus 2, clamped to 5
         assertEquals(
-                LocalDate.of(2026, 8, 26).atTime(LocalTime.MAX).toInstant(ZoneOffset.UTC),
+                LocalDate.of(2026, 8, 26).atTime(23, 59, 59).toInstant(ZoneOffset.UTC),
                 task.deadline());
         assertEquals(ExtractionProvenance.ETL, task.extractionProvenance());
         assertNull(task.confidence());
         assertNull(task.effortEstimateMinutes());
-        assertNull(task.organizationId());
+        assertEquals(ORGANIZATION_ID, task.organizationId());
         assertNull(task.projectId());
         assertNull(task.snoozedUntil());
     }
@@ -233,6 +235,62 @@ class DealToTaskMapperTest {
 
         assertNull(task.deadline());
         assertEquals(1, task.urgency());
+        // A CLOSED_WON deal with no close date recorded is still DONE - the
+        // rep marked it won - but there is nothing to derive completedAt
+        // from, so it stays null rather than throwing or defaulting.
+        assertEquals(TaskStatus.DONE, task.status());
+        assertNull(task.completedAt());
+    }
+
+    @Test
+    void closedWonSetsCompletedAtFromTheCloseDate() {
+        Deal deal = Deal.builder()
+                .dealId("D-90010")
+                .title("Won deal")
+                .stage(DealStage.CLOSED_WON)
+                .closeDate(LocalDate.of(2026, 8, 8))
+                .stageChangedAt(Instant.parse("2026-08-08T16:00:00Z"))
+                .build();
+
+        Task task = MAPPER.map(deal, AS_OF);
+
+        assertEquals(TaskStatus.DONE, task.status());
+        assertEquals(
+                LocalDate.of(2026, 8, 8).atTime(23, 59, 59).toInstant(ZoneOffset.UTC),
+                task.completedAt());
+        // Reuses toDeadline's conversion, so the two cannot drift.
+        assertEquals(task.deadline(), task.completedAt());
+    }
+
+    @Test
+    void closedLostLeavesCompletedAtNull() {
+        Deal deal = Deal.builder()
+                .dealId("D-90011")
+                .title("Lost deal")
+                .stage(DealStage.CLOSED_LOST)
+                .closeDate(LocalDate.of(2026, 8, 8))
+                .stageChangedAt(Instant.parse("2026-08-08T16:00:00Z"))
+                .build();
+
+        Task task = MAPPER.map(deal, AS_OF);
+
+        assertEquals(TaskStatus.CANCELLED, task.status());
+        assertNull(task.completedAt());
+    }
+
+    @Test
+    void anOpenStageLeavesCompletedAtNull() {
+        Deal deal = Deal.builder()
+                .dealId("D-90012")
+                .title("Still open")
+                .stage(DealStage.NEGOTIATION)
+                .closeDate(LocalDate.of(2026, 9, 1))
+                .stageChangedAt(Instant.parse("2026-08-20T00:00:00Z"))
+                .build();
+
+        Task task = MAPPER.map(deal, AS_OF);
+
+        assertNull(task.completedAt());
     }
 
     @Test
@@ -241,7 +299,7 @@ class DealToTaskMapperTest {
 
         Instant deadline = DealToTaskMapper.toDeadline(closeDate);
 
-        assertEquals(Instant.parse("2026-09-30T23:59:59.999999999Z"), deadline);
+        assertEquals(Instant.parse("2026-09-30T23:59:59Z"), deadline);
         assertNull(DealToTaskMapper.toDeadline((LocalDate) null));
     }
 

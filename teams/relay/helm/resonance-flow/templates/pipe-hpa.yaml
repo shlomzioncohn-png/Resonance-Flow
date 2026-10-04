@@ -1,0 +1,41 @@
+{{/*
+Interim CPU-based HPA for the Pipe (components.notification-delivery). Design doc §05/§10: the
+real scaling signal for this connection-bound workload is active WebSocket connections/pod, not
+CPU - but that needs a custom-metrics adapter (e.g. Prometheus Adapter) exposing that metric to
+the autoscaling/v2 API, plus a load-tested target-per-pod value, neither of which exist yet.
+This lands CPU-based autoscaling first so the Deployment isn't stuck at a fixed replica
+count; swap the `metrics` block below for a `type: Pods` custom metric once both land.
+
+Deliberately its own file (not a generic loop over every component, unlike deployment.yaml/
+service.yaml) so this doesn't change autoscaling behavior for any other team's component -
+see the existing top-level `autoscaling` values block, which is chart-wide/single and
+currently unused by any component.
+
+Uses `index` (not dot-notation) because the component key has a hyphen -
+`.Values.components.notification-delivery` doesn't parse as a Go template field access.
+*/}}
+{{- with index .Values.components "notification-delivery" }}
+{{- if and .enabled .autoscaling .autoscaling.enabled }}
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: {{ include "resonance-flow.fullname" $ }}-notification-delivery
+  labels:
+    {{- include "resonance-flow.labels" $ | nindent 4 }}
+    app.kubernetes.io/component: notification-delivery
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: {{ include "resonance-flow.fullname" $ }}-notification-delivery
+  minReplicas: {{ .autoscaling.minReplicas }}
+  maxReplicas: {{ .autoscaling.maxReplicas }}
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: {{ .autoscaling.targetCPUUtilizationPercentage }}
+{{- end }}
+{{- end }}

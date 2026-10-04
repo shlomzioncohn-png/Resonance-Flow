@@ -1,3 +1,5 @@
+// Copied verbatim from chain/ruthHoltzman/dependency-repository-66, unmodified.
+
 package com.rnd.chain.dto;
 
 import java.time.LocalDateTime;
@@ -5,29 +7,32 @@ import java.util.Objects;
 import java.util.UUID;
 
 // Identifier type: UUID, pending Inbox publishing its own task id type.
-public class Task {
+public final class Task {
 
     private final UUID id;
-    private UUID parentTaskId;
-    private String ownerId;
+    private final UUID parentTaskId;
+    private final String ownerId;
 
-    private TaskStatus status;
+    private final TaskStatus status;
 
-    /** Whether all of this task's dependencies and constraints are satisfied, so it can be worked on. */
-    private boolean isReady;
+    /** Whether all of this task's dependencies and constraints are satisfied, so it can be worked on.
+     * Invariant: must equal {@code blockingCount == 0 && openConstraintCount == 0}. Not enforced by
+     * this class (a stored field, not derived) - {@code TaskEligibilityService.withCounters} is the
+     * single place responsible for keeping it in sync whenever either counter changes. */
+    private final boolean isReady;
 
     /** Number of not-yet-completed tasks that this task depends on (i.e. tasks blocking it). */
-    private int blockingCount;
+    private final int blockingCount;
 
     /** Number of unresolved constraints (e.g. scheduling/resource constraints) still open on this task. */
-    private int openConstraintCount;
+    private final int openConstraintCount;
 
-    private Integer estimatedDurationMin;
-    private Double score;
+    private final Integer estimatedDurationMin;
+    private final Double score;
 
     private final LocalDateTime createdAt;
-    private LocalDateTime updatedAt;
-    private LocalDateTime deletedAt;
+    private final LocalDateTime updatedAt;
+    private final LocalDateTime deletedAt;
 
     private Task(UUID id,
                  UUID parentTaskId,
@@ -53,6 +58,9 @@ public class Task {
         if (openConstraintCount < 0) {
             throw new IllegalArgumentException("openConstraintCount must not be negative");
         }
+        if (status == null) {
+            throw new IllegalArgumentException("status must not be null");
+        }
         this.id = id;
         this.parentTaskId = parentTaskId;
         this.ownerId = ownerId;
@@ -75,59 +83,34 @@ public class Task {
         return parentTaskId;
     }
 
-    public void setParentTaskId(UUID parentTaskId) {
-        this.parentTaskId = parentTaskId;
+    public String getOwnerId() {
+        return ownerId;
     }
-
-    public String getOwnerId() {return ownerId;}
-
-    public void setOwnerId(String ownerId) {this.ownerId = ownerId;}
 
     public TaskStatus getStatus() {
         return status;
-    }
-
-    public void setStatus(TaskStatus status) {
-        this.status = status;
     }
 
     public boolean isReady() {
         return isReady;
     }
 
-    public void setReady(boolean isReady) {
-        this.isReady = isReady;
-    }
-
     public int getBlockingCount() {
         return blockingCount;
-    }
-
-    public void setBlockingCount(int blockingCount) {
-        this.blockingCount = blockingCount;
     }
 
     public int getOpenConstraintCount() {
         return openConstraintCount;
     }
 
-    public void setOpenConstraintCount(int openConstraintCount) {
-        this.openConstraintCount = openConstraintCount;
-    }
-
     public Integer getEstimatedDurationMin() {
         return estimatedDurationMin;
     }
 
-    public void setEstimatedDurationMin(Integer estimatedDurationMin) {
-        this.estimatedDurationMin = estimatedDurationMin;
+    public Double getScore() {
+        return score;
     }
 
-    public Double getScore() {return score;}
-
-    public void setScore(Double score) {this.score = score;}
-
-    // createdAt is final: getter only, no setter
     public LocalDateTime getCreatedAt() {
         return createdAt;
     }
@@ -136,16 +119,8 @@ public class Task {
         return updatedAt;
     }
 
-    public void setUpdatedAt(LocalDateTime updatedAt) {
-        this.updatedAt = updatedAt;
-    }
-
     public LocalDateTime getDeletedAt() {
         return deletedAt;
-    }
-
-    public void setDeletedAt(LocalDateTime deletedAt) {
-        this.deletedAt = deletedAt;
     }
 
     @Override
@@ -162,6 +137,17 @@ public class Task {
     @Override
     public int hashCode() {
         return Objects.hashCode(id);
+    }
+
+    @Override
+    public String toString() {
+        return "Task{id=" + id
+                + ", status=" + status
+                + ", isReady=" + isReady
+                + ", blockingCount=" + blockingCount
+                + ", openConstraintCount=" + openConstraintCount
+                + ", deletedAt=" + deletedAt
+                + "}";
     }
 
     public static Builder builder() {
@@ -203,6 +189,9 @@ public class Task {
             return this;
         }
 
+        /** See the invariant note on {@link Task#isReady}: callers other than
+         * {@code TaskEligibilityService.withCounters} must keep this consistent with
+         * blockingCount/openConstraintCount themselves. */
         public Builder isReady(boolean isReady) {
             this.isReady = isReady;
             return this;
