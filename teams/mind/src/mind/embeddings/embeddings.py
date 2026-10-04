@@ -15,8 +15,8 @@ from sklearn.feature_extraction.text import HashingVectorizer
 # A plain constant, not read from mind.config.Settings: this dimension is
 # inherent to this hashing vectorizer, needed to build it at import time,
 # and importing mind.config.Settings requires a DSN. Must match
-# VectorStoreSettings.embedding_dim's default -- both describe the same
-# fixed fact about this placeholder implementation.
+# migrations/versions/0001_initial_vector_schema.py's EMBEDDING_DIM --
+# both describe the same fixed fact about this placeholder implementation.
 EMBEDDING_DIM = 256
 
 _vectorizer = HashingVectorizer(

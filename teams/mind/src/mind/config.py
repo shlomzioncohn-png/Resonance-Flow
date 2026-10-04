@@ -49,7 +49,13 @@ class VectorStoreSettings(BaseModel):
     dsn: Secret[PostgresDsn]
     table: str = "task_embeddings"
     search_effort: int = Field(default=400, ge=1)
-    embedding_dim: int = Field(default=256, ge=1)
+    # No embedding_dim here: the column width is baked into
+    # migrations/versions/0001_initial_vector_schema.py, not read from
+    # config -- a migration must be deterministic regardless of whatever
+    # the environment happens to have configured when it runs. Keeping a
+    # same-named config field around once nothing reads it would be a
+    # trap: it'd look like changing it changes the table, when it
+    # wouldn't (see issue #441).
 
 
 class _ChartVectorStoreSource(PydanticBaseSettingsSource):

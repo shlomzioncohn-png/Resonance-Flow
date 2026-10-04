@@ -32,9 +32,9 @@ class PgVectorStore(VectorStore):
         max_conn: int = 5,
         pool_timeout: float = 30.0,
     ) -> None:
-        # No I/O here -- opening the pool and creating the schema are async,
-        # so both happen lazily on first use (see _ensure_ready), unless
-        # open() is called explicitly first.
+        # No I/O here -- opening the pool is async, so it happens lazily
+        # on first use (see _ensure_ready), unless open() is called
+        # explicitly first.
         self._settings = settings
         self._pool = AsyncConnectionPool(
             str(settings.dsn.get_secret_value()),
@@ -57,44 +57,35 @@ class PgVectorStore(VectorStore):
     async def _ensure_ready(self) -> None:
         # Double-checked locking: two concurrent callers could otherwise
         # both see _ready is False and both try to open the pool at once.
+        # Opening the pool is still the one real shared operation here --
+        # the schema check below is a single cheap SELECT, not a reason on
+        # its own, but not a reason to drop the lock either.
         if self._ready:
             return
         async with self._ready_lock:
             if self._ready:
                 return
             await self._pool.open()
-            await self._ensure_schema()
+            await self._check_schema_migrated()
             self._ready = True
 
     def _table(self) -> sql.Identifier:
         return sql.Identifier(self._settings.table)
 
-    async def _ensure_schema(self) -> None:
-        table = self._table()
+    async def _check_schema_migrated(self) -> None:
+        # This service's DB role only ever needs SELECT/INSERT/UPDATE/
+        # DELETE at runtime, not DDL -- the schema is created once, ahead
+        # of time, by `alembic upgrade head` (see migrations/). Failing
+        # fast here with a clear message beats every caller's first query
+        # discovering it as a bare UndefinedTable.
         async with self._pool.connection() as conn, conn.cursor() as cur:
-            await cur.execute("CREATE EXTENSION IF NOT EXISTS vector;")
-            await cur.execute(
-                sql.SQL(
-                    """
-                    CREATE TABLE IF NOT EXISTS {table} (
-                        task_id TEXT PRIMARY KEY,
-                        embedding VECTOR({dim}) NOT NULL
-                    );
-                    """
-                ).format(table=table, dim=sql.Literal(self._settings.embedding_dim))
-            )
-            # HNSW index for fast approximate cosine-distance search.
-            await cur.execute(
-                sql.SQL(
-                    """
-                    CREATE INDEX IF NOT EXISTS {idx}
-                    ON {table} USING hnsw (embedding vector_cosine_ops);
-                    """
-                ).format(
-                    idx=sql.Identifier(f"{self._settings.table}_embedding_hnsw_idx"),
-                    table=table,
+            await cur.execute("SELECT to_regclass(%s);", (self._settings.table,))
+            row = await cur.fetchone()
+            if row is None or row[0] is None:
+                raise RuntimeError(
+                    f"Vector store table {self._settings.table!r} does not exist -- "
+                    "schema not migrated. Run `alembic upgrade head` (or `make migrate`)."
                 )
-            )
 
     async def upsert(self, task_id: str, vector: list[float]) -> None:
         await self._ensure_ready()

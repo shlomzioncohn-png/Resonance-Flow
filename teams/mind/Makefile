@@ -1,4 +1,4 @@
-.PHONY: install dev test lint fmt run eval eval-ci schema docker-build docker-up proto
+.PHONY: install dev test lint fmt run eval eval-ci schema migrate docker-build docker-up proto
 
 install:
 	pip install -e .
@@ -8,6 +8,9 @@ dev:
 
 proto:
 	python -m grpc_tools.protoc --proto_path=proto --python_out=src/mind/messaging proto/*.proto
+
+migrate:
+	alembic upgrade head
 
 test: proto
 	pytest --cov=src/mind

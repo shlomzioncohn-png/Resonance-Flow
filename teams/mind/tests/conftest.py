@@ -36,6 +36,16 @@ if "TEST_DATABASE_URL" in os.environ:
     os.environ.setdefault("MIND_VECTOR_STORE__DSN", os.environ["TEST_DATABASE_URL"])
 os.environ.setdefault("MIND_ENVIRONMENT", "ci")
 
+# PgVectorStore no longer creates its own schema (issue #441) -- the real
+# `task_embeddings` table only exists once `alembic upgrade head` has run.
+# Only when a real DSN is actually configured, since plenty of test files
+# (test_loader.py, test_config.py, ...) need no DB at all and shouldn't be
+# forced through this. Runs against whatever Postgres CI/local already
+# pointed MIND_VECTOR_STORE__DSN at -- this is the real verification that
+# the migration applies cleanly, not just a fixture setup step.
+if "MIND_VECTOR_STORE__DSN" in os.environ:
+    subprocess.run(["alembic", "upgrade", "head"], cwd=_ROOT, check=True)
+
 _MESSAGING = _ROOT / "src" / "mind" / "messaging"
 
 if not (_MESSAGING / "mind_task_created_pb2.py").exists():
