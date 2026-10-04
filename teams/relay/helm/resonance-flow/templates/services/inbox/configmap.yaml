@@ -1,0 +1,69 @@
+{{- $component := .Values.components.inbox }}
+{{- if $component.enabled }}
+{{- with $component.config }}
+{{- $cfg := .data }}
+---
+{{ include "resonance-flow.configMapHeader" (dict "root" $ "component" "inbox") }}
+
+data:
+  config.yaml: |
+    server:
+      port: {{ $component.containerPort }}
+    spring:
+      application:
+        name: inbox
+      datasource:
+        # Same host/port helpers as the wait-for-postgresql initContainer.
+        url: "jdbc:postgresql://{{ include "resonance-flow.dependencyHostByName" (dict "root" $ "deps" $component.dependencies "name" "postgresql") }}:{{ include "resonance-flow.dependencyPort" (dict "deps" $component.dependencies "name" "postgresql") }}/{{ $cfg.datasource.database }}?stringtype=unspecified"
+        username: {{ $cfg.datasource.username | quote }}
+        password: {{ $cfg.datasource.password | quote }}
+      flyway:
+        baseline-on-migrate: true
+      kafka:
+        {{- include "resonance-flow.springKafkaBase" (dict "root" $) | nindent 8 }}
+          # Extends springKafkaBase's properties map. Consumed by the producer's
+          # KafkaProtobufSerializer below (see #227 and teams/relay/docs/kafka-producer-consumer-guide.md).
+          schema.registry.url: {{ printf "http://%s:%s/apis/ccompat/v6" (include "resonance-flow.dependencyHostByName" (dict "root" $ "deps" $component.dependencies "name" "schema-registry")) (include "resonance-flow.dependencyPort" (dict "deps" $component.dependencies "name" "schema-registry")) | quote }}
+        {{- include "resonance-flow.springKafkaConsumerDefaults" (dict "groupId" $cfg.kafka.consumerGroupId) | nindent 8 }}
+        producer:
+          key-serializer: org.apache.kafka.common.serialization.StringSerializer
+          value-serializer: io.confluent.kafka.serializers.protobuf.KafkaProtobufSerializer
+    inbox:
+      kafka:
+        topics:
+          bridge-structured-tasks: {{ $cfg.kafka.topics.bridgeStructuredTasks | quote }}
+          chain-scheduling-updated: {{ $cfg.kafka.topics.chainSchedulingUpdated | quote }}
+          mind-task-creation-requested: {{ $cfg.kafka.topics.mindTaskCreationRequested | quote }}
+        retry:
+          max-attempts: 3
+          initial-backoff-ms: 500
+          multiplier: 2.0
+          max-backoff-ms: 10000
+    kafka:
+      producer:
+        retry:
+          max-attempts: 3
+          initial-backoff-ms: 200
+          backoff-multiplier: 2.0
+          max-backoff-ms: 5000
+    outbox:
+      worker:
+        poll-interval-ms: 5000
+        batch-size: 20
+        max-retries: 3
+        backoff-base-seconds: 10
+        backoff-max-seconds: 120
+      cleanup:
+        cron: "0 0 3 * * *"
+        published-retention-days: 7
+        failed-retention-days: 30
+    logging:
+      file:
+        name: logs/inbox.log
+      logback:
+        rollingpolicy:
+          max-file-size: 10MB
+          max-history: 14
+          total-size-cap: 500MB
+{{- end }}
+{{- end }}

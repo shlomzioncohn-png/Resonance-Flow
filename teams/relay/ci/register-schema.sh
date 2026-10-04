@@ -3,7 +3,7 @@
 # after check-schema-compatibility.sh has already passed. Never run this on a PR.
 #
 # Usage: register-schema.sh <path-to-.proto-file> <subject-name>
-# Example: register-schema.sh teams/relay/src/main/proto/task-event.proto task-event-value
+# Example: register-schema.sh shared/proto/task-event.proto task-event-value
 set -euo pipefail
 
 SCHEMA_FILE="$1"

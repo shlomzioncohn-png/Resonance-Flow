@@ -6,7 +6,14 @@ imagePullSecret:
   password: ""
   email: "noreply@kamatech.org"
 nameOverride: ""
-fullnameOverride: ""
+# Pinned, not "": Chain's DB Secret/ConfigMap names are hardcoded in this file
+# (volumes, postgresql.initdb.scriptsConfigMap, postgresql.primary.extraVolumes)
+# because values.yaml can't call the resonance-flow.fullname template itself.
+# This override guarantees fullname is always "resonance-flow" so those
+# literals can't drift from what configmap.yaml actually renders - installing
+# under any other release name broke that wiring (verified against a real
+# cluster, see PR #417 review).
+fullnameOverride: "resonance-flow"
 serviceAccount:
   create: true
   automount: true
@@ -41,25 +48,15 @@ pipeConsumerGroupSweep:
     limits:
       cpu: 200m
       memory: 256Mi
-components:
-  mind:
-    enabled: true
-    replicaCount: 1
-    image:
-      repository: "ghcr.io/kamatechorg/resonance-flow/mind"
-      pullPolicy: IfNotPresent
-      tag: "22a8e01"
-    containerPort: 8000
-    service:
-      type: ClusterIP
-      port: 80
-    resources:
-      requests:
-        cpu: 100m
-        memory: 256Mi
-      limits:
-        cpu: 500m
-        memory: 512Mi
+x-defaults:
+  resources: &defaultResources
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+  healthProbes: &defaultHealthProbes
     startupProbe:
       httpGet:
         path: /health
@@ -78,7 +75,21 @@ components:
         port: http
       periodSeconds: 5
       failureThreshold: 3
-    env: {}
+  service: &defaultService
+    type: ClusterIP
+    port: 80
+components:
+  mind:
+    enabled: true
+    replicaCount: 1
+    image:
+      repository: "ghcr.io/kamatechorg/resonance-flow/mind"
+      pullPolicy: IfNotPresent
+      tag: "22a8e01"
+    containerPort: 8000
+    service: *defaultService
+    resources: *defaultResources
+    <<: *defaultHealthProbes
     dependencies:
       - name: minio
         port: 9000
@@ -117,35 +128,9 @@ components:
       pullPolicy: IfNotPresent
       tag: "placeholder"
     containerPort: 8082
-    service:
-      type: ClusterIP
-      port: 80
-    resources:
-      requests:
-        cpu: 100m
-        memory: 256Mi
-      limits:
-        cpu: 500m
-        memory: 512Mi
-    startupProbe:
-      httpGet:
-        path: /health
-        port: http
-      periodSeconds: 5
-      failureThreshold: 40
-    livenessProbe:
-      httpGet:
-        path: /health
-        port: http
-      periodSeconds: 10
-      failureThreshold: 3
-    readinessProbe:
-      httpGet:
-        path: /health
-        port: http
-      periodSeconds: 5
-      failureThreshold: 3
-    env: {}
+    service: *defaultService
+    resources: *defaultResources
+    <<: *defaultHealthProbes
   bridge:
     enabled: true
     replicaCount: 1
@@ -154,35 +139,9 @@ components:
       pullPolicy: IfNotPresent
       tag: "94c3259"
     containerPort: 8080
-    service:
-      type: ClusterIP
-      port: 80
-    resources:
-      requests:
-        cpu: 100m
-        memory: 256Mi
-      limits:
-        cpu: 500m
-        memory: 512Mi
-    startupProbe:
-      httpGet:
-        path: /health
-        port: http
-      periodSeconds: 5
-      failureThreshold: 40
-    livenessProbe:
-      httpGet:
-        path: /health
-        port: http
-      periodSeconds: 10
-      failureThreshold: 3
-    readinessProbe:
-      httpGet:
-        path: /health
-        port: http
-      periodSeconds: 5
-      failureThreshold: 3
-    env: {}
+    service: *defaultService
+    resources: *defaultResources
+    <<: *defaultHealthProbes
     dependencies:
       - name: minio
         port: 9000
@@ -194,9 +153,7 @@ components:
       pullPolicy: IfNotPresent
       tag: "placeholder"
     containerPort: 80
-    service:
-      type: ClusterIP
-      port: 80
+    service: *defaultService
     resources:
       requests:
         cpu: 100m
@@ -222,7 +179,6 @@ components:
         port: http
       periodSeconds: 5
       failureThreshold: 3
-    env: {}
   chain:
     enabled: true
     replicaCount: 1
@@ -231,35 +187,43 @@ components:
       pullPolicy: IfNotPresent
       tag: "placeholder"
     containerPort: 8081
-    service:
-      type: ClusterIP
-      port: 80
-    resources:
-      requests:
-        cpu: 100m
-        memory: 256Mi
-      limits:
-        cpu: 500m
-        memory: 512Mi
-    startupProbe:
-      httpGet:
-        path: /health
-        port: http
-      periodSeconds: 5
-      failureThreshold: 40
-    livenessProbe:
-      httpGet:
-        path: /health
-        port: http
-      periodSeconds: 10
-      failureThreshold: 3
-    readinessProbe:
-      httpGet:
-        path: /health
-        port: http
-      periodSeconds: 5
-      failureThreshold: 3
-    env: {}
+    service: *defaultService
+    resources: *defaultResources
+    <<: *defaultHealthProbes
+    # Password comes from the chain-db-credentials Secret, mounted as a file below -
+    # not a literal here, not an env var, and not created by this chart (provided
+    # externally). secretName must match the fullname-prefixed name
+    # templates/services/chain/configmap.yaml renders (fullname resolves to the
+    # fixed "resonance-flow" release name this chart is always installed as).
+    volumeMounts:
+      - name: chain-db-credentials
+        mountPath: /etc/resonance-flow/secrets/chain-db
+        readOnly: true
+    volumes:
+      - name: chain-db-credentials
+        secret:
+          secretName: resonance-flow-chain-db-credentials
+    dependencies:
+      - name: postgresql
+        port: 5432
+    config:
+      data:
+        datasource:
+          # Own database and user - not Inbox's tasks schema or its superuser.
+          database: chain
+          username: chain
+        kafka:
+          consumerGroupId: chain-service
+          topics:
+            taskDependenciesProposed: task.dependencies.proposed # drives addDependency
+            # taskDependenciesRemoved intentionally omitted: Chain confirmed (#385 follow-up)
+            # removeDependency is REST-only (Lens BFF -> Chain), no Kafka topic behind it today -
+            # task.dependencies.removed was proposed but is not active. May return once #133
+            # settles whether Mind can retract a proposed dependency.
+            # drives onTaskStatusChanged; PROPOSED, assumes Inbox's 8-value status enum
+            taskStatusUpdated: task.status.updated
+            taskSchedulingUpdated: task.scheduling.updated # produced, consumed by Inbox
+        # No topic for onConstraintAdded/onConstraintStatusChanged - still REST-triggered.
   inbox:
     enabled: true
     replicaCount: 1
@@ -268,16 +232,8 @@ components:
       pullPolicy: IfNotPresent
       tag: "085a2e7"
     containerPort: 8080
-    service:
-      type: ClusterIP
-      port: 80
-    resources:
-      requests:
-        cpu: 100m
-        memory: 256Mi
-      limits:
-        cpu: 500m
-        memory: 512Mi
+    service: *defaultService
+    resources: *defaultResources
     startupProbe:
       httpGet:
         path: /actuator/health/liveness
@@ -297,7 +253,6 @@ components:
         port: http
       periodSeconds: 5
       failureThreshold: 3
-    env: {}
     dependencies:
       - name: postgresql
         port: 5432
@@ -353,7 +308,6 @@ components:
         port: http
       periodSeconds: 5
       failureThreshold: 3
-    env: {}
   lens-gateway:
     enabled: true
     replicaCount: 1
@@ -362,35 +316,9 @@ components:
       pullPolicy: IfNotPresent
       tag: "placeholder"
     containerPort: 8080
-    service:
-      type: ClusterIP
-      port: 80
-    resources:
-      requests:
-        cpu: 100m
-        memory: 256Mi
-      limits:
-        cpu: 500m
-        memory: 512Mi
-    startupProbe:
-      httpGet:
-        path: /health
-        port: http
-      periodSeconds: 5
-      failureThreshold: 40
-    livenessProbe:
-      httpGet:
-        path: /health
-        port: http
-      periodSeconds: 10
-      failureThreshold: 3
-    readinessProbe:
-      httpGet:
-        path: /health
-        port: http
-      periodSeconds: 5
-      failureThreshold: 3
-    env: {}
+    service: *defaultService
+    resources: *defaultResources
+    <<: *defaultHealthProbes
   notification-delivery:
     enabled: true
     replicaCount: 1
@@ -427,8 +355,6 @@ components:
         port: http
       periodSeconds: 10
       failureThreshold: 3
-    # /readyz (not /healthz) - don't route clients before the Kafka consumer has attached
-    # and been assigned partitions (see HealthController.java).
     readinessProbe:
       httpGet:
         path: /readyz
@@ -436,6 +362,11 @@ components:
       periodSeconds: 5
       failureThreshold: 3
     env: {}
+    dependencies:
+      - name: schema-registry
+        port: 8080
+    config:
+      managed: true
     # Interim CPU-based HPA (templates/pipe-hpa.yaml). §10 open question: the real scaling
     # signal is active WebSocket connections/pod, but that needs a custom-metrics adapter
     # (e.g. Prometheus Adapter) plus a load-tested target-per-pod value. Swap this for a
@@ -526,3 +457,18 @@ postgresql:
       limits:
         cpu: 150m
         memory: 192Mi
+    initdb:
+      # Both names below must match the fullname-prefixed names
+      # templates/services/chain/configmap.yaml renders.
+      scriptsConfigMap: resonance-flow-chain-db-init
+    # Chain's DB password for the init script - a file, not an env var. Optional:
+    # Postgres without Chain (inbox/mind CI) must still start; the script skips Chain then.
+    extraVolumes:
+      - name: chain-db-credentials
+        secret:
+          secretName: resonance-flow-chain-db-credentials
+          optional: true
+    extraVolumeMounts:
+      - name: chain-db-credentials
+        mountPath: /etc/resonance-flow/secrets/chain-db
+        readOnly: true
