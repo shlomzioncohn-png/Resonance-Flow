@@ -14,6 +14,7 @@ import itertools
 import math
 
 import pytest
+from pydantic import ValidationError
 
 from mind.evaluation.extraction_eval import (
     _normalize,
@@ -28,6 +29,7 @@ from mind.evaluation.extraction_fixture import (
     FIXTURE_EXTRACTED,
     FIXTURE_THRESHOLD,
 )
+from mind.evaluation.run_extraction_eval import _load_input
 
 
 def _exact(a: str, b: str) -> float:
@@ -293,3 +295,69 @@ def test_every_valid_score_grid_satisfies_the_matching_invariants(shape):
             assert len({pair.annotated for pair in report.matched}) == tp
             assert tp + len(report.false_positives) == n_extracted
             assert tp + len(report.missed) == n_annotated
+
+
+# --- the report is a pydantic model ---------------------------------------------------
+
+
+def test_report_dump_includes_counts_and_computed_true_positives():
+    report = evaluate_extraction(
+        FIXTURE_EXTRACTED,
+        FIXTURE_ANNOTATED,
+        similarity=placeholder_similarity,
+        threshold=FIXTURE_THRESHOLD,
+    )
+    dumped = report.model_dump()
+
+    assert dumped["true_positives"] == 3
+    assert dumped["n_extracted"] == len(FIXTURE_EXTRACTED)
+    assert dumped["n_annotated"] == len(FIXTURE_ANNOTATED)
+    assert dumped["matched"][0].keys() == {"extracted", "annotated", "similarity"}
+    assert {"precision", "recall", "f1", "missed", "false_positives"} <= dumped.keys()
+
+
+def test_report_counts_are_the_denominators_of_precision_and_recall():
+    report = evaluate_extraction(["a", "b", "c"], ["a"], similarity=_exact, threshold=1.0)
+
+    assert (report.n_extracted, report.n_annotated) == (3, 1)
+    assert report.precision == pytest.approx(report.true_positives / report.n_extracted)
+    assert report.recall == pytest.approx(report.true_positives / report.n_annotated)
+
+
+def test_report_is_immutable():
+    report = evaluate_extraction(["a"], ["a"], similarity=_exact, threshold=1.0)
+
+    with pytest.raises(ValidationError):
+        report.precision = 0.0  # type: ignore[misc]
+
+
+# --- the CLI's --input file ---------------------------------------------------------
+
+
+def test_input_file_loads_two_string_lists(tmp_path):
+    path = tmp_path / "pair.json"
+    path.write_text('{"extracted": ["a"], "annotated": ["b", "c"]}', encoding="utf-8")
+
+    loaded = _load_input(path)
+
+    assert loaded.extracted == ["a"]
+    assert loaded.annotated == ["b", "c"]
+
+
+@pytest.mark.parametrize(
+    "payload, expected_fragment",
+    [
+        ('{"extracted": ["a"]}', "annotated"),  # missing key
+        ('{"extracted": ["a", 2], "annotated": []}', "extracted.1"),  # non-string item
+        ('{"extracted": [], "annotated": [], "extra": 1}', "extra"),  # unknown key
+        ('{"extracted": "a", "annotated": []}', "extracted"),  # not a list
+        ("not json", "json"),
+        ("[]", "should be an object"),  # wrong top-level shape
+    ],
+)
+def test_bad_input_file_names_the_problem(tmp_path, payload, expected_fragment):
+    path = tmp_path / "pair.json"
+    path.write_text(payload, encoding="utf-8")
+
+    with pytest.raises(ValueError, match=expected_fragment):
+        _load_input(path)

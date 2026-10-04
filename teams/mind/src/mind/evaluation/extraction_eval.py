@@ -34,11 +34,11 @@ approaches on a fixed reference, not to certify an absolute quality score. See
 
 import numbers
 from collections.abc import Callable, Sequence
-from dataclasses import dataclass, field
+
+from pydantic import BaseModel, ConfigDict, Field, computed_field
 
 
-@dataclass(frozen=True)
-class MatchedPair:
+class MatchedPair(BaseModel):
     """One extracted item matched to one annotation, with the similarity that won it.
 
     Kept in the report (not just the count) so later weeks can explain *why* a run
@@ -46,15 +46,18 @@ class MatchedPair:
     ranking harness's `ScenarioResult.candidates` exists for.
     """
 
+    model_config = ConfigDict(frozen=True)
+
     extracted: str
     annotated: str
-    similarity: float
+    similarity: float = Field(ge=0.0, le=1.0)
 
 
-@dataclass(frozen=True)
-class ExtractionEvalReport:
+class ExtractionEvalReport(BaseModel):
     """Aggregate result of one extraction-quality comparison.
 
+    - `n_extracted` / `n_annotated`: how many items each side had — the
+      denominators of precision and recall.
     - `precision`: `TP / len(extracted)` — of what the pipeline extracted, how much
       was real. `1.0` when nothing was extracted *and* nothing was annotated,
       `0.0` when nothing was extracted but annotations exist (matches the
@@ -67,16 +70,22 @@ class ExtractionEvalReport:
     - `false_positives`: extracted items that matched nothing.
 
     `len(matched) == true_positives`, `len(false_positives) == FP`,
-    `len(missed) == FN`.
+    `len(missed) == FN`. `true_positives` is a computed field, so it is part of
+    `model_dump()` / the JSON report without being stored twice.
     """
 
-    precision: float
-    recall: float
-    f1: float
-    matched: list[MatchedPair] = field(default_factory=list)
-    missed: list[str] = field(default_factory=list)
-    false_positives: list[str] = field(default_factory=list)
+    model_config = ConfigDict(frozen=True)
 
+    n_extracted: int = Field(ge=0)
+    n_annotated: int = Field(ge=0)
+    precision: float = Field(ge=0.0, le=1.0)
+    recall: float = Field(ge=0.0, le=1.0)
+    f1: float = Field(ge=0.0, le=1.0)
+    matched: list[MatchedPair] = Field(default_factory=list)
+    missed: list[str] = Field(default_factory=list)
+    false_positives: list[str] = Field(default_factory=list)
+
+    @computed_field  # type: ignore[prop-decorator]
     @property
     def true_positives(self) -> int:
         return len(self.matched)
@@ -224,6 +233,8 @@ def evaluate_extraction(
     )
 
     return ExtractionEvalReport(
+        n_extracted=len(extracted),
+        n_annotated=len(annotated),
         precision=precision,
         recall=recall,
         f1=f1,

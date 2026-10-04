@@ -21,10 +21,11 @@ is kept for later "why" analysis.
 """
 
 import argparse
-import dataclasses
 import json
 import sys
 from pathlib import Path
+
+from pydantic import BaseModel, ConfigDict, StrictStr
 
 from mind.evaluation.extraction_eval import (
     PLACEHOLDER_THRESHOLD,
@@ -39,10 +40,10 @@ def _summary_lines(report: ExtractionEvalReport) -> str:
     return (
         "[extraction-quality]\n"
         f"  Precision: {report.precision:.1%} "
-        f"({report.true_positives}/{report.true_positives + len(report.false_positives)} "
+        f"({report.true_positives}/{report.n_extracted} "
         f"extracted items matched an annotation)\n"
         f"  Recall:    {report.recall:.1%} "
-        f"({report.true_positives}/{report.true_positives + len(report.missed)} "
+        f"({report.true_positives}/{report.n_annotated} "
         f"annotations were found)\n"
         f"  F1:        {report.f1:.1%}"
     )
@@ -60,19 +61,17 @@ def _detail_lines(report: ExtractionEvalReport) -> str:
     return "\n".join(lines)
 
 
-def _load_input(path: Path) -> tuple[list[str], list[str]]:
-    with path.open(encoding="utf-8") as f:
-        raw = json.load(f)
-    try:
-        extracted = list(raw["extracted"])
-        annotated = list(raw["annotated"])
-    except (KeyError, TypeError) as e:
-        raise ValueError(
-            f'{path}: expected a JSON object with "extracted" and "annotated" lists'
-        ) from e
-    if not all(isinstance(s, str) for s in [*extracted, *annotated]):
-        raise ValueError(f"{path}: every item in both lists must be a string")
-    return extracted, annotated
+class ExtractionEvalInput(BaseModel):
+    """The `--input` file: `{"extracted": [...], "annotated": [...]}`, strings only."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    extracted: list[StrictStr]
+    annotated: list[StrictStr]
+
+
+def _load_input(path: Path) -> ExtractionEvalInput:
+    return ExtractionEvalInput.model_validate_json(path.read_text(encoding="utf-8"))
 
 
 def main() -> None:
@@ -101,10 +100,11 @@ def main() -> None:
     else:
         source = args.input
         try:
-            extracted, annotated = _load_input(Path(args.input))
-        except (FileNotFoundError, ValueError, json.JSONDecodeError) as e:
+            loaded = _load_input(Path(args.input))
+        except (OSError, ValueError) as e:  # pydantic's ValidationError is a ValueError
             print(f"Could not load input from {args.input!r}: {e}", file=sys.stderr)
             sys.exit(1)
+        extracted, annotated = loaded.extracted, loaded.annotated
 
     try:
         report = evaluate_extraction(
@@ -131,9 +131,8 @@ def main() -> None:
         "similarity_backend": "placeholder_similarity",
         "threshold": args.threshold,
         "input": source,
-        "report": dataclasses.asdict(report),
+        "report": report.model_dump(),
     }
-    output["report"]["true_positives"] = report.true_positives
 
     print("--- Extraction Eval Report (full detail, also written to extraction_report.json) ---")
     print(json.dumps(output, indent=4))
