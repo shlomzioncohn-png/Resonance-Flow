@@ -107,11 +107,7 @@ runs:
 
     - name: Smoke test
       shell: bash
-      run: |
-        HEALTH_PATH=$(yq eval ".components.${{ inputs.service_name }}.readinessProbe.httpGet.path" "$CHART_VALUES")
-        kubectl -n ${{ inputs.service_name }} port-forward svc/${{ inputs.service_name }}-resonance-flow-${{ inputs.service_name }} ${{ inputs.container_port }}:80 &
-        sleep 5
-        curl -sf "http://localhost:${{ inputs.container_port }}${HEALTH_PATH}"
+      run: bash "${{ github.action_path }}/smoke-test.sh" "${{ inputs.service_name }}" "${{ inputs.container_port }}"
 
     - name: Log in to GHCR
       uses: docker/login-action@v3
