@@ -1,6 +1,9 @@
 package com.rnd.inbox.task.controller;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.rnd.inbox.project.Project;
+import com.rnd.inbox.project.ProjectRepository;
+import com.rnd.inbox.project.ProjectStatus;
 import com.rnd.inbox.support.PostgresIntegrationTest;
 import com.rnd.inbox.task.dto.TaskCreateRequestDto;
 import com.rnd.inbox.task.dto.TaskStatusUpdateRequestDto;
@@ -20,6 +23,7 @@ import com.rnd.inbox.user.repository.UserRepository;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.openapitools.jackson.nullable.JsonNullable;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.http.MediaType;
@@ -63,10 +67,15 @@ class TaskTenantIsolationIntegrationTest extends PostgresIntegrationTest {
     @Autowired
     private TenantRepository tenantRepository;
 
+    @Autowired
+    private ProjectRepository projectRepository;
+
     private Tenant tenantA;
     private Tenant tenantB;
     private User tenantAEmployee;
+    private User tenantATeamLead;
     private User tenantBAdmin;
+    private User tenantBTeamLead;
     private User systemAdmin;
     private Task taskA;
     private Task taskB;
@@ -76,7 +85,9 @@ class TaskTenantIsolationIntegrationTest extends PostgresIntegrationTest {
         tenantA = persistTenant();
         tenantB = persistTenant();
         tenantAEmployee = persistUser(tenantA, UserRole.EMPLOYEE);
+        tenantATeamLead = persistUser(tenantA, UserRole.TEAM_LEAD);
         tenantBAdmin = persistUser(tenantB, UserRole.TENANT_ADMIN);
+        tenantBTeamLead = persistUser(tenantB, UserRole.TEAM_LEAD);
         // Own tenant is irrelevant for SYSTEM_ADMIN's scope, but User.tenant is NOT NULL in the
         // schema, so every user (including a system admin) still needs some tenant row.
         systemAdmin = persistUser(tenantA, UserRole.SYSTEM_ADMIN);
@@ -87,6 +98,7 @@ class TaskTenantIsolationIntegrationTest extends PostgresIntegrationTest {
     @AfterEach
     void cleanUp() {
         taskRepository.deleteAll();
+        projectRepository.deleteAll();
         userRepository.deleteAll();
         tenantRepository.deleteAll();
     }
@@ -123,6 +135,16 @@ class TaskTenantIsolationIntegrationTest extends PostgresIntegrationTest {
         task.setCreatedAt(Instant.now());
         task.setUpdatedAt(Instant.now());
         return taskRepository.saveAndFlush(task);
+    }
+
+    private Project persistProject(Tenant tenant) {
+        Project project = new Project();
+        project.setTenant(tenant);
+        project.setName("Project " + UUID.randomUUID());
+        project.setStatus(ProjectStatus.ACTIVE);
+        project.setCreatedAt(Instant.now());
+        project.setUpdatedAt(Instant.now());
+        return projectRepository.saveAndFlush(project);
     }
 
     @Test
@@ -253,5 +275,105 @@ class TaskTenantIsolationIntegrationTest extends PostgresIntegrationTest {
 
         assertThat(taskRepository.findById(taskA.getId()).orElseThrow().getTitle())
                 .isEqualTo("Updated by employee");
+    }
+
+    @Test
+    void getTaskById_crossTenantTeamLead_returns403() throws Exception {
+        // Role coverage: TEAM_LEAD is a distinct ActorScope branch from TENANT_ADMIN/EMPLOYEE in
+        // AdminOrTenantScopePolicy, but all three map to the same WithinTenant scope for tasks -
+        // this proves that holds for TEAM_LEAD specifically, not just assumed from the other two.
+        mockMvc.perform(get("/api/v1/tasks/{id}", taskA.getId())
+                        .header(ACTOR_HEADER, tenantBTeamLead.getId().toString()))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.error").value("FORBIDDEN"));
+    }
+
+    @Test
+    void updateTask_sameTenantTeamLead_succeeds() throws Exception {
+        TaskUpdateRequestDto request = new TaskUpdateRequestDto();
+        request.setTitle("Updated by team lead");
+
+        mockMvc.perform(patch("/api/v1/tasks/{id}", taskA.getId())
+                        .header(ACTOR_HEADER, tenantATeamLead.getId().toString())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(request)))
+                .andExpect(status().isOk());
+
+        assertThat(taskRepository.findById(taskA.getId()).orElseThrow().getTitle())
+                .isEqualTo("Updated by team lead");
+    }
+
+    @Test
+    void updateTask_withProjectIdFromAnotherTenant_returns403AndTaskUnchanged() throws Exception {
+        // Reference injection: the actor and the task are both in tenant A (passes the main
+        // authorization check), but the payload points projectId at a project that belongs to
+        // tenant B. TaskService.resolveProjectInTenant must catch this even though the task
+        // itself was never cross-tenant.
+        Project projectB = persistProject(tenantB);
+        TaskUpdateRequestDto request = new TaskUpdateRequestDto();
+        request.setProjectId(JsonNullable.of(projectB.getId().toString()));
+
+        mockMvc.perform(patch("/api/v1/tasks/{id}", taskA.getId())
+                        .header(ACTOR_HEADER, tenantAEmployee.getId().toString())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(request)))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.error").value("FORBIDDEN"));
+
+        assertThat(taskRepository.findById(taskA.getId()).orElseThrow().getProject()).isNull();
+    }
+
+    @Test
+    void updateTask_withOwnerIdFromAnotherTenant_returns403AndTaskUnchanged() throws Exception {
+        // Same reference-injection shape as above, but for ownerId pointing at a user who
+        // belongs to tenant B instead of a project.
+        TaskUpdateRequestDto request = new TaskUpdateRequestDto();
+        request.setOwnerId(JsonNullable.of(tenantBAdmin.getId().toString()));
+
+        mockMvc.perform(patch("/api/v1/tasks/{id}", taskA.getId())
+                        .header(ACTOR_HEADER, tenantAEmployee.getId().toString())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(request)))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.error").value("FORBIDDEN"));
+
+        assertThat(taskRepository.findById(taskA.getId()).orElseThrow().getOwner()).isNull();
+    }
+
+    @Test
+    void createTask_withProjectIdFromAnotherTenant_returns403AndDoesNotPersist() throws Exception {
+        Project projectB = persistProject(tenantB);
+        TaskCreateRequestDto request = new TaskCreateRequestDto();
+        request.setTenantId(tenantA.getId().toString());
+        request.setTitle("Task with cross-tenant project");
+        request.setProjectId(projectB.getId().toString());
+
+        mockMvc.perform(post("/api/v1/tasks")
+                        .header(ACTOR_HEADER, tenantAEmployee.getId().toString())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(request)))
+                .andExpect(status().isForbidden());
+
+        assertThat(taskRepository.findAll())
+                .extracting(Task::getTitle)
+                .doesNotContain("Task with cross-tenant project");
+    }
+
+    @Test
+    void createTask_withOwnerIdFromAnotherTenant_returns403AndDoesNotPersist() throws Exception {
+        TaskCreateRequestDto request = new TaskCreateRequestDto();
+        request.setTenantId(tenantA.getId().toString());
+        request.setTitle("Task with cross-tenant owner");
+        request.setOwnerId(tenantBAdmin.getId().toString());
+
+        mockMvc.perform(post("/api/v1/tasks")
+                        .header(ACTOR_HEADER, tenantAEmployee.getId().toString())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(request)))
+                .andExpect(status().isForbidden());
+
+        assertThat(taskRepository.findAll())
+                .extracting(Task::getTitle)
+                .doesNotContain("Task with cross-tenant owner");
     }
 }
