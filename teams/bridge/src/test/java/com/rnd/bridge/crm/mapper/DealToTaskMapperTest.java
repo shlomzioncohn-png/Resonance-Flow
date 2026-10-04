@@ -3,6 +3,8 @@ package com.rnd.bridge.crm.mapper;
 import com.rnd.bridge.crm.model.Deal;
 import com.rnd.bridge.crm.model.DealStage;
 import com.rnd.bridge.crm.repository.JsonDealRepository;
+import com.rnd.bridge.task.enrichment.EnrichmentProperties;
+import com.rnd.bridge.task.enrichment.NoOpTaskEnricher;
 import com.rnd.bridge.task.model.ExtractionProvenance;
 import com.rnd.bridge.task.model.RoleContext;
 import com.rnd.bridge.task.model.SourceType;
@@ -32,7 +34,7 @@ class DealToTaskMapperTest {
 
     private static final Instant AS_OF = Instant.parse("2026-08-23T00:00:00Z");
     private static final String ORGANIZATION_ID = "org-test-0000";
-    private static final DealToTaskMapper MAPPER = new DealToTaskMapper(ORGANIZATION_ID);
+    private static final DealToTaskMapper MAPPER = new DealToTaskMapper(ORGANIZATION_ID, new EnrichmentProperties(), new NoOpTaskEnricher());
 
     private static JsonDealRepository repository() {
         return new JsonDealRepository(new DefaultResourceLoader(), "classpath:crm/synthetic-deals.json");

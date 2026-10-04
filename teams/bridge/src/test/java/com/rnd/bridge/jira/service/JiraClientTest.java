@@ -7,6 +7,8 @@ import com.rnd.bridge.jira.dto.JiraSearchResult;
 import com.rnd.bridge.jira.dto.JiraStatus;
 import com.rnd.bridge.jira.mapper.JiraIssueMapper;
 import com.rnd.bridge.task.TaskValidator;
+import com.rnd.bridge.task.enrichment.EnrichmentProperties;
+import com.rnd.bridge.task.enrichment.NoOpTaskEnricher;
 import com.rnd.bridge.task.model.ExtractionProvenance;
 import com.rnd.bridge.task.model.SourceType;
 import com.rnd.bridge.task.model.Task;
@@ -22,7 +24,6 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.web.reactive.function.client.WebClient;
 import reactor.core.publisher.Mono;
 
-import java.time.Instant;
 import java.util.Collections;
 import java.util.List;
 import java.util.function.Function;
@@ -48,7 +49,7 @@ class JiraClientTest {
     private WebClient.ResponseSpec responseSpec;
 
     @Spy
-    private JiraIssueMapper jiraIssueMapper;
+    private JiraIssueMapper jiraIssueMapper = new JiraIssueMapper(new EnrichmentProperties(), new NoOpTaskEnricher());
 
     @Spy
     private TaskValidator taskValidator;

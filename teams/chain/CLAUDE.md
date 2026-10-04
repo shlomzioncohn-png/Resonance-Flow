@@ -51,31 +51,28 @@ onConstraintStatusChanged.
     wired to a live endpoint).
 
 ## Open items
-- pom.xml still lacks a real persistence layer, and Task/TaskDependency
-  are plain DTOs, not JPA entities. @Transactional is kept on
-  TaskEligibilityService's public methods deliberately (team decision:
-  keep the transaction boundary in place now so there's no service-level
-  change needed once a real DB lands) — spring-boot-starter-data-jpa is
-  back in pom.xml for this, plus a placeholder H2 in-memory DataSource
-  (application.yml) purely so Spring Boot's DataSourceAutoConfiguration
-  doesn't fail app startup and a PlatformTransactionManager bean exists.
-  No JPA entities/repositories use H2 - real data still lives in the
-  in-memory TaskRepository/TaskDependencyRepository, so @Transactional
-  does not actually cover Task/TaskDependency mutations yet.
-- Waiting on team lead's answer about whether a real DB is coming,
-  or whether the in-memory contract is final for now
-- Until real JPA-backed repositories exist, TaskEligibilityService ALSO
-  uses in-process locking to make read-modify-write on blockingCount /
-  openConstraintCount actually atomic - @Transactional alone doesn't
-  cover this today. This locking is only correct for a single JVM owning
-  the in-memory repositories — once persistence is real, add @Version or
-  an atomic UPDATE for the counters and the locking can be retired. Full
-  rationale is in the class Javadoc; summary: dependencyGraphLock guards
-  the edges plus any DONE-status read that decides whether an edge
-  currently counts against blockingCount, per-task locks (striped over a
-  fixed array, not one object per task id, to keep memory bounded) guard
-  a single task's counters, and dependencyGraphLock is always acquired
-  before a per-task lock, never after, so the two can't deadlock.
+- Resolved: real persistence layer now exists - Postgres-backed
+  `Postgres*Repository`/`JpaTransactionRunner` implementations
+  (`repository/`), own `chain` database + own `chain` DB user (not the
+  shared postgres superuser, not Inbox's resonance_flow database - see
+  PR #417), Flyway-owned schema (`src/main/resources/db/migration/`).
+  `Task`/`TaskDependency`/`DependencyHistoryEntry` stay plain DTOs -
+  entities (`TaskEntity`/`TaskDependencyEntity`/`DependencyHistoryEntity`)
+  are mapped to/from them entirely inside the adapters. The H2 placeholder
+  is gone; `MockDataConfig`'s in-memory beans remain only as the
+  `@ConditionalOnMissingBean` fallback when no real `DataSource` is wired.
+- `TaskRepository#update()`'s atomicity is now real: `PostgresTaskRepository`
+  uses a pessimistic row lock (`SELECT ... FOR UPDATE`) as the sole
+  correctness mechanism for `blockingCount`/`openConstraintCount` under
+  concurrent writes - `@Version` on `TaskEntity` is defense-in-depth for a
+  different, not-yet-existing write path, not part of this guarantee.
+  `TaskEligibilityService`'s in-process `dependencyGraphLock` is
+  **unchanged and still required** - it isn't redundant with per-row
+  Postgres locking, since it serializes the multi-row cycle-detection DFS
+  and a read-together-with-an-edge-write decision, neither of which
+  reduces to locking one row. Full rationale is in the class Javadoc;
+  summary: dependencyGraphLock guards the edges plus any DONE-status read
+  that decides whether an edge currently counts against blockingCount.
 - 2026-08-30, addressed a teammate code review on PR #172:
   - Fixed: addDependency/removeDependency were only using
     dependencyGraphLock, not the per-task lock the other methods use for
