@@ -32,7 +32,7 @@ class ContentFactoryTest {
     @Test
     void userRole_reflectsTeamLead() {
         assertThat(ContentFactory.userRole(true)).isEqualTo("team_lead");
-        assertThat(ContentFactory.userRole(false)).isEqualTo("member");
+        assertThat(ContentFactory.userRole(false)).isEqualTo("employee");
     }
 
     @Test

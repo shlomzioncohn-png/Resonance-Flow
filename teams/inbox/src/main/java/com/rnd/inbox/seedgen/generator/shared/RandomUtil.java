@@ -43,9 +43,9 @@ public final class RandomUtil {
      * the same way a fair die rolled 100,000 times won't land on each face precisely 16,667
      * times. Reproducible regardless — the same seed draws the same sequence of keys every run.
      *
-     * <p>Iteration order over {@code percentages} doesn't affect which key gets chosen for a
-     * given roll (any fixed order carves up the same 0-100 line the same way), only which
-     * fraction of the roll axis each key occupies — the map's own (deterministic) order is fine.
+     * <p>The roll axis is carved up in {@code percentages}' iteration order, so that order decides
+     * which key a given roll lands on: it must be the same on every run, or the same seed would
+     * draw different values. The {@code DatasetConfig} tables are insertion-ordered for this reason.
      */
     public static String pick(Random random, Map<String, Double> percentages) {
         double roll = random.nextDouble() * 100;

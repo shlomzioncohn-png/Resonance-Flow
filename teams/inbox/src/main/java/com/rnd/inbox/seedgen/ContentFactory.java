@@ -43,7 +43,7 @@ public final class ContentFactory {
     }
 
     public static String userRole(boolean teamLead) {
-        return teamLead ? "team_lead" : "member";
+        return teamLead ? "team_lead" : "employee";
     }
 
     /** Not globally unique — titles don't need to be, and repeats across tenants are fine. */
