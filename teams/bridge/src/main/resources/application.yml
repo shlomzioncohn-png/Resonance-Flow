@@ -97,14 +97,35 @@ bridge:
       session-gap-minutes: 45
     # Per-source fixture/real switch - see plan.md. Each source can go "real" independently;
     # "real" beans throw UnsupportedOperationException until their connector is implemented.
+    # Shared by every real Google reader (Calendar/Gmail/Drive) - see intake.google.
+    # GoogleCredentialsProvider. Personal Gmail account -> OAuth2 user-consent flow, not a
+    # service account: client-secrets-path is the OAuth Client ID JSON from Google Cloud
+    # Console (Desktop app type), tokens-directory caches the refresh token after the one-time
+    # browser consent so later runs don't need a browser.
+    google:
+      client-secrets-path: ${BRIDGE_GOOGLE_CLIENT_SECRETS_PATH:}
+      tokens-directory: ${BRIDGE_GOOGLE_TOKENS_DIR:}
     email:
       mode: fixture
     drive:
       mode: fixture
     calendar:
       mode: fixture
+      # Only read when mode: real. "primary" means the calendar of whichever Google account
+      # completes the OAuth consent.
+      calendar-id: ${BRIDGE_CALENDAR_ID:primary}
     slack:
       mode: fixture
+      # Only read when mode: real. Bot User OAuth Token (xoxb-...) from a Slack app installed
+      # with channels:history/groups:history/files:read scopes - see plan.md.
+      bot-token: ${BRIDGE_SLACK_BOT_TOKEN:}
+      tenant-id: kamatech
+      # Channel IDs (Cxxxxxxxx) the bot has been invited to - no config here means "read every
+      # channel", Slack has no such mode without a much broader scope.
+      channels: ${BRIDGE_SLACK_CHANNELS:}
+      # Slack app's Signing Secret (Basic Information page) - verifies X-Slack-Signature on
+      # inbound Events API requests. Only used by SlackEventsController, not by polling.
+      signing-secret: ${BRIDGE_SLACK_SIGNING_SECRET:}
     whatsapp:
       mode: fixture
       # Only read when mode: real. See plan.md - there's no export API, so this directory is

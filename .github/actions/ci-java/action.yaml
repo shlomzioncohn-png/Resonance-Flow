@@ -1,6 +1,6 @@
 name: CI - Java service
 description: >
-  Checks out the repo, brings up the shared test infra (kind cluster + Helm chart with
+  Brings up the shared test infra (kind cluster + Helm chart with
   this component disabled + Postgres), then runs this service's Java tests. Used by
   both service-ci-java.yaml (PR) and service-cd.yaml's build job (push/dispatch).
 
@@ -15,8 +15,6 @@ inputs:
 runs:
   using: composite
   steps:
-    - uses: actions/checkout@v7
-
     - uses: ./.github/actions/setup-service-infra
       with:
         service_name: ${{ inputs.service_name }}
