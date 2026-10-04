@@ -1,5 +1,4 @@
 import argparse
-import dataclasses
 import json
 import sys
 from datetime import UTC, datetime
@@ -16,7 +15,7 @@ from mind.evaluation.baseline_record import (
     write_baseline_record,
 )
 from mind.evaluation.dummy_model import DummyModel
-from mind.evaluation.harness import Report, run, split_by_role
+from mind.evaluation.harness import EvaluationOutput, Report, run, split_by_role
 from mind.evaluation.interfaces import RankingModel
 from mind.evaluation.personas import PersonaSchemaError, load_personas, validate_personas
 
@@ -28,6 +27,16 @@ def _summary_lines(label: str, report: Report) -> str:
         f"  Top-1 accuracy:      {report.top1_accuracy:.1%} "
         f"({report.correct_top1}/{report.total_scenarios})"
     )
+
+
+def _report_json(output: EvaluationOutput) -> str:
+    """Serialize the report. A NaN/inf anywhere raises here instead of reaching
+    report.json as a bare `NaN` — which is not valid JSON (jq reads it as null,
+    JavaScript's JSON.parse throws).
+
+    Deliberately `json.dumps(..., allow_nan=False)` and not `model_dump_json()`:
+    pydantic's JSON serializer writes NaN as `null` by default, silently."""
+    return json.dumps(output.model_dump(), indent=4, allow_nan=False)
 
 
 def main() -> None:
@@ -147,19 +156,20 @@ def main() -> None:
     print(_summary_lines("[combined]", combined_report))
     print("===========================\n")
 
-    output = {
-        "model_name": combined_report.model_name,
-        "combined": dataclasses.asdict(combined_report),
-        "groups": {name: dataclasses.asdict(r) for name, r in group_reports.items()},
-        "roles": {role: dataclasses.asdict(r) for role, r in role_reports.items()},
-    }
+    output = EvaluationOutput(
+        model_name=combined_report.model_name,
+        combined=combined_report,
+        groups=group_reports,
+        roles=role_reports,
+    )
 
+    report_text = _report_json(output)
     print("--- Evaluation Report (full detail, also written to report.json) ---")
-    print(json.dumps(output, indent=4))
+    print(report_text)
     print("----------------------------------------------------------------------\n")
 
     with open("report.json", "w") as f:
-        json.dump(output, f, indent=4)
+        f.write(report_text)
 
     if args.record_baseline is not None and provenance is not None:
         record = build_baseline_record(

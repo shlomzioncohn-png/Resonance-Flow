@@ -91,7 +91,7 @@ def build_baseline_record(
         "combined": _summary(combined),
         "groups": {name: _summary(r) for name, r in groups.items()},
         "roles": {role: _summary(r) for role, r in roles.items()},
-        "scenario_results": [dataclasses.asdict(r) for r in combined.scenario_results],
+        "scenario_results": [r.model_dump() for r in combined.scenario_results],
     }
 
 

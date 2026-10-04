@@ -125,20 +125,6 @@ public class GlobalExceptionHandler {
         return "Validation failed";
     }
 
-    @ExceptionHandler(MethodArgumentTypeMismatchException.class)
-    public ResponseEntity<ApiError> handleInvalidTaskId(
-            MethodArgumentTypeMismatchException ex,
-            HttpServletRequest request) {
-
-        return ResponseEntity
-                .status(HttpStatus.BAD_REQUEST)
-                .body(new ApiError(
-                        HttpStatus.BAD_REQUEST.value(),
-                        "INVALID_TASK_ID",
-                        "Invalid task ID",
-                        request.getRequestURI()));
-    }
-
     @ExceptionHandler(HttpMessageNotReadableException.class)
     public ResponseEntity<ApiError> handleInvalidRequestPayload(
             HttpMessageNotReadableException ex,

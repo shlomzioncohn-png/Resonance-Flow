@@ -57,7 +57,7 @@ public class TaskDependencyController {
                 "/tasks/"
                         + taskId
                         + "/dependencies/"
-                        + createdDependency.getDependsOnTaskId());
+                        + createdDependency.dependsOnTaskId());
 
         return ResponseEntity
                 .created(location)

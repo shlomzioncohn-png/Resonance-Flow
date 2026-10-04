@@ -4,6 +4,8 @@ import com.rnd.bridge.jira.dto.JiraIssue;
 import com.rnd.bridge.jira.dto.JiraIssueFields;
 import com.rnd.bridge.jira.dto.JiraIssueType;
 import com.rnd.bridge.jira.dto.JiraStatus;
+import com.rnd.bridge.task.enrichment.EnrichmentProperties;
+import com.rnd.bridge.task.enrichment.NoOpTaskEnricher;
 import com.rnd.bridge.task.model.ExtractionProvenance;
 import com.rnd.bridge.task.model.RoleContext;
 import com.rnd.bridge.task.model.SourceType;
@@ -18,7 +20,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 class JiraIssueMapperTest {
 
-    private final JiraIssueMapper mapper = new JiraIssueMapper();
+    private final JiraIssueMapper mapper = new JiraIssueMapper(new EnrichmentProperties(), new NoOpTaskEnricher());
 
     @Test
     void map_shouldConvertOpenIssueToNewTask() {

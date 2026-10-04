@@ -5,12 +5,15 @@ import java.util.function.Supplier;
 /** DB-independent transaction boundary seam, so the in-memory impl can later be swapped for a real one. */
 public interface TransactionRunner {
 
-    /** Runs {@code action}; best-effort atomicity across repositories. Exclusive: no concurrent
-     * {@code runInTransaction}/{@code runInReadOnlyTransaction} call overlaps this one. */
+    /** Runs {@code action} atomically. On a real transactional store this is row/constraint-level
+     * isolation, not global exclusivity - two calls touching unrelated rows may run concurrently;
+     * two calls that touch the same row are still serialized by the store itself. (The in-memory
+     * implementation is stricter: one lock, no overlap at all, since it has no row-level isolation
+     * of its own to fall back on.) */
     <T> T runInTransaction(Supplier<T> action);
 
-    /** Runs a read-only {@code action}; can run concurrently with other read-only actions, but
-     * still waits for any in-flight {@link #runInTransaction} to finish (and blocks new ones
-     * from starting) so it never observes a mid-write/mid-rollback state. */
+    /** Runs a read-only {@code action}; on a real transactional store, isolated from concurrent
+     * writes by the store's own transaction isolation rather than by blocking - it never observes
+     * a mid-write/mid-rollback state, but does not itself serialize against unrelated writes. */
     <T> T runInReadOnlyTransaction(Supplier<T> action);
 }

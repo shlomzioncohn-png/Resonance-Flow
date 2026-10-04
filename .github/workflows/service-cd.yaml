@@ -15,10 +15,6 @@ on:
         description: "python, java, or node"
         required: true
         type: string
-      container_port:
-        description: "Local port used for the post-deploy smoke test port-forward"
-        required: true
-        type: number
 
 jobs:
   build:
@@ -56,7 +52,6 @@ jobs:
         with:
           service_name: ${{ inputs.service_name }}
           service_dir: ${{ inputs.service_dir }}
-          container_port: ${{ inputs.container_port }}
 
   update-manifest:
     needs: build
