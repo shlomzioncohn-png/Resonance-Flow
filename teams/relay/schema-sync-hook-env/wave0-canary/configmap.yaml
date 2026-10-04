@@ -1,0 +1,9 @@
+# Trivial wave-0 resource, standing in for resonance-flow (the services). Its
+# only purpose: show whether ArgoCD advanced past sync-wave -1. If the
+# schema-sync-hook Job fails, this must NOT get synced.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: wave0-canary
+data:
+  note: "if this ConfigMap exists in the cluster, ArgoCD reached sync-wave 0"

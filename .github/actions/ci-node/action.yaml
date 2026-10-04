@@ -1,0 +1,26 @@
+name: CI - Node service
+description: >
+  Checks out the repo, brings up the shared test infra (kind cluster + Helm chart with
+  this component disabled + Postgres), then runs this service's Node tests. Used by
+  both service-ci-node.yaml (PR) and service-cd.yaml's build job (push/dispatch).
+
+inputs:
+  service_name:
+    description: "Component name, matches the key under components.<service_name> in teams/relay/helm/resonance-flow/values.yaml"
+    required: true
+  service_dir:
+    description: "Path to the service, e.g. teams/lens/frontend"
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - uses: actions/checkout@v7
+
+    - uses: ./.github/actions/setup-service-infra
+      with:
+        service_name: ${{ inputs.service_name }}
+
+    - uses: ./.github/actions/test-node
+      with:
+        service_dir: ${{ inputs.service_dir }}

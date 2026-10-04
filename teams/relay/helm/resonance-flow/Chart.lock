@@ -1,0 +1,12 @@
+dependencies:
+- name: kafka
+  repository: oci://registry-1.docker.io/bitnamicharts
+  version: 32.4.3
+- name: minio
+  repository: oci://registry-1.docker.io/bitnamicharts
+  version: 17.0.21
+- name: postgresql
+  repository: oci://registry-1.docker.io/bitnamicharts
+  version: 18.8.13
+digest: sha256:2aad3adcaeb3ce184ebed310049027213f65c38b3b15c5c477f27e7b904951f1
+generated: "2026-09-01T01:27:41.5807315+03:00"

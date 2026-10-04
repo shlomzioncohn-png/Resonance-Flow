@@ -1,0 +1,144 @@
+name: Mind CI/CD
+
+on:
+  push:
+    branches: [ "main" ]
+    tags: [ "mind-v*.*.*" ]
+    paths:
+      - "teams/mind/**"
+  pull_request:
+    paths:
+      - "teams/mind/**"
+      - ".github/workflows/mind-ci.yaml"
+  workflow_dispatch: {}
+
+# Cancel an in-progress run when a newer commit is pushed to the same ref —
+# the older run is measuring stale code and just burns Actions minutes.
+concurrency:
+  group: mind-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    runs-on: self-hosted
+    timeout-minutes: 15  # a hung `make eval` must not run to the 6h default
+    permissions:
+      contents: read
+    defaults:
+      run:
+        working-directory: teams/mind
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+          cache-dependency-path: teams/mind/pyproject.toml
+
+      - name: Install
+        run: make dev
+
+      - name: Lint (ruff + mypy)
+        run: make lint
+
+      # Smoke-check that run.py still produces a report end-to-end. The real
+      # regression check runs against eval/personas/ — it is switched on in the
+      # PR that lands the persona scenario set.
+      - name: Evaluation harness smoke check
+        run: python -m mind.evaluation.run --model dummy --personas tests/fixtures/personas
+
+  ci:
+    needs: lint
+    if: github.event_name == 'pull_request'
+    permissions:
+      contents: read
+    uses: ./.github/workflows/service-ci-python.yaml
+    with:
+      service_name: mind
+      service_dir: teams/mind
+
+  cd:
+    needs: lint
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    permissions:
+      contents: write
+      packages: write
+      pull-requests: write
+    uses: ./.github/workflows/service-cd.yaml
+    secrets: inherit
+    with:
+      service_name: mind
+      service_dir: teams/mind
+      language: python
+      container_port: 8000
+
+  # Deploys Kafka/Schema Registry/MIND via the real Helm chart; round-trip.py
+  # then runs from the runner against the deployed Kafka/registry.
+  round-trip:
+    if: github.event_name == 'pull_request'
+    runs-on: self-hosted
+    timeout-minutes: 25
+    permissions:
+      contents: read
+
+    env:
+      CHART_DIR: teams/relay/helm/resonance-flow
+      RELEASE: mind-rt
+      NAMESPACE: mind-rt
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: azure/setup-helm@v5
+
+      # No working-directory override on this or the helm/kubectl steps below -
+      # kind's kubeconfig write-up is tied to where it runs, keep it at the repo root.
+      - name: Create kind cluster
+        uses: helm/kind-action@v1
+        with:
+          cluster_name: mind-rt-cluster
+
+      - name: Fetch chart dependencies
+        run: helm dependency build "$CHART_DIR"
+
+      # Phase 1: infra only, MIND's image isn't built yet (two-phase, like service-ci.yaml).
+      - name: Deploy chart with MIND disabled (infra only)
+        run: |
+          helm upgrade --install "$RELEASE" "$CHART_DIR" \
+            -f "$CHART_DIR/values.yaml" \
+            -f "$CHART_DIR/values/values-mind.yaml" \
+            --set components.mind.enabled=false \
+            --namespace "$NAMESPACE" --create-namespace \
+            --wait --timeout 420s
+
+      - name: Build and load the MIND image
+        working-directory: teams/mind
+        run: |
+          docker build -t mind:local .
+          kind load docker-image mind:local --name mind-rt-cluster
+
+      - name: Deploy chart with MIND enabled
+        run: |
+          helm upgrade --install "$RELEASE" "$CHART_DIR" \
+            -f "$CHART_DIR/values.yaml" \
+            -f "$CHART_DIR/values/values-mind.yaml" \
+            --namespace "$NAMESPACE" \
+            --wait --timeout 420s
+
+      - name: Diagnose deploy failure
+        if: failure()
+        run: |
+          kubectl -n "$NAMESPACE" get pods -o wide
+          kubectl -n "$NAMESPACE" describe pods
+          kubectl -n "$NAMESPACE" logs -l app.kubernetes.io/component=mind --all-containers --tail=200 || true
+
+      # Kafka's advertised.listeners is the in-cluster pod DNS name, unreachable
+      # through a port-forward - run round-trip.py inside the MIND pod instead.
+      - name: Round trip
+        run: |
+          POD=$(kubectl -n "$NAMESPACE" get pod -l app.kubernetes.io/component=mind -o jsonpath='{.items[0].metadata.name}')
+          SR_SVC=$(kubectl -n "$NAMESPACE" get svc -l app.kubernetes.io/component=schema-registry -o jsonpath='{.items[0].metadata.name}')
+          kubectl -n "$NAMESPACE" exec "$POD" -- python scripts/round-trip.py \
+            --bootstrap-servers "${RELEASE}-kafka:9092" \
+            --schema-registry-url "http://${SR_SVC}:8080/apis/ccompat/v6"
