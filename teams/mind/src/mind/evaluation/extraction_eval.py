@@ -32,8 +32,6 @@ approaches on a fixed reference, not to certify an absolute quality score. See
 `extraction_eval_design.md` §7.
 """
 
-from __future__ import annotations
-
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 
@@ -95,7 +93,12 @@ def _normalize(text: str) -> str:
     return collapsed.lower().removesuffix(".")
 
 
-def default_similarity(a: str, b: str) -> float:
+# Threshold calibrated for `placeholder_similarity` (Jaccard). Not the locked lexical
+# tau = 0.60 of `extraction_eval_design.md` §6, which belongs to the `rapidfuzz` backend.
+PLACEHOLDER_THRESHOLD = 0.5
+
+
+def placeholder_similarity(a: str, b: str) -> float:
     """Placeholder lexical similarity: Jaccard overlap of the two token sets.
 
     Pure-Python, no dependencies. This is **not** the backend the design calls

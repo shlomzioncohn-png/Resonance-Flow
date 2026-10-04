@@ -10,8 +10,8 @@ bootstrap, mirroring `run.py --model dummy`. Real pipeline output plugs in here
 once Yonit's extraction and Michal's ASR are producing it.
 
 `--threshold` and the similarity backend are the swappable matching rule (see
-`extraction_eval.evaluate_extraction`). The default similarity is the pure-Python
-`default_similarity` placeholder and the default threshold is the fixture's 0.5 —
+`extraction_eval.evaluate_extraction`). The similarity is the pure-Python
+`placeholder_similarity` and the default threshold is the fixture's 0.5 —
 **not** the locked lexical τ = 0.60 from `extraction_eval_design.md` §6, which is
 calibrated for the `rapidfuzz` backend that is not built yet.
 
@@ -20,8 +20,6 @@ written to `extraction_report.json`), so the matched/missed/false-positive detai
 is kept for later "why" analysis.
 """
 
-from __future__ import annotations
-
 import argparse
 import dataclasses
 import json
@@ -29,13 +27,12 @@ import sys
 from pathlib import Path
 
 from mind.evaluation.extraction_eval import (
+    PLACEHOLDER_THRESHOLD,
     ExtractionEvalReport,
-    default_similarity,
     evaluate_extraction,
+    placeholder_similarity,
 )
 from mind.evaluation.extraction_fixture import FIXTURE_ANNOTATED, FIXTURE_EXTRACTED
-
-DEFAULT_THRESHOLD = 0.5
 
 
 def _summary_lines(report: ExtractionEvalReport) -> str:
@@ -92,8 +89,8 @@ def main() -> None:
     parser.add_argument(
         "--threshold",
         type=float,
-        default=DEFAULT_THRESHOLD,
-        help=f"Similarity at/above which a pair counts as the same item (default {DEFAULT_THRESHOLD}). "
+        default=PLACEHOLDER_THRESHOLD,
+        help=f"Similarity at/above which a pair counts as the same item (default {PLACEHOLDER_THRESHOLD}). "
         "Not the locked lexical tau=0.60 — that is for the rapidfuzz backend, not the placeholder.",
     )
     args = parser.parse_args()
@@ -112,13 +109,13 @@ def main() -> None:
     report = evaluate_extraction(
         extracted,
         annotated,
-        similarity=default_similarity,
+        similarity=placeholder_similarity,
         threshold=args.threshold,
     )
 
     print("\n=== Extraction-Quality Eval ===")
     print(f"Input:              {source}")
-    print("Similarity backend: default_similarity (placeholder — Jaccard token overlap)")
+    print("Similarity backend: placeholder_similarity (placeholder — Jaccard token overlap)")
     print(f"Threshold:          {args.threshold}")
     print(f"Items:              {len(extracted)} extracted, {len(annotated)} annotated\n")
     print(_summary_lines(report))
@@ -127,7 +124,7 @@ def main() -> None:
     print("===============================\n")
 
     output = {
-        "similarity_backend": "default_similarity",
+        "similarity_backend": "placeholder_similarity",
         "threshold": args.threshold,
         "input": source,
         "report": dataclasses.asdict(report),

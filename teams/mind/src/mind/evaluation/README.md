@@ -199,8 +199,8 @@ python -m mind.evaluation.run_extraction_eval --input pair.json
 `pair.json` is `{"extracted": [...], "annotated": [...]}`. With no `--input`, the
 fixture in `extraction_fixture.py` runs — three true positives, one false
 positive, one false negative, precision = recall = 0.75, worked out by hand in
-that file's docstring. The default similarity is a pure-Python Jaccard placeholder
-(`default_similarity`); the real backend (embeddings, or a `rapidfuzz` baseline)
+that file's docstring. The similarity the CLI uses is a pure-Python Jaccard placeholder
+(`placeholder_similarity`, paired with `PLACEHOLDER_THRESHOLD = 0.5`); the real backend (embeddings, or a `rapidfuzz` baseline)
 is not built yet — blocked on Ayala's answer (`extraction_eval_design.md` §4).
 `metrics.extraction_precision_recall` is a stricter placeholder still (exact
 string match); it is not this eval.

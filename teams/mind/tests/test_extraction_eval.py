@@ -7,15 +7,15 @@ and that `threshold` is a real knob.
 
 Most tests use an exact-match similarity (`_exact`, 1.0 iff the normalized
 strings are equal) with `threshold=1.0`, so the expected counts are unambiguous.
-The fixture test and the paraphrase test use the real `default_similarity`.
+The fixture test and the paraphrase test use the real `placeholder_similarity`.
 """
 
 import pytest
 
 from mind.evaluation.extraction_eval import (
     _normalize,
-    default_similarity,
     evaluate_extraction,
+    placeholder_similarity,
 )
 from mind.evaluation.extraction_fixture import (
     FIXTURE_ANNOTATED,
@@ -113,7 +113,7 @@ def test_constructed_fixture_matches_hand_computed_numbers():
     report = evaluate_extraction(
         FIXTURE_EXTRACTED,
         FIXTURE_ANNOTATED,
-        similarity=default_similarity,
+        similarity=placeholder_similarity,
         threshold=FIXTURE_THRESHOLD,
     )
 
@@ -136,7 +136,7 @@ def test_paraphrase_matches_below_similarity_one():
     report = evaluate_extraction(
         ["Industrial Designer to present the components concept"],
         ["The Industrial Designer will present the components concept."],
-        similarity=default_similarity,
+        similarity=placeholder_similarity,
         threshold=0.5,
     )
 
@@ -178,10 +178,10 @@ def test_threshold_is_a_real_knob():
     annotated = ["The Industrial Designer will present the components concept."]
 
     below = evaluate_extraction(
-        extracted, annotated, similarity=default_similarity, threshold=0.7
+        extracted, annotated, similarity=placeholder_similarity, threshold=0.7
     )
     above = evaluate_extraction(
-        extracted, annotated, similarity=default_similarity, threshold=0.8
+        extracted, annotated, similarity=placeholder_similarity, threshold=0.8
     )
 
     assert below.true_positives == 1
