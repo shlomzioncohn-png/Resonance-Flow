@@ -13,9 +13,8 @@ inputs:
     description: "Path to the service, e.g. teams/bridge"
     required: true
   container_port:
-    description: "Unused - the smoke test lets kubectl pick a free port. Kept until callers stop passing it (already removed on main by #504)."
-    required: false
-    default: ""
+    description: "Local port used for the post-deploy smoke test port-forward"
+    required: true
   extra_build_contexts:
     description: "Optional docker build-contexts (name=path per line), e.g. shared=shared"
     required: false
@@ -108,29 +107,7 @@ runs:
 
     - name: Smoke test
       shell: bash
-      run: |
-        SERVICE="${{ inputs.service_name }}"
-        HEALTH_PATH=$(yq eval ".components.${SERVICE}.readinessProbe.httpGet.path" "$CHART_VALUES")
-        # fullnameOverride is pinned to "resonance-flow" (values.yaml), so this is the
-        # same Service name ArgoCD deploys in prod.
-        SVC="svc/resonance-flow-${SERVICE}"
-        # ":80" lets kubectl pick a free local port - fixed ports collide between services
-        # sharing the self-hosted runner.
-        PF_LOG="$RUNNER_TEMP/port-forward-${SERVICE}.log"
-        kubectl -n "$SERVICE" port-forward "$SVC" :80 > "$PF_LOG" 2>&1 &
-        PF_PID=$!
-        # Don't leave the forward running on the shared runner after the step.
-        trap 'kill "$PF_PID" 2>/dev/null || true' EXIT
-        for i in $(seq 1 30); do
-          PORT=$(sed -n 's/^Forwarding from 127\.0\.0\.1:\([0-9]*\) .*/\1/p' "$PF_LOG" | head -1)
-          [ -n "$PORT" ] && break
-          kill -0 "$PF_PID" 2>/dev/null || break  # forward died (e.g. Service not found) - fail now
-          sleep 1
-        done
-        if [ -z "$PORT" ]; then
-          echo "port-forward to $SVC never came up:" >&2; cat "$PF_LOG" >&2; exit 1
-        fi
-        curl -sf --retry 5 --retry-connrefused "http://localhost:${PORT}${HEALTH_PATH}"
+      run: bash "${{ github.action_path }}/smoke-test.sh" "${{ inputs.service_name }}" "${{ inputs.container_port }}"
 
     - name: Log in to GHCR
       uses: docker/login-action@v3
