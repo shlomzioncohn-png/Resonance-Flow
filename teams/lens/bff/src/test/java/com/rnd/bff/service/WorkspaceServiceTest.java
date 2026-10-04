@@ -3,8 +3,11 @@ package com.rnd.bff.service;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import com.rnd.bff.client.ChainClient;
@@ -133,96 +136,56 @@ class WorkspaceServiceTest {
     }
 
     // -------------------------------------------------------------------------
-    // listTasks — "My Tasks" screen
+    // listTasks — "My Tasks" screen. Filtering, search and paging happen in
+    // Inbox (or InboxClient's mock), so these only check what the service
+    // passes down - see InboxClientTest for the mock's own filtering.
     // -------------------------------------------------------------------------
 
-    private static List<TaskDTO> fourTasksAcrossStatuses() {
-        return List.of(
-                taskWithStatus("task_001", "READY", "Fix login bug"),
-                taskWithStatus("task_002", "IN_PROGRESS", "Update documentation"),
-                taskWithStatus("task_003", "BLOCKED", "Update customer proposal"),
-                taskWithStatus("task_004", "READY", "Write onboarding guide"));
-    }
-
-    // Distinct name from task(id, priority, effortEstimate) above - same arg
-    // count with a String third parameter would still resolve unambiguously
-    // by type, but two same-named overloads with unrelated meanings would be
-    // needlessly confusing to a reader.
-    private static TaskDTO taskWithStatus(String id, String status, String title) {
-        return TaskDTO.builder().id(id).title(title).status(status).priority("MEDIUM").build();
+    private static TaskListResponseDTO emptyPage() {
+        return TaskListResponseDTO.builder().items(List.of()).total(0).page(0).size(20).build();
     }
 
     @Test
-    void listTasks_noFilter_returnsEverythingWithCorrectTotal() {
-        when(inboxClient.getTasksForUser(anyString())).thenReturn(fourTasksAcrossStatuses());
+    void listTasks_noFilter_passesNoStatusToInbox() {
+        when(inboxClient.listTasks("emp_001", null, null, 0, 20)).thenReturn(emptyPage());
 
-        TaskListResponseDTO result = workspaceService.listTasks("emp_001", null, null, 0, 20);
+        workspaceService.listTasks("emp_001", null, null, 0, 20);
 
-        assertThat(result.getTotal()).isEqualTo(4);
-        assertThat(result.getItems()).hasSize(4);
+        verify(inboxClient).listTasks("emp_001", null, null, 0, 20);
     }
 
     @Test
-    void listTasks_filterInProgress_returnsOnlyInProgressTasks() {
-        when(inboxClient.getTasksForUser(anyString())).thenReturn(fourTasksAcrossStatuses());
+    void listTasks_statusFilter_isPassedToInboxInUppercase() {
+        when(inboxClient.listTasks(anyString(), any(), any(), anyInt(), anyInt())).thenReturn(emptyPage());
 
-        TaskListResponseDTO result = workspaceService.listTasks("emp_001", "in_progress", null, 0, 20);
+        workspaceService.listTasks("emp_001", "in_progress", "docs", 0, 20);
 
-        assertThat(result.getItems()).extracting(TaskDTO::getId).containsExactly("task_002");
+        verify(inboxClient).listTasks("emp_001", "IN_PROGRESS", "docs", 0, 20);
     }
 
     @Test
-    void listTasks_filterWaitingOnMe_mapsToReadyStatus() {
-        // Judgment call documented in WorkspaceService.listTasks: waiting_on_me == READY.
-        when(inboxClient.getTasksForUser(anyString())).thenReturn(fourTasksAcrossStatuses());
+    void listTasks_allOrUnrecognizedFilter_failsOpenWithNoStatus() {
+        when(inboxClient.listTasks(anyString(), any(), any(), anyInt(), anyInt())).thenReturn(emptyPage());
 
-        TaskListResponseDTO result = workspaceService.listTasks("emp_001", "waiting_on_me", null, 0, 20);
+        workspaceService.listTasks("emp_001", "all", null, 0, 20);
+        workspaceService.listTasks("emp_001", "not_a_real_filter", null, 0, 20);
 
-        assertThat(result.getItems()).extracting(TaskDTO::getId).containsExactly("task_001", "task_004");
+        verify(inboxClient, times(2)).listTasks("emp_001", null, null, 0, 20);
     }
 
     @Test
-    void listTasks_unrecognizedFilterValue_failsOpenAndReturnsEverything() {
-        when(inboxClient.getTasksForUser(anyString())).thenReturn(fourTasksAcrossStatuses());
+    void listTasks_negativePageAndOversizedSize_areClampedBeforeCallingInbox() {
+        when(inboxClient.listTasks(anyString(), any(), any(), anyInt(), anyInt())).thenReturn(emptyPage());
 
-        TaskListResponseDTO result = workspaceService.listTasks("emp_001", "not_a_real_filter", null, 0, 20);
+        workspaceService.listTasks("emp_001", null, null, -1, 999);
 
-        assertThat(result.getTotal()).isEqualTo(4);
-    }
-
-    @Test
-    void listTasks_search_isCaseInsensitiveAndMatchesTitleOnly() {
-        when(inboxClient.getTasksForUser(anyString())).thenReturn(fourTasksAcrossStatuses());
-
-        TaskListResponseDTO result = workspaceService.listTasks("emp_001", null, "DOCUMENTATION", 0, 20);
-
-        assertThat(result.getItems()).extracting(TaskDTO::getId).containsExactly("task_002");
-    }
-
-    @Test
-    void listTasks_pageBeyondLastPage_returnsEmptyItemsNotAnError() {
-        when(inboxClient.getTasksForUser(anyString())).thenReturn(fourTasksAcrossStatuses());
-
-        TaskListResponseDTO result = workspaceService.listTasks("emp_001", null, null, 5, 20);
-
-        assertThat(result.getItems()).isEmpty();
-        assertThat(result.getTotal()).isEqualTo(4);
-    }
-
-    @Test
-    void listTasks_negativePageAndOversizedSize_areClampedInsteadOfThrowing() {
-        when(inboxClient.getTasksForUser(anyString())).thenReturn(fourTasksAcrossStatuses());
-
-        TaskListResponseDTO result = workspaceService.listTasks("emp_001", null, null, -1, 999);
-
-        assertThat(result.getPage()).isZero();
-        assertThat(result.getSize()).isEqualTo(100);
-        assertThat(result.getItems()).hasSize(4);
+        verify(inboxClient).listTasks("emp_001", null, null, 0, 100);
     }
 
     @Test
     void listTasks_inboxThrows_throwsServiceUnavailableForInbox() {
-        when(inboxClient.getTasksForUser(anyString())).thenThrow(new RuntimeException("connection refused"));
+        when(inboxClient.listTasks(anyString(), any(), any(), anyInt(), anyInt()))
+                .thenThrow(new RuntimeException("connection refused"));
 
         assertThatThrownBy(() -> workspaceService.listTasks("emp_001", null, null, 0, 20))
                 .isInstanceOf(ServiceUnavailableException.class);

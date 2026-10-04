@@ -192,69 +192,40 @@ public class WorkspaceService {
     }
 
     /**
-     * "My Tasks" screen: the employee's full task list, with filter, title
-     * search, and pagination.
+     * "My Tasks" screen: the employee's task list, with status filter, search,
+     * and pagination - all three passed through to Inbox, which pages for us.
      *
-     * filter values: all | in_progress | blocked | waiting_on_me (default all
-     * for null/blank/unrecognized - fail open rather than hide tasks behind
-     * a typo'd filter value).
+     * filter values: all | one of the 8 statuses in lowercase (default all for
+     * null/blank/unrecognized - fail open rather than hide tasks behind a
+     * typo'd filter value).
      *
-     * AWAITING PRODUCT CONFIRMATION: "waiting_on_me" is currently mapped to
-     * status == READY (i.e., "nothing is blocking it, the next action is mine").
-     * If the intended semantic is different (e.g., tasks blocking OTHER people
-     * that are waiting on this one, or tasks delegated to me that I haven't
-     * started), this mapping will change together with the Chain-provided data
-     * it would need. Please confirm the intended filter behavior before Phase 2.
-     *
-     * Related: docs/employee-ui-design.md, My Workspace screenshot, "waiting on me" badge.
+     * KNOWN GAP: Inbox returns every task in the employee's tenant, not only
+     * their own - Inbox has no owner/assignee filter yet. Raised with Inbox.
      */
     public TaskListResponseDTO listTasks(String userId, String filter, String search, int page, int size) {
         int safePage = Math.max(page, 0);
         int safeSize = Math.min(Math.max(size, 1), 100);
 
-        List<TaskDTO> all;
         try {
-            all = inboxClient.getTasksForUser(userId);
+            return inboxClient.listTasks(userId, toStatusFilter(filter), search, safePage, safeSize);
         } catch (RuntimeException ex) {
             throw new ServiceUnavailableException("Inbox", "Inbox is unavailable", ex);
         }
-
-        List<TaskDTO> matching =
-                all.stream()
-                        .filter(t -> matchesFilter(t, filter))
-                        .filter(t -> matchesSearch(t, search))
-                        .toList();
-
-        int from = Math.min(safePage * safeSize, matching.size());
-        int to = Math.min(from + safeSize, matching.size());
-
-        return TaskListResponseDTO.builder()
-                .items(matching.subList(from, to))
-                .total(matching.size())
-                .page(safePage)
-                .size(safeSize)
-                .build();
     }
 
-    private boolean matchesFilter(TaskDTO task, String filter) {
-        if (filter == null || filter.isBlank()) {
-            return true;
-        }
-        return switch (filter.toLowerCase()) {
-            case "in_progress" -> "IN_PROGRESS".equals(task.getStatus());
-            case "blocked" -> "BLOCKED".equals(task.getStatus());
-            case "waiting_on_me" -> "READY".equals(task.getStatus());
-            case "all" -> true;
-            default -> true;
-        };
-    }
+    private static final List<String> STATUSES = List.of(
+            "NEW", "IN_REVIEW", "APPROVED", "IN_PROGRESS", "SNOOZED", "DONE", "REJECTED", "CANCELLED");
 
-    private boolean matchesSearch(TaskDTO task, String search) {
-        if (search == null || search.isBlank()) {
-            return true;
+    /**
+     * The frontend's filter is one of the 8 statuses in lowercase, or "all".
+     * Anything else (blank, "all", an unknown value) means no status filter.
+     */
+    private static String toStatusFilter(String filter) {
+        if (filter == null) {
+            return null;
         }
-        return task.getTitle() != null
-                && task.getTitle().toLowerCase().contains(search.toLowerCase());
+        String status = filter.toUpperCase();
+        return STATUSES.contains(status) ? status : null;
     }
 
     /** Task details panel / drill-down from either My Workspace or My Tasks. */

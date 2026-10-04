@@ -1,23 +1,51 @@
 package com.rnd.bff.client;
 
 import com.rnd.bff.dto.TaskDTO;
+import com.rnd.bff.dto.TaskListResponseDTO;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.http.HttpEntity;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.HttpMethod;
+import org.springframework.http.MediaType;
+import org.springframework.http.client.JdkClientHttpRequestFactory;
 import org.springframework.stereotype.Service;
+import org.springframework.web.client.HttpClientErrorException;
+import org.springframework.web.client.RestTemplate;
+import org.springframework.web.util.UriComponentsBuilder;
 
+import java.net.URI;
+import java.net.http.HttpClient;
+import java.time.Duration;
+import java.time.Instant;
 import java.time.LocalDateTime;
+import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
+import java.util.UUID;
 
 /**
  * Client for Inbox — owns canonical task data (see
- * docs/lens-architecture-design.md). Inbox's Task API isn't live yet, so
- * this holds an in-memory mock task set instead of calling out anywhere.
- * The method signatures (userId in, task data out) are what the real HTTP
- * calls will use, so wiring them up later is a body swap, not a redesign.
+ * docs/lens-architecture-design.md).
  *
- * Internally, the mock is seeded as InboxTaskRecord — every field named and
+ * Two modes, switched by inbox.mock-enabled (INBOX_MOCK_ENABLED):
+ * - true (default): an in-memory mock task set, no network calls — so the
+ *   team can keep working without running Inbox locally.
+ * - false: real HTTP calls to Inbox's Task API (/api/v1/tasks, currently on
+ *   Inbox's inbox-team branch) at inbox.service.url. See
+ *   lens/frontend/docs/api-integration-status.md for how to run Inbox locally.
+ *
+ * Inbox identifies the caller by an X-Actor-Id header holding a user UUID
+ * from its own users table. The Gateway still sends a mock userId
+ * ("emp_001"), so inbox.dev-actor-id can override it with a seeded Inbox user
+ * for local testing.
+ *
+ * In mock mode, the mock is seeded as InboxTaskRecord — every field named and
  * typed after the real `tasks` table (shared/database/migrations) — and
  * only translated to TaskDTO (the BFF's frontend-facing contract) at the
  * method boundary. TaskDTO carries both the real schema fields and is
@@ -26,7 +54,7 @@ import java.util.Map;
  * into the canonical data model (see docs/employee-workspace-api-contract.md
  * §5.0 for the status model change).
  *
- * Ignores userId for now (single mock tenant) — every method still takes it
+ * The mock ignores userId (single mock tenant) — every method still takes it
  * so callers don't change when Inbox becomes real and starts scoping by user.
  *
  * Backed by a mutable LinkedHashMap (not List.of(...) per call) so
@@ -37,8 +65,15 @@ import java.util.Map;
 @Service
 public class InboxClient {
 
-    @Value("${inbox.service.url:http://inbox-service:8080}")
-    private String inboxServiceUrl;
+    private static final Logger logger = LoggerFactory.getLogger(InboxClient.class);
+
+    private static final String ACTOR_HEADER = "X-Actor-Id";
+    private static final String TASKS_PATH = "/api/v1/tasks";
+
+    private final String inboxServiceUrl;
+    private final boolean mockEnabled;
+    private final String devActorId;
+    private final RestTemplate restTemplate;
 
     // Single mock tenant/user/project ids, reused across every seeded task -
     // this mock models one tenant with one employee (Alex Morgan), same as
@@ -52,7 +87,38 @@ public class InboxClient {
 
     private final Map<String, InboxTaskRecord> tasksById = new LinkedHashMap<>();
 
+    @Autowired
+    public InboxClient(
+            @Value("${inbox.service.url:http://inbox-service:8080}") String inboxServiceUrl,
+            @Value("${inbox.mock-enabled:true}") boolean mockEnabled,
+            @Value("${inbox.dev-actor-id:}") String devActorId,
+            @Value("${inbox.connect-timeout-ms:2000}") long connectTimeoutMs,
+            @Value("${inbox.read-timeout-ms:10000}") long readTimeoutMs) {
+        this.inboxServiceUrl = inboxServiceUrl;
+        this.mockEnabled = mockEnabled;
+        this.devActorId = devActorId;
+
+        // JDK HttpClient (not RestTemplate's default HttpURLConnection), because
+        // HttpURLConnection can't send PATCH - which updateStatus() needs.
+        JdkClientHttpRequestFactory requestFactory = new JdkClientHttpRequestFactory(
+                HttpClient.newBuilder().connectTimeout(Duration.ofMillis(connectTimeoutMs)).build());
+        requestFactory.setReadTimeout(Duration.ofMillis(readTimeoutMs));
+        this.restTemplate = new RestTemplate(requestFactory);
+
+        if (mockEnabled) {
+            seedMockTasks();
+        } else {
+            logger.info("InboxClient using real Inbox at {} (dev actor: {})",
+                    inboxServiceUrl, devActorId.isBlank() ? "none" : devActorId);
+        }
+    }
+
+    /** Mock mode, for unit tests - no Inbox needed. */
     public InboxClient() {
+        this("http://inbox-service:8080", true, "", 2000, 10000);
+    }
+
+    private void seedMockTasks() {
         // task_001: NEW status, high priority, available
         seed(InboxTaskRecord.builder()
                 .id("task_001")
@@ -272,8 +338,15 @@ public class InboxClient {
         tasksById.put(task.getId(), task);
     }
 
-    // TODO: replace with GET {inboxServiceUrl}/api/v1/tasks?userId=... once Inbox exposes it
+    /**
+     * Candidate tasks for the recommendation flow. In real mode this is only
+     * Inbox's first page (100 tasks) - enough for the recommendation demo, but
+     * not "every task the user has".
+     */
     public List<TaskDTO> getTasksForUser(String userId) {
+        if (!mockEnabled) {
+            return listTasks(userId, null, null, 0, 100).getItems();
+        }
         List<TaskDTO> result = new ArrayList<>();
         for (InboxTaskRecord record : tasksById.values()) {
             result.add(toTaskDTO(record));
@@ -281,23 +354,142 @@ public class InboxClient {
         return result;
     }
 
-    // TODO: replace with GET {inboxServiceUrl}/api/v1/tasks/{taskId} once Inbox exposes it
-    public TaskDTO getTaskById(String userId, String taskId) {
-        InboxTaskRecord record = tasksById.get(taskId);
-        return record == null ? null : toTaskDTO(record);
+    /**
+     * One page of the My Tasks list.
+     *
+     * @param status one of the 8 statuses in UPPERCASE, or null for all
+     * @param search free text (Inbox matches title or description), or null
+     */
+    public TaskListResponseDTO listTasks(String userId, String status, String search, int page, int size) {
+        if (mockEnabled) {
+            return listMockTasks(status, search, page, size);
+        }
+        URI uri = UriComponentsBuilder.fromHttpUrl(inboxServiceUrl)
+                .path(TASKS_PATH)
+                .queryParamIfPresent("status", Optional.ofNullable(status))
+                .queryParamIfPresent("search", Optional.ofNullable(search).filter(s -> !s.isBlank()))
+                .queryParam("page", page)
+                .queryParam("size", size)
+                .encode()
+                .build()
+                .toUri();
+        InboxPageResponse body = restTemplate.exchange(
+                uri, HttpMethod.GET, new HttpEntity<>(actorHeaders(userId)), InboxPageResponse.class)
+                .getBody();
+        if (body == null) {
+            throw new IllegalStateException("Inbox returned an empty task page");
+        }
+        List<TaskDTO> items = body.getContent() == null
+                ? List.of()
+                : body.getContent().stream().map(InboxClient::toTaskDTO).toList();
+        return TaskListResponseDTO.builder()
+                .items(items)
+                .total((int) body.getTotalElements())
+                .page(body.getPage())
+                .size(body.getSize())
+                .build();
     }
 
-    // TODO: replace with PATCH {inboxServiceUrl}/api/v1/tasks/{taskId} once Inbox exposes it
-    public TaskDTO updateStatus(String userId, String taskId, String newStatus) {
-        InboxTaskRecord record = tasksById.get(taskId);
-        if (record == null) {
+    /** @return the task, or null if Inbox doesn't have it (404, or an id that isn't a UUID) */
+    public TaskDTO getTaskById(String userId, String taskId) {
+        if (mockEnabled) {
+            InboxTaskRecord record = tasksById.get(taskId);
+            return record == null ? null : toTaskDTO(record);
+        }
+        if (!isUuid(taskId)) {
             return null;
         }
-        // newStatus is one of the 8 real status values (TaskStatusUpdateDTO's
-        // @Pattern already validates this before this is called).
-        // Store it as-is, converting only to lowercase for consistency with Inbox schema.
-        record.setStatus(newStatus.toLowerCase());
-        return toTaskDTO(record);
+        try {
+            InboxTaskResponse task = restTemplate.exchange(
+                    taskUri(taskId), HttpMethod.GET, new HttpEntity<>(actorHeaders(userId)),
+                    InboxTaskResponse.class)
+                    .getBody();
+            return task == null ? null : toTaskDTO(task);
+        } catch (HttpClientErrorException.NotFound | HttpClientErrorException.BadRequest ex) {
+            return null;
+        }
+    }
+
+    /** @return the updated task, or null if Inbox doesn't have it */
+    public TaskDTO updateStatus(String userId, String taskId, String newStatus) {
+        if (mockEnabled) {
+            InboxTaskRecord record = tasksById.get(taskId);
+            if (record == null) {
+                return null;
+            }
+            // newStatus is one of the 8 real status values (TaskStatusUpdateDTO's
+            // @Pattern already validates this before this is called).
+            // Store it as-is, converting only to lowercase for consistency with Inbox schema.
+            record.setStatus(newStatus.toLowerCase());
+            return toTaskDTO(record);
+        }
+        if (!isUuid(taskId)) {
+            return null;
+        }
+        HttpHeaders headers = actorHeaders(userId);
+        headers.setContentType(MediaType.APPLICATION_JSON);
+        try {
+            InboxTaskResponse task = restTemplate.exchange(
+                    URI.create(taskUri(taskId) + "/status"), HttpMethod.PATCH,
+                    new HttpEntity<>(Map.of("status", newStatus.toUpperCase()), headers),
+                    InboxTaskResponse.class)
+                    .getBody();
+            return task == null ? null : toTaskDTO(task);
+        } catch (HttpClientErrorException.NotFound ex) {
+            return null;
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // Real-mode helpers
+    // -------------------------------------------------------------------------
+
+    private URI taskUri(String taskId) {
+        return UriComponentsBuilder.fromHttpUrl(inboxServiceUrl)
+                .path(TASKS_PATH + "/{id}")
+                .buildAndExpand(taskId)
+                .encode()
+                .toUri();
+    }
+
+    /**
+     * Inbox task ids are UUIDs. Inbox answers a non-UUID id with 500 (not
+     * 404), so it's checked here and treated as "not found" without calling Inbox.
+     */
+    private static boolean isUuid(String id) {
+        try {
+            UUID.fromString(id);
+            return true;
+        } catch (IllegalArgumentException ex) {
+            return false;
+        }
+    }
+
+    /** Inbox's X-Actor-Id - the dev override if set, otherwise the userId from the Gateway. */
+    private HttpHeaders actorHeaders(String userId) {
+        HttpHeaders headers = new HttpHeaders();
+        headers.set(ACTOR_HEADER, devActorId.isBlank() ? userId : devActorId);
+        return headers;
+    }
+
+    // -------------------------------------------------------------------------
+    // Mock-mode helpers
+    // -------------------------------------------------------------------------
+
+    private TaskListResponseDTO listMockTasks(String status, String search, int page, int size) {
+        List<TaskDTO> matching = getTasksForUser(null).stream()
+                .filter(t -> status == null || status.equals(t.getStatus()))
+                .filter(t -> search == null || search.isBlank()
+                        || (t.getTitle() != null && t.getTitle().toLowerCase().contains(search.toLowerCase())))
+                .toList();
+        int from = Math.min(page * size, matching.size());
+        int to = Math.min(from + size, matching.size());
+        return TaskListResponseDTO.builder()
+                .items(matching.subList(from, to))
+                .total(matching.size())
+                .page(page)
+                .size(size)
+                .build();
     }
 
     // -------------------------------------------------------------------------
@@ -343,6 +535,54 @@ public class InboxClient {
                 .updatedAt(record.getUpdatedAt())
                 .completedAt(record.getCompletedAt())
                 .build();
+    }
+
+    /**
+     * Inbox's JSON -> TaskDTO. Enum values are lowercased to match the DB
+     * vocabulary the mock (and so the frontend) already uses - except status,
+     * which TaskDTO keeps UPPERCASE. owner/project stay null: Inbox only
+     * returns their ids, and resolving names is a separate call not done yet.
+     */
+    private static TaskDTO toTaskDTO(InboxTaskResponse task) {
+        return TaskDTO.builder()
+                .id(task.getId())
+                .title(task.getTitle())
+                .description(task.getDescription())
+                .status(task.getStatus())
+                .priority(toFrontendPriority(task.getPriorityScore()))
+                .effortEstimate(task.getEffortEstimateMinutes())
+                .dueDate(toLocalDateTime(task.getDeadline()))
+                .tenantId(task.getTenant() == null ? null : task.getTenant().getId())
+                .projectId(task.getProjectId())
+                .sourceType(toLowerCase(task.getSourceType()))
+                .sourceRef(task.getSourceRef())
+                .tier(toLowerCase(task.getTier()))
+                .roleContext(toLowerCase(task.getRoleContext()))
+                .urgency(task.getUrgency())
+                .effortEstimateConfidence(task.getEffortEstimateConfidence())
+                .inboxStatus(toLowerCase(task.getStatus()))
+                .isAvailable(task.getAvailable())
+                .priorityScore(task.getPriorityScore())
+                .snoozedUntil(toLocalDateTime(task.getSnoozedUntil()))
+                .extractionProvenance(toLowerCase(task.getExtractionProvenance()))
+                .confidence(task.getConfidence())
+                .suggestedOwnerUserId(task.getSuggestedOwnerUserId())
+                .suggestedOwnerConfidence(task.getSuggestedOwnerConfidence())
+                .metadata(task.getMetadata())
+                .createdBy(task.getCreatedById())
+                .createdAt(toLocalDateTime(task.getCreatedAt()))
+                .updatedAt(toLocalDateTime(task.getUpdatedAt()))
+                .completedAt(toLocalDateTime(task.getCompletedAt()))
+                .build();
+    }
+
+    /** TaskDTO uses zone-less LocalDateTime; Inbox sends UTC instants, kept as UTC. */
+    private static LocalDateTime toLocalDateTime(Instant instant) {
+        return instant == null ? null : LocalDateTime.ofInstant(instant, ZoneOffset.UTC);
+    }
+
+    private static String toLowerCase(String value) {
+        return value == null ? null : value.toLowerCase();
     }
 
     /**

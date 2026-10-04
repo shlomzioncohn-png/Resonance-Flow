@@ -180,7 +180,10 @@ export default function TaskDetailsPage({ params }: { params: Promise<{ taskId: 
                     label="Priority"
                     value={<Chip size="small" label={task.priority} sx={softToneSx('error')} />}
                   />
-                  <DetailRow label="Estimated effort" value={`${task.effortEstimate} min`} />
+                  <DetailRow
+                    label="Estimated effort"
+                    value={task.effortEstimate != null ? `${task.effortEstimate} min` : '—'}
+                  />
                   <DetailRow label="Project" value={task.project} />
                   {(task.constraints ?? []).length > 0 && (
                     <DetailRow label="Constraints" value={(task.constraints ?? []).join(', ')} />
