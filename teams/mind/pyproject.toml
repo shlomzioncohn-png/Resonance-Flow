@@ -13,7 +13,10 @@ dependencies = [
     "confluent-kafka[protobuf,schemaregistry]>=2.5,<2.11",
     "protobuf>=5",
     "pyyaml",
-    # add as decided: vector-store client, OCR/ASR libs, LLM client, etc.
+    # LLM provider calls (mind.extraction.providers); also what
+    # fastapi.testclient.TestClient runs on in the tests.
+    "httpx",
+    # add as decided: vector-store client, OCR/ASR libs, etc.
 ]
 
 [project.optional-dependencies]
@@ -23,7 +26,6 @@ dev = [
     "ruff",
     "mypy",
     "types-PyYAML",
-    "httpx",  # required by fastapi.testclient.TestClient
     "grpcio-tools==1.71.0",  # protoc, for `make proto`
 ]
 

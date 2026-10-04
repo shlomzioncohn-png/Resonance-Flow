@@ -28,6 +28,7 @@ from mind.extraction.providers.base import (
     LLMRateLimited,
     LLMResponse,
 )
+from mind.extraction.providers.pricing import estimate_cost
 from mind.observability.tracking import record_call
 
 logger = logging.getLogger("mind.extraction")
@@ -171,9 +172,23 @@ class BasicExtractor:
             response = self._provider.complete(system, user)
         finally:
             duration_ms = (time.perf_counter() - started) * 1000
-        # Cost stays 0.0 until provider pricing is verified against the
-        # official price list; token counts are on the response meanwhile.
-        record_call(model_name=self._provider.name, duration_ms=duration_ms, cost=0.0)
+        # The model id comes off the response rather than off the provider:
+        # a benchmark comparing two DeepSeek models needs to tell them apart,
+        # and only the answer knows which one produced it.
+        record_call(
+            model_name=response.model or self._provider.name,
+            duration_ms=duration_ms,
+            # `estimate_cost` returns None for an unpriced model or a
+            # provider that reported no usage. `record_call` wants a float,
+            # so that lands as 0.0 here; `pricing.is_priced` is how a cost
+            # report tells "free" apart from "unknown".
+            cost=estimate_cost(
+                response.model,
+                response.prompt_tokens,
+                response.completion_tokens,
+            )
+            or 0.0,
+        )
         return response
 
     def _backoff(self, transient_retries: int, error: LLMError) -> float:
