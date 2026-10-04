@@ -4,7 +4,7 @@
 # change fails fast instead of reaching production.
 #
 # Usage: check-schema-compatibility.sh <path-to-.proto-file> <subject-name>
-# Example: check-schema-compatibility.sh teams/relay/src/main/proto/task-event.proto task-event-value
+# Example: check-schema-compatibility.sh shared/proto/task-event.proto task-event-value
 set -euo pipefail
 
 SCHEMA_FILE="$1"
