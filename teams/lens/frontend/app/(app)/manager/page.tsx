@@ -52,7 +52,8 @@ export default function ManagerDashboardPage() {
   const [teamFilter, setTeamFilter] = useState('all')
   const [ownerFilter, setOwnerFilter] = useState('all')
   const [sort, setSort] = useState('health')
-
+//TODO: Make a STORY and implement MSW
+//TODO: Delete simulateError
   const fetchProjects = useCallback((simulateError: boolean) => {
     return getProjects(simulateError)
       .then((data) => {

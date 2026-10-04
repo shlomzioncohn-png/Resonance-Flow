@@ -6,6 +6,7 @@ import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
 import org.springframework.security.config.annotation.web.configurers.AbstractHttpConfigurer;
 import org.springframework.security.web.SecurityFilterChain;
+import org.springframework.web.cors.CorsConfigurationSource;
 
 /**
  * Security configuration for the Gateway.
@@ -22,9 +23,17 @@ import org.springframework.security.web.SecurityFilterChain;
 @EnableWebSecurity
 public class SecurityConfig {
 
+    private final CorsConfigurationSource corsConfigurationSource;
+
+    public SecurityConfig(CorsConfigurationSource corsConfigurationSource) {
+        this.corsConfigurationSource = corsConfigurationSource;
+    }
+
     @Bean
     public SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
         http
+            // Enable CORS with configured origin whitelist
+            .cors(cors -> cors.configurationSource(corsConfigurationSource))
             // Disable CSRF — Gateway is a stateless API, no session cookies
             .csrf(AbstractHttpConfigurer::disable)
             // Permit all requests; JWT enforcement is a future task
