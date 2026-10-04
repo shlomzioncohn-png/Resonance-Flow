@@ -1,13 +1,19 @@
 components:
   bridge:
     enabled: true
-    secretEnv:
-      MINIO_ACCESS_KEY:
-        name: bridge-minio
-        key: root-user
-      MINIO_SECRET_KEY:
-        name: bridge-minio
-        key: root-password
+    config:
+      spring:
+        config:
+          import: "configtree:/etc/resonance-flow/secrets/minio/"
+    secretFiles:
+      - name: minio-credentials
+        secretName: bridge-minio
+        mountPath: /etc/resonance-flow/secrets/minio
+        items:
+          - key: root-user
+            path: minio.access-key
+          - key: root-password
+            path: minio.secret-key
   notification-delivery:
     enabled: false
   mind:

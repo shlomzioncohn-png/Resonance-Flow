@@ -77,7 +77,7 @@ spec:
               containerPort: {{ $component.containerPort }}
               protocol: TCP
 
-          {{- if or $component.config $component.env $component.secretEnv }}
+          {{- if or $component.config $component.env }}
           env:
             {{- if $component.config }}
             {{- include "resonance-flow.configFilePathEnv" $ | nindent 12 }}
@@ -85,14 +85,7 @@ spec:
             {{- range $name, $value := $component.env }}
             - name: {{ $name }}
               value: {{ $value | quote }}
-            {{- end }}
-            {{- range $name, $secret := $component.secretEnv }}
-            - name: {{ $name }}
-              valueFrom:
-                secretKeyRef:
-                  name: {{ $secret.name }}
-                  key: {{ $secret.key }}
-            {{- end }}
+              {{- end }}
           {{- end }}
           {{- with $component.startupProbe }}
           startupProbe:
@@ -113,7 +106,7 @@ spec:
           resources:
             {{- toYaml . | nindent 12 }}
           {{- end }}
-          {{- if or $component.config $.Values.volumeMounts }}
+          {{- if or $component.config $.Values.volumeMounts $component.secretFiles }}
           volumeMounts:
             {{- if $component.config }}
             - name: resonance-flow-config
@@ -121,21 +114,33 @@ spec:
               subPath: config.yaml
               readOnly: true
               {{- end }}
+              {{- range $secret := $component.secretFiles }}
+            - name: {{ $secret.name }}
+              mountPath: {{ $secret.mountPath }}
+              readOnly: true
+              {{- end }}
               {{- with $.Values.volumeMounts }}
               {{- toYaml . | nindent 12 }}
               {{- end }}
           {{- end }}
 
-      {{- if or $component.config $.Values.volumes }}
+      {{- if or $component.config $.Values.volumes $component.secretFiles }}
       volumes:
         {{- if $component.config }}
         - name: resonance-flow-config
           configMap:
             name: {{ include "resonance-flow.fullname" $ }}-{{ $componentName }}-config
-          {{- end }}
-          {{- with $.Values.volumes }}
-          {{- toYaml . | nindent 8 }}
-          {{- end }}
+        {{- end }}
+        {{- range $secret := $component.secretFiles }}
+        - name: {{ $secret.name }}
+          secret:
+            secretName: {{ $secret.secretName }}
+            items:
+              {{- toYaml $secret.items | nindent 14 }}
+        {{- end }}
+        {{- with $.Values.volumes }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
       {{- end }}
 
       {{- with $.Values.nodeSelector }}
