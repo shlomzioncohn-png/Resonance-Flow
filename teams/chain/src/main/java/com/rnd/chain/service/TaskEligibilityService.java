@@ -314,15 +314,12 @@ public class TaskEligibilityService {
      * (Postgres itself), not a caller-supplied claim, so a redelivered event that repeats a
      * transition already applied is a no-op instead of double-adjusting the counter.
      *
-     * <p><b>Known gap (PR #468 review):</b> {@code constraintId} is not currently verified to
-     * belong to {@code taskId} - {@link ConstraintRepository#updateStatus} operates on
-     * {@code constraintId} alone. A caller passing a mismatched {@code taskId} can adjust the
-     * wrong task's counter, or mutate a constraint whose real owning task doesn't exist / is
-     * soft-deleted, with nothing here to catch it. Tracked as a follow-up.
+     * <p>{@code constraintId} must belong to {@code taskId}: the repository matches on both, so
+     * a mismatched pair is rejected before anything is written (see
+     * {@link ConstraintRepository#updateStatus}).
      *
      * @throws NullPointerException if any argument is null
-     * @throws IllegalStateException if no constraint with this id exists (see
-     * {@link ConstraintRepository#updateStatus})
+     * @throws IllegalStateException if no constraint with this id belongs to this task
      */
     @Transactional
     public void onConstraintStatusChanged(UUID taskId, String constraintId,
@@ -334,7 +331,7 @@ public class TaskEligibilityService {
         log.info("Constraint {} on task {} changing to {}", constraintId, taskId, newStatus);
 
         Constraint.ConstraintStatus previousStatus =
-                constraintRepository.updateStatus(constraintId, newStatus, reason, LocalDateTime.now());
+                constraintRepository.updateStatus(taskId, constraintId, newStatus, reason, LocalDateTime.now());
 
         boolean wasOpen = previousStatus == Constraint.ConstraintStatus.PENDING;
         boolean isOpenNow = newStatus == Constraint.ConstraintStatus.PENDING;

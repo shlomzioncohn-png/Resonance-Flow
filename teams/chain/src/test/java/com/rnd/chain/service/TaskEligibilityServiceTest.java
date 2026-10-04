@@ -450,7 +450,7 @@ class TaskEligibilityServiceTest {
         // updateStatus() reports the REAL previous status from Postgres, not a caller-supplied
         // claim - PENDING here simulates the constraint genuinely having been open before this call.
         when(fixture.constraintRepo().updateStatus(
-                eq(constraintId), eq(Constraint.ConstraintStatus.SATISFIED), any(), any()))
+                eq(taskId), eq(constraintId), eq(Constraint.ConstraintStatus.SATISFIED), any(), any()))
                 .thenReturn(Constraint.ConstraintStatus.PENDING);
 
         fixture.service().onConstraintStatusChanged(
@@ -467,7 +467,7 @@ class TaskEligibilityServiceTest {
         String constraintId = UUID.randomUUID().toString();
         Fixture fixture = newFixture(List.of(buildTask(taskId, 0, 0, true)), List.of());
         when(fixture.constraintRepo().updateStatus(
-                eq(constraintId), eq(Constraint.ConstraintStatus.PENDING), any(), any()))
+                eq(taskId), eq(constraintId), eq(Constraint.ConstraintStatus.PENDING), any(), any()))
                 .thenReturn(Constraint.ConstraintStatus.SATISFIED);
 
         fixture.service().onConstraintStatusChanged(
@@ -486,7 +486,7 @@ class TaskEligibilityServiceTest {
         String constraintId = UUID.randomUUID().toString();
         Fixture fixture = newFixture(List.of(), List.of());
         when(fixture.constraintRepo().updateStatus(
-                eq(constraintId), eq(Constraint.ConstraintStatus.WAIVED), any(), any()))
+                eq(taskId), eq(constraintId), eq(Constraint.ConstraintStatus.WAIVED), any(), any()))
                 .thenReturn(Constraint.ConstraintStatus.SATISFIED);
 
         assertDoesNotThrow(() -> fixture.service().onConstraintStatusChanged(
@@ -501,7 +501,7 @@ class TaskEligibilityServiceTest {
         String constraintId = UUID.randomUUID().toString();
         Fixture fixture = newFixture(List.of(buildTask(taskId, 0, 1, false)), List.of());
         when(fixture.constraintRepo().updateStatus(
-                eq(constraintId), eq(Constraint.ConstraintStatus.PENDING), any(), any()))
+                eq(taskId), eq(constraintId), eq(Constraint.ConstraintStatus.PENDING), any(), any()))
                 .thenReturn(Constraint.ConstraintStatus.PENDING);
 
         fixture.service().onConstraintStatusChanged(
@@ -509,5 +509,24 @@ class TaskEligibilityServiceTest {
 
         Task task = fixture.taskRepo().findById(taskId).orElseThrow();
         assertEquals(1, task.getOpenConstraintCount());
+    }
+
+    @Test
+    void onConstraintStatusChanged_constraintBelongsToAnotherTask_throwsAndLeavesCounterUntouched() {
+        // The repository matches on constraintId AND taskId, so a mismatched pair matches no row and
+        // throws before anything is written - Task-B's counter must not move.
+        UUID wrongTaskId = UUID.randomUUID();
+        String constraintId = UUID.randomUUID().toString();
+        Fixture fixture = newFixture(List.of(buildTask(wrongTaskId, 0, 0, true)), List.of());
+        when(fixture.constraintRepo().updateStatus(
+                eq(wrongTaskId), eq(constraintId), eq(Constraint.ConstraintStatus.PENDING), any(), any()))
+                .thenThrow(new IllegalStateException("No constraint " + constraintId + " on task " + wrongTaskId));
+
+        assertThrows(IllegalStateException.class, () -> fixture.service().onConstraintStatusChanged(
+                wrongTaskId, constraintId, Constraint.ConstraintStatus.PENDING, null));
+
+        Task task = fixture.taskRepo().findById(wrongTaskId).orElseThrow();
+        assertEquals(0, task.getOpenConstraintCount());
+        assertTrue(task.isReady());
     }
 }

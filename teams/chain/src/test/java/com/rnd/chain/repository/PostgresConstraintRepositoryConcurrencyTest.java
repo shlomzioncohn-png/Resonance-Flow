@@ -85,7 +85,7 @@ class PostgresConstraintRepositoryConcurrencyTest {
         // TaskEligibilityService, not a lost update or a duplicate counter decrement.
         ConcurrentTestRunner.run(THREAD_COUNT, index ->
                 previousStatuses.add(constraintRepository.updateStatus(
-                        constraintId, Constraint.ConstraintStatus.SATISFIED, null, LocalDateTime.now())));
+                        taskId, constraintId, Constraint.ConstraintStatus.SATISFIED, null, LocalDateTime.now())));
 
         assertThat(previousStatuses).hasSize(THREAD_COUNT);
         assertThat(previousStatuses.stream()

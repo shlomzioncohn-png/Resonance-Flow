@@ -151,7 +151,7 @@ class PostgresConstraintRepositoryTest {
         constraintRepository.save(newConstraint(constraintId, taskId, Constraint.ConstraintStatus.PENDING, null));
 
         Constraint.ConstraintStatus previous = constraintRepository.updateStatus(
-            constraintId, Constraint.ConstraintStatus.SATISFIED,
+            taskId, constraintId, Constraint.ConstraintStatus.SATISFIED,
             Map.of("resolvedBy", "user-7"), LocalDateTime.now());
 
         assertThat(previous).isEqualTo(Constraint.ConstraintStatus.PENDING);
@@ -168,7 +168,7 @@ class PostgresConstraintRepositoryTest {
         constraintRepository.save(newConstraint(constraintId, taskId, Constraint.ConstraintStatus.SATISFIED, null));
 
         Constraint.ConstraintStatus previous = constraintRepository.updateStatus(
-            constraintId, Constraint.ConstraintStatus.PENDING, null, LocalDateTime.now());
+            taskId, constraintId, Constraint.ConstraintStatus.PENDING, null, LocalDateTime.now());
 
         assertThat(previous).isEqualTo(Constraint.ConstraintStatus.SATISFIED);
     }
@@ -184,7 +184,7 @@ class PostgresConstraintRepositoryTest {
         constraintRepository.save(newConstraint(constraintId, taskId, Constraint.ConstraintStatus.SATISFIED, null));
 
         Constraint.ConstraintStatus previous = constraintRepository.updateStatus(
-            constraintId, Constraint.ConstraintStatus.SATISFIED, null, LocalDateTime.now());
+            taskId, constraintId, Constraint.ConstraintStatus.SATISFIED, null, LocalDateTime.now());
 
         assertThat(previous).isEqualTo(Constraint.ConstraintStatus.SATISFIED);
     }
@@ -192,8 +192,25 @@ class PostgresConstraintRepositoryTest {
     @Test
     void updateStatus_constraintDoesNotExist_throws() {
         assertThatThrownBy(() -> constraintRepository.updateStatus(
-                UUID.randomUUID().toString(), Constraint.ConstraintStatus.SATISFIED, null, LocalDateTime.now()))
+                UUID.randomUUID(), UUID.randomUUID().toString(), Constraint.ConstraintStatus.SATISFIED,
+                null, LocalDateTime.now()))
             .isInstanceOf(IllegalStateException.class);
+    }
+
+    @Test
+    void updateStatus_constraintBelongsToAnotherTask_throwsAndWritesNothing() {
+        String constraintId = UUID.randomUUID().toString();
+        constraintRepository.save(newConstraint(constraintId, UUID.randomUUID(),
+            Constraint.ConstraintStatus.PENDING, null));
+
+        assertThatThrownBy(() -> constraintRepository.updateStatus(
+                UUID.randomUUID(), constraintId, Constraint.ConstraintStatus.SATISFIED, null, LocalDateTime.now()))
+            .isInstanceOf(IllegalStateException.class);
+
+        assertThat(constraintRepository.findById(constraintId))
+            .get()
+            .extracting(Constraint::getStatus)
+            .isEqualTo(Constraint.ConstraintStatus.PENDING);
     }
 
     @Test

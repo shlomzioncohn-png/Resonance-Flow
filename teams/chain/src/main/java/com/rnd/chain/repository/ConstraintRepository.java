@@ -54,10 +54,16 @@ public interface ConstraintRepository {
      * so a redelivered event that repeats a transition already applied is detectable from real
      * state, not trusted from the caller's own claim.
      *
+     * <p>{@code taskId} is part of the match, not just a check afterwards: the update only touches
+     * a row whose {@code constraint_id} AND {@code task_id} both match, so a mismatched task can
+     * never mutate a constraint it doesn't own.
+     *
      * @return the constraint's status immediately before this update.
-     * @throws IllegalStateException if no constraint with this id exists - callers must go
-     * through {@link #save} first for a constraint they haven't seen before.
+     * @throws IllegalStateException if no constraint with this id belongs to this task (either it
+     * doesn't exist, or it belongs to a different task) - callers must go through {@link #save}
+     * first for a constraint they haven't seen before.
      */
-    Constraint.ConstraintStatus updateStatus(String constraintId, Constraint.ConstraintStatus newStatus,
+    Constraint.ConstraintStatus updateStatus(UUID taskId, String constraintId,
+                                              Constraint.ConstraintStatus newStatus,
                                               Map<String, Object> reason, LocalDateTime updatedAt);
 }

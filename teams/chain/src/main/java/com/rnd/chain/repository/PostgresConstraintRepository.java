@@ -107,23 +107,29 @@ public class PostgresConstraintRepository implements ConstraintRepository {
     }
 
     @Override
-    public Constraint.ConstraintStatus updateStatus(String constraintId, Constraint.ConstraintStatus newStatus,
+    public Constraint.ConstraintStatus updateStatus(UUID taskId, String constraintId,
+                                                      Constraint.ConstraintStatus newStatus,
                                                       Map<String, Object> reason, LocalDateTime updatedAt) {
+        Objects.requireNonNull(taskId, "taskId must not be null");
         Objects.requireNonNull(constraintId, "constraintId must not be null");
         Objects.requireNonNull(newStatus, "newStatus must not be null");
         Objects.requireNonNull(updatedAt, "updatedAt must not be null");
         // The CTE reads the row's current status under FOR UPDATE (locking it) before the UPDATE
         // below changes it, so the two happen as one atomic step - no other writer can change the
-        // row in between, and no separate round-trip is needed to find the "before" value.
+        // row in between, and no separate round-trip is needed to find the "before" value. The
+        // task_id match is part of both the lock and the update, so a mismatched task matches no
+        // row at all and nothing is written - the check and the write can't be separated.
         List<String> previous = jdbcTemplate.query(
-            "WITH old AS (SELECT status FROM task_constraint WHERE constraint_id = ? FOR UPDATE) "
+            "WITH old AS (SELECT status FROM task_constraint "
+                + "WHERE constraint_id = ? AND task_id = ? FOR UPDATE) "
                 + "UPDATE task_constraint SET status = ?, reason = ?, updated_at = ? "
-                + "WHERE constraint_id = ? "
+                + "WHERE constraint_id = ? AND task_id = ? "
                 + "RETURNING (SELECT status FROM old)",
             (rs, rowNum) -> rs.getString(1),
-            constraintId, newStatus.name(), toJsonb(reason), Timestamp.valueOf(updatedAt), constraintId);
+            constraintId, taskId, newStatus.name(), toJsonb(reason), Timestamp.valueOf(updatedAt),
+            constraintId, taskId);
         if (previous.isEmpty()) {
-            throw new IllegalStateException("No constraint found with id: " + constraintId);
+            throw new IllegalStateException("No constraint " + constraintId + " on task " + taskId);
         }
         return Constraint.ConstraintStatus.valueOf(previous.get(0));
     }

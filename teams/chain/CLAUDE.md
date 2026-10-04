@@ -98,12 +98,11 @@ onConstraintStatusChanged.
   - Major: `onConstraintStatusChanged` never verifies `constraintId` actually belongs to
     `taskId` - `ConstraintRepository#updateStatus` operates on `constraintId` alone, so a caller
     passing a mismatched `taskId` could adjust the wrong task's counter, or mutate a constraint
-    whose real owning task doesn't exist/is soft-deleted, uncaught. **Not yet fixed** - two
-    options on the table: (a) `updateStatus` also returns the constraint's real `task_id` for the
-    caller to compare, or (b) `updateStatus` takes `taskId` too and checks it inside the SQL
-    itself (`WHERE constraint_id = ? AND task_id = ?`, throwing if zero rows match) - leaning
-    toward (b), atomic, no extra round trip. Documented as a known gap in
-    `onConstraintStatusChanged`'s Javadoc in the meantime.
+    whose real owning task doesn't exist/is soft-deleted, uncaught. **Fixed** by checking the
+    pair inside the SQL itself: `updateStatus` now takes `taskId` and matches on both
+    `constraint_id` and `task_id` (in the lock and the update), so a mismatched pair matches no
+    row and nothing is written - the check and the write are one atomic statement, no extra
+    round trip. Covered by a repository test and a service-level test.
   - Minor (both fixed): a formatting slip in `TaskEligibilityServiceConcurrencyTest` (one of
     three mechanically-updated constructor calls was indented to the wrong block), and
     `onConstraintStatusChanged` was missing the Javadoc `onConstraintAdded` got.
