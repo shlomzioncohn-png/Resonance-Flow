@@ -138,9 +138,9 @@ Zeroing blocked tasks outright was the obvious alternative and is what
    harness's `max` would return whichever task appears first in the file — the
    answer decided by line order. The band still ranks them sensibly.
 
-On the persona set the two behave identically: in the 20 dev scenarios the
-expected answer is never a blocked task and no scenario is entirely blocked, so
-this choice costs nothing measurable and keeps information downstream needs.
+In the 20 dev scenarios the expected answer is never a blocked task and no
+scenario is entirely blocked, so the band and a hard zero are indistinguishable
+there — and the band keeps information downstream needs.
 
 ## The two nullable fields
 
@@ -205,28 +205,22 @@ week 6, and it will be built from `factors`, not from this string.
 A baseline that is not reproducible cannot be compared to the week-7 stretch,
 which is the entire purpose of measuring it.
 
-## How this was developed and measured
+## How this was developed
 
 The 30 persona scenarios were split 20 / 10 **before any scoring code was
 written** — see [`eval_split.py`](./eval_split.py) for the derivation and the
 rules. Every weight, threshold and keyword was chosen against the 20 dev
-scenarios; the 10 holdout scenarios were run **once**, at the end, and only
-their aggregate accuracy was read.
+scenarios, and no holdout scenario was read while building this package.
 
-| set | top-1 accuracy |
-|---|---|
-| dev (20) | 100% (20/20) |
-| holdout (10) | 90% (9/10) |
-| combined (30) | 96.7% (29/30) |
-| `SkipBlockedNearestDeadlineModel`, the best cheap baseline | 66.7% (20/30) |
+The split is a development discipline, not a change to the eval set and not a
+measurement. **Scoring this model against the persona set is R1's**, through the
+harness, over all 30 — so this package reports no accuracy number of its own and
+there is exactly one place such a number comes from.
 
-**Read the holdout number, not the dev number.** The lexicon was written from the
-dev scenarios' own wording, so 100% there is close to meaningless as evidence of
-generalisation. 90% on scenarios that were never read is the claim this model can
-actually make.
-
-The split is a development discipline, not a change to the eval set: R1's
-reported baseline is still `make eval`, over all 30.
+What the split lets this package claim without measuring anything is the part
+that matters for trusting that number: the weights behind it were not fitted to
+the scenarios it will be computed on, and the lexicon was written without
+reading a third of the set.
 
 ## Known limitations
 
@@ -236,21 +230,20 @@ reported baseline is still `make eval`, over all 30.
   — so its body can be replaced (embeddings, a learned classifier) without
   touching the rules, the weights or the tests. A frozen lexicon is, however, the
   honest way to meet the reproducibility requirement for a baseline.
-- **29/30 is close to the set's ceiling.** A set without headroom cannot show
-  improvement, which is the problem the September rebuild fixed. Whether this
-  number leaves R3's week-7 stretch room to demonstrate anything is R1's call to
-  interpret, not this package's.
+- **The set may have little headroom left for the stretch.** A set a baseline
+  nearly saturates cannot show improvement, which is the problem the September
+  rebuild fixed. Whether that is the case here, and what it means for R3's
+  week-7 stretch, is R1's call to read off the reported numbers — not this
+  package's to assert.
 - **`initiative` never fires** on the current set, as noted above.
 
 ## Running it
 
 ```
-pytest tests/test_scoring.py -v                       # the acceptance tests
-python -m mind.scoring.dev_eval                       # dev split, full detail
-python -m mind.scoring.dev_eval --split holdout       # holdout, aggregate only
-python -m mind.evaluation.run --personas eval/personas --model segmented
+pytest tests/test_scoring.py -v     # the acceptance tests
 ```
 
-The last one is R1's official path and needs `"segmented"` registered in the
+That is all this package runs. Evaluating the model against the persona set goes
+through the harness and belongs to R1; it needs `"segmented"` registered in the
 `models` dict in [`../evaluation/run.py`](../evaluation/run.py), which is R1's
 file.

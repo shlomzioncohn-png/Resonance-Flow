@@ -10,8 +10,10 @@ will challenge about a hand-weighted model scored on 30 labelled examples.
 Rules this split is only worth something if we actually follow:
 
 1. Every weight, threshold and impact keyword is chosen against DEV only.
-2. HOLDOUT is run once, at the end, and only its aggregate accuracy is read —
-   never its per-scenario failures. Reading them and then adjusting burns it.
+2. HOLDOUT is never calibrated against. Whoever measures this model — R1,
+   through the harness — reads its aggregate; its per-scenario failures do not
+   come back here, because reading them and then adjusting a weight silently
+   turns the holdout into more dev data.
 3. A dev/holdout gap gets reported, not fixed.
 
 How the split was derived (reproducible, not hand-picked)
