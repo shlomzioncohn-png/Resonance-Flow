@@ -44,6 +44,10 @@ public class TaskSelectionService {
 
     @Transactional(readOnly = true)
     public TaskSelectionResponseDto selectTasks(UUID tenantId, UUID userId, int availableMinutes) {
+        if (availableMinutes <= 0) {
+            return mapper.noTasksAvailable(availableMinutes);
+        }
+
         Instant now = Instant.now(clock);
 
         List<Task> rawCandidates = taskRepository.findCandidateTasksForUser(tenantId, userId);

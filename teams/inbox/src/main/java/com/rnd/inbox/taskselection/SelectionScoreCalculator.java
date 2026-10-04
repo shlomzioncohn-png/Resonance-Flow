@@ -50,14 +50,16 @@ public class SelectionScoreCalculator {
             return 0;
         }
 
+        double priorityFactor = normalizedPriority(task);
+
         double hoursLeft = hoursBetween(now, deadline);
         if (hoursLeft > 0) {
-            return Math.exp(-hoursLeft / properties.getDeadlineHalfLifeHours());
+            return priorityFactor * Math.exp(-hoursLeft / properties.getDeadlineHalfLifeHours());
         }
 
         double hoursOverdue = -hoursLeft;
-        return 1 + properties.getOverdueExtraCap()
-                * (1 - Math.exp(-hoursOverdue / (24 * properties.getDeadlineHalfLifeHours())));
+        return priorityFactor * (1 + properties.getOverdueExtraCap()
+                * (1 - Math.exp(-hoursOverdue / (24 * properties.getDeadlineHalfLifeHours()))));
     }
 
     public double normalizedTimeFit(Task task) {
