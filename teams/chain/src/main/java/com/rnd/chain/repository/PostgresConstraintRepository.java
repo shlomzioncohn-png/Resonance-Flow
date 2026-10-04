@@ -122,9 +122,10 @@ public class PostgresConstraintRepository implements ConstraintRepository {
         List<String> previous = jdbcTemplate.query(
             "WITH old AS (SELECT status FROM task_constraint "
                 + "WHERE constraint_id = ? AND task_id = ? FOR UPDATE) "
-                + "UPDATE task_constraint SET status = ?, reason = ?, updated_at = ? "
-                + "WHERE constraint_id = ? AND task_id = ? "
-                + "RETURNING (SELECT status FROM old)",
+                + "UPDATE task_constraint t SET status = ?, reason = ?, updated_at = ? "
+                + "FROM old "
+                + "WHERE t.constraint_id = ? AND t.task_id = ? "
+                + "RETURNING old.status",
             (rs, rowNum) -> rs.getString(1),
             constraintId, taskId, newStatus.name(), toJsonb(reason), Timestamp.valueOf(updatedAt),
             constraintId, taskId);

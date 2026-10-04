@@ -38,7 +38,15 @@ class PostgresConstraintRepositoryConcurrencyTest {
     @Autowired
     private ConstraintRepository constraintRepository;
 
+    @Autowired
+    private org.springframework.jdbc.core.JdbcTemplate jdbcTemplate;
+
+    private void seedTask(UUID taskId) {
+        jdbcTemplate.update("INSERT INTO task (id, owner_id, status) VALUES (?, 'owner', 'ACTIVE') ON CONFLICT (id) DO NOTHING", taskId);
+    }
+
     private Constraint newConstraint(String constraintId, UUID taskId, Constraint.ConstraintStatus status) {
+        seedTask(taskId);
         LocalDateTime now = LocalDateTime.now();
         return new Constraint(constraintId, taskId, Constraint.ConstraintType.APPROVAL_NEEDED,
                 status, null, "source-ref", now, now);

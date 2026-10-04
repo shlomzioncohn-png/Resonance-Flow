@@ -31,8 +31,22 @@ class PostgresConstraintRepositoryTest {
     @Autowired
     private ConstraintRepository constraintRepository;
 
+    @Autowired
+    private org.springframework.jdbc.core.JdbcTemplate jdbcTemplate;
+
+    private UUID seededTask() {
+        UUID id = UUID.randomUUID();
+        seedTask(id);
+        return id;
+    }
+
+    private void seedTask(UUID taskId) {
+        jdbcTemplate.update("INSERT INTO task (id, owner_id, status) VALUES (?, 'owner', 'ACTIVE') ON CONFLICT (id) DO NOTHING", taskId);
+    }
+
     private Constraint newConstraint(String constraintId, UUID taskId, Constraint.ConstraintStatus status,
                                       Map<String, Object> reason) {
+        seedTask(taskId);
         LocalDateTime now = LocalDateTime.now();
         return new Constraint(constraintId, taskId, Constraint.ConstraintType.APPROVAL_NEEDED,
             status, reason, "source-ref", now, now);
@@ -62,8 +76,10 @@ class PostgresConstraintRepositoryTest {
     @Test
     void save_reasonRoundTripsThroughJsonb() {
         Map<String, Object> reason = Map.of("approverId", "user-42", "level", 2);
-        Constraint constraint = newConstraint(UUID.randomUUID().toString(), UUID.randomUUID(),
-            Constraint.ConstraintStatus.PENDING, reason);
+        LocalDateTime now = LocalDateTime.now();
+        Constraint constraint = new Constraint(UUID.randomUUID().toString(), seededTask(),
+            Constraint.ConstraintType.APPROVAL_NEEDED, Constraint.ConstraintStatus.PENDING, reason,
+            "source-ref", now, now);
 
         constraintRepository.save(constraint);
 
@@ -75,8 +91,10 @@ class PostgresConstraintRepositoryTest {
 
     @Test
     void save_nullReason_roundTripsAsNull() {
-        Constraint constraint = newConstraint(UUID.randomUUID().toString(), UUID.randomUUID(),
-            Constraint.ConstraintStatus.PENDING, null);
+        LocalDateTime now = LocalDateTime.now();
+        Constraint constraint = new Constraint(UUID.randomUUID().toString(), seededTask(),
+            Constraint.ConstraintType.APPROVAL_NEEDED, Constraint.ConstraintStatus.PENDING, null,
+            "source-ref", now, now);
 
         constraintRepository.save(constraint);
 
@@ -122,8 +140,10 @@ class PostgresConstraintRepositoryTest {
 
     @Test
     void save_taskDoesNotExist_rejectedByForeignKey() {
-        Constraint constraint = newConstraint(UUID.randomUUID().toString(), UUID.randomUUID(),
-            Constraint.ConstraintStatus.PENDING, null);
+        LocalDateTime now = LocalDateTime.now();
+        Constraint constraint = new Constraint(UUID.randomUUID().toString(), UUID.randomUUID(),
+            Constraint.ConstraintType.APPROVAL_NEEDED, Constraint.ConstraintStatus.PENDING, null,
+            "source-ref", now, now);
 
         assertThatThrownBy(() -> constraintRepository.save(constraint))
             .isInstanceOf(DataIntegrityViolationException.class);
