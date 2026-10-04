@@ -75,6 +75,9 @@ def _load_input(path: Path) -> ExtractionEvalInput:
 
 
 def main() -> None:
+    # The report prints "↔" and "—"; a Windows console (cp1255/cp1252) cannot encode them.
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8")
     parser = argparse.ArgumentParser(
         description="Run the extraction-quality eval (precision/recall of extracted action items)."
     )
