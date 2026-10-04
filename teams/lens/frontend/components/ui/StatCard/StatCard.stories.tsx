@@ -1,22 +1,22 @@
-import type { Meta, StoryObj } from '@storybook/react'
-import Box from '@mui/material/Box'
-import StatCard from './StatCard'
+import type { Meta, StoryObj } from '@storybook/react';
+import Box from '@mui/material/Box';
+import StatCard from './StatCard';
 
 const meta = {
   title: 'UI/StatCard',
   component: StatCard,
   tags: ['autodocs'],
-} satisfies Meta<typeof StatCard>
+} satisfies Meta<typeof StatCard>;
 
-export default meta
-type Story = StoryObj<typeof meta>
+export default meta;
+type Story = StoryObj<typeof meta>;
 
 export const Default: Story = {
   args: {
     label: 'Total Tasks',
     value: 64,
   },
-}
+};
 
 export const WithSubtitle: Story = {
   args: {
@@ -24,7 +24,7 @@ export const WithSubtitle: Story = {
     value: '48%',
     subtitle: 'of all tasks',
   },
-}
+};
 
 export const Success: Story = {
   args: {
@@ -32,7 +32,7 @@ export const Success: Story = {
     value: 20,
     color: 'success',
   },
-}
+};
 
 export const Warning: Story = {
   args: {
@@ -40,7 +40,7 @@ export const Warning: Story = {
     value: 18,
     color: 'warning',
   },
-}
+};
 
 export const Error: Story = {
   args: {
@@ -48,7 +48,7 @@ export const Error: Story = {
     value: 5,
     color: 'error',
   },
-}
+};
 
 export const Grid: Story = {
   args: {
@@ -64,4 +64,4 @@ export const Grid: Story = {
       <StatCard label="% Complete" value="48%" color="info" />
     </Box>
   ),
-}
+};

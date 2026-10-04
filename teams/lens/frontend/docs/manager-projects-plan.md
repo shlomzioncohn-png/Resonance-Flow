@@ -3,7 +3,7 @@
 **Update (confirmed with Rachel Zahler, mentor):** this view now lives at `/manager`
 ("Manager Dashboard" in the sidebar) instead of a separate `/manager/projects` route —
 there's no separate "Projects" nav entry. Longer-term the plan is two distinct views:
-"Dashboard" = charts/graphs (not yet built), "Projects" = a *table* of project data
+"Dashboard" = charts/graphs (not yet built), "Projects" = a _table_ of project data
 (owner, description, deadline, etc.) as a possible follow-up if time allows — starting
 small with the dashboard/graphs first. What's built below (KPI tiles + a project-card
 grid) is serving as the Manager Dashboard's content for now.
@@ -13,7 +13,7 @@ frame **"Manager / Projects"** (`nodeId=4:21`) — confirmed against a full-fide
 screenshot the user provided directly (mock data: 12 projects, "Sort: Health" filter).
 
 Note: a link to `nodeId=4:22` was also given — that node is just the `Sidebar / Manager`
-component *instance* nested inside frame `4:21`, not a separate design. No action needed;
+component _instance_ nested inside frame `4:21`, not a separate design. No action needed;
 it already matches the existing `components/layout/Sidebar`.
 
 **Flag with the mentor:** a Figma Make link was also given

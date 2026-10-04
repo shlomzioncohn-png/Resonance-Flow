@@ -1,4 +1,4 @@
-import { test as base, Page } from '@playwright/test'
+import { test as base, Page } from '@playwright/test';
 
 /**
  * Fixture for API mocking in Playwright tests.
@@ -11,35 +11,35 @@ import { test as base, Page } from '@playwright/test'
 
 export interface ApiMockFixtures {
   mockWorkspaceApi: {
-    recommendSuccess: (task: any) => Promise<void>
-    recommendSuccessWithDelay: (task: any, delayMs: number) => Promise<void>
-    recommendError: (errorCode: string, statusCode: number) => Promise<void>
-    recommendEmpty: () => Promise<void>
-    startTaskSuccess: (taskId: string) => Promise<void>
-    expectRecommendCalled: (withPayload?: any) => Promise<void>
-  }
+    recommendSuccess: (task: any) => Promise<void>;
+    recommendSuccessWithDelay: (task: any, delayMs: number) => Promise<void>;
+    recommendError: (errorCode: string, statusCode: number) => Promise<void>;
+    recommendEmpty: () => Promise<void>;
+    startTaskSuccess: (taskId: string) => Promise<void>;
+    expectRecommendCalled: (withPayload?: any) => Promise<void>;
+  };
 }
 
 export const test = base.extend<ApiMockFixtures>({
   mockWorkspaceApi: async ({ page }, use) => {
-    const requestCaptures: { url: string; method: string; body: any }[] = []
-    let routeHandled = false
+    const requestCaptures: { url: string; method: string; body: any }[] = [];
+    let routeHandled = false;
 
     const mockApi = {
       async recommendSuccess(task: any) {
         // Clear previous captures and reset flag
-        requestCaptures.length = 0
-        routeHandled = false
-        
+        requestCaptures.length = 0;
+        routeHandled = false;
+
         await page.route('**/api/workspace/recommend', async (route) => {
           // Capture request
-          const request = route.request()
+          const request = route.request();
           requestCaptures.push({
             url: request.url(),
             method: request.method(),
             body: request.postDataJSON(),
-          })
-          routeHandled = true
+          });
+          routeHandled = true;
 
           // Mock success response
           await route.fulfill({
@@ -54,19 +54,19 @@ export const test = base.extend<ApiMockFixtures>({
               confidenceScore: 85,
               alternatives: [],
             }),
-          })
-        })
+          });
+        });
       },
 
       async recommendError(errorCode: string, statusCode: number) {
         await page.route('**/api/workspace/recommend', async (route) => {
           // Capture request
-          const request = route.request()
+          const request = route.request();
           requestCaptures.push({
             url: request.url(),
             method: request.method(),
             body: request.postDataJSON(),
-          })
+          });
 
           // Mock error response
           await route.fulfill({
@@ -84,21 +84,21 @@ export const test = base.extend<ApiMockFixtures>({
               path: '/api/workspace/recommend',
               timestamp: new Date().toISOString(),
             }),
-          })
-        })
+          });
+        });
       },
 
       async recommendSuccessWithDelay(task: any, delayMs: number) {
         await page.route('**/api/workspace/recommend', async (route) => {
-          const request = route.request()
+          const request = route.request();
           requestCaptures.push({
             url: request.url(),
             method: request.method(),
             body: request.postDataJSON(),
-          })
+          });
 
           // Simulate slow backend
-          await new Promise((resolve) => setTimeout(resolve, delayMs))
+          await new Promise((resolve) => setTimeout(resolve, delayMs));
 
           await route.fulfill({
             status: 200,
@@ -112,18 +112,18 @@ export const test = base.extend<ApiMockFixtures>({
               confidenceScore: 85,
               alternatives: [],
             }),
-          })
-        })
+          });
+        });
       },
 
       async recommendEmpty() {
         await page.route('**/api/workspace/recommend', async (route) => {
-          const request = route.request()
+          const request = route.request();
           requestCaptures.push({
             url: request.url(),
             method: request.method(),
             body: request.postDataJSON(),
-          })
+          });
 
           // Return 200 but with null task (no suitable task found)
           await route.fulfill({
@@ -138,14 +138,14 @@ export const test = base.extend<ApiMockFixtures>({
               confidenceScore: 0,
               alternatives: [],
             }),
-          })
-        })
+          });
+        });
       },
 
       async startTaskSuccess(taskId: string) {
         await page.route(`**/api/tasks/${taskId}/status`, async (route) => {
-          const request = route.request()
-          
+          const request = route.request();
+
           // Mock successful status update
           await route.fulfill({
             status: 200,
@@ -155,33 +155,31 @@ export const test = base.extend<ApiMockFixtures>({
               status: 'IN_PROGRESS',
               updatedAt: new Date().toISOString(),
             }),
-          })
-        })
+          });
+        });
       },
 
       async expectRecommendCalled(withPayload?: any) {
-        const call = requestCaptures[requestCaptures.length - 1]
+        const call = requestCaptures[requestCaptures.length - 1];
         if (!call) {
-          throw new Error('No API call captured for /api/workspace/recommend')
+          throw new Error('No API call captured for /api/workspace/recommend');
         }
         if (call.method !== 'POST') {
-          throw new Error(`Expected POST, got ${call.method}`)
+          throw new Error(`Expected POST, got ${call.method}`);
         }
         if (withPayload) {
           Object.entries(withPayload).forEach(([key, value]) => {
             if (call.body[key] !== value) {
-              throw new Error(
-                `Expected payload.${key}=${value}, got ${call.body[key]}`,
-              )
+              throw new Error(`Expected payload.${key}=${value}, got ${call.body[key]}`);
             }
-          })
+          });
         }
       },
-    }
+    };
 
     // eslint-disable-next-line react-hooks/rules-of-hooks
-    await use(mockApi)
+    await use(mockApi);
   },
-})
+});
 
-export { expect } from '@playwright/test'
+export { expect } from '@playwright/test';

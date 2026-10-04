@@ -1,13 +1,13 @@
-import Box from '@mui/material/Box'
-import Stack from '@mui/material/Stack'
-import Typography from '@mui/material/Typography'
+import Box from '@mui/material/Box';
+import Stack from '@mui/material/Stack';
+import Typography from '@mui/material/Typography';
 
 export interface LogoProps {
-  variant?: 'light' | 'dark'
+  variant?: 'light' | 'dark';
 }
 
 export default function Logo({ variant = 'dark' }: LogoProps) {
-  const isDark = variant === 'dark'
+  const isDark = variant === 'dark';
 
   return (
     <Stack direction="row" spacing={1.25} sx={{ alignItems: 'center' }}>
@@ -54,5 +54,5 @@ export default function Logo({ variant = 'dark' }: LogoProps) {
         </Typography>
       </Box>
     </Stack>
-  )
+  );
 }

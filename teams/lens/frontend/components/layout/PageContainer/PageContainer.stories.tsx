@@ -1,16 +1,16 @@
-import type { Meta, StoryObj } from '@storybook/nextjs-vite'
-import { expect } from 'storybook/test'
-import Button from '@mui/material/Button'
-import Typography from '@mui/material/Typography'
-import PageContainer from './PageContainer'
+import type { Meta, StoryObj } from '@storybook/nextjs-vite';
+import { expect } from 'storybook/test';
+import Button from '@mui/material/Button';
+import Typography from '@mui/material/Typography';
+import PageContainer from './PageContainer';
 
 const meta = {
   component: PageContainer,
   tags: ['ai-generated'],
-} satisfies Meta<typeof PageContainer>
+} satisfies Meta<typeof PageContainer>;
 
-export default meta
-type Story = StoryObj<typeof meta>
+export default meta;
+type Story = StoryObj<typeof meta>;
 
 export const Default: Story = {
   args: {
@@ -18,9 +18,11 @@ export const Default: Story = {
     children: <Typography>Page content goes here.</Typography>,
   },
   play: async ({ canvas }) => {
-    await expect(canvas.getByRole('heading', { level: 1, name: 'Manager Dashboard' })).toBeVisible()
+    await expect(
+      canvas.getByRole('heading', { level: 1, name: 'Manager Dashboard' }),
+    ).toBeVisible();
   },
-}
+};
 
 export const WithDescriptionAndActions: Story = {
   args: {
@@ -33,4 +35,4 @@ export const WithDescriptionAndActions: Story = {
     ),
     children: <Typography>Page content goes here.</Typography>,
   },
-}
+};

@@ -4,12 +4,12 @@
  * request is answered by an MSW handler (mocks/handlers.ts) instead of a
  * real backend.
  */
-import { api } from './api'
+import { api } from './api';
 
 export interface WorkloadEntry {
-  employeeId: string
-  employeeName: string
-  activeTasks: number
+  employeeId: string;
+  employeeName: string;
+  activeTasks: number;
 }
 
 /**
@@ -18,6 +18,6 @@ export interface WorkloadEntry {
  * there too, since a real backend would just ignore an unknown query param.
  */
 export function getManagerWorkload(simulateError = false): Promise<WorkloadEntry[]> {
-  const query = simulateError ? '?simulateError=true' : ''
-  return api.get<WorkloadEntry[]>(`/api/manager/workload${query}`)
+  const query = simulateError ? '?simulateError=true' : '';
+  return api.get<WorkloadEntry[]>(`/api/manager/workload${query}`);
 }

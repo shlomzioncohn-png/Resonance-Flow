@@ -1,6 +1,6 @@
-import type { ReactNode } from 'react'
-import { TaskProvider } from './taskStore'
+import type { ReactNode } from 'react';
+import { TaskProvider } from './taskStore';
 
 export default function EmployeeLayout({ children }: { children: ReactNode }) {
-  return <TaskProvider>{children}</TaskProvider>
+  return <TaskProvider>{children}</TaskProvider>;
 }

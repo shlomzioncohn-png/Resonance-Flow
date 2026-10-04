@@ -9,7 +9,7 @@ works end to end yet — this records exactly why, so it doesn't need rediscover
 - **Gateway** (`teams/lens/gateway`): `/health` and `/health/ready`, plus one proxy route
   (`/api/**` → BFF). No other routes.
 - **BFF** (`teams/lens/bff`): one endpoint, `GET /api/status` → `{"service":"bff","status":"up"}`.
-  Its own README calls it *"Project skeleton only (stage 1)"* — no calls to Bridge, Mind,
+  Its own README calls it _"Project skeleton only (stage 1)"_ — no calls to Bridge, Mind,
   Inbox, or Chain exist yet.
 - **Frontend**: `services/api.ts` + `services/gatewayHealth.ts`, not imported anywhere yet.
   All employee screens still run on mock data (`app/(app)/employee/mockTask.ts`).
@@ -19,12 +19,12 @@ works end to end yet — this records exactly why, so it doesn't need rediscover
 Four concrete, independent mismatches between the Gateway's code and how BFF actually
 runs (per `teams/lens/docker-compose.yml`, the compose file that runs both together):
 
-| Gateway expects (`HealthController.java`, `application.yml`) | BFF actually is | Source |
-|---|---|---|
-| host `bff-service` | service name `bff` | `teams/lens/docker-compose.yml` |
-| port `8080` | port `8082` | same, `SERVER_PORT=8082` |
-| health at `/health` | health at `/actuator/health` (Spring Actuator default) | `teams/lens/bff/README.md` |
-| proxy strips `/api`, forwards `/status` | controller is mapped at `/api/status`, not `/status` | `StatusController.java` `@GetMapping("/api/status")` + Gateway's `StripPrefix=1` |
+| Gateway expects (`HealthController.java`, `application.yml`) | BFF actually is                                        | Source                                                                           |
+| ------------------------------------------------------------ | ------------------------------------------------------ | -------------------------------------------------------------------------------- |
+| host `bff-service`                                           | service name `bff`                                     | `teams/lens/docker-compose.yml`                                                  |
+| port `8080`                                                  | port `8082`                                            | same, `SERVER_PORT=8082`                                                         |
+| health at `/health`                                          | health at `/actuator/health` (Spring Actuator default) | `teams/lens/bff/README.md`                                                       |
+| proxy strips `/api`, forwards `/status`                      | controller is mapped at `/api/status`, not `/status`   | `StatusController.java` `@GetMapping("/api/status")` + Gateway's `StripPrefix=1` |
 
 The last one means even a corrected hostname/port wouldn't fix `/api/status` through the
 Gateway — the stripped path doesn't match BFF's own route. It would still 404.

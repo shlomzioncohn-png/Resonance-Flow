@@ -1,4 +1,4 @@
-import { defineConfig, devices } from '@playwright/test'
+import { defineConfig, devices } from '@playwright/test';
 
 /**
  * Playwright configuration for LENS Frontend E2E tests.
@@ -38,10 +38,12 @@ export default defineConfig({
     // For now, testing with Chromium only to avoid timeout issues
   ],
 
-  webServer: process.env.CI ? {
-    command: 'npm run dev',
-    url: 'http://localhost:3000',
-    reuseExistingServer: false,
-    timeout: 120000,
-  } : undefined,
-})
+  webServer: process.env.CI
+    ? {
+        command: 'npm run dev',
+        url: 'http://localhost:3000',
+        reuseExistingServer: false,
+        timeout: 120000,
+      }
+    : undefined,
+});

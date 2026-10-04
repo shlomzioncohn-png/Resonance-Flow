@@ -1,18 +1,18 @@
-'use client'
+'use client';
 
-import { useCallback, useEffect, useState } from 'react'
-import Chip from '@mui/material/Chip'
-import Stack from '@mui/material/Stack'
-import Typography from '@mui/material/Typography'
-import PageContainer from '@/components/layout/PageContainer'
-import LoadingState from '@/components/feedback/LoadingState'
-import EmptyState from '@/components/feedback/EmptyState'
-import ErrorState from '@/components/feedback/ErrorState'
-import DataTable, { type DataTableColumn } from '@/components/ui/DataTable'
-import { listTasks, type ApiTask } from '@/services/workspaceApi'
-import { priorityTone, softToneSx, statusTone } from '../shared'
+import { useCallback, useEffect, useState } from 'react';
+import Chip from '@mui/material/Chip';
+import Stack from '@mui/material/Stack';
+import Typography from '@mui/material/Typography';
+import PageContainer from '@/components/layout/PageContainer';
+import LoadingState from '@/components/feedback/LoadingState';
+import EmptyState from '@/components/feedback/EmptyState';
+import ErrorState from '@/components/feedback/ErrorState';
+import DataTable, { type DataTableColumn } from '@/components/ui/DataTable';
+import { listTasks, type ApiTask } from '@/services/workspaceApi';
+import { priorityTone, softToneSx, statusTone } from '../shared';
 
-type LoadState = 'loading' | 'loaded' | 'error'
+type LoadState = 'loading' | 'loaded' | 'error';
 
 const columns: DataTableColumn<ApiTask>[] = [
   {
@@ -32,7 +32,9 @@ const columns: DataTableColumn<ApiTask>[] = [
   {
     key: 'status',
     header: 'Status',
-    render: (task) => <Chip size="small" label={task.status} sx={softToneSx(statusTone(task.status))} />,
+    render: (task) => (
+      <Chip size="small" label={task.status} sx={softToneSx(statusTone(task.status))} />
+    ),
   },
   {
     key: 'priority',
@@ -57,29 +59,29 @@ const columns: DataTableColumn<ApiTask>[] = [
     align: 'right',
     render: (task) => `${task.effortEstimate} min`,
   },
-]
+];
 
 export default function EmployeeTasksPage() {
-  const [state, setState] = useState<LoadState>('loading')
-  const [tasks, setTasks] = useState<ApiTask[]>([])
+  const [state, setState] = useState<LoadState>('loading');
+  const [tasks, setTasks] = useState<ApiTask[]>([]);
 
   const fetchTasks = useCallback(() => {
     return listTasks({ size: 100 }) // largest page the API allows — fine while the task set is this small; will need real pagination once it isn't
       .then((response) => {
-        setTasks(response.items)
-        setState('loaded')
+        setTasks(response.items);
+        setState('loaded');
       })
-      .catch(() => setState('error'))
-  }, [])
+      .catch(() => setState('error'));
+  }, []);
 
   useEffect(() => {
-    fetchTasks()
-  }, [fetchTasks])
+    fetchTasks();
+  }, [fetchTasks]);
 
   const retry = useCallback(() => {
-    setState('loading')
-    fetchTasks()
-  }, [fetchTasks])
+    setState('loading');
+    fetchTasks();
+  }, [fetchTasks]);
 
   return (
     <PageContainer
@@ -107,5 +109,5 @@ export default function EmployeeTasksPage() {
         />
       )}
     </PageContainer>
-  )
+  );
 }

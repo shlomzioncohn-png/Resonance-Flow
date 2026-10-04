@@ -5,12 +5,14 @@
 E2E tests verify both **VISIBLE** (UI) and **INVISIBLE** (API) behavior using Playwright.
 
 ### VISIBLE Testing
+
 - User can see the form
 - User can interact with buttons/inputs
 - UI updates after user action
 - Error messages display correctly
 
 ### INVISIBLE Testing
+
 - Frontend sends correct API payload
 - API responses are handled properly
 - Network errors are caught and displayed
@@ -36,31 +38,34 @@ npm run test:e2e:chromium
 ### Fixtures (`../fixtures/api-mocking.ts`)
 
 Provides `mockWorkspaceApi` fixture with:
+
 - `recommendSuccess(task)` - Mock successful API response
 - `recommendError(errorCode, statusCode)` - Mock error response
 - `expectRecommendCalled(payload)` - Verify API was called with correct payload
 
 **Example:**
+
 ```typescript
 test('shows recommendation', async ({ page, mockWorkspaceApi }) => {
   // Setup mock
-  await mockWorkspaceApi.recommendSuccess({ id: 'task_001', title: 'Task' })
-  
+  await mockWorkspaceApi.recommendSuccess({ id: 'task_001', title: 'Task' });
+
   // User interaction
-  await page.fill('[data-testid="available-time"]', '45')
-  await page.click('[data-testid="recommend-btn"]')
-  
+  await page.fill('[data-testid="available-time"]', '45');
+  await page.click('[data-testid="recommend-btn"]');
+
   // Verify API (INVISIBLE)
-  await mockWorkspaceApi.expectRecommendCalled({ availableTime: 45 })
-  
+  await mockWorkspaceApi.expectRecommendCalled({ availableTime: 45 });
+
   // Verify UI (VISIBLE)
-  await expect(page.locator('[data-testid="task-title"]')).toContainText('Task')
-})
+  await expect(page.locator('[data-testid="task-title"]')).toContainText('Task');
+});
 ```
 
 ## Test Scenarios
 
 ### 1. Happy Path ✅
+
 - User submits available time
 - API returns task recommendation
 - UI displays task details
@@ -68,6 +73,7 @@ test('shows recommendation', async ({ page, mockWorkspaceApi }) => {
 **File:** `workspace-recommendation.spec.ts::Happy Path`
 
 ### 2. Error Handling ❌
+
 - User submits form
 - API returns 503 SERVICE_UNAVAILABLE
 - UI displays error message
@@ -75,6 +81,7 @@ test('shows recommendation', async ({ page, mockWorkspaceApi }) => {
 **File:** `workspace-recommendation.spec.ts::Error`
 
 ### 3. Timeout ⏱️
+
 - User submits form
 - API takes too long (504 GATEWAY_TIMEOUT)
 - UI displays timeout message
@@ -82,6 +89,7 @@ test('shows recommendation', async ({ page, mockWorkspaceApi }) => {
 **File:** `workspace-recommendation.spec.ts::Timeout`
 
 ### 4. Validation 🚫
+
 - User submits invalid form
 - Client-side validation prevents API call
 - UI displays validation error
@@ -113,20 +121,23 @@ For tests to work, the Frontend components must include these `data-testid` attr
 ## How API Mocking Works
 
 1. **Intercept Request:**
+
    ```typescript
    await page.route('**/api/workspace/recommend', async (route) => {
      // route.request() = incoming request
-   })
+   });
    ```
 
 2. **Verify Payload (INVISIBLE):**
+
    ```typescript
-   const request = route.request()
-   const body = request.postDataJSON()
-   expect(body.availableTime).toBe(45)
+   const request = route.request();
+   const body = request.postDataJSON();
+   expect(body.availableTime).toBe(45);
    ```
 
 3. **Mock Response:**
+
    ```typescript
    await route.fulfill({
      status: 200,
@@ -136,59 +147,69 @@ For tests to work, the Frontend components must include these `data-testid` attr
 
 4. **Assert UI (VISIBLE):**
    ```typescript
-   await expect(page.locator('[data-testid="task-title"]')).toContainText('...')
+   await expect(page.locator('[data-testid="task-title"]')).toContainText('...');
    ```
 
 ## Common Patterns
 
 ### Verify API was called with specific payload
+
 ```typescript
 await mockWorkspaceApi.expectRecommendCalled({
   availableTime: 45,
-  projectFilter: 'Platform Service'
-})
+  projectFilter: 'Platform Service',
+});
 ```
 
 ### Mock successful response
+
 ```typescript
 await mockWorkspaceApi.recommendSuccess({
   id: 'task_001',
   title: 'Task Title',
   // ...
-})
+});
 ```
 
 ### Mock error response
+
 ```typescript
-await mockWorkspaceApi.recommendError('SERVICE_UNAVAILABLE', 503)
+await mockWorkspaceApi.recommendError('SERVICE_UNAVAILABLE', 503);
 ```
 
 ## Debugging Tips
 
 ### 1. Use UI Mode
+
 ```bash
 npm run test:e2e:ui
 ```
+
 Visually debug tests in browser.
 
 ### 2. Use Debug Mode
+
 ```bash
 npm run test:e2e:debug
 ```
+
 Step through tests in Playwright Inspector.
 
 ### 3. View Screenshots/Videos
+
 Failures generate screenshots and videos in `test-results/`.
 
 ### 4. Add Debug Logs
+
 ```typescript
-await page.evaluate(() => console.log('Debug info'))
+await page.evaluate(() => console.log('Debug info'));
 ```
 
 ### 5. Inspect Network Requests
+
 ```typescript
-page.on('request', req => console.log('>>>', req.url()))
-page.on('response', res => console.log('<<<', res.url(), res.status()))
+page.on('request', (req) => console.log('>>>', req.url()));
+page.on('response', (res) => console.log('<<<', res.url(), res.status()));
 ```
 
 ## Next Steps

@@ -1,14 +1,14 @@
-import type { Meta, StoryObj } from '@storybook/nextjs-vite'
-import { expect, fn } from 'storybook/test'
-import Header from './Header'
+import type { Meta, StoryObj } from '@storybook/nextjs-vite';
+import { expect, fn } from 'storybook/test';
+import Header from './Header';
 
 const meta = {
   component: Header,
   tags: ['ai-generated'],
-} satisfies Meta<typeof Header>
+} satisfies Meta<typeof Header>;
 
-export default meta
-type Story = StoryObj<typeof meta>
+export default meta;
+type Story = StoryObj<typeof meta>;
 
 // The mobile menu button (onMenuClick) is only visible below the `md`
 // breakpoint (sx={{ display: { md: 'none' } }}), which real per-story
@@ -20,6 +20,6 @@ type Story = StoryObj<typeof meta>
 export const Default: Story = {
   args: { onMenuClick: fn() },
   play: async ({ canvas }) => {
-    await expect(canvas.getByText('Guest user')).toBeVisible()
+    await expect(canvas.getByText('Guest user')).toBeVisible();
   },
-}
+};

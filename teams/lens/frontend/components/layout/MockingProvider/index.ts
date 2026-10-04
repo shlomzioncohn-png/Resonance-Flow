@@ -1,1 +1,1 @@
-export { MockingProvider } from './MockingProvider'
+export { MockingProvider } from './MockingProvider';

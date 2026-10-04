@@ -1,5 +1,5 @@
-import type { Meta, StoryObj } from '@storybook/nextjs-vite'
-import ProjectCard from './ProjectCard'
+import type { Meta, StoryObj } from '@storybook/nextjs-vite';
+import ProjectCard from './ProjectCard';
 
 const meta = {
   component: ProjectCard,
@@ -14,10 +14,10 @@ const meta = {
       </div>
     ),
   ],
-} satisfies Meta<typeof ProjectCard>
+} satisfies Meta<typeof ProjectCard>;
 
-export default meta
-type Story = StoryObj<typeof meta>
+export default meta;
+type Story = StoryObj<typeof meta>;
 
 export const Healthy: Story = {
   args: {
@@ -34,7 +34,7 @@ export const Healthy: Story = {
     lastUpdatedAt: new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString(),
     href: '/projects/apollo',
   },
-}
+};
 
 export const AtRisk: Story = {
   args: {
@@ -50,7 +50,7 @@ export const AtRisk: Story = {
     blockedCount: 7,
     href: '/projects/orbit',
   },
-}
+};
 
 export const Critical: Story = {
   args: {
@@ -66,7 +66,7 @@ export const Critical: Story = {
     blockedCount: 21,
     href: '/projects/zeus',
   },
-}
+};
 
 export const NoData: Story = {
   args: {
@@ -84,4 +84,4 @@ export const NoData: Story = {
     lastUpdatedAt: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString(),
     href: '/projects/iris',
   },
-}
+};

@@ -1,32 +1,32 @@
-'use client'
+'use client';
 
-import Box from '@mui/material/Box'
-import Card from '@mui/material/Card'
-import CardContent from '@mui/material/CardContent'
-import Typography from '@mui/material/Typography'
-import Avatar from '@mui/material/Avatar'
-import Stack from '@mui/material/Stack'
-import Chip from '@mui/material/Chip'
+import Box from '@mui/material/Box';
+import Card from '@mui/material/Card';
+import CardContent from '@mui/material/CardContent';
+import Typography from '@mui/material/Typography';
+import Avatar from '@mui/material/Avatar';
+import Stack from '@mui/material/Stack';
+import Chip from '@mui/material/Chip';
 
 export interface Activity {
-  id: string
+  id: string;
   actor: {
-    name: string
-    avatar?: string
-  }
-  action: string
-  description?: string
-  timestamp: string
-  icon?: string
-  type?: 'default' | 'success' | 'warning' | 'error'
+    name: string;
+    avatar?: string;
+  };
+  action: string;
+  description?: string;
+  timestamp: string;
+  icon?: string;
+  type?: 'default' | 'success' | 'warning' | 'error';
 }
 
 export interface ActivityFeedProps {
-  activities: Activity[]
+  activities: Activity[];
   /** Optional title for the section */
-  title?: string
+  title?: string;
   /** Maximum number of activities to display */
-  maxItems?: number
+  maxItems?: number;
 }
 
 const typeColorMap = {
@@ -34,7 +34,7 @@ const typeColorMap = {
   success: { bg: '#d1fae5', icon: '#10b981' },
   warning: { bg: '#fef3c7', icon: '#f59e0b' },
   error: { bg: '#fee2e2', icon: '#ef4444' },
-}
+};
 
 /**
  * ActivityFeed Component
@@ -47,7 +47,7 @@ export default function ActivityFeed({
   title = 'Recent Activity',
   maxItems = 10,
 }: ActivityFeedProps) {
-  const displayedActivities = activities.slice(0, maxItems)
+  const displayedActivities = activities.slice(0, maxItems);
 
   return (
     <Card>
@@ -59,7 +59,7 @@ export default function ActivityFeed({
         {displayedActivities.length > 0 ? (
           <Stack spacing={2}>
             {displayedActivities.map((activity) => {
-              const colors = typeColorMap[activity.type || 'default']
+              const colors = typeColorMap[activity.type || 'default'];
 
               return (
                 <Box
@@ -97,7 +97,7 @@ export default function ActivityFeed({
                     </Typography>
                   </Box>
                 </Box>
-              )
+              );
             })}
           </Stack>
         ) : (
@@ -107,5 +107,5 @@ export default function ActivityFeed({
         )}
       </CardContent>
     </Card>
-  )
+  );
 }

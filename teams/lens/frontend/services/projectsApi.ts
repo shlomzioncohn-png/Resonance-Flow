@@ -5,28 +5,28 @@
  * development this request is answered by an MSW handler (mocks/handlers.ts)
  * instead of a real backend.
  */
-import { api } from './api'
-import type { StatusTone } from '@/components/ui/StatusBadge'
+import { api } from './api';
+import type { StatusTone } from '@/components/ui/StatusBadge';
 
 export interface ProjectMember {
-  name: string
-  avatarUrl?: string
+  name: string;
+  avatarUrl?: string;
 }
 
 export interface Project {
-  id: string
-  name: string
-  team: string
-  owner: string
-  status: StatusTone
-  statusLabel: string
-  members: ProjectMember[]
+  id: string;
+  name: string;
+  team: string;
+  owner: string;
+  status: StatusTone;
+  statusLabel: string;
+  members: ProjectMember[];
   /** 0-100 */
-  progressPercent: number
-  totalCount: number
-  inProgressCount: number
-  blockedCount: number
-  lastUpdatedAt: string
+  progressPercent: number;
+  totalCount: number;
+  inProgressCount: number;
+  blockedCount: number;
+  lastUpdatedAt: string;
 }
 
 /**
@@ -35,6 +35,6 @@ export interface Project {
  * there too, since a real backend would just ignore an unknown query param.
  */
 export function getProjects(simulateError = false): Promise<Project[]> {
-  const query = simulateError ? '?simulateError=true' : ''
-  return api.get<Project[]>(`/api/manager/projects${query}`)
+  const query = simulateError ? '?simulateError=true' : '';
+  return api.get<Project[]>(`/api/manager/projects${query}`);
 }

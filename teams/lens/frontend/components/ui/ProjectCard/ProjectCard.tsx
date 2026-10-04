@@ -1,44 +1,44 @@
-'use client'
+'use client';
 
-import Link from 'next/link'
-import Avatar from '@mui/material/Avatar'
-import AvatarGroup from '@mui/material/AvatarGroup'
-import Card from '@mui/material/Card'
-import CardContent from '@mui/material/CardContent'
-import LinearProgress from '@mui/material/LinearProgress'
-import Stack from '@mui/material/Stack'
-import Typography from '@mui/material/Typography'
-import { useTheme } from '@mui/material/styles'
-import StatusBadge, { type StatusTone } from '../StatusBadge'
+import Link from 'next/link';
+import Avatar from '@mui/material/Avatar';
+import AvatarGroup from '@mui/material/AvatarGroup';
+import Card from '@mui/material/Card';
+import CardContent from '@mui/material/CardContent';
+import LinearProgress from '@mui/material/LinearProgress';
+import Stack from '@mui/material/Stack';
+import Typography from '@mui/material/Typography';
+import { useTheme } from '@mui/material/styles';
+import StatusBadge, { type StatusTone } from '../StatusBadge';
 
 export interface ProjectCardMember {
-  name: string
-  avatarUrl?: string
+  name: string;
+  avatarUrl?: string;
 }
 
 export interface ProjectCardProps {
-  id: string
-  name: string
-  team: string
-  status: StatusTone
-  statusLabel: string
-  members: ProjectCardMember[]
+  id: string;
+  name: string;
+  team: string;
+  status: StatusTone;
+  statusLabel: string;
+  members: ProjectCardMember[];
   /** 0-100 */
-  progressPercent: number
-  totalCount: number
-  inProgressCount: number
-  blockedCount: number
-  lastUpdatedAt: string
-  href: string
+  progressPercent: number;
+  totalCount: number;
+  inProgressCount: number;
+  blockedCount: number;
+  lastUpdatedAt: string;
+  href: string;
 }
 
 function formatRelativeTime(iso: string): string {
-  const diffMinutes = Math.round((Date.now() - new Date(iso).getTime()) / 60000)
-  if (diffMinutes < 1) return 'just now'
-  if (diffMinutes < 60) return `${diffMinutes}m ago`
-  const diffHours = Math.round(diffMinutes / 60)
-  if (diffHours < 24) return `${diffHours}h ago`
-  return `${Math.round(diffHours / 24)}d ago`
+  const diffMinutes = Math.round((Date.now() - new Date(iso).getTime()) / 60000);
+  if (diffMinutes < 1) return 'just now';
+  if (diffMinutes < 60) return `${diffMinutes}m ago`;
+  const diffHours = Math.round(diffMinutes / 60);
+  if (diffHours < 24) return `${diffHours}h ago`;
+  return `${Math.round(diffHours / 24)}d ago`;
 }
 
 /**
@@ -61,8 +61,8 @@ export default function ProjectCard({
   lastUpdatedAt,
   href,
 }: ProjectCardProps) {
-  const theme = useTheme()
-  const titleId = `${id}-project-name`
+  const theme = useTheme();
+  const titleId = `${id}-project-name`;
 
   return (
     <Card sx={{ position: 'relative', height: '100%' }}>
@@ -129,5 +129,5 @@ export default function ProjectCard({
 
       <Link href={href} aria-labelledby={titleId} style={{ position: 'absolute', inset: 0 }} />
     </Card>
-  )
+  );
 }

@@ -1,21 +1,21 @@
-'use client'
+'use client';
 
-import Box from '@mui/material/Box'
-import Card from '@mui/material/Card'
-import CardContent from '@mui/material/CardContent'
-import Typography from '@mui/material/Typography'
-import Stack from '@mui/material/Stack'
+import Box from '@mui/material/Box';
+import Card from '@mui/material/Card';
+import CardContent from '@mui/material/CardContent';
+import Typography from '@mui/material/Typography';
+import Stack from '@mui/material/Stack';
 
 export interface ProcessStage {
-  name: string
-  count: number
-  color?: string
+  name: string;
+  count: number;
+  color?: string;
 }
 
 export interface ProcessStatusProps {
-  stages: ProcessStage[]
+  stages: ProcessStage[];
   /** Optional title for the section */
-  title?: string
+  title?: string;
 }
 
 /**
@@ -24,17 +24,14 @@ export interface ProcessStatusProps {
  * Displays a visual representation of workflow stages with task counts.
  * Shows stages like Planning, In Progress, Review, Testing, Done.
  */
-export default function ProcessStatus({
-  stages,
-  title = 'Process Status',
-}: ProcessStatusProps) {
+export default function ProcessStatus({ stages, title = 'Process Status' }: ProcessStatusProps) {
   const defaultColors = [
     '#f3f4f6', // Planning - gray
     '#3b82f6', // In Progress - blue
     '#f97316', // Review - orange
     '#a855f7', // Testing - purple
     '#10b981', // Done - green
-  ]
+  ];
 
   return (
     <Card>
@@ -44,8 +41,8 @@ export default function ProcessStatus({
         </Typography>
         <Box sx={{ display: 'flex', gap: 1.5, overflowX: 'auto', pb: 1 }}>
           {stages.map((stage, index) => {
-            const bgColor = stage.color || defaultColors[index % defaultColors.length]
-            const isLight = index === 0
+            const bgColor = stage.color || defaultColors[index % defaultColors.length];
+            const isLight = index === 0;
 
             return (
               <Card
@@ -113,10 +110,10 @@ export default function ProcessStatus({
                   </Typography>
                 </CardContent>
               </Card>
-            )
+            );
           })}
         </Box>
       </CardContent>
     </Card>
-  )
+  );
 }
