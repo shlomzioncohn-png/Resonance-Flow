@@ -1,89 +1,89 @@
-'use client'
+'use client';
 
-import { useState } from 'react'
-import Link from 'next/link'
-import Avatar from '@mui/material/Avatar'
-import Box from '@mui/material/Box'
-import Button from '@mui/material/Button'
-import Card from '@mui/material/Card'
-import CardContent from '@mui/material/CardContent'
-import Chip from '@mui/material/Chip'
-import CircularProgress from '@mui/material/CircularProgress'
-import MenuItem from '@mui/material/MenuItem'
-import Stack from '@mui/material/Stack'
-import TextField from '@mui/material/TextField'
-import Typography from '@mui/material/Typography'
-import { alpha } from '@mui/material/styles'
-import ArrowForwardOutlinedIcon from '@mui/icons-material/ArrowForwardOutlined'
-import AutoAwesomeOutlinedIcon from '@mui/icons-material/AutoAwesomeOutlined'
-import CheckCircleOutlinedIcon from '@mui/icons-material/CheckCircleOutlined'
-import ChatBubbleOutlineOutlinedIcon from '@mui/icons-material/ChatBubbleOutlineOutlined'
-import CodeOutlinedIcon from '@mui/icons-material/CodeOutlined'
-import LinkOutlinedIcon from '@mui/icons-material/LinkOutlined'
-import NotificationsActiveOutlinedIcon from '@mui/icons-material/NotificationsActiveOutlined'
-import PersonOutlineIcon from '@mui/icons-material/PersonOutlined'
-import PlayArrowOutlinedIcon from '@mui/icons-material/PlayArrowOutlined'
-import ScheduleOutlinedIcon from '@mui/icons-material/ScheduleOutlined'
-import WarningAmberOutlinedIcon from '@mui/icons-material/WarningAmberOutlined'
-import PageContainer from '@/components/layout/PageContainer'
-import { radiusTokens } from '@/theme'
-import { DetailRow, iconBadgeSx, softToneSx, statusTone } from './shared'
-import { recommendTask, updateTaskStatus, type TaskRecommendation } from '@/services/workspaceApi'
+import { useState } from 'react';
+import Link from 'next/link';
+import Avatar from '@mui/material/Avatar';
+import Box from '@mui/material/Box';
+import Button from '@mui/material/Button';
+import Card from '@mui/material/Card';
+import CardContent from '@mui/material/CardContent';
+import Chip from '@mui/material/Chip';
+import CircularProgress from '@mui/material/CircularProgress';
+import MenuItem from '@mui/material/MenuItem';
+import Stack from '@mui/material/Stack';
+import TextField from '@mui/material/TextField';
+import Typography from '@mui/material/Typography';
+import { alpha } from '@mui/material/styles';
+import ArrowForwardOutlinedIcon from '@mui/icons-material/ArrowForwardOutlined';
+import AutoAwesomeOutlinedIcon from '@mui/icons-material/AutoAwesomeOutlined';
+import CheckCircleOutlinedIcon from '@mui/icons-material/CheckCircleOutlined';
+import ChatBubbleOutlineOutlinedIcon from '@mui/icons-material/ChatBubbleOutlineOutlined';
+import CodeOutlinedIcon from '@mui/icons-material/CodeOutlined';
+import LinkOutlinedIcon from '@mui/icons-material/LinkOutlined';
+import NotificationsActiveOutlinedIcon from '@mui/icons-material/NotificationsActiveOutlined';
+import PersonOutlineIcon from '@mui/icons-material/PersonOutlined';
+import PlayArrowOutlinedIcon from '@mui/icons-material/PlayArrowOutlined';
+import ScheduleOutlinedIcon from '@mui/icons-material/ScheduleOutlined';
+import WarningAmberOutlinedIcon from '@mui/icons-material/WarningAmberOutlined';
+import PageContainer from '@/components/layout/PageContainer';
+import { radiusTokens } from '@/theme';
+import { DetailRow, iconBadgeSx, softToneSx, statusTone } from './shared';
+import { recommendTask, updateTaskStatus, type TaskRecommendation } from '@/services/workspaceApi';
 
-const TIME_OPTIONS_MIN = [15, 30, 45, 60, 90]
+const TIME_OPTIONS_MIN = [15, 30, 45, 60, 90];
 
 export default function EmployeeWorkspacePage() {
-  const [minutes, setMinutes] = useState(45)
-  const [projectFilter, setProjectFilter] = useState<string>('')
-  const [loading, setLoading] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-  const [validationError, setValidationError] = useState<string | null>(null)
-  const [recommendation, setRecommendation] = useState<TaskRecommendation | null>(null)
-  const [starting, setStarting] = useState(false)
-  const [started, setStarted] = useState(false)
+  const [minutes, setMinutes] = useState(45);
+  const [projectFilter, setProjectFilter] = useState<string>('');
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [validationError, setValidationError] = useState<string | null>(null);
+  const [recommendation, setRecommendation] = useState<TaskRecommendation | null>(null);
+  const [starting, setStarting] = useState(false);
+  const [started, setStarted] = useState(false);
 
   const findBestTask = async () => {
     // Validate input
     if (!minutes || minutes < 1) {
-      setValidationError('Available time must be at least 1 minute')
-      return
+      setValidationError('Available time must be at least 1 minute');
+      return;
     }
-    
-    setStarted(false)
-    setError(null)
-    setValidationError(null)
-    setLoading(true)
+
+    setStarted(false);
+    setError(null);
+    setValidationError(null);
+    setLoading(true);
     try {
       const result = await recommendTask({
         availableTime: minutes,
         projectFilter: projectFilter || undefined,
-      })
-      setRecommendation(result)
+      });
+      setRecommendation(result);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to fetch recommendation')
-      setRecommendation(null)
+      setError(err instanceof Error ? err.message : 'Failed to fetch recommendation');
+      setRecommendation(null);
     } finally {
-      setLoading(false)
+      setLoading(false);
     }
-  }
+  };
 
   const startTask = async () => {
-    if (!recommendation?.task) return
-    setStarting(true)
+    if (!recommendation?.task) return;
+    setStarting(true);
     try {
-      const updated = await updateTaskStatus(recommendation.task.id, 'IN_PROGRESS')
+      const updated = await updateTaskStatus(recommendation.task.id, 'IN_PROGRESS');
       // Reflect the new status in the displayed recommendation
-      setRecommendation((prev) => prev ? { ...prev, task: updated } : prev)
-      setStarted(true)
+      setRecommendation((prev) => (prev ? { ...prev, task: updated } : prev));
+      setStarted(true);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to start task')
+      setError(err instanceof Error ? err.message : 'Failed to start task');
     } finally {
-      setStarting(false)
+      setStarting(false);
     }
-  }
+  };
 
-  const task = recommendation?.task ?? null
-  const fitsWindow = task ? minutes >= task.effortEstimate : false
+  const task = recommendation?.task ?? null;
+  const fitsWindow = task ? minutes >= task.effortEstimate : false;
 
   return (
     <PageContainer title="My Workspace" description="Make the most of your available time.">
@@ -142,7 +142,13 @@ export default function EmployeeWorkspacePage() {
                 </TextField>
                 <Button
                   variant="contained"
-                  startIcon={loading ? <CircularProgress size={16} color="inherit" /> : <AutoAwesomeOutlinedIcon />}
+                  startIcon={
+                    loading ? (
+                      <CircularProgress size={16} color="inherit" />
+                    ) : (
+                      <AutoAwesomeOutlinedIcon />
+                    )
+                  }
                   onClick={findBestTask}
                   disabled={loading}
                   data-testid="recommend-btn"
@@ -156,7 +162,10 @@ export default function EmployeeWorkspacePage() {
 
         {/* Validation error */}
         {validationError && (
-          <Card sx={{ border: '1px solid', borderColor: 'warning.main' }} data-testid="validation-error">
+          <Card
+            sx={{ border: '1px solid', borderColor: 'warning.main' }}
+            data-testid="validation-error"
+          >
             <CardContent>
               <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
                 <WarningAmberOutlinedIcon color="warning" />
@@ -213,7 +222,9 @@ export default function EmployeeWorkspacePage() {
                       spacing={2}
                       sx={{ alignItems: 'center', justifyContent: 'space-between' }}
                     >
-                      <Typography variant="h6" data-testid="recommendation-task-title">{task.title}</Typography>
+                      <Typography variant="h6" data-testid="recommendation-task-title">
+                        {task.title}
+                      </Typography>
                       <Chip
                         size="small"
                         label={task.priority}
@@ -255,7 +266,13 @@ export default function EmployeeWorkspacePage() {
                         variant="contained"
                         disabled={started || starting}
                         onClick={startTask}
-                        startIcon={starting ? <CircularProgress size={16} color="inherit" /> : (!started && <PlayArrowOutlinedIcon />)}
+                        startIcon={
+                          starting ? (
+                            <CircularProgress size={16} color="inherit" />
+                          ) : (
+                            !started && <PlayArrowOutlinedIcon />
+                          )
+                        }
                         data-testid="start-task-btn"
                       >
                         {started ? 'Task started' : starting ? 'Starting…' : 'Start task'}
@@ -314,7 +331,9 @@ export default function EmployeeWorkspacePage() {
                   <Chip
                     size="small"
                     icon={<ScheduleOutlinedIcon />}
-                    label={fitsWindow ? `Fits in ${minutes} min` : `Needs ${task.effortEstimate} min`}
+                    label={
+                      fitsWindow ? `Fits in ${minutes} min` : `Needs ${task.effortEstimate} min`
+                    }
                     sx={softToneSx(fitsWindow ? 'info' : 'warning')}
                   />
                   {(task.dependencies ?? []).length > 0 && (
@@ -362,5 +381,5 @@ export default function EmployeeWorkspacePage() {
         )}
       </Stack>
     </PageContainer>
-  )
+  );
 }

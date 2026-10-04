@@ -1,34 +1,34 @@
-import type { ReactNode } from 'react'
-import Link from 'next/link'
-import Card from '@mui/material/Card'
-import Table from '@mui/material/Table'
-import TableBody from '@mui/material/TableBody'
-import TableCell from '@mui/material/TableCell'
-import TableContainer from '@mui/material/TableContainer'
-import TableHead from '@mui/material/TableHead'
-import TableRow from '@mui/material/TableRow'
+import type { ReactNode } from 'react';
+import Link from 'next/link';
+import Card from '@mui/material/Card';
+import Table from '@mui/material/Table';
+import TableBody from '@mui/material/TableBody';
+import TableCell from '@mui/material/TableCell';
+import TableContainer from '@mui/material/TableContainer';
+import TableHead from '@mui/material/TableHead';
+import TableRow from '@mui/material/TableRow';
 
 export interface DataTableColumn<Row> {
   /** Unique key for this column — used as the React key for header/body cells. */
-  key: string
-  header: string
-  render: (row: Row) => ReactNode
-  align?: 'left' | 'center' | 'right'
-  width?: string | number
+  key: string;
+  header: string;
+  render: (row: Row) => ReactNode;
+  align?: 'left' | 'center' | 'right';
+  width?: string | number;
 }
 
 export interface DataTableProps<Row> {
-  columns: DataTableColumn<Row>[]
-  rows: Row[]
-  getRowId: (row: Row) => string
+  columns: DataTableColumn<Row>[];
+  rows: Row[];
+  getRowId: (row: Row) => string;
   /**
    * When provided, each row navigates to this URL on click/Enter. Implemented
    * as a real anchor stretched over the row (not a `<tr onClick>`), so rows
    * stay keyboard- and screen-reader-accessible.
    */
-  getRowHref?: (row: Row) => string
+  getRowHref?: (row: Row) => string;
   /** Rendered instead of the table when `rows` is empty. */
-  emptyState?: ReactNode
+  emptyState?: ReactNode;
 }
 
 /**
@@ -46,7 +46,7 @@ export default function DataTable<Row>({
   emptyState,
 }: DataTableProps<Row>) {
   if (rows.length === 0 && emptyState) {
-    return <>{emptyState}</>
+    return <>{emptyState}</>;
   }
 
   return (
@@ -64,12 +64,16 @@ export default function DataTable<Row>({
           </TableHead>
           <TableBody>
             {rows.map((row) => {
-              const rowId = getRowId(row)
-              const href = getRowHref?.(row)
-              const titleCellId = `${rowId}-primary-cell`
+              const rowId = getRowId(row);
+              const href = getRowHref?.(row);
+              const titleCellId = `${rowId}-primary-cell`;
 
               return (
-                <TableRow key={rowId} hover={!!href} sx={href ? { position: 'relative' } : undefined}>
+                <TableRow
+                  key={rowId}
+                  hover={!!href}
+                  sx={href ? { position: 'relative' } : undefined}
+                >
                   {columns.map((column, index) => (
                     <TableCell
                       key={column.key}
@@ -87,11 +91,11 @@ export default function DataTable<Row>({
                     </TableCell>
                   ))}
                 </TableRow>
-              )
+              );
             })}
           </TableBody>
         </Table>
       </TableContainer>
     </Card>
-  )
+  );
 }

@@ -1,14 +1,14 @@
-import type { Meta, StoryObj } from '@storybook/nextjs-vite'
-import { fn } from 'storybook/test'
-import FilterChip from './FilterChip'
+import type { Meta, StoryObj } from '@storybook/nextjs-vite';
+import { fn } from 'storybook/test';
+import FilterChip from './FilterChip';
 
 const meta = {
   component: FilterChip,
   tags: ['ai-generated'],
-} satisfies Meta<typeof FilterChip>
+} satisfies Meta<typeof FilterChip>;
 
-export default meta
-type Story = StoryObj<typeof meta>
+export default meta;
+type Story = StoryObj<typeof meta>;
 
 export const Status: Story = {
   args: {
@@ -22,7 +22,7 @@ export const Status: Story = {
     ],
     onChange: fn(),
   },
-}
+};
 
 export const Team: Story = {
   args: {
@@ -36,7 +36,7 @@ export const Team: Story = {
     ],
     onChange: fn(),
   },
-}
+};
 
 export const SortByHealth: Story = {
   args: {
@@ -49,4 +49,4 @@ export const SortByHealth: Story = {
     ],
     onChange: fn(),
   },
-}
+};

@@ -1,12 +1,15 @@
-'use client'
+'use client';
 
-import type { Meta, StoryObj } from '@storybook/react'
-import { useEffect, useState } from 'react'
-import Box from '@mui/material/Box'
-import CircularProgress from '@mui/material/CircularProgress'
-import Alert from '@mui/material/Alert'
-import AdminProjectDetails from './AdminProjectDetails'
-import { getProjectDetails, type AdminProjectDetails as AdminProjectDetailsType } from '@/services/adminProjectsApi'
+import type { Meta, StoryObj } from '@storybook/react';
+import { useEffect, useState } from 'react';
+import Box from '@mui/material/Box';
+import CircularProgress from '@mui/material/CircularProgress';
+import Alert from '@mui/material/Alert';
+import AdminProjectDetails from './AdminProjectDetails';
+import {
+  getProjectDetails,
+  type AdminProjectDetails as AdminProjectDetailsType,
+} from '@/services/adminProjectsApi';
 
 const meta = {
   title: 'Admin/ProjectDetails',
@@ -20,44 +23,46 @@ const meta = {
     },
   },
   tags: ['autodocs'],
-} satisfies Meta<typeof AdminProjectDetails>
+} satisfies Meta<typeof AdminProjectDetails>;
 
-export default meta
-type Story = StoryObj<typeof meta>
+export default meta;
+type Story = StoryObj<typeof meta>;
 
 /**
  * Wrapper component that fetches data from API
  */
 function ProjectDetailsStory({ projectId }: { projectId: string }) {
-  const [state, setState] = useState<'loading' | 'loaded' | 'error'>('loading')
-  const [project, setProject] = useState<AdminProjectDetailsType | null>(null)
-  const [error, setError] = useState<string | null>(null)
+  const [state, setState] = useState<'loading' | 'loaded' | 'error'>('loading');
+  const [project, setProject] = useState<AdminProjectDetailsType | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     getProjectDetails(projectId)
       .then((data) => {
-        setProject(data)
-        setState('loaded')
+        setProject(data);
+        setState('loaded');
       })
       .catch((err) => {
-        setError(err.message)
-        setState('error')
-      })
-  }, [projectId])
+        setError(err.message);
+        setState('error');
+      });
+  }, [projectId]);
 
   if (state === 'loading') {
     return (
-      <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '400px' }}>
+      <Box
+        sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '400px' }}
+      >
         <CircularProgress />
       </Box>
-    )
+    );
   }
 
   if (state === 'error') {
-    return <Alert severity="error">{error}</Alert>
+    return <Alert severity="error">{error}</Alert>;
   }
 
-  if (!project) return null
+  if (!project) return null;
 
   return (
     <AdminProjectDetails
@@ -72,10 +77,21 @@ function ProjectDetailsStory({ projectId }: { projectId: string }) {
       blockedTasks={project.blockedTasks}
       completedTasks={project.completedTasks}
       progressPercentage={project.progressPercentage}
-      processStages={(project.processStages as Array<{ name: string; count: number }>).map((stage) => ({
-        ...stage,
-      }))}
-      team={(project.team as Array<{ id: string; name: string; role: string; avatar?: string; activeTasks?: number; workload?: 'Available' | 'At Capacity' | 'Overloaded' }>).map((member) => ({
+      processStages={(project.processStages as Array<{ name: string; count: number }>).map(
+        (stage) => ({
+          ...stage,
+        }),
+      )}
+      team={(
+        project.team as Array<{
+          id: string;
+          name: string;
+          role: string;
+          avatar?: string;
+          activeTasks?: number;
+          workload?: 'Available' | 'At Capacity' | 'Overloaded';
+        }>
+      ).map((member) => ({
         id: member.id,
         name: member.name,
         role: member.role,
@@ -83,7 +99,16 @@ function ProjectDetailsStory({ projectId }: { projectId: string }) {
         activeTasks: member.activeTasks,
         workload: member.workload as 'Available' | 'At Capacity' | 'Overloaded' | undefined,
       }))}
-      recentActivities={(project.recentActivities as Array<{ id: string; actor: { name: string; avatar?: string }; action: string; description: string; timestamp: string; type?: 'success' | 'warning' | 'error' | 'info' }>).map((activity) => ({
+      recentActivities={(
+        project.recentActivities as Array<{
+          id: string;
+          actor: { name: string; avatar?: string };
+          action: string;
+          description: string;
+          timestamp: string;
+          type?: 'success' | 'warning' | 'error' | 'info';
+        }>
+      ).map((activity) => ({
         id: activity.id,
         actor: activity.actor,
         action: activity.action,
@@ -95,7 +120,7 @@ function ProjectDetailsStory({ projectId }: { projectId: string }) {
       onArchive={() => alert('Archive clicked')}
       onDelete={() => alert('Delete clicked')}
     />
-  )
+  );
 }
 
 const mockTeam = [
@@ -147,7 +172,7 @@ const mockTeam = [
     activeTasks: 4,
     workload: 'Available' as const,
   },
-]
+];
 
 const mockProcessStages = [
   { name: 'Planning', count: 12 },
@@ -155,7 +180,7 @@ const mockProcessStages = [
   { name: 'Review', count: 8 },
   { name: 'Testing', count: 6 },
   { name: 'Done', count: 20 },
-]
+];
 
 const mockActivities = [
   {
@@ -198,7 +223,7 @@ const mockActivities = [
     timestamp: '5h ago',
     type: 'default' as const,
   },
-]
+];
 
 /**
  * Default healthy project with good progress
@@ -223,7 +248,7 @@ export const Healthy: Story = {
     onArchive: () => alert('Archive clicked'),
     onDelete: () => alert('Delete clicked'),
   },
-}
+};
 
 /**
  * Project at risk with moderate progress
@@ -254,7 +279,7 @@ export const AtRisk: Story = {
     onArchive: () => alert('Archive clicked'),
     onDelete: () => alert('Delete clicked'),
   },
-}
+};
 
 /**
  * Critical project requiring immediate attention
@@ -285,4 +310,4 @@ export const Critical: Story = {
     onArchive: () => alert('Archive clicked'),
     onDelete: () => alert('Delete clicked'),
   },
-}
+};

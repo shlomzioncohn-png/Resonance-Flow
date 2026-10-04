@@ -1,6 +1,6 @@
-import { alpha } from '@mui/material/styles'
-import type { PaletteOptions } from '@mui/material/styles'
-import { colorTokens, statusTokens } from './tokens'
+import { alpha } from '@mui/material/styles';
+import type { PaletteOptions } from '@mui/material/styles';
+import { colorTokens, statusTokens } from './tokens';
 
 /**
  * Adds a `status` palette group (healthy / warning / critical / neutral) for
@@ -14,31 +14,31 @@ import { colorTokens, statusTokens } from './tokens'
  */
 declare module '@mui/material/styles' {
   interface StatusPaletteEntry {
-    main: string
-    bg: string
-    text: string
+    main: string;
+    bg: string;
+    text: string;
   }
 
   interface Palette {
     status: {
-      healthy: StatusPaletteEntry
-      warning: StatusPaletteEntry
-      critical: StatusPaletteEntry
-      neutral: StatusPaletteEntry
-    }
+      healthy: StatusPaletteEntry;
+      warning: StatusPaletteEntry;
+      critical: StatusPaletteEntry;
+      neutral: StatusPaletteEntry;
+    };
     /** Dark, always-on-dark sidebar surface — independent of light/dark mode. */
     sidebar: {
-      background: string
-      text: string
-      textActive: string
-      divider: string
-      hover: string
-    }
+      background: string;
+      text: string;
+      textActive: string;
+      divider: string;
+      hover: string;
+    };
   }
 
   interface PaletteOptions {
-    status?: Palette['status']
-    sidebar?: Palette['sidebar']
+    status?: Palette['status'];
+    sidebar?: Palette['sidebar'];
   }
 }
 
@@ -84,4 +84,4 @@ export const palette: PaletteOptions = {
     divider: alpha('#ffffff', 0.08),
     hover: alpha('#ffffff', 0.06),
   },
-}
+};

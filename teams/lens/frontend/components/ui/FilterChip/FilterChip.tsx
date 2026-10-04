@@ -1,23 +1,23 @@
-'use client'
+'use client';
 
-import { useState, type MouseEvent } from 'react'
-import Chip from '@mui/material/Chip'
-import Menu from '@mui/material/Menu'
-import MenuItem from '@mui/material/MenuItem'
-import Stack from '@mui/material/Stack'
-import ArrowDropDownIcon from '@mui/icons-material/ArrowDropDown'
+import { useState, type MouseEvent } from 'react';
+import Chip from '@mui/material/Chip';
+import Menu from '@mui/material/Menu';
+import MenuItem from '@mui/material/MenuItem';
+import Stack from '@mui/material/Stack';
+import ArrowDropDownIcon from '@mui/icons-material/ArrowDropDown';
 
 export interface FilterChipOption {
-  label: string
-  value: string
+  label: string;
+  value: string;
 }
 
 export interface FilterChipProps {
   /** Prefix shown before the selected option's label, e.g. "Status" → "Status: All". */
-  label: string
-  options: FilterChipOption[]
-  value: string
-  onChange: (value: string) => void
+  label: string;
+  options: FilterChipOption[];
+  value: string;
+  onChange: (value: string) => void;
 }
 
 /**
@@ -27,15 +27,15 @@ export interface FilterChipProps {
  * misleading default "delete" label for this non-deleting use.
  */
 export default function FilterChip({ label, options, value, onChange }: FilterChipProps) {
-  const [anchorEl, setAnchorEl] = useState<HTMLElement | null>(null)
-  const selected = options.find((option) => option.value === value)
+  const [anchorEl, setAnchorEl] = useState<HTMLElement | null>(null);
+  const selected = options.find((option) => option.value === value);
 
-  const handleOpen = (event: MouseEvent<HTMLElement>) => setAnchorEl(event.currentTarget)
-  const handleClose = () => setAnchorEl(null)
+  const handleOpen = (event: MouseEvent<HTMLElement>) => setAnchorEl(event.currentTarget);
+  const handleClose = () => setAnchorEl(null);
   const handleSelect = (optionValue: string) => {
-    onChange(optionValue)
-    handleClose()
-  }
+    onChange(optionValue);
+    handleClose();
+  };
 
   return (
     <>
@@ -64,5 +64,5 @@ export default function FilterChip({ label, options, value, onChange }: FilterCh
         ))}
       </Menu>
     </>
-  )
+  );
 }

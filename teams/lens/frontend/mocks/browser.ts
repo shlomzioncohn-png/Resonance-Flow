@@ -5,7 +5,7 @@
  * components/layout/MockingProvider - see that file for why start() has to
  * be awaited before the rest of the app renders.
  */
-import { setupWorker } from 'msw/browser'
-import { handlers } from './handlers'
+import { setupWorker } from 'msw/browser';
+import { handlers } from './handlers';
 
-export const worker = setupWorker(...handlers)
+export const worker = setupWorker(...handlers);

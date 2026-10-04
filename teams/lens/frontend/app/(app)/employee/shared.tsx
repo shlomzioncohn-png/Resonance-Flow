@@ -1,10 +1,10 @@
-import type { ReactNode } from 'react'
-import Box from '@mui/material/Box'
-import Typography from '@mui/material/Typography'
-import { alpha, type Theme } from '@mui/material/styles'
-import { radiusTokens } from '@/theme'
+import type { ReactNode } from 'react';
+import Box from '@mui/material/Box';
+import Typography from '@mui/material/Typography';
+import { alpha, type Theme } from '@mui/material/styles';
+import { radiusTokens } from '@/theme';
 
-export type Tone = 'error' | 'info' | 'secondary' | 'success' | 'warning'
+export type Tone = 'error' | 'info' | 'secondary' | 'success' | 'warning';
 
 // Soft "pastel" chip look (light tinted background, matching-color text/icon) built from
 // the theme's own palette entries via alpha() — MUI's Chip has no built-in "soft" variant.
@@ -13,7 +13,7 @@ export function softToneSx(tone: Tone) {
     bgcolor: alpha(theme.palette[tone].main, 0.12),
     color: theme.palette[tone].dark,
     '& .MuiChip-icon': { color: theme.palette[tone].main },
-  })
+  });
 }
 
 export function iconBadgeSx(theme: Theme) {
@@ -27,23 +27,23 @@ export function iconBadgeSx(theme: Theme) {
     borderRadius: radiusTokens.md,
     bgcolor: alpha(theme.palette.primary.main, 0.1),
     color: 'primary.main',
-  }
+  };
 }
 
 /** Maps a task status string to a display tone. Handles both API-casing (READY/BLOCKED) and legacy mock casing (Ready/Blocked). */
 export function statusTone(status: string): Tone {
-  const normalised = status.toUpperCase()
-  if (normalised === 'READY' || normalised === 'COMPLETED') return 'success'
-  if (normalised === 'IN_PROGRESS') return 'info'
-  return 'warning' // BLOCKED or unknown
+  const normalised = status.toUpperCase();
+  if (normalised === 'READY' || normalised === 'COMPLETED') return 'success';
+  if (normalised === 'IN_PROGRESS') return 'info';
+  return 'warning'; // BLOCKED or unknown
 }
 
 /** Maps a task priority string to a display tone. Handles both API-casing (HIGH/MEDIUM/LOW) and legacy mock casing. */
 export function priorityTone(priority: string): Tone {
-  const normalised = priority.toUpperCase()
-  if (normalised === 'HIGH') return 'error'
-  if (normalised === 'MEDIUM') return 'warning'
-  return 'success' // LOW or unknown
+  const normalised = priority.toUpperCase();
+  if (normalised === 'HIGH') return 'error';
+  if (normalised === 'MEDIUM') return 'warning';
+  return 'success'; // LOW or unknown
 }
 
 export function DetailRow({ label, value }: { label: string; value: ReactNode }) {
@@ -54,5 +54,5 @@ export function DetailRow({ label, value }: { label: string; value: ReactNode })
       </Typography>
       <Box sx={{ typography: 'body2', mt: 0.25 }}>{value}</Box>
     </Box>
-  )
+  );
 }

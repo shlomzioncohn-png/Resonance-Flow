@@ -9,6 +9,7 @@ import org.springframework.security.config.annotation.web.configuration.EnableWe
 import org.springframework.security.config.annotation.web.configurers.AbstractHttpConfigurer;
 import org.springframework.security.config.http.SessionCreationPolicy;
 import org.springframework.security.web.SecurityFilterChain;
+import org.springframework.web.cors.CorsConfigurationSource;
 
 /**
  * Security configuration for the Gateway.
@@ -39,16 +40,22 @@ public class SecurityConfig {
     @Value("${app.auth.enabled:false}")
     private boolean authEnabled;
 
+    private final CorsConfigurationSource corsConfigurationSource;
+
+    public SecurityConfig(CorsConfigurationSource corsConfigurationSource) {
+        this.corsConfigurationSource = corsConfigurationSource;
+    }
+
     @Bean
     public SecurityFilterChain filterChain(HttpSecurity http,
                                            SecurityErrorHandler securityErrorHandler) throws Exception {
         http
+            // Enable CORS with the origin whitelist from CorsConfig, so browser preflight
+            // (OPTIONS, which never carries a token) isn't rejected as 401
+            .cors(cors -> cors.configurationSource(corsConfigurationSource))
             // Disable CSRF — Gateway is a stateless API, no session cookies
             .csrf(AbstractHttpConfigurer::disable)
-            .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
-            // Use the CORS mappings from GatewayApplication, so browser preflight
-            // (OPTIONS, which never carries a token) isn't rejected as 401
-            .cors(Customizer.withDefaults());
+            .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS));
 
         if (authEnabled) {
             http

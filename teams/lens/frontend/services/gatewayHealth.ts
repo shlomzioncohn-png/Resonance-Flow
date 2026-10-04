@@ -1,15 +1,15 @@
-import { api } from './api'
+import { api } from './api';
 
 /** Shape of the Gateway's own /health response (GATEWAY_CONTRACT.md §5). */
 export interface GatewayHealth {
-  status: string
-  service: string
-  version: string
-  timestamp: string
+  status: string;
+  service: string;
+  version: string;
+  timestamp: string;
   dependencies?: {
-    bff: 'UP' | 'DOWN' | 'UNKNOWN'
-    bff_url: string
-  }
+    bff: 'UP' | 'DOWN' | 'UNKNOWN';
+    bff_url: string;
+  };
 }
 
 /**
@@ -20,5 +20,5 @@ export interface GatewayHealth {
  * docs/api-integration-status.md).
  */
 export function fetchGatewayHealth() {
-  return api.get<GatewayHealth>('/health')
+  return api.get<GatewayHealth>('/health');
 }

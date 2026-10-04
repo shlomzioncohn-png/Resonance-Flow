@@ -5,33 +5,33 @@
  * one layer down, at the BFF (com.rnd.bff.client.EmployeeClient) — this call
  * is real, straight through the Gateway, same as services/workspaceApi.ts.
  */
-import { api } from './api'
+import { api } from './api';
 
 export interface TaskRef {
-  id: string
-  title: string
-  owner: string
+  id: string;
+  title: string;
+  owner: string;
 }
 
 export interface EmployeeTask {
-  id: string
-  title: string
-  team: string
-  priority: 'High' | 'Medium' | 'Low'
-  status: 'Ready' | 'Blocked'
-  description: string
-  owner: string
-  due: string
-  estimatedMinutes: number
-  createdAt: string
-  source: string
-  sprint: string
-  tags: string[]
-  blockedBy: TaskRef[]
-  blocks: TaskRef[]
-  blockingReason: string | null
+  id: string;
+  title: string;
+  team: string;
+  priority: 'High' | 'Medium' | 'Low';
+  status: 'Ready' | 'Blocked';
+  description: string;
+  owner: string;
+  due: string;
+  estimatedMinutes: number;
+  createdAt: string;
+  source: string;
+  sprint: string;
+  tags: string[];
+  blockedBy: TaskRef[];
+  blocks: TaskRef[];
+  blockingReason: string | null;
 }
 
 export function getMyTask(): Promise<EmployeeTask> {
-  return api.get<EmployeeTask>('/api/workspace/employee-task')
+  return api.get<EmployeeTask>('/api/workspace/employee-task');
 }

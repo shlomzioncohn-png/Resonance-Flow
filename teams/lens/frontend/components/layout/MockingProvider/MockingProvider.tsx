@@ -1,6 +1,6 @@
-'use client'
+'use client';
 
-import { useEffect, useState, type ReactNode } from 'react'
+import { useEffect, useState, type ReactNode } from 'react';
 
 /**
  * Starts the MSW browser worker (mocks/browser.ts) before rendering
@@ -28,15 +28,15 @@ import { useEffect, useState, type ReactNode } from 'react'
 // effect run (both StrictMode passes, and any real remount) shares the
 // same single start() call. It naturally resets on a real page navigation,
 // since that re-evaluates this module from scratch.
-let startPromise: Promise<void> | null = null
+let startPromise: Promise<void> | null = null;
 
 export function MockingProvider({ children }: { children: ReactNode }) {
-  const [ready, setReady] = useState(process.env.NODE_ENV !== 'development')
+  const [ready, setReady] = useState(process.env.NODE_ENV !== 'development');
 
   useEffect(() => {
-    if (process.env.NODE_ENV !== 'development') return
+    if (process.env.NODE_ENV !== 'development') return;
 
-    let cancelled = false
+    let cancelled = false;
 
     if (!startPromise) {
       startPromise = import('@/mocks/browser').then(({ worker }) =>
@@ -49,19 +49,19 @@ export function MockingProvider({ children }: { children: ReactNode }) {
             onUnhandledRequest: 'bypass',
           })
           .then(() => undefined),
-      )
+      );
     }
-    const started = startPromise
+    const started = startPromise;
 
     started.then(() => {
-      if (!cancelled) setReady(true)
-    })
+      if (!cancelled) setReady(true);
+    });
     return () => {
-      cancelled = true
-    }
-  }, [])
+      cancelled = true;
+    };
+  }, []);
 
-  if (!ready) return null
+  if (!ready) return null;
 
-  return <>{children}</>
+  return <>{children}</>;
 }

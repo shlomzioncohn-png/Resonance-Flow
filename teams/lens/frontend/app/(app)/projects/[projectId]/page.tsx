@@ -1,12 +1,12 @@
-import PageContainer from '@/components/layout/PageContainer'
-import EmptyState from '@/components/feedback/EmptyState'
+import PageContainer from '@/components/layout/PageContainer';
+import EmptyState from '@/components/feedback/EmptyState';
 
 export default async function ProjectDetailPage({
   params,
 }: {
-  params: Promise<{ projectId: string }>
+  params: Promise<{ projectId: string }>;
 }) {
-  const { projectId } = await params
+  const { projectId } = await params;
 
   return (
     <PageContainer
@@ -18,5 +18,5 @@ export default async function ProjectDetailPage({
         description={`Workload and status detail for project "${projectId}" will appear here once connected to real data.`}
       />
     </PageContainer>
-  )
+  );
 }

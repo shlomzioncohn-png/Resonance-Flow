@@ -1,25 +1,25 @@
-'use client'
+'use client';
 
-import Card from '@mui/material/Card'
-import Stack from '@mui/material/Stack'
-import Typography from '@mui/material/Typography'
-import { useTheme } from '@mui/material/styles'
-import type { StatusTone } from '../StatusBadge'
+import Card from '@mui/material/Card';
+import Stack from '@mui/material/Stack';
+import Typography from '@mui/material/Typography';
+import { useTheme } from '@mui/material/styles';
+import type { StatusTone } from '../StatusBadge';
 
 export interface KpiTileProps {
-  value: number
-  label: string
+  value: number;
+  label: string;
   /**
    * Workflow-health tone the number is colored by. 'neutral' is a plain
    * count (e.g. "Total projects") and reads as dark text rather than the
    * pale gray `status.neutral` swatch, which would look disabled here.
    */
-  tone: StatusTone
+  tone: StatusTone;
 }
 
 export default function KpiTile({ value, label, tone }: KpiTileProps) {
-  const theme = useTheme()
-  const color = tone === 'neutral' ? theme.palette.text.primary : theme.palette.status[tone].main
+  const theme = useTheme();
+  const color = tone === 'neutral' ? theme.palette.text.primary : theme.palette.status[tone].main;
 
   return (
     <Card sx={{ px: 3, py: 2.5, flex: 1 }}>
@@ -32,5 +32,5 @@ export default function KpiTile({ value, label, tone }: KpiTileProps) {
         </Typography>
       </Stack>
     </Card>
-  )
+  );
 }

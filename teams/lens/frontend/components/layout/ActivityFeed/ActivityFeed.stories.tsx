@@ -1,14 +1,14 @@
-import type { Meta, StoryObj } from '@storybook/react'
-import ActivityFeed from './ActivityFeed'
+import type { Meta, StoryObj } from '@storybook/react';
+import ActivityFeed from './ActivityFeed';
 
 const meta = {
   title: 'Admin/ActivityFeed',
   component: ActivityFeed,
   tags: ['autodocs'],
-} satisfies Meta<typeof ActivityFeed>
+} satisfies Meta<typeof ActivityFeed>;
 
-export default meta
-type Story = StoryObj<typeof meta>
+export default meta;
+type Story = StoryObj<typeof meta>;
 
 const mockActivities = [
   {
@@ -51,31 +51,31 @@ const mockActivities = [
     timestamp: '5h ago',
     type: 'default' as const,
   },
-]
+];
 
 export const Default: Story = {
   args: {
     activities: mockActivities,
   },
-}
+};
 
 export const Limited: Story = {
   args: {
     activities: mockActivities,
     maxItems: 3,
   },
-}
+};
 
 export const Empty: Story = {
   args: {
     activities: [],
     title: 'Activity Feed',
   },
-}
+};
 
 export const CustomTitle: Story = {
   args: {
     activities: mockActivities,
     title: 'Project Timeline',
   },
-}
+};

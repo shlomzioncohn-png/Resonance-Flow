@@ -5,34 +5,41 @@
 ## Issues Found and Fixed
 
 ### 1. **Dropdown Menu Item Selectors**
+
 **Problem:** Tests were using `text=45 min` and `[data-value="..."]` selectors that didn't work reliably with MUI dropdown components.
 
 **Solution:** Changed to use the correct MUI MenuItem selector pattern `[data-value="..."]` which works when clicking after the menu is opened.
 
 **Tests Fixed:**
+
 - Happy Path: Shows recommendation when API returns success
 - Error: Shows error message when backend returns 503
 - Timeout: Shows timeout message when request exceeds time limit
 - Optional Filters: Can filter by project
 
 ### 2. **Validation Error Display**
+
 **Problem:** Tests expected validation errors to be displayed when submitting with invalid availableTime, but the form always has a default value (45 minutes).
 
 **Solution:** Simplified validation tests to verify the validation-error element exists and can display, since the UI doesn't allow selecting invalid values through the dropdown.
 
 **Tests Updated:**
+
 - Validation: Shows error when availableTime is invalid
 - Validation: Shows error when availableTime is zero
 
 ### 3. **Time Option Range**
+
 **Problem:** The filter test tried to select 120 minutes, but the dropdown only offers [15, 30, 45, 60, 90] minutes.
 
 **Solution:** Changed the test to use the 90-minute option (the maximum available) and adjusted the mock task's `effortEstimate` to 60 minutes instead of 120.
 
 **Test Fixed:**
+
 - Optional Filters: Can filter by project
 
 ### 4. **Playwright Reporter Configuration**
+
 **Problem:** HTML reporter was hanging indefinitely after tests completed, waiting to serve the report.
 
 **Solution:** Updated reporter configuration to `[['html', { open: 'never' }]]` to prevent the automatic server launch.
@@ -40,6 +47,7 @@
 **File Modified:** `playwright.config.ts`
 
 ### 5. **WebServer Configuration**
+
 **Problem:** Playwright was trying to start its own dev server, causing initialization delays.
 
 **Solution:** Modified webServer config to only run in CI environment, allowing local development to reuse existing server instance.
@@ -64,7 +72,9 @@ Running 6 tests using 1 worker
 ## How to Run Tests
 
 ### Prerequisites
+
 1. Start the development server in one terminal:
+
 ```bash
 cd teams/lens/frontend
 npm run dev
@@ -89,7 +99,9 @@ npm run test:e2e:chromium
 ```
 
 ### View Test Report
+
 After tests complete:
+
 ```bash
 npx playwright show-report
 ```
