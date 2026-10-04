@@ -182,6 +182,11 @@ issuer — gets a JSON `401 UNAUTHORIZED` and **never reaches the BFF**.
 
 `/health`, `/health/ready` and Swagger stay public.
 
+> **Enforcement is off by default** (`app.auth.enabled` / `APP_AUTH_ENABLED=false`)
+> until the frontend logs in through Keycloak and sends the token (Auth stage 3).
+> While off, `/api/**` is open and any `Authorization` header is ignored. Set
+> `APP_AUTH_ENABLED=true` to test with real tokens (as in the curl example below).
+
 > Still mocked (Auth stage 2): the userId forwarded to BFF as `X-User-Id` is
 > still `emp_001`, not the token's `sub`, and roles aren't enforced yet.
 
@@ -214,8 +219,9 @@ curl -i http://localhost:8080/api/workspace/tasks -H "Authorization: Bearer $TOK
 curl -i http://localhost:8080/api/workspace/tasks                                     # 401
 ```
 
-Tokens live 5 minutes. Automated coverage of every rejection case is in
-`SecurityJwtValidationTests`.
+The `# 401` line assumes `APP_AUTH_ENABLED=true`. Tokens live 5 minutes.
+Automated coverage of every rejection case is in `SecurityJwtValidationTests`;
+the off switch is covered by `AuthDisabledTests`.
 
 ---
 

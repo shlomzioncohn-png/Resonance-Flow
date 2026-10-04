@@ -24,6 +24,9 @@ public class SecurityValidationConfig {
     @Value("${app.dev-mode:false}")
     private boolean devMode;
 
+    @Value("${app.auth.enabled:false}")
+    private boolean authEnabled;
+
     @Value("${spring.security.oauth2.resourceserver.jwt.issuer-uri:#{null}}")
     private String jwtIssuerUri;
 
@@ -40,6 +43,10 @@ public class SecurityValidationConfig {
         if (jwkSetUri == null || jwkSetUri.isBlank()) {
             fail("JWKS URL (spring.security.oauth2.resourceserver.jwt.jwk-set-uri / KEYCLOAK_JWK_SET_URI) " +
                     "must be configured. Without it, token signatures cannot be verified.");
+        }
+
+        if (!authEnabled) {
+            logger.warn("⚠️  AUTH DISABLED (app.auth.enabled=false): /api/** accepts requests without a JWT.");
         }
 
         if (devMode) {

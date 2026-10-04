@@ -13,6 +13,9 @@ spring:
 
 app:
   dev-mode: true
+  # Tests run with enforcement on; AuthDisabledTests covers the off switch
+  auth:
+    enabled: true
 
 bff:
   service:
