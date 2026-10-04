@@ -52,10 +52,9 @@ export default function ManagerDashboardPage() {
   const [teamFilter, setTeamFilter] = useState('all');
   const [ownerFilter, setOwnerFilter] = useState('all');
   const [sort, setSort] = useState('health');
-  //TODO: Make a STORY and implement MSW
-  //TODO: Delete simulateError
-  const fetchProjects = useCallback((simulateError: boolean) => {
-    return getProjects(simulateError)
+
+  const fetchProjects = useCallback(() => {
+    return getProjects()
       .then((data) => {
         setProjects(data);
         setFetchStatus('loaded');
@@ -65,11 +64,11 @@ export default function ManagerDashboardPage() {
 
   const retry = useCallback(() => {
     setFetchStatus('loading');
-    fetchProjects(false);
+    fetchProjects();
   }, [fetchProjects]);
 
   useEffect(() => {
-    fetchProjects(false);
+    fetchProjects();
   }, [fetchProjects]);
 
   const teamOptions = useMemo(() => optionsFrom(projects.map((p) => p.team)), [projects]);
