@@ -4,6 +4,8 @@ import com.rnd.bridge.jira.dto.JiraIssue;
 import com.rnd.bridge.jira.dto.JiraIssueFields;
 import com.rnd.bridge.jira.dto.JiraStatus;
 import com.rnd.bridge.task.AbstractTaskMapper;
+import com.rnd.bridge.task.enrichment.EnrichmentProperties;
+import com.rnd.bridge.task.enrichment.TaskEnricher;
 import com.rnd.bridge.task.model.RoleContext;
 import com.rnd.bridge.task.model.SourceType;
 import com.rnd.bridge.task.model.TaskStatus;
@@ -14,6 +16,10 @@ import java.time.Instant;
 
 @Component
 public class JiraIssueMapper extends AbstractTaskMapper<JiraIssue> {
+
+    public JiraIssueMapper(EnrichmentProperties enrichmentProperties, TaskEnricher taskEnricher) {
+        super(enrichmentProperties, taskEnricher);
+    }
 
     @Override
     protected SourceType sourceType() {

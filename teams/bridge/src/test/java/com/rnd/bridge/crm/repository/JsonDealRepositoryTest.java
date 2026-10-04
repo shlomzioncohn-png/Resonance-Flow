@@ -2,6 +2,8 @@ package com.rnd.bridge.crm.repository;
 
 import com.rnd.bridge.crm.mapper.DealToTaskMapper;
 import com.rnd.bridge.crm.model.Deal;
+import com.rnd.bridge.task.enrichment.EnrichmentProperties;
+import com.rnd.bridge.task.enrichment.NoOpTaskEnricher;
 import com.rnd.bridge.crm.model.DealStage;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -23,7 +25,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 
 class JsonDealRepositoryTest {
 
-    private static final DealToTaskMapper MAPPER = new DealToTaskMapper("org-test-0000");
+    private static final DealToTaskMapper MAPPER = new DealToTaskMapper("org-test-0000", new EnrichmentProperties(), new NoOpTaskEnricher());
 
     private DealRepository repository;
 

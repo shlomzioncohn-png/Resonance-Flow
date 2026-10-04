@@ -97,7 +97,7 @@ public class TaskStateReconciliationService {
         List<TaskDependency> dependencies = taskDependencyRepository.findByTaskId(taskId);
 
         List<UUID> blockerIds = dependencies.stream()
-                .map(TaskDependency::getDependsOnTaskId)
+                .map(TaskDependency::dependsOnTaskId)
                 .collect(Collectors.toList());
 
         if (blockerIds.isEmpty()) {

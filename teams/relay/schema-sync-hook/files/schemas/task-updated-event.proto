@@ -42,6 +42,7 @@ message TaskUpdatedEvent {
   optional string suggested_owner_user_id = 18;       // UUID as string. Nullable - set later by MIND (Task.java: suggestedOwnerUser, no nullable = false).
   optional float suggested_owner_confidence = 19;
   google.protobuf.Timestamp updated_at = 20;
+  optional string owner_id = 21;                     // UUID as string.
 }
 
 enum SourceType {

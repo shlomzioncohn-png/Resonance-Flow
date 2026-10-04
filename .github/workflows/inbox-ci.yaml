@@ -34,4 +34,3 @@ jobs:
       service_name: inbox
       service_dir: teams/inbox
       language: java
-      container_port: 8080
