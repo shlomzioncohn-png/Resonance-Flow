@@ -106,12 +106,16 @@ def main() -> None:
             print(f"Could not load input from {args.input!r}: {e}", file=sys.stderr)
             sys.exit(1)
 
-    report = evaluate_extraction(
-        extracted,
-        annotated,
-        similarity=placeholder_similarity,
-        threshold=args.threshold,
-    )
+    try:
+        report = evaluate_extraction(
+            extracted,
+            annotated,
+            similarity=placeholder_similarity,
+            threshold=args.threshold,
+        )
+    except ValueError as e:
+        print(f"Extraction eval aborted: {e}", file=sys.stderr)
+        sys.exit(1)
 
     print("\n=== Extraction-Quality Eval ===")
     print(f"Input:              {source}")

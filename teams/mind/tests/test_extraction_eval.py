@@ -10,6 +10,9 @@ strings are equal) with `threshold=1.0`, so the expected counts are unambiguous.
 The fixture test and the paraphrase test use the real `placeholder_similarity`.
 """
 
+import itertools
+import math
+
 import pytest
 
 from mind.evaluation.extraction_eval import (
@@ -211,3 +214,82 @@ def test_matching_is_insensitive_to_formatting():
     )
 
     assert report.true_positives == 1
+
+
+# --- a bad similarity or threshold must fail loudly, never score ----------------------
+
+_BAD_VALUES = [
+    pytest.param(float("nan"), id="nan"),
+    pytest.param(math.inf, id="inf"),
+    pytest.param(-math.inf, id="-inf"),
+    pytest.param(1.5, id="above-1"),
+    pytest.param(-0.1, id="below-0"),
+    pytest.param(None, id="none"),
+    pytest.param("0.9", id="string"),
+    pytest.param(True, id="bool"),
+]
+
+
+@pytest.mark.parametrize("bad", _BAD_VALUES)
+def test_invalid_similarity_score_is_rejected(bad):
+    # Regression for the NaN case: this used to return matched=1, precision=recall=1.0.
+    with pytest.raises(ValueError, match=r"similarity\('task a', 'task a'\) must be"):
+        evaluate_extraction(
+            ["task a"], ["task a"], similarity=lambda _a, _b: bad, threshold=0.6
+        )
+
+
+@pytest.mark.parametrize("bad", _BAD_VALUES)
+def test_invalid_threshold_is_rejected(bad):
+    with pytest.raises(ValueError, match="threshold must be"):
+        evaluate_extraction(["a"], ["a"], similarity=_exact, threshold=bad)
+
+
+def test_one_bad_score_among_good_ones_still_fails():
+    # Only one pair misbehaves; the run must not quietly score around it.
+    def flaky(a: str, b: str) -> float:
+        return float("nan") if (a, b) == ("x y z", "q r s") else _exact(a, b)
+
+    with pytest.raises(ValueError, match="x y z"):
+        evaluate_extraction(
+            ["a b c", "x y z"], ["a b c", "q r s"], similarity=flaky, threshold=0.6
+        )
+
+
+def test_boundary_scores_and_integer_scores_are_accepted():
+    for score in (0, 1, 0.0, 1.0):
+        evaluate_extraction(
+            ["a"], ["b"], similarity=lambda _a, _b, s=score: s, threshold=0.5
+        )
+    for threshold in (0, 1, 0.0, 1.0):
+        evaluate_extraction(["a"], ["a"], similarity=_exact, threshold=threshold)
+
+
+@pytest.mark.parametrize("shape", [(1, 1), (1, 2), (2, 1), (2, 2), (2, 3)])
+def test_every_valid_score_grid_satisfies_the_matching_invariants(shape):
+    """Exhaustive over small shapes: every grid of valid scores yields a coherent report."""
+    n_extracted, n_annotated = shape
+    extracted = [f"e{i}" for i in range(n_extracted)]
+    annotated = [f"a{j}" for j in range(n_annotated)]
+    cells = [(e, a) for e in extracted for a in annotated]
+
+    for scores in itertools.product([0.0, 0.3, 0.6, 1.0], repeat=len(cells)):
+        grid = dict(zip(cells, scores, strict=True))
+        for threshold in (0.0, 0.6, 1.0):
+            report = evaluate_extraction(
+                extracted,
+                annotated,
+                similarity=lambda a, b, grid=grid: grid[(a, b)],
+                threshold=threshold,
+            )
+            tp = report.true_positives
+            assert tp <= min(n_extracted, n_annotated)
+            assert 0.0 <= report.precision <= 1.0
+            assert 0.0 <= report.recall <= 1.0
+            assert 0.0 <= report.f1 <= 1.0
+            assert all(pair.similarity >= threshold for pair in report.matched)
+            # one-to-one, and every item is accounted for exactly once
+            assert len({pair.extracted for pair in report.matched}) == tp
+            assert len({pair.annotated for pair in report.matched}) == tp
+            assert tp + len(report.false_positives) == n_extracted
+            assert tp + len(report.missed) == n_annotated

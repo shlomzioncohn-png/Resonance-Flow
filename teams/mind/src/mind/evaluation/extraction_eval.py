@@ -32,6 +32,7 @@ approaches on a fixed reference, not to certify an absolute quality score. See
 `extraction_eval_design.md` §7.
 """
 
+import numbers
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 
@@ -93,6 +94,24 @@ def _normalize(text: str) -> str:
     return collapsed.lower().removesuffix(".")
 
 
+def _checked_unit_interval(value: object, what: str) -> float:
+    """Return `value` as a float, or raise `ValueError` if it is not a real number in [0, 1].
+
+    `similarity` is caller-supplied and `threshold` is a call-site knob, so neither is
+    trusted. The check matters most for NaN: `nan < threshold` is `False`, so a NaN
+    score slips past the matching loop's early `break` and is matched as if it had
+    cleared the bar — the eval would report a perfect score instead of failing.
+    `bool` is rejected too (`True` is an `int`, but is never a similarity).
+    """
+    if (
+        isinstance(value, bool)
+        or not isinstance(value, numbers.Real)
+        or not 0.0 <= value <= 1.0
+    ):
+        raise ValueError(f"{what} must be a real number in [0, 1]; got {value!r}")
+    return float(value)
+
+
 # Threshold calibrated for `placeholder_similarity` (Jaccard). Not the locked lexical
 # tau = 0.60 of `extraction_eval_design.md` §6, which belongs to the `rapidfuzz` backend.
 PLACEHOLDER_THRESHOLD = 0.5
@@ -146,14 +165,26 @@ def evaluate_extraction(
     and whose score clears `threshold`. A merge (two annotations → one extracted
     item) therefore surfaces as one true positive plus one missed annotation,
     rather than being hidden.
+
+    Raises `ValueError` if `threshold`, or any score `similarity` returns, is not a
+    real number in [0, 1] (NaN, infinity, out-of-range, non-numeric). A measuring
+    tool must fail loudly here: a NaN score would otherwise be matched silently and
+    reported as a perfect run.
     """
+    threshold = _checked_unit_interval(threshold, "threshold")
     norm_extracted = [_normalize(item) for item in extracted]
     norm_annotated = [_normalize(item) for item in annotated]
 
     # Every (extracted, annotated) pair with its score. `ei` / `ai` are indices
     # back into the original (un-normalized) lists, kept for the report.
     scored_pairs = [
-        (similarity(norm_e, norm_a), ei, ai)
+        (
+            _checked_unit_interval(
+                similarity(norm_e, norm_a), f"similarity({norm_e!r}, {norm_a!r})"
+            ),
+            ei,
+            ai,
+        )
         for ei, norm_e in enumerate(norm_extracted)
         for ai, norm_a in enumerate(norm_annotated)
     ]
