@@ -118,6 +118,21 @@ class TaskUpdatedEventHandlerIntegrationTest {
         fail("Timed out waiting for: " + description);
     }
 
+    /** Like {@link KafkaTestUtils#getSingleRecord}, but filtered by key - needed when the topic
+     * may already carry unrelated records from an earlier test method in this same class. */
+    private static ConsumerRecord<String, String> awaitRecordWithKey(
+            Consumer<String, String> consumer, String key, java.time.Duration timeout) {
+        long deadline = System.currentTimeMillis() + timeout.toMillis();
+        while (System.currentTimeMillis() < deadline) {
+            for (ConsumerRecord<String, String> record : consumer.poll(java.time.Duration.ofMillis(200))) {
+                if (key.equals(record.key())) {
+                    return record;
+                }
+            }
+        }
+        return null;
+    }
+
     @Test
     void validNewerEvent_appliesTheStatusChangeAndStampsUpdatedAt() throws InterruptedException {
         UUID taskId = UUID.randomUUID();
@@ -226,5 +241,41 @@ class TaskUpdatedEventHandlerIntegrationTest {
 
         awaitUntil("a later retry attempt to succeed now that the task exists", () ->
                 taskRepository.findById(taskId).map(t -> t.getStatus() == TaskStatus.ACTIVE).orElse(false));
+    }
+
+    @Test
+    void referencedTaskThatNeverArrives_exhaustsRetriesThenLandsOnErrors() {
+        // PR #467 review: coverage existed for "retries then succeeds" (the race above) but not
+        // for "retries exhaust, then lands on .errors" - this task never gets created at all.
+        UUID taskId = UUID.randomUUID();
+
+        Map<String, Object> consumerProps = new HashMap<>();
+        consumerProps.put(ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG, bootstrapServers);
+        consumerProps.put(ConsumerConfig.GROUP_ID_CONFIG, "errors-topic-probe-exhaustion");
+        consumerProps.put(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "earliest");
+        consumerProps.put(ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class);
+        consumerProps.put(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class);
+        Consumer<String, String> errorsProbe = new DefaultKafkaConsumerFactory<>(consumerProps,
+                new StringDeserializer(), new StringDeserializer()).createConsumer();
+        errorsProbe.subscribe(java.util.List.of(ERROR_TOPIC));
+
+        Instant beforeSend = Instant.now();
+        producer.send(TOPIC, taskId.toString(), TaskUpdatedEvent.newBuilder()
+                .setTaskId(taskId.toString())
+                .setStatus(com.rnd.inbox.event.TaskStatus.TASK_STATUS_IN_PROGRESS)
+                .setUpdatedAt(timestamp(BASE_TIME))
+                .build());
+
+        // 3 attempts, 2s backoff -> 2 waits before exhaustion (~4s) - arriving any sooner would
+        // mean it skipped straight to .errors without actually retrying. Filtered by key: .errors
+        // is shared across every test method in this class (reuseForks=false only isolates
+        // between classes), so an unrelated record already sitting there from an earlier test
+        // (e.g. malformedEvent's "bad-key") could otherwise satisfy a key-blind read instantly.
+        ConsumerRecord<String, String> onErrorsTopic =
+                awaitRecordWithKey(errorsProbe, taskId.toString(), java.time.Duration.ofSeconds(15));
+        assertNotNull(onErrorsTopic, "a referenced task that never arrives must exhaust retries and land on .errors");
+        assertTrue(Instant.now().isAfter(beforeSend.plusMillis(3500)),
+                "arrival before ~2 backoff intervals have elapsed means retries didn't actually happen");
+        errorsProbe.close();
     }
 }

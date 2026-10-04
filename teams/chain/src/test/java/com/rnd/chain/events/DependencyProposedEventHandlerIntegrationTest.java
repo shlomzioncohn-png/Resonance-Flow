@@ -14,6 +14,7 @@ import org.apache.kafka.clients.consumer.Consumer;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.kafka.clients.producer.ProducerConfig;
+import org.apache.kafka.common.serialization.ByteArraySerializer;
 import org.apache.kafka.common.serialization.StringDeserializer;
 import org.apache.kafka.common.serialization.StringSerializer;
 import org.junit.jupiter.api.BeforeEach;
@@ -186,6 +187,40 @@ class DependencyProposedEventHandlerIntegrationTest {
         ConsumerRecord<String, String> onErrorsTopic =
                 KafkaTestUtils.getSingleRecord(errorsProbe, ERROR_TOPIC, java.time.Duration.ofMillis(3000));
         assertNotNull(onErrorsTopic, "a malformed event must land on .errors well under one retry backoff (5s)");
+        errorsProbe.close();
+    }
+
+    @Test
+    void genuinelyMalformedBytes_notValidProtobufAtAll_alsoGoesStraightToTheErrorsTopic() {
+        // PR #467 review: every "malformed" test above sends well-formed Protobuf with an
+        // invalid field value - an application-level failure (parseUuid), not a deserialization
+        // failure. ChainProtobufKafkaConfig's own Javadoc makes a specific claim that
+        // ErrorHandlingDeserializer routes wrong-schema/corrupt bytes through the same error
+        // path - this sends bytes that aren't Confluent-wire-format Protobuf at all (no magic
+        // byte/schema-id prefix) to actually exercise that claim.
+        Map<String, Object> rawProducerProps = new HashMap<>();
+        rawProducerProps.put(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, bootstrapServers);
+        rawProducerProps.put(ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG, StringSerializer.class);
+        rawProducerProps.put(ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG, ByteArraySerializer.class);
+        KafkaTemplate<String, byte[]> rawProducer = new KafkaTemplate<>(new DefaultKafkaProducerFactory<>(rawProducerProps));
+
+        Map<String, Object> consumerProps = new HashMap<>();
+        consumerProps.put(ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG, bootstrapServers);
+        consumerProps.put(ConsumerConfig.GROUP_ID_CONFIG, "errors-topic-probe-raw-bytes");
+        consumerProps.put(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "earliest");
+        consumerProps.put(ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class);
+        consumerProps.put(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class);
+        Consumer<String, String> errorsProbe = new DefaultKafkaConsumerFactory<>(consumerProps,
+                new StringDeserializer(), new StringDeserializer()).createConsumer();
+        errorsProbe.subscribe(java.util.List.of(ERROR_TOPIC));
+
+        rawProducer.send(TOPIC, "bad-key",
+                "this is not protobuf at all, not even close".getBytes(java.nio.charset.StandardCharsets.UTF_8));
+
+        ConsumerRecord<String, String> onErrorsTopic =
+                KafkaTestUtils.getSingleRecord(errorsProbe, ERROR_TOPIC, java.time.Duration.ofSeconds(15));
+        assertNotNull(onErrorsTopic,
+                "genuinely malformed (non-protobuf) bytes must also land on .errors via ErrorHandlingDeserializer");
         errorsProbe.close();
     }
 

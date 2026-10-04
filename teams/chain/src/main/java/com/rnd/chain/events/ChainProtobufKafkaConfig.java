@@ -9,6 +9,7 @@ import io.confluent.kafka.serializers.protobuf.KafkaProtobufSerializer;
 import io.confluent.kafka.serializers.protobuf.KafkaProtobufSerializerConfig;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
 import org.apache.kafka.clients.producer.ProducerConfig;
+import org.apache.kafka.common.serialization.Serializer;
 import org.apache.kafka.common.serialization.StringDeserializer;
 import org.apache.kafka.common.serialization.StringSerializer;
 import org.springframework.beans.factory.annotation.Value;
@@ -45,6 +46,17 @@ import java.util.Map;
  * indefinitely: a message that should go straight to `.errors` instead never arrives there at
  * all. Caught by DependencyProposedEventHandlerIntegrationTest's malformed-event test - a real,
  * production-impacting bug this Protobuf-typed template fixes, not just a test artifact.
+ *
+ * PR #467 review follow-up: that same Protobuf-typed template then broke the OTHER direction -
+ * a genuine deserialization failure (corrupt/non-Protobuf bytes, not a well-formed message with
+ * an invalid field) has no decoded object at all, only the original raw bytes.
+ * DeadLetterPublishingRecoverer republishes those raw {@code byte[]} through this same template,
+ * and {@code KafkaProtobufSerializer} can only serialize a {@code Message}, so the DLT publish
+ * itself threw a ClassCastException - the publish failure then retried the recovery indefinitely,
+ * permanently stuck on that one poisoned offset (confirmed: subsequent valid records on the same
+ * topic were never consumed either). {@link PassthroughOrProtobufSerializer} is the fix: pass
+ * {@code byte[]} straight through unchanged (it's already the bytes that need to end up on
+ * {@code .errors}), delegate to the real Protobuf serializer for everything else.
  */
 @Configuration
 public class ChainProtobufKafkaConfig {
@@ -71,10 +83,43 @@ public class ChainProtobufKafkaConfig {
         Map<String, Object> props = new HashMap<>();
         props.put(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, bootstrapServers);
         props.put(ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG, StringSerializer.class);
-        props.put(ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG, KafkaProtobufSerializer.class);
+        props.put(ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG, PassthroughOrProtobufSerializer.class);
         props.put(KafkaProtobufSerializerConfig.SCHEMA_REGISTRY_URL_CONFIG, schemaRegistryUrl);
         ProducerFactory<String, T> producerFactory = new DefaultKafkaProducerFactory<>(props);
         return new KafkaTemplate<>(producerFactory);
+    }
+
+    /**
+     * See the class Javadoc's "PR #467 review follow-up" note. Registered via
+     * {@code VALUE_SERIALIZER_CLASS_CONFIG} like any other serializer - Kafka's producer config
+     * instantiates it by reflection (no-arg constructor) and calls {@code configure(...)}, same as
+     * it would for {@link KafkaProtobufSerializer} directly.
+     */
+    public static final class PassthroughOrProtobufSerializer implements Serializer<Object> {
+
+        private final KafkaProtobufSerializer<com.google.protobuf.Message> delegate = new KafkaProtobufSerializer<>();
+
+        @Override
+        public void configure(Map<String, ?> configs, boolean isKey) {
+            delegate.configure(configs, isKey);
+        }
+
+        @Override
+        public byte[] serialize(String topic, Object data) {
+            if (data instanceof byte[] raw) {
+                // The original failed record's raw bytes, handed to us by
+                // DeadLetterPublishingRecoverer recovering a deserialization failure - there is
+                // no decoded Message to re-encode, and these bytes are already exactly what
+                // belongs on .errors.
+                return raw;
+            }
+            return delegate.serialize(topic, (com.google.protobuf.Message) data);
+        }
+
+        @Override
+        public void close() {
+            delegate.close();
+        }
     }
 
     @Bean
