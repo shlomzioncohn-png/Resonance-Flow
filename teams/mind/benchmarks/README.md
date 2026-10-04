@@ -7,13 +7,10 @@ managed-API-vs-local-model spike). Keep raw run outputs here; write the
 resulting decision into the relevant README or an ADR.
 
 - `ocr-asr-benchmark.md` — OCR: 5 configs benchmarked (Tesseract psm 3/6/11,
-  PaddleOCR mobile/server); the engine choice is open — PaddleOCR mobile is far
-  more accurate, Tesseract far cheaper; the doc has the evidence and a
-  recommendation. ASR: known risk, blocked on missing AMI data, not
-  benchmarked. Status also in `src/mind/multimodal/README.md`.
-- `aligned_metrics.py` — position-based CER used for the OCR accuracy numbers
-  (grouped and strict); `analyze_*.py` — follow-up analyses of the misses and
-  of Tesseract's per-word confidence.
+  PaddleOCR mobile/server); Tesseract `--psm 11` chosen on latency and memory,
+  with the accuracy trade (PaddleOCR is ~2.7x more accurate) documented. ASR:
+  known risk, blocked on missing AMI data, not benchmarked. Status also in
+  `src/mind/multimodal/README.md`.
 - `ocr_asr_benchmark.py` — reproduces the OCR half (`python -m
   benchmarks.ocr_asr_benchmark` from `teams/mind/`; prints an explicit
   "BLOCKED" notice for the ASR half instead of fake numbers). Needs

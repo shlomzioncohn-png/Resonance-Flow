@@ -1,22 +1,23 @@
 # MIND — OCR / ASR Local-Model Benchmark & Recommendation
 
-**OCR engine: needs a call from the team — the evidence changed.** The
-earlier decision (Tesseract `--psm 11`, not PaddleOCR) rested on unaligned
-word recall (64.7% vs. 66.5%) plus cost. That recall comparison was
-misleading: PaddleOCR returns text *lines* with the spaces inside them
-dropped (e.g. `ATT.GEN.ADMIN.OFFICEFaX:614-466-5087`), and word recall counts
-exact whitespace-split words, so it undercounts PaddleOCR by construction.
-Scored on characters, independent of tokenization, PaddleOCR is far more
-accurate: **grouped CER 0.074 (mobile) / 0.102 (server) vs. 0.200 for
-Tesseract `--psm 11`** (character error rate; lower is better, 0 is
-perfect), and a check that uses no box matching at all agrees (page-level
-CER 0.070 vs. 0.168). The cost side is unchanged and large: ~45s vs. ~0.5s
-per page, ~620MB vs. ~34MB. Which side wins is a latency/size-vs-accuracy
-call — see "OCR — final decision". `OCR_ENGINE=tesseract` in `.env.example`
-stays a placeholder until that call is made. n=2 documents.
+**Decision: OCR uses Tesseract (`--psm 11`).** Decided with the mentor, on
+latency and memory: ~0.5s and ~34MB per page, vs. ~40-46s and ~570-620MB for
+PaddleOCR mobile (CPU), and no heavy dependency in the image (PaddleOCR needs
+`paddlepaddle` plus model weights, whose downloads were also blocked on the dev
+network). **This is an accuracy trade, made knowingly:** on FUNSD (n=2)
+PaddleOCR mobile has ~2.7x fewer character errors — grouped CER 0.074 vs. 0.200
+for Tesseract `--psm 11`, and a check with no box matching agrees (page-level
+CER 0.070 vs. 0.168). The first reasoning for Tesseract — word recall looking
+tied (64.7% vs. 66.5%) — was a measurement artifact (PaddleOCR drops the spaces
+inside a line, which exact-match word recall undercounts) and is **not** part of
+this decision. If accuracy later becomes the binding constraint, PaddleOCR
+mobile is the documented upgrade path — see "OCR — final decision".
 
-An earlier "91.2% character similarity" figure was **retracted** — it is
-not an accuracy (see "Retracted").
+**Accuracy of the chosen engine: grouped CER 0.20 for `--psm 11`** (character
+error rate; lower is better, 0 is perfect), with a strict one-to-one CER of 0.37
+as a conservative bound — see "OCR — CER: grouped and strict". n=2 documents.
+An earlier "91.2% character similarity" figure was **retracted** — it is not an
+accuracy (see "Retracted").
 
 ## Purpose
 
@@ -27,7 +28,7 @@ capacity planning.
 
 ## Scope
 
-**OCR: benchmarked, 5 configs (3 Tesseract + 2 PaddleOCR); engine choice open — see "OCR — final decision".**
+**OCR: done, 5 configs (3 Tesseract + 2 PaddleOCR); Tesseract `--psm 11` chosen — see "OCR — final decision".**
 **ASR: blocked — see "Known risk."** No AMI audio (or any ASR) sample
 exists anywhere in this repo, or on any branch — checked directly
 right before writing this, not assumed. There's nothing to run Whisper
@@ -339,9 +340,10 @@ percent-correct. The function was removed.
 
 ## OCR — final decision
 
-**Open — it needs a call from the team. Evidence and a recommendation:**
+**Use `tesseract --psm 11` (sparse text).** Decided with the mentor on latency
+and memory:
 
-| | Tesseract `--psm 11` | PaddleOCR mobile |
+| | Tesseract `--psm 11` (chosen) | PaddleOCR mobile |
 |---|---|---|
 | Accuracy (grouped CER, lower is better) | 0.200 | **0.074** (~2.7x fewer character errors) |
 | Latency per page (CPU) | **~0.5s** | ~40-46s (mkldnn off; with it on, or on a GPU, likely less — untested) |
@@ -350,37 +352,35 @@ percent-correct. The function was removed.
 | Output | words + boxes + per-word confidence (`tsv`) | text lines + boxes + per-line score |
 | Known issue here | — | `enable_mkldnn=False` needed (oneDNN crash in this build) |
 
-**What changed.** The earlier decision — Tesseract, because word recall looked
-tied (64.7% vs. 66.5%) and PaddleOCR cost ~80x more — no longer holds as
-stated: the tie was a measurement artifact (word recall undercounts
-PaddleOCR's space-less lines), and on characters PaddleOCR is clearly more
-accurate. The cost is real and unchanged.
+**What we give up.** About 2.7x more character errors than PaddleOCR mobile on
+FUNSD (grouped CER 0.20 vs. 0.074; n=2, so the exact ratio is uncertain but the
+direction held under every variation tried — see "OCR — CER"). Tesseract's
+remaining errors are real: mostly wrong characters inside matched words, plus
+some words it puts no box on (about 7% of GT words for `--psm 11`).
 
-**Recommendation (for the mentor/team to confirm).** If OCR runs as
-asynchronous ingestion — documents arrive from Bridge and are processed in the
-background, so nobody waits ~45s on a page — **PaddleOCR mobile is the better
-default**: ~2.7x fewer character errors, and the latency/memory cost doesn't
-land on a user. Keep **Tesseract `--psm 11` as the lightweight fallback**, and
-as the engine if the container/memory budget or interactive latency matters
-more than accuracy. Not `paddleocr_server`: it was less accurate than mobile
-(0.102 vs. 0.074) and takes minutes per page. Before committing:
-1. Re-measure latency with mkldnn on / on the target hardware.
-2. Measure the image-size impact (`paddlepaddle` + weights) — Relay needs to
-   know (see `docs/relay-handoff.md`, which currently only anticipates
-   `tesseract-ocr`).
-3. Confirm on more than 2 documents and on a non-FUNSD sample.
-4. Evaluate PaddleOCR's per-line score the way Tesseract's per-word
-   confidence was (below) — that evidence is Tesseract-only so far.
+**How the loss is mitigated.** Tesseract reports a confidence per word, and
+that confidence differs between correctly read words and the miss groups (see
+the per-word-confidence section below) — so the OCR interface should return it
+and let extraction discount low-confidence words. That evidence is directional
+and Tesseract-only.
 
-Until the call is made, `OCR_ENGINE=tesseract` in `.env.example` is a
-placeholder, not a decision.
+**What the earlier reasoning got wrong, for the record.** The first decision for
+Tesseract rested on word recall looking tied. It wasn't a fair comparison, and
+this decision doesn't use it.
+
+**Upgrade path if accuracy becomes the binding constraint:** PaddleOCR mobile
+(not `paddleocr_server`: less accurate than mobile — CER 0.102 vs. 0.074 — and
+minutes per page). Before switching: (1) re-measure latency with mkldnn on /
+on the target hardware, (2) measure the image-size impact (`paddlepaddle` +
+weights — Relay needs to know, see `docs/relay-handoff.md`), (3) confirm on more
+than 2 documents and on a non-FUNSD sample, (4) evaluate PaddleOCR's per-line
+score the way Tesseract's per-word confidence was.
 
 **Resource budget for capacity planning (Checkpoint 1):**
 - `tesseract --psm 11`: ~0.5s latency, ~35MB peak memory, ~0.45s CPU time per
   FUNSD-sized page.
-- `paddleocr_mobile`: ~40-46s latency, ~570-620MB peak memory, ~100s CPU time
-  per page.
-- `paddleocr_server`: minutes per page (299-1,482s observed), ~650-840MB.
+- For reference, `paddleocr_mobile`: ~40-46s, ~570-620MB, ~100s CPU per page;
+  `paddleocr_server`: minutes per page (299-1,482s observed), ~650-840MB.
 
 ## OCR — handling the real residual errors: per-word confidence
 

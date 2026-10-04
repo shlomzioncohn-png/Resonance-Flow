@@ -5,24 +5,21 @@ Local OCR + ASR preprocessing.
 - OCR: scanned documents / PDFs (validated against RVL-CDIP / FUNSD).
 - ASR: meeting audio / recordings (validated against AMI, ICSI, QMSum, MeetingBank).
 - Output feeds `extraction/` through the same interface as text-native sources.
-- **OCR: engine choice open — Tesseract vs. PaddleOCR mobile; needs a call
-  from the team.** Both were benchmarked on FUNSD (n=2 documents). On
-  characters (grouped CER — GT and OCR words matched by bounding-box overlap,
-  each cluster of overlapping words scored as one string; lower is better, 0
-  is perfect) PaddleOCR mobile scores **0.074** vs. **0.200** for Tesseract
-  `--psm 11` — about 2.7x fewer character errors, confirmed by a check that
-  uses no box matching (0.070 vs. 0.168). The cost: ~40–46s vs. ~0.5s per
-  page and ~570–620MB vs. ~34MB (CPU, mkldnn off). The earlier decision
-  "Tesseract, not PaddleOCR" rested on word recall looking tied (64.7% vs.
-  66.5%); that was a measurement artifact — PaddleOCR drops the spaces inside
-  a line, which exact-match word recall undercounts. Recommendation: if OCR
-  runs as background ingestion, PaddleOCR mobile as the default with
-  Tesseract `--psm 11` as the lightweight fallback; `paddleocr_server` is not
-  worth it (CER 0.102, minutes per page). Open items before committing: re-time
-  with mkldnn on, measure the image-size impact (Relay needs to know), confirm
-  on more documents. Full numbers: `benchmarks/ocr-asr-benchmark.md`.
+- **OCR: resolved — Tesseract, `--psm 11`** (sparse text), decided with the
+  mentor on latency and memory: ~0.5s and ~34MB per page vs. ~40–46s and
+  ~570–620MB for PaddleOCR mobile (CPU), with no heavy dependency in the image.
+  **This is an accuracy trade made knowingly:** on FUNSD (n=2 documents)
+  PaddleOCR mobile has ~2.7x fewer character errors — grouped CER 0.074 vs. 0.200
+  for Tesseract `--psm 11` (grouped CER: GT and OCR words matched by
+  bounding-box overlap, each cluster of overlapping words scored as one string;
+  lower is better, 0 is perfect; a check with no box matching agrees, 0.070 vs.
+  0.168). A stricter one-to-one version gives 0.37 for Tesseract and is the
+  conservative bound. PaddleOCR mobile is the documented upgrade path if
+  accuracy becomes the binding constraint (not `paddleocr_server`). Full
+  numbers and the open items for switching: `benchmarks/ocr-asr-benchmark.md`.
   An earlier "~91% accuracy" figure was retracted — it had no zero point and
-  rewarded output volume (random gibberish scored 42–53% on it).
+  rewarded output volume (random gibberish scored 42–53% on it). Unaligned word
+  recall (64.7%) is a secondary, recall-only number that undercounts PaddleOCR.
   **Per-word confidence:** Tesseract
   already scores each recognized word 0-100 internally (its `tsv`
   output mode), and that score differs between the miss groups in a
