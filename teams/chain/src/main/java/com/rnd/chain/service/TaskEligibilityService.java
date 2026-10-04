@@ -74,13 +74,18 @@ public class TaskEligibilityService {
     }
 
     /** Copies every field of {@code task} into a new Builder, so callers only need to
-     * override the field(s) they're actually changing before calling build(). */
+     * override the field(s) they're actually changing before calling build(). Must copy
+     * {@code isReady} too even though {@link #withCounters} always overrides it afterward - a
+     * caller that builds directly off this (like {@link #onTaskStatusChanged}) without going
+     * through withCounters would otherwise silently get isReady=false (Task.Builder's isReady is
+     * a primitive boolean with no default, not "whatever the source task already had"). */
     private static Task.Builder copyOf(Task task) {
         return Task.builder()
                 .id(task.getId())
                 .parentTaskId(task.getParentTaskId())
                 .ownerId(task.getOwnerId())
                 .status(task.getStatus())
+                .isReady(task.isReady())
                 .blockingCount(task.getBlockingCount())
                 .openConstraintCount(task.getOpenConstraintCount())
                 .estimatedDurationMin(task.getEstimatedDurationMin())

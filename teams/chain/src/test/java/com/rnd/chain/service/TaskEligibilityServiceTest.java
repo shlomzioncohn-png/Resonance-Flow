@@ -473,6 +473,20 @@ class TaskEligibilityServiceTest {
     }
 
     @Test
+    void onTaskStatusChanged_taskWithNoOpenBlockersOrConstraints_staysReadyAfterStatusChange() {
+        // Regression test (review finding): copyOf() previously didn't carry isReady across, so
+        // Task.Builder's un-set primitive boolean silently defaulted to false - onTaskStatusChanged
+        // corrupted isReady on every call, including a same-status no-op replay like this one,
+        // regardless of the task's actual blockingCount/openConstraintCount.
+        UUID taskId = UUID.randomUUID();
+        Fixture fixture = newFixture(List.of(buildTask(taskId, 0, 0, true)), List.of());
+
+        fixture.service().onTaskStatusChanged(taskId, TaskStatus.ACTIVE);
+
+        assertTrue(fixture.taskRepo().findById(taskId).orElseThrow().isReady());
+    }
+
+    @Test
     void statusChangeToNonDone_fromNonDone_doesNotTriggerDependentsRecalculation() {
         // taskA's blockingCount (5, an arbitrary non-zero value) must come back completely
         // untouched - proof that adjustDependentsBlockingCount never ran for this transition.
