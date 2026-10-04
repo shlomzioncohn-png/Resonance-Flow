@@ -365,8 +365,10 @@ will make a presentation on the user interface concept"). The rule
    "Whitespace" is whatever `str.split()` treats as such, which includes the
    non-breaking space `\xa0` — so `\xa0` needs no separate `.replace`. It does
    **not** include `\u200b` (zero-width space), which would survive
-   normalization; that is not a concern for this corpus, where `\xc2\xa0` (`\xa0`
-   encoded as UTF-8) is the only non-ASCII byte.
+   normalization. Neither matters for the AMI action items themselves: the 306
+   `<actions>` sentences contain no non-ASCII character at all (the `\xc2\xa0`
+   bytes found elsewhere in the package, see "Real data slice" above, are not in
+   them).
 2. Score every (extracted, annotated) pair with a `similarity(a, b) -> float` in
    `[0, 1]`.
 3. Match greedily, one-to-one: highest similarity first, take a pair iff both

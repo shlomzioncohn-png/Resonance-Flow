@@ -41,9 +41,15 @@
 - **Meeting id:** the filename stem (`IB4003.abssumm.xml` → `IB4003`); it is
   also the prefix of every `nite:id` inside the file
   (`IB4003.rdhillon.s.7`).
-- **Encoding:** the XML declares `encoding="ISO-8859-1"`. Parse with the
-  declared encoding, not UTF-8 — some AMI files carry bytes that are valid
-  ISO-8859-1 and invalid UTF-8.
+- **Encoding:** the XML header declares `encoding="ISO-8859-1"`, but that header is
+  wrong for this corpus. Read every file as UTF-8. All 5,080 XML files in the
+  package decode as UTF-8; the 63 that contain non-ASCII bytes hold
+  `\xc2\xa0` (a UTF-8-encoded non-breaking space), apart from two
+  `participantSummaries` files with an `ö`. Honoring the declared encoding would
+  decode `\xc2\xa0` as `Â` + a non-breaking space — corruption. (An earlier
+  version of this note said the opposite; README "Real data slice", item 3, has
+  the evidence.) None of this touches the action items themselves: the 306
+  `<actions>` sentences contain no non-ASCII character at all.
 
 ### Count — locked at 306
 
