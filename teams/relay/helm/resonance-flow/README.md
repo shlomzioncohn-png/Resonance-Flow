@@ -78,9 +78,20 @@ Currently wired up:
 
 - **Kafka** - every component depends on it, so it's set globally
   (`dependencies` in `values.yaml`).
-- **Postgres** - `inbox` and `chain` use it (Chain with its own database and
+- **Postgres** - `inbox`, `mind`, and `chain` (Chain with its own database and
   user - see [Chain's DB credentials](#chains-db-credentials-componentschain)).
+  pgvector's `vector.so` is overlaid from the official `pgvector/pgvector` image:
+  Bitnami's own build crashes (SIGILL) building HNSW indexes on non-AVX-512 CPUs
+  (#490). The Bitnami image is pinned by digest since the overlay must match its
+  Postgres major and pgvector version.
 - **MinIO** - `bridge` and `mind` use it.
+
+A `dependencies` list set in `values-<service>.yaml` **replaces** the one in
+`values.yaml` (Helm merges maps, not lists) - repeat every entry, don't just add.
+
+CI's `setup-service-infra` port-forwards this Postgres to `localhost:5432` and
+exports `PG*` / `TEST_DATABASE_URL` (superuser, `resonance_flow`) to the test step
+of **every** service whose `values-<service>.yaml` enables `postgresql`.
 
 ```yaml
 components:
