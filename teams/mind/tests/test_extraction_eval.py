@@ -207,6 +207,15 @@ def test_normalization_ignores_case_whitespace_and_trailing_period():
     assert _normalize("  The   Task  Is   Done. ") == "the task is done"
 
 
+def test_non_breaking_space_is_collapsed_like_a_regular_space():
+    assert _normalize("The team will\xa0meet next\xa0\xa0Tuesday.") == "the team will meet next tuesday"
+
+
+def test_zero_width_space_is_not_treated_as_whitespace():
+    # Documented in the README: `str.split()` does not split on U+200B, so it survives.
+    assert _normalize("a\u200bb") == "a\u200bb"
+
+
 def test_matching_is_insensitive_to_formatting():
     report = evaluate_extraction(
         ["  the TASK is   done.  "],
