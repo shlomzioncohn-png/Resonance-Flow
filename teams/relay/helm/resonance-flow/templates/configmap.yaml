@@ -1,5 +1,12 @@
 {{- range $componentName, $component := .Values.components }}
-{{- if and $component.enabled (ne $componentName "inbox") }}
+{{/*
+inbox, chain and notification-delivery each render their own ConfigMap
+(templates/services/{inbox,chain}/, templates/service-notification-delivery/) instead -
+their config needs the dependencyAddress/kafkaSaslJaasConfig helpers computed at
+render time, which this loop can't do (it just re-serializes values.yaml's static
+$component.config as-is).
+*/}}
+{{- if and $component.enabled (ne $componentName "inbox") (ne $componentName "chain") (ne $componentName "notification-delivery") }}
 {{- with $component.config }}
 ---
 apiVersion: v1

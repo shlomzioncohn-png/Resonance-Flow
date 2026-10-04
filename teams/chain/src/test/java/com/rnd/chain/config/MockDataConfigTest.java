@@ -1,5 +1,7 @@
 package com.rnd.chain.config;
 
+import com.rnd.chain.repository.DependencyHistoryRepository;
+import com.rnd.chain.repository.InMemoryDependencyHistoryRepository;
 import com.rnd.chain.repository.InMemoryTaskDependencyRepository;
 import com.rnd.chain.repository.InMemoryTaskRepository;
 import com.rnd.chain.repository.TaskDependencyRepository;
@@ -51,6 +53,24 @@ class MockDataConfigTest {
                 .run(context -> assertThat(context.getBeansOfType(TaskDependencyRepository.class)).hasSize(1));
     }
 
+    @Test
+    void dependencyHistoryRepository_doesNotOverrideAnExistingBean() {
+        new ApplicationContextRunner()
+                .withUserConfiguration(CustomDependencyHistoryRepositoryConfig.class, MockDataConfig.class)
+                .run(context -> {
+                    assertThat(context.getBeansOfType(DependencyHistoryRepository.class)).hasSize(1);
+                    assertThat(context.getBean(DependencyHistoryRepository.class))
+                            .isSameAs(CustomDependencyHistoryRepositoryConfig.CUSTOM_INSTANCE);
+                });
+    }
+
+    @Test
+    void dependencyHistoryRepository_isCreated_whenNoOtherBeanIsRegistered() {
+        new ApplicationContextRunner()
+                .withUserConfiguration(MockDataConfig.class)
+                .run(context -> assertThat(context.getBeansOfType(DependencyHistoryRepository.class)).hasSize(1));
+    }
+
     @Configuration
     static class CustomTaskRepositoryConfig {
         static final TaskRepository CUSTOM_INSTANCE = new InMemoryTaskRepository(List.of());
@@ -70,4 +90,15 @@ class MockDataConfigTest {
             return CUSTOM_INSTANCE;
         }
     }
+
+    @Configuration
+    static class CustomDependencyHistoryRepositoryConfig {
+        static final DependencyHistoryRepository CUSTOM_INSTANCE = new InMemoryDependencyHistoryRepository();
+
+        @Bean
+        DependencyHistoryRepository dependencyHistoryRepository() {
+            return CUSTOM_INSTANCE;
+        }
+    }
+
 }

@@ -1,3 +1,5 @@
+# CI applies an all-components-off overlay first (setup-service-infra), so only
+# list what this service needs enabled - everything else is already off.
 components:
   bridge:
     enabled: true
@@ -5,32 +7,19 @@ components:
       spring:
         config:
           import: "configtree:/etc/resonance-flow/secrets/minio/"
-    secretFiles:
-      - name: minio-credentials
-        secretName: bridge-minio
+        volumeMounts:
+        - name: minio-credentials
         mountPath: /etc/resonance-flow/secrets/minio
-        items:
-          - key: root-user
-            path: minio.access-key
-          - key: root-password
-            path: minio.secret-key
-  notification-delivery:
-    enabled: false
-  mind:
-    enabled: false
-  lens-bff:
-    enabled: false
-  lens-frontend:
-    enabled: false
-  chain:
-    enabled: false
-  inbox:
-    enabled: false
-  lens-gateway:
-    enabled: false
-  schema-registry:
-    enabled: false
-
+        readOnly: true
+    volumes:
+      - name: minio-credentials
+        secret:
+          secretName: bridge-minio
+          items:
+            - key: root-user
+              path: minio.access-key
+            - key: root-password
+              path: minio.secret-key
 kafka:
   enabled: true
 minio:

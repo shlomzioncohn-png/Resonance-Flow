@@ -40,7 +40,7 @@ docker compose down           # stop (add -v to also drop named volumes)
 | bridge | 21 | 3.3.13 |
 | inbox | 21 | 3.3.13 |
 | Chain | 11 | 2.7.18 |
-| relay | 11 | 2.7.18 |
+| relay | 21 | 3.3.13 |
 
 (`teams/inbox/README.md` still describes Java 11 / Spring Boot 2.7.18 — that's stale; its `pom.xml`
 and `teams/inbox/CLAUDE.md` are current and authoritative.)
@@ -53,9 +53,8 @@ on push/tag/`workflow_dispatch`, then builds/pushes a GHCR image and smoke-tests
 `kind` cluster, then calls `service-update-manifest.yaml` to open the manifest-bump PR. The
 kind cluster + Helm chart setup shared by both phases lives in the
 `.github/actions/setup-service-infra` composite action, so there's exactly one kind cluster
-per job regardless of which phase runs. Each team's workflow (`teams/inbox/CLAUDE.md`'s
-consumer/idempotency section, `teams/inbox/README.md`'s "Bridge task ingestion" section, and
-`bridge-ci.yaml` etc.) is scoped with `paths: teams/<team>/**`, so it only fires on changes to
+per job regardless of which phase runs. Each team's workflow (`bridge-ci.yaml`,
+`inbox-ci.yaml`, etc.) is scoped with `paths: teams/<team>/**`, so it only fires on changes to
 that team's own directory — despite that, the workflow **files themselves** must live at the
 repo root under `.github/workflows/`; GitHub Actions silently ignores workflow files placed
 inside a team's own folder.
@@ -85,15 +84,17 @@ inside a team's own folder.
 
 - `teams/relay/helm/resonance-flow/` is the **one shared Helm chart** for every team's service —
   one release, one namespace (`resonance-flow`). Each team owns a `components.<team>` block (image,
-  probes, resources, env), split out per-team under
-  `teams/relay/helm/resonance-flow/values/values-<team>.yaml`. Coordinate chart/template changes
-  with its owner rather than editing the chart unilaterally.
-- `kafka/` is a separate Helm chart for the **cluster's** shared Kafka (distinct from the
-  single-node Kafka each team may run locally via its own `docker-compose.yml`).
-- A team's CD, on push to `main`, builds and pushes a GHCR image, then commits the new image tag
-  straight into `teams/relay/helm/resonance-flow/values/values-<team>.yaml` (see
+  probes, resources, env) in `teams/relay/helm/resonance-flow/values.yaml`. Coordinate
+  chart/template changes with its owner rather than editing the chart unilaterally.
+- `values/values-<team>.yaml` is only for that team's CI install, and is opt-in: CI first applies
+  an all-components-off overlay (`setup-service-infra`), so the file lists just the components
+  and subcharts that service needs.
+- The cluster's Kafka, Postgres and MinIO are Bitnami subcharts of `resonance-flow` (distinct from
+  the single-node Kafka each team may run locally via its own `docker-compose.yml`).
+- A team's CD, on push to `main`, builds and pushes a GHCR image, then opens a PR bumping the
+  image tag in `teams/relay/helm/resonance-flow/values.yaml` (see
   `service-update-manifest.yaml`). ArgoCD (`teams/relay/argocd/`) watches the `resonance-flow`
-  and `kafka` charts and reconciles the cluster — push-based GitOps, no image updater involved.
+  and `schema-sync-hook` charts and reconciles the cluster — no image updater involved.
 - Because every team's component renders from the same Helm release into the same namespace, a
   broken value in one team's block (bad tag, template error) can block sync for every other team's
   service in the same `Application` — see `teams/relay/argocd/README.md` "Known limitation".

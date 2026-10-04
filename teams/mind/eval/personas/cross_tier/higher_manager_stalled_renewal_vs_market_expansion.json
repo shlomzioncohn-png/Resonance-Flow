@@ -1,0 +1,53 @@
+{
+  "scenario_id": "higher_manager_stalled_renewal_vs_market_expansion",
+  "persona": {
+    "role": "Higher Manager",
+    "department": null
+  },
+  "context": {
+    "free_time_minutes": 60,
+    "current_datetime": "2026-09-07T09:00:00",
+    "time_horizon": "this_week",
+    "constraints": []
+  },
+  "tasks": [
+    {
+      "task_id": "task_filler_travel_policy",
+      "title": "Approve the updated team travel policy",
+      "description": "Sign off on minor wording changes to the department travel policy; routine, no deadline.",
+      "deadline": null,
+      "effort_estimate": 15,
+      "tier": "operational",
+      "blocked": false,
+      "parent_task_id": null
+    },
+    {
+      "task_id": "task_renewal",
+      "title": "Decide the retention terms for the ContosoCorp renewal",
+      "description": "ContosoCorp is a large share of divisional revenue and its renewal has stalled over pricing; the account team cannot move without your call on how far to flex. No deadline set, but it is slipping week by week.",
+      "deadline": null,
+      "effort_estimate": 35,
+      "tier": "tactical",
+      "blocked": false,
+      "parent_task_id": null
+    },
+    {
+      "task_id": "task_expansion",
+      "title": "Scope the move into the adjacent market segment",
+      "description": "Early analysis of a neighbouring market segment that could add growth next year; exploratory, no deadline.",
+      "deadline": null,
+      "effort_estimate": 50,
+      "tier": "strategic",
+      "blocked": false,
+      "parent_task_id": null
+    }
+  ],
+  "expected_top_task_id": "task_renewal",
+  "expected_reason": "None of the tasks has a deadline. task_renewal protects a large, at-risk slice of current divisional revenue that is actively slipping and cannot progress without this person's decision; task_expansion is speculative future growth with no time pressure.",
+  "source": {
+    "type": "synthetic",
+    "source_detail": null
+  },
+  "team_lead_approved": true,
+  "mentor_approved": false
+}

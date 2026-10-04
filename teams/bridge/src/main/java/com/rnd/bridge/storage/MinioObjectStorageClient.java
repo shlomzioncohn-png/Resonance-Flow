@@ -1,12 +1,15 @@
 package com.rnd.bridge.storage;
 
 import io.minio.BucketExistsArgs;
+import io.minio.GetObjectArgs;
 import io.minio.MakeBucketArgs;
 import io.minio.MinioClient;
 import io.minio.PutObjectArgs;
+import io.minio.errors.ErrorResponseException;
 import java.io.ByteArrayInputStream;
 import java.io.InputStream;
 import java.util.Map;
+import java.util.Optional;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
@@ -44,6 +47,23 @@ public class MinioObjectStorageClient implements ObjectStorageClient {
         }
 
         return new PutResult(contentType, content.length);
+    }
+
+    @Override
+    public Optional<byte[]> getObject(String objectKey) {
+        ensureBucket();
+
+        try (InputStream in = minioClient.getObject(
+                GetObjectArgs.builder().bucket(bucket).object(objectKey).build())) {
+            return Optional.of(in.readAllBytes());
+        } catch (ErrorResponseException e) {
+            if ("NoSuchKey".equals(e.errorResponse().code())) {
+                return Optional.empty();
+            }
+            throw new IllegalStateException("Failed to read object " + objectKey + " from MinIO", e);
+        } catch (Exception e) {
+            throw new IllegalStateException("Failed to read object " + objectKey + " from MinIO", e);
+        }
     }
 
     private synchronized void ensureBucket() {

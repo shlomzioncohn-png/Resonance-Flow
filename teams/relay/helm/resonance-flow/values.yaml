@@ -6,7 +6,14 @@ imagePullSecret:
   password: ""
   email: "noreply@kamatech.org"
 nameOverride: ""
-fullnameOverride: ""
+# Pinned, not "": Chain's DB Secret/ConfigMap names are hardcoded in this file
+# (volumes, postgresql.initdb.scriptsConfigMap, postgresql.primary.extraVolumes)
+# because values.yaml can't call the resonance-flow.fullname template itself.
+# This override guarantees fullname is always "resonance-flow" so those
+# literals can't drift from what configmap.yaml actually renders - installing
+# under any other release name broke that wiring (verified against a real
+# cluster, see PR #417 review).
+fullnameOverride: "resonance-flow"
 serviceAccount:
   create: true
   automount: true
@@ -16,37 +23,6 @@ podAnnotations: {}
 podLabels: {}
 podSecurityContext: {}
 securityContext: {}
-service:
-  type: ClusterIP
-  port: 8082
-ingress:
-  enabled: false
-  className: ""
-  annotations: {}
-  hosts:
-    - host: chart-example.local
-      paths:
-        - path: /
-          pathType: ImplementationSpecific
-  tls: []
-httpRoute:
-  enabled: false
-  annotations: {}
-  parentRefs:
-    - name: gateway
-      sectionName: http
-  hostnames:
-    - chart-example.local
-  rules:
-    - matches:
-        - path:
-            type: PathPrefix
-            value: /headers
-autoscaling:
-  enabled: false
-  minReplicas: 1
-  maxReplicas: 100
-  targetCPUUtilizationPercentage: 80
 volumes: []
 volumeMounts: []
 dependencies:
@@ -72,6 +48,36 @@ pipeConsumerGroupSweep:
     limits:
       cpu: 200m
       memory: 256Mi
+x-defaults:
+  resources: &defaultResources
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+  healthProbes: &defaultHealthProbes
+    startupProbe:
+      httpGet:
+        path: /health
+        port: http
+      periodSeconds: 5
+      failureThreshold: 40
+    livenessProbe:
+      httpGet:
+        path: /health
+        port: http
+      periodSeconds: 10
+      failureThreshold: 3
+    readinessProbe:
+      httpGet:
+        path: /health
+        port: http
+      periodSeconds: 5
+      failureThreshold: 3
+  service: &defaultService
+    type: ClusterIP
+    port: 80
 components:
   mind:
     enabled: true
@@ -81,38 +87,44 @@ components:
       pullPolicy: IfNotPresent
       tag: "22a8e01"
     containerPort: 8000
-    service:
-      type: ClusterIP
-      port: 80
-    resources:
-      requests:
-        cpu: 100m
-        memory: 256Mi
-      limits:
-        cpu: 500m
-        memory: 512Mi
-    startupProbe:
-      httpGet:
-        path: /health
-        port: http
-      periodSeconds: 5
-      failureThreshold: 40
-    livenessProbe:
-      httpGet:
-        path: /health
-        port: http
-      periodSeconds: 10
-      failureThreshold: 3
-    readinessProbe:
-      httpGet:
-        path: /health
-        port: http
-      periodSeconds: 5
-      failureThreshold: 3
+    service: *defaultService
+    resources: *defaultResources
+    <<: *defaultHealthProbes
     env: {}
+    # A list set in values-<service>.yaml replaces this one wholesale (Helm merges
+    # maps, not lists) - repeat every entry there, don't just add yours.
     dependencies:
       - name: minio
         port: 9000
+      - name: postgresql
+        port: 5432
+    # Mounted as config.yaml at /etc/resonance-flow/config/ - keys are what MIND reads.
+    config:
+      vector_store:
+        # pgvector needs user/password/db, not an API key.
+        url: ""
+        user: mind
+        db: mind
+      llm:
+        model: ""
+        cache_dir: ./models
+      ocr:
+        provider: local
+      asr:
+        provider: local
+        whisper_model: base
+      object_storage:
+        endpoint: http://resonance-flow-minio.resonance-flow.svc.cluster.local:9000
+        bucket: ""
+      kafka:
+        bootstrap_servers: resonance-flow-kafka.resonance-flow.svc.cluster.local:9092
+        schema_registry_url: http://resonance-flow-schema-registry.resonance-flow.svc.cluster.local:80/apis/ccompat/v6
+        producer:
+          task_creation_requested_topic: task.creation.requested
+      service:
+        log_level: INFO
+    secret:
+      create: true
   lens-bff:
     enabled: true
     replicaCount: 1
@@ -121,35 +133,9 @@ components:
       pullPolicy: IfNotPresent
       tag: "placeholder"
     containerPort: 8082
-    service:
-      type: ClusterIP
-      port: 80
-    resources:
-      requests:
-        cpu: 100m
-        memory: 256Mi
-      limits:
-        cpu: 500m
-        memory: 512Mi
-    startupProbe:
-      httpGet:
-        path: /health
-        port: http
-      periodSeconds: 5
-      failureThreshold: 40
-    livenessProbe:
-      httpGet:
-        path: /health
-        port: http
-      periodSeconds: 10
-      failureThreshold: 3
-    readinessProbe:
-      httpGet:
-        path: /health
-        port: http
-      periodSeconds: 5
-      failureThreshold: 3
-    env: {}
+    service: *defaultService
+    resources: *defaultResources
+    <<: *defaultHealthProbes
   bridge:
     enabled: true
     replicaCount: 1
@@ -158,34 +144,9 @@ components:
       pullPolicy: IfNotPresent
       tag: "94c3259"
     containerPort: 8080
-    service:
-      type: ClusterIP
-      port: 80
-    resources:
-      requests:
-        cpu: 100m
-        memory: 256Mi
-      limits:
-        cpu: 500m
-        memory: 512Mi
-    startupProbe:
-      httpGet:
-        path: /health
-        port: http
-      periodSeconds: 5
-      failureThreshold: 40
-    livenessProbe:
-      httpGet:
-        path: /health
-        port: http
-      periodSeconds: 10
-      failureThreshold: 3
-    readinessProbe:
-      httpGet:
-        path: /health
-        port: http
-      periodSeconds: 5
-      failureThreshold: 3
+    service: *defaultService
+    resources: *defaultResources
+    <<: *defaultHealthProbes
     env: {}
     config:
       spring:
@@ -264,9 +225,7 @@ components:
       pullPolicy: IfNotPresent
       tag: "placeholder"
     containerPort: 80
-    service:
-      type: ClusterIP
-      port: 80
+    service: *defaultService
     resources:
       requests:
         cpu: 100m
@@ -292,7 +251,6 @@ components:
         port: http
       periodSeconds: 5
       failureThreshold: 3
-    env: {}
   chain:
     enabled: true
     replicaCount: 1
@@ -301,35 +259,43 @@ components:
       pullPolicy: IfNotPresent
       tag: "placeholder"
     containerPort: 8081
-    service:
-      type: ClusterIP
-      port: 80
-    resources:
-      requests:
-        cpu: 100m
-        memory: 256Mi
-      limits:
-        cpu: 500m
-        memory: 512Mi
-    startupProbe:
-      httpGet:
-        path: /health
-        port: http
-      periodSeconds: 5
-      failureThreshold: 40
-    livenessProbe:
-      httpGet:
-        path: /health
-        port: http
-      periodSeconds: 10
-      failureThreshold: 3
-    readinessProbe:
-      httpGet:
-        path: /health
-        port: http
-      periodSeconds: 5
-      failureThreshold: 3
-    env: {}
+    service: *defaultService
+    resources: *defaultResources
+    <<: *defaultHealthProbes
+    # Password comes from the chain-db-credentials Secret, mounted as a file below -
+    # not a literal here, not an env var, and not created by this chart (provided
+    # externally). secretName must match the fullname-prefixed name
+    # templates/services/chain/configmap.yaml renders (fullname resolves to the
+    # fixed "resonance-flow" release name this chart is always installed as).
+    volumeMounts:
+      - name: chain-db-credentials
+        mountPath: /etc/resonance-flow/secrets/chain-db
+        readOnly: true
+    volumes:
+      - name: chain-db-credentials
+        secret:
+          secretName: resonance-flow-chain-db-credentials
+    dependencies:
+      - name: postgresql
+        port: 5432
+    config:
+      data:
+        datasource:
+          # Own database and user - not Inbox's tasks schema or its superuser.
+          database: chain
+          username: chain
+        kafka:
+          consumerGroupId: chain-service
+          topics:
+            taskDependenciesProposed: task.dependencies.proposed # drives addDependency
+            # taskDependenciesRemoved intentionally omitted: Chain confirmed (#385 follow-up)
+            # removeDependency is REST-only (Lens BFF -> Chain), no Kafka topic behind it today -
+            # task.dependencies.removed was proposed but is not active. May return once #133
+            # settles whether Mind can retract a proposed dependency.
+            # drives onTaskStatusChanged; PROPOSED, assumes Inbox's 8-value status enum
+            taskStatusUpdated: task.status.updated
+            taskSchedulingUpdated: task.scheduling.updated # produced, consumed by Inbox
+        # No topic for onConstraintAdded/onConstraintStatusChanged - still REST-triggered.
   inbox:
     enabled: true
     replicaCount: 1
@@ -338,16 +304,8 @@ components:
       pullPolicy: IfNotPresent
       tag: "085a2e7"
     containerPort: 8080
-    service:
-      type: ClusterIP
-      port: 80
-    resources:
-      requests:
-        cpu: 100m
-        memory: 256Mi
-      limits:
-        cpu: 500m
-        memory: 512Mi
+    service: *defaultService
+    resources: *defaultResources
     startupProbe:
       httpGet:
         path: /actuator/health/liveness
@@ -367,7 +325,6 @@ components:
         port: http
       periodSeconds: 5
       failureThreshold: 3
-    env: {}
     dependencies:
       - name: postgresql
         port: 5432
@@ -375,10 +332,7 @@ components:
         port: 8080
     config:
       data:
-        datasource:
-          database: resonance_flow
-          username: postgres
-          password: postgres
+        # datasource credentials come from postgresql.auth below - no copy here.
         kafka:
           consumerGroupId: inbox-service
           topics:
@@ -389,10 +343,7 @@ components:
     enabled: true
     replicaCount: 1
     image:
-      # Same image already used for local dev (teams/relay/docker-compose.yml) and the
-      # draft teams/relay/schema-sync-hook chart - in-memory Apicurio registry, ccompat
-      # (Confluent-compatible) API. Not durable storage - fine for dev/CI, would need a
-      # persistent backend (its own Postgres/Kafka storage) before a real prod rollout.
+      # In-memory Apicurio registry - not durable, fine for dev/CI only.
       repository: "apicurio/apicurio-registry-mem"
       pullPolicy: IfNotPresent
       tag: "2.5.11.Final"
@@ -412,9 +363,7 @@ components:
         path: /health/live
         port: http
       periodSeconds: 5
-      # Quarkus boot under a constrained CPU request measured ~200s+ locally (verified live -
-      # killed with SIGTERM right at the old 40*5s=200s budget, before it finished starting).
-      # 60*5s=300s matches the margin inbox's own startupProbe already carries for the same reason.
+      # Quarkus boot measured ~200s+ under a constrained CPU request - needs the margin.
       failureThreshold: 60
     livenessProbe:
       httpGet:
@@ -428,7 +377,6 @@ components:
         port: http
       periodSeconds: 5
       failureThreshold: 3
-    env: {}
   lens-gateway:
     enabled: true
     replicaCount: 1
@@ -437,6 +385,17 @@ components:
       pullPolicy: IfNotPresent
       tag: "placeholder"
     containerPort: 8080
+    service: *defaultService
+    resources: *defaultResources
+    <<: *defaultHealthProbes
+  notification-delivery:
+    enabled: true
+    replicaCount: 1
+    image:
+      repository: "ghcr.io/kamatechorg/resonance-flow/notification-delivery"
+      pullPolicy: IfNotPresent
+      tag: "placeholder"
+    containerPort: 8082
     service:
       type: ClusterIP
       port: 80
@@ -447,25 +406,45 @@ components:
       limits:
         cpu: 500m
         memory: 512Mi
+    terminationGracePeriodSeconds: 30
+    updateStrategy:
+      type: RollingUpdate
+      rollingUpdate:
+        maxUnavailable: 0
+        maxSurge: 25%
     startupProbe:
       httpGet:
-        path: /health
+        path: /healthz
         port: http
       periodSeconds: 5
       failureThreshold: 40
     livenessProbe:
       httpGet:
-        path: /health
+        path: /healthz
         port: http
       periodSeconds: 10
       failureThreshold: 3
     readinessProbe:
       httpGet:
-        path: /health
+        path: /readyz
         port: http
       periodSeconds: 5
       failureThreshold: 3
     env: {}
+    dependencies:
+      - name: schema-registry
+        port: 8080
+    config:
+      managed: true
+    # Interim CPU-based HPA (templates/pipe-hpa.yaml). §10 open question: the real scaling
+    # signal is active WebSocket connections/pod, but that needs a custom-metrics adapter
+    # (e.g. Prometheus Adapter) plus a load-tested target-per-pod value. Swap this for a
+    # custom-metric HPA once both exist.
+    autoscaling:
+      enabled: true
+      minReplicas: 2
+      maxReplicas: 10
+      targetCPUUtilizationPercentage: 70
 kafka:
   enabled: true
   # bitnami/kafka was pruned from Docker Hub's free tier in 2025; bitnamilegacy/kafka
@@ -478,7 +457,7 @@ kafka:
   # client silently failed the handshake and retried forever without ever actually connecting
   # or crashing (verified locally). Pinning explicit client credentials here (instead of the
   # chart's own randomly-generated ones) so every component's mounted config can reference the
-  # same known username/password - see components.inbox.config.data.kafka.sasl below.
+  # same known username/password - see resonance-flow.kafkaSaslJaasConfig in _helpers.tpl.
   sasl:
     client:
       users:
@@ -534,19 +513,64 @@ minio:
 postgresql:
   enabled: true
   architecture: standalone
-  # Must match components.inbox.config.data.datasource.{password,database} above -
-  # nothing else wires these two together, and the subchart otherwise generates a
-  # random password / only creates the default "postgres" database.
+  # Also inbox's datasource credentials (services/inbox/configmap.yaml reads them from
+  # here). Pinned: the subchart otherwise generates a random password and only creates
+  # the default "postgres" database.
   auth:
     postgresPassword: postgres
     database: resonance_flow
+  # Pinned: the pgvector overlay below is built for PG 18 and must match its major.
+  # From bitnami/postgresql:latest, built 2026-09-20 (PG 18.6, pgvector 0.8.6).
+  image:
+    digest: "sha256:7d77a46bbf200709237318c27dec0eaeae2520e403dd18fdebde2be7a6b04993"
   primary:
     persistence:
       enabled: false
+    # Bitnami's own vector.so crashes (SIGILL) building HNSW indexes on non-AVX-512 CPUs
+    # (#490); overlay the official portable build. Its version must match Bitnami's
+    # bundled vector--*.sql / .control (0.8.6), which stay in place.
+    initContainers:
+      - name: copy-pgvector
+        # vector.so needs only GLIBC_2.14; Bitnami's image (Photon OS 5) has 2.43.
+        image: pgvector/pgvector:0.8.6-pg18-bookworm@sha256:2ba9ca5f2e7daa0f0e7723cba1ee9167bab54efd3640516a44ac1a928dd67e7a
+        command: ["cp", "/usr/lib/postgresql/18/lib/vector.so", "/pgvector/vector.so"]
+        securityContext:
+          runAsUser: 1001
+          runAsNonRoot: true
+          readOnlyRootFilesystem: true
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop: ["ALL"]
+        volumeMounts:
+          - name: pgvector
+            mountPath: /pgvector
+    extraVolumes:
+      - name: pgvector
+        emptyDir: {}
+      # Chain's DB password for the init script - a file, not an env var. Optional:
+      # Postgres without Chain (inbox/mind CI) must still start; the script skips Chain then.
+      - name: chain-db-credentials
+        secret:
+          secretName: resonance-flow-chain-db-credentials
+          optional: true
+    extraVolumeMounts:
+      - name: pgvector
+        mountPath: /opt/bitnami/postgresql/lib/vector.so
+        subPath: vector.so
+        readOnly: true
+      - name: chain-db-credentials
+        mountPath: /etc/resonance-flow/secrets/chain-db
+        readOnly: true
+    # HNSW index builds use maintenance_work_mem (64MB default) on top of
+    # shared_buffers (128MB) - 192Mi left no headroom and OOMKills instead of erroring.
     resources:
       requests:
         cpu: 100m
-        memory: 128Mi
+        memory: 256Mi
       limits:
-        cpu: 150m
-        memory: 192Mi
+        cpu: 250m
+        memory: 512Mi
+    initdb:
+      # Both names below must match the fullname-prefixed names
+      # templates/services/chain/configmap.yaml renders.
+      scriptsConfigMap: resonance-flow-chain-db-init

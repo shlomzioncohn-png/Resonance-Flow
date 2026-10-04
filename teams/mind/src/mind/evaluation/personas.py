@@ -20,14 +20,16 @@ eval/personas/README.md:
 
 from __future__ import annotations
 
+import calendar
 import json
 from collections import Counter
 from dataclasses import dataclass, field
+from datetime import date, datetime, time, timedelta
 from pathlib import Path
 
 from pydantic import ValidationError
 
-from mind.evaluation.interfaces import PersonaEvaluationScenario
+from mind.evaluation.interfaces import PersonaEvaluationScenario, TimeHorizon
 
 # Present in eval/personas/ as a generated artifact (see mind.evaluation.schema);
 # skipped when scanning the directory for scenario files.
@@ -159,3 +161,47 @@ def validate_personas(scenarios: list[PersonaEvaluationScenario]) -> ValidationR
         )
 
     return report
+
+
+def time_horizon_end(current: datetime, horizon: TimeHorizon) -> datetime:
+    """Last instant still considered "inside" the given time_horizon window.
+
+    See "Deadline proximity" in eval/personas/README.md: a scenario's correct
+    answer must have its own deadline (if any) inside this window; only a
+    distractor's deadline may fall beyond it.
+    """
+    if horizon == "today":
+        return datetime.combine(current.date(), time(23, 59, 59))
+    if horizon == "this_week":
+        # Monday-start week; end = the Sunday of the current week.
+        days_until_sunday = 6 - current.weekday()
+        end_date = current.date() + timedelta(days=days_until_sunday)
+        return datetime.combine(end_date, time(23, 59, 59))
+    if horizon == "this_month":
+        last_day = calendar.monthrange(current.year, current.month)[1]
+        return datetime.combine(date(current.year, current.month, last_day), time(23, 59, 59))
+    raise AssertionError(f"unhandled TimeHorizon: {horizon!r}")
+
+
+def correct_answer_deadline_violates_time_horizon(
+    scenario: PersonaEvaluationScenario,
+) -> str | None:
+    """Checks one scenario against the time_horizon rule above.
+
+    Returns a human-readable violation message if the scenario's correct
+    answer has a deadline that falls after its time_horizon window ends, or
+    None if the scenario is fine (including when the correct answer has no
+    deadline at all, in which case there is nothing to check).
+    """
+    correct = next(t for t in scenario.tasks if t.task_id == scenario.expected_top_task_id)
+    if correct.deadline is None:
+        return None
+
+    end = time_horizon_end(scenario.context.current_datetime, scenario.context.time_horizon)
+    if correct.deadline > end:
+        return (
+            f"{scenario.scenario_id}: time_horizon={scenario.context.time_horizon!r} ends "
+            f"{end.isoformat()}, but correct answer {correct.task_id!r} has deadline "
+            f"{correct.deadline.isoformat()} (after the window)"
+        )
+    return None

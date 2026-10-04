@@ -13,6 +13,11 @@ metadata:
 spec:
   replicas: {{ $component.replicaCount }}
 
+  {{- with $component.updateStrategy }}
+  strategy:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+
   selector:
     matchLabels:
       {{- include "resonance-flow.selectorLabels" $ | nindent 6 }}
@@ -43,6 +48,10 @@ spec:
       {{- end }}
 
       serviceAccountName: {{ include "resonance-flow.serviceAccountName" $ }}
+
+      {{- with $component.terminationGracePeriodSeconds }}
+      terminationGracePeriodSeconds: {{ . }}
+      {{- end }}
 
       {{- with $.Values.podSecurityContext }}
       securityContext:
@@ -77,16 +86,30 @@ spec:
               containerPort: {{ $component.containerPort }}
               protocol: TCP
 
-          {{- if or $component.config $component.env }}
+          {{- if or $component.config $component.secret $component.env (eq $componentName "notification-delivery") }}
           env:
+            {{- if eq $componentName "notification-delivery" }}
+            {{/* Populates the app's generic INSTANCE_NAME contract (see application.yml /
+                 InstanceNameGuard) with this pod's own name - a Kubernetes concept the chart
+                 knows about so the app itself doesn't have to. */}}
+            - name: INSTANCE_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            {{- end }}
             {{- if $component.config }}
             {{- include "resonance-flow.configFilePathEnv" $ | nindent 12 }}
+            {{- end }}
+            {{- if $component.secret }}
+            - name: SECRETS_FILE_PATH
+              value: "/etc/resonance-flow/secret/secrets.yaml"
             {{- end }}
             {{- range $name, $value := $component.env }}
             - name: {{ $name }}
               value: {{ $value | quote }}
-              {{- end }}
+            {{- end }}
           {{- end }}
+
           {{- with $component.startupProbe }}
           startupProbe:
             {{- toYaml . | nindent 12 }}
@@ -106,39 +129,42 @@ spec:
           resources:
             {{- toYaml . | nindent 12 }}
           {{- end }}
-          {{- if or $component.config $.Values.volumeMounts $component.secretFiles }}
+          {{- $volumeMounts := concat ($.Values.volumeMounts | default list) ($component.volumeMounts | default list) }}
+          {{- if or $component.config $component.secret $volumeMounts }}
           volumeMounts:
             {{- if $component.config }}
             - name: resonance-flow-config
               mountPath: /etc/resonance-flow/config/config.yaml
               subPath: config.yaml
               readOnly: true
-              {{- end }}
-              {{- range $secret := $component.secretFiles }}
-            - name: {{ $secret.name }}
-              mountPath: {{ $secret.mountPath }}
+            {{- end }}
+            {{- if $component.secret }}
+            # whole Secret as a dir (no subPath): an optional missing Secret then
+            # leaves an empty dir, not a phantom file, and updates propagate.
+            - name: resonance-flow-secret
+              mountPath: /etc/resonance-flow/secret
               readOnly: true
-              {{- end }}
-              {{- with $.Values.volumeMounts }}
-              {{- toYaml . | nindent 12 }}
-              {{- end }}
+            {{- end }}
+            {{- with $volumeMounts }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
           {{- end }}
 
-      {{- if or $component.config $.Values.volumes $component.secretFiles }}
+      {{- $volumes := concat ($.Values.volumes | default list) ($component.volumes | default list) }}
+      {{- if or $component.config $component.secret $volumes }}
       volumes:
         {{- if $component.config }}
         - name: resonance-flow-config
           configMap:
             name: {{ include "resonance-flow.fullname" $ }}-{{ $componentName }}-config
         {{- end }}
-        {{- range $secret := $component.secretFiles }}
-        - name: {{ $secret.name }}
+        {{- if $component.secret }}
+        - name: resonance-flow-secret
           secret:
-            secretName: {{ $secret.secretName }}
-            items:
-              {{- toYaml $secret.items | nindent 14 }}
+            secretName: {{ include "resonance-flow.fullname" $ }}-{{ $componentName }}-secret
+            optional: true
         {{- end }}
-        {{- with $.Values.volumes }}
+        {{- with $volumes }}
         {{- toYaml . | nindent 8 }}
         {{- end }}
       {{- end }}

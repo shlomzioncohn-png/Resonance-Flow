@@ -13,10 +13,10 @@ This is a minimal Spring Boot skeleton. No Kafka integration or business logic i
 ## Project structure
 
 ```
-src/main/java/com/rnd/relay/
+notification_delivery/main/java/
 └── RelayApplication.java   # Spring Boot entry point
-src/main/resources/application.yml
-src/test/java/com/rnd/relay/
+notification_delivery/main/resources/application.yml
+notification_delivery/test/java/
 ```
 
 ## Running locally with Maven

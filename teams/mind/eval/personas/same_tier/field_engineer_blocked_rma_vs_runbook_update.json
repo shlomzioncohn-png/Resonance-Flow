@@ -1,0 +1,43 @@
+{
+  "scenario_id": "field_engineer_blocked_rma_vs_runbook_update",
+  "persona": {
+    "role": "Field Engineer",
+    "department": null
+  },
+  "context": {
+    "free_time_minutes": 50,
+    "current_datetime": "2026-09-07T14:00:00",
+    "time_horizon": "this_week",
+    "constraints": []
+  },
+  "tasks": [
+    {
+      "task_id": "task_rma",
+      "title": "Swap the failed controller at Customer C",
+      "description": "Customer C's backup path fails tonight at midnight if the primary is not restored, but the replacement controller has not shipped from the vendor, so nothing can be done on site yet.",
+      "deadline": "2026-09-08T00:00:00",
+      "effort_estimate": 40,
+      "tier": "operational",
+      "blocked": true,
+      "parent_task_id": null
+    },
+    {
+      "task_id": "task_runbook",
+      "title": "Update the on-call runbook for the new alerting stack",
+      "description": "The runbook still references the retired tool; on-call engineers hit stale steps twice this week. No deadline, but it keeps causing mistakes.",
+      "deadline": null,
+      "effort_estimate": 40,
+      "tier": "operational",
+      "blocked": false,
+      "parent_task_id": null
+    }
+  ],
+  "expected_top_task_id": "task_runbook",
+  "expected_reason": "task_rma is blocked — the replacement part has not shipped, so its midnight deadline cannot be met regardless; task_runbook is unblocked and keeps causing on-call mistakes.",
+  "source": {
+    "type": "synthetic",
+    "source_detail": null
+  },
+  "team_lead_approved": true,
+  "mentor_approved": false
+}
