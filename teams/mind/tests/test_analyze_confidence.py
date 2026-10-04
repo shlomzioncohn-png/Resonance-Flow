@@ -41,3 +41,64 @@ def test_hits_exclude_words_that_were_missed_and_include_the_rest():
 def test_a_miss_whose_brought_token_has_no_confidence_is_skipped_not_an_error():
     _, by_category = collect_confidences([("x", "x")], [miss("x", "zzz")], {"other": [1.0]})
     assert by_category == {}
+
+
+def test_analysis_scripts_use_the_chosen_psm_not_a_hardcoded_one(monkeypatch):
+    # A future PSM change in ocr_asr_benchmark.CHOSEN_PSM_ARGS must reach both
+    # analysis scripts; hardcoding "--psm 11" there would silently keep analysing psm11.
+    import subprocess
+    from pathlib import Path
+    from types import SimpleNamespace
+
+    from benchmarks import analyze_confidence, analyze_word_misses
+
+    marker = ["--psm", "99"]
+    monkeypatch.setattr(analyze_confidence, "CHOSEN_PSM_ARGS", marker)
+    monkeypatch.setattr(analyze_word_misses, "CHOSEN_PSM_ARGS", marker)
+
+    commands: list[list[str]] = []
+
+    def fake_run(cmd, **kwargs):
+        commands.append(cmd)
+        return SimpleNamespace(stdout=b"header\n")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    analyze_confidence.tesseract_confidences("tesseract", Path("page.png"))
+    assert commands[0][-3:-1] == marker
+
+    seen: list[list[str]] = []
+
+    def fake_run_ocr(cmd, image_path, psm_args):
+        seen.append(psm_args)
+        raise StopIteration  # enough: we only need the psm_args analyze_doc passed
+
+    monkeypatch.setattr(analyze_word_misses, "run_ocr", fake_run_ocr)
+    monkeypatch.setattr(
+        analyze_word_misses, "load_manifest", lambda: {"d": SimpleNamespace(image=Path("p.png"))}
+    )
+    try:
+        analyze_word_misses.analyze_doc("tesseract", "d")
+    except StopIteration:
+        pass
+    assert seen == [marker]
+
+
+def test_chosen_psm_is_the_psm11_config_entry():
+    from benchmarks.ocr_asr_benchmark import CHOSEN_PSM_ARGS, OCR_CONFIGS
+
+    assert OCR_CONFIGS["psm11_sparse_text"] == CHOSEN_PSM_ARGS
+
+
+def test_all_three_analyses_share_one_normalize():
+    # word_recall, the miss classification and the confidence numbers must
+    # normalise words identically; separate copies could drift silently.
+    from benchmarks import (
+        aligned_metrics,
+        analyze_confidence,
+        analyze_word_misses,
+        ocr_asr_benchmark,
+    )
+
+    assert analyze_confidence.normalize is aligned_metrics.normalize
+    assert analyze_word_misses.normalize is aligned_metrics.normalize
+    assert ocr_asr_benchmark._normalize is aligned_metrics.normalize

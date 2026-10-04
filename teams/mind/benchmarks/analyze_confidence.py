@@ -18,7 +18,6 @@ usable mitigation -- not just a nice API shape.
 
 from __future__ import annotations
 
-import re
 import subprocess
 import sys
 from pathlib import Path
@@ -26,12 +25,9 @@ from pathlib import Path
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
+from benchmarks.aligned_metrics import normalize
 from benchmarks.analyze_word_misses import MissRow, analyze_doc, gt_word_pairs
-from benchmarks.ocr_asr_benchmark import find_tesseract, load_manifest
-
-
-def _normalize(word: str) -> str:
-    return re.sub(r"[^\w]", "", word).lower()
+from benchmarks.ocr_asr_benchmark import CHOSEN_PSM_ARGS, find_tesseract, load_manifest
 
 
 def tesseract_confidences(tesseract_cmd: str, image_path: Path) -> dict[str, list[float]]:
@@ -40,7 +36,7 @@ def tesseract_confidences(tesseract_cmd: str, image_path: Path) -> dict[str, lis
     A list, not a single value, because the same normalized word can
     appear more than once on a page with different confidences.
     """
-    cmd = [tesseract_cmd, str(image_path), "stdout", "--psm", "11", "tsv"]
+    cmd = [tesseract_cmd, str(image_path), "stdout", *CHOSEN_PSM_ARGS, "tsv"]
     proc = subprocess.run(cmd, capture_output=True, check=True)
     lines = proc.stdout.decode("utf-8", errors="replace").splitlines()
     conf_by_word: dict[str, list[float]] = {}
@@ -51,7 +47,7 @@ def tesseract_confidences(tesseract_cmd: str, image_path: Path) -> dict[str, lis
         level, conf_str, text = fields[0], fields[10], fields[11]
         if level != "5":  # level 5 = individual recognized word
             continue
-        norm = _normalize(text)
+        norm = normalize(text)
         conf = float(conf_str)
         if norm and conf >= 0:
             conf_by_word.setdefault(norm, []).append(conf)
@@ -75,7 +71,7 @@ def collect_confidences(
     contributes every confidence Tesseract gave the token it produced, so a
     token that appears several times on the page adds several values.
     """
-    miss_gt_norms = {_normalize(row.gt_word) for row in misses}
+    miss_gt_norms = {normalize(row.gt_word) for row in misses}
 
     hits: list[float] = []
     for _, gt_norm in gt_pairs:
@@ -86,7 +82,7 @@ def collect_confidences(
 
     by_category: dict[str, list[float]] = {}
     for row in misses:
-        brought_norm = _normalize(row.ocr_brought)
+        brought_norm = normalize(row.ocr_brought)
         if brought_norm in conf_by_word:
             by_category.setdefault(row.category, []).extend(conf_by_word[brought_norm])
     return hits, by_category

@@ -6,7 +6,13 @@ test_aligned_metrics.py. Direct unit tests on the calculation itself, not just
 eyeballing the benchmark script's printed output, per review feedback on PR #345.
 """
 
-from benchmarks.ocr_asr_benchmark import _normalize, word_recall
+from benchmarks.ocr_asr_benchmark import (
+    CHOSEN_CONFIG,
+    ConfigAverages,
+    _normalize,
+    format_conclusion,
+    word_recall,
+)
 
 
 def test_normalize_strips_punctuation_and_lowercases():
@@ -41,3 +47,29 @@ def test_word_recall_does_not_double_count_duplicate_gt_words():
     # word_recall dedupes both sides via set(), so the same GT word
     # appearing twice is one denominator entry, not two
     assert word_recall("hello", ["hello", "hello"]) == 1.0
+
+
+def _avg(grouped_cer: float, duration_s: float = 1.0) -> ConfigAverages:
+    return ConfigAverages(
+        duration_s=duration_s,
+        peak_rss_mb=10.0,
+        cpu_time_s=1.0,
+        word_recall=0.5,
+        grouped_cer=grouped_cer,
+    )
+
+
+def test_conclusion_recommends_the_chosen_config_and_labels_the_lowest_cer_separately():
+    # PaddleOCR has the lowest CER, but the decision is Tesseract psm 11: the
+    # printout must recommend the decision, not the measured leader.
+    text = format_conclusion({CHOSEN_CONFIG: _avg(0.200), "paddleocr_mobile": _avg(0.074, 45.0)})
+    recommendation, lowest = text.splitlines()[0], text.splitlines()[1]
+    assert recommendation.startswith("OCR recommendation (the team's decision): " + CHOSEN_CONFIG)
+    assert "paddleocr_mobile" not in recommendation
+    assert "not the pick" in lowest and "paddleocr_mobile" in lowest
+
+
+def test_conclusion_says_so_when_the_chosen_config_is_also_the_lowest_cer():
+    text = format_conclusion({CHOSEN_CONFIG: _avg(0.05), "paddleocr_mobile": _avg(0.074)})
+    assert "Also the lowest grouped CER" in text
+    assert "not the pick" not in text

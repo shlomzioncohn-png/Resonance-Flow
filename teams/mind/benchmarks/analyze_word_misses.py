@@ -46,7 +46,6 @@ from __future__ import annotations
 
 import difflib
 import json
-import re
 import sys
 from typing import Literal
 
@@ -55,7 +54,8 @@ from pydantic import BaseModel
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
-from benchmarks.ocr_asr_benchmark import find_tesseract, load_manifest, run_ocr
+from benchmarks.aligned_metrics import normalize
+from benchmarks.ocr_asr_benchmark import CHOSEN_PSM_ARGS, find_tesseract, load_manifest, run_ocr
 
 Category = Literal["digit_merge", "segmentation", "char_misread", "different_word", "not_detected"]
 
@@ -88,11 +88,6 @@ class MissRow(BaseModel):
     similarity: float
     category: Category
 
-
-def _normalize(word: str) -> str:
-    return re.sub(r"[^\w]", "", word).lower()
-
-
 def gt_word_pairs(doc_id: str) -> list[tuple[str, str]]:
     """(original_text, normalized_text) for every GT word, in document order."""
     path = load_manifest()[doc_id].annotation
@@ -100,7 +95,7 @@ def gt_word_pairs(doc_id: str) -> list[tuple[str, str]]:
     pairs = []
     for block in data["form"]:
         for w in block["words"]:
-            norm = _normalize(w["text"])
+            norm = normalize(w["text"])
             if norm:
                 pairs.append((w["text"], norm))
     return pairs
@@ -120,9 +115,9 @@ def classify(gt_norm: str, ocr_norm_tokens: list[str], best_match: str | None, b
 
 def analyze_doc(tesseract_cmd: str, doc_id: str) -> list[MissRow]:
     image_path = load_manifest()[doc_id].image
-    result = run_ocr(tesseract_cmd, image_path, ["--psm", "11"])
+    result = run_ocr(tesseract_cmd, image_path, CHOSEN_PSM_ARGS)
     ocr_raw_tokens = result.text.split()
-    ocr_norm_tokens = [_normalize(w) for w in ocr_raw_tokens if _normalize(w)]
+    ocr_norm_tokens = [normalize(w) for w in ocr_raw_tokens if normalize(w)]
     ocr_norm_set = set(ocr_norm_tokens)
 
     rows: list[MissRow] = []
