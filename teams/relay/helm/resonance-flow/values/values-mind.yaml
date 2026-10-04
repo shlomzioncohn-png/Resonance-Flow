@@ -5,7 +5,6 @@ components:
       repository: mind
       tag: local
       pullPolicy: Never
-    dependencies: []
   schema-registry:
     enabled: true
   lens-bff:
@@ -44,4 +43,4 @@ kafka:
 minio:
   enabled: true
 postgresql:
-  enabled: false
+  enabled: true
