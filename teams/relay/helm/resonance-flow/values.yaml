@@ -115,7 +115,7 @@ components:
         provider: local
         whisper_model: base
       object_storage:
-        bucket: ""
+        bucket: bridge-raw
       kafka:
         producer:
           task_creation_requested_topic: task.creation.requested
