@@ -436,7 +436,11 @@ public class TaskEligibilityService {
         boolean isOpenNow = newStatus == Constraint.ConstraintStatus.PENDING;
         if (wasOpen == isOpenNow) {
             // Genuinely no open/close transition per the caller's own claim (e.g.
-            // SATISFIED -> WAIVED) - cheap fast path, no lock/repository touch needed.
+            // SATISFIED -> WAIVED) - still validates taskId (review finding: this class's own
+            // @throws contract, and every other public method here, validate unconditionally),
+            // but stops short of updateCounters - no lock/write/isReady-recompute needed when
+            // the counter provably isn't changing.
+            requireTask(taskId);
             return;
         }
 

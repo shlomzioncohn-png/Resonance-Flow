@@ -627,12 +627,30 @@ class TaskEligibilityServiceTest {
 
     @Test
     void onConstraintStatusChanged_nonOpenTransition_doesNothing() {
-        // taskId's own Task is deliberately NOT seeded - if the method touched the repository
-        // at all for this non-open-changing transition, this would throw.
+        // taskId is seeded (unlike before this fix) - a non-open-changing transition still
+        // validates taskId now (see onConstraintStatusChanged_nonOpenTransition_taskDoesNotExist_throws),
+        // it just stops short of updateCounters - no counter change, no lock, no write.
+        UUID taskId = UUID.randomUUID();
+        Fixture fixture = newFixture(List.of(buildTask(taskId, 0, 0, true)), List.of());
+        Task before = fixture.taskRepo().findById(taskId).orElseThrow();
+
+        assertDoesNotThrow(() -> fixture.service().onConstraintStatusChanged(
+                taskId, UUID.randomUUID(), Constraint.ConstraintStatus.SATISFIED, Constraint.ConstraintStatus.WAIVED));
+
+        assertSame(before, fixture.taskRepo().findById(taskId).orElseThrow(),
+                "a non-open-changing transition must not write a new Task instance");
+    }
+
+    @Test
+    void onConstraintStatusChanged_nonOpenTransition_taskDoesNotExist_throws() {
+        // Regression test (review finding): the fast path for a non-open-changing transition
+        // (e.g. SATISFIED -> WAIVED) previously returned before validating taskId at all,
+        // contradicting this method's own @throws contract and every other public method's
+        // convention of always validating task existence.
         UUID taskId = UUID.randomUUID();
         Fixture fixture = newFixture(List.of(), List.of());
 
-        assertDoesNotThrow(() -> fixture.service().onConstraintStatusChanged(
+        assertThrows(IllegalArgumentException.class, () -> fixture.service().onConstraintStatusChanged(
                 taskId, UUID.randomUUID(), Constraint.ConstraintStatus.SATISFIED, Constraint.ConstraintStatus.WAIVED));
     }
 
