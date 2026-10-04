@@ -176,6 +176,23 @@ class TaskEligibilityServiceTest {
     }
 
     @Test
+    void addDependency_duplicate_targetTaskNoLongerExists_doesNotThrow() {
+        // Regression test (review finding): a duplicate/retried addDependency call must be a
+        // genuine no-op, including not requiring dependsOnTaskId to still exist - it previously
+        // called requireTask(dependsOnTaskId) unconditionally, so a redelivered event for an edge
+        // whose target had since been removed threw instead of being idempotent.
+        UUID taskId = UUID.randomUUID();
+        UUID dependsOnTaskId = UUID.randomUUID();
+        Fixture fixture = newFixture(
+                List.of(),
+                List.of(new TaskDependency(taskId, dependsOnTaskId)));
+
+        assertDoesNotThrow(() -> fixture.service().addDependency(taskId, dependsOnTaskId));
+
+        assertEquals(1, fixture.dependencyRepo().findByTaskId(taskId).size());
+    }
+
+    @Test
     void addDependency_targetAlreadyDone_doesNotIncrementBlockingCount_butStillRecalculates() {
         // Adding a dependency on an already-DONE task must not count against blockingCount -
         // there will be no future status transition to ever decrement it back off - but

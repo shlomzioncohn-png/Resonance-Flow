@@ -190,21 +190,20 @@ public class TaskEligibilityService {
                     "Cannot add dependency: task " + taskId + " -> " + dependsOnTaskId + " would create a cycle");
             }
 
-            boolean dependsOnAlreadyDone = requireTask(dependsOnTaskId).getStatus() == TaskStatus.DONE;
-
-            // taskId is only validated for a genuinely new edge - a duplicate/retried call
-            // already returns below without touching taskRepository at all, matching the
-            // idempotent-no-op contract the rest of this method documents.
-            if (isNewEdge) {
-                requireTask(taskId);
-            }
-            taskDependencyRepository.save(new TaskDependency(taskId, dependsOnTaskId));
-
+            // Every read/write below is gated on isNewEdge (review finding): a duplicate/retried
+            // call must be a genuine no-op, including not requiring taskId/dependsOnTaskId to
+            // still exist - a redelivered event for an edge that already exists (or whose target
+            // has since been removed) must never throw. requireTask(dependsOnTaskId) previously
+            // ran unconditionally here, so a duplicate/retried call for an edge whose target no
+            // longer existed threw instead of being idempotent.
             if (!isNewEdge) {
                 log.warn("Dependency {} -> {} already existed, blockingCount left unchanged", taskId, dependsOnTaskId);
                 return;
             }
 
+            requireTask(taskId);
+            boolean dependsOnAlreadyDone = requireTask(dependsOnTaskId).getStatus() == TaskStatus.DONE;
+            taskDependencyRepository.save(new TaskDependency(taskId, dependsOnTaskId));
             adjustBlockingCount(taskId, dependsOnAlreadyDone, 1);
         }
     }
