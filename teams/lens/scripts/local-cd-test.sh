@@ -1,35 +1,55 @@
 #!/usr/bin/env bash
-# Runs the same checks as lens-frontend-ci.yaml's `cd` job (service-cd.yaml -> ci-node +
-# deploy-service), against a local kind cluster, so this doesn't have to be validated by
-# waiting on the self-hosted CI runner. Skips the two steps that only make sense in CI:
-# pushing the image to GHCR and opening the manifest-bump PR (service-update-manifest.yaml).
+# Runs the same checks as <service>-ci.yaml's `cd` job (service-cd.yaml -> ci-java/ci-node +
+# deploy-service) for any one of LENS's three services, against a local kind cluster, so this
+# doesn't have to be validated by waiting on the self-hosted CI runner. One script instead of
+# three near-identical copies (lens-bff/lens-gateway/lens-frontend) - only the test-phase command
+# actually differs between them (Java via Docker/Maven vs Node via npm). Skips the two steps that
+# only make sense in CI: pushing the image to GHCR and opening the manifest-bump PR
+# (service-update-manifest.yaml).
 #
-# Usage: ./local-cd-test.sh [--clean]
-#   --clean   delete the kind cluster at the end (default: leave it running, so the
-#             next run skips cluster creation - that's most of the time this saves)
+# Usage: ./local-cd-test.sh <service_name> <service_dir> <language> <container_port> [--clean]
+#   service_name     matches components.<service_name> in teams/relay/helm/resonance-flow/values.yaml
+#   service_dir      path to the service, e.g. teams/lens/bff
+#   language          java | node
+#   container_port   from that service's own <service>-ci.yaml (the `cd` job's `with:` block)
+#   --clean          delete the kind cluster at the end (default: leave it running, so the
+#                     next run skips cluster creation - that's most of the time this saves)
 #
-# Requires: docker, kind, helm, kubectl, yq, node/npm - all already on this machine
-# except yq; on Windows/Git Bash: `choco install yq` or `scoop install yq`.
+# Examples:
+#   ./local-cd-test.sh lens-bff      teams/lens/bff      java 8082
+#   ./local-cd-test.sh lens-gateway  teams/lens/gateway  java 8080
+#   ./local-cd-test.sh lens-frontend teams/lens/frontend node 8083
+#
+# Requires: docker, kind, helm, kubectl, yq - all already on this machine (plus npm, only if
+# testing the node service).
 
 set -euo pipefail
 export MSYS_NO_PATHCONV=1
 
-SERVICE_NAME="lens-frontend"
-SERVICE_DIR="teams/lens/frontend"
-CONTAINER_PORT=8083
+SERVICE_NAME="${1:?usage: $0 <service_name> <service_dir> <language> <container_port> [--clean]}"
+SERVICE_DIR="${2:?usage: $0 <service_name> <service_dir> <language> <container_port> [--clean]}"
+LANGUAGE="${3:?usage: $0 <service_name> <service_dir> <language> <container_port> [--clean]}"
+CONTAINER_PORT="${4:?usage: $0 <service_name> <service_dir> <language> <container_port> [--clean]}"
 CLUSTER_NAME="${SERVICE_NAME}-cluster"
 CHART_DIR="teams/relay/helm/resonance-flow"
 CHART_VALUES="${CHART_DIR}/values.yaml"
 CLEAN=0
 
-for arg in "$@"; do
+for arg in "${@:5}"; do
   [ "$arg" = "--clean" ] && CLEAN=1
 done
+
+case "$LANGUAGE" in
+  java|node) ;;
+  *) echo "FAIL: language must be 'java' or 'node', got '$LANGUAGE'"; exit 1 ;;
+esac
 
 REPO_ROOT="$(git rev-parse --show-toplevel)"
 cd "$REPO_ROOT"
 
-for bin in docker kind helm kubectl yq npm; do
+REQUIRED_BINS=(docker kind helm kubectl yq)
+[ "$LANGUAGE" = "node" ] && REQUIRED_BINS+=(npm)
+for bin in "${REQUIRED_BINS[@]}"; do
   command -v "$bin" >/dev/null 2>&1 || { echo "FAIL: '$bin' is required but not installed"; exit 1; }
 done
 
@@ -43,8 +63,17 @@ cleanup() {
 }
 trap cleanup EXIT
 
-echo "==> [ci-node] npm ci / lint / build"
-(cd "$SERVICE_DIR" && npm ci && npm run lint && npm run build)
+if [ "$LANGUAGE" = "java" ]; then
+  echo "==> [ci-java] mvn -B test (via Docker, same image CI uses)"
+  docker run --rm --network host \
+    -v "$PWD:/workspace" -w "/workspace/${SERVICE_DIR}" \
+    -v "$HOME/.m2:/root/.m2" \
+    maven:3.9.9-eclipse-temurin-21 \
+    mvn -B test
+else
+  echo "==> [ci-node] npm ci / lint / build"
+  (cd "$SERVICE_DIR" && npm ci && npm run lint && npm run build)
+fi
 
 if kind get clusters 2>/dev/null | grep -qx "$CLUSTER_NAME"; then
   echo "==> kind cluster $CLUSTER_NAME already exists, reusing it"
@@ -52,6 +81,8 @@ else
   echo "==> Creating kind cluster $CLUSTER_NAME"
   kind create cluster --name "$CLUSTER_NAME"
 fi
+
+kubectl config use-context "kind-${CLUSTER_NAME}" >/dev/null
 
 echo "==> Fetching chart dependencies"
 helm dependency build "$CHART_DIR"
