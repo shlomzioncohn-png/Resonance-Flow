@@ -34,3 +34,4 @@ jobs:
       service_name: chain
       service_dir: teams/chain
       language: java
+      container_port: 8081

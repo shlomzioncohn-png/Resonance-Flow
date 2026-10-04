@@ -15,6 +15,10 @@ on:
         description: "python, java, or node"
         required: true
         type: string
+      container_port:
+        description: "Local port used for the post-deploy smoke test port-forward"
+        required: true
+        type: number
       extra_build_contexts:
         description: "Optional docker build-contexts (name=path per line), e.g. shared=shared"
         required: false
@@ -57,6 +61,7 @@ jobs:
         with:
           service_name: ${{ inputs.service_name }}
           service_dir: ${{ inputs.service_dir }}
+          container_port: ${{ inputs.container_port }}
           extra_build_contexts: ${{ inputs.extra_build_contexts }}
 
   update-manifest:

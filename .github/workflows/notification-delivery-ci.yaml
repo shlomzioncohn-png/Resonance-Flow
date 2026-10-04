@@ -35,4 +35,5 @@ jobs:
       service_name: notification-delivery
       service_dir: teams/relay/notification_delivery
       language: java
+      container_port: 8082
       extra_build_contexts: shared=shared

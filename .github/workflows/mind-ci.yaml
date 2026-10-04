@@ -71,6 +71,7 @@ jobs:
       service_name: mind
       service_dir: teams/mind
       language: python
+      container_port: 8000
 
   # Deploys Kafka/Schema Registry/MIND via the real Helm chart; round-trip.py
   # then runs from the runner against the deployed Kafka/registry.
