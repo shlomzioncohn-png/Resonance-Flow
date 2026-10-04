@@ -47,6 +47,7 @@ enum SourceType {
   SOURCE_TYPE_CALENDAR = 10;
   SOURCE_TYPE_MANUAL = 11;
   SOURCE_TYPE_DRIVE = 12;
+  SOURCE_TYPE_JIRA_ISSUE = 13;
 }
 
 enum TaskTier {

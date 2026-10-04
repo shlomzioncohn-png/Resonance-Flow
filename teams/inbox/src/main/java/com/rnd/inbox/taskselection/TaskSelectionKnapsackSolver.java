@@ -45,7 +45,7 @@ public class TaskSelectionKnapsackSolver {
         }
         int byWeight = Integer.compare(candidate.totalWeight, current.totalWeight);
         if (byWeight != 0) {
-            return byWeight < 0;
+            return byWeight > 0;
         }
         int byDeadline = Double.compare(candidate.averageDeadlineEpochSeconds(), current.averageDeadlineEpochSeconds());
         if (byDeadline != 0) {
