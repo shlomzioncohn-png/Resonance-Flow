@@ -328,6 +328,9 @@ components:
     resources: *defaultResources
     <<: *defaultHealthProbes
     env: {}
+    dependencies:
+      - name: notification-delivery
+        port: 80
     config:
       notificationDelivery:
         service:
