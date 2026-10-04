@@ -13,8 +13,8 @@ test: proto
 	pytest --cov=src/mind
 
 lint: proto
-	ruff check src tests
-	mypy src
+	ruff check src tests benchmarks
+	mypy src benchmarks
 	python -m mind.evaluation.schema --check
 
 schema:
