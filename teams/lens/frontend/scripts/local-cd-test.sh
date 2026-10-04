@@ -92,7 +92,7 @@ fi
 
 echo "==> Smoke test"
 HEALTH_PATH=$(yq eval ".components.${SERVICE_NAME}.readinessProbe.httpGet.path" "$CHART_VALUES")
-kubectl -n "$SERVICE_NAME" port-forward "svc/${SERVICE_NAME}-resonance-flow-${SERVICE_NAME}" "${CONTAINER_PORT}:80" &
+kubectl -n "$SERVICE_NAME" port-forward "svc/resonance-flow-${SERVICE_NAME}" "${CONTAINER_PORT}:80" &
 PF_PID=$!
 sleep 5
 if curl -sf "http://localhost:${CONTAINER_PORT}${HEALTH_PATH}" > /dev/null; then
