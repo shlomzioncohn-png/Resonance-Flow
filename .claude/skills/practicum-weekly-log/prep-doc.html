@@ -1,0 +1,442 @@
+<title>ציר הזמן של Resonance-Flow</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Rubik:wght@500;600;700&family=Heebo:wght@400;500;600&family=IBM+Plex+Mono:wght@500&display=swap');
+
+  :root{
+    --bg:#f5f4f0;
+    --surface:#fbfaf7;
+    --surface-2:#f0eee8;
+    --ink:#1e2224;
+    --ink-soft:#565f63;
+    --ink-faint:#8a9194;
+    --accent:#2b6e6b;
+    --accent-ink:#ffffff;
+    --accent-soft:#e3eeec;
+    --accent-soft-ink:#1f5350;
+    --line:#dedad2;
+    --line-strong:#c7c2b7;
+    --warn-soft:#f3e9d8;
+    --warn-ink:#8a6412;
+    --shadow: 0 1px 2px rgba(30,34,36,.04), 0 6px 18px rgba(30,34,36,.05);
+  }
+  @media (prefers-color-scheme: dark){
+    :root:not([data-theme="light"]){
+      --bg:#14181a;
+      --surface:#1b2023;
+      --surface-2:#20262a;
+      --ink:#ecedea;
+      --ink-soft:#a7afae;
+      --ink-faint:#6c7477;
+      --accent:#5fb8b1;
+      --accent-ink:#0d1f1e;
+      --accent-soft:#1f3634;
+      --accent-soft-ink:#a9e3dd;
+      --line:#2a3134;
+      --line-strong:#3a4245;
+      --warn-soft:#3a3120;
+      --warn-ink:#e3c07a;
+      --shadow: 0 1px 2px rgba(0,0,0,.3), 0 10px 24px rgba(0,0,0,.35);
+    }
+  }
+  :root[data-theme="dark"]{
+    --bg:#14181a;
+    --surface:#1b2023;
+    --surface-2:#20262a;
+    --ink:#ecedea;
+    --ink-soft:#a7afae;
+    --ink-faint:#6c7477;
+    --accent:#5fb8b1;
+    --accent-ink:#0d1f1e;
+    --accent-soft:#1f3634;
+    --accent-soft-ink:#a9e3dd;
+    --line:#2a3134;
+    --line-strong:#3a4245;
+    --warn-soft:#3a3120;
+    --warn-ink:#e3c07a;
+    --shadow: 0 1px 2px rgba(0,0,0,.3), 0 10px 24px rgba(0,0,0,.35);
+  }
+
+  *{box-sizing:border-box;}
+  html{direction:rtl;}
+  body{
+    background:var(--bg);
+    color:var(--ink);
+    font-family:'Heebo', system-ui, sans-serif;
+    line-height:1.65;
+    padding-inline:20px;
+    padding-block:40px 80px;
+  }
+  h1,h2,h3{
+    font-family:'Rubik','Heebo',system-ui,sans-serif;
+    text-wrap:balance;
+    margin:0;
+  }
+  code, .mono{
+    font-family:'IBM Plex Mono', ui-monospace, monospace;
+    direction:ltr;
+    unicode-bidi:isolate;
+  }
+
+  .page{max-width:840px; margin-inline:auto;}
+
+  /* header */
+  header.top{
+    display:flex; flex-direction:column; gap:10px;
+    margin-bottom:34px;
+    padding-bottom:26px;
+    border-bottom:1px solid var(--line);
+  }
+  .eyebrow{
+    font-size:12.5px; font-weight:600; letter-spacing:.06em;
+    color:var(--accent-soft-ink); background:var(--accent-soft);
+    display:inline-flex; width:fit-content; padding:5px 12px; border-radius:100px;
+  }
+  h1{font-size:clamp(26px,4vw,34px); font-weight:700; color:var(--ink);}
+  .top p{margin:0; color:var(--ink-soft); font-size:15.5px; max-width:62ch;}
+  .top .meta{
+    display:flex; gap:16px; flex-wrap:wrap;
+    font-size:13.5px; color:var(--ink-faint); margin-top:4px;
+  }
+  .top .meta span{display:flex; align-items:center; gap:6px;}
+  .dot{width:5px;height:5px;border-radius:50%;background:var(--ink-faint);}
+
+  /* quick nav */
+  nav.jump{
+    display:flex; flex-wrap:wrap; gap:8px;
+    margin-bottom:40px;
+  }
+  nav.jump a{
+    font-size:13.5px; font-weight:500; text-decoration:none;
+    color:var(--ink-soft); background:var(--surface);
+    border:1px solid var(--line); border-radius:100px;
+    padding:6px 13px;
+    transition:border-color .15s, color .15s, background .15s;
+  }
+  nav.jump a:hover{ border-color:var(--accent); color:var(--accent-soft-ink); background:var(--accent-soft); }
+  nav.jump a b{color:var(--ink);}
+
+  /* timeline */
+  .timeline{ position:relative; }
+  .timeline::before{
+    content:"";
+    position:absolute; right:19px; top:8px; bottom:8px;
+    width:2px; background:var(--line-strong);
+  }
+  .phase{
+    position:relative;
+    padding-inline-end:56px;
+    margin-bottom:34px;
+    scroll-margin-top:20px;
+  }
+  .phase:last-child{margin-bottom:0;}
+  .node{
+    position:absolute; inset-inline-end:0; top:2px;
+    width:40px; height:40px; border-radius:50%;
+    background:var(--surface); border:2px solid var(--accent);
+    color:var(--accent-soft-ink);
+    display:flex; align-items:center; justify-content:center;
+    font-family:'Rubik',sans-serif; font-weight:700; font-size:15px;
+    box-shadow:var(--shadow);
+    z-index:1;
+  }
+  .card{
+    background:var(--surface);
+    border:1px solid var(--line);
+    border-radius:16px;
+    padding:22px 24px 24px;
+    box-shadow:var(--shadow);
+  }
+  .card h2{font-size:19px; font-weight:700; margin-bottom:3px;}
+  .card .subtitle{
+    font-size:13.5px; color:var(--ink-faint); margin-bottom:18px;
+  }
+
+  .block{margin-top:16px;}
+  .block:first-of-type{margin-top:0;}
+  .block .label{
+    display:flex; align-items:center; gap:7px;
+    font-size:12.5px; font-weight:600; letter-spacing:.03em;
+    color:var(--accent-soft-ink);
+    margin-bottom:6px;
+  }
+  .block .label::before{
+    content:""; width:6px; height:6px; border-radius:2px;
+    background:var(--accent); flex:none;
+  }
+  .block p, .block li{
+    font-size:15px; color:var(--ink);
+    margin:0;
+  }
+  .block ul{margin:0; padding-inline-start:20px; display:flex; flex-direction:column; gap:6px;}
+  .block p + p{margin-top:8px;}
+
+  .sub{
+    margin-top:18px;
+    border-top:1px dashed var(--line);
+    padding-top:16px;
+  }
+  .sub h3{
+    font-size:14.5px; font-weight:600; color:var(--ink);
+    margin-bottom:10px;
+    display:flex; align-items:center; gap:8px;
+  }
+  .sub h3 .tag{
+    font-family:'IBM Plex Mono',monospace; direction:ltr; unicode-bidi:isolate;
+    font-size:11.5px; font-weight:500; color:var(--accent-soft-ink);
+    background:var(--accent-soft); padding:2px 7px; border-radius:6px;
+  }
+
+  .note{
+    display:flex; gap:9px;
+    background:var(--warn-soft); color:var(--warn-ink);
+    border-radius:10px; padding:10px 13px;
+    font-size:13.5px; margin-top:16px;
+    line-height:1.55;
+  }
+  .note b{font-weight:700;}
+
+  .pillrow{display:flex; flex-wrap:wrap; gap:6px; margin-top:6px;}
+  .pill{
+    font-family:'IBM Plex Mono',monospace; direction:ltr; unicode-bidi:isolate;
+    font-size:12px; color:var(--ink-soft);
+    background:var(--surface-2); border:1px solid var(--line);
+    border-radius:7px; padding:3px 8px;
+  }
+
+  footer.end{
+    margin-top:44px; padding-top:22px; border-top:1px solid var(--line);
+    font-size:13px; color:var(--ink-faint); text-align:center;
+  }
+
+  @media (max-width:520px){
+    .timeline::before{right:15px;}
+    .node{width:32px;height:32px;font-size:13px;}
+    .phase{padding-inline-end:44px;}
+    .card{padding:18px 16px 20px;}
+  }
+</style>
+
+<div class="page">
+
+  <header class="top">
+    <span class="eyebrow">הכנה לפגישת מנטורים · GONG</span>
+    <h1>ציר הזמן של Resonance-Flow</h1>
+    <p>שישה שלבי עבודה מרכזיים בפיתוח שכבת ה‑Kafka/CI/אינטגרציה של צוות Relay — התפקיד של כל שלב, מה נעשה בפועל, ולמה.</p>
+    <div class="meta">
+      <span><span class="dot"></span>Relay — Resonance-Flow</span>
+      <span><span class="dot"></span>6 שלבים</span>
+      <span><span class="dot"></span>Ayala</span>
+    </div>
+  </header>
+
+  <nav class="jump">
+    <a href="#p0"><b>0</b> · הקמת Kafka</a>
+    <a href="#p1"><b>1</b> · Self-hosted runner</a>
+    <a href="#p2"><b>2</b> · Schema Registry</a>
+    <a href="#p3"><b>3</b> · שער תאימות ב-CI</a>
+    <a href="#p4"><b>4</b> · RELAY↔MIND</a>
+    <a href="#p5"><b>5</b> · תחזוקת בראנץ'</a>
+  </nav>
+
+  <div class="timeline">
+
+    <!-- PHASE 0 -->
+    <section class="phase" id="p0">
+      <div class="node">0</div>
+      <div class="card">
+        <h2>הקמת Kafka — התשתית הראשונית</h2>
+        <div class="subtitle">נקודת ההתחלה: בלי broker אין תקשורת אסינכרונית בין הצוותים</div>
+
+        <div class="block">
+          <div class="label">תפקיד</div>
+          <p>להקים מאפס את ה‑event bus הבסיסי של Relay, <b>ובמקביל לקבוע קונבנציה אחת שכל צוות אחר יעבוד לפיה</b> — לא רק "יש לנו Kafka", אלא איך כל שירות בפלטפורמה מתחבר אליו, בלי שכל צוות ימציא את הגלגל בעצמו.</p>
+        </div>
+
+        <div class="block">
+          <div class="label">מה נעשה בפועל — 5 צעדים, על פני כשבוע</div>
+          <ul>
+            <li><span class="mono">19.8</span> — Broker מקומי דרך <code>docker-compose</code>, במצב <code>KRaft</code> (single-node, בלי ZooKeeper).</li>
+            <li><span class="mono">20.8</span> — סכמת <code>task-event</code> ראשונה כ‑POJO רגיל ב‑Java, וחיווט producer/consumer בסיסי — <b>עדיין בלי schema registry</b>.</li>
+            <li><span class="mono">23.8</span> — הוצאת כל הגדרות ה‑client (כתובת broker, protocol, אישורים) למשתני סביבה, כדי שאותו קוד ירוץ מקומית ובענן בלי שינוי.</li>
+            <li><span class="mono">24.8</span> — סכמת Avro אמיתית + חיבור ל‑Schema Registry, וטיוטות סכמה ראשונות גם לאירועים של Inbox ו‑Bridge (לא רק relay).</li>
+            <li><span class="mono">25.8</span> — מעבר מ‑Avro ל‑Protobuf כפורמט הסכמה בכל הפרויקט.</li>
+          </ul>
+        </div>
+
+        <div class="block">
+          <div class="label">התוצר המרכזי: קונבנציה אחידה לכל צוות</div>
+          <p>מסמך מדריך (<code>kafka-producer-consumer-guide.md</code>) שקובע שם משתנה סביבה אחיד לכל שירות בפלטפורמה, כדי שאותה תבנית קונפיג תעבוד לכל צוות:</p>
+          <div class="pillrow">
+            <span class="pill">KAFKA_BOOTSTRAP_SERVERS</span>
+            <span class="pill">KAFKA_SECURITY_PROTOCOL</span>
+            <span class="pill">SCHEMA_REGISTRY_URL</span>
+            <span class="pill">KAFKA_CONSUMER_GROUP_ID</span>
+            <span class="pill">KAFKA_CONSUMER_AUTO_OFFSET_RESET</span>
+          </div>
+          <p style="margin-top:10px;">וכלל נוסף שנקבע אז ונשאר עד היום: לכל סוג אירוע — topic משלו וקובץ סכמה משלו, אף פעם לא לשתף בין שני סוגי אירועים שונים.</p>
+        </div>
+
+        <div class="note">
+          <span>⚑</span>
+          <span><b>חיפשתי בכל ההיסטוריה ולא מצאתי:</b> תיעוד כתוב של הנימוק הספציפי "למה Protobuf ולא Avro" (רק את זה שזה קרה, ב‑25.8, יום אחרי שה‑Avro כבר עבד מול Schema Registry אמיתי). אם זה נדון בעל‑פה/בסלאק בזמנו — זה לא משהו שיש לי גישה אליו, כדאי שתמלאי את זה מהזיכרון שלך.</span>
+        </div>
+      </div>
+    </section>
+
+    <!-- PHASE 1 -->
+    <section class="phase" id="p1">
+      <div class="node">1</div>
+      <div class="card">
+        <h2>מעבר ל‑CI runner עצמי</h2>
+        <div class="subtitle">מ‑GitHub-hosted ל‑self-hosted, כדי לגשת למשאבים פנימיים</div>
+
+        <div class="block">
+          <div class="label">תפקיד</div>
+          <p>לאפשר ל‑CI לגשת למשאבים שלא זמינים מראנר ציבורי של GitHub — בעיקר לצורך העבודה על ה‑schema registry הפנימי.</p>
+        </div>
+        <div class="block">
+          <div class="label">מה נעשה בפועל</div>
+          <p>שינוי <code>runs-on: ubuntu-latest</code> → <code>runs-on: self-hosted</code> בכל workflow רלוונטי בריפו — כולל נגיעה קטנה בקובץ ה‑CI של MIND (<code>mind-ci.yml</code>).</p>
+        </div>
+        <div class="block">
+          <div class="label">שיקולים</div>
+          <p>המעבר חשף תקלת תשתית אמיתית: הראנר העצמי לא כלל כלים שראנרי <code>ubuntu-latest</code> מגיעים איתם מובנים — Maven, Python, Node. זה הפיל CI לכמה צוותים (Chain, Bridge, Lens) בו‑זמנית. אותרה הבעיה ודווחה לבעלת הראנר לתיקון בצד התשתית.</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- PHASE 2 -->
+    <section class="phase" id="p2">
+      <div class="node">2</div>
+      <div class="card">
+        <h2>Schema Registry ומנגנון סנכרון</h2>
+        <div class="subtitle">#259 / #260 — רישום סכמות אוטומטי אחרי merge</div>
+
+        <div class="block">
+          <div class="label">תפקיד</div>
+          <p>לספק מנגנון post-merge שרושם אוטומטית כל שינוי סכמה שנכנס ל‑<code>main</code>/<code>relay-team</code> לתוך schema registry אמיתי — כדי שצרכני Kafka ידעו לפענח הודעות בלי תיאום ידני.</p>
+        </div>
+        <div class="block">
+          <div class="label">מה נעשה בפועל</div>
+          <ul>
+            <li>פריסת <b>Apicurio Schema Registry</b> כ‑component בצ'ארט המשותף.</li>
+            <li>בניית Job שרץ דרך ArgoCD (עם <code>sync-wave</code> מבוקר) שקורא את <code>schema-subjects.tsv</code> ורושם כל סכמה.</li>
+            <li>אימות מקצה‑לקצה על <code>kind</code>+ArgoCD, בשלושה תרחישים: רישום ראשוני, שינוי תואם, ושינוי שובר.</li>
+          </ul>
+        </div>
+        <div class="block">
+          <div class="label">שיקולים</div>
+          <p>הרישום קורה <b>אחרי</b> merge בלבד — לא לפני — כדי לא "לדלוף" סכמה של PR שעוד לא אושר. ה‑sync-wave מוגדר לרוץ רק אחרי שה‑Application הראשי דיווח <code>Healthy</code>. בתרחיש שינוי שובר, ה‑Application יורד ל‑<code>Degraded</code> וה‑canary הבא בתור לא ממשיך — בדיוק ההתנהגות שרצינו.</p>
+        </div>
+        <div class="pillrow">
+          <span class="pill">ArgoCD sync-wave</span>
+          <span class="pill">kind + ArgoCD e2e</span>
+          <span class="pill">3 תרחישי בדיקה</span>
+        </div>
+      </div>
+    </section>
+
+    <!-- PHASE 3 -->
+    <section class="phase" id="p3">
+      <div class="node">3</div>
+      <div class="card">
+        <h2>שער תאימות סכמה ב‑CI</h2>
+        <div class="subtitle"><code>relay-schema-ci.yaml</code> — חוסם לפני merge, בלי cluster חי</div>
+
+        <div class="block">
+          <div class="label">תפקיד</div>
+          <p>לחסום PR ששובר תאימות סכמת Kafka — לפני שהוא בכלל מגיע ל‑merge, בלי להזדקק לסביבה חיה.</p>
+        </div>
+        <div class="block">
+          <div class="label">מה נעשה בפועל</div>
+          <p>workflow שמקים Apicurio זמני בתוך ה‑CI job עצמו, זורע אותו עם הסכמות מה‑branch הבסיס (לא מה‑PR!), ובודק שגרסאות ה‑PR עדיין תואמות.</p>
+        </div>
+        <div class="sub">
+          <h3>הבאג שאותר ותוקן <span class="tag">#240</span></h3>
+          <p>ה‑checks (<code>schema-compat</code>, <code>chart-lint</code>) הוגדרו כ‑Required — אבל ה‑workflow היה מוגבל ב‑<code>paths:</code> filter. התוצאה: כל PR שלא נגע בקבצי relay נשאר תקוע לנצח על <code>Expected — Waiting for status</code>, כי כשה‑workflow מדלג, ה‑check אף פעם לא מדווח סטטוס — וגיטהאב לא יודע לשחרר required check שמעולם לא דיווח.</p>
+        </div>
+        <div class="block">
+          <div class="label">שיקולים</div>
+          <p>הפתרון: job בשם <code>changes</code> שרץ <b>תמיד</b> (מהיר, כמה שניות) ומחליט אם הבדיקה האמיתית רלוונטית. כך ה‑required checks תמיד מדווחים — job שדולג נספר כעובר — והעבודה הכבדה (הקמת Apicurio, seed, בדיקה) קורית רק כשבאמת יש שינוי רלוונטי.</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- PHASE 4 -->
+    <section class="phase" id="p4">
+      <div class="node">4</div>
+      <div class="card">
+        <h2>אינטגרציית RELAY↔MIND</h2>
+        <div class="subtitle">#278 · #279 · #280 · #326 · #281 — המשימה הגדולה</div>
+
+        <div class="block">
+          <div class="label">תפקיד כללי</div>
+          <p>MIND עדיין ללא קוד Kafka משלהם — התפקיד היה להכין עבורם את כל צד ה‑Relay של האינטגרציה: איך הם מקבלים קונפיג, איך הם מדברים עם Kafka, ולהוכיח שזה עובד בפועל.</p>
+        </div>
+
+        <div class="sub">
+          <h3><span class="tag">#278</span> קונפיג כקבצים מחוברים</h3>
+          <div class="block"><div class="label">תפקיד</div><p>למסור ל‑MIND את פרטי החיבור (Kafka, vector store, אחסון) בלי הארדקוד.</p></div>
+          <div class="block"><div class="label">מה נעשה</div><p>קונפיג + secrets כ‑ConfigMap/Secret שמתחברים ל‑<code>config.yaml</code>/<code>secrets.yaml</code> דרך mount — לא משתני סביבה (החלטת הר"צ). ה‑template של הצ'ארט הורחב באופן גנרי לכל component עם בלוק <code>secret</code>.</p></div>
+        </div>
+
+        <div class="sub">
+          <h3><span class="tag">#279</span> הגדרת הסכמות</h3>
+          <div class="block"><div class="label">תפקיד</div><p>להגדיר את מבנה אירועי ה‑Kafka בין MIND לצוותים האחרים.</p></div>
+          <div class="block"><div class="label">מה נעשה</div><p>טיוטה ראשונית מבוססת על הענף של MIND עצמם, ואז — אחרי הבהרה מהר"צ שהיקף המשימה שונה — טיוטות חדשות לשני flows אמיתיים: קליטה מ‑Inbox (<code>mind-task-created.proto</code>) והפקה ל‑Chain (<code>mind-task-dependencies.proto</code>).</p></div>
+          <div class="block"><div class="label">שיקולים</div><p>עיקרון מנחה מהר"צ: כשיש חוסר התאמה בין צוותים, <b>הצרכן קובע</b> — הוא יודע הכי טוב מה הוא צריך.</p></div>
+        </div>
+
+        <div class="sub">
+          <h3><span class="tag">#280</span> אימות קריאת קונפיג</h3>
+          <div class="block"><div class="label">תפקיד</div><p>לוודא ש‑MIND בפועל קוראים את הקונפיג מה‑mount, לא הארדקוד.</p></div>
+          <div class="block"><div class="label">מה נעשה</div><p>פריסת stand-in service (עותק מתוכנת של קוד ה‑API האמיתי של MIND) על <code>kind</code>, אימות חי שהערכים מגיעים מהקובץ. המשימה הסתיימה והוכחה — הקבצים נמחקו לאחר מכן כי לא היו מחוברים ל‑CI חוזר.</p></div>
+        </div>
+
+        <div class="sub">
+          <h3><span class="tag">#326</span> מודול Kafka לאימוץ</h3>
+          <div class="block"><div class="label">תפקיד</div><p>לחסוך מ‑MIND לבנות producer/consumer מאפס.</p></div>
+          <div class="block"><div class="label">מה נעשה</div><p>מודול <code>adopt/messaging</code> — מחלקות <code>ProtobufProducer</code>/<code>ProtobufConsumer</code> שמטפלות בפורמט ה‑wire של Confluent (magic byte + schema id + payload), עם קונפיג שנקרא מהקבצים המחוברים של #278.</p></div>
+        </div>
+
+        <div class="sub">
+          <h3><span class="tag">#281</span> הוכחת הראונד‑טריפ החי</h3>
+          <div class="block"><div class="label">תפקיד</div><p>להוכיח בפועל — לא רק "הקוד מתקמפל" — ששני ה‑flows של MIND עובדים דרך הצ'ארט האמיתי.</p></div>
+          <div class="block"><div class="label">מה נעשה</div><p>ניסיון ראשון עם <code>docker-compose</code> התברר כלא מספיק — המשימה דרשה פריסה דרך הצ'ארט. בהמשך: הוספת schema-registry כ‑component, בניית image stand-in ל‑MIND, פריסה אמיתית על <code>kind</code>+Helm, ולבסוף — סקריפט בדיקה אוטומטי שרץ בכל PR ב‑CI (Kafka+registry זמניים, לא ידני).</p></div>
+          <div class="block"><div class="label">קשיים ופתרונות</div>
+            <ul>
+              <li><b>Multi-platform image manifests</b> — <code>kind</code> לא ידע לטעון images רב‑פלטפורמיים; נפתר בפינון ל‑digest ספציפי.</li>
+              <li><b>SASL כברירת מחדל</b> ב‑Bitnami Kafka חסם חיבור פשוט — הוגדר PLAINTEXT מפורשות.</li>
+              <li><b><code>replication.factor=3</code></b> מול broker בודד — קפקא נתקע בלולאה על טופיק פנימי; תוקן ל‑1.</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- PHASE 5 -->
+    <section class="phase" id="p5">
+      <div class="node">5</div>
+      <div class="card">
+        <h2>תחזוקת הבראנץ'</h2>
+        <div class="subtitle">לשמור סנכרון עם relay-team/main לאורך כל העבודה</div>
+
+        <div class="block">
+          <div class="label">תפקיד</div>
+          <p>למנוע פיגור גדול מדי מול הבראנצ'ים המשותפים, שהופך את המיזוג לכואב ומסוכן ככל שעובר זמן.</p>
+        </div>
+        <div class="block">
+          <div class="label">מה נעשה בפועל</div>
+          <ul>
+            <li>מיזוג <code>main</code>→<code>relay-team</code> — קונפליקט אמיתי אחד (שתי גרסאות מקבילות של <code>relay-schema-ci.yaml</code>).</li>
+            <li>מיזוג <code>relay-team</code>→הבראנץ' האישי — כולל טיפול בשני קבצי קונפיג מקומיים (<code>skip-worktree</code>) וקונפליקט אחד ב‑<code>schema-subjects.tsv</code>.</li>
+            <li>ניקוי שבעה בראנצ'ים ישנים שכבר מוזגו במלואם.</li>
+          </ul>
+        </div>
+      </div>
+    </section>
+
+  </div>
+
+  <footer class="end">מסמך הכנה אישי · לא לשיתוף חיצוני</footer>
+</div>

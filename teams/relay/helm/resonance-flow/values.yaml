@@ -98,9 +98,6 @@ components:
       - name: schema-registry
         port: 8080
     # Mounted as config.yaml at /etc/resonance-flow/config/ - keys are what MIND reads.
-    # Host/port fields (vector_store.url, object_storage.endpoint, kafka.*) aren't
-    # here - templates/service-mind/configmap.yaml computes them from `dependencies`
-    # above, same reason inbox/chain don't hardcode theirs either (see #512).
     config:
       vector_store:
         # pgvector needs user/password/db, not an API key.
@@ -124,11 +121,6 @@ components:
     secret:
       create: true
       data:
-        # Dev/CI-only default (this cluster's ephemeral) - the same value the
-        # Postgres init script (templates/services/chain/configmap.yaml) uses
-        # for mind's CREATE ROLE, so there's one source of truth, not two
-        # hand-typed copies. Not Chain's pattern (externally-provided secret) -
-        # #512 needs CI/round-trip to work with no secret provisioned.
         vector_store_password: mind-dev-password
   lens-bff:
     enabled: true

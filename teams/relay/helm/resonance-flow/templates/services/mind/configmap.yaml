@@ -8,9 +8,6 @@
 data:
   config.yaml: |
     vector_store:
-      # Same host/port helpers as the wait-for-postgresql initContainer. Bare
-      # host:port, not a URL - mind.config.py builds the DSN from this plus
-      # .user/.db/.password (see teams/mind/src/mind/config.py).
       url: {{ printf "%s:%s" (include "resonance-flow.dependencyHostByName" (dict "root" $ "deps" $component.dependencies "name" "postgresql")) (include "resonance-flow.dependencyPort" (dict "deps" $component.dependencies "name" "postgresql")) | quote }}
       user: {{ $cfg.vector_store.user | quote }}
       db: {{ $cfg.vector_store.db | quote }}
