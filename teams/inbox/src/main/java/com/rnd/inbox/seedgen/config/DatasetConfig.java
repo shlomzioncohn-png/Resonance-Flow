@@ -1,5 +1,6 @@
 package com.rnd.inbox.seedgen.config;
 
+import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -275,6 +276,8 @@ public final class DatasetConfig {
         if (Math.abs(total - 100.0) > 0.001) {
             throw new IllegalStateException("Percentages must sum to 100, got " + total + " for " + map.keySet());
         }
-        return Map.copyOf(map);
+        // Not Map.copyOf: its iteration order is randomized per JVM run, which would change what
+        // RandomUtil.pick returns for the same seed.
+        return Collections.unmodifiableMap(map);
     }
 }
