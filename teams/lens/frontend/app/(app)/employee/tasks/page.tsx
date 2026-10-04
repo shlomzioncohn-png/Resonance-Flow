@@ -57,7 +57,7 @@ const columns: DataTableColumn<ApiTask>[] = [
     key: 'effort',
     header: 'Effort',
     align: 'right',
-    render: (task) => `${task.effortEstimate} min`,
+    render: (task) => (task.effortEstimate != null ? `${task.effortEstimate} min` : '—'),
   },
 ];
 
