@@ -43,8 +43,9 @@ Local OCR + ASR preprocessing.
   - `text: str`
   - `low_confidence_words: list[LowConfidenceWord]` (`text`, `confidence`)
     -- words Tesseract itself scored below `LOW_CONFIDENCE_THRESHOLD`
-    (**60**, tuned against the confidence-by-miss-category numbers above;
-    see the constant's docstring in `ocr.py` for the exact reasoning).
+    (**60**, a starting point rather than a tuned value: it flags 12% of
+    correct words and catches ~55% of real errors, see above and the comment
+    on the constant in `ocr.py`).
   - `error: str | None` -- set when `success` is `False`.
 
   The call is wrapped in `instrumented_call("tesseract-psm11-ocr")`

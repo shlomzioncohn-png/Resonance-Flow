@@ -30,18 +30,26 @@ from pydantic import BaseModel
 
 from mind.api.instrumentation import instrumented_call
 
+# Tesseract page-segmentation args -- the OCR decision (psm 11, sparse text; see
+# benchmarks/ocr-asr-benchmark.md). Defined here, not imported from benchmarks/
+# (service code doesn't depend on the benchmark scripts); the benchmark's own
+# CHOSEN_PSM_ARGS is a separate copy, and tests/test_ocr_pipeline.py fails if
+# the two ever differ, so a future PSM change can't leave one of them behind.
+OCR_PSM_ARGS = ["--psm", "11"]
+
 # Confidence below which a recognized word is flagged as "low confidence"
-# instead of trusted outright. Tuned against benchmarks/analyze_confidence.py's
-# output on the 2 FUNSD documents in local-data/funsd/: correctly-recalled
-# words average confidence 80.4; every miss category scores below that, with
-# the dangerous one -- Tesseract confidently producing a real but *wrong*
-# word (`different_word`) -- lowest at 46.3, followed by not_detected (47.2)
-# and char_misread (53.0). 60 sits comfortably above all three of those with
-# margin, while staying below digit_merge (61.9) and segmentation (63.8) --
-# both of which the error analysis found don't need flagging anyway, since
-# Tesseract's text was already correct there (a boundary/merge issue, not a
-# wrong reading). See benchmarks/ocr-asr-benchmark.md "per-word confidence"
-# for the full table this is drawn from.
+# instead of trusted outright. A starting point, not a validated detector:
+# from benchmarks/analyze_confidence.py on the 2 FUNSD documents in
+# local-data/funsd/, correctly-read words average 80.4 and the miss groups
+# 45-63 (different_word 45.4, not_detected 47.2, char_misread 52.4,
+# digit_merge 59.1, segmentation 62.8) -- but the distributions overlap
+# heavily. At 60, 12% of correctly-read words are flagged and about 55% of
+# the real errors (char_misread + different_word + not_detected) are caught;
+# no cut-off does both (80 catches 81% of errors but flags 39% of correct
+# words). digit_merge and segmentation misses (correct text, wrong word
+# boundaries) sit on either side of 60 and are flagged only partly. Choose
+# the final cut-off against real downstream impact once extraction exists.
+# See benchmarks/ocr-asr-benchmark.md "per-word confidence" for the tables.
 LOW_CONFIDENCE_THRESHOLD = 60.0
 
 _WINDOWS_DEFAULT_INSTALL = r"C:\Program Files\Tesseract-OCR\tesseract.exe"
@@ -103,7 +111,7 @@ def _run_tesseract_tsv(tesseract_cmd: str, image_bytes: bytes) -> str:
     try:
         with os.fdopen(fd, "wb") as f:
             f.write(image_bytes)
-        cmd = [tesseract_cmd, tmp_path, "stdout", "--psm", "11", "tsv"]
+        cmd = [tesseract_cmd, tmp_path, "stdout", *OCR_PSM_ARGS, "tsv"]
         proc = subprocess.run(cmd, capture_output=True, timeout=60, check=False)
     finally:
         os.unlink(tmp_path)
