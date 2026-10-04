@@ -19,21 +19,24 @@ Local OCR + ASR preprocessing.
   a good fallback; it cost 22x more than `mobile` for equal-or-worse
   recall in this test, likely due to a CPU-acceleration workaround
   needed on the dev machine).
-  **Real accuracy is ~91%, not 64.7%:** the headline word-recall figure
-  is an exact-match proxy against FUNSD's own annotations; measured at
-  the character level instead, `--psm 11` scores **91.2%**. The 27-point
-  gap is mostly dataset/metric noise, not OCR quality — 59% of the
-  "missed" words were cases where Tesseract's output was actually
-  correct (digits merged with an adjacent field, a word-boundary
-  mismatch against the annotation, or in one case an outright typo in
-  FUNSD's own ground truth). Full breakdown:
-  `benchmarks/word-recall-error-analysis.md`.
-  **Per-word confidence, for the real residual errors:** Tesseract
+  **Accuracy: aligned CER 0.37 for `--psm 11`** (character error rate;
+  lower is better, 0 is perfect) on FUNSD, with words paired to the
+  ground truth by bounding-box overlap — see
+  `benchmarks/ocr-asr-benchmark.md` "OCR — aligned CER". Treat 0.37 as a
+  *pessimistic bound*, not a final figure: most of it is unmatched words
+  that mostly sit on an OCR box (merges/splits), which one-to-one
+  matching charges as errors. An earlier "~91% accuracy" figure was
+  retracted — it had no zero point and rewarded output volume (random
+  gibberish scored 42–53% on it). Unaligned word recall (64.7%) is a
+  secondary, recall-only number. n=2 documents; PaddleOCR has no aligned
+  score (it emits lines, not words).
+  **Per-word confidence:** Tesseract
   already scores each recognized word 0-100 internally (its `tsv`
-  output mode) and that score predicts the errors that are real —
-  correctly-read words average 80.4 confidence vs. 46-64 for every
-  miss category, lowest (46.3) for the one category worth worrying
-  about (OCR confidently producing a different, wrong word). The OCR
+  output mode), and that score differs between the miss groups in a
+  heuristic classification of word-recall misses — correctly-read words
+  average 80.4 confidence vs. 46-64 for every miss category, lowest
+  (46.3) for OCR confidently producing a different, wrong word (directional
+  evidence, not a validated error detector). The OCR
   interface should surface this per-word confidence alongside the text
   so `extraction/` (once built) can discount or flag low-confidence
   words instead of trusting every word equally — see

@@ -32,28 +32,33 @@ truth). There is nothing to run Whisper against yet. Documented here as
 a known risk (see ocr-asr-benchmark.md "Known risk"), not silently
 skipped.
 
-Deliberately rough throughout (see ocr-asr-benchmark.md): wall-clock
-latency, a sampled peak-RSS/CPU-time footprint via psutil (Python's
-stdlib `resource` module doesn't exist on Windows), and two accuracy
-proxies against FUNSD's ground truth -- neither is a real OCR metric
-(no CER/WER with proper alignment, no position matching):
-- word_recall: exact-match, "did the same word come out at all."
-- char_similarity: per-GT-word best character-level similarity
-  (difflib.SequenceMatcher ratio) to *any* word OCR produced -- added
-  after word_recall alone made 3 near-miss configs (e.g. `street` read
-  as `sireet`) look like outright failures instead of near-hits. Not a
-  substitute for real CER (no positional alignment -- deliberately, so
-  it still means something for psm11's "no particular order" output),
-  just a second, more forgiving lens on the same output.
+Latency and resource footprint are deliberately rough (see
+ocr-asr-benchmark.md): wall-clock time and a sampled peak-RSS/CPU-time
+via psutil (Python's stdlib `resource` module doesn't exist on Windows).
+
+Accuracy is scored against FUNSD's ground truth two ways:
+- aligned CER (primary; benchmarks/aligned_metrics.py): words are paired
+  by bounding-box overlap (IoU >= 0.3, one-to-one), CER is computed on
+  each pair, unmatched GT words count as deletions and unmatched OCR
+  words as insertions -- so garbage is penalized and reading order
+  (which `--psm 11` doesn't have) doesn't matter. Needs OCR word boxes,
+  so Tesseract only: PaddleOCR emits text *lines*, which a one-to-one
+  word match can't score (see ocr-asr-benchmark.md).
+- word_recall (secondary): exact-match, "did this GT word appear
+  anywhere in the OCR output." Recall only -- it never looks at what
+  the OCR produced beyond the GT, so it is not an accuracy.
+
+An earlier `char_similarity_score` (best character match to *any* OCR
+word) was removed: it had no zero point and rewarded output volume --
+random gibberish scored 42-53% against the ground truth, rising as more
+was emitted. See ocr-asr-benchmark.md.
 """
 
 from __future__ import annotations
 
-import difflib
 import functools
 import hashlib
 import json
-import re
 import shutil
 import subprocess
 import sys
@@ -64,10 +69,13 @@ from typing import TYPE_CHECKING
 
 from pydantic import BaseModel
 
+from benchmarks.aligned_metrics import WordBox, aligned_score
+from benchmarks.aligned_metrics import normalize as _normalize
+
 if TYPE_CHECKING:
     # psutil is the optional [benchmark] extra (see module docstring) --
     # imported lazily inside the functions that actually use it, so the
-    # rest of this module (word_recall, char_similarity_score, etc.) stays
+    # rest of this module (word_recall, etc.) stays
     # importable without it. This TYPE_CHECKING-only import exists purely
     # so mypy/ruff can resolve the `psutil.Process` type hint below without
     # requiring psutil to be installed to import this module at runtime.
@@ -129,9 +137,14 @@ class DocPaths(BaseModel):
 class OCRRunResult(BaseModel):
     """What one OCR call produced -- shared by run_ocr() (Tesseract
     subprocess) and run_paddle_ocr() (in-process PaddleOCR), so both can
-    feed the same word_recall()/char_similarity_score() and BenchmarkRow."""
+    feed the same word_recall() and BenchmarkRow.
+
+    `words` (text + bounding box per word) is what aligned scoring needs.
+    run_ocr() fills it; run_paddle_ocr() leaves it empty, because PaddleOCR
+    emits text lines rather than words."""
 
     text: str
+    words: list[WordBox] = []
     duration_s: float
     peak_rss_mb: float
     cpu_time_s: float
@@ -139,7 +152,11 @@ class OCRRunResult(BaseModel):
 
 class BenchmarkRow(BaseModel):
     """One (config, document) measurement -- the raw row each benchmark
-    loop iteration produces, before averaging into ConfigAverages."""
+    loop iteration produces, before averaging into ConfigAverages.
+
+    The aligned_* fields are None for engines without word boxes
+    (PaddleOCR). unmatched_gt / unmatched_ocr are the deletions / insertions
+    inside aligned_cer, kept visible so the number isn't a black box."""
 
     config: str
     doc: str
@@ -147,19 +164,26 @@ class BenchmarkRow(BaseModel):
     peak_rss_mb: float
     cpu_time_s: float
     word_recall: float
-    char_similarity: float
     gt_word_count: int
+    aligned_cer: float | None = None
+    aligned_word_precision: float | None = None
+    aligned_word_recall: float | None = None
+    unmatched_gt: int | None = None
+    unmatched_ocr: int | None = None
 
 
 class ConfigAverages(BaseModel):
     """BenchmarkRow's numeric fields, averaged across all documents for
-    one config -- what run_ocr_benchmark()/run_paddle_benchmark() return."""
+    one config -- what run_ocr_benchmark()/run_paddle_benchmark() return.
+    aligned_* are None when no document of the config had word boxes."""
 
     duration_s: float
     peak_rss_mb: float
     cpu_time_s: float
     word_recall: float
-    char_similarity: float
+    aligned_cer: float | None = None
+    aligned_word_precision: float | None = None
+    aligned_word_recall: float | None = None
 
 
 def find_tesseract() -> str:
@@ -239,25 +263,49 @@ def load_manifest() -> dict[str, DocPaths]:
     return docs
 
 
-def _normalize(word: str) -> str:
-    return re.sub(r"[^\w]", "", word).lower()
-
-
-def ground_truth_words(doc_id: str) -> list[str]:
+def ground_truth_boxes(doc_id: str) -> list[WordBox]:
+    """Every annotated FUNSD word with its box, in annotation order. Includes
+    entries with empty text; aligned_score() drops those."""
     path = load_manifest()[doc_id].annotation
     with path.open(encoding="utf-8") as f:
         data = json.load(f)
-    words: list[str] = []
+    boxes: list[WordBox] = []
     for block in data["form"]:
         for w in block["words"]:
-            normalized = _normalize(w["text"])
-            if normalized:
-                words.append(normalized)
+            x0, y0, x1, y1 = w["box"]
+            boxes.append(WordBox(text=w["text"], x0=x0, y0=y0, x1=x1, y1=y1))
+    return boxes
+
+
+def ground_truth_words(doc_id: str) -> list[str]:
+    words = (_normalize(b.text) for b in ground_truth_boxes(doc_id))
+    return [w for w in words if w]
+
+
+def parse_tesseract_tsv(tsv: str) -> list[WordBox]:
+    """Level-5 (word) rows of `tesseract ... tsv` output, as boxes.
+
+    Columns: level page block par line word left top width height conf text.
+    Rows with conf < 0 or blank text are layout scaffolding, not words."""
+    words: list[WordBox] = []
+    for line in tsv.splitlines()[1:]:  # skip header
+        fields = line.split("\t")
+        if len(fields) != 12 or fields[0] != "5":
+            continue
+        text = fields[11]
+        if float(fields[10]) < 0 or not text.strip():
+            continue
+        left, top, width, height = (float(v) for v in fields[6:10])
+        words.append(WordBox(text=text, x0=left, y0=top, x1=left + width, y1=top + height))
     return words
 
 
 def run_ocr(tesseract_cmd: str, image_path: Path, psm_args: list[str]) -> OCRRunResult:
     """Run tesseract as a subprocess and sample its memory/CPU while it runs.
+
+    Uses tesseract's `tsv` output so one run yields both the text and each
+    word's bounding box (needed for aligned scoring). Same recognition work
+    as plain-text output, so the latency/memory numbers are comparable.
 
     Sampling every 10ms is rough (may miss a very brief true peak on a
     fast run) -- adequate for this week's comparison, not a substitute
@@ -265,13 +313,20 @@ def run_ocr(tesseract_cmd: str, image_path: Path, psm_args: list[str]) -> OCRRun
     """
     import psutil  # optional [benchmark] extra -- see module docstring
 
-    cmd = [tesseract_cmd, str(image_path), "stdout", *psm_args]
+    cmd = [tesseract_cmd, str(image_path), "stdout", *psm_args, "tsv"]
     start = time.perf_counter()
     proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     ps_proc = psutil.Process(proc.pid)
+    # Drain stdout/stderr on a worker thread while this thread samples. tsv
+    # output (~12KB) is bigger than a Windows pipe buffer (~4KB), so polling
+    # without reading deadlocks tesseract on its own write -- plain-text
+    # output happened to fit, which is why this didn't bite before.
+    output: list[tuple[bytes, bytes]] = []
+    reader = threading.Thread(target=lambda: output.append(proc.communicate()))
+    reader.start()
     peak_rss = 0
     cpu_time = 0.0
-    while proc.poll() is None:
+    while reader.is_alive():
         try:
             peak_rss = max(peak_rss, ps_proc.memory_info().rss)
             times = ps_proc.cpu_times()
@@ -279,12 +334,15 @@ def run_ocr(tesseract_cmd: str, image_path: Path, psm_args: list[str]) -> OCRRun
         except psutil.NoSuchProcess:
             break
         time.sleep(0.01)
-    stdout, stderr = proc.communicate()
+    reader.join()
+    stdout, stderr = output[0]
     duration = time.perf_counter() - start
     if proc.returncode != 0:
         raise RuntimeError(f"tesseract failed: {stderr.decode(errors='replace')}")
+    words = parse_tesseract_tsv(stdout.decode("utf-8", errors="replace"))
     return OCRRunResult(
-        text=stdout.decode("utf-8", errors="replace"),
+        text=" ".join(w.text for w in words),
+        words=words,
         duration_s=duration,
         peak_rss_mb=peak_rss / (1024 * 1024),
         cpu_time_s=cpu_time,
@@ -302,25 +360,39 @@ def word_recall(ocr_text: str, gt_words: list[str]) -> float:
     return len(gt_set & ocr_words) / len(gt_set)
 
 
-def char_similarity_score(ocr_text: str, gt_words: list[str]) -> float:
-    """Average, over every GT word, of its best character-level
-    similarity (difflib ratio, 0-1) to any single word OCR produced.
+def _mean_or_none(values: list[float | None]) -> float | None:
+    present = [v for v in values if v is not None]
+    return sum(present) / len(present) if present else None
 
-    Gives partial credit for near-misses that word_recall scores as a
-    complete failure (`street` read as `sireet` -> ~0.83, not 0). Not
-    positional -- doesn't assume matching order between GT and OCR
-    output -- which is what makes it usable for psm11 ("no particular
-    order") too, unlike a proper aligned CER."""
-    ocr_words = [_normalize(w) for w in ocr_text.split() if _normalize(w)]
-    if not gt_words:
-        return 0.0
-    if not ocr_words:
-        return 0.0
-    scores = [
-        max(difflib.SequenceMatcher(None, gt_word, ocr_word).ratio() for ocr_word in ocr_words)
-        for gt_word in gt_words
-    ]
-    return sum(scores) / len(scores)
+
+def _average_rows(rows: list[BenchmarkRow]) -> ConfigAverages:
+    n = len(rows)
+    return ConfigAverages(
+        duration_s=sum(r.duration_s for r in rows) / n,
+        peak_rss_mb=sum(r.peak_rss_mb for r in rows) / n,
+        cpu_time_s=sum(r.cpu_time_s for r in rows) / n,
+        word_recall=sum(r.word_recall for r in rows) / n,
+        aligned_cer=_mean_or_none([r.aligned_cer for r in rows]),
+        aligned_word_precision=_mean_or_none([r.aligned_word_precision for r in rows]),
+        aligned_word_recall=_mean_or_none([r.aligned_word_recall for r in rows]),
+    )
+
+
+def _format_averages(config_name: str, avg: ConfigAverages) -> str:
+    line = (
+        f"{config_name}: duration={avg.duration_s:.3f}s "
+        f"peak_rss={avg.peak_rss_mb:.1f}MB cpu_time={avg.cpu_time_s:.3f}s "
+        f"word_recall(unaligned)={avg.word_recall:.3f}"
+    )
+    if avg.aligned_cer is not None:
+        line += (
+            f" | aligned: CER={avg.aligned_cer:.3f}"
+            f" word_precision={avg.aligned_word_precision:.3f}"
+            f" word_recall={avg.aligned_word_recall:.3f}"
+        )
+    else:
+        line += " | aligned: n/a (no word boxes)"
+    return line
 
 
 def run_ocr_benchmark() -> dict[str, ConfigAverages]:
@@ -333,7 +405,7 @@ def run_ocr_benchmark() -> dict[str, ConfigAverages]:
             gt_words = ground_truth_words(doc_id)
             result = run_ocr(tesseract_cmd, paths.image, psm_args)
             recall = word_recall(result.text, gt_words)
-            char_sim = char_similarity_score(result.text, gt_words)
+            aligned = aligned_score(ground_truth_boxes(doc_id), result.words)
             row = BenchmarkRow(
                 config=config_name,
                 doc=doc_id,
@@ -341,8 +413,12 @@ def run_ocr_benchmark() -> dict[str, ConfigAverages]:
                 peak_rss_mb=round(result.peak_rss_mb, 1),
                 cpu_time_s=round(result.cpu_time_s, 3),
                 word_recall=round(recall, 3),
-                char_similarity=round(char_sim, 3),
                 gt_word_count=len(gt_words),
+                aligned_cer=round(aligned.cer, 3),
+                aligned_word_precision=round(aligned.word_precision, 3),
+                aligned_word_recall=round(aligned.word_recall, 3),
+                unmatched_gt=aligned.deletions,
+                unmatched_ocr=aligned.insertions,
             )
             rows.append(row)
             print(row.model_dump())
@@ -350,21 +426,9 @@ def run_ocr_benchmark() -> dict[str, ConfigAverages]:
     print("\n--- OCR per-config averages ---")
     averages: dict[str, ConfigAverages] = {}
     for config_name in OCR_CONFIGS:
-        config_rows = [r for r in rows if r.config == config_name]
-        n = len(config_rows)
-        avg = ConfigAverages(
-            duration_s=sum(r.duration_s for r in config_rows) / n,
-            peak_rss_mb=sum(r.peak_rss_mb for r in config_rows) / n,
-            cpu_time_s=sum(r.cpu_time_s for r in config_rows) / n,
-            word_recall=sum(r.word_recall for r in config_rows) / n,
-            char_similarity=sum(r.char_similarity for r in config_rows) / n,
-        )
+        avg = _average_rows([r for r in rows if r.config == config_name])
         averages[config_name] = avg
-        print(
-            f"{config_name}: duration={avg.duration_s:.3f}s "
-            f"peak_rss={avg.peak_rss_mb:.1f}MB cpu_time={avg.cpu_time_s:.3f}s "
-            f"word_recall={avg.word_recall:.3f} char_similarity={avg.char_similarity:.3f}"
-        )
+        print(_format_averages(config_name, avg))
     return averages
 
 
@@ -446,7 +510,6 @@ def run_paddle_benchmark() -> dict[str, ConfigAverages]:
             gt_words = ground_truth_words(doc_id)
             result = run_paddle_ocr(ocr, paths.image)
             recall = word_recall(result.text, gt_words)
-            char_sim = char_similarity_score(result.text, gt_words)
             row = BenchmarkRow(
                 config=config_name,
                 doc=doc_id,
@@ -454,7 +517,6 @@ def run_paddle_benchmark() -> dict[str, ConfigAverages]:
                 peak_rss_mb=round(result.peak_rss_mb, 1),
                 cpu_time_s=round(result.cpu_time_s, 3),
                 word_recall=round(recall, 3),
-                char_similarity=round(char_sim, 3),
                 gt_word_count=len(gt_words),
             )
             rows.append(row)
@@ -463,21 +525,9 @@ def run_paddle_benchmark() -> dict[str, ConfigAverages]:
     print("\n--- PaddleOCR per-config averages ---")
     averages: dict[str, ConfigAverages] = {}
     for config_name in PADDLE_CONFIGS:
-        config_rows = [r for r in rows if r.config == config_name]
-        n = len(config_rows)
-        avg = ConfigAverages(
-            duration_s=sum(r.duration_s for r in config_rows) / n,
-            peak_rss_mb=sum(r.peak_rss_mb for r in config_rows) / n,
-            cpu_time_s=sum(r.cpu_time_s for r in config_rows) / n,
-            word_recall=sum(r.word_recall for r in config_rows) / n,
-            char_similarity=sum(r.char_similarity for r in config_rows) / n,
-        )
+        avg = _average_rows([r for r in rows if r.config == config_name])
         averages[config_name] = avg
-        print(
-            f"{config_name}: duration={avg.duration_s:.3f}s "
-            f"peak_rss={avg.peak_rss_mb:.1f}MB cpu_time={avg.cpu_time_s:.3f}s "
-            f"word_recall={avg.word_recall:.3f} char_similarity={avg.char_similarity:.3f}"
-        )
+        print(_format_averages(config_name, avg))
     return averages
 
 
@@ -497,17 +547,17 @@ def main() -> None:
     paddle_averages = run_paddle_benchmark()
     run_asr_benchmark()
 
-    all_averages: dict[str, ConfigAverages] = {**tesseract_averages, **paddle_averages}
-    best_config = max(all_averages, key=lambda c: all_averages[c].word_recall)
-    best = all_averages[best_config]
+    best_config = min(tesseract_averages, key=lambda c: tesseract_averages[c].aligned_cer or 0.0)
+    best = tesseract_averages[best_config]
     print("\n--- Conclusion ---")
     print(
-        f"OCR: best word recall is {best_config} "
-        f"({best.word_recall:.3f}, char_similarity={best.char_similarity:.3f}) "
-        f"among {list(all_averages)}, duration={best.duration_s:.3f}s, "
-        f"peak_rss={best.peak_rss_mb:.1f}MB. Recall alone doesn't decide this "
-        "when latency differs by orders of magnitude -- see "
-        "ocr-asr-benchmark.md for the reasoned recommendation.\n"
+        f"OCR: lowest aligned CER is {best_config} (CER={best.aligned_cer:.3f}, "
+        f"aligned word precision={best.aligned_word_precision:.3f}, "
+        f"recall={best.aligned_word_recall:.3f}) among {list(tesseract_averages)}, "
+        f"duration={best.duration_s:.3f}s, peak_rss={best.peak_rss_mb:.1f}MB.\n"
+        f"PaddleOCR ({list(paddle_averages)}) has no aligned score -- it emits text "
+        "lines, not words -- so it is compared on unaligned word_recall, latency and "
+        "memory only; see ocr-asr-benchmark.md for the reasoned recommendation.\n"
         "ASR: NO DECISION -- blocked on missing AMI audio (known risk, see doc)."
     )
 

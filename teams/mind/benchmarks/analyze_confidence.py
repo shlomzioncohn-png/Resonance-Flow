@@ -2,8 +2,7 @@
 
 Run: python -m benchmarks.analyze_confidence (from teams/mind/)
 
-The mentor's proposal for handling the residual ~9% character-level
-error (100% - the 91.2% char_similarity score): have OCR emit a
+The mentor's proposal for handling the residual OCR errors: have OCR emit a
 per-word confidence alongside each recognized word, so extraction can
 treat low-confidence words differently (flag, re-check, discount) instead
 of trusting every word equally. Tesseract already computes this -- no
