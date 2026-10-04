@@ -36,7 +36,7 @@ scripts run against a locally-installed Tesseract, not inside this
 image). That's fine for now (OCR isn't wired into `src/mind/` yet —
 Phase 2), but expect the image to grow next week when `apt-get install
 tesseract-ocr` gets added to the runtime stage for real OCR support —
-flagging so Relay isn't surprised by the size jump.
+flagging so Relay isn't surprised by the size jump. (The OCR engine is not final: if the team picks PaddleOCR instead, the image would instead grow by `paddlepaddle` plus model weights — larger, and not yet measured; see `benchmarks/ocr-asr-benchmark.md` "OCR — final decision".)
 
 ## Ports
 

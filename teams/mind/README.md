@@ -114,10 +114,11 @@ licensing constraints.
   `docker-compose.yml` (`pgvector/pgvector` image); extension enabled by
   `db/init/01-enable-pgvector.sql`. No application schema yet -- that
   lands with the real embeddings work.
-- ~~OCR: managed API vs. local model~~ Resolved: **local Tesseract**
-  (`--psm 11`), not PaddleOCR (benchmarked as the alternative and lost
-  on cost/accuracy tradeoff). See
-  [`benchmarks/ocr-asr-benchmark.md`](./benchmarks/ocr-asr-benchmark.md).
+- OCR: local model, **engine still open** — Tesseract `--psm 11` vs. PaddleOCR
+  mobile. Managed-API-vs-local is settled (local). On FUNSD (n=2) PaddleOCR
+  has ~2.7x fewer character errors (grouped CER 0.074 vs. 0.200) at ~90x the
+  latency; see [`benchmarks/ocr-asr-benchmark.md`](./benchmarks/ocr-asr-benchmark.md)
+  "OCR — final decision" for the evidence and a recommendation.
 - ASR: **blocked**, not resolved — no AMI audio (or any audio) sample
   exists anywhere in this repo to benchmark Whisper against. See
   [`benchmarks/ocr-asr-benchmark.md`](./benchmarks/ocr-asr-benchmark.md)

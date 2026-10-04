@@ -36,17 +36,21 @@ Latency and resource footprint are deliberately rough (see
 ocr-asr-benchmark.md): wall-clock time and a sampled peak-RSS/CPU-time
 via psutil (Python's stdlib `resource` module doesn't exist on Windows).
 
-Accuracy is scored against FUNSD's ground truth two ways:
-- aligned CER (primary; benchmarks/aligned_metrics.py): words are paired
-  by bounding-box overlap (IoU >= 0.3, one-to-one), CER is computed on
-  each pair, unmatched GT words count as deletions and unmatched OCR
-  words as insertions -- so garbage is penalized and reading order
-  (which `--psm 11` doesn't have) doesn't matter. Needs OCR word boxes,
-  so Tesseract only: PaddleOCR emits text *lines*, which a one-to-one
-  word match can't score (see ocr-asr-benchmark.md).
-- word_recall (secondary): exact-match, "did this GT word appear
-  anywhere in the OCR output." Recall only -- it never looks at what
-  the OCR produced beyond the GT, so it is not an accuracy.
+Accuracy is scored against FUNSD's ground truth (benchmarks/aligned_metrics.py):
+- grouped CER (primary): GT and OCR words that overlap by bounding box are
+  clustered, each cluster is scored as one string (concatenated in position
+  order), so a merged or split word with correct characters costs nothing,
+  while wrong, missing and extra characters do. Unmatched GT words are
+  deletions, unmatched OCR words insertions: CER = (S+D+I) / GT characters.
+  Works for any engine that reports boxes -- Tesseract words and
+  PaddleOCR lines -- and doesn't depend on reading order (`--psm 11` has none).
+- strict CER (conservative bound; Tesseract only): one-to-one word pairing
+  by IoU >= 0.3. A merge/split is charged as a deletion plus an insertion,
+  so it overstates the error; meaningless for PaddleOCR (lines vs. words).
+  Reported with word precision/recall at the same pairing.
+- word_recall (secondary): "did this GT word appear anywhere in the output."
+  Recall only -- it never looks at what the OCR produced beyond the GT, so
+  it is not an accuracy.
 
 An earlier `char_similarity_score` (best character match to *any* OCR
 word) was removed: it had no zero point and rewarded output volume --
@@ -69,7 +73,7 @@ from typing import TYPE_CHECKING
 
 from pydantic import BaseModel
 
-from benchmarks.aligned_metrics import WordBox, aligned_score
+from benchmarks.aligned_metrics import WordBox, aligned_score, grouped_score
 from benchmarks.aligned_metrics import normalize as _normalize
 
 if TYPE_CHECKING:
@@ -139,9 +143,9 @@ class OCRRunResult(BaseModel):
     subprocess) and run_paddle_ocr() (in-process PaddleOCR), so both can
     feed the same word_recall() and BenchmarkRow.
 
-    `words` (text + bounding box per word) is what aligned scoring needs.
-    run_ocr() fills it; run_paddle_ocr() leaves it empty, because PaddleOCR
-    emits text lines rather than words."""
+    `words` (text + bounding box) is what position-based scoring needs: one
+    entry per word for Tesseract (run_ocr), one per text *line* for PaddleOCR
+    (run_paddle_ocr) -- which grouped scoring handles and strict does not."""
 
     text: str
     words: list[WordBox] = []
@@ -154,9 +158,10 @@ class BenchmarkRow(BaseModel):
     """One (config, document) measurement -- the raw row each benchmark
     loop iteration produces, before averaging into ConfigAverages.
 
-    The aligned_* fields are None for engines without word boxes
-    (PaddleOCR). unmatched_gt / unmatched_ocr are the deletions / insertions
-    inside aligned_cer, kept visible so the number isn't a black box."""
+    grouped_* is the primary CER (any engine with boxes). strict_* is the
+    one-to-one pairing, Tesseract only (None for PaddleOCR, which emits
+    lines). The unmatched_* counts are the deletions / insertions inside
+    each CER, kept visible so the number isn't a black box."""
 
     config: str
     doc: str
@@ -165,25 +170,30 @@ class BenchmarkRow(BaseModel):
     cpu_time_s: float
     word_recall: float
     gt_word_count: int
-    aligned_cer: float | None = None
-    aligned_word_precision: float | None = None
-    aligned_word_recall: float | None = None
-    unmatched_gt: int | None = None
-    unmatched_ocr: int | None = None
+    grouped_cer: float | None = None
+    grouped_unmatched_gt: int | None = None
+    grouped_unmatched_ocr: int | None = None
+    grouped_merged_or_split_groups: int | None = None
+    strict_cer: float | None = None
+    strict_word_precision: float | None = None
+    strict_word_recall: float | None = None
+    strict_unmatched_gt: int | None = None
+    strict_unmatched_ocr: int | None = None
 
 
 class ConfigAverages(BaseModel):
     """BenchmarkRow's numeric fields, averaged across all documents for
     one config -- what run_ocr_benchmark()/run_paddle_benchmark() return.
-    aligned_* are None when no document of the config had word boxes."""
+    strict_* are None when no document of the config had word boxes."""
 
     duration_s: float
     peak_rss_mb: float
     cpu_time_s: float
     word_recall: float
-    aligned_cer: float | None = None
-    aligned_word_precision: float | None = None
-    aligned_word_recall: float | None = None
+    grouped_cer: float | None = None
+    strict_cer: float | None = None
+    strict_word_precision: float | None = None
+    strict_word_recall: float | None = None
 
 
 def find_tesseract() -> str:
@@ -372,9 +382,10 @@ def _average_rows(rows: list[BenchmarkRow]) -> ConfigAverages:
         peak_rss_mb=sum(r.peak_rss_mb for r in rows) / n,
         cpu_time_s=sum(r.cpu_time_s for r in rows) / n,
         word_recall=sum(r.word_recall for r in rows) / n,
-        aligned_cer=_mean_or_none([r.aligned_cer for r in rows]),
-        aligned_word_precision=_mean_or_none([r.aligned_word_precision for r in rows]),
-        aligned_word_recall=_mean_or_none([r.aligned_word_recall for r in rows]),
+        grouped_cer=_mean_or_none([r.grouped_cer for r in rows]),
+        strict_cer=_mean_or_none([r.strict_cer for r in rows]),
+        strict_word_precision=_mean_or_none([r.strict_word_precision for r in rows]),
+        strict_word_recall=_mean_or_none([r.strict_word_recall for r in rows]),
     )
 
 
@@ -384,14 +395,16 @@ def _format_averages(config_name: str, avg: ConfigAverages) -> str:
         f"peak_rss={avg.peak_rss_mb:.1f}MB cpu_time={avg.cpu_time_s:.3f}s "
         f"word_recall(unaligned)={avg.word_recall:.3f}"
     )
-    if avg.aligned_cer is not None:
+    if avg.grouped_cer is not None:
+        line += f" | grouped CER={avg.grouped_cer:.3f}"
+    if avg.strict_cer is not None:
         line += (
-            f" | aligned: CER={avg.aligned_cer:.3f}"
-            f" word_precision={avg.aligned_word_precision:.3f}"
-            f" word_recall={avg.aligned_word_recall:.3f}"
+            f" | strict CER={avg.strict_cer:.3f}"
+            f" (word precision={avg.strict_word_precision:.3f}"
+            f" recall={avg.strict_word_recall:.3f})"
         )
     else:
-        line += " | aligned: n/a (no word boxes)"
+        line += " | strict: n/a (no word boxes)"
     return line
 
 
@@ -405,7 +418,9 @@ def run_ocr_benchmark() -> dict[str, ConfigAverages]:
             gt_words = ground_truth_words(doc_id)
             result = run_ocr(tesseract_cmd, paths.image, psm_args)
             recall = word_recall(result.text, gt_words)
-            aligned = aligned_score(ground_truth_boxes(doc_id), result.words)
+            gt_boxes = ground_truth_boxes(doc_id)
+            strict = aligned_score(gt_boxes, result.words)
+            grouped = grouped_score(gt_boxes, result.words)
             row = BenchmarkRow(
                 config=config_name,
                 doc=doc_id,
@@ -414,11 +429,15 @@ def run_ocr_benchmark() -> dict[str, ConfigAverages]:
                 cpu_time_s=round(result.cpu_time_s, 3),
                 word_recall=round(recall, 3),
                 gt_word_count=len(gt_words),
-                aligned_cer=round(aligned.cer, 3),
-                aligned_word_precision=round(aligned.word_precision, 3),
-                aligned_word_recall=round(aligned.word_recall, 3),
-                unmatched_gt=aligned.deletions,
-                unmatched_ocr=aligned.insertions,
+                grouped_cer=round(grouped.cer, 3),
+                grouped_unmatched_gt=grouped.unmatched_gt,
+                grouped_unmatched_ocr=grouped.unmatched_ocr,
+                grouped_merged_or_split_groups=grouped.merged_or_split_groups,
+                strict_cer=round(strict.cer, 3),
+                strict_word_precision=round(strict.word_precision, 3),
+                strict_word_recall=round(strict.word_recall, 3),
+                strict_unmatched_gt=strict.deletions,
+                strict_unmatched_ocr=strict.insertions,
             )
             rows.append(row)
             print(row.model_dump())
@@ -472,10 +491,17 @@ def run_paddle_ocr(ocr, image_path: Path) -> OCRRunResult:
     cpu_time = (cpu_after.user - cpu_before.user) + (cpu_after.system - cpu_before.system)
 
     texts: list[str] = []
+    lines: list[WordBox] = []
     for res in results:
-        texts.extend(res.get("rec_texts", []) or [])
+        page_texts = res.get("rec_texts", []) or []
+        page_boxes = res.get("rec_boxes")
+        texts.extend(page_texts)
+        if page_boxes is not None:  # axis-aligned [x0, y0, x1, y1], image pixel coordinates
+            for text, (x0, y0, x1, y1) in zip(page_texts, page_boxes.tolist(), strict=True):
+                lines.append(WordBox(text=text, x0=x0, y0=y0, x1=x1, y1=y1))
     return OCRRunResult(
         text=" ".join(texts),
+        words=lines,
         duration_s=duration,
         peak_rss_mb=peak[0] / (1024 * 1024),
         cpu_time_s=cpu_time,
@@ -510,6 +536,7 @@ def run_paddle_benchmark() -> dict[str, ConfigAverages]:
             gt_words = ground_truth_words(doc_id)
             result = run_paddle_ocr(ocr, paths.image)
             recall = word_recall(result.text, gt_words)
+            grouped = grouped_score(ground_truth_boxes(doc_id), result.words)
             row = BenchmarkRow(
                 config=config_name,
                 doc=doc_id,
@@ -518,6 +545,10 @@ def run_paddle_benchmark() -> dict[str, ConfigAverages]:
                 cpu_time_s=round(result.cpu_time_s, 3),
                 word_recall=round(recall, 3),
                 gt_word_count=len(gt_words),
+                grouped_cer=round(grouped.cer, 3),
+                grouped_unmatched_gt=grouped.unmatched_gt,
+                grouped_unmatched_ocr=grouped.unmatched_ocr,
+                grouped_merged_or_split_groups=grouped.merged_or_split_groups,
             )
             rows.append(row)
             print(row.model_dump())
@@ -547,17 +578,16 @@ def main() -> None:
     paddle_averages = run_paddle_benchmark()
     run_asr_benchmark()
 
-    best_config = min(tesseract_averages, key=lambda c: tesseract_averages[c].aligned_cer or 0.0)
-    best = tesseract_averages[best_config]
+    all_averages: dict[str, ConfigAverages] = {**tesseract_averages, **paddle_averages}
+    best_config = min(all_averages, key=lambda c: all_averages[c].grouped_cer or 0.0)
+    best = all_averages[best_config]
     print("\n--- Conclusion ---")
     print(
-        f"OCR: lowest aligned CER is {best_config} (CER={best.aligned_cer:.3f}, "
-        f"aligned word precision={best.aligned_word_precision:.3f}, "
-        f"recall={best.aligned_word_recall:.3f}) among {list(tesseract_averages)}, "
-        f"duration={best.duration_s:.3f}s, peak_rss={best.peak_rss_mb:.1f}MB.\n"
-        f"PaddleOCR ({list(paddle_averages)}) has no aligned score -- it emits text "
-        "lines, not words -- so it is compared on unaligned word_recall, latency and "
-        "memory only; see ocr-asr-benchmark.md for the reasoned recommendation.\n"
+        f"OCR: lowest grouped CER is {best_config} (CER={best.grouped_cer:.3f}) among "
+        f"{list(all_averages)}, duration={best.duration_s:.3f}s, "
+        f"peak_rss={best.peak_rss_mb:.1f}MB. Grouped CER measures characters, not "
+        "tokenization, but it does not decide this alone: latency differs by orders of "
+        "magnitude -- see ocr-asr-benchmark.md for the reasoned recommendation.\n"
         "ASR: NO DECISION -- blocked on missing AMI audio (known risk, see doc)."
     )
 

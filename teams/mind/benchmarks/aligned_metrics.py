@@ -35,6 +35,24 @@ reported in ocr-asr-benchmark.md. Caveat: "known-true pairs" are by
 construction the correctly-read words, so recovery for misread words
 can't be measured this way.
 
+Two variants, both position-based:
+
+- strict (`aligned_score`): one-to-one word pairing, described above.
+- grouped (`grouped_score`): many-to-one / one-to-many, in the spirit of
+  CLEval's instance matching. GT and OCR words that overlap are clustered
+  into groups (connected components of the overlap graph); each group is
+  scored as one string -- the GT words' text vs. the OCR words' text, both
+  concatenated in position order -- so a merged or split word is *not*
+  charged as an error when its characters are right. Unmatched GT words are
+  still deletions and unmatched OCR words still insertions.
+
+Why grouped is the one to use for decisions (chosen before looking at its
+numbers): CER is meant to measure *characters*, and strict matching mixes
+in tokenization -- a merged `43215` + `9428` -> `432159428` has zero wrong
+characters yet costs a deletion plus an insertion. Strict stays as the
+conservative bound. What grouped deliberately ignores is word boundaries;
+it still penalizes wrong, missing, and extra characters.
+
 Known limitation of one-to-one matching: when OCR merges two GT words
 into one box (or splits one), the merged/split box overlaps each GT word
 by less than the threshold, so it scores as a deletion plus an insertion
@@ -170,4 +188,142 @@ def aligned_score(
         cer=char_edits / gt_chars,
         word_precision=exact / len(ocr) if ocr else 0.0,
         word_recall=exact / len(gt),
+    )
+
+
+DEFAULT_OVERLAP_THRESHOLD = 0.5
+LINE_TOLERANCE = 0.6  # x the smaller median box height; see _reading_order
+
+
+class GroupedScore(BaseModel):
+    """Result of grouped_score(); counts are on normalized, non-empty words."""
+
+    gt_words: int
+    ocr_words: int
+    groups: int  # clusters containing at least one GT word and one OCR word
+    one_to_one_groups: int
+    merged_or_split_groups: int  # more than one word on at least one side
+    largest_group_words: int  # GT + OCR words in the biggest cluster
+    unmatched_gt: int  # GT words no OCR word overlaps (deletions)
+    unmatched_ocr: int  # OCR words no GT word overlaps (insertions)
+    group_edits: int  # character edits inside groups
+    deleted_chars: int
+    inserted_chars: int
+    char_edits: int
+    gt_chars: int
+    cer: float
+
+
+def overlap_coefficient(a: WordBox, b: WordBox) -> float:
+    """Intersection area over the *smaller* box's area: 1.0 when one box sits
+    inside the other, which is how a merged word's box relates to the words
+    it swallowed (and a tall OCR box to a short GT box)."""
+    iw = min(a.x1, b.x1) - max(a.x0, b.x0)
+    ih = min(a.y1, b.y1) - max(a.y0, b.y0)
+    if iw <= 0 or ih <= 0:
+        return 0.0
+    smaller = min((a.x1 - a.x0) * (a.y1 - a.y0), (b.x1 - b.x0) * (b.y1 - b.y0))
+    return iw * ih / smaller if smaller > 0 else 0.0
+
+
+def _median_height(words: list[WordBox]) -> float:
+    heights = sorted(w.y1 - w.y0 for w in words)
+    return max(heights[len(heights) // 2], 1.0)
+
+
+def _reading_order(words: list[WordBox], tolerance: float) -> list[WordBox]:
+    """Top-to-bottom by line, left-to-right within a line. Words share a line
+    when their vertical centers are within `tolerance` of the line's mean
+    center, so a group on one text line is simply sorted by x.
+
+    The tolerance is chosen once per group and used for *both* the GT and the
+    OCR side (see grouped_score): box centers agree between FUNSD and
+    Tesseract but heights don't (OCR boxes up to ~2x taller), and a
+    per-side tolerance made the taller OCR boxes merge neighbouring lines --
+    producing a different word order than the GT for the same text."""
+    if len(words) < 2:
+        return list(words)
+    by_center = sorted(words, key=lambda w: (w.y0 + w.y1) / 2)
+    lines: list[list[WordBox]] = [[by_center[0]]]
+    for w in by_center[1:]:
+        line_center = sum((x.y0 + x.y1) / 2 for x in lines[-1]) / len(lines[-1])
+        if abs((w.y0 + w.y1) / 2 - line_center) <= tolerance:
+            lines[-1].append(w)
+        else:
+            lines.append([w])
+    return [w for line in lines for w in sorted(line, key=lambda w: w.x0)]
+
+
+def _cluster(gt: list[WordBox], ocr: list[WordBox], threshold: float) -> list[list[int]]:
+    """Connected components of the GT/OCR overlap graph. Nodes 0..G-1 are GT
+    words, G..G+O-1 are OCR words; returns each component's node list."""
+    parent = list(range(len(gt) + len(ocr)))
+
+    def find(x: int) -> int:
+        while parent[x] != x:
+            parent[x] = parent[parent[x]]
+            x = parent[x]
+        return x
+
+    for i, g in enumerate(gt):
+        for j, o in enumerate(ocr):
+            if overlap_coefficient(g, o) >= threshold:
+                parent[find(i)] = find(len(gt) + j)
+    components: dict[int, list[int]] = {}
+    for node in range(len(parent)):
+        components.setdefault(find(node), []).append(node)
+    return list(components.values())
+
+
+def grouped_score(
+    gt_words: list[WordBox],
+    ocr_words: list[WordBox],
+    overlap_threshold: float = DEFAULT_OVERLAP_THRESHOLD,
+) -> GroupedScore:
+    gt = _prepare(gt_words)
+    ocr = _prepare(ocr_words)
+    gt_chars = sum(len(g.text) for g in gt)
+    if gt_chars == 0:
+        raise ValueError("ground truth has no characters -- CER is undefined")
+
+    group_edits = deleted_chars = inserted_chars = 0
+    groups = one_to_one = merged_or_split = unmatched_gt = unmatched_ocr = largest = 0
+    for component in _cluster(gt, ocr, overlap_threshold):
+        gt_side = [gt[n] for n in component if n < len(gt)]
+        ocr_side = [ocr[n - len(gt)] for n in component if n >= len(gt)]
+        if not ocr_side:
+            unmatched_gt += len(gt_side)
+            deleted_chars += sum(len(g.text) for g in gt_side)
+        elif not gt_side:
+            unmatched_ocr += len(ocr_side)
+            inserted_chars += sum(len(o.text) for o in ocr_side)
+        else:
+            groups += 1
+            if len(gt_side) == 1 and len(ocr_side) == 1:
+                one_to_one += 1
+            else:
+                merged_or_split += 1
+            largest = max(largest, len(component))
+            tolerance = LINE_TOLERANCE * min(_median_height(gt_side), _median_height(ocr_side))
+            group_edits += levenshtein(
+                "".join(w.text for w in _reading_order(gt_side, tolerance)),
+                "".join(w.text for w in _reading_order(ocr_side, tolerance)),
+            )
+
+    char_edits = group_edits + deleted_chars + inserted_chars
+    return GroupedScore(
+        gt_words=len(gt),
+        ocr_words=len(ocr),
+        groups=groups,
+        one_to_one_groups=one_to_one,
+        merged_or_split_groups=merged_or_split,
+        largest_group_words=largest,
+        unmatched_gt=unmatched_gt,
+        unmatched_ocr=unmatched_ocr,
+        group_edits=group_edits,
+        deleted_chars=deleted_chars,
+        inserted_chars=inserted_chars,
+        char_edits=char_edits,
+        gt_chars=gt_chars,
+        cer=char_edits / gt_chars,
     )

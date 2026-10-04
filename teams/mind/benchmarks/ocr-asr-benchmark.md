@@ -1,18 +1,22 @@
 # MIND — OCR / ASR Local-Model Benchmark & Recommendation
 
-**Decision: OCR uses Tesseract (`--psm 11`), not PaddleOCR.** PaddleOCR
-(mobile and server, PP-OCRv5) was benchmarked as the alternative the
-mentor asked for and did not win on the cost/accuracy tradeoff — see
-"OCR — final decision" below. What that rests on: unaligned word recall
-(64.7% vs. 66.5%), latency and memory. PaddleOCR emits text *lines*, not
-words, so it has no aligned-CER score yet (see "OCR — aligned CER").
+**OCR engine: needs a call from the team — the evidence changed.** The
+earlier decision (Tesseract `--psm 11`, not PaddleOCR) rested on unaligned
+word recall (64.7% vs. 66.5%) plus cost. That recall comparison was
+misleading: PaddleOCR returns text *lines* with the spaces inside them
+dropped (e.g. `ATT.GEN.ADMIN.OFFICEFaX:614-466-5087`), and word recall counts
+exact whitespace-split words, so it undercounts PaddleOCR by construction.
+Scored on characters, independent of tokenization, PaddleOCR is far more
+accurate: **grouped CER 0.074 (mobile) / 0.102 (server) vs. 0.200 for
+Tesseract `--psm 11`** (character error rate; lower is better, 0 is
+perfect), and a check that uses no box matching at all agrees (page-level
+CER 0.070 vs. 0.168). The cost side is unchanged and large: ~45s vs. ~0.5s
+per page, ~620MB vs. ~34MB. Which side wins is a latency/size-vs-accuracy
+call — see "OCR — final decision". `OCR_ENGINE=tesseract` in `.env.example`
+stays a placeholder until that call is made. n=2 documents.
 
-**Primary accuracy number: aligned CER, 0.37 for `--psm 11`** (lower is
-better; 0 is perfect) — and that is a *pessimistic* figure, not a final
-one: most of it is unmatched words that mostly sit on an OCR box (merges
-and splits), which one-to-one matching charges as errors. An earlier
-"91.2% character similarity" figure was **retracted** — it is not an
-accuracy (see "Retracted").
+An earlier "91.2% character similarity" figure was **retracted** — it is
+not an accuracy (see "Retracted").
 
 ## Purpose
 
@@ -23,7 +27,7 @@ capacity planning.
 
 ## Scope
 
-**OCR: done, 5 configs (3 Tesseract + 2 PaddleOCR), final decision below.**
+**OCR: benchmarked, 5 configs (3 Tesseract + 2 PaddleOCR); engine choice open — see "OCR — final decision".**
 **ASR: blocked — see "Known risk."** No AMI audio (or any ASR) sample
 exists anywhere in this repo, or on any branch — checked directly
 right before writing this, not assumed. There's nothing to run Whisper
@@ -58,21 +62,25 @@ against yet.
   `python -m benchmarks.ocr_asr_benchmark` prints the raw per-document
   numbers this table is built from, for all 5 OCR configs and both
   modalities, ending in an explicit conclusion line.
-- **Accuracy metrics** (against FUNSD's ground truth):
-  - **Aligned CER — primary.** Words are paired by bounding-box overlap
-    (IoU ≥ 0.3, one-to-one); CER is computed on each pair; an unmatched
-    GT word is a deletion and an unmatched OCR word an insertion:
-    `CER = (substitutions + deletions + insertions) / GT characters`.
-    Lower is better, 0 is perfect, and it can exceed 1 when the OCR
-    emits more garbage than there is ground truth. Position-based, so
-    reading order (which `--psm 11` doesn't have) doesn't matter.
-    `benchmarks/aligned_metrics.py`. Tesseract only — it needs word
-    boxes, and PaddleOCR emits text lines.
+- **Accuracy metrics** (against FUNSD's ground truth; details in "OCR — CER"):
+  - **Grouped CER — primary.** GT and OCR words that overlap by bounding
+    box are clustered and each cluster is scored as one string (text
+    concatenated in position order), so merged/split words and reading
+    order don't matter, while wrong, missing and extra characters do:
+    `CER = (substitutions + deletions + insertions) / GT characters`. Lower
+    is better, 0 is perfect, and it can exceed 1 when the OCR emits more
+    garbage than there is ground truth. Works for any engine that reports
+    boxes — Tesseract words and PaddleOCR lines.
+    `benchmarks/aligned_metrics.py`.
+  - **Strict CER — conservative bound (Tesseract only).** One-to-one word
+    pairing by IoU ≥ 0.3; a merge or split costs a deletion plus an
+    insertion, so it overstates the error. Meaningless for PaddleOCR's
+    lines.
   - **Word recall — secondary.** Fraction of FUNSD's ground-truth words
     that appear *anywhere* in the output, case/punctuation-insensitive.
-    Recall only: it never looks at what the OCR produced beyond the
-    ground truth, so it is not an accuracy. Same definition for both
-    tools.
+    Recall only, and it depends on how the output is split into words — it
+    undercounts PaddleOCR, which drops spaces inside a line — so it is not
+    an accuracy and not a fair cross-engine comparison.
 - **Resource footprint:** wall-clock latency (`time.perf_counter`) and
   a **sampled** peak RSS memory + CPU time, polled via `psutil`
   (Python's stdlib `resource` module doesn't exist on Windows). For
@@ -125,42 +133,39 @@ just slow by nature":
 
 ## OCR — results
 
-| Config | Latency (avg) | Peak RSS (avg) | CPU time (avg) | Word recall (avg) |
-|---|---:|---:|---:|---:|
-| `tesseract --psm 3` (default) | 0.95s | 35.1 MB | 0.44s | 56.0% |
-| `tesseract --psm 6` (single block) | 0.57s | 34.7 MB | 0.54s | 48.2% |
-| `tesseract --psm 11` (sparse text) | **0.49s** | **34.5 MB** | 0.45s | 64.7% |
-| `paddleocr_mobile` | 40.4s | 569.1 MB | 109.4s | **66.5%** |
-| `paddleocr_server` | 890.4s | 655.5 MB | 3375.3s | 64.7% |
+| Config | Latency (avg) | Peak RSS (avg) | CPU time (avg) | Grouped CER ↓ | Word recall (unaligned) |
+|---|---:|---:|---:|---:|---:|
+| `tesseract --psm 3` | 0.95s | 35.1 MB | 0.44s | 0.294 | 56.0% |
+| `tesseract --psm 6` | 0.57s | 34.7 MB | 0.54s | 0.354 | 48.2% |
+| `tesseract --psm 11` | **0.49s** | **34.5 MB** | 0.45s | 0.200 | 64.7% |
+| `paddleocr_mobile` | 40.4s | 569.1 MB | 109.4s | **0.074** | **66.5%** |
+| `paddleocr_server` | 890.4s | 655.5 MB | 3375.3s | 0.102 | 64.7% |
 
-(PaddleOCR's `cpu_time` exceeds wall-clock latency because it uses
-multiple threads — that's expected, not a measurement error.)
+Latency/memory are from the first run, on an otherwise idle machine. A
+second run (CPU shared with other work) gave `paddleocr_mobile` 45.7s /
+617MB and `paddleocr_server` 440s / 837MB; per-page server latency has
+ranged 299–1,482s across runs, so read it as "minutes per page", not a
+stable number. PaddleOCR's `cpu_time` exceeds latency because it is
+multi-threaded. PaddleOCR ran with `enable_mkldnn=False` (see setup).
+Unaligned word recall **undercounts PaddleOCR** — it drops the spaces inside
+a line — so compare engines on grouped CER, not on that column.
 
-- **Tesseract `--psm 11`** remains the best of the 3 Tesseract configs,
-  for the same reason as before: FUNSD's scattered form-field layout
-  matches "sparse text" better than "single block" or generic
-  "automatic." See prior analysis below (unchanged).
-- **`paddleocr_mobile`** has the single highest recall measured
-  (66.5%) — but only **2.1 points above `tesseract --psm 11`**, for
-  **~80x the latency** (40.4s vs. 0.49s) and **~16x the peak memory**
-  (569MB vs. 34.5MB).
-- **`paddleocr_server` did not beat `paddleocr_mobile`** — it tied
-  Tesseract's `psm11` recall (64.7%) exactly, while costing **~22x
-  `paddleocr_mobile`'s latency** (890s vs. 40s) and **~30x its CPU
-  time**. The larger model bought nothing on this sample; if anything
-  it went slightly backward on doc `82092117` (see raw rows in the
-  script's output). This may be an artifact of `enable_mkldnn=False`
-  disproportionately hurting the larger model, of the 2-document
-  sample size, or both — not something to over-read with n=2, but
-  real enough that "bigger PaddleOCR model = better" should not be
-  assumed without re-testing once mkldnn is fixed.
+- **Tesseract `--psm 11`** is the best of the 3 Tesseract configs on CER
+  and recall (`--psm 3` is more precise; see the CER section).
+- **`paddleocr_mobile`** has by far the lowest CER: 0.074 vs. 0.200 — about
+  2.7x fewer character errors — at ~80-90x the latency (40-46s vs. 0.5s)
+  and ~16-18x the peak memory (570-620MB vs. 34.5MB).
+- **`paddleocr_server` is not better than `paddleocr_mobile`**: CER 0.102 vs.
+  0.074, and mixed per document — slightly better on `82092117` (0.029 vs.
+  0.039), clearly worse on `82200067_0069` (0.175 vs. 0.110, where it left 19
+  GT words with no OCR box vs. 8) — at 10-20x the latency. n=2, and
+  `enable_mkldnn=False` may hurt the larger model more; but nothing here
+  supports paying for it.
 
-**On the mentor's original concern** (is 64.7% word recall too low?):
-the heavier PaddleOCR moved *unaligned word recall* from 64.7% to 66.5%
-— a 2-point lift for ~80x the latency. Word recall is recall-only, and
-PaddleOCR has no aligned score, so this does not show the two tools are
-equally accurate; it shows the recall-and-cost evidence doesn't justify
-the cost.
+**On the mentor's original concern** (is 64.7% word recall too low?): it was
+partly a metric problem. Word recall is recall-only and depends on how the
+output is split into words. Measured on characters, Tesseract `--psm 11`
+scores a grouped CER of 0.20, and PaddleOCR mobile 0.074.
 
 The 98 word-recall misses were also classified by cause — see
 [`word-recall-error-analysis.md`](./word-recall-error-analysis.md). Treat
@@ -171,28 +176,107 @@ accuracy: its "59% aren't real errors" figure used a best-match-anywhere
 rule with loose thresholds, the same family of idea as the retracted
 metric below. It should be redone with box-based classification.
 
-## OCR — aligned CER (primary accuracy metric)
+## OCR — CER: grouped (primary) and strict (conservative bound)
 
-Per config, mean of the 2 FUNSD documents, IoU ≥ 0.3 (Tesseract only):
+Two position-based CERs against FUNSD's ground truth, both independent of
+reading order (`--psm 11` has none). Lower is better, 0 is perfect, and
+either can exceed 1 when the OCR emits more garbage than there is ground
+truth. Code: `benchmarks/aligned_metrics.py`.
 
-| Config | Aligned CER ↓ | Aligned word precision | Aligned word recall | (unaligned word recall) |
+- **Grouped — primary.** GT and OCR words that overlap by bounding box
+  (overlap coefficient ≥ 0.5: intersection over the *smaller* box) are
+  clustered; each cluster is scored as one string — the GT words' text and
+  the OCR words' text, each concatenated in position order — so a merged or
+  split word with correct characters costs nothing, while wrong, missing and
+  extra characters do. Unmatched GT words are deletions, unmatched OCR words
+  insertions. It works for any engine that reports boxes, so it can score
+  PaddleOCR's text lines too. *Why this one is primary — decided before
+  looking at its numbers:* CER should measure characters, and strict
+  matching mixes in tokenization (a zip code read as `432159428` instead of
+  `43215` + `9428` has zero wrong characters yet costs a deletion plus an
+  insertion).
+- **Strict — conservative bound.** One-to-one pairing of words by IoU ≥ 0.3,
+  CER on each pair; a merge or split is charged as a deletion plus an
+  insertion, so it overstates the OCR's error. Tesseract only (PaddleOCR's
+  lines can't be paired one-to-one with words). Reported with word
+  precision/recall at the same pairing.
+
+Mean of the 2 FUNSD documents (Tesseract; overlap/IoU thresholds as above):
+
+| Config | Grouped CER ↓ | Strict CER | Strict word precision / recall | Unaligned word recall |
 |---|---:|---:|---:|---:|
-| `tesseract --psm 3` | 0.422 | **0.72** | 0.49 | 56.0% |
-| `tesseract --psm 6` | 0.655 | 0.44 | 0.36 | 48.2% |
-| `tesseract --psm 11` | **0.368** | 0.60 | **0.53** | 64.7% |
+| `tesseract --psm 3` | 0.294 | 0.422 | **0.72** / 0.49 | 56.0% |
+| `tesseract --psm 6` | 0.354 | 0.655 | 0.44 / 0.36 | 48.2% |
+| `tesseract --psm 11` | **0.200** | **0.368** | 0.60 / **0.53** | 64.7% |
 
-`--psm 11` has the lowest CER and the highest aligned recall, but
-**`--psm 3` is more precise** (0.72 vs. 0.60: `--psm 11` emits more
-words, including fragments). So "`--psm 11` wins on every axis" is no
-longer true — it wins on CER and recall, not precision. Per document,
-`--psm 11`: 0.334 and 0.402.
+`--psm 11` has the lowest CER on both measures and the highest recall, but
+**`--psm 3` is more precise** (0.72 vs. 0.60: `--psm 11` emits more words,
+including fragments) — so "`--psm 11` wins on every axis" is not true. The
+grouped ranking holds at every overlap threshold (0.3 / 0.5 / 0.7):
+`--psm 11` 0.187 / 0.200 / 0.289, `--psm 3` 0.292 / 0.294 / 0.349,
+`--psm 6` 0.352 / 0.354 / 0.429. But it is n=2, and the lead is uneven —
+per document, grouped CER: `--psm 11` 0.120 and 0.280, `--psm 3` 0.127 and
+0.460, so on `82092117` the two nearly tie and the margin comes mostly from
+the other page.
 
-**How the matching threshold was chosen.** ICDAR's usual IoU ≥ 0.5
-turned out to fit this data badly: FUNSD's word boxes and Tesseract's
-follow different conventions — centers line up (median offset ~0.5px) but
-heights differ, up to ~2x on some pages. Measured on the 218 words
-Tesseract read *exactly* and that sit at the same spot (a known-true
-pairing):
+**PaddleOCR on the same footing.** Grouped scoring only needs boxes, so
+PaddleOCR's text lines can be scored too (strict can't: lines vs. words).
+Mean of the two documents:
+
+| Config | Grouped CER ↓ | Per document | Page-level CER (no box matching) |
+|---|---:|---:|---:|
+| `paddleocr_mobile` | **0.074** | 0.039, 0.110 | 0.070 |
+| `paddleocr_server` | 0.102 | 0.029, 0.175 | not computed |
+| `tesseract --psm 11` | 0.200 | 0.120, 0.280 | 0.168 |
+| `tesseract --psm 3` | 0.294 | 0.127, 0.460 | 0.289 |
+| `tesseract --psm 6` | 0.354 | 0.233, 0.475 | 0.317 |
+
+The page-level column is an independent cross-check that uses no box
+matching at all: both sides' words are put in one reading order for the whole
+page and compared as one string against one string. PaddleOCR mobile's lead
+holds under every variation tried: overlap threshold 0.3 / 0.5 / 0.7 gives
+0.075 / 0.075 / 0.080 (vs. 0.187 / 0.200 / 0.289 for `--psm 11`); line
+tolerance 0.3-1.0 leaves it flat at 0.075; and the page-level number agrees
+(0.070 vs. 0.168). Composition (both documents pooled): only 8 of 373 GT words
+(2%) have no PaddleOCR box on them (25 for `--psm 11`), 3 PaddleOCR lines
+have no GT word, pooled CER 0.065. Its groups are larger (97 groups, 70 of
+them merged/split, since one line covers several words), which is exactly what
+grouped scoring is built to handle.
+
+Caveats specific to this comparison: n=2 FUNSD fax scans. I could not check
+how FUNSD's ground-truth text and boxes were originally produced (the dataset
+paper was blocked here); if an OCR engine produced them, engines that read
+like it could be favored — unverified. Neither engine got preprocessing;
+PaddleOCR ran with orientation/unwarping off and mkldnn off.
+
+**What the grouped CER is made of** (`--psm 11`, both documents pooled; 373
+GT words, 301 character edits): 244 groups (189 one-to-one, 55 merged or
+split; the largest, 25 words, is a narrow multi-line paragraph), 25 GT words
+with no OCR box on them (deletions), 15 OCR words with no GT word (insertions).
+Edit mass: 56% inside groups (wrong characters, plus any reading-order
+disagreement within multi-line groups), 30% deleted-word characters, 14%
+inserted-word characters. About 93% of GT words have an OCR box on them, so
+what remains is mostly wrong characters inside matched words — pooled CER
+0.178, mean of the two documents 0.200. (`--psm 3` is different: 71% of its
+edit mass is 81 GT words it never put a box on.)
+
+**A fix that moved the number, and the check on it.** The first version built
+the reading order of the OCR side using the OCR boxes' own height. OCR boxes
+are up to ~2x taller than FUNSD's (centers agree, heights don't), which
+folded neighbouring lines together and ordered the same words differently
+than the GT — e.g. a 57-character paragraph that scored 23 edits although
+most of its words were right. The fix: one line tolerance for both sides
+(0.6 x the smaller median box height). It moved `--psm 11` from 0.268 to
+0.200, which is large enough to distrust, so: the CER is flat for tolerance
+factors 0.3–0.8 (`--psm 11` 0.200, `--psm 3` 0.294, `--psm 6` 0.354–0.365)
+and only rises at ≥ 1.0 (0.212 / 0.306 / 0.385), exactly when lines start to
+merge again. A unit test fails if the per-side behavior comes back.
+
+**How the strict threshold was chosen.** ICDAR's usual IoU ≥ 0.5 fits this
+data badly: FUNSD's word boxes and Tesseract's follow different conventions
+— centers line up (median offset ~0.5px) but heights differ, up to ~2x on
+some pages. Measured on the 218 words Tesseract read *exactly* and that sit
+at the same spot (a known-true pairing):
 
 | Matching rule | Known-true pairs recovered | Wrong-text candidates per GT word |
 |---|---:|---:|
@@ -201,58 +285,45 @@ pairing):
 | overlap coefficient ≥ 0.5 | 100% | 0.27 |
 | center-in-either-box | 100% | 0.42 |
 
-0.3 was picked for matching quality on those pairs, not for how good the
-CER looked. Caveat: known-true pairs are by construction the correctly
-read words, so recovery for misread words can't be measured this way.
+0.3 was picked for matching quality on those pairs, not for how good the CER
+looked. (The overlap-coefficient rule — which recovers everything — is what
+grouped scoring uses; there the "wrong-text" candidates are mostly the
+legitimate merged/split neighbours it is meant to group.) Caveat:
+known-true pairs are by construction the correctly read words.
 
-**The ranking depends on that threshold.** Aligned CER at other
-thresholds:
+**Strict CER depends on its threshold — grouped much less.** Strict CER at
+IoU ≥ 0.3 / 0.5 / 0.7: `--psm 3` 0.422 / 0.997 / 1.500, `--psm 6` 0.655 /
+1.022 / 1.543, `--psm 11` 0.368 / 1.065 / 1.587. At 0.5 and above strict
+matching collapses, measures box mismatch, and `--psm 11` (more, smaller
+fragments) comes out *worst*. Strict: of its 96 unmatched GT words (`--psm
+11`), 73% have an OCR box sitting on them — merges, splits and box
+mismatches, which is what grouped scoring separates out.
 
-| Config | IoU ≥ 0.3 | IoU ≥ 0.5 | IoU ≥ 0.7 |
-|---|---:|---:|---:|
-| `--psm 3` | 0.422 | 0.997 | 1.500 |
-| `--psm 6` | 0.655 | 1.022 | 1.543 |
-| `--psm 11` | 0.368 | 1.065 | 1.587 |
+**Sanity check — garbage must be penalized.** The mentor's experiment against
+the grouped metric (random lowercase words at random page positions, appended
+to the real `--psm 11` output):
 
-At 0.5 and above matching collapses, the score mostly measures box
-mismatch, and `--psm 11` (more, smaller fragments) comes out *worst*. So
-the case for `--psm 11` over `--psm 3` is "lowest CER by 0.054 at the
-threshold chosen for matching quality, with n=2 documents" — real but
-not robust, and not a large margin.
-
-**What the 0.37 is made of** (`--psm 11`, both documents pooled; 373 GT
-words, 605 character edits): 277 words matched, 96 GT words unmatched
-(deletions), 51 OCR words unmatched (insertions). Edit mass: 25%
-substitutions inside matched pairs, 48% deleted-word characters, 27%
-inserted-word characters. Of the 96 unmatched GT words, **70 (73%) have an
-OCR box sitting on them** (merge, split, or box mismatch) and 26 (27%)
-have none (really missing); 61% of unmatched OCR words sit on at least one
-GT word. One-to-one matching charges a merge/split as a deletion plus an
-insertion even when the characters are right, so **0.37 is a pessimistic
-bound on Tesseract's character error, not the error itself.** The next
-step is many-to-one (CLEval-style) matching to separate real misses from
-tokenization differences.
-
-**Sanity check — garbage must be penalized.** The mentor's experiment,
-against the new metric (random lowercase words placed at random page
-positions, appended to the real `--psm 11` output):
-
-| Garbage words added | Aligned CER (real output + garbage) | Garbage only |
+| Garbage words added | Grouped CER (real output + garbage) | Garbage only |
 |---:|---:|---:|
-| 0 | 0.368 | 1.000 (nothing) |
-| 50 | 0.734 | 1.315 |
-| 200 | 1.747 | 2.346 |
-| 1000 | 7.456 | 7.786 |
+| 0 | 0.200 | 1.000 (nothing) |
+| 50 | 0.564 | 1.318 |
+| 200 | 1.565 | 2.270 |
+| 1000 | 7.199 | 7.523 |
 
-It rises monotonically and exceeds 1 — pinned in
-`tests/test_aligned_metrics.py`, along with identity → 0, empty OCR → 1,
-and reading-order invariance.
+It rises monotonically and passes 1 — pinned, for both scorers, in
+`tests/test_aligned_metrics.py` and `tests/test_grouped_metrics.py`
+(identity → 0, empty OCR → 1, reading-order and list-order invariance, extra
+output never lowers CER; mutation-checked).
 
 **Limitations.** n=2 documents. FUNSD's annotation is noisy (e.g.
 `comunication` is misspelled in the ground truth; empty-text boxes are
 ignored). Text is normalized (case and punctuation dropped), so
-punctuation-only OCR noise isn't penalized. PaddleOCR can't be scored
-one-to-one at word level (it emits lines).
+punctuation-only OCR noise isn't penalized. Grouped scoring ignores word
+boundaries by design — one page-wide box with the right text in the right
+order would score 0 — which is fine for a character error rate and for
+Tesseract's word-level output, but it is not a tokenization metric (strict is
+the one that sees that). Reading order *inside* a multi-line group is a
+heuristic.
 
 ## Retracted: the "91.2% character similarity"
 
@@ -268,38 +339,48 @@ percent-correct. The function was removed.
 
 ## OCR — final decision
 
-**Use `tesseract --psm 11` (sparse text) as the default.** It has the
-lowest aligned CER of the three Tesseract configs (0.37, vs. 0.42 for
-`--psm 3` and 0.66 for `--psm 6`) and the highest aligned word recall
-(0.53), though `--psm 3` is more precise (0.72 vs. 0.60) and the margin
-over it depends on the matching threshold (see "OCR — aligned CER"). The
-0.37 is a pessimistic bound — most of it is unmatched words that mostly
-sit on an OCR box (merges/splits) — and **not** the "~91% accuracy" an
-earlier version of this document claimed (retracted above).
+**Open — it needs a call from the team. Evidence and a recommendation:**
 
-The Tesseract-vs-PaddleOCR choice rests on cost, not on an accuracy
-comparison we can make: unaligned word recall is close (64.7% vs. 66.5%
-for `paddleocr_mobile` — 2.1 points, recall-only), PaddleOCR has no
-aligned score (it emits lines, not words), and it costs ~80x the latency
-and ~16x the memory. For a pipeline that needs to process pages at any
-real volume, that cost difference is decisive on its own absent a
-specific accuracy-critical use case. If one appears, the first step is
-to score PaddleOCR on the same footing (many-to-one matching), not to
-assume it is better.
+| | Tesseract `--psm 11` | PaddleOCR mobile |
+|---|---|---|
+| Accuracy (grouped CER, lower is better) | 0.200 | **0.074** (~2.7x fewer character errors) |
+| Latency per page (CPU) | **~0.5s** | ~40-46s (mkldnn off; with it on, or on a GPU, likely less — untested) |
+| Memory (peak RSS) | **~34MB** | ~570-620MB (whole Python process) |
+| Install | system package `tesseract-ocr` | `paddlepaddle` + `paddleocr` + model weights; weight downloads were blocked on the dev network (manual workaround); image growth not measured |
+| Output | words + boxes + per-word confidence (`tsv`) | text lines + boxes + per-line score |
+| Known issue here | — | `enable_mkldnn=False` needed (oneDNN crash in this build) |
 
-**If a use case ever needs the extra ~2 points badly enough to accept
-~40s/page and ~570MB, `paddleocr_mobile` is the fallback — not
-`paddleocr_server`,** which cost 22x more than `paddleocr_mobile` for
-equal-or-worse recall in this test. This should be re-verified once
-`enable_mkldnn` works on the target hardware, since that constraint is
-specific to this dev machine's paddlepaddle build, not to PaddleOCR as
-a tool.
+**What changed.** The earlier decision — Tesseract, because word recall looked
+tied (64.7% vs. 66.5%) and PaddleOCR cost ~80x more — no longer holds as
+stated: the tie was a measurement artifact (word recall undercounts
+PaddleOCR's space-less lines), and on characters PaddleOCR is clearly more
+accurate. The cost is real and unchanged.
+
+**Recommendation (for the mentor/team to confirm).** If OCR runs as
+asynchronous ingestion — documents arrive from Bridge and are processed in the
+background, so nobody waits ~45s on a page — **PaddleOCR mobile is the better
+default**: ~2.7x fewer character errors, and the latency/memory cost doesn't
+land on a user. Keep **Tesseract `--psm 11` as the lightweight fallback**, and
+as the engine if the container/memory budget or interactive latency matters
+more than accuracy. Not `paddleocr_server`: it was less accurate than mobile
+(0.102 vs. 0.074) and takes minutes per page. Before committing:
+1. Re-measure latency with mkldnn on / on the target hardware.
+2. Measure the image-size impact (`paddlepaddle` + weights) — Relay needs to
+   know (see `docs/relay-handoff.md`, which currently only anticipates
+   `tesseract-ocr`).
+3. Confirm on more than 2 documents and on a non-FUNSD sample.
+4. Evaluate PaddleOCR's per-line score the way Tesseract's per-word
+   confidence was (below) — that evidence is Tesseract-only so far.
+
+Until the call is made, `OCR_ENGINE=tesseract` in `.env.example` is a
+placeholder, not a decision.
 
 **Resource budget for capacity planning (Checkpoint 1):**
-- `tesseract --psm 11` (recommended default): ~0.5s latency, ~35MB peak
-  memory, ~0.45s CPU time per FUNSD-sized page.
-- `paddleocr_mobile` (accuracy fallback): ~40s latency, ~570MB peak
-  memory, ~110s CPU time per page.
+- `tesseract --psm 11`: ~0.5s latency, ~35MB peak memory, ~0.45s CPU time per
+  FUNSD-sized page.
+- `paddleocr_mobile`: ~40-46s latency, ~570-620MB peak memory, ~100s CPU time
+  per page.
+- `paddleocr_server`: minutes per page (299-1,482s observed), ~650-840MB.
 
 ## OCR — handling the real residual errors: per-word confidence
 
@@ -310,7 +391,7 @@ confidence differs between the groups found in the miss analysis. Tested
 via `benchmarks/analyze_confidence.py` (`python -m
 benchmarks.analyze_confidence`). The groups come from the heuristic miss
 classification (see the caveat above), so read this as directional
-evidence, not a validated detector:
+evidence, not a validated detector, and for Tesseract only (PaddleOCR's per-line score hasn't been evaluated):
 
 | Group | n | avg. Tesseract confidence |
 |---|---:|---:|
