@@ -112,13 +112,12 @@ def _checked_unit_interval(value: object, what: str) -> float:
     cleared the bar — the eval would report a perfect score instead of failing.
     `bool` is rejected too (`True` is an `int`, but is never a similarity).
     """
-    if (
-        isinstance(value, bool)
-        or not isinstance(value, numbers.Real)
-        or not 0.0 <= value <= 1.0
-    ):
+    number: float | None = None
+    if isinstance(value, numbers.Real) and not isinstance(value, bool):
+        number = float(value)
+    if number is None or not 0.0 <= number <= 1.0:
         raise ValueError(f"{what} must be a real number in [0, 1]; got {value!r}")
-    return float(value)
+    return number
 
 
 # Threshold calibrated for `placeholder_similarity` (Jaccard). Not the locked lexical
