@@ -72,6 +72,19 @@ onConstraintStatusChanged.
   Reconcile the two once #66 merges - probably TaskEligibilityService
   should delegate the raw edge validation/CRUD to TaskDependencyService
   and keep only cycle detection + counters.
+  - 2026-09-22, PR #373 round-3 review (leaRevivo): this note predates
+    #373's TransactionRunner/DependencyHistoryRepository work, so it only
+    covers validation/CRUD delegation - it does NOT yet capture that
+    TaskEligibilityService.addDependency/removeDependency also write to
+    TaskDependencyRepository directly, bypassing TransactionRunner and
+    DependencyHistoryRepository entirely. Dormant today (nothing wires
+    TaskEligibilityService's addDependency/removeDependency to an
+    endpoint), but whoever reconciles the two services must also route
+    TaskEligibilityService's edge writes through TaskDependencyService/
+    TransactionRunner - otherwise the audit-history feature silently
+    misses changes made through that path. Tracked alongside issue #401
+    (controller-level unification; the natural place this would first get
+    wired to a live endpoint).
 
 ## Open items
 - PR #468 review (2026-09-23, leaRevivo) findings addressed 2026-09-24:
@@ -162,6 +175,28 @@ onConstraintStatusChanged.
   fixed array, not one object per task id, to keep memory bounded) guard
   a single task's counters, and dependencyGraphLock is always acquired
   before a per-task lock, never after, so the two can't deadlock.
+- Resolved: real persistence layer now exists - Postgres-backed
+  `Postgres*Repository`/`JpaTransactionRunner` implementations
+  (`repository/`), own `chain` database + own `chain` DB user (not the
+  shared postgres superuser, not Inbox's resonance_flow database - see
+  PR #417), Flyway-owned schema (`src/main/resources/db/migration/`).
+  `Task`/`TaskDependency`/`DependencyHistoryEntry` stay plain DTOs -
+  entities (`TaskEntity`/`TaskDependencyEntity`/`DependencyHistoryEntity`)
+  are mapped to/from them entirely inside the adapters. The H2 placeholder
+  is gone; `MockDataConfig`'s in-memory beans remain only as the
+  `@ConditionalOnMissingBean` fallback when no real `DataSource` is wired.
+- `TaskRepository#update()`'s atomicity is now real: `PostgresTaskRepository`
+  uses a pessimistic row lock (`SELECT ... FOR UPDATE`) as the sole
+  correctness mechanism for `blockingCount`/`openConstraintCount` under
+  concurrent writes - `@Version` on `TaskEntity` is defense-in-depth for a
+  different, not-yet-existing write path, not part of this guarantee.
+  `TaskEligibilityService`'s in-process `dependencyGraphLock` is
+  **unchanged and still required** - it isn't redundant with per-row
+  Postgres locking, since it serializes the multi-row cycle-detection DFS
+  and a read-together-with-an-edge-write decision, neither of which
+  reduces to locking one row. Full rationale is in the class Javadoc;
+  summary: dependencyGraphLock guards the edges plus any DONE-status read
+  that decides whether an edge currently counts against blockingCount.
 - 2026-08-30, addressed a teammate code review on PR #172:
   - Fixed: addDependency/removeDependency were only using
     dependencyGraphLock, not the per-task lock the other methods use for

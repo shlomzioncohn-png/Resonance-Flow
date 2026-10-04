@@ -16,25 +16,16 @@ spring:
     producer:
       key-serializer: org.apache.kafka.common.serialization.StringSerializer
       value-serializer: org.apache.kafka.common.serialization.StringSerializer
-  # Real Postgres datasource (issue #378) - a dedicated Chain database/user, not Inbox's
-  # resonance_flow. Defaults below are placeholders pending DevOps actually provisioning the
-  # DB/user (see teams/chain/CLAUDE.md) - Task/TaskDependency still live in the in-memory
-  # TaskRepository/TaskDependencyRepository until #377 lands, so only the Constraint migration/
-  # repository actually uses this connection today.
   datasource:
-    url: jdbc:postgresql://${DB_HOST:localhost}:${DB_PORT:5432}/${DB_NAME:chain}
-    username: ${DB_USER:chain_user}
-    password: ${DB_PASSWORD:chain_password}
-  # Off by default (PR #468 review, Critical finding): Flyway migrates eagerly at context
-  # startup, not lazily on first DB use - so with this left enabled, EVERY @SpringBootTest
-  # (ChainApplicationTests, ChainEventConsumerIntegrationTest included, neither of which has
-  # anything to do with persistence) would require a live, reachable Postgres just to boot,
-  # which neither local dev nor CI (values-chain.yaml's postgresql.enabled is still false) has
-  # today. Postgres-backed tests opt in individually via
-  # @TestPropertySource(properties = "spring.flyway.enabled=true") - see
-  # PostgresConstraintRepositoryTest/PostgresConstraintRepositoryConcurrencyTest.
-  flyway:
-    enabled: false
+    # Own database + own DB user (not the shared postgres superuser or Inbox's resonance_flow
+    # database) - matches PR #417's Helm wiring. No currentSchema: chain owns this whole
+    # database, so its tables live in the database's own default (public) schema.
+    url: jdbc:postgresql://${DB_HOST:localhost}:${DB_PORT:5432}/${DB_NAME:chain}?stringtype=unspecified
+    username: ${DB_USER:chain}
+    password: ${DB_PASSWORD:chain}
+  jpa:
+    hibernate:
+      ddl-auto: validate
 
 chain:
   kafka:

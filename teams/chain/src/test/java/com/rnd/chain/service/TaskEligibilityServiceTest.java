@@ -4,45 +4,654 @@ import com.rnd.chain.dto.Constraint;
 import com.rnd.chain.dto.Task;
 import com.rnd.chain.dto.TaskDependency;
 import com.rnd.chain.dto.TaskStatus;
-import com.rnd.chain.repository.ConstraintRepository;
+import com.rnd.chain.event.SchedulingUpdatePublisher;
+import com.rnd.chain.event.TaskSchedulingUpdatedEvent;
+import com.rnd.chain.exception.DependencyNotFoundException;
+import com.rnd.chain.exception.DuplicateDependencyException;
+import com.rnd.chain.exception.InvalidDependencyException;
+import com.rnd.chain.exception.TaskNotFoundException;
+import com.rnd.chain.repository.InMemoryConstraintRepository;
 import com.rnd.chain.repository.InMemoryTaskDependencyRepository;
 import com.rnd.chain.repository.InMemoryTaskRepository;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import java.time.LocalDateTime;
+import java.util.ArrayList;
 import java.util.List;
-import java.util.Map;
 import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.*;
-import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.eq;
-import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.never;
-import static org.mockito.Mockito.verify;
-import static org.mockito.Mockito.when;
 
 class TaskEligibilityServiceTest {
 
+    private InMemoryTaskRepository taskRepository;
+    private InMemoryTaskDependencyRepository dependencyRepository;
+
+    private RecordingSchedulingUpdatePublisher publisher;
+
+    private InMemoryConstraintRepository constraintRepository;
+
+    private TaskEligibilityService service;
+
+    @BeforeEach
+    void setUp() {
+
+        taskRepository =
+                new InMemoryTaskRepository(List.of());
+
+        dependencyRepository =
+                new InMemoryTaskDependencyRepository(List.of());
+
+        publisher =
+                new RecordingSchedulingUpdatePublisher();
+
+        SchedulingUpdateService schedulingUpdateService =
+                new SchedulingUpdateService(publisher);
+
+        constraintRepository =
+                new InMemoryConstraintRepository();
+
+        service =
+                new TaskEligibilityService(
+                        taskRepository,
+                        dependencyRepository,
+                        schedulingUpdateService,
+                        constraintRepository);
+    }
+
+    private static Constraint newConstraint(
+            UUID taskId,
+            String constraintId,
+            Constraint.ConstraintStatus status) {
+
+        LocalDateTime now = LocalDateTime.now();
+        return new Constraint(
+                constraintId,
+                taskId,
+                Constraint.ConstraintType.APPROVAL_NEEDED,
+                status,
+                null,
+                "source-ref",
+                now,
+                now);
+    }
+
+    @Test
+    void addDependency_shouldIncreaseBlockingCountAndMakeTaskNotReady() {
+
+        UUID taskId = UUID.randomUUID();
+        UUID dependencyId = UUID.randomUUID();
+
+        taskRepository.save(
+                createTask(
+                        taskId,
+                        TaskStatus.ACTIVE,
+                        true,
+                        0,
+                        0));
+
+        taskRepository.save(
+                createTask(
+                        dependencyId,
+                        TaskStatus.ACTIVE,
+                        true,
+                        0,
+                        0));
+
+        service.addDependency(
+                taskId,
+                dependencyId);
+
+        Task updated =
+                taskRepository.findById(taskId)
+                        .orElseThrow();
+
+        assertEquals(
+                1,
+                updated.getBlockingCount());
+
+        assertFalse(
+                updated.isReady());
+
+        assertEquals(
+                1,
+                publisher.getEvents().size());
+
+        assertEquals(
+                taskId,
+                publisher.getEvents()
+                        .get(0)
+                        .getTaskId());
+
+        assertFalse(
+                publisher.getEvents()
+                        .get(0)
+                        .isAvailable());
+    }
+
+    @Test
+    void addDependency_whenDependencyAlreadyDone_shouldNotBlockTask() {
+
+        UUID taskId = UUID.randomUUID();
+        UUID dependencyId = UUID.randomUUID();
+
+        taskRepository.save(
+                createTask(
+                        taskId,
+                        TaskStatus.ACTIVE,
+                        true,
+                        0,
+                        0));
+
+        taskRepository.save(
+                createTask(
+                        dependencyId,
+                        TaskStatus.DONE,
+                        true,
+                        0,
+                        0));
+
+        service.addDependency(
+                taskId,
+                dependencyId);
+
+        Task updated =
+                taskRepository.findById(taskId)
+                        .orElseThrow();
+
+        assertEquals(
+                0,
+                updated.getBlockingCount());
+
+        assertTrue(
+                updated.isReady());
+
+        assertTrue(
+                publisher.getEvents().isEmpty());
+    }
+
+    @Test
+    void addDependency_whenDuplicate_shouldThrowDuplicateDependencyException() {
+
+        UUID taskId = UUID.randomUUID();
+        UUID dependencyId = UUID.randomUUID();
+
+        taskRepository.save(
+                createTask(
+                        taskId,
+                        TaskStatus.ACTIVE,
+                        true,
+                        0,
+                        0));
+
+        taskRepository.save(
+                createTask(
+                        dependencyId,
+                        TaskStatus.ACTIVE,
+                        true,
+                        0,
+                        0));
+
+        service.addDependency(
+                taskId,
+                dependencyId);
+
+        assertThrows(
+                DuplicateDependencyException.class,
+                () -> service.addDependency(
+                        taskId,
+                        dependencyId));
+
+        Task updated =
+                taskRepository.findById(taskId)
+                        .orElseThrow();
+
+        assertEquals(
+                1,
+                updated.getBlockingCount());
+    }
+
+    @Test
+    void addDependency_whenCycleWouldBeCreated_shouldThrowInvalidDependencyException() {
+
+        UUID taskA = UUID.randomUUID();
+        UUID taskB = UUID.randomUUID();
+        UUID taskC = UUID.randomUUID();
+
+        taskRepository.save(
+                createTask(
+                        taskA,
+                        TaskStatus.ACTIVE,
+                        true,
+                        0,
+                        0));
+
+        taskRepository.save(
+                createTask(
+                        taskB,
+                        TaskStatus.ACTIVE,
+                        true,
+                        0,
+                        0));
+
+        taskRepository.save(
+                createTask(
+                        taskC,
+                        TaskStatus.ACTIVE,
+                        true,
+                        0,
+                        0));
+
+        service.addDependency(
+                taskA,
+                taskB);
+
+        service.addDependency(
+                taskB,
+                taskC);
+
+        assertThrows(
+                InvalidDependencyException.class,
+                () -> service.addDependency(
+                        taskC,
+                        taskA));
+
+        assertTrue(
+                dependencyRepository
+                        .findByTaskId(taskC)
+                        .isEmpty());
+    }
+
+    @Test
+    void removeDependency_shouldDecreaseBlockingCountAndMakeTaskReady() {
+
+        UUID taskId = UUID.randomUUID();
+        UUID dependencyId = UUID.randomUUID();
+
+        taskRepository.save(
+                createTask(
+                        taskId,
+                        TaskStatus.ACTIVE,
+                        true,
+                        0,
+                        0));
+
+        taskRepository.save(
+                createTask(
+                        dependencyId,
+                        TaskStatus.ACTIVE,
+                        true,
+                        0,
+                        0));
+
+        service.addDependency(
+                taskId,
+                dependencyId);
+
+        publisher.clear();
+
+        service.removeDependency(
+                taskId,
+                dependencyId);
+
+        Task updated =
+                taskRepository.findById(taskId)
+                        .orElseThrow();
+
+        assertEquals(
+                0,
+                updated.getBlockingCount());
+
+        assertTrue(
+                updated.isReady());
+
+        assertEquals(
+                1,
+                publisher.getEvents().size());
+
+        assertTrue(
+                publisher.getEvents()
+                        .get(0)
+                        .isAvailable());
+    }
+
+    @Test
+    void removeDependency_whenDependencyDoesNotExist_shouldThrow() {
+
+        UUID taskId = UUID.randomUUID();
+        UUID dependencyId = UUID.randomUUID();
+
+        taskRepository.save(
+                createTask(
+                        taskId,
+                        TaskStatus.ACTIVE,
+                        true,
+                        0,
+                        0));
+
+        taskRepository.save(
+                createTask(
+                        dependencyId,
+                        TaskStatus.ACTIVE,
+                        true,
+                        0,
+                        0));
+
+        assertThrows(
+                DependencyNotFoundException.class,
+                () -> service.removeDependency(
+                        taskId,
+                        dependencyId));
+    }
+
+    @Test
+    void onTaskStatusChanged_whenDependencyBecomesDone_shouldUnblockDependent() {
+
+        UUID taskId = UUID.randomUUID();
+        UUID dependencyId = UUID.randomUUID();
+
+        taskRepository.save(
+                createTask(
+                        taskId,
+                        TaskStatus.ACTIVE,
+                        true,
+                        0,
+                        0));
+
+        taskRepository.save(
+                createTask(
+                        dependencyId,
+                        TaskStatus.ACTIVE,
+                        true,
+                        0,
+                        0));
+
+        service.addDependency(
+                taskId,
+                dependencyId);
+
+        publisher.clear();
+
+        service.onTaskStatusChanged(
+                dependencyId,
+                TaskStatus.DONE);
+
+        Task updated =
+                taskRepository.findById(taskId)
+                        .orElseThrow();
+
+        assertEquals(
+                0,
+                updated.getBlockingCount());
+
+        assertTrue(
+                updated.isReady());
+
+        assertEquals(
+                1,
+                publisher.getEvents().size());
+    }
+
+    @Test
+    void onTaskStatusChanged_whenDependencyReopens_shouldBlockDependentAgain() {
+
+        UUID taskId = UUID.randomUUID();
+        UUID dependencyId = UUID.randomUUID();
+
+        taskRepository.save(
+                createTask(
+                        taskId,
+                        TaskStatus.ACTIVE,
+                        true,
+                        0,
+                        0));
+
+        taskRepository.save(
+                createTask(
+                        dependencyId,
+                        TaskStatus.DONE,
+                        true,
+                        0,
+                        0));
+
+        service.addDependency(
+                taskId,
+                dependencyId);
+
+        publisher.clear();
+
+        service.onTaskStatusChanged(
+                dependencyId,
+                TaskStatus.ACTIVE);
+
+        Task updated =
+                taskRepository.findById(taskId)
+                        .orElseThrow();
+
+        assertEquals(
+                1,
+                updated.getBlockingCount());
+
+        assertFalse(
+                updated.isReady());
+
+        assertEquals(
+                1,
+                publisher.getEvents().size());
+    }
+
+    @Test
+    void onConstraintAdded_shouldIncreaseOpenConstraintCountAndBlockTask() {
+
+        UUID taskId = UUID.randomUUID();
+
+        taskRepository.save(
+                createTask(
+                        taskId,
+                        TaskStatus.ACTIVE,
+                        true,
+                        0,
+                        0));
+
+        service.onConstraintAdded(newConstraint(taskId, "c-add", Constraint.ConstraintStatus.PENDING));
+
+        Task updated =
+                taskRepository.findById(taskId)
+                        .orElseThrow();
+
+        assertEquals(
+                1,
+                updated.getOpenConstraintCount());
+
+        assertFalse(
+                updated.isReady());
+
+        assertEquals(
+                1,
+                publisher.getEvents().size());
+    }
+
+    @Test
+    void onConstraintStatusChanged_whenPendingBecomesSatisfied_shouldUnblockTask() {
+
+        UUID taskId = UUID.randomUUID();
+
+        taskRepository.save(
+                createTask(
+                        taskId,
+                        TaskStatus.ACTIVE,
+                        false,
+                        0,
+                        1));
+
+        constraintRepository.save(newConstraint(taskId, "c-sat", Constraint.ConstraintStatus.PENDING));
+
+        service.onConstraintStatusChanged(
+                taskId,
+                "c-sat",
+                Constraint.ConstraintStatus.SATISFIED,
+                null);
+
+        Task updated =
+                taskRepository.findById(taskId)
+                        .orElseThrow();
+
+        assertEquals(
+                0,
+                updated.getOpenConstraintCount());
+
+        assertTrue(
+                updated.isReady());
+
+        assertEquals(
+                1,
+                publisher.getEvents().size());
+    }
+
+    @Test
+    void onConstraintStatusChanged_whenOpenStateDoesNotChange_shouldDoNothing() {
+
+        UUID taskId = UUID.randomUUID();
+
+        taskRepository.save(
+                createTask(
+                        taskId,
+                        TaskStatus.ACTIVE,
+                        false,
+                        0,
+                        1));
+
+        constraintRepository.save(newConstraint(taskId, "c-same", Constraint.ConstraintStatus.PENDING));
+
+        service.onConstraintStatusChanged(
+                taskId,
+                "c-same",
+                Constraint.ConstraintStatus.PENDING,
+                null);
+
+        Task updated =
+                taskRepository.findById(taskId)
+                        .orElseThrow();
+
+        assertEquals(
+                1,
+                updated.getOpenConstraintCount());
+
+        assertFalse(
+                updated.isReady());
+
+        assertTrue(
+                publisher.getEvents().isEmpty());
+    }
+
+    @Test
+    void getTaskEligibility_whenTaskDoesNotExist_shouldThrowTaskNotFoundException() {
+
+        UUID missingTaskId =
+                UUID.randomUUID();
+
+        assertThrows(
+                TaskNotFoundException.class,
+                () -> service.getTaskEligibility(
+                        missingTaskId));
+    }
+
+    @Test
+    void recalculateTaskEligibility_shouldFixIncorrectReadyState() {
+
+        UUID taskId = UUID.randomUUID();
+
+        taskRepository.save(
+                createTask(
+                        taskId,
+                        TaskStatus.ACTIVE,
+                        true,
+                        1,
+                        0));
+
+        service.recalculateTaskEligibility(
+                taskId);
+
+        Task updated =
+                taskRepository.findById(taskId)
+                        .orElseThrow();
+
+        assertFalse(
+                updated.isReady());
+
+        assertEquals(
+                1,
+                updated.getBlockingCount());
+
+        assertEquals(
+                1,
+                publisher.getEvents().size());
+    }
+
+    private Task createTask(
+            UUID id,
+            TaskStatus status,
+            boolean ready,
+            int blockingCount,
+            int openConstraintCount) {
+
+        LocalDateTime now =
+                LocalDateTime.now();
+
+        return Task.builder()
+                .id(id)
+                .parentTaskId(null)
+                .ownerId("test-owner")
+                .status(status)
+                .isReady(ready)
+                .blockingCount(blockingCount)
+                .openConstraintCount(openConstraintCount)
+                .estimatedDurationMin(null)
+                .score(null)
+                .createdAt(now)
+                .updatedAt(now)
+                .deletedAt(null)
+                .build();
+    }
+
+    private static class RecordingSchedulingUpdatePublisher
+            implements SchedulingUpdatePublisher {
+
+        private final List<TaskSchedulingUpdatedEvent> events =
+                new ArrayList<>();
+
+        @Override
+        public void publish(
+                TaskSchedulingUpdatedEvent event) {
+
+            events.add(event);
+        }
+
+        List<TaskSchedulingUpdatedEvent> getEvents() {
+            return events;
+        }
+
+        void clear() {
+            events.clear();
+        }
+    }
+
+
+    // Tests retained from main, adapted for the added scheduling dependency.
+
     private record Fixture(InMemoryTaskRepository taskRepo,
                             InMemoryTaskDependencyRepository dependencyRepo,
-                            ConstraintRepository constraintRepo,
+                            InMemoryConstraintRepository constraintRepo,
                             TaskEligibilityService service) {
     }
 
     private static Fixture newFixture(List<Task> tasks, List<TaskDependency> edges) {
         InMemoryTaskRepository taskRepo = new InMemoryTaskRepository(tasks);
         InMemoryTaskDependencyRepository dependencyRepo = new InMemoryTaskDependencyRepository(edges);
-        ConstraintRepository constraintRepo = mock(ConstraintRepository.class);
-        return new Fixture(taskRepo, dependencyRepo, constraintRepo,
-                new TaskEligibilityService(taskRepo, dependencyRepo, constraintRepo));
-    }
-
-    private static Constraint buildConstraint(String constraintId, UUID taskId,
-                                               Constraint.ConstraintStatus status) {
-        LocalDateTime now = LocalDateTime.now();
-        return new Constraint(constraintId, taskId, Constraint.ConstraintType.APPROVAL_NEEDED,
-                status, null, "source-ref", now, now);
+        InMemoryConstraintRepository constraintRepo = new InMemoryConstraintRepository();
+        return new Fixture(taskRepo, dependencyRepo, constraintRepo, new TaskEligibilityService(taskRepo,
+                dependencyRepo, new SchedulingUpdateService(event -> {}), constraintRepo));
     }
 
     private static Task buildTask(UUID id, int blockingCount, int openConstraintCount, boolean isReady) {
@@ -135,7 +744,7 @@ class TaskEligibilityServiceTest {
         UUID taskId = UUID.randomUUID();
         Fixture fixture = newFixture(List.of(), List.of());
 
-        assertThrows(IllegalArgumentException.class,
+        assertThrows(TaskNotFoundException.class,
                 () -> fixture.service().recalculateTaskEligibility(taskId));
     }
 
@@ -160,15 +769,14 @@ class TaskEligibilityServiceTest {
     void addDependency_duplicate_doesNotInflateBlockingCount() {
         UUID taskId = UUID.randomUUID();
         UUID dependsOnTaskId = UUID.randomUUID();
-        // taskId's own Task is deliberately NOT seeded: for a duplicate edge, requireTask(taskId)
-        // must never run, so if it did, this would throw instead of completing silently.
         Fixture fixture = newFixture(
-                List.of(buildTask(dependsOnTaskId, 0, 0, true)),
+                List.of(buildTask(taskId, 1, 0, false),
+                        buildTask(dependsOnTaskId, 0, 0, true)),
                 List.of(new TaskDependency(taskId, dependsOnTaskId)));
-
-        assertDoesNotThrow(() -> fixture.service().addDependency(taskId, dependsOnTaskId));
-
+        assertThrows(DuplicateDependencyException.class,
+                () -> fixture.service().addDependency(taskId, dependsOnTaskId));
         assertEquals(1, fixture.dependencyRepo().findByTaskId(taskId).size());
+        assertEquals(1, fixture.taskRepo().findById(taskId).orElseThrow().getBlockingCount());
     }
 
     @Test
@@ -223,7 +831,7 @@ class TaskEligibilityServiceTest {
         UUID taskB = UUID.randomUUID();
         Fixture fixture = newFixture(List.of(), List.of(new TaskDependency(taskA, taskB)));
 
-        assertThrows(IllegalStateException.class,
+        assertThrows(InvalidDependencyException.class,
                 () -> fixture.service().addDependency(taskB, taskA));
 
         assertEquals(1, fixture.dependencyRepo().findByTaskId(taskA).size());
@@ -239,7 +847,7 @@ class TaskEligibilityServiceTest {
         UUID dependsOnTaskId = UUID.randomUUID();
         Fixture fixture = newFixture(List.of(buildTask(dependsOnTaskId, 0, 0, true)), List.of());
 
-        assertThrows(IllegalArgumentException.class,
+        assertThrows(TaskNotFoundException.class,
                 () -> fixture.service().addDependency(taskId, dependsOnTaskId));
 
         assertTrue(fixture.dependencyRepo().findByTaskId(taskId).isEmpty());
@@ -251,7 +859,7 @@ class TaskEligibilityServiceTest {
         UUID dependsOnTaskId = UUID.randomUUID();
         Fixture fixture = newFixture(List.of(), List.of());
 
-        assertThrows(IllegalArgumentException.class,
+        assertThrows(TaskNotFoundException.class,
                 () -> fixture.service().addDependency(taskId, dependsOnTaskId));
 
         assertTrue(fixture.dependencyRepo().findByTaskId(taskId).isEmpty());
@@ -291,13 +899,15 @@ class TaskEligibilityServiceTest {
 
     @Test
     void removeDependency_notFound_doesNotChangeCounter() {
-        // taskId's own Task is deliberately NOT seeded - if requireTask(taskId) ran, this
-        // would throw instead of completing silently.
         UUID taskId = UUID.randomUUID();
         UUID dependsOnTaskId = UUID.randomUUID();
-        Fixture fixture = newFixture(List.of(), List.of());
-
-        assertDoesNotThrow(() -> fixture.service().removeDependency(taskId, dependsOnTaskId));
+        Fixture fixture = newFixture(
+                List.of(buildTask(taskId, 0, 0, true),
+                        buildTask(dependsOnTaskId, 0, 0, true)), List.of());
+        assertThrows(DependencyNotFoundException.class,
+                () -> fixture.service().removeDependency(taskId, dependsOnTaskId));
+        assertTrue(fixture.dependencyRepo().findByTaskId(taskId).isEmpty());
+        assertEquals(0, fixture.taskRepo().findById(taskId).orElseThrow().getBlockingCount());
     }
 
     @Test
@@ -312,7 +922,7 @@ class TaskEligibilityServiceTest {
                 List.of(buildTask(dependsOnTaskId, 0, 0, true)),
                 List.of(new TaskDependency(taskId, dependsOnTaskId)));
 
-        assertThrows(IllegalArgumentException.class,
+        assertThrows(TaskNotFoundException.class,
                 () -> fixture.service().removeDependency(taskId, dependsOnTaskId));
 
         assertEquals(1, fixture.dependencyRepo().findByTaskId(taskId).size());
@@ -396,17 +1006,11 @@ class TaskEligibilityServiceTest {
     }
 
     @Test
-    void onConstraintAdded_newConstraint_incrementsOpenConstraintCount_andStaysNotReady() {
+    void onConstraintAdded_incrementsOpenConstraintCount_andStaysNotReady() {
         UUID taskId = UUID.randomUUID();
         Fixture fixture = newFixture(List.of(buildTask(taskId, 0, 0, true)), List.of());
-        Constraint constraint = buildConstraint(UUID.randomUUID().toString(), taskId,
-                Constraint.ConstraintStatus.PENDING);
-        // save() reports whether Postgres actually inserted a new row - true here simulates a
-        // genuinely new constraint (see ConstraintRepository's Javadoc for why this, not a bare
-        // "did it succeed", is what tells the caller whether to touch the counter).
-        when(fixture.constraintRepo().save(constraint)).thenReturn(true);
 
-        fixture.service().onConstraintAdded(constraint);
+        fixture.service().onConstraintAdded(newConstraint(taskId, "c-add2", Constraint.ConstraintStatus.PENDING));
 
         Task task = fixture.taskRepo().findById(taskId).orElseThrow();
         assertEquals(1, task.getOpenConstraintCount());
@@ -414,47 +1018,14 @@ class TaskEligibilityServiceTest {
     }
 
     @Test
-    void onConstraintAdded_taskDoesNotExist_throwsAndNeverSaves() {
-        // taskId's own Task is deliberately NOT seeded - covers both a genuinely missing task
-        // and a soft-deleted one, since TaskRepository#findById treats both as not found.
-        UUID taskId = UUID.randomUUID();
-        Fixture fixture = newFixture(List.of(), List.of());
-        Constraint constraint = buildConstraint(UUID.randomUUID().toString(), taskId,
-                Constraint.ConstraintStatus.PENDING);
-
-        assertThrows(IllegalArgumentException.class, () -> fixture.service().onConstraintAdded(constraint));
-
-        verify(fixture.constraintRepo(), never()).save(any());
-    }
-
-    @Test
-    void onConstraintAdded_redeliveredConstraint_doesNotIncrementAgain() {
-        UUID taskId = UUID.randomUUID();
-        Fixture fixture = newFixture(List.of(buildTask(taskId, 0, 1, false)), List.of());
-        Constraint constraint = buildConstraint(UUID.randomUUID().toString(), taskId,
-                Constraint.ConstraintStatus.PENDING);
-        // false = the row already existed (redelivery of the same "constraint added" event).
-        when(fixture.constraintRepo().save(constraint)).thenReturn(false);
-
-        fixture.service().onConstraintAdded(constraint);
-
-        Task task = fixture.taskRepo().findById(taskId).orElseThrow();
-        assertEquals(1, task.getOpenConstraintCount());
-    }
-
-    @Test
     void onConstraintStatusChanged_closingLastConstraint_becomesReady() {
         UUID taskId = UUID.randomUUID();
-        String constraintId = UUID.randomUUID().toString();
         Fixture fixture = newFixture(List.of(buildTask(taskId, 0, 1, false)), List.of());
-        // updateStatus() reports the REAL previous status from Postgres, not a caller-supplied
-        // claim - PENDING here simulates the constraint genuinely having been open before this call.
-        when(fixture.constraintRepo().updateStatus(
-                eq(taskId), eq(constraintId), eq(Constraint.ConstraintStatus.SATISFIED), any(), any()))
-                .thenReturn(Constraint.ConstraintStatus.PENDING);
+
+        fixture.constraintRepo().save(newConstraint(taskId, "c-close2", Constraint.ConstraintStatus.PENDING));
 
         fixture.service().onConstraintStatusChanged(
-                taskId, constraintId, Constraint.ConstraintStatus.SATISFIED, null);
+                taskId, "c-close2", Constraint.ConstraintStatus.SATISFIED, null);
 
         Task task = fixture.taskRepo().findById(taskId).orElseThrow();
         assertEquals(0, task.getOpenConstraintCount());
@@ -464,14 +1035,12 @@ class TaskEligibilityServiceTest {
     @Test
     void onConstraintStatusChanged_reopeningConstraint_becomesNotReadyAgain() {
         UUID taskId = UUID.randomUUID();
-        String constraintId = UUID.randomUUID().toString();
         Fixture fixture = newFixture(List.of(buildTask(taskId, 0, 0, true)), List.of());
-        when(fixture.constraintRepo().updateStatus(
-                eq(taskId), eq(constraintId), eq(Constraint.ConstraintStatus.PENDING), any(), any()))
-                .thenReturn(Constraint.ConstraintStatus.SATISFIED);
+
+        fixture.constraintRepo().save(newConstraint(taskId, "c-reopen", Constraint.ConstraintStatus.SATISFIED));
 
         fixture.service().onConstraintStatusChanged(
-                taskId, constraintId, Constraint.ConstraintStatus.PENDING, null);
+                taskId, "c-reopen", Constraint.ConstraintStatus.PENDING, null);
 
         Task task = fixture.taskRepo().findById(taskId).orElseThrow();
         assertEquals(1, task.getOpenConstraintCount());
@@ -483,50 +1052,12 @@ class TaskEligibilityServiceTest {
         // taskId's own Task is deliberately NOT seeded - if the method touched the repository
         // at all for this non-open-changing transition, this would throw.
         UUID taskId = UUID.randomUUID();
-        String constraintId = UUID.randomUUID().toString();
         Fixture fixture = newFixture(List.of(), List.of());
-        when(fixture.constraintRepo().updateStatus(
-                eq(taskId), eq(constraintId), eq(Constraint.ConstraintStatus.WAIVED), any(), any()))
-                .thenReturn(Constraint.ConstraintStatus.SATISFIED);
+
+        fixture.constraintRepo().save(newConstraint(taskId, "c-waive", Constraint.ConstraintStatus.SATISFIED));
 
         assertDoesNotThrow(() -> fixture.service().onConstraintStatusChanged(
-                taskId, constraintId, Constraint.ConstraintStatus.WAIVED, null));
+                taskId, "c-waive", Constraint.ConstraintStatus.WAIVED, null));
     }
 
-    @Test
-    void onConstraintStatusChanged_redeliveredTransition_doesNotDoubleAdjust() {
-        // The DB already reflects the target state (PENDING), meaning this exact transition was
-        // already applied - a redelivered event, not trusted from a caller-supplied previousStatus.
-        UUID taskId = UUID.randomUUID();
-        String constraintId = UUID.randomUUID().toString();
-        Fixture fixture = newFixture(List.of(buildTask(taskId, 0, 1, false)), List.of());
-        when(fixture.constraintRepo().updateStatus(
-                eq(taskId), eq(constraintId), eq(Constraint.ConstraintStatus.PENDING), any(), any()))
-                .thenReturn(Constraint.ConstraintStatus.PENDING);
-
-        fixture.service().onConstraintStatusChanged(
-                taskId, constraintId, Constraint.ConstraintStatus.PENDING, null);
-
-        Task task = fixture.taskRepo().findById(taskId).orElseThrow();
-        assertEquals(1, task.getOpenConstraintCount());
-    }
-
-    @Test
-    void onConstraintStatusChanged_constraintBelongsToAnotherTask_throwsAndLeavesCounterUntouched() {
-        // The repository matches on constraintId AND taskId, so a mismatched pair matches no row and
-        // throws before anything is written - Task-B's counter must not move.
-        UUID wrongTaskId = UUID.randomUUID();
-        String constraintId = UUID.randomUUID().toString();
-        Fixture fixture = newFixture(List.of(buildTask(wrongTaskId, 0, 0, true)), List.of());
-        when(fixture.constraintRepo().updateStatus(
-                eq(wrongTaskId), eq(constraintId), eq(Constraint.ConstraintStatus.PENDING), any(), any()))
-                .thenThrow(new IllegalStateException("No constraint " + constraintId + " on task " + wrongTaskId));
-
-        assertThrows(IllegalStateException.class, () -> fixture.service().onConstraintStatusChanged(
-                wrongTaskId, constraintId, Constraint.ConstraintStatus.PENDING, null));
-
-        Task task = fixture.taskRepo().findById(wrongTaskId).orElseThrow();
-        assertEquals(0, task.getOpenConstraintCount());
-        assertTrue(task.isReady());
-    }
 }

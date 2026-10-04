@@ -3,11 +3,10 @@ package com.rnd.chain.repository;
 import com.rnd.chain.dto.Constraint;
 import com.rnd.chain.testsupport.ConcurrentTestRunner;
 
-import org.junit.jupiter.api.Disabled;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.test.context.TestPropertySource;
 
 import java.time.LocalDateTime;
 import java.util.Queue;
@@ -18,8 +17,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 /**
  * Exercises {@link PostgresConstraintRepository}'s concurrency guarantees against a real Postgres
- * instance - same "cannot pass yet" caveat as {@link PostgresConstraintRepositoryTest} (see its
- * Javadoc): no {@code task(id)} table exists until issue #377 lands.
+ * instance.
  *
  * <p>{@code TaskRepository#update} already gives {@code Task.openConstraintCount} atomic per-id
  * updates once {@link ConstraintRepository} has told the caller what actually happened at the DB
@@ -28,14 +26,11 @@ import static org.assertj.core.api.Assertions.assertThat;
  * correctly even when multiple threads race on the exact same {@code constraintId}, which a
  * single-threaded test can't exercise.
  *
- * <p>{@code @Disabled} for the same reason as {@link PostgresConstraintRepositoryTest} (PR #468
- * review, Critical finding) - remove once #377 lands and a real Postgres is reachable in CI.
- * {@code spring.flyway.enabled} is off by default (see application.yml); this class opts back
- * in, same reasoning as {@link PostgresConstraintRepositoryTest}.
+ * <p>{@code @Tag("postgres")}: excluded from the default run, same as
+ * {@link PostgresConstraintRepositoryTest} - run with {@code -Ppostgres-integration}.
  */
 @SpringBootTest
-@TestPropertySource(properties = "spring.flyway.enabled=true")
-@Disabled("blocked on #377 - task(id) table doesn't exist yet, and no Postgres is reachable in CI (values-chain.yaml postgresql.enabled is still false)")
+@Tag("postgres")
 class PostgresConstraintRepositoryConcurrencyTest {
 
     private static final int THREAD_COUNT = 16;

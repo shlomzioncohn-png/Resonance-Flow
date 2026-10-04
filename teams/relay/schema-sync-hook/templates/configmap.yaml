@@ -7,13 +7,25 @@ metadata:
     {{- include "schema-sync-hook.labels" . | nindent 4 }}
 
 data:
+  # Compatibility level, from the "# compatibility:" line in schema-subjects.tsv
+  # (same source the CI check reads). run-all.sh applies it to the live registry
+  # before checking — Apicurio enforces nothing by default.
+  compatibility-level: {{ include "schema-sync-hook.compatLevel" . | quote }}
+
   # Orchestrator ONLY — the actual check/register logic lives in the two
-  # verbatim copies below, not reinvented here. Loops over every schema in
-  # schemas.tsv, running check-then-register for each; keeps going if one
-  # schema fails, but remembers to fail the whole Job at the end.
+  # verbatim copies below, not reinvented here. Sets the compatibility level,
+  # then loops over every schema in schemas.tsv running check-then-register;
+  # keeps going if one schema fails, but fails the whole Job at the end.
   run-all.sh: |
     #!/bin/bash
     set -euo pipefail
+
+    REGISTRY_URL="${SCHEMA_REGISTRY_URL:-http://localhost:8081/apis/ccompat/v6}"
+    LEVEL="$(cat /schema-list/compatibility-level)"
+    echo "Setting global compatibility level to ${LEVEL}"
+    curl -sf -X PUT "${REGISTRY_URL}/config" \
+      -H "Content-Type: application/vnd.schemaregistry.v1+json" \
+      -d "{\"compatibility\": \"${LEVEL}\"}" > /dev/null
 
     FAILED=0
     while IFS=$'\t' read -r FILE SUBJECT; do

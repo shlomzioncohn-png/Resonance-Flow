@@ -1,0 +1,24 @@
+name: CI - Java service
+description: >
+  Brings up the shared test infra (kind cluster + Helm chart with
+  this component disabled + Postgres), then runs this service's Java tests. Used by
+  both service-ci-java.yaml (PR) and service-cd.yaml's build job (push/dispatch).
+
+inputs:
+  service_name:
+    description: "Component name, matches the key under components.<service_name> in teams/relay/helm/resonance-flow/values.yaml"
+    required: true
+  service_dir:
+    description: "Path to the service, e.g. teams/bridge"
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - uses: ./.github/actions/setup-service-infra
+      with:
+        service_name: ${{ inputs.service_name }}
+
+    - uses: ./.github/actions/test-java
+      with:
+        service_dir: ${{ inputs.service_dir }}
