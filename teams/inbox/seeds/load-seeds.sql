@@ -10,6 +10,10 @@
 --
 -- Order matters — later tables reference earlier ones by foreign key:
 --   tenants -> users -> teams (team_lead_id references users!) -> team_members -> tasks -> assignments
+--
+-- Stop at the first error: without this psql carries on, so one rejected \copy (e.g. a role value
+-- missing from the user_role enum) silently leaves every table that references it empty.
+\set ON_ERROR_STOP on
 
 \copy tenants (id, name, slug, status) FROM 'tenants.csv' WITH (FORMAT csv, HEADER true)
 \copy users (id, tenant_id, email, username, display_name, role, status) FROM 'users.csv' WITH (FORMAT csv, HEADER true)
