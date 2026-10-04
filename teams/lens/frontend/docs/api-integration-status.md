@@ -79,8 +79,9 @@ test UUID they send works for us too.
    docker exec -w /tmp/seeds resonance-postgres sh -c \
      "sed -i 's/,member,/,employee,/' users.csv && psql -U postgres -d resonance_flow -f load-seeds.sql"
    ```
-   The `sed` is needed because the CSVs we got (2026-10-04) still use the old role name
-   `member`, and the DB enum (migration V9) now only accepts `employee`.
+   The `sed` is only needed for CSVs generated before Inbox PR #530 (like the ones we got
+   on 2026-10-04). Those still use the old role name `member`, and the DB enum (migration
+   V9) only accepts `employee`. Newer CSVs are already fixed, so the `sed` does nothing.
 4. Run the BFF with:
    `INBOX_MOCK_ENABLED=false`, `INBOX_SERVICE_URL=http://localhost:8083`,
    `INBOX_DEV_ACTOR_ID=ef071a8a-1040-3a27-904a-f6352bad4fea`. That test user ("User 8",
@@ -105,8 +106,8 @@ search, paging), a single task, a status change (saved in Inbox), and an unknown
 
 ## Next steps
 
-1. Inbox: an assignee filter for "my tasks" (gap 2), merging the Task API to `main`, and
-   fresh seed CSVs with the new role name.
+1. Inbox: an assignee filter for "my tasks" (gap 2), and merging the Task API to `main`.
+   The seed role name is already fixed on `inbox-team` (PR #530).
 2. Error handling: Inbox 401/403/400 currently surface as 503 "unavailable". Map them to
    clear messages on the screens.
 3. Snooze support (gap 6).
