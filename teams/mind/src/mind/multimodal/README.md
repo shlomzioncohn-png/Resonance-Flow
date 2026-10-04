@@ -20,18 +20,16 @@ Local OCR + ASR preprocessing.
   An earlier "~91% accuracy" figure was retracted — it had no zero point and
   rewarded output volume (random gibberish scored 42–53% on it). Unaligned word
   recall (64.7%) is a secondary, recall-only number that undercounts PaddleOCR.
-  **Per-word confidence:** Tesseract
-  already scores each recognized word 0-100 internally (its `tsv`
-  output mode), and that score differs between the miss groups in a
-  heuristic classification of word-recall misses — correctly-read words
-  average 80.4 confidence vs. 46-64 for every miss category, lowest
-  (46.3) for OCR confidently producing a different, wrong word (directional
-  evidence, not a validated error detector). The OCR
-  interface should surface this per-word confidence alongside the text
-  so `extraction/` (once built) can discount or flag low-confidence
-  words instead of trusting every word equally — see
-  `benchmarks/analyze_confidence.py` and the benchmark doc's "per-word
-  confidence" section for the numbers and a starting threshold.
+  **Per-word confidence:** Tesseract already scores each recognized word
+  0-100 internally (its `tsv` output mode), and that score differs between
+  correctly-read words (avg 80.4) and the miss groups of a heuristic
+  classification of word-recall misses (avg 45-63) — but the distributions
+  overlap heavily: a cut-off of 60 flags 12% of correct words and catches only
+  ~55% of the real errors, and no cut-off does both (directional evidence,
+  Tesseract only, not a validated detector). The OCR interface should still
+  return it alongside the text, as one signal for `extraction/` (once built)
+  rather than a filter — see `benchmarks/analyze_confidence.py` and the
+  benchmark doc's "per-word confidence" section.
   Resource budget for capacity planning: ~0.5s latency, ~35MB peak
   memory, ~0.45s CPU time per page on a dev machine (no GPU, no load).
   See `benchmarks/ocr-asr-benchmark.md` for the full comparison and

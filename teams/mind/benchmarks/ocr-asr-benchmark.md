@@ -391,34 +391,63 @@ confidence differs between the groups found in the miss analysis. Tested
 via `benchmarks/analyze_confidence.py` (`python -m
 benchmarks.analyze_confidence`). The groups come from the heuristic miss
 classification (see the caveat above), so read this as directional
-evidence, not a validated detector, and for Tesseract only (PaddleOCR's per-line score hasn't been evaluated):
+evidence, not a validated detector, and for Tesseract only (PaddleOCR's
+per-line score hasn't been evaluated).
 
-| Group | n | avg. Tesseract confidence |
-|---|---:|---:|
-| Correctly-recalled words (word_recall hits) | 586 | **80.4** |
-| `segmentation` misses | 33 | 63.8 |
-| `digit_merge` misses | 22 | 61.9 |
-| `char_misread` misses | 17 | 53.0 |
-| `not_detected` misses | 3 | 47.2 |
-| **`different_word` misses (the risky category)** | 19 | **46.3** |
+**Correction (review feedback on PR #345).** The first version of this
+analysis tallied misses in a dict keyed by the ground-truth word, so a word
+missed twice on a page (form documents repeat "date", "name", "5"...)
+overwrote itself: **11 of the 98 miss rows were silently dropped**, and the
+per-category counts and averages below were computed from the 87 that
+survived. Fixed (misses are now a list; regression-tested). Before → after:
+`digit_merge` n=22 → 32 and avg 61.9 → 59.1, `segmentation` 33 → 34 and 63.8 →
+62.8, `char_misread` 17 → 19 and 53.0 → 52.4, `different_word` 19 → 20 and
+46.3 → 45.4, `not_detected` unchanged, correctly-read words unchanged. The
+picture is the same, but `digit_merge` now sits just *below* 60, which matters
+for any threshold near it (PR #509 uses 60.0).
 
-Every miss category scores meaningfully below the 80.4 average for
-correct words, and `different_word` — the category flagged above as
-the one actually worth worrying about for extraction — scores lowest
-of all (46.3, ~34 points below correct words).
+| Group | n (confidence values) | avg. Tesseract confidence | share below 60 |
+|---|---:|---:|---:|
+| Correctly-recalled words (word_recall hits) | 586 | **80.4** | 12% |
+| `segmentation` misses | 34 | 62.8 | 38% |
+| `digit_merge` misses | 32 | 59.1 | 34% |
+| `char_misread` misses | 19 | 52.4 | 47% |
+| `not_detected` misses | 3 | 47.2 | 100% |
+| **`different_word` misses (the risky category)** | 20 | **45.4** | 55% |
+
+`n` counts confidence values, not miss rows: a miss row contributes every
+confidence Tesseract gave the token it produced, so a token that appears
+several times adds several values.
+
+The averages look like a strong signal (80 vs. 45-59) but **the
+distributions overlap heavily.** Flagging words below a cut-off, on the real
+errors (`char_misread` + `different_word` + `not_detected`, n=42) vs. the
+correctly-read words (n=586):
+
+| Cut-off | Correct words flagged | Real errors caught |
+|---:|---:|---:|
+| 40 | 5% | 40% |
+| 50 | 7% | 52% |
+| 60 | 12% | 55% |
+| 70 | 23% | 64% |
+| 80 | 39% | 81% |
+
+No cut-off both catches most errors and leaves the correct words alone: at 60
+roughly half the real errors slip through while one correct word in eight is
+flagged; catching 81% (cut-off 80) flags 39% of the correct words. So
+confidence is a useful but **weak-to-moderate** signal, not a detector — an
+earlier version of this section claimed a 60-65 cut-off would "catch most"
+errors while keeping "nearly all" correct words; that was inferred from the
+averages and was never computed, and is wrong.
 
 **Recommendation:** the multimodal OCR interface should return, per
 recognized word, both the text **and** Tesseract's confidence score
 (already computed internally — this is a change to what we read out of
 Tesseract's output, not a new capability to build). Extraction (once
-built, Phase 2) can then discount or flag low-confidence words instead
-of trusting every word equally — a threshold around 60-65 would catch
-most `char_misread`/`different_word`/`not_detected` cases while keeping
-nearly all correct words (80.4 avg) and most `digit_merge`/
-`segmentation` cases (which don't need special handling anyway, since
-their content is already correct). Exact threshold needs tuning once
-extraction exists to measure against real downstream impact, not
-picked from this n=98 sample alone.
+built, Phase 2) can use it to discount or flag low-confidence words, as one
+signal among others rather than a filter — and the cut-off should be chosen
+against real downstream impact once extraction exists, with the trade-off
+above in view, not picked from this n=98 sample alone.
 
 All figures are on this dev machine (CPU only, no load, no mkldnn for
 PaddleOCR) — a shared/production host, or one where the mkldnn crash
