@@ -418,6 +418,32 @@ Findings from this round **not** addressed on this branch, each for a specific r
 - The Java-25/Spring-Boot-2.7.18 compatibility concern - doesn't describe this branch's actual
   `pom.xml` (see the Stack-section fix above), so there's nothing to remediate here.
 
+## Code review fixes (2026-10-04, PR #114 seventh review round)
+
+Three correctness fixes from this round's review, each with a regression test:
+
+- **`onTaskStatusChanged` no longer corrupts `Task.isReady`.** `copyOf` didn't carry `isReady`
+  across, and `Task.Builder`'s primitive boolean defaults to `false`. `withCounters` masked this
+  by always re-setting it, but `onTaskStatusChanged` builds directly off `copyOf`, so every status
+  change - including a same-status replay - flipped a ready task to not-ready in the repository.
+- **`addDependency`'s duplicate-edge path is a true no-op.** It previously called
+  `requireTask(dependsOnTaskId)` before the `isNewEdge` check, so a retried call for an existing
+  edge whose target had since been removed threw instead of being idempotent. All reads and writes
+  after the cycle check are now gated on `isNewEdge`, matching `removeDependency`.
+- **`onConstraintStatusChanged`'s non-open fast path validates `taskId`.** The early return for
+  transitions that don't cross the `PENDING` boundary skipped task-existence validation, contradicting
+  the method's `@throws` contract. It now calls `requireTask` first; the lock, counter write, and
+  `isReady` recompute are still skipped.
+
+Findings from this round not addressed on this branch:
+- `Task`'s dead `@Setter` - owned by a teammate, reported to her separately.
+- `.vscode/settings.json`'s `java.compile.nullAnalysis.mode` - a personal IDE setting that
+  already landed on `main` through an unrelated commit, and reaches this branch only via a merge
+  from `main`.
+- Two findings in this round were already fixed by earlier commits on this branch when the review
+  was posted (the dead `@EqualsAndHashCode` on `Constraint`, and the duplicated `buildTask` in
+  `TaskEligibilityServiceTest`).
+
 ## Dependency graph persistence (Issue #66)
 
 `TaskDependencyRepository` / `InMemoryTaskDependencyRepository` (in `repository/`) are a pure
