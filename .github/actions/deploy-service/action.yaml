@@ -3,7 +3,8 @@ description: >
   Builds the service's image, loads it into the already-running kind cluster, upgrades
   the chart to enable the component with that image, smoke-tests it, then pushes the
   image to GHCR. Assumes setup-service-infra already ran in this job (same kind cluster,
-  same namespace, component installed disabled, $CHART_DIR/$CHART_VALUES exported).
+  same namespace, component installed disabled, $CHART_DIR/$CHART_VALUES/$CHART_ALL_OFF
+  exported).
 
 inputs:
   service_name:
@@ -11,9 +12,6 @@ inputs:
     required: true
   service_dir:
     description: "Path to the service, e.g. teams/bridge"
-    required: true
-  container_port:
-    description: "Local port used for the post-deploy smoke test port-forward"
     required: true
   extra_build_contexts:
     description: "Optional docker build-contexts (name=path per line), e.g. shared=shared"
@@ -75,6 +73,7 @@ runs:
         SERVICE="${{ inputs.service_name }}"
         helm upgrade --install "$SERVICE" "$CHART_DIR" \
           -f "$CHART_VALUES" \
+          -f "$CHART_ALL_OFF" \
           -f "$CHART_DIR/values/values-${SERVICE}.yaml" \
           --set components.${SERVICE}.image.repository="$SERVICE" \
           --set components.${SERVICE}.image.tag=local \
@@ -108,10 +107,21 @@ runs:
     - name: Smoke test
       shell: bash
       run: |
-        HEALTH_PATH=$(yq eval ".components.${{ inputs.service_name }}.readinessProbe.httpGet.path" "$CHART_VALUES")
-        kubectl -n ${{ inputs.service_name }} port-forward svc/${{ inputs.service_name }}-resonance-flow-${{ inputs.service_name }} ${{ inputs.container_port }}:80 &
-        sleep 5
-        curl -sf "http://localhost:${{ inputs.container_port }}${HEALTH_PATH}"
+        SERVICE="${{ inputs.service_name }}"
+        HEALTH_PATH=$(yq eval ".components.${SERVICE}.readinessProbe.httpGet.path" "$CHART_VALUES")
+        # ":80" lets kubectl pick a free local port - fixed ports collide between services
+        # sharing the self-hosted runner.
+        PF_LOG="$RUNNER_TEMP/port-forward-${SERVICE}.log"
+        kubectl -n "$SERVICE" port-forward "svc/${SERVICE}-resonance-flow-${SERVICE}" :80 > "$PF_LOG" 2>&1 &
+        for i in $(seq 1 30); do
+          PORT=$(sed -n 's/^Forwarding from 127\.0\.0\.1:\([0-9]*\) .*/\1/p' "$PF_LOG" | head -1)
+          [ -n "$PORT" ] && break
+          sleep 1
+        done
+        if [ -z "$PORT" ]; then
+          echo "port-forward never came up:" >&2; cat "$PF_LOG" >&2; exit 1
+        fi
+        curl -sf --retry 5 --retry-connrefused "http://localhost:${PORT}${HEALTH_PATH}"
 
     - name: Log in to GHCR
       uses: docker/login-action@v3
