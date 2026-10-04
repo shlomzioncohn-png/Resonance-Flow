@@ -197,9 +197,13 @@ class TaskUpdatedEventHandlerIntegrationTest {
                 .setUpdatedAt(timestamp(BASE_TIME))
                 .build());
 
+        // PR #467 review: a generous timeout here would pass identically whether this arrived
+        // immediately or only after a retry burned the handler's 2s backoff first - bounding it
+        // well under that backoff is what actually proves "never retried", not just "eventually
+        // reached .errors".
         ConsumerRecord<String, String> onErrorsTopic =
-                KafkaTestUtils.getSingleRecord(errorsProbe, ERROR_TOPIC, java.time.Duration.ofSeconds(15));
-        assertNotNull(onErrorsTopic, "a malformed event must land on the .errors topic");
+                KafkaTestUtils.getSingleRecord(errorsProbe, ERROR_TOPIC, java.time.Duration.ofMillis(1500));
+        assertNotNull(onErrorsTopic, "a malformed event must land on .errors well under one retry backoff (2s)");
         errorsProbe.close();
     }
 
