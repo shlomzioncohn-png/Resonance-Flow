@@ -101,17 +101,18 @@ search, paging), a single task, a status change (saved in Inbox), and an unknown
 | 3   | List shape `{content, total_elements}` → `{items, total}`                                      | ✅ Mapped in `InboxClient.listTasks`                                                                                                                                          |
 | 4   | Our single `filter` → Inbox's `status`                                                         | ✅ `WorkspaceService.toStatusFilter`. `search`/`page`/`size` are passed straight through, and Inbox does the paging.                                                          |
 | 5   | Task field names                                                                               | ✅ Mapped in `InboxClient.toTaskDTO`. `owner`/`project` stay empty (Inbox only has ids). `priority` is derived from `priority_score`. `dependencies`/`constraints` are empty. |
-| 6   | `snoozedUntil` when snoozing                                                                   | ❌ Open — snoozing from our screen fails until `TaskStatusUpdateDTO` carries it                                                                                               |
+| 6   | `snoozedUntil` when snoozing                                                                   | ✅ `snoozedUntil` is passed from the frontend through Gateway and BFF to Inbox. Without it Inbox answers 400. (No snooze button on the screens yet.)                          |
 | 7   | Inbox returns **500** (not 404) for a task id that isn't a UUID                                | ✅ Worked around: the BFF treats a non-UUID id as "not found" without calling Inbox. Needs reporting to Inbox.                                                                |
 
 ## Next steps
 
-1. Inbox: merging the Task API to `main`.
-   The seed role name is already fixed on `inbox-team` (PR #530).
-2. Error handling: Inbox 401/403/400 currently surface as 503 "unavailable". Map them to
-   clear messages on the screens.
-3. Snooze support (gap 6).
-4. Show owner/project names (needs a call to Inbox's users API, or names in the task
-   response).
-5. Agree with Inbox on a chat API (they mediate with Mind), then add it to the BFF and
-   Gateway and wire `ChatPanel`.
+1. Inbox: merging the Task API to `main`. The seed role name is already fixed on
+   `inbox-team` (PR #530).
+2. Show owner/project names. This needs names in Inbox's task response (Inbox only sends
+   ids).
+3. Agree with Inbox (Esti) on a chat API (they mediate with Mind), then add it to the BFF
+   and Gateway and wire `ChatPanel`.
+
+Done since the first snapshot: error handling (Inbox 401/403/400 keep their status and
+get a clear message on screen; the Gateway passes BFF's 4xx message on), snooze, "my
+tasks" scoping, and recommendations that only pick workable tasks.
