@@ -21,6 +21,13 @@ import java.util.UUID;
  * - Events with no event id, handled state-based instead (e.g. task.updated - see
  *   TaskUpdatedEventHandler): use {@link #processUnclaimed}, which just runs the action and logs
  *   the outcome - the action itself must already be safe to run more than once.
+ *
+ * Retry policy (decided in PR #467 review): every handler's {@code @RetryableTopic} retries any
+ * exception except {@link NonRetryableEventException} - Spring allows either an include or an
+ * exclude list, not both, so exclude is the only one set. This is opt-out, the same policy the
+ * old DefaultErrorHandler had. Retries are bounded (3-5 attempts), so an unexpected bug costs
+ * a few delayed attempts rather than an infinite loop, while transient failures such as a dropped
+ * DB connection are retried without each one needing its own wrapper.
  */
 @Component
 public class ChainEventProcessingTemplate {

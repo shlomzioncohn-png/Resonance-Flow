@@ -51,7 +51,7 @@ public class TaskCreatedEventHandler {
             backoff = @Backoff(delay = 2000),
             dltStrategy = DltStrategy.FAIL_ON_ERROR,
             dltTopicSuffix = ".errors",
-            include = ChainTransientProcessingException.class,
+            exclude = NonRetryableEventException.class,
             kafkaTemplate = "taskCreatedEventKafkaTemplate")
     @KafkaListener(
             topics = "${chain.kafka.topics.task-created:task.created}",

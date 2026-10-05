@@ -62,7 +62,7 @@ public class TaskUpdatedEventHandler {
             backoff = @Backoff(delay = 2000),
             dltStrategy = DltStrategy.FAIL_ON_ERROR,
             dltTopicSuffix = ".errors",
-            include = ChainTransientProcessingException.class,
+            exclude = NonRetryableEventException.class,
             kafkaTemplate = "taskUpdatedEventKafkaTemplate")
     @KafkaListener(
             topics = "${chain.kafka.topics.task-updated:task.updated}",
@@ -85,8 +85,8 @@ public class TaskUpdatedEventHandler {
                     "task.updated referenced a task Chain hasn't seen yet: " + taskId, e);
         } catch (RuntimeException e) {
             // Same reasoning as TaskCreatedEventHandler#persist: an unexpected failure here (e.g.
-            // a bug in the repository) must not fall outside @RetryableTopic's allow-list, or it
-            // skips retry entirely and lands straight on .errors looking like nothing happened.
+            // a bug in the repository) is still retried as a transient failure, not sent straight
+            // to .errors without a retry attempt.
             throw new ChainTransientProcessingException(
                     "Failed to apply task.updated for task " + taskId, e);
         }
