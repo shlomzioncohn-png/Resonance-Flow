@@ -126,6 +126,16 @@ Running the full stack in Docker (`docker compose up --build`, including the `br
 container itself) also works — the compose file wires MinIO/Kafka service-name addresses for
 that case — but the host+Docker-infra split above is the faster loop for day-to-day work.
 
+### Slack real-time ingestion (Events API)
+
+Alongside the polling trigger above, Slack messages can also be ingested in near-real-time via
+`POST /api/bridge/slack/events` (`SlackEventsController`) — Slack's Events API webhook, covering
+new messages, edits (`message_changed`), and threaded replies, with retry-safe publication and
+idempotent attachment handling. See `plan.md`'s "Slack real-time ingestion" section for the full
+design and current limitations. Exposing this endpoint to Slack (a public URL, signing secret,
+event subscription setup) isn't documented here yet — not yet exercised against real Slack
+traffic.
+
 ### Fixture format
 
 Realism was chosen per source, not uniformly (see `plan.md` for the full reasoning): Gmail

@@ -33,10 +33,10 @@ class InMemoryTaskDependencyRepositoryTest {
 
         assertThat(seeded.existsDependency(a, b)).isTrue();
         assertThat(seeded.findByTaskId(a))
-                .extracting(TaskDependency::getDependsOnTaskId)
+                .extracting(TaskDependency::dependsOnTaskId)
                 .containsExactly(b);
         assertThat(seeded.findByDependsOnTaskId(b))
-                .extracting(TaskDependency::getTaskId)
+                .extracting(TaskDependency::taskId)
                 .containsExactly(a);
     }
 
@@ -79,10 +79,10 @@ class InMemoryTaskDependencyRepositoryTest {
 
         assertThat(result).contains(new TaskDependency(a, b));
         assertThat(repository.findByTaskId(a))
-                .extracting(TaskDependency::getDependsOnTaskId)
+                .extracting(TaskDependency::dependsOnTaskId)
                 .containsExactly(b);
         assertThat(repository.findByDependsOnTaskId(b))
-                .extracting(TaskDependency::getTaskId)
+                .extracting(TaskDependency::taskId)
                 .containsExactly(a);
     }
 
@@ -102,7 +102,7 @@ class InMemoryTaskDependencyRepositoryTest {
         repository.save(new TaskDependency(a, c));
 
         assertThat(repository.findByTaskId(a))
-                .extracting(TaskDependency::getDependsOnTaskId)
+                .extracting(TaskDependency::dependsOnTaskId)
                 .containsExactlyInAnyOrder(b, c);
     }
 
@@ -133,7 +133,7 @@ class InMemoryTaskDependencyRepositoryTest {
         repository.delete(a, b);
 
         assertThat(repository.findByTaskId(a))
-                .extracting(TaskDependency::getDependsOnTaskId)
+                .extracting(TaskDependency::dependsOnTaskId)
                 .containsExactly(c);
     }
 
@@ -144,10 +144,10 @@ class InMemoryTaskDependencyRepositoryTest {
         repository.save(new TaskDependency(a, b));
 
         assertThat(repository.findByTaskId(a))
-                .extracting(TaskDependency::getDependsOnTaskId)
+                .extracting(TaskDependency::dependsOnTaskId)
                 .containsExactly(b);
         assertThat(repository.findByDependsOnTaskId(b))
-                .extracting(TaskDependency::getTaskId)
+                .extracting(TaskDependency::taskId)
                 .containsExactly(a);
 
         repository.delete(a, b);
@@ -176,7 +176,7 @@ class InMemoryTaskDependencyRepositoryTest {
         assertThat(successes.get()).isEqualTo(1);
         assertThat(noOps.get()).isEqualTo(threadCount - 1);
         assertThat(repository.findByTaskId(a))
-                .extracting(TaskDependency::getDependsOnTaskId)
+                .extracting(TaskDependency::dependsOnTaskId)
                 .containsExactly(b);
     }
 
@@ -212,7 +212,7 @@ class InMemoryTaskDependencyRepositoryTest {
         ConcurrentTestRunner.run(edgeCount, index -> repository.save(new TaskDependency(a, dependsOnIds[index])));
 
         assertThat(repository.findByTaskId(a))
-                .extracting(TaskDependency::getDependsOnTaskId)
+                .extracting(TaskDependency::dependsOnTaskId)
                 .containsExactlyInAnyOrder(dependsOnIds);
     }
 }

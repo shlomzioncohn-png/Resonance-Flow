@@ -7,6 +7,8 @@ import com.rnd.bridge.crm.repository.DealRepository;
 import com.rnd.bridge.crm.repository.JsonDealRepository;
 import com.rnd.bridge.publish.LoggingPayloadPublisher;
 import com.rnd.bridge.task.TaskValidator;
+import com.rnd.bridge.task.enrichment.EnrichmentProperties;
+import com.rnd.bridge.task.enrichment.NoOpTaskEnricher;
 import com.rnd.bridge.task.model.Task;
 import org.junit.jupiter.api.Test;
 import org.springframework.core.io.DefaultResourceLoader;
@@ -30,7 +32,7 @@ class CrmLaneIntegrationTest {
     private static CrmLane newLane(DealRepository repository) {
         return new CrmLane(
                 new CrmSourceReader(repository),
-                new DealToTaskMapper("org-test-0000"),
+                new DealToTaskMapper("org-test-0000", new EnrichmentProperties(), new NoOpTaskEnricher()),
                 new TaskValidator(),
                 new LoggingPayloadPublisher<Task>());
     }

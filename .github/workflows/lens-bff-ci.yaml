@@ -14,12 +14,23 @@ on:
 
 jobs:
   ci:
+    if: github.event_name == 'pull_request'
+    permissions:
+      contents: read
+    uses: ./.github/workflows/service-ci-java.yaml
+    with:
+      service_name: lens-bff
+      service_dir: teams/lens/bff
+
+  cd:
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
     permissions:
       contents: write
       packages: write
-    uses: ./.github/workflows/service-ci.yaml
+      pull-requests: write
+    uses: ./.github/workflows/service-cd.yaml
+    secrets: inherit
     with:
       service_name: lens-bff
       service_dir: teams/lens/bff
       language: java
-      container_port: 8082

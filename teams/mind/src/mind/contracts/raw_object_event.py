@@ -11,10 +11,11 @@ from pydantic import (
     field_validator,
 )
 
-from .raw_object_event_enums import (
+from mind.contracts.base_enums import SourceType
+from mind.contracts.raw_object_event_enums import (
+    ChangeType,
     Modality,
     ScopeDecision,
-    SourceType,
 )
 
 
@@ -38,6 +39,25 @@ class RawObjectEvent(BaseModel):
     )
     schema_version: str
     attachment_index: int = Field(ge=0)
+    attachment_count: int = Field(ge=0)
+    revision: int = Field(ge=0 , 
+         description=(  "Revision of the logical object. "
+             "Starts at 0 and increases when its content changes."
+        ),)
+    change_type: ChangeType = Field(
+        description=(
+            "Type of change represented by this event."
+        ),
+    )
+    change_significance_score: int = Field(
+        ge=0,
+        le=100,
+        description=(
+            "Bridge-provided score indicating how significant "
+            "the change is for reprocessing."
+        ),
+    )
+    modality: Modality = Modality.TEXT
 
     
     # Optional fields
@@ -50,9 +70,8 @@ class RawObjectEvent(BaseModel):
     description="MinIO object key for transcript, e.g. EMAIL/tenant-123/2026-08-20/message.txt"
     )
     source_timestamp: AwareDatetime | None = None
-    modality: Modality = Modality.TEXT
-    # Optional correlation identifier shared by the source body and its attachments.
-    correlation_id: UUID | None = None
+    correlation_id: UUID | None = Field(default=None, description="Optional correlation identifier shared by the source body and its attachments.")
+
 
     @field_validator("ingested_at", "source_timestamp")
     @classmethod

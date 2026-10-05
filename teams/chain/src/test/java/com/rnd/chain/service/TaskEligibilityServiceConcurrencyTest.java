@@ -70,7 +70,8 @@ class TaskEligibilityServiceConcurrencyTest {
 
         InMemoryTaskRepository taskRepository = new InMemoryTaskRepository(allTasks);
         InMemoryTaskDependencyRepository dependencyRepository = new InMemoryTaskDependencyRepository(List.of());
-        TaskEligibilityService service = new TaskEligibilityService(taskRepository, dependencyRepository);
+        TaskEligibilityService service = new TaskEligibilityService(
+                taskRepository, dependencyRepository, new SchedulingUpdateService(event -> {}));
 
         List<Runnable> jobs = blockerIds.stream()
                 .<Runnable>map(blockerId -> () -> service.addDependency(hubId, blockerId))
@@ -96,7 +97,8 @@ class TaskEligibilityServiceConcurrencyTest {
 
         InMemoryTaskRepository taskRepository = new InMemoryTaskRepository(allTasks);
         InMemoryTaskDependencyRepository dependencyRepository = new InMemoryTaskDependencyRepository(List.of());
-        TaskEligibilityService service = new TaskEligibilityService(taskRepository, dependencyRepository);
+        TaskEligibilityService service = new TaskEligibilityService(
+                taskRepository, dependencyRepository, new SchedulingUpdateService(event -> {}));
 
         for (UUID blockerId : blockerIds) {
             service.addDependency(hubId, blockerId);
@@ -141,9 +143,9 @@ class TaskEligibilityServiceConcurrencyTest {
 
             InMemoryTaskRepository taskRepository = new InMemoryTaskRepository(
                     List.of(TaskTestFixtures.defaultTask(dependentId).build(), TaskTestFixtures.defaultTask(targetId).build()));
-            InMemoryTaskDependencyRepository dependencyRepository =
-                    new InMemoryTaskDependencyRepository(List.of());
-            TaskEligibilityService service = new TaskEligibilityService(taskRepository, dependencyRepository);
+            InMemoryTaskDependencyRepository dependencyRepository = new InMemoryTaskDependencyRepository(List.of());
+            TaskEligibilityService service = new TaskEligibilityService(
+                    taskRepository, dependencyRepository, new SchedulingUpdateService(event -> {}));
 
             List<Runnable> jobs = List.of(
                     () -> service.addDependency(dependentId, targetId),

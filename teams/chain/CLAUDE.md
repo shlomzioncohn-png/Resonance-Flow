@@ -43,53 +43,49 @@ already has (edgeExists() / the task's own stored previousStatus).
   Reconcile the two once #66 merges - probably TaskEligibilityService
   should delegate the raw edge validation/CRUD to TaskDependencyService
   and keep only cycle detection + counters.
-- Task/Constraint/TaskDependency on THIS branch now use Lombok
-  (2026-09-08, PLAN.md Finding #17) for accessors/equals-hashCode/builder
-  - explicitly requested, reversing an earlier same-day decision not to
-  (see README.md's 2026-09-07 fourth-round notes) because it would add a
-  6th divergent DTO variant across the still-unmerged branches that also
-  touch teams/chain/dto. That risk is real and unchanged; it's being
-  tracked/handled separately from this branch, not resolved here. Task's
-  equals/hashCode stays id-only and Constraint's stays constraintId-only
-  (@EqualsAndHashCode(onlyExplicitlyIncluded = true) + explicit
-  @Include) - do not let a future merge silently widen either to
-  all-fields equality, since the per-task locking design leans on it.
+  - 2026-09-22, PR #373 round-3 review (leaRevivo): this note predates
+    #373's TransactionRunner/DependencyHistoryRepository work, so it only
+    covers validation/CRUD delegation - it does NOT yet capture that
+    TaskEligibilityService.addDependency/removeDependency also write to
+    TaskDependencyRepository directly, bypassing TransactionRunner and
+    DependencyHistoryRepository entirely. Dormant today (nothing wires
+    TaskEligibilityService's addDependency/removeDependency to an
+    endpoint), but whoever reconciles the two services must also route
+    TaskEligibilityService's edge writes through TaskDependencyService/
+    TransactionRunner - otherwise the audit-history feature silently
+    misses changes made through that path. Tracked alongside issue #401
+    (controller-level unification; the natural place this would first get
+    wired to a live endpoint).
+
+- Task/TaskDependency/Constraint use Lombok for accessors and the builder. `Task` keeps
+  Lombok-generated id-only equals/hashCode (`@EqualsAndHashCode(onlyExplicitlyIncluded = true)` +
+  `@Include` on id) - don't widen it to all fields. `Constraint`'s equals/hashCode are hand-written
+  (id-only) on purpose, next to its hand-written `getReason`/`setReason`; don't re-add
+  `@EqualsAndHashCode` there, since it generates nothing alongside the hand-written methods.
 
 ## Open items
-- pom.xml still lacks a real persistence layer, and Task/TaskDependency
-  are plain DTOs, not JPA entities. @Transactional is kept on
-  TaskEligibilityService's public methods deliberately (team decision:
-  keep the transaction boundary in place now so there's no service-level
-  change needed once a real DB lands) — spring-boot-starter-data-jpa is
-  back in pom.xml for this, plus a placeholder H2 in-memory DataSource
-  (application.yml) purely so Spring Boot's DataSourceAutoConfiguration
-  doesn't fail app startup and a PlatformTransactionManager bean exists.
-  No JPA entities/repositories use H2 - real data still lives in the
-  in-memory TaskRepository/TaskDependencyRepository, so @Transactional
-  does not actually cover Task/TaskDependency mutations yet.
-- RESOLVED: a real database will be available for Chain (no longer
-  waiting on team lead's answer). @Transactional and the placeholder
-  JPA/H2 dependencies stay exactly as-is until that migration actually
-  happens — see PLAN.md's "Phase 3 detail — recommended transactional
-  approach once real persistence lands" for the concrete, already-agreed
-  migration checklist (JPA entities, JPA-backed repository
-  implementations of the existing interfaces, retiring the in-process
-  locking in favor of an atomic counter UPDATE + row locking, and a
-  DB-level unique constraint on (task_id, depends_on_task_id) for edge
-  idempotency). That migration is tracked as separate follow-up work, not
-  part of this remediation PR.
-- Until real JPA-backed repositories exist, TaskEligibilityService ALSO
-  uses in-process locking to make read-modify-write on blockingCount /
-  openConstraintCount actually atomic - @Transactional alone doesn't
-  cover this today. This locking is only correct for a single JVM owning
-  the in-memory repositories — once persistence is real, add @Version or
-  an atomic UPDATE for the counters and the locking can be retired. Full
-  rationale is in the class Javadoc; summary: dependencyGraphLock guards
-  the edges plus any DONE-status read that decides whether an edge
-  currently counts against blockingCount, per-task locks (striped over a
-  fixed array, not one object per task id, to keep memory bounded) guard
-  a single task's counters, and dependencyGraphLock is always acquired
-  before a per-task lock, never after, so the two can't deadlock.
+- Resolved: real persistence layer now exists - Postgres-backed
+  `Postgres*Repository`/`JpaTransactionRunner` implementations
+  (`repository/`), own `chain` database + own `chain` DB user (not the
+  shared postgres superuser, not Inbox's resonance_flow database - see
+  PR #417), Flyway-owned schema (`src/main/resources/db/migration/`).
+  `Task`/`TaskDependency`/`DependencyHistoryEntry` stay plain DTOs -
+  entities (`TaskEntity`/`TaskDependencyEntity`/`DependencyHistoryEntity`)
+  are mapped to/from them entirely inside the adapters. The H2 placeholder
+  is gone; `MockDataConfig`'s in-memory beans remain only as the
+  `@ConditionalOnMissingBean` fallback when no real `DataSource` is wired.
+- `TaskRepository#update()`'s atomicity is now real: `PostgresTaskRepository`
+  uses a pessimistic row lock (`SELECT ... FOR UPDATE`) as the sole
+  correctness mechanism for `blockingCount`/`openConstraintCount` under
+  concurrent writes - `@Version` on `TaskEntity` is defense-in-depth for a
+  different, not-yet-existing write path, not part of this guarantee.
+  `TaskEligibilityService`'s in-process `dependencyGraphLock` is
+  **unchanged and still required** - it isn't redundant with per-row
+  Postgres locking, since it serializes the multi-row cycle-detection DFS
+  and a read-together-with-an-edge-write decision, neither of which
+  reduces to locking one row. Full rationale is in the class Javadoc;
+  summary: dependencyGraphLock guards the edges plus any DONE-status read
+  that decides whether an edge currently counts against blockingCount.
 - 2026-08-30, addressed a teammate code review on PR #172:
   - Fixed: addDependency/removeDependency were only using
     dependencyGraphLock, not the per-task lock the other methods use for

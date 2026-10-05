@@ -2,10 +2,13 @@ package com.rnd.bridge.crm;
 
 import com.rnd.bridge.crm.mapper.DealToTaskMapper;
 import com.rnd.bridge.publish.LoggingPayloadPublisher;
+import com.rnd.bridge.task.enrichment.EnrichmentProperties;
+import com.rnd.bridge.task.enrichment.TaskEnricher;
 import com.rnd.bridge.publish.kafka.KafkaPayloadPublisher;
 import com.rnd.bridge.task.BridgeTaskEventDto;
 import com.rnd.bridge.task.TaskValidator;
 import com.rnd.bridge.task.model.Task;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -25,8 +28,10 @@ import org.springframework.kafka.core.KafkaTemplate;
 class CrmLaneConfig {
 
     @Bean
-    DealToTaskMapper dealToTaskMapper(@Value("${bridge.crm.organization-id:local-crm-org}") String organizationId) {
-        return new DealToTaskMapper(organizationId);
+    DealToTaskMapper dealToTaskMapper(@Value("${bridge.crm.organization-id:local-crm-org}") String organizationId,
+                                      EnrichmentProperties enrichmentProperties,
+                                      TaskEnricher taskEnricher) {
+        return new DealToTaskMapper(organizationId, enrichmentProperties, taskEnricher);
     }
 
     @Bean
@@ -43,7 +48,7 @@ class CrmLaneConfig {
     @Profile("kafka")
     @Primary
     KafkaPayloadPublisher kafkaTaskPublisher(
-            KafkaTemplate<String, BridgeTaskEventDto> kafkaTemplate,
+            @Qualifier("bridgeTaskEventKafkaTemplate") KafkaTemplate<String, BridgeTaskEventDto> kafkaTemplate,
             @Value("${bridge.structured-tasks-topic:bridge.structured.tasks}") String topic) {
         return new KafkaPayloadPublisher(kafkaTemplate, topic);
     }

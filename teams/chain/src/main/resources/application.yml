@@ -11,10 +11,40 @@ management:
 spring:
   application:
     name: chain
-  # Placeholder in-memory DB so a DataSource/PlatformTransactionManager exists
-  # and @Transactional in TaskEligibilityService isn't left without a manager.
-  # No JPA entities use this yet - real data still lives in the in-memory
-  # TaskRepository/TaskDependencyRepository. Replace with the real DB config
-  # once that migration actually happens (decision already resolved - see teams/chain/CLAUDE.md and PLAN.md's Phase 3).
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+    producer:
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.apache.kafka.common.serialization.StringSerializer
   datasource:
-    url: jdbc:h2:mem:chain;DB_CLOSE_DELAY=-1
+    # Own database + own DB user (not the shared postgres superuser or Inbox's resonance_flow
+    # database) - matches PR #417's Helm wiring. No currentSchema: chain owns this whole
+    # database, so its tables live in the database's own default (public) schema.
+    url: jdbc:postgresql://${DB_HOST:localhost}:${DB_PORT:5432}/${DB_NAME:chain}?stringtype=unspecified
+    username: ${DB_USER:chain}
+    password: ${DB_PASSWORD:chain}
+  jpa:
+    hibernate:
+      ddl-auto: validate
+
+chain:
+  kafka:
+    topics:
+      task.scheduling.updated: task.scheduling.updated
+    # Left unset on purpose: ChainEventConsumer stays disabled
+    # (@ConditionalOnProperty) until the first approved cross-team
+    # contract exists and a real topic is configured here.
+    # consumed-topics: <topic-name>
+    consumer-group-id: ${spring.application.name}
+    retry:
+      # Explicit on purpose, matching ChainKafkaErrorHandlingConfig's
+      # previously-hardcoded FixedBackOff(2000L, 2L) exactly - values here
+      # can be tuned per environment without a code change.
+      max-attempts: 2
+      interval-ms: 2000
+  events:
+    # Explicit on purpose, even though "in-memory" is also the default:
+    # InMemoryProcessedEventStore only activates for this exact value, so
+    # an environment that meant to run a persistent store but forgot to
+    # set this fails fast instead of silently falling back to it.
+    processed-store: in-memory

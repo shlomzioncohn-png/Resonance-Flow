@@ -1,18 +1,8 @@
+# CI applies an all-components-off overlay first (setup-service-infra), so only
+# list what this service needs enabled - everything else is already off.
 components:
   chain:
     enabled: true
-  mind:
-    enabled: false
-  lens-bff:
-    enabled: false
-  bridge:
-    enabled: false
-  lens-frontend:
-    enabled: false
-  inbox:
-    enabled: false
-  lens-gateway:
-    enabled: false
 
 kafka:
   enabled: true
