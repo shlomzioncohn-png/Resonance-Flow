@@ -3,6 +3,7 @@ package com.rnd.bff.service;
 import com.rnd.bff.client.ChainClient;
 import com.rnd.bff.client.EmployeeClient;
 import com.rnd.bff.client.InboxClient;
+import com.rnd.bff.client.InboxSelectionResponse;
 import com.rnd.bff.client.MindClient;
 import com.rnd.bff.dto.EmployeeTaskDTO;
 import com.rnd.bff.dto.TaskDTO;
@@ -18,6 +19,8 @@ import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
 import java.time.Instant;
+import java.time.LocalDateTime;
+import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
@@ -55,6 +58,21 @@ public class WorkspaceService {
                 "Workspace recommendation request - userId: {}, availableTime: {} minutes",
                 userId,
                 request.getAvailableTime());
+
+        // Real Inbox: Inbox picks the tasks itself (its own effort estimates,
+        // scoring and "what fits together in N minutes"). If that call fails
+        // for any reason other than Inbox refusing the request, fall back to
+        // the BFF's own ranking below - same degrade-don't-fail approach as
+        // for Chain and Mind.
+        if (!inboxClient.isMockEnabled()) {
+            try {
+                return recommendFromInboxSelection(request, userId);
+            } catch (InboxRejectedException ex) {
+                throw ex;
+            } catch (RuntimeException ex) {
+                logger.warn("Inbox task selection failed, falling back to BFF ranking - userId: {}", userId, ex);
+            }
+        }
 
         List<TaskDTO> candidates;
         try {
@@ -119,14 +137,7 @@ public class WorkspaceService {
                         .orElse(null);
 
         if (bestTask == null) {
-            return TaskRecommendationDTO.builder()
-                    .explanation("No matching tasks available right now.")
-                    .fitsInTime(false)
-                    .isHighPriority(false)
-                    .hasNoDependencies(true)
-                    .confidenceScore(0)
-                    .alternatives(List.of())
-                    .build();
+            return noMatchingTasks("No matching tasks available right now.");
         }
 
         // Unknown effort -> false (see fitsIn), matching the unknown-dependencies handling below.
@@ -152,6 +163,68 @@ public class WorkspaceService {
                 .hasNoDependencies(hasNoDependencies)
                 .confidenceScore(scoreByTaskId.getOrDefault(bestTask.getId(), 0))
                 .alternatives(alternatives)
+                .build();
+    }
+
+    /**
+     * Builds the recommendation from Inbox's task selection: the first selected
+     * task is the recommendation (fetched in full, so the card has status,
+     * priority etc.), the rest are alternatives in Inbox's suggested order.
+     * Note: projectFilter/minPriority from the request aren't applied here -
+     * Inbox's selection doesn't take them.
+     */
+    private TaskRecommendationDTO recommendFromInboxSelection(WorkspaceRequestDTO request, String userId) {
+        InboxSelectionResponse selection = inboxClient.selectTasks(userId, request.getAvailableTime());
+        List<InboxSelectionResponse.SelectedTask> selected =
+                selection.getSelectedTasks() == null ? List.of() : selection.getSelectedTasks();
+        String reason = selection.getReason();
+        boolean hasReason = reason != null && !reason.isBlank();
+        if (selected.isEmpty()) {
+            return noMatchingTasks(hasReason ? reason : "No matching tasks available right now.");
+        }
+
+        InboxSelectionResponse.SelectedTask first = selected.get(0);
+        TaskDTO bestTask = inboxClient.getTaskById(userId, first.getId());
+        if (bestTask == null) {
+            bestTask = toTaskDTO(first);
+        }
+        List<TaskDTO> alternatives = selected.stream().skip(1).map(WorkspaceService::toTaskDTO).toList();
+
+        return TaskRecommendationDTO.builder()
+                .task(bestTask)
+                .explanation(hasReason ? reason : "Picked to fit your " + request.getAvailableTime() + " minutes")
+                // usedFallback: nothing fit, so Inbox widened the window
+                .fitsInTime(!selection.isUsedFallback())
+                .isHighPriority("HIGH".equals(bestTask.getPriority()))
+                // Inbox only selects tasks that aren't blocked (is_available)
+                .hasNoDependencies(Boolean.TRUE.equals(bestTask.getIsAvailable()))
+                // selection_score is 0-1; the card shows it as "N% match"
+                .confidenceScore((int) Math.round(first.getSelectionScore() * 100))
+                .alternatives(alternatives)
+                .build();
+    }
+
+    /** A selected task as TaskDTO, when the full task isn't fetched (alternatives). */
+    private static TaskDTO toTaskDTO(InboxSelectionResponse.SelectedTask task) {
+        return TaskDTO.builder()
+                .id(task.getId())
+                .title(task.getTitle())
+                .description(task.getDescription())
+                .effortEstimate(task.getEffortEstimateMinutes())
+                .dueDate(task.getDeadline() == null
+                        ? null
+                        : LocalDateTime.ofInstant(task.getDeadline(), ZoneOffset.UTC))
+                .build();
+    }
+
+    private static TaskRecommendationDTO noMatchingTasks(String explanation) {
+        return TaskRecommendationDTO.builder()
+                .explanation(explanation)
+                .fitsInTime(false)
+                .isHighPriority(false)
+                .hasNoDependencies(true)
+                .confidenceScore(0)
+                .alternatives(List.of())
                 .build();
     }
 

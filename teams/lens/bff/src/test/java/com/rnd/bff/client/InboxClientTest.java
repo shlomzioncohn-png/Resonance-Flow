@@ -173,7 +173,13 @@ class InboxClientTest {
             String path = exchange.getRequestURI().getPath();
             int status = 200;
             String body;
-            if (path.equals("/api/v1/tasks")) {
+            if (path.equals("/api/v1/tasks/selection")) {
+                body = "{\"selected_tasks\":[{\"id\":\"bd77b903-c5eb-3648-95cc-6e78adb0e126\","
+                        + "\"title\":\"Github issue task 175\",\"effort_estimate_minutes\":21,"
+                        + "\"deadline\":\"2026-10-11T10:00:08Z\",\"selection_score\":0.28}],"
+                        + "\"total_effort_minutes\":21,\"remaining_minutes\":0,\"used_fallback\":true,"
+                        + "\"reason\":\"window was automatically expanded to 21 minutes\"}";
+            } else if (path.equals("/api/v1/tasks")) {
                 body = "{\"content\":[" + INBOX_TASK_JSON + "],\"page\":0,\"size\":20,"
                         + "\"total_elements\":828,\"total_pages\":42}";
             } else if (path.contains("99999999-9999-9999-9999-999999999999")) {
@@ -270,5 +276,18 @@ class InboxClientTest {
                 Instant.parse("2026-10-12T09:00:00Z"));
 
         assertThat(lastBody.get()).isEqualTo("{\"status\":\"SNOOZED\",\"snoozed_until\":\"2026-10-12T09:00:00Z\"}");
+    }
+
+    @Test
+    void selectTasks_real_sendsWindowAndUserAndMapsSnakeCase() {
+        InboxSelectionResponse selection = realClient(ACTOR).selectTasks("emp_001", 15);
+
+        assertThat(lastQuery.get()).contains("availableMinutes=15", "userId=" + ACTOR);
+        assertThat(lastActor.get()).isEqualTo(ACTOR);
+        assertThat(selection.isUsedFallback()).isTrue();
+        assertThat(selection.getReason()).contains("expanded to 21 minutes");
+        assertThat(selection.getSelectedTasks()).hasSize(1);
+        assertThat(selection.getSelectedTasks().get(0).getEffortEstimateMinutes()).isEqualTo(21);
+        assertThat(selection.getSelectedTasks().get(0).getSelectionScore()).isEqualTo(0.28);
     }
 }

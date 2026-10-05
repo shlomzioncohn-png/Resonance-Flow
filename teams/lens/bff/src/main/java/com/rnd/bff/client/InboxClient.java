@@ -457,6 +457,40 @@ public class InboxClient {
         }
     }
 
+    /** True when running on the in-memory mock (no Inbox calls). */
+    public boolean isMockEnabled() {
+        return mockEnabled;
+    }
+
+    /**
+     * Inbox's own pick of the best tasks for the user's available time
+     * (GET /api/v1/tasks/selection). Real mode only - the mock has no
+     * equivalent, so WorkspaceService keeps its own ranking in mock mode.
+     */
+    public InboxSelectionResponse selectTasks(String userId, int availableMinutes) {
+        if (mockEnabled) {
+            throw new IllegalStateException("Task selection needs the real Inbox (inbox.mock-enabled=false)");
+        }
+        URI uri = UriComponentsBuilder.fromHttpUrl(inboxServiceUrl)
+                .path(TASKS_PATH + "/selection")
+                .queryParam("availableMinutes", availableMinutes)
+                .queryParam("userId", actorId(userId))
+                .encode()
+                .build()
+                .toUri();
+        try {
+            InboxSelectionResponse body = restTemplate.exchange(
+                    uri, HttpMethod.GET, new HttpEntity<>(actorHeaders(userId)), InboxSelectionResponse.class)
+                    .getBody();
+            if (body == null) {
+                throw new IllegalStateException("Inbox returned an empty task selection");
+            }
+            return body;
+        } catch (HttpClientErrorException ex) {
+            throw rejected(ex);
+        }
+    }
+
     // -------------------------------------------------------------------------
     // Real-mode helpers
     // -------------------------------------------------------------------------

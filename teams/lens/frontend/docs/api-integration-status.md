@@ -30,8 +30,10 @@ still mocked inside the BFF.
   - `GET /workspace/tasks` (filter, search, page, size) — real Inbox in real mode
   - `GET /workspace/tasks/{taskId}` — real Inbox in real mode
   - `PATCH /workspace/tasks/{taskId}/status` — real Inbox in real mode
-  - `POST /workspace/recommend` — uses Inbox's first page (100 tasks) as candidates;
-    Chain and Mind still mocked
+  - `POST /workspace/recommend` — real mode: Inbox's task selection
+    (`GET /api/v1/tasks/selection?availableMinutes=&userId=`, inbox-team PR #550) picks
+    the tasks. If that call fails (other than a 4xx), it falls back to the BFF's own
+    ranking over the user's tasks (Chain and Mind still mocked).
   - `GET /workspace/employee-task`, `GET /manager/workload`, `GET /manager/projects`,
     `GET /admin/projects[/{id}]` — mocked
 - **Frontend**: the employee screens call the Gateway through `services/workspaceApi.ts`
@@ -103,6 +105,13 @@ search, paging), a single task, a status change (saved in Inbox), and an unknown
 | 5   | Task field names                                                                               | ✅ Mapped in `InboxClient.toTaskDTO`. `owner`/`project` stay empty (Inbox only has ids). `priority` is derived from `priority_score`. `dependencies`/`constraints` are empty. |
 | 6   | `snoozedUntil` when snoozing                                                                   | ✅ `snoozedUntil` is passed from the frontend through Gateway and BFF to Inbox. Without it Inbox answers 400. (No snooze button on the screens yet.)                          |
 | 7   | Inbox returns **500** (not 404) for a task id that isn't a UUID                                | ✅ Worked around: the BFF treats a non-UUID id as "not found" without calling Inbox. Needs reporting to Inbox.                                                                |
+
+## Known Inbox bug (reported)
+
+`GET /api/v1/tasks/selection` answers **500** when a candidate task has no
+`priority_score` (`SelectionScoreCalculator.normalizedPriority` NPE). With the seed, that
+happens for most windows above ~20 minutes, so the BFF falls back to its own ranking
+there.
 
 ## Next steps
 

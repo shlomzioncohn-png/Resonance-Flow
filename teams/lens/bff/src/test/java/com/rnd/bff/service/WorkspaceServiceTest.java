@@ -6,13 +6,16 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import com.rnd.bff.client.ChainClient;
 import com.rnd.bff.client.EmployeeClient;
 import com.rnd.bff.client.InboxClient;
+import com.rnd.bff.client.InboxSelectionResponse;
 import com.rnd.bff.client.MindClient;
 import com.rnd.bff.dto.TaskDTO;
 import com.rnd.bff.dto.TaskDependenciesDTO;
@@ -49,6 +52,9 @@ class WorkspaceServiceTest {
     @BeforeEach
     void setUp() {
         workspaceService = new WorkspaceService(inboxClient, chainClient, mindClient, employeeClient);
+        // Most tests exercise the BFF's own ranking (mock mode); the
+        // "Inbox selection" tests below switch this off.
+        lenient().when(inboxClient.isMockEnabled()).thenReturn(true);
     }
 
     private static TaskDTO task(String id, String priority, Integer effortEstimate) {
@@ -176,6 +182,74 @@ class WorkspaceServiceTest {
 
         assertThat(result.getTask().getId()).isEqualTo("fits_high");
         assertThat(result.getFitsInTime()).isTrue();
+    }
+
+    // -------------------------------------------------------------------------
+    // recommend - real Inbox: Inbox's task selection
+    // -------------------------------------------------------------------------
+
+    private static InboxSelectionResponse.SelectedTask selected(String id, int effort, double score) {
+        return new InboxSelectionResponse.SelectedTask(id, "Task " + id, null, effort, null, score);
+    }
+
+    @Test
+    void recommend_realInbox_usesInboxSelectionFirstTaskAndAlternatives() {
+        when(inboxClient.isMockEnabled()).thenReturn(false);
+        when(inboxClient.selectTasks("emp_001", 60)).thenReturn(new InboxSelectionResponse(
+                List.of(selected("t1", 30, 0.82), selected("t2", 20, 0.4)), 50, 1.22, 10, false, null));
+        TaskDTO full = task("t1", "HIGH", 30);
+        when(inboxClient.getTaskById("emp_001", "t1")).thenReturn(full);
+
+        TaskRecommendationDTO result =
+                workspaceService.recommend(new WorkspaceRequestDTO(60, null, null), "emp_001");
+
+        assertThat(result.getTask()).isSameAs(full);
+        assertThat(result.getAlternatives()).extracting(TaskDTO::getId).containsExactly("t2");
+        assertThat(result.getFitsInTime()).isTrue();
+        assertThat(result.getIsHighPriority()).isTrue();
+        assertThat(result.getConfidenceScore()).isEqualTo(82);
+        // Inbox picked it - the BFF's own ranking (Chain/Mind) isn't used
+        verifyNoInteractions(chainClient, mindClient);
+    }
+
+    @Test
+    void recommend_realInbox_windowWidened_reportsDoesNotFitWithInboxReason() {
+        when(inboxClient.isMockEnabled()).thenReturn(false);
+        String reason = "No task fit the original 15 minutes; window was automatically expanded to 21 minutes";
+        when(inboxClient.selectTasks("emp_001", 15)).thenReturn(new InboxSelectionResponse(
+                List.of(selected("t1", 21, 0.28)), 21, 0.28, 0, true, reason));
+
+        TaskRecommendationDTO result =
+                workspaceService.recommend(new WorkspaceRequestDTO(15, null, null), "emp_001");
+
+        assertThat(result.getFitsInTime()).isFalse();
+        assertThat(result.getExplanation()).isEqualTo(reason);
+        // Full task not found -> the selected task's own fields are used
+        assertThat(result.getTask().getEffortEstimate()).isEqualTo(21);
+    }
+
+    @Test
+    void recommend_realInbox_selectionFails_fallsBackToBffRanking() {
+        when(inboxClient.isMockEnabled()).thenReturn(false);
+        when(inboxClient.selectTasks(anyString(), anyInt())).thenThrow(new RuntimeException("Inbox 500"));
+        when(inboxClient.getTasksForUser(anyString())).thenReturn(List.of(task("task_001", "HIGH", 30)));
+        when(chainClient.getFeasibility(anyString(), anyList())).thenReturn(Map.of());
+        when(mindClient.getScores(anyString(), anyList(), any())).thenReturn(Map.of("task_001", 85));
+
+        TaskRecommendationDTO result =
+                workspaceService.recommend(new WorkspaceRequestDTO(60, null, null), "emp_001");
+
+        assertThat(result.getTask().getId()).isEqualTo("task_001");
+    }
+
+    @Test
+    void recommend_realInbox_selectionRejected_isPassedOnNotHidden() {
+        when(inboxClient.isMockEnabled()).thenReturn(false);
+        when(inboxClient.selectTasks(anyString(), anyInt()))
+                .thenThrow(new InboxRejectedException(401, "Actor does not exist"));
+
+        assertThatThrownBy(() -> workspaceService.recommend(new WorkspaceRequestDTO(60, null, null), "emp_001"))
+                .isInstanceOf(InboxRejectedException.class);
     }
 
     // -------------------------------------------------------------------------
