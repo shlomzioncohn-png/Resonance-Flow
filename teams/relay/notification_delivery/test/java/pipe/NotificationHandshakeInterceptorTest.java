@@ -15,7 +15,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 class NotificationHandshakeInterceptorTest {
 
     private final NotificationHandshakeInterceptor interceptor =
-            new NotificationHandshakeInterceptor(new HeaderAuthenticationStub());
+            new NotificationHandshakeInterceptor(new TrustedHeaderAuthenticator());
 
     @Test
     void missingOrgIdIsRejectedWithBadRequest() {

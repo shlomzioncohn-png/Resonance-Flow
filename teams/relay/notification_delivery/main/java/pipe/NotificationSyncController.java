@@ -19,15 +19,15 @@ public class NotificationSyncController {
 
     private final ActivityReplayBuffer replayBuffer;
     private final KafkaNotificationReplayService kafkaReplayService;
-    private final HeaderAuthenticationStub authenticationStub;
+    private final TrustedHeaderAuthenticator authenticator;
 
     public NotificationSyncController(
             ActivityReplayBuffer replayBuffer,
             KafkaNotificationReplayService kafkaReplayService,
-            HeaderAuthenticationStub authenticationStub) {
+            TrustedHeaderAuthenticator authenticator) {
         this.replayBuffer = replayBuffer;
         this.kafkaReplayService = kafkaReplayService;
-        this.authenticationStub = authenticationStub;
+        this.authenticator = authenticator;
     }
 
     @GetMapping("/sync")
@@ -35,7 +35,7 @@ public class NotificationSyncController {
             @RequestHeader("X-Org-Id") String orgId,
             @RequestHeader("X-User-Id") String userId,
             @RequestParam("since") long sinceEpochMillis) {
-        AuthenticatedPrincipal principal = authenticationStub.authenticate(orgId, userId)
+        AuthenticatedPrincipal principal = authenticator.authenticate(orgId, userId)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.BAD_REQUEST, "X-Org-Id and X-User-Id must not be blank"));
         Instant since = Instant.ofEpochMilli(sinceEpochMillis);
         List<ActivityReplayBuffer.Entry> entries = replayBuffer.since(principal.orgId(), principal.userId(), since)

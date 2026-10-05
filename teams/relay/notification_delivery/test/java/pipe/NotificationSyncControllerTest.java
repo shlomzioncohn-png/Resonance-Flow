@@ -35,7 +35,7 @@ class NotificationSyncControllerTest {
     @Test
     void returnsEntriesRecordedSinceTheGivenInstantAsJsonPayloads() {
         NotificationSyncController controller =
-                new NotificationSyncController(replayBuffer, kafkaReplayService, new HeaderAuthenticationStub());
+                new NotificationSyncController(replayBuffer, kafkaReplayService, new TrustedHeaderAuthenticator());
         TaskNotification event = TaskNotification.newBuilder()
                 .setEventId(UUID.randomUUID().toString())
                 .setOrgId(ORG_ID)
@@ -58,7 +58,7 @@ class NotificationSyncControllerTest {
     @Test
     void blankIdentityHeadersAreRejectedWithBadRequest() {
         NotificationSyncController controller =
-                new NotificationSyncController(replayBuffer, kafkaReplayService, new HeaderAuthenticationStub());
+                new NotificationSyncController(replayBuffer, kafkaReplayService, new TrustedHeaderAuthenticator());
 
         assertThatThrownBy(() -> controller.sync(" ", USER_ID, 0L))
                 .isInstanceOfSatisfying(ResponseStatusException.class,
@@ -72,7 +72,7 @@ class NotificationSyncControllerTest {
     @Test
     void fallsBackToKafkaWhenTheLocalBufferCannotProveItHasEverything() {
         NotificationSyncController controller =
-                new NotificationSyncController(replayBuffer, kafkaReplayService, new HeaderAuthenticationStub());
+                new NotificationSyncController(replayBuffer, kafkaReplayService, new TrustedHeaderAuthenticator());
         TaskNotification event = TaskNotification.newBuilder()
                 .setEventId(UUID.randomUUID().toString())
                 .setOrgId(ORG_ID)

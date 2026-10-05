@@ -18,16 +18,16 @@ class NotificationHandshakeInterceptor implements HandshakeInterceptor {
     static final String USER_ID_ATTRIBUTE = "userId";
     static final String LAST_EVENT_ID_ATTRIBUTE = "lastEventId";
 
-    private final HeaderAuthenticationStub authenticationStub;
+    private final TrustedHeaderAuthenticator authenticator;
 
-    NotificationHandshakeInterceptor(HeaderAuthenticationStub authenticationStub) {
-        this.authenticationStub = authenticationStub;
+    NotificationHandshakeInterceptor(TrustedHeaderAuthenticator authenticator) {
+        this.authenticator = authenticator;
     }
 
     @Override
     public boolean beforeHandshake(ServerHttpRequest request, ServerHttpResponse response,
             WebSocketHandler wsHandler, Map<String, Object> attributes) {
-        Optional<AuthenticatedPrincipal> authenticated = authenticationStub.authenticate(
+        Optional<AuthenticatedPrincipal> authenticated = authenticator.authenticate(
                 request.getHeaders().getFirst("X-Org-Id"),
                 request.getHeaders().getFirst("X-User-Id"));
         if (authenticated.isEmpty()) {

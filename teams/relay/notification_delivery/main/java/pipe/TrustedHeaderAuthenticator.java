@@ -9,7 +9,7 @@ import java.util.Optional;
 // (it has no Ingress). Rejects missing or blank values so they can't collapse into one shared
 // "org:user" key and leak notifications between users.
 @Component
-class HeaderAuthenticationStub {
+class TrustedHeaderAuthenticator {
 
     Optional<AuthenticatedPrincipal> authenticate(String orgId, String userId) {
         if (isBlank(orgId) || isBlank(userId)) {
