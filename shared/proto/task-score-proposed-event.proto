@@ -3,6 +3,7 @@ syntax = "proto3";
 package com.rnd.mind.event;
 
 import "google/protobuf/timestamp.proto";
+import "task-created-event.proto";
 
 option java_package = "com.rnd.mind.event";
 option java_multiple_files = true;
@@ -15,17 +16,9 @@ option java_multiple_files = true;
 message TaskScoreProposedEvent {
   string event_id = 1;                         // UUID as string. Chain dedupes on it.
   string task_id = 2;                          // UUID as string.
-  TaskTier tier = 3;
+  com.rnd.inbox.event.TaskTier tier = 3;
   float mind_score = 4;                        // 0.0..1.0, importance only. Chain converts it to priority_score (1..10).
   float confidence = 5;                        // 0.0..1.0.
   int32 effort_estimate_minutes = 6;           // > 0.
   google.protobuf.Timestamp deadline = 7;
-}
-
-// Same values as TaskTier in task-created-event.proto.
-enum TaskTier {
-  TASK_TIER_UNSPECIFIED = 0;
-  TASK_TIER_OPERATIONAL = 1;
-  TASK_TIER_TACTICAL = 2;
-  TASK_TIER_STRATEGIC = 3;
 }
