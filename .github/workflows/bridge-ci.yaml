@@ -6,10 +6,12 @@ on:
     tags: [ "bridge-v*.*.*" ]
     paths:
       - "teams/bridge/**"
+      - "teams/inbox/src/main/proto/**"
   pull_request:
     branches: [ "main" ]
     paths:
       - "teams/bridge/**"
+      - "teams/inbox/src/main/proto/**"
   workflow_dispatch: {}
 
 jobs:
