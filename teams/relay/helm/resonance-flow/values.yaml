@@ -506,6 +506,5 @@ postgresql:
         cpu: 250m
         memory: 512Mi
     initdb:
-      # Both names below must match the fullname-prefixed names
-      # templates/services/chain/configmap.yaml renders.
-      scriptsConfigMap: resonance-flow-chain-db-init
+      # Rendered by templates/postgresql-initdb.yaml
+      scriptsConfigMap: resonance-flow-postgresql-initdb
