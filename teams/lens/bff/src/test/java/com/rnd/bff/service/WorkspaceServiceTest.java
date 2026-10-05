@@ -55,7 +55,8 @@ class WorkspaceServiceTest {
         return TaskDTO.builder()
                 .id(id)
                 .title("Task " + id)
-                .status("READY")
+                .status("APPROVED")
+                .isAvailable(true)
                 .priority(priority)
                 .effortEstimate(effortEstimate)
                 .project("Platform Service")
@@ -134,6 +135,47 @@ class WorkspaceServiceTest {
         assertThat(result.getTask().getId()).isEqualTo("task_001");
         assertThat(result.getConfidenceScore()).isZero();
         assertThat(result.getExplanation()).contains("ranking unavailable");
+    }
+
+    @Test
+    void recommend_skipsClosedSnoozedAndBlockedTasks() {
+        TaskDTO done = task("done", "HIGH", 30);
+        done.setStatus("DONE");
+        TaskDTO snoozed = task("snoozed", "HIGH", 30);
+        snoozed.setStatus("SNOOZED");
+        TaskDTO blocked = task("blocked", "HIGH", 30);
+        blocked.setIsAvailable(false);
+        TaskDTO workable = task("workable", "LOW", 30);
+        when(inboxClient.getTasksForUser(anyString())).thenReturn(List.of(done, snoozed, blocked, workable));
+        when(chainClient.getFeasibility(anyString(), anyList())).thenReturn(Map.of());
+        when(mindClient.getScores(anyString(), anyList(), any())).thenReturn(Map.of("workable", 85));
+
+        TaskRecommendationDTO result =
+                workspaceService.recommend(new WorkspaceRequestDTO(60, null, null), "emp_001");
+
+        assertThat(result.getTask().getId()).isEqualTo("workable");
+        assertThat(result.getAlternatives()).isEmpty();
+    }
+
+    @Test
+    void recommend_equalScores_prefersTaskThatFitsThenHigherPriorityScore() {
+        TaskDTO tooLong = task("too_long", "HIGH", 120);
+        tooLong.setPriorityScore(9.0);
+        TaskDTO fitsLow = task("fits_low", "LOW", 30);
+        fitsLow.setPriorityScore(2.0);
+        TaskDTO fitsHigh = task("fits_high", "HIGH", 30);
+        fitsHigh.setPriorityScore(8.0);
+        when(inboxClient.getTasksForUser(anyString())).thenReturn(List.of(tooLong, fitsLow, fitsHigh));
+        when(chainClient.getFeasibility(anyString(), anyList())).thenReturn(Map.of());
+        // Same score for every task - like Mind's mock
+        when(mindClient.getScores(anyString(), anyList(), any()))
+                .thenReturn(Map.of("too_long", 85, "fits_low", 85, "fits_high", 85));
+
+        TaskRecommendationDTO result =
+                workspaceService.recommend(new WorkspaceRequestDTO(60, null, null), "emp_001");
+
+        assertThat(result.getTask().getId()).isEqualTo("fits_high");
+        assertThat(result.getFitsInTime()).isTrue();
     }
 
     // -------------------------------------------------------------------------

@@ -104,10 +104,17 @@ public class WorkspaceService {
             }
         }
 
+        // Mind's score decides. On a tie (e.g. Mind's mock scores every task the
+        // same), prefer a task that fits the available time, then the more
+        // important one - otherwise the first task in Inbox's list would win.
         Map<String, Integer> finalScoreByTaskId = scoreByTaskId;
+        int availableTime = request.getAvailableTime();
         TaskDTO bestTask =
                 candidates.stream()
-                        .max(Comparator.comparing(task -> finalScoreByTaskId.getOrDefault(task.getId(), 0)))
+                        .max(Comparator.<TaskDTO, Integer>comparing(
+                                        task -> finalScoreByTaskId.getOrDefault(task.getId(), 0))
+                                .thenComparing(task -> fitsIn(task, availableTime))
+                                .thenComparing(task -> task.getPriorityScore() == null ? 0.0 : task.getPriorityScore()))
                         .orElse(null);
 
         if (bestTask == null) {
@@ -121,11 +128,8 @@ public class WorkspaceService {
                     .build();
         }
 
-        // An unknown effort estimate can't be confirmed to fit - false is the
-        // conservative read, matching the unknown-dependencies handling below.
-        boolean fitsInTime =
-                bestTask.getEffortEstimate() != null
-                        && bestTask.getEffortEstimate() <= request.getAvailableTime();
+        // Unknown effort -> false (see fitsIn), matching the unknown-dependencies handling below.
+        boolean fitsInTime = fitsIn(bestTask, availableTime);
         boolean isHighPriority = "HIGH".equals(bestTask.getPriority());
         // "No dependencies" requires Chain to have actually said so; unknown
         // (Chain down, or no entry for this task) is not the same as "none".
@@ -150,8 +154,24 @@ public class WorkspaceService {
                 .build();
     }
 
+    /**
+     * Statuses a task can still be worked on in (see
+     * docs/employee-workspace-api-contract.md §5.0). DONE, REJECTED and
+     * CANCELLED are closed; SNOOZED is paused on purpose.
+     */
+    private static final List<String> WORKABLE_STATUSES = List.of("NEW", "IN_REVIEW", "APPROVED", "IN_PROGRESS");
+
+    /** An unknown effort estimate can't be confirmed to fit - false is the conservative read. */
+    private static boolean fitsIn(TaskDTO task, int availableTime) {
+        return task.getEffortEstimate() != null && task.getEffortEstimate() <= availableTime;
+    }
+
     private List<TaskDTO> filterCandidates(List<TaskDTO> tasks, WorkspaceRequestDTO request) {
         return tasks.stream()
+                .filter(t -> WORKABLE_STATUSES.contains(t.getStatus()))
+                // isAvailable=false means blocked (by dependencies/constraints, set by Chain);
+                // null means unknown, which isn't treated as blocked
+                .filter(t -> !Boolean.FALSE.equals(t.getIsAvailable()))
                 .filter(
                         t ->
                                 request.getProjectFilter() == null
