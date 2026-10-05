@@ -222,14 +222,15 @@ components:
         kafka:
           consumerGroupId: chain-service
           topics:
-            taskDependenciesProposed: task.dependencies.proposed # drives addDependency
+            taskSchedulingUpdated: task.scheduling.updated # produced, consumed by Inbox
+            # Consumed, Protobuf (#467): task.created/updated from Inbox, proposals from Mind.
+            taskCreated: task.created
+            taskUpdated: task.updated
+            dependenciesProposed: task.dependencies.proposed
             # taskDependenciesRemoved intentionally omitted: Chain confirmed (#385 follow-up)
             # removeDependency is REST-only (Lens BFF -> Chain), no Kafka topic behind it today -
             # task.dependencies.removed was proposed but is not active. May return once #133
             # settles whether Mind can retract a proposed dependency.
-            # drives onTaskStatusChanged; PROPOSED, assumes Inbox's 8-value status enum
-            taskStatusUpdated: task.status.updated
-            taskSchedulingUpdated: task.scheduling.updated # produced, consumed by Inbox
         # No topic for onConstraintAdded/onConstraintStatusChanged - still REST-triggered.
   inbox:
     enabled: true

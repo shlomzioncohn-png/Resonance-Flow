@@ -23,20 +23,20 @@ data:
         password: "${password}"
       kafka:
         {{- include "resonance-flow.springKafkaBase" (dict "root" $) | nindent 8 }}
-          # Extends springKafkaBase's properties map, for Chain's Protobuf (de)serializers.
-          # No serializers here: like inbox, the app owns its wire format.
-          schema.registry.url: {{ printf "http://%s/apis/ccompat/v6" (include "resonance-flow.dependencyAddress" (dict "root" $ "deps" $component.dependencies "name" "schema-registry")) | quote }}
         {{- include "resonance-flow.springKafkaConsumerDefaults" (dict "groupId" $cfg.kafka.consumerGroupId) | nindent 8 }}
+    # Keys are what Chain's code reads (application.yml / ChainProtobufKafkaConfig / the
+    # handlers' @KafkaListener placeholders). No serializers: the app owns its wire format.
     chain:
       kafka:
-        # Map keys are the literal eventType strings KafkaEventPublisher.resolveTopic()
-        # looks up (see KafkaEventPublisherTest) - must be dot-case, matching
-        # application.yml's local default, not kebab-case.
+        schema-registry-url: {{ printf "http://%s/apis/ccompat/v6" (include "resonance-flow.dependencyAddress" (dict "root" $ "deps" $component.dependencies "name" "schema-registry")) | quote }}
+        consumer-group-id: {{ $cfg.kafka.consumerGroupId | quote }}
         topics:
-          task.dependencies.proposed: {{ $cfg.kafka.topics.taskDependenciesProposed | quote }}
-          # task.dependencies.removed omitted - see values.yaml note (removeDependency is REST-only, not Kafka)
-          task.status.updated: {{ $cfg.kafka.topics.taskStatusUpdated | quote }}
+          # Dot-case: KafkaEventPublisher.resolveTopic() looks up the literal event type.
           task.scheduling.updated: {{ $cfg.kafka.topics.taskSchedulingUpdated | quote }}
+          # Kebab-case: referenced as ${chain.kafka.topics.<key>} by each handler's listener.
+          task-created: {{ $cfg.kafka.topics.taskCreated | quote }}
+          task-updated: {{ $cfg.kafka.topics.taskUpdated | quote }}
+          dependencies-proposed: {{ $cfg.kafka.topics.dependenciesProposed | quote }}
     logging:
       file:
         name: logs/chain.log
