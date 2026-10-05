@@ -1,8 +1,14 @@
 package com.rnd.inbox.taskselection;
 
+import com.rnd.inbox.shared.exception.UnauthenticatedException;
 import com.rnd.inbox.task.model.Task;
 import com.rnd.inbox.task.model.TaskStatus;
 import com.rnd.inbox.task.repository.TaskRepository;
+import com.rnd.inbox.task.security.TaskAuthorization;
+import com.rnd.inbox.tenant.model.Tenant;
+import com.rnd.inbox.user.model.User;
+import com.rnd.inbox.user.model.UserRole;
+import com.rnd.inbox.user.repository.UserRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -18,10 +24,12 @@ import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 import java.util.stream.Stream;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
@@ -35,6 +43,10 @@ class TaskSelectionServiceTest {
     @Mock
     private TaskRepository taskRepository;
 
+    @Mock
+    private UserRepository userRepository;
+
+    private final TaskAuthorization taskAuthorization = new TaskAuthorization();
     private final TaskSelectionProperties properties = new TaskSelectionProperties();
     private final EffortEstimateResolver effortEstimateResolver = new EffortEstimateResolver(properties);
     private final SelectionScoreCalculator selectionScoreCalculator =
@@ -47,8 +59,8 @@ class TaskSelectionServiceTest {
 
     @BeforeEach
     void setUp() {
-        service = new TaskSelectionService(taskRepository, effortEstimateResolver, selectionScoreCalculator,
-                knapsackSolver, mapper, clock);
+        service = new TaskSelectionService(taskRepository, userRepository, taskAuthorization,
+                effortEstimateResolver, selectionScoreCalculator, knapsackSolver, mapper, clock);
     }
 
     private void givenCandidates(Task... tasks) {
@@ -533,5 +545,88 @@ class TaskSelectionServiceTest {
         TaskSelectionResponseDto stillDistinguishesTwoOldTasksResult = selectTasks(15);
 
         assertThat(titles(stillDistinguishesTwoOldTasksResult)).containsExactly("YearOld");
+    }
+
+    // ---- selectTasksForUser — who the selection is for, and in which tenant ----
+
+    private static User user(UserRole role, UUID tenantId) {
+        Tenant tenant = new Tenant();
+        tenant.setId(tenantId);
+        User user = new User();
+        user.setId(UUID.randomUUID());
+        user.setTenant(tenant);
+        user.setRole(role);
+        return user;
+    }
+
+    private static Task fittingTask(String title) {
+        Task task = task(title);
+        task.setEffortEstimateMinutes(15);
+        task.setEffortEstimateConfidence(0.9f);
+        return task;
+    }
+
+    @Test
+    void selectTasksForUser_whenActorUnknown_throwsUnauthenticated() {
+        UUID unknownActorId = UUID.randomUUID();
+        when(userRepository.findById(unknownActorId)).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> service.selectTasksForUser(unknownActorId, null, 30))
+                .isInstanceOf(UnauthenticatedException.class);
+        verifyNoInteractions(taskRepository);
+    }
+
+    @Test
+    void selectTasksForUser_withoutUserId_selectsActorsOwnTasksInActorsTenant() {
+        User employee = user(UserRole.EMPLOYEE, TENANT_ID);
+        when(userRepository.findById(employee.getId())).thenReturn(Optional.of(employee));
+        when(taskRepository.findCandidateTasksForUser(TENANT_ID, employee.getId()))
+                .thenReturn(List.of(fittingTask("Mine")));
+
+        TaskSelectionResponseDto result = service.selectTasksForUser(employee.getId(), null, 30);
+
+        assertThat(titles(result)).containsExactly("Mine");
+    }
+
+    @Test
+    void selectTasksForUser_whenNonAdminPassesUserId_selectsThatUsersTasksWithinActorsTenant() {
+        User employee = user(UserRole.EMPLOYEE, TENANT_ID);
+        UUID colleagueId = UUID.randomUUID();
+        when(userRepository.findById(employee.getId())).thenReturn(Optional.of(employee));
+        when(taskRepository.findCandidateTasksForUser(TENANT_ID, colleagueId))
+                .thenReturn(List.of(fittingTask("Colleague's")));
+
+        TaskSelectionResponseDto result = service.selectTasksForUser(employee.getId(), colleagueId, 30);
+
+        assertThat(titles(result)).containsExactly("Colleague's");
+    }
+
+    @Test
+    void selectTasksForUser_whenSystemAdminPassesUserIdFromAnotherTenant_selectsInThatUsersTenant() {
+        UUID otherTenantId = UUID.randomUUID();
+        User admin = user(UserRole.SYSTEM_ADMIN, TENANT_ID);
+        User target = user(UserRole.EMPLOYEE, otherTenantId);
+        when(userRepository.findById(admin.getId())).thenReturn(Optional.of(admin));
+        when(userRepository.findById(target.getId())).thenReturn(Optional.of(target));
+        when(taskRepository.findCandidateTasksForUser(otherTenantId, target.getId()))
+                .thenReturn(List.of(fittingTask("Other tenant's")));
+
+        TaskSelectionResponseDto result = service.selectTasksForUser(admin.getId(), target.getId(), 30);
+
+        assertThat(titles(result)).containsExactly("Other tenant's");
+    }
+
+    @Test
+    void selectTasksForUser_whenSystemAdminPassesUnknownUserId_returnsEmptySelection() {
+        User admin = user(UserRole.SYSTEM_ADMIN, TENANT_ID);
+        UUID unknownUserId = UUID.randomUUID();
+        when(userRepository.findById(admin.getId())).thenReturn(Optional.of(admin));
+        when(userRepository.findById(unknownUserId)).thenReturn(Optional.empty());
+
+        TaskSelectionResponseDto result = service.selectTasksForUser(admin.getId(), unknownUserId, 30);
+
+        assertThat(result.getSelectedTasks()).isEmpty();
+        assertThat(result.getRemainingMinutes()).isEqualTo(30);
+        verifyNoInteractions(taskRepository);
     }
 }
