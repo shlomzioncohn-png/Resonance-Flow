@@ -2,6 +2,9 @@ package com.rnd.inbox.task.controller;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.rnd.inbox.support.PostgresIntegrationTest;
+import com.rnd.inbox.task.assignment.Assignment;
+import com.rnd.inbox.task.assignment.AssignmentRepository;
+import com.rnd.inbox.task.assignment.AssignmentRole;
 import com.rnd.inbox.task.dto.TaskCreateRequestDto;
 import com.rnd.inbox.task.dto.TaskStatusUpdateRequestDto;
 import com.rnd.inbox.task.dto.TaskUpdateRequestDto;
@@ -10,6 +13,12 @@ import com.rnd.inbox.task.model.Task;
 import com.rnd.inbox.task.model.TaskExtractionProvenance;
 import com.rnd.inbox.task.model.TaskStatus;
 import com.rnd.inbox.task.repository.TaskRepository;
+import com.rnd.inbox.team.member.TeamMember;
+import com.rnd.inbox.team.member.TeamMemberId;
+import com.rnd.inbox.team.member.TeamMemberRepository;
+import com.rnd.inbox.team.model.Team;
+import com.rnd.inbox.team.model.TeamStatus;
+import com.rnd.inbox.team.repository.TeamRepository;
 import com.rnd.inbox.tenant.model.Tenant;
 import com.rnd.inbox.tenant.model.TenantStatus;
 import com.rnd.inbox.tenant.repository.TenantRepository;
@@ -26,9 +35,12 @@ import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
 
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.hamcrest.Matchers.containsInAnyOrder;
 import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.hasSize;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -63,6 +75,16 @@ class TaskControllerTest extends PostgresIntegrationTest {
     @Autowired
     private TenantRepository tenantRepository;
 
+    @Autowired
+    private AssignmentRepository assignmentRepository;
+
+    @Autowired
+    private TeamRepository teamRepository;
+
+    @Autowired
+    private TeamMemberRepository teamMemberRepository;
+
+    private final List<UUID> createdTenantIds = new ArrayList<>();
     private Tenant tenant;
     private User actor;
 
@@ -72,13 +94,12 @@ class TaskControllerTest extends PostgresIntegrationTest {
         actor = persistUser(tenant, UserRole.EMPLOYEE);
     }
 
-    // Every row this test class creates is deleted again here - nothing lingers in the DB for
-    // the next test class or the next run. Order matters: tasks/users reference tenants via FK.
+    // Every row this test class creates lives under a tenant from persistTenant(), and only
+    // those tenants' rows are deleted again here - never a table-wide deleteAll(), because this
+    // runs against the shared local database (see PostgresIntegrationTest).
     @AfterEach
     void cleanUp() {
-        taskRepository.deleteAll();
-        userRepository.deleteAll();
-        tenantRepository.deleteAll();
+        deleteTenantData(createdTenantIds);
     }
 
     private Tenant persistTenant() {
@@ -88,7 +109,9 @@ class TaskControllerTest extends PostgresIntegrationTest {
         t.setStatus(TenantStatus.ACTIVE);
         t.setCreatedAt(Instant.now());
         t.setUpdatedAt(Instant.now());
-        return tenantRepository.saveAndFlush(t);
+        Tenant saved = tenantRepository.saveAndFlush(t);
+        createdTenantIds.add(saved.getId());
+        return saved;
     }
 
     private User persistUser(Tenant tenant, UserRole role) {
@@ -115,6 +138,46 @@ class TaskControllerTest extends PostgresIntegrationTest {
         return taskRepository.saveAndFlush(task);
     }
 
+    private Task persistOwnedTask(Tenant tenant, String title, User owner) {
+        Task task = persistTask(tenant, title);
+        task.setOwner(owner);
+        return taskRepository.saveAndFlush(task);
+    }
+
+    private Team persistTeam(Tenant tenant, User teamLead) {
+        Team team = new Team();
+        team.setTenant(tenant);
+        team.setName("Team " + UUID.randomUUID());
+        team.setTeamLead(teamLead);
+        team.setStatus(TeamStatus.ACTIVE);
+        team.setCreatedAt(Instant.now());
+        team.setUpdatedAt(Instant.now());
+        return teamRepository.saveAndFlush(team);
+    }
+
+    // leftAt == null means the membership is still active.
+    private void persistTeamMember(Team team, User user, Instant leftAt) {
+        TeamMember member = new TeamMember();
+        member.setId(new TeamMemberId(team.getId(), user.getId()));
+        member.setTeam(team);
+        member.setUser(user);
+        member.setJoinedAt(Instant.now());
+        member.setLeftAt(leftAt);
+        teamMemberRepository.saveAndFlush(member);
+    }
+
+    // Exactly one of user/team is set - the assignments table's CHECK constraint rejects both
+    // or neither.
+    private void persistAssignment(Task task, User user, Team team) {
+        Assignment assignment = new Assignment();
+        assignment.setTask(task);
+        assignment.setUser(user);
+        assignment.setTeam(team);
+        assignment.setAssignmentRole(AssignmentRole.ASSIGNEE);
+        assignment.setAssignedAt(Instant.now());
+        assignmentRepository.saveAndFlush(assignment);
+    }
+
     private TaskCreateRequestDto validCreateRequest() {
         TaskCreateRequestDto request = new TaskCreateRequestDto();
         request.setTenantId(tenant.getId().toString());
@@ -132,7 +195,7 @@ class TaskControllerTest extends PostgresIntegrationTest {
                 .andExpect(header().string("Location", containsString("/api/v1/tasks/")))
                 .andExpect(jsonPath("$.title").value("Fix flaky test"));
 
-        assertThat(taskRepository.findAll()).hasSize(1);
+        assertThat(countTasksInTenant(tenant.getId())).isEqualTo(1);
     }
 
     @Test
@@ -145,7 +208,7 @@ class TaskControllerTest extends PostgresIntegrationTest {
                 .andExpect(jsonPath("$.error").value("VALIDATION_ERROR"))
                 .andExpect(jsonPath("$.field_errors").isArray());
 
-        assertThat(taskRepository.findAll()).isEmpty();
+        assertThat(countTasksInTenant(tenant.getId())).isZero();
     }
 
     @Test
@@ -183,7 +246,8 @@ class TaskControllerTest extends PostgresIntegrationTest {
                 .andExpect(status().isForbidden())
                 .andExpect(jsonPath("$.error").value("FORBIDDEN"));
 
-        assertThat(taskRepository.findAll()).isEmpty();
+        assertThat(countTasksInTenant(otherTenant.getId())).isZero();
+        assertThat(countTasksInTenant(tenant.getId())).isZero();
     }
 
     @Test
@@ -278,6 +342,79 @@ class TaskControllerTest extends PostgresIntegrationTest {
                 .andExpect(jsonPath("$.content[0].id").value(matchByTitle.getId().toString()));
 
         assertThat(noMatch.getId()).isNotEqualTo(matchByTitle.getId());
+    }
+
+    @Test
+    void listTasks_withUserIdFilter_returnsOwnedAndAssignedTasksOnly() throws Exception {
+        User target = persistUser(tenant, UserRole.EMPLOYEE);
+        User other = persistUser(tenant, UserRole.EMPLOYEE);
+        Team activeTeam = persistTeam(tenant, other);
+        persistTeamMember(activeTeam, target, null);
+        Team formerTeam = persistTeam(tenant, other);
+        persistTeamMember(formerTeam, target, Instant.now());
+
+        Task owned = persistOwnedTask(tenant, "Owned by target", target);
+        Task assignedDirectly = persistTask(tenant, "Assigned to target");
+        persistAssignment(assignedDirectly, target, null);
+        Task assignedToActiveTeam = persistTask(tenant, "Assigned to target's team");
+        persistAssignment(assignedToActiveTeam, null, activeTeam);
+        // Owned AND assigned - must still come back exactly once.
+        Task ownedAndAssigned = persistOwnedTask(tenant, "Owned and assigned", target);
+        persistAssignment(ownedAndAssigned, target, null);
+
+        persistTask(tenant, "Unrelated, no owner");
+        persistOwnedTask(tenant, "Owned by someone else", other);
+        persistAssignment(persistTask(tenant, "Assigned to someone else"), other, null);
+        persistAssignment(persistTask(tenant, "Assigned to a team target left"), null, formerTeam);
+        // Target's team is on these two, but someone else is personally responsible for each -
+        // as owner in the first, as individual assignee in the second - so they are not target's.
+        persistAssignment(persistOwnedTask(tenant, "Team task owned by someone else", other), null, activeTeam);
+        Task teamTaskAssignedToOther = persistTask(tenant, "Team task assigned to someone else");
+        persistAssignment(teamTaskAssignedToOther, null, activeTeam);
+        persistAssignment(teamTaskAssignedToOther, other, null);
+
+        mockMvc.perform(get("/api/v1/tasks?userId={userId}", target.getId())
+                        .header(ACTOR_HEADER, actor.getId().toString()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.total_elements").value(4))
+                .andExpect(jsonPath("$.content[*].id", containsInAnyOrder(
+                        owned.getId().toString(),
+                        assignedDirectly.getId().toString(),
+                        assignedToActiveTeam.getId().toString(),
+                        ownedAndAssigned.getId().toString())));
+    }
+
+    @Test
+    void listTasks_withUserIdFilterCombinedWithStatus_appliesBoth() throws Exception {
+        User target = persistUser(tenant, UserRole.EMPLOYEE);
+        persistOwnedTask(tenant, "Still new", target);
+        Task done = persistOwnedTask(tenant, "Already done", target);
+        done.setStatus(TaskStatus.DONE);
+        taskRepository.saveAndFlush(done);
+
+        mockMvc.perform(get("/api/v1/tasks?status=DONE&userId={userId}", target.getId())
+                        .header(ACTOR_HEADER, actor.getId().toString()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content", hasSize(1)))
+                .andExpect(jsonPath("$.content[0].id").value(done.getId().toString()));
+    }
+
+    @Test
+    void listTasks_withUserIdOfUnknownUser_returnsEmptyPage() throws Exception {
+        persistTask(tenant, "Some task");
+
+        mockMvc.perform(get("/api/v1/tasks?userId={userId}", UUID.randomUUID())
+                        .header(ACTOR_HEADER, actor.getId().toString()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content", hasSize(0)))
+                .andExpect(jsonPath("$.total_elements").value(0));
+    }
+
+    @Test
+    void listTasks_withMalformedUserId_returns400() throws Exception {
+        mockMvc.perform(get("/api/v1/tasks?userId=not-a-uuid").header(ACTOR_HEADER, actor.getId().toString()))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error").value("VALIDATION_ERROR"));
     }
 
     @Test

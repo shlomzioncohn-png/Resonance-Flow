@@ -165,6 +165,8 @@ public class TaskService {
                 filter.getDeadlineTo() != null,
                 filter.getDeadlineTo(),
                 Boolean.TRUE.equals(filter.getNoDeadline()),
+                filter.getUserId() != null,
+                filter.getUserId(),
                 pageable);
         return PageResponseDto.from(tasks.map(taskRestMapper::toResponseDto));
     }

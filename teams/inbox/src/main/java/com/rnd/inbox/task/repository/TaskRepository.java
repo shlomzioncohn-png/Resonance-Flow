@@ -46,6 +46,19 @@ public interface TaskRepository extends JpaRepository<Task, UUID> {
     // and only then does "? IS NULL" with no other type context in the statement fail with
     // "could not determine data type of parameter $n". Every field here gets the same safe
     // has-flag pattern uniformly rather than trusting any of them to be a genuine exception.
+    //
+    // relatedUserId narrows to tasks "related to" one user:
+    //   1. tasks they own (tasks.owner_id), or
+    //   2. tasks assigned to them personally, or
+    //   3. tasks assigned to a team they are currently a member of (left_at IS NULL) - but only
+    //      while nobody is personally responsible for the task: no owner and no assignment to an
+    //      individual user. Once a specific person holds the task, the rest of the team no
+    //      longer sees it as theirs (that person still gets it through rule 1 or 2).
+    // Rule 3 is deliberately narrower than findCandidateTasksForUser, which counts every task of
+    // the user's teams. The whole block is ANDed with the tenant scope like every other filter,
+    // never a replacement for it, so asking for a user from another tenant matches nothing.
+    // EXISTS (not a JOIN) keeps one row per task, so the page content and the derived count
+    // query stay correct without DISTINCT.
     @Query("""
             SELECT t FROM Task t
             WHERE (:bypassTenantScope = TRUE OR t.tenant.id = :tenantId)
@@ -59,6 +72,25 @@ public interface TaskRepository extends JpaRepository<Task, UUID> {
               AND (:hasDeadlineFrom = FALSE OR t.deadline >= :deadlineFrom)
               AND (:hasDeadlineTo = FALSE OR t.deadline <= :deadlineTo)
               AND (:hasNoDeadline = FALSE OR t.deadline IS NULL)
+              AND (:hasRelatedUser = FALSE
+                   OR t.owner.id = :relatedUserId
+                   OR EXISTS (
+                       SELECT a.id FROM Assignment a
+                       WHERE a.task = t AND a.user.id = :relatedUserId
+                   )
+                   OR (t.owner IS NULL
+                       AND EXISTS (
+                           SELECT ta.id FROM Assignment ta
+                           WHERE ta.task = t
+                             AND ta.team.id IN (
+                                 SELECT tm.team.id FROM TeamMember tm
+                                 WHERE tm.user.id = :relatedUserId AND tm.leftAt IS NULL
+                             )
+                       )
+                       AND NOT EXISTS (
+                           SELECT ua.id FROM Assignment ua
+                           WHERE ua.task = t AND ua.user IS NOT NULL
+                       )))
             """)
     Page<Task> findFiltered(
             @Param("bypassTenantScope") boolean bypassTenantScope,
@@ -78,6 +110,8 @@ public interface TaskRepository extends JpaRepository<Task, UUID> {
             @Param("hasDeadlineTo") boolean hasDeadlineTo,
             @Param("deadlineTo") Instant deadlineTo,
             @Param("hasNoDeadline") boolean hasNoDeadline,
+            @Param("hasRelatedUser") boolean hasRelatedUser,
+            @Param("relatedUserId") UUID relatedUserId,
             Pageable pageable);
 
     @Query("""

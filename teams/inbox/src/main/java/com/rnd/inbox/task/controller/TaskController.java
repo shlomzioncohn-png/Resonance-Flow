@@ -77,12 +77,17 @@ public class TaskController {
     }
 
     @Operation(summary = "List tasks within the actor's scope, paginated, with optional filters "
-            + "(SYSTEM_ADMIN: every tenant; everyone else: their own tenant only)")
+            + "(SYSTEM_ADMIN: every tenant; everyone else: their own tenant only)",
+            description = "Pass userId to get only the tasks related to that user: tasks they own, tasks "
+                    + "assigned to them personally, or tasks assigned to a team they are currently a member of "
+                    + "while no individual is responsible for them (no owner, no personal assignee). "
+                    + "A userId outside the actor's scope returns an empty page.")
     @ApiResponses({
             @ApiResponse(responseCode = "200", description = "Page of tasks",
                     content = @Content(schema = @Schema(implementation = PageResponseDto.class))),
             @ApiResponse(responseCode = "400", description = "deadlineFrom/deadlineTo not both provided, "
-                    + "or noDeadline combined with a deadline range"),
+                    + "noDeadline combined with a deadline range, or a filter value that does not parse "
+                    + "(e.g. userId is not a UUID)"),
             @ApiResponse(responseCode = "401", description = "Missing or unrecognized actor identity")
     })
     @GetMapping

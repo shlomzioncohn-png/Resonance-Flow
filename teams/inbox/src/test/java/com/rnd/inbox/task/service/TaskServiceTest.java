@@ -607,7 +607,8 @@ class TaskServiceTest {
         Page<Task> page = new PageImpl<>(List.of(task), pageable, 1);
         when(taskRepository.findFiltered(
                 eq(true), isNull(), eq(false), isNull(), eq(false), isNull(), eq(false), isNull(), eq(false),
-                isNull(), eq(false), isNull(), eq(false), isNull(), eq(false), isNull(), eq(false), eq(pageable)))
+                isNull(), eq(false), isNull(), eq(false), isNull(), eq(false), isNull(), eq(false),
+                eq(false), isNull(), eq(pageable)))
                 .thenReturn(page);
         TaskResponseDto responseDto = sampleTaskResponseDto();
         when(taskRestMapper.toResponseDto(task)).thenReturn(responseDto);
@@ -626,12 +627,38 @@ class TaskServiceTest {
         Page<Task> page = new PageImpl<>(List.of(task), pageable, 1);
         when(taskRepository.findFiltered(
                 eq(false), eq(tenantId), eq(false), isNull(), eq(false), isNull(), eq(false), isNull(), eq(false),
-                isNull(), eq(false), isNull(), eq(false), isNull(), eq(false), isNull(), eq(false), eq(pageable)))
+                isNull(), eq(false), isNull(), eq(false), isNull(), eq(false), isNull(), eq(false),
+                eq(false), isNull(), eq(pageable)))
                 .thenReturn(page);
         TaskResponseDto responseDto = sampleTaskResponseDto();
         when(taskRestMapper.toResponseDto(task)).thenReturn(responseDto);
 
         PageResponseDto<TaskResponseDto> result = taskService.listTasks(new TaskFilterDto(), pageable, actor.getId());
+
+        assertThat(result.getContent()).containsExactly(responseDto);
+    }
+
+    @Test
+    void listTasks_whenUserIdProvided_passesItAlongsideTheActorsOwnTenantScope() {
+        User actor = actorWithRole(UserRole.TENANT_ADMIN);
+        when(userRepository.findById(actor.getId())).thenReturn(Optional.of(actor));
+        Pageable pageable = PageRequest.of(0, 20);
+        Task task = new Task();
+        Page<Task> page = new PageImpl<>(List.of(task), pageable, 1);
+        UUID relatedUserId = UUID.randomUUID();
+        // The tenant scope (bypass=false, tenantId) must still be passed - userId narrows the
+        // result inside the actor's scope, it never replaces it.
+        when(taskRepository.findFiltered(
+                eq(false), eq(tenantId), eq(false), isNull(), eq(false), isNull(), eq(false), isNull(), eq(false),
+                isNull(), eq(false), isNull(), eq(false), isNull(), eq(false), isNull(), eq(false),
+                eq(true), eq(relatedUserId), eq(pageable)))
+                .thenReturn(page);
+        TaskResponseDto responseDto = sampleTaskResponseDto();
+        when(taskRestMapper.toResponseDto(task)).thenReturn(responseDto);
+        TaskFilterDto filter = new TaskFilterDto();
+        filter.setUserId(relatedUserId);
+
+        PageResponseDto<TaskResponseDto> result = taskService.listTasks(filter, pageable, actor.getId());
 
         assertThat(result.getContent()).containsExactly(responseDto);
     }
