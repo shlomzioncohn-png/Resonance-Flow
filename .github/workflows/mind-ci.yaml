@@ -102,6 +102,26 @@ jobs:
       - name: Fetch chart dependencies
         run: helm dependency build "$CHART_DIR"
 
+      - name: Provision MIND's DB and app Secrets
+        run: |
+          kubectl create namespace "$NAMESPACE" --dry-run=client -o yaml | kubectl apply -f -
+          PASSWORD="$(openssl rand -base64 24)"
+          kubectl -n "$NAMESPACE" create secret generic resonance-flow-mind-db-credentials \
+            --from-literal=password="$PASSWORD" \
+            --dry-run=client -o yaml | kubectl apply -f -
+          cat > "$RUNNER_TEMP/mind-secrets.yaml" <<EOF
+          llm:
+            api_key: ""
+          vector_store:
+            password: "$PASSWORD"
+          object_storage:
+            access_key: ""
+            secret_key: ""
+          EOF
+          kubectl -n "$NAMESPACE" create secret generic resonance-flow-mind-secret \
+            --from-file=secrets.yaml="$RUNNER_TEMP/mind-secrets.yaml" \
+            --dry-run=client -o yaml | kubectl apply -f -
+
       # Phase 1: infra only, MIND's image isn't built yet (two-phase, like service-ci.yaml).
       - name: Deploy chart with MIND disabled (infra only)
         run: |

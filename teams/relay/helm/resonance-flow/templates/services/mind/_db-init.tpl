@@ -8,10 +8,15 @@ create-mind-database.sh: |
   else
     export PGPASSWORD="$POSTGRES_PASSWORD"
   fi
-  psql -v ON_ERROR_STOP=1 -v mind_pw={{ .Values.components.mind.secret.data.vector_store_password | quote }} --username postgres <<-'EOSQL'
+  MIND_DB_PASSWORD_FILE=/etc/resonance-flow/secrets/mind-db/password
+  if [ -s "$MIND_DB_PASSWORD_FILE" ]; then
+    psql -v ON_ERROR_STOP=1 -v mind_pw="$(cat "$MIND_DB_PASSWORD_FILE")" --username postgres <<-'EOSQL'
       CREATE USER {{ $mindVectorStore.user }} WITH PASSWORD :'mind_pw';
       CREATE DATABASE {{ $mindVectorStore.db }} OWNER {{ $mindVectorStore.user }};
       \connect {{ $mindVectorStore.db }}
       CREATE EXTENSION IF NOT EXISTS vector;
   EOSQL
+  else
+    echo "mind-db-credentials not provided - skipping MIND's database" >&2
+  fi
 {{- end -}}

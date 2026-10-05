@@ -82,7 +82,5 @@ data:
 # live password from none under an offline render, so writing here risks
 # overwriting or deleting the real value. Provided externally; referenced by
 # name only, here and in values.yaml's postgresql.primary.extraVolumes.
-{{- if $.Values.components.mind.enabled }}
 {{- include "resonance-flow.mind.dbInitScript" $ | nindent 2 }}
-{{- end }}
 {{- end }}

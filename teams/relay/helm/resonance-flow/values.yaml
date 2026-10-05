@@ -119,9 +119,7 @@ components:
       service:
         log_level: INFO
     secret:
-      create: true
-      data:
-        vector_store_password: mind-dev-password
+      create: false
   lens-bff:
     enabled: true
     replicaCount: 1
@@ -470,7 +468,14 @@ postgresql:
         secret:
           secretName: resonance-flow-chain-db-credentials
           optional: true
+      - name: mind-db-credentials
+        secret:
+          secretName: resonance-flow-mind-db-credentials
+          optional: true
     extraVolumeMounts:
       - name: chain-db-credentials
         mountPath: /etc/resonance-flow/secrets/chain-db
+        readOnly: true
+      - name: mind-db-credentials
+        mountPath: /etc/resonance-flow/secrets/mind-db
         readOnly: true
