@@ -35,4 +35,9 @@ class InboxTaskStatusMapperTest {
         assertEquals(TaskStatus.PENDING, InboxTaskStatusMapper.map(com.rnd.inbox.event.TaskStatus.TASK_STATUS_SNOOZED));
         assertEquals(TaskStatus.PENDING, InboxTaskStatusMapper.map(com.rnd.inbox.event.TaskStatus.TASK_STATUS_UNSPECIFIED));
     }
+
+    @Test
+    void unrecognized_mapsToPending_forForwardCompatibleSchemaDrift() {
+        assertEquals(TaskStatus.PENDING, InboxTaskStatusMapper.map(com.rnd.inbox.event.TaskStatus.UNRECOGNIZED));
+    }
 }

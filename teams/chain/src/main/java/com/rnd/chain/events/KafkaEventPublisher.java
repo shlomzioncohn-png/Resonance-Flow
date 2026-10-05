@@ -7,6 +7,7 @@ import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.stereotype.Component;
 
 import java.util.Map;
+import java.util.Objects;
 
 /**
  * EventPublisher implementation that actually publishes to Kafka.
@@ -45,17 +46,16 @@ public class KafkaEventPublisher implements EventPublisher {
 
     @Override
     public void publish(String eventType, String key, Object payload) {
+        Objects.requireNonNull(payload, "payload");
         String topic = resolveTopic(eventType);
         String serialized = serialize(payload);
 
         kafkaTemplate.send(topic, key, serialized)
                 .whenComplete((result, ex) -> {
                     if (ex != null) {
-                        log.error("Failed to publish [{}] (key={}) to topic [{}]",
-                                payload.getClass().getSimpleName(), key, topic, ex);
+                        log.error("Failed to publish [{}] (key={}) to topic [{}]", eventType, key, topic, ex);
                     } else {
-                        log.info("Published [{}] (key={}) to topic [{}]",
-                                payload.getClass().getSimpleName(), key, topic);
+                        log.info("Published [{}] (key={}) to topic [{}]", eventType, key, topic);
                     }
                 });
     }

@@ -66,6 +66,13 @@ class KafkaEventPublisherTest {
     }
 
     @Test
+    void publish_rejectsNullPayload_beforeTouchingKafka() {
+        assertThrows(NullPointerException.class,
+                () -> publisher.publish("task.scheduling.updated", "task-1", null));
+        verifyNoInteractions(kafkaTemplate);
+    }
+
+    @Test
     void publish_doesNotThrow_whenKafkaSendFailsAsynchronously() {
         CompletableFuture<SendResult<String, String>> failedFuture = new CompletableFuture<>();
         failedFuture.completeExceptionally(new RuntimeException("Kafka is down"));
