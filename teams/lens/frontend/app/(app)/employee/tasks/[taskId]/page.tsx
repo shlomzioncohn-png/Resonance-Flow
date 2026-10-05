@@ -37,13 +37,6 @@ export default function TaskDetailsPage({ params }: { params: Promise<{ taskId: 
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    // Resets loading synchronously so navigating between two task pages
-    // (taskId changes without the component remounting) shows the spinner
-    // instead of a stale flash of the previous task's content/error while
-    // the new fetch is in flight - the default useState(true) only covers
-    // the very first render, not a later taskId change.
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    setLoading(true);
     let ignore = false;
     getTask(taskId)
       .then((result) => {

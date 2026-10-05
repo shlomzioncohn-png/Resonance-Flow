@@ -30,11 +30,9 @@ export interface Project {
 }
 
 /**
- * simulateError asks the mock handler to respond with a 500 instead of data
- * - see mocks/handlers.ts. Meaningless against a real backend; harmless
- * there too, since a real backend would just ignore an unknown query param.
+ * Get all projects with health/KPI data.
+ * This request is answered by an MSW handler (mocks/handlers.ts) in development.
  */
-export function getProjects(simulateError = false): Promise<Project[]> {
-  const query = simulateError ? '?simulateError=true' : '';
-  return api.get<Project[]>(`/api/manager/projects${query}`);
+export function getProjects(): Promise<Project[]> {
+  return api.get<Project[]>('/api/manager/projects');
 }

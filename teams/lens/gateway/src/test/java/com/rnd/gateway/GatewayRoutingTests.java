@@ -23,6 +23,7 @@ import java.io.IOException;
 import java.util.concurrent.TimeUnit;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.jwt;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -101,7 +102,7 @@ class GatewayRoutingTests {
                 .setBody("{\"task\":{\"id\":\"t1\",\"title\":\"Test task\",\"status\":\"READY\",\"priority\":\"HIGH\"}," +
                          "\"explanation\":\"Test\",\"fitsInTime\":true,\"isHighPriority\":true,\"hasNoDependencies\":true}"));
 
-        mockMvc.perform(post("/api/workspace/recommend")
+        mockMvc.perform(post("/api/workspace/recommend").with(jwt())
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"availableTime\": 45}"))
             .andExpect(status().isOk());
@@ -122,7 +123,7 @@ class GatewayRoutingTests {
                 .setBody("{\"task\":{\"id\":\"t1\",\"title\":\"Test\",\"status\":\"READY\",\"priority\":\"HIGH\"}," +
                          "\"explanation\":\"Test\",\"fitsInTime\":true,\"isHighPriority\":true,\"hasNoDependencies\":true}"));
 
-        mockMvc.perform(post("/api/workspace/recommend")
+        mockMvc.perform(post("/api/workspace/recommend").with(jwt())
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"availableTime\": 45}"))
             .andExpect(status().isOk());
@@ -136,7 +137,7 @@ class GatewayRoutingTests {
     @Order(3)
     @DisplayName("Unknown route returns 404")
     void testUnknownRouteReturns404() throws Exception {
-        mockMvc.perform(get("/api/unknown/endpoint"))
+        mockMvc.perform(get("/api/unknown/endpoint").with(jwt()))
             .andExpect(status().isNotFound());
     }
 
@@ -158,7 +159,7 @@ class GatewayRoutingTests {
     @Order(5)
     @DisplayName("Missing availableTime returns 400 BAD_REQUEST")
     void testMissingAvailableTimeReturns400() throws Exception {
-        mockMvc.perform(post("/api/workspace/recommend")
+        mockMvc.perform(post("/api/workspace/recommend").with(jwt())
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{}"))
             .andExpect(status().isBadRequest())
@@ -170,7 +171,7 @@ class GatewayRoutingTests {
     @Order(6)
     @DisplayName("availableTime of zero returns 400 BAD_REQUEST")
     void testZeroAvailableTimeReturns400() throws Exception {
-        mockMvc.perform(post("/api/workspace/recommend")
+        mockMvc.perform(post("/api/workspace/recommend").with(jwt())
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"availableTime\": 0}"))
             .andExpect(status().isBadRequest());
@@ -189,7 +190,7 @@ class GatewayRoutingTests {
                 .setHeader("Content-Type", "application/json")
                 .setBody("{\"items\":[],\"total\":0,\"page\":1,\"size\":5}"));
 
-        mockMvc.perform(get("/api/workspace/tasks?filter=blocked&search=login&page=1&size=5"))
+        mockMvc.perform(get("/api/workspace/tasks?filter=blocked&search=login&page=1&size=5").with(jwt()))
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.page").value(1))
             .andExpect(jsonPath("$.size").value(5));
@@ -211,7 +212,7 @@ class GatewayRoutingTests {
                 .setHeader("Content-Type", "application/json")
                 .setBody("{\"items\":[],\"total\":0,\"page\":0,\"size\":20}"));
 
-        mockMvc.perform(get("/api/workspace/tasks"))
+        mockMvc.perform(get("/api/workspace/tasks").with(jwt()))
             .andExpect(status().isOk());
 
         RecordedRequest recorded = takeRequest();
@@ -231,7 +232,7 @@ class GatewayRoutingTests {
                 .setHeader("Content-Type", "application/json")
                 .setBody("{\"id\":\"task-1\",\"title\":\"Review API changes\",\"status\":\"Blocked\"}"));
 
-        mockMvc.perform(get("/api/workspace/employee-task"))
+        mockMvc.perform(get("/api/workspace/employee-task").with(jwt()))
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.id").value("task-1"));
 
@@ -252,7 +253,7 @@ class GatewayRoutingTests {
     void testBffUnavailableReturns503() throws Exception {
         mockBff.shutdown();
 
-        mockMvc.perform(post("/api/workspace/recommend")
+        mockMvc.perform(post("/api/workspace/recommend").with(jwt())
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"availableTime\": 45}"))
             .andExpect(status().isServiceUnavailable());
