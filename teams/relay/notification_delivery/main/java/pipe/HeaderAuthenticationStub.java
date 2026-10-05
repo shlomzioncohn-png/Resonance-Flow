@@ -2,12 +2,23 @@ package pipe;
 
 import org.springframework.stereotype.Component;
 
-// No-op stand-in for real authentication: trusts X-Org-Id/X-User-Id as-is until
-// requests are actually authenticated upstream (e.g. by lens-gateway).
+import java.util.Optional;
+
+// Trusts X-Org-Id/X-User-Id as-is. The Keycloak token is validated by lens-gateway and the
+// identity reaches us as headers via lens-bff, the only caller allowed to reach this service
+// (it has no Ingress). Rejects missing or blank values so they can't collapse into one shared
+// "org:user" key and leak notifications between users.
 @Component
 class HeaderAuthenticationStub {
 
-    AuthenticatedPrincipal authenticate(String orgId, String userId) {
-        return new AuthenticatedPrincipal(orgId, userId);
+    Optional<AuthenticatedPrincipal> authenticate(String orgId, String userId) {
+        if (isBlank(orgId) || isBlank(userId)) {
+            return Optional.empty();
+        }
+        return Optional.of(new AuthenticatedPrincipal(orgId, userId));
+    }
+
+    private static boolean isBlank(String value) {
+        return value == null || value.isBlank();
     }
 }
