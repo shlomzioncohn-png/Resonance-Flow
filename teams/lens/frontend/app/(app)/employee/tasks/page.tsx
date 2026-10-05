@@ -9,6 +9,7 @@ import LoadingState from '@/components/feedback/LoadingState';
 import EmptyState from '@/components/feedback/EmptyState';
 import ErrorState from '@/components/feedback/ErrorState';
 import DataTable, { type DataTableColumn } from '@/components/ui/DataTable';
+import { getErrorMessage } from '@/services/api';
 import { listTasks, type ApiTask } from '@/services/workspaceApi';
 import { priorityTone, softToneSx, statusTone } from '../shared';
 
@@ -64,6 +65,7 @@ const columns: DataTableColumn<ApiTask>[] = [
 export default function EmployeeTasksPage() {
   const [state, setState] = useState<LoadState>('loading');
   const [tasks, setTasks] = useState<ApiTask[]>([]);
+  const [errorMessage, setErrorMessage] = useState('');
 
   const fetchTasks = useCallback(() => {
     return listTasks({ size: 100 }) // largest page the API allows — fine while the task set is this small; will need real pagination once it isn't
@@ -71,7 +73,10 @@ export default function EmployeeTasksPage() {
         setTasks(response.items);
         setState('loaded');
       })
-      .catch(() => setState('error'));
+      .catch((err) => {
+        setErrorMessage(getErrorMessage(err));
+        setState('error');
+      });
   }, []);
 
   useEffect(() => {
@@ -90,9 +95,7 @@ export default function EmployeeTasksPage() {
     >
       {state === 'loading' && <LoadingState message="Loading your tasks…" />}
 
-      {state === 'error' && (
-        <ErrorState description="Couldn't load your tasks. Please try again." onRetry={retry} />
-      )}
+      {state === 'error' && <ErrorState description={errorMessage} onRetry={retry} />}
 
       {state === 'loaded' && (
         <DataTable

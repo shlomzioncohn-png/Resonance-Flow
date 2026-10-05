@@ -28,6 +28,7 @@ import WarningAmberOutlinedIcon from '@mui/icons-material/WarningAmberOutlined';
 import PageContainer from '@/components/layout/PageContainer';
 import { radiusTokens } from '@/theme';
 import { DetailRow, iconBadgeSx, softToneSx, statusTone } from './shared';
+import { getErrorMessage } from '@/services/api';
 import { recommendTask, updateTaskStatus, type TaskRecommendation } from '@/services/workspaceApi';
 
 const TIME_OPTIONS_MIN = [15, 30, 45, 60, 90];
@@ -60,7 +61,7 @@ export default function EmployeeWorkspacePage() {
       });
       setRecommendation(result);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to fetch recommendation');
+      setError(getErrorMessage(err));
       setRecommendation(null);
     } finally {
       setLoading(false);
@@ -76,7 +77,7 @@ export default function EmployeeWorkspacePage() {
       setRecommendation((prev) => (prev ? { ...prev, task: updated } : prev));
       setStarted(true);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to start task');
+      setError(getErrorMessage(err));
     } finally {
       setStarting(false);
     }

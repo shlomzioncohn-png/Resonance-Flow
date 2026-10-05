@@ -19,6 +19,7 @@ import com.rnd.bff.dto.TaskDependenciesDTO;
 import com.rnd.bff.dto.TaskListResponseDTO;
 import com.rnd.bff.dto.TaskRecommendationDTO;
 import com.rnd.bff.dto.WorkspaceRequestDTO;
+import com.rnd.bff.exception.InboxRejectedException;
 import com.rnd.bff.exception.ServiceUnavailableException;
 import com.rnd.bff.exception.TaskNotFoundException;
 import java.util.List;
@@ -180,6 +181,15 @@ class WorkspaceServiceTest {
         workspaceService.listTasks("emp_001", null, null, -1, 999);
 
         verify(inboxClient).listTasks("emp_001", null, null, 0, 100);
+    }
+
+    @Test
+    void getTask_inboxRejects_passesRejectionOnInsteadOfServiceUnavailable() {
+        when(inboxClient.getTaskById(anyString(), anyString()))
+                .thenThrow(new InboxRejectedException(403, "Actor cannot act on task"));
+
+        assertThatThrownBy(() -> workspaceService.getTask("emp_001", "task_001"))
+                .isInstanceOf(InboxRejectedException.class);
     }
 
     @Test

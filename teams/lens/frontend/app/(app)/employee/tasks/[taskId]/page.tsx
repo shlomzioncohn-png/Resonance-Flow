@@ -22,6 +22,7 @@ import PersonOutlineIcon from '@mui/icons-material/PersonOutlined';
 import WarningAmberOutlinedIcon from '@mui/icons-material/WarningAmberOutlined';
 import { radiusTokens } from '@/theme';
 import { DetailRow, softToneSx, statusTone } from '../../shared';
+import { getErrorMessage } from '@/services/api';
 import { getTask, type ApiTask } from '@/services/workspaceApi';
 import ChatPanel from './ChatPanel';
 
@@ -49,7 +50,7 @@ export default function TaskDetailsPage({ params }: { params: Promise<{ taskId: 
         if (!ignore) setTask(result);
       })
       .catch((err) => {
-        if (!ignore) setError(err instanceof Error ? err.message : 'Failed to load task');
+        if (!ignore) setError(getErrorMessage(err));
       })
       .finally(() => {
         if (!ignore) setLoading(false);

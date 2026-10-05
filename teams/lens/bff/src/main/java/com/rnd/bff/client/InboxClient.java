@@ -2,6 +2,7 @@ package com.rnd.bff.client;
 
 import com.rnd.bff.dto.TaskDTO;
 import com.rnd.bff.dto.TaskListResponseDTO;
+import com.rnd.bff.exception.InboxRejectedException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -373,9 +374,14 @@ public class InboxClient {
                 .encode()
                 .build()
                 .toUri();
-        InboxPageResponse body = restTemplate.exchange(
-                uri, HttpMethod.GET, new HttpEntity<>(actorHeaders(userId)), InboxPageResponse.class)
-                .getBody();
+        InboxPageResponse body;
+        try {
+            body = restTemplate.exchange(
+                    uri, HttpMethod.GET, new HttpEntity<>(actorHeaders(userId)), InboxPageResponse.class)
+                    .getBody();
+        } catch (HttpClientErrorException ex) {
+            throw rejected(ex);
+        }
         if (body == null) {
             throw new IllegalStateException("Inbox returned an empty task page");
         }
@@ -405,8 +411,10 @@ public class InboxClient {
                     InboxTaskResponse.class)
                     .getBody();
             return task == null ? null : toTaskDTO(task);
-        } catch (HttpClientErrorException.NotFound | HttpClientErrorException.BadRequest ex) {
+        } catch (HttpClientErrorException.NotFound ex) {
             return null;
+        } catch (HttpClientErrorException ex) {
+            throw rejected(ex);
         }
     }
 
@@ -437,12 +445,34 @@ public class InboxClient {
             return task == null ? null : toTaskDTO(task);
         } catch (HttpClientErrorException.NotFound ex) {
             return null;
+        } catch (HttpClientErrorException ex) {
+            throw rejected(ex);
         }
     }
 
     // -------------------------------------------------------------------------
     // Real-mode helpers
     // -------------------------------------------------------------------------
+
+    /**
+     * Inbox answered 4xx (other than 404). Keeps Inbox's own message when its
+     * error body has one ({ "message": ... }), so a 400 says *why*.
+     * Only 401/403 are kept as-is; any other 4xx is reported as 400.
+     */
+    private static InboxRejectedException rejected(HttpClientErrorException ex) {
+        int status = ex.getStatusCode().value();
+        String message = ex.getStatusText();
+        try {
+            Map<?, ?> body = ex.getResponseBodyAs(Map.class);
+            if (body != null && body.get("message") instanceof String inboxMessage) {
+                message = inboxMessage;
+            }
+        } catch (RuntimeException ignored) {
+            // Not JSON - keep the status text
+        }
+        logger.warn("Inbox rejected request: {} {}", status, message);
+        return new InboxRejectedException(status == 401 || status == 403 ? status : 400, message);
+    }
 
     private URI taskUri(String taskId) {
         return UriComponentsBuilder.fromHttpUrl(inboxServiceUrl)

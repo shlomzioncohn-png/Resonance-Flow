@@ -10,6 +10,7 @@ import com.rnd.bff.dto.TaskDependenciesDTO;
 import com.rnd.bff.dto.TaskListResponseDTO;
 import com.rnd.bff.dto.TaskRecommendationDTO;
 import com.rnd.bff.dto.WorkspaceRequestDTO;
+import com.rnd.bff.exception.InboxRejectedException;
 import com.rnd.bff.exception.ServiceUnavailableException;
 import com.rnd.bff.exception.TaskNotFoundException;
 import org.slf4j.Logger;
@@ -57,6 +58,9 @@ public class WorkspaceService {
         List<TaskDTO> candidates;
         try {
             candidates = filterCandidates(inboxClient.getTasksForUser(userId), request);
+        } catch (InboxRejectedException ex) {
+            // Inbox is up and said no (401/403/400) - not an outage, pass it on as-is
+            throw ex;
         } catch (RuntimeException ex) {
             // Inbox owns canonical task data - with no task list, no recommendation
             // is possible, so this fails the request rather than degrading.
@@ -208,6 +212,9 @@ public class WorkspaceService {
 
         try {
             return inboxClient.listTasks(userId, toStatusFilter(filter), search, safePage, safeSize);
+        } catch (InboxRejectedException ex) {
+            // Inbox is up and said no (401/403/400) - not an outage, pass it on as-is
+            throw ex;
         } catch (RuntimeException ex) {
             throw new ServiceUnavailableException("Inbox", "Inbox is unavailable", ex);
         }
@@ -233,6 +240,9 @@ public class WorkspaceService {
         TaskDTO task;
         try {
             task = inboxClient.getTaskById(userId, taskId);
+        } catch (InboxRejectedException ex) {
+            // Inbox is up and said no (401/403/400) - not an outage, pass it on as-is
+            throw ex;
         } catch (RuntimeException ex) {
             throw new ServiceUnavailableException("Inbox", "Inbox is unavailable", ex);
         }
@@ -247,6 +257,9 @@ public class WorkspaceService {
         TaskDTO updated;
         try {
             updated = inboxClient.updateStatus(userId, taskId, newStatus);
+        } catch (InboxRejectedException ex) {
+            // Inbox is up and said no (401/403/400) - not an outage, pass it on as-is
+            throw ex;
         } catch (RuntimeException ex) {
             throw new ServiceUnavailableException("Inbox", "Inbox is unavailable", ex);
         }

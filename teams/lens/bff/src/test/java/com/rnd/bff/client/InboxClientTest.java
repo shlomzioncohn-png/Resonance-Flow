@@ -2,6 +2,7 @@ package com.rnd.bff.client;
 
 import com.rnd.bff.dto.TaskDTO;
 import com.rnd.bff.dto.TaskListResponseDTO;
+import com.rnd.bff.exception.InboxRejectedException;
 import com.sun.net.httpserver.HttpServer;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -16,6 +17,7 @@ import java.util.Map;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /**
  * Unit tests for InboxClient's InboxTaskRecord -> TaskDTO translation layer
@@ -173,6 +175,9 @@ class InboxClientTest {
             if (path.equals("/api/v1/tasks")) {
                 body = "{\"content\":[" + INBOX_TASK_JSON + "],\"page\":0,\"size\":20,"
                         + "\"total_elements\":828,\"total_pages\":42}";
+            } else if (path.contains("99999999-9999-9999-9999-999999999999")) {
+                status = 403;
+                body = "{\"status\":403,\"error\":\"FORBIDDEN\",\"message\":\"Actor cannot act on task\"}";
             } else if (path.contains("00000000-0000-0000-0000-000000000000")) {
                 status = 404;
                 body = "{}";
@@ -245,5 +250,13 @@ class InboxClientTest {
         assertThat(lastMethod.get()).isEqualTo("PATCH");
         assertThat(lastBody.get()).isEqualTo("{\"status\":\"IN_PROGRESS\"}");
         assertThat(updated.getStatus()).isEqualTo("IN_PROGRESS");
+    }
+
+    @Test
+    void getTaskById_real_inboxForbidden_throwsInboxRejectedWithInboxMessage() {
+        assertThatThrownBy(() -> realClient(ACTOR).getTaskById("emp_001", "99999999-9999-9999-9999-999999999999"))
+                .isInstanceOf(InboxRejectedException.class)
+                .hasMessage("Actor cannot act on task")
+                .satisfies(ex -> assertThat(((InboxRejectedException) ex).getStatus()).isEqualTo(403));
     }
 }

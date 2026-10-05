@@ -100,6 +100,25 @@ public class GlobalExceptionHandler {
                 HttpStatus.SERVICE_UNAVAILABLE);
     }
 
+    /**
+     * Inbox is up but refused the request (401/403/400). Passed on with the
+     * same status, so the screen can tell "not allowed" from "Inbox is down".
+     */
+    @ExceptionHandler(InboxRejectedException.class)
+    public ResponseEntity<ErrorResponse> handleInboxRejectedException(
+            InboxRejectedException ex, WebRequest request) {
+        String path = getRequestPath(request);
+        logger.warn("Inbox rejected request ({}) - Path: {}, Details: {}", ex.getStatus(), path, ex.getMessage());
+        HttpStatus status = HttpStatus.valueOf(ex.getStatus());
+        String message = switch (ex.getStatus()) {
+            case 401 -> "User is not recognized by Inbox";
+            case 403 -> "Not allowed to access this task";
+            default -> "Inbox rejected the request";
+        };
+        return new ResponseEntity<>(
+                new ErrorResponse(status.name(), message, path, ex.getMessage()), status);
+    }
+
     /** Triggered when a task id doesn't exist in Inbox's task set. */
     @ExceptionHandler(TaskNotFoundException.class)
     public ResponseEntity<ErrorResponse> handleTaskNotFoundException(
