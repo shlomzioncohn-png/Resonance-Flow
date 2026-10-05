@@ -22,6 +22,7 @@ import com.rnd.chain.dto.TaskEligibilityResponse;
 
 import java.time.LocalDateTime;
 import java.util.ArrayDeque;
+import java.util.ArrayList;
 import java.util.Deque;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -237,6 +238,69 @@ public class TaskEligibilityService {
         }
     }
 
+    private record PendingEdge(UUID dependsOnTaskId, boolean isNewEdge, boolean dependsOnAlreadyDone) {
+    }
+
+    /** Cycle/existence checks only - no writes. An edge that already exists is a redelivery and
+     * comes back as a no-op ({@code isNewEdge == false}), not an error. */
+    private PendingEdge validateEdge(UUID taskId, UUID dependsOnTaskId) {
+        if (taskDependencyRepository.existsDependency(taskId, dependsOnTaskId)) {
+            return new PendingEdge(dependsOnTaskId, false, false);
+        }
+        if (wouldCreateCycle(taskId, dependsOnTaskId)) {
+            throw new InvalidDependencyException(
+                    "Dependency would create a cycle: " + taskId + " -> " + dependsOnTaskId);
+        }
+        requireTask(taskId);
+        boolean dependsOnAlreadyDone = requireTask(dependsOnTaskId).getStatus() == TaskStatus.DONE;
+        return new PendingEdge(dependsOnTaskId, true, dependsOnAlreadyDone);
+    }
+
+    /** Writes one already-validated edge - no cycle/existence checks, see {@link #validateEdge}. */
+    private void applyEdge(UUID taskId, PendingEdge edge) {
+        if (!edge.isNewEdge()) {
+            log.info("Dependency {} -> {} already existed, blockingCount left unchanged",
+                    taskId, edge.dependsOnTaskId());
+            return;
+        }
+        taskDependencyRepository.save(new TaskDependency(taskId, edge.dependsOnTaskId()));
+        adjustBlockingCount(taskId, edge.dependsOnAlreadyDone(), 1);
+    }
+
+    /**
+     * Same effect as calling {@link #addDependency} once per id, but validates every entry
+     * against the current graph state before applying any of them, so one invalid entry (a
+     * cycle, or a dependency target Chain hasn't seen yet) fails the whole batch with zero
+     * partial effect (PR #467 review, on the Kafka handler that batches a task.dependencies.proposed
+     * event's array through this method). Entries that already exist are no-ops, so a redelivered
+     * event is safe to apply again.
+     *
+     * <p>Validating up front is safe because {@link #wouldCreateCycle} only traverses edges that
+     * already exist before this call, and every same-batch edge starts at {@code taskId}. The whole
+     * batch runs under one {@code dependencyGraphLock} acquisition, so no concurrent writer can
+     * invalidate a validated entry before it is applied.
+     */
+    @Transactional
+    public void addDependencies(UUID taskId, List<UUID> dependsOnTaskIds) {
+        Objects.requireNonNull(taskId, "taskId must not be null");
+        Objects.requireNonNull(dependsOnTaskIds, "dependsOnTaskIds must not be null");
+        List<UUID> distinctIds = dependsOnTaskIds.stream()
+                .peek(id -> Objects.requireNonNull(id, "dependsOnTaskIds must not contain null elements"))
+                .distinct()
+                .toList();
+        log.info("Adding {} distinct dependency(ies) for task {}", distinctIds.size(), taskId);
+
+        synchronized (dependencyGraphLock) {
+            List<PendingEdge> validated = new ArrayList<>(distinctIds.size());
+            for (UUID dependsOnTaskId : distinctIds) {
+                validated.add(validateEdge(taskId, dependsOnTaskId));
+            }
+            for (PendingEdge edge : validated) {
+                applyEdge(taskId, edge);
+            }
+        }
+    }
+
     public void removeDependency(
             UUID taskId,
             UUID dependsOnTaskId) {
@@ -373,6 +437,42 @@ public class TaskEligibilityService {
                 adjustDependentsBlockingCount(
                         taskId,
                         1);
+            }
+        }
+    }
+
+    /**
+     * Same status-change effect as {@link #onTaskStatusChanged}, but for a producer (task.updated)
+     * whose events carry no id and must be ordered by the {@code updatedAt} on the event itself.
+     * The staleness check, status write, and {@code updatedAt} stamp all happen inside one
+     * {@code dependencyGraphLock} critical section, so a redelivered or out-of-order event cannot
+     * interleave between them (PR #467 review).
+     *
+     * @throws TaskNotFoundException if no task with {@code taskId} exists
+     */
+    @Transactional
+    public void onTaskStatusChangedIfNewer(UUID taskId, TaskStatus newStatus, LocalDateTime eventUpdatedAt) {
+        Objects.requireNonNull(taskId, "taskId must not be null");
+        Objects.requireNonNull(newStatus, "newStatus must not be null");
+        Objects.requireNonNull(eventUpdatedAt, "eventUpdatedAt must not be null");
+
+        synchronized (dependencyGraphLock) {
+            Task current = requireTask(taskId);
+            if (current.getUpdatedAt() != null && !eventUpdatedAt.isAfter(current.getUpdatedAt())) {
+                log.debug("Task {} status update ignored: event updatedAt {} is not newer than stored {}",
+                        taskId, eventUpdatedAt, current.getUpdatedAt());
+                return;
+            }
+
+            log.info("Task {} status changed to {}", taskId, newStatus);
+            TaskStatus previousStatus = current.getStatus();
+            requireUpdated(taskRepository.update(taskId, task ->
+                    copyOf(task).status(newStatus).updatedAt(eventUpdatedAt).build()), taskId);
+
+            if (previousStatus != TaskStatus.DONE && newStatus == TaskStatus.DONE) {
+                adjustDependentsBlockingCount(taskId, -1);
+            } else if (previousStatus == TaskStatus.DONE && newStatus != TaskStatus.DONE) {
+                adjustDependentsBlockingCount(taskId, 1);
             }
         }
     }

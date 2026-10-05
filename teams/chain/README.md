@@ -34,7 +34,7 @@ persistence" below.
 
 - Java 21
 - Spring Boot 3.3.13 (Maven)
-- Spring Kafka
+- Spring Kafka, with Confluent Protobuf (de)serialization against a Schema Registry
 - Lombok (`Task`/`TaskDependency` accessors/builder/equals-hashCode; `Constraint`'s
   equals/hashCode are hand-written, see the 2026-09-08 fixes below)
 - Docker / Docker Compose
@@ -76,13 +76,16 @@ src/main/java/com/rnd/chain/
 ├── dto/                    # Task, TaskDependency, TaskStatus, Constraint, ApiError,
 │                           # TaskResponse, TaskTraceResponse, ProcessedEvent (idempotency
 │                           # claim record)
-├── events/                 # Kafka publish/consume infrastructure - see below
-│   ├── EventEnvelope.java
+├── events/                 # Kafka consume/publish infrastructure - see below
+│   ├── TaskCreatedEventHandler.java / TaskUpdatedEventHandler.java /
+│   │   DependencyProposedEventHandler.java   # one @KafkaListener per inbound topic
+│   ├── ChainEventProcessingTemplate.java     # shared claim/logging skeleton
+│   ├── EventFields.java                      # UUID / Timestamp parsing shared by the handlers
+│   ├── ChainProtobufKafkaConfig.java         # Protobuf consumer/producer factories
 │   ├── EventPublisher.java / KafkaEventPublisher.java
-│   ├── EventHandler.java
-│   ├── ChainEventConsumer.java
-│   ├── ChainEventTopicsProperties.java / ChainKafkaRetryProperties.java
-│   ├── ChainKafkaErrorHandlingConfig.java
+│   ├── ChainEventTopicsProperties.java
+│   ├── ChainTransientProcessingException.java / ReferencedTaskNotFoundException.java
+│   ├── NonRetryableEventException.java / InboxTaskStatusMapper.java
 │   ├── ProcessedEventStore.java / InMemoryProcessedEventStore.java
 │   └── payloads/
 ├── exception/              # GlobalExceptionHandler, NotFoundException/BadRequestException +
@@ -111,9 +114,9 @@ src/test/java/com/rnd/chain/
 │                           # PostgresConstraintRepositoryConcurrencyTest (issue #378, @Tag("postgres"))
 ├── dto/ConstraintTest.java, TaskTest.java, TaskDependencyTest.java,
 │                           # TaskTestFixtures.java (shared Task.Builder defaults)
-├── events/                 # ChainEventConsumerTest, ChainEventConsumerIntegrationTest
-│                           # (@EmbeddedKafka), EventEnvelopeTest, InMemoryProcessedEventStoreTest,
-│                           # KafkaEventPublisherTest
+├── events/                 # *HandlerTest and *HandlerIntegrationTest (@EmbeddedKafka) per inbound
+│                           # topic, ChainEventProcessingTemplateTest, InboxTaskStatusMapperTest,
+│                           # KafkaEventPublisherTest, ChainProtobufKafkaConfigTest
 ├── config/MockDataConfigTest.java
 └── exception/GlobalExceptionHandlerTest.java, ExceptionConstructorTest.java
 ```
@@ -141,49 +144,67 @@ An unknown task id returns `404` with an `ApiError` body; an invalid (non-UUID) 
 
 ## Kafka event infrastructure
 
-Chain can publish and consume Kafka events using a shared `EventEnvelope<T>` (event type,
-event ID, timestamp, correlation ID, payload).
+Chain consumes three Protobuf topics and publishes one flat-JSON topic. Each inbound topic has its
+own `@KafkaListener` handler, and the handlers share the claim/logging skeleton in
+`ChainEventProcessingTemplate`.
 
-**Publishing** goes through `EventPublisher` / `KafkaEventPublisher`, which serializes an
-`EventEnvelope` and sends it to the topic configured for its event type under
-`chain.kafka.topics` in `application.yml`. `EventPublisher.publish(event)` itself is still
-fire-and-forget by design - a failed publish is logged, not retried or persisted for a later
-attempt, and business logic is not expected to know or care. A stronger delivery guarantee (e.g. a
-transactional outbox) is out of scope for this infrastructure layer.
+| Topic | Producer | Handler | Idempotency | Retries before `.errors` |
+| --- | --- | --- | --- | --- |
+| `task.created` | Inbox | `TaskCreatedEventHandler` | state-based (no event id) | 3 attempts, 2s apart |
+| `task.updated` | Inbox | `TaskUpdatedEventHandler` | state-based, last-write-wins on `updated_at` | 3 attempts, 2s apart |
+| `task.dependencies.proposed` | Mind | `DependencyProposedEventHandler` | `event_id` claim in `ProcessedEventStore` | 5 attempts, 5s apart |
 
-**Consuming** is handled by `ChainEventConsumer`, which routes each incoming message to the
-`EventHandler<T>` bean registered for its `eventType`. It is disabled by default
-(`@ConditionalOnProperty` on `chain.kafka.consumed-topics`) until a real topic is configured -
-today, Chain doesn't consume from anywhere in any environment. `chain.kafka.consumed-topics`
-accepts a comma-separated list (e.g. `mind.dependency.proposed,inbox.task.status.updated`) to
-subscribe to more than one topic at once - needed since Chain consumes from multiple services
-(Mind, Inbox).
+**Retry and dead-lettering**: retries are non-blocking, via `@RetryableTopic`, so a message waiting
+to retry never stalls the rest of its partition. Every exception is retried except
+`NonRetryableEventException` (malformed messages, cycles), which goes straight to `<topic>.errors`.
+Retries are bounded (see the table), so an unexpected bug costs a few delayed attempts before it
+lands on `<topic>.errors`. A typical retried case is `ReferencedTaskNotFoundException`, raised when
+a referenced task has not arrived yet.
 
-**Error handling**: malformed or unroutable messages (bad JSON, missing/invalid fields, a payload
-that doesn't match the target handler's type) fail fast with `NonRetryableEventException` and go
-straight to the topic's dead-letter topic (`<topic>.DLT`). Any other failure (e.g. a future
-handler's transient dependency issue) is retried before falling back to the DLT, per
-`chain.kafka.retry.max-attempts` / `chain.kafka.retry.interval-ms` (default: 3 attempts total,
-2 seconds apart) - see `ChainKafkaErrorHandlingConfig`.
+**Offsets**: auto-commit is disabled and each listener uses `AckMode.RECORD`. An offset is committed
+only after its record is handled or handed to its retry/DLT topic, so a crash mid-processing
+redelivers the record instead of losing it.
 
-**Idempotency**: each event is claimed via `ProcessedEventStore` before its handler runs, so a
-duplicate delivery (retry, redelivery, or multiple partitions) is only processed once. The claim
-is released if the handler fails, so a genuine retry can still process the event again. The
-current implementation, `InMemoryProcessedEventStore`, only guards a single running instance and
-loses all claim history on restart - it is not safe for production or for multiple instances of
-this service running concurrently. See its Javadoc for what a claim does and doesn't guarantee.
+**Idempotency**: `task.dependencies.proposed` is deduplicated by `event_id`. The claim is released if
+the handler fails, so a retry can process the event again. `task.created` and `task.updated` carry no
+event id, so they rely on their state changes being safe to repeat. The current
+`InMemoryProcessedEventStore` guards a single running instance only and loses all claims on restart,
+so it is not safe for production or for several instances of this service. See its Javadoc for what
+a claim does and doesn't guarantee.
+
+**Status mapping**: `InboxTaskStatusMapper` collapses Inbox's 8 task statuses into Chain's 3.
+`DONE`, `CANCELLED` and `REJECTED` map to `DONE`, because all three release dependents. `IN_PROGRESS`
+maps to `ACTIVE`, and every other status maps to `PENDING`.
+
+**Publishing**: the live publisher for `task.scheduling.updated` is `KafkaSchedulingUpdatePublisher`
+(`com.rnd.chain.event`), used by `SchedulingUpdateService`. It sends `TaskSchedulingUpdatedEvent` as
+JSON through the `KafkaTemplate` defined in `ChainProtobufKafkaConfig`. That JSON is interim until
+the Protobuf contract is settled (#545). `KafkaEventPublisher` (flat JSON, no envelope) is not
+wired to any caller and is scheduled for removal under #543.
+
+**Schemas**: the `.proto` sources live in `src/main/proto/` and are committed. Messages are
+validated against the Schema Registry at `SCHEMA_REGISTRY_URL`. Tests use a mock registry
+(`mock://...`), so no registry process is needed.
 
 ### Configuration
 
 | Property | Purpose | Default |
 | --- | --- | --- |
-| `chain.kafka.topics.<eventType>` | Topic to publish a given event type to | none - required per event type |
-| `chain.kafka.consumed-topics` | Topic(s) `ChainEventConsumer` listens on - comma-separated for more than one | unset (consumer disabled) |
+| `chain.kafka.topics.task-created` (env `TASK_CREATED_TOPIC`) | Topic consumed for `task.created` | `task.created` |
+| `chain.kafka.topics.task-updated` (env `TASK_UPDATED_TOPIC`) | Topic consumed for `task.updated` | `task.updated` |
+| `chain.kafka.topics.dependencies-proposed` (env `DEPENDENCIES_PROPOSED_TOPIC`) | Topic consumed for `task.dependencies.proposed` | `task.dependencies.proposed` |
+| `chain.kafka.topics.task.scheduling.updated` (env `CHAIN_SCHEDULING_UPDATED_TOPIC`) | Topic published to for `task.scheduling.updated` | `task.scheduling.updated` |
 | `KAFKA_BOOTSTRAP_SERVERS` (env var, not `chain.*`) | Kafka broker(s) address | `localhost:9092` |
-| `chain.kafka.consumer-group-id` | Consumer group ID | `${spring.application.name}` |
-| `chain.kafka.retry.max-attempts` | Retries after the initial delivery attempt, before falling back to the DLT | `2` |
-| `chain.kafka.retry.interval-ms` | Milliseconds between retry attempts | `2000` |
+| `chain.kafka.consumer-group-id` (env `KAFKA_CONSUMER_GROUP_ID`) | Consumer group ID | `chain-service` |
+| `chain.kafka.schema-registry-url` (env `SCHEMA_REGISTRY_URL`) | Schema Registry URL (ccompat API) | `http://localhost:8082/apis/ccompat/v6` |
 | `chain.events.processed-store` | Which `ProcessedEventStore` implementation is active | `in-memory` |
+
+Retry attempts and backoff are not properties. Each handler sets them on its own `@RetryableTopic`
+annotation.
+
+Broker security (SASL, TLS) is set through Spring's `spring.kafka.properties.*`, for example
+`spring.kafka.properties.security.protocol=SASL_PLAINTEXT`. Every consumer factory and producer
+template starts from those properties, so the same settings apply everywhere.
 
 ## Running locally with Maven
 
@@ -218,7 +239,9 @@ java -jar target/chain-0.1.0-SNAPSHOT.jar
 
 The app will be available at http://localhost:8081 (or whatever `SERVER_PORT` is set to in `.env`).
 Set `KAFKA_BOOTSTRAP_SERVERS` in `.env` to point the container at a real broker - `localhost:9092`
-(the default) only works if Kafka runs on the same host network as this container.
+(the default) only works if Kafka runs on the same host network as this container. Set
+`SCHEMA_REGISTRY_URL` the same way, since the default `localhost:8082` is not reachable from inside
+the container either.
 
 To stop:
 
@@ -545,6 +568,9 @@ Findings from this round not addressed on this branch:
 
 Kafka-related tests use `@EmbeddedKafka` (`spring-kafka-test`) - no external Kafka broker or
 Docker is needed to run the test suite.
+
+Run the tests on JDK 21 or 23. The Byte Buddy version bundled with Spring Boot 3.3.13 does not
+support JDK 25, and Mockito then fails while loading the Spring context.
 
 **A real Postgres reachable at `DB_HOST`/`DB_PORT`/`DB_NAME`/`DB_USER`/`DB_PASSWORD` (defaults:
 `localhost`/`5432`/`chain`/`chain`/`chain`) is now required for the full suite** - any
