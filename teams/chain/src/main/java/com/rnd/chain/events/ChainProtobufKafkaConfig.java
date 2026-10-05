@@ -21,6 +21,7 @@ import org.springframework.kafka.core.DefaultKafkaConsumerFactory;
 import org.springframework.kafka.core.DefaultKafkaProducerFactory;
 import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.kafka.core.ProducerFactory;
+import org.springframework.kafka.listener.ContainerProperties;
 import org.springframework.kafka.support.serializer.ErrorHandlingDeserializer;
 
 import java.util.HashMap;
@@ -76,7 +77,17 @@ public class ChainProtobufKafkaConfig {
         props.put(KafkaProtobufDeserializerConfig.SCHEMA_REGISTRY_URL_CONFIG, schemaRegistryUrl);
         props.put(KafkaProtobufDeserializerConfig.SPECIFIC_PROTOBUF_VALUE_TYPE, specificProtobufType);
         props.put(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "earliest");
+        // Offsets commit only after the listener (or the retry/DLT hand-off) finishes, see listenerContainerFactory
+        props.put(ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG, false);
         return props;
+    }
+
+    private static <T> ConcurrentKafkaListenerContainerFactory<String, T> listenerContainerFactory(
+            ConsumerFactory<String, T> consumerFactory) {
+        ConcurrentKafkaListenerContainerFactory<String, T> factory = new ConcurrentKafkaListenerContainerFactory<>();
+        factory.setConsumerFactory(consumerFactory);
+        factory.getContainerProperties().setAckMode(ContainerProperties.AckMode.RECORD);
+        return factory;
     }
 
     private <T> KafkaTemplate<String, T> protobufTemplate() {
@@ -130,10 +141,7 @@ public class ChainProtobufKafkaConfig {
     @Bean
     public ConcurrentKafkaListenerContainerFactory<String, TaskCreatedEvent> taskCreatedEventKafkaListenerContainerFactory(
             ConsumerFactory<String, TaskCreatedEvent> taskCreatedEventConsumerFactory) {
-        ConcurrentKafkaListenerContainerFactory<String, TaskCreatedEvent> factory =
-                new ConcurrentKafkaListenerContainerFactory<>();
-        factory.setConsumerFactory(taskCreatedEventConsumerFactory);
-        return factory;
+        return listenerContainerFactory(taskCreatedEventConsumerFactory);
     }
 
     @Bean
@@ -149,10 +157,7 @@ public class ChainProtobufKafkaConfig {
     @Bean
     public ConcurrentKafkaListenerContainerFactory<String, TaskUpdatedEvent> taskUpdatedEventKafkaListenerContainerFactory(
             ConsumerFactory<String, TaskUpdatedEvent> taskUpdatedEventConsumerFactory) {
-        ConcurrentKafkaListenerContainerFactory<String, TaskUpdatedEvent> factory =
-                new ConcurrentKafkaListenerContainerFactory<>();
-        factory.setConsumerFactory(taskUpdatedEventConsumerFactory);
-        return factory;
+        return listenerContainerFactory(taskUpdatedEventConsumerFactory);
     }
 
     @Bean
@@ -168,10 +173,7 @@ public class ChainProtobufKafkaConfig {
     @Bean
     public ConcurrentKafkaListenerContainerFactory<String, DependencyProposedEvent> dependencyProposedEventKafkaListenerContainerFactory(
             ConsumerFactory<String, DependencyProposedEvent> dependencyProposedEventConsumerFactory) {
-        ConcurrentKafkaListenerContainerFactory<String, DependencyProposedEvent> factory =
-                new ConcurrentKafkaListenerContainerFactory<>();
-        factory.setConsumerFactory(dependencyProposedEventConsumerFactory);
-        return factory;
+        return listenerContainerFactory(dependencyProposedEventConsumerFactory);
     }
 
     @Bean
