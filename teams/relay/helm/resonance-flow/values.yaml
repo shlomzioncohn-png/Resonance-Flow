@@ -437,6 +437,11 @@ components:
     dependencies:
       - name: schema-registry
         port: 8080
+    # Trusts X-Org-Id/X-User-Id as-is (lens-gateway validates the token, lens-bff forwards
+    # the identity), so only lens-bff may reach it - see templates/networkpolicy.yaml.
+    networkPolicy:
+      allowFrom:
+        - lens-bff
     config:
       managed: true
     # Interim CPU-based HPA (templates/pipe-hpa.yaml). §10 open question: the real scaling
