@@ -216,8 +216,8 @@ components:
           scanned-docs-dir: "${BRIDGE_MEDIA_SCANNED_DOCS_DIR:}"
           tenant-id: "${BRIDGE_MEDIA_TENANT_ID:kamatech}"
           min-file-size-bytes: "${BRIDGE_MEDIA_MIN_FILE_SIZE_BYTES:1}"
-        volumeMounts:
-        - name: object-storage-credentials
+    volumeMounts:
+      - name: object-storage-credentials
         mountPath: /etc/resonance-flow/secrets/object-storage
         readOnly: true
     volumes:
