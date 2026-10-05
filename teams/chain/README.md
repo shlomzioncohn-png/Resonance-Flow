@@ -64,6 +64,7 @@ src/main/java/com/rnd/chain/
 │   ├── TaskCreatedEventHandler.java / TaskUpdatedEventHandler.java /
 │   │   DependencyProposedEventHandler.java   # one @KafkaListener per inbound topic
 │   ├── ChainEventProcessingTemplate.java     # shared claim/logging skeleton
+│   ├── EventFields.java                      # UUID / Timestamp parsing shared by the handlers
 │   ├── ChainProtobufKafkaConfig.java         # Protobuf consumer/producer factories
 │   ├── EventPublisher.java / KafkaEventPublisher.java
 │   ├── ChainEventTopicsProperties.java
@@ -224,6 +225,9 @@ mvn test
 
 Kafka-related tests use `@EmbeddedKafka` (`spring-kafka-test`) - no external Kafka broker or
 Docker is needed to run the test suite.
+
+Run the tests on JDK 21 or 23. The Byte Buddy version bundled with Spring Boot 3.3.13 does not
+support JDK 25, and Mockito then fails while loading the Spring context.
 
 ## Dependency graph persistence (Issue #66)
 
