@@ -171,7 +171,7 @@ class GatewayRoutingIntegrationTest {
                         org.springframework.http.HttpStatus.FORBIDDEN, "Forbidden",
                         org.springframework.http.HttpHeaders.EMPTY, bffBody, null));
 
-        mockMvc.perform(get("/api/workspace/tasks/task_001"))
+        mockMvc.perform(get("/api/workspace/tasks/task_001").with(jwt()))
                 .andExpect(status().isForbidden())
                 .andExpect(jsonPath("$.errorCode").value("FORBIDDEN"))
                 .andExpect(jsonPath("$.message").value("Not allowed to access this task"));
@@ -189,7 +189,7 @@ class GatewayRoutingIntegrationTest {
                         org.springframework.http.HttpStatus.INTERNAL_SERVER_ERROR, "Internal Server Error",
                         org.springframework.http.HttpHeaders.EMPTY, bffBody, null));
 
-        mockMvc.perform(get("/api/workspace/tasks/task_001"))
+        mockMvc.perform(get("/api/workspace/tasks/task_001").with(jwt()))
                 .andExpect(status().isInternalServerError())
                 .andExpect(jsonPath("$.message").value("Downstream service returned an error"));
     }
