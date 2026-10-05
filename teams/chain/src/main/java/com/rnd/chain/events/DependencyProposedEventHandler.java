@@ -12,6 +12,8 @@ import org.springframework.transaction.annotation.Transactional;
 import java.util.List;
 import java.util.UUID;
 
+import static com.rnd.chain.events.EventFields.parseUuid;
+
 /**
  * Consumes task.dependencies.proposed (Mind, Protobuf) to feed
  * {@link TaskEligibilityService#addDependencies}.
@@ -105,11 +107,4 @@ public class DependencyProposedEventHandler {
         }
     }
 
-    private static UUID parseUuid(String raw, String fieldName) {
-        try {
-            return UUID.fromString(raw);
-        } catch (IllegalArgumentException e) {
-            throw new NonRetryableEventException("Invalid " + fieldName + " (not a UUID): " + raw, e);
-        }
-    }
 }

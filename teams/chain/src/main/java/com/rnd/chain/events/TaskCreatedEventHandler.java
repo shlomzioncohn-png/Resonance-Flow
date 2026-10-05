@@ -1,6 +1,5 @@
 package com.rnd.chain.events;
 
-import com.google.protobuf.Timestamp;
 import com.rnd.chain.dto.Task;
 import com.rnd.chain.dto.TaskStatus;
 import com.rnd.chain.repository.TaskRepository;
@@ -13,8 +12,10 @@ import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
-import java.time.ZoneOffset;
 import java.util.UUID;
+
+import static com.rnd.chain.events.EventFields.parseUuid;
+import static com.rnd.chain.events.EventFields.toLocalDateTime;
 
 /**
  * Consumes task.created (Inbox, Protobuf) - the event that tells Chain a task exists at all.
@@ -101,15 +102,4 @@ public class TaskCreatedEventHandler {
         }
     }
 
-    private static UUID parseUuid(String raw, String fieldName) {
-        try {
-            return UUID.fromString(raw);
-        } catch (IllegalArgumentException e) {
-            throw new NonRetryableEventException("Invalid " + fieldName + " (not a UUID): " + raw, e);
-        }
-    }
-
-    private static LocalDateTime toLocalDateTime(Timestamp ts) {
-        return LocalDateTime.ofEpochSecond(ts.getSeconds(), ts.getNanos(), ZoneOffset.UTC);
-    }
 }
