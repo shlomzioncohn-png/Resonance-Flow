@@ -207,6 +207,8 @@ class InboxClientTest {
         TaskListResponseDTO result = realClient(ACTOR).listTasks("emp_001", "IN_PROGRESS", "meeting", 0, 20);
 
         assertThat(lastQuery.get()).contains("status=IN_PROGRESS", "search=meeting", "page=0", "size=20");
+        // Only the user's own tasks ("my tasks"), not the whole tenant
+        assertThat(lastQuery.get()).contains("userId=" + ACTOR);
         // dev-actor-id replaces the Gateway's mock userId
         assertThat(lastActor.get()).isEqualTo(ACTOR);
 
@@ -229,6 +231,7 @@ class InboxClientTest {
         realClient("").listTasks("emp_001", null, null, 0, 20);
 
         assertThat(lastActor.get()).isEqualTo("emp_001");
+        assertThat(lastQuery.get()).contains("userId=emp_001");
         assertThat(lastQuery.get()).doesNotContain("status=", "search=");
     }
 

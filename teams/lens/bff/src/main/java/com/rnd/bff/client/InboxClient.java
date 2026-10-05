@@ -356,7 +356,9 @@ public class InboxClient {
     }
 
     /**
-     * One page of the My Tasks list.
+     * One page of the My Tasks list - only the user's own tasks. Inbox's userId
+     * filter returns tasks the user owns, is assigned to, or that are assigned
+     * to one of their teams with no one personally on them yet.
      *
      * @param status one of the 8 statuses in UPPERCASE, or null for all
      * @param search free text (Inbox matches title or description), or null
@@ -367,6 +369,7 @@ public class InboxClient {
         }
         URI uri = UriComponentsBuilder.fromHttpUrl(inboxServiceUrl)
                 .path(TASKS_PATH)
+                .queryParam("userId", actorId(userId))
                 .queryParamIfPresent("status", Optional.ofNullable(status))
                 .queryParamIfPresent("search", Optional.ofNullable(search).filter(s -> !s.isBlank()))
                 .queryParam("page", page)
@@ -495,10 +498,15 @@ public class InboxClient {
         }
     }
 
-    /** Inbox's X-Actor-Id - the dev override if set, otherwise the userId from the Gateway. */
+    /** The Inbox user we act as - the dev override if set, otherwise the userId from the Gateway. */
+    private String actorId(String userId) {
+        return devActorId.isBlank() ? userId : devActorId;
+    }
+
+    /** Inbox's X-Actor-Id header. */
     private HttpHeaders actorHeaders(String userId) {
         HttpHeaders headers = new HttpHeaders();
-        headers.set(ACTOR_HEADER, devActorId.isBlank() ? userId : devActorId);
+        headers.set(ACTOR_HEADER, actorId(userId));
         return headers;
     }
 
