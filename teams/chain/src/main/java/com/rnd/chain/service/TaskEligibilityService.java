@@ -10,6 +10,7 @@ import com.rnd.chain.exception.DependencyNotFoundException;
 import com.rnd.chain.exception.DuplicateDependencyException;
 import com.rnd.chain.exception.InvalidDependencyException;
 import com.rnd.chain.exception.TaskNotFoundException;
+import com.rnd.chain.repository.ConstraintRepository;
 import com.rnd.chain.repository.TaskDependencyRepository;
 import com.rnd.chain.repository.TaskRepository;
 
@@ -19,6 +20,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import com.rnd.chain.dto.TaskEligibilityResponse;
 
+import java.time.LocalDateTime;
 import java.util.ArrayDeque;
 import java.util.Deque;
 import java.util.HashMap;
@@ -30,7 +32,6 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 import java.util.function.UnaryOperator;
-import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicReference;
 
 /**
@@ -56,24 +57,20 @@ public class TaskEligibilityService {
     private final TaskRepository taskRepository;
     private final TaskDependencyRepository taskDependencyRepository;
     private final SchedulingUpdateService schedulingUpdateService;
+    private final ConstraintRepository constraintRepository;
 
     private final Object dependencyGraphLock = new Object();
-
-    // Idempotency ledger for open constraints per task (PLAN.md Finding #10): a redelivered
-    // constraint event must not double-count openConstraintCount.
-    // TODO(JPA): in-memory only with no restart story. Once openConstraintCount is durably persisted
-    // while this map stays JVM-local, a restart desynchronizes the two. Rebuild it from persisted
-    // state on startup, or replace it with a persisted openConstraintIds column/table.
-    private final Map<UUID, Set<String>> openConstraintIdsByTask = new ConcurrentHashMap<>();
 
     public TaskEligibilityService(
             TaskRepository taskRepository,
             TaskDependencyRepository taskDependencyRepository,
-            SchedulingUpdateService schedulingUpdateService) {
+            SchedulingUpdateService schedulingUpdateService,
+            ConstraintRepository constraintRepository) {
 
         this.taskRepository = taskRepository;
         this.taskDependencyRepository = taskDependencyRepository;
         this.schedulingUpdateService = schedulingUpdateService;
+        this.constraintRepository = constraintRepository;
     }
 
     private Task requireTask(UUID taskId) {
@@ -194,9 +191,8 @@ public class TaskEligibilityService {
 
         synchronized (dependencyGraphLock) {
 
-            // Checked before the cycle check and the task lookups (review finding): a duplicate
-            // must not require either task to still exist, and an existing edge cannot be
-            // introducing a new cycle.
+            // Checked before the cycle check and the task lookups: a duplicate must not require
+            // either task to still exist, and an existing edge cannot be introducing a new cycle.
             if (taskDependencyRepository.existsDependency(taskId, dependsOnTaskId)) {
                 throw new DuplicateDependencyException(
                         "Task " + taskId + " already depends on " + dependsOnTaskId);
@@ -407,99 +403,75 @@ public class TaskEligibilityService {
         }
     }
 
-    public void onConstraintAdded(UUID taskId, String constraintId) {
+    /**
+     * Persists {@code constraint} and, if it's genuinely new, increments its task's
+     * {@code openConstraintCount}.
+     *
+     * @throws NullPointerException if constraint is null
+     * @throws TaskNotFoundException if the constraint's task doesn't exist or is soft-deleted -
+     * checked before writing, so a rejected call never leaves an orphaned constraint row.
+     */
+    @Transactional
+    public void onConstraintAdded(Constraint constraint) {
+        Objects.requireNonNull(constraint, "constraint must not be null");
+        UUID taskId = constraint.getTaskId();
+        log.info("Constraint {} added on task {}", constraint.getConstraintId(), taskId);
 
-        Objects.requireNonNull(
-                taskId,
-                "taskId must not be null");
-
-        Objects.requireNonNull(
-                constraintId,
-                "constraintId must not be null");
-
+        requireTask(taskId);
+        boolean wasInserted = constraintRepository.save(constraint);
+        if (!wasInserted) {
+            log.debug("Constraint {} already existed on task {} - duplicate add, no-op",
+                    constraint.getConstraintId(), taskId);
+            return;
+        }
         updateCounters(
                 taskId,
-                task -> {
-                    Set<String> openIds = openConstraintIdsByTask
-                            .computeIfAbsent(taskId, id -> ConcurrentHashMap.newKeySet());
-
-                    if (!openIds.add(constraintId)) {
-                        log.debug("Constraint {} already tracked as open on task {} - duplicate add, no-op",
-                                constraintId, taskId);
-                        return task;
-                    }
-
-                    return withCounters(
-                            task,
-                            task.getBlockingCount(),
-                            task.getOpenConstraintCount() + 1);
-                });
+                task -> withCounters(
+                        task,
+                        task.getBlockingCount(),
+                        task.getOpenConstraintCount() + 1));
     }
 
+    /**
+     * Transitions {@code constraintId}'s status and, if this crosses the open/closed (PENDING)
+     * boundary, adjusts {@code taskId}'s {@code openConstraintCount}. Idempotent: the previous
+     * status comes from the repository (the DB itself), not a caller-supplied claim.
+     *
+     * <p>{@code constraintId} must belong to {@code taskId}: the repository matches on both, so a
+     * mismatched pair is rejected before anything is written.
+     *
+     * @throws NullPointerException if any argument is null
+     * @throws IllegalStateException if no constraint with this id belongs to this task
+     */
+    @Transactional
     public void onConstraintStatusChanged(
             UUID taskId,
             String constraintId,
-            Constraint.ConstraintStatus previousStatus,
-            Constraint.ConstraintStatus newStatus) {
+            Constraint.ConstraintStatus newStatus,
+            Map<String, Object> reason) {
 
-        Objects.requireNonNull(
-                taskId,
-                "taskId must not be null");
+        Objects.requireNonNull(taskId, "taskId must not be null");
+        Objects.requireNonNull(constraintId, "constraintId must not be null");
+        Objects.requireNonNull(newStatus, "newStatus must not be null");
 
-        Objects.requireNonNull(
-                constraintId,
-                "constraintId must not be null");
+        Constraint.ConstraintStatus previousStatus =
+                constraintRepository.updateStatus(taskId, constraintId, newStatus, reason, LocalDateTime.now());
 
-        Objects.requireNonNull(
-                previousStatus,
-                "previousStatus must not be null");
-
-        Objects.requireNonNull(
-                newStatus,
-                "newStatus must not be null");
-
-        boolean wasOpen =
-                previousStatus == Constraint.ConstraintStatus.PENDING;
-
-        boolean isOpenNow =
-                newStatus == Constraint.ConstraintStatus.PENDING;
-
+        boolean wasOpen = previousStatus == Constraint.ConstraintStatus.PENDING;
+        boolean isOpenNow = newStatus == Constraint.ConstraintStatus.PENDING;
         if (wasOpen == isOpenNow) {
-            // Still validates taskId, per this method's @throws contract, but skips updateCounters
-            // since the counter provably doesn't change.
-            requireTask(taskId);
+            log.debug("Constraint {} on task {} already reflects the {} -> {} transition - "
+                    + "duplicate event, no-op", constraintId, taskId, previousStatus, newStatus);
             return;
         }
 
+        int delta = isOpenNow ? 1 : -1;
         updateCounters(
                 taskId,
-                task -> {
-                    Set<String> openIds = openConstraintIdsByTask
-                            .computeIfAbsent(taskId, id -> ConcurrentHashMap.newKeySet());
-
-                    boolean currentlyTrackedOpen = openIds.contains(constraintId);
-
-                    if (currentlyTrackedOpen == isOpenNow) {
-                        log.debug("Constraint {} on task {} already reflects the {} -> {} transition - duplicate event, no-op",
-                                constraintId, taskId, previousStatus, newStatus);
-                        return task;
-                    }
-
-                    int delta;
-                    if (isOpenNow) {
-                        openIds.add(constraintId);
-                        delta = 1;
-                    } else {
-                        openIds.remove(constraintId);
-                        openConstraintIdsByTask.computeIfPresent(taskId, (id, ids) -> ids.isEmpty() ? null : ids);
-                        delta = -1;
-                    }
-
-                    return withCounters(
-                            task,
-                            task.getBlockingCount(),
-                            Math.max(0, task.getOpenConstraintCount() + delta));
-                });
+                task -> withCounters(
+                        task,
+                        task.getBlockingCount(),
+                        Math.max(0, task.getOpenConstraintCount() + delta)));
     }
 
     public TaskEligibilityResponse getTaskEligibility(UUID taskId) {

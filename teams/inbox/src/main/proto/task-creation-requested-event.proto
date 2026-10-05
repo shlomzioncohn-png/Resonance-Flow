@@ -1,0 +1,51 @@
+syntax = "proto3";
+
+package com.rnd.inbox.event;
+
+option java_package = "com.rnd.inbox.event";
+option java_multiple_files = true;
+
+import "google/protobuf/timestamp.proto";
+import "task-created-event.proto";
+
+message TaskCreationRequestedEvent {
+  optional string event_id = 1;
+  string correlation_id = 2;
+  string tenant_id = 3;
+  optional string project_id = 4;
+  string title = 5;
+  optional string description = 6;
+  SourceType source_type = 7;
+  string source_ref = 8;
+  optional TaskTier tier = 9;
+  optional TaskRoleContext role_context = 10;
+  optional int32 urgency = 11;
+  optional int32 effort_estimate_minutes = 12;
+  optional google.protobuf.Timestamp deadline = 13;
+  optional TaskStatus status = 14;
+  optional double confidence = 15;
+  optional bool has_dependencies = 16;
+  optional string created_by_user_id = 17;
+  repeated Assignee assignees = 18;
+}
+
+message Assignee {
+  AssigneeType assignee_type = 1;
+  string id = 2;
+  AssignmentRole assignment_role = 3;
+  optional string assigned_by = 4;
+}
+
+enum AssigneeType {
+  ASSIGNEE_TYPE_UNSPECIFIED = 0;
+  ASSIGNEE_TYPE_USER = 1;
+  ASSIGNEE_TYPE_TEAM = 2;
+}
+
+enum AssignmentRole {
+  ASSIGNMENT_ROLE_UNSPECIFIED = 0;
+  ASSIGNMENT_ROLE_OWNER = 1;
+  ASSIGNMENT_ROLE_ASSIGNEE = 2;
+  ASSIGNMENT_ROLE_RESPONSIBLE = 3;
+  ASSIGNMENT_ROLE_COLLABORATOR = 4;
+}

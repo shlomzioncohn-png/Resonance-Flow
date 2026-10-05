@@ -45,9 +45,11 @@ shared cluster/local Postgres instance (not the shared `postgres` superuser, not
 (`src/main/resources/db/migration/`); `Task`/`TaskDependency`/`DependencyHistoryEntry` stay plain
 DTOs, mapped to/from JPA entities entirely inside the `Postgres*Repository` adapters - no entity
 ever crosses a service boundary. `MockDataConfig`'s in-memory beans back off automatically
-(`@ConditionalOnMissingBean`) once a real `DataSource` is reachable. See
-[CLAUDE.md](CLAUDE.md) for prior rationale/open items. The idempotency store described below is
-still in-memory only, unaffected by this.
+(`@ConditionalOnMissingBean`) once a real `DataSource` is reachable. The `Constraint` repository
+is the exception to the JPA approach: plain JDBC (`JdbcTemplate`), per the team-lead decision of
+2026-09-17 (see "Constraint persistence" below). See [CLAUDE.md](CLAUDE.md) for prior
+rationale/open items. The idempotency store described below is still in-memory only, unaffected
+by this.
 
 Task identifiers are `java.util.UUID` for now, pending the Inbox team publishing its own task id
 type (`Task`/`TaskDependency` will switch to that type once it exists).
@@ -69,7 +71,8 @@ src/main/java/com/rnd/chain/
 ├── repository/             # TaskRepository / TaskDependencyRepository / DependencyHistoryRepository
 │                           # / TransactionRunner + in-memory impls, Postgres*Repository /
 │                           # JpaTransactionRunner (real impls), entity/ (JPA entities), jpa/
-│                           # (Spring Data interfaces)
+│                           # (Spring Data interfaces); ConstraintRepository +
+│                           # PostgresConstraintRepository (JDBC, issue #378)
 ├── dto/                    # Task, TaskDependency, TaskStatus, Constraint, ApiError,
 │                           # TaskResponse, TaskTraceResponse, ProcessedEvent (idempotency
 │                           # claim record)
@@ -86,9 +89,12 @@ src/main/java/com/rnd/chain/
 │                           # TaskNotFoundException/DuplicateDependencyException (adopted from
 │                           # Riki's branch - see the 2026-09-08 fixes below), plus
 │                           # DependencyNotFoundException/InvalidDependencyException (issue #66)
-└── config/                 # MockDataConfig - empty-seeded repository beans
+└── config/                 # MockDataConfig - empty-seeded repository beans;
+                            # ConstraintRepositoryConfig - the real Postgres-backed
+                            # ConstraintRepository bean (issue #378)
 src/main/resources/application.yml
-src/main/resources/db/migration/  # Flyway migrations (V1 schema, V2 dependency_history)
+src/main/resources/db/migration/  # Flyway migrations (V1 schema, V2 dependency_history,
+                                  # V3 task_constraint - issue #378)
 src/test/java/com/rnd/chain/
 ├── controller/ChainControllerTest.java
 ├── service/                # TaskTraversalServiceTest, TaskTraversalPerformanceTest,
@@ -101,7 +107,8 @@ src/test/java/com/rnd/chain/
 │                           # InMemoryTransactionRunnerTest, and the Postgres-backed equivalents
 │                           # (PostgresTaskRepositoryContractTest/Test, PostgresTaskDependencyRepositoryTest,
 │                           # PostgresDependencyHistoryRepositoryTest - need a real Postgres reachable, see
-│                           # "Tests" below)
+│                           # "Tests" below); PostgresConstraintRepositoryTest and
+│                           # PostgresConstraintRepositoryConcurrencyTest (issue #378, @Tag("postgres"))
 ├── dto/ConstraintTest.java, TaskTest.java, TaskDependencyTest.java,
 │                           # TaskTestFixtures.java (shared Task.Builder defaults)
 ├── events/                 # ChainEventConsumerTest, ChainEventConsumerIntegrationTest
@@ -556,13 +563,10 @@ two diverged, `main` is the base and this branch's changes are layered on top:
 - **Duplicate edges**: `addDependency` on an existing edge throws `DuplicateDependencyException`
   (mapped to HTTP 409 by `GlobalExceptionHandler`) before any task lookup or counter change. An
   event consumer retrying an already-applied edge should treat this exception as "already applied".
-- **Constraint tracking**: `onConstraintAdded(taskId, constraintId)` and
-  `onConstraintStatusChanged(taskId, constraintId, previous, new)` keep an in-memory ledger of open
-  constraint ids per task, so a redelivered event does not double-count `openConstraintCount`.
-  `ConstraintService` passes the constraint id.
-  - **Known gap**: the ledger has no restart story. After a restart it is empty, so closing a
-    constraint that was opened before the restart is ignored. Tracked under
-    `constraint-persistent-378`, which moves this state into the database.
+- **Constraint tracking** is persisted: `ConstraintService` saves the constraint, and
+  `TaskEligibilityService` uses the database to detect duplicates (`save` reports whether the row
+  was inserted) and to read the previous status (`updateStatus`). An in-memory ledger is not used,
+  so a restart does not lose track of open constraints (issue #378).
 - **Non-open constraint transitions** still validate `taskId` (`TaskNotFoundException`) before
   returning early.
 - `wouldCreateCycle` reads edges through `findByTaskIdUnderExternalLock` (it already runs under
@@ -652,6 +656,48 @@ double-click or client retry can hit a normal duplicate/not-found error.
 Same status as the dependency graph: Postgres-backed in production (`PostgresDependencyHistoryRepository`
 + `JpaTransactionRunner`), in-memory only as `MockDataConfig`'s fallback. The manual compensating
 action in `TaskDependencyService` was **not** removed - see "Dependency graph persistence" above.
+
+## Constraint persistence (Issue #378)
+
+`ConstraintRepository` / `PostgresConstraintRepository` (in `repository/`) give `Constraint` a
+real Postgres-backed store: `findByTaskId`, `findById`, `save`, `updateStatus`. Plain JDBC, not
+JPA - see "Stack" above. `reason` (`Map<String, Object>`) is stored as `jsonb`, converted via
+Jackson + `PGobject` (`toJsonb`/`fromJsonb`). `type`/`status` are `VARCHAR` + a `CHECK` constraint
+listing the valid enum values, not a native Postgres enum type - works identically regardless of
+persistence technology, and is simpler to extend later (`DROP`/`ADD CONSTRAINT` vs.
+`ALTER TYPE ... ADD VALUE`). Registered as a bean via `config/ConstraintRepositoryConfig.java` (a
+`@Bean` factory method, not `@Repository` directly on the class - the latter was tried first and
+silently failed to self-register; see [CLAUDE.md](CLAUDE.md) "Open items").
+
+**Depends on issue #377 (Task/TaskDependency Postgres persistence), which is not done yet.**
+`V1__create_task_constraint_table.sql`'s `task_id` column references `task(id)`, a table #377 is
+supposed to create - team decision: build the Constraint side now rather than wait, accepting
+that the migration won't apply (and `PostgresConstraintRepositoryTest` won't pass) until #377
+lands. Verified this is the actual failure mode (`Connection to localhost:5432 refused` locally,
+with no Postgres running yet either) - not a wiring bug.
+
+**Wired into `TaskEligibilityService`** (2026-09-22). `onConstraintAdded`/`onConstraintStatusChanged`
+persist through `ConstraintRepository` and derive whether `Task.openConstraintCount` actually needs
+adjusting from a DB-verified fact about the write itself, not a `SELECT COUNT(*)`, not the
+`+1`/`-1` delta pattern `blockingCount` uses, and not an in-memory idempotency ledger:
+
+- `save` reports whether Postgres genuinely inserted a new row, via `RETURNING (xmax = 0)` -
+  Postgres's own signal for "this row is new, not the result of the `ON CONFLICT` branch" - at no
+  extra query cost, since it rides along on the write that already has to happen.
+- `updateStatus` atomically returns the row's status immediately before this call (a CTE under
+  `FOR UPDATE`, read and written in one statement), so a redelivered status-change event is
+  detected from real state instead of a caller-supplied `previousStatus`.
+
+Write order is Postgres first, then the in-memory `Task` counter, never the reverse - a
+crash/failure between the two steps means a redelivered event re-runs the (idempotent) repository
+call, which correctly reports "already there," and the counter update proceeds correctly on
+retry. The reverse order is worse: skipping the repository call once a caller believes an event
+was "already handled" can permanently lose a `Constraint` row, not just delay a counter update.
+
+`onConstraintAdded` also validates the task exists (and isn't soft-deleted) before writing -
+`task_constraint`'s FK enforces existence at the DB level, but not soft-delete (a soft-deleted
+task still has a row); `TaskRepository#findById` already treats a soft-deleted task as not found,
+so calling it first is what actually satisfies #378's "non-existing, **non-deleted** task" wording.
 
 ## Code review fixes (2026-09-10, PR #251)
 

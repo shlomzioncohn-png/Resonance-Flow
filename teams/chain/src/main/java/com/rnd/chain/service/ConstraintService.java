@@ -56,9 +56,7 @@ public class ConstraintService {
                 now
         );
 
-        constraintRepository.save(constraint);
-
-        taskEligibilityService.onConstraintAdded(taskId, constraint.getConstraintId());
+        taskEligibilityService.onConstraintAdded(constraint);
 
         return constraint;
     }
@@ -77,19 +75,15 @@ public class ConstraintService {
                 .orElseThrow(() ->
                         new ConstraintNotFoundException(constraintId));
 
-        Constraint.ConstraintStatus previousStatus = constraint.getStatus();
-
-        constraint.setStatus(newStatus);
-        constraint.setUpdatedAt(LocalDateTime.now());
-
-        constraintRepository.save(constraint);
-
         taskEligibilityService.onConstraintStatusChanged(
                 taskId,
                 constraintId,
-                previousStatus,
-                newStatus
+                newStatus,
+                constraint.getReason()
         );
+
+        constraint.setStatus(newStatus);
+        constraint.setUpdatedAt(LocalDateTime.now());
 
         return constraint;
     }

@@ -14,6 +14,8 @@ inputs:
 runs:
   using: composite
   steps:
+    - uses: ./.github/actions/free-runner-disk
+
     - uses: azure/setup-helm@v5
 
     - name: Create kind cluster
@@ -74,7 +76,8 @@ runs:
           exit 1
         fi
         echo "::add-mask::$PG_PASSWORD"
-        PG_PASSWORD_URI=$(PW="$PG_PASSWORD" yq -n 'strenv(PW) | @uri')
+        # @uri is query-style (space -> "+"); libpq reads "+" literally, so use %20.
+        PG_PASSWORD_URI=$(PW="$PG_PASSWORD" yq -n 'strenv(PW) | @uri | sub("\+"; "%20")')
         kubectl -n "$SERVICE" port-forward "svc/$SVC" 5432:5432 &
         for i in $(seq 1 30); do
           if (echo > /dev/tcp/127.0.0.1/5432) >/dev/null 2>&1; then

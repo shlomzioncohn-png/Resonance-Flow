@@ -30,7 +30,7 @@ Fields are listed with their type, whether they are required, their foreign-key 
 | Topic | Decision |
 |---|---|
 | Team lead | One team lead per team, stored in `teams.team_lead_id`. |
-| Permissions | No granular RBAC/permissions schema at this stage. Keep a basic `users.role`; extend later if required. |
+| Permissions | No granular RBAC/permissions schema. `users.role` is a fixed enum (`system_admin` / `tenant_admin` / `team_lead` / `employee`) — it says which of these four kinds of user someone is, not a permissions model; extend later if a real RBAC schema is required. |
 | OTP storage | Do not assume Redis. Store an OTP hash and expiration in PostgreSQL unless a different architecture is approved. |
 | Task dependencies | Not stored in Inbox. Chain owns the dependency graph. |
 | Availability | `tasks.is_available` is materialized in Inbox and updated from Chain. |
@@ -71,7 +71,7 @@ Fields are listed with their type, whether they are required, their foreign-key 
 | `first_name` | VARCHAR(100) | No | — | User first name. |
 | `last_name` | VARCHAR(100) | No | — | User last name. |
 | `display_name` | VARCHAR(255) | Yes | — | Name displayed in the application. |
-| `role` | VARCHAR(50) | Yes | — | Basic organizational/application role. No granular permissions model at this stage. |
+| `role` | VARCHAR / ENUM | Yes | `system_admin / tenant_admin / team_lead / employee` | Basic organizational/application role. No granular permissions model at this stage. |
 | `status` | VARCHAR(30) | Yes | `pending / active / suspended / disabled` | User lifecycle status. |
 | `created_at` | TIMESTAMPTZ | Yes | DEFAULT `now()` | Creation timestamp. |
 | `updated_at` | TIMESTAMPTZ | Yes | DEFAULT `now()` | Last update timestamp. |
@@ -168,7 +168,7 @@ Fields are listed with their type, whether they are required, their foreign-key 
 | `project_id` | UUID | No | FK → `projects.id` | Project associated with the task. |
 | `title` | TEXT | Yes | — | Short task title. |
 | `description` | TEXT | No | — | Detailed task description. |
-| `source_type` | VARCHAR / ENUM | Yes | `github_issue / github_pr / crm_deal / email / slack / whatsapp / meeting / doc / scanned_doc / calendar / manual` | Original source of the task. |
+| `source_type` | VARCHAR / ENUM | Yes | `github_issue / github_pr / crm_deal / email / slack / whatsapp / meeting / doc / scanned_doc / calendar / manual / jira_issue` | Original source of the task. |
 | `source_ref` | TEXT | No | — | Reference to the original source, such as URL, message ID, or issue ID. |
 | `correlation_id` | UUID | No | — | Request/response correlation value used by Mind on the unstructured creation path (`task.creation.requested` → `task.created`). NULL for tasks created via the structured path (Bridge) or manually. Technical field, not a business attribute. |
 | `tier` | VARCHAR / ENUM | No | `operational / tactical / strategic` | Task level used by Mind for tier-specific classification/ranking. May be NULL before classification. |
@@ -186,7 +186,7 @@ Fields are listed with their type, whether they are required, their foreign-key 
 | `effort_estimate_confidence` | REAL | No | CHECK `0..1` | Confidence score for the ML-inferred `effort_estimate_minutes` value. |
 | `suggested_owner_user_id` | UUID | No | FK → `users.id` | ML-suggested owner proposed by Mind. Distinct from `owner_id`, which is the confirmed accountable owner — this is a proposal, not a decision. |
 | `suggested_owner_confidence` | REAL | No | CHECK `0..1` | Confidence score for `suggested_owner_user_id`. |
-| `created_by` | UUID | No | FK → `users.id` | User who manually created the task; NULL for automatically created tasks. |
+| `created_by` | UUID | No | FK → `users.id` | User who created the task. Sent by the originating system on every ingestion path — Bridge (`bridge.*.tasks`) and Mind (`task.creation.requested`) each include the acting user's id, same as manual creation. NULL only when the source has no identifiable user (e.g. a fully automated integration with no acting user). |
 | `created_at` | TIMESTAMPTZ | Yes | DEFAULT `now()` | Creation timestamp. |
 | `updated_at` | TIMESTAMPTZ | Yes | DEFAULT `now()` | Last update timestamp. |
 | `completed_at` | TIMESTAMPTZ | No | — | Completion timestamp. `is_completed` is intentionally not stored because `status = 'done'` is the source of truth. |

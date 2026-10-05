@@ -73,8 +73,7 @@ class ConstraintServiceTest {
                 created.getStatus()
         );
 
-        verify(constraintRepository).save(created);
-        verify(taskEligibilityService).onConstraintAdded(eq(taskId), anyString());
+        verify(taskEligibilityService).onConstraintAdded(created);
     }
 
     @Test
@@ -96,7 +95,7 @@ class ConstraintServiceTest {
         );
 
         verify(constraintRepository, never()).save(any());
-        verify(taskEligibilityService, never()).onConstraintAdded(any(), any());
+        verify(taskEligibilityService, never()).onConstraintAdded(any());
     }
 
     @Test
@@ -124,13 +123,11 @@ class ConstraintServiceTest {
                 updated.getStatus()
         );
 
-        verify(constraintRepository).save(constraint);
-
         verify(taskEligibilityService).onConstraintStatusChanged(
                 taskId,
                 "constraint-1",
-                Constraint.ConstraintStatus.PENDING,
-                Constraint.ConstraintStatus.SATISFIED
+                Constraint.ConstraintStatus.SATISFIED,
+                constraint.getReason()
         );
     }
 

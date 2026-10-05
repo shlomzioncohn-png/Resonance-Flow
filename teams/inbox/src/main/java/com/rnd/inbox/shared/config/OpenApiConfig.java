@@ -1,5 +1,8 @@
 package com.rnd.inbox.shared.config;
 
+import com.rnd.inbox.task.model.Task;
+import com.rnd.inbox.team.model.Team;
+import com.rnd.inbox.user.model.User;
 import com.rnd.inbox.shared.dto.ErrorResponseDto;
 import io.swagger.v3.oas.models.OpenAPI;
 import io.swagger.v3.oas.models.Operation;
