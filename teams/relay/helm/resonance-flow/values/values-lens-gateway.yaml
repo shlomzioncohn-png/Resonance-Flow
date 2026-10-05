@@ -21,4 +21,7 @@ kafka:
 minio:
   enabled: false
 postgresql:
-  enabled: false
+  # Keycloak's database (lens-gateway waits for Keycloak - see wait-for-keycloak).
+  enabled: true
+keycloak:
+  enabled: true

@@ -1,0 +1,15 @@
+{{- if .Values.keycloak.enabled }}
+---
+apiVersion: v1
+kind: ConfigMap
+
+metadata:
+  # Mounted into Keycloak's import dir via keycloak.extraVolumes in values.yaml.
+  name: {{ .Release.Name }}-keycloak-realm
+  labels:
+    {{- include "resonance-flow.labels" . | nindent 4 }}
+    app.kubernetes.io/component: keycloak
+
+data:
+  {{- (.Files.Glob "files/keycloak/*.json").AsConfig | nindent 2 }}
+{{- end }}

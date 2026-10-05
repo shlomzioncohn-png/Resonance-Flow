@@ -1,0 +1,34 @@
+{
+  "realm": "lens",
+  "displayName": "LENS (placeholder - replace with the realm export from the LENS team)",
+  "enabled": true,
+  "accessTokenLifespan": 300,
+  "roles": {
+    "realm": [
+      { "name": "employee" }
+    ]
+  },
+  "clients": [
+    {
+      "clientId": "lens-dev-cli",
+      "enabled": true,
+      "publicClient": true,
+      "directAccessGrantsEnabled": true,
+      "standardFlowEnabled": false
+    }
+  ],
+  "users": [
+    {
+      "username": "employee1",
+      "enabled": true,
+      "email": "employee1@example.com",
+      "emailVerified": true,
+      "firstName": "Employee",
+      "lastName": "One",
+      "credentials": [
+        { "type": "password", "value": "employee1", "temporary": false }
+      ],
+      "realmRoles": ["employee"]
+    }
+  ]
+}
