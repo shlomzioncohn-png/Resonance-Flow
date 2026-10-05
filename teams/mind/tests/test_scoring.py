@@ -13,6 +13,7 @@ import pytest
 
 from mind.evaluation.interfaces import ScoreContext, Task, Tier
 from mind.scoring.factors import FACTOR_NAMES, Factor
+from mind.scoring.features import impact
 from mind.scoring.segmented_model import (
     BLOCKED_CEILING,
     TIER_RULES,
@@ -291,3 +292,59 @@ def test_score_stays_within_zero_and_one_at_the_extremes() -> None:
         )
 
         assert 0.0 <= result.score <= 1.0
+
+
+# --- the lexicons read words, not letter sequences ---------------------------
+#
+# The phrases are matched with a word boundary, so an impact keyword cannot be
+# collected from inside an unrelated word. This is not cosmetic: "board" fired
+# inside "dashboard" and "onboarding", which handed +0.15 impact to three of the
+# deliberately low-stakes tasks in the persona set, i.e. to exactly the tasks the
+# ranking has to push down.
+
+NEUTRAL = "A task with no particular signals in its wording."
+
+
+@pytest.mark.parametrize(
+    "wording",
+    [
+        "Start the order-history dashboard widget",
+        "Refresh the onboarding wiki page",
+        "Replace the keyboard shortcuts help",
+        "Post it on the team whiteboard",
+        "Answer the question in slack",
+        "Translate the error messages",
+    ],
+)
+def test_impact_keyword_does_not_fire_inside_a_longer_word(wording: str) -> None:
+    """Both "board" and "sla" are whole words; dashboard and slack are not about them."""
+    assert impact(make_task(title=wording, description=NEUTRAL)) == pytest.approx(
+        impact(make_task(title="Do the thing", description=NEUTRAL))
+    )
+
+
+@pytest.mark.parametrize("wording", ["Prepare the board deck", "The SLA expires at noon"])
+def test_impact_keyword_still_fires_as_a_whole_word(wording: str) -> None:
+    """The word boundary removes the false matches without removing the real one."""
+    assert impact(make_task(title=wording, description=NEUTRAL)) > impact(
+        make_task(title="Do the thing", description=NEUTRAL)
+    )
+
+
+@pytest.mark.parametrize(
+    "wording",
+    [
+        "Support escalated it this morning",
+        "Two customers reported it",
+        "The regulators asked for it",
+        "Repeated outages this week",
+        "Our investors are asking",
+        "A competitor announced it",
+        "The job is corrupting rows",
+    ],
+)
+def test_stem_entries_still_match_longer_words(wording: str) -> None:
+    """Entries marked `*` are prefixes on purpose and must keep their inflections."""
+    assert impact(make_task(title=wording, description=NEUTRAL)) > impact(
+        make_task(title="Do the thing", description=NEUTRAL)
+    )

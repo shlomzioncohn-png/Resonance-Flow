@@ -11,7 +11,7 @@ from __future__ import annotations
 from datetime import datetime
 
 from mind.evaluation.interfaces import Task
-from mind.scoring.keywords import IMPACT_BASE, IMPACT_PHRASES, URGENCY_PHRASES
+from mind.scoring.keywords import IMPACT_BASE, IMPACT_MATCHERS, URGENCY_MATCHERS
 
 #: An effort estimate at or above this many minutes earns no quick-win credit.
 #: 120 minutes is roughly the largest `effort_estimate` the persona set uses, so
@@ -61,7 +61,7 @@ def stated_urgency(task: Task) -> float:
     volume outrank an actual timestamp.
     """
     text = task_text(task)
-    matched = [weight for phrase, weight in URGENCY_PHRASES.items() if phrase in text]
+    matched = [weight for pattern, weight in URGENCY_MATCHERS if pattern.search(text)]
     return max(matched, default=0.0)
 
 
@@ -91,7 +91,7 @@ def impact(task: Task) -> float:
     reading as worthless.
     """
     text = task_text(task)
-    total = IMPACT_BASE + sum(w for phrase, w in IMPACT_PHRASES.items() if phrase in text)
+    total = IMPACT_BASE + sum(w for pattern, w in IMPACT_MATCHERS if pattern.search(text))
     return min(1.0, max(0.0, total))
 
 
