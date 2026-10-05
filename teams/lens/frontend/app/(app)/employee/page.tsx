@@ -233,9 +233,11 @@ export default function EmployeeWorkspacePage() {
                         data-testid="task-priority"
                       />
                     </Stack>
-                    <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-                      {task.project}
-                    </Typography>
+                    {task.project && (
+                      <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+                        {task.project}
+                      </Typography>
+                    )}
 
                     <Stack spacing={0.75} sx={{ mb: 3 }}>
                       <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
@@ -318,9 +320,11 @@ export default function EmployeeWorkspacePage() {
                     sx={[softToneSx(statusTone(task.status)), { fontWeight: 600 }]}
                   />
                 </Stack>
-                <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-                  {task.project}
-                </Typography>
+                {task.project && (
+                  <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+                    {task.project}
+                  </Typography>
+                )}
 
                 <Stack direction="row" spacing={1} sx={{ flexWrap: 'wrap', mb: 3 }}>
                   <Chip
@@ -352,26 +356,33 @@ export default function EmployeeWorkspacePage() {
                   <DetailRow
                     label="Owner"
                     value={
-                      <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
-                        <Avatar
-                          sx={{
-                            width: 24,
-                            height: 24,
-                            bgcolor: (theme) => alpha(theme.palette.primary.main, 0.12),
-                            color: 'primary.main',
-                          }}
-                        >
-                          <PersonOutlineIcon sx={{ fontSize: 16 }} />
-                        </Avatar>
-                        <span data-testid="task-owner">{task.owner}</span>
-                      </Stack>
+                      task.owner ? (
+                        <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
+                          <Avatar
+                            sx={{
+                              width: 24,
+                              height: 24,
+                              bgcolor: (theme) => alpha(theme.palette.primary.main, 0.12),
+                              color: 'primary.main',
+                            }}
+                          >
+                            <PersonOutlineIcon sx={{ fontSize: 16 }} />
+                          </Avatar>
+                          <span data-testid="task-owner">{task.owner}</span>
+                        </Stack>
+                      ) : (
+                        '—'
+                      )
                     }
                   />
                   {task.dueDate && (
                     <DetailRow label="Due" value={new Date(task.dueDate).toLocaleString()} />
                   )}
-                  <DetailRow label="Estimated effort" value={`${task.effortEstimate} min`} />
-                  <DetailRow label="Project" value={task.project} />
+                  <DetailRow
+                    label="Estimated effort"
+                    value={task.effortEstimate != null ? `${task.effortEstimate} min` : '—'}
+                  />
+                  <DetailRow label="Project" value={task.project ?? '—'} />
                   {(task.constraints ?? []).length > 0 && (
                     <DetailRow label="Constraints" value={(task.constraints ?? []).join(', ')} />
                   )}

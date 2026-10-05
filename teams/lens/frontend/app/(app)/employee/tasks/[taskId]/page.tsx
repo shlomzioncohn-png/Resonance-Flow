@@ -118,9 +118,11 @@ export default function TaskDetailsPage({ params }: { params: Promise<{ taskId: 
               sx={[softToneSx(statusTone(task.status)), { fontWeight: 600 }]}
             />
           </Stack>
-          <Typography variant="body1" color="text.secondary">
-            {task.project}
-          </Typography>
+          {task.project && (
+            <Typography variant="body1" color="text.secondary">
+              {task.project}
+            </Typography>
+          )}
         </Box>
       </Stack>
 
@@ -159,19 +161,23 @@ export default function TaskDetailsPage({ params }: { params: Promise<{ taskId: 
                   <DetailRow
                     label="Owner"
                     value={
-                      <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
-                        <Avatar
-                          sx={{
-                            width: 24,
-                            height: 24,
-                            bgcolor: (theme) => alpha(theme.palette.primary.main, 0.12),
-                            color: 'primary.main',
-                          }}
-                        >
-                          <PersonOutlineIcon sx={{ fontSize: 16 }} />
-                        </Avatar>
-                        {task.owner}
-                      </Stack>
+                      task.owner ? (
+                        <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
+                          <Avatar
+                            sx={{
+                              width: 24,
+                              height: 24,
+                              bgcolor: (theme) => alpha(theme.palette.primary.main, 0.12),
+                              color: 'primary.main',
+                            }}
+                          >
+                            <PersonOutlineIcon sx={{ fontSize: 16 }} />
+                          </Avatar>
+                          {task.owner}
+                        </Stack>
+                      ) : (
+                        '—'
+                      )
                     }
                   />
                   {task.dueDate && (
@@ -185,7 +191,7 @@ export default function TaskDetailsPage({ params }: { params: Promise<{ taskId: 
                     label="Estimated effort"
                     value={task.effortEstimate != null ? `${task.effortEstimate} min` : '—'}
                   />
-                  <DetailRow label="Project" value={task.project} />
+                  <DetailRow label="Project" value={task.project ?? '—'} />
                   {(task.constraints ?? []).length > 0 && (
                     <DetailRow label="Constraints" value={(task.constraints ?? []).join(', ')} />
                   )}

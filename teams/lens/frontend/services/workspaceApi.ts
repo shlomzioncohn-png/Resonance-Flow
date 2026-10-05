@@ -30,8 +30,9 @@ export interface ApiTask {
   effortEstimate: number;
   /** ISO-8601 datetime string */
   dueDate?: string;
-  owner: string;
-  project: string;
+  /** Display names. Missing for real Inbox tasks: Inbox only sends ids so far. */
+  owner?: string;
+  project?: string;
   /** IDs of tasks this task depends on */
   dependencies?: string[];
   /** Blocker labels, e.g. "approval_needed" */

@@ -24,9 +24,11 @@ const columns: DataTableColumn<ApiTask>[] = [
         <Typography variant="body2" sx={{ fontWeight: 600 }}>
           {task.title}
         </Typography>
-        <Typography variant="caption" color="text.secondary">
-          {task.project}
-        </Typography>
+        {task.project && (
+          <Typography variant="caption" color="text.secondary">
+            {task.project}
+          </Typography>
+        )}
       </Stack>
     ),
   },
@@ -47,7 +49,7 @@ const columns: DataTableColumn<ApiTask>[] = [
   {
     key: 'owner',
     header: 'Owner',
-    render: (task) => task.owner,
+    render: (task) => task.owner ?? '—',
   },
   {
     key: 'due',
