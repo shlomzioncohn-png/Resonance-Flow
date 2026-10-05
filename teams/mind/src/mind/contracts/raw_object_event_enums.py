@@ -3,17 +3,6 @@
 from enum import Enum
 
 
-class SourceType(str, Enum):
-    """Business origin of the object."""
-
-    EMAIL = "EMAIL"
-    SLACK = "SLACK"
-    WHATSAPP = "WHATSAPP"
-    DRIVE = "DRIVE"
-    CALENDAR = "CALENDAR"
-    MEETING = "MEETING"
-
-
 class ScopeDecision(str, Enum):
     """Bridge work-relevance decision."""
 
@@ -24,6 +13,12 @@ class ScopeDecision(str, Enum):
 class Modality(str, Enum):
     """Technical routing hint supplied by Bridge."""
 
-    AUDIO = "audio"
-    SCANNED_DOC = "scanned_doc"
-    TEXT = "text"
+    AUDIO = "AUDIO"
+    SCANNED_DOC = "SCANNED_DOC"
+    TEXT = "TEXT"
+    
+class ChangeType(str, Enum):
+    """Type of source-object change reported by Bridge."""
+
+    UPSERT = "UPSERT"
+    DELETE_REVIEW = "DELETE_REVIEW"

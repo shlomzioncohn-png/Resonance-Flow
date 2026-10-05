@@ -1,5 +1,7 @@
 package com.rnd.chain.events;
 
+import com.rnd.chain.exception.InvalidDependencyException;
+import com.rnd.chain.exception.TaskNotFoundException;
 import com.rnd.chain.service.TaskEligibilityService;
 import com.rnd.mind.event.DependencyProposedEvent;
 import org.springframework.kafka.annotation.KafkaListener;
@@ -91,14 +93,14 @@ public class DependencyProposedEventHandler {
     private void addDependencies(UUID taskId, List<UUID> dependsOnTaskIds) {
         try {
             taskEligibilityService.addDependencies(taskId, dependsOnTaskIds);
-        } catch (IllegalArgumentException e) {
+        } catch (TaskNotFoundException e) {
             // Task not found - task_id or one of the dependsOnTaskIds hasn't landed via
             // task.created yet. The team spec guarantees Mind only ever sends final, valid ids,
             // so this is always a timing gap, never a genuinely invalid reference - retryable,
             // see class Javadoc. Which specific id was missing is in e's message/cause.
             throw new ReferencedTaskNotFoundException(
                     "task.dependencies.proposed referenced a task Chain hasn't seen yet (task=" + taskId + ")", e);
-        } catch (IllegalStateException e) {
+        } catch (InvalidDependencyException e) {
             // Cycle detected - a structural problem with the data itself, not a timing issue.
             // Retrying won't help, straight to the error topic. Which pair would have cycled is
             // in e's message.

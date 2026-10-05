@@ -114,6 +114,11 @@ class TaskCreatedEventHandlerTest {
             public Optional<Task> update(UUID id, UnaryOperator<Task> mutator) {
                 return Optional.empty();
             }
+
+            @Override
+            public List<Task> updateAll(List<UUID> ids, UnaryOperator<Task> mutator) {
+                return List.of();
+            }
         };
         TaskCreatedEventHandler handler = new TaskCreatedEventHandler(failingRepository, newTemplate());
         TaskCreatedEvent event = eventFor(UUID.randomUUID(), "owner-1").build();

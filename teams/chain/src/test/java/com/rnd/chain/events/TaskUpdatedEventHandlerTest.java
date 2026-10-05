@@ -4,6 +4,9 @@ import com.google.protobuf.Timestamp;
 import com.rnd.chain.dto.Task;
 import com.rnd.chain.dto.TaskDependency;
 import com.rnd.chain.dto.TaskStatus;
+import com.rnd.chain.repository.InMemoryConstraintRepository;
+import com.rnd.chain.service.SchedulingUpdateService;
+import static org.mockito.Mockito.mock;
 import com.rnd.chain.repository.InMemoryTaskDependencyRepository;
 import com.rnd.chain.repository.InMemoryTaskRepository;
 import com.rnd.chain.service.TaskEligibilityService;
@@ -46,7 +49,8 @@ class TaskUpdatedEventHandlerTest {
     private static Fixture newFixture(List<Task> tasks, List<TaskDependency> edges) {
         InMemoryTaskRepository taskRepo = new InMemoryTaskRepository(tasks);
         InMemoryTaskDependencyRepository dependencyRepo = new InMemoryTaskDependencyRepository(edges);
-        TaskEligibilityService eligibilityService = new TaskEligibilityService(taskRepo, dependencyRepo);
+        TaskEligibilityService eligibilityService = new TaskEligibilityService(taskRepo, dependencyRepo,
+                mock(SchedulingUpdateService.class), new InMemoryConstraintRepository());
         ChainEventProcessingTemplate template = new ChainEventProcessingTemplate(new InMemoryProcessedEventStore());
         return new Fixture(taskRepo, new TaskUpdatedEventHandler(eligibilityService, template));
     }

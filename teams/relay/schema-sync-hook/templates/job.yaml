@@ -72,6 +72,8 @@ spec:
             items:
               - key: schemas.tsv
                 path: schemas.tsv
+              - key: compatibility-level
+                path: compatibility-level
         - name: schemas
           configMap:
             name: {{ include "schema-sync-hook.fullname" . }}-schemas

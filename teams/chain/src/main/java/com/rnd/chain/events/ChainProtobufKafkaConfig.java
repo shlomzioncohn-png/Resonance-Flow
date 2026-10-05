@@ -1,5 +1,6 @@
 package com.rnd.chain.events;
 
+import com.rnd.chain.event.TaskSchedulingUpdatedEvent;
 import com.rnd.inbox.event.TaskCreatedEvent;
 import com.rnd.inbox.event.TaskUpdatedEvent;
 import com.rnd.mind.event.DependencyProposedEvent;
@@ -24,6 +25,7 @@ import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.kafka.core.ProducerFactory;
 import org.springframework.kafka.listener.ContainerProperties;
 import org.springframework.kafka.support.serializer.ErrorHandlingDeserializer;
+import org.springframework.kafka.support.serializer.JsonSerializer;
 
 import java.util.HashMap;
 import java.util.Map;
@@ -199,6 +201,18 @@ public class ChainProtobufKafkaConfig {
         Map<String, Object> props = new HashMap<>(kafkaProperties.buildProducerProperties());
         props.put(ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG, StringSerializer.class);
         props.put(ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG, StringSerializer.class);
+        return new KafkaTemplate<>(new DefaultKafkaProducerFactory<>(props));
+    }
+
+    /**
+     * Template for the live task.scheduling.updated publisher in com.rnd.chain.event. Interim JSON
+     * wire format until the Protobuf contract is settled (#545); remove or switch when it is.
+     */
+    @Bean
+    public KafkaTemplate<String, TaskSchedulingUpdatedEvent> taskSchedulingUpdatedEventKafkaTemplate() {
+        Map<String, Object> props = new HashMap<>(kafkaProperties.buildProducerProperties());
+        props.put(ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG, StringSerializer.class);
+        props.put(ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG, JsonSerializer.class);
         return new KafkaTemplate<>(new DefaultKafkaProducerFactory<>(props));
     }
 }

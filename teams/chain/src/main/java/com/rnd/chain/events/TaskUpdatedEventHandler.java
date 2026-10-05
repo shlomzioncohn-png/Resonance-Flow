@@ -2,6 +2,7 @@ package com.rnd.chain.events;
 
 import com.rnd.chain.dto.Task;
 import com.rnd.chain.dto.TaskStatus;
+import com.rnd.chain.exception.TaskNotFoundException;
 import com.rnd.chain.service.TaskEligibilityService;
 import com.rnd.inbox.event.TaskUpdatedEvent;
 import org.springframework.kafka.annotation.KafkaListener;
@@ -81,7 +82,7 @@ public class TaskUpdatedEventHandler {
     private void apply(UUID taskId, TaskStatus newStatus, LocalDateTime eventUpdatedAt) {
         try {
             taskEligibilityService.onTaskStatusChangedIfNewer(taskId, newStatus, eventUpdatedAt);
-        } catch (IllegalArgumentException e) {
+        } catch (TaskNotFoundException e) {
             throw new ReferencedTaskNotFoundException(
                     "task.updated referenced a task Chain hasn't seen yet: " + taskId, e);
         } catch (RuntimeException e) {

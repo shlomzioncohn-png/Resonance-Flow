@@ -1,0 +1,43 @@
+{
+  "scenario_id": "ceo_regulator_call_vs_board_prep",
+  "persona": {
+    "role": "CEO",
+    "department": null
+  },
+  "context": {
+    "free_time_minutes": 55,
+    "current_datetime": "2026-09-07T09:00:00",
+    "time_horizon": "today",
+    "constraints": []
+  },
+  "tasks": [
+    {
+      "task_id": "task_board",
+      "title": "Finalize Thursday's board prep",
+      "description": "Pull together your notes for the board session on Thursday, three days away; the pack is due to members the evening before.",
+      "deadline": "2026-09-09T18:00:00",
+      "effort_estimate": 45,
+      "tier": "strategic",
+      "blocked": false,
+      "parent_task_id": null
+    },
+    {
+      "task_id": "task_regulator",
+      "title": "Send the regulator your licence-review responses",
+      "description": "The regulator's office asked for your written answers to their licence-review questions ahead of a call at 11:00 today; if the responses are not filed by 10:45 the review slips to next month.",
+      "deadline": "2026-09-07T10:45:00",
+      "effort_estimate": 30,
+      "tier": "strategic",
+      "blocked": false,
+      "parent_task_id": null
+    }
+  ],
+  "expected_top_task_id": "task_regulator",
+  "expected_reason": "task_regulator and task_board are both strategic with hard deadlines, but task_regulator's responses are due within two hours while task_board's pack is not due until the evening before Thursday's session.",
+  "source": {
+    "type": "synthetic",
+    "source_detail": null
+  },
+  "team_lead_approved": true,
+  "mentor_approved": false
+}

@@ -3,6 +3,9 @@ package com.rnd.chain.events;
 import com.rnd.chain.dto.Task;
 import com.rnd.chain.dto.TaskDependency;
 import com.rnd.chain.dto.TaskStatus;
+import com.rnd.chain.repository.InMemoryConstraintRepository;
+import com.rnd.chain.service.SchedulingUpdateService;
+import static org.mockito.Mockito.mock;
 import com.rnd.chain.repository.InMemoryTaskDependencyRepository;
 import com.rnd.chain.repository.InMemoryTaskRepository;
 import com.rnd.chain.service.TaskEligibilityService;
@@ -36,7 +39,8 @@ class DependencyProposedEventHandlerTest {
     private static Fixture newFixture(List<Task> tasks) {
         InMemoryTaskRepository taskRepo = new InMemoryTaskRepository(tasks);
         InMemoryTaskDependencyRepository dependencyRepo = new InMemoryTaskDependencyRepository(List.of());
-        TaskEligibilityService eligibilityService = new TaskEligibilityService(taskRepo, dependencyRepo);
+        TaskEligibilityService eligibilityService = new TaskEligibilityService(taskRepo, dependencyRepo,
+                mock(SchedulingUpdateService.class), new InMemoryConstraintRepository());
         ChainEventProcessingTemplate template = new ChainEventProcessingTemplate(new InMemoryProcessedEventStore());
         return new Fixture(taskRepo, new DependencyProposedEventHandler(eligibilityService, template));
     }
@@ -101,7 +105,8 @@ class DependencyProposedEventHandlerTest {
         // B already depends on A - proposing A depends on B would close a cycle.
         InMemoryTaskDependencyRepository dependencyRepo =
                 new InMemoryTaskDependencyRepository(List.of(new TaskDependency(taskB, taskA)));
-        TaskEligibilityService eligibilityService = new TaskEligibilityService(taskRepo, dependencyRepo);
+        TaskEligibilityService eligibilityService = new TaskEligibilityService(taskRepo, dependencyRepo,
+                mock(SchedulingUpdateService.class), new InMemoryConstraintRepository());
         ChainEventProcessingTemplate template = new ChainEventProcessingTemplate(new InMemoryProcessedEventStore());
         DependencyProposedEventHandler handler = new DependencyProposedEventHandler(eligibilityService, template);
 
@@ -126,7 +131,8 @@ class DependencyProposedEventHandlerTest {
         InMemoryTaskRepository taskRepo = new InMemoryTaskRepository(List.of(buildTask(taskB), buildTask(taskC)));
         InMemoryTaskDependencyRepository dependencyRepo =
                 new InMemoryTaskDependencyRepository(List.of(new TaskDependency(taskA, taskB)));
-        TaskEligibilityService eligibilityService = new TaskEligibilityService(taskRepo, dependencyRepo);
+        TaskEligibilityService eligibilityService = new TaskEligibilityService(taskRepo, dependencyRepo,
+                mock(SchedulingUpdateService.class), new InMemoryConstraintRepository());
         ChainEventProcessingTemplate template = new ChainEventProcessingTemplate(new InMemoryProcessedEventStore());
         DependencyProposedEventHandler handler = new DependencyProposedEventHandler(eligibilityService, template);
 
