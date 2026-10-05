@@ -102,6 +102,7 @@ message TaskCreatedEvent {
   optional string created_by = 18;                   // UUID as string. Nullable - see note above.
   google.protobuf.Timestamp created_at = 19;
   optional google.protobuf.Struct metadata = 20;     // Free-form JSONB - see note above.
+  optional string owner_id = 21;                     // UUID as string.
 }
 
 enum SourceType {

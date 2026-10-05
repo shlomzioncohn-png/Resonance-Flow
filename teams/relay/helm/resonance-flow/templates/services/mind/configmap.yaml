@@ -8,7 +8,7 @@
 data:
   config.yaml: |
     vector_store:
-      url: {{ printf "%s:%s" (include "resonance-flow.dependencyHostByName" (dict "root" $ "deps" $component.dependencies "name" "postgresql")) (include "resonance-flow.dependencyPort" (dict "deps" $component.dependencies "name" "postgresql")) | quote }}
+      url: {{ include "resonance-flow.dependencyAddress" (dict "root" $ "deps" $component.dependencies "name" "postgresql") | quote }}
       user: {{ $cfg.vector_store.user | quote }}
       db: {{ $cfg.vector_store.db | quote }}
     llm:
@@ -20,11 +20,11 @@ data:
       provider: {{ $cfg.asr.provider | quote }}
       whisper_model: {{ $cfg.asr.whisper_model | quote }}
     object_storage:
-      endpoint: {{ printf "http://%s:%s" (include "resonance-flow.dependencyHostByName" (dict "root" $ "deps" $component.dependencies "name" "minio")) (include "resonance-flow.dependencyPort" (dict "deps" $component.dependencies "name" "minio")) | quote }}
+      endpoint: {{ printf "http://%s" (include "resonance-flow.dependencyAddress" (dict "root" $ "deps" $component.dependencies "name" "minio")) | quote }}
       bucket: {{ $cfg.object_storage.bucket | quote }}
     kafka:
-      bootstrap_servers: {{ printf "%s:%s" (include "resonance-flow.dependencyHostByName" (dict "root" $ "deps" $.Values.dependencies "name" "kafka")) (include "resonance-flow.dependencyPort" (dict "deps" $.Values.dependencies "name" "kafka")) | quote }}
-      schema_registry_url: {{ printf "http://%s:%s/apis/ccompat/v6" (include "resonance-flow.dependencyHostByName" (dict "root" $ "deps" $component.dependencies "name" "schema-registry")) (include "resonance-flow.dependencyPort" (dict "deps" $component.dependencies "name" "schema-registry")) | quote }}
+      bootstrap_servers: {{ include "resonance-flow.dependencyAddress" (dict "root" $ "deps" $.Values.dependencies "name" "kafka") | quote }}
+      schema_registry_url: {{ printf "http://%s/apis/ccompat/v6" (include "resonance-flow.dependencyAddress" (dict "root" $ "deps" $component.dependencies "name" "schema-registry")) | quote }}
       producer:
         task_creation_requested_topic: {{ $cfg.kafka.producer.task_creation_requested_topic | quote }}
     service:

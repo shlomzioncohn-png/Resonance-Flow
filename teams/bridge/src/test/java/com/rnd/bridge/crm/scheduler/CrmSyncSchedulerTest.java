@@ -35,7 +35,7 @@ class CrmSyncSchedulerTest {
 
         scheduler.syncCrmTasks();
 
-        verify(crmLane, never()).run(any(), any());
+        verify(crmLane, never()).run(any(ReadCursor.class), any());
     }
 
     @Test

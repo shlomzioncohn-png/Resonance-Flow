@@ -1,8 +1,8 @@
 {{- range $componentName, $component := .Values.components }}
 {{/*
 inbox, chain, mind and notification-delivery each render their own ConfigMap
-(templates/services/{inbox,chain,mind}/, templates/service-notification-delivery/)
-instead - their config needs the dependencyHostByName/kafkaSaslJaasConfig helpers computed at
+(templates/services/{inbox,chain,mind}/, templates/service-notification-delivery/) instead -
+their config needs the dependencyAddress/kafkaSaslJaasConfig helpers computed at
 render time, which this loop can't do (it just re-serializes values.yaml's static
 $component.config as-is).
 */}}
