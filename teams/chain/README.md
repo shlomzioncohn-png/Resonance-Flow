@@ -174,6 +174,10 @@ validated against the Schema Registry at `SCHEMA_REGISTRY_URL`. Tests use a mock
 Retry attempts and backoff are not properties. Each handler sets them on its own `@RetryableTopic`
 annotation.
 
+Broker security (SASL, TLS) is set through Spring's `spring.kafka.properties.*`, for example
+`spring.kafka.properties.security.protocol=SASL_PLAINTEXT`. Every consumer factory and producer
+template starts from those properties, so the same settings apply everywhere.
+
 ## Running locally with Maven
 
 Requires a local Maven installation (`mvn`) and JDK 21.
