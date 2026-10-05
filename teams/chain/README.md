@@ -546,6 +546,34 @@ Flyway/Hibernate need a live connection. Bring one up via `docker compose up pos
 repo root (creates the `chain` database/user on first init - see
 `shared/database/init/create-chain-database.sh`), or point at any reachable Postgres instance.
 
+## Merge with main (2026-10-05)
+
+This branch merges `origin/main` (Postgres persistence, `ChainController`, events). Where the
+two diverged, `main` is the base and this branch's changes are layered on top:
+
+- **Lombok stays on `Task`/`Constraint`** (team lead's instruction). `TaskDependency` is now the
+  `main` record, since `main`'s persistence and traversal code call its record accessors.
+- **Duplicate edges**: `addDependency` on an existing edge throws `DuplicateDependencyException`
+  (mapped to HTTP 409 by `GlobalExceptionHandler`) before any task lookup or counter change. An
+  event consumer retrying an already-applied edge should treat this exception as "already applied".
+- **Constraint tracking**: `onConstraintAdded(taskId, constraintId)` and
+  `onConstraintStatusChanged(taskId, constraintId, previous, new)` keep an in-memory ledger of open
+  constraint ids per task, so a redelivered event does not double-count `openConstraintCount`.
+  `ConstraintService` passes the constraint id.
+  - **Known gap**: the ledger has no restart story. After a restart it is empty, so closing a
+    constraint that was opened before the restart is ignored. Tracked under
+    `constraint-persistent-378`, which moves this state into the database.
+- **Non-open constraint transitions** still validate `taskId` (`TaskNotFoundException`) before
+  returning early.
+- `wouldCreateCycle` reads edges through `findByTaskIdUnderExternalLock` (it already runs under
+  `dependencyGraphLock`).
+- Cross-team `pom.xml` changes from an earlier commit (Java 25 bump in `teams/bridge`,
+  `teams/inbox`, `teams/lens`) are reverted to `main`'s versions. This PR only changes Chain.
+
+**Local test note:** the full suite needs a reachable Postgres (see Tests above). On a JDK newer
+than Byte Buddy supports (e.g. JDK 25), run Mockito-based tests with
+`-DargLine="-Dnet.bytebuddy.experimental=true"`. CI runs on Java 21 and does not need it.
+
 ## Dependency graph persistence (Issue #66)
 
 `TaskDependencyRepository` / `InMemoryTaskDependencyRepository` (in `repository/`) are a pure
