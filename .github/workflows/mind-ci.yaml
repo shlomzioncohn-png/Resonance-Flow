@@ -102,6 +102,8 @@ jobs:
       - name: Fetch chart dependencies
         run: helm dependency build "$CHART_DIR"
 
+      - uses: ./.github/actions/install-yq
+
       - name: Provision MIND's DB and app Secrets
         run: |
           kubectl create namespace "$NAMESPACE" --dry-run=client -o yaml | kubectl apply -f -
@@ -109,6 +111,8 @@ jobs:
           kubectl -n "$NAMESPACE" create secret generic resonance-flow-mind-db-credentials \
             --from-literal=password="$PASSWORD" \
             --dry-run=client -o yaml | kubectl apply -f -
+          SASL_USER="$(yq '.kafka.sasl.client.users[0]' "$CHART_DIR/values.yaml")"
+          SASL_PASSWORD="$(yq '.kafka.sasl.client.passwords[0]' "$CHART_DIR/values.yaml")"
           cat > "$RUNNER_TEMP/mind-secrets.yaml" <<EOF
           llm:
             api_key: ""
@@ -117,6 +121,11 @@ jobs:
           object_storage:
             access_key: ""
             secret_key: ""
+          kafka:
+            sasl:
+              mechanism: PLAIN
+              username: "$SASL_USER"
+              password: "$SASL_PASSWORD"
           EOF
           kubectl -n "$NAMESPACE" create secret generic resonance-flow-mind-secret \
             --from-file=secrets.yaml="$RUNNER_TEMP/mind-secrets.yaml" \
