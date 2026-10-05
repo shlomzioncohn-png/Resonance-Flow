@@ -63,8 +63,6 @@ runs:
         kubectl -n "$SERVICE" create secret generic resonance-flow-mind-db-credentials \
           --from-literal=password="$PASSWORD" \
           --dry-run=client -o yaml | kubectl apply -f -
-        SASL_USER="$(yq '.kafka.sasl.client.users[0]' "$CHART_VALUES")"
-        SASL_PASSWORD="$(yq '.kafka.sasl.client.passwords[0]' "$CHART_VALUES")"
         cat > "$RUNNER_TEMP/mind-secrets.yaml" <<EOF
         llm:
           api_key: ""
@@ -73,11 +71,6 @@ runs:
         object_storage:
           access_key: ""
           secret_key: ""
-        kafka:
-          sasl:
-            mechanism: PLAIN
-            username: "$SASL_USER"
-            password: "$SASL_PASSWORD"
         EOF
         kubectl -n "$SERVICE" create secret generic resonance-flow-mind-secret \
           --from-file=secrets.yaml="$RUNNER_TEMP/mind-secrets.yaml" \
