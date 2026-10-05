@@ -176,10 +176,11 @@ a claim does and doesn't guarantee.
 `DONE`, `CANCELLED` and `REJECTED` map to `DONE`, because all three release dependents. `IN_PROGRESS`
 maps to `ACTIVE`, and every other status maps to `PENDING`.
 
-**Publishing**: `KafkaEventPublisher` sends a flat JSON payload with no envelope to
-`task.scheduling.updated`, keyed by task id. It is fire-and-forget: a failed send is logged, not
-retried. Nothing on this branch calls `EventPublisher.publish` yet, so no event is published in
-practice until `TaskEligibilityService` is wired to it (tracked under #214 / #445).
+**Publishing**: the live publisher for `task.scheduling.updated` is `KafkaSchedulingUpdatePublisher`
+(`com.rnd.chain.event`), used by `SchedulingUpdateService`. It sends `TaskSchedulingUpdatedEvent` as
+JSON through the `KafkaTemplate` defined in `ChainProtobufKafkaConfig`. That JSON is interim until
+the Protobuf contract is settled (#545). `KafkaEventPublisher` (flat JSON, no envelope) is not
+wired to any caller and is scheduled for removal under #543.
 
 **Schemas**: the `.proto` sources live in `src/main/proto/` and are committed. Messages are
 validated against the Schema Registry at `SCHEMA_REGISTRY_URL`. Tests use a mock registry
