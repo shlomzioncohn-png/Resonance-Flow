@@ -17,6 +17,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
@@ -273,10 +274,10 @@ public class WorkspaceService {
     }
 
     /** "Start task" / manual status changes from the task details panel. */
-    public TaskDTO updateTaskStatus(String userId, String taskId, String newStatus) {
+    public TaskDTO updateTaskStatus(String userId, String taskId, String newStatus, Instant snoozedUntil) {
         TaskDTO updated;
         try {
-            updated = inboxClient.updateStatus(userId, taskId, newStatus);
+            updated = inboxClient.updateStatus(userId, taskId, newStatus, snoozedUntil);
         } catch (InboxRejectedException ex) {
             // Inbox is up and said no (401/403/400) - not an outage, pass it on as-is
             throw ex;

@@ -115,6 +115,17 @@ export function listTasks(params: TaskListParams = {}): Promise<TaskListResponse
 export type TaskStatus =
   'NEW' | 'IN_REVIEW' | 'APPROVED' | 'IN_PROGRESS' | 'SNOOZED' | 'DONE' | 'REJECTED' | 'CANCELLED';
 
-export function updateTaskStatus(taskId: string, status: TaskStatus): Promise<ApiTask> {
-  return api.patch<ApiTask>(`/api/workspace/tasks/${taskId}/status`, { status });
+/**
+ * @param snoozedUntil required when status is 'SNOOZED' (Inbox rejects the change
+ *   with 400 without it): when the task wakes up again. Ignored for other statuses.
+ */
+export function updateTaskStatus(
+  taskId: string,
+  status: TaskStatus,
+  snoozedUntil?: Date,
+): Promise<ApiTask> {
+  return api.patch<ApiTask>(`/api/workspace/tasks/${taskId}/status`, {
+    status,
+    ...(snoozedUntil && { snoozedUntil: snoozedUntil.toISOString() }),
+  });
 }

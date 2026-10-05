@@ -11,6 +11,7 @@ import org.junit.jupiter.api.Test;
 import java.io.IOException;
 import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
+import java.time.Instant;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
@@ -96,7 +97,7 @@ class InboxClientTest {
     void updateStatus_roundTripsAllEightStatuses() {
         for (String status : List.of(
                 "NEW", "IN_REVIEW", "APPROVED", "IN_PROGRESS", "SNOOZED", "DONE", "REJECTED", "CANCELLED")) {
-            TaskDTO updated = inboxClient.updateStatus("any-user", "task_001", status);
+            TaskDTO updated = inboxClient.updateStatus("any-user", "task_001", status, null);
             assertThat(updated.getStatus()).isEqualTo(status);
             // getTaskById after updateStatus reflects the same value - proves
             // the underlying InboxTaskRecord was actually mutated, not just
@@ -107,7 +108,7 @@ class InboxClientTest {
 
     @Test
     void updateStatus_unknownId_returnsNull() {
-        assertThat(inboxClient.updateStatus("any-user", "does-not-exist", "IN_PROGRESS")).isNull();
+        assertThat(inboxClient.updateStatus("any-user", "does-not-exist", "IN_PROGRESS", null)).isNull();
     }
 
     // -------------------------------------------------------------------------
@@ -248,7 +249,7 @@ class InboxClientTest {
 
     @Test
     void updateStatus_real_sendsPatchWithUppercaseStatus() {
-        TaskDTO updated = realClient(ACTOR).updateStatus("emp_001", "539e1548-18e9-3021-92c7-25567dfe1cc8", "in_progress");
+        TaskDTO updated = realClient(ACTOR).updateStatus("emp_001", "539e1548-18e9-3021-92c7-25567dfe1cc8", "in_progress", null);
 
         assertThat(lastMethod.get()).isEqualTo("PATCH");
         assertThat(lastBody.get()).isEqualTo("{\"status\":\"IN_PROGRESS\"}");
@@ -261,5 +262,13 @@ class InboxClientTest {
                 .isInstanceOf(InboxRejectedException.class)
                 .hasMessage("Actor cannot act on task")
                 .satisfies(ex -> assertThat(((InboxRejectedException) ex).getStatus()).isEqualTo(403));
+    }
+
+    @Test
+    void updateStatus_real_snoozeSendsSnoozedUntil() {
+        realClient(ACTOR).updateStatus("emp_001", "539e1548-18e9-3021-92c7-25567dfe1cc8", "SNOOZED",
+                Instant.parse("2026-10-12T09:00:00Z"));
+
+        assertThat(lastBody.get()).isEqualTo("{\"status\":\"SNOOZED\",\"snoozed_until\":\"2026-10-12T09:00:00Z\"}");
     }
 }

@@ -105,7 +105,7 @@ public class WorkspaceController {
                 "Task status update - userId: {}, taskId: {}, newStatus: {}",
                 userId, taskId, body.getStatus());
 
-        return ResponseEntity.ok(workspaceService.updateTaskStatus(userId, taskId, body.getStatus()));
+        return ResponseEntity.ok(workspaceService.updateTaskStatus(userId, taskId, body.getStatus(), body.getSnoozedUntil()));
     }
 
     /**

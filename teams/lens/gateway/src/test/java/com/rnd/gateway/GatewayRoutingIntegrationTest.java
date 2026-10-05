@@ -157,6 +157,42 @@ class GatewayRoutingIntegrationTest {
                 .andExpect(jsonPath("$.title").value("Review API changes"));
     }
 
+    @Test
+    void getTaskDetails_whenBFFReturns403_passesBffMessageOn() throws Exception {
+        byte[] bffBody = ("{\"status\":\"ERROR\",\"errorCode\":\"FORBIDDEN\","
+                + "\"message\":\"Not allowed to access this task\"}").getBytes();
+        when(restTemplate.exchange(
+                contains("workspace/tasks/task_001"),
+                eq(org.springframework.http.HttpMethod.GET),
+                any(),
+                eq(TaskDTO.class)))
+                .thenThrow(org.springframework.web.client.HttpClientErrorException.create(
+                        org.springframework.http.HttpStatus.FORBIDDEN, "Forbidden",
+                        org.springframework.http.HttpHeaders.EMPTY, bffBody, null));
+
+        mockMvc.perform(get("/api/workspace/tasks/task_001"))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.errorCode").value("FORBIDDEN"))
+                .andExpect(jsonPath("$.message").value("Not allowed to access this task"));
+    }
+
+    @Test
+    void getTaskDetails_whenBFFReturns500_keepsGenericMessage() throws Exception {
+        byte[] bffBody = "{\"message\":\"NullPointerException in InboxClient\"}".getBytes();
+        when(restTemplate.exchange(
+                contains("workspace/tasks/task_001"),
+                eq(org.springframework.http.HttpMethod.GET),
+                any(),
+                eq(TaskDTO.class)))
+                .thenThrow(org.springframework.web.client.HttpServerErrorException.create(
+                        org.springframework.http.HttpStatus.INTERNAL_SERVER_ERROR, "Internal Server Error",
+                        org.springframework.http.HttpHeaders.EMPTY, bffBody, null));
+
+        mockMvc.perform(get("/api/workspace/tasks/task_001"))
+                .andExpect(status().isInternalServerError())
+                .andExpect(jsonPath("$.message").value("Downstream service returned an error"));
+    }
+
     // =========================================================================
     // Timeout and error handling tests
     // =========================================================================

@@ -11,6 +11,9 @@ import com.rnd.gateway.exception.ServiceUnavailableException;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -62,6 +65,9 @@ public class WorkspaceController {
     // TODO: replace with real JWT extraction service when Auth & Identity is implemented
     private static final String MOCK_USER_ID = "emp_001";
 
+    /** Reads BFF error bodies (see bffErrorReason). */
+    private static final ObjectMapper ERROR_BODY_READER = new ObjectMapper();
+
     private final RestTemplate restTemplate;
 
     @Value("${bff.service.url:http://bff-service:8080}")
@@ -110,6 +116,29 @@ public class WorkspaceController {
         }
         logger.warn("Using mock user ID for endpoint: {} (dev-mode enabled)", endpoint);
         return MOCK_USER_ID;
+    }
+
+    /**
+     * The message to show for a BFF error. For a 4xx, BFF's own "message" is
+     * passed on (e.g. "Task not found", "Not allowed to access this task") -
+     * BFF writes those for clients, so they hold nothing internal. A 5xx keeps
+     * the generic text, so internal details (exception names, downstream
+     * errors) never reach the browser.
+     */
+    private String bffErrorReason(HttpStatusCodeException e) {
+        String generic = "Downstream service returned an error";
+        if (!e.getStatusCode().is4xxClientError()) {
+            return generic;
+        }
+        try {
+            JsonNode message = ERROR_BODY_READER.readTree(e.getResponseBodyAsString()).path("message");
+            if (message.isTextual() && !message.asText().isBlank()) {
+                return message.asText();
+            }
+        } catch (JsonProcessingException ignored) {
+            // Not JSON - fall back to the generic text
+        }
+        return generic;
     }
 
     /**
@@ -194,10 +223,9 @@ public class WorkspaceController {
             throw new ServiceUnavailableException("bff", "BFF is currently unavailable");
 
         } catch (HttpStatusCodeException e) {
-            // BFF returned a 4xx/5xx — preserve the status code, hide internal details
+            // BFF returned a 4xx/5xx — preserve the status code (see bffErrorReason)
             logger.warn("BFF returned {} for user: {}", e.getStatusCode(), userId);
-            throw new ResponseStatusException(e.getStatusCode(),
-                    "Downstream service returned an error");
+            throw new ResponseStatusException(e.getStatusCode(), bffErrorReason(e));
 
         } catch (Exception e) {
             logger.error("Unexpected error forwarding workspace request for user: {}", userId, e);
@@ -280,7 +308,7 @@ public class WorkspaceController {
 
         } catch (HttpStatusCodeException e) {
             logger.warn("BFF returned {} for task list - userId: {}", e.getStatusCode(), userId);
-            throw new ResponseStatusException(e.getStatusCode(), "Downstream service returned an error");
+            throw new ResponseStatusException(e.getStatusCode(), bffErrorReason(e));
 
         } catch (Exception e) {
             logger.error("Unexpected error fetching task list for userId: {}", userId, e);
@@ -336,7 +364,7 @@ public class WorkspaceController {
 
         } catch (HttpStatusCodeException e) {
             logger.warn("BFF returned {} for taskId: {}", e.getStatusCode(), taskId);
-            throw new ResponseStatusException(e.getStatusCode(), "Downstream service returned an error");
+            throw new ResponseStatusException(e.getStatusCode(), bffErrorReason(e));
 
         } catch (Exception e) {
             logger.error("Unexpected error fetching task details for taskId: {}", taskId, e);
@@ -400,7 +428,7 @@ public class WorkspaceController {
 
         } catch (HttpStatusCodeException e) {
             logger.warn("BFF returned {} for taskId: {}", e.getStatusCode(), taskId);
-            throw new ResponseStatusException(e.getStatusCode(), "Downstream service returned an error");
+            throw new ResponseStatusException(e.getStatusCode(), bffErrorReason(e));
 
         } catch (Exception e) {
             logger.error("Unexpected error updating task status for taskId: {}", taskId, e);
@@ -454,7 +482,7 @@ public class WorkspaceController {
 
         } catch (HttpStatusCodeException e) {
             logger.warn("BFF returned {} for employee task - userId: {}", e.getStatusCode(), userId);
-            throw new ResponseStatusException(e.getStatusCode(), "Downstream service returned an error");
+            throw new ResponseStatusException(e.getStatusCode(), bffErrorReason(e));
 
         } catch (Exception e) {
             logger.error("Unexpected error fetching employee task for userId: {}", userId, e);

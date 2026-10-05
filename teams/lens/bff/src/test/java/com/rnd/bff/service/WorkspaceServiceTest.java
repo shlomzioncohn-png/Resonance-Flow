@@ -257,9 +257,9 @@ class WorkspaceServiceTest {
 
     @Test
     void updateTaskStatus_unknownId_throwsTaskNotFoundException() {
-        when(inboxClient.updateStatus(anyString(), anyString(), anyString())).thenReturn(null);
+        when(inboxClient.updateStatus(anyString(), anyString(), anyString(), any())).thenReturn(null);
 
-        assertThatThrownBy(() -> workspaceService.updateTaskStatus("emp_001", "task_missing", "BLOCKED"))
+        assertThatThrownBy(() -> workspaceService.updateTaskStatus("emp_001", "task_missing", "IN_PROGRESS", null))
                 .isInstanceOf(TaskNotFoundException.class);
     }
 }

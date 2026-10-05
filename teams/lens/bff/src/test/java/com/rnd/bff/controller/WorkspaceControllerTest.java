@@ -114,7 +114,7 @@ class WorkspaceControllerTest {
 
     @Test
     void updateTaskStatus_undocumentedEnumValue_returns400() throws Exception {
-        TaskStatusUpdateDTO body = new TaskStatusUpdateDTO("DELETED_BY_ME");
+        TaskStatusUpdateDTO body = new TaskStatusUpdateDTO("DELETED_BY_ME", null);
 
         mockMvc
                 .perform(
@@ -135,7 +135,7 @@ class WorkspaceControllerTest {
     // whatever runs after this test.
     @DirtiesContext
     void updateTaskStatus_documentedEnumValue_returns200AndEchoesStatus() throws Exception {
-        TaskStatusUpdateDTO body = new TaskStatusUpdateDTO("IN_PROGRESS");
+        TaskStatusUpdateDTO body = new TaskStatusUpdateDTO("IN_PROGRESS", null);
 
         mockMvc
                 .perform(
@@ -149,7 +149,7 @@ class WorkspaceControllerTest {
 
     @Test
     void updateTaskStatus_unknownTaskId_returns404() throws Exception {
-        TaskStatusUpdateDTO body = new TaskStatusUpdateDTO("IN_PROGRESS");
+        TaskStatusUpdateDTO body = new TaskStatusUpdateDTO("IN_PROGRESS", null);
 
         mockMvc
                 .perform(

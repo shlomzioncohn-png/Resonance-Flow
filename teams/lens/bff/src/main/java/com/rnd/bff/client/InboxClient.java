@@ -421,8 +421,11 @@ public class InboxClient {
         }
     }
 
-    /** @return the updated task, or null if Inbox doesn't have it */
-    public TaskDTO updateStatus(String userId, String taskId, String newStatus) {
+    /**
+     * @param snoozedUntil when a SNOOZED task wakes up; null for any other status
+     * @return the updated task, or null if Inbox doesn't have it
+     */
+    public TaskDTO updateStatus(String userId, String taskId, String newStatus, Instant snoozedUntil) {
         if (mockEnabled) {
             InboxTaskRecord record = tasksById.get(taskId);
             if (record == null) {
@@ -432,6 +435,7 @@ public class InboxClient {
             // @Pattern already validates this before this is called).
             // Store it as-is, converting only to lowercase for consistency with Inbox schema.
             record.setStatus(newStatus.toLowerCase());
+            record.setSnoozedUntil(snoozedUntil == null ? null : toLocalDateTime(snoozedUntil));
             return toTaskDTO(record);
         }
         if (!isUuid(taskId)) {
@@ -442,7 +446,7 @@ public class InboxClient {
         try {
             InboxTaskResponse task = restTemplate.exchange(
                     URI.create(taskUri(taskId) + "/status"), HttpMethod.PATCH,
-                    new HttpEntity<>(Map.of("status", newStatus.toUpperCase()), headers),
+                    new HttpEntity<>(statusBody(newStatus, snoozedUntil), headers),
                     InboxTaskResponse.class)
                     .getBody();
             return task == null ? null : toTaskDTO(task);
@@ -501,6 +505,16 @@ public class InboxClient {
     /** The Inbox user we act as - the dev override if set, otherwise the userId from the Gateway. */
     private String actorId(String userId) {
         return devActorId.isBlank() ? userId : devActorId;
+    }
+
+    /** Inbox's PATCH .../status body - snoozed_until only when there is one. */
+    private static Map<String, Object> statusBody(String newStatus, Instant snoozedUntil) {
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("status", newStatus.toUpperCase());
+        if (snoozedUntil != null) {
+            body.put("snoozed_until", snoozedUntil.toString());
+        }
+        return body;
     }
 
     /** Inbox's X-Actor-Id header. */
