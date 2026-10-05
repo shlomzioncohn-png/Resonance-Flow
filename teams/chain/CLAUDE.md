@@ -5,6 +5,13 @@ Implementing dependency update flow: addDependency, removeDependency,
 onTaskStatusChanged, recalculateTaskEligibility, onConstraintAdded,
 onConstraintStatusChanged.
 
+`onConstraintAdded(taskId, constraintId)` and `onConstraintStatusChanged(taskId, constraintId,
+previousStatus, newStatus)` both take a `constraintId` now (2026-09-08, PLAN.md Finding #10) - a
+per-task `Set<UUID>` of currently-open constraint ids (`openConstraintIdsByTask` in
+TaskEligibilityService) makes a redelivered event a no-op instead of double-counting
+openConstraintCount, mirroring the idempotency every other counter-mutating path in this class
+already has (edgeExists() / the task's own stored previousStatus).
+
 ## Key decisions
 - isReady = blockingCount==0 AND openConstraintCount==0
 - Tasks CAN reopen from DONE (confirmed by team lead) - blockingCount
@@ -85,6 +92,12 @@ onConstraintStatusChanged.
     misses changes made through that path. Tracked alongside issue #401
     (controller-level unification; the natural place this would first get
     wired to a live endpoint).
+
+- Task/TaskDependency/Constraint use Lombok for accessors and the builder. `Task` keeps
+  Lombok-generated id-only equals/hashCode (`@EqualsAndHashCode(onlyExplicitlyIncluded = true)` +
+  `@Include` on id) - don't widen it to all fields. `Constraint`'s equals/hashCode are hand-written
+  (id-only) on purpose, next to its hand-written `getReason`/`setReason`; don't re-add
+  `@EqualsAndHashCode` there, since it generates nothing alongside the hand-written methods.
 
 ## Open items
 - PR #468 review (2026-09-23, leaRevivo) findings addressed 2026-09-24:

@@ -191,6 +191,13 @@ public class TaskEligibilityService {
 
         synchronized (dependencyGraphLock) {
 
+            // Checked before the cycle check and the task lookups: a duplicate must not require
+            // either task to still exist, and an existing edge cannot be introducing a new cycle.
+            if (taskDependencyRepository.existsDependency(taskId, dependsOnTaskId)) {
+                throw new DuplicateDependencyException(
+                        "Task " + taskId + " already depends on " + dependsOnTaskId);
+            }
+
             if (wouldCreateCycle(
                     taskId,
                     dependsOnTaskId)) {
@@ -309,8 +316,9 @@ public class TaskEligibilityService {
                 continue;
             }
 
+            // Under dependencyGraphLock, so the repository's own read lock is redundant here.
             for (TaskDependency dependency :
-                    taskDependencyRepository.findByTaskId(current)) {
+                    taskDependencyRepository.findByTaskIdUnderExternalLock(current)) {
 
                 toVisit.push(
                         dependency.dependsOnTaskId());
