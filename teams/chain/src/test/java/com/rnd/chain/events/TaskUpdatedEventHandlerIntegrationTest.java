@@ -30,6 +30,7 @@ import org.springframework.kafka.test.context.EmbeddedKafka;
 import org.springframework.kafka.test.utils.KafkaTestUtils;
 import org.springframework.test.context.TestPropertySource;
 
+import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
@@ -37,6 +38,7 @@ import java.util.HashMap;
 import java.util.Map;
 import java.util.UUID;
 
+import static org.awaitility.Awaitility.await;
 import static org.junit.jupiter.api.Assertions.*;
 
 /**
@@ -107,17 +109,6 @@ class TaskUpdatedEventHandlerIntegrationTest {
                 .build();
     }
 
-    private void awaitUntil(String description, java.util.function.BooleanSupplier condition) throws InterruptedException {
-        long deadline = System.currentTimeMillis() + 20_000;
-        while (System.currentTimeMillis() < deadline) {
-            if (condition.getAsBoolean()) {
-                return;
-            }
-            Thread.sleep(200);
-        }
-        fail("Timed out waiting for: " + description);
-    }
-
     /** Like {@link KafkaTestUtils#getSingleRecord}, but filtered by key - needed when the topic
      * may already carry unrelated records from an earlier test method in this same class. */
     private static ConsumerRecord<String, String> awaitRecordWithKey(
@@ -145,7 +136,7 @@ class TaskUpdatedEventHandlerIntegrationTest {
                 .setUpdatedAt(timestamp(newerTime))
                 .build());
 
-        awaitUntil("status to become ACTIVE", () ->
+        await().atMost(Duration.ofSeconds(20)).alias("status to become ACTIVE").until(() ->
                 taskRepository.findById(taskId).map(t -> t.getStatus() == TaskStatus.ACTIVE).orElse(false));
 
         Task updated = taskRepository.findById(taskId).orElseThrow();
@@ -169,7 +160,7 @@ class TaskUpdatedEventHandlerIntegrationTest {
                 .setUpdatedAt(timestamp(BASE_TIME.plusMinutes(5)))
                 .build());
 
-        awaitUntil("the dependent to be released", () ->
+        await().atMost(Duration.ofSeconds(20)).alias("the dependent to be released").until(() ->
                 taskRepository.findById(dependent).map(Task::isReady).orElse(false));
 
         assertEquals(0, taskRepository.findById(dependent).orElseThrow().getBlockingCount());
@@ -186,12 +177,12 @@ class TaskUpdatedEventHandlerIntegrationTest {
                 .setUpdatedAt(timestamp(BASE_TIME.minusMinutes(1))) // older than stored
                 .build());
 
-        // Give a wrongly-applied stale update a chance to happen, then confirm it didn't.
-        Thread.sleep(3000);
-
-        Task unchanged = taskRepository.findById(taskId).orElseThrow();
-        assertEquals(TaskStatus.ACTIVE, unchanged.getStatus(), "a stale/duplicate snapshot must not overwrite a newer status");
-        assertEquals(BASE_TIME, unchanged.getUpdatedAt());
+        // A wrongly-applied stale update would show up within this window; the state must stay unchanged throughout.
+        await().during(Duration.ofSeconds(3)).atMost(Duration.ofSeconds(5)).untilAsserted(() -> {
+            Task unchanged = taskRepository.findById(taskId).orElseThrow();
+            assertEquals(TaskStatus.ACTIVE, unchanged.getStatus(), "a stale/duplicate snapshot must not overwrite a newer status");
+            assertEquals(BASE_TIME, unchanged.getUpdatedAt());
+        });
     }
 
     @Test
@@ -239,7 +230,7 @@ class TaskUpdatedEventHandlerIntegrationTest {
         Thread.sleep(500);
         ((InMemoryTaskRepository) taskRepository).save(buildTask(taskId, TaskStatus.PENDING, BASE_TIME.minusMinutes(1)));
 
-        awaitUntil("a later retry attempt to succeed now that the task exists", () ->
+        await().atMost(Duration.ofSeconds(20)).alias("a later retry attempt to succeed now that the task exists").until(() ->
                 taskRepository.findById(taskId).map(t -> t.getStatus() == TaskStatus.ACTIVE).orElse(false));
     }
 

@@ -27,12 +27,14 @@ import org.springframework.kafka.test.context.EmbeddedKafka;
 import org.springframework.kafka.test.utils.KafkaTestUtils;
 import org.springframework.test.context.TestPropertySource;
 
+import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDateTime;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.UUID;
 
+import static org.awaitility.Awaitility.await;
 import static org.junit.jupiter.api.Assertions.*;
 
 /**
@@ -84,17 +86,6 @@ class TaskCreatedEventHandlerIntegrationTest {
         return Timestamp.newBuilder().setSeconds(instant.getEpochSecond()).setNanos(instant.getNano()).build();
     }
 
-    private void awaitUntil(String description, java.util.function.BooleanSupplier condition) throws InterruptedException {
-        long deadline = System.currentTimeMillis() + 20_000;
-        while (System.currentTimeMillis() < deadline) {
-            if (condition.getAsBoolean()) {
-                return;
-            }
-            Thread.sleep(200);
-        }
-        fail("Timed out waiting for: " + description);
-    }
-
     @Test
     void validEvent_isConsumedAndInsertsANewReadyTask() throws InterruptedException {
         UUID taskId = UUID.randomUUID();
@@ -106,7 +97,7 @@ class TaskCreatedEventHandlerIntegrationTest {
                 .setCreatedAt(timestamp(Instant.now()))
                 .build());
 
-        awaitUntil("the new task to be inserted", () ->
+        await().atMost(Duration.ofSeconds(20)).alias("the new task to be inserted").until(() ->
                 taskRepository.findById(taskId).isPresent());
 
         Task saved = taskRepository.findById(taskId).orElseThrow();
@@ -132,7 +123,7 @@ class TaskCreatedEventHandlerIntegrationTest {
                 .setCreatedAt(timestamp(Instant.now()))
                 .build());
 
-        awaitUntil("owner to be updated by the (re)delivery", () ->
+        await().atMost(Duration.ofSeconds(20)).alias("owner to be updated by the (re)delivery").until(() ->
                 taskRepository.findById(taskId).map(t -> "real-owner".equals(t.getOwnerId())).orElse(false));
 
         Task merged = taskRepository.findById(taskId).orElseThrow();

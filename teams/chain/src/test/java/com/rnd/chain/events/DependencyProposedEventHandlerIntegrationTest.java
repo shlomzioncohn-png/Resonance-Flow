@@ -30,11 +30,13 @@ import org.springframework.kafka.test.context.EmbeddedKafka;
 import org.springframework.kafka.test.utils.KafkaTestUtils;
 import org.springframework.test.context.TestPropertySource;
 
+import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.UUID;
 
+import static org.awaitility.Awaitility.await;
 import static org.junit.jupiter.api.Assertions.*;
 
 /**
@@ -110,17 +112,6 @@ class DependencyProposedEventHandlerIntegrationTest {
                 .build();
     }
 
-    private void awaitUntil(String description, java.util.function.BooleanSupplier condition) throws InterruptedException {
-        long deadline = System.currentTimeMillis() + 20_000;
-        while (System.currentTimeMillis() < deadline) {
-            if (condition.getAsBoolean()) {
-                return;
-            }
-            Thread.sleep(200);
-        }
-        fail("Timed out waiting for: " + description);
-    }
-
     @Test
     void validEvent_isConsumedAndAppliedToTheDependencyGraph() throws InterruptedException {
         UUID taskId = UUID.randomUUID();
@@ -134,7 +125,7 @@ class DependencyProposedEventHandlerIntegrationTest {
                 .addDependencies(com.rnd.mind.event.Dependency.newBuilder().setDependsOnTaskId(depId.toString()).build())
                 .build());
 
-        awaitUntil("blockingCount to become 1", () ->
+        await().atMost(Duration.ofSeconds(20)).alias("blockingCount to become 1").until(() ->
                 taskRepository.findById(taskId).map(t -> t.getBlockingCount() == 1).orElse(false));
     }
 
@@ -153,14 +144,14 @@ class DependencyProposedEventHandlerIntegrationTest {
                 .build();
 
         producer.send(TOPIC, taskId.toString(), event);
-        awaitUntil("first delivery applied", () ->
+        await().atMost(Duration.ofSeconds(20)).alias("first delivery applied").until(() ->
                 taskRepository.findById(taskId).map(t -> t.getBlockingCount() == 1).orElse(false));
 
         producer.send(TOPIC, taskId.toString(), event); // exact same event_id, redelivered
-        Thread.sleep(2000); // give a wrongly-duplicated apply a chance to happen
-
-        assertEquals(1, taskRepository.findById(taskId).orElseThrow().getBlockingCount(),
-                "redelivery of the same event_id must not double-apply");
+        // A wrongly-duplicated apply would show up within this window; the count must stay at 1 throughout.
+        await().during(Duration.ofSeconds(2)).atMost(Duration.ofSeconds(5)).untilAsserted(() ->
+                assertEquals(1, taskRepository.findById(taskId).orElseThrow().getBlockingCount(),
+                        "redelivery of the same event_id must not double-apply"));
     }
 
     @Test
@@ -243,7 +234,7 @@ class DependencyProposedEventHandlerIntegrationTest {
         Thread.sleep(1500);
         ((InMemoryTaskRepository) taskRepository).save(buildTask(depId));
 
-        awaitUntil("a later retry attempt to succeed now that the task exists", () ->
+        await().atMost(Duration.ofSeconds(20)).alias("a later retry attempt to succeed now that the task exists").until(() ->
                 taskRepository.findById(taskId).map(t -> t.getBlockingCount() == 1).orElse(false));
     }
 }
