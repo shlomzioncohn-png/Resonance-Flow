@@ -3,23 +3,6 @@
 components:
   bridge:
     enabled: true
-    config:
-      spring:
-        config:
-          import: "configtree:/etc/resonance-flow/secrets/minio/"
-        volumeMounts:
-        - name: minio-credentials
-        mountPath: /etc/resonance-flow/secrets/minio
-        readOnly: true
-    volumes:
-      - name: minio-credentials
-        secret:
-          secretName: bridge-minio
-          items:
-            - key: root-user
-              path: minio.access-key
-            - key: root-password
-              path: minio.secret-key
 kafka:
   enabled: true
 minio:
