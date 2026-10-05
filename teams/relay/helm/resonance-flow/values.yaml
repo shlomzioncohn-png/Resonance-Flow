@@ -196,8 +196,8 @@ components:
     resources: *defaultResources
     <<: *defaultHealthProbes
     # Password comes from the chain-db-credentials Secret, mounted as a file below -
-    # not a literal here, not an env var, and not created by this chart (provided
-    # externally). secretName must match the fullname-prefixed name
+    # not a literal here, not an env var; created once by the chain db-credentials
+    # hook Job, not rendered as a chart resource. secretName must match the fullname-prefixed name
     # templates/services/chain/configmap.yaml renders (fullname resolves to the
     # fixed "resonance-flow" release name this chart is always installed as).
     volumeMounts:

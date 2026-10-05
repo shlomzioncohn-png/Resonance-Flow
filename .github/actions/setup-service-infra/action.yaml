@@ -41,18 +41,6 @@ runs:
       run: |
         yq '{"components": (.components | map_values({"enabled": false}))}' "$CHART_VALUES" > "$CHART_ALL_OFF"
 
-    - name: Provision Chain's DB credentials Secret
-      if: inputs.service_name == 'chain'
-      shell: bash
-      run: |
-        SERVICE="${{ inputs.service_name }}"
-        # Namespace must exist before the Secret - the Deploy step below also
-        # passes --create-namespace, which is then a harmless no-op.
-        kubectl create namespace "$SERVICE" --dry-run=client -o yaml | kubectl apply -f -
-        kubectl -n "$SERVICE" create secret generic resonance-flow-chain-db-credentials \
-          --from-literal=password="$(openssl rand -base64 24)" \
-          --dry-run=client -o yaml | kubectl apply -f -
-
     - name: Deploy chart with ${{ inputs.service_name }} disabled (infra only, for tests)
       shell: bash
       run: |
