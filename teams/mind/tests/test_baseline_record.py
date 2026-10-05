@@ -6,11 +6,15 @@ from datetime import date
 from pathlib import Path
 
 import pytest
+from pydantic import ValidationError
 
 from mind.evaluation.baseline_models import SkipBlockedNearestDeadlineModel
 from mind.evaluation.baseline_record import (
+    BaselineRecord,
     BaselineRecordError,
+    PersonaSetInfo,
     Provenance,
+    ScoreSummary,
     build_baseline_record,
     load_baseline_record,
     write_baseline_record,
@@ -62,7 +66,7 @@ def test_split_by_role_rejects_scenarios_in_a_different_order_than_the_report():
 # -- build_baseline_record -------------------------------------------------------
 
 
-def _record() -> dict:
+def _record() -> BaselineRecord:
     combined = run(DummyModel(), PLACEHOLDER_SCENARIOS)
     return build_baseline_record(
         recorded_on=date(2026, 10, 4),
@@ -78,17 +82,17 @@ def _record() -> dict:
 def test_record_is_labelled_with_date_model_commits_metric_and_persona_set():
     record = _record()
 
-    assert record["recorded_on"] == "2026-10-04"
-    assert record["model_name"] == "DummyModel"
-    assert record["model_commit"] == "a" * 40
-    assert record["metric"] == "top-1 accuracy"
-    assert record["persona_set"] == {
-        "path": "eval/personas",
-        "commit": "b" * 40,
-        "scenarios": 2,
-        "team_lead_approved": 0,
-        "mentor_approved": 0,
-    }
+    assert record.recorded_on == date(2026, 10, 4)
+    assert record.model_name == "DummyModel"
+    assert record.model_commit == "a" * 40
+    assert record.metric == "top-1 accuracy"
+    assert record.persona_set == PersonaSetInfo(
+        path="eval/personas",
+        commit="b" * 40,
+        scenarios=2,
+        team_lead_approved=0,
+        mentor_approved=0,
+    )
 
 
 def test_record_carries_overall_per_role_and_per_scenario_results():
@@ -96,13 +100,29 @@ def test_record_carries_overall_per_role_and_per_scenario_results():
 
     # DummyModel ties every task and the harness picks the first; both
     # placeholder scenarios list their correct task first.
-    assert record["combined"] == {"correct_top1": 2, "total_scenarios": 2, "top1_accuracy": 1.0}
-    assert set(record["roles"]) == {"Developer", "Manager"}
-    assert [r["scenario_id"] for r in record["scenario_results"]] == [
+    assert record.combined == ScoreSummary(correct_top1=2, total_scenarios=2, top1_accuracy=1.0)
+    assert set(record.roles) == {"Developer", "Manager"}
+    assert [r.scenario_id for r in record.scenario_results] == [
         "developer_placeholder_1",
         "manager_placeholder_1",
     ]
-    json.dumps(record)  # everything in it is JSON-serializable
+    json.loads(record.model_dump_json())  # everything in it is JSON-serializable
+
+
+def test_build_refuses_a_report_whose_accuracy_does_not_match_its_counts():
+    combined = run(DummyModel(), PLACEHOLDER_SCENARIOS)
+    wrong = combined.model_copy(update={"top1_accuracy": 0.5})  # counts say 2/2 = 1.0
+
+    with pytest.raises(ValidationError, match="top1_accuracy is 0.5"):
+        build_baseline_record(
+            recorded_on=date(2026, 10, 4),
+            provenance=FAKE_PROVENANCE,
+            personas_path=Path("eval/personas"),
+            scenarios=PLACEHOLDER_SCENARIOS,
+            combined=wrong,
+            groups={},
+            roles={},
+        )
 
 
 # -- write_baseline_record -------------------------------------------------------
@@ -122,7 +142,7 @@ def test_write_never_overwrites_an_existing_record(tmp_path):
     original = path.read_text(encoding="utf-8")
 
     with pytest.raises(BaselineRecordError, match="never overwritten"):
-        write_baseline_record(path, {"something": "else"})
+        write_baseline_record(path, _record().model_copy(update={"model_name": "Other"}))
 
     assert path.read_text(encoding="utf-8") == original
 
@@ -191,7 +211,12 @@ def test_load_gives_back_exactly_the_report_that_was_recorded(tmp_path):
 def test_load_rejects_a_record_whose_totals_do_not_match_its_scenarios(tmp_path):
     path = tmp_path / "baseline_score.json"
     _write_real_record(path)
-    _tamper(path, lambda r: r["combined"].update(correct_top1=r["combined"]["correct_top1"] + 1))
+    def one_more_correct(record):
+        c = record["combined"]
+        c["correct_top1"] += 1
+        c["top1_accuracy"] = c["correct_top1"] / c["total_scenarios"]  # accuracy still agrees
+
+    _tamper(path, one_more_correct)
 
     with pytest.raises(BaselineRecordError, match="correct_top1"):
         load_baseline_record(path)
@@ -213,7 +238,9 @@ def test_load_rejects_a_scenario_whose_passed_flag_contradicts_its_prediction(tm
     def flip_first_miss(record):
         miss = next(r for r in record["scenario_results"] if not r["passed"])
         miss["passed"] = True
-        record["combined"]["correct_top1"] += 1  # totals still add up
+        c = record["combined"]
+        c["correct_top1"] += 1  # totals still add up
+        c["top1_accuracy"] = c["correct_top1"] / c["total_scenarios"]
 
     _tamper(path, flip_first_miss)
 
@@ -225,5 +252,24 @@ def test_load_rejects_a_file_that_is_not_a_baseline_record(tmp_path):
     path = tmp_path / "baseline_score.json"
     path.write_text(json.dumps({"combined": {}}), encoding="utf-8")
 
-    with pytest.raises(BaselineRecordError, match="not a readable baseline record"):
+    with pytest.raises(BaselineRecordError, match="not a valid baseline record"):
+        load_baseline_record(path)
+
+
+def test_load_rejects_an_accuracy_that_does_not_match_its_own_counts(tmp_path):
+    path = tmp_path / "baseline_score.json"
+    _write_real_record(path)
+    # Only the accuracy is edited (20/30 = 0.667 -> 0.95); counts and scenarios untouched.
+    _tamper(path, lambda r: r["combined"].update(top1_accuracy=0.95))
+
+    with pytest.raises(BaselineRecordError, match="top1_accuracy is 0.95"):
+        load_baseline_record(path)
+
+
+def test_load_error_names_the_field_at_fault(tmp_path):
+    path = tmp_path / "baseline_score.json"
+    _write_real_record(path)
+    _tamper(path, lambda r: r.update(model_commit="main"))
+
+    with pytest.raises(BaselineRecordError, match="model_commit"):
         load_baseline_record(path)

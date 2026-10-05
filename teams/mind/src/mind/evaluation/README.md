@@ -191,10 +191,15 @@ manual spot-check and the week-7 comparison).
   nothing under `src/` or `eval/personas/` is uncommitted; the tool does not
   check this.
 
+The format is one Pydantic model, `baseline_record.BaselineRecord`, used for
+both writing and reading. Its checks run on every write and every read: each
+accuracy (combined, per group, per role) must equal its own
+`correct_top1 / total_scenarios`, `combined` must agree with the per-scenario
+results, and each scenario's `passed` must match its prediction. A record that
+fails any of them is refused, with an error naming the field.
 `baseline_record.load_baseline_record(path)` reads a record back into the
 `Report` it was written from, so the week-7 comparison (#487) diffs the stretch
-run against the recorded baseline instead of a re-run. It refuses a record whose
-per-scenario results don't add up to its own totals.
+run against the recorded baseline instead of a re-run.
 
 ### 2026-09-23: no week-5 baseline number exists yet
 
