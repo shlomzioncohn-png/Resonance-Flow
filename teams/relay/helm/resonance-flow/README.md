@@ -140,13 +140,13 @@ empty — the loader must handle a missing file):
 
 Chain gets its own Postgres database and user (`chain`), not Inbox's. The
 password lives only in the `resonance-flow-chain-db-credentials` Secret (key
-`password`), which the chart **never creates** - it's provided externally
-(CI's `setup-service-infra` action generates it with `openssl rand`). Create it
-before installing with Chain enabled:
-
-```bash
-kubectl -n resonance-flow create secret generic resonance-flow-chain-db-credentials   --from-literal=password="$(openssl rand -base64 24)"
-```
+`password`). A pre-install/pre-upgrade hook Job
+(`templates/services/chain/db-credentials-hook.yaml`, PreSync under ArgoCD)
+creates it with a random password if it's missing, and never touches an existing
+one - so no manual step, in CI or the cluster. The Secret itself isn't a Helm
+resource: an offline render (ArgoCD) can't see the live password and would
+regenerate it every sync. To rotate, delete the Secret and restart Postgres and
+Chain after the next sync.
 
 It's mounted as a file, never an env var: into Chain's pod (read via Spring
 `configtree`) and, `optional: true`, into Postgres, whose init script
