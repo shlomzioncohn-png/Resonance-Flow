@@ -43,7 +43,7 @@ data:
 {{- end }}
 {{- end }}
 
-# Helm never creates or touches chain-db-credentials' data - it can't tell a
-# live password from none under an offline render, so writing here risks
-# overwriting or deleting the real value. Provided externally; referenced by
-# name only, here and in values.yaml's postgresql.primary.extraVolumes.
+
+# chain-db-credentials isn't rendered here - an offline render can't tell a live
+# password from none, so it would overwrite the real value. Created once by
+# db-credentials-hook.yaml; referenced by name only, here and in values.yaml.
