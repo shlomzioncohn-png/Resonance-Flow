@@ -183,17 +183,14 @@ properties:
 {{- end }}
 
 {{/*
-Kafka consumer defaults (offset reset, auto-commit, string (de)serializers),
-identical across every component - only the consumer group id varies. Takes
-{groupId}.
+Kafka consumer defaults (offset reset, auto-commit) - only the consumer group
+id varies. No deserializers: the app owns its wire format. Takes {groupId}.
 */}}
 {{- define "resonance-flow.springKafkaConsumerDefaults" -}}
 consumer:
   group-id: {{ .groupId | quote }}
   auto-offset-reset: earliest
   enable-auto-commit: false
-  key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
-  value-deserializer: org.apache.kafka.common.serialization.StringDeserializer
 {{- end }}
 
 {{/*
