@@ -10,6 +10,7 @@ import com.rnd.chain.exception.DependencyNotFoundException;
 import com.rnd.chain.exception.DuplicateDependencyException;
 import com.rnd.chain.exception.InvalidDependencyException;
 import com.rnd.chain.exception.TaskNotFoundException;
+import com.rnd.chain.repository.InMemoryConstraintRepository;
 import com.rnd.chain.repository.InMemoryTaskDependencyRepository;
 import com.rnd.chain.repository.InMemoryTaskRepository;
 import org.junit.jupiter.api.BeforeEach;
@@ -29,6 +30,8 @@ class TaskEligibilityServiceTest {
 
     private RecordingSchedulingUpdatePublisher publisher;
 
+    private InMemoryConstraintRepository constraintRepository;
+
     private TaskEligibilityService service;
 
     @BeforeEach
@@ -46,11 +49,32 @@ class TaskEligibilityServiceTest {
         SchedulingUpdateService schedulingUpdateService =
                 new SchedulingUpdateService(publisher);
 
+        constraintRepository =
+                new InMemoryConstraintRepository();
+
         service =
                 new TaskEligibilityService(
                         taskRepository,
                         dependencyRepository,
-                        schedulingUpdateService);
+                        schedulingUpdateService,
+                        constraintRepository);
+    }
+
+    private static Constraint newConstraint(
+            UUID taskId,
+            String constraintId,
+            Constraint.ConstraintStatus status) {
+
+        LocalDateTime now = LocalDateTime.now();
+        return new Constraint(
+                constraintId,
+                taskId,
+                Constraint.ConstraintType.APPROVAL_NEEDED,
+                status,
+                null,
+                "source-ref",
+                now,
+                now);
     }
 
     @Test
@@ -430,7 +454,7 @@ class TaskEligibilityServiceTest {
                         0,
                         0));
 
-        service.onConstraintAdded(taskId);
+        service.onConstraintAdded(newConstraint(taskId, "c-add", Constraint.ConstraintStatus.PENDING));
 
         Task updated =
                 taskRepository.findById(taskId)
@@ -461,10 +485,13 @@ class TaskEligibilityServiceTest {
                         0,
                         1));
 
+        constraintRepository.save(newConstraint(taskId, "c-sat", Constraint.ConstraintStatus.PENDING));
+
         service.onConstraintStatusChanged(
                 taskId,
-                Constraint.ConstraintStatus.PENDING,
-                Constraint.ConstraintStatus.SATISFIED);
+                "c-sat",
+                Constraint.ConstraintStatus.SATISFIED,
+                null);
 
         Task updated =
                 taskRepository.findById(taskId)
@@ -495,10 +522,13 @@ class TaskEligibilityServiceTest {
                         0,
                         1));
 
+        constraintRepository.save(newConstraint(taskId, "c-same", Constraint.ConstraintStatus.PENDING));
+
         service.onConstraintStatusChanged(
                 taskId,
+                "c-same",
                 Constraint.ConstraintStatus.PENDING,
-                Constraint.ConstraintStatus.PENDING);
+                null);
 
         Task updated =
                 taskRepository.findById(taskId)
@@ -612,14 +642,16 @@ class TaskEligibilityServiceTest {
 
     private record Fixture(InMemoryTaskRepository taskRepo,
                             InMemoryTaskDependencyRepository dependencyRepo,
+                            InMemoryConstraintRepository constraintRepo,
                             TaskEligibilityService service) {
     }
 
     private static Fixture newFixture(List<Task> tasks, List<TaskDependency> edges) {
         InMemoryTaskRepository taskRepo = new InMemoryTaskRepository(tasks);
         InMemoryTaskDependencyRepository dependencyRepo = new InMemoryTaskDependencyRepository(edges);
-        return new Fixture(taskRepo, dependencyRepo, new TaskEligibilityService(taskRepo, dependencyRepo,
-                new SchedulingUpdateService(event -> {})));
+        InMemoryConstraintRepository constraintRepo = new InMemoryConstraintRepository();
+        return new Fixture(taskRepo, dependencyRepo, constraintRepo, new TaskEligibilityService(taskRepo,
+                dependencyRepo, new SchedulingUpdateService(event -> {}), constraintRepo));
     }
 
     private static Task buildTask(UUID id, int blockingCount, int openConstraintCount, boolean isReady) {
@@ -978,7 +1010,7 @@ class TaskEligibilityServiceTest {
         UUID taskId = UUID.randomUUID();
         Fixture fixture = newFixture(List.of(buildTask(taskId, 0, 0, true)), List.of());
 
-        fixture.service().onConstraintAdded(taskId);
+        fixture.service().onConstraintAdded(newConstraint(taskId, "c-add2", Constraint.ConstraintStatus.PENDING));
 
         Task task = fixture.taskRepo().findById(taskId).orElseThrow();
         assertEquals(1, task.getOpenConstraintCount());
@@ -990,8 +1022,10 @@ class TaskEligibilityServiceTest {
         UUID taskId = UUID.randomUUID();
         Fixture fixture = newFixture(List.of(buildTask(taskId, 0, 1, false)), List.of());
 
+        fixture.constraintRepo().save(newConstraint(taskId, "c-close2", Constraint.ConstraintStatus.PENDING));
+
         fixture.service().onConstraintStatusChanged(
-                taskId, Constraint.ConstraintStatus.PENDING, Constraint.ConstraintStatus.SATISFIED);
+                taskId, "c-close2", Constraint.ConstraintStatus.SATISFIED, null);
 
         Task task = fixture.taskRepo().findById(taskId).orElseThrow();
         assertEquals(0, task.getOpenConstraintCount());
@@ -1003,8 +1037,10 @@ class TaskEligibilityServiceTest {
         UUID taskId = UUID.randomUUID();
         Fixture fixture = newFixture(List.of(buildTask(taskId, 0, 0, true)), List.of());
 
+        fixture.constraintRepo().save(newConstraint(taskId, "c-reopen", Constraint.ConstraintStatus.SATISFIED));
+
         fixture.service().onConstraintStatusChanged(
-                taskId, Constraint.ConstraintStatus.SATISFIED, Constraint.ConstraintStatus.PENDING);
+                taskId, "c-reopen", Constraint.ConstraintStatus.PENDING, null);
 
         Task task = fixture.taskRepo().findById(taskId).orElseThrow();
         assertEquals(1, task.getOpenConstraintCount());
@@ -1018,8 +1054,10 @@ class TaskEligibilityServiceTest {
         UUID taskId = UUID.randomUUID();
         Fixture fixture = newFixture(List.of(), List.of());
 
+        fixture.constraintRepo().save(newConstraint(taskId, "c-waive", Constraint.ConstraintStatus.SATISFIED));
+
         assertDoesNotThrow(() -> fixture.service().onConstraintStatusChanged(
-                taskId, Constraint.ConstraintStatus.SATISFIED, Constraint.ConstraintStatus.WAIVED));
+                taskId, "c-waive", Constraint.ConstraintStatus.WAIVED, null));
     }
 
 }
