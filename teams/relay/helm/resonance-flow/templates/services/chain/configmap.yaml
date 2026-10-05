@@ -23,10 +23,10 @@ data:
         password: "${password}"
       kafka:
         {{- include "resonance-flow.springKafkaBase" (dict "root" $) | nindent 8 }}
+          # Extends springKafkaBase's properties map, for Chain's Protobuf (de)serializers.
+          # No serializers here: like inbox, the app owns its wire format.
+          schema.registry.url: {{ printf "http://%s/apis/ccompat/v6" (include "resonance-flow.dependencyAddress" (dict "root" $ "deps" $component.dependencies "name" "schema-registry")) | quote }}
         {{- include "resonance-flow.springKafkaConsumerDefaults" (dict "groupId" $cfg.kafka.consumerGroupId) | nindent 8 }}
-        producer:
-          key-serializer: org.apache.kafka.common.serialization.StringSerializer
-          value-serializer: org.springframework.kafka.support.serializer.JsonSerializer
     chain:
       kafka:
         # Map keys are the literal eventType strings KafkaEventPublisher.resolveTopic()
@@ -58,6 +58,8 @@ metadata:
 data:
   create-chain-database.sh: |
     #!/bin/bash
+    # Subshell: Bitnami sources this file, so set -e/-u would otherwise leak into its init.
+    (
     set -euo pipefail
     if [ -n "${POSTGRES_PASSWORD_FILE:-}" ]; then
       export PGPASSWORD="$(cat "$POSTGRES_PASSWORD_FILE")"
@@ -77,6 +79,7 @@ data:
     else
       echo "chain-db-credentials not provided - skipping Chain's database" >&2
     fi
+    )
 
 # Helm never creates or touches chain-db-credentials' data - it can't tell a
 # live password from none under an offline render, so writing here risks

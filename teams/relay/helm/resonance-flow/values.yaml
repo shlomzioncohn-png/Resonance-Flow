@@ -211,6 +211,8 @@ components:
     dependencies:
       - name: postgresql
         port: 5432
+      - name: schema-registry
+        port: 8080
     config:
       data:
         datasource:
