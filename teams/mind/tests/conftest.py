@@ -44,6 +44,18 @@ os.environ.setdefault("MIND_ENVIRONMENT", "ci")
 # pointed MIND_VECTOR_STORE__DSN at -- this is the real verification that
 # the migration applies cleanly, not just a fixture setup step.
 if "MIND_VECTOR_STORE__DSN" in os.environ:
+    # The migration deliberately never runs CREATE EXTENSION (needs
+    # superuser; belongs in db/init/01-enable-pgvector.sql for a real
+    # deploy, see migrations/versions/0001's docstring). Locally that
+    # init script handles it. In CI, the shared Postgres setup-service-
+    # infra port-forwards (relay#513) never runs it either -- nothing
+    # else in that path does -- so the migration hits "type vector does
+    # not exist" otherwise. CI's TEST_DATABASE_URL connects as the
+    # `postgres` superuser specifically so tests can do this themselves.
+    import psycopg
+
+    with psycopg.connect(os.environ["MIND_VECTOR_STORE__DSN"], autocommit=True) as _conn:
+        _conn.execute("CREATE EXTENSION IF NOT EXISTS vector;")
     subprocess.run(["alembic", "upgrade", "head"], cwd=_ROOT, check=True)
 
 _MESSAGING = _ROOT / "src" / "mind" / "messaging"
