@@ -127,10 +127,11 @@ own `@KafkaListener` handler, and the handlers share the claim/logging skeleton 
 | `task.dependencies.proposed` | Mind | `DependencyProposedEventHandler` | `event_id` claim in `ProcessedEventStore` | 5 attempts, 5s apart |
 
 **Retry and dead-lettering**: retries are non-blocking, via `@RetryableTopic`, so a message waiting
-to retry never stalls the rest of its partition. Only `ChainTransientProcessingException` is
-retried, and `ReferencedTaskNotFoundException` (a referenced task has not arrived yet) is a subtype
-of it. Malformed messages and cycles (`NonRetryableEventException`) are not retried. Neither is any
-other exception, including an unexpected bug, so those go straight to `<topic>.errors`.
+to retry never stalls the rest of its partition. Every exception is retried except
+`NonRetryableEventException` (malformed messages, cycles), which goes straight to `<topic>.errors`.
+Retries are bounded (see the table), so an unexpected bug costs a few delayed attempts before it
+lands on `<topic>.errors`. A typical retried case is `ReferencedTaskNotFoundException`, raised when
+a referenced task has not arrived yet.
 
 **Offsets**: auto-commit is disabled and each listener uses `AckMode.RECORD`. An offset is committed
 only after its record is handled or handed to its retry/DLT topic, so a crash mid-processing
