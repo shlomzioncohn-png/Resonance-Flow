@@ -74,6 +74,8 @@ public class SourceRecordLoader {
                     .toList();
             case MEETING, SCANNED_DOC -> throw new IllegalArgumentException(
                     sourceType + " is produced by the meeting/doc/audio lane, not this one");
+            // Contract-only value - no reader produces this yet (see RawSourceType.DOC's javadoc).
+            case DOC -> throw new IllegalArgumentException(sourceType + " has no reader yet");
         };
     }
 }

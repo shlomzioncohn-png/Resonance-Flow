@@ -43,8 +43,13 @@ import java.util.List;
  * intake run (see MessageSnapshot.attachmentCount and ChatSourceRecordMapper).
  *
  * attachmentIndex is confirmed required by Mind's own contract (teams/mind/src/mind/
- * contracts/raw_object_event.py) - 0 for a standalone item, 1+ for an attachment.
+ * contracts/raw_object_event.py) - 0 for a standalone item, 1+ for an attachment. Typed as
+ * a primitive int (not nullable) per the contract - no caller has ever passed null here.
  * correlationId stays optional (Mind: omitted for standalone items).
+ *
+ * changeSignificanceScore is required by Mind's agreed contract (0-100) but has no real
+ * calculation yet - create() hardcodes CURRENT_CHANGE_SIGNIFICANCE_SCORE for every event
+ * until that logic exists, so no caller needs to supply it.
  *
  * implements BridgePayload (see core.BridgePayload): tenantId() is satisfied by the
  * record's own tenantId component; dedupKey() is contentHash — the object_key is always
@@ -67,12 +72,14 @@ public record RawObjectEvent(
         String transcriptObjectKey,
         Instant sourceTimestamp,
         String correlationId,
-        Integer attachmentIndex,
+        int attachmentIndex,
         int attachmentCount,
         int revision,
-        ChangeType changeType) implements BridgePayload {
+        ChangeType changeType,
+        int changeSignificanceScore) implements BridgePayload {
 
     private static final String CURRENT_SCHEMA_VERSION = "1.0";
+    private static final int CURRENT_CHANGE_SIGNIFICANCE_SCORE = 100;
 
     public static RawObjectEvent create(
             String objectKey,
@@ -87,7 +94,7 @@ public record RawObjectEvent(
             Long sizeBytes,
             Instant sourceTimestamp,
             String correlationId,
-            Integer attachmentIndex,
+            int attachmentIndex,
             int attachmentCount,
             int revision,
             ChangeType changeType) {
@@ -115,7 +122,7 @@ public record RawObjectEvent(
             String transcriptObjectKey,
             Instant sourceTimestamp,
             String correlationId,
-            Integer attachmentIndex,
+            int attachmentIndex,
             int attachmentCount,
             int revision,
             ChangeType changeType) {
@@ -123,7 +130,7 @@ public record RawObjectEvent(
                 CURRENT_SCHEMA_VERSION, objectKey, sourceType, tenantId, ingestedAt,
                 scopeDecision, contentHash, modality, participants, contentType, sizeBytes,
                 transcriptObjectKey, sourceTimestamp, correlationId, attachmentIndex, attachmentCount, revision,
-                changeType);
+                changeType, CURRENT_CHANGE_SIGNIFICANCE_SCORE);
     }
 
     @Override

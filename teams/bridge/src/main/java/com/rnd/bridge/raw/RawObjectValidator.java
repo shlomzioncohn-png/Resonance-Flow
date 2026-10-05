@@ -19,7 +19,7 @@ public final class RawObjectValidator implements PayloadValidator<RawObjectEvent
     public void validate(RawObjectEvent event) {
         requireNonNull(event.objectKey(), "objectKey");
         requireNonNull(event.sourceType(), "sourceType");
-        requireNonNull(event.tenantId(), "tenantId");
+        requireNonBlank(event.tenantId(), "tenantId");
         requireNonNull(event.ingestedAt(), "ingestedAt");
         requireNonNull(event.scopeDecision(), "scopeDecision");
         requireNonNull(event.contentHash(), "contentHash");
@@ -30,6 +30,13 @@ public final class RawObjectValidator implements PayloadValidator<RawObjectEvent
     private static void requireNonNull(Object value, String field) {
         if (value == null) {
             throw new ValidationException("Invalid RawObjectEvent." + field + " = null: must not be null");
+        }
+    }
+
+    private static void requireNonBlank(String value, String field) {
+        requireNonNull(value, field);
+        if (value.isBlank()) {
+            throw new ValidationException("Invalid RawObjectEvent." + field + " = \"" + value + "\": must not be blank");
         }
     }
 }

@@ -54,12 +54,27 @@ class RawObjectEventSerializationTest {
         assertThat(json).contains("\"attachment_count\"");
         assertThat(json).contains("\"revision\"");
         assertThat(json).contains("\"change_type\"");
+        assertThat(json).contains("\"change_significance_score\"");
 
         assertThat(json).doesNotContain("\"objectKey\"");
         assertThat(json).doesNotContain("\"contentHash\"");
         assertThat(json).doesNotContain("\"sourceType\"");
         assertThat(json).doesNotContain("\"changeType\"");
         assertThat(json).doesNotContain("\"attachmentCount\"");
+        assertThat(json).doesNotContain("\"changeSignificanceScore\"");
+    }
+
+    @Test
+    void serializesChangeSignificanceScoreAsTheCurrentHardcodedValue() throws Exception {
+        RawObjectEvent event = RawObjectEvent.create(
+                "EMAIL/kamatech/2026-08-18/x.json", RawSourceType.EMAIL, "kamatech",
+                Instant.now(), ScopeDecision.INCLUDED, "sha256:" + "a".repeat(64),
+                Modality.TEXT, List.of(), null, null, Instant.now(), "corr-1", 0, 0, 0, ChangeType.UPSERT);
+
+        String json = objectMapper.writeValueAsString(event);
+
+        assertThat(json).contains("\"change_significance_score\":100");
+        assertThat(event.changeSignificanceScore()).isEqualTo(100);
     }
 
     @Test
