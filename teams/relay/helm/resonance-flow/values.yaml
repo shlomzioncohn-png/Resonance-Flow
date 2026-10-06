@@ -135,6 +135,20 @@ components:
     service: *defaultService
     resources: *defaultResources
     <<: *defaultHealthProbes
+    env: {}
+    dependencies:
+      - name: notification-delivery
+        port: 80
+    config:
+      inbox:
+        service:
+          url: http://resonance-flow-inbox:80
+      chain:
+        service:
+          url: http://resonance-flow-chain:80
+      notificationDelivery:
+        service:
+          url: http://resonance-flow-notification-delivery:80
   bridge:
     enabled: true
     replicaCount: 1
@@ -156,7 +170,7 @@ components:
       repository: "ghcr.io/kamatechorg/resonance-flow/lens-frontend"
       pullPolicy: IfNotPresent
       tag: "placeholder"
-    containerPort: 80
+    containerPort: 3000
     service: *defaultService
     resources:
       requests:
@@ -323,6 +337,8 @@ components:
     service: *defaultService
     resources: *defaultResources
     <<: *defaultHealthProbes
+    env: {}
+
   notification-delivery:
     enabled: true
     replicaCount: 1
