@@ -6,8 +6,11 @@ import pytest
 
 from mind.extraction.providers.settings import (
     DEFAULT_MODEL,
+    GEMINI_DEFAULT_MODEL,
     DeepSeekSettings,
+    GeminiSettings,
     load_deepseek_settings,
+    load_gemini_settings,
 )
 
 
@@ -101,3 +104,54 @@ def test_the_endpoint_tolerates_a_trailing_slash() -> None:
     without = DeepSeekSettings(base_url="https://api.deepseek.com")
 
     assert with_slash.completions_url == without.completions_url
+
+
+# --- gemini --------------------------------------------------------------
+
+
+def test_each_provider_reads_only_its_own_subtree(_mounted: Path) -> None:
+    """One file holds every provider; a loader must not pick up a neighbour."""
+
+    (_mounted / "secrets.yaml").write_text(
+        "llm:\n"
+        "  deepseek:\n    api_key: sk-deepseek\n"
+        "  gemini:\n    api_key: gemini-key\n",
+        encoding="utf-8",
+    )
+
+    assert load_deepseek_settings().api_key == "sk-deepseek"
+    assert load_gemini_settings().api_key == "gemini-key"
+
+
+def test_the_gemini_model_defaults_to_the_pinned_one(_mounted: Path) -> None:
+    """Pinned rather than latest: a baseline holds only if the model does."""
+
+    assert load_gemini_settings().model == GEMINI_DEFAULT_MODEL
+
+
+def test_an_empty_model_falls_back_rather_than_building_a_broken_url(_mounted: Path) -> None:
+    """The local config file ships with an empty model until it is filled in."""
+
+    (_mounted / "config.yaml").write_text(
+        'llm:\n  gemini:\n    model: ""\n', encoding="utf-8"
+    )
+
+    assert load_gemini_settings().model == GEMINI_DEFAULT_MODEL
+
+
+def test_thinking_stays_off_by_default_and_null_means_omit_it(_mounted: Path) -> None:
+    """None means leave the field out, not think as much as you like."""
+
+    assert load_gemini_settings().thinking_budget == 0
+
+    (_mounted / "config.yaml").write_text(
+        "llm:\n  gemini:\n    thinking_budget: null\n", encoding="utf-8"
+    )
+
+    assert load_gemini_settings().thinking_budget is None
+
+
+def test_the_generate_url_carries_the_model_and_the_api_version() -> None:
+    settings = GeminiSettings(model="gemini-3.6-flash", base_url="https://host/")
+
+    assert settings.generate_url == "https://host/v1beta/models/gemini-3.6-flash:generateContent"

@@ -27,7 +27,8 @@ from mind.extraction.providers.base import (
     LLMTimeout,
     LLMUnavailable,
 )
-from mind.extraction.providers.deepseek import MAX_ERROR_DETAIL_CHARS, DeepSeekProvider
+from mind.extraction.providers.deepseek import DeepSeekProvider
+from mind.extraction.providers.http import MAX_ERROR_DETAIL_CHARS
 from mind.extraction.providers.settings import DeepSeekSettings
 
 VALID_ANSWER = json.dumps(

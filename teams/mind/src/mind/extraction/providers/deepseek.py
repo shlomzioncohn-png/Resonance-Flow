@@ -44,14 +44,10 @@ from mind.extraction.providers.base import (
     LLMTimeout,
     LLMUnavailable,
 )
+from mind.extraction.providers.http import as_int, clip, error_detail
 from mind.extraction.providers.settings import DeepSeekSettings, load_deepseek_settings
 
 logger = logging.getLogger("mind.extraction.providers")
-
-# Provider error bodies are quoted into logs and into failure records. A
-# block page or a stack trace can be enormous, and the first part is always
-# the informative part.
-MAX_ERROR_DETAIL_CHARS = 300
 
 # 402 is DeepSeek's "insufficient balance". It belongs with the refusals on
 # purpose: the call will keep failing until somebody tops the account up, so
@@ -162,7 +158,7 @@ class DeepSeekProvider:
         """Turn a non-200 into the right `LLMError`. Never returns."""
 
         status = response.status_code
-        detail = _error_detail(response)
+        detail = error_detail(response)
 
         if status == httpx.codes.TOO_MANY_REQUESTS:
             retry_after = _retry_after_seconds(response)
@@ -185,7 +181,7 @@ class DeepSeekProvider:
             payload = response.json()
         except ValueError as exc:
             raise LLMUnavailable(
-                f"DeepSeek returned a body that is not JSON: {_clip(response.text)}"
+                f"DeepSeek returned a body that is not JSON: {clip(response.text)}"
             ) from exc
 
         if not isinstance(payload, dict):
@@ -217,40 +213,9 @@ class DeepSeekProvider:
         return LLMResponse(
             text=text,
             model=str(payload.get("model") or self._settings.model),
-            prompt_tokens=_as_int(usage.get("prompt_tokens")),
-            completion_tokens=_as_int(usage.get("completion_tokens")),
+            prompt_tokens=as_int(usage.get("prompt_tokens")),
+            completion_tokens=as_int(usage.get("completion_tokens")),
         )
-
-
-def _clip(text: str) -> str:
-    """Shorten a body for a log line, marking that it was shortened."""
-
-    collapsed = " ".join(text.split())
-    if len(collapsed) <= MAX_ERROR_DETAIL_CHARS:
-        return collapsed
-    return collapsed[:MAX_ERROR_DETAIL_CHARS] + " [...]"
-
-
-def _error_detail(response: httpx.Response) -> str:
-    """The provider's own explanation, if it gave one.
-
-    DeepSeek answers an error as `{"error": {"message": ...}}`. Anything that
-    is not that shape - an HTML page from a gateway, most often - falls back
-    to the clipped raw body, which is what makes an interception visible in
-    the logs instead of looking like an API bug.
-    """
-
-    try:
-        payload = response.json()
-    except ValueError:
-        return _clip(response.text)
-
-    if isinstance(payload, dict):
-        error = payload.get("error")
-        if isinstance(error, dict) and error.get("message"):
-            return _clip(str(error["message"]))
-
-    return _clip(response.text)
 
 
 def _retry_after_seconds(response: httpx.Response) -> float | None:
@@ -270,9 +235,3 @@ def _retry_after_seconds(response: httpx.Response) -> float | None:
         logger.info("DeepSeek sent an unparseable Retry-After (%r); using our own backoff", raw)
         return None
     return seconds if seconds >= 0 else None
-
-
-def _as_int(value: object) -> int | None:
-    """Token counts are optional, and a non-numeric one is simply absent."""
-
-    return value if isinstance(value, int) and not isinstance(value, bool) else None

@@ -137,3 +137,58 @@ A live smoke test is therefore a manual step — mount a key, point
 through. Note that a filtered network may intercept `api.deepseek.com` and
 answer with its own block page; an HTML body or a `418` is the filter, not
 DeepSeek.
+
+#### Gemini
+
+`providers/gemini.py` is the comparison provider #350 names, and on a network
+that filters `api.deepseek.com` it is the only one that can actually be run. It
+is not `deepseek.py` with the URL swapped — Gemini takes the system prompt as
+its own `system_instruction` field, returns the answer as a list of parts, and
+puts its retry hint in the error body instead of a header.
+
+```yaml
+llm:
+  gemini:
+    model: gemini-3.6-flash
+    thinking_budget: 0
+```
+
+Two settings carry a measurement behind them.
+
+`thinking_budget: 0` is the difference between a usable client and an unusable
+one: against the live API the same trivial prompt took ~1.4s with thinking off
+and ~101s with it on. Extraction asks for four short fields and has nothing to
+reason about. It is `int | None` because not every model accepts the field —
+one returned 400 for a body the others took — and `None` omits it entirely.
+
+The model is **pinned, not "latest"**. A baseline is comparable across weeks
+only if the model behind it holds still. Note also that `ListModels` is not an
+entitlement: a key issued today lists the previous generation but gets a 404
+asking for it, so verify a model by calling it.
+
+On the free tier `503 "experiencing high demand"` is an everyday event rather
+than an edge case, and the newest model is the most congested. That is handled,
+not avoided: a 503 is retryable and spends the transient-retry budget, never a
+repair round.
+
+Blocked answers are the one case this client has that DeepSeek's does not. A
+`finishReason` of `SAFETY`/`BLOCKLIST`/`PROHIBITED_CONTENT`, or a `promptFeedback`
+block with no candidates at all, is a refusal: the same prompt will be blocked
+again, so it is not retried.
+
+#### The live smoke test
+
+`scripts/smoke_gemini.py` runs one item through the whole path — prompts,
+provider, parsing, repair loop, confidence, contract — against the real API. It
+is manual on purpose: it needs a key, it spends quota, and it must never run in
+CI.
+
+```bash
+CONFIG_FILE_PATH=config.local.yaml SECRETS_FILE_PATH=secrets.local.yaml \
+    python scripts/smoke_gemini.py
+```
+
+On a network that intercepts TLS, add `--os-trust-store` (needs
+`pip install truststore`). Python verifies against certifi and will reject an
+interception certificate that the browser and curl accept; the flag hands
+verification to the OS, which already trusts it, rather than weakening it.
