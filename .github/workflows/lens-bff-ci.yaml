@@ -34,3 +34,4 @@ jobs:
       service_name: lens-bff
       service_dir: teams/lens/bff
       language: java
+      container_port: 8082

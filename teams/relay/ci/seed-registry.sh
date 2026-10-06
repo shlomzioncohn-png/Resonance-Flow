@@ -17,7 +17,7 @@ BASE_REF="${1:?usage: seed-registry.sh <git-ref>}"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(git -C "$SCRIPT_DIR" rev-parse --show-toplevel)"
-PROTO_DIR="teams/relay/src/main/proto"
+PROTO_DIR="shared/proto"
 REGISTRY_URL="${SCHEMA_REGISTRY_URL:-http://localhost:8081/apis/ccompat/v6}"
 
 # Schema list + compatibility level, read from BASE_REF (not this PR).
