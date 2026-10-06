@@ -9,4 +9,4 @@ kafka:
 minio:
   enabled: false
 postgresql:
-  enabled: false
+  enabled: true
