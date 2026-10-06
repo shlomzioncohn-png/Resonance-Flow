@@ -36,8 +36,3 @@ dependencies:
     version: 18.8.13
     repository: oci://registry-1.docker.io/bitnamicharts
     condition: postgresql.enabled
-
-  - name: keycloak
-    version: 25.2.0
-    repository: oci://registry-1.docker.io/bitnamicharts
-    condition: keycloak.enabled

@@ -22,5 +22,3 @@ minio:
   enabled: false
 postgresql:
   enabled: false
-keycloak:
-  enabled: false

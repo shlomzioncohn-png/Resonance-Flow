@@ -391,10 +391,6 @@ components:
       periodSeconds: 5
       failureThreshold: 3
     env: {}
-    # Validates every request's token against Keycloak (issuer + signing keys).
-    dependencies:
-      - name: keycloak
-        port: 80
   notification-delivery:
     enabled: true
     replicaCount: 1
@@ -531,11 +527,6 @@ postgresql:
   primary:
     persistence:
       enabled: false
-    # Creates Keycloak's own database/user on first boot - rendered by
-    # templates/keycloak/db-init-secret.yaml from keycloak.externalDatabase.password,
-    # so that password is set in exactly one place.
-    initdb:
-      scriptsSecret: "{{ .Release.Name }}-keycloak-db-init"
     resources:
       requests:
         cpu: 100m
@@ -543,53 +534,3 @@ postgresql:
       limits:
         cpu: 150m
         memory: 192Mi
-# Issues the tokens lens-gateway validates. Served under /auth on the public host
-# (the Ingress routes /, /api and /auth); notification-delivery etc. never see a token.
-keycloak:
-  enabled: true
-  # bitnami/keycloak was pruned from Docker Hub's free tier like kafka/minio above.
-  # bitnamilegacy is unmaintained - no security patches for the identity server.
-  image:
-    registry: docker.io
-    repository: bitnamilegacy/keycloak
-  # Dev mode (start-dev) until there's a public host + TLS; flip to true with KC_HOSTNAME.
-  production: false
-  httpRelativePath: "/auth/"
-  # Behind the Ingress: trust its X-Forwarded-* so issued URLs/issuer use the public host.
-  proxyHeaders: xforwarded
-  auth:
-    adminUser: admin
-    adminPassword: "resonance-flow-dev-admin"
-  # Separate database on the shared postgresql subchart above, not Keycloak's own.
-  postgresql:
-    enabled: false
-  externalDatabase:
-    host: "{{ .Release.Name }}-postgresql"
-    port: 5432
-    user: keycloak
-    database: keycloak
-    password: "resonance-flow-dev-keycloak"
-  # Realm as code: templates/keycloak/realm-configmap.yaml (from files/keycloak/), imported
-  # on every start if the realm doesn't exist yet - Postgres has no persistence, so this is
-  # also what rebuilds it after a Postgres restart.
-  extraStartupArgs: "--import-realm"
-  extraVolumes:
-    - name: realm
-      configMap:
-        name: "{{ .Release.Name }}-keycloak-realm"
-  extraVolumeMounts:
-    - name: realm
-      mountPath: /opt/bitnami/keycloak/data/import
-      readOnly: true
-  # TODO: set once the public host is known - must equal lens-gateway's expected issuer
-  # minus /realms/lens, e.g. https://<host>/auth.
-  extraEnvVars: []
-  #  - name: KC_HOSTNAME
-  #    value: "https://<host>/auth"
-  resources:
-    requests:
-      cpu: 250m
-      memory: 512Mi
-    limits:
-      cpu: 1000m
-      memory: 1Gi
