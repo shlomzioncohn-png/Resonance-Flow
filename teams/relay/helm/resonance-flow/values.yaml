@@ -123,6 +123,7 @@ components:
         log_level: INFO
     secret:
       create: false
+    kafkaSasl: true
   lens-bff:
     enabled: true
     replicaCount: 1
