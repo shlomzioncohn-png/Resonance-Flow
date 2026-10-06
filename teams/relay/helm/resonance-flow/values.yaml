@@ -98,11 +98,12 @@ components:
         port: 9000
       - name: postgresql
         port: 5432
+      - name: schema-registry
+        port: 8080
     # Mounted as config.yaml at /etc/resonance-flow/config/ - keys are what MIND reads.
     config:
       vector_store:
         # pgvector needs user/password/db, not an API key.
-        url: ""
         user: mind
         db: mind
       llm:
@@ -114,17 +115,15 @@ components:
         provider: local
         whisper_model: base
       object_storage:
-        endpoint: http://resonance-flow-minio.resonance-flow.svc.cluster.local:9000
-        bucket: ""
+        bucket: bridge-raw
       kafka:
-        bootstrap_servers: resonance-flow-kafka.resonance-flow.svc.cluster.local:9092
-        schema_registry_url: http://resonance-flow-schema-registry.resonance-flow.svc.cluster.local:80/apis/ccompat/v6
         producer:
           task_creation_requested_topic: task.creation.requested
       service:
         log_level: INFO
     secret:
-      create: true
+      create: false
+    kafkaSasl: true
   lens-bff:
     enabled: true
     replicaCount: 1
@@ -486,6 +485,10 @@ postgresql:
         secret:
           secretName: resonance-flow-chain-db-credentials
           optional: true
+      - name: mind-db-credentials
+        secret:
+          secretName: resonance-flow-mind-db-credentials
+          optional: true
     extraVolumeMounts:
       - name: pgvector
         mountPath: /opt/bitnami/postgresql/lib/vector.so
@@ -493,6 +496,9 @@ postgresql:
         readOnly: true
       - name: chain-db-credentials
         mountPath: /etc/resonance-flow/secrets/chain-db
+        readOnly: true
+      - name: mind-db-credentials
+        mountPath: /etc/resonance-flow/secrets/mind-db
         readOnly: true
     # HNSW index builds use maintenance_work_mem (64MB default) on top of
     # shared_buffers (128MB) - 192Mi left no headroom and OOMKills instead of erroring.
@@ -504,6 +510,5 @@ postgresql:
         cpu: 250m
         memory: 512Mi
     initdb:
-      # Both names below must match the fullname-prefixed names
-      # templates/services/chain/configmap.yaml renders.
-      scriptsConfigMap: resonance-flow-chain-db-init
+      # Rendered by templates/postgresql-initdb.yaml
+      scriptsConfigMap: resonance-flow-postgresql-initdb

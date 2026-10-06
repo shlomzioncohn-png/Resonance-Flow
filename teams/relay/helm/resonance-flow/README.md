@@ -156,30 +156,43 @@ The init script runs only on a fresh Postgres volume.
 
 ### MIND (`components.mind`)
 
-Keys mirror MIND's `teams/mind/.env.example`; the file layout is a proposal
-pending MIND's sign-off.
+MIND's `config.yaml` is rendered by `templates/services/mind/configmap.yaml`, not by the
+generic `templates/configmap.yaml` (which skips `mind`). Host and port values are computed
+from `dependencies`, so they follow the release and namespace:
 
-| `config.yaml` key | `.env.example` var | value | status |
-|---|---|---|---|
-| `object_storage.endpoint` | `OBJECT_STORAGE_ENDPOINT` | `http://resonance-flow-minio...:9000` | real (chart MinIO) |
-| `kafka.bootstrap_servers` | (new - not in `.env.example` yet) | `resonance-flow-kafka...:9092` | real |
-| `kafka.producer.task_creation_requested_topic` | (new) | `task.creation.requested` | agreed (inbox consumes it) |
-| `vector_store.user` / `.db` | `VECTOR_STORE_USER` / `_DB` | `mind` | assumed (pgvector, per mind-relay-handoff) |
-| `llm.cache_dir` | `MODEL_CACHE_DIR` | `./models` | from `.env.example` |
-| `asr.whisper_model` | `WHISPER_MODEL` | `base` | default |
-| `service.log_level` | `LOG_LEVEL` | `INFO` | default |
-| `vector_store.url` | `VECTOR_STORE_URL` | - | **TBD** - pgvector not deployed anywhere yet |
-| `llm.model` | `LLM_MODEL` | - | **TBD** - provider not chosen |
-| `ocr.provider` / `asr.provider` | `OCR_PROVIDER` / `ASR_PROVIDER` | `local` | **TBD** - local vs managed |
-| `object_storage.bucket` | `OBJECT_STORAGE_BUCKET` | - | **TBD** - Bridge's raw-file bucket |
-
-`secrets.yaml` keys (`components.mind.secret`):
-
-| `secrets.yaml` key | `.env.example` var | status |
+| `config.yaml` key | source | value |
 |---|---|---|
-| `llm.api_key` | `LLM_API_KEY` | pending |
-| `vector_store.password` | `VECTOR_STORE_PASSWORD` | pending |
-| `object_storage.access_key` | `OBJECT_STORAGE_ACCESS_KEY` | pending |
-| `object_storage.secret_key` | `OBJECT_STORAGE_SECRET_KEY` | pending |
+| `vector_store.url` | `dependencies` (`postgresql`) | `host:5432` |
+| `vector_store.user` / `.db` | `components.mind.config.vector_store` | `mind` / `mind` |
+| `object_storage.endpoint` | `dependencies` (`minio`) | `http://host:9000` |
+| `object_storage.bucket` | `components.mind.config.object_storage` | `bridge-raw` (same as Bridge) |
+| `kafka.bootstrap_servers` | top-level `dependencies` (`kafka`) | `host:9092` |
+| `kafka.schema_registry_url` | `dependencies` (`schema-registry`) | `http://host/apis/ccompat/v6` |
+| `kafka.producer.task_creation_requested_topic` | `components.mind.config.kafka` | `task.creation.requested` |
 
-See issue #278.
+### MIND's DB and app credentials (`components.mind`)
+
+MIND's two Secrets are created by a pre-install/pre-upgrade hook Job
+(`templates/services/mind/db-credentials-hook.yaml`), so no manual step is needed in CI or
+the cluster:
+
+- `resonance-flow-mind-db-credentials` (key `password`): a random password, mounted
+  optionally into Postgres. The init script (`templates/services/mind/_db-init.tpl`,
+  included from `templates/postgresql-initdb.yaml`) creates the `mind` role, database, and
+  `vector` extension from it. It runs only on a fresh Postgres volume.
+- `resonance-flow-mind-secret` (key `secrets.yaml`): MIND's app secret, with the same
+  password. It also includes `kafka.sasl` (user and password from `kafka.sasl.client` in
+  `values.yaml`) only when `components.mind.kafkaSasl` is `true`. That is the default, for
+  shared clusters. `values/values-mind.yaml` sets it to `false`, because CI's Kafka broker
+  runs PLAINTEXT and MIND fails the handshake if it sends SASL.
+
+The hook creates the app Secret only when the DB Secret is newly created. If the DB Secret
+already exists but the app Secret is missing, create the app Secret by hand with the same
+password.
+
+`components.mind.secret` has `create: false`, and the chart has no template for it. The app
+Secret's `kafka.sasl` uses the dev credentials in `values.yaml`. A cluster with different
+Kafka credentials must change them there, or recreate the Secret.
+
+Still open: the MinIO credentials (`object_storage.access_key` / `secret_key`, empty), the
+LLM key (`llm.api_key`, empty), and the LLM, OCR, and ASR providers (`local` for now).
