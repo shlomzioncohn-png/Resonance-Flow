@@ -45,6 +45,9 @@ jobs:
       # No-op when nothing changed (same tag redeployed).
       - name: Open a PR with the manifest update
         uses: peter-evans/create-pull-request@v7
+        # Self-hosted runners may lack $HOME; the action needs it for `git config --global`.
+        env:
+          HOME: ${{ runner.temp }}
         with:
           token: ${{ secrets.RELAY_CI_PUSH_TOKEN }}
           base: main
