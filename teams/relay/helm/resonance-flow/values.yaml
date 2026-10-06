@@ -153,7 +153,6 @@ components:
         config:
           import: "configtree:/etc/resonance-flow/secrets/object-storage/"
         kafka:
-          bootstrap-servers: "bridge-kafka:9092"
           # GitHub currently publishes to bridge.github.tasks.
           # Issue #275 will decide whether to use the shared topic instead.
           topic: "bridge.github.tasks"
@@ -161,7 +160,6 @@ components:
             security.protocol: "SASL_PLAINTEXT"
             sasl.mechanism: "PLAIN"
       minio:
-        endpoint: "http://bridge-minio:9000"
         bucket: "bridge-raw"
       github:
         api:
@@ -220,10 +218,9 @@ components:
       - name: object-storage-credentials
         mountPath: /etc/resonance-flow/secrets/object-storage
         readOnly: true
-    volumes:
-      - name: object-storage-credentials
-        secret:
-          secretName: bridge-minio
+    dependencySecretVolumes:
+        - name: object-storage-credentials
+          dependencyName: minio
           items:
             - key: root-user
               path: minio.access-key
