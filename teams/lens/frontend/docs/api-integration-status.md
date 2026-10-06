@@ -34,11 +34,13 @@ still mocked inside the BFF.
     (`GET /api/v1/tasks/selection?availableMinutes=&userId=`, inbox-team PR #550) picks
     the tasks. If that call fails (other than a 4xx), it falls back to the BFF's own
     ranking over the user's tasks (Chain and Mind still mocked).
+  - `GET /workspace/tasks/selection?availableMinutes=` — Inbox's task selection as-is
+    (no fallback; 1-480 minutes)
   - `GET /workspace/employee-task`, `GET /manager/workload`, `GET /manager/projects`,
-    `GET /admin/projects[/{id}]` — mocked
-- **Frontend**: the employee screens call the Gateway through `services/workspaceApi.ts`
-  and `services/employeeApi.ts`. MSW (`mocks/handlers.ts`) now only mocks
-  `GET /api/admin/projects/:projectId`; everything else passes through to the Gateway.
+    `GET /admin/projects[/{id}]` — mocked inside the BFF
+- **Frontend**: every screen calls the Gateway through `services/*Api.ts`. There is no
+  mocking in the browser anymore (MSW was removed on 2026-10-06): all mock data lives in
+  the BFF.
 - **Chat** (`app/(app)/employee/tasks/[taskId]/ChatPanel.tsx`): a scripted demo with
   canned replies. No chat endpoint exists in the Gateway, BFF or Inbox yet.
 

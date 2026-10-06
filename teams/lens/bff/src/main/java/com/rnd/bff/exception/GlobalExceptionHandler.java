@@ -133,6 +133,21 @@ public class GlobalExceptionHandler {
                 new ErrorResponse(status.name(), message, path, ex.getMessage()), status);
     }
 
+    /**
+     * Triggered when a project id has no details (ProjectDetailsService).
+     * Needs its own handler: the catch-all below would otherwise win over the
+     * exception's @ResponseStatus(NOT_FOUND) and turn it into a 500.
+     */
+    @ExceptionHandler(ProjectNotFoundException.class)
+    public ResponseEntity<ErrorResponse> handleProjectNotFoundException(
+            ProjectNotFoundException ex, WebRequest request) {
+        String path = getRequestPath(request);
+        logger.warn("Project not found - Path: {}, projectId: {}", path, ex.getProjectId());
+        return new ResponseEntity<>(
+                new ErrorResponse("NOT_FOUND", "Project not found", path, ex.getMessage()),
+                HttpStatus.NOT_FOUND);
+    }
+
     /** Triggered when a task id doesn't exist in Inbox's task set. */
     @ExceptionHandler(TaskNotFoundException.class)
     public ResponseEntity<ErrorResponse> handleTaskNotFoundException(
