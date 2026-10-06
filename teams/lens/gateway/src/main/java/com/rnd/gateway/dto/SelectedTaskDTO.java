@@ -6,7 +6,7 @@ import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
-import java.time.LocalDateTime;
+import java.time.Instant;
 
 /**
  * One task in a task selection (see TaskSelectionDTO). Mirrors
@@ -27,7 +27,7 @@ public class SelectedTaskDTO {
     /** Minutes - Inbox's own estimate, used to fit the window. */
     private Integer effortEstimate;
 
-    private LocalDateTime dueDate;
+    private Instant dueDate;
 
     /** 0-1, higher is a better pick. */
     private Double selectionScore;

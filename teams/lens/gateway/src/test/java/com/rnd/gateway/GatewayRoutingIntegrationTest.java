@@ -15,7 +15,6 @@ import org.springframework.web.client.ResourceAccessException;
 import org.springframework.web.client.RestTemplate;
 
 import java.net.SocketTimeoutException;
-import java.time.LocalDateTime;
 import java.util.List;
 
 import static org.hamcrest.Matchers.*;
@@ -141,7 +140,7 @@ class GatewayRoutingIntegrationTest {
         task.setPriority("HIGH");
         task.setStatus("READY");
         task.setEffortEstimate(35);
-        task.setDueDate(LocalDateTime.of(2026, 8, 30, 17, 0));
+        task.setDueDate(java.time.Instant.parse("2026-08-30T17:00:00Z"));
         task.setOwner("Alex Morgan");
 
         when(restTemplate.exchange(

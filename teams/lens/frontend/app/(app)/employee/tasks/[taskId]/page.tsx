@@ -21,7 +21,7 @@ import ChatBubbleOutlineOutlinedIcon from '@mui/icons-material/ChatBubbleOutline
 import PersonOutlineIcon from '@mui/icons-material/PersonOutlined';
 import WarningAmberOutlinedIcon from '@mui/icons-material/WarningAmberOutlined';
 import { radiusTokens } from '@/theme';
-import { DetailRow, softToneSx, statusTone } from '../../shared';
+import { DetailRow, PriorityChip, softToneSx, statusTone } from '../../shared';
 import { getErrorMessage } from '@/services/api';
 import { getTask, type ApiTask } from '@/services/workspaceApi';
 import ChatPanel from './ChatPanel';
@@ -176,10 +176,7 @@ export default function TaskDetailsPage({ params }: { params: Promise<{ taskId: 
                   {task.dueDate && (
                     <DetailRow label="Due" value={new Date(task.dueDate).toLocaleString()} />
                   )}
-                  <DetailRow
-                    label="Priority"
-                    value={<Chip size="small" label={task.priority} sx={softToneSx('error')} />}
-                  />
+                  <DetailRow label="Priority" value={<PriorityChip priority={task.priority} />} />
                   <DetailRow
                     label="Estimated effort"
                     value={task.effortEstimate != null ? `${task.effortEstimate} min` : '—'}

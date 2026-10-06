@@ -638,7 +638,7 @@ public class InboxClient {
                 .status(toUpperCase(record.getStatus()))
                 .priority(toFrontendPriority(record.getPriorityScore()))
                 .effortEstimate(record.getEffortEstimateMinutes())
-                .dueDate(record.getDeadline())
+                .dueDate(toInstant(record.getDeadline()))
                 .owner(record.getOwner())
                 .project(record.getProject())
                 .dependencies(record.getDependencies())
@@ -653,19 +653,19 @@ public class InboxClient {
                 .roleContext(record.getRoleContext())
                 .urgency(record.getUrgency())
                 .effortEstimateConfidence(record.getEffortEstimateConfidence())
-                .inboxStatus(record.getStatus())
+                .inboxStatus(toUpperCase(record.getStatus()))
                 .isAvailable(record.getIsAvailable())
                 .priorityScore(record.getPriorityScore())
-                .snoozedUntil(record.getSnoozedUntil())
+                .snoozedUntil(toInstant(record.getSnoozedUntil()))
                 .extractionProvenance(record.getExtractionProvenance())
                 .confidence(record.getConfidence())
                 .suggestedOwnerUserId(record.getSuggestedOwnerUserId())
                 .suggestedOwnerConfidence(record.getSuggestedOwnerConfidence())
                 .metadata(record.getMetadata())
                 .createdBy(record.getCreatedBy())
-                .createdAt(record.getCreatedAt())
-                .updatedAt(record.getUpdatedAt())
-                .completedAt(record.getCompletedAt())
+                .createdAt(toInstant(record.getCreatedAt()))
+                .updatedAt(toInstant(record.getUpdatedAt()))
+                .completedAt(toInstant(record.getCompletedAt()))
                 .build();
     }
 
@@ -683,7 +683,7 @@ public class InboxClient {
                 .status(task.getStatus())
                 .priority(toFrontendPriority(task.getPriorityScore()))
                 .effortEstimate(task.getEffortEstimateMinutes())
-                .dueDate(toLocalDateTime(task.getDeadline()))
+                .dueDate(task.getDeadline())
                 .tenantId(task.getTenant() == null ? null : task.getTenant().getId())
                 .projectId(task.getProjectId())
                 .sourceType(toLowerCase(task.getSourceType()))
@@ -692,23 +692,32 @@ public class InboxClient {
                 .roleContext(toLowerCase(task.getRoleContext()))
                 .urgency(task.getUrgency())
                 .effortEstimateConfidence(task.getEffortEstimateConfidence())
-                .inboxStatus(toLowerCase(task.getStatus()))
+                .inboxStatus(task.getStatus())
                 .isAvailable(task.getAvailable())
                 .priorityScore(task.getPriorityScore())
-                .snoozedUntil(toLocalDateTime(task.getSnoozedUntil()))
+                .snoozedUntil(task.getSnoozedUntil())
                 .extractionProvenance(toLowerCase(task.getExtractionProvenance()))
                 .confidence(task.getConfidence())
                 .suggestedOwnerUserId(task.getSuggestedOwnerUserId())
                 .suggestedOwnerConfidence(task.getSuggestedOwnerConfidence())
                 .metadata(task.getMetadata())
                 .createdBy(task.getCreatedById())
-                .createdAt(toLocalDateTime(task.getCreatedAt()))
-                .updatedAt(toLocalDateTime(task.getUpdatedAt()))
-                .completedAt(toLocalDateTime(task.getCompletedAt()))
+                .createdAt(task.getCreatedAt())
+                .updatedAt(task.getUpdatedAt())
+                .completedAt(task.getCompletedAt())
                 .build();
     }
 
-    /** TaskDTO uses zone-less LocalDateTime; Inbox sends UTC instants, kept as UTC. */
+    /**
+     * TaskDTO dates are Instants, sent as ISO-8601 UTC ("...Z"), so the browser
+     * converts them to local time correctly. The mock's records are zone-less
+     * LocalDateTime and are read as UTC.
+     */
+    private static Instant toInstant(LocalDateTime dateTime) {
+        return dateTime == null ? null : dateTime.toInstant(ZoneOffset.UTC);
+    }
+
+    /** For storing an Instant on a mock record (zone-less, UTC). */
     private static LocalDateTime toLocalDateTime(Instant instant) {
         return instant == null ? null : LocalDateTime.ofInstant(instant, ZoneOffset.UTC);
     }
@@ -725,7 +734,8 @@ public class InboxClient {
      */
     private static String toFrontendPriority(Double priorityScore) {
         if (priorityScore == null) {
-            return "MEDIUM";
+            // No score -> no priority. Showing MEDIUM here would be made up.
+            return null;
         }
         if (priorityScore >= 7) {
             return "HIGH";

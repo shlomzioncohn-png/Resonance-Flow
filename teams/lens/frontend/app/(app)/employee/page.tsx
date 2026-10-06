@@ -27,7 +27,14 @@ import ScheduleOutlinedIcon from '@mui/icons-material/ScheduleOutlined';
 import WarningAmberOutlinedIcon from '@mui/icons-material/WarningAmberOutlined';
 import PageContainer from '@/components/layout/PageContainer';
 import { radiusTokens } from '@/theme';
-import { DetailRow, iconBadgeSx, softToneSx, statusTone } from './shared';
+import {
+  DetailRow,
+  iconBadgeSx,
+  PriorityChip,
+  priorityTone,
+  softToneSx,
+  statusTone,
+} from './shared';
 import { getErrorMessage } from '@/services/api';
 import { recommendTask, updateTaskStatus, type TaskRecommendation } from '@/services/workspaceApi';
 
@@ -40,6 +47,8 @@ export default function EmployeeWorkspacePage() {
   const [error, setError] = useState<string | null>(null);
   const [validationError, setValidationError] = useState<string | null>(null);
   const [recommendation, setRecommendation] = useState<TaskRecommendation | null>(null);
+  // The minutes the shown recommendation was asked for - `minutes` can change after it arrives
+  const [searchedMinutes, setSearchedMinutes] = useState(minutes);
   const [starting, setStarting] = useState(false);
   const [started, setStarted] = useState(false);
 
@@ -60,6 +69,7 @@ export default function EmployeeWorkspacePage() {
         projectFilter: projectFilter || undefined,
       });
       setRecommendation(result);
+      setSearchedMinutes(minutes);
     } catch (err) {
       setError(getErrorMessage(err));
       setRecommendation(null);
@@ -84,7 +94,8 @@ export default function EmployeeWorkspacePage() {
   };
 
   const task = recommendation?.task ?? null;
-  const fitsWindow = task ? minutes >= task.effortEstimate : false;
+  // The server decides (it also knows when the effort is unknown) - not recomputed here
+  const fitsWindow = recommendation?.fitsInTime ?? false;
 
   return (
     <PageContainer title="My Workspace" description="Make the most of your available time.">
@@ -151,7 +162,8 @@ export default function EmployeeWorkspacePage() {
                     )
                   }
                   onClick={findBestTask}
-                  disabled={loading}
+                  // Not while a task is starting - its answer would land on the new recommendation
+                  disabled={loading || starting}
                   data-testid="recommend-btn"
                 >
                   {loading ? 'Finding…' : 'Find my best task'}
@@ -192,6 +204,20 @@ export default function EmployeeWorkspacePage() {
           </Card>
         )}
 
+        {/* No task found - show the server's reason instead of an empty screen */}
+        {recommendation && !task && (
+          <Card data-testid="no-recommendation">
+            <CardContent>
+              <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
+                <ScheduleOutlinedIcon color="action" />
+                <Typography variant="body2" color="text.secondary">
+                  {recommendation.explanation || 'No matching tasks available right now.'}
+                </Typography>
+              </Stack>
+            </CardContent>
+          </Card>
+        )}
+
         {/* Recommendation result */}
         {recommendation && task && (
           <Stack direction={{ xs: 'column', lg: 'row' }} spacing={3} sx={{ alignItems: 'stretch' }}>
@@ -226,12 +252,7 @@ export default function EmployeeWorkspacePage() {
                       <Typography variant="h6" data-testid="recommendation-task-title">
                         {task.title}
                       </Typography>
-                      <Chip
-                        size="small"
-                        label={task.priority}
-                        sx={[softToneSx('error'), { fontWeight: 600 }]}
-                        data-testid="task-priority"
-                      />
+                      <PriorityChip priority={task.priority} bold />
                     </Stack>
                     {task.project && (
                       <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
@@ -267,7 +288,7 @@ export default function EmployeeWorkspacePage() {
                     <Stack direction="row" spacing={1.5} sx={{ flexWrap: 'wrap' }}>
                       <Button
                         variant="contained"
-                        disabled={started || starting}
+                        disabled={started || starting || loading}
                         onClick={startTask}
                         startIcon={
                           starting ? (
@@ -330,14 +351,18 @@ export default function EmployeeWorkspacePage() {
                   <Chip
                     size="small"
                     icon={<NotificationsActiveOutlinedIcon />}
-                    label={task.priority}
-                    sx={softToneSx('error')}
+                    label={task.priority ?? '—'}
+                    sx={softToneSx(priorityTone(task.priority))}
                   />
                   <Chip
                     size="small"
                     icon={<ScheduleOutlinedIcon />}
                     label={
-                      fitsWindow ? `Fits in ${minutes} min` : `Needs ${task.effortEstimate} min`
+                      fitsWindow
+                        ? `Fits in ${searchedMinutes} min`
+                        : task.effortEstimate != null
+                          ? `Needs ${task.effortEstimate} min`
+                          : 'Effort unknown'
                     }
                     sx={softToneSx(fitsWindow ? 'info' : 'warning')}
                   />

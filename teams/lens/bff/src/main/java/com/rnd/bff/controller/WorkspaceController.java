@@ -50,13 +50,14 @@ public class WorkspaceController {
      *
      * GET /workspace/tasks?filter=&search=&page=&size=
      *
-     * filter: all | in_progress | blocked | waiting_on_me (default all)
+     * filter: all, or one of the 8 statuses in lowercase (default all)
      * page: 0-based (default 0), size: default 20, clamped to [1, 100]
      */
     @Operation(summary = "List tasks", description = "Filter, title search, and pagination for My Tasks.")
     @GetMapping("/workspace/tasks")
     public ResponseEntity<TaskListResponseDTO> listTasks(
-            @Parameter(description = "all | in_progress | blocked | waiting_on_me (default all)")
+            @Parameter(description = "all, or one of the 8 statuses in lowercase (new, in_review, approved, "
+                    + "in_progress, snoozed, done, rejected, cancelled). Default all")
             @RequestParam(required = false) String filter,
             @Parameter(description = "Free-text, matched against task title (case-insensitive)")
             @RequestParam(required = false) String search,

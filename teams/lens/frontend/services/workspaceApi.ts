@@ -24,8 +24,8 @@ export interface ApiTask {
    * See docs/employee-workspace-api-contract.md §5.0 for status model.
    */
   status: string;
-  /** LOW | MEDIUM | HIGH */
-  priority: string;
+  /** HIGH/MEDIUM/LOW. Missing when the task has no priority score. */
+  priority?: string;
   /** Estimated effort in minutes */
   effortEstimate: number;
   /** ISO-8601 datetime string */

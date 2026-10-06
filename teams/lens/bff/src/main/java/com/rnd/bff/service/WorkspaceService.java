@@ -21,8 +21,6 @@ import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
 import java.time.Instant;
-import java.time.LocalDateTime;
-import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
@@ -213,9 +211,7 @@ public class WorkspaceService {
                 .title(task.getTitle())
                 .description(task.getDescription())
                 .effortEstimate(task.getEffortEstimateMinutes())
-                .dueDate(task.getDeadline() == null
-                        ? null
-                        : LocalDateTime.ofInstant(task.getDeadline(), ZoneOffset.UTC))
+                .dueDate(task.getDeadline())
                 .build();
     }
 
@@ -364,9 +360,7 @@ public class WorkspaceService {
                                 .title(task.getTitle())
                                 .description(task.getDescription())
                                 .effortEstimate(task.getEffortEstimateMinutes())
-                                .dueDate(task.getDeadline() == null
-                                        ? null
-                                        : LocalDateTime.ofInstant(task.getDeadline(), ZoneOffset.UTC))
+                                .dueDate(task.getDeadline())
                                 .selectionScore(task.getSelectionScore())
                                 .build())
                         .toList();

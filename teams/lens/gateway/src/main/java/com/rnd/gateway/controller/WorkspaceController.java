@@ -46,8 +46,10 @@ import java.net.SocketTimeoutException;
  *
  * Endpoints:
  * POST  /api/workspace/recommend             - Get best task recommendation for available time
+ * GET   /api/workspace/tasks                 - My Tasks list (filter, search, pagination)
+ * GET   /api/workspace/tasks/selection       - Tasks that fit availableMinutes together
  * GET   /api/workspace/tasks/{taskId}        - Get full task details (dependencies, tags, etc.)
- * PATCH /api/workspace/tasks/{taskId}/status - Update task status (READY/IN_PROGRESS/BLOCKED/COMPLETED)
+ * PATCH /api/workspace/tasks/{taskId}/status - Update task status (one of the 8 Inbox statuses)
  * GET   /api/workspace/employee-task         - Get the employee's current task (My Workspace demo)
  *
  * Identity flow (current: MOCK):
@@ -255,7 +257,8 @@ public class WorkspaceController {
             description = "\"My Tasks\" screen — filter, title search, and pagination.")
     @GetMapping("/tasks")
     public ResponseEntity<TaskListResponseDTO> getTaskList(
-            @Parameter(description = "all | in_progress | blocked | waiting_on_me (default all)")
+            @Parameter(description = "all, or one of the 8 statuses in lowercase (new, in_review, approved, "
+                    + "in_progress, snoozed, done, rejected, cancelled). Default all")
             @RequestParam(required = false) String filter,
             @Parameter(description = "Free-text, matched against task title (case-insensitive)")
             @RequestParam(required = false) String search,
@@ -441,9 +444,10 @@ public class WorkspaceController {
      * Update task status
      *
      * Request: PATCH /api/workspace/tasks/{taskId}/status
-     * Body: { "status": "IN_PROGRESS" }
+     * Body: { "status": "SNOOZED", "snoozedUntil": "2026-10-07T09:00:00Z" }
      *
-     * Allowed status values: READY, IN_PROGRESS, BLOCKED, COMPLETED
+     * Allowed status values: NEW, IN_REVIEW, APPROVED, IN_PROGRESS, SNOOZED,
+     * DONE, REJECTED, CANCELLED. snoozedUntil is required only for SNOOZED.
      *
      * Response: updated TaskDTO
      */

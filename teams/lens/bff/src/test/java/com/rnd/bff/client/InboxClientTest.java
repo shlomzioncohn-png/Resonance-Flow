@@ -12,7 +12,6 @@ import java.io.IOException;
 import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
-import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicReference;
@@ -42,14 +41,14 @@ class InboxClientTest {
 
         // One task per status (8-status model), priority bucketed from priority_score:
         // >= 7 HIGH, >= 4 MEDIUM, else LOW.
-        assertStatusAndPriority(byId.get("task_001"), "NEW", "HIGH", "new", 8.0);
-        assertStatusAndPriority(byId.get("task_002"), "IN_REVIEW", "HIGH", "in_review", 8.0);
-        assertStatusAndPriority(byId.get("task_003"), "APPROVED", "MEDIUM", "approved", 5.0);
-        assertStatusAndPriority(byId.get("task_004"), "IN_PROGRESS", "LOW", "in_progress", 2.0);
-        assertStatusAndPriority(byId.get("task_005"), "DONE", "HIGH", "done", 8.0);
-        assertStatusAndPriority(byId.get("task_006"), "SNOOZED", "LOW", "snoozed", 3.0);
-        assertStatusAndPriority(byId.get("task_007"), "REJECTED", "MEDIUM", "rejected", 4.0);
-        assertStatusAndPriority(byId.get("task_008"), "CANCELLED", "LOW", "cancelled", 1.0);
+        assertStatusAndPriority(byId.get("task_001"), "NEW", "HIGH", "NEW", 8.0);
+        assertStatusAndPriority(byId.get("task_002"), "IN_REVIEW", "HIGH", "IN_REVIEW", 8.0);
+        assertStatusAndPriority(byId.get("task_003"), "APPROVED", "MEDIUM", "APPROVED", 5.0);
+        assertStatusAndPriority(byId.get("task_004"), "IN_PROGRESS", "LOW", "IN_PROGRESS", 2.0);
+        assertStatusAndPriority(byId.get("task_005"), "DONE", "HIGH", "DONE", 8.0);
+        assertStatusAndPriority(byId.get("task_006"), "SNOOZED", "LOW", "SNOOZED", 3.0);
+        assertStatusAndPriority(byId.get("task_007"), "REJECTED", "MEDIUM", "REJECTED", 4.0);
+        assertStatusAndPriority(byId.get("task_008"), "CANCELLED", "LOW", "CANCELLED", 1.0);
     }
 
     private void assertStatusAndPriority(
@@ -182,6 +181,8 @@ class InboxClientTest {
             } else if (path.equals("/api/v1/tasks")) {
                 body = "{\"content\":[" + INBOX_TASK_JSON + "],\"page\":0,\"size\":20,"
                         + "\"total_elements\":828,\"total_pages\":42}";
+            } else if (path.contains("11111111-1111-1111-1111-111111111111")) {
+                body = INBOX_TASK_JSON.replace("\"priority_score\":8.0", "\"priority_score\":null");
             } else if (path.contains("99999999-9999-9999-9999-999999999999")) {
                 status = 403;
                 body = "{\"status\":403,\"error\":\"FORBIDDEN\",\"message\":\"Actor cannot act on task\"}";
@@ -224,10 +225,11 @@ class InboxClientTest {
         assertThat(task.getId()).isEqualTo("539e1548-18e9-3021-92c7-25567dfe1cc8");
         assertThat(task.getTitle()).isEqualTo("Meeting task 1");
         assertThat(task.getStatus()).isEqualTo("IN_PROGRESS");
-        assertThat(task.getInboxStatus()).isEqualTo("in_progress");
+        assertThat(task.getInboxStatus()).isEqualTo("IN_PROGRESS");
         assertThat(task.getPriority()).isEqualTo("HIGH");
         assertThat(task.getEffortEstimate()).isEqualTo(30);
-        assertThat(task.getDueDate()).isEqualTo(LocalDateTime.of(2026, 10, 20, 15, 0));
+        // Sent with its zone (UTC), so the browser shows the right local time
+        assertThat(task.getDueDate()).isEqualTo(Instant.parse("2026-10-20T15:00:00Z"));
         assertThat(task.getTenantId()).isEqualTo("1a2befb7-9bb3-39dd-89cd-6f1c47cd2db6");
         assertThat(task.getSourceType()).isEqualTo("meeting");
         assertThat(task.getIsAvailable()).isFalse();
@@ -322,5 +324,13 @@ class InboxClientTest {
                 .containsExactly("task_001");
         assertThat(selection.isUsedFallback()).isTrue();
         assertThat(selection.getReason()).contains("expanded to 35 minutes");
+    }
+
+    @Test
+    void getTaskById_real_noPriorityScore_hasNoPriorityInsteadOfMedium() {
+        TaskDTO task = realClient(ACTOR).getTaskById("emp_001", "11111111-1111-1111-1111-111111111111");
+
+        assertThat(task.getPriorityScore()).isNull();
+        assertThat(task.getPriority()).isNull();
     }
 }
