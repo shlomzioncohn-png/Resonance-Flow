@@ -18,6 +18,12 @@ inputs:
 runs:
   using: composite
   steps:
+    - name: Prune unused Docker networks
+      shell: bash
+      run: |
+        # until=1h spares a network another job has just created and not yet attached to a container.
+        docker network prune -f --filter "until=1h" || true
+
     - name: Free Docker disk if below ${{ inputs.min_free_gb }} GB
       shell: bash
       run: |
