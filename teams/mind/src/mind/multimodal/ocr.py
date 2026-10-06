@@ -10,11 +10,15 @@ indistinguishable from a confident (and possibly wrong) read -- see
 matters (a confident wrong word is the case a corrupted-file check can't
 catch).
 
-NOTE: ``extract_text``'s signature is being agreed with R2 (issue #449), who
-calls it from her ``bridge.raw.landed`` consumer (#349). Agreed so far: it takes
-a file path, and a failure carries a classified ``reason``. Still open: the
-shape of the low-confidence signal, per-page text, and how a scanned document
-is recognised (``source_type``, #188) -- see this package's README.
+The signature was agreed with R2 (issue #449), who calls it from her
+``bridge.raw.landed`` consumer (#349): raw ``bytes`` in (her consumer already
+reads the object to verify its content hash), a typed failure ``reason`` so a
+data failure can be told from an environment one, per-document counts
+(``word_count``, ``low_confidence_count``, ``mean_confidence``) so the
+low-confidence list has a denominator, text per page, and a page cap. Whether a
+document is scanned is decided by the caller (``RawObjectEvent.modality``), not
+guessed here -- ``filename`` is only a secondary hint for telling a PDF from an
+image. See this package's README.
 """
 
 from __future__ import annotations
@@ -24,18 +28,18 @@ import os
 import shutil
 import subprocess
 import tempfile
+from enum import Enum
 from pathlib import Path
-from typing import Literal
 
 import pypdfium2 as pdfium
-from pydantic import BaseModel, model_validator
+from pydantic import BaseModel, computed_field, model_validator
 
 from mind.api.instrumentation import instrumented_call
 
 # Tesseract page-segmentation args -- the OCR decision (psm 11, sparse text; see
 # benchmarks/ocr-asr-benchmark.md). Defined here, not imported from benchmarks/
 # (service code doesn't depend on the benchmark scripts); the benchmark's own
-# CHOSEN_PSM_ARGS is a separate copy, and tests/test_ocr_pipeline.py fails if
+# CHOSEN_PSM_ARGS is a separate copy, and tests/test_ocr_psm_sync.py fails if
 # the two ever differ, so a future PSM change can't leave one of them behind.
 OCR_PSM_ARGS = ["--psm", "11"]
 
@@ -50,9 +54,19 @@ OCR_PSM_ARGS = ["--psm", "11"]
 # no cut-off does both (80 catches 81% of errors but flags 39% of correct
 # words). digit_merge and segmentation misses (correct text, wrong word
 # boundaries) sit on either side of 60 and are flagged only partly. Choose
-# the final cut-off against real downstream impact once extraction exists.
+# the final cut-off against real downstream impact once extraction exists;
+# OCRResult.mean_confidence lets a caller calibrate later without a new OCR run.
 # See benchmarks/ocr-asr-benchmark.md "per-word confidence" for the tables.
 LOW_CONFIDENCE_THRESHOLD = 60.0
+
+# Longest PDF extract_text() will OCR by default; more pages fails with
+# TOO_MANY_PAGES before any page is rendered. OCR runs synchronously inside the
+# caller's Kafka handler, so its cost is time the consumer is blocked: measured
+# on the dev machine, about 2.6 s per PDF page (rasterizing at ~200 DPI plus
+# Tesseract, a FUNSD-sized form page; a bare image is faster, ~0.5 s), so 10
+# pages is about 26 s. A guess at a sensible default, not a measured limit --
+# callers can pass their own `max_pages`.
+MAX_PAGES = 10
 
 _WINDOWS_DEFAULT_INSTALL = r"C:\Program Files\Tesseract-OCR\tesseract.exe"
 
@@ -67,40 +81,68 @@ class LowConfidenceWord(BaseModel):
     confidence: float
 
 
-# Why an extraction failed, so the caller can react differently to each:
-#   file_not_found  -- the path does not exist (a pipeline bug, not a bad document)
-#   file_unreadable -- the path exists but could not be read (a directory, permissions)
-#   empty_input     -- the file is empty
-#   corrupt_input   -- not a readable image or PDF
-#   unreadable_scan -- a valid image/PDF in which no text was recognised (blank or too poor)
-#   ocr_unavailable -- the tesseract binary is not installed (an environment problem)
-#   ocr_failed      -- tesseract ran and failed or timed out for another reason
-FailureReason = Literal[
-    "file_not_found",
-    "file_unreadable",
-    "empty_input",
-    "corrupt_input",
-    "unreadable_scan",
-    "ocr_unavailable",
-    "ocr_failed",
-]
+class OCRFailureReason(str, Enum):
+    """Why an extraction failed, so the caller can react differently to each.
+
+    Data failures -- the document itself is the problem; retrying gives the same
+    result, so the caller can drop it and move on:
+      EMPTY_INPUT         no bytes at all
+      UNREADABLE_FORMAT   not a readable image or PDF (corrupt, or another format)
+      NO_TEXT_RECOGNIZED  a valid image/PDF in which no text was found (blank or too poor)
+      TOO_MANY_PAGES      a PDF longer than `max_pages`
+
+    Environment failures -- nothing is wrong with the document; the caller must
+    not treat the document as processed (e.g. commit a Kafka offset past it):
+      OCR_UNAVAILABLE     the tesseract binary is not installed
+      OCR_FAILED          tesseract ran and failed or timed out
+    """
+
+    EMPTY_INPUT = "EMPTY_INPUT"
+    UNREADABLE_FORMAT = "UNREADABLE_FORMAT"
+    NO_TEXT_RECOGNIZED = "NO_TEXT_RECOGNIZED"
+    TOO_MANY_PAGES = "TOO_MANY_PAGES"
+    OCR_UNAVAILABLE = "OCR_UNAVAILABLE"
+    OCR_FAILED = "OCR_FAILED"
+
+
+_RETRYABLE_REASONS = frozenset({OCRFailureReason.OCR_UNAVAILABLE, OCRFailureReason.OCR_FAILED})
 
 
 class OCRResult(BaseModel):
     """Result of extract_text(). Always returned, never raised past this module.
 
+    On success: ``text`` is all pages joined with a newline (the convenience
+    view); ``pages`` holds the text of each page, so the index is the page
+    number (0-based), with ``""`` for a page where nothing was recognised;
+    ``word_count`` / ``mean_confidence`` cover every recognised word, and
+    ``low_confidence_words`` the ones below LOW_CONFIDENCE_THRESHOLD, with
+    ``low_confidence_count`` their number -- the list alone has no denominator.
+
     ``success=False`` means "could not extract" -- ``reason`` says why (a
-    classified code to branch on) and ``error`` is the human-readable message --
-    as distinct from a successful extraction that happens to contain
-    low-confidence words (``success=True``, ``low_confidence_words`` non-empty).
-    ``reason`` is set exactly when ``success`` is False.
+    classified code to branch on), ``error`` is the human-readable message for
+    logs, and ``retryable`` is True for environment failures (the document is
+    fine; try again once the environment is fixed). ``reason`` is set exactly
+    when ``success`` is False.
     """
 
     success: bool
     text: str = ""
+    pages: list[str] = []
+    word_count: int = 0
+    mean_confidence: float | None = None
     low_confidence_words: list[LowConfidenceWord] = []
-    reason: FailureReason | None = None
+    reason: OCRFailureReason | None = None
     error: str | None = None
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def low_confidence_count(self) -> int:
+        return len(self.low_confidence_words)
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def retryable(self) -> bool:
+        return self.reason in _RETRYABLE_REASONS
 
     @model_validator(mode="after")
     def _reason_iff_failure(self) -> OCRResult:
@@ -111,8 +153,26 @@ class OCRResult(BaseModel):
         return self
 
 
-def _failure(reason: FailureReason, error: str) -> OCRResult:
+def _failure(reason: OCRFailureReason, error: str) -> OCRResult:
     return OCRResult(success=False, reason=reason, error=error)
+
+
+class _PageOCR(BaseModel):
+    """What one page's TSV yielded."""
+
+    text: str
+    word_count: int
+    confidence_sum: float
+    low_confidence: list[LowConfidenceWord]
+
+
+class _TooManyPages(Exception):
+    def __init__(self, pages: int, max_pages: int) -> None:
+        super().__init__(f"PDF has {pages} pages, more than max_pages={max_pages}")
+
+
+class _TesseractRejectedImage(Exception):
+    """Tesseract exited non-zero on an image: it could not read it."""
 
 
 def _find_tesseract() -> str:
@@ -128,9 +188,15 @@ def _is_pdf(content: bytes, filename: str) -> bool:
     return content[:5] == b"%PDF-" or filename.lower().endswith(".pdf")
 
 
-def _pdf_to_page_images(content: bytes) -> list[bytes]:
-    """Render each PDF page to PNG bytes, at a resolution Tesseract can read."""
+def _pdf_to_page_images(content: bytes, max_pages: int) -> list[bytes]:
+    """Render each PDF page to PNG bytes, at a resolution Tesseract can read.
+
+    Raises _TooManyPages before rendering anything if the PDF is longer than
+    `max_pages` -- rendering is part of the cost the cap exists to bound.
+    """
     pdf = pdfium.PdfDocument(io.BytesIO(content))
+    if len(pdf) > max_pages:
+        raise _TooManyPages(len(pdf), max_pages)
     page_images = []
     for page in pdf:
         bitmap = page.render(scale=_PDF_RENDER_SCALE)
@@ -138,10 +204,6 @@ def _pdf_to_page_images(content: bytes) -> list[bytes]:
         bitmap.to_pil().save(buf, format="PNG")
         page_images.append(buf.getvalue())
     return page_images
-
-
-class _TesseractRejectedImage(Exception):
-    """Tesseract exited non-zero on an image: it could not read it."""
 
 
 def _run_tesseract_tsv(tesseract_cmd: str, image_bytes: bytes) -> str:
@@ -160,13 +222,14 @@ def _run_tesseract_tsv(tesseract_cmd: str, image_bytes: bytes) -> str:
     return proc.stdout.decode("utf-8", errors="replace")
 
 
-def _parse_tsv(tsv: str) -> tuple[str, list[LowConfidenceWord]]:
-    """-> (extracted text, words scoring below LOW_CONFIDENCE_THRESHOLD).
+def _parse_tsv(tsv: str) -> _PageOCR:
+    """One page's text, word count, confidence sum, and low-confidence words.
 
     TSV level 5 = an individual recognized word (see
     benchmarks/analyze_confidence.py, which established this parsing).
     """
     words: list[str] = []
+    confidence_sum = 0.0
     low_confidence: list[LowConfidenceWord] = []
     for line in tsv.splitlines()[1:]:  # skip header row
         fields = line.split("\t")
@@ -179,75 +242,91 @@ def _parse_tsv(tsv: str) -> tuple[str, list[LowConfidenceWord]]:
         if conf < 0:  # Tesseract's own "not applicable" sentinel
             continue
         words.append(text)
+        confidence_sum += conf
         if conf < LOW_CONFIDENCE_THRESHOLD:
             low_confidence.append(LowConfidenceWord(text=text, confidence=conf))
-    return " ".join(words), low_confidence
+    return _PageOCR(
+        text=" ".join(words),
+        word_count=len(words),
+        confidence_sum=confidence_sum,
+        low_confidence=low_confidence,
+    )
 
 
-def extract_text(path: str | os.PathLike[str]) -> OCRResult:
+def extract_text(content: bytes, *, filename: str = "", max_pages: int = MAX_PAGES) -> OCRResult:
     """Extract text from a scanned document (image or PDF) via tesseract --psm 11.
 
     Args:
-        path: Path to the file on local disk (an image, or a PDF -- told apart
-            by its ``%PDF-`` magic bytes, or failing that its ``.pdf`` suffix).
+        content: Raw file bytes (e.g. as landed by Bridge) -- not a path.
+        filename: Original filename, if known. A secondary hint only, used to
+            tell a PDF from an image when the content doesn't start with the
+            ``%PDF-`` magic bytes; safe to omit. It is not used to decide
+            whether the document is scanned -- that is the caller's call.
+        max_pages: Longest PDF to OCR; a longer one fails with TOO_MANY_PAGES
+            before any page is rendered. A single image counts as one page.
 
-    Always returns an OCRResult, never raises: a missing, unreadable, empty or
-    corrupted file, or an unreadable scan, comes back as ``success=False`` with
-    a classified ``reason`` (see FailureReason) and an ``error`` message --
-    not an exception and not garbage text.
+    Always returns an OCRResult, never raises: empty or corrupted input, too
+    long a PDF, an unreadable scan, or a missing/failing tesseract comes back
+    as ``success=False`` with a classified ``reason`` (see OCRFailureReason),
+    an ``error`` message and a ``retryable`` flag -- not an exception and not
+    garbage text.
 
-    Every successful result carries ``low_confidence_words`` -- words
-    Tesseract itself scored below LOW_CONFIDENCE_THRESHOLD -- so a caller
-    (extraction) can flag or discount them instead of trusting all OCR
-    output equally.
+    Every successful result carries the low-confidence signal -- words
+    Tesseract itself scored below LOW_CONFIDENCE_THRESHOLD, plus the counts to
+    read it against -- so a caller (extraction) can flag or discount them
+    instead of trusting all OCR output equally.
     """
-    file_path = Path(path)
-    try:
-        content = file_path.read_bytes()
-    except FileNotFoundError:
-        return _failure("file_not_found", f"no such file: {file_path}")
-    except OSError as exc:
-        return _failure("file_unreadable", f"could not read {file_path}: {exc}")
-    return _extract_from_bytes(content, filename=file_path.name)
-
-
-def _extract_from_bytes(content: bytes, *, filename: str) -> OCRResult:
     if not content:
-        return _failure("empty_input", "empty input")
+        return _failure(OCRFailureReason.EMPTY_INPUT, "empty input")
 
     try:
         tesseract_cmd = _find_tesseract()
     except RuntimeError as exc:
-        return _failure("ocr_unavailable", str(exc))
+        return _failure(OCRFailureReason.OCR_UNAVAILABLE, str(exc))
 
     try:
         # Deliberately broad: pypdfium2/PIL can raise several different
         # internal error types for a malformed file, and the contract here
         # is "never raise, always return a result" -- see module docstring.
-        page_images = _pdf_to_page_images(content) if _is_pdf(content, filename) else [content]
+        page_images = (
+            _pdf_to_page_images(content, max_pages) if _is_pdf(content, filename) else [content]
+        )
+    except _TooManyPages as exc:
+        return _failure(OCRFailureReason.TOO_MANY_PAGES, str(exc))
     except Exception as exc:  # noqa: BLE001
-        return _failure("corrupt_input", f"could not read input as image or PDF: {exc}")
+        return _failure(
+            OCRFailureReason.UNREADABLE_FORMAT, f"could not read input as image or PDF: {exc}"
+        )
 
     if not page_images:
-        return _failure("corrupt_input", "PDF has no pages")
+        return _failure(OCRFailureReason.UNREADABLE_FORMAT, "PDF has no pages")
 
-    page_texts: list[str] = []
-    all_low_confidence: list[LowConfidenceWord] = []
+    parsed: list[_PageOCR] = []
     try:
         with instrumented_call("tesseract-psm11-ocr"):
             for image_bytes in page_images:
-                tsv = _run_tesseract_tsv(tesseract_cmd, image_bytes)
-                text, low_confidence = _parse_tsv(tsv)
-                if text:
-                    page_texts.append(text)
-                all_low_confidence.extend(low_confidence)
+                parsed.append(_parse_tsv(_run_tesseract_tsv(tesseract_cmd, image_bytes)))
     except _TesseractRejectedImage as exc:
-        return _failure("corrupt_input", f"tesseract could not read the image: {exc}")
+        return _failure(
+            OCRFailureReason.UNREADABLE_FORMAT, f"tesseract could not read the image: {exc}"
+        )
     except Exception as exc:  # noqa: BLE001 -- boundary: never raise, see module docstring
-        return _failure("ocr_failed", f"tesseract failed: {exc}")
+        return _failure(OCRFailureReason.OCR_FAILED, f"tesseract failed: {exc}")
 
-    text = "\n".join(page_texts)
+    pages = [page.text for page in parsed]
+    text = "\n".join(page for page in pages if page)
     if not text:
-        return _failure("unreadable_scan", "no text recognized (scan may be unreadable or blank)")
+        return _failure(
+            OCRFailureReason.NO_TEXT_RECOGNIZED,
+            "no text recognized (scan may be unreadable or blank)",
+        )
 
-    return OCRResult(success=True, text=text, low_confidence_words=all_low_confidence)
+    word_count = sum(page.word_count for page in parsed)
+    return OCRResult(
+        success=True,
+        text=text,
+        pages=pages,
+        word_count=word_count,
+        mean_confidence=round(sum(page.confidence_sum for page in parsed) / word_count, 2),
+        low_confidence_words=[word for page in parsed for word in page.low_confidence],
+    )

@@ -34,51 +34,74 @@ Local OCR + ASR preprocessing.
   memory, ~0.45s CPU time per page on a dev machine (no GPU, no load).
   See `benchmarks/ocr-asr-benchmark.md` for the full comparison and
   reasoning.
-- **OCR: built (`ocr.py`).** `extract_text(path: str | os.PathLike[str])
-  -> OCRResult` -- takes the path of a file on local disk (image or PDF;
-  PDFs are rasterized page-by-page via `pypdfium2` before OCR), runs
+- **OCR: built (`ocr.py`).** `extract_text(content: bytes, *, filename: str =
+  "", max_pages: int = 10) -> OCRResult` -- takes the raw bytes of an image or
+  a PDF (PDFs are rasterized page-by-page via `pypdfium2` before OCR), runs
   `tesseract --psm 11` in TSV mode, and returns an `OCRResult`. It never
-  raises:
+  raises. Fields:
   - `success: bool`
-  - `text: str` -- all pages, joined with a newline.
+  - `text: str` -- all pages joined with a newline (the convenience view).
+  - `pages: list[str]` -- the text of each page; the index is the page number
+    (0-based), with `""` for a page where nothing was recognised, so a blank
+    page keeps its slot.
+  - `word_count: int`, `mean_confidence: float | None` -- over every
+    recognised word, so the low-confidence list has a denominator ("12 weak
+    words of 40" is not "12 of 4000"), and a caller can calibrate its own
+    cut-off later without a new OCR run.
   - `low_confidence_words: list[LowConfidenceWord]` (`text`, `confidence`)
-    -- words Tesseract itself scored below `LOW_CONFIDENCE_THRESHOLD`
-    (**60**, a starting point rather than a tuned value: it flags 12% of
-    correct words and catches ~55% of real errors, see above and the comment
-    on the constant in `ocr.py`).
-  - `reason: FailureReason | None` -- why it failed, set exactly when
-    `success` is `False`, so the caller can react differently to each:
-    `file_not_found` (the path does not exist -- a pipeline bug, not a bad
-    document), `file_unreadable` (exists but can't be read: a directory,
-    permissions), `empty_input`, `corrupt_input` (not a readable image or
-    PDF), `unreadable_scan` (a valid image/PDF in which no text was
-    recognised: blank or too poor), `ocr_unavailable` (the `tesseract`
-    binary is not installed), `ocr_failed` (tesseract failed or timed out).
-  - `error: str | None` -- the human-readable message for the same failure.
+    and `low_confidence_count: int` -- words Tesseract itself scored below
+    `LOW_CONFIDENCE_THRESHOLD` (**60**, a module constant: a starting point
+    rather than a tuned value, it flags 12% of correct words and catches ~55%
+    of real errors -- see above and the comment on the constant in `ocr.py`).
+  - `reason: OCRFailureReason | None`, `error: str | None`, `retryable: bool`
+    -- set when `success` is `False` (`reason` exactly then). `error` is the
+    message for logs; `reason` is what to branch on, and the split that
+    matters is *data* versus *environment*:
+    - data failures (retrying gives the same result, drop the document):
+      `EMPTY_INPUT`, `UNREADABLE_FORMAT` (not a readable image or PDF),
+      `NO_TEXT_RECOGNIZED` (a valid image/PDF in which no text was found:
+      blank or too poor), `TOO_MANY_PAGES` (a PDF over `max_pages`);
+    - environment failures, `retryable=True` (nothing is wrong with the
+      document -- do not treat it as processed, e.g. do not commit a Kafka
+      offset past it): `OCR_UNAVAILABLE` (the `tesseract` binary is not
+      installed), `OCR_FAILED` (tesseract failed or timed out).
+
+  `max_pages` (default `MAX_PAGES = 10`) bounds the cost of a call: a longer
+  PDF fails with `TOO_MANY_PAGES` *before* any page is rendered. OCR runs
+  synchronously, so it is time the caller's handler is blocked: measured on the
+  dev machine, **about 2.6 s per PDF page** (rasterizing at ~200 DPI plus
+  Tesseract, a FUNSD-sized form page; a bare image is faster, ~0.5 s) -- 10
+  pages is about 26 s. The default is a guess at a sensible limit, not a
+  measured one; pass `max_pages` to change it.
 
   The call is wrapped in `instrumented_call("tesseract-psm11-ocr")`
   (`src/mind/api/instrumentation.py`), so latency/cost are recorded like
   every other call in the service.
 
-  **Signature: agreed with R2 so far** (her answers on #449) -- a file
-  *path* as input, and a *classified failure reason* rather than only a
-  message. **Still open with her:** whether a list of low-confidence words
-  is the shape she wants (versus a count or ratio per document, or a
-  configurable threshold), whether she needs text per page for multi-page
-  PDFs (today the pages are joined and the boundaries lost), and how she
-  knows a document is scanned at all -- `RawObjectEvent.source_type`
-  (`src/mind/contracts/raw_object_event.py`) has no value for "scanned
-  document" yet (see #188). She calls this from her `bridge.raw.landed`
-  consumer (#349). "Path" is read as a local filesystem path; if she means
-  an object-storage key, a storage client would have to be added here.
+  **Signature: agreed with R2** (her answers on #449, who calls this from her
+  `bridge.raw.landed` consumer, #349). She asked for: raw `bytes` in (her
+  consumer already reads the object to verify its content hash, so a path
+  would mean reading it twice; `filename` stays as a secondary hint -- the
+  `%PDF-` magic-byte check covers the real cases); a typed failure reason so a
+  data failure can be told from an environment one; the per-document counts;
+  `pages`; and the page cap. *Whether a document is scanned* is the caller's
+  decision, not `ocr.py`'s: `RawObjectEvent.modality` already has
+  `Modality.SCANNED_DOC` and `SourceType.SCANNED_DOC` exists, so no new
+  `source_type` value is needed (#188 looks stale). The open question is on
+  Bridge's side: Bridge sets `modality` for the media lane (a scanned-docs
+  directory is always `SCANNED_DOC`) and, for unstructured attachments, derives
+  it from the MIME type (`image/*` and `application/pdf` give `SCANNED_DOC`; no
+  MIME type gives `TEXT`, the contract's default), so a scanned file whose MIME
+  type is missing would be routed down the text path -- R2 keeps `content_type`
+  plus a magic-byte check as a fallback.
 
-  Tests: `tests/test_ocr_pipeline.py` (clean scan, string path, PDF input,
-  corrupted file, corrupted PDF, unreadable/blank scan, empty file, missing
-  file, low-confidence words) -- these need the `tesseract` binary and skip
-  without it; the FUNSD-backed ones additionally skip if `local-data/` isn't
-  populated. `tests/test_ocr_result.py` covers every failure `reason` and the
-  `OCRResult` invariant (a reason exactly when it failed) with the
+  Tests: `tests/test_ocr_result.py` covers the result shape, every failure
+  `reason`, `retryable`, `pages`, the counts and the page cap with the
   tesseract-facing steps replaced, so it runs without the binary, in CI too.
+  `tests/test_ocr_pipeline.py` runs the real binary (clean scan, multi-page
+  PDF, a blank page in the middle, corrupted file and PDF, blank scan, empty
+  input, low-confidence words) and skips without it; the FUNSD-backed ones
+  additionally skip if `local-data/` isn't populated.
 - **ASR: known risk, not just "open"** — no decision exists, and it
   cannot exist yet: there is no AMI audio (or any audio) sample
   anywhere in this repo, on any branch, to benchmark Whisper against

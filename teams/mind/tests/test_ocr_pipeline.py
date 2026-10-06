@@ -1,4 +1,4 @@
-"""Tests for the OCR pipeline (src/mind/multimodal/ocr.py).
+"""Tests for the OCR pipeline (src/mind/multimodal/ocr.py) against the real tesseract.
 
 Tesseract itself is a system binary (not pip-installable, see
 pyproject.toml), so every test that actually invokes it skips cleanly on a
@@ -6,8 +6,8 @@ machine without it, rather than failing the suite. The clean-scan and
 low-confidence tests additionally need the FUNSD sample already used by
 benchmarks/ (local-data/, gitignored) and skip if it isn't present.
 
-The failure classification (reason codes) is tested without the binary in
-test_ocr_result.py.
+The failure classification, counts, pages and page cap are tested without the
+binary in test_ocr_result.py.
 """
 
 from __future__ import annotations
@@ -18,7 +18,7 @@ from pathlib import Path
 import pytest
 from PIL import Image
 
-from mind.multimodal.ocr import LOW_CONFIDENCE_THRESHOLD, extract_text
+from mind.multimodal.ocr import LOW_CONFIDENCE_THRESHOLD, OCRFailureReason, extract_text
 
 try:
     from mind.multimodal.ocr import _find_tesseract
@@ -53,46 +53,62 @@ def _blank_image_bytes(size: tuple[int, int] = (200, 200)) -> bytes:
     return buf.getvalue()
 
 
-def _pdf_bytes_from_image(image_bytes: bytes) -> bytes:
+def _pdf_from_pages(*images: Image.Image) -> bytes:
+    pages = [image.convert("RGB") for image in images]
     buf = io.BytesIO()
-    Image.open(io.BytesIO(image_bytes)).convert("RGB").save(buf, format="PDF")
+    pages[0].save(buf, format="PDF", save_all=True, append_images=pages[1:])
     return buf.getvalue()
-
-
-def _write(tmp_path: Path, name: str, content: bytes) -> Path:
-    path = tmp_path / name
-    path.write_bytes(content)
-    return path
 
 
 @_funsd_available
 def test_clean_scan_returns_text():
-    result = extract_text(_FUNSD_IMAGE)
+    result = extract_text(_FUNSD_IMAGE.read_bytes(), filename="82092117.png")
 
     assert result.success
     assert result.reason is None
     assert result.error is None
     assert len(result.text) > 100
+    assert result.pages == [result.text]
 
 
 @_funsd_available
-def test_path_may_be_a_string():
-    assert extract_text(str(_FUNSD_IMAGE)).success
+def test_counts_describe_the_same_words_as_the_text():
+    result = extract_text(_FUNSD_IMAGE.read_bytes(), filename="82092117.png")
+
+    assert result.word_count == len(result.text.split())
+    assert result.mean_confidence is not None and 0 < result.mean_confidence <= 100
+    assert result.low_confidence_count == len(result.low_confidence_words)
+    assert result.low_confidence_count < result.word_count
 
 
 @_funsd_available
-def test_pdf_input_returns_text(tmp_path: Path):
-    pdf = _write(tmp_path, "scan.pdf", _pdf_bytes_from_image(_FUNSD_IMAGE.read_bytes()))
+def test_pdf_input_returns_text_per_page():
+    page = Image.open(_FUNSD_IMAGE)
+    pdf = _pdf_from_pages(page, page)
 
-    result = extract_text(pdf)
+    result = extract_text(pdf, filename="scan.pdf")
 
     assert result.success
-    assert len(result.text) > 100
+    assert len(result.pages) == 2
+    assert all(len(p) > 100 for p in result.pages)
+
+
+@_funsd_available
+def test_a_blank_page_in_the_middle_of_a_pdf_keeps_its_slot():
+    page = Image.open(_FUNSD_IMAGE)
+    blank = Image.new("RGB", page.size, "white")
+
+    result = extract_text(_pdf_from_pages(page, blank, page), filename="scan.pdf")
+
+    assert result.success
+    assert len(result.pages) == 3
+    assert result.pages[0] and result.pages[2]
+    assert result.pages[1] == ""
 
 
 @_funsd_available
 def test_low_confidence_words_are_flagged():
-    result = extract_text(_FUNSD_IMAGE)
+    result = extract_text(_FUNSD_IMAGE.read_bytes(), filename="82092117.png")
 
     assert result.success
     # This scan is known (benchmarks/analyze_confidence.py) to contain words
@@ -104,49 +120,36 @@ def test_low_confidence_words_are_flagged():
         assert word.text
 
 
-def test_corrupted_file_returns_failure_not_garbage(tmp_path: Path):
-    path = _write(tmp_path, "doc.png", b"this is not a valid image or pdf file at all")
-
-    result = extract_text(path)
+def test_corrupted_file_returns_failure_not_garbage():
+    result = extract_text(b"this is not a valid image or pdf file at all", filename="doc.png")
 
     assert result.success is False
-    assert result.reason == "corrupt_input"
+    assert result.reason == OCRFailureReason.UNREADABLE_FORMAT
+    assert result.text == ""
+    assert result.pages == []
+    assert result.error
+
+
+def test_corrupted_pdf_returns_failure():
+    result = extract_text(b"%PDF-1.4 not actually a valid pdf structure", filename="doc.pdf")
+
+    assert result.success is False
+    assert result.reason == OCRFailureReason.UNREADABLE_FORMAT
+    assert result.error
+
+
+def test_unreadable_blank_scan_returns_failure():
+    result = extract_text(_blank_image_bytes(), filename="blank.png")
+
+    assert result.success is False
+    assert result.reason == OCRFailureReason.NO_TEXT_RECOGNIZED
     assert result.text == ""
     assert result.error
 
 
-def test_corrupted_pdf_returns_failure(tmp_path: Path):
-    path = _write(tmp_path, "doc.pdf", b"%PDF-1.4 not actually a valid pdf structure")
-
-    result = extract_text(path)
+def test_empty_input_returns_failure():
+    result = extract_text(b"")
 
     assert result.success is False
-    assert result.reason == "corrupt_input"
-    assert result.error
-
-
-def test_unreadable_blank_scan_returns_failure(tmp_path: Path):
-    path = _write(tmp_path, "blank.png", _blank_image_bytes())
-
-    result = extract_text(path)
-
-    assert result.success is False
-    assert result.reason == "unreadable_scan"
-    assert result.text == ""
-    assert result.error
-
-
-def test_empty_file_returns_failure(tmp_path: Path):
-    result = extract_text(_write(tmp_path, "empty.png", b""))
-
-    assert result.success is False
-    assert result.reason == "empty_input"
+    assert result.reason == OCRFailureReason.EMPTY_INPUT
     assert result.error == "empty input"
-
-
-def test_missing_file_returns_failure(tmp_path: Path):
-    result = extract_text(tmp_path / "does-not-exist.png")
-
-    assert result.success is False
-    assert result.reason == "file_not_found"
-    assert "does-not-exist.png" in (result.error or "")
