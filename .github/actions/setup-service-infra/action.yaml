@@ -44,25 +44,7 @@ runs:
     - name: Provision MIND's Secrets
       if: inputs.service_name == 'mind'
       shell: bash
-      run: |
-        SERVICE="${{ inputs.service_name }}"
-        PASSWORD="$(openssl rand -base64 24)"
-        kubectl create namespace "$SERVICE" --dry-run=client -o yaml | kubectl apply -f -
-        kubectl -n "$SERVICE" create secret generic resonance-flow-mind-db-credentials \
-          --from-literal=password="$PASSWORD" \
-          --dry-run=client -o yaml | kubectl apply -f -
-        cat > "$RUNNER_TEMP/mind-secrets.yaml" <<EOF
-        llm:
-          api_key: ""
-        vector_store:
-          password: "$PASSWORD"
-        object_storage:
-          access_key: ""
-          secret_key: ""
-        EOF
-        kubectl -n "$SERVICE" create secret generic resonance-flow-mind-secret \
-          --from-file=secrets.yaml="$RUNNER_TEMP/mind-secrets.yaml" \
-          --dry-run=client -o yaml | kubectl apply -f -
+      run: bash teams/relay/scripts/provision-mind-secrets.sh "${{ inputs.service_name }}"
 
     - name: Deploy chart with ${{ inputs.service_name }} disabled (infra only, for tests)
       shell: bash
