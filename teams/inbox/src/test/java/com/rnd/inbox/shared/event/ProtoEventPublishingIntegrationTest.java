@@ -5,9 +5,9 @@ import com.google.protobuf.Message;
 import com.rnd.inbox.event.TaskCompletedEvent;
 import com.rnd.inbox.event.TaskCreatedEvent;
 import com.rnd.inbox.event.TaskUpdatedEvent;
-import com.rnd.inbox.task.TaskCompletedProtoMapper;
-import com.rnd.inbox.task.TaskCreatedProtoMapper;
-import com.rnd.inbox.task.TaskUpdatedProtoMapper;
+import com.rnd.inbox.task.event.TaskCompletedProtoMapper;
+import com.rnd.inbox.task.event.TaskCreatedProtoMapper;
+import com.rnd.inbox.task.event.TaskUpdatedProtoMapper;
 import io.confluent.kafka.schemaregistry.client.MockSchemaRegistryClient;
 import io.confluent.kafka.schemaregistry.client.SchemaRegistryClient;
 import io.confluent.kafka.serializers.AbstractKafkaSchemaSerDeConfig;
@@ -42,6 +42,7 @@ import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 
 import static org.assertj.core.api.Assertions.assertThat;
+
 
 class ProtoEventPublishingIntegrationTest {
 

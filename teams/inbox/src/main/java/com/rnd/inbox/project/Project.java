@@ -1,8 +1,8 @@
 package com.rnd.inbox.project;
 
-import com.rnd.inbox.tenant.Tenant;
-import com.rnd.inbox.user.User;
-import com.rnd.inbox.team.Team;
+import com.rnd.inbox.tenant.model.Tenant;
+import com.rnd.inbox.user.model.User;
+import com.rnd.inbox.team.model.Team;
 
 import com.rnd.inbox.shared.model.type.LowercasePostgreSQLEnumJdbcType;
 import org.hibernate.annotations.GenericGenerator;

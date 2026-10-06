@@ -55,7 +55,10 @@ to get wrong by writing the "obvious" thing instead:
   `task.scheduling.updated`; omitting it leaves the stored value unchanged, so a message that
   updates only availability never wipes a score. Inbox does not compute it either.
 - **OTP is stored in PostgreSQL** (hash + expiry). Don't introduce Redis for it.
-- **No granular RBAC.** A basic `users.role` only, until a schema change is agreed.
+- **No granular RBAC.** `users.role` is a fixed enum (`UserRole`: `SYSTEM_ADMIN` / `TENANT_ADMIN` /
+  `TEAM_LEAD` / `EMPLOYEE`, V8 migration) — it classifies *what kind* of user someone is, not a
+  permissions model. Don't build authorization logic that branches on it without a separate
+  decision to do so.
 - **`tier`, `role_context` and `confidence` are nullable** — they may be unset before Mind
   classifies. Don't make them required to simplify a mapper.
 - **`correlation_id` is technical, not a business attribute** — set on the unstructured creation
