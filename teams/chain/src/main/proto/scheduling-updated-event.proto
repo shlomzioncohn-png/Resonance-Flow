@@ -1,0 +1,16 @@
+syntax = "proto3";
+
+package com.rnd.chain.event;
+
+option java_package = "com.rnd.chain.event";
+option java_multiple_files = true;
+
+// kafkaTopic: task.scheduling.updated (Chain -> Inbox)
+// Field numbers and types must stay identical to Inbox's scheduling-updated-event.proto
+// (teams/inbox/src/main/proto): the consumer decodes by field number.
+message SchedulingUpdatedEvent {
+  optional string event_id = 1;        // UUID as string. Always set by Chain; stable across retries.
+  string task_id = 2;                  // UUID as string.
+  optional bool available = 3;         // Chain-computed readiness.
+  optional double priority_score = 4;  // 1..10, fractional. Absent = leave Inbox's stored value unchanged.
+}

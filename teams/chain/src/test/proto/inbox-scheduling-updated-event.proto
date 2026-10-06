@@ -1,0 +1,15 @@
+syntax = "proto3";
+
+package com.rnd.inbox.event;
+
+option java_package = "com.rnd.inbox.event";
+option java_multiple_files = true;
+
+// Verbatim copy of teams/inbox/src/main/proto/scheduling-updated-event.proto, used only to prove
+// Chain's wire output decodes the way Inbox's consumer reads it. Re-copy when Inbox changes it.
+message SchedulingUpdatedEvent {
+  optional string event_id = 1;
+  string task_id = 2;
+  optional bool available = 3;
+  optional double priority_score = 4;
+}

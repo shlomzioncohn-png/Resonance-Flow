@@ -215,6 +215,23 @@
                         </configuration>
                     </execution>
                     <execution>
+                        <id>compile-test-protos</id>
+                        <goals>
+                            <goal>test-compile</goal>
+                        </goals>
+                    </execution>
+                    <execution>
+                        <id>compile-scheduling-updated-event</id>
+                        <goals>
+                            <goal>compile</goal>
+                        </goals>
+                        <configuration>
+                            <includes>
+                                <include>scheduling-updated-event.proto</include>
+                            </includes>
+                        </configuration>
+                    </execution>
+                    <execution>
                         <id>compile-dependency-proposed-event</id>
                         <goals>
                             <goal>compile</goal>

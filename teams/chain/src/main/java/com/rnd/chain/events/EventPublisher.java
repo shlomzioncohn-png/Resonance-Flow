@@ -1,13 +1,13 @@
 package com.rnd.chain.events;
 
+import com.google.protobuf.Message;
+
 /**
  * Publishes events produced by Chain (e.g. to Kafka).
  *
- * No envelope: the retired EventEnvelope wrapper assumed a Chain-invented cross-team format that
- * was never actually agreed with anyone (see its own former Javadoc). Every consumer Chain
- * publishes to expects its own, team-owned flat contract instead (e.g. Inbox's SchedulingEventDto
- * for task.scheduling.updated) - so publish() takes an already-shaped payload and serializes it
- * as-is.
+ * No envelope: every consumer Chain publishes to expects its own, team-owned contract (e.g.
+ * Inbox's SchedulingUpdatedEvent for task.scheduling.updated), so publish() takes an
+ * already-built Protobuf message and sends it as-is. Every event must carry its own event_id.
  */
 public interface EventPublisher {
 
@@ -18,7 +18,7 @@ public interface EventPublisher {
      * @param key       the Kafka message key - callers should key by the entity the event is
      *                  about (e.g. taskId), not a per-event id, so every event about the same
      *                  entity lands in order on one partition.
-     * @param payload   the flat payload to serialize and publish as-is.
+     * @param payload   the Protobuf message to publish as-is.
      */
-    void publish(String eventType, String key, Object payload);
+    void publish(String eventType, String key, Message payload);
 }

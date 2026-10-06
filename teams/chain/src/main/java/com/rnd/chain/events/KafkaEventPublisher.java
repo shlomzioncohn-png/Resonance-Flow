@@ -1,6 +1,6 @@
 package com.rnd.chain.events;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
+import com.google.protobuf.Message;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.kafka.core.KafkaTemplate;
@@ -12,7 +12,7 @@ import java.util.Objects;
 /**
  * EventPublisher implementation that actually publishes to Kafka.
  *
- * Publishes {@code payload} as-is (flat JSON, no envelope) - see EventPublisher's Javadoc for why.
+ * Publishes the Protobuf {@code payload} as-is (no envelope) - see EventPublisher's Javadoc for why.
  * The Kafka message key is whatever the caller passes in (e.g. taskId for task.scheduling.updated,
  * matching Inbox's own consumer's partition-ordering assumption), never a locally generated event
  * id.
@@ -30,27 +30,23 @@ public class KafkaEventPublisher implements EventPublisher {
 
     private static final Logger log = LoggerFactory.getLogger(KafkaEventPublisher.class);
 
-    private final KafkaTemplate<String, String> kafkaTemplate;
-    private final ObjectMapper objectMapper;
+    private final KafkaTemplate<String, Message> kafkaTemplate;
     private final Map<String, String> eventTypeToTopic;
 
-    public KafkaEventPublisher(KafkaTemplate<String, String> kafkaTemplate,
-                               ObjectMapper objectMapper,
+    public KafkaEventPublisher(KafkaTemplate<String, Message> kafkaTemplate,
                                ChainEventTopicsProperties topicsProperties) {
         this.kafkaTemplate = kafkaTemplate;
-        this.objectMapper = objectMapper;
         this.eventTypeToTopic = topicsProperties.topics() != null
                 ? Map.copyOf(topicsProperties.topics())
                 : Map.of();
     }
 
     @Override
-    public void publish(String eventType, String key, Object payload) {
+    public void publish(String eventType, String key, Message payload) {
         Objects.requireNonNull(payload, "payload");
         String topic = resolveTopic(eventType);
-        String serialized = serialize(payload);
 
-        kafkaTemplate.send(topic, key, serialized)
+        kafkaTemplate.send(topic, key, payload)
                 .whenComplete((result, ex) -> {
                     if (ex != null) {
                         log.error("Failed to publish [{}] (key={}) to topic [{}]", eventType, key, topic, ex);
@@ -66,14 +62,5 @@ public class KafkaEventPublisher implements EventPublisher {
             throw new EventPublishException("No topic configured for event type: " + eventType);
         }
         return topic;
-    }
-
-    private String serialize(Object payload) {
-        try {
-            return objectMapper.writeValueAsString(payload);
-        } catch (Exception e) {
-            throw new EventPublishException(
-                    "Failed to serialize payload of type " + payload.getClass().getName(), e);
-        }
     }
 }
