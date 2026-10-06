@@ -2,11 +2,12 @@ package com.rnd.chain.service;
 
 import com.rnd.chain.dto.Task;
 import com.rnd.chain.dto.TaskStatus;
+import com.rnd.chain.dto.TaskTestFixtures;
+import com.rnd.chain.repository.InMemoryConstraintRepository;
 import com.rnd.chain.repository.InMemoryTaskDependencyRepository;
 import com.rnd.chain.repository.InMemoryTaskRepository;
 import org.junit.jupiter.api.Test;
 
-import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
@@ -28,22 +29,11 @@ class TaskEligibilityServiceConcurrencyTest {
 
     private static final int THREAD_COUNT = 16;
 
-    private Task buildTask(UUID id) {
-        return Task.builder()
-                .id(id)
-                .ownerId("owner")
-                .status(TaskStatus.ACTIVE)
-                .isReady(false)
-                .blockingCount(0)
-                .openConstraintCount(0)
-                .createdAt(LocalDateTime.now())
-                .updatedAt(LocalDateTime.now())
-                .build();
-    }
-
-    /** Runs `task` on THREAD_COUNT threads simultaneously (released by a shared latch), waits for all to finish. */
-    private void runConcurrently(List<Runnable> tasks) throws InterruptedException {
-        ExecutorService pool = Executors.newFixedThreadPool(THREAD_COUNT);
+    /** Runs `tasks` simultaneously (released by a shared latch) on a pool of `poolSize` threads,
+     * waiting up to `timeoutSeconds` for all to finish (review finding #24 - merges what used to
+     * be two line-for-line-identical harness methods differing only in these two values). */
+    private void runConcurrently(List<Runnable> tasks, int poolSize, long timeoutSeconds) throws InterruptedException {
+        ExecutorService pool = Executors.newFixedThreadPool(poolSize);
         CountDownLatch ready = new CountDownLatch(tasks.size());
         CountDownLatch start = new CountDownLatch(1);
         CountDownLatch done = new CountDownLatch(tasks.size());
@@ -64,7 +54,7 @@ class TaskEligibilityServiceConcurrencyTest {
 
         assertTrue(ready.await(5, TimeUnit.SECONDS), "workers failed to start");
         start.countDown();
-        assertTrue(done.await(30, TimeUnit.SECONDS), "workers did not finish in time");
+        assertTrue(done.await(timeoutSeconds, TimeUnit.SECONDS), "workers did not finish in time");
         pool.shutdown();
     }
 
@@ -76,19 +66,20 @@ class TaskEligibilityServiceConcurrencyTest {
                 .collect(Collectors.toList());
 
         List<Task> allTasks = new ArrayList<>();
-        allTasks.add(buildTask(hubId));
-        blockerIds.forEach(id -> allTasks.add(buildTask(id)));
+        allTasks.add(TaskTestFixtures.defaultTask(hubId).build());
+        blockerIds.forEach(id -> allTasks.add(TaskTestFixtures.defaultTask(id).build()));
 
         InMemoryTaskRepository taskRepository = new InMemoryTaskRepository(allTasks);
         InMemoryTaskDependencyRepository dependencyRepository = new InMemoryTaskDependencyRepository(List.of());
         TaskEligibilityService service = new TaskEligibilityService(
-                taskRepository, dependencyRepository, new SchedulingUpdateService(event -> {}));
+                taskRepository, dependencyRepository, new SchedulingUpdateService(event -> {}),
+                new InMemoryConstraintRepository());
 
         List<Runnable> jobs = blockerIds.stream()
                 .<Runnable>map(blockerId -> () -> service.addDependency(hubId, blockerId))
                 .collect(Collectors.toList());
 
-        runConcurrently(jobs);
+        runConcurrently(jobs, THREAD_COUNT, 30);
 
         Task hub = taskRepository.findById(hubId).orElseThrow();
         assertEquals(THREAD_COUNT, hub.getBlockingCount(), "every concurrent addDependency must be counted exactly once");
@@ -103,13 +94,14 @@ class TaskEligibilityServiceConcurrencyTest {
                 .collect(Collectors.toList());
 
         List<Task> allTasks = new ArrayList<>();
-        allTasks.add(buildTask(hubId));
-        blockerIds.forEach(id -> allTasks.add(buildTask(id)));
+        allTasks.add(TaskTestFixtures.defaultTask(hubId).build());
+        blockerIds.forEach(id -> allTasks.add(TaskTestFixtures.defaultTask(id).build()));
 
         InMemoryTaskRepository taskRepository = new InMemoryTaskRepository(allTasks);
         InMemoryTaskDependencyRepository dependencyRepository = new InMemoryTaskDependencyRepository(List.of());
         TaskEligibilityService service = new TaskEligibilityService(
-                taskRepository, dependencyRepository, new SchedulingUpdateService(event -> {}));
+                taskRepository, dependencyRepository, new SchedulingUpdateService(event -> {}),
+                new InMemoryConstraintRepository());
 
         for (UUID blockerId : blockerIds) {
             service.addDependency(hubId, blockerId);
@@ -120,41 +112,56 @@ class TaskEligibilityServiceConcurrencyTest {
                 .<Runnable>map(blockerId -> () -> service.onTaskStatusChanged(blockerId, TaskStatus.DONE))
                 .collect(Collectors.toList());
 
-        runConcurrently(jobs);
+        runConcurrently(jobs, THREAD_COUNT, 30);
 
         Task hub = taskRepository.findById(hubId).orElseThrow();
         assertEquals(0, hub.getBlockingCount(), "every concurrent completion must be counted exactly once");
         assertTrue(hub.isReady());
     }
 
+    /**
+     * PLAN.md Finding #9: a PR comment on this branch claimed a test with this name already
+     * covered the race between adding a new edge to a target and that same target completing at
+     * the same time, but no such test existed anywhere in the repo (confirmed by
+     * {@code git grep} across the whole module and a full read of this file). This is that test.
+     *
+     * <p>The race: {@code addDependency(dependent, target)} and
+     * {@code onTaskStatusChanged(target, DONE)} both read the target's DONE status under
+     * {@code dependencyGraphLock} before deciding whether the new edge counts against
+     * {@code blockingCount} - see the comments in both methods. Run many times (not just once)
+     * because a lock-ordering bug here would only reproduce on some interleavings, and a single
+     * pass could pass by luck even with the bug present.
+     *
+     * <p>Invariant under test: whichever order the two calls actually interleave in, the
+     * dependent must never end up permanently stuck - i.e. it must end with
+     * {@code blockingCount == 0} and {@code isReady == true}, since target is DONE by the time
+     * both operations have completed either way.
+     */
     @Test
     void concurrentAddDependency_raceWithTargetCompletion_neverLeavesDependentPermanentlyStuck() throws InterruptedException {
-        // Regression test for the two Critical findings together: addDependency reading the
-        // target's DONE status races against onTaskStatusChanged flipping it, for many trials,
-        // to catch a rare interleaving a single run could miss.
         int trials = 50;
-        for (int i = 0; i < trials; i++) {
+        for (int trial = 0; trial < trials; trial++) {
             UUID dependentId = UUID.randomUUID();
-            UUID blockerId = UUID.randomUUID();
+            UUID targetId = UUID.randomUUID();
 
             InMemoryTaskRepository taskRepository = new InMemoryTaskRepository(
-                    List.of(buildTask(dependentId), buildTask(blockerId)));
+                    List.of(TaskTestFixtures.defaultTask(dependentId).build(), TaskTestFixtures.defaultTask(targetId).build()));
             InMemoryTaskDependencyRepository dependencyRepository = new InMemoryTaskDependencyRepository(List.of());
             TaskEligibilityService service = new TaskEligibilityService(
-                    taskRepository, dependencyRepository, new SchedulingUpdateService(event -> {}));
+                    taskRepository, dependencyRepository, new SchedulingUpdateService(event -> {}),
+                    new InMemoryConstraintRepository());
 
-            runConcurrently(List.of(
-                    () -> service.addDependency(dependentId, blockerId),
-                    () -> service.onTaskStatusChanged(blockerId, TaskStatus.DONE)));
+            List<Runnable> jobs = List.of(
+                    () -> service.addDependency(dependentId, targetId),
+                    () -> service.onTaskStatusChanged(targetId, TaskStatus.DONE));
+
+            runConcurrently(jobs, jobs.size(), 10);
 
             Task dependent = taskRepository.findById(dependentId).orElseThrow();
-            Task blocker = taskRepository.findById(blockerId).orElseThrow();
-
-            if (blocker.getStatus() == TaskStatus.DONE) {
-                assertEquals(0, dependent.getBlockingCount(),
-                        "trial " + i + ": blocker finished DONE but dependent is still counting it as blocking");
-                assertTrue(dependent.isReady(), "trial " + i + ": dependent should be ready once its only blocker is DONE");
-            }
+            assertEquals(0, dependent.getBlockingCount(),
+                    "trial " + trial + ": dependent must not be left permanently stuck");
+            assertTrue(dependent.isReady(),
+                    "trial " + trial + ": dependent must become ready once target is DONE");
         }
     }
 }
