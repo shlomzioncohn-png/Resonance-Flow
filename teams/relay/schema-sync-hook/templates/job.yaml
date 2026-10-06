@@ -34,6 +34,9 @@ spec:
           env:
             - name: SCHEMA_REGISTRY_URL
               value: {{ .Values.schemaRegistryUrl | quote }}
+            # import -> subject lookup for schema references (_schema-references.sh)
+            - name: SCHEMA_SUBJECTS_FILE
+              value: /schema-list/schemas.tsv
 
           # alpine ships without bash/curl/jq — install them at start, then run
           # the real orchestrator script.
@@ -66,6 +69,8 @@ spec:
                 path: check-schema-compatibility.sh
               - key: register-schema.sh
                 path: register-schema.sh
+              - key: _schema-references.sh
+                path: _schema-references.sh
         - name: schema-list
           configMap:
             name: {{ include "schema-sync-hook.fullname" . }}

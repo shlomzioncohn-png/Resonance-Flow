@@ -209,7 +209,8 @@ JSON through the `KafkaTemplate` defined in `ChainProtobufKafkaConfig`. That JSO
 the Protobuf contract is settled (#545). `KafkaEventPublisher` (flat JSON, no envelope) is not
 wired to any caller and is scheduled for removal under #543.
 
-**Schemas**: the `.proto` sources live in `src/main/proto/` and are committed. Messages are
+**Schemas**: the `.proto` sources come from the repo's [`shared/proto/`](../../shared/proto)
+(`task-created-event`, `task-updated-event`, `task-dependencies-proposed-event`). Messages are
 validated against the Schema Registry at `SCHEMA_REGISTRY_URL`. Tests use a mock registry
 (`mock://...`), so no registry process is needed.
 
