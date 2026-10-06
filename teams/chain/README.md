@@ -580,8 +580,8 @@ repo root (creates the `chain` database/user on first init - see
 `shared/database/init/create-chain-database.sh`), or point at any reachable Postgres instance.
 
 In CI, like Inbox, the tests run against the kind cluster's Postgres (`values-chain.yaml` enables
-it). `TEST_DATABASE_URL` is set there, which activates the `postgres-integration` profile, so the
-`@Tag("postgres")` tests run in CI too.
+it). The `@Tag("postgres")` tests still run only with `mvn test -Ppostgres-integration`. Several
+of them also need a Kafka broker, so they aren't enabled in CI yet.
 
 ## Merge with main (2026-10-05)
 

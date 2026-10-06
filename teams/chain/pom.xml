@@ -271,12 +271,6 @@
     <profiles>
         <profile>
             <id>postgres-integration</id>
-            <!-- CI's setup-service-infra sets this when it provides a test Postgres. -->
-            <activation>
-                <property>
-                    <name>env.TEST_DATABASE_URL</name>
-                </property>
-            </activation>
             <properties>
                 <surefire.excludedGroups/>
             </properties>
