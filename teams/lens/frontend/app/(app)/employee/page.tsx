@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import Link from 'next/link';
+import Alert from '@mui/material/Alert';
 import Avatar from '@mui/material/Avatar';
 import Box from '@mui/material/Box';
 import Button from '@mui/material/Button';
@@ -10,22 +11,24 @@ import CardContent from '@mui/material/CardContent';
 import Chip from '@mui/material/Chip';
 import CircularProgress from '@mui/material/CircularProgress';
 import MenuItem from '@mui/material/MenuItem';
+import Snackbar from '@mui/material/Snackbar';
 import Stack from '@mui/material/Stack';
 import TextField from '@mui/material/TextField';
 import Typography from '@mui/material/Typography';
 import { alpha } from '@mui/material/styles';
-import ArrowForwardOutlinedIcon from '@mui/icons-material/ArrowForwardOutlined';
 import AutoAwesomeOutlinedIcon from '@mui/icons-material/AutoAwesomeOutlined';
 import CheckCircleOutlinedIcon from '@mui/icons-material/CheckCircleOutlined';
-import ChatBubbleOutlineOutlinedIcon from '@mui/icons-material/ChatBubbleOutlineOutlined';
 import CodeOutlinedIcon from '@mui/icons-material/CodeOutlined';
 import LinkOutlinedIcon from '@mui/icons-material/LinkOutlined';
 import NotificationsActiveOutlinedIcon from '@mui/icons-material/NotificationsActiveOutlined';
 import PersonOutlineIcon from '@mui/icons-material/PersonOutlined';
-import PlayArrowOutlinedIcon from '@mui/icons-material/PlayArrowOutlined';
 import ScheduleOutlinedIcon from '@mui/icons-material/ScheduleOutlined';
 import WarningAmberOutlinedIcon from '@mui/icons-material/WarningAmberOutlined';
 import PageContainer from '@/components/layout/PageContainer';
+import TaskActions, {
+  BLOCK_REASON_LABELS,
+  REJECT_CATEGORY_LABELS,
+} from '@/components/ui/TaskActions';
 import { radiusTokens } from '@/theme';
 import {
   DetailRow,
@@ -50,7 +53,8 @@ export default function EmployeeWorkspacePage() {
   // The minutes the shown recommendation was asked for - `minutes` can change after it arrives
   const [searchedMinutes, setSearchedMinutes] = useState(minutes);
   const [starting, setStarting] = useState(false);
-  const [started, setStarted] = useState(false);
+  // Phase 1 (design only): actions other than Start task aren't wired yet
+  const [preview, setPreview] = useState<string | null>(null);
 
   const findBestTask = async () => {
     // Validate input
@@ -59,7 +63,6 @@ export default function EmployeeWorkspacePage() {
       return;
     }
 
-    setStarted(false);
     setError(null);
     setValidationError(null);
     setLoading(true);
@@ -85,7 +88,6 @@ export default function EmployeeWorkspacePage() {
       const updated = await updateTaskStatus(recommendation.task.id, 'IN_PROGRESS');
       // Reflect the new status in the displayed recommendation
       setRecommendation((prev) => (prev ? { ...prev, task: updated } : prev));
-      setStarted(true);
     } catch (err) {
       setError(getErrorMessage(err));
     } finally {
@@ -285,39 +287,20 @@ export default function EmployeeWorkspacePage() {
                       )}
                     </Stack>
 
-                    <Stack direction="row" spacing={1.5} sx={{ flexWrap: 'wrap' }}>
-                      <Button
-                        variant="contained"
-                        disabled={started || starting || loading}
-                        onClick={startTask}
-                        startIcon={
-                          starting ? (
-                            <CircularProgress size={16} color="inherit" />
-                          ) : (
-                            !started && <PlayArrowOutlinedIcon />
-                          )
-                        }
-                        data-testid="start-task-btn"
-                      >
-                        {started ? 'Task started' : starting ? 'Starting…' : 'Start task'}
-                      </Button>
-                      <Button
-                        variant="outlined"
-                        component={Link}
-                        href={`/employee/tasks/${task.id}?chat=1`}
-                        startIcon={<ChatBubbleOutlineOutlinedIcon />}
-                      >
-                        Chat about it
-                      </Button>
-                      <Button
-                        variant="outlined"
-                        component={Link}
-                        href={`/employee/tasks/${task.id}`}
-                        endIcon={<ArrowForwardOutlinedIcon />}
-                      >
-                        View details
-                      </Button>
-                    </Stack>
+                    <TaskActions
+                      status={task.status}
+                      detailsHref={`/employee/tasks/${task.id}`}
+                      linkComponent={Link}
+                      busy={starting || loading}
+                      onStart={startTask}
+                      onDone={() => setPreview('Mark as done')}
+                      onBlock={(details) =>
+                        setPreview(`Can't do this now: ${BLOCK_REASON_LABELS[details.reason]}`)
+                      }
+                      onReject={(details) =>
+                        setPreview(`Reject task: ${REJECT_CATEGORY_LABELS[details.category]}`)
+                      }
+                    />
                   </Box>
                 </Stack>
               </CardContent>
@@ -417,6 +400,16 @@ export default function EmployeeWorkspacePage() {
           </Stack>
         )}
       </Stack>
+      <Snackbar
+        open={preview !== null}
+        autoHideDuration={4000}
+        onClose={() => setPreview(null)}
+        anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
+      >
+        <Alert severity="info" variant="filled" onClose={() => setPreview(null)}>
+          Preview only - not saved yet. {preview}
+        </Alert>
+      </Snackbar>
     </PageContainer>
   );
 }
