@@ -9,14 +9,16 @@ on:
       - "!teams/lens/bff/**"
       - "resonance-flow/**"
       - ".github/workflows/lens-frontend-ci.yaml"
-      - ".github/workflows/service-ci.yaml"
+      - ".github/workflows/service-ci-node.yaml"
+      - ".github/workflows/service-cd.yaml"
   pull_request:
     branches: [ "main" ]
     paths:
       - "teams/lens/frontend/**"
       - "!teams/lens/bff/**"
       - ".github/workflows/lens-frontend-ci.yaml"
-      - ".github/workflows/service-ci.yaml"
+      - ".github/workflows/service-ci-node.yaml"
+      - ".github/workflows/service-cd.yaml"
   workflow_dispatch: {}
 
 concurrency:
@@ -28,16 +30,26 @@ permissions:
 
 jobs:
   ci:
+    if: github.event_name == 'pull_request'
+    permissions:
+      contents: read
+    uses: ./.github/workflows/service-ci-node.yaml
+    with:
+      service_name: lens-frontend
+      service_dir: teams/lens/frontend
+
+  cd:
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
     permissions:
       contents: write
       packages: write
-    uses: ./.github/workflows/service-ci.yaml
+      pull-requests: write
+    uses: ./.github/workflows/service-cd.yaml
+    secrets: inherit
     with:
       service_name: lens-frontend
-      service_dir: teams/lens
+      service_dir: teams/lens/frontend
       language: node
-      container_port: 8083
-      health_path: /
 
   playwright:
     runs-on: ubuntu-latest
@@ -47,7 +59,7 @@ jobs:
     defaults:
       run:
         working-directory: teams/lens/frontend
-    
+
     steps:
       - uses: actions/checkout@v4
 

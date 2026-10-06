@@ -1,0 +1,51 @@
+name: Free runner disk
+description: >
+  Reclaims Docker disk on the shared self-hosted runner when free space drops below a
+  threshold. Nothing else cleans it between jobs, so images, build cache and leaked kind
+  clusters pile up until jobs fail with "No space left on device". Other jobs run on the
+  same host concurrently, so only resources older than their age filters are removed.
+
+inputs:
+  min_free_gb:
+    description: "Skip cleanup while the Docker data disk has at least this many GB free"
+    required: false
+    default: "20"
+  stale_cluster_hours:
+    description: "Delete kind clusters older than this - well past any job's timeout, so they're leaked"
+    required: false
+    default: "6"
+
+runs:
+  using: composite
+  steps:
+    - name: Free Docker disk if below ${{ inputs.min_free_gb }} GB
+      shell: bash
+      run: |
+        DOCKER_ROOT=$(docker info -f '{{.DockerRootDir}}')
+        free_gb() { df -BG --output=avail "$DOCKER_ROOT" | tail -1 | tr -dc '0-9'; }
+        BEFORE=$(free_gb)
+        echo "Free on $DOCKER_ROOT: ${BEFORE}G (threshold ${{ inputs.min_free_gb }}G)"
+        if [ "$BEFORE" -ge "${{ inputs.min_free_gb }}" ]; then
+          exit 0
+        fi
+
+        # kind-action's post step deletes its cluster, unless the job was killed first.
+        # Via docker labels, not `kind`: kind isn't on PATH until kind-action runs.
+        CUTOFF=$(date -d "-${{ inputs.stale_cluster_hours }} hours" +%s)
+        for node in $(docker ps -aq --filter "label=io.x-k8s.kind.cluster"); do
+          CREATED=$(docker inspect -f '{{.Created}}' "$node")
+          if [ "$(date -d "$CREATED" +%s)" -lt "$CUTOFF" ]; then
+            echo "Removing stale kind node $(docker inspect -f '{{.Name}}' "$node") (created $CREATED)"
+            docker rm -f -v "$node" || true
+          fi
+        done
+
+        # until=1h spares an image another job just built and hasn't `kind load`ed yet.
+        docker container prune -f --filter "until=1h" || true
+        docker image prune -af --filter "until=1h" || true
+        docker builder prune -af --filter "until=1h" || true
+        # Unnamed volumes only; ones attached to a live container are never removed.
+        docker volume prune -f || true
+
+        echo "Free on $DOCKER_ROOT: ${BEFORE}G -> $(free_gb)G"
+        docker system df || true

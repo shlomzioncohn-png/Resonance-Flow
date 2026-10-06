@@ -1,0 +1,35 @@
+syntax = "proto3";
+
+package com.rnd.inbox.event;
+
+option java_package = "com.rnd.inbox.event";
+option java_multiple_files = true;
+
+import "google/protobuf/timestamp.proto";
+import "task-created-event.proto";
+
+
+
+message TaskUpdatedEvent {
+  string task_id = 1;
+  string tenant_id = 2;
+  optional string project_id = 3;
+  string title = 4;
+  string description = 5;
+  bool is_available = 6;
+  SourceType source_type = 7;
+  string source_ref = 8;
+  optional TaskTier tier = 9;
+  optional TaskRoleContext role_context = 10;
+  optional int32 urgency = 11;
+  optional int32 effort_estimate_minutes = 12;
+  optional google.protobuf.Timestamp deadline = 13;
+  TaskStatus status = 14;
+  ExtractionProvenance extraction_provenance = 15;
+  optional float confidence = 16;
+  optional float effort_estimate_confidence = 17;
+  optional string suggested_owner_user_id = 18;
+  optional float suggested_owner_confidence = 19;
+  google.protobuf.Timestamp updated_at = 20;
+  optional string owner_id = 21;
+}

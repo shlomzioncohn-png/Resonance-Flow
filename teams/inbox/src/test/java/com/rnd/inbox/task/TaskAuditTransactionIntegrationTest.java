@@ -1,11 +1,17 @@
 package com.rnd.inbox.task;
 
+import com.rnd.inbox.task.model.SourceType;
+import com.rnd.inbox.task.model.Task;
+import com.rnd.inbox.task.model.TaskExtractionProvenance;
+import com.rnd.inbox.task.model.TaskStatus;
+import com.rnd.inbox.task.repository.TaskRepository;
+import com.rnd.inbox.task.service.TaskService;
 import com.rnd.inbox.audit.AuditLog;
 import com.rnd.inbox.audit.AuditLogRepository;
 import com.rnd.inbox.support.PostgresIntegrationTest;
-import com.rnd.inbox.tenant.Tenant;
-import com.rnd.inbox.tenant.TenantRepository;
-import com.rnd.inbox.tenant.TenantStatus;
+import com.rnd.inbox.tenant.model.Tenant;
+import com.rnd.inbox.tenant.repository.TenantRepository;
+import com.rnd.inbox.tenant.model.TenantStatus;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.mock.mockito.MockBean;

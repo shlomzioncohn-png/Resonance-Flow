@@ -1,0 +1,43 @@
+{
+  "scenario_id": "salesperson_processing_cutoff_vs_call_summary",
+  "persona": {
+    "role": "Salesperson",
+    "department": null
+  },
+  "context": {
+    "free_time_minutes": 50,
+    "current_datetime": "2026-09-10T13:00:00",
+    "time_horizon": "this_week",
+    "constraints": []
+  },
+  "tasks": [
+    {
+      "task_id": "task_orderform",
+      "title": "Get the signed order form to ops",
+      "description": "The signed order form has to reach ops before the 15:00 daily processing cutoff or it books a day late.",
+      "deadline": "2026-09-10T15:00:00",
+      "effort_estimate": 15,
+      "tier": "tactical",
+      "blocked": false,
+      "parent_task_id": null
+    },
+    {
+      "task_id": "task_summary",
+      "title": "Send the follow-up summary from this morning's call",
+      "description": "The prospect asked for a written recap and next steps; they take it to their internal committee tomorrow afternoon, so they need it first thing tomorrow morning.",
+      "deadline": "2026-09-11T09:00:00",
+      "effort_estimate": 20,
+      "tier": "tactical",
+      "blocked": false,
+      "parent_task_id": null
+    }
+  ],
+  "expected_top_task_id": "task_orderform",
+  "expected_reason": "Both tasks are tactical with hard deadlines, but task_orderform's 15:00 processing cutoff is today while task_summary is not needed until tomorrow morning.",
+  "source": {
+    "type": "synthetic",
+    "source_detail": null
+  },
+  "team_lead_approved": true,
+  "mentor_approved": false
+}

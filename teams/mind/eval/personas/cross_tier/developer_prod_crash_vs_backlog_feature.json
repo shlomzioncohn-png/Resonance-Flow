@@ -1,0 +1,53 @@
+{
+  "scenario_id": "developer_prod_crash_vs_backlog_feature",
+  "persona": {
+    "role": "Developer",
+    "department": null
+  },
+  "context": {
+    "free_time_minutes": 45,
+    "current_datetime": "2026-09-07T09:00:00",
+    "time_horizon": "today",
+    "constraints": []
+  },
+  "tasks": [
+    {
+      "task_id": "task_wiki",
+      "title": "Refresh the onboarding wiki page",
+      "description": "Update a few stale setup steps on the team wiki; nobody is waiting on it.",
+      "deadline": null,
+      "effort_estimate": 15,
+      "tier": "operational",
+      "blocked": false,
+      "parent_task_id": null
+    },
+    {
+      "task_id": "task_crash",
+      "title": "Fix the null-pointer crash in checkout",
+      "description": "Customers hit a crash when applying a discount code at checkout; support has escalated it and needs it fixed before the 12:00 support-team SLA.",
+      "deadline": "2026-09-07T12:00:00",
+      "effort_estimate": 30,
+      "tier": "operational",
+      "blocked": false,
+      "parent_task_id": null
+    },
+    {
+      "task_id": "task_backlog_widget",
+      "title": "Start the order-history dashboard widget",
+      "description": "Kick off a new dashboard widget showing recent orders; next on the backlog, not requested by anyone yet.",
+      "deadline": null,
+      "effort_estimate": 40,
+      "tier": "tactical",
+      "blocked": false,
+      "parent_task_id": null
+    }
+  ],
+  "expected_top_task_id": "task_crash",
+  "expected_reason": "task_crash is a production-impacting checkout failure with a hard deadline three hours away (the support SLA); task_backlog_widget is unrequested backlog work and task_wiki has no deadline and nobody waiting.",
+  "source": {
+    "type": "synthetic",
+    "source_detail": null
+  },
+  "team_lead_approved": true,
+  "mentor_approved": false
+}

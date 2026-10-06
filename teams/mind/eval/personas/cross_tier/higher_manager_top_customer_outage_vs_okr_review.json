@@ -1,0 +1,53 @@
+{
+  "scenario_id": "higher_manager_top_customer_outage_vs_okr_review",
+  "persona": {
+    "role": "Higher Manager",
+    "department": null
+  },
+  "context": {
+    "free_time_minutes": 60,
+    "current_datetime": "2026-09-07T14:00:00",
+    "time_horizon": "this_week",
+    "constraints": []
+  },
+  "tasks": [
+    {
+      "task_id": "task_filler_newsletter",
+      "title": "Write the monthly department newsletter blurb",
+      "description": "A short update for the company newsletter; flexible, no deadline.",
+      "deadline": null,
+      "effort_estimate": 15,
+      "tier": "strategic",
+      "blocked": false,
+      "parent_task_id": null
+    },
+    {
+      "task_id": "task_okr",
+      "title": "Review the division's draft Q4 OKRs",
+      "description": "Your review is needed by Thursday evening so it's folded in before OKRs lock at Friday's leadership sync; if needed the lock can slip a day, but it is cleaner to have your review in by then.",
+      "deadline": "2026-09-10T18:00:00",
+      "effort_estimate": 45,
+      "tier": "strategic",
+      "blocked": false,
+      "parent_task_id": null
+    },
+    {
+      "task_id": "task_outage",
+      "title": "Coordinate the top-customer production outage",
+      "description": "Your single largest customer's production has been down for 30 minutes; their exec called you directly and their team is escalating. No formal deadline, it is live now.",
+      "deadline": null,
+      "effort_estimate": 40,
+      "tier": "operational",
+      "blocked": false,
+      "parent_task_id": null
+    }
+  ],
+  "expected_top_task_id": "task_outage",
+  "expected_reason": "task_outage is an active production outage at the largest customer, live right now; task_okr has a deadline but the lock can slip a day.",
+  "source": {
+    "type": "synthetic",
+    "source_detail": null
+  },
+  "team_lead_approved": true,
+  "mentor_approved": false
+}
