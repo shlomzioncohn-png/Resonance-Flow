@@ -10,7 +10,6 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.rnd.bff.client.ChainClient;
-import com.rnd.bff.client.EmployeeClient;
 import com.rnd.bff.client.InboxClient;
 import com.rnd.bff.client.MindClient;
 import com.rnd.bff.config.CorsConfig;
@@ -34,7 +33,7 @@ import org.springframework.test.web.servlet.MockMvc;
 // them on its own - without them Spring Security's default (deny everything,
 // 401) applies instead of the BFF's real permit-all chain.
 @WebMvcTest(WorkspaceController.class)
-@Import({WorkspaceService.class, InboxClient.class, ChainClient.class, MindClient.class, EmployeeClient.class,
+@Import({WorkspaceService.class, InboxClient.class, ChainClient.class, MindClient.class,
         SecurityConfig.class, CorsConfig.class})
 class WorkspaceControllerTest {
 
@@ -222,25 +221,6 @@ class WorkspaceControllerTest {
     void listTasks_missingUserIdHeader_returns400() throws Exception {
         mockMvc
                 .perform(get("/workspace/tasks"))
-                .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.errorCode", is("BAD_REQUEST")));
-    }
-
-    @Test
-    void getMyTask_returnsTheMockEmployeeTask() throws Exception {
-        mockMvc
-                .perform(get("/workspace/employee-task").header("X-User-Id", "emp_001"))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.id", is("task-1")))
-                .andExpect(jsonPath("$.title", is("Review API changes")))
-                .andExpect(jsonPath("$.status", is("Blocked")))
-                .andExpect(jsonPath("$.blockedBy[0].id", is("task-0")));
-    }
-
-    @Test
-    void getMyTask_missingUserIdHeader_returns400() throws Exception {
-        mockMvc
-                .perform(get("/workspace/employee-task"))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.errorCode", is("BAD_REQUEST")));
     }

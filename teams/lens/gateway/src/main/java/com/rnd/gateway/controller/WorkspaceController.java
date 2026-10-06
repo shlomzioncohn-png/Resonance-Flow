@@ -1,6 +1,5 @@
 package com.rnd.gateway.controller;
 
-import com.rnd.gateway.dto.EmployeeTaskDTO;
 import com.rnd.gateway.dto.TaskDTO;
 import com.rnd.gateway.dto.TaskListResponseDTO;
 import com.rnd.gateway.dto.TaskRecommendationDTO;
@@ -50,7 +49,6 @@ import java.net.SocketTimeoutException;
  * GET   /api/workspace/tasks/selection       - Tasks that fit availableMinutes together
  * GET   /api/workspace/tasks/{taskId}        - Get full task details (dependencies, tags, etc.)
  * PATCH /api/workspace/tasks/{taskId}/status - Update task status (one of the 8 Inbox statuses)
- * GET   /api/workspace/employee-task         - Get the employee's current task (My Workspace demo)
  *
  * Identity flow (current: MOCK):
  *   TODO: replace mock userId with real JWT extraction.
@@ -84,9 +82,6 @@ public class WorkspaceController {
 
     @Value("${bff.endpoints.task-selection:/workspace/tasks/selection}")
     private String bffTaskSelectionPath;
-
-    @Value("${bff.endpoints.employee-task:/workspace/employee-task}")
-    private String bffEmployeeTaskPath;
 
     @Value("${bff.read-timeout-ms:10000}")
     private long bffReadTimeoutMs;
@@ -505,57 +500,4 @@ public class WorkspaceController {
         }
     }
 
-    /**
-     * Get the employee's current task (My Workspace chat/blocking-dependency demo).
-     *
-     * Request: GET /api/workspace/employee-task
-     *
-     * Response: EmployeeTaskDTO
-     */
-    @Operation(summary = "Get my current task", description = "The employee's current task for the My Workspace demo.")
-    @GetMapping("/employee-task")
-    public ResponseEntity<EmployeeTaskDTO> getMyTask() {
-
-        String userId = getMockUserId("workspace.employee-task"); // TODO: extract from JWT
-
-        logger.info("Employee task request - userId: {}", userId);
-
-        try {
-            String bffUrl = UriComponentsBuilder.fromHttpUrl(bffServiceUrl)
-                    .path(bffEmployeeTaskPath)
-                    .toUriString();
-            logger.debug("Forwarding to BFF: {}", bffUrl);
-
-            HttpEntity<Void> getTaskRequest = new HttpEntity<>(buildHeaders(userId));
-
-            ResponseEntity<EmployeeTaskDTO> bffResponse = restTemplate.exchange(
-                    bffUrl, HttpMethod.GET, getTaskRequest, EmployeeTaskDTO.class);
-
-            EmployeeTaskDTO employeeTask = bffResponse.getBody();
-            if (employeeTask == null) {
-                throw new ServiceUnavailableException("bff", "BFF returned empty response");
-            }
-
-            logger.info("Received employee task from BFF - userId: {}", userId);
-            return ResponseEntity.ok(employeeTask);
-
-        } catch (ServiceUnavailableException | GatewayTimeoutException | ResponseStatusException e) {
-            throw e;
-        } catch (ResourceAccessException e) {
-            if (e.getCause() instanceof SocketTimeoutException) {
-                logger.error("BFF read timeout for employee task - userId: {}", userId, e);
-                throw new GatewayTimeoutException("bff", bffReadTimeoutMs, "BFF did not respond in time");
-            }
-            logger.error("BFF unreachable for employee task - userId: {}", userId, e);
-            throw new ServiceUnavailableException("bff", "BFF is currently unavailable");
-
-        } catch (HttpStatusCodeException e) {
-            logger.warn("BFF returned {} for employee task - userId: {}", e.getStatusCode(), userId);
-            throw new ResponseStatusException(e.getStatusCode(), bffErrorReason(e));
-
-        } catch (Exception e) {
-            logger.error("Unexpected error fetching employee task for userId: {}", userId, e);
-            throw new ServiceUnavailableException("bff", "Unexpected error communicating with BFF");
-        }
-    }
 }

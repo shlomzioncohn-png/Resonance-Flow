@@ -13,7 +13,6 @@ import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import com.rnd.bff.client.ChainClient;
-import com.rnd.bff.client.EmployeeClient;
 import com.rnd.bff.client.InboxClient;
 import com.rnd.bff.client.InboxSelectionResponse;
 import com.rnd.bff.client.MindClient;
@@ -47,13 +46,12 @@ class WorkspaceServiceTest {
     @Mock private InboxClient inboxClient;
     @Mock private ChainClient chainClient;
     @Mock private MindClient mindClient;
-    @Mock private EmployeeClient employeeClient;
 
     private WorkspaceService workspaceService;
 
     @BeforeEach
     void setUp() {
-        workspaceService = new WorkspaceService(inboxClient, chainClient, mindClient, employeeClient);
+        workspaceService = new WorkspaceService(inboxClient, chainClient, mindClient);
         // Most tests exercise the BFF's own ranking (mock mode); the
         // "Inbox selection" tests below switch this off.
         lenient().when(inboxClient.isMockEnabled()).thenReturn(true);

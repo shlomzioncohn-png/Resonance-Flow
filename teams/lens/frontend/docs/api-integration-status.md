@@ -2,7 +2,8 @@
 
 Snapshot as of 2026-10-04. Current focus: connecting the BFF to Inbox's real Task API.
 The **My Tasks** list and **Task details** screens now work end to end against a local
-Inbox. The chat was dropped from the plan (2026-10-06).
+Inbox. The chat was dropped from the plan (2026-10-06) and its code removed
+(ChatPanel, taskStore, the `employee-task` endpoint).
 
 ## How a request flows today
 
@@ -36,7 +37,7 @@ still mocked inside the BFF.
     ranking over the user's tasks (Chain and Mind still mocked).
   - `GET /workspace/tasks/selection?availableMinutes=` — Inbox's task selection as-is
     (no fallback; 1-480 minutes)
-  - `GET /workspace/employee-task`, `GET /manager/workload`, `GET /manager/projects`,
+  - `GET /manager/workload`, `GET /manager/projects`,
     `GET /admin/projects[/{id}]` — mocked inside the BFF
 - **Frontend**: every screen calls the Gateway through `services/*Api.ts`. There is no
   mocking in the browser anymore (MSW was removed on 2026-10-06): all mock data lives in
