@@ -10,9 +10,6 @@ Produce to the Kafka topic:
 resonance.task-events-notifications
 ```
 
-- Value: a `TaskNotification` protobuf, serialized with the Confluent `KafkaProtobufSerializer` (schema registry).
-- Key: anything. The service re-keys every message to `org_id:user_id` and republishes it to `resonance.task-notifications`, which is internal. Don't produce to that topic directly.
-
 ## Proto
 
 Source: [`shared/proto/task-notification.proto`](../../../shared/proto/task-notification.proto)
