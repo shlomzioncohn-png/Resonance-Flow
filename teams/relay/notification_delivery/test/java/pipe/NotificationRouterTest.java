@@ -6,7 +6,6 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
-import java.time.Duration;
 import java.time.Instant;
 import java.util.UUID;
 
@@ -22,9 +21,6 @@ class NotificationRouterTest {
 
     private static final String ORG_ID = "org-1";
     private static final String USER_ID = "user-1";
-    private static final Duration DEBOUNCE_WINDOW = Duration.ofSeconds(3);
-    private static final Duration MAX_DIRTY_AGE = Duration.ofSeconds(10);
-    private static final Duration DEDUP_TTL = Duration.ofMinutes(5);
 
     @Mock
     NotificationSink sink;
@@ -34,7 +30,7 @@ class NotificationRouterTest {
 
     @Test
     void activityPolicyIsDeliveredImmediately() {
-        NotificationRouter router = new NotificationRouter(sink, meterRegistry, DEBOUNCE_WINDOW, MAX_DIRTY_AGE, DEDUP_TTL);
+        NotificationRouter router = new NotificationRouter(sink, meterRegistry);
         TaskNotification activityTask = notification(PushPolicy.ACTIVITY, t0);
 
         router.handle(activityTask, 42L, t0);
@@ -45,7 +41,7 @@ class NotificationRouterTest {
 
     @Test
     void duplicateEventIdIsDroppedOnRedeliveryAndCounted() {
-        NotificationRouter router = new NotificationRouter(sink, meterRegistry, DEBOUNCE_WINDOW, MAX_DIRTY_AGE, DEDUP_TTL);
+        NotificationRouter router = new NotificationRouter(sink, meterRegistry);
         TaskNotification activityTask = notification( PushPolicy.ACTIVITY, t0);
         TaskNotification retriedCopy = activityTask.toBuilder().build(); // same event_id, simulating a producer retry
 
@@ -59,13 +55,13 @@ class NotificationRouterTest {
 
     @Test
     void rollupOnlyPolicyIsHeldUntilTheDebounceWindowGoesQuiet() {
-        NotificationRouter router = new NotificationRouter(sink, meterRegistry, DEBOUNCE_WINDOW, MAX_DIRTY_AGE, DEDUP_TTL);
+        NotificationRouter router = new NotificationRouter(sink, meterRegistry);
         router.handle(notification(PushPolicy.ROLLUP_ONLY, t0), 1L, t0);
 
-        router.tick(t0.plus(DEBOUNCE_WINDOW).minusSeconds(1));
+        router.tick(t0.plus(NotificationRouter.DEBOUNCE_WINDOW).minusSeconds(1));
         verify(sink, never()).refresh(ORG_ID, USER_ID);
 
-        router.tick(t0.plus(DEBOUNCE_WINDOW));
+        router.tick(t0.plus(NotificationRouter.DEBOUNCE_WINDOW));
         verify(sink).refresh(ORG_ID, USER_ID);
         verifyNoMoreInteractions(sink);
         assertThat(meterRegistry.counter("pipe.notifications.rollup_only").count()).isEqualTo(1.0);
@@ -74,14 +70,14 @@ class NotificationRouterTest {
 
     @Test
     void burstOfRollupOnlyEventsCollapsesIntoOneRefresh() {
-        NotificationRouter router = new NotificationRouter(sink, meterRegistry, DEBOUNCE_WINDOW, MAX_DIRTY_AGE, DEDUP_TTL);
+        NotificationRouter router = new NotificationRouter(sink, meterRegistry);
         Instant lastEventAt = t0;
         for (int i = 0; i < 50; i++) {
             lastEventAt = t0.plusMillis(i * 100L);
             router.handle(notification(PushPolicy.ROLLUP_ONLY, lastEventAt), i, lastEventAt);
         }
 
-        router.tick(lastEventAt.plus(DEBOUNCE_WINDOW));
+        router.tick(lastEventAt.plus(NotificationRouter.DEBOUNCE_WINDOW));
 
         verify(sink, never()).activity(any(), anyLong());
         verify(sink).refresh(ORG_ID, USER_ID);
@@ -92,11 +88,11 @@ class NotificationRouterTest {
 
     @Test
     void continuousChurnStillFlushesWithinTheMaxDirtyAge() {
-        NotificationRouter router = new NotificationRouter(sink, meterRegistry, DEBOUNCE_WINDOW, MAX_DIRTY_AGE, DEDUP_TTL);
+        NotificationRouter router = new NotificationRouter(sink, meterRegistry);
         Instant lastEventAt = t0;
         long offset = 0;
         // an event every second, never a DEBOUNCE_WINDOW-sized gap, for longer than MAX_DIRTY_AGE
-        while (lastEventAt.isBefore(t0.plus(MAX_DIRTY_AGE).plusSeconds(2))) {
+        while (lastEventAt.isBefore(t0.plus(NotificationRouter.MAX_DIRTY_AGE).plusSeconds(2))) {
             router.handle(notification(PushPolicy.ROLLUP_ONLY, lastEventAt), offset++, lastEventAt);
             router.tick(lastEventAt);
             lastEventAt = lastEventAt.plusSeconds(1);
@@ -107,9 +103,9 @@ class NotificationRouterTest {
 
     @Test
     void unsetPushPolicyIsIgnored() {
-        NotificationRouter router = new NotificationRouter(sink, meterRegistry, DEBOUNCE_WINDOW, MAX_DIRTY_AGE, DEDUP_TTL);
+        NotificationRouter router = new NotificationRouter(sink, meterRegistry);
         router.handle(notification(PushPolicy.PUSH_POLICY_UNSPECIFIED, t0), 1L, t0);
-        router.tick(t0.plus(MAX_DIRTY_AGE));
+        router.tick(t0.plus(NotificationRouter.MAX_DIRTY_AGE));
 
         verifyNoMoreInteractions(sink);
     }

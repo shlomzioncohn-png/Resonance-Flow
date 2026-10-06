@@ -124,29 +124,26 @@ The service publishes a topic:
 
 ### Schema — v1
 
-The source of truth is `shared/proto/task-notification.proto`; this is a copy of it.
-
 ```protobuf
 // resonance.task-notifications, v1
 message TaskNotification {
-  string event_id = 1;                       // UUID, minted by producer — dedup key
-  string org_id = 2;                         // partition key (with user_id)
-  string user_id = 3;                        // recipient / assignee
+  string event_id = 1;                 // UUID, minted by producer — dedup key
+  string org_id = 2;                   // partition key (with user_id)
+  string user_id = 3;                  // recipient / assignee
   string task_id = 4;
-  // 5 is unused (an earlier draft had `EventType event_type = 5`; see §03 for why it isn't needed)
+  EventType event_type = 5;            // what happened
   double urgency_score = 6;
   int32 effort_estimate_minutes = 7;
-  google.protobuf.Timestamp occurred_at = 8; // source time, not Kafka time
-  string source_ref = 9;                     // traceability
-  PushPolicy push_policy = 10;               // how the pipe should deliver this
+  int64 occurred_at_ms = 8;            // source time, not Kafka time
+  string source_ref = 9;               // traceability
+  PushPolicy push_policy = 10;         // how the pipe should deliver this
 }
 ```
 
 ```protobuf
 enum PushPolicy {
-  PUSH_POLICY_UNSPECIFIED = 0; // proto3 default — an unset policy is logged and ignored, never pushed
-  ACTIVITY = 1;                // deliver immediately as its own WebSocket message
-  ROLLUP_ONLY = 2;             // coalesced into a refresh signal
+  PUSH_ACTIVITY = 0;       // deliver immediately as its own WebSocket message
+  PUSH_REFRESH_ONLY = 1;   // coalesced into a refresh signal
 }
 ```
 
@@ -166,32 +163,31 @@ Not every message deserves an immediate push.
 
 Some events are discrete and useful to show as activity. Others are background recalculations that may happen frequently and only indicate that the user's current ranking should be refreshed.
 
-### `push_policy` decides
+### `push_policy`, not `event_type`, decides
 
 The delivery decision is carried in `push_policy`.
 
-The Pipe does not infer the delivery behavior from what kind of change happened — which is why the contract carries no `event_type` field at all.
+The Pipe does not infer the delivery behavior by pattern-matching on `event_type`.
 
 This keeps the classification with the component that knows whether the change is meaningful to the user.
 
-A new kind of change can therefore be introduced without requiring the Pipe to be redeployed just to understand its delivery behavior.
+A new event type can therefore be introduced without requiring the Pipe to be redeployed just to understand its delivery behavior.
 
 | `push_policy` | On the wire |
-|---|---|
-| `ACTIVITY` | Pushed immediately as its own WebSocket message |
-| `ROLLUP_ONLY` | Not pushed individually; marks the user's rollup dirty |
-| `PUSH_POLICY_UNSPECIFIED` | Not pushed; logged as a producer bug |
+|---|---|---|
+| `PUSH_ACTIVITY` | Pushed immediately as its own WebSocket message |
+| `PUSH_REFRESH_ONLY` | Not pushed individually; marks the user's rollup dirty |
 
 ### Refresh coalescing
 
-`ROLLUP_ONLY` events are not simply discarded.
+`PUSH_REFRESH_ONLY` events are not simply discarded.
 
 They indicate that something relevant to the user's current ranking may have changed.
 
 Instead of pushing every recalculation separately, the Pipe coalesces them:
 
 ```text
-ROLLUP_ONLY
+PUSH_REFRESH_ONLY
        │
        ▼
 user marked dirty
@@ -346,7 +342,7 @@ usable, already-unique id and never fails to start just for lacking one.
 
 Inside an actual Kubernetes cluster, though, a missing `INSTANCE_NAME` means the chart's
 downward-API wiring got dropped, and that's worth failing loudly for rather than quietly running
-on the random fallback. `InstanceNameGuard` (`TaskNotificationConsumer`'s sibling in the `pipe` package)
+on the random fallback. `InstanceNameGuard` (`TaskNotificationConsumer`'s sibling in `event/`)
 checks this specifically: it reads `KUBERNETES_SERVICE_HOST`, which the kubelet sets in every pod
 regardless of this service's own config (the same signal Kubernetes client libraries use to
 detect in-cluster execution — the one piece of Kubernetes-specific awareness this class needs,
@@ -481,7 +477,7 @@ Kafka offsets alone cannot identify retries because the retry receives a new off
 
 **Fix:**
 
-- `ROLLUP_ONLY` events are coalesced before reaching the connection;
+- `PUSH_REFRESH_ONLY` events are coalesced before reaching the connection;
 - activity events are expected to be low-rate;
 - every connection has a bounded output buffer;
 - a client that exceeds the buffer limit is disconnected;
@@ -664,7 +660,7 @@ Track at minimum:
 - replay fallback rate;
 - dedup-hit rate;
 - dropped slow-client count;
-- number of `ROLLUP_ONLY` messages;
+- number of `PUSH_REFRESH_ONLY` messages;
 - number of emitted refresh signals;
 - refresh coalescing ratio;
 - reconnect rate;
@@ -824,12 +820,6 @@ relay:
   pipe:
     replay-buffer:
       capacity-per-user: 200
-      max-polls: 20
-    refresh:
-      debounce-window: 3s
-      max-dirty-age: 10s
-    dedup:
-      ttl: 5m
     websocket:
       outbox-capacity: 32
       heartbeat-interval-seconds: 15
@@ -840,10 +830,6 @@ relay:
 | `kafka.topics.task-notifications.partitions` | 12 *(proposed)* | §02, §10 |
 | `kafka.topics.task-notifications.retention-days` | 7 *(proposed)* | §02, §10 |
 | `pipe.replay-buffer.capacity-per-user` | 200 | §06.1 |
-| `pipe.replay-buffer.max-polls` | 20 | §06.1 |
-| `pipe.refresh.debounce-window` | 3s | §03 |
-| `pipe.refresh.max-dirty-age` | 10s | §03 (hard ceiling) |
-| `pipe.dedup.ttl` | 5m | §06.4 |
 | `pipe.websocket.outbox-capacity` | 32 | §06.5 |
 | `pipe.websocket.heartbeat-interval-seconds` | 15 | §05, §06.3 |
 

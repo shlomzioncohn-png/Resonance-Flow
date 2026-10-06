@@ -12,14 +12,6 @@ relay:
       # Bounds how long a single reconnect can spend catching up before giving up and
       # resuming live — a reconnect must not hang the client indefinitely on a Kafka read.
       max-polls: 20
-    refresh:
-      # ROLLUP_ONLY coalescing (design doc §03): emit once the user has been quiet for
-      # debounce-window, but never later than max-dirty-age after the first change.
-      debounce-window: 3s
-      max-dirty-age: 10s
-    dedup:
-      # How long an event_id is remembered for duplicate suppression (design doc §06.4).
-      ttl: 5m
     websocket:
       outbox-capacity: 32
       heartbeat-interval-seconds: 15

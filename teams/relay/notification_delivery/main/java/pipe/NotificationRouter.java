@@ -4,7 +4,6 @@ import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.MeterRegistry;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
@@ -19,11 +18,11 @@ public class NotificationRouter {
 
     private static final Logger log = LoggerFactory.getLogger(NotificationRouter.class);
 
+    static final Duration DEBOUNCE_WINDOW = Duration.ofSeconds(3);
+    static final Duration MAX_DIRTY_AGE = Duration.ofSeconds(10);
+    static final Duration DEDUP_TTL = Duration.ofMinutes(5);
+
     private final NotificationSink sink;
-    // design doc §11 (relay.pipe.refresh.*, relay.pipe.dedup.*) — see pipe-limits.yaml.
-    private final Duration debounceWindow;
-    private final Duration maxDirtyAge;
-    private final Duration dedupTtl;
     private final Map<String, Instant> seenEventIds = new ConcurrentHashMap<>();
     private final Map<String, DirtyState> dirtyUsers = new ConcurrentHashMap<>();
 
@@ -32,16 +31,8 @@ public class NotificationRouter {
     private final Counter rollupOnlyMessagesCounter;
     private final Counter refreshSignalsEmittedCounter;
 
-    public NotificationRouter(
-            NotificationSink sink,
-            MeterRegistry meterRegistry,
-            @Value("${relay.pipe.refresh.debounce-window:3s}") Duration debounceWindow,
-            @Value("${relay.pipe.refresh.max-dirty-age:10s}") Duration maxDirtyAge,
-            @Value("${relay.pipe.dedup.ttl:5m}") Duration dedupTtl) {
+    public NotificationRouter(NotificationSink sink, MeterRegistry meterRegistry) {
         this.sink = sink;
-        this.debounceWindow = debounceWindow;
-        this.maxDirtyAge = maxDirtyAge;
-        this.dedupTtl = dedupTtl;
         this.duplicateEventsCounter = meterRegistry.counter("pipe.notifications.duplicate");
         this.rollupOnlyMessagesCounter = meterRegistry.counter("pipe.notifications.rollup_only");
         this.refreshSignalsEmittedCounter = meterRegistry.counter("pipe.refresh.signals.emitted");
@@ -72,11 +63,11 @@ public class NotificationRouter {
 
     // Split from scheduledTick() so the debounce logic below can be driven by a fixed Instant in tests.
     public void tick(Instant now) {
-        seenEventIds.values().removeIf(seenAt -> Duration.between(seenAt, now).compareTo(dedupTtl) > 0);
+        seenEventIds.values().removeIf(seenAt -> Duration.between(seenAt, now).compareTo(DEDUP_TTL) > 0);
 
         dirtyUsers.forEach((userKey, state) -> {
-            boolean quiet = Duration.between(state.lastDirtyAt(), now).compareTo(debounceWindow) >= 0;
-            boolean overdue = Duration.between(state.firstDirtyAt(), now).compareTo(maxDirtyAge) >= 0;
+            boolean quiet = Duration.between(state.lastDirtyAt(), now).compareTo(DEBOUNCE_WINDOW) >= 0;
+            boolean overdue = Duration.between(state.firstDirtyAt(), now).compareTo(MAX_DIRTY_AGE) >= 0;
             if ((quiet || overdue) && dirtyUsers.remove(userKey, state)) {
                 String[] orgAndUser = splitUserKey(userKey);
                 refreshSignalsEmittedCounter.increment();
