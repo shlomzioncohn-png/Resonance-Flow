@@ -108,6 +108,23 @@ For anything the TCP-reachability check can't express, drop a raw
 container spec into `initContainers` (globally or per-component) instead
 - it's appended after the generated `dependencies` containers.
 
+## Restricting callers (`networkPolicy`)
+
+By default any pod in the cluster can connect to any other. A component that
+trusts its caller declares `networkPolicy.allowFrom`, the list of components
+whose pods may connect to its `http` port. `templates/networkpolicy.yaml` then
+denies every other in-cluster source:
+
+| Component | `allowFrom` | Why |
+|---|---|---|
+| `notification-delivery` | `lens-bff` | trusts `X-Org-Id` / `X-User-Id` as-is |
+| `lens-bff` | `lens-gateway` | `/internal/auth/*` checks passwords |
+
+kubelet probes and `kubectl port-forward` aren't affected, because traffic from
+the pod's own node is always allowed. The rules only take effect if the cluster's
+CNI enforces NetworkPolicy. On a CNI that doesn't, they render but block nothing.
+The policy applies to the whole pod, not to individual paths.
+
 ## Component configuration (`config` / `secret`)
 
 A `components.<name>.config` block is rendered verbatim to a `config.yaml`
