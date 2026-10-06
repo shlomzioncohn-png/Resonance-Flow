@@ -425,7 +425,7 @@ Content-Type: application/json
    ✓ High importance
    ✓ No blocking dependency
    
-   [ Start task ]  [ Chat about it ]  [ View details ]
+   [ Start task ]  [ View details ]
    ```
 
 ### Flow Diagram

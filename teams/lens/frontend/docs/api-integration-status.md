@@ -2,7 +2,7 @@
 
 Snapshot as of 2026-10-04. Current focus: connecting the BFF to Inbox's real Task API.
 The **My Tasks** list and **Task details** screens now work end to end against a local
-Inbox. The chat comes next.
+Inbox. The chat was dropped from the plan (2026-10-06).
 
 ## How a request flows today
 
@@ -41,8 +41,6 @@ still mocked inside the BFF.
 - **Frontend**: every screen calls the Gateway through `services/*Api.ts`. There is no
   mocking in the browser anymore (MSW was removed on 2026-10-06): all mock data lives in
   the BFF.
-- **Chat** (`app/(app)/employee/tasks/[taskId]/ChatPanel.tsx`): a scripted demo with
-  canned replies. No chat endpoint exists in the Gateway, BFF or Inbox yet.
 
 ## Inbox Task API (branch `inbox-team`, commit `438c368`)
 
@@ -121,8 +119,6 @@ there.
    `inbox-team` (PR #530).
 2. Show owner/project names. This needs names in Inbox's task response (Inbox only sends
    ids).
-3. Agree with Inbox (Esti) on a chat API (they mediate with Mind), then add it to the BFF
-   and Gateway and wire `ChatPanel`.
 
 Done since the first snapshot: error handling (Inbox 401/403/400 keep their status and
 get a clear message on screen; the Gateway passes BFF's 4xx message on), snooze, "my
