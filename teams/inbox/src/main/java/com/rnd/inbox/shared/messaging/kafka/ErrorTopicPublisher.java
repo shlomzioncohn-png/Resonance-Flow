@@ -30,7 +30,7 @@ public class ErrorTopicPublisher {
         this.clock = clock;
     }
 
-    public void publish(ConsumerRecord<String, String> record, String errorType, String errorMessage,
+    public void publish(ConsumerRecord<?, ?> record, String originalPayload, String errorType, String errorMessage,
             List<String> errorDetails, int retryCount, String correlationId) {
         String errorTopic = record.topic() + ERROR_TOPIC_SUFFIX;
 
@@ -38,7 +38,7 @@ public class ErrorTopicPublisher {
         body.put("originalTopic", record.topic());
         body.put("originalPartition", record.partition());
         body.put("originalOffset", record.offset());
-        body.put("originalPayload", record.value());
+        body.put("originalPayload", originalPayload);
         body.put("errorType", errorType);
         body.put("errorMessage", errorMessage);
         body.put("errorDetails", errorDetails == null ? List.of() : errorDetails);
@@ -50,7 +50,7 @@ public class ErrorTopicPublisher {
 
         String json = toJson(errorType, errorMessage, body);
 
-        ProducerRecord<String, String> errorRecord = new ProducerRecord<>(errorTopic, record.key(), json);
+        ProducerRecord<String, String> errorRecord = new ProducerRecord<>(errorTopic, (String) record.key(), json);
         addHeader(errorRecord, "x-original-topic", record.topic());
         addHeader(errorRecord, "x-error-type", errorType);
         addHeader(errorRecord, "x-retry-count", String.valueOf(retryCount));

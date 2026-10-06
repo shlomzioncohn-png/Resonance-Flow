@@ -29,6 +29,15 @@ once CI exists (see "Smoke test" below), publishing a tagged image to
 a registry so Relay doesn't need to build from source is the natural
 next step — track it here when it happens.
 
+**Open item:** the runtime image does not install the `tesseract-ocr`
+system package today — verified: no `apt-get install` for it anywhere
+in the `Dockerfile`, only in local dev setups (the OCR benchmark
+scripts run against a locally-installed Tesseract, not inside this
+image). That's fine for now (OCR isn't wired into `src/mind/` yet —
+Phase 2), but expect the image to grow next week when `apt-get install
+tesseract-ocr` gets added to the runtime stage for real OCR support —
+flagging so Relay isn't surprised by the size jump. (Decided: Tesseract. PaddleOCR was evaluated and not chosen — partly to avoid the larger image it would need, `paddlepaddle` plus model weights; see `benchmarks/ocr-asr-benchmark.md`.)
+
 ## Ports
 
 | Port | Service | Notes |
@@ -116,6 +125,8 @@ nothing (no cached layers, no old containers/volumes):
 
 ```bash
 cd teams/mind
+cp .env.example .env        # .env is gitignored -- a fresh clone has none;
+                             # docker compose's env_file: .env fails outright without this
 docker compose down -v      # full cleanup -- no old state
 docker compose up -d --build
 sleep 5

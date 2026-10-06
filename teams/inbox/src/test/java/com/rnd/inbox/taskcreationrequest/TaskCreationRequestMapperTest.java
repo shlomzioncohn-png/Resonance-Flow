@@ -1,19 +1,15 @@
 package com.rnd.inbox.taskcreationrequest;
 
 import com.rnd.inbox.project.Project;
-import com.rnd.inbox.project.ProjectRepository;
-import com.rnd.inbox.task.SourceType;
-import com.rnd.inbox.task.Task;
-import com.rnd.inbox.task.TaskExtractionProvenance;
-import com.rnd.inbox.task.TaskRoleContext;
-import com.rnd.inbox.task.TaskStatus;
-import com.rnd.inbox.task.TaskTier;
-import com.rnd.inbox.tenant.Tenant;
-import com.rnd.inbox.tenant.TenantRepository;
+import com.rnd.inbox.task.model.SourceType;
+import com.rnd.inbox.task.model.Task;
+import com.rnd.inbox.task.model.TaskExtractionProvenance;
+import com.rnd.inbox.task.security.TaskRoleContext;
+import com.rnd.inbox.task.model.TaskStatus;
+import com.rnd.inbox.task.model.TaskTier;
+import com.rnd.inbox.tenant.model.Tenant;
+import com.rnd.inbox.user.model.User;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.extension.ExtendWith;
-import org.mockito.Mock;
-import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.time.Clock;
 import java.time.Instant;
@@ -21,23 +17,15 @@ import java.time.ZoneOffset;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.mockito.Mockito.when;
 
-@ExtendWith(MockitoExtension.class)
 class TaskCreationRequestMapperTest {
 
     private static final Instant FIXED_NOW = Instant.parse("2026-01-01T00:00:00Z");
 
-    @Mock
-    private TenantRepository tenantRepository;
-
-    @Mock
-    private ProjectRepository projectRepository;
-
     private final Clock clock = Clock.fixed(FIXED_NOW, ZoneOffset.UTC);
 
     private TaskCreationRequestMapper mapper() {
-        return new TaskCreationRequestMapper(tenantRepository, projectRepository, clock);
+        return new TaskCreationRequestMapper(clock);
     }
 
     private TaskCreationRequestEventDto dtoFor(UUID tenantId) {
@@ -53,19 +41,17 @@ class TaskCreationRequestMapperTest {
         return dto;
     }
 
-    private Tenant stubTenant(UUID tenantId) {
-        Tenant tenantRef = new Tenant();
-        tenantRef.setId(tenantId);
-        when(tenantRepository.getReferenceById(tenantId)).thenReturn(tenantRef);
-        return tenantRef;
+    private Tenant tenant() {
+        Tenant tenant = new Tenant();
+        tenant.setId(UUID.randomUUID());
+        return tenant;
     }
 
     @Test
     void mapsDtoToTaskWithoutTakingIdFromThePayload() {
-        UUID tenantId = UUID.randomUUID();
-        Tenant tenantRef = stubTenant(tenantId);
+        Tenant tenantRef = tenant();
 
-        TaskCreationRequestEventDto dto = dtoFor(tenantId);
+        TaskCreationRequestEventDto dto = dtoFor(tenantRef.getId());
         dto.setDescription("Extracted from the #sales-acme thread");
         dto.setTier("TACTICAL");
         dto.setRoleContext("SALESPERSON");
@@ -73,7 +59,7 @@ class TaskCreationRequestMapperTest {
         dto.setEffortEstimateMinutes(45);
         dto.setDeadline("2026-09-02T12:00:00Z");
 
-        Task task = mapper().map(dto);
+        Task task = mapper().map(dto, tenantRef, null, null);
 
         assertThat(task.getId()).isNull();
         assertThat(task.getTenant()).isSameAs(tenantRef);
@@ -92,66 +78,77 @@ class TaskCreationRequestMapperTest {
 
     @Test
     void mapsTheUnstructuredPathAsMlInferredRatherThanEtl() {
-        UUID tenantId = UUID.randomUUID();
-        stubTenant(tenantId);
+        Tenant tenantRef = tenant();
 
-        Task task = mapper().map(dtoFor(tenantId));
+        Task task = mapper().map(dtoFor(tenantRef.getId()), tenantRef, null, null);
 
         assertThat(task.getExtractionProvenance()).isEqualTo(TaskExtractionProvenance.ML_INFERRED);
     }
 
     @Test
     void defaultsStatusToNewWhenThePayloadOmitsIt() {
-        UUID tenantId = UUID.randomUUID();
-        stubTenant(tenantId);
+        Tenant tenantRef = tenant();
 
-        Task task = mapper().map(dtoFor(tenantId));
+        Task task = mapper().map(dtoFor(tenantRef.getId()), tenantRef, null, null);
 
         assertThat(task.getStatus()).isEqualTo(TaskStatus.NEW);
     }
 
     @Test
     void mapsATaskWithoutDependenciesAsImmediatelyAvailable() {
-        UUID tenantId = UUID.randomUUID();
-        stubTenant(tenantId);
-
-        TaskCreationRequestEventDto dto = dtoFor(tenantId);
+        Tenant tenantRef = tenant();
+        TaskCreationRequestEventDto dto = dtoFor(tenantRef.getId());
         dto.setHasDependencies(false);
 
-        assertThat(mapper().map(dto).isAvailable()).isTrue();
+        assertThat(mapper().map(dto, tenantRef, null, null).isAvailable()).isTrue();
     }
 
     @Test
     void mapsATaskWithDependenciesAsBlockedUntilChainCalculatesAvailability() {
-        UUID tenantId = UUID.randomUUID();
-        stubTenant(tenantId);
-
-        TaskCreationRequestEventDto dto = dtoFor(tenantId);
+        Tenant tenantRef = tenant();
+        TaskCreationRequestEventDto dto = dtoFor(tenantRef.getId());
         dto.setHasDependencies(true);
 
-        assertThat(mapper().map(dto).isAvailable()).isFalse();
+        assertThat(mapper().map(dto, tenantRef, null, null).isAvailable()).isFalse();
     }
 
     @Test
     void resolvesTheProjectReferenceOnlyWhenThePayloadCarriesOne() {
-        UUID tenantId = UUID.randomUUID();
-        UUID projectId = UUID.randomUUID();
-        stubTenant(tenantId);
+        Tenant tenantRef = tenant();
         Project projectRef = new Project();
-        projectRef.setId(projectId);
-        when(projectRepository.getReferenceById(projectId)).thenReturn(projectRef);
+        projectRef.setId(UUID.randomUUID());
 
-        TaskCreationRequestEventDto dto = dtoFor(tenantId);
-        dto.setProjectId(projectId.toString());
+        TaskCreationRequestEventDto dto = dtoFor(tenantRef.getId());
+        dto.setProjectId(projectRef.getId().toString());
 
-        assertThat(mapper().map(dto).getProject()).isSameAs(projectRef);
+        assertThat(mapper().map(dto, tenantRef, projectRef, null).getProject()).isSameAs(projectRef);
     }
 
     @Test
     void leavesTheProjectUnsetWhenThePayloadOmitsIt() {
-        UUID tenantId = UUID.randomUUID();
-        stubTenant(tenantId);
+        Tenant tenantRef = tenant();
 
-        assertThat(mapper().map(dtoFor(tenantId)).getProject()).isNull();
+        assertThat(mapper().map(dtoFor(tenantRef.getId()), tenantRef, null, null).getProject()).isNull();
     }
+
+    @Test
+    void mapsCreatedByWhenACreatorIsProvided() {
+        Tenant tenantRef = tenant();
+        User createdByRef = new User();
+        createdByRef.setId(UUID.randomUUID());
+
+        Task task = mapper().map(dtoFor(tenantRef.getId()), tenantRef, null, createdByRef);
+
+        assertThat(task.getCreatedBy()).isSameAs(createdByRef);
+    }
+
+    @Test
+    void leavesCreatedByUnsetWhenNoCreatorIsProvided() {
+        Tenant tenantRef = tenant();
+
+        Task task = mapper().map(dtoFor(tenantRef.getId()), tenantRef, null, null);
+
+        assertThat(task.getCreatedBy()).isNull();
+    }
+
 }

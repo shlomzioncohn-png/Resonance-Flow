@@ -5,6 +5,13 @@ Implementing dependency update flow: addDependency, removeDependency,
 onTaskStatusChanged, recalculateTaskEligibility, onConstraintAdded,
 onConstraintStatusChanged.
 
+`onConstraintAdded(taskId, constraintId)` and `onConstraintStatusChanged(taskId, constraintId,
+previousStatus, newStatus)` both take a `constraintId` now (2026-09-08, PLAN.md Finding #10) - a
+per-task `Set<UUID>` of currently-open constraint ids (`openConstraintIdsByTask` in
+TaskEligibilityService) makes a redelivered event a no-op instead of double-counting
+openConstraintCount, mirroring the idempotency every other counter-mutating path in this class
+already has (edgeExists() / the task's own stored previousStatus).
+
 ## Key decisions
 - isReady = blockingCount==0 AND openConstraintCount==0
 - Tasks CAN reopen from DONE (confirmed by team lead) - blockingCount
@@ -14,6 +21,30 @@ onConstraintStatusChanged.
   based push/pop, no depth limit — not optimized yet, revisit only if
   it's a bottleneck)
 - No retry logic (@Retryable) — let exceptions propagate to the caller
+- Constraint persistence (issue #378, 2026-09-17 team-lead decision):
+  Postgres via plain JDBC (JdbcTemplate), not JPA/Hibernate - Chain's
+  repositories are already hand-written interfaces, not Spring Data, and
+  the operations needed (upsert, atomic counter updates, row locking) are
+  raw SQL anyway. Same decision applies to Task/TaskDependency once #377
+  starts. Enums stored as VARCHAR + CHECK, not a native Postgres enum
+  type (works the same regardless of persistence tech, simpler to change
+  later). Table is `task_constraint`, not `constraint` - a reserved SQL
+  keyword - matching this module's own `task_dependency` naming instead
+  of Inbox's plural `tasks` convention.
+- This branch (#378) writes Constraint persistence assuming #377 (Task/
+  TaskDependency Postgres persistence) already landed, rather than
+  building #377's task table ourselves - not our work to do. Accepted
+  consequence: V1__create_task_constraint_table.sql's FK to task(id)
+  won't apply, and PostgresConstraintRepositoryTest won't pass, until
+  #377 actually lands. See README.md "Constraint persistence" for detail.
+- Write order (implemented): persist to Postgres via ConstraintRepository
+  before updating the in-memory Task counter, never the reverse. If the
+  process fails in between, a redelivered event re-runs the (idempotent)
+  repository call, which correctly reports "already there" / the real
+  previous status, so the counter update proceeds correctly on retry.
+  The reverse order is worse: a caller that skips the repository call
+  once it believes an event was "already handled" can permanently lose
+  a Constraint row instead of just delaying a counter update.
 
 ## Real repository contracts (from chain/ruthHoltzman/dependency-repository-66)
 - TaskRepository: findById, findAllById, findByParentTaskId, save
@@ -23,6 +54,18 @@ onConstraintStatusChanged.
 - Proposed addition (pending team approval, NOT YET MERGED):
   incrementBlockingCount/decrementBlockingCount/
   incrementOpenConstraintCount/decrementOpenConstraintCount
+- ConstraintRepository (issue #378, new): findByTaskId, findById,
+  save (upsert by constraintId, returns whether the row was newly
+  inserted), updateStatus (atomic status transition, returns the real
+  previous status). Postgres-backed implementation is
+  PostgresConstraintRepository (JDBC) - registered via a @Bean factory
+  method (ConstraintRepositoryConfig) guarded with @ConditionalOnMissingBean,
+  like TaskRepository/TaskDependencyRepository's beans in MockDataConfig -
+  NOT via @Repository/@ConditionalOnMissingBean directly on the class
+  (found not to reliably self-register that way - see "Open items").
+  No in-memory implementation exists or is planned - unlike Task/
+  TaskDependency, Constraint had no in-memory repository to begin with
+  (per issue #378's own description).
 - Task/TaskDependency/TaskStatus were merged from main (2026-08-27) after
   ruthHoltzman's DTO review landed there: Task now has a required ownerId,
   score is Double (was Integer), and construction is via Task.builder()
@@ -50,7 +93,101 @@ onConstraintStatusChanged.
     (controller-level unification; the natural place this would first get
     wired to a live endpoint).
 
+- Task/TaskDependency/Constraint use Lombok for accessors and the builder. `Task` keeps
+  Lombok-generated id-only equals/hashCode (`@EqualsAndHashCode(onlyExplicitlyIncluded = true)` +
+  `@Include` on id) - don't widen it to all fields. `Constraint`'s equals/hashCode are hand-written
+  (id-only) on purpose, next to its hand-written `getReason`/`setReason`; don't re-add
+  `@EqualsAndHashCode` there, since it generates nothing alongside the hand-written methods.
+
 ## Open items
+- PR #468 review (2026-09-23, leaRevivo) findings addressed 2026-09-24:
+  - Critical: `PostgresConstraintRepositoryTest`/`PostgresConstraintRepositoryConcurrencyTest`
+    were committed active with no exclusion, and `values-chain.yaml`'s `postgresql.enabled`
+    is still `false` - so CI's `mvn -B test` (same job as the Postgres port-forward step, which
+    is a no-op without that flag) had nothing on 5432 and would fail for the whole team on
+    every push to `teams/chain/**`, not just locally. Fixed with `@Disabled(...)` on both
+    classes. **Also found while fixing this** (not called out by the review, but the same root
+    cause): `ChainApplicationTests` and `ChainEventConsumerIntegrationTest` - two *pre-existing*
+    tests unrelated to Constraint - were *also* newly broken by this branch, because
+    `@SpringBootTest` boots the whole context, and Flyway migrates eagerly at startup once a
+    real Postgres `DataSource` + `flyway-core` are on the classpath, not lazily on first use.
+    Fixed at the root: `spring.flyway.enabled: false` by default (application.yml), with the two
+    Postgres-backed test classes opting back in individually via
+    `@TestPropertySource(properties = "spring.flyway.enabled=true")` - the same
+    per-test-class-override pattern `ChainEventConsumerIntegrationTest` already used for
+    `chain.kafka.consumed-topics`. Verified: `ChainApplicationTests`/
+    `ChainEventConsumerIntegrationTest` pass again; the two Postgres tests report `Skipped`, not
+    `Errors`. (The remaining local test failures, `ChainControllerTest`/`KafkaEventPublisherTest`,
+    are an unrelated Mockito/ByteBuddy-vs-JDK25 issue specific to a local JDK newer than the
+    project's Java 21 - confirmed CI itself runs `mvn -B test` inside a `maven:...-temurin-21`
+    Docker image, per `teams/chain/Dockerfile`, so this doesn't reproduce in CI at all.)
+  - Major: `onConstraintStatusChanged` never verifies `constraintId` actually belongs to
+    `taskId` - `ConstraintRepository#updateStatus` operates on `constraintId` alone, so a caller
+    passing a mismatched `taskId` could adjust the wrong task's counter, or mutate a constraint
+    whose real owning task doesn't exist/is soft-deleted, uncaught. **Fixed** by checking the
+    pair inside the SQL itself: `updateStatus` now takes `taskId` and matches on both
+    `constraint_id` and `task_id` (in the lock and the update), so a mismatched pair matches no
+    row and nothing is written - the check and the write are one atomic statement, no extra
+    round trip. Covered by a repository test and a service-level test.
+  - Minor (both fixed): a formatting slip in `TaskEligibilityServiceConcurrencyTest` (one of
+    three mechanically-updated constructor calls was indented to the wrong block), and
+    `onConstraintStatusChanged` was missing the Javadoc `onConstraintAdded` got.
+- RESOLVED (2026-09-22): openConstraintCount's counter-strategy question
+  (recompute-via-query vs keep the +1/-1 delta pattern) - decided on a
+  third option, neither of the original two. `ConstraintRepository.save`
+  reports whether Postgres actually inserted a new row (via `xmax = 0` in
+  the `RETURNING` clause - Postgres's own signal, not a `SELECT COUNT(*)`)
+  and `updateStatus` atomically returns the row's real previous status (a
+  CTE under `FOR UPDATE`, read and written in one statement). Both are
+  derived from Postgres itself, at no extra query cost beyond the write
+  that already has to happen - no in-memory idempotency map needed at
+  all, so the restart-desync failure mode this section used to describe
+  (see below) doesn't apply here: there's no in-memory ledger left to
+  desync. `TaskEligibilityService.onConstraintAdded`/
+  `onConstraintStatusChanged` are wired to `ConstraintRepository`
+  accordingly - this is what actually shipped, not the delta/map pattern
+  PR #114 originally added those methods with.
+- Real bug found and fixed while wiring this up: `PostgresConstraintRepository`
+  was originally annotated `@Repository @ConditionalOnMissingBean(ConstraintRepository.class)`
+  directly on the class - this silently failed to register as a bean at
+  all (`NoSuchBeanDefinitionException` for `ConstraintRepository` when
+  `TaskEligibilityService` needed it), because `@ConditionalOnMissingBean`
+  does not reliably self-register when placed directly on a
+  component-scanned class outside true auto-configuration. Fixed by
+  registering it via a `@Bean` factory method instead
+  (`ConstraintRepositoryConfig`), the same working pattern
+  `MockDataConfig` already uses for `TaskRepository`/
+  `TaskDependencyRepository` - `PostgresConstraintRepository` itself is
+  now a plain class, not a `@Component`, matching `InMemoryTaskRepository`.
+- Still waiting on team-lead/DevOps for the real Postgres DB name/user for
+  Chain (dedicated DB + non-superuser user, per team-lead's answer to
+  Q8-12) - application.yml/.env.example currently use placeholder values
+  (DB_NAME=chain, DB_USER=chain_user/chain_password) pending that.
+- pom.xml still lacks a real persistence layer, and Task/TaskDependency
+  are plain DTOs, not JPA entities. @Transactional is kept on
+  TaskEligibilityService's public methods deliberately (team decision:
+  keep the transaction boundary in place now so there's no service-level
+  change needed once a real DB lands) — spring-boot-starter-data-jpa is
+  back in pom.xml for this, plus a placeholder H2 in-memory DataSource
+  (application.yml) purely so Spring Boot's DataSourceAutoConfiguration
+  doesn't fail app startup and a PlatformTransactionManager bean exists.
+  No JPA entities/repositories use H2 - real data still lives in the
+  in-memory TaskRepository/TaskDependencyRepository, so @Transactional
+  does not actually cover Task/TaskDependency mutations yet.
+- Waiting on team lead's answer about whether a real DB is coming,
+  or whether the in-memory contract is final for now
+- Until real JPA-backed repositories exist, TaskEligibilityService ALSO
+  uses in-process locking to make read-modify-write on blockingCount /
+  openConstraintCount actually atomic - @Transactional alone doesn't
+  cover this today. This locking is only correct for a single JVM owning
+  the in-memory repositories — once persistence is real, add @Version or
+  an atomic UPDATE for the counters and the locking can be retired. Full
+  rationale is in the class Javadoc; summary: dependencyGraphLock guards
+  the edges plus any DONE-status read that decides whether an edge
+  currently counts against blockingCount, per-task locks (striped over a
+  fixed array, not one object per task id, to keep memory bounded) guard
+  a single task's counters, and dependencyGraphLock is always acquired
+  before a per-task lock, never after, so the two can't deadlock.
 - Resolved: real persistence layer now exists - Postgres-backed
   `Postgres*Repository`/`JpaTransactionRunner` implementations
   (`repository/`), own `chain` database + own `chain` DB user (not the

@@ -30,18 +30,21 @@ spring:
 chain:
   kafka:
     topics:
-      task.scheduling.updated: task.scheduling.updated
-    # Left unset on purpose: ChainEventConsumer stays disabled
-    # (@ConditionalOnProperty) until the first approved cross-team
-    # contract exists and a real topic is configured here.
-    # consumed-topics: <topic-name>
-    consumer-group-id: ${spring.application.name}
-    retry:
-      # Explicit on purpose, matching ChainKafkaErrorHandlingConfig's
-      # previously-hardcoded FixedBackOff(2000L, 2L) exactly - values here
-      # can be tuned per environment without a code change.
-      max-attempts: 2
-      interval-ms: 2000
+      task.scheduling.updated: ${CHAIN_SCHEDULING_UPDATED_TOPIC:task.scheduling.updated}
+      task-created: ${TASK_CREATED_TOPIC:task.created}
+      task-updated: ${TASK_UPDATED_TOPIC:task.updated}
+      dependencies-proposed: ${DEPENDENCIES_PROPOSED_TOPIC:task.dependencies.proposed}
+    # One shared group for the whole service, matching Inbox's "inbox-service"
+    # convention - set explicitly rather than left to ${spring.application.name}
+    # ("chain"), which TaskCreatedEventHandler/TaskUpdatedEventHandler/
+    # DependencyProposedEventHandler's @KafkaListener groupId also reference directly.
+    consumer-group-id: ${KAFKA_CONSUMER_GROUP_ID:chain-service}
+    # Schema Registry (Apicurio, ccompat API) - needed because task.created/task.updated/
+    # task.dependencies.proposed are all Protobuf, validated against it.
+    schema-registry-url: ${SCHEMA_REGISTRY_URL:http://localhost:8082/apis/ccompat/v6}
+    # chain.kafka.retry.* (the old blocking FixedBackOff policy) was removed along with
+    # ChainKafkaErrorHandlingConfig/ChainKafkaRetryProperties - retry/backoff for each handler is
+    # now configured directly on its own @RetryableTopic annotation instead of one shared policy.
   events:
     # Explicit on purpose, even though "in-memory" is also the default:
     # InMemoryProcessedEventStore only activates for this exact value, so
