@@ -1,19 +1,12 @@
 #!/usr/bin/env bash
-# Runs the same checks as <service>-ci.yaml's `cd` job (service-cd.yaml -> ci-java/ci-node +
-# deploy-service) for any one of LENS's three services, against a local kind cluster, so this
-# doesn't have to be validated by waiting on the self-hosted CI runner. One script instead of
-# three near-identical copies (lens-bff/lens-gateway/lens-frontend) - only the test-phase command
-# actually differs between them (Java via Docker/Maven vs Node via npm). Skips the two steps that
-# only make sense in CI: pushing the image to GHCR and opening the manifest-bump PR
-# (service-update-manifest.yaml).
+# Runs a LENS service's CI cd checks on a local kind cluster. Skips the GHCR push and manifest PR.
 #
 # Usage: ./local-cd-test.sh <service_name> <service_dir> <language> <container_port> [--clean]
 #   service_name     matches components.<service_name> in teams/relay/helm/resonance-flow/values.yaml
 #   service_dir      path to the service, e.g. teams/lens/bff
 #   language          java | node
 #   container_port   from that service's own <service>-ci.yaml (the `cd` job's `with:` block)
-#   --clean          delete the kind cluster at the end (default: leave it running, so the
-#                     next run skips cluster creation - that's most of the time this saves)
+#   --clean          delete the kind cluster at the end (default: keep it for faster reruns)
 #
 # Examples:
 #   ./local-cd-test.sh lens-bff      teams/lens/bff      java 8082

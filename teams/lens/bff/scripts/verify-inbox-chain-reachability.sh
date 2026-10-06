@@ -1,14 +1,6 @@
 #!/usr/bin/env bash
-# Proves lens-bff's configured Inbox/Chain addresses (config.inbox.service.url,
-# config.chain.service.url in teams/relay/helm/resonance-flow/values.yaml) are actually
-# network-reachable inside the cluster, by deploying real lens-bff + Inbox + Chain
-# together (all built locally, no GHCR pull, no PAT needed) and curling both from a
-# throwaway pod in the same namespace.
-#
-# What this does NOT prove: InboxClient.java / ChainClient.java in teams/lens/bff are
-# fully mocked right now (in-memory data, no HTTP calls ever made) - so there is no
-# business-logic round trip to observe yet. This only confirms the network path lens-bff
-# would use once those clients are wired up for real.
+# Checks that lens-bff's Inbox and Chain URLs are reachable inside the cluster.
+# Network path only: InboxClient and ChainClient are still mocked.
 #
 # Usage: ./verify-inbox-chain-reachability.sh [--clean]
 #   --clean   delete the kind cluster at the end (default: leave it running)
