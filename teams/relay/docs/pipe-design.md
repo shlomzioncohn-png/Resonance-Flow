@@ -101,7 +101,9 @@ The transport is based on WebSockets, despite the current traffic being primaril
 
 A REST poll endpoint covers clients that cannot hold a long-lived WebSocket connection.
 
-For reconnects, the client supplies the last received event ID (e.g., via a reconnection message payload or query parameter), and the receiving instance can recover missed events from its local ring buffer or directly from Kafka.
+The Pipe is not exposed to browsers directly. Its only caller is lens-bff, which holds the WebSocket to the Pipe on the user's behalf after lens-gateway has authenticated the user — see [§08](#08--isolation--sensitive-data).
+
+For reconnects, the caller supplies the last received event ID on the handshake (`Last-Event-ID` header or `lastEventId` query parameter), and the receiving instance can recover missed events from its local ring buffer or directly from Kafka.
 
 ---
 
@@ -122,26 +124,29 @@ The service publishes a topic:
 
 ### Schema — v1
 
+The source of truth is `shared/proto/task-notification.proto`; this is a copy of it.
+
 ```protobuf
 // resonance.task-notifications, v1
 message TaskNotification {
-  string event_id = 1;                 // UUID, minted by producer — dedup key
-  string org_id = 2;                   // partition key (with user_id)
-  string user_id = 3;                  // recipient / assignee
+  string event_id = 1;                       // UUID, minted by producer — dedup key
+  string org_id = 2;                         // partition key (with user_id)
+  string user_id = 3;                        // recipient / assignee
   string task_id = 4;
-  EventType event_type = 5;            // what happened
+  // 5 is unused (an earlier draft had `EventType event_type = 5`; see §03 for why it isn't needed)
   double urgency_score = 6;
   int32 effort_estimate_minutes = 7;
-  int64 occurred_at_ms = 8;            // source time, not Kafka time
-  string source_ref = 9;               // traceability
-  PushPolicy push_policy = 10;         // how the pipe should deliver this
+  google.protobuf.Timestamp occurred_at = 8; // source time, not Kafka time
+  string source_ref = 9;                     // traceability
+  PushPolicy push_policy = 10;               // how the pipe should deliver this
 }
 ```
 
 ```protobuf
 enum PushPolicy {
-  PUSH_ACTIVITY = 0;       // deliver immediately as its own WebSocket message
-  PUSH_REFRESH_ONLY = 1;   // coalesced into a refresh signal
+  PUSH_POLICY_UNSPECIFIED = 0; // proto3 default — an unset policy is logged and ignored, never pushed
+  ACTIVITY = 1;                // deliver immediately as its own WebSocket message
+  ROLLUP_ONLY = 2;             // coalesced into a refresh signal
 }
 ```
 
@@ -161,31 +166,32 @@ Not every message deserves an immediate push.
 
 Some events are discrete and useful to show as activity. Others are background recalculations that may happen frequently and only indicate that the user's current ranking should be refreshed.
 
-### `push_policy`, not `event_type`, decides
+### `push_policy` decides
 
 The delivery decision is carried in `push_policy`.
 
-The Pipe does not infer the delivery behavior by pattern-matching on `event_type`.
+The Pipe does not infer the delivery behavior from what kind of change happened — which is why the contract carries no `event_type` field at all.
 
 This keeps the classification with the component that knows whether the change is meaningful to the user.
 
-A new event type can therefore be introduced without requiring the Pipe to be redeployed just to understand its delivery behavior.
+A new kind of change can therefore be introduced without requiring the Pipe to be redeployed just to understand its delivery behavior.
 
 | `push_policy` | On the wire |
-|---|---|---|
-| `PUSH_ACTIVITY` | Pushed immediately as its own WebSocket message |
-| `PUSH_REFRESH_ONLY` | Not pushed individually; marks the user's rollup dirty |
+|---|---|
+| `ACTIVITY` | Pushed immediately as its own WebSocket message |
+| `ROLLUP_ONLY` | Not pushed individually; marks the user's rollup dirty |
+| `PUSH_POLICY_UNSPECIFIED` | Not pushed; logged as a producer bug |
 
 ### Refresh coalescing
 
-`PUSH_REFRESH_ONLY` events are not simply discarded.
+`ROLLUP_ONLY` events are not simply discarded.
 
 They indicate that something relevant to the user's current ranking may have changed.
 
 Instead of pushing every recalculation separately, the Pipe coalesces them:
 
 ```text
-PUSH_REFRESH_ONLY
+ROLLUP_ONLY
        │
        ▼
 user marked dirty
@@ -214,7 +220,7 @@ A hard ceiling is applied so a continuously changing user still receives a bound
 
 ### The problem
 
-At any moment there can be thousands of live WebSocket connections spread across many instances behind one Gateway/LB.
+At any moment there can be thousands of live WebSocket connections spread across many instances behind one Service.
 
 A Kafka notification is addressed to a specific user, but that user's browser can be connected to any Pipe instance.
 
@@ -318,7 +324,8 @@ The workload therefore uses a normal Kubernetes `Deployment`, not a `StatefulSet
 | Shutdown | `terminationGracePeriodSeconds: 30` | Stop new connections and drain existing streams |
 | Readiness probe | `GET /readyz` | Do not route clients before Kafka consumption is active |
 | Liveness probe | `GET /healthz` | Process up |
-| Ingress / LB timeout | > 60s idle timeout | Must exceed the 15s heartbeat interval; depends on the ingress controller/cloud LB in use, not settable on the Deployment itself |
+| Ingress | None — `ClusterIP` Service only | The Pipe's only caller is lens-bff (§08); a `NetworkPolicy` denies every other in-cluster source |
+| Edge idle timeout | > 60s, on lens-gateway's Ingress / LB | The browser's long-lived connection terminates at the edge, not here; that timeout must exceed the 15s heartbeat interval and is set on the ingress controller/cloud LB, not on this Deployment |
 
 ### Consumer group behavior
 
@@ -339,7 +346,7 @@ usable, already-unique id and never fails to start just for lacking one.
 
 Inside an actual Kubernetes cluster, though, a missing `INSTANCE_NAME` means the chart's
 downward-API wiring got dropped, and that's worth failing loudly for rather than quietly running
-on the random fallback. `InstanceNameGuard` (`TaskNotificationConsumer`'s sibling in `event/`)
+on the random fallback. `InstanceNameGuard` (`TaskNotificationConsumer`'s sibling in the `pipe` package)
 checks this specifically: it reads `KUBERNETES_SERVICE_HOST`, which the kubelet sets in every pod
 regardless of this service's own config (the same signal Kubernetes client libraries use to
 detect in-cluster execution — the one piece of Kubernetes-specific awareness this class needs,
@@ -395,7 +402,7 @@ A crashed pod loses only ephemeral state:
 
 The durable source of truth is Kafka.
 
-The client reconnects through the Gateway to any available pod and supplies `Last-Event-ID`.
+lens-bff reconnects to any available pod (through the Pipe's `ClusterIP` Service) and supplies `Last-Event-ID`.
 
 That pod recovers any missing events using the recovery flow in §06.
 
@@ -440,7 +447,7 @@ After replay, the connection rejoins the normal live WebSocket path.
 **Fix:**
 
 - client reconnects use exponential backoff with jitter;
-- Gateway rate-limits reconnects;
+- lens-gateway rate-limits browser reconnects;
 - rolling deployments use `maxUnavailable: 0`;
 - recovery is driven by `Last-Event-ID`.
 
@@ -474,7 +481,7 @@ Kafka offsets alone cannot identify retries because the retry receives a new off
 
 **Fix:**
 
-- `PUSH_REFRESH_ONLY` events are coalesced before reaching the connection;
+- `ROLLUP_ONLY` events are coalesced before reaching the connection;
 - activity events are expected to be low-rate;
 - every connection has a bounded output buffer;
 - a client that exceeds the buffer limit is disconnected;
@@ -575,8 +582,8 @@ Confirm whether the broker already expires empty groups with no committed offset
 
 | Endpoint | Purpose | Notes |
 |---|---|---|
-| `GET /api/v1/events/stream` (WebSocket upgrade) | Main WebSocket stream | `Last-Event-ID` sent as query param or first client frame on connect; user/tenant resolved from auth token |
-| `GET /api/v1/events/sync?since=` | REST catch-up / polling fallback | Same dedup rules apply |
+| `GET /api/v1/events/stream` (WebSocket upgrade) | Main WebSocket stream | Requires `X-Org-Id` / `X-User-Id` headers (400 if missing or blank); optional resume token as `Last-Event-ID` header or `lastEventId` query param (400 if not a number) — client frames are ignored |
+| `GET /api/v1/events/sync?since=` | REST catch-up / polling fallback | Same identity headers; same dedup rules apply |
 | `GET /healthz` | Liveness | Process up |
 | `GET /readyz` | Readiness | Kafka consumer attached and not critically lagging |
 
@@ -584,38 +591,47 @@ Confirm whether the broker already expires empty groups with no committed offset
 
 ```text
 Browser
-   │
+   │  Keycloak access token
+   ▼
+lens-gateway (Ingress)
+   │  validates the token against Keycloak
+   ▼
+lens-bff
    │ GET /api/v1/events/stream
    │ Upgrade: websocket
-   │ Connection: Upgrade
-   │ (optional) Last-Event-ID sent on connect
+   │ X-Org-Id / X-User-Id  (from the validated token)
+   │ (optional) Last-Event-ID
    ▼
-Gateway / LB
+Pipe Service (ClusterIP)
    │
    ▼
 Any Pipe Instance
    │
-   ├── register user_id → WebSocket connection
+   ├── register org_id:user_id → WebSocket connection
    │
-   └── start delivery (bidirectional; pings/pongs for keepalive)
+   └── start delivery (pings/pongs for keepalive)
 ```
 
-The Gateway does not need to know which instance previously served the user.
+Neither lens-gateway nor lens-bff needs to know which instance previously served the user.
 
 ---
 
 ## 08 — Isolation & sensitive data
 
-The Gateway authenticates every connection and resolves:
+The Pipe never sees a token. Authentication happens upstream:
 
-```text
-org_id
-user_id
-```
+1. **lens-gateway** validates every request's Keycloak access token (issuer + signing keys).
+2. **lens-bff** resolves `org_id` and `user_id` from that validated identity and forwards them to the Pipe as `X-Org-Id` / `X-User-Id`.
+3. **The Pipe** trusts those headers as-is (`TrustedHeaderAuthenticator`), rejecting a missing or blank value with `400` — otherwise blank values would collapse into one shared `:` key and leak notifications between users.
 
-from the authentication token.
+Trusting headers is only safe because nothing but lens-bff can reach the Pipe:
 
-A client cannot request another user's stream by supplying a different user ID.
+- the Pipe has no Ingress — only a `ClusterIP` Service;
+- a `NetworkPolicy` (`components.notification-delivery.networkPolicy.allowFrom: [lens-bff]` in the shared chart) denies ingress from every other pod in the cluster, so no other workload can forge the headers.
+
+Because the only client is server-to-server, the WebSocket endpoint does not check `Origin`; browser-facing origin checks live in lens-gateway.
+
+A browser cannot request another user's stream by supplying a different user ID — it never talks to the Pipe, and lens-bff derives the IDs from the token rather than from client input.
 
 The notification topic is keyed by:
 
@@ -648,7 +664,7 @@ Track at minimum:
 - replay fallback rate;
 - dedup-hit rate;
 - dropped slow-client count;
-- number of `PUSH_REFRESH_ONLY` messages;
+- number of `ROLLUP_ONLY` messages;
 - number of emitted refresh signals;
 - refresh coalescing ratio;
 - reconnect rate;
@@ -758,7 +774,11 @@ This causes every instance to consume the complete notification topic independen
 
 No sticky routing is required.
 
-The Gateway can establish a connection to any Pipe instance.
+lens-bff can establish a connection to any Pipe instance through the Pipe's `ClusterIP` Service.
+
+#### Identity
+
+The Pipe trusts `X-Org-Id` / `X-User-Id` from lens-bff, which is enforced as its only caller by a `NetworkPolicy` — see [§08](#08--isolation--sensitive-data).
 
 #### Shared state
 
@@ -804,6 +824,12 @@ relay:
   pipe:
     replay-buffer:
       capacity-per-user: 200
+      max-polls: 20
+    refresh:
+      debounce-window: 3s
+      max-dirty-age: 10s
+    dedup:
+      ttl: 5m
     websocket:
       outbox-capacity: 32
       heartbeat-interval-seconds: 15
@@ -814,6 +840,10 @@ relay:
 | `kafka.topics.task-notifications.partitions` | 12 *(proposed)* | §02, §10 |
 | `kafka.topics.task-notifications.retention-days` | 7 *(proposed)* | §02, §10 |
 | `pipe.replay-buffer.capacity-per-user` | 200 | §06.1 |
+| `pipe.replay-buffer.max-polls` | 20 | §06.1 |
+| `pipe.refresh.debounce-window` | 3s | §03 |
+| `pipe.refresh.max-dirty-age` | 10s | §03 (hard ceiling) |
+| `pipe.dedup.ttl` | 5m | §06.4 |
 | `pipe.websocket.outbox-capacity` | 32 | §06.5 |
 | `pipe.websocket.heartbeat-interval-seconds` | 15 | §05, §06.3 |
 
