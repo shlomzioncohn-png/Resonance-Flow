@@ -2,8 +2,9 @@ name: Set up per-service test infra
 description: >
   Spins up a kind cluster, installs the shared Helm chart with the component itself
   disabled (only its infra deps come up), and port-forwards Postgres if the service
-  declares it. Shared by every service-ci-<language>.yaml and service-cd-<language>.yaml
-  so there is exactly one kind cluster per job, whichever phase that job runs.
+  declares it, exporting PG*/TEST_DATABASE_URL. Shared by every service-ci-<language>.yaml
+  and service-cd.yaml so there is exactly one kind cluster per job, whichever phase that
+  job runs.
 
 inputs:
   service_name:
@@ -25,28 +26,20 @@ runs:
       run: |
         echo "CHART_DIR=teams/relay/helm/resonance-flow" >> "$GITHUB_ENV"
         echo "CHART_VALUES=teams/relay/helm/resonance-flow/values.yaml" >> "$GITHUB_ENV"
+        echo "CHART_ALL_OFF=$RUNNER_TEMP/components-all-off.yaml" >> "$GITHUB_ENV"
 
     - name: Fetch chart dependencies
       shell: bash
       run: helm dependency build "$CHART_DIR"
 
-    - name: Install yq
-      shell: bash
-      run: |
-        sudo curl -sL -o /usr/local/bin/yq https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
-        sudo chmod +x /usr/local/bin/yq
+    - uses: ./.github/actions/install-yq
 
-    - name: Provision Chain's DB credentials Secret
-      if: inputs.service_name == 'chain'
+    # Opt-in, not opt-out: values-<service>.yaml only enables what it needs, so a
+    # component added to values.yaml later can't leak into every other team's CI.
+    - name: Build all-components-off overlay
       shell: bash
       run: |
-        SERVICE="${{ inputs.service_name }}"
-        # Namespace must exist before the Secret - the Deploy step below also
-        # passes --create-namespace, which is then a harmless no-op.
-        kubectl create namespace "$SERVICE" --dry-run=client -o yaml | kubectl apply -f -
-        kubectl -n "$SERVICE" create secret generic resonance-flow-chain-db-credentials \
-          --from-literal=password="$(openssl rand -base64 24)" \
-          --dry-run=client -o yaml | kubectl apply -f -
+        yq '{"components": (.components | map_values({"enabled": false}))}' "$CHART_VALUES" > "$CHART_ALL_OFF"
 
     - name: Deploy chart with ${{ inputs.service_name }} disabled (infra only, for tests)
       shell: bash
@@ -54,6 +47,7 @@ runs:
         SERVICE="${{ inputs.service_name }}"
         helm upgrade --install "$SERVICE" "$CHART_DIR" \
           -f "$CHART_VALUES" \
+          -f "$CHART_ALL_OFF" \
           -f "$CHART_DIR/values/values-${SERVICE}.yaml" \
           --set components.${SERVICE}.enabled=false \
           --namespace "$SERVICE" --create-namespace \
@@ -68,10 +62,35 @@ runs:
           echo "values-${SERVICE}.yaml doesn't enable postgresql - skipping"
           exit 0
         fi
-        kubectl -n "$SERVICE" port-forward svc/${SERVICE}-postgresql 5432:5432 &
+        # By label, not a hand-built name; the subchart also has a headless "-hl" Service.
+        SVC=$(kubectl -n "$SERVICE" get svc \
+          -l "app.kubernetes.io/instance=$SERVICE,app.kubernetes.io/name=postgresql,app.kubernetes.io/component=primary" \
+          -o jsonpath='{.items[?(@.spec.clusterIP!="None")].metadata.name}')
+        # From the live Secret/values, so it can't drift from what was installed.
+        PG_PASSWORD=$(kubectl -n "$SERVICE" get secret "$SVC" -o jsonpath='{.data.postgres-password}' | base64 -d)
+        PG_DATABASE=$(helm get values "$SERVICE" -n "$SERVICE" --all -o yaml | yq eval '.postgresql.auth.database // ""' -)
+        if [ -z "$SVC" ] || [ -z "$PG_PASSWORD" ] || [ -z "$PG_DATABASE" ]; then
+          echo "Couldn't resolve Postgres Service/password/database (svc='$SVC', db='$PG_DATABASE')" >&2
+          exit 1
+        fi
+        echo "::add-mask::$PG_PASSWORD"
+        # @uri is query-style (space -> "+"); libpq reads "+" literally, so use %20.
+        PG_PASSWORD_URI=$(PW="$PG_PASSWORD" yq -n 'strenv(PW) | @uri | sub("\+"; "%20")')
+        kubectl -n "$SERVICE" port-forward "svc/$SVC" 5432:5432 &
         for i in $(seq 1 30); do
-          (echo > /dev/tcp/127.0.0.1/5432) >/dev/null 2>&1 && exit 0
+          if (echo > /dev/tcp/127.0.0.1/5432) >/dev/null 2>&1; then
+            # libpq's standard PG* vars + a URL (password URL-encoded) for the test step.
+            {
+              echo "PGHOST=127.0.0.1"
+              echo "PGPORT=5432"
+              echo "PGUSER=postgres"
+              echo "PGPASSWORD=$PG_PASSWORD"
+              echo "PGDATABASE=$PG_DATABASE"
+              echo "TEST_DATABASE_URL=postgresql://postgres:$PG_PASSWORD_URI@127.0.0.1:5432/$PG_DATABASE"
+            } >> "$GITHUB_ENV"
+            exit 0
+          fi
           sleep 2
         done
-        echo "Postgres port-forward never became reachable" >&2
+        echo "Postgres port-forward to svc/$SVC never became reachable" >&2
         exit 1

@@ -4,7 +4,7 @@ through the same generic mechanism every other component uses: this ConfigMap is
 and wired up via CONFIG_FILE_PATH / SPRING_CONFIG_ADDITIONAL_LOCATION, injected generically
 by deployment.yaml whenever $component.config is truthy (see resonance-flow.configFilePathEnv
 in _helpers.tpl). It's a separate file (like services/inbox/configmap.yaml) only because its
-content needs the dependencyHostByName/kafkaSaslJaasConfig helpers computed at render time -
+content needs the dependencyAddress/kafkaSaslJaasConfig helpers computed at render time -
 templates/configmap.yaml's generic loop just re-serializes values.yaml's static
 $component.config as-is and can't do that, so both components are excluded from it.
 
@@ -38,11 +38,11 @@ data:
         # kafka is a top-level dependency (shared by every component), schema-registry is
         # declared on this component specifically - same split components.inbox.dependencies
         # and the services/inbox configmap use.
-        bootstrap-servers: {{ printf "%s:%s" (include "resonance-flow.dependencyHostByName" (dict "root" $ "deps" $.Values.dependencies "name" "kafka")) (include "resonance-flow.dependencyPort" (dict "deps" $.Values.dependencies "name" "kafka")) | quote }}
+        bootstrap-servers: {{ include "resonance-flow.dependencyAddress" (dict "root" $ "deps" $.Values.dependencies "name" "kafka") | quote }}
         properties:
           security.protocol: SASL_PLAINTEXT
           sasl.mechanism: PLAIN
           sasl.jaas.config: {{ include "resonance-flow.kafkaSaslJaasConfig" $ | quote }}
-          schema.registry.url: {{ printf "http://%s:%s/apis/ccompat/v6" (include "resonance-flow.dependencyHostByName" (dict "root" $ "deps" .dependencies "name" "schema-registry")) (include "resonance-flow.dependencyPort" (dict "deps" .dependencies "name" "schema-registry")) | quote }}
+          schema.registry.url: {{ printf "http://%s/apis/ccompat/v6" (include "resonance-flow.dependencyAddress" (dict "root" $ "deps" .dependencies "name" "schema-registry")) | quote }}
 {{- end }}
 {{- end }}
