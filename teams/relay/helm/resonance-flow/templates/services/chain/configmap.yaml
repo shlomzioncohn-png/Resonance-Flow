@@ -1,0 +1,87 @@
+{{- $component := .Values.components.chain }}
+{{- if $component.enabled }}
+{{- with $component.config }}
+{{- $cfg := .data }}
+---
+{{ include "resonance-flow.configMapHeader" (dict "root" $ "component" "chain") }}
+
+data:
+  config.yaml: |
+    server:
+      port: {{ $component.containerPort }}
+    spring:
+      config:
+        # Binds the chain-db-credentials Secret's "password" file to the ${password}
+        # placeholder below - the Secret is mounted as a file, not passed as an env var.
+        import: "optional:configtree:/etc/resonance-flow/secrets/chain-db/"
+      application:
+        name: chain
+      datasource:
+        # Same host/port helpers as the wait-for-postgresql initContainer.
+        url: "jdbc:postgresql://{{ include "resonance-flow.dependencyAddress" (dict "root" $ "deps" $component.dependencies "name" "postgresql") }}/{{ $cfg.datasource.database }}?stringtype=unspecified"
+        username: {{ $cfg.datasource.username | quote }}
+        password: "${password}"
+      kafka:
+        {{- include "resonance-flow.springKafkaBase" (dict "root" $) | nindent 8 }}
+        {{- include "resonance-flow.springKafkaConsumerDefaults" (dict "groupId" $cfg.kafka.consumerGroupId) | nindent 8 }}
+    # Keys are what Chain's code reads (application.yml / ChainProtobufKafkaConfig / the
+    # handlers' @KafkaListener placeholders). No serializers: the app owns its wire format.
+    chain:
+      kafka:
+        schema-registry-url: {{ printf "http://%s/apis/ccompat/v6" (include "resonance-flow.dependencyAddress" (dict "root" $ "deps" $component.dependencies "name" "schema-registry")) | quote }}
+        consumer-group-id: {{ $cfg.kafka.consumerGroupId | quote }}
+        topics:
+          # Dot-case: KafkaEventPublisher.resolveTopic() looks up the literal event type.
+          task.scheduling.updated: {{ $cfg.kafka.topics.taskSchedulingUpdated | quote }}
+          # Kebab-case: referenced as ${chain.kafka.topics.<key>} by each handler's listener.
+          task-created: {{ $cfg.kafka.topics.taskCreated | quote }}
+          task-updated: {{ $cfg.kafka.topics.taskUpdated | quote }}
+          dependencies-proposed: {{ $cfg.kafka.topics.dependenciesProposed | quote }}
+    logging:
+      file:
+        name: logs/chain.log
+{{- end }}
+{{- end }}
+
+{{- if .Values.postgresql.enabled }}
+{{- $datasource := $component.config.data.datasource }}
+---
+apiVersion: v1
+kind: ConfigMap
+
+metadata:
+  name: {{ include "resonance-flow.fullname" $ }}-chain-db-init
+  labels:
+    {{- include "resonance-flow.labels" $ | nindent 4 }}
+    app.kubernetes.io/component: chain
+
+data:
+  create-chain-database.sh: |
+    #!/bin/bash
+    # Subshell: Bitnami sources this file, so set -e/-u would otherwise leak into its init.
+    (
+    set -euo pipefail
+    if [ -n "${POSTGRES_PASSWORD_FILE:-}" ]; then
+      export PGPASSWORD="$(cat "$POSTGRES_PASSWORD_FILE")"
+    else
+      export PGPASSWORD="$POSTGRES_PASSWORD"
+    fi
+    # Mounted from the optional chain-db-credentials Secret (values.yaml's
+    # postgresql.primary.extraVolumes). No exit here: Bitnami sources non-executable
+    # init scripts, so exit would abort its whole init.
+    CHAIN_DB_PASSWORD_FILE=/etc/resonance-flow/secrets/chain-db/password
+    if [ -s "$CHAIN_DB_PASSWORD_FILE" ]; then
+      # :'chain_pw' makes psql quote it as a literal - never spliced into the SQL text.
+      psql -v ON_ERROR_STOP=1 -v chain_pw="$(cat "$CHAIN_DB_PASSWORD_FILE")" --username postgres <<-'EOSQL'
+        CREATE USER {{ $datasource.username }} WITH PASSWORD :'chain_pw';
+        CREATE DATABASE {{ $datasource.database }} OWNER {{ $datasource.username }};
+    EOSQL
+    else
+      echo "chain-db-credentials not provided - skipping Chain's database" >&2
+    fi
+    )
+
+# chain-db-credentials isn't rendered here - an offline render can't tell a live
+# password from none, so it would overwrite the real value. Created once by
+# db-credentials-hook.yaml; referenced by name only, here and in values.yaml.
+{{- end }}

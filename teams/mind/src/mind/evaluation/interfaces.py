@@ -26,7 +26,7 @@ which Pydantic (raise-or-nothing) cannot represent.
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Literal, Protocol, runtime_checkable
+from typing import Annotated, Literal, Protocol, runtime_checkable
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -292,6 +292,37 @@ class PersonaEvaluationScenario(BaseModel):
         return self
 
 
+class ScoreFactors(BaseModel):
+    """The contributions behind one `ScoreResult.score`.
+
+    Deliberately generic: the contract is shared by every ranking model, so it
+    does not name any model's factors. Each model owns its own fixed factor
+    vocabulary (and the test that its keys stay inside it) in its own package.
+    NaN/inf are rejected here; `run.py` also refuses to write them to report.json.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True, allow_inf_nan=False)
+
+    contributions: dict[Annotated[str, Field(min_length=1)], float] = Field(
+        min_length=1,
+        description=(
+            "Named contributions that produced the score, keyed by factor name. Each "
+            "model owns its own factor vocabulary (a fixed set, enforced in that "
+            "model's package, not here); a model with one rule per tier may return "
+            "different keys per tier. Any finite value, negative allowed (e.g. an "
+            "explicit penalty). Not required to sum to `score`."
+        ),
+    )
+    blocked: bool = Field(
+        default=False,
+        description="True when the model applied a blocked adjustment to this score.",
+    )
+    base_score: float | None = Field(
+        default=None,
+        description="The score before any blocked adjustment, when the model has one.",
+    )
+
+
 class ScoreResult(BaseModel):
     """What a ranking model returns for one task."""
 
@@ -312,6 +343,15 @@ class ScoreResult(BaseModel):
         description=(
             "Optional short explanation for the score — compared against a "
             "scenario's expected_reason in later analysis, not by the harness."
+        ),
+    )
+    factors: ScoreFactors | None = Field(
+        default=None,
+        description=(
+            "Optional breakdown of what produced `score`; None means no breakdown. "
+            "Written into the harness report per candidate, never used for ranking. "
+            "Exists so a later explanation step can be built from the factors that "
+            "actually produced the score, instead of reverse-engineering the formula."
         ),
     )
 

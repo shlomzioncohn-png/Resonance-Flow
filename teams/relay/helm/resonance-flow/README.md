@@ -78,8 +78,20 @@ Currently wired up:
 
 - **Kafka** - every component depends on it, so it's set globally
   (`dependencies` in `values.yaml`).
-- **Postgres** - only `inbox` uses it.
+- **Postgres** - `inbox`, `mind`, and `chain` (Chain with its own database and
+  user - see [Chain's DB credentials](#chains-db-credentials-componentschain)).
+  pgvector's `vector.so` is overlaid from the official `pgvector/pgvector` image:
+  Bitnami's own build crashes (SIGILL) building HNSW indexes on non-AVX-512 CPUs
+  (#490). The Bitnami image is pinned by digest since the overlay must match its
+  Postgres major and pgvector version.
 - **MinIO** - `bridge` and `mind` use it.
+
+A `dependencies` list set in `values-<service>.yaml` **replaces** the one in
+`values.yaml` (Helm merges maps, not lists) - repeat every entry, don't just add.
+
+CI's `setup-service-infra` port-forwards this Postgres to `localhost:5432` and
+exports `PG*` / `TEST_DATABASE_URL` (superuser, `resonance_flow`) to the test step
+of **every** service whose `values-<service>.yaml` enables `postgresql`.
 
 ```yaml
 components:
@@ -103,8 +115,14 @@ file in a ConfigMap (`templates/configmap.yaml`), mounted at
 `/etc/resonance-flow/config/config.yaml` (`CONFIG_FILE_PATH`). Spring Boot
 services also get `SPRING_CONFIG_ADDITIONAL_LOCATION` pointed at it; other
 services read the file themselves. So the `config` keys are the config-file
-keys the service reads. (`inbox` is the exception - it needs a Spring-shaped
-file, from `templates/service-inbox/configmap.yaml` instead.)
+keys the service reads. (`inbox`, `chain` and `notification-delivery` are the
+exception - they need a Spring-shaped file with values computed at render time
+(Kafka/Postgres hosts, SASL config), so each renders its own ConfigMap from
+`templates/services/<name>/configmap.yaml` (`notification-delivery`:
+`templates/service-notification-delivery/configmap.yaml`) instead. Shared
+pieces come from `_helpers.tpl`: `resonance-flow.configMapHeader`,
+`resonance-flow.springKafkaBase` and `resonance-flow.springKafkaConsumerDefaults`
+- use them for any new Spring component rather than copying the Kafka block.)
 
 Secrets never go in `config` (a plain ConfigMap, readable by anyone with
 access). A `components.<name>.secret` block renders a `Secret`, mounted as a
@@ -117,6 +135,24 @@ empty — the loader must handle a missing file):
   outside the chart (`kubectl` / sealed-secrets / external-secrets).
 - `secret.create: true` - the chart renders it, values from
   `secret.data.*` (via `--set` for local testing, never committed).
+
+### Chain's DB credentials (`components.chain`)
+
+Chain gets its own Postgres database and user (`chain`), not Inbox's. The
+password lives only in the `resonance-flow-chain-db-credentials` Secret (key
+`password`). A pre-install/pre-upgrade hook Job
+(`templates/services/chain/db-credentials-hook.yaml`, PreSync under ArgoCD)
+creates it with a random password if it's missing, and never touches an existing
+one - so no manual step, in CI or the cluster. The Secret itself isn't a Helm
+resource: an offline render (ArgoCD) can't see the live password and would
+regenerate it every sync. To rotate, delete the Secret and restart Postgres and
+Chain after the next sync.
+
+It's mounted as a file, never an env var: into Chain's pod (read via Spring
+`configtree`) and, `optional: true`, into Postgres, whose init script
+(`templates/services/chain/configmap.yaml`) creates the user/database from it.
+Without the Secret, Postgres still starts and just skips Chain's database.
+The init script runs only on a fresh Postgres volume.
 
 ### MIND (`components.mind`)
 

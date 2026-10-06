@@ -1,24 +1,16 @@
+# CI applies an all-components-off overlay first (setup-service-infra), so only
+# list what this service needs enabled - everything else is already off.
 components:
   chain:
     enabled: true
-  mind:
-    enabled: false
-  lens-bff:
-    enabled: false
-  bridge:
-    enabled: false
-  lens-frontend:
-    enabled: false
-  inbox:
-    enabled: false
-  lens-gateway:
-    enabled: false
+  # Chain's Kafka topics carry Protobuf, registered in the schema registry.
   schema-registry:
-    enabled: false
+    enabled: true
 
+# Minio is only used by mind/bridge, so it stays off for a chain-only install.
 kafka:
   enabled: true
 minio:
   enabled: false
 postgresql:
-  enabled: false
+  enabled: true

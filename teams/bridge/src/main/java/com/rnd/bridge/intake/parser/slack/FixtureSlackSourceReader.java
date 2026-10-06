@@ -30,10 +30,11 @@ public class FixtureSlackSourceReader implements SlackSourceReader {
     }
 
     @Override
-    public List<ChatMessage> read() {
+    public List<ChatMessage> read(Instant since) {
         List<ChatMessage> messages = new ArrayList<>();
         for (JsonNode node : readJson(objectMapper, FIXTURE_ROOT + "slack-sample.json")) {
             long epochMillis = Math.round(node.get("ts").asDouble() * 1000);
+            String ts = node.get("ts").asText();
             messages.add(new ChatMessage(
                     RawSourceType.SLACK,
                     node.get("tenantId").asText(),
@@ -41,7 +42,9 @@ public class FixtureSlackSourceReader implements SlackSourceReader {
                     node.get("user").asText(),
                     Instant.ofEpochMilli(epochMillis),
                     node.get("text").asText(),
-                    resolveAttachments(node.get("files"))));
+                    resolveAttachments(node.get("files")),
+                    ts,
+                    null));
         }
         return messages;
     }
