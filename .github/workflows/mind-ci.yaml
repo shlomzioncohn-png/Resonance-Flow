@@ -102,9 +102,6 @@ jobs:
       - name: Fetch chart dependencies
         run: helm dependency build "$CHART_DIR"
 
-      - name: Provision MIND's DB and app Secrets
-        run: bash teams/relay/scripts/provision-mind-secrets.sh "$NAMESPACE"
-
       # Phase 1: infra only, MIND's image isn't built yet (two-phase, like service-ci.yaml).
       - name: Deploy chart with MIND disabled (infra only)
         run: |

@@ -41,11 +41,6 @@ runs:
       run: |
         yq '{"components": (.components | map_values({"enabled": false}))}' "$CHART_VALUES" > "$CHART_ALL_OFF"
 
-    - name: Provision MIND's Secrets
-      if: inputs.service_name == 'mind'
-      shell: bash
-      run: bash teams/relay/scripts/provision-mind-secrets.sh "${{ inputs.service_name }}"
-
     - name: Deploy chart with ${{ inputs.service_name }} disabled (infra only, for tests)
       shell: bash
       run: |
