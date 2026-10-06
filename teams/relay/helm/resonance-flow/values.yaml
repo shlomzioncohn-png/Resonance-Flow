@@ -136,6 +136,11 @@ components:
     service: *defaultService
     resources: *defaultResources
     <<: *defaultHealthProbes
+    # /internal/auth/* checks passwords for lens-gateway, so only lens-gateway may reach
+    # it - see templates/networkpolicy.yaml. Covers the whole pod, not just that path.
+    networkPolicy:
+      allowFrom:
+        - lens-gateway
   bridge:
     enabled: true
     replicaCount: 1
