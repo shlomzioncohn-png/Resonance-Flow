@@ -118,13 +118,8 @@ re-derive it separately from the wait-for-<dep> initContainer.
 {{- end }}
 
 {{/*
-One initContainer per {name, port, host?} dependency, blocking until
-host:port is TCP-reachable. Skips a dependency whose target is disabled
-(components.<name>.enabled: false, or the matching top-level subchart's
-own enabled: false) - an isolated per-team values file that turns a
-dependency off would otherwise wait forever on something that will never
-come up (verified live: lens-gateway's notification-delivery dependency
-hung this way when the isolated test values disabled it).
+One initContainer per {name, port, host?} dependency, blocking until host:port is
+TCP-reachable. Dependencies whose target is disabled get no initContainer.
 */}}
 {{- define "resonance-flow.waitForDependencies" -}}
 {{- $root := .root }}
