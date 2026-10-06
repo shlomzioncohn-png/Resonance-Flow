@@ -579,6 +579,10 @@ Flyway/Hibernate need a live connection. Bring one up via `docker compose up pos
 repo root (creates the `chain` database/user on first init - see
 `shared/database/init/create-chain-database.sh`), or point at any reachable Postgres instance.
 
+In CI, like Inbox, the tests run against the kind cluster's Postgres (`values-chain.yaml` enables
+it). `TEST_DATABASE_URL` is set there, which activates the `postgres-integration` profile, so the
+`@Tag("postgres")` tests run in CI too.
+
 ## Merge with main (2026-10-05)
 
 This branch merges `origin/main` (Postgres persistence, `ChainController`, events). Where the
