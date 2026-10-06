@@ -4,7 +4,7 @@ import org.springframework.stereotype.Component;
 
 import java.util.Optional;
 
-// Trusts X-Org-Id/X-User-Id as-is. The Keycloak token is validated by lens-gateway and the
+// Trusts X-Org-Id/X-User-Id as-is. The user's JWT is validated by lens-gateway and the
 // identity reaches us as headers via lens-bff, the only caller allowed to reach this service
 // (it has no Ingress). Rejects missing or blank values so they can't collapse into one shared
 // "org:user" key and leak notifications between users.

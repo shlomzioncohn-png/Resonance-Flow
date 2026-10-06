@@ -587,10 +587,10 @@ Confirm whether the broker already expires empty groups with no committed offset
 
 ```text
 Browser
-   │  Keycloak access token
+   │  LENS JWT (RS256, issued by lens-gateway at login)
    ▼
 lens-gateway (Ingress)
-   │  validates the token against Keycloak
+   │  validates the token's signature with its own public key
    ▼
 lens-bff
    │ GET /api/v1/events/stream
@@ -616,7 +616,7 @@ Neither lens-gateway nor lens-bff needs to know which instance previously served
 
 The Pipe never sees a token. Authentication happens upstream:
 
-1. **lens-gateway** validates every request's Keycloak access token (issuer + signing keys).
+1. **lens-gateway** issues an RS256-signed JWT at login and validates it on every request (signature + expiry) — there is no external identity provider.
 2. **lens-bff** resolves `org_id` and `user_id` from that validated identity and forwards them to the Pipe as `X-Org-Id` / `X-User-Id`.
 3. **The Pipe** trusts those headers as-is (`TrustedHeaderAuthenticator`), rejecting a missing or blank value with `400` — otherwise blank values would collapse into one shared `:` key and leak notifications between users.
 
