@@ -10,10 +10,11 @@ indistinguishable from a confident (and possibly wrong) read -- see
 matters (a confident wrong word is the case a corrupted-file check can't
 catch).
 
-NOTE: ``extract_text``'s signature is a working draft. Issue #449 calls for
-agreeing it with R2 before her ``bridge.raw.landed`` consumer (#349) is
-built against it -- treat it as a starting point for that conversation, not
-a settled contract.
+NOTE: ``extract_text``'s signature is being agreed with R2 (issue #449), who
+calls it from her ``bridge.raw.landed`` consumer (#349). Agreed so far: it takes
+a file path, and a failure carries a classified ``reason``. Still open: the
+shape of the low-confidence signal, per-page text, and how a scanned document
+is recognised (``source_type``, #188) -- see this package's README.
 """
 
 from __future__ import annotations
@@ -24,9 +25,10 @@ import shutil
 import subprocess
 import tempfile
 from pathlib import Path
+from typing import Literal
 
 import pypdfium2 as pdfium
-from pydantic import BaseModel
+from pydantic import BaseModel, model_validator
 
 from mind.api.instrumentation import instrumented_call
 
@@ -65,19 +67,52 @@ class LowConfidenceWord(BaseModel):
     confidence: float
 
 
+# Why an extraction failed, so the caller can react differently to each:
+#   file_not_found  -- the path does not exist (a pipeline bug, not a bad document)
+#   file_unreadable -- the path exists but could not be read (a directory, permissions)
+#   empty_input     -- the file is empty
+#   corrupt_input   -- not a readable image or PDF
+#   unreadable_scan -- a valid image/PDF in which no text was recognised (blank or too poor)
+#   ocr_unavailable -- the tesseract binary is not installed (an environment problem)
+#   ocr_failed      -- tesseract ran and failed or timed out for another reason
+FailureReason = Literal[
+    "file_not_found",
+    "file_unreadable",
+    "empty_input",
+    "corrupt_input",
+    "unreadable_scan",
+    "ocr_unavailable",
+    "ocr_failed",
+]
+
+
 class OCRResult(BaseModel):
     """Result of extract_text(). Always returned, never raised past this module.
 
-    ``success=False`` means "could not extract" -- corrupted input, an
-    empty/blank page, or a scan Tesseract couldn't read -- as distinct from
-    a successful extraction that happens to contain low-confidence words
-    (``success=True``, ``low_confidence_words`` non-empty).
+    ``success=False`` means "could not extract" -- ``reason`` says why (a
+    classified code to branch on) and ``error`` is the human-readable message --
+    as distinct from a successful extraction that happens to contain
+    low-confidence words (``success=True``, ``low_confidence_words`` non-empty).
+    ``reason`` is set exactly when ``success`` is False.
     """
 
     success: bool
     text: str = ""
     low_confidence_words: list[LowConfidenceWord] = []
+    reason: FailureReason | None = None
     error: str | None = None
+
+    @model_validator(mode="after")
+    def _reason_iff_failure(self) -> OCRResult:
+        if self.success and (self.reason is not None or self.error is not None):
+            raise ValueError("a successful result carries no reason or error")
+        if not self.success and (self.reason is None or not self.error):
+            raise ValueError("a failed result needs both a reason and an error message")
+        return self
+
+
+def _failure(reason: FailureReason, error: str) -> OCRResult:
+    return OCRResult(success=False, reason=reason, error=error)
 
 
 def _find_tesseract() -> str:
@@ -105,6 +140,10 @@ def _pdf_to_page_images(content: bytes) -> list[bytes]:
     return page_images
 
 
+class _TesseractRejectedImage(Exception):
+    """Tesseract exited non-zero on an image: it could not read it."""
+
+
 def _run_tesseract_tsv(tesseract_cmd: str, image_bytes: bytes) -> str:
     """Run tesseract --psm 11 in TSV mode on one page image, return raw TSV."""
     fd, tmp_path = tempfile.mkstemp(suffix=".png")
@@ -117,7 +156,7 @@ def _run_tesseract_tsv(tesseract_cmd: str, image_bytes: bytes) -> str:
         os.unlink(tmp_path)
     if proc.returncode != 0:
         stderr = proc.stderr.decode("utf-8", errors="replace").strip()
-        raise ValueError(stderr or f"tesseract exited {proc.returncode}")
+        raise _TesseractRejectedImage(stderr or f"tesseract exited {proc.returncode}")
     return proc.stdout.decode("utf-8", errors="replace")
 
 
@@ -145,31 +184,41 @@ def _parse_tsv(tsv: str) -> tuple[str, list[LowConfidenceWord]]:
     return " ".join(words), low_confidence
 
 
-def extract_text(content: bytes, *, filename: str = "") -> OCRResult:
+def extract_text(path: str | os.PathLike[str]) -> OCRResult:
     """Extract text from a scanned document (image or PDF) via tesseract --psm 11.
 
     Args:
-        content: Raw file bytes (e.g. as landed by Bridge) -- not a path.
-        filename: Original filename, if known. Used only to help tell a PDF
-            from an image when the content itself doesn't start with the
-            ``%PDF-`` magic bytes; safe to omit.
+        path: Path to the file on local disk (an image, or a PDF -- told apart
+            by its ``%PDF-`` magic bytes, or failing that its ``.pdf`` suffix).
 
-    Always returns an OCRResult, never raises: a corrupted file, empty
-    input, or unreadable scan comes back as ``success=False`` with
-    ``error`` set, not an exception and not garbage text.
+    Always returns an OCRResult, never raises: a missing, unreadable, empty or
+    corrupted file, or an unreadable scan, comes back as ``success=False`` with
+    a classified ``reason`` (see FailureReason) and an ``error`` message --
+    not an exception and not garbage text.
 
     Every successful result carries ``low_confidence_words`` -- words
     Tesseract itself scored below LOW_CONFIDENCE_THRESHOLD -- so a caller
     (extraction) can flag or discount them instead of trusting all OCR
     output equally.
     """
+    file_path = Path(path)
+    try:
+        content = file_path.read_bytes()
+    except FileNotFoundError:
+        return _failure("file_not_found", f"no such file: {file_path}")
+    except OSError as exc:
+        return _failure("file_unreadable", f"could not read {file_path}: {exc}")
+    return _extract_from_bytes(content, filename=file_path.name)
+
+
+def _extract_from_bytes(content: bytes, *, filename: str) -> OCRResult:
     if not content:
-        return OCRResult(success=False, error="empty input")
+        return _failure("empty_input", "empty input")
 
     try:
         tesseract_cmd = _find_tesseract()
     except RuntimeError as exc:
-        return OCRResult(success=False, error=str(exc))
+        return _failure("ocr_unavailable", str(exc))
 
     try:
         # Deliberately broad: pypdfium2/PIL can raise several different
@@ -177,10 +226,10 @@ def extract_text(content: bytes, *, filename: str = "") -> OCRResult:
         # is "never raise, always return a result" -- see module docstring.
         page_images = _pdf_to_page_images(content) if _is_pdf(content, filename) else [content]
     except Exception as exc:  # noqa: BLE001
-        return OCRResult(success=False, error=f"could not read input as image or PDF: {exc}")
+        return _failure("corrupt_input", f"could not read input as image or PDF: {exc}")
 
     if not page_images:
-        return OCRResult(success=False, error="PDF has no pages")
+        return _failure("corrupt_input", "PDF has no pages")
 
     page_texts: list[str] = []
     all_low_confidence: list[LowConfidenceWord] = []
@@ -192,11 +241,13 @@ def extract_text(content: bytes, *, filename: str = "") -> OCRResult:
                 if text:
                     page_texts.append(text)
                 all_low_confidence.extend(low_confidence)
+    except _TesseractRejectedImage as exc:
+        return _failure("corrupt_input", f"tesseract could not read the image: {exc}")
     except Exception as exc:  # noqa: BLE001 -- boundary: never raise, see module docstring
-        return OCRResult(success=False, error=f"tesseract failed: {exc}")
+        return _failure("ocr_failed", f"tesseract failed: {exc}")
 
     text = "\n".join(page_texts)
     if not text:
-        return OCRResult(success=False, error="no text recognized (scan may be unreadable or blank)")
+        return _failure("unreadable_scan", "no text recognized (scan may be unreadable or blank)")
 
     return OCRResult(success=True, text=text, low_confidence_words=all_low_confidence)

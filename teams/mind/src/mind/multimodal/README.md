@@ -34,35 +34,51 @@ Local OCR + ASR preprocessing.
   memory, ~0.45s CPU time per page on a dev machine (no GPU, no load).
   See `benchmarks/ocr-asr-benchmark.md` for the full comparison and
   reasoning.
-- **OCR: built (`ocr.py`).** `extract_text(content: bytes, *, filename:
-  str = "") -> OCRResult` -- takes raw file bytes (image or PDF; PDFs are
-  rasterized page-by-page via `pypdfium2` before OCR), runs
-  `tesseract --psm 11` in TSV mode, and returns an `OCRResult`:
-  - `success: bool` -- `False` for a corrupted file, empty input, or a
-    scan Tesseract couldn't read at all (never an exception).
-  - `text: str`
+- **OCR: built (`ocr.py`).** `extract_text(path: str | os.PathLike[str])
+  -> OCRResult` -- takes the path of a file on local disk (image or PDF;
+  PDFs are rasterized page-by-page via `pypdfium2` before OCR), runs
+  `tesseract --psm 11` in TSV mode, and returns an `OCRResult`. It never
+  raises:
+  - `success: bool`
+  - `text: str` -- all pages, joined with a newline.
   - `low_confidence_words: list[LowConfidenceWord]` (`text`, `confidence`)
     -- words Tesseract itself scored below `LOW_CONFIDENCE_THRESHOLD`
     (**60**, a starting point rather than a tuned value: it flags 12% of
     correct words and catches ~55% of real errors, see above and the comment
     on the constant in `ocr.py`).
-  - `error: str | None` -- set when `success` is `False`.
+  - `reason: FailureReason | None` -- why it failed, set exactly when
+    `success` is `False`, so the caller can react differently to each:
+    `file_not_found` (the path does not exist -- a pipeline bug, not a bad
+    document), `file_unreadable` (exists but can't be read: a directory,
+    permissions), `empty_input`, `corrupt_input` (not a readable image or
+    PDF), `unreadable_scan` (a valid image/PDF in which no text was
+    recognised: blank or too poor), `ocr_unavailable` (the `tesseract`
+    binary is not installed), `ocr_failed` (tesseract failed or timed out).
+  - `error: str | None` -- the human-readable message for the same failure.
 
   The call is wrapped in `instrumented_call("tesseract-psm11-ocr")`
   (`src/mind/api/instrumentation.py`), so latency/cost are recorded like
   every other call in the service.
 
-  **This signature is a working draft, not yet confirmed with R2** --
-  she calls this from her `bridge.raw.landed` consumer (#349) once
-  `RawObjectEvent.source_type` (`src/mind/contracts/raw_object_event.py`)
-  has a value for "scanned document", which it does not yet (see #188).
-  Update this section once the signature is agreed.
+  **Signature: agreed with R2 so far** (her answers on #449) -- a file
+  *path* as input, and a *classified failure reason* rather than only a
+  message. **Still open with her:** whether a list of low-confidence words
+  is the shape she wants (versus a count or ratio per document, or a
+  configurable threshold), whether she needs text per page for multi-page
+  PDFs (today the pages are joined and the boundaries lost), and how she
+  knows a document is scanned at all -- `RawObjectEvent.source_type`
+  (`src/mind/contracts/raw_object_event.py`) has no value for "scanned
+  document" yet (see #188). She calls this from her `bridge.raw.landed`
+  consumer (#349). "Path" is read as a local filesystem path; if she means
+  an object-storage key, a storage client would have to be added here.
 
-  Tests: `tests/test_ocr_pipeline.py` (clean scan, PDF input, corrupted
-  file, corrupted PDF, unreadable/blank scan, empty input, low-confidence
-  words). Tests that need the `tesseract` binary skip on a machine
-  without it; the FUNSD-backed tests additionally skip if `local-data/`
-  isn't populated.
+  Tests: `tests/test_ocr_pipeline.py` (clean scan, string path, PDF input,
+  corrupted file, corrupted PDF, unreadable/blank scan, empty file, missing
+  file, low-confidence words) -- these need the `tesseract` binary and skip
+  without it; the FUNSD-backed ones additionally skip if `local-data/` isn't
+  populated. `tests/test_ocr_result.py` covers every failure `reason` and the
+  `OCRResult` invariant (a reason exactly when it failed) with the
+  tesseract-facing steps replaced, so it runs without the binary, in CI too.
 - **ASR: known risk, not just "open"** — no decision exists, and it
   cannot exist yet: there is no AMI audio (or any audio) sample
   anywhere in this repo, on any branch, to benchmark Whisper against
