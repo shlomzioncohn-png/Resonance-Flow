@@ -181,7 +181,10 @@ the cluster:
   included from `templates/postgresql-initdb.yaml`) creates the `mind` role, database, and
   `vector` extension from it. It runs only on a fresh Postgres volume.
 - `resonance-flow-mind-secret` (key `secrets.yaml`): MIND's app secret, with the same
-  password plus `kafka.sasl` (user and password from `kafka.sasl.client` in `values.yaml`).
+  password. It also includes `kafka.sasl` (user and password from `kafka.sasl.client` in
+  `values.yaml`) only when `components.mind.kafkaSasl` is `true`. That is the default, for
+  shared clusters. `values/values-mind.yaml` sets it to `false`, because CI's Kafka broker
+  runs PLAINTEXT and MIND fails the handshake if it sends SASL.
 
 The hook creates the app Secret only when the DB Secret is newly created. If the DB Secret
 already exists but the app Secret is missing, create the app Secret by hand with the same
