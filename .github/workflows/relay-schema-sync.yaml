@@ -33,9 +33,13 @@ jobs:
           # check-all-schemas.sh, which are CI-only
           cp teams/relay/ci/check-schema-compatibility.sh teams/relay/ci/register-schema.sh teams/relay/schema-sync-hook/files/ci/
           cp teams/relay/ci/schema-subjects.tsv teams/relay/schema-sync-hook/files/
-          # inbox keeps only the schemas it publishes - refresh those, don't add others
+          # inbox keeps only the schemas it publishes - refresh those, don't add others.
+          # Skip inbox's own unregistered protos (no shared/proto source), or cp fails the step.
           for f in teams/inbox/src/main/proto/*.proto; do
-            cp "teams/relay/src/main/proto/$(basename "$f")" "$f"
+            src="shared/proto/$(basename "$f")"
+            if [ -f "$src" ]; then
+              cp "$src" "$f"
+            fi
           done
 
       # PAT, not GITHUB_TOKEN - see service-update-manifest.yaml. No-op when nothing changed.
@@ -50,4 +54,4 @@ jobs:
             teams/inbox/src/main/proto
           commit-message: "chore(relay): sync schema file copies"
           title: "chore(relay): sync schema file copies"
-          body: "Automated sync of `teams/relay/src/main/proto` and `teams/relay/ci` into their copies, triggered by `${{ github.sha }}`. Needs review/approval per the `main` branch ruleset."
+          body: "Automated sync of `shared/proto` and `teams/relay/ci` into their copies, triggered by `${{ github.sha }}`. Needs review/approval per the `main` branch ruleset."
