@@ -11,7 +11,7 @@ create-mind-database.sh: |
     fi
     MIND_DB_PASSWORD_FILE=/etc/resonance-flow/secrets/mind-db/password
     if [ -s "$MIND_DB_PASSWORD_FILE" ]; then
-      psql -v ON_ERROR_STOP=1 -v mind_pw="$(cat "$MIND_DB_PASSWORD_FILE")" --username postgres <<-'EOSQL'
+      psql -v ON_ERROR_STOP=1 -v mind_pw="$(cat "$MIND_DB_PASSWORD_FILE")" --username postgres <<'EOSQL'
         CREATE USER {{ $mindVectorStore.user }} WITH PASSWORD :'mind_pw';
         CREATE DATABASE {{ $mindVectorStore.db }} OWNER {{ $mindVectorStore.user }};
         \connect {{ $mindVectorStore.db }}

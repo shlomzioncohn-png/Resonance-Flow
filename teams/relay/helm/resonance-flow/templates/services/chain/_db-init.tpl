@@ -16,7 +16,7 @@ create-chain-database.sh: |
     CHAIN_DB_PASSWORD_FILE=/etc/resonance-flow/secrets/chain-db/password
     if [ -s "$CHAIN_DB_PASSWORD_FILE" ]; then
       # :'chain_pw' makes psql quote it as a literal - never spliced into the SQL text.
-      psql -v ON_ERROR_STOP=1 -v chain_pw="$(cat "$CHAIN_DB_PASSWORD_FILE")" --username postgres <<-'EOSQL'
+      psql -v ON_ERROR_STOP=1 -v chain_pw="$(cat "$CHAIN_DB_PASSWORD_FILE")" --username postgres <<'EOSQL'
         CREATE USER {{ $datasource.username }} WITH PASSWORD :'chain_pw';
         CREATE DATABASE {{ $datasource.database }} OWNER {{ $datasource.username }};
   EOSQL
