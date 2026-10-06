@@ -4,6 +4,7 @@ import com.rnd.bff.dto.EmployeeTaskDTO;
 import com.rnd.bff.dto.TaskDTO;
 import com.rnd.bff.dto.TaskListResponseDTO;
 import com.rnd.bff.dto.TaskRecommendationDTO;
+import com.rnd.bff.dto.TaskSelectionDTO;
 import com.rnd.bff.dto.TaskStatusUpdateDTO;
 import com.rnd.bff.dto.WorkspaceRequestDTO;
 import com.rnd.bff.service.WorkspaceService;
@@ -70,6 +71,29 @@ public class WorkspaceController {
                 userId, filter, search, page, size);
 
         return ResponseEntity.ok(workspaceService.listTasks(userId, filter, search, page, size));
+    }
+
+    /**
+     * Inbox's pick of the tasks to do in the available time.
+     *
+     * GET /workspace/tasks/selection?availableMinutes=60
+     *
+     * availableMinutes: required, 1-480. Mapped before /workspace/tasks/{taskId},
+     * and Spring prefers this literal path over the {taskId} pattern anyway.
+     */
+    @Operation(summary = "Select tasks for the available time",
+            description = "The tasks that fit availableMinutes together, in suggested order (Inbox's task "
+                    + "selection). usedFallback=true: nothing fit, so the shortest task was picked anyway. "
+                    + "400 if availableMinutes is missing or not 1-480.")
+    @GetMapping("/workspace/tasks/selection")
+    public ResponseEntity<TaskSelectionDTO> selectTasks(
+            @Parameter(description = "Free time in minutes, 1-480")
+            @RequestParam(required = false) Integer availableMinutes,
+            @RequestHeader("X-User-Id") String userId) {
+
+        logger.info("Task selection request - userId: {}, availableMinutes: {}", userId, availableMinutes);
+
+        return ResponseEntity.ok(workspaceService.selectTasks(userId, availableMinutes));
     }
 
     /**

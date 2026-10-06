@@ -194,6 +194,36 @@ class GatewayRoutingIntegrationTest {
                 .andExpect(jsonPath("$.message").value("Downstream service returned an error"));
     }
 
+    @Test
+    void selectTasks_forwardsMinutesToBffAndReturnsSelection() throws Exception {
+        com.rnd.gateway.dto.TaskSelectionDTO selection = new com.rnd.gateway.dto.TaskSelectionDTO(
+                60,
+                List.of(new com.rnd.gateway.dto.SelectedTaskDTO("t1", "Task t1", null, 30, null, 0.82)),
+                30, 30, false, null);
+        when(restTemplate.exchange(
+                contains("workspace/tasks/selection?availableMinutes=60"),
+                eq(org.springframework.http.HttpMethod.GET),
+                any(),
+                eq(com.rnd.gateway.dto.TaskSelectionDTO.class)))
+                .thenReturn(org.springframework.http.ResponseEntity.ok(selection));
+
+        mockMvc.perform(get("/api/workspace/tasks/selection?availableMinutes=60").with(jwt()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.availableMinutes").value(60))
+                .andExpect(jsonPath("$.selectedTasks[0].id").value("t1"))
+                .andExpect(jsonPath("$.remainingMinutes").value(30));
+    }
+
+    @Test
+    void selectTasks_minutesOutOfRange_returns400WithoutCallingBff() throws Exception {
+        mockMvc.perform(get("/api/workspace/tasks/selection?availableMinutes=500").with(jwt()))
+                .andExpect(status().isBadRequest());
+        mockMvc.perform(get("/api/workspace/tasks/selection").with(jwt()))
+                .andExpect(status().isBadRequest());
+
+        verifyNoInteractions(restTemplate);
+    }
+
     // =========================================================================
     // Timeout and error handling tests
     // =========================================================================

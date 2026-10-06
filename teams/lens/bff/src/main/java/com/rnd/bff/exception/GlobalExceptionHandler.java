@@ -67,6 +67,20 @@ public class GlobalExceptionHandler {
                 HttpStatus.BAD_REQUEST);
     }
 
+    /**
+     * Triggered by an invalid argument the service checks itself, e.g.
+     * availableMinutes outside 1-480. Same mapping as the Gateway's handler.
+     */
+    @ExceptionHandler(IllegalArgumentException.class)
+    public ResponseEntity<ErrorResponse> handleIllegalArgumentException(
+            IllegalArgumentException ex, WebRequest request) {
+        String path = getRequestPath(request);
+        logger.warn("Invalid argument - Path: {}, Details: {}", path, ex.getMessage());
+        return new ResponseEntity<>(
+                new ErrorResponse("BAD_REQUEST", ex.getMessage(), path, null),
+                HttpStatus.BAD_REQUEST);
+    }
+
     /** Triggered by calling an endpoint with the wrong HTTP method. */
     @ExceptionHandler(HttpRequestMethodNotSupportedException.class)
     public ResponseEntity<ErrorResponse> handleMethodNotSupportedException(

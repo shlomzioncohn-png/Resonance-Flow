@@ -20,7 +20,9 @@ import com.rnd.bff.client.MindClient;
 import com.rnd.bff.dto.TaskDTO;
 import com.rnd.bff.dto.TaskDependenciesDTO;
 import com.rnd.bff.dto.TaskListResponseDTO;
+import com.rnd.bff.dto.SelectedTaskDTO;
 import com.rnd.bff.dto.TaskRecommendationDTO;
+import com.rnd.bff.dto.TaskSelectionDTO;
 import com.rnd.bff.dto.WorkspaceRequestDTO;
 import com.rnd.bff.exception.InboxRejectedException;
 import com.rnd.bff.exception.ServiceUnavailableException;
@@ -335,5 +337,52 @@ class WorkspaceServiceTest {
 
         assertThatThrownBy(() -> workspaceService.updateTaskStatus("emp_001", "task_missing", "IN_PROGRESS", null))
                 .isInstanceOf(TaskNotFoundException.class);
+    }
+
+    // -------------------------------------------------------------------------
+    // selectTasks - "tasks for N minutes"
+    // -------------------------------------------------------------------------
+
+    @Test
+    void selectTasks_minutesOutOfRangeOrMissing_throwsIllegalArgument() {
+        for (Integer minutes : new Integer[] {null, 0, -5, 481}) {
+            assertThatThrownBy(() -> workspaceService.selectTasks("emp_001", minutes))
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessageContaining("between 1 and 480");
+        }
+        verifyNoInteractions(inboxClient);
+    }
+
+    @Test
+    void selectTasks_mapsInboxSelection() {
+        when(inboxClient.selectTasks("emp_001", 60)).thenReturn(new InboxSelectionResponse(
+                List.of(selected("t1", 30, 0.82), selected("t2", 20, 0.4)), 50, 1.22, 10, false, null));
+
+        TaskSelectionDTO result = workspaceService.selectTasks("emp_001", 60);
+
+        assertThat(result.getAvailableMinutes()).isEqualTo(60);
+        assertThat(result.getSelectedTasks()).extracting(SelectedTaskDTO::getId).containsExactly("t1", "t2");
+        assertThat(result.getSelectedTasks().get(0).getEffortEstimate()).isEqualTo(30);
+        assertThat(result.getSelectedTasks().get(0).getSelectionScore()).isEqualTo(0.82);
+        assertThat(result.getTotalEffortMinutes()).isEqualTo(50);
+        assertThat(result.getRemainingMinutes()).isEqualTo(10);
+        assertThat(result.getUsedFallback()).isFalse();
+    }
+
+    @Test
+    void selectTasks_inboxDown_throwsServiceUnavailable_noFallback() {
+        when(inboxClient.selectTasks(anyString(), anyInt())).thenThrow(new RuntimeException("Inbox 500"));
+
+        assertThatThrownBy(() -> workspaceService.selectTasks("emp_001", 60))
+                .isInstanceOf(ServiceUnavailableException.class);
+    }
+
+    @Test
+    void selectTasks_inboxRejects_isPassedOn() {
+        when(inboxClient.selectTasks(anyString(), anyInt()))
+                .thenThrow(new InboxRejectedException(401, "Actor does not exist"));
+
+        assertThatThrownBy(() -> workspaceService.selectTasks("emp_001", 60))
+                .isInstanceOf(InboxRejectedException.class);
     }
 }

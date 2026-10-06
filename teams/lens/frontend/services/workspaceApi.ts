@@ -64,6 +64,42 @@ export function getTask(taskId: string): Promise<ApiTask> {
   return api.get<ApiTask>(`/api/workspace/tasks/${taskId}`);
 }
 
+// ── Task selection ("which tasks fit in N minutes?") ─────────────────────
+
+export interface SelectedTask {
+  id: string;
+  title: string;
+  description?: string;
+  /** Minutes */
+  effortEstimate: number;
+  /** ISO-8601 datetime string */
+  dueDate?: string;
+  /** 0-1, higher is a better pick */
+  selectionScore: number;
+}
+
+export interface TaskSelection {
+  availableMinutes: number;
+  /** In suggested execution order. Empty when nothing can be done. */
+  selectedTasks: SelectedTask[];
+  totalEffortMinutes: number;
+  remainingMinutes: number;
+  /** True when nothing fit, so the shortest task was picked anyway (it takes longer). */
+  usedFallback: boolean;
+  /** Why, e.g. "window was automatically expanded to 21 minutes". May be missing. */
+  reason?: string;
+}
+
+/** Largest window the API accepts (Inbox's limit). */
+export const MAX_SELECTION_MINUTES = 480;
+
+/** The tasks that fit `availableMinutes` (1-480) together, picked by Inbox. */
+export function selectTasks(availableMinutes: number): Promise<TaskSelection> {
+  return api.get<TaskSelection>(
+    `/api/workspace/tasks/selection?availableMinutes=${availableMinutes}`,
+  );
+}
+
 // ── Task list ("My Tasks" screen) ──────────────────────────────────────────
 
 /**

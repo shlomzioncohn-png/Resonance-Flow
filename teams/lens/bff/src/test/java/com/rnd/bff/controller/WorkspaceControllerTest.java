@@ -244,4 +244,36 @@ class WorkspaceControllerTest {
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.errorCode", is("BAD_REQUEST")));
     }
+
+    // -------------------------------------------------------------------------
+    // GET /workspace/tasks/selection (mock Inbox)
+    // -------------------------------------------------------------------------
+
+    @Test
+    void selectTasks_returnsTasksThatFitTogether() throws Exception {
+        mockMvc
+                .perform(get("/workspace/tasks/selection?availableMinutes=90").header("X-User-Id", "emp_001"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.availableMinutes", is(90)))
+                .andExpect(jsonPath("$.selectedTasks.length()", is(2)))
+                .andExpect(jsonPath("$.selectedTasks[0].id", is("task_001")))
+                .andExpect(jsonPath("$.totalEffortMinutes", is(80)))
+                .andExpect(jsonPath("$.usedFallback", is(false)));
+    }
+
+    @Test
+    void selectTasks_minutesOutOfRange_returns400() throws Exception {
+        mockMvc
+                .perform(get("/workspace/tasks/selection?availableMinutes=0").header("X-User-Id", "emp_001"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.errorCode", is("BAD_REQUEST")))
+                .andExpect(jsonPath("$.message", containsString("between 1 and 480")));
+    }
+
+    @Test
+    void selectTasks_minutesMissing_returns400() throws Exception {
+        mockMvc
+                .perform(get("/workspace/tasks/selection").header("X-User-Id", "emp_001"))
+                .andExpect(status().isBadRequest());
+    }
 }

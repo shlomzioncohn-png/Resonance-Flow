@@ -464,12 +464,12 @@ public class InboxClient {
 
     /**
      * Inbox's own pick of the best tasks for the user's available time
-     * (GET /api/v1/tasks/selection). Real mode only - the mock has no
-     * equivalent, so WorkspaceService keeps its own ranking in mock mode.
+     * (GET /api/v1/tasks/selection). The mock does a simple stand-in, see
+     * selectMockTasks.
      */
     public InboxSelectionResponse selectTasks(String userId, int availableMinutes) {
         if (mockEnabled) {
-            throw new IllegalStateException("Task selection needs the real Inbox (inbox.mock-enabled=false)");
+            return selectMockTasks(availableMinutes);
         }
         URI uri = UriComponentsBuilder.fromHttpUrl(inboxServiceUrl)
                 .path(TASKS_PATH + "/selection")
@@ -561,6 +561,52 @@ public class InboxClient {
     // -------------------------------------------------------------------------
     // Mock-mode helpers
     // -------------------------------------------------------------------------
+
+    /**
+     * A simple stand-in for Inbox's selection, so the endpoint works without
+     * Inbox: workable, unblocked tasks with an effort estimate, most important
+     * first, added while they still fit. If none fits, the shortest one is
+     * picked anyway (usedFallback), like Inbox does. Not Inbox's real algorithm.
+     */
+    private InboxSelectionResponse selectMockTasks(int availableMinutes) {
+        List<InboxTaskRecord> candidates = tasksById.values().stream()
+                .filter(t -> List.of("new", "in_review", "approved", "in_progress").contains(t.getStatus()))
+                .filter(t -> !Boolean.FALSE.equals(t.getIsAvailable()))
+                .filter(t -> t.getEffortEstimateMinutes() != null)
+                .sorted((a, b) -> Double.compare(
+                        b.getPriorityScore() == null ? 0 : b.getPriorityScore(),
+                        a.getPriorityScore() == null ? 0 : a.getPriorityScore()))
+                .toList();
+
+        List<InboxSelectionResponse.SelectedTask> selected = new ArrayList<>();
+        int used = 0;
+        for (InboxTaskRecord task : candidates) {
+            if (used + task.getEffortEstimateMinutes() <= availableMinutes) {
+                selected.add(toSelectedTask(task));
+                used += task.getEffortEstimateMinutes();
+            }
+        }
+        if (!selected.isEmpty() || candidates.isEmpty()) {
+            return new InboxSelectionResponse(selected, used, 0, availableMinutes - used, false, null);
+        }
+        InboxTaskRecord shortest = candidates.stream()
+                .min((a, b) -> Integer.compare(a.getEffortEstimateMinutes(), b.getEffortEstimateMinutes()))
+                .orElseThrow();
+        int effort = shortest.getEffortEstimateMinutes();
+        return new InboxSelectionResponse(List.of(toSelectedTask(shortest)), effort, 0, 0, true,
+                "No task fit the original " + availableMinutes + " minutes; window was automatically expanded to "
+                        + effort + " minutes");
+    }
+
+    private static InboxSelectionResponse.SelectedTask toSelectedTask(InboxTaskRecord task) {
+        return new InboxSelectionResponse.SelectedTask(
+                task.getId(),
+                task.getTitle(),
+                task.getDescription(),
+                task.getEffortEstimateMinutes(),
+                task.getDeadline() == null ? null : task.getDeadline().toInstant(ZoneOffset.UTC),
+                task.getPriorityScore() == null ? 0 : task.getPriorityScore() / 10);
+    }
 
     private TaskListResponseDTO listMockTasks(String status, String search, int page, int size) {
         List<TaskDTO> matching = getTasksForUser(null).stream()

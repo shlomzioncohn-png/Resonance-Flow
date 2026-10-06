@@ -290,4 +290,37 @@ class InboxClientTest {
         assertThat(selection.getSelectedTasks().get(0).getEffortEstimateMinutes()).isEqualTo(21);
         assertThat(selection.getSelectedTasks().get(0).getSelectionScore()).isEqualTo(0.28);
     }
+
+    // -------------------------------------------------------------------------
+    // selectTasks - mock mode (workable + unblocked + has effort: task_001 35min, task_004 45min)
+    // -------------------------------------------------------------------------
+
+    @Test
+    void selectTasks_mock_picksMostImportantTasksThatFitTogether() {
+        InboxSelectionResponse selection = inboxClient.selectTasks("any-user", 90);
+
+        assertThat(selection.getSelectedTasks()).extracting(InboxSelectionResponse.SelectedTask::getId)
+                .containsExactly("task_001", "task_004");
+        assertThat(selection.getTotalEffortMinutes()).isEqualTo(80);
+        assertThat(selection.getRemainingMinutes()).isEqualTo(10);
+        assertThat(selection.isUsedFallback()).isFalse();
+    }
+
+    @Test
+    void selectTasks_mock_skipsTaskThatNoLongerFits() {
+        InboxSelectionResponse selection = inboxClient.selectTasks("any-user", 40);
+
+        assertThat(selection.getSelectedTasks()).extracting(InboxSelectionResponse.SelectedTask::getId)
+                .containsExactly("task_001");
+    }
+
+    @Test
+    void selectTasks_mock_nothingFits_picksShortestAndFlagsFallback() {
+        InboxSelectionResponse selection = inboxClient.selectTasks("any-user", 20);
+
+        assertThat(selection.getSelectedTasks()).extracting(InboxSelectionResponse.SelectedTask::getId)
+                .containsExactly("task_001");
+        assertThat(selection.isUsedFallback()).isTrue();
+        assertThat(selection.getReason()).contains("expanded to 35 minutes");
+    }
 }

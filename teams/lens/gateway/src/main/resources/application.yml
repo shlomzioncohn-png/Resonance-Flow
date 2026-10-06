@@ -46,6 +46,7 @@ bff:
   endpoints:
     workspace-recommend: ${BFF_ENDPOINT_WORKSPACE_RECOMMEND:/workspace/recommend}
     tasks: ${BFF_ENDPOINT_TASKS:/workspace/tasks}
+    task-selection: ${BFF_ENDPOINT_TASK_SELECTION:/workspace/tasks/selection}
     employee-task: ${BFF_ENDPOINT_EMPLOYEE_TASK:/workspace/employee-task}
 
 server:

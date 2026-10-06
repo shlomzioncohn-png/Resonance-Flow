@@ -4,6 +4,7 @@ import com.rnd.gateway.dto.EmployeeTaskDTO;
 import com.rnd.gateway.dto.TaskDTO;
 import com.rnd.gateway.dto.TaskListResponseDTO;
 import com.rnd.gateway.dto.TaskRecommendationDTO;
+import com.rnd.gateway.dto.TaskSelectionDTO;
 import com.rnd.gateway.dto.TaskStatusUpdateDTO;
 import com.rnd.gateway.dto.WorkspaceRequestDTO;
 import com.rnd.gateway.exception.GatewayTimeoutException;
@@ -78,6 +79,9 @@ public class WorkspaceController {
 
     @Value("${bff.endpoints.tasks:/workspace/tasks}")
     private String bffTasksPath;
+
+    @Value("${bff.endpoints.task-selection:/workspace/tasks/selection}")
+    private String bffTaskSelectionPath;
 
     @Value("${bff.endpoints.employee-task:/workspace/employee-task}")
     private String bffEmployeeTaskPath;
@@ -312,6 +316,67 @@ public class WorkspaceController {
 
         } catch (Exception e) {
             logger.error("Unexpected error fetching task list for userId: {}", userId, e);
+            throw new ServiceUnavailableException("bff", "Unexpected error communicating with BFF");
+        }
+    }
+
+    /**
+     * Inbox's pick of the tasks to do in the available time
+     *
+     * Request: GET /api/workspace/tasks/selection?availableMinutes=60
+     * Forwards to: GET {bff}/workspace/tasks/selection?availableMinutes=60
+     *
+     * availableMinutes is required, 1-480 (Inbox's limit) - checked here, so a
+     * bad value is a 400 without a round trip. Spring maps this literal path
+     * ahead of /tasks/{taskId}.
+     */
+    @Operation(summary = "Select tasks for the available time",
+            description = "The tasks that fit availableMinutes together, in suggested order. "
+                    + "usedFallback=true: nothing fit, so the shortest task was picked anyway.")
+    @GetMapping("/tasks/selection")
+    public ResponseEntity<TaskSelectionDTO> selectTasks(
+            @Parameter(description = "Free time in minutes, 1-480")
+            @RequestParam(required = false) Integer availableMinutes) {
+
+        if (availableMinutes == null || availableMinutes < 1 || availableMinutes > 480) {
+            throw new IllegalArgumentException("availableMinutes must be between 1 and 480");
+        }
+        String userId = getMockUserId("workspace.tasks.selection"); // TODO: extract from JWT
+
+        logger.info("Task selection request - userId: {}, availableMinutes: {}", userId, availableMinutes);
+
+        try {
+            String bffUrl = UriComponentsBuilder.fromHttpUrl(bffServiceUrl)
+                    .path(bffTaskSelectionPath)
+                    .queryParam("availableMinutes", availableMinutes)
+                    .toUriString();
+            logger.debug("Forwarding to BFF: {}", bffUrl);
+
+            ResponseEntity<TaskSelectionDTO> bffResponse = restTemplate.exchange(
+                    bffUrl, HttpMethod.GET, new HttpEntity<>(buildHeaders(userId)), TaskSelectionDTO.class);
+
+            TaskSelectionDTO selection = bffResponse.getBody();
+            if (selection == null) {
+                throw new ServiceUnavailableException("bff", "BFF returned empty response");
+            }
+            return ResponseEntity.ok(selection);
+
+        } catch (ServiceUnavailableException | GatewayTimeoutException | ResponseStatusException e) {
+            throw e;
+        } catch (ResourceAccessException e) {
+            if (e.getCause() instanceof SocketTimeoutException) {
+                logger.error("BFF read timeout for task selection - userId: {}", userId, e);
+                throw new GatewayTimeoutException("bff", bffReadTimeoutMs, "BFF did not respond in time");
+            }
+            logger.error("BFF unreachable for task selection - userId: {}", userId, e);
+            throw new ServiceUnavailableException("bff", "BFF is currently unavailable");
+
+        } catch (HttpStatusCodeException e) {
+            logger.warn("BFF returned {} for task selection - userId: {}", e.getStatusCode(), userId);
+            throw new ResponseStatusException(e.getStatusCode(), bffErrorReason(e));
+
+        } catch (Exception e) {
+            logger.error("Unexpected error fetching task selection for userId: {}", userId, e);
             throw new ServiceUnavailableException("bff", "Unexpected error communicating with BFF");
         }
     }

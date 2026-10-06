@@ -9,7 +9,9 @@ import com.rnd.bff.dto.EmployeeTaskDTO;
 import com.rnd.bff.dto.TaskDTO;
 import com.rnd.bff.dto.TaskDependenciesDTO;
 import com.rnd.bff.dto.TaskListResponseDTO;
+import com.rnd.bff.dto.SelectedTaskDTO;
 import com.rnd.bff.dto.TaskRecommendationDTO;
+import com.rnd.bff.dto.TaskSelectionDTO;
 import com.rnd.bff.dto.WorkspaceRequestDTO;
 import com.rnd.bff.exception.InboxRejectedException;
 import com.rnd.bff.exception.ServiceUnavailableException;
@@ -327,6 +329,55 @@ public class WorkspaceService {
         }
         String status = filter.toUpperCase();
         return STATUSES.contains(status) ? status : null;
+    }
+
+    /** Inbox's limit for one selection window (TaskSelectionRequestDto.MAX_AVAILABLE_MINUTES). */
+    public static final int MAX_SELECTION_MINUTES = 480;
+
+    /**
+     * "Which tasks should I do in N minutes?" - Inbox picks the tasks that fit
+     * together (its own effort estimates and scoring). Unlike recommend(),
+     * this returns Inbox's whole selection as-is, with no BFF ranking or
+     * fallback: if Inbox can't answer, it's reported as unavailable.
+     *
+     * @throws IllegalArgumentException (-> 400) if availableMinutes is missing or not 1-480
+     */
+    public TaskSelectionDTO selectTasks(String userId, Integer availableMinutes) {
+        if (availableMinutes == null || availableMinutes < 1 || availableMinutes > MAX_SELECTION_MINUTES) {
+            throw new IllegalArgumentException(
+                    "availableMinutes must be between 1 and " + MAX_SELECTION_MINUTES);
+        }
+        InboxSelectionResponse selection;
+        try {
+            selection = inboxClient.selectTasks(userId, availableMinutes);
+        } catch (InboxRejectedException ex) {
+            // Inbox is up and said no (401/403/400) - not an outage, pass it on as-is
+            throw ex;
+        } catch (RuntimeException ex) {
+            throw new ServiceUnavailableException("Inbox", "Inbox is unavailable", ex);
+        }
+        List<SelectedTaskDTO> tasks = selection.getSelectedTasks() == null
+                ? List.of()
+                : selection.getSelectedTasks().stream()
+                        .map(task -> SelectedTaskDTO.builder()
+                                .id(task.getId())
+                                .title(task.getTitle())
+                                .description(task.getDescription())
+                                .effortEstimate(task.getEffortEstimateMinutes())
+                                .dueDate(task.getDeadline() == null
+                                        ? null
+                                        : LocalDateTime.ofInstant(task.getDeadline(), ZoneOffset.UTC))
+                                .selectionScore(task.getSelectionScore())
+                                .build())
+                        .toList();
+        return TaskSelectionDTO.builder()
+                .availableMinutes(availableMinutes)
+                .selectedTasks(tasks)
+                .totalEffortMinutes(selection.getTotalEffortMinutes())
+                .remainingMinutes(selection.getRemainingMinutes())
+                .usedFallback(selection.isUsedFallback())
+                .reason(selection.getReason())
+                .build();
     }
 
     /** Task details panel / drill-down from either My Workspace or My Tasks. */
