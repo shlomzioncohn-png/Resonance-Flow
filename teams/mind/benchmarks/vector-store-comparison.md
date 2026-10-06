@@ -311,6 +311,65 @@ won't be merged and its branch history won't be part of `main`. The PoC
 folder itself was removed once its logic was promoted into
 `src/mind/embeddings/`.
 
+## Foundation Gate benchmark (week 3)
+
+The three validation stages above all used synthetic or placeholder data
+-- real data was explicitly BLOCKED at the time (no loader existed, see
+`SCALE_AND_RECALL_REPORT.md` §1). That has changed: `eval/real_slice/`
+now has 16 real, human-annotated tasks (verbatim AMI Meeting Corpus
+action items, three real meetings -- see each file's `source` field) and
+the vector-store interface is final. [`foundation_gate_benchmark.py`](foundation_gate_benchmark.py)
+re-runs the benchmark against this real slice, run via:
+
+```bash
+cd teams/mind
+docker compose up -d vector-store
+source .venv/bin/activate   # or: make dev, then activate
+export MIND_VECTOR_STORE__DSN="postgresql://mind:mind@localhost:5432/mind"
+python -m benchmarks.foundation_gate_benchmark
+```
+
+Two different things are measured, deliberately kept separate:
+
+- **Latency (p50/p95/p99)** needs scale, not realism. The 16 real tasks
+  are padded with 84 synthetic filler rows to reach this doc's
+  >=100-vector minimum (§1) -- filler only ever affects scale, never the
+  recall measurement below.
+- **Recall** needs realism, not scale. There's no real near-duplicate
+  corpus in this data (no two AMI action items are paraphrases of each
+  other), so recall here asks a different, equally real question: for
+  three hand-identified task pairs that discuss the same sub-topic
+  within one real meeting (e.g. two action items both about collecting
+  seating preferences), does the related real task outrank an unrelated
+  real control task from the *same* meeting?
+
+**Result (last real run, [`foundation_gate_benchmark_results.json`](foundation_gate_benchmark_results.json)):**
+
+| Metric | Result |
+|---|---|
+| Total vectors (16 real + 84 synthetic filler) | 100 |
+| Latency p50 / p95 / p99 | 3.73ms / 15.72ms / 21.84ms |
+| Recall (related outranks control, real pairs) | **3/3** |
+
+p99 is ~14x under the 300ms target, consistent with the earlier
+10,000-row synthetic result -- latency doesn't depend on content, only
+vector count and dimension, so this isn't a surprise. The real finding
+is the recall column: unlike the semantic-quality validation above
+(0% end-to-end recall on paraphrased near-duplicates, traced to the
+placeholder embedding model), plain topical relatedness within a real
+meeting ranks correctly 3/3 here. **This does not contradict the earlier
+finding** -- "the same sub-topic, different wording" (what these three
+pairs test) and "a near-exact paraphrase" (what the semantic-quality
+stage tested) are different difficulty levels for a word-overlap
+embedding model; the gap is still in `embeddings.py`'s placeholder
+model, not pgvector or its HNSW index.
+
+**HNSW confirmed in code, not just planned:** `pgvector_store.py`'s
+`_ensure_schema()` already creates a `USING hnsw (embedding
+vector_cosine_ops)` index (`CREATE INDEX IF NOT EXISTS ...`), and
+`search()` sets `hnsw.ef_search` before every query -- this benchmark
+ran against that real code path, not a bypass.
+
 ## Follow-up (open, not fixed here)
 
 HNSW *build-time* quality was never investigated — only `ef_search`

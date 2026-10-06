@@ -163,10 +163,19 @@ checks and who owns what.
 
 ## Foundation Gate checklist (end of week 3)
 
-- [ ] Harness and vector store run on toy data **and** on one small real
+- [x] Harness and vector store run on toy data **and** on one small real
       dataset slice (e.g. a handful of AMI recordings or a few scanned
-      FUNSD/RVL-CDIP pages)
-- [ ] Both are runnable by someone outside the MIND team
+      FUNSD/RVL-CDIP pages) -- harness: `eval/real_slice/` (AMI), see
+      `tests/test_real_slice.py`; vector store: same `eval/real_slice/`
+      tasks, see `benchmarks/vector-store-comparison.md`'s "Foundation
+      Gate benchmark (week 3)" section (#469)
+- [ ] Both are runnable by someone outside the MIND team -- vector-store
+      setup guide exists and was run on a clean environment (see
+      `src/mind/embeddings/README.md`'s "Foundation Gate benchmark"
+      section), but no one outside the team has run it from the
+      instructions alone yet (#469's own acceptance criterion -- needs a
+      teammate to actually do this and report what got stuck)
 - [ ] Persona evaluation set complete and mentor-approved
-- [ ] Vector-store choice documented and reasoned
+- [x] Vector-store choice documented and reasoned -- see
+      `benchmarks/vector-store-comparison.md`
 - [ ] Automated tests passing; a README per component; one-command deploy
