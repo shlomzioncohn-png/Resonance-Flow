@@ -83,6 +83,12 @@ class PgVectorStore(VectorStore):
                     """
                 ).format(table=table, dim=sql.Literal(self._settings.embedding_dim))
             )
+            await cur.execute(
+                sql.SQL(
+                    "ALTER TABLE {table} ADD COLUMN IF NOT EXISTS"
+                    " is_completed BOOLEAN NOT NULL DEFAULT FALSE;"
+                ).format(table=table)
+            )
             # HNSW index for fast approximate cosine-distance search.
             await cur.execute(
                 sql.SQL(
@@ -110,6 +116,32 @@ class PgVectorStore(VectorStore):
                 (task_id, vector),
             )
 
+    async def upsert_if_absent(self, task_id: str, vector: list[float]) -> bool:
+        await self._ensure_ready()
+        async with self._pool.connection() as conn, conn.cursor() as cur:
+            await cur.execute(
+                sql.SQL(
+                    """
+                    INSERT INTO {table} (task_id, embedding)
+                    VALUES (%s, %s)
+                    ON CONFLICT (task_id) DO NOTHING;
+                    """
+                ).format(table=self._table()),
+                (task_id, vector),
+            )
+            return cur.rowcount > 0
+
+    async def mark_completed(self, task_id: str) -> bool:
+        await self._ensure_ready()
+        async with self._pool.connection() as conn, conn.cursor() as cur:
+            await cur.execute(
+                sql.SQL("UPDATE {table} SET is_completed = TRUE WHERE task_id = %s;").format(
+                    table=self._table()
+                ),
+                (task_id,),
+            )
+            return cur.rowcount > 0
+
     async def delete(self, task_id: str) -> None:
         await self._ensure_ready()
         async with self._pool.connection() as conn, conn.cursor() as cur:
@@ -131,7 +163,7 @@ class PgVectorStore(VectorStore):
         # (even one derived from it) forces a full table scan instead.
         return sql.SQL(
             """
-            SELECT task_id, 1 - (embedding <=> %s::vector) AS similarity
+            SELECT task_id, 1 - (embedding <=> %s::vector) AS similarity, is_completed
             FROM {table}
             ORDER BY embedding <=> %s::vector
             LIMIT %s;
@@ -151,4 +183,7 @@ class PgVectorStore(VectorStore):
             )
             await cur.execute(self._search_query(), (query_vector, query_vector, k))
             rows = await cur.fetchall()
-            return [SearchResult(task_id=row[0], similarity=row[1]) for row in rows]
+            return [
+                SearchResult(task_id=row[0], similarity=row[1], is_completed=row[2])
+                for row in rows
+            ]

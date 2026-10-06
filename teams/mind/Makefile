@@ -1,4 +1,4 @@
-.PHONY: install dev test lint fmt run eval eval-ci schema docker-build docker-up proto
+.PHONY: install dev test lint fmt run run-index-consumer eval eval-ci schema docker-build docker-up proto
 
 install:
 	pip install -e .
@@ -25,6 +25,9 @@ fmt:
 
 run: proto
 	uvicorn mind.api.main:app --reload --port 8000
+
+run-index-consumer: proto
+	python scripts/index_consumer.py
 
 eval:
 	python -m mind.evaluation.run --personas eval/personas

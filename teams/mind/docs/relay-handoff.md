@@ -38,6 +38,20 @@ Phase 2), but expect the image to grow next week when `apt-get install
 tesseract-ocr` gets added to the runtime stage for real OCR support —
 flagging so Relay isn't surprised by the size jump. (Decided: Tesseract. PaddleOCR was evaluated and not chosen — partly to avoid the larger image it would need, `paddlepaddle` plus model weights; see `benchmarks/ocr-asr-benchmark.md`.)
 
+## Containers
+
+Two MIND containers now exist, built from the same image (`Dockerfile`),
+differing only in `command`:
+
+| Service | Command | Exposes HTTP? |
+|---|---|---|
+| `mind` | `uvicorn mind.api.main:app` | Yes, port `8000`. |
+| `mind-index-consumer` (#470) | `python scripts/index_consumer.py` | No — consumes `task.created`/`task.updated`/`task.completed` from Kafka and writes to the vector store. No port to expose. |
+
+**Open item:** `mind-index-consumer` has no liveness/health signal today
+(stdout logging per message only) — flagging for Relay since `mind`'s own
+`/health` pattern below doesn't apply to it.
+
 ## Ports
 
 | Port | Service | Notes |

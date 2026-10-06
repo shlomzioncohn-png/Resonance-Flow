@@ -34,6 +34,7 @@ class SearchResult(BaseModel):
         le=1.0,
         description="Cosine similarity, comparable to Settings.duplicate_similarity_threshold",
     )
+    is_completed: bool = False
 
 
 class VectorStore(ABC):
@@ -56,6 +57,22 @@ class VectorStore(ABC):
     @abstractmethod
     async def upsert(self, task_id: str, vector: list[float]) -> None:
         """Save or update the vector for a given task_id."""
+        ...
+
+    @abstractmethod
+    async def upsert_if_absent(self, task_id: str, vector: list[float]) -> bool:
+        """Insert only if task_id isn't already stored (insert-or-no-op,
+        not upsert's insert-or-update). Returns True if inserted, False if
+        a row for task_id already existed (left untouched).
+        """
+        ...
+
+    @abstractmethod
+    async def mark_completed(self, task_id: str) -> bool:
+        """Mark a stored task_id as completed. Returns True if a row
+        existed and was updated, False if task_id isn't stored (callers
+        should log and skip, not treat this as an error).
+        """
         ...
 
     @abstractmethod

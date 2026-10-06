@@ -19,10 +19,12 @@ Vectors, semantic search, duplicate/related-task detection.
 ## What's here
 
 ```
-__init__.py         the public interface -- embed(), SearchResult, VectorStore
+__init__.py         the public interface -- embed(), SearchResult, VectorStore, nearest_tasks()
 embeddings.py        embed() -- the (placeholder) text vectorizer
 base.py               VectorStore abstract interface (the "contract") + SearchResult -- dependency-free (besides pydantic)
 pgvector_store.py    the ONLY file that knows about Postgres/pgvector
+index_consumer.py    #470 -- Kafka task.{created,updated,completed} handlers that keep the store in sync (see ../../../scripts/index_consumer.py for the process that runs them)
+search.py             nearest_tasks() -- the shared embed()+search() primitive behind #471/#245
 ```
 
 Config lives one level up, at `mind.config` (`Settings`/`VectorStoreSettings`)
@@ -110,6 +112,21 @@ similar = await store.search(vector, k=5)  # [SearchResult(task_id=..., similari
 
 await store.delete(task.id)  # e.g. when the task itself is deleted
 ```
+
+`SearchResult.is_completed` and the `upsert_if_absent()`/`mark_completed()`
+primitives exist for the #470 index consumer (`index_consumer.py`), which
+keeps this store in sync with Inbox's `task.created`/`task.updated`/
+`task.completed` Kafka events:
+
+```python
+await store.upsert_if_absent(task_id, vector)  # insert-or-no-op, not upsert's insert-or-update
+await store.mark_completed(task_id)             # True if a row existed and was updated
+```
+
+`nearest_tasks(store, text, *, k)` (`search.py`) is the shared primitive
+behind duplicate detection (#471) and dependency-target resolution (#245):
+`embed(text)` then `store.search(vector, k=k)`, nothing else -- callers
+apply their own similarity threshold to the result.
 
 No caller anywhere else in the codebase should know that Postgres is
 involved. If we switch databases later, only `pgvector_store.py` (a new

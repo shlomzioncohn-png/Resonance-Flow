@@ -49,3 +49,19 @@ if not (_MESSAGING / "mind_task_created_pb2.py").exists():
         ],
         check=True,
     )
+
+# task-{created,updated,completed}-event.proto are Inbox's real, registered
+# schemas (vendored verbatim -- see each file's header), used by the #470
+# index consumer. Separate from the mind-task-* drafts above.
+if not (_MESSAGING / "task_created_event_pb2.py").exists():
+    subprocess.run(
+        [
+            "python", "-m", "grpc_tools.protoc",
+            "--proto_path", str(_ROOT / "proto"),
+            "--python_out", str(_MESSAGING),
+            str(_ROOT / "proto" / "task-created-event.proto"),
+            str(_ROOT / "proto" / "task-updated-event.proto"),
+            str(_ROOT / "proto" / "task-completed-event.proto"),
+        ],
+        check=True,
+    )

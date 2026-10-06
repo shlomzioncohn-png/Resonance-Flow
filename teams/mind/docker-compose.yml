@@ -17,6 +17,24 @@ services:
       vector-store:
         condition: service_healthy
 
+  mind-index-consumer:
+    build: .
+    command: ["python", "scripts/index_consumer.py"]
+    env_file:
+      - .env
+    environment:
+      MIND_VECTOR_STORE__DSN: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@vector-store:5432/${POSTGRES_DB}
+      # Kafka bootstrap/schema-registry come from CONFIG_FILE_PATH/SECRETS_FILE_PATH
+      # (messaging/config.py), not env vars here -- there's no local Kafka
+      # broker wired into this compose file yet (only teams/inbox/docker-compose.yml
+      # has one today), so this service has nothing to actually connect to
+      # until that gap is closed.
+    volumes:
+      - ./models:/app/models
+    depends_on:
+      vector-store:
+        condition: service_healthy
+
   vector-store:
     image: pgvector/pgvector:pg16
     environment:

@@ -42,9 +42,11 @@ target, to be confirmed with mentors).
 
 from mind.embeddings.base import SearchResult, VectorStore
 from mind.embeddings.embeddings import embed
+from mind.embeddings.search import nearest_tasks
 
 __all__ = [
     "SearchResult",
     "VectorStore",
     "embed",
+    "nearest_tasks",
 ]
