@@ -4,11 +4,13 @@
 # the pre-merge compatibility check something to compare the PR's schemas
 # against — the "previous, known-good schema from Git" — with no live cluster.
 #
-# Reuses register-schema.sh for the actual registration. Pairs with
-# check-all-schemas.sh. Driven by .github/workflows/relay-schema-ci.yaml.
+# The schema list AND the compatibility level also come from <git-ref>
+# (schema-subjects.tsv on that ref), not from this checkout — so a PR can't
+# weaken its own gate. Reuses register-schema.sh for the actual registration.
+# Pairs with check-all-schemas.sh. Driven by .github/workflows/relay-schema-ci.yaml.
 #
 # Usage: seed-registry.sh <git-ref>
-# Example: seed-registry.sh origin/main
+# Example: seed-registry.sh origin/relay-team
 set -euo pipefail
 
 BASE_REF="${1:?usage: seed-registry.sh <git-ref>}"
@@ -16,14 +18,13 @@ BASE_REF="${1:?usage: seed-registry.sh <git-ref>}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(git -C "$SCRIPT_DIR" rev-parse --show-toplevel)"
 PROTO_DIR="teams/relay/src/main/proto"
-SUBJECTS_TSV="${SCRIPT_DIR}/schema-subjects.tsv"
 REGISTRY_URL="${SCHEMA_REGISTRY_URL:-http://localhost:8081/apis/ccompat/v6}"
-COMPATIBILITY_LEVEL="${COMPATIBILITY_LEVEL:-FULL}"
+
+# Schema list + compatibility level, read from BASE_REF (not this PR).
+source "${SCRIPT_DIR}/_load-schema-policy.sh"
 
 # Apicurio enforces NO compatibility rule by default (level NONE), so the checks
-# would silently always pass. Set the level explicitly and globally first.
-# FULL = both BACKWARD and FORWARD: producers and consumers evolve schemas
-# independently here, so a change must be safe in both directions.
+# would silently always pass. Set the level (from the base branch's tsv) first.
 echo "Setting global compatibility level to ${COMPATIBILITY_LEVEL}"
 curl -sf -X PUT "${REGISTRY_URL}/config" \
   -H "Content-Type: application/vnd.schemaregistry.v1+json" \
@@ -42,4 +43,4 @@ while IFS=$'\t' read -r FILE SUBJECT || [ -n "$FILE" ]; do
   else
     echo "=== ${SUBJECT}: ${FILE} does not exist on ${BASE_REF} — new schema, nothing to seed ==="
   fi
-done < "$SUBJECTS_TSV"
+done <<< "$SCHEMA_LIST"

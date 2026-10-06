@@ -217,7 +217,8 @@ final class HubSpotClient {
                         }
                         if (!response.getStatusCode().is2xxSuccessful()) {
                             throw new HubSpotClientException(
-                                    "HubSpot request to " + path + " failed with status " + status);
+                                    "HubSpot request to " + path + " failed with status " + status
+                                            + errorBodySuffix(response));
                         }
                         return response.bodyTo(responseType);
                     });
@@ -237,6 +238,27 @@ final class HubSpotClient {
                 throw new TransportFailure(restClientFailure);
             }
             throw restClientFailure;
+        }
+    }
+
+    /**
+     * HubSpot's error responses carry a {@code message}/{@code category}
+     * body (e.g. {@code EXPIRED_AUTHENTICATION}) that says exactly what went
+     * wrong - far more useful than the bare status code alone. Best-effort
+     * only: reading the body can itself fail (empty body, non-JSON-text
+     * content), and a failure here must never mask the real fatal-status
+     * exception this is attached to.
+     */
+    private static String errorBodySuffix(RestClient.RequestHeadersSpec.ConvertibleClientHttpResponse response) {
+        try {
+            String body = response.bodyTo(String.class);
+            if (body == null || body.isBlank()) {
+                return "";
+            }
+            String trimmed = body.strip();
+            return ": " + (trimmed.length() > 500 ? trimmed.substring(0, 500) + "..." : trimmed);
+        } catch (RuntimeException e) {
+            return "";
         }
     }
 

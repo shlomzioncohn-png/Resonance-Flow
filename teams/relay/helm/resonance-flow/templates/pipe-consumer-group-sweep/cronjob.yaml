@@ -1,0 +1,56 @@
+{{- if .Values.pipeConsumerGroupSweep.enabled }}
+{{- $sweep := .Values.pipeConsumerGroupSweep }}
+apiVersion: batch/v1
+kind: CronJob
+
+metadata:
+  name: {{ include "resonance-flow.fullname" $ }}-pipe-consumer-group-sweep
+  labels:
+    {{- include "resonance-flow.labels" $ | nindent 4 }}
+    app.kubernetes.io/component: pipe-consumer-group-sweep
+
+spec:
+  schedule: {{ $sweep.schedule | quote }}
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: {{ $sweep.successfulJobsHistoryLimit }}
+  failedJobsHistoryLimit: {{ $sweep.failedJobsHistoryLimit }}
+
+  jobTemplate:
+    spec:
+      backoffLimit: 1
+      template:
+        metadata:
+          labels:
+            {{- include "resonance-flow.selectorLabels" $ | nindent 12 }}
+            app.kubernetes.io/component: pipe-consumer-group-sweep
+
+        spec:
+          restartPolicy: Never
+          containers:
+            - name: sweep
+              image: "{{ $sweep.image.repository }}:{{ $sweep.image.tag }}"
+              command: ["/bin/sh", "/scripts/sweep.sh"]
+
+              env:
+                - name: KAFKA_BOOTSTRAP_SERVERS
+                  value: {{ include "resonance-flow.dependencyAddress" (dict "root" $ "deps" $.Values.dependencies "name" "kafka") | quote }}
+                - name: KAFKA_SASL_JAAS_CONFIG
+                  value: {{ include "resonance-flow.kafkaSaslJaasConfig" $ | quote }}
+                - name: GROUP_PATTERN
+                  value: {{ $sweep.groupPattern | quote }}
+
+              volumeMounts:
+                - name: sweep-script
+                  mountPath: /scripts
+
+              {{- with $sweep.resources }}
+              resources:
+                {{- toYaml . | nindent 16 }}
+              {{- end }}
+
+          volumes:
+            - name: sweep-script
+              configMap:
+                name: {{ include "resonance-flow.fullname" $ }}-pipe-consumer-group-sweep
+                defaultMode: 0755
+{{- end }}

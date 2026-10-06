@@ -7,6 +7,7 @@ import com.rnd.bridge.task.model.Task;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.stereotype.Service;
@@ -26,7 +27,7 @@ public class JiraKafkaProducer {
 
     @Autowired
     public JiraKafkaProducer(
-            KafkaTemplate<String, BridgeTaskEventDto> kafkaTemplate,
+            @Qualifier("bridgeTaskEventKafkaTemplate") KafkaTemplate<String, BridgeTaskEventDto> kafkaTemplate,
             @Value("${bridge.structured-tasks-topic:bridge.structured.tasks}") String topic,
             TaskValidator taskValidator) {
         this.TOPIC = (topic != null && !topic.isBlank()) ? topic : DEFAULT_TOPIC;
