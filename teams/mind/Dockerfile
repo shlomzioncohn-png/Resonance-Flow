@@ -24,6 +24,13 @@ RUN mkdir -p src/mind/messaging && touch src/mind/__init__.py \
 RUN python -m venv /opt/venv
 ENV PATH="/opt/venv/bin:$PATH"
 
+# sentence-transformers pulls in torch; PyPI's default torch wheel is the
+# GPU (CUDA) build -- ~3.3GB of CUDA libraries that will never run here
+# and just slow the image and every CI pull. Install the CPU wheel into
+# the venv first, from PyTorch's own CPU index, so the install below
+# finds it already satisfied instead of replacing it.
+RUN pip install --no-cache-dir torch --index-url https://download.pytorch.org/whl/cpu
+
 # Install dependencies before the real source ever shows up in a layer
 # -- pyproject.toml/hatchling still needs *a* src/mind/ to build the
 # wheel, so give it an empty placeholder. Editing any file under the
@@ -66,6 +73,6 @@ EXPOSE 8000
 # Uses the stdlib (urllib) instead of curl/wget so the runtime image
 # doesn't need either installed.
 HEALTHCHECK --interval=10s --timeout=3s --start-period=5s --retries=3 \
-    CMD python -c "import urllib.request as u; import sys; sys.exit(0 if u.urlopen('http://localhost:8000/health', timeout=2).status == 200 else 1)"
+    CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8000/health', timeout=2)"
 
 CMD ["uvicorn", "mind.api.main:app", "--host", "0.0.0.0", "--port", "8000"]

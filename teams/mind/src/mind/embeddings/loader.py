@@ -56,7 +56,7 @@ def _load_checksums() -> dict[str, str]:
     return checksums
 
 
-def _fetch_missing_files(manifest: dict[str, Any], checksums: dict[str, str]) -> None:
+def _fetch_missing_files(manifest: dict[str, Any]) -> None:
     """Download the source zip once and extract only the files the
     manifest references that aren't already cached locally."""
     needed = [
@@ -71,12 +71,21 @@ def _fetch_missing_files(manifest: dict[str, Any], checksums: dict[str, str]) ->
     with urlopen(manifest["source_url"], timeout=60) as resp:
         zip_bytes = resp.read()
 
+    # manifest paths are "<zip_root_prefix>dataset/testing_data/..." --
+    # inside the zip it's just "dataset/testing_data/...". The prefix
+    # comes from the manifest, not hardcoded here, so a future manifest
+    # using a different layout doesn't hit an IndexError from a split()
+    # that silently assumed this one's.
+    zip_root_prefix = manifest["zip_root_prefix"]
     with zipfile.ZipFile(io.BytesIO(zip_bytes)) as zf:
         for path in missing:
             rel_path = path.relative_to(DATASETS_DIR).as_posix()
-            # manifest paths are "local-data/funsd/dataset/testing_data/..."
-            # -- inside the zip it's just "dataset/testing_data/...".
-            zip_member = rel_path.split("local-data/funsd/", 1)[1]
+            if not rel_path.startswith(zip_root_prefix):
+                raise ValueError(
+                    f"Manifest file {rel_path!r} does not start with its own "
+                    f"zip_root_prefix {zip_root_prefix!r}"
+                )
+            zip_member = rel_path[len(zip_root_prefix) :]
             data = zf.read(zip_member)
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_bytes(data)
@@ -85,6 +94,9 @@ def _fetch_missing_files(manifest: dict[str, Any], checksums: dict[str, str]) ->
 def _verify_checksum(path: Path, expected_sha: str) -> None:
     actual = hashlib.sha256(path.read_bytes()).hexdigest()
     if actual != expected_sha:
+        # Otherwise the bad file stays cached: the next run sees it exists,
+        # skips the download, and fails the same way forever.
+        path.unlink()
         raise ValueError(f"Checksum mismatch for {path}: expected {expected_sha}, got {actual}")
 
 
@@ -100,7 +112,7 @@ def fetch_real_slice() -> list[Record]:
     pairs ready for embed()."""
     manifest = _load_manifest()
     checksums = _load_checksums()
-    _fetch_missing_files(manifest, checksums)
+    _fetch_missing_files(manifest)
 
     records = []
     for record in manifest["records"]:

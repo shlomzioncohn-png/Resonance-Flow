@@ -35,12 +35,16 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(MethodArgumentNotValidException.class)
     public ResponseEntity<ErrorResponseDto> handleValidation(MethodArgumentNotValidException ex) {
         List<FieldErrorDto> fieldErrors = ex.getBindingResult().getFieldErrors().stream()
-                .map(fe -> new FieldErrorDto(fe.getField(), fe.getDefaultMessage()))
+                .map(fe -> new FieldErrorDto(toSnakeCase(fe.getField()), fe.getDefaultMessage()))
                 .toList();
 
         ErrorResponseDto body = new ErrorResponseDto(
                 400, "VALIDATION_ERROR", "Request validation failed", Instant.now(clock), fieldErrors);
         return ResponseEntity.badRequest().body(body);
+    }
+
+    private static String toSnakeCase(String camelCase) {
+        return camelCase.replaceAll("([a-z0-9])([A-Z])", "$1_$2").toLowerCase();
     }
 
     @ExceptionHandler(Exception.class)

@@ -10,6 +10,7 @@ import com.rnd.chain.exception.DependencyNotFoundException;
 import com.rnd.chain.exception.DuplicateDependencyException;
 import com.rnd.chain.exception.InvalidDependencyException;
 import com.rnd.chain.exception.TaskNotFoundException;
+import com.rnd.chain.repository.ConstraintRepository;
 import com.rnd.chain.repository.TaskDependencyRepository;
 import com.rnd.chain.repository.TaskRepository;
 
@@ -19,7 +20,9 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import com.rnd.chain.dto.TaskEligibilityResponse;
 
+import java.time.LocalDateTime;
 import java.util.ArrayDeque;
+import java.util.ArrayList;
 import java.util.Deque;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -55,17 +58,20 @@ public class TaskEligibilityService {
     private final TaskRepository taskRepository;
     private final TaskDependencyRepository taskDependencyRepository;
     private final SchedulingUpdateService schedulingUpdateService;
+    private final ConstraintRepository constraintRepository;
 
     private final Object dependencyGraphLock = new Object();
 
     public TaskEligibilityService(
             TaskRepository taskRepository,
             TaskDependencyRepository taskDependencyRepository,
-            SchedulingUpdateService schedulingUpdateService) {
+            SchedulingUpdateService schedulingUpdateService,
+            ConstraintRepository constraintRepository) {
 
         this.taskRepository = taskRepository;
         this.taskDependencyRepository = taskDependencyRepository;
         this.schedulingUpdateService = schedulingUpdateService;
+        this.constraintRepository = constraintRepository;
     }
 
     private Task requireTask(UUID taskId) {
@@ -186,6 +192,13 @@ public class TaskEligibilityService {
 
         synchronized (dependencyGraphLock) {
 
+            // Checked before the cycle check and the task lookups: a duplicate must not require
+            // either task to still exist, and an existing edge cannot be introducing a new cycle.
+            if (taskDependencyRepository.existsDependency(taskId, dependsOnTaskId)) {
+                throw new DuplicateDependencyException(
+                        "Task " + taskId + " already depends on " + dependsOnTaskId);
+            }
+
             if (wouldCreateCycle(
                     taskId,
                     dependsOnTaskId)) {
@@ -222,6 +235,69 @@ public class TaskEligibilityService {
                     1);
 
             return dependency;
+        }
+    }
+
+    private record PendingEdge(UUID dependsOnTaskId, boolean isNewEdge, boolean dependsOnAlreadyDone) {
+    }
+
+    /** Cycle/existence checks only - no writes. An edge that already exists is a redelivery and
+     * comes back as a no-op ({@code isNewEdge == false}), not an error. */
+    private PendingEdge validateEdge(UUID taskId, UUID dependsOnTaskId) {
+        if (taskDependencyRepository.existsDependency(taskId, dependsOnTaskId)) {
+            return new PendingEdge(dependsOnTaskId, false, false);
+        }
+        if (wouldCreateCycle(taskId, dependsOnTaskId)) {
+            throw new InvalidDependencyException(
+                    "Dependency would create a cycle: " + taskId + " -> " + dependsOnTaskId);
+        }
+        requireTask(taskId);
+        boolean dependsOnAlreadyDone = requireTask(dependsOnTaskId).getStatus() == TaskStatus.DONE;
+        return new PendingEdge(dependsOnTaskId, true, dependsOnAlreadyDone);
+    }
+
+    /** Writes one already-validated edge - no cycle/existence checks, see {@link #validateEdge}. */
+    private void applyEdge(UUID taskId, PendingEdge edge) {
+        if (!edge.isNewEdge()) {
+            log.info("Dependency {} -> {} already existed, blockingCount left unchanged",
+                    taskId, edge.dependsOnTaskId());
+            return;
+        }
+        taskDependencyRepository.save(new TaskDependency(taskId, edge.dependsOnTaskId()));
+        adjustBlockingCount(taskId, edge.dependsOnAlreadyDone(), 1);
+    }
+
+    /**
+     * Same effect as calling {@link #addDependency} once per id, but validates every entry
+     * against the current graph state before applying any of them, so one invalid entry (a
+     * cycle, or a dependency target Chain hasn't seen yet) fails the whole batch with zero
+     * partial effect (PR #467 review, on the Kafka handler that batches a task.dependencies.proposed
+     * event's array through this method). Entries that already exist are no-ops, so a redelivered
+     * event is safe to apply again.
+     *
+     * <p>Validating up front is safe because {@link #wouldCreateCycle} only traverses edges that
+     * already exist before this call, and every same-batch edge starts at {@code taskId}. The whole
+     * batch runs under one {@code dependencyGraphLock} acquisition, so no concurrent writer can
+     * invalidate a validated entry before it is applied.
+     */
+    @Transactional
+    public void addDependencies(UUID taskId, List<UUID> dependsOnTaskIds) {
+        Objects.requireNonNull(taskId, "taskId must not be null");
+        Objects.requireNonNull(dependsOnTaskIds, "dependsOnTaskIds must not be null");
+        List<UUID> distinctIds = dependsOnTaskIds.stream()
+                .peek(id -> Objects.requireNonNull(id, "dependsOnTaskIds must not contain null elements"))
+                .distinct()
+                .toList();
+        log.info("Adding {} distinct dependency(ies) for task {}", distinctIds.size(), taskId);
+
+        synchronized (dependencyGraphLock) {
+            List<PendingEdge> validated = new ArrayList<>(distinctIds.size());
+            for (UUID dependsOnTaskId : distinctIds) {
+                validated.add(validateEdge(taskId, dependsOnTaskId));
+            }
+            for (PendingEdge edge : validated) {
+                applyEdge(taskId, edge);
+            }
         }
     }
 
@@ -304,8 +380,9 @@ public class TaskEligibilityService {
                 continue;
             }
 
+            // Under dependencyGraphLock, so the repository's own read lock is redundant here.
             for (TaskDependency dependency :
-                    taskDependencyRepository.findByTaskId(current)) {
+                    taskDependencyRepository.findByTaskIdUnderExternalLock(current)) {
 
                 toVisit.push(
                         dependency.dependsOnTaskId());
@@ -364,6 +441,42 @@ public class TaskEligibilityService {
         }
     }
 
+    /**
+     * Same status-change effect as {@link #onTaskStatusChanged}, but for a producer (task.updated)
+     * whose events carry no id and must be ordered by the {@code updatedAt} on the event itself.
+     * The staleness check, status write, and {@code updatedAt} stamp all happen inside one
+     * {@code dependencyGraphLock} critical section, so a redelivered or out-of-order event cannot
+     * interleave between them (PR #467 review).
+     *
+     * @throws TaskNotFoundException if no task with {@code taskId} exists
+     */
+    @Transactional
+    public void onTaskStatusChangedIfNewer(UUID taskId, TaskStatus newStatus, LocalDateTime eventUpdatedAt) {
+        Objects.requireNonNull(taskId, "taskId must not be null");
+        Objects.requireNonNull(newStatus, "newStatus must not be null");
+        Objects.requireNonNull(eventUpdatedAt, "eventUpdatedAt must not be null");
+
+        synchronized (dependencyGraphLock) {
+            Task current = requireTask(taskId);
+            if (current.getUpdatedAt() != null && !eventUpdatedAt.isAfter(current.getUpdatedAt())) {
+                log.debug("Task {} status update ignored: event updatedAt {} is not newer than stored {}",
+                        taskId, eventUpdatedAt, current.getUpdatedAt());
+                return;
+            }
+
+            log.info("Task {} status changed to {}", taskId, newStatus);
+            TaskStatus previousStatus = current.getStatus();
+            requireUpdated(taskRepository.update(taskId, task ->
+                    copyOf(task).status(newStatus).updatedAt(eventUpdatedAt).build()), taskId);
+
+            if (previousStatus != TaskStatus.DONE && newStatus == TaskStatus.DONE) {
+                adjustDependentsBlockingCount(taskId, -1);
+            } else if (previousStatus == TaskStatus.DONE && newStatus != TaskStatus.DONE) {
+                adjustDependentsBlockingCount(taskId, 1);
+            }
+        }
+    }
+
     private void adjustDependentsBlockingCount(
             UUID taskId,
             int delta) {
@@ -390,12 +503,27 @@ public class TaskEligibilityService {
         }
     }
 
-    public void onConstraintAdded(UUID taskId) {
+    /**
+     * Persists {@code constraint} and, if it's genuinely new, increments its task's
+     * {@code openConstraintCount}.
+     *
+     * @throws NullPointerException if constraint is null
+     * @throws TaskNotFoundException if the constraint's task doesn't exist or is soft-deleted -
+     * checked before writing, so a rejected call never leaves an orphaned constraint row.
+     */
+    @Transactional
+    public void onConstraintAdded(Constraint constraint) {
+        Objects.requireNonNull(constraint, "constraint must not be null");
+        UUID taskId = constraint.getTaskId();
+        log.info("Constraint {} added on task {}", constraint.getConstraintId(), taskId);
 
-        Objects.requireNonNull(
-                taskId,
-                "taskId must not be null");
-
+        requireTask(taskId);
+        boolean wasInserted = constraintRepository.save(constraint);
+        if (!wasInserted) {
+            log.debug("Constraint {} already existed on task {} - duplicate add, no-op",
+                    constraint.getConstraintId(), taskId);
+            return;
+        }
         updateCounters(
                 taskId,
                 task -> withCounters(
@@ -404,43 +532,46 @@ public class TaskEligibilityService {
                         task.getOpenConstraintCount() + 1));
     }
 
+    /**
+     * Transitions {@code constraintId}'s status and, if this crosses the open/closed (PENDING)
+     * boundary, adjusts {@code taskId}'s {@code openConstraintCount}. Idempotent: the previous
+     * status comes from the repository (the DB itself), not a caller-supplied claim.
+     *
+     * <p>{@code constraintId} must belong to {@code taskId}: the repository matches on both, so a
+     * mismatched pair is rejected before anything is written.
+     *
+     * @throws NullPointerException if any argument is null
+     * @throws IllegalStateException if no constraint with this id belongs to this task
+     */
+    @Transactional
     public void onConstraintStatusChanged(
             UUID taskId,
-            Constraint.ConstraintStatus previousStatus,
-            Constraint.ConstraintStatus newStatus) {
+            String constraintId,
+            Constraint.ConstraintStatus newStatus,
+            Map<String, Object> reason) {
 
-        Objects.requireNonNull(
-                taskId,
-                "taskId must not be null");
+        Objects.requireNonNull(taskId, "taskId must not be null");
+        Objects.requireNonNull(constraintId, "constraintId must not be null");
+        Objects.requireNonNull(newStatus, "newStatus must not be null");
 
-        Objects.requireNonNull(
-                previousStatus,
-                "previousStatus must not be null");
+        Constraint.ConstraintStatus previousStatus =
+                constraintRepository.updateStatus(taskId, constraintId, newStatus, reason, LocalDateTime.now());
 
-        Objects.requireNonNull(
-                newStatus,
-                "newStatus must not be null");
-
-        boolean wasOpen =
-                previousStatus == Constraint.ConstraintStatus.PENDING;
-
-        boolean isOpenNow =
-                newStatus == Constraint.ConstraintStatus.PENDING;
-
+        boolean wasOpen = previousStatus == Constraint.ConstraintStatus.PENDING;
+        boolean isOpenNow = newStatus == Constraint.ConstraintStatus.PENDING;
         if (wasOpen == isOpenNow) {
+            log.debug("Constraint {} on task {} already reflects the {} -> {} transition - "
+                    + "duplicate event, no-op", constraintId, taskId, previousStatus, newStatus);
             return;
         }
 
         int delta = isOpenNow ? 1 : -1;
-
         updateCounters(
                 taskId,
                 task -> withCounters(
                         task,
                         task.getBlockingCount(),
-                        Math.max(
-                                0,
-                                task.getOpenConstraintCount() + delta)));
+                        Math.max(0, task.getOpenConstraintCount() + delta)));
     }
 
     public TaskEligibilityResponse getTaskEligibility(UUID taskId) {

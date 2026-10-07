@@ -4,7 +4,9 @@ pgvector-backed implementation of VectorStore.
 This is the ONLY file in the codebase that is allowed to know pgvector /
 Postgres-specific details (SQL, connection strings, the `<=>` operator,
 psycopg, etc). If we ever swap databases, this file gets replaced by e.g.
-`qdrant_store.py` and nothing outside `factory.py` needs to change.
+`qdrant_store.py` implementing the same `base.VectorStore` contract --
+callers construct it directly, wherever they currently construct
+`PgVectorStore`.
 
 Uses psycopg (v3), not psycopg2 -- FastAPI route handlers declared
 `async def` run on the event loop, and a blocking psycopg2 call there
@@ -17,36 +19,25 @@ import asyncio
 from psycopg import sql
 from psycopg_pool import AsyncConnectionPool
 
+from mind.config import VectorStoreSettings
 from mind.embeddings.base import SearchResult, VectorStore
-from mind.embeddings.config import EMBEDDING_DIM, get_settings
-
-
-def _require_dsn() -> str:
-    # Deferred fail-fast: importing this module never requires a DSN (see
-    # config.Settings); constructing a PgVectorStore does.
-    dsn = get_settings().vector_store_dsn
-    if not dsn:
-        raise RuntimeError(
-            "MIND_VECTOR_STORE_DSN is not set. Required to connect to the "
-            "vector store; code that only needs embed() doesn't need it."
-        )
-    return dsn
 
 
 class PgVectorStore(VectorStore):
     def __init__(
         self,
-        dsn: str | None = None,
+        settings: VectorStoreSettings,
+        *,
         min_conn: int = 1,
         max_conn: int = 5,
-        *,
         pool_timeout: float = 30.0,
     ) -> None:
         # No I/O here -- opening the pool and creating the schema are async,
         # so both happen lazily on first use (see _ensure_ready), unless
         # open() is called explicitly first.
+        self._settings = settings
         self._pool = AsyncConnectionPool(
-            dsn or _require_dsn(),
+            str(settings.dsn.get_secret_value()),
             min_size=min_conn,
             max_size=max_conn,
             timeout=pool_timeout,
@@ -75,9 +66,8 @@ class PgVectorStore(VectorStore):
             await self._ensure_schema()
             self._ready = True
 
-    @staticmethod
-    def _table() -> sql.Identifier:
-        return sql.Identifier(get_settings().vector_store_table)
+    def _table(self) -> sql.Identifier:
+        return sql.Identifier(self._settings.table)
 
     async def _ensure_schema(self) -> None:
         table = self._table()
@@ -91,7 +81,7 @@ class PgVectorStore(VectorStore):
                         embedding VECTOR({dim}) NOT NULL
                     );
                     """
-                ).format(table=table, dim=sql.Literal(EMBEDDING_DIM))
+                ).format(table=table, dim=sql.Literal(self._settings.embedding_dim))
             )
             # HNSW index for fast approximate cosine-distance search.
             await cur.execute(
@@ -101,7 +91,7 @@ class PgVectorStore(VectorStore):
                     ON {table} USING hnsw (embedding vector_cosine_ops);
                     """
                 ).format(
-                    idx=sql.Identifier(f"{get_settings().vector_store_table}_embedding_hnsw_idx"),
+                    idx=sql.Identifier(f"{self._settings.table}_embedding_hnsw_idx"),
                     table=table,
                 )
             )
@@ -157,7 +147,7 @@ class PgVectorStore(VectorStore):
             # same transaction-scoped semantics SET LOCAL would have had.
             await cur.execute(
                 "SELECT set_config('hnsw.ef_search', %s, true);",
-                (str(get_settings().vector_search_effort),),
+                (str(self._settings.search_effort),),
             )
             await cur.execute(self._search_query(), (query_vector, query_vector, k))
             rows = await cur.fetchall()

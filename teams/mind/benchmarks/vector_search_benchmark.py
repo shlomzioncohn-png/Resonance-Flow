@@ -16,7 +16,7 @@ Addresses issue #87:
      reference).
 
 Run:  python vector_search_benchmark.py
-(from teams/mind/, with MIND_VECTOR_STORE_DSN pointed at a real pgvector
+(from teams/mind/, with MIND_VECTOR_STORE__DSN pointed at a real pgvector
 instance and the `mind` package installed -- same setup as the test
 suite.)
 """
@@ -27,7 +27,9 @@ import random
 import statistics
 import time
 
-from mind.embeddings import clear, embed, embed_batch, search, upsert
+from mind.config import get_settings
+from mind.embeddings import embed, embed_batch
+from mind.embeddings.pgvector_store import PgVectorStore
 
 N_FILLER = 10_000  # upper end of the 5,000-10,000 range asked for
 N_LATENCY_QUERIES = 100
@@ -91,8 +93,10 @@ def percentile(values: list[float], p: float) -> float:
 
 async def main() -> None:
     random.seed(87)
+    store = PgVectorStore(get_settings().vector_store)
+    await store.open()
     print("Resetting table...")
-    await clear()
+    await store.clear()
 
     # --- 1. Load synthetic filler (clearly id-prefixed, batch-embedded) ---
     print(f"Generating {N_FILLER} synthetic filler texts...")
@@ -118,7 +122,7 @@ async def main() -> None:
         batch_ids = filler_ids[start : start + BATCH]
         batch_vectors = filler_vectors[start : start + BATCH]
         await asyncio.gather(
-            *(upsert(task_id, vector) for task_id, vector in zip(batch_ids, batch_vectors))
+            *(store.upsert(task_id, vector) for task_id, vector in zip(batch_ids, batch_vectors))
         )
         if (start // BATCH) % 4 == 0:
             print(f"  upserted {start + len(batch_ids)}/{N_FILLER}")
@@ -132,7 +136,7 @@ async def main() -> None:
         pair_upserts.append((id_a, embed(text_a)))
         pair_upserts.append((id_b, embed(text_b)))
         pair_rows.append((id_a, id_b, text_a, text_b))
-    await asyncio.gather(*(upsert(task_id, vector) for task_id, vector in pair_upserts))
+    await asyncio.gather(*(store.upsert(task_id, vector) for task_id, vector in pair_upserts))
 
     total_rows = N_FILLER + 2 * len(PAIRS)
     print(f"Total rows loaded: {total_rows}")
@@ -143,7 +147,7 @@ async def main() -> None:
     for _ in range(N_LATENCY_QUERIES):
         qvec = embed(fake_filler_text(), is_query=True)
         start = time.perf_counter()
-        await search(qvec, k=10)
+        await store.search(qvec, k=10)
         query_latencies.append((time.perf_counter() - start) * 1000)
 
     # --- 4. Recall: does querying one pair member surface the other? ---
@@ -154,7 +158,7 @@ async def main() -> None:
         query_vec = embed(text_a, is_query=True)  # BGE asymmetry: query side
         hits_this_pair = {}
         for k in K_VALUES:
-            results = await search(query_vec, k=k)
+            results = await store.search(query_vec, k=k)
             hit = id_b in [r.task_id for r in results]
             pair_hits[k].append(hit)
             hits_this_pair[k] = hit
@@ -207,6 +211,8 @@ async def main() -> None:
     # never blocks the event loop, even for this one quick write.
     await asyncio.to_thread(_write_results)
     print("\nWrote vector_search_benchmark_results.json (local reference, gitignored)")
+
+    await store.close()
 
 
 if __name__ == "__main__":

@@ -1,5 +1,6 @@
 package com.rnd.bridge.media;
 
+import com.rnd.bridge.raw.model.ChangeType;
 import com.rnd.bridge.raw.model.Modality;
 import com.rnd.bridge.raw.model.RawObjectEvent;
 import com.rnd.bridge.raw.model.RawSourceType;
@@ -33,6 +34,12 @@ public class MediaIntakeService {
     // standalone item (this lane never splits one source item into a body + attachments).
     private static final int ATTACHMENT_INDEX_STANDALONE = 0;
 
+    // This lane never splits a logical item into body + attachments and never republishes
+    // an existing correlationId, so attachmentCount/revision are always 0 and changeType is
+    // always UPSERT - see RawObjectEvent's javadoc.
+    private static final int ATTACHMENT_COUNT_STANDALONE = 0;
+    private static final int REVISION_INITIAL = 0;
+
     private final ObjectStorageClient storageClient;
 
     public MediaIntakeService(ObjectStorageClient storageClient) {
@@ -52,7 +59,8 @@ public class MediaIntakeService {
         return RawObjectEvent.create(
                 objectKey, sourceType, tenantId, ingestedAt, ScopeDecision.INCLUDED, contentHash,
                 modality, null, putResult.contentType(), putResult.sizeBytes(), transcriptObjectKey,
-                null, null, ATTACHMENT_INDEX_STANDALONE);
+                null, null, ATTACHMENT_INDEX_STANDALONE, ATTACHMENT_COUNT_STANDALONE, REVISION_INITIAL,
+                ChangeType.UPSERT);
     }
 
     /**

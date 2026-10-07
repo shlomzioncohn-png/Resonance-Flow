@@ -36,49 +36,23 @@ jobs:
         with:
           token: ${{ secrets.RELAY_CI_PUSH_TOKEN }}
 
-      - name: Install yq
-        run: |
-          sudo curl -sL -o /usr/local/bin/yq https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
-          sudo chmod +x /usr/local/bin/yq
+      - uses: ./.github/actions/install-yq
 
       - name: Update chart values with new image tag
         run: |
           yq -i ".components.${{ inputs.service_name }}.image.repository = \"${{ inputs.image_repository }}\" | .components.${{ inputs.service_name }}.image.tag = \"${{ inputs.image_tag }}\"" "$CHART_VALUES"
 
-      - name: Commit updated values
-        id: commit
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add "$CHART_VALUES"
-          if git diff --cached --quiet; then
-            echo "changed=false" >> "$GITHUB_OUTPUT"
-          else
-            git commit -m "chore(${{ inputs.service_name }}): deploy image ${{ inputs.image_tag }} [skip ci]"
-            echo "changed=true" >> "$GITHUB_OUTPUT"
-          fi
-
-      - name: Install GitHub CLI
-        if: steps.commit.outputs.changed == 'true'
-        run: |
-          (type -p wget >/dev/null || sudo apt-get install wget -y) \
-          && sudo mkdir -p -m 755 /etc/apt/keyrings \
-          && wget -qO- https://cli.github.com/packages/githubcli-archive-keyring.gpg | sudo tee /etc/apt/keyrings/githubcli-archive-keyring.gpg > /dev/null \
-          && sudo chmod go+r /etc/apt/keyrings/githubcli-archive-keyring.gpg \
-          && echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" | sudo tee /etc/apt/sources.list.d/github-cli.list > /dev/null \
-          && sudo apt update \
-          && sudo apt install gh -y
-
+      # No-op when nothing changed (same tag redeployed).
       - name: Open a PR with the manifest update
-        if: steps.commit.outputs.changed == 'true'
+        uses: peter-evans/create-pull-request@v7
+        # Self-hosted runners may lack $HOME; the action needs it for `git config --global`.
         env:
-          GH_TOKEN: ${{ secrets.RELAY_CI_PUSH_TOKEN }}
-        run: |
-          BRANCH="ci/${{ inputs.service_name }}-deploy-${{ inputs.image_tag }}"
-          git checkout -b "$BRANCH"
-          git push origin "$BRANCH"
-          gh pr create \
-            --base main \
-            --head "$BRANCH" \
-            --title "chore(${{ inputs.service_name }}): deploy image ${{ inputs.image_tag }}" \
-            --body "Automated image tag bump for \`${{ inputs.service_name }}\` to \`${{ inputs.image_tag }}\`, triggered by \`${{ github.event_name }}\` on \`${{ github.ref_name }}\`. Needs review/approval per the \`main\` branch ruleset."
+          HOME: ${{ runner.temp }}
+        with:
+          token: ${{ secrets.RELAY_CI_PUSH_TOKEN }}
+          base: main
+          branch: ci/${{ inputs.service_name }}-deploy-${{ inputs.image_tag }}
+          add-paths: ${{ env.CHART_VALUES }}
+          commit-message: "chore(${{ inputs.service_name }}): deploy image ${{ inputs.image_tag }} [skip ci]"
+          title: "chore(${{ inputs.service_name }}): deploy image ${{ inputs.image_tag }}"
+          body: "Automated image tag bump for `${{ inputs.service_name }}` to `${{ inputs.image_tag }}`, triggered by `${{ github.event_name }}` on `${{ github.ref_name }}`. Needs review/approval per the `main` branch ruleset."

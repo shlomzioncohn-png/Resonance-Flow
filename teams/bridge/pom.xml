@@ -20,6 +20,13 @@
     <properties>
         <java.version>21</java.version>
         <minio.version>8.5.2</minio.version>
+        <google-api-client.version>2.7.0</google-api-client.version>
+        <google-oauth-client.version>1.36.0</google-oauth-client.version>
+        <google-http-client.version>1.44.2</google-http-client.version>
+        <google-api-services-gmail.version>v1-rev20240520-2.0.0</google-api-services-gmail.version>
+        <google-api-services-calendar.version>v3-rev20260708-2.0.0</google-api-services-calendar.version>
+        <google-api-services-drive.version>v3-rev20240521-2.0.0</google-api-services-drive.version>
+        <slack-api-client.version>1.44.2</slack-api-client.version>
     </properties>
 
     <dependencies>
@@ -47,6 +54,59 @@
             <groupId>io.minio</groupId>
             <artifactId>minio</artifactId>
             <version>${minio.version}</version>
+        </dependency>
+
+        <!-- Gmail/Calendar/Drive: shared Google OAuth2 client machinery plus one generated API
+             client per product. All three real readers (RealEmailSourceReader,
+             RealCalendarSourceReader, RealDriveSourceReader) share the same credential loading
+             (see intake.google.GoogleCredentialsProvider) built on these. Personal Gmail
+             accounts can't use service-account domain-wide delegation, so this is the
+             installed-app OAuth2 user-consent flow (one-time browser approval via
+             google-oauth-client-jetty's local redirect receiver, cached refresh token
+             thereafter) - the resulting Credential implements HttpRequestInitializer directly,
+             so no separate credentials-adapter library is needed. -->
+        <dependency>
+            <groupId>com.google.api-client</groupId>
+            <artifactId>google-api-client</artifactId>
+            <version>${google-api-client.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>com.google.oauth-client</groupId>
+            <artifactId>google-oauth-client</artifactId>
+            <version>${google-oauth-client.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>com.google.oauth-client</groupId>
+            <artifactId>google-oauth-client-jetty</artifactId>
+            <version>${google-oauth-client.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>com.google.http-client</groupId>
+            <artifactId>google-http-client-gson</artifactId>
+            <version>${google-http-client.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>com.google.apis</groupId>
+            <artifactId>google-api-services-gmail</artifactId>
+            <version>${google-api-services-gmail.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>com.google.apis</groupId>
+            <artifactId>google-api-services-calendar</artifactId>
+            <version>${google-api-services-calendar.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>com.google.apis</groupId>
+            <artifactId>google-api-services-drive</artifactId>
+            <version>${google-api-services-drive.version}</version>
+        </dependency>
+
+        <!-- Slack: RealSlackSourceReader talks to the Web API (conversations.history) through
+             this instead of hand-rolled HTTP. -->
+        <dependency>
+            <groupId>com.slack.api</groupId>
+            <artifactId>slack-api-client</artifactId>
+            <version>${slack-api-client.version}</version>
         </dependency>
 
         <dependency>
