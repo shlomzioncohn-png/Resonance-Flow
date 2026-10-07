@@ -55,7 +55,7 @@ class GlobalExceptionHandlerTest {
         assertThat(body.getError()).isEqualTo("VALIDATION_ERROR");
         assertThat(body.getTimestamp()).isEqualTo(FIXED_NOW);
         assertThat(body.getFieldErrors()).hasSize(2);
-        assertThat(body.getFieldErrors().get(0).getField()).isEqualTo("displayName");
+        assertThat(body.getFieldErrors().get(0).getField()).isEqualTo("display_name");
         assertThat(body.getFieldErrors().get(0).getMessage()).isEqualTo("must not be blank");
         assertThat(body.getFieldErrors().get(1).getField()).isEqualTo("email");
         assertThat(body.getFieldErrors().get(1).getMessage()).isEqualTo("must be a well-formed email address");

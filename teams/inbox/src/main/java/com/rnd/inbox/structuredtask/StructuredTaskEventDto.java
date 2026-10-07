@@ -3,11 +3,12 @@ package com.rnd.inbox.structuredtask;
 import com.rnd.inbox.shared.messaging.validation.IsoInstant;
 import com.rnd.inbox.shared.messaging.validation.ValidEnum;
 import com.rnd.inbox.shared.messaging.validation.ValidUuid;
-import com.rnd.inbox.task.AssignmentRole;
-import com.rnd.inbox.task.SourceType;
-import com.rnd.inbox.task.TaskRoleContext;
-import com.rnd.inbox.task.TaskStatus;
-import com.rnd.inbox.task.TaskTier;
+import com.rnd.inbox.task.assignment.AssigneeDto;
+import com.rnd.inbox.task.model.SourceType;
+import com.rnd.inbox.task.security.TaskRoleContext;
+import com.rnd.inbox.task.model.TaskStatus;
+import com.rnd.inbox.task.model.TaskTier;
+import jakarta.validation.Valid;
 import jakarta.validation.constraints.DecimalMax;
 import jakarta.validation.constraints.DecimalMin;
 import jakarta.validation.constraints.Max;
@@ -15,7 +16,8 @@ import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Positive;
 
-@ConsistentAssignment
+import java.util.List;
+
 public class StructuredTaskEventDto {
 
     @ValidUuid
@@ -34,7 +36,7 @@ public class StructuredTaskEventDto {
     private String description;
 
     @NotBlank
-    @ValidEnum(enumClass = SourceType.class, allowed = {"GITHUB_ISSUE", "GITHUB_PR", "CRM_DEAL"})
+    @ValidEnum(enumClass = SourceType.class, allowed = {"GITHUB_ISSUE", "GITHUB_PR", "CRM_DEAL", "JIRA_ISSUE"})
     private String sourceType;
 
     @NotBlank
@@ -64,16 +66,10 @@ public class StructuredTaskEventDto {
     private Double confidence;
 
     @ValidUuid
-    private String assigneeUserId;
+    private String createdByUserId;
 
-    @ValidUuid
-    private String assigneeTeamId;
-
-    @ValidEnum(enumClass = AssignmentRole.class)
-    private String assignmentRole;
-
-    @ValidUuid
-    private String assignedByUserId;
+    @Valid
+    private List<AssigneeDto> assignees;
 
     public String getEventId() {
         return eventId;
@@ -187,35 +183,19 @@ public class StructuredTaskEventDto {
         this.confidence = confidence;
     }
 
-    public String getAssigneeUserId() {
-        return assigneeUserId;
+    public String getCreatedByUserId() {
+        return createdByUserId;
     }
 
-    public void setAssigneeUserId(String assigneeUserId) {
-        this.assigneeUserId = assigneeUserId;
+    public void setCreatedByUserId(String createdByUserId) {
+        this.createdByUserId = createdByUserId;
     }
 
-    public String getAssigneeTeamId() {
-        return assigneeTeamId;
+    public List<AssigneeDto> getAssignees() {
+        return assignees;
     }
 
-    public void setAssigneeTeamId(String assigneeTeamId) {
-        this.assigneeTeamId = assigneeTeamId;
-    }
-
-    public String getAssignmentRole() {
-        return assignmentRole;
-    }
-
-    public void setAssignmentRole(String assignmentRole) {
-        this.assignmentRole = assignmentRole;
-    }
-
-    public String getAssignedByUserId() {
-        return assignedByUserId;
-    }
-
-    public void setAssignedByUserId(String assignedByUserId) {
-        this.assignedByUserId = assignedByUserId;
+    public void setAssignees(List<AssigneeDto> assignees) {
+        this.assignees = assignees;
     }
 }

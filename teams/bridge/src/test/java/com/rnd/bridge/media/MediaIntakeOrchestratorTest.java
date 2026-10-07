@@ -9,6 +9,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
+import com.rnd.bridge.raw.model.ChangeType;
 import com.rnd.bridge.raw.model.Modality;
 import com.rnd.bridge.raw.model.RawObjectEvent;
 import com.rnd.bridge.raw.model.RawSourceType;
@@ -138,7 +139,7 @@ class MediaIntakeOrchestratorTest {
     private RawObjectEvent fakeEvent(String objectKey) {
         return RawObjectEvent.create(objectKey, RawSourceType.MEETING, "demo-tenant", Instant.now(),
                 ScopeDecision.INCLUDED, "sha256:" + "0".repeat(64), Modality.AUDIO, null,
-                "audio/mpeg", 2000L, null, null, 0);
+                "audio/mpeg", 2000L, null, null, 0, 0, 0, ChangeType.UPSERT);
     }
 
     private String sha256(byte[] content) throws Exception {
