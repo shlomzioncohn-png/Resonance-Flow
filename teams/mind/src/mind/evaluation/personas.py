@@ -31,6 +31,10 @@ from pydantic import ValidationError
 
 from mind.evaluation.interfaces import PersonaEvaluationScenario, TimeHorizon
 
+# The persona set's directory (teams/mind/eval/personas). The one place this path
+# is spelled out: schema.py and personas_checksum.py import it from here.
+PERSONAS_DIR = Path(__file__).resolve().parents[3] / "eval" / "personas"
+
 # Present in eval/personas/ as a generated artifact (see mind.evaluation.schema);
 # skipped when scanning the directory for scenario files.
 SCHEMA_FILENAME = "scenario.schema.json"

@@ -18,13 +18,11 @@ from __future__ import annotations
 import argparse
 import json
 import sys
-from pathlib import Path
 
 from mind.evaluation.interfaces import PersonaEvaluationScenario
+from mind.evaluation.personas import PERSONAS_DIR, SCHEMA_FILENAME
 
-SCHEMA_PATH = (
-    Path(__file__).resolve().parents[3] / "eval" / "personas" / "scenario.schema.json"
-)
+SCHEMA_PATH = PERSONAS_DIR / SCHEMA_FILENAME
 
 _SCHEMA_DIALECT = "https://json-schema.org/draft/2020-12/schema"
 _SCHEMA_ID = "https://resonance-flow.internal/mind/eval/personas/scenario.schema.json"

@@ -1,0 +1,39 @@
+name: Notification Delivery CI/CD
+
+on:
+  push:
+    branches: [ "main", "relay-team" ]
+    paths:
+      - "teams/relay/notification_delivery/**"
+      - "shared/proto/task-notification.proto"
+  pull_request:
+    branches: [ "main", "relay-team" ]
+    paths:
+      - "teams/relay/notification_delivery/**"
+      - "shared/proto/task-notification.proto"
+  workflow_dispatch: {}
+
+jobs:
+  ci:
+    if: github.event_name == 'pull_request'
+    permissions:
+      contents: read
+    uses: ./.github/workflows/service-ci-java.yaml
+    with:
+      service_name: notification-delivery
+      service_dir: teams/relay/notification_delivery
+
+  cd:
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    permissions:
+      contents: write
+      packages: write
+      pull-requests: write
+    uses: ./.github/workflows/service-cd.yaml
+    secrets: inherit
+    with:
+      service_name: notification-delivery
+      service_dir: teams/relay/notification_delivery
+      language: java
+      container_port: 8082
+      extra_build_contexts: shared=shared

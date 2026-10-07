@@ -17,7 +17,7 @@ public class SchedulingEventDto {
     private String taskId;
 
     @NotNull
-    @JsonProperty("isAvailable")
+    @JsonProperty("is_available")
     private Boolean available;
 
     @DecimalMin("1.0")

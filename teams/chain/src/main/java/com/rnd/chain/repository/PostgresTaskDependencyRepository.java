@@ -45,6 +45,13 @@ public class PostgresTaskDependencyRepository implements TaskDependencyRepositor
     }
 
     @Override
+    public boolean existsDependency(UUID taskId, UUID dependsOnTaskId) {
+        Objects.requireNonNull(taskId, "taskId must not be null");
+        Objects.requireNonNull(dependsOnTaskId, "dependsOnTaskId must not be null");
+        return jpaRepository.existsByIdTaskIdAndIdDependsOnTaskId(taskId, dependsOnTaskId);
+    }
+
+    @Override
     @Transactional
     public boolean delete(UUID taskId, UUID dependsOnTaskId) {
         Objects.requireNonNull(taskId, "taskId must not be null");
