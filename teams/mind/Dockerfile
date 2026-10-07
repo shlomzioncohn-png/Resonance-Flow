@@ -73,6 +73,6 @@ EXPOSE 8000
 # Uses the stdlib (urllib) instead of curl/wget so the runtime image
 # doesn't need either installed.
 HEALTHCHECK --interval=10s --timeout=3s --start-period=5s --retries=3 \
-    CMD python -c "import urllib.request as u; import sys; sys.exit(0 if u.urlopen('http://localhost:8000/health', timeout=2).status == 200 else 1)"
+    CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8000/health', timeout=2)"
 
 CMD ["uvicorn", "mind.api.main:app", "--host", "0.0.0.0", "--port", "8000"]

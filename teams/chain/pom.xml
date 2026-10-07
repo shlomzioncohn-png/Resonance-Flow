@@ -19,7 +19,54 @@
 
     <properties>
         <java.version>21</java.version>
+        <protobuf.version>3.25.3</protobuf.version>
+        <confluent.version>7.1.15</confluent.version>
+        <!-- A property, not plugin config: an empty <excludedGroups/> in a profile doesn't override. -->
+        <surefire.excludedGroups>postgres</surefire.excludedGroups>
     </properties>
+
+    <repositories>
+        <repository>
+            <id>confluent</id>
+            <url>https://packages.confluent.io/maven/</url>
+        </repository>
+    </repositories>
+
+    <!--
+        kafka-protobuf-serializer pulls in kotlinpoet-jvm, whose transitive kotlin-stdlib
+        resolves to 1.6.21 by default. That's too old: at runtime it's missing
+        kotlin.enums.EnumEntriesKt, added in Kotlin 1.9. Pin the Kotlin artifacts to a
+        version that has it (matches teams/inbox/pom.xml's identical pin).
+    -->
+    <dependencyManagement>
+        <dependencies>
+            <dependency>
+                <groupId>org.jetbrains.kotlin</groupId>
+                <artifactId>kotlin-stdlib</artifactId>
+                <version>1.9.22</version>
+            </dependency>
+            <dependency>
+                <groupId>org.jetbrains.kotlin</groupId>
+                <artifactId>kotlin-stdlib-common</artifactId>
+                <version>1.9.22</version>
+            </dependency>
+            <dependency>
+                <groupId>org.jetbrains.kotlin</groupId>
+                <artifactId>kotlin-stdlib-jdk7</artifactId>
+                <version>1.9.22</version>
+            </dependency>
+            <dependency>
+                <groupId>org.jetbrains.kotlin</groupId>
+                <artifactId>kotlin-stdlib-jdk8</artifactId>
+                <version>1.9.22</version>
+            </dependency>
+            <dependency>
+                <groupId>org.jetbrains.kotlin</groupId>
+                <artifactId>kotlin-reflect</artifactId>
+                <version>1.9.22</version>
+            </dependency>
+        </dependencies>
+    </dependencyManagement>
 
     <dependencies>
         <dependency>
@@ -58,6 +105,13 @@
         </dependency>
 
         <dependency>
+            <groupId>org.projectlombok</groupId>
+            <artifactId>lombok</artifactId>
+            <version>1.18.46</version>
+            <optional>true</optional>
+        </dependency>
+
+        <dependency>
             <groupId>org.flywaydb</groupId>
             <artifactId>flyway-core</artifactId>
         </dependency>
@@ -68,7 +122,6 @@
         <dependency>
             <groupId>org.postgresql</groupId>
             <artifactId>postgresql</artifactId>
-            <scope>runtime</scope>
         </dependency>
 
         <dependency>
@@ -76,20 +129,140 @@
             <artifactId>springdoc-openapi-starter-webmvc-ui</artifactId>
             <version>2.6.0</version>
         </dependency>
+
+        <dependency>
+            <groupId>com.google.protobuf</groupId>
+            <artifactId>protobuf-java</artifactId>
+            <version>${protobuf.version}</version>
+        </dependency>
+
+        <dependency>
+            <groupId>com.google.protobuf</groupId>
+            <artifactId>protobuf-java-util</artifactId>
+            <version>${protobuf.version}</version>
+        </dependency>
+
+        <dependency>
+            <groupId>io.confluent</groupId>
+            <artifactId>kafka-protobuf-serializer</artifactId>
+            <version>${confluent.version}</version>
+        </dependency>
     </dependencies>
 
 
     <build>
+        <extensions>
+            <extension>
+                <groupId>kr.motd.maven</groupId>
+                <artifactId>os-maven-plugin</artifactId>
+                <version>1.7.1</version>
+            </extension>
+        </extensions>
         <plugins>
             <plugin>
                 <groupId>org.springframework.boot</groupId>
                 <artifactId>spring-boot-maven-plugin</artifactId>
             </plugin>
             <plugin>
+                <groupId>org.xolstice.maven.plugins</groupId>
+                <artifactId>protobuf-maven-plugin</artifactId>
+                <version>0.6.1</version>
+                <configuration>
+                    <protocArtifact>com.google.protobuf:protoc:${protobuf.version}:exe:${os.detected.classifier}</protocArtifact>
+                    <!--
+                        task-created-event.proto / task-updated-event.proto are copied verbatim
+                        from teams/relay/src/main/proto/ (schemas are owned by Relay - that
+                        directory and teams/relay/ci/schema-subjects.tsv are the registered
+                        source of truth). Copied into src/main/proto instead of referenced via a
+                        ../relay relative path: that path doesn't exist inside the Docker build
+                        context (teams/chain only) - see teams/inbox/pom.xml's identical comment
+                        for the same reasoning.
+                        dependency-proposed-event.proto is Chain's own working draft for
+                        task.dependencies.proposed (Mind) - no officially registered schema
+                        exists for this topic yet; see that file's own header comment.
+                    -->
+                    <protoSourceRoot>${project.basedir}/src/main/proto</protoSourceRoot>
+                    <!--
+                        Each file redeclares its own top-level enums independently - protoc
+                        rejects duplicate enum value names within one package if given multiple
+                        files in a single invocation, so each gets its own execution, and
+                        clearOutputDirectory=false so a later execution doesn't delete the
+                        classes an earlier one just generated (same pattern as teams/inbox/pom.xml).
+                    -->
+                    <clearOutputDirectory>false</clearOutputDirectory>
+                </configuration>
+                <executions>
+                    <execution>
+                        <id>compile-task-created-event</id>
+                        <goals>
+                            <goal>compile</goal>
+                        </goals>
+                        <configuration>
+                            <includes>
+                                <include>task-created-event.proto</include>
+                            </includes>
+                        </configuration>
+                    </execution>
+                    <execution>
+                        <id>compile-task-updated-event</id>
+                        <goals>
+                            <goal>compile</goal>
+                        </goals>
+                        <configuration>
+                            <includes>
+                                <include>task-updated-event.proto</include>
+                            </includes>
+                        </configuration>
+                    </execution>
+                    <execution>
+                        <id>compile-dependency-proposed-event</id>
+                        <goals>
+                            <goal>compile</goal>
+                        </goals>
+                        <configuration>
+                            <includes>
+                                <include>dependency-proposed-event.proto</include>
+                            </includes>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-compiler-plugin</artifactId>
+                <!-- Explicit annotationProcessorPaths (PLAN.md Finding #17): the
+                     parent-managed compiler plugin (3.10.1, from 2022) doesn't reliably
+                     invoke Lombok's annotation processor via implicit classpath scanning
+                     under this JDK - verified Lombok itself works fine via plain javac
+                     with an explicit -processorpath, so this forces the same wiring
+                     through Maven instead of relying on discovery. -->
+                <configuration>
+                    <annotationProcessorPaths>
+                        <path>
+                            <groupId>org.projectlombok</groupId>
+                            <artifactId>lombok</artifactId>
+                            <version>1.18.46</version>
+                        </path>
+                    </annotationProcessorPaths>
+                </configuration>
+            </plugin>
+            <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-surefire-plugin</artifactId>
                 <configuration>
-                    <excludedGroups>postgres</excludedGroups>
+                    <!--
+                        PR #467 review: multiple @EmbeddedKafka @SpringBootTest classes (now 3,
+                        plus the embedded-broker tests already in the suite) proved to interfere
+                        with each other's broker/consumer lifecycle when reusing one JVM fork
+                        across test classes - see PLAN.md's Round 5, Finding 5 for the originally
+                        diagnosed case (confirmed deterministic, not flaky: the second class
+                        passed reliably alone, failed once run after the first in the same fork).
+                        reuseForks=false gives every test class its own fresh JVM, closing this
+                        off at the process level regardless of the exact resource that leaks
+                        between classes - at the cost of a JVM startup per class, not per run.
+                    -->
+                    <reuseForks>false</reuseForks>
+                    <excludedGroups>${surefire.excludedGroups}</excludedGroups>
                 </configuration>
             </plugin>
         </plugins>
@@ -98,17 +271,9 @@
     <profiles>
         <profile>
             <id>postgres-integration</id>
-            <build>
-                <plugins>
-                    <plugin>
-                        <groupId>org.apache.maven.plugins</groupId>
-                        <artifactId>maven-surefire-plugin</artifactId>
-                        <configuration>
-                            <excludedGroups/>
-                        </configuration>
-                    </plugin>
-                </plugins>
-            </build>
+            <properties>
+                <surefire.excludedGroups/>
+            </properties>
         </profile>
     </profiles>
 </project>
