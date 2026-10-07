@@ -143,15 +143,28 @@ public class ChainEventConsumer {
         return root.get("eventType").asText();
     }
 
-    private UUID readEventId(JsonNode root) {
-        requirePresent(root, "eventId");
-        String rawEventId = root.get("eventId").asText();
-        try {
-            return UUID.fromString(rawEventId);
-        } catch (IllegalArgumentException e) {
-            throw new NonRetryableEventException("Message has an invalid [eventId] (not a UUID): " + rawEventId, e);
-        }
+   private UUID readEventId(JsonNode root) {
+
+    String rawEventId;
+
+    if (root.hasNonNull("event_id")) {
+        rawEventId = root.get("event_id").asText();
+    } else if (root.hasNonNull("eventId")) {
+        rawEventId = root.get("eventId").asText();
+    } else {
+        throw new NonRetryableEventException(
+                "Message is missing required field [event_id]");
     }
+
+    try {
+        return UUID.fromString(rawEventId);
+    } catch (IllegalArgumentException e) {
+        throw new NonRetryableEventException(
+                "Message has an invalid [event_id] (not a UUID): "
+                        + rawEventId,
+                e);
+    }
+}
 
     private Instant readOccurredAt(JsonNode root) {
         requirePresent(root, "occurredAt");

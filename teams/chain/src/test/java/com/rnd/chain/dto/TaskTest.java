@@ -7,7 +7,7 @@ import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
-
+import static org.junit.jupiter.api.Assertions.*;
 class TaskTest {
 
     @Test
@@ -28,14 +28,28 @@ class TaskTest {
                 .hasMessageContaining("id");
     }
 
-    @Test
-    void builder_throwsIllegalArgumentException_whenOwnerIdIsNull() {
-        assertThatThrownBy(() -> newTaskBuilder()
-                .ownerId(null)
-                .build())
-                .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining("ownerId");
-    }
+@Test
+void builder_allowsNullOwnerId() {
+
+    LocalDateTime now = LocalDateTime.now();
+
+    Task task = Task.builder()
+            .id(UUID.randomUUID())
+            .parentTaskId(null)
+            .ownerId(null)
+            .status(TaskStatus.ACTIVE)
+            .isReady(true)
+            .blockingCount(0)
+            .openConstraintCount(0)
+            .estimatedDurationMin(null)
+            .score(null)
+            .createdAt(now)
+            .updatedAt(now)
+            .deletedAt(null)
+            .build();
+
+    assertNull(task.getOwnerId());
+}
 
     @Test
     void builder_throwsIllegalArgumentException_whenBlockingCountIsNegative() {
