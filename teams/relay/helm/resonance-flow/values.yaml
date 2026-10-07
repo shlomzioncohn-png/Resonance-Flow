@@ -32,6 +32,28 @@ initContainers: []
 nodeSelector: {}
 tolerations: []
 affinity: {}
+# Public entry point (templates/ingress.yaml): one host, routed by path to components'
+# Services. Off by default so teams' kind CI never renders it; the shared environment
+# turns it on with its own host/TLS. Needs an ingress controller - not installed here.
+ingress:
+  enabled: false
+  className: ""
+  # Controller/cert-manager specifics, e.g. cert-manager.io/cluster-issuer.
+  annotations: {}
+  host: ""
+  # TLS cert for host - created by cert-manager or by hand. Empty = plain HTTP, which
+  # sends LENS passwords (/auth/*) unencrypted.
+  # Flat, not ingress.tls.secretName: minio has its own ingress.tls (false), and
+  # Helm warns on every render when the two shapes differ.
+  tlsSecretName: ""
+  # Prefix match; the longest matching path wins. The path is forwarded as-is (no rewrite).
+  paths:
+    - path: /
+      component: lens-frontend
+    - path: /api
+      component: lens-gateway
+    - path: /auth
+      component: lens-gateway
 pipeConsumerGroupSweep:
   enabled: true
   schedule: "0 * * * *"
