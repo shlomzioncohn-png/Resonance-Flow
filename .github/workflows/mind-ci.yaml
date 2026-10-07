@@ -120,13 +120,69 @@ jobs:
           docker build -t mind:local .
           kind load docker-image mind:local --name mind-rt-cluster
 
+      # No --wait here on purpose: the MIND deployment can't become Ready
+      # until the schema is migrated (see "Run Alembic migrations" below),
+      # so waiting here would just time out before that ever runs. This
+      # step only needs to get the Deployment/ConfigMap/Secret applied.
       - name: Deploy chart with MIND enabled
         run: |
           helm upgrade --install "$RELEASE" "$CHART_DIR" \
             -f "$CHART_DIR/values.yaml" \
             -f "$CHART_DIR/values/values-mind.yaml" \
-            --namespace "$NAMESPACE" \
-            --wait --timeout 420s
+            --namespace "$NAMESPACE"
+
+      # #441/#528 moved vector-store schema creation from the app's own
+      # auto-create-on-first-use to Alembic migrations -- nothing else in
+      # this cluster runs them, so without this step the MIND pod crashes
+      # at startup ("Vector store table 'task_embeddings' does not exist")
+      # and never becomes Ready. Runs as a one-off Pod using the same
+      # already-loaded image and the same config/secret mounts the real
+      # Deployment uses (see templates/deployment.yaml), so it resolves
+      # the DSN exactly the way the app itself would.
+      - name: Run Alembic migrations
+        run: |
+          cat <<EOF | kubectl -n "$NAMESPACE" apply -f -
+          apiVersion: v1
+          kind: Pod
+          metadata:
+            name: mind-migrate
+          spec:
+            restartPolicy: Never
+            containers:
+              - name: migrate
+                image: mind:local
+                imagePullPolicy: Never
+                command: ["alembic", "upgrade", "head"]
+                env:
+                  - name: CONFIG_FILE_PATH
+                    value: "/etc/resonance-flow/config/config.yaml"
+                  - name: SECRETS_FILE_PATH
+                    value: "/etc/resonance-flow/secret/secrets.yaml"
+                volumeMounts:
+                  - name: resonance-flow-config
+                    mountPath: /etc/resonance-flow/config/config.yaml
+                    subPath: config.yaml
+                    readOnly: true
+                  - name: resonance-flow-secret
+                    mountPath: /etc/resonance-flow/secret
+                    readOnly: true
+            volumes:
+              - name: resonance-flow-config
+                configMap:
+                  name: resonance-flow-mind-config
+              - name: resonance-flow-secret
+                secret:
+                  secretName: resonance-flow-mind-secret
+                  optional: true
+          EOF
+          kubectl -n "$NAMESPACE" wait --for=jsonpath='{.status.phase}'=Succeeded pod/mind-migrate --timeout=120s || true
+          kubectl -n "$NAMESPACE" logs pod/mind-migrate
+          STATUS=$(kubectl -n "$NAMESPACE" get pod mind-migrate -o jsonpath='{.status.phase}')
+          kubectl -n "$NAMESPACE" delete pod mind-migrate --ignore-not-found
+          test "$STATUS" = "Succeeded"
+
+      - name: Wait for MIND deployment to be ready
+        run: kubectl -n "$NAMESPACE" rollout status deployment/resonance-flow-mind --timeout=420s
 
       - name: Diagnose deploy failure
         if: failure()
@@ -134,6 +190,7 @@ jobs:
           kubectl -n "$NAMESPACE" get pods -o wide
           kubectl -n "$NAMESPACE" describe pods
           kubectl -n "$NAMESPACE" logs -l app.kubernetes.io/component=mind --all-containers --tail=200 || true
+          kubectl -n "$NAMESPACE" logs pod/mind-migrate --tail=200 || true
 
       # Kafka's advertised.listeners is the in-cluster pod DNS name, unreachable
       # through a port-forward - run round-trip.py inside the MIND pod instead.
