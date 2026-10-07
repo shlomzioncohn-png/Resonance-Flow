@@ -78,6 +78,18 @@ LOW_CONFIDENCE_THRESHOLD = 60.0
 # default, not a measured limit -- callers can pass their own `max_pages`.
 MAX_PAGES = 10
 
+# Longest one tesseract run (one page) may take before it is killed and the call
+# fails with OCR_FAILED. With MAX_PAGES it fixes the worst case of a call, which is
+# what the caller has to size its handler against, not the ~20 s typical case:
+# MAX_PAGES * TESSERACT_TIMEOUT_S = 200 s, under librdkafka's default
+# max.poll.interval.ms of 300 s (teams/mind sets none). A consumer that runs OCR
+# inside its Kafka handler for longer than that is dropped from the group
+# mid-handler, its commit fails after the rebalance, and the message is
+# reprocessed -- duplicate OCR work on exactly the document that was already too
+# slow. 20 s is about 10x the ~2 s a Letter page takes. The bound covers the
+# tesseract runs only: rasterizing a PDF page (~0.5 s each, not capped) comes on top.
+TESSERACT_TIMEOUT_S = 20
+
 _WINDOWS_DEFAULT_INSTALL = r"C:\Program Files\Tesseract-OCR\tesseract.exe"
 
 # Render scale for PDF pages: ~200 DPI (200/72), well above what a scanned
@@ -270,7 +282,7 @@ def _run_tesseract_tsv(tesseract_cmd: str, image_bytes: bytes) -> str:
         with os.fdopen(fd, "wb") as f:
             f.write(image_bytes)
         cmd = [tesseract_cmd, tmp_path, "stdout", *OCR_PSM_ARGS, "tsv"]
-        proc = subprocess.run(cmd, capture_output=True, timeout=60, check=False)
+        proc = subprocess.run(cmd, capture_output=True, timeout=TESSERACT_TIMEOUT_S, check=False)
     finally:
         os.unlink(tmp_path)
     if proc.returncode != 0:

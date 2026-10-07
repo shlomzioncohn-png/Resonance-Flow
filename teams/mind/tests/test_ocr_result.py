@@ -164,12 +164,61 @@ def test_tesseract_failing_on_a_valid_image_is_an_environment_failure(
 @pytest.mark.usefixtures("tesseract_found")
 def test_a_tesseract_timeout_is_an_environment_failure(monkeypatch: pytest.MonkeyPatch):
     def times_out(cmd, **kwargs):
-        raise subprocess.TimeoutExpired(cmd, 60)
+        raise subprocess.TimeoutExpired(cmd, ocr.TESSERACT_TIMEOUT_S)
 
     monkeypatch.setattr(subprocess, "run", times_out)
     result = extract_text(png_bytes(), filename="a.png")
     assert (result.success, result.reason) == (False, OCRFailureReason.OCR_FAILED)
     assert result.retryable is True
+
+
+# --- the worst case of a call (R2, PR #509) --------------------------------------
+# R2 runs OCR inside her Kafka handler and teams/mind sets no max.poll.interval.ms,
+# so librdkafka's default of 300 s applies. A call that can outlast it gets her
+# consumer kicked out of the group mid-handler and the message reprocessed. What she
+# sizes against is the bound, not the ~20 s typical case.
+
+KAFKA_DEFAULT_MAX_POLL_INTERVAL_S = 300  # librdkafka default for max.poll.interval.ms
+
+
+@pytest.mark.usefixtures("tesseract_found")
+def test_each_tesseract_run_is_given_the_per_page_timeout(monkeypatch: pytest.MonkeyPatch):
+    seen: list[float] = []
+
+    def fake_run(cmd, **kwargs):
+        seen.append(kwargs["timeout"])
+        return subprocess.CompletedProcess(cmd, 0, stdout=tsv(("word", 90.0)), stderr=b"")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    assert extract_text(pdf_of_blank_pages(2)).success
+    assert seen == [ocr.TESSERACT_TIMEOUT_S] * 2
+    assert ocr.TESSERACT_TIMEOUT_S == 20
+
+
+def test_the_worst_case_of_a_default_call_is_under_the_kafka_poll_interval():
+    worst_case_s = ocr.MAX_PAGES * ocr.TESSERACT_TIMEOUT_S
+    assert worst_case_s == 200
+    assert worst_case_s < KAFKA_DEFAULT_MAX_POLL_INTERVAL_S
+
+
+@pytest.mark.usefixtures("tesseract_found")
+def test_a_timeout_on_one_page_fails_the_call_without_running_the_rest(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    # the bound only holds if the call stops at the first timeout, instead of
+    # spending another timeout on every remaining page
+    calls: list[int] = []
+
+    def second_page_hangs(cmd, **kwargs):
+        calls.append(1)
+        if len(calls) == 2:
+            raise subprocess.TimeoutExpired(cmd, kwargs["timeout"])
+        return subprocess.CompletedProcess(cmd, 0, stdout=tsv(("word", 90.0)), stderr=b"")
+
+    monkeypatch.setattr(subprocess, "run", second_page_hangs)
+    result = extract_text(pdf_of_blank_pages(5))
+    assert (result.success, result.reason) == (False, OCRFailureReason.OCR_FAILED)
+    assert len(calls) == 2
 
 
 @pytest.mark.usefixtures("tesseract_found")

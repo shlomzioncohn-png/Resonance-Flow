@@ -106,6 +106,18 @@ Local OCR + ASR preprocessing.
   default is a guess at a sensible limit, not a measured one; pass
   `max_pages` to change it (at least 1; below that is a `ValueError`).
 
+  **Worst case, which is what a consumer must be sized against:** one
+  Tesseract run (one page) is killed after `TESSERACT_TIMEOUT_S = 20` s and the
+  call fails with `OCR_FAILED`, so with the default `max_pages` the OCR can take
+  at most 10 x 20 = **200 s**, under librdkafka's default `max.poll.interval.ms`
+  of 300 s (`teams/mind` sets none). A consumer that runs OCR inside its Kafka
+  handler for longer than that is dropped from the group mid-handler, its
+  commit fails after the rebalance and the message is reprocessed -- duplicate
+  OCR work on the very document that was too slow. The 200 s bound covers the
+  Tesseract runs only: rasterizing a PDF page (~0.5 s each, not capped) comes
+  on top, and a caller that raises `max_pages` should keep
+  `max_pages x 20 s` under its own poll interval.
+
   The call is wrapped in `instrumented_call("tesseract-psm11-ocr")`
   (`src/mind/api/instrumentation.py`), so latency/cost are recorded like
   every other call in the service.
