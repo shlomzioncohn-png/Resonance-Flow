@@ -5,29 +5,31 @@ services:
       - "8000:8000"
     env_file:
       - .env
+    environment:
+      # Built from POSTGRES_USER/PASSWORD/DB (below) rather than read as a
+      # single var from .env, and pointed at the `vector-store` service
+      # name -- inside this container, `localhost` would mean the `mind`
+      # container itself, not the DB container next to it.
+      MIND_VECTOR_STORE__DSN: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@vector-store:5432/${POSTGRES_DB}
     volumes:
       - ./models:/app/models
     depends_on:
       vector-store:
         condition: service_healthy
 
-  # pgvector: PostgreSQL + a vector similarity search extension. See
-  # README "Open decisions" (resolved) and db/init/ for the extension
-  # bootstrap -- no application schema yet, that lands with the real
-  # embeddings work.
   vector-store:
     image: pgvector/pgvector:pg16
     environment:
-      - POSTGRES_USER=${VECTOR_STORE_USER:-mind}
-      - POSTGRES_PASSWORD=${VECTOR_STORE_PASSWORD:-mind}
-      - POSTGRES_DB=${VECTOR_STORE_DB:-mind}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
     ports:
       - "5432:5432"
     volumes:
       - vector-store-data:/var/lib/postgresql/data
       - ./db/init:/docker-entrypoint-initdb.d:ro
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${VECTOR_STORE_USER:-mind} -d ${VECTOR_STORE_DB:-mind}"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
       interval: 5s
       timeout: 3s
       retries: 5
