@@ -41,9 +41,13 @@ Local OCR + ASR preprocessing.
   raises. Fields:
   - `success: bool`
   - `text: str` -- all pages joined with a newline (the convenience view).
-  - `pages: list[str]` -- the text of each page; the index is the page number
-    (0-based), with `""` for a page where nothing was recognised, so a blank
-    page keeps its slot.
+    **Line breaks are kept:** within a page, words are grouped into Tesseract's
+    own lines (its `block_num` / `par_num` / `line_num`), spaces inside a line
+    and a newline between lines, so a 4-line form comes back as 4 lines
+    rather than one run-on string that mixes the fields of different lines.
+  - `pages: list[str]` -- the text of each page (with the same line breaks);
+    the index is the page number (0-based), with `""` for a page where
+    nothing was recognised, so a blank page keeps its slot.
   - `word_count: int`, `mean_confidence: float | None` -- over every
     recognised word, so the low-confidence list has a denominator ("12 weak
     words of 40" is not "12 of 4000"), and a caller can calibrate its own
@@ -56,15 +60,28 @@ Local OCR + ASR preprocessing.
   - `reason: OCRFailureReason | None`, `error: str | None`, `retryable: bool`
     -- set when `success` is `False` (`reason` exactly then). `error` is the
     message for logs; `reason` is what to branch on, and the split that
-    matters is *data* versus *environment*:
+    matters is *data* versus *environment* (and a third, a bug of ours):
     - data failures (retrying gives the same result, drop the document):
-      `EMPTY_INPUT`, `UNREADABLE_FORMAT` (not a readable image or PDF),
+      `EMPTY_INPUT`, `UNREADABLE_FORMAT` (not a readable image or PDF --
+      decided by PIL / `pypdfium2` *before* tesseract runs, so a corrupt or
+      truncated file is never confused with a broken install),
       `NO_TEXT_RECOGNIZED` (a valid image/PDF in which no text was found:
       blank or too poor), `TOO_MANY_PAGES` (a PDF over `max_pages`);
     - environment failures, `retryable=True` (nothing is wrong with the
       document -- do not treat it as processed, e.g. do not commit a Kafka
       offset past it): `OCR_UNAVAILABLE` (the `tesseract` binary is not
-      installed), `OCR_FAILED` (tesseract failed or timed out).
+      installed), `OCR_FAILED` (tesseract exited non-zero, timed out, or
+      could not be run, on an image already proven valid, so it is the
+      environment -- e.g. a missing language pack, `tesseract-ocr` installed
+      without `tesseract-ocr-eng`). `retryable` means "may succeed later",
+      not "will": bound the retries, since a page that always times out fails
+      every time;
+    - a bug in our own code, `retryable=False`: `INTERNAL_ERROR` (an
+      unexpected exception inside `extract_text`, logged with its traceback).
+      Not retryable, because retrying the same document fails the same way
+      and would block everything behind it; park the document (dead-letter)
+      rather than dropping it silently. Only the expected environment errors
+      above are `OCR_FAILED` -- a bug is never reported as one.
 
   `max_pages` (default `MAX_PAGES = 10`) bounds the cost of a call: a longer
   PDF fails with `TOO_MANY_PAGES` *before* any page is rendered. OCR runs
@@ -78,7 +95,7 @@ Local OCR + ASR preprocessing.
   (`src/mind/api/instrumentation.py`), so latency/cost are recorded like
   every other call in the service.
 
-  **Signature: agreed with R2** (her answers on #449, who calls this from her
+  **Signature: agreed with R2** (in Slack, confirmed on PR #509; she calls this from her
   `bridge.raw.landed` consumer, #349). She asked for: raw `bytes` in (her
   consumer already reads the object to verify its content hash, so a path
   would mean reading it twice; `filename` stays as a secondary hint -- the

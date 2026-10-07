@@ -81,6 +81,48 @@ def test_counts_describe_the_same_words_as_the_text():
     assert result.low_confidence_count < result.word_count
 
 
+def _form_image_bytes(lines: list[str]) -> bytes:
+    """A clean rendering of `lines`, one per row, in Pillow's built-in scalable font."""
+    from PIL import ImageDraw, ImageFont
+
+    image = Image.new("RGB", (900, 25 + 75 * len(lines)), "white")
+    draw = ImageDraw.Draw(image)
+    font = ImageFont.load_default(size=40)
+    for row, text in enumerate(lines):
+        draw.text((30, 25 + row * 75), text, fill="black", font=font)
+    buf = io.BytesIO()
+    image.save(buf, format="PNG")
+    return buf.getvalue()
+
+
+def test_a_four_line_form_comes_back_as_four_lines():
+    # Review feedback on PR #509: the words used to be joined with spaces, which
+    # folded a form into one line and mixed the fields of different lines.
+    form = [
+        "Invoice number: 4471",
+        "Due date: 12 March 2026",
+        "Owner: Dana Levi",
+        "Action: send the signed contract",
+    ]
+
+    result = extract_text(_form_image_bytes(form), filename="form.png")
+
+    assert result.success
+    lines = result.text.split("\n")
+    assert len(lines) == 4, result.text
+    for line, label in zip(lines, ["Invoice", "Due", "Owner", "Action"], strict=True):
+        assert line.startswith(label), result.text
+
+
+@_funsd_available
+def test_a_real_scan_keeps_its_lines_and_the_word_count():
+    result = extract_text(_FUNSD_IMAGE.read_bytes(), filename="82092117.png")
+
+    assert result.success
+    assert result.text.count("\n") > 10  # a form page is many lines, not one
+    assert result.word_count == len(result.text.split())  # no word lost to the grouping
+
+
 @_funsd_available
 def test_pdf_input_returns_text_per_page():
     page = Image.open(_FUNSD_IMAGE)
