@@ -62,10 +62,10 @@ public class SourceRecordLoader {
 
     public List<SourceRecord> load(RawSourceType sourceType, ReadCursor cursor) {
         return switch (sourceType) {
-            case EMAIL -> emailReader.read();
+            case EMAIL -> emailReader.read(cursor).records();
             case DRIVE -> driveReader.read();
-            // Slack and Calendar honor the cursor today (stage 2, per plan.md "Cursor
-            // persistence") - Email/Drive/WhatsApp still read everything every run until their
+            // Slack, Calendar, and Email honor the cursor today (stage 2, per plan.md "Cursor
+            // persistence") - Drive/WhatsApp still read everything every run until their
             // Real reader adds since-filtering of its own.
             case CALENDAR -> calendarReader.read(cursor).records();
             case SLACK -> chatGroupStateReconciler.group(slackReader.read(cursor.since()));

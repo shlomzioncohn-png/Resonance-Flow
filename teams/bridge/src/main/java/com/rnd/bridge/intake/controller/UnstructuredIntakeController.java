@@ -8,6 +8,8 @@ import com.rnd.bridge.intake.lane.UnstructuredIntakeLane;
 import com.rnd.bridge.intake.parser.SourceRecordGrouper;
 import com.rnd.bridge.intake.parser.calendar.CalendarReadResult;
 import com.rnd.bridge.intake.parser.calendar.CalendarSourceReader;
+import com.rnd.bridge.intake.parser.email.EmailReadResult;
+import com.rnd.bridge.intake.parser.email.EmailSourceReader;
 import com.rnd.bridge.raw.model.RawSourceType;
 import java.time.Instant;
 import java.util.List;
@@ -32,15 +34,21 @@ public class UnstructuredIntakeController {
     private final Map<RawSourceType, UnstructuredIntakeLane> lanesBySource;
     private final CursorStore cursorStore;
     private final CalendarSourceReader calendarSourceReader;
+    private final EmailSourceReader emailSourceReader;
     private final KeyedLock calendarCursorLock;
 
     public UnstructuredIntakeController(
             List<UnstructuredIntakeLane> lanes, CursorStore cursorStore, CalendarSourceReader calendarSourceReader,
-            KeyedLock calendarCursorLock) {
+            EmailSourceReader emailSourceReader, KeyedLock calendarCursorLock) {
         this.lanesBySource = lanes.stream()
                 .collect(Collectors.toMap(UnstructuredIntakeLane::sourceType, Function.identity()));
         this.cursorStore = cursorStore;
         this.calendarSourceReader = calendarSourceReader;
+        this.emailSourceReader = emailSourceReader;
+        // Same KeyedLock instance as Calendar's - it's a per-key lock, and the key already
+        // includes the sourceType (see calendarCursorLockKey/emailCursorLockKey), so one shared
+        // bean safely serializes both sources' independent load-read-process-save cycles without
+        // them ever contending on each other's key.
         this.calendarCursorLock = calendarCursorLock;
     }
 
@@ -52,6 +60,9 @@ public class UnstructuredIntakeController {
         }
         if (sourceType == RawSourceType.CALENDAR) {
             return runCalendar(lane);
+        }
+        if (sourceType == RawSourceType.EMAIL) {
+            return runEmail(lane);
         }
 
         ReadCursor cursor = cursorStore.load(sourceType, TENANT_ID);
@@ -127,5 +138,47 @@ public class UnstructuredIntakeController {
 
     private static String calendarCursorLockKey(String tenantId) {
         return "%s/%s".formatted(RawSourceType.CALENDAR.name(), tenantId);
+    }
+
+    /**
+     * Gmail's cursor is a historyId, not a timestamp - same reasoning as Calendar's syncToken
+     * (see runCalendar/runCalendarLocked's javadoc): advancing to a new historyId before every
+     * record from the read that produced it was actually published would permanently lose
+     * whatever failed, since Gmail's history API only ever returns what changed since a given
+     * id, not a replay of everything again. Email therefore takes the same dedicated path as
+     * Calendar - reads via emailSourceReader.read(cursor) directly, with the resulting
+     * nextHistoryId tied to that one call (see EmailReadResult/RealEmailSourceReader's javadoc),
+     * then runs the already-fetched records through the lane's normal map/validate/publish loop
+     * via the Stream overload of run(). Persistence rule is identical to Calendar's: only
+     * advance on a fully successful run (rejected == 0).
+     * Shares calendarCursorLock (not a separate lock) - see the constructor's comment for why
+     * that's safe: the lock key already encodes the sourceType, so Email and Calendar never
+     * contend on each other's key despite using the same KeyedLock instance.
+     */
+    private IntakeResult runEmail(UnstructuredIntakeLane lane) {
+        AtomicReference<IntakeResult> result = new AtomicReference<>();
+        calendarCursorLock.run(emailCursorLockKey(TENANT_ID), () -> result.set(runEmailLocked(lane)));
+        return result.get();
+    }
+
+    private IntakeResult runEmailLocked(UnstructuredIntakeLane lane) {
+        ReadCursor cursor = cursorStore.load(RawSourceType.EMAIL, TENANT_ID);
+        Instant asOf = Instant.now();
+        EmailReadResult emailRead = emailSourceReader.read(cursor);
+        IntakeResult result = lane.run(SourceRecordGrouper.groupByCorrelationId(emailRead.records()).stream(), asOf);
+        if (result.rejected() == 0) {
+            String nextHistoryId = emailRead.nextHistoryId();
+            // Null means this read never produced a new cursor to advance to (e.g. fixture
+            // mode) - leave whatever's already stored untouched rather than overwriting a real
+            // historyId with nothing.
+            if (nextHistoryId != null) {
+                cursorStore.save(RawSourceType.EMAIL, TENANT_ID, new ReadCursor(asOf, null, nextHistoryId));
+            }
+        }
+        return result;
+    }
+
+    private static String emailCursorLockKey(String tenantId) {
+        return "%s/%s".formatted(RawSourceType.EMAIL.name(), tenantId);
     }
 }

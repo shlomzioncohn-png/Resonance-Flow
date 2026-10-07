@@ -24,6 +24,8 @@ import com.rnd.bridge.intake.controller.UnstructuredIntakeController;
 import com.rnd.bridge.intake.model.SourceRecord;
 import com.rnd.bridge.intake.parser.calendar.CalendarReadResult;
 import com.rnd.bridge.intake.parser.calendar.CalendarSourceReader;
+import com.rnd.bridge.intake.parser.email.EmailReadResult;
+import com.rnd.bridge.intake.parser.email.EmailSourceReader;
 import com.rnd.bridge.intake.service.IntakeLandingService;
 import com.rnd.bridge.raw.model.ChangeType;
 import com.rnd.bridge.raw.model.Modality;
@@ -105,6 +107,7 @@ class UnstructuredIntakeControllerTest {
     private final GroupStateStore groupStateStore = mock(GroupStateStore.class);
     private final CursorStore cursorStore = mock(CursorStore.class);
     private final CalendarSourceReader calendarSourceReader = mock(CalendarSourceReader.class);
+    private final EmailSourceReader emailSourceReader = mock(EmailSourceReader.class);
     private final CalendarEventStateStore calendarEventStateStore = mock(CalendarEventStateStore.class);
     private final KeyedLock calendarCursorLock = new KeyedLock();
 
@@ -116,7 +119,8 @@ class UnstructuredIntakeControllerTest {
 
     private UnstructuredIntakeController controllerFor(RawSourceType sourceType) {
         return new UnstructuredIntakeController(
-                List.of(laneFor(sourceType)), cursorStore, calendarSourceReader, calendarCursorLock);
+                List.of(laneFor(sourceType)), cursorStore, calendarSourceReader, emailSourceReader,
+                calendarCursorLock);
     }
 
     @Test
@@ -169,18 +173,77 @@ class UnstructuredIntakeControllerTest {
         verify(cursorStore, never()).save(any(), any(), any());
     }
 
+    // DRIVE stands in for "any source with no dedicated controller path" - EMAIL now has its own
+    // historyId-cursor path (see the emailCursor... tests below), same as CALENDAR already did.
     @Test
     void nonSlackCursorAdvancesEvenWhenTheRunHasRejectedRecords() {
+        UnstructuredIntakeController controller = controllerFor(RawSourceType.DRIVE);
+        when(cursorStore.load(RawSourceType.DRIVE, "kamatech")).thenReturn(ReadCursor.full());
+        when(sourceReader.read(any())).thenReturn(Stream.of(List.of(RECORD)));
+        when(payloadMapper.map(any(), any())).thenReturn(EVENT);
+        doThrow(new LaneException("kafka down")).when(payloadPublisher).publish(any());
+
+        IntakeResult result = controller.run(RawSourceType.DRIVE);
+
+        assertThat(result.rejected()).isEqualTo(1);
+        verify(cursorStore).save(eq(RawSourceType.DRIVE), eq("kamatech"), any());
+    }
+
+    /**
+     * Full/initial sync: no stored historyId, the read completes fully, and the reader reports
+     * the nextHistoryId it obtained - the controller must persist exactly that as the new cursor
+     * once the whole run has succeeded. Mirrors calendarCursorPersistsTheNewSyncTokenWhenTheRunFullySucceeds.
+     */
+    @Test
+    void emailCursorPersistsTheNewHistoryIdWhenTheRunFullySucceeds() {
         UnstructuredIntakeController controller = controllerFor(RawSourceType.EMAIL);
         when(cursorStore.load(RawSourceType.EMAIL, "kamatech")).thenReturn(ReadCursor.full());
-        when(sourceReader.read(any())).thenReturn(Stream.of(List.of(RECORD)));
+        when(emailSourceReader.read(any())).thenReturn(new EmailReadResult(List.of(RECORD), "history-2"));
+        when(payloadMapper.map(any(), any())).thenReturn(EVENT);
+
+        IntakeResult result = controller.run(RawSourceType.EMAIL);
+
+        assertThat(result.rejected()).isEqualTo(0);
+        ArgumentCaptor<ReadCursor> captor = ArgumentCaptor.forClass(ReadCursor.class);
+        verify(cursorStore).save(eq(RawSourceType.EMAIL), eq("kamatech"), captor.capture());
+        assertThat(captor.getValue().historyId()).isEqualTo("history-2");
+    }
+
+    /**
+     * Safe cursor advancement: if any record from the batch Gmail returned under the current
+     * historyId failed to publish, the controller must NOT persist the new historyId the reader
+     * obtained - doing so would permanently lose that record, since Gmail's history API would
+     * never resend it under a later incremental sync. Mirrors calendarCursorIsNotAdvancedWhenTheRunHasRejectedRecords.
+     */
+    @Test
+    void emailCursorIsNotAdvancedWhenTheRunHasRejectedRecords() {
+        UnstructuredIntakeController controller = controllerFor(RawSourceType.EMAIL);
+        when(cursorStore.load(RawSourceType.EMAIL, "kamatech")).thenReturn(new ReadCursor(null, null, "history-1"));
+        when(emailSourceReader.read(any())).thenReturn(new EmailReadResult(List.of(RECORD), "history-2"));
         when(payloadMapper.map(any(), any())).thenReturn(EVENT);
         doThrow(new LaneException("kafka down")).when(payloadPublisher).publish(any());
 
         IntakeResult result = controller.run(RawSourceType.EMAIL);
 
         assertThat(result.rejected()).isEqualTo(1);
-        verify(cursorStore).save(eq(RawSourceType.EMAIL), eq("kamatech"), any());
+        verify(cursorStore, never()).save(any(), any(), any());
+    }
+
+    /**
+     * A read that produced no new cursor to advance to (e.g. the reader never obtained one) must
+     * not overwrite whatever cursor is already stored.
+     */
+    @Test
+    void emailCursorIsUntouchedWhenTheReaderReportsNoNewHistoryId() {
+        UnstructuredIntakeController controller = controllerFor(RawSourceType.EMAIL);
+        when(cursorStore.load(RawSourceType.EMAIL, "kamatech")).thenReturn(ReadCursor.full());
+        when(emailSourceReader.read(any())).thenReturn(new EmailReadResult(List.of(RECORD), null));
+        when(payloadMapper.map(any(), any())).thenReturn(EVENT);
+
+        IntakeResult result = controller.run(RawSourceType.EMAIL);
+
+        assertThat(result.rejected()).isEqualTo(0);
+        verify(cursorStore, never()).save(any(), any(), any());
     }
 
     /**
