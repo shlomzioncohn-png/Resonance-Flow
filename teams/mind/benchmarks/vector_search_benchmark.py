@@ -146,20 +146,20 @@ async def main() -> None:
     query_latencies = []
     for _ in range(N_LATENCY_QUERIES):
         qvec = embed(fake_filler_text(), is_query=True)
-        start = time.perf_counter()
+        query_t0 = time.perf_counter()
         await store.search(qvec, k=10)
-        query_latencies.append((time.perf_counter() - start) * 1000)
+        query_latencies.append((time.perf_counter() - query_t0) * 1000)
 
     # --- 4. Recall: does querying one pair member surface the other? ---
     print("Measuring duplicate-pair recall...")
     pair_details = []
-    pair_hits = {k: [] for k in K_VALUES}
+    pair_hits: dict[int, list[bool]] = {k: [] for k in K_VALUES}
     for id_a, id_b, text_a, text_b in pair_rows:
         query_vec = embed(text_a, is_query=True)  # BGE asymmetry: query side
         hits_this_pair = {}
         for k in K_VALUES:
-            results = await store.search(query_vec, k=k)
-            hit = id_b in [r.task_id for r in results]
+            search_results = await store.search(query_vec, k=k)
+            hit = id_b in [r.task_id for r in search_results]
             pair_hits[k].append(hit)
             hits_this_pair[k] = hit
         pair_details.append({
