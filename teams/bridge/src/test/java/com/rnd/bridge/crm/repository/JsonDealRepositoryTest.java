@@ -43,6 +43,7 @@ class JsonDealRepositoryTest {
         assertEquals(79, snapshot.allDeals().size());
         assertEquals(32, snapshot.dealIds().size());
         assertEquals(Instant.parse("2026-08-24T09:00:00Z"), snapshot.asOf());
+        assertEquals(0, snapshot.skippedAtRead());
     }
 
     @Test

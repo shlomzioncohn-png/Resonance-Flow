@@ -73,7 +73,7 @@ public class JsonDealRepository implements DealRepository {
         List<String> dealIds = Collections.unmodifiableList(new ArrayList<>(unmodifiableHistory.keySet()));
 
         this.snapshot = new DealSnapshot(
-                feed.asOf(), allDeals, Collections.unmodifiableMap(unmodifiableHistory), dealIds);
+                feed.asOf(), allDeals, Collections.unmodifiableMap(unmodifiableHistory), dealIds, 0);
     }
 
     @Override

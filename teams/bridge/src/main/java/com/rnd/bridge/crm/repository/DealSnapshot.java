@@ -10,17 +10,20 @@ import java.util.Optional;
 
 /**
  * One fetch's worth of CRM deal data - every history row {@link DealRepository#snapshot()} saw,
- * grouped by deal, plus the instant the fetch was taken. Immutable: {@link #asOf()} and every
- * accessor here come from the same fetch, so nothing here can disagree with itself the way
- * {@code asOf()} and {@code findAll()} used to when they were served from a repository field
- * cached across separate calls (see {@link DealRepository}'s old per-instance-cached finder
- * methods, removed in favor of this type, and finding F1 in the CRM-lane audit).
+ * grouped by deal, plus the instant the fetch was taken, plus how many records were skipped while
+ * reading it (a deal that failed to parse - see {@code HubSpotDealRepository} - never makes it
+ * into this snapshot at all). Immutable: {@link #asOf()} and every accessor here come from the
+ * same fetch, so nothing here can disagree with itself the way {@code asOf()} and {@code
+ * findAll()} used to when they were served from a repository field cached across separate calls
+ * (see {@link DealRepository}'s old per-instance-cached finder methods, removed in favor of this
+ * type, and finding F1 in the CRM-lane audit).
  */
 public record DealSnapshot(
         Instant asOf,
         List<Deal> allDeals,
         Map<String, List<Deal>> historyByDealId,
-        List<String> dealIds) {
+        List<String> dealIds,
+        int skippedAtRead) {
 
     public List<Deal> findHistoryByDealId(String dealId) {
         return historyByDealId.getOrDefault(dealId, List.of());

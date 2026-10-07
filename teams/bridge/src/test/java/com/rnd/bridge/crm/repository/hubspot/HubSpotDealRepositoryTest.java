@@ -299,6 +299,7 @@ class HubSpotDealRepositoryTest {
         DealSnapshot snapshot = assertDoesNotThrow(repository::snapshot);
 
         assertEquals(List.of("D-6b"), snapshot.allDeals().stream().map(Deal::dealId).toList());
+        assertEquals(1, snapshot.skippedAtRead());
     }
 
     @Test
@@ -574,6 +575,24 @@ class HubSpotDealRepositoryTest {
         assertEquals(3, snapshot.findHistoryByDealId("D-40").size());
         assertEquals(1, snapshot.latestPerDeal().size());
         assertEquals(DealStage.CLOSED_WON, snapshot.latestPerDeal().get(0).stage());
+    }
+
+    @Test
+    void snapshotCountsRecordsSkippedWhileParsingWithoutFailingTheWholeFetch() {
+        enqueueConstructorPipeline();
+        HubSpotDealRepository repository = newRepositoryWithClock(Clock.fixed(FIXED_NOW, ZoneOffset.UTC));
+
+        enqueuePipeline();
+        String badDeal = dealJson("D-30", "Bad stage", "1000", null, "2026-08-01T08:00:00Z",
+                historyEntry("st-999-does-not-exist", "2026-08-01T08:00:00.000Z"));
+        String goodDeal = dealJson("D-31", "Good deal alongside it", "2000", null, "2026-08-02T08:00:00Z",
+                historyEntry("st-100", "2026-08-02T08:00:00.000Z"));
+        enqueueJson(dealsPage(null, badDeal, goodDeal));
+
+        DealSnapshot snapshot = repository.snapshot();
+
+        assertEquals(List.of("D-31"), snapshot.dealIds());
+        assertEquals(1, snapshot.skippedAtRead());
     }
 
     /** A {@link Clock} whose {@link #instant()} can be advanced between calls, for proving asOf moves. */

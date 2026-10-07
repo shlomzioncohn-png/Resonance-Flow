@@ -64,9 +64,9 @@ import java.util.Map;
  * <p>
  * <b>Two different failure shapes for "unrecognized stage," by design, not by accident.</b> A deal
  * whose HISTORY references a stage ID absent from an otherwise-valid, fully-resolved pipeline
- * mapping is a per-record skip - logged and dropped, the rest of the fetch proceeds. A pipeline
- * whose STAGE LABEL itself isn't in {@link HubSpotStageMapping}'s table fails {@link #snapshot()}
- * entirely, before the deals endpoint is ever called - see
+ * mapping is a per-record skip - counted in {@link DealSnapshot#skippedAtRead()}, the rest of the
+ * fetch proceeds. A pipeline whose STAGE LABEL itself isn't in {@link HubSpotStageMapping}'s table
+ * fails {@link #snapshot()} entirely, before the deals endpoint is ever called - see
  * {@link HubSpotStageMapping#resolveIdsToStages}.
  * <p>
  * <b>Freshness.</b> {@link #snapshot()} performs one fresh, fully independent fetch - pipeline and
@@ -130,6 +130,7 @@ public class HubSpotDealRepository implements DealRepository {
         Instant asOf = clock.instant();
 
         List<Deal> deals = new ArrayList<>();
+        int skippedAtRead = 0;
         for (HubSpotDealRecord record : client.fetchAllDeals()) {
             // toDealHistory() parses this one record's date/amount/stage
             // history - each of those is a claim about HubSpot's response
@@ -142,6 +143,7 @@ public class HubSpotDealRepository implements DealRepository {
                 deals.addAll(toDealHistory(record, stageMapping));
             } catch (RuntimeException e) {
                 log.warn("Skipping HubSpot deal {} - failed to parse: {}", record.id(), e.getMessage());
+                skippedAtRead++;
             }
         }
         deals.sort(Comparator.comparing(Deal::stageChangedAt).thenComparing(Deal::dealId));
@@ -159,7 +161,7 @@ public class HubSpotDealRepository implements DealRepository {
         List<String> dealIds = Collections.unmodifiableList(new ArrayList<>(unmodifiableHistory.keySet()));
 
         return new DealSnapshot(
-                asOf, allDeals, Collections.unmodifiableMap(unmodifiableHistory), dealIds);
+                asOf, allDeals, Collections.unmodifiableMap(unmodifiableHistory), dealIds, skippedAtRead);
     }
 
     private List<Deal> toDealHistory(HubSpotDealRecord record, Map<String, DealStage> stageMapping) {

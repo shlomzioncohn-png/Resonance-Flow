@@ -52,8 +52,8 @@ public class CrmSyncScheduler {
         try {
             DealSnapshot snapshot = dealRepository.snapshot();
             IntakeResult result = crmLane.run(snapshot.latestPerDeal().stream(), snapshot.asOf());
-            log.info("Scheduled CRM sync complete: {} read, {} published, {} rejected.",
-                    result.read(), result.published(), result.rejected());
+            log.info("Scheduled CRM sync complete: {} read, {} published, {} rejected, {} skipped at read.",
+                    result.read(), result.published(), result.rejected(), snapshot.skippedAtRead());
         } catch (RuntimeException e) {
             log.error("Scheduled CRM sync failed", e);
         }

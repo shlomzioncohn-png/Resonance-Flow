@@ -46,7 +46,7 @@ class CrmBridgeControllerTest {
     private DealRepository dealRepository;
 
     private static DealSnapshot snapshotAt(Instant asOf) {
-        return new DealSnapshot(asOf, List.of(), Map.of(), List.of());
+        return new DealSnapshot(asOf, List.of(), Map.of(), List.of(), 0);
     }
 
     @Test
@@ -60,7 +60,8 @@ class CrmBridgeControllerTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.read").value(79))
                 .andExpect(jsonPath("$.published").value(79))
-                .andExpect(jsonPath("$.rejected").value(0));
+                .andExpect(jsonPath("$.rejected").value(0))
+                .andExpect(jsonPath("$.skippedAtRead").value(0));
     }
 
     @Test
@@ -90,6 +91,17 @@ class CrmBridgeControllerTest {
                 .andExpect(status().isOk());
 
         verify(crmLane).run(any(Stream.class), eq(configuredAsOf));
+    }
+
+    @Test
+    void reportsSkippedAtReadFromTheSnapshot() throws Exception {
+        Instant asOf = Instant.parse("2026-08-24T09:00:00Z");
+        when(dealRepository.snapshot()).thenReturn(new DealSnapshot(asOf, List.of(), Map.of(), List.of(), 3));
+        when(crmLane.run(any(Stream.class), eq(asOf))).thenReturn(new IntakeResult(29, 29, 0, List.of()));
+
+        mockMvc.perform(post("/bridge/crm/sync"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.skippedAtRead").value(3));
     }
 
     @Test

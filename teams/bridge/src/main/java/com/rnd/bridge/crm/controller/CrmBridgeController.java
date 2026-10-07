@@ -42,6 +42,8 @@ public class CrmBridgeController {
     @PostMapping("/sync")
     public CrmSyncResponse sync() {
         DealSnapshot snapshot = dealRepository.snapshot();
-        return CrmSyncResponse.from(crmLane.run(snapshot.latestPerDeal().stream(), snapshot.asOf()));
+        return CrmSyncResponse.from(
+                crmLane.run(snapshot.latestPerDeal().stream(), snapshot.asOf()),
+                snapshot.skippedAtRead());
     }
 }

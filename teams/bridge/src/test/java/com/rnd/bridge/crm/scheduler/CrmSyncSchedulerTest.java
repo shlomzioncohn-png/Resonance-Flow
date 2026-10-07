@@ -32,7 +32,7 @@ class CrmSyncSchedulerTest {
     private final CrmSyncScheduler scheduler = new CrmSyncScheduler(crmLane, dealRepository);
 
     private static DealSnapshot snapshotAt(Instant asOf) {
-        return new DealSnapshot(asOf, List.of(), Map.of(), List.of());
+        return new DealSnapshot(asOf, List.of(), Map.of(), List.of(), 0);
     }
 
     @Test
