@@ -5,6 +5,7 @@ import com.rnd.chain.dto.TaskDependency;
 import com.rnd.chain.dto.TaskStatus;
 import com.rnd.chain.event.SchedulingUpdatePublisher;
 import com.rnd.chain.event.TaskSchedulingUpdatedEvent;
+import com.rnd.chain.repository.InMemoryConstraintRepository;
 import com.rnd.chain.repository.InMemoryDependencyHistoryRepository;
 import com.rnd.chain.repository.InMemoryTaskDependencyRepository;
 import com.rnd.chain.repository.InMemoryTaskRepository;
@@ -68,7 +69,8 @@ class TaskDependencyServiceIntegrationTest {
                 new TaskEligibilityService(
                         taskRepository,
                         dependencyRepository,
-                        schedulingUpdateService);
+                        schedulingUpdateService,
+                        new InMemoryConstraintRepository());
 
         taskDependencyService =
                 new TaskDependencyService(

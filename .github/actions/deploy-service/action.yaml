@@ -3,7 +3,8 @@ description: >
   Builds the service's image, loads it into the already-running kind cluster, upgrades
   the chart to enable the component with that image, smoke-tests it, then pushes the
   image to GHCR. Assumes setup-service-infra already ran in this job (same kind cluster,
-  same namespace, component installed disabled, $CHART_DIR/$CHART_VALUES exported).
+  same namespace, component installed disabled, $CHART_DIR/$CHART_VALUES/$CHART_ALL_OFF
+  exported).
 
 inputs:
   service_name:
@@ -15,6 +16,10 @@ inputs:
   container_port:
     description: "Local port used for the post-deploy smoke test port-forward"
     required: true
+  extra_build_contexts:
+    description: "Optional docker build-contexts (name=path per line), e.g. shared=shared"
+    required: false
+    default: ""
 
 outputs:
   image_tag:
@@ -55,6 +60,7 @@ runs:
       uses: docker/build-push-action@v6
       with:
         context: ${{ inputs.service_dir }}
+        build-contexts: ${{ inputs.extra_build_contexts }}
         load: true
         tags: ${{ inputs.service_name }}:local
         cache-from: type=gha,scope=${{ inputs.service_name }}
@@ -70,6 +76,7 @@ runs:
         SERVICE="${{ inputs.service_name }}"
         helm upgrade --install "$SERVICE" "$CHART_DIR" \
           -f "$CHART_VALUES" \
+          -f "$CHART_ALL_OFF" \
           -f "$CHART_DIR/values/values-${SERVICE}.yaml" \
           --set components.${SERVICE}.image.repository="$SERVICE" \
           --set components.${SERVICE}.image.tag=local \
@@ -102,11 +109,7 @@ runs:
 
     - name: Smoke test
       shell: bash
-      run: |
-        HEALTH_PATH=$(yq eval ".components.${{ inputs.service_name }}.readinessProbe.httpGet.path" "$CHART_VALUES")
-        kubectl -n ${{ inputs.service_name }} port-forward svc/${{ inputs.service_name }}-resonance-flow-${{ inputs.service_name }} ${{ inputs.container_port }}:80 &
-        sleep 5
-        curl -sf "http://localhost:${{ inputs.container_port }}${HEALTH_PATH}"
+      run: bash "${{ github.action_path }}/smoke-test.sh" "${{ inputs.service_name }}" "${{ inputs.container_port }}"
 
     - name: Log in to GHCR
       uses: docker/login-action@v3

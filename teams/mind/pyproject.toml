@@ -29,8 +29,29 @@ dev = [
     "ruff",
     "mypy",
     "types-PyYAML",
+    "types-psutil",  # CI's `make lint` runs `mypy ... benchmarks`, so this
+                     # stub needs to be here, not in [benchmark] below --
+                     # CI installs `.[dev]` only, never `.[benchmark]`
+                     # (that extra stays heavy/optional on purpose: paddleocr,
+                     # paddlepaddle). The stub alone (no runtime psutil
+                     # needed) is enough for mypy to resolve the import --
+                     # verified locally: mypy passes on benchmarks/ with
+                     # types-psutil installed and psutil itself uninstalled.
     "httpx",  # required by fastapi.testclient.TestClient
     "grpcio-tools==1.71.0",  # protoc, for `make proto`
+    "python-dotenv",  # tests/conftest.py loads .env for os.environ-reading fixtures
+]
+# Not a runtime dependency of src/mind/ -- extraction/multimodal isn't
+# built yet (Phase 2). Only benchmarks/ocr_asr_benchmark.py needs these;
+# Tesseract also requires the tesseract-ocr system binary (not
+# pip-installable); PaddleOCR also requires its model weights, which may
+# need manual placement under ~/.paddlex/official_models/ if the
+# auto-download hosters are network-filtered -- see
+# benchmarks/ocr-asr-benchmark.md "PaddleOCR -- setup".
+benchmark = [
+    "psutil",  # cross-platform peak-RSS/CPU sampling; stdlib `resource` is Unix-only
+    "paddleocr",
+    "paddlepaddle",
 ]
 
 [build-system]
@@ -42,11 +63,19 @@ packages = ["src/mind"]
 
 [tool.ruff]
 line-length = 100
-src = ["src", "tests"]
+src = ["src", "tests", "benchmarks"]
 extend-exclude = ["*_pb2.py"]
 
 [tool.mypy]
 exclude = ["_pb2\\.py$"]
+
+# paddleocr ships no type stubs and no py.typed marker -- no stub package
+# exists to install (unlike psutil's types-psutil above), so this is the
+# standard mypy way to silence "missing library stubs" for it specifically,
+# not a blanket ignore for the whole benchmarks/ tree.
+[[tool.mypy.overrides]]
+module = "paddleocr"
+ignore_missing_imports = true
 
 [[tool.mypy.overrides]]
 module = "confluent_kafka.*"

@@ -1,14 +1,13 @@
 """
-Tests for mind.embeddings.generate -- no DB required (embed()/embed_batch()
+Tests for mind.embeddings.embeddings -- no DB required (embed()/embed_batch()
 never touch pgvector).
 """
 
 import asyncio
 from unittest.mock import patch
 
-from mind.embeddings import generate as generate_module
-from mind.embeddings.config import EMBEDDING_DIM
-from mind.embeddings.generate import embed, embed_async, embed_batch
+from mind.embeddings import embeddings as embeddings_module
+from mind.embeddings.embeddings import EMBEDDING_DIM, embed, embed_async, embed_batch
 
 
 def test_embed_is_deterministic():
@@ -64,10 +63,10 @@ async def test_embed_async_concurrent_calls_load_model_only_once():
     asyncio.to_thread), so several concurrent calls hitting a cold
     (unset) _model must still construct exactly one SentenceTransformer,
     not one per thread that got there first."""
-    original_model = generate_module._model
-    generate_module._model = None
+    original_model = embeddings_module._model
+    embeddings_module._model = None
     construction_count = 0
-    real_constructor = generate_module.SentenceTransformer
+    real_constructor = embeddings_module.SentenceTransformer
 
     def counting_constructor(*args, **kwargs):
         nonlocal construction_count
@@ -76,13 +75,13 @@ async def test_embed_async_concurrent_calls_load_model_only_once():
 
     try:
         with patch.object(
-            generate_module, "SentenceTransformer", side_effect=counting_constructor
+            embeddings_module, "SentenceTransformer", side_effect=counting_constructor
         ):
             results = await asyncio.gather(
                 *(embed_async(f"concurrent load test {i}") for i in range(8))
             )
     finally:
-        generate_module._model = original_model
+        embeddings_module._model = original_model
 
     assert construction_count == 1
     assert all(len(vec) == EMBEDDING_DIM for vec in results)

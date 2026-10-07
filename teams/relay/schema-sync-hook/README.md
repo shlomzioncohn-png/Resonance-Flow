@@ -23,7 +23,7 @@ block in the shared [`resonance-flow`](../helm/resonance-flow) Helm chart —
 same pattern every other team's service uses, in the same release/namespace —
 not as its own chart or Application. `values.yaml`'s `schemaRegistryUrl` here
 points at it via its cross-namespace FQDN accordingly. It's still only reachable
-from inside the cluster; `teams/relay/docker-compose.yml`'s copy remains the
+from inside the cluster; `teams/relay/notification_delivery/docker-compose.yml`'s copy remains the
 one used for local dev.
 
 ## Why not a PreSync hook (the earlier version of this chart used one)
@@ -50,7 +50,7 @@ data — only spins up a throwaway local `kind` cluster for smoke tests.
 - **Everything under `files/`** — `schemas/*.proto`, `ci/check-schema-compatibility.sh`
   / `register-schema.sh`, and `schema-subjects.tsv` — are **copies**, not the
   source of truth, even though they now sit right next to the real ones
-  (`../src/main/proto/`, `../ci/`) — Helm's `.Files.Get` still can't read outside
+  (`../../../shared/proto/`, `../ci/`) — Helm's `.Files.Get` still can't read outside
   its own chart directory, no matter how close. **Fixed by automation, not
   manual discipline:**
   [`.github/workflows/relay-schema-sync.yaml`](../../../.github/workflows/relay-schema-sync.yaml)

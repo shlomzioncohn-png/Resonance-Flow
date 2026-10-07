@@ -2,13 +2,30 @@
 
 package com.rnd.chain.dto;
 
+import lombok.EqualsAndHashCode;
+import lombok.Getter;
+import lombok.Setter;
+
 import java.time.LocalDateTime;
 import java.util.Objects;
 import java.util.UUID;
 
 // Identifier type: UUID, pending Inbox publishing its own task id type.
+//
+// @Getter/@Setter (PLAN.md Finding #17) generate the trivial accessors (no setter for the final
+// id/createdAt fields - Lombok skips those automatically). @EqualsAndHashCode(onlyExplicitlyIncluded
+// = true) + @Include on id only: this MUST stay id-only equality (the whole per-task locking
+// design in TaskEligibilityService leans on it), not the all-fields default @Data would generate.
+// @Builder is placed on the constructor (not the class) so its generated builder still calls this
+// constructor - and therefore still runs its validation - on every build(), the same as the
+// hand-written Builder it replaces. builderClassName = "Builder" keeps Task.builder()/Task.Builder
+// exactly as every existing caller (e.g. TaskTestFixtures) already uses them.
+@Getter
+@Setter
+@EqualsAndHashCode(onlyExplicitlyIncluded = true)
 public final class Task {
 
+    @EqualsAndHashCode.Include
     private final UUID id;
     private final UUID parentTaskId;
     private final String ownerId;
@@ -34,6 +51,7 @@ public final class Task {
     private final LocalDateTime updatedAt;
     private final LocalDateTime deletedAt;
 
+    @lombok.Builder(builderClassName = "Builder")
     private Task(UUID id,
                  UUID parentTaskId,
                  String ownerId,
@@ -75,68 +93,19 @@ public final class Task {
         this.deletedAt = deletedAt;
     }
 
-    public UUID getId() {
-        return id;
-    }
-
-    public UUID getParentTaskId() {
-        return parentTaskId;
-    }
-
-    public String getOwnerId() {
-        return ownerId;
-    }
-
-    public TaskStatus getStatus() {
-        return status;
-    }
-
-    public boolean isReady() {
-        return isReady;
-    }
-
-    public int getBlockingCount() {
-        return blockingCount;
-    }
-
-    public int getOpenConstraintCount() {
-        return openConstraintCount;
-    }
-
-    public Integer getEstimatedDurationMin() {
-        return estimatedDurationMin;
-    }
-
-    public Double getScore() {
-        return score;
-    }
-
-    public LocalDateTime getCreatedAt() {
-        return createdAt;
-    }
-
-    public LocalDateTime getUpdatedAt() {
-        return updatedAt;
-    }
-
-    public LocalDateTime getDeletedAt() {
-        return deletedAt;
-    }
-
-    @Override
-    public boolean equals(Object o) {
-        if (this == o) {
-            return true;
-        }
-        if (!(o instanceof Task)) {
-            return false;
-        }
-        return id.equals(((Task) o).id);
-    }
-
-    @Override
-    public int hashCode() {
-        return Objects.hashCode(id);
+    /**
+     * Returns a new, independent Task with the same field values as {@code source}. Repositories
+     * hand out copies (rather than the stored instance) from their read methods, and store a copy
+     * on save(), so a caller mutating a Task it received can never change repository state without
+     * going through save() - see CLAUDE.md "Open items" (this is a stand-in for the isolation a
+     * real persistence layer gives for free).
+     */
+    public static Task copyOf(Task source) {
+        Objects.requireNonNull(source, "source must not be null");
+        return new Task(source.id, source.parentTaskId, source.ownerId, source.status,
+                source.isReady, source.blockingCount, source.openConstraintCount,
+                source.estimatedDurationMin, source.score, source.createdAt, source.updatedAt,
+                source.deletedAt);
     }
 
     @Override
@@ -148,93 +117,5 @@ public final class Task {
                 + ", openConstraintCount=" + openConstraintCount
                 + ", deletedAt=" + deletedAt
                 + "}";
-    }
-
-    public static Builder builder() {
-        return new Builder();
-    }
-
-    /** Builder for {@link Task}, useful given the number of constructor parameters. */
-    public static class Builder {
-        private UUID id;
-        private UUID parentTaskId;
-        private String ownerId;
-        private TaskStatus status;
-        private boolean isReady;
-        private int blockingCount;
-        private int openConstraintCount;
-        private Integer estimatedDurationMin;
-        private Double score;
-        private LocalDateTime createdAt;
-        private LocalDateTime updatedAt;
-        private LocalDateTime deletedAt;
-
-        public Builder id(UUID id) {
-            this.id = id;
-            return this;
-        }
-
-        public Builder parentTaskId(UUID parentTaskId) {
-            this.parentTaskId = parentTaskId;
-            return this;
-        }
-
-        public Builder ownerId(String ownerId) {
-            this.ownerId = ownerId;
-            return this;
-        }
-
-        public Builder status(TaskStatus status) {
-            this.status = status;
-            return this;
-        }
-
-        /** See the invariant note on {@link Task#isReady}: callers other than
-         * {@code TaskEligibilityService.withCounters} must keep this consistent with
-         * blockingCount/openConstraintCount themselves. */
-        public Builder isReady(boolean isReady) {
-            this.isReady = isReady;
-            return this;
-        }
-
-        public Builder blockingCount(int blockingCount) {
-            this.blockingCount = blockingCount;
-            return this;
-        }
-
-        public Builder openConstraintCount(int openConstraintCount) {
-            this.openConstraintCount = openConstraintCount;
-            return this;
-        }
-
-        public Builder estimatedDurationMin(Integer estimatedDurationMin) {
-            this.estimatedDurationMin = estimatedDurationMin;
-            return this;
-        }
-
-        public Builder score(Double score) {
-            this.score = score;
-            return this;
-        }
-
-        public Builder createdAt(LocalDateTime createdAt) {
-            this.createdAt = createdAt;
-            return this;
-        }
-
-        public Builder updatedAt(LocalDateTime updatedAt) {
-            this.updatedAt = updatedAt;
-            return this;
-        }
-
-        public Builder deletedAt(LocalDateTime deletedAt) {
-            this.deletedAt = deletedAt;
-            return this;
-        }
-
-        public Task build() {
-            return new Task(id, parentTaskId, ownerId, status, isReady, blockingCount,
-                    openConstraintCount, estimatedDurationMin, score, createdAt, updatedAt, deletedAt);
-        }
     }
 }

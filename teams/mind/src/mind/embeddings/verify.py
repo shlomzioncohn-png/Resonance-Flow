@@ -11,15 +11,13 @@ import sys
 import psycopg
 from psycopg import sql
 
-from mind.embeddings.config import get_settings
+from mind.config import get_settings
 from mind.embeddings.loader import MANIFEST_PATH, _load_manifest
 
 
 def main() -> int:
-    dsn = get_settings().vector_store_dsn
-    if not dsn:
-        raise RuntimeError("MIND_VECTOR_STORE_DSN is not set. Required to connect to the vector store.")
-
+    settings = get_settings().vector_store
+    dsn = str(settings.dsn.get_secret_value())
     manifest_count = len(_load_manifest()["records"])
 
     # Plain sync psycopg here (not the async pool pgvector_store.py uses)
@@ -27,9 +25,7 @@ def main() -> int:
     # there's no event loop to protect.
     with psycopg.connect(dsn) as conn, conn.cursor() as cur:
         cur.execute(
-            sql.SQL("SELECT COUNT(*) FROM {table};").format(
-                table=sql.Identifier(get_settings().vector_store_table)
-            )
+            sql.SQL("SELECT COUNT(*) FROM {table};").format(table=sql.Identifier(settings.table))
         )
         row = cur.fetchone()
         assert row is not None, "SELECT COUNT(*) always returns exactly one row"

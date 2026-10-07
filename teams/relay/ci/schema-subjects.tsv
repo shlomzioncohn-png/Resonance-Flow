@@ -3,7 +3,7 @@
 #
 # Format:
 #   # compatibility: <LEVEL>                          one directive line, default FULL
-#   <file-under-src/main/proto>\t<subject>            one per schema (tab-separated)
+#   <file-under-shared/proto>\t<subject>              one per schema (tab-separated)
 #   lines starting with # are otherwise ignored
 #
 # Single list for both stages:
@@ -22,3 +22,5 @@ task-completed-event.proto	task.completed-value
 raw-object-event.proto	bridge.raw.landed-value
 github-task.proto	bridge.github.tasks-value
 task-creation-requested-event.proto	task.creation.requested-value
+task-dependencies-proposed-event.proto	task.dependencies.proposed-value
+task-score-proposed-event.proto	task.score.proposed-value

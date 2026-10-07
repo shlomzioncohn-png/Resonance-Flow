@@ -16,6 +16,8 @@ public interface SpringDataTaskDependencyJpaRepository extends JpaRepository<Tas
 
     List<TaskDependencyEntity> findByIdDependsOnTaskId(UUID dependsOnTaskId);
 
+    boolean existsByIdTaskIdAndIdDependsOnTaskId(UUID taskId, UUID dependsOnTaskId);
+
     long deleteByIdTaskIdAndIdDependsOnTaskId(UUID taskId, UUID dependsOnTaskId);
 
     /** Native insert; no-ops on a PK collision instead of throwing. Returns 1 if inserted, 0 if

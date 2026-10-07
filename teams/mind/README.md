@@ -109,7 +109,15 @@ licensing constraints.
 
 ## Open decisions (track and update as they close)
 
-- OCR/ASR: managed API vs. local model (e.g. local Whisper)
+- ~~OCR: managed API vs. local model~~ Resolved: **local Tesseract** (`--psm 11`),
+  chosen over PaddleOCR with the mentor on latency and memory (~0.5s / ~34MB vs.
+  ~45s / ~600MB per page). A trade made knowingly — PaddleOCR mobile has ~2.7x
+  fewer character errors on FUNSD (grouped CER 0.074 vs. 0.200). See
+  [`benchmarks/ocr-asr-benchmark.md`](./benchmarks/ocr-asr-benchmark.md).
+- ASR: **blocked**, not resolved — no AMI audio (or any audio) sample
+  exists anywhere in this repo to benchmark Whisper against. See
+  [`benchmarks/ocr-asr-benchmark.md`](./benchmarks/ocr-asr-benchmark.md)
+  "Known risk".
 - Evaluation metric: top-1 accuracy vs. MRR/nDCG
 - How the score is published to Chain: separate event vs. field on `Task`
 - Which real dataset slice to validate against first: FUNSD vs. AMI
@@ -118,14 +126,21 @@ licensing constraints.
 ## Getting started
 
 ```bash
-cp .env.example .env       # already filled with working defaults today
-make dev                   # install with dev dependencies
-make lint                  # ruff + mypy
-make test                  # run the test suite
-make eval                  # run the evaluation harness against eval/personas/
-make run                   # run the API locally
-make docker-up             # or run everything via docker compose (API + vector-store)
+cp .env.example .env             # already filled with working defaults today
+make dev                         # install with dev dependencies
+make lint                        # ruff + mypy
+docker compose up vector-store -d # bring up just the DB -- make test/make run need it
+make test                        # run the test suite
+make eval                        # run the evaluation harness against eval/personas/
+make run                         # run the API locally
+make docker-up                   # or run everything via docker compose (API + vector-store)
 ```
+
+`make test` and `make run` connect to Postgres over `MIND_VECTOR_STORE__DSN`
+(already set in `.env.example` against `localhost:5432`), so the
+`vector-store` container above must be up first even when you're running
+`mind` itself outside Docker. `make docker-up` doesn't need that step --
+it brings up `vector-store` itself.
 
 `make docker-up` (`docker compose up`) now brings up the full stack —
 the API **and** its `vector-store` (pgvector) dependency — with one
