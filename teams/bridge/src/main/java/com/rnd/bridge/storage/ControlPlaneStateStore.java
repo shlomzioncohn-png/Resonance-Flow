@@ -2,21 +2,14 @@ package com.rnd.bridge.storage;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.rnd.bridge.core.KeyedLock;
-import io.minio.BucketExistsArgs;
-import io.minio.GetObjectArgs;
-import io.minio.MakeBucketArgs;
-import io.minio.MinioClient;
-import io.minio.PutObjectArgs;
-import io.minio.errors.ErrorResponseException;
-import java.io.ByteArrayInputStream;
-import java.io.InputStream;
+import java.util.Map;
+import java.util.Optional;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.UnaryOperator;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
 /**
- * Atomic read-modify-write for small control-plane JSON blobs kept in MinIO — a dedup index, a
+ * Atomic read-modify-write for small control-plane JSON blobs kept in object storage — a dedup index, a
  * future sync cursor (see plan.md's "Cursor persistence") — shared by both raw-landing lanes
  * (Malki, Esther; same pairing as {@link ObjectStorageClient}). Deliberately exposes only
  * {@link #update}, not separate load/save methods: a caller can only touch this kind of state
@@ -31,18 +24,14 @@ import org.springframework.stereotype.Component;
 @Component
 public class ControlPlaneStateStore {
 
-    private final MinioClient minioClient;
+    private final ObjectStorageClient storage;
     private final ObjectMapper objectMapper;
     private final KeyedLock lock;
-    private final String bucket;
-    private volatile boolean bucketEnsured = false;
 
-    public ControlPlaneStateStore(MinioClient minioClient, ObjectMapper objectMapper, KeyedLock lock,
-                                   @Value("${minio.bucket}") String bucket) {
-        this.minioClient = minioClient;
+    public ControlPlaneStateStore(ObjectStorageClient storage, ObjectMapper objectMapper, KeyedLock lock) {
+        this.storage = storage;
         this.objectMapper = objectMapper;
         this.lock = lock;
-        this.bucket = bucket;
     }
 
     /**
@@ -63,46 +52,23 @@ public class ControlPlaneStateStore {
     }
 
     private <T> T load(String key, Class<T> type, T emptyValue) {
-        ensureBucket();
-        try (InputStream in = minioClient.getObject(GetObjectArgs.builder().bucket(bucket).object(key).build())) {
-            return objectMapper.readValue(in, type);
-        } catch (ErrorResponseException e) {
-            if ("NoSuchKey".equals(e.errorResponse().code())) {
+        try {
+            Optional<byte[]> content = storage.getObject(key);
+            if (content.isEmpty()) {
                 return emptyValue;
             }
-            throw new IllegalStateException("Failed to read control-plane state " + key, e);
+            return objectMapper.readValue(content.get(), type);
         } catch (Exception e) {
             throw new IllegalStateException("Failed to read control-plane state " + key, e);
         }
     }
 
     private void save(String key, Object value) {
-        ensureBucket();
         try {
             byte[] json = objectMapper.writeValueAsBytes(value);
-            minioClient.putObject(PutObjectArgs.builder()
-                    .bucket(bucket)
-                    .object(key)
-                    .stream(new ByteArrayInputStream(json), json.length, -1)
-                    .contentType("application/json")
-                    .build());
+            storage.putObject(key, json, "application/json", Map.of());
         } catch (Exception e) {
             throw new IllegalStateException("Failed to write control-plane state " + key, e);
-        }
-    }
-
-    private synchronized void ensureBucket() {
-        if (bucketEnsured) {
-            return;
-        }
-        try {
-            boolean exists = minioClient.bucketExists(BucketExistsArgs.builder().bucket(bucket).build());
-            if (!exists) {
-                minioClient.makeBucket(MakeBucketArgs.builder().bucket(bucket).build());
-            }
-            bucketEnsured = true;
-        } catch (Exception e) {
-            throw new IllegalStateException("Failed to ensure MinIO bucket " + bucket, e);
         }
     }
 }

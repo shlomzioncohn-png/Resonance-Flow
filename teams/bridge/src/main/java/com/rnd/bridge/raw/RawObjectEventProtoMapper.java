@@ -4,7 +4,9 @@ import com.google.protobuf.util.Timestamps;
 import com.rnd.bridge.raw.model.ChangeType;
 import com.rnd.bridge.raw.model.Modality;
 import com.rnd.bridge.raw.model.RawObjectEvent;
+import com.rnd.bridge.raw.model.RawObjectRef;
 import com.rnd.bridge.raw.model.RawSourceType;
+import com.rnd.bridge.raw.model.Role;
 import com.rnd.bridge.raw.model.ScopeDecision;
 import java.util.List;
 import org.springframework.stereotype.Component;
@@ -15,10 +17,10 @@ import org.springframework.stereotype.Component;
  * reconciler and MinIO call still operates on the domain record; only the publishers
  * (KafkaRawObjectPublisher) see the generated type, via this mapper.
  * <p>
- * The generated proto type shares three enum simple names with their domain counterparts
- * (ScopeDecision, Modality, ChangeType) and the message type itself shares RawObjectEvent's
- * name too, so proto references are fully qualified throughout rather than imported, to avoid
- * any ambiguity between com.rnd.bridge.raw.model.* (domain) and
+ * The generated proto type shares enum simple names with their domain counterparts
+ * (ScopeDecision, Modality, ChangeType, Role) and the message type itself shares
+ * RawObjectEvent's name too, so proto references are fully qualified throughout rather than
+ * imported, to avoid any ambiguity between com.rnd.bridge.raw.model.* (domain) and
  * com.rnd.bridge.shared.unstructured.dto.* (generated) types of the same simple name.
  */
 @Component
@@ -28,32 +30,35 @@ public class RawObjectEventProtoMapper {
         com.rnd.bridge.shared.unstructured.dto.RawObjectEvent.Builder builder =
                 com.rnd.bridge.shared.unstructured.dto.RawObjectEvent.newBuilder()
                         .setSchemaVersion(event.schemaVersion())
-                        .setObjectKey(event.objectKey())
                         .setSourceType(toProtoSourceType(event.sourceType()))
                         .setTenantId(event.tenantId())
                         .setIngestedAt(toProtoTimestamp(event.ingestedAt()))
                         .setScopeDecision(toProtoScopeDecision(event.scopeDecision()))
-                        .setContentHash(event.contentHash())
-                        .setModality(toProtoModality(event.modality()))
                         .addAllParticipants(event.participants() == null ? List.of() : event.participants())
-                        .setContentType(event.contentType() == null ? "" : event.contentType())
                         .setCorrelationId(event.correlationId())
-                        .setAttachmentIndex(event.attachmentIndex())
-                        .setAttachmentCount(event.attachmentCount())
                         .setRevision(event.revision())
                         .setChangeType(toProtoChangeType(event.changeType()))
-                        .setChangeSignificanceScore(event.changeSignificanceScore());
+                        .setChangeSignificanceScore(event.changeSignificanceScore())
+                        .addAllObjects(event.objects().stream().map(this::toProtoRef).toList());
 
-        if (event.sizeBytes() != null) {
-            builder.setSizeBytes(event.sizeBytes());
-        }
-        if (event.transcriptObjectKey() != null) {
-            builder.setTranscriptObjectKey(event.transcriptObjectKey());
-        }
         if (event.sourceTimestamp() != null) {
             builder.setSourceTimestamp(toProtoTimestamp(event.sourceTimestamp()));
         }
 
+        return builder.build();
+    }
+
+    private com.rnd.bridge.shared.unstructured.dto.RawObjectRef toProtoRef(RawObjectRef ref) {
+        com.rnd.bridge.shared.unstructured.dto.RawObjectRef.Builder builder =
+                com.rnd.bridge.shared.unstructured.dto.RawObjectRef.newBuilder()
+                        .setRole(toProtoRole(ref.role()))
+                        .setObjectKey(ref.objectKey())
+                        .setContentHash(ref.contentHash())
+                        .setContentType(ref.contentType() == null ? "" : ref.contentType())
+                        .setModality(toProtoModality(ref.modality()));
+        if (ref.sizeBytes() != null) {
+            builder.setSizeBytes(ref.sizeBytes());
+        }
         return builder.build();
     }
 
@@ -94,6 +99,16 @@ public class RawObjectEventProtoMapper {
         return switch (changeType) {
             case UPSERT -> com.rnd.bridge.shared.unstructured.dto.ChangeType.UPSERT;
             case DELETE_REVIEW -> com.rnd.bridge.shared.unstructured.dto.ChangeType.DELETE_REVIEW;
+        };
+    }
+
+    private static com.rnd.bridge.shared.unstructured.dto.Role toProtoRole(Role role) {
+        return switch (role) {
+            case BODY -> com.rnd.bridge.shared.unstructured.dto.Role.BODY;
+            case ATTACHMENT -> com.rnd.bridge.shared.unstructured.dto.Role.ATTACHMENT;
+            case TRANSCRIPT -> com.rnd.bridge.shared.unstructured.dto.Role.TRANSCRIPT;
+            case RECORDING -> com.rnd.bridge.shared.unstructured.dto.Role.RECORDING;
+            case SOURCE_METADATA -> com.rnd.bridge.shared.unstructured.dto.Role.SOURCE_METADATA;
         };
     }
 }

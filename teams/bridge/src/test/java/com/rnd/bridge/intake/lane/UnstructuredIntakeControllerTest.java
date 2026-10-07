@@ -26,8 +26,11 @@ import com.rnd.bridge.intake.parser.calendar.CalendarReadResult;
 import com.rnd.bridge.intake.parser.calendar.CalendarSourceReader;
 import com.rnd.bridge.intake.service.IntakeLandingService;
 import com.rnd.bridge.raw.model.ChangeType;
+import com.rnd.bridge.raw.model.Modality;
 import com.rnd.bridge.raw.model.RawObjectEvent;
+import com.rnd.bridge.raw.model.RawObjectRef;
 import com.rnd.bridge.raw.model.RawSourceType;
+import com.rnd.bridge.raw.model.Role;
 import com.rnd.bridge.raw.model.ScopeDecision;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
@@ -61,9 +64,10 @@ class UnstructuredIntakeControllerTest {
             "{}".getBytes(StandardCharsets.UTF_8), null, null, 0, 0, List.of(), 0);
 
     private static final RawObjectEvent EVENT = RawObjectEvent.create(
-            "EMAIL/kamatech/2026-08-18/x.json", RawSourceType.EMAIL, "kamatech", Instant.parse("2026-08-18T09:15:00Z"),
-            ScopeDecision.INCLUDED, "sha256:" + "0".repeat(64), null, List.of("hadas@kamatech.org"),
-            "application/json", 2L, Instant.parse("2026-08-18T09:15:00Z"), "corr-1", 0, 0, 0, ChangeType.UPSERT);
+            RawSourceType.EMAIL, "kamatech", Instant.parse("2026-08-18T09:15:00Z"), ScopeDecision.INCLUDED,
+            List.of("hadas@kamatech.org"), Instant.parse("2026-08-18T09:15:00Z"), "corr-1", 0, ChangeType.UPSERT,
+            List.of(new RawObjectRef(Role.BODY, "EMAIL/kamatech/2026-08-18/x.json", "sha256:" + "0".repeat(64),
+                    "application/json", 2L, Modality.TEXT)));
 
     // A chat transcript record (attachmentIndex 0, non-null groupId) - the shape that actually
     // reaches UnstructuredIntakeLane.afterPublish's GroupStateStore confirmation branch.
@@ -73,9 +77,10 @@ class UnstructuredIntakeControllerTest {
             "ruth: hi".getBytes(StandardCharsets.UTF_8), null, null, 0, 0, List.of("m1"), 0, "g1");
 
     private static final RawObjectEvent SLACK_EVENT = RawObjectEvent.create(
-            "SLACK/kamatech/2026-08-18/x.json", RawSourceType.SLACK, "kamatech", Instant.parse("2026-08-18T09:00:00Z"),
-            ScopeDecision.INCLUDED, "sha256:" + "1".repeat(64), null, List.of("ruth"), "text/plain", 8L,
-            Instant.parse("2026-08-18T09:00:00Z"), "corr-2", 0, 0, 0, ChangeType.UPSERT);
+            RawSourceType.SLACK, "kamatech", Instant.parse("2026-08-18T09:00:00Z"), ScopeDecision.INCLUDED,
+            List.of("ruth"), Instant.parse("2026-08-18T09:00:00Z"), "corr-2", 0, ChangeType.UPSERT,
+            List.of(new RawObjectRef(Role.TRANSCRIPT, "SLACK/kamatech/2026-08-18/x.json", "sha256:" + "1".repeat(64),
+                    "text/plain", 8L, Modality.TEXT)));
 
     private static final SourceRecord CALENDAR_RECORD = new SourceRecord(
             RawSourceType.CALENDAR, "kamatech", "event-1", "corr-3", Instant.parse("2026-08-18T09:15:00Z"),
@@ -83,15 +88,15 @@ class UnstructuredIntakeControllerTest {
             "{}".getBytes(StandardCharsets.UTF_8), null, null, 0, 0, List.of(), 0);
 
     private static final RawObjectEvent CALENDAR_EVENT = RawObjectEvent.create(
-            "CALENDAR/kamatech/2026-08-18/x.json", RawSourceType.CALENDAR, "kamatech",
-            Instant.parse("2026-08-18T09:15:00Z"), ScopeDecision.INCLUDED, "sha256:" + "2".repeat(64), null,
-            List.of("malki@kamatech.org"), "application/json", 2L, Instant.parse("2026-08-18T09:15:00Z"), "corr-3",
-            0, 0, 0, ChangeType.UPSERT);
+            RawSourceType.CALENDAR, "kamatech", Instant.parse("2026-08-18T09:15:00Z"), ScopeDecision.INCLUDED,
+            List.of("malki@kamatech.org"), Instant.parse("2026-08-18T09:15:00Z"), "corr-3", 0, ChangeType.UPSERT,
+            List.of(new RawObjectRef(Role.BODY, "CALENDAR/kamatech/2026-08-18/x.json", "sha256:" + "2".repeat(64),
+                    "application/json", 2L, Modality.TEXT)));
 
     @SuppressWarnings("unchecked")
-    private final SourceReader<SourceRecord> sourceReader = mock(SourceReader.class);
+    private final SourceReader<List<SourceRecord>> sourceReader = mock(SourceReader.class);
     @SuppressWarnings("unchecked")
-    private final PayloadMapper<SourceRecord, RawObjectEvent> payloadMapper = mock(PayloadMapper.class);
+    private final PayloadMapper<List<SourceRecord>, RawObjectEvent> payloadMapper = mock(PayloadMapper.class);
     @SuppressWarnings("unchecked")
     private final PayloadValidator<RawObjectEvent> payloadValidator = mock(PayloadValidator.class);
     @SuppressWarnings("unchecked")
@@ -118,7 +123,7 @@ class UnstructuredIntakeControllerTest {
     void slackCursorIsNotAdvancedWhenTheRunHasRejectedRecords() {
         UnstructuredIntakeController controller = controllerFor(RawSourceType.SLACK);
         when(cursorStore.load(RawSourceType.SLACK, "kamatech")).thenReturn(ReadCursor.full());
-        when(sourceReader.read(any())).thenReturn(Stream.of(RECORD));
+        when(sourceReader.read(any())).thenReturn(Stream.of(List.of(RECORD)));
         when(payloadMapper.map(any(), any())).thenReturn(EVENT);
         doThrow(new LaneException("kafka down")).when(payloadPublisher).publish(any());
 
@@ -132,7 +137,7 @@ class UnstructuredIntakeControllerTest {
     void slackCursorAdvancesWhenTheRunFullySucceeds() {
         UnstructuredIntakeController controller = controllerFor(RawSourceType.SLACK);
         when(cursorStore.load(RawSourceType.SLACK, "kamatech")).thenReturn(ReadCursor.full());
-        when(sourceReader.read(any())).thenReturn(Stream.of(RECORD));
+        when(sourceReader.read(any())).thenReturn(Stream.of(List.of(RECORD)));
         when(payloadMapper.map(any(), any())).thenReturn(EVENT);
 
         IntakeResult result = controller.run(RawSourceType.SLACK);
@@ -152,7 +157,7 @@ class UnstructuredIntakeControllerTest {
     void slackCursorIsNotAdvancedWhenChatGroupConfirmationFailsAfterKafkaPublishSucceeds() {
         UnstructuredIntakeController controller = controllerFor(RawSourceType.SLACK);
         when(cursorStore.load(RawSourceType.SLACK, "kamatech")).thenReturn(ReadCursor.full());
-        when(sourceReader.read(any())).thenReturn(Stream.of(SLACK_RECORD));
+        when(sourceReader.read(any())).thenReturn(Stream.of(List.of(SLACK_RECORD)));
         when(payloadMapper.map(any(), any())).thenReturn(SLACK_EVENT);
         doThrow(new IllegalStateException("MinIO unreachable"))
                 .when(groupStateStore).confirmPublished(RawSourceType.SLACK, "kamatech", "g1", 0);
@@ -168,7 +173,7 @@ class UnstructuredIntakeControllerTest {
     void nonSlackCursorAdvancesEvenWhenTheRunHasRejectedRecords() {
         UnstructuredIntakeController controller = controllerFor(RawSourceType.EMAIL);
         when(cursorStore.load(RawSourceType.EMAIL, "kamatech")).thenReturn(ReadCursor.full());
-        when(sourceReader.read(any())).thenReturn(Stream.of(RECORD));
+        when(sourceReader.read(any())).thenReturn(Stream.of(List.of(RECORD)));
         when(payloadMapper.map(any(), any())).thenReturn(EVENT);
         doThrow(new LaneException("kafka down")).when(payloadPublisher).publish(any());
 

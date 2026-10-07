@@ -9,32 +9,43 @@ import "google/protobuf/timestamp.proto";
 
 // kafkaTopic: bridge.raw.landed
 // Reconciled against the agreed Bridge/MIND RawObjectEvent contract
-// (teams/bridge/src/main/java/com/rnd/bridge/raw/model/RawObjectEvent.java). Fields 1-13 and
-// every existing enum value/number are unchanged from the original draft - only additive
-// changes (new fields 14-19, new enum values appended at new numbers) were made, so this
-// schema stays FULL-compatible with whatever was previously registered under
-// bridge.raw.landed-value.
+// (teams/bridge/src/main/java/com/rnd/bridge/raw/model/RawObjectEvent.java). schema_version
+// "2.0" - a breaking change from the flat "1.0" contract: one RawObjectEvent is now one
+// logical item carrying every MinIO object it owns (body/transcript and every attachment
+// alike) as a repeated RawObjectRef, instead of fanning out into several Kafka events keyed
+// by attachment_index.
 
 message RawObjectEvent {
   string schema_version = 1;
+  SourceType source_type = 2;
+  string tenant_id = 3;
+  google.protobuf.Timestamp ingested_at = 4;
+  ScopeDecision scope_decision = 5;
+  repeated string participants = 6;
+  google.protobuf.Timestamp source_timestamp = 7;
+  string correlation_id = 8;
+  int32 revision = 9;
+  ChangeType change_type = 10;
+  int32 change_significance_score = 11;
+  repeated RawObjectRef objects = 12;
+}
+
+message RawObjectRef {
+  Role role = 1;
   string object_key = 2;
-  SourceType source_type = 3;
-  string tenant_id = 4;
-  google.protobuf.Timestamp ingested_at = 5;
-  ScopeDecision scope_decision = 6;
-  string content_hash = 7;
-  optional Modality modality = 8;
-  repeated string participants = 9;
-  string content_type = 10;
-  optional int64 size_bytes = 11;
-  optional string transcript_object_key = 12; // Populated later, once transcription completes.
-  google.protobuf.Timestamp source_timestamp = 13;
-  string correlation_id = 14;
-  int32 attachment_index = 15;
-  int32 attachment_count = 16;
-  int32 revision = 17;
-  ChangeType change_type = 18;
-  int32 change_significance_score = 19;
+  string content_hash = 3;
+  string content_type = 4;
+  optional int64 size_bytes = 5;
+  Modality modality = 6;
+}
+
+enum Role {
+  ROLE_UNSPECIFIED = 0;
+  BODY = 1;
+  ATTACHMENT = 2;
+  TRANSCRIPT = 3;
+  RECORDING = 4;
+  SOURCE_METADATA = 5;
 }
 
 enum SourceType {

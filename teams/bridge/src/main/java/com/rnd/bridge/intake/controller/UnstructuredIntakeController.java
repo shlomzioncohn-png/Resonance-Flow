@@ -5,6 +5,7 @@ import com.rnd.bridge.core.KeyedLock;
 import com.rnd.bridge.core.ReadCursor;
 import com.rnd.bridge.intake.lane.CursorStore;
 import com.rnd.bridge.intake.lane.UnstructuredIntakeLane;
+import com.rnd.bridge.intake.parser.SourceRecordGrouper;
 import com.rnd.bridge.intake.parser.calendar.CalendarReadResult;
 import com.rnd.bridge.intake.parser.calendar.CalendarSourceReader;
 import com.rnd.bridge.raw.model.RawSourceType;
@@ -111,7 +112,7 @@ public class UnstructuredIntakeController {
         ReadCursor cursor = cursorStore.load(RawSourceType.CALENDAR, TENANT_ID);
         Instant asOf = Instant.now();
         CalendarReadResult calendarRead = calendarSourceReader.read(cursor);
-        IntakeResult result = lane.run(calendarRead.records().stream(), asOf);
+        IntakeResult result = lane.run(SourceRecordGrouper.groupByCorrelationId(calendarRead.records()).stream(), asOf);
         if (result.rejected() == 0) {
             String nextSyncToken = calendarRead.nextSyncToken();
             // Null means this read never produced a new cursor to advance to (e.g. fixture

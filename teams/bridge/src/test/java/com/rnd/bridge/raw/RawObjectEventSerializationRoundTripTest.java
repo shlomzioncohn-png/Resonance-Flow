@@ -6,7 +6,9 @@ import com.google.protobuf.InvalidProtocolBufferException;
 import com.rnd.bridge.raw.model.ChangeType;
 import com.rnd.bridge.raw.model.Modality;
 import com.rnd.bridge.raw.model.RawObjectEvent;
+import com.rnd.bridge.raw.model.RawObjectRef;
 import com.rnd.bridge.raw.model.RawSourceType;
+import com.rnd.bridge.raw.model.Role;
 import com.rnd.bridge.raw.model.ScopeDecision;
 import io.confluent.kafka.schemaregistry.client.MockSchemaRegistryClient;
 import io.confluent.kafka.schemaregistry.client.SchemaRegistryClient;
@@ -39,11 +41,13 @@ class RawObjectEventSerializationRoundTripTest {
 
     @Test
     void protobufBytesRoundTripThroughRealSerializerAndDeserializer() throws InvalidProtocolBufferException {
+        RawObjectRef transcript = new RawObjectRef(
+                Role.TRANSCRIPT, "SLACK/kamatech/2026-08-18/x.json", "sha256:" + "a".repeat(64), "audio/mpeg",
+                456L, Modality.AUDIO);
         RawObjectEvent event = RawObjectEvent.create(
-                "SLACK/kamatech/2026-08-18/x.json", RawSourceType.SLACK, "kamatech",
-                Instant.parse("2026-08-18T09:15:00Z"), ScopeDecision.INCLUDED,
-                "sha256:" + "a".repeat(64), Modality.AUDIO, List.of("ruth"), "audio/mpeg", 456L,
-                Instant.parse("2026-08-18T09:20:00Z"), "corr-1", 1, 1, 0, ChangeType.UPSERT);
+                RawSourceType.SLACK, "kamatech", Instant.parse("2026-08-18T09:15:00Z"), ScopeDecision.INCLUDED,
+                List.of("ruth"), Instant.parse("2026-08-18T09:20:00Z"), "corr-1", 0, ChangeType.UPSERT,
+                List.of(transcript));
         com.rnd.bridge.shared.unstructured.dto.RawObjectEvent protoEvent = mapper.toProto(event);
 
         byte[] bytes;
@@ -65,7 +69,9 @@ class RawObjectEventSerializationRoundTripTest {
 
         assertThat(deserialized).isEqualTo(protoEvent);
         assertThat(deserialized.getCorrelationId()).isEqualTo("corr-1");
-        assertThat(deserialized.getAttachmentIndex()).isEqualTo(1);
         assertThat(deserialized.getChangeSignificanceScore()).isEqualTo(100);
+        assertThat(deserialized.getObjectsList()).hasSize(1);
+        assertThat(deserialized.getObjects(0).getRole())
+                .isEqualTo(com.rnd.bridge.shared.unstructured.dto.Role.TRANSCRIPT);
     }
 }

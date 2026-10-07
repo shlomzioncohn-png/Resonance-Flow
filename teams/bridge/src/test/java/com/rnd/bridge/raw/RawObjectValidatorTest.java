@@ -7,7 +7,9 @@ import com.rnd.bridge.core.error.ValidationException;
 import com.rnd.bridge.raw.model.ChangeType;
 import com.rnd.bridge.raw.model.Modality;
 import com.rnd.bridge.raw.model.RawObjectEvent;
+import com.rnd.bridge.raw.model.RawObjectRef;
 import com.rnd.bridge.raw.model.RawSourceType;
+import com.rnd.bridge.raw.model.Role;
 import com.rnd.bridge.raw.model.ScopeDecision;
 import java.time.Instant;
 import java.util.List;
@@ -17,12 +19,17 @@ class RawObjectValidatorTest {
 
     private final RawObjectValidator validator = new RawObjectValidator();
 
+    private static RawObjectRef validRef() {
+        return new RawObjectRef(
+                Role.BODY, "EMAIL/kamatech/2026-08-18/x.json", "sha256:" + "a".repeat(64),
+                "application/json", 1L, Modality.TEXT);
+    }
+
     private static RawObjectEvent eventWithTenantId(String tenantId) {
         return RawObjectEvent.create(
-                "EMAIL/kamatech/2026-08-18/x.json", RawSourceType.EMAIL, tenantId,
-                Instant.parse("2026-08-18T09:15:00Z"), ScopeDecision.INCLUDED,
-                "sha256:" + "a".repeat(64), Modality.TEXT, List.of(), "application/json", 1L,
-                Instant.parse("2026-08-18T09:15:00Z"), "corr-1", 0, 0, 0, ChangeType.UPSERT);
+                RawSourceType.EMAIL, tenantId, Instant.parse("2026-08-18T09:15:00Z"), ScopeDecision.INCLUDED,
+                List.of(), Instant.parse("2026-08-18T09:15:00Z"), "corr-1", 0, ChangeType.UPSERT,
+                List.of(validRef()));
     }
 
     @Test
@@ -54,13 +61,36 @@ class RawObjectValidatorTest {
     @Test
     void validateRejectsNullCorrelationIdRegardlessOfTenantId() {
         RawObjectEvent event = RawObjectEvent.create(
-                "EMAIL/kamatech/2026-08-18/x.json", RawSourceType.EMAIL, "kamatech",
-                Instant.parse("2026-08-18T09:15:00Z"), ScopeDecision.INCLUDED,
-                "sha256:" + "a".repeat(64), Modality.TEXT, List.of(), "application/json", 1L,
-                Instant.parse("2026-08-18T09:15:00Z"), null, 0, 0, 0, ChangeType.UPSERT);
+                RawSourceType.EMAIL, "kamatech", Instant.parse("2026-08-18T09:15:00Z"), ScopeDecision.INCLUDED,
+                List.of(), Instant.parse("2026-08-18T09:15:00Z"), null, 0, ChangeType.UPSERT, List.of(validRef()));
 
         assertThatThrownBy(() -> validator.validate(event))
                 .isInstanceOf(ValidationException.class)
                 .hasMessageContaining("correlationId");
+    }
+
+    @Test
+    void validateRejectsAnEmptyObjectList() {
+        RawObjectEvent event = RawObjectEvent.create(
+                RawSourceType.EMAIL, "kamatech", Instant.parse("2026-08-18T09:15:00Z"), ScopeDecision.INCLUDED,
+                List.of(), Instant.parse("2026-08-18T09:15:00Z"), "corr-1", 0, ChangeType.UPSERT, List.of());
+
+        assertThatThrownBy(() -> validator.validate(event))
+                .isInstanceOf(ValidationException.class)
+                .hasMessageContaining("objects");
+    }
+
+    @Test
+    void validateRejectsAnObjectMissingItsContentHash() {
+        RawObjectRef invalidRef = new RawObjectRef(Role.BODY, "EMAIL/kamatech/2026-08-18/x.json", null,
+                "application/json", 1L, Modality.TEXT);
+        RawObjectEvent event = RawObjectEvent.create(
+                RawSourceType.EMAIL, "kamatech", Instant.parse("2026-08-18T09:15:00Z"), ScopeDecision.INCLUDED,
+                List.of(), Instant.parse("2026-08-18T09:15:00Z"), "corr-1", 0, ChangeType.UPSERT,
+                List.of(invalidRef));
+
+        assertThatThrownBy(() -> validator.validate(event))
+                .isInstanceOf(ValidationException.class)
+                .hasMessageContaining("contentHash");
     }
 }

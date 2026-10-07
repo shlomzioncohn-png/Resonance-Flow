@@ -12,13 +12,16 @@ import static org.mockito.Mockito.when;
 import com.rnd.bridge.raw.model.ChangeType;
 import com.rnd.bridge.raw.model.Modality;
 import com.rnd.bridge.raw.model.RawObjectEvent;
+import com.rnd.bridge.raw.model.RawObjectRef;
 import com.rnd.bridge.raw.model.RawSourceType;
+import com.rnd.bridge.raw.model.Role;
 import com.rnd.bridge.raw.model.ScopeDecision;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.security.MessageDigest;
 import java.time.Instant;
 import java.util.HexFormat;
+import java.util.List;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -79,7 +82,7 @@ class MediaIntakeOrchestratorTest {
 
         MediaIntakeOrchestrator.IntakeSummary summary = orchestrator.runIntake();
 
-        assertThat(summary.uploadedObjectKeys()).containsExactly(event.objectKey());
+        assertThat(summary.uploadedObjectKeys()).containsExactly(event.objects().get(0).objectKey());
         assertThat(Files.exists(zoomDir.resolve("uploaded").resolve("meeting.mp3"))).isTrue();
         verify(eventPublisher).publish(event);
         verify(dedupIndex).checkAndRecord(eq(RawSourceType.MEETING), eq("demo-tenant"), any());
@@ -103,18 +106,19 @@ class MediaIntakeOrchestratorTest {
     void transcriptSidecarIsLandedAndLinkedNotProcessedOnItsOwn() throws Exception {
         Files.write(zoomDir.resolve("meeting.mp3"), "c".repeat(2000).getBytes());
         Files.writeString(zoomDir.resolve("meeting.vtt"), "WEBVTT transcript");
-        String transcriptKey = "MEETING/demo-tenant/2026-08-30/t.vtt";
+        RawObjectRef transcriptRef = new RawObjectRef(Role.TRANSCRIPT, "MEETING/demo-tenant/2026-08-30/t.vtt",
+                "sha256:" + "e".repeat(64), "text/vtt", 18L, Modality.TEXT);
         when(intakeService.landTranscript(any(), eq("meeting.vtt"), eq("demo-tenant"),
                 eq(RawSourceType.MEETING), any()))
-                .thenReturn(transcriptKey);
+                .thenReturn(transcriptRef);
         RawObjectEvent event = fakeEvent("MEETING/demo-tenant/2026-08-30/x.mp3");
         when(intakeService.land(any(), any(), eq("meeting.mp3"), eq("demo-tenant"),
-                eq(RawSourceType.MEETING), eq(Modality.AUDIO), any(), eq(transcriptKey)))
+                eq(RawSourceType.MEETING), eq(Modality.AUDIO), any(), eq(transcriptRef)))
                 .thenReturn(event);
 
         MediaIntakeOrchestrator.IntakeSummary summary = orchestrator.runIntake();
 
-        assertThat(summary.uploadedObjectKeys()).containsExactly(event.objectKey());
+        assertThat(summary.uploadedObjectKeys()).containsExactly(event.objects().get(0).objectKey());
         assertThat(summary.failedFiles()).isEmpty();
         assertThat(Files.exists(zoomDir.resolve("uploaded").resolve("meeting.vtt"))).isTrue();
         verify(intakeService).landTranscript(any(), eq("meeting.vtt"), eq("demo-tenant"),
@@ -137,9 +141,10 @@ class MediaIntakeOrchestratorTest {
     }
 
     private RawObjectEvent fakeEvent(String objectKey) {
-        return RawObjectEvent.create(objectKey, RawSourceType.MEETING, "demo-tenant", Instant.now(),
-                ScopeDecision.INCLUDED, "sha256:" + "0".repeat(64), Modality.AUDIO, null,
-                "audio/mpeg", 2000L, null, null, 0, 0, 0, ChangeType.UPSERT);
+        return RawObjectEvent.create(RawSourceType.MEETING, "demo-tenant", Instant.now(),
+                ScopeDecision.INCLUDED, null, null, "corr-1", 0, ChangeType.UPSERT,
+                List.of(new RawObjectRef(Role.RECORDING, objectKey, "sha256:" + "0".repeat(64),
+                        "audio/mpeg", 2000L, Modality.AUDIO)));
     }
 
     private String sha256(byte[] content) throws Exception {

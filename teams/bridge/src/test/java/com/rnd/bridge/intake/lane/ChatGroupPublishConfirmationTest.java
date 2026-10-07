@@ -21,13 +21,17 @@ import com.rnd.bridge.intake.config.ChatSessionProperties;
 import com.rnd.bridge.intake.model.ChatMessage;
 import com.rnd.bridge.intake.model.GroupState;
 import com.rnd.bridge.intake.model.SourceRecord;
+import com.rnd.bridge.intake.parser.SourceRecordGrouper;
 import com.rnd.bridge.intake.service.ChatGroupStateReconciler;
 import com.rnd.bridge.intake.service.ChatSessionGrouper;
 import com.rnd.bridge.intake.service.ChatSourceRecordMapper;
 import com.rnd.bridge.intake.service.IntakeLandingService;
 import com.rnd.bridge.raw.model.ChangeType;
+import com.rnd.bridge.raw.model.Modality;
 import com.rnd.bridge.raw.model.RawObjectEvent;
+import com.rnd.bridge.raw.model.RawObjectRef;
 import com.rnd.bridge.raw.model.RawSourceType;
+import com.rnd.bridge.raw.model.Role;
 import com.rnd.bridge.raw.model.ScopeDecision;
 import com.rnd.bridge.storage.ControlPlaneStateStores;
 import com.rnd.bridge.storage.InMemoryObjectStorageClient;
@@ -42,13 +46,13 @@ import org.junit.jupiter.api.Test;
 /**
  * Exercises the two-phase publish confirmation end to end through a real
  * ChatGroupStateReconciler + GroupStateStore wired into a real UnstructuredIntakeLane: a chat
- * group is only ever marked published once its transcript record has actually gone through
- * the lane's publish step successfully (afterPublish -> GroupStateStore.confirmPublished), not
- * merely because the reconciler built a record for it.
- * Failure stubs use same() rather than the default equals-based matching: RawObjectEvent has
- * no byte[] fields, so a retry's rebuilt event is .equals() to the original failed one
- * (identical content) - equals-based stubbing would make run1's failure stub also swallow
- * run2's otherwise-successful retry of that exact same content.
+ * group is only ever marked published once its whole object group (transcript + every
+ * attachment, bundled into one RawObjectEvent - see SourceRecordGrouper) has actually gone
+ * through the lane's land/publish steps successfully (afterPublish -> confirmPublished), not
+ * merely because the reconciler built records for it. Publication is atomic per group now - a
+ * transcript-only or attachment-only partial outcome no longer exists (see
+ * ChatGroupStateReconciler.mergeAndMaybePublish's simplification): either the whole group's
+ * event publishes, or none of it does, and a retry rebuilds and republishes the complete group.
  */
 class ChatGroupPublishConfirmationTest {
 
@@ -64,9 +68,9 @@ class ChatGroupPublishConfirmationTest {
             properties, new ChatSessionGrouper(properties), new ChatSourceRecordMapper(), groupStateStore);
 
     @SuppressWarnings("unchecked")
-    private final SourceReader<SourceRecord> sourceReader = mock(SourceReader.class);
+    private final SourceReader<List<SourceRecord>> sourceReader = mock(SourceReader.class);
     @SuppressWarnings("unchecked")
-    private final PayloadMapper<SourceRecord, RawObjectEvent> payloadMapper = mock(PayloadMapper.class);
+    private final PayloadMapper<List<SourceRecord>, RawObjectEvent> payloadMapper = mock(PayloadMapper.class);
     @SuppressWarnings("unchecked")
     private final PayloadValidator<RawObjectEvent> payloadValidator = mock(PayloadValidator.class);
     @SuppressWarnings("unchecked")
@@ -86,109 +90,80 @@ class ChatGroupPublishConfirmationTest {
                 List.of(attachment), id, null);
     }
 
-    private RawObjectEvent eventFor(SourceRecord record) {
+    private RawObjectEvent eventFor(List<SourceRecord> group) {
+        SourceRecord primary = UnstructuredPayloadMapper.primaryOf(group);
+        List<RawObjectRef> objects = group.stream()
+                .map(record -> new RawObjectRef(
+                        record.attachmentIndex() == 0 ? Role.TRANSCRIPT : Role.ATTACHMENT,
+                        "SLACK/kamatech/2026-08-18/" + record.naturalId() + ".json",
+                        "sha256:" + "0".repeat(64), "application/json", 2L, Modality.TEXT))
+                .toList();
         return RawObjectEvent.create(
-                "SLACK/kamatech/2026-08-18/" + record.naturalId() + ".json", record.sourceType(), record.tenantId(),
-                Instant.parse("2026-08-18T09:00:00Z"), ScopeDecision.INCLUDED, "sha256:" + "0".repeat(64), null,
-                record.participants(), "application/json", 2L, record.occurredAt(), record.correlationId(),
-                record.attachmentIndex(), record.attachmentCount(), record.revision(), ChangeType.UPSERT);
-    }
-
-    private SourceRecord transcriptOf(List<SourceRecord> records) {
-        return records.stream().filter(r -> r.attachmentIndex() == 0).findFirst().orElseThrow();
-    }
-
-    private SourceRecord attachmentOf(List<SourceRecord> records) {
-        return records.stream().filter(r -> r.attachmentIndex() > 0).findFirst().orElseThrow();
+                primary.sourceType(), primary.tenantId(), Instant.parse("2026-08-18T09:00:00Z"),
+                ScopeDecision.INCLUDED, primary.participants(), primary.occurredAt(), primary.correlationId(),
+                primary.revision(), ChangeType.UPSERT, objects);
     }
 
     @Test
-    void transcriptFailsAttachmentSucceedsThenRetrySucceeds() {
+    void wholeGroupFailsThenRetrySucceedsAndPublishesTranscriptAndAttachmentTogether() {
         List<ChatMessage> messages = List.of(messageWithAttachment("2026-08-18T09:00:00Z", "listen to this", "m1"));
         List<SourceRecord> run1Records = reconciler.group(messages);
-        SourceRecord transcript = transcriptOf(run1Records);
-        SourceRecord attachment = attachmentOf(run1Records);
-        RawObjectEvent transcriptEvent = eventFor(transcript);
-        RawObjectEvent attachmentEvent = eventFor(attachment);
+        assertThat(run1Records).hasSize(2); // transcript + attachment, one logical group
+        List<List<SourceRecord>> run1Groups = SourceRecordGrouper.groupByCorrelationId(run1Records);
+        assertThat(run1Groups).hasSize(1);
+        RawObjectEvent event1 = eventFor(run1Groups.get(0));
 
-        when(sourceReader.read(any())).thenReturn(Stream.of(transcript, attachment));
-        when(payloadMapper.map(eq(transcript), any())).thenReturn(transcriptEvent);
-        when(payloadMapper.map(eq(attachment), any())).thenReturn(attachmentEvent);
-        doThrow(new LaneException("kafka down")).when(payloadPublisher).publish(same(transcriptEvent));
+        when(sourceReader.read(any())).thenReturn(Stream.of(run1Groups.get(0)));
+        when(payloadMapper.map(eq(run1Groups.get(0)), any())).thenReturn(event1);
+        // same() rather than equals-based matching: RawObjectEvent has no byte[] fields, so a
+        // retry's rebuilt event is .equals() to the original failed one (identical content) -
+        // equals-based stubbing would make run1's failure stub also swallow run2's otherwise-
+        // successful retry of that exact same content.
+        doThrow(new LaneException("kafka down")).when(payloadPublisher).publish(same(event1));
 
         IntakeResult run1 = lane.run(ReadCursor.full(), Instant.parse("2026-08-18T10:00:00Z"));
 
-        assertThat(run1.published()).isEqualTo(1); // attachment only
-        assertThat(run1.rejected()).isEqualTo(1); // transcript
-        // transcript.correlationId() is Mind's UUID, not GroupStateStore's own key - resolve the
-        // group the same way UnstructuredIntakeLane.afterPublish does, via the messageId index.
+        assertThat(run1.published()).isZero();
+        assertThat(run1.rejected()).isEqualTo(1); // the whole group, not a per-attachment count
         String groupId = groupStateStore.findGroupIdForMessage(RawSourceType.SLACK, "kamatech", "m1").orElseThrow();
         GroupState afterRun1 = groupStateStore.load(RawSourceType.SLACK, "kamatech", groupId).orElseThrow();
         assertThat(afterRun1.published()).isFalse();
 
         // Retry: cursor was frozen (rejected > 0), so the same messages are reconciled again.
         List<SourceRecord> run2Records = reconciler.group(messages);
-        assertThat(run2Records).hasSize(2); // still-pending group: full rebuild, not the attachment-only carve-out
-        SourceRecord retryTranscript = transcriptOf(run2Records);
-        SourceRecord retryAttachment = attachmentOf(run2Records);
-        RawObjectEvent retryTranscriptEvent = eventFor(retryTranscript);
-        RawObjectEvent retryAttachmentEvent = eventFor(retryAttachment);
-        when(sourceReader.read(any())).thenReturn(Stream.of(retryTranscript, retryAttachment));
-        when(payloadMapper.map(eq(retryTranscript), any())).thenReturn(retryTranscriptEvent);
-        when(payloadMapper.map(eq(retryAttachment), any())).thenReturn(retryAttachmentEvent);
+        assertThat(run2Records).hasSize(2); // still-pending group: full rebuild, not a partial carve-out
+        List<List<SourceRecord>> run2Groups = SourceRecordGrouper.groupByCorrelationId(run2Records);
+        RawObjectEvent event2 = eventFor(run2Groups.get(0));
+        when(sourceReader.read(any())).thenReturn(Stream.of(run2Groups.get(0)));
+        when(payloadMapper.map(eq(run2Groups.get(0)), any())).thenReturn(event2);
 
         IntakeResult run2 = lane.run(ReadCursor.full(), Instant.parse("2026-08-18T10:05:00Z"));
 
-        assertThat(run2.published()).isEqualTo(2);
+        assertThat(run2.published()).isEqualTo(1); // one group, one event
         assertThat(run2.rejected()).isEqualTo(0);
         GroupState afterRun2 = groupStateStore.load(RawSourceType.SLACK, "kamatech", groupId).orElseThrow();
         assertThat(afterRun2.published()).isTrue();
         assertThat(afterRun2.revision()).isZero(); // a retry is not a content change
-        assertThat(afterRun2.correlationId()).isEqualTo(transcript.correlationId()); // retry keeps the same id
     }
 
     @Test
-    void transcriptSucceedsAttachmentFailsThenRetrySucceeds() {
+    void successfulPublishLandsEveryRecordInTheGroupBeforePublishing() {
         List<ChatMessage> messages = List.of(messageWithAttachment("2026-08-18T09:00:00Z", "listen to this", "m1"));
-        List<SourceRecord> run1Records = reconciler.group(messages);
-        SourceRecord transcript = transcriptOf(run1Records);
-        SourceRecord attachment = attachmentOf(run1Records);
-        RawObjectEvent transcriptEvent = eventFor(transcript);
-        RawObjectEvent attachmentEvent = eventFor(attachment);
+        List<SourceRecord> records = reconciler.group(messages);
+        List<List<SourceRecord>> groups = SourceRecordGrouper.groupByCorrelationId(records);
+        RawObjectEvent event = eventFor(groups.get(0));
 
-        when(sourceReader.read(any())).thenReturn(Stream.of(transcript, attachment));
-        when(payloadMapper.map(eq(transcript), any())).thenReturn(transcriptEvent);
-        when(payloadMapper.map(eq(attachment), any())).thenReturn(attachmentEvent);
-        doThrow(new LaneException("kafka down")).when(payloadPublisher).publish(same(attachmentEvent));
+        when(sourceReader.read(any())).thenReturn(Stream.of(groups.get(0)));
+        when(payloadMapper.map(eq(groups.get(0)), any())).thenReturn(event);
 
-        IntakeResult run1 = lane.run(ReadCursor.full(), Instant.parse("2026-08-18T10:00:00Z"));
+        IntakeResult result = lane.run(ReadCursor.full(), Instant.parse("2026-08-18T10:00:00Z"));
 
-        assertThat(run1.published()).isEqualTo(1); // transcript only
-        assertThat(run1.rejected()).isEqualTo(1); // attachment
-        // transcript.correlationId() is Mind's UUID, not GroupStateStore's own key - resolve the
-        // group the same way UnstructuredIntakeLane.afterPublish does, via the messageId index.
+        assertThat(result.published()).isEqualTo(1);
+        // Both the transcript and the attachment were landed, in the same group's afterMap.
+        org.mockito.Mockito.verify(landingService, org.mockito.Mockito.times(2))
+                .land(any(), any(), any(), any());
         String groupId = groupStateStore.findGroupIdForMessage(RawSourceType.SLACK, "kamatech", "m1").orElseThrow();
-        GroupState afterRun1 = groupStateStore.load(RawSourceType.SLACK, "kamatech", groupId).orElseThrow();
-        // The transcript was confirmed despite its sibling attachment failing independently.
-        assertThat(afterRun1.published()).isTrue();
-
-        // Retry: cursor was frozen (rejected > 0), so the same messages are reconciled again.
-        List<SourceRecord> run2Records = reconciler.group(messages);
-        // Confirmed+unchanged group: only the attachment is regenerated, not the transcript.
-        assertThat(run2Records).hasSize(1);
-        SourceRecord retryAttachment = run2Records.get(0);
-        assertThat(retryAttachment.attachmentIndex()).isGreaterThan(0);
-        RawObjectEvent retryAttachmentEvent = eventFor(retryAttachment);
-        when(sourceReader.read(any())).thenReturn(Stream.of(retryAttachment));
-        when(payloadMapper.map(eq(retryAttachment), any())).thenReturn(retryAttachmentEvent);
-
-        IntakeResult run2 = lane.run(ReadCursor.full(), Instant.parse("2026-08-18T10:05:00Z"));
-
-        assertThat(run2.published()).isEqualTo(1);
-        assertThat(run2.rejected()).isEqualTo(0);
-        GroupState afterRun2 = groupStateStore.load(RawSourceType.SLACK, "kamatech", groupId).orElseThrow();
-        assertThat(afterRun2.published()).isTrue();
-        assertThat(afterRun2.revision()).isZero();
-        assertThat(afterRun2.correlationId()).isEqualTo(transcript.correlationId()); // retry keeps the same id
+        GroupState state = groupStateStore.load(RawSourceType.SLACK, "kamatech", groupId).orElseThrow();
+        assertThat(state.published()).isTrue();
     }
 }

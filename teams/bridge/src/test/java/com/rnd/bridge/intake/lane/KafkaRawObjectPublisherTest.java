@@ -11,7 +11,9 @@ import com.rnd.bridge.raw.RawObjectEventProtoMapper;
 import com.rnd.bridge.raw.model.ChangeType;
 import com.rnd.bridge.raw.model.Modality;
 import com.rnd.bridge.raw.model.RawObjectEvent;
+import com.rnd.bridge.raw.model.RawObjectRef;
 import com.rnd.bridge.raw.model.RawSourceType;
+import com.rnd.bridge.raw.model.Role;
 import com.rnd.bridge.raw.model.ScopeDecision;
 import java.time.Instant;
 import java.util.List;
@@ -36,9 +38,10 @@ class KafkaRawObjectPublisherTest {
     // switches on modality, and RawObjectValidator already requires it non-null in production;
     // this fixture predates both and used null harmlessly under the old JSON serializer.
     private static final RawObjectEvent EVENT = RawObjectEvent.create(
-            "SLACK/kamatech/2026-08-18/x.json", RawSourceType.SLACK, "kamatech", Instant.parse("2026-08-18T09:15:00Z"),
-            ScopeDecision.INCLUDED, "sha256:" + "0".repeat(64), Modality.AUDIO, List.of("ruth"), "application/json", 2L,
-            Instant.parse("2026-08-18T09:15:00Z"), "corr-1", 0, 0, 0, ChangeType.UPSERT);
+            RawSourceType.SLACK, "kamatech", Instant.parse("2026-08-18T09:15:00Z"), ScopeDecision.INCLUDED,
+            List.of("ruth"), Instant.parse("2026-08-18T09:15:00Z"), "corr-1", 0, ChangeType.UPSERT,
+            List.of(new RawObjectRef(Role.TRANSCRIPT, "SLACK/kamatech/2026-08-18/x.json",
+                    "sha256:" + "0".repeat(64), "application/json", 2L, Modality.AUDIO)));
 
     private static final com.rnd.bridge.shared.unstructured.dto.RawObjectEvent PROTO_EVENT =
             new RawObjectEventProtoMapper().toProto(EVENT);
