@@ -169,21 +169,23 @@ async def main() -> None:
         })
     recall_summary = {f"recall_at_{k}": sum(hits) / len(hits) for k, hits in pair_hits.items()}
 
+    latency_stats = {
+        "n_queries": N_LATENCY_QUERIES,
+        "avg": statistics.mean(query_latencies),
+        "p50": percentile(query_latencies, 50),
+        "p95": percentile(query_latencies, 95),
+        "p99": percentile(query_latencies, 99),
+        "max": max(query_latencies),
+    }
+    p95_under_300ms = percentile(query_latencies, 95) < 300
     results = {
         "dataset_composition": {
             "synthetic_filler": N_FILLER,
             "manual_pair_rows": 2 * len(PAIRS),
             "total_rows": total_rows,
         },
-        "search_latency_ms": {
-            "n_queries": N_LATENCY_QUERIES,
-            "avg": statistics.mean(query_latencies),
-            "p50": percentile(query_latencies, 50),
-            "p95": percentile(query_latencies, 95),
-            "p99": percentile(query_latencies, 99),
-            "max": max(query_latencies),
-        },
-        "p95_under_300ms": percentile(query_latencies, 95) < 300,
+        "search_latency_ms": latency_stats,
+        "p95_under_300ms": p95_under_300ms,
         "duplicate_pair_recall": {
             "summary": recall_summary,
             "details": pair_details,
@@ -192,12 +194,12 @@ async def main() -> None:
 
     print("\n=== Summary ===")
     print(f"Total rows: {total_rows} ({N_FILLER} synthetic filler + {2 * len(PAIRS)} manual pairs)")
-    print(f"search() latency: avg={results['search_latency_ms']['avg']:.2f}ms "
-          f"p50={results['search_latency_ms']['p50']:.2f}ms "
-          f"p95={results['search_latency_ms']['p95']:.2f}ms "
-          f"p99={results['search_latency_ms']['p99']:.2f}ms "
-          f"max={results['search_latency_ms']['max']:.2f}ms")
-    print(f"<300ms p95 target: {'PASS' if results['p95_under_300ms'] else 'FAIL'}")
+    print(f"search() latency: avg={latency_stats['avg']:.2f}ms "
+          f"p50={latency_stats['p50']:.2f}ms "
+          f"p95={latency_stats['p95']:.2f}ms "
+          f"p99={latency_stats['p99']:.2f}ms "
+          f"max={latency_stats['max']:.2f}ms")
+    print(f"<300ms p95 target: {'PASS' if p95_under_300ms else 'FAIL'}")
     print(f"Duplicate-pair recall: {recall_summary}")
     for d in pair_details:
         status = "HIT " if d["hit_at_10"] else "MISS"
