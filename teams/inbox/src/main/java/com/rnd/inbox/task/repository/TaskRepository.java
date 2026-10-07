@@ -7,6 +7,7 @@ import com.rnd.inbox.task.model.TaskTier;
 import com.rnd.inbox.team.member.TeamMember;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
+import org.springframework.data.jpa.repository.EntityGraph;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
@@ -57,8 +58,17 @@ public interface TaskRepository extends JpaRepository<Task, UUID> {
     // Rule 3 is deliberately narrower than findCandidateTasksForUser, which counts every task of
     // the user's teams. The whole block is ANDed with the tenant scope like every other filter,
     // never a replacement for it, so asking for a user from another tenant matches nothing.
-    // EXISTS (not a JOIN) keeps one row per task, so the page content and the derived count
-    // query stay correct without DISTINCT.
+    // Subqueries (not a JOIN) keep one row per task, so the page content and the derived count
+    // query stay correct without DISTINCT. They are written as "t.id IN (...)" rather than
+    // "EXISTS (... WHERE a.task = t)" on purpose: Postgres costs a subquery that refers to the
+    // outer task as if it ran once per task, and that inflated estimate (576,499 instead of
+    // 4,359 on a 17,000-task tenant) was enough to trigger JIT compilation - about 210 ms spent
+    // preparing a statement that then ran in 25 ms.
+    //
+    // The entity graph joins each task's tenant into the page query. The response shows the
+    // tenant of every task, and without the join Hibernate loads each distinct tenant with a
+    // SELECT of its own - up to 21 statements for one page of 20 tasks.
+    @EntityGraph(attributePaths = "tenant")
     @Query("""
             SELECT t FROM Task t
             WHERE (:bypassTenantScope = TRUE OR t.tenant.id = :tenantId)
@@ -74,22 +84,21 @@ public interface TaskRepository extends JpaRepository<Task, UUID> {
               AND (:hasNoDeadline = FALSE OR t.deadline IS NULL)
               AND (:hasRelatedUser = FALSE
                    OR t.owner.id = :relatedUserId
-                   OR EXISTS (
-                       SELECT a.id FROM Assignment a
-                       WHERE a.task = t AND a.user.id = :relatedUserId
+                   OR t.id IN (
+                       SELECT a.task.id FROM Assignment a
+                       WHERE a.user.id = :relatedUserId
                    )
                    OR (t.owner IS NULL
-                       AND EXISTS (
-                           SELECT ta.id FROM Assignment ta
-                           WHERE ta.task = t
-                             AND ta.team.id IN (
-                                 SELECT tm.team.id FROM TeamMember tm
-                                 WHERE tm.user.id = :relatedUserId AND tm.leftAt IS NULL
-                             )
-                       )
-                       AND NOT EXISTS (
-                           SELECT ua.id FROM Assignment ua
-                           WHERE ua.task = t AND ua.user IS NOT NULL
+                       AND t.id IN (
+                           SELECT ta.task.id FROM Assignment ta
+                           WHERE ta.team.id IN (
+                                     SELECT tm.team.id FROM TeamMember tm
+                                     WHERE tm.user.id = :relatedUserId AND tm.leftAt IS NULL
+                                 )
+                             AND NOT EXISTS (
+                                     SELECT ua.id FROM Assignment ua
+                                     WHERE ua.task = ta.task AND ua.user IS NOT NULL
+                                 )
                        )))
             """)
     Page<Task> findFiltered(

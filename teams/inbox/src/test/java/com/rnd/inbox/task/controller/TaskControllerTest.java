@@ -441,6 +441,76 @@ class TaskControllerTest extends PostgresIntegrationTest {
     }
 
     @Test
+    void listTasks_sortedByDeadline_returnsTasksInThatOrder() throws Exception {
+        Task sooner = persistTask(tenant, "Due sooner");
+        sooner.setDeadline(Instant.parse("2026-11-01T00:00:00Z"));
+        taskRepository.saveAndFlush(sooner);
+        Task later = persistTask(tenant, "Due later");
+        later.setDeadline(Instant.parse("2026-12-01T00:00:00Z"));
+        taskRepository.saveAndFlush(later);
+
+        mockMvc.perform(get("/api/v1/tasks?sort=deadline,desc")
+                        .header(ACTOR_HEADER, actor.getId().toString()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content[0].title").value("Due later"))
+                .andExpect(jsonPath("$.content[1].title").value("Due sooner"));
+    }
+
+    @Test
+    void listTasks_sortedBySnakeCaseName_isAccepted() throws Exception {
+        persistTask(tenant, "Any task");
+
+        mockMvc.perform(get("/api/v1/tasks?sort=priority_score,desc&sort=created_at,asc")
+                        .header(ACTOR_HEADER, actor.getId().toString()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content", hasSize(1)));
+    }
+
+    @Test
+    void listTasks_sortedByUnsupportedProperty_returns400() throws Exception {
+        mockMvc.perform(get("/api/v1/tasks?sort=title,asc")
+                        .header(ACTOR_HEADER, actor.getId().toString()))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error").value("INVALID_TASK_SORT"));
+    }
+
+    @Test
+    void listTasks_sortedByUnknownProperty_returns400NotServerError() throws Exception {
+        mockMvc.perform(get("/api/v1/tasks?sort=noSuchColumn,asc")
+                        .header(ACTOR_HEADER, actor.getId().toString()))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error").value("INVALID_TASK_SORT"));
+    }
+
+    @Test
+    void listTasks_withoutSort_pagesThroughEveryTaskExactlyOnceNewestFirst() throws Exception {
+        Instant base = Instant.parse("2026-10-01T00:00:00Z");
+        for (int i = 0; i < 5; i++) {
+            Task task = persistTask(tenant, "Task " + i);
+            // Tasks 3 and 4 share a creation instant, so only the id tie-breaker orders them.
+            task.setCreatedAt(base.plusSeconds(Math.min(i, 3)));
+            taskRepository.saveAndFlush(task);
+        }
+
+        List<String> seen = new ArrayList<>();
+        List<String> titles = new ArrayList<>();
+        for (int page = 0; page < 3; page++) {
+            String body = mockMvc.perform(get("/api/v1/tasks?size=2&page=" + page)
+                            .header(ACTOR_HEADER, actor.getId().toString()))
+                    .andExpect(status().isOk())
+                    .andReturn().getResponse().getContentAsString();
+            objectMapper.readTree(body).get("content").forEach(task -> {
+                seen.add(task.get("id").asText());
+                titles.add(task.get("title").asText());
+            });
+        }
+
+        assertThat(seen).hasSize(5).doesNotHaveDuplicates();
+        assertThat(titles.subList(0, 2)).containsExactlyInAnyOrder("Task 3", "Task 4");
+        assertThat(titles.subList(2, 5)).containsExactly("Task 2", "Task 1", "Task 0");
+    }
+
+    @Test
     void updateTask_withValidRequest_returns200AndPersistsChange() throws Exception {
         Task task = persistTask(tenant, "Old title");
         TaskUpdateRequestDto request = new TaskUpdateRequestDto();

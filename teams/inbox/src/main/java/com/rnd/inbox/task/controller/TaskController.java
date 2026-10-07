@@ -81,13 +81,16 @@ public class TaskController {
             description = "Pass userId to get only the tasks related to that user: tasks they own, tasks "
                     + "assigned to them personally, or tasks assigned to a team they are currently a member of "
                     + "while no individual is responsible for them (no owner, no personal assignee). "
-                    + "A userId outside the actor's scope returns an empty page.")
+                    + "A userId outside the actor's scope returns an empty page. "
+                    + "Sorting is supported by deadline, priorityScore and createdAt only "
+                    + "(e.g. sort=deadline,asc); with no sort the newest tasks come first. "
+                    + "The task id is always the final tie-breaker, so paging is stable.")
     @ApiResponses({
             @ApiResponse(responseCode = "200", description = "Page of tasks",
                     content = @Content(schema = @Schema(implementation = PageResponseDto.class))),
             @ApiResponse(responseCode = "400", description = "deadlineFrom/deadlineTo not both provided, "
-                    + "noDeadline combined with a deadline range, or a filter value that does not parse "
-                    + "(e.g. userId is not a UUID)"),
+                    + "noDeadline combined with a deadline range, a filter value that does not parse "
+                    + "(e.g. userId is not a UUID), or sorting by an unsupported property"),
             @ApiResponse(responseCode = "401", description = "Missing or unrecognized actor identity")
     })
     @GetMapping
