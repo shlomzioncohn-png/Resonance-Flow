@@ -112,14 +112,60 @@ What the two plans show:
 - **Execution time: 322 ms before, 8 ms after.** `EXPLAIN ANALYZE` adds its own timing overhead,
   so these are higher than the 190 ms and 8 ms measured through the API.
 
+## Example: one `SELECT` per tenant to a `JOIN` (third row)
+
+The request asks for the first page of 20 tasks, ordered by deadline, as a system admin. The 20
+tasks belong to 13 tenants, and the response shows the tenant of every task. Shown without the
+filters that were not sent, with column lists shortened to `*` and with shortened ids.
+
+**Statements before** (16)
+
+```sql
+-- 1. the actor
+select u.*, tn.* from users u join tenants tn on tn.id = u.tenant_id
+where u.id = '00000000-...';
+
+-- 2. the page of tasks
+select t.* from tasks t
+order by t.deadline fetch first 20 rows only;
+
+-- 3-15. the tenant of each task: one statement per tenant on the page, 13 in all
+select tn.* from tenants tn where tn.id = 'bed5eccc-...';
+select tn.* from tenants tn where tn.id = '50e26b34-...';
+select tn.* from tenants tn where tn.id = 'e7f32392-...';
+-- ... 10 more statements, one per tenant
+
+-- 16. the total number of tasks, for paging
+select count(t.id) from tasks t;
+```
+
+**Statements after** (3)
+
+```sql
+-- 1. the actor
+select u.*, tn.* from users u join tenants tn on tn.id = u.tenant_id
+where u.id = '00000000-...';
+
+-- 2. the page of tasks, each one together with its tenant
+select t.*, tn.* from tasks t join tenants tn on tn.id = t.tenant_id
+order by t.deadline fetch first 20 rows only;
+
+-- 3. the total number of tasks, for paging
+select count(t.id) from tasks t;
+```
+
+What the two lists show:
+
+- **Statements: 16 before, 3 after.** The actor, the page and the count are the same three
+  statements in both lists. The other 13 loaded the tenants, and they are gone.
+- **The number of statements depended on the data.** There was one more statement for every
+  different tenant on the page, so a page of 20 tasks could add up to 20. Now every list request
+  issues 3 statements, whatever the page holds.
+- **Each of the 13 statements took 0-1 ms.** None of them was a slow query; the cost was 13 more
+  round trips to the database on every request.
+
 ## Also changed
 
 - The task id is always the last sort key, so tasks that share a value keep a fixed order and
   paging cannot repeat or skip a task.
 - Sorting by a column that does not exist returns `400` instead of `500`.
-
-## Checked and left unchanged
-
-The other task-list scenarios - filters by status, source, tier, availability and deadline range,
-and text search - ran in 1-50 ms and needed no change. Pages up to 98,000 rows deep take about
-100 ms, under the threshold.
