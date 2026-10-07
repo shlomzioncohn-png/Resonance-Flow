@@ -210,6 +210,13 @@ already has (edgeExists() / the task's own stored previousStatus).
   reduces to locking one row. Full rationale is in the class Javadoc;
   summary: dependencyGraphLock guards the edges plus any DONE-status read
   that decides whether an edge currently counts against blockingCount.
+- Resolved (#384): Kafka topics wired in chart config - consume
+  `task.dependencies.proposed` (addDependency), `task.dependencies.removed`
+  (removeDependency, PROPOSED), `task.status.updated` (onTaskStatusChanged,
+  PROPOSED - assumes Inbox's full 8-value status enum, not yet confirmed with
+  Inbox); produce `task.scheduling.updated`. onConstraintAdded/
+  onConstraintStatusChanged stay REST-triggered - no topic today, draft schemas
+  exist only in case that changes later.
 - 2026-08-30, addressed a teammate code review on PR #172:
   - Fixed: addDependency/removeDependency were only using
     dependencyGraphLock, not the per-task lock the other methods use for
