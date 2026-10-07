@@ -105,6 +105,22 @@ class CrmBridgeControllerTest {
     }
 
     @Test
+    void snapshotFailureReturnsAClearServiceUnavailableErrorNotAGenericFiveHundred() throws Exception {
+        // E.g. HubSpotDealRepository.snapshot() re-fetching a pipeline that now has an
+        // unrecognized stage label (see HubSpotDealRepositoryTest's
+        // secondSnapshotFailsEntirelyWhenTheRefetchedPipelineHasAnUnrecognizedStageLabel) - this
+        // test only needs a RuntimeException escaping dealRepository.snapshot() in general.
+        when(dealRepository.snapshot()).thenThrow(
+                new RuntimeException("HubSpot pipeline \"Sales Pipeline\" has a stage \"Some Brand New Custom Stage\" "
+                        + "with no known DealStage mapping"));
+
+        mockMvc.perform(post("/bridge/crm/sync"))
+                .andExpect(status().isServiceUnavailable())
+                .andExpect(jsonPath("$.error").value(
+                        org.hamcrest.Matchers.containsString("Some Brand New Custom Stage")));
+    }
+
+    @Test
     void getIsNotAllowed() throws Exception {
         mockMvc.perform(get("/bridge/crm/sync"))
                 .andExpect(status().isMethodNotAllowed());

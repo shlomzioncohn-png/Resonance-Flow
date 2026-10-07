@@ -519,6 +519,44 @@ class HubSpotDealRepositoryTest {
     }
 
     @Test
+    void secondSnapshotFailsEntirelyWhenTheRefetchedPipelineHasAnUnrecognizedStageLabel() {
+        // A real behavior change from the F1 fix, not previously possible: the OLD/deprecated path
+        // resolved stage mapping once, at construction, so a stage id missing from THAT mapping was
+        // a per-deal skip (see unknownStageIdReferencedByADealIsSkippedNotFailingTheWholeSync).
+        // snapshot() re-fetches and re-resolves the WHOLE pipeline on every call, so an unrecognized
+        // LABEL anywhere in the pipeline - even one no deal currently uses - now fails the entire
+        // snapshot before the deals endpoint is ever called. Known limitation for F6, documented in
+        // CLAUDE.md. CrmBridgeController's @ExceptionHandler (see CrmBridgeControllerTest) and the
+        // scheduler's existing catch(RuntimeException) + log are what keep this loud and clear
+        // instead of a confusing failure.
+        enqueueConstructorPipeline();
+        HubSpotDealRepository repository = newRepository();
+
+        String pipelineWithAnUnrecognizedLabel = """
+                {
+                  "results": [
+                    {
+                      "id": "pl-1",
+                      "label": "Sales Pipeline",
+                      "stages": [
+                        {"id": "st-100", "label": "Appointment Scheduled"},
+                        {"id": "st-999", "label": "Some Brand New Custom Stage"}
+                      ]
+                    }
+                  ]
+                }
+                """;
+        enqueueJson(pipelineWithAnUnrecognizedLabel);
+
+        UnknownHubSpotStageException exception =
+                assertThrows(UnknownHubSpotStageException.class, repository::snapshot);
+
+        assertTrue(exception.getMessage().contains("Some Brand New Custom Stage"));
+        assertEquals(2, server.getRequestCount(),
+                "constructor pipeline + the failed snapshot pipeline fetch - never reaches the deals endpoint");
+    }
+
+    @Test
     void secondSnapshotPicksUpAStageIdAddedToThePipelineAfterTheFirstSnapshot() {
         // F6 is out of scope here (the mapping RULES don't change) - this is about F1/F14's
         // freshness: the old per-instance-cached path resolved stage ids once, at construction, and
