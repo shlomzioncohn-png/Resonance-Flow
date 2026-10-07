@@ -22,7 +22,7 @@ import org.springframework.web.bind.annotation.RestController;
  * single-flight guard or lock before that lands.
  * <p>
  * Takes exactly one {@link DealSnapshot} per request and runs the lane against its {@code
- * allDeals()}/{@code asOf()} together, via {@code CrmLane.run(Stream, Instant)} - never the
+ * latestPerDeal()}/{@code asOf()} together, via {@code CrmLane.run(Stream, Instant)} - never the
  * {@code ReadCursor} overload, which would fetch the deals and the {@code asOf} from two separate,
  * potentially different snapshots (see {@code HubSpotDealRepository.snapshot()}'s Javadoc: every
  * call is an independent fetch, so two calls can legitimately disagree).
@@ -42,6 +42,6 @@ public class CrmBridgeController {
     @PostMapping("/sync")
     public CrmSyncResponse sync() {
         DealSnapshot snapshot = dealRepository.snapshot();
-        return CrmSyncResponse.from(crmLane.run(snapshot.allDeals().stream(), snapshot.asOf()));
+        return CrmSyncResponse.from(crmLane.run(snapshot.latestPerDeal().stream(), snapshot.asOf()));
     }
 }

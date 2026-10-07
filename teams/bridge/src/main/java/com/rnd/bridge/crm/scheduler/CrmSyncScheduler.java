@@ -15,7 +15,7 @@ import org.springframework.stereotype.Service;
  * once-a-day pull for now, not move to real-time, until told otherwise.
  * <p>
  * Takes exactly one {@link DealSnapshot} per run and calls {@code crmLane.run(Stream, Instant)}
- * against its {@code allDeals()}/{@code asOf()} together - the same single-snapshot-per-run shape
+ * against its {@code latestPerDeal()}/{@code asOf()} together - the same single-snapshot-per-run shape
  * {@code CrmBridgeController} uses, so a scheduled run and a manual trigger agree on what "one
  * sync" means, and neither can see a mix of two different fetches the way calling {@code
  * dealRepository.snapshot()} twice in one run could. A failure here is caught and logged rather
@@ -51,7 +51,7 @@ public class CrmSyncScheduler {
         log.info("Starting scheduled CRM sync.");
         try {
             DealSnapshot snapshot = dealRepository.snapshot();
-            IntakeResult result = crmLane.run(snapshot.allDeals().stream(), snapshot.asOf());
+            IntakeResult result = crmLane.run(snapshot.latestPerDeal().stream(), snapshot.asOf());
             log.info("Scheduled CRM sync complete: {} read, {} published, {} rejected.",
                     result.read(), result.published(), result.rejected());
         } catch (RuntimeException e) {

@@ -154,4 +154,17 @@ class JsonDealRepositoryTest {
         // pins that calling it again doesn't produce different (or differently-ordered) data.
         assertEquals(snapshot, repository.snapshot());
     }
+
+    @Test
+    void latestPerDealReturnsOneEntryPerDealWithItsLatestStage() {
+        List<Deal> latest = snapshot.latestPerDeal();
+
+        assertEquals(32, latest.size());
+        assertEquals(
+                Set.copyOf(snapshot.dealIds()),
+                latest.stream().map(Deal::dealId).collect(Collectors.toSet()));
+
+        Deal d10432 = latest.stream().filter(d -> d.dealId().equals("D-10432")).findFirst().orElseThrow();
+        assertEquals(DealStage.NEGOTIATION, d10432.stage());
+    }
 }

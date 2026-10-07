@@ -3,6 +3,7 @@ package com.rnd.bridge.crm.repository;
 import com.rnd.bridge.crm.model.Deal;
 
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -28,5 +29,24 @@ public record DealSnapshot(
     public Optional<Deal> findLatestByDealId(String dealId) {
         List<Deal> history = findHistoryByDealId(dealId);
         return history.isEmpty() ? Optional.empty() : Optional.of(history.get(history.size() - 1));
+    }
+
+    /**
+     * One {@link Deal} per deal id - its latest state by {@code stageChangedAt} - in the same
+     * deal-id order as {@link #dealIds()}. {@link #historyByDealId()}'s lists are stored
+     * oldest-first (see {@link DealRepository}'s own contract), so "latest" is each list's last
+     * element.
+     * <p>
+     * This is what a lane should publish: one event per deal, not one per stage transition.
+     * Publishing {@link #allDeals()} instead produces a wrong status/urgency the moment Inbox
+     * receives a later record for a {@code sourceRef} it has already seen, since Inbox's ingestion
+     * is insert-or-return-existing, not an upsert (finding F2 in the CRM-lane audit).
+     */
+    public List<Deal> latestPerDeal() {
+        List<Deal> latest = new ArrayList<>(dealIds.size());
+        for (String dealId : dealIds) {
+            findLatestByDealId(dealId).ifPresent(latest::add);
+        }
+        return latest;
     }
 }

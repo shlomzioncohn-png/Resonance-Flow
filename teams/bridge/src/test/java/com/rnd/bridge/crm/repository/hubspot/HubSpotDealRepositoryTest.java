@@ -556,6 +556,26 @@ class HubSpotDealRepositoryTest {
         assertEquals(DealStage.CLOSED_WON, second.findLatestByDealId("D-23").orElseThrow().stage());
     }
 
+    @Test
+    void snapshotKeepsFullHistoryWhileLatestPerDealReturnsOnlyTheLastStagePerDeal() {
+        enqueueConstructorPipeline();
+        HubSpotDealRepository repository = newRepositoryWithClock(Clock.fixed(FIXED_NOW, ZoneOffset.UTC));
+
+        enqueuePipeline();
+        String deal = dealJson("D-40", "Reopened", "1000", null, "2026-08-01T08:00:00Z",
+                String.join(",",
+                        historyEntry("st-500", "2026-08-20T10:00:00.000Z"),
+                        historyEntry("st-400", "2026-08-10T09:00:00.000Z"),
+                        historyEntry("st-100", "2026-08-01T08:00:00.000Z")));
+        enqueueJson(dealsPage(null, deal));
+
+        DealSnapshot snapshot = repository.snapshot();
+
+        assertEquals(3, snapshot.findHistoryByDealId("D-40").size());
+        assertEquals(1, snapshot.latestPerDeal().size());
+        assertEquals(DealStage.CLOSED_WON, snapshot.latestPerDeal().get(0).stage());
+    }
+
     /** A {@link Clock} whose {@link #instant()} can be advanced between calls, for proving asOf moves. */
     private static final class MutableClock extends Clock {
         private Instant instant;
