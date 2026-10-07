@@ -1,9 +1,9 @@
 package com.rnd.bridge.jira.service;
 
 import com.rnd.bridge.publish.kafka.KafkaPayloadPublisher;
-import com.rnd.bridge.task.BridgeTaskEventDto;
 import com.rnd.bridge.task.TaskValidator;
 import com.rnd.bridge.task.model.Task;
+import com.rnd.inbox.event.StructuredTaskEvent;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -27,7 +27,7 @@ public class JiraKafkaProducer {
 
     @Autowired
     public JiraKafkaProducer(
-            @Qualifier("bridgeTaskEventKafkaTemplate") KafkaTemplate<String, BridgeTaskEventDto> kafkaTemplate,
+            @Qualifier("bridgeTaskEventKafkaTemplate") KafkaTemplate<String, StructuredTaskEvent> kafkaTemplate,
             @Value("${bridge.structured-tasks-topic:bridge.structured.tasks}") String topic,
             TaskValidator taskValidator) {
         this.TOPIC = (topic != null && !topic.isBlank()) ? topic : DEFAULT_TOPIC;
@@ -42,7 +42,7 @@ public class JiraKafkaProducer {
 
         taskValidator.validate(task);
 
-        log.info("Publishing task {} to topic {} as BridgeTaskEventDto", task.sourceRef(), TOPIC);
+        log.info("Publishing task {} to topic {} as StructuredTaskEvent", task.sourceRef(), TOPIC);
 
         kafkaPayloadPublisher.publish(task);
 
