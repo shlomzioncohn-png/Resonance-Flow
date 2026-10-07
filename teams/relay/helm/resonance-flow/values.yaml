@@ -25,6 +25,8 @@ podSecurityContext: {}
 securityContext: {}
 volumes: []
 volumeMounts: []
+objectStorage:
+  provider: minio
 dependencies:
   - name: kafka
     port: 9092
@@ -94,7 +96,7 @@ components:
     # A list set in values-<service>.yaml replaces this one wholesale (Helm merges
     # maps, not lists) - repeat every entry there, don't just add yours.
     dependencies:
-      - name: minio
+      - name: object-storage
         port: 9000
       - name: postgresql
         port: 5432
@@ -161,6 +163,8 @@ components:
     resources: *defaultResources
     <<: *defaultHealthProbes
     env: {}
+    objectStorage:
+      bucket: "bridge-raw"
     config:
       spring:
         config:
@@ -172,8 +176,6 @@ components:
           properties:
             security.protocol: "SASL_PLAINTEXT"
             sasl.mechanism: "PLAIN"
-      minio:
-        bucket: "bridge-raw"
       github:
         api:
           base-url: "https://api.github.com"
@@ -232,15 +234,15 @@ components:
         mountPath: /etc/resonance-flow/secrets/object-storage
         readOnly: true
     dependencySecretVolumes:
-        - name: object-storage-credentials
-          dependencyName: minio
-          items:
-            - key: root-user
-              path: minio.access-key
-            - key: root-password
-              path: minio.secret-key
+      - name: object-storage-credentials
+        dependencyName: object-storage
+        items:
+          - key: root-user
+            path: minio.access-key
+          - key: root-password
+            path: minio.secret-key
     dependencies:
-      - name: minio
+      - name: object-storage
         port: 9000
   lens-frontend:
     enabled: true

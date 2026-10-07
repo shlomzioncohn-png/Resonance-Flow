@@ -7,8 +7,9 @@
 
 {{- $_ := set $config.spring.kafka.properties "sasl.jaas.config" (include "resonance-flow.kafkaSaslJaasConfig" $) }}
 
-{{- $_ := set $config.minio "endpoint" (printf "http://%s" (include "resonance-flow.dependencyAddress" (dict "root" $ "deps" $component.dependencies "name" "minio"))) }}
-
+{{- $objectStorageConfig := deepCopy $component.objectStorage }}
+{{- $_ := set $objectStorageConfig "endpoint" (printf "http://%s" (include "resonance-flow.dependencyAddress" (dict "root" $ "deps" $component.dependencies "name" "object-storage"))) }}
+{{- $_ := set $config "minio" $objectStorageConfig }}
 ---
 {{ include "resonance-flow.configMapHeader" (dict "root" $ "component" "bridge") }}
 
