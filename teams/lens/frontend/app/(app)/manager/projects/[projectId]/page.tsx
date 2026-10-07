@@ -29,9 +29,6 @@ export default function AdminProjectDetailsPage() {
   const [error, setError] = useState<string | null>(null);
 
   const fetchProject = useCallback(() => {
-    setState('loading');
-    setError(null);
-
     getProjectDetails(projectId)
       .then((data) => {
         setProject(data);
@@ -44,11 +41,15 @@ export default function AdminProjectDetailsPage() {
       });
   }, [projectId]);
 
+  // The effect body never calls setState synchronously — the loading
+  // transition for a retry happens in handleRetry instead.
   useEffect(() => {
     fetchProject();
   }, [fetchProject]);
 
   const handleRetry = () => {
+    setState('loading');
+    setError(null);
     fetchProject();
   };
 
