@@ -45,6 +45,10 @@ benchmark = [
     "psutil",  # cross-platform peak-RSS/CPU sampling; stdlib `resource` is Unix-only
     "paddleocr",
     "paddlepaddle",
+    # ASR size benchmark (#135). faster-whisper, not openai-whisper: it runs
+    # Whisper on CTranslate2 instead of PyTorch -- faster on CPU, lower peak
+    # memory, and no multi-GB torch install. Same model weights/sizes.
+    "faster-whisper",
 ]
 
 [build-system]
@@ -68,6 +72,12 @@ exclude = ["_pb2\\.py$"]
 # not a blanket ignore for the whole benchmarks/ tree.
 [[tool.mypy.overrides]]
 module = "paddleocr"
+ignore_missing_imports = true
+
+# Same reason for faster-whisper, and CI never installs `.[benchmark]` anyway,
+# so without this `make lint` fails on the import in CI.
+[[tool.mypy.overrides]]
+module = "faster_whisper"
 ignore_missing_imports = true
 
 [[tool.mypy.overrides]]
