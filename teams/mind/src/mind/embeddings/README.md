@@ -130,11 +130,9 @@ behind duplicate detection (#471) and dependency-target resolution (#245):
 apply their own similarity threshold to the result.
 
 `resolve_dependency_targets(store, references, *, k=5)`
-(`dependency_resolution.py`) is #245 itself: given Yonit's extracted
-free-text dependency mentions (`list[str]`, one string per mention --
-the interface agreed with her), returns one ranked candidate-task list
-per reference, same order. Makes no match/no-match decision -- that's
-#244's confidence scoring, on top of these same similarity scores:
+(`dependency_resolution.py`) is #245: a `list[str]` of Yonit's free-text
+dependency mentions in, one ranked candidate list out per string, same
+order. No match/no-match decision -- that's #244, on these same scores:
 
 ```python
 from mind.embeddings import resolve_dependency_targets
