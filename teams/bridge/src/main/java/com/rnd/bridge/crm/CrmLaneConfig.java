@@ -19,7 +19,7 @@ import org.springframework.kafka.core.KafkaTemplate;
 /**
  * Bean wiring for {@link CrmLane}'s collaborators that intentionally carry
  * no Spring annotations of their own - {@link DealToTaskMapper} and
- * {@link TaskValidator} are plain, framework-free classes shared or shareable
+ * {@link CrmTaskValidator} are plain, framework-free classes shared or shareable
  * across lanes - plus the publisher, which is the logging stand-in unless
  * the {@code kafka} profile is active, mirroring how the {@code hubspot}
  * profile overrides {@code JsonDealRepository} elsewhere in this package.
@@ -37,6 +37,11 @@ class CrmLaneConfig {
     @Bean
     TaskValidator taskValidator() {
         return new TaskValidator();
+    }
+
+    @Bean
+    CrmTaskValidator crmTaskValidator(TaskValidator taskValidator) {
+        return new CrmTaskValidator(taskValidator);
     }
 
     @Bean

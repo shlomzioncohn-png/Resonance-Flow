@@ -45,7 +45,7 @@ class CrmLaneIntegrationTest {
         return new CrmLane(
                 new CrmSourceReader(repository),
                 new DealToTaskMapper(VALID_TENANT_ID, new EnrichmentProperties(), new NoOpTaskEnricher()),
-                new TaskValidator(),
+                new CrmTaskValidator(new TaskValidator()),
                 new LoggingPayloadPublisher<Task>());
     }
 
