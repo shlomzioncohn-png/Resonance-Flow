@@ -68,6 +68,29 @@ class CrmLaneIntegrationTest {
     }
 
     @Test
+    void aNoProfileRunUsingTheProductionDefaultTenantIdPublishesEveryDealNotRejectingItForTenantShape() {
+        // Pins the fix for a real regression caught before this landed: CrmTaskValidator validates
+        // tenant-id SHAPE unconditionally, not just under the kafka profile, so the OLD
+        // "local-crm-org" placeholder CRM_ORGANIZATION_ID defaulted to - a valid string, but not
+        // UUID-shaped - would have made every task fail validation on a plain `mvn spring-boot:run`
+        // (no profiles: JsonDealRepository + LoggingPayloadPublisher). The production default is
+        // now exactly CrmTaskValidator.LOCAL_PLACEHOLDER_TENANT_ID (see application.yml) because it
+        // passes this validator while still being obviously fake.
+        DealRepository repository = repository();
+        CrmLane lane = new CrmLane(
+                new CrmSourceReader(repository),
+                new DealToTaskMapper(
+                        CrmTaskValidator.LOCAL_PLACEHOLDER_TENANT_ID, new EnrichmentProperties(), new NoOpTaskEnricher()),
+                new CrmTaskValidator(new TaskValidator()),
+                new LoggingPayloadPublisher<Task>());
+
+        IntakeResult result = lane.run(ReadCursor.full(), repository.snapshot().asOf());
+
+        assertEquals(0, result.rejected(), () -> "expected no rejections, got: " + result.errors());
+        assertEquals(32, result.published());
+    }
+
+    @Test
     void theRunIsDeterministicAcrossRepeatedInvocations() {
         DealRepository repository = repository();
         Instant asOf = repository.snapshot().asOf();

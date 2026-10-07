@@ -21,6 +21,21 @@ import java.util.regex.Pattern;
  */
 public final class CrmTaskValidator implements PayloadValidator<Task> {
 
+    /**
+     * The only tenant id value {@code CRM_ORGANIZATION_ID} may default to without the
+     * {@code kafka} profile (see {@code application.yml}'s {@code bridge.crm.organization-id} and
+     * {@code CrmLaneConfig.dealToTaskMapper}) - a clearly fake, canonically-shaped UUID (RFC 4122's
+     * "nil" UUID), not the old {@code "local-crm-org"} placeholder. This class validates tenant-id
+     * shape unconditionally, including for a no-profile local/demo run through
+     * {@code JsonDealRepository} + {@code LoggingPayloadPublisher}, so the default itself has to be
+     * UUID-shaped or every task in that run would be rejected - that regression is exactly why this
+     * constant exists, rather than leaving the non-UUID placeholder in place.
+     * {@code CrmLaneConfig}'s {@code kafka}-profile startup check still rejects this exact value by
+     * name (not just by shape), so forgetting to override {@code CRM_ORGANIZATION_ID} for a real
+     * deployment is still caught.
+     */
+    public static final String LOCAL_PLACEHOLDER_TENANT_ID = "00000000-0000-0000-0000-000000000000";
+
     // Canonical 36-char 8-4-4-4-12 hex-hyphenated shape, case-insensitive - not
     // UUID.fromString(), which is lenient enough to accept malformed strings like "1-1-1-1-1".
     private static final Pattern UUID_PATTERN = Pattern.compile(
@@ -48,6 +63,7 @@ public final class CrmTaskValidator implements PayloadValidator<Task> {
         }
     }
 
+    /** Shared with {@code CrmLaneConfig}'s startup check, so the two agree on what "valid" means. */
     public static boolean isValidTenantId(String value) {
         return value != null && UUID_PATTERN.matcher(value).matches();
     }
