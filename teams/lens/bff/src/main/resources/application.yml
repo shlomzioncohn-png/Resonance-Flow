@@ -10,3 +10,11 @@ management:
     web:
       exposure:
         include: health,info
+
+# Inbox service configuration — used by InboxUserClient (admin Users screen).
+# Override INBOX_SERVICE_URL to point at a different Inbox without recompiling.
+inbox:
+  service:
+    url: ${INBOX_SERVICE_URL:http://inbox-service:8080}
+  connect-timeout-ms: ${INBOX_CONNECT_TIMEOUT_MS:2000}
+  read-timeout-ms: ${INBOX_READ_TIMEOUT_MS:10000}

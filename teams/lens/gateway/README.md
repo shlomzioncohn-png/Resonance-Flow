@@ -188,7 +188,9 @@ issuer — gets a JSON `401 UNAUTHORIZED` and **never reaches the BFF**.
 > `APP_AUTH_ENABLED=true` to test with real tokens (as in the curl example below).
 
 > Still mocked (Auth stage 2): the userId forwarded to BFF as `X-User-Id` is
-> still `emp_001`, not the token's `sub`, and roles aren't enforced yet.
+> still `emp_001` (`/api/workspace/**`) or a fixed `app.mock-actor-id`
+> (`/api/manager/users/**`), not the token's `sub`. Roles *are* enforced for
+> `/api/manager/users/**` — see Gateway Routes below.
 
 ### Local Keycloak
 
@@ -227,15 +229,32 @@ the off switch is covered by `AuthDisabledTests`.
 
 ## Gateway Routes
 
-The Gateway currently handles three workspace endpoints (manual routing via `WorkspaceController`):
+The Gateway currently handles these endpoints (manual routing via explicit controllers):
 
 | Endpoint | Method | Purpose |
 |----------|--------|---------|
 | `/api/workspace/recommend` | POST | Get task recommendation for available time |
 | `/api/workspace/tasks/{taskId}` | GET | Get full task details by ID |
 | `/api/workspace/tasks/{taskId}/status` | PATCH | Update task status |
+| `/api/manager/users` | GET | List users, MANAGER only — see below |
+| `/api/manager/users/{id}` | GET | Get one user's details, MANAGER only |
+| `/api/manager/users/{id}` | PATCH | Edit displayName/firstName/lastName/phone, MANAGER only |
+| `/api/manager/users/{id}/status` | PATCH | Change status (ACTIVE/SUSPENDED/DISABLED), MANAGER only |
 
 **All endpoints forward to BFF** at `http://bff-service:8080` using `RestTemplate`.
+
+**`/api/manager/users/**` is MANAGER-only for real**, not just on paper: `SecurityConfig` adds
+`.requestMatchers("/api/manager/users/**").hasRole("MANAGER")` ahead of the general `/api/**`
+rule, backed by `KeycloakRoleConverter` mapping the `lens` realm's actual `manager`/`employee`
+roles (`realm_access.roles`) to Spring authorities — see the Authentication section above for how
+to get a token for each. This only takes effect once `APP_AUTH_ENABLED=true`; while auth is off
+(today's default) this route is open like every other `/api/**` route.
+
+**Known gap:** `ManagerUsersController` still forwards `X-User-Id` as a fixed mock id
+(`app.mock-actor-id`), not one derived from the token's `sub` — there is no per-Keycloak-identity
+Inbox user mapping in this repo yet (the task this feature implements,
+`manager-users-screen-task.md`, assumes a prior "auth" task that was never built). See that
+controller's javadoc.
 
 **Future phases:** Once more team services are ready, BFF will expand to handle Bridge, Chain, Inbox, and Mind routing. Gateway's endpoint structure remains unchanged.
 

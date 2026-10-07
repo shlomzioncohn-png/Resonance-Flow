@@ -26,6 +26,7 @@ bff:
     workspace-recommend: /workspace/recommend
     tasks: /workspace/tasks
     employee-task: /workspace/employee-task
+    manager-users: /manager/users
 
 server:
   port: 0

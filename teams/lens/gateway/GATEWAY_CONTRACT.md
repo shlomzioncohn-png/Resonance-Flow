@@ -61,8 +61,12 @@ The Gateway exposes four endpoints for the Frontend's workspace functionality. A
 | GET | `/api/workspace/tasks/{taskId}` | `http://bff-service:8080/workspace/tasks/{taskId}` | BFF (Sari) | Get full task details by ID |
 | PATCH | `/api/workspace/tasks/{taskId}/status` | `http://bff-service:8080/workspace/tasks/{taskId}/status` | BFF (Sari) | Update task status |
 | GET | `/api/workspace/employee-task` | `http://bff-service:8080/workspace/employee-task` | BFF (Sari) | Get the employee's current task (My Workspace demo); mocked at the BFF, no downstream service owns this yet |
+| GET | `/api/manager/users` | `http://bff-service:8080/manager/users` | BFF (Sari) | List users, **MANAGER-only** (`hasRole`). Real call through to Inbox — not mocked. |
+| GET | `/api/manager/users/{id}` | `http://bff-service:8080/manager/users/{id}` | BFF (Sari) | One user's details, MANAGER-only |
+| PATCH | `/api/manager/users/{id}` | `http://bff-service:8080/manager/users/{id}` | BFF (Sari) | Edit displayName/firstName/lastName/phone only, MANAGER-only |
+| PATCH | `/api/manager/users/{id}/status` | `http://bff-service:8080/manager/users/{id}/status` | BFF (Sari) | Change status (ACTIVE/SUSPENDED/DISABLED), MANAGER-only, 409 on self-change |
 
-**Current Implementation:** Manual routing via `WorkspaceController.java` — each endpoint explicitly forwards to BFF using `RestTemplate`.
+**Current Implementation:** Manual routing via `WorkspaceController.java` and `ManagerUsersController.java` — each endpoint explicitly forwards to BFF using `RestTemplate`.
 
 **Future Phases:** Once more team services are ready, BFF will expand to route to Bridge, Chain, Inbox, and Mind services. Gateway's routing layer remains unchanged.
 
