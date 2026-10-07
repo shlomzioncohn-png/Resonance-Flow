@@ -1,0 +1,65 @@
+# The cluster's ingress controller: serves the resonance-flow chart's Ingress
+# (ingress.className: traefik, set in helm/resonance-flow/environments/shared.yaml).
+# Its own Application and namespace, not a subchart of resonance-flow: it's
+# cluster-wide infra, and a problem in one shouldn't block the other's sync.
+#
+# Traefik, not ingress-nginx: ingress-nginx was archived on 2026-03-24 and gets
+# no further releases or security fixes.
+#
+# sync-wave "2": after resonance-flow ("0") and schema-sync-hook ("1"), not before.
+# Its Service is type LoadBalancer - on a cluster that can't provision one, it stays
+# Progressing forever, and an earlier wave would then block every later one.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: traefik
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "2"
+spec:
+  project: default
+  source:
+    repoURL: https://traefik.github.io/charts
+    chart: traefik
+    targetRevision: 41.6.1
+    helm:
+      valuesObject:
+        ingressClass:
+          enabled: true
+          # Ingresses must opt in with ingressClassName: traefik.
+          isDefaultClass: false
+          name: traefik
+        providers:
+          kubernetesIngress:
+            # Writes the Service's external address into each Ingress's status,
+            # so `kubectl get ingress` shows the address the DNS record points at.
+            publishedService:
+              enabled: true
+        # Every plain-HTTP request gets a permanent redirect to HTTPS, before any
+        # Ingress rule matches - /auth/* carries LENS passwords, so it must never be
+        # served over port 80. Controller-wide, so it covers any future Ingress too.
+        ports:
+          web:
+            http:
+              redirections:
+                entryPoint:
+                  to: websecure
+                  scheme: https
+                  permanent: true
+        service:
+          type: LoadBalancer
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: traefik
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+    retry:
+      limit: 5
+      backoff:
+        duration: 5s
+        factor: 2
+        maxDuration: 3m
