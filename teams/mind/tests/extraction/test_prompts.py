@@ -20,7 +20,9 @@ def test_system_prompt_names_every_field_and_forbids_extras() -> None:
     for field in ("title", "description", "source_ref", "has_dependencies"):
         assert field in prompt
     assert "null" in prompt
-    assert "Exactly those four keys" in prompt
+    # Worded without a count on purpose: the same sentence has to hold when
+    # the classification block adds three more keys below it.
+    assert "Exactly the keys listed above" in prompt
 
 
 def test_extraction_prompt_carries_source_type_and_content() -> None:
@@ -66,3 +68,43 @@ def test_json_braces_in_content_survive_filling() -> None:
     prompt = extraction_prompt(SourceType.DOC, 'the payload was {"id": 7}')
 
     assert '{"id": 7}' in prompt
+
+
+# --- the classification block (#351) -------------------------------------
+
+
+def test_the_switch_off_prompt_never_mentions_classification() -> None:
+    """A model cannot volunteer a key it was never told about."""
+
+    prompt = system_prompt()
+
+    for word in ("tier", "urgency", "role_context", "STRATEGIC"):
+        assert word not in prompt
+
+
+def test_the_switch_on_prompt_adds_the_three_and_keeps_the_four() -> None:
+    prompt = system_prompt(classify=True)
+
+    for field in ("title", "source_ref", "tier", "urgency", "role_context"):
+        assert field in prompt
+    assert prompt.startswith(system_prompt())
+
+
+def test_the_classification_block_spells_out_every_permitted_value() -> None:
+    """Categorical fields need the vocabulary written out, or the model
+    invents a neighbouring word that then fails validation."""
+
+    prompt = system_prompt(classify=True)
+
+    for value in ("OPERATIONAL", "TACTICAL", "STRATEGIC"):
+        assert value in prompt
+    for value in ("DEVELOPER", "MANAGER", "HIGHER_MANAGER", "FIELD_ENGINEER",
+                  "SALESPERSON", "CEO"):
+        assert value in prompt
+
+
+def test_the_classification_block_says_null_is_a_correct_answer() -> None:
+    prompt = system_prompt(classify=True)
+
+    assert "null" in prompt
+    assert "better than a guess" in prompt

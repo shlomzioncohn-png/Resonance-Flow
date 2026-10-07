@@ -13,6 +13,12 @@ from dataclasses import dataclass
 class ExtractionConfig:
     """How hard to try, and how long to wait between tries."""
 
+    # Whether to ask for tier, urgency and role_context in the same call
+    # (#351). A switch rather than a rewrite, so both shapes can be run
+    # from one build: the day a provider is reachable for a measured run,
+    # comparing them is a flag rather than a checkout of an old commit.
+    classify: bool = True
+
     # Total rounds spent on one item: the first attempt plus repairs.
     # Past this the item is recorded as failed and the pipeline moves on.
     max_attempts: int = 3

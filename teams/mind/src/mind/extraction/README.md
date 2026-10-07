@@ -192,3 +192,141 @@ On a network that intercepts TLS, add `--os-trust-store` (needs
 `pip install truststore`). Python verifies against certifi and will reject an
 interception certificate that the browser and curl accept; the flag hands
 verification to the OS, which already trusts it, rather than weakening it.
+
+## Classification at extraction time (#351)
+
+Three more fields, asked for in the same call: `tier`, `urgency` and
+`role_context`. All three are nullable, and that is the stance rather than a
+convenience — the prompt tells the model that `null` is the correct answer
+when the content does not make the value clear, because Chain's selection and
+the segmented ranking both act on `tier`, and a wrong value there is worse
+than a missing one.
+
+`role_context` is read from the content alone, never from who sent the message
+or who might be assigned it. A task can carry a role before it has an owner,
+which is most obvious for the CEO persona: it has no task tool of its own and
+reaches Mind only through unstructured content.
+
+### The switch
+
+`ExtractionConfig.classify` decides whether the three fields are asked for at
+all. It is read in exactly two places inside `extract()` — which prompt is
+built, and which schema the answer is validated against — because those are
+one decision: a prompt asking for seven fields and a schema accepting four
+would fail every answer it received.
+
+| | `classify=False` | `classify=True` |
+|---|---|---|
+| system prompt | `system.md` | `system.md` + `classification.md` |
+| schema | `ExtractedFields` | `ExtractedFieldsWithClassification` |
+
+With the switch off the prompt never mentions `tier` at all. That is
+deliberate: a model that has heard the word sometimes volunteers the field,
+and `extra="forbid"` would then reject an otherwise good answer.
+
+The combined model inherits from both halves, so it *is* an `ExtractedFields`.
+That is what lets `confidence.py`, `extractor.py` and every other caller stay
+untouched by the switch, and it is pinned by a test.
+
+The switch exists so that both configurations can be run from one build. The
+question it is there to answer — does asking for seven fields degrade the four
+basic ones? — needs the two run over the same inputs, and without it that
+comparison would mean checking out an old commit mid-run.
+
+### An unusable classification becomes null, not a repair round
+
+A value outside the permitted vocabulary (`"critical"` for a tier), or an
+urgency outside 1-5, is recorded as `None` and logged — it does not fail
+validation.
+
+This is the one place that departs from the "forgive formatting, never
+content" line, and the asymmetry behind it is the point. `title` is required
+by the contract, so a bad one is a real failure and still earns a repair
+round. These three are optional by design, and a model that reached outside
+the vocabulary has demonstrated exactly the uncertainty that `null` exists to
+express. Measured on the same answer, before and after:
+
+| | invented `tier`, repaired | invented `tier`, nulled |
+|---|---|---|
+| outcome | `ExtractionFailure` | `ExtractionSuccess` |
+| provider calls | 3 | 1 |
+| title, description, source_ref | discarded | kept |
+| the other two classification fields | discarded | kept |
+
+Losing a good title, description and source_ref — and paying three calls for
+it — because of one word in an optional field was the wrong trade.
+
+Urgency is **not** clamped into range. A `7` might mean "past the top of your
+scale", or it might mean the model scored on 1 to 10, where 7 is middling.
+Those are indistinguishable from here, and the costs are not symmetric: a
+missing urgency is visibly missing, while a clamped one is a plausible-looking
+number that quietly inflates every ranking downstream.
+
+Every dropped value is logged at WARNING with the text the model actually
+wrote. Without that, a model inventing values all day would be
+indistinguishable from an honest one declining to guess — both end in `null`.
+
+### Why `confidence` does not change
+
+`confidence` is the confidence in the *extraction*, and it is left exactly as
+#350 built it. An empty classification field costs nothing: the signals in
+`confidence.py` name `description` and `source_ref` explicitly, and the same
+answer scores identically whether the three fields are absent or present and
+empty.
+
+The contract itself argues for this. It carries `effort_estimate_confidence`
+as a separate field, so when it wants confidence about one field it says so.
+There is no `tier_confidence`, and inventing a meaning for the shared one
+would misread it for Inbox.
+
+One second-order effect is worth knowing rather than engineering around: if a
+classification problem does cause a repair round, the `repair_attempts`
+penalty fires and lowers the score for the extraction as a whole. After the
+change above that is now rare — an unusable value no longer causes a repair —
+but it is not impossible, and a low score with no obvious cause in the four
+basic fields may have come from here.
+
+### What was measured, and what was not
+
+Run against the live API on 2026-10-07 (`gemini-3.6-flash`), over six tasks
+from the **dev** half of the persona split — one per role, never the holdout,
+and never used as prompt examples.
+
+**Does asking for seven fields degrade the four?** No difference found. The
+same six tasks, run with the switch off and then on:
+
+| | title | `source_ref` | `has_dependencies` | mean confidence |
+|---|---|---|---|---|
+| off vs on | 6/6 identical | 6/6 | 6/6 | 0.855 vs 0.855 |
+
+All six titles came back byte-identical. Neither configuration needed a repair
+round; the two extra provider calls in the classified run were 503 retries.
+
+Three caveats, all of them load-bearing:
+
+- the noise floor — the same configuration run twice — rests on **two** items,
+  not six: the free tier's daily quota ran out part-way through the third run.
+  So "identical" is not fully separable from "deterministic at temperature 0".
+- n=6, one model, one run per configuration. This is a signal, not a number to
+  quote.
+- it does not test **one call for seven fields against two separate calls**,
+  which is the comparison #351 actually names. That one cannot be run at all
+  yet: no split path exists. The pieces for it do — `classification.md` is
+  already its own prompt and `ClassificationFields` its own model — so
+  building it is wiring rather than rewriting, but until it is built the
+  combined prompt is the issue's recommended starting point rather than a
+  measured winner.
+
+**Is the classification any good?** Unknown, and not claimed. A six-task spot
+check against the labelled dev scenarios agreed on `tier` three times out of
+six, with every disagreement a borderline judgement (a departmental newsletter
+labelled strategic, read as operational) rather than a nonsense answer. That
+points at the tier definitions in `classification.md` differing from the ones
+the scenario authors used — a prompt-calibration task to do against
+`MIND-05-Task-Flow-Explained.md` §3, not a code defect.
+
+`role_context` came back null in three of six, each time on a task whose text
+genuinely names no role. Worth knowing before anyone treats the persona labels
+as ground truth for it: the label is the persona whose inbox the task sits in,
+while this field is required to come from the content alone. The two are not
+the same quantity, and a null may be the honest answer where a label exists.
