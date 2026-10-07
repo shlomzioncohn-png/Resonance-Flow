@@ -101,7 +101,9 @@ The transport is based on WebSockets, despite the current traffic being primaril
 
 A REST poll endpoint covers clients that cannot hold a long-lived WebSocket connection.
 
-For reconnects, the client supplies the last received event ID (e.g., via a reconnection message payload or query parameter), and the receiving instance can recover missed events from its local ring buffer or directly from Kafka.
+The Pipe is not exposed to browsers directly. Its only caller is lens-bff, which holds the WebSocket to the Pipe on the user's behalf after lens-gateway has authenticated the user — see [§08](#08--isolation--sensitive-data).
+
+For reconnects, the caller supplies the last received event ID on the handshake (`Last-Event-ID` header or `lastEventId` query parameter), and the receiving instance can recover missed events from its local ring buffer or directly from Kafka.
 
 ---
 
@@ -218,7 +220,7 @@ A hard ceiling is applied so a continuously changing user still receives a bound
 
 ### The problem
 
-At any moment there can be thousands of live WebSocket connections spread across many instances behind one Gateway/LB.
+At any moment there can be thousands of live WebSocket connections spread across many instances behind one Service.
 
 A Kafka notification is addressed to a specific user, but that user's browser can be connected to any Pipe instance.
 
@@ -322,7 +324,8 @@ The workload therefore uses a normal Kubernetes `Deployment`, not a `StatefulSet
 | Shutdown | `terminationGracePeriodSeconds: 30` | Stop new connections and drain existing streams |
 | Readiness probe | `GET /readyz` | Do not route clients before Kafka consumption is active |
 | Liveness probe | `GET /healthz` | Process up |
-| Ingress / LB timeout | > 60s idle timeout | Must exceed the 15s heartbeat interval; depends on the ingress controller/cloud LB in use, not settable on the Deployment itself |
+| Ingress | None — `ClusterIP` Service only | The Pipe's only caller is lens-bff (§08); a `NetworkPolicy` denies every other in-cluster source |
+| Edge idle timeout | > 60s, on lens-gateway's Ingress / LB | The browser's long-lived connection terminates at the edge, not here; that timeout must exceed the 15s heartbeat interval and is set on the ingress controller/cloud LB, not on this Deployment |
 
 ### Consumer group behavior
 
@@ -399,7 +402,7 @@ A crashed pod loses only ephemeral state:
 
 The durable source of truth is Kafka.
 
-The client reconnects through the Gateway to any available pod and supplies `Last-Event-ID`.
+lens-bff reconnects to any available pod (through the Pipe's `ClusterIP` Service) and supplies `Last-Event-ID`.
 
 That pod recovers any missing events using the recovery flow in §06.
 
@@ -444,7 +447,7 @@ After replay, the connection rejoins the normal live WebSocket path.
 **Fix:**
 
 - client reconnects use exponential backoff with jitter;
-- Gateway rate-limits reconnects;
+- lens-gateway rate-limits browser reconnects;
 - rolling deployments use `maxUnavailable: 0`;
 - recovery is driven by `Last-Event-ID`.
 
@@ -579,8 +582,8 @@ Confirm whether the broker already expires empty groups with no committed offset
 
 | Endpoint | Purpose | Notes |
 |---|---|---|
-| `GET /api/v1/events/stream` (WebSocket upgrade) | Main WebSocket stream | `Last-Event-ID` sent as query param or first client frame on connect; user/tenant resolved from auth token |
-| `GET /api/v1/events/sync?since=` | REST catch-up / polling fallback | Same dedup rules apply |
+| `GET /api/v1/events/stream` (WebSocket upgrade) | Main WebSocket stream | Requires `X-Org-Id` / `X-User-Id` headers (400 if missing or blank); optional resume token as `Last-Event-ID` header or `lastEventId` query param (400 if not a number) — client frames are ignored |
+| `GET /api/v1/events/sync?since=` | REST catch-up / polling fallback | Same identity headers; same dedup rules apply |
 | `GET /healthz` | Liveness | Process up |
 | `GET /readyz` | Readiness | Kafka consumer attached and not critically lagging |
 
@@ -588,38 +591,47 @@ Confirm whether the broker already expires empty groups with no committed offset
 
 ```text
 Browser
-   │
+   │  LENS JWT (RS256, issued by lens-gateway at login)
+   ▼
+lens-gateway (Ingress)
+   │  validates the token's signature with its own public key
+   ▼
+lens-bff
    │ GET /api/v1/events/stream
    │ Upgrade: websocket
-   │ Connection: Upgrade
-   │ (optional) Last-Event-ID sent on connect
+   │ X-Org-Id / X-User-Id  (from the validated token)
+   │ (optional) Last-Event-ID
    ▼
-Gateway / LB
+Pipe Service (ClusterIP)
    │
    ▼
 Any Pipe Instance
    │
-   ├── register user_id → WebSocket connection
+   ├── register org_id:user_id → WebSocket connection
    │
-   └── start delivery (bidirectional; pings/pongs for keepalive)
+   └── start delivery (pings/pongs for keepalive)
 ```
 
-The Gateway does not need to know which instance previously served the user.
+Neither lens-gateway nor lens-bff needs to know which instance previously served the user.
 
 ---
 
 ## 08 — Isolation & sensitive data
 
-The Gateway authenticates every connection and resolves:
+The Pipe never sees a token. Authentication happens upstream:
 
-```text
-org_id
-user_id
-```
+1. **lens-gateway** issues an RS256-signed JWT at login and validates it on every request (signature + expiry) — there is no external identity provider.
+2. **lens-bff** resolves `org_id` and `user_id` from that validated identity and forwards them to the Pipe as `X-Org-Id` / `X-User-Id`.
+3. **The Pipe** trusts those headers as-is (`TrustedHeaderAuthenticator`), rejecting a missing or blank value with `400` — otherwise blank values would collapse into one shared `:` key and leak notifications between users.
 
-from the authentication token.
+Trusting headers is only safe because nothing but lens-bff can reach the Pipe:
 
-A client cannot request another user's stream by supplying a different user ID.
+- the Pipe has no Ingress — only a `ClusterIP` Service;
+- a `NetworkPolicy` (`components.notification-delivery.networkPolicy.allowFrom: [lens-bff]` in the shared chart) denies ingress from every other pod in the cluster, so no other workload can forge the headers.
+
+Because the only client is server-to-server, the WebSocket endpoint does not check `Origin`; browser-facing origin checks live in lens-gateway.
+
+A browser cannot request another user's stream by supplying a different user ID — it never talks to the Pipe, and lens-bff derives the IDs from the token rather than from client input.
 
 The notification topic is keyed by:
 
@@ -762,7 +774,11 @@ This causes every instance to consume the complete notification topic independen
 
 No sticky routing is required.
 
-The Gateway can establish a connection to any Pipe instance.
+lens-bff can establish a connection to any Pipe instance through the Pipe's `ClusterIP` Service.
+
+#### Identity
+
+The Pipe trusts `X-Org-Id` / `X-User-Id` from lens-bff, which is enforced as its only caller by a `NetworkPolicy` — see [§08](#08--isolation--sensitive-data).
 
 #### Shared state
 
