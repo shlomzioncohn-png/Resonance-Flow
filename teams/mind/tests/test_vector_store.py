@@ -61,11 +61,13 @@ async def test_embed_is_independent():
     assert vec != embed("Completely unrelated marketing task")
 
 
-def test_embed_rejects_text_with_no_extractable_tokens():
-    """Empty/punctuation-only text would hash to an all-zero vector, which
-    makes pgvector's cosine-distance operator return NaN and silently
-    corrupt search ranking -- embed() should refuse it instead."""
-    for text in ("", "   ", "!!!"):
+def test_embed_rejects_empty_or_whitespace_only_text():
+    """A task with no title or description has nothing meaningful to
+    index -- embed() refuses it as a semantic guard, not a model
+    limitation (BGE happily embeds punctuation-only text like "!!!";
+    unlike the earlier HashingVectorizer placeholder, that's no longer
+    an all-zero/NaN-cosine-distance risk, so it's not rejected)."""
+    for text in ("", "   "):
         with pytest.raises(ValueError):
             embed(text)
 
