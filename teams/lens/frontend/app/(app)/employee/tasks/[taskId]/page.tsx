@@ -35,7 +35,6 @@ export default function TaskDetailsPage({ params }: { params: { taskId: string }
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
-    setLoading(true)
     getTask(params.taskId)
       .then(setTask)
       .catch((err) => setError(err instanceof Error ? err.message : 'Failed to load task'))

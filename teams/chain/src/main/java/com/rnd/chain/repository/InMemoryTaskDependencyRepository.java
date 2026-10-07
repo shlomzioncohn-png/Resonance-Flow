@@ -15,6 +15,10 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.locks.ReadWriteLock;
+import java.util.concurrent.locks.ReentrantReadWriteLock;
+import java.util.function.Function;
+import java.util.stream.Collectors;
 
 /**
  * In-memory implementation of {@link TaskDependencyRepository}, indexed by task id in both
@@ -30,34 +34,26 @@ import java.util.concurrent.ConcurrentHashMap;
  * <pre>
  *     B is in dependenciesByTask.get(A)   AND   A is in dependentsByTask.get(B)
  * </pre>
- * i.e. an edge exists if and only if it appears in both maps at once.
- * {@code save} adds to both maps, {@code delete} removes from both maps,
- * within the same {@code synchronized} block, so the two maps never
- * observably disagree about which edges exist.
+ * i.e. an edge exists if and only if it appears in both maps at once. {@code save} adds to both
+ * maps, {@code delete} removes from both maps, within the same write-lock scope, so the two maps
+ * never observably disagree about which edges exist.
  *
- * <p><b>Complexity:</b> a map lookup ({@code get}) is O(1) average, but a
- * {@code find...} call also has to materialize the matching edges into a
- * list, which is O(k) where k is the number of edges found for that task.
- * So the total cost of a find call is O(k), not O(1) - the O(1) part is
- * only the initial map access.
+ * <p><b>Complexity:</b> a map lookup ({@code get}) is O(1) average, but a {@code find...} call
+ * also has to materialize the matching edges into a list, which is O(k) where k is the number of
+ * edges found for that task. So the total cost of a find call is O(k), not O(1) - the O(1) part
+ * is only the initial map access.
  *
- * <p><b>Atomicity guarantees:</b> {@code save}/{@code delete} are atomic
- * with respect to other writes (guarded by {@code writeLock}: the
- * exists-check and the update to both maps happen inside one lock).
- * {@code find...} calls take no lock at all. There is no guarantee that a
- * reader sees a consistent snapshot across <em>both</em> maps together -
- * only that each individual map read is consistent. This is not a problem
- * today because every read method only ever touches one of the two maps
- * ({@link #findByTaskId} reads only {@code dependenciesByTask},
- * {@link #findByDependsOnTaskId} reads only {@code dependentsByTask}). If
- * a future caller needs a cross-map snapshot (e.g. a method that returns
- * both dependencies and dependents of a task atomically together), this
- * design is not sufficient and needs to be revisited.
+ * <p><b>Atomicity / visibility guarantees:</b> {@code save}/{@code delete} are atomic with
+ * respect to other writes AND reads (guarded by a {@link ReadWriteLock}: the exists-check and the
+ * update to both maps happen inside one write-lock scope, exclusive against both other writers
+ * and readers). {@code find...}/{@code existsDependency} take the shared read lock, so multiple
+ * readers still run concurrently with each other, but never observe a write mid-flight - closing
+ * the torn-view gap a single-{@code synchronized}-block version would have (review finding #3).
  *
- * <p><b>Known limitation:</b> {@code writeLock} is a single global lock,
- * so unrelated edges (different task ids) serialize against each other
- * unnecessarily. Deliberately not striped per-key - not worth the added
- * complexity for a temporary in-memory stand-in. Tracked as issue #299.
+ * <p><b>Known limitation:</b> the write lock is a single global lock, so unrelated edges
+ * (different task ids) serialize against each other unnecessarily. Deliberately not striped
+ * per-key - not worth the added complexity for a temporary in-memory stand-in. Tracked as issue
+ * #299.
  *
  * @see <a href="https://github.com/KamaTechOrg/Resonance-Flow/issues/299">#299</a>
  */
@@ -65,37 +61,80 @@ public class InMemoryTaskDependencyRepository implements TaskDependencyRepositor
 
     private static final Logger log = LoggerFactory.getLogger(InMemoryTaskDependencyRepository.class);
 
-    private final ConcurrentHashMap<UUID, Set<UUID>> dependenciesByTask = new ConcurrentHashMap<>();
-    private final ConcurrentHashMap<UUID, Set<UUID>> dependentsByTask = new ConcurrentHashMap<>();
-    private final Object writeLock = new Object();
+    private final Map<UUID, Set<UUID>> dependenciesByTask = new ConcurrentHashMap<>();
+    private final Map<UUID, Set<UUID>> dependentsByTask = new ConcurrentHashMap<>();
+    // ReadWriteLock rather than a plain writeLock (see review finding #3): the two adjacency
+    // maps above are updated sequentially, not atomically, so a reader with no lock at all
+    // could observe one map already updated and the other not yet - a torn view of the same
+    // logical edge set. Guarding writes AND reads through one ReadWriteLock closes that:
+    // multiple readers still run concurrently (readLock is shared), but a reader can never
+    // observe a write mid-flight (writeLock is exclusive against both readers and writers).
+    private final ReadWriteLock lock = new ReentrantReadWriteLock();
 
     public InMemoryTaskDependencyRepository(List<TaskDependency> edges) {
         Objects.requireNonNull(edges, "edges must not be null");
-        for (TaskDependency edge : edges) {
-            Objects.requireNonNull(edge, "edges must not contain null elements");
-            indexEdge(edge.taskId(), edge.dependsOnTaskId());
+        lock.writeLock().lock();
+        try {
+            for (TaskDependency edge : edges) {
+                Objects.requireNonNull(edge, "edges must not contain null elements");
+                indexEdge(edge.taskId(), edge.dependsOnTaskId());
+            }
+        } finally {
+            lock.writeLock().unlock();
         }
         log.debug("Loaded {} dependency edge(s)", edges.size());
     }
 
     @Override
     public List<TaskDependency> findByTaskId(UUID taskId) {
-        Set<UUID> dependsOn = dependenciesByTask.getOrDefault(taskId, Set.of());
-        List<TaskDependency> result = new ArrayList<>(dependsOn.size());
-        for (UUID dependsOnTaskId : dependsOn) {
-            result.add(new TaskDependency(taskId, dependsOnTaskId));
+        Objects.requireNonNull(taskId, "taskId must not be null");
+        lock.readLock().lock();
+        try {
+            return toTaskDependencyList(dependenciesByTask.getOrDefault(taskId, Set.of()),
+                    dependsOnTaskId -> new TaskDependency(taskId, dependsOnTaskId));
+        } finally {
+            lock.readLock().unlock();
         }
-        return result;
+    }
+
+    /**
+     * Overrides the interface default to skip {@link #lock} entirely - safe only because every
+     * caller of this method already runs inside {@code TaskEligibilityService}'s
+     * {@code dependencyGraphLock}, which is exclusive with every write this repository ever
+     * makes ({@link #save}/{@link #delete} are only ever invoked from inside that same lock).
+     * See the interface Javadoc ({@link TaskDependencyRepository#findByTaskIdUnderExternalLock})
+     * for the full contract this override relies on. Avoids an uncontended (but not free)
+     * read-lock acquire/release on every node a cycle-detection DFS visits (review finding).
+     */
+    @Override
+    public List<TaskDependency> findByTaskIdUnderExternalLock(UUID taskId) {
+        Objects.requireNonNull(taskId, "taskId must not be null");
+        return toTaskDependencyList(dependenciesByTask.getOrDefault(taskId, Set.of()),
+                dependsOnTaskId -> new TaskDependency(taskId, dependsOnTaskId));
     }
 
     @Override
     public List<TaskDependency> findByDependsOnTaskId(UUID taskId) {
-        Set<UUID> dependents = dependentsByTask.getOrDefault(taskId, Set.of());
-        List<TaskDependency> result = new ArrayList<>(dependents.size());
-        for (UUID dependentTaskId : dependents) {
-            result.add(new TaskDependency(dependentTaskId, taskId));
+        Objects.requireNonNull(taskId, "taskId must not be null");
+        lock.readLock().lock();
+        try {
+            return toTaskDependencyList(dependentsByTask.getOrDefault(taskId, Set.of()),
+                    dependentTaskId -> new TaskDependency(dependentTaskId, taskId));
+        } finally {
+            lock.readLock().unlock();
         }
-        return result;
+    }
+
+    @Override
+    public boolean existsDependency(UUID taskId, UUID dependsOnTaskId) {
+        Objects.requireNonNull(taskId, "taskId must not be null");
+        Objects.requireNonNull(dependsOnTaskId, "dependsOnTaskId must not be null");
+        lock.readLock().lock();
+        try {
+            return dependenciesByTask.getOrDefault(taskId, Set.of()).contains(dependsOnTaskId);
+        } finally {
+            lock.readLock().unlock();
+        }
     }
 
     @Override
@@ -103,7 +142,8 @@ public class InMemoryTaskDependencyRepository implements TaskDependencyRepositor
         Objects.requireNonNull(dependency, "dependency must not be null");
         UUID taskId = dependency.taskId();
         UUID dependsOnTaskId = dependency.dependsOnTaskId();
-        synchronized (writeLock) {
+        lock.writeLock().lock();
+        try {
             boolean added = indexEdge(taskId, dependsOnTaskId);
             if (!added) {
                 log.debug("Dependency already exists: task {} depends on {} - no-op", taskId, dependsOnTaskId);
@@ -111,12 +151,15 @@ public class InMemoryTaskDependencyRepository implements TaskDependencyRepositor
             }
             log.info("Saved dependency: task {} depends on {}", taskId, dependsOnTaskId);
             return Optional.of(dependency);
+        } finally {
+            lock.writeLock().unlock();
         }
     }
 
     @Override
     public boolean delete(UUID taskId, UUID dependsOnTaskId) {
-        synchronized (writeLock) {
+        lock.writeLock().lock();
+        try {
             Set<UUID> dependsOn = dependenciesByTask.get(taskId);
             boolean removed = dependsOn != null && dependsOn.remove(dependsOnTaskId);
             if (!removed) {
@@ -131,11 +174,20 @@ public class InMemoryTaskDependencyRepository implements TaskDependencyRepositor
             }
             log.info("Deleted dependency: task {} depends on {}", taskId, dependsOnTaskId);
             return true;
+        } finally {
+            lock.writeLock().unlock();
         }
     }
 
+    /** Shared by every {@code find...} method: maps each id in {@code ids} through {@code toEdge}
+     * into a pre-sized {@link ArrayList} (review finding - {@code Collectors.toList()} gives no
+     * capacity hint, so the result would otherwise grow/copy internally as elements accumulate). */
+    private static List<TaskDependency> toTaskDependencyList(Set<UUID> ids, Function<UUID, TaskDependency> toEdge) {
+        return ids.stream().map(toEdge).collect(Collectors.toCollection(() -> new ArrayList<>(ids.size())));
+    }
+
     /**
-     * Adds the edge to both adjacency maps. Must run under {@link #writeLock}.
+     * Adds the edge to both adjacency maps. Must run under {@link #lock}'s write lock.
      *
      * @return true if this was a new edge (not already present).
      */

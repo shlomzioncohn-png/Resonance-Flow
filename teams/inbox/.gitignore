@@ -6,3 +6,4 @@ target/
 .env
 .DS_Store
 logs/
+docs/Task_Dataset_Design.he.md

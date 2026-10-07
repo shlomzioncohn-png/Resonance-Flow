@@ -36,11 +36,13 @@ jobs:
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0
+      # Here, not in schema-compat: its registry service container starts before any step.
+      - uses: ./.github/actions/free-runner-disk
       - name: Did this PR touch relay schema / chart / ci files?
         id: filter
         run: |
           if git diff --name-only "${{ github.event.pull_request.base.sha }}" HEAD \
-             | grep -qE '^teams/relay/(src/main/proto|ci|schema-sync-hook)/|^\.github/workflows/relay-schema-ci\.yaml$'; then
+             | grep -qE '^shared/proto/|^teams/relay/(ci|schema-sync-hook)/|^\.github/workflows/relay-schema-ci\.yaml$'; then
             echo "relevant=true" >> "$GITHUB_OUTPUT"
             echo "Relay schema / chart / ci files changed — running the checks."
           else

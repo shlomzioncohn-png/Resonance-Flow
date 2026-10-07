@@ -74,12 +74,12 @@
 
         <dependency>
             <groupId>org.springframework.boot</groupId>
-            <artifactId>spring-boot-starter-actuator</artifactId>
+            <artifactId>spring-boot-starter-validation</artifactId>
         </dependency>
 
         <dependency>
             <groupId>org.springframework.boot</groupId>
-            <artifactId>spring-boot-starter-validation</artifactId>
+            <artifactId>spring-boot-starter-actuator</artifactId>
         </dependency>
 
         <dependency>
@@ -187,61 +187,13 @@
                 <version>0.6.1</version>
                 <configuration>
                     <protocArtifact>com.google.protobuf:protoc:${protobuf.version}:exe:${os.detected.classifier}</protocArtifact>
-                    <!--
-                        Schemas are owned by Relay - teams/relay/src/main/proto/ and
-                        teams/relay/ci/schema-subjects.tsv are the registered source of truth.
-                        Copied into src/main/proto (only the ones Inbox actually publishes)
-                        instead of referenced via a ../relay relative path: that path doesn't
-                        exist inside the Docker build context (teams/inbox only), the same class
-                        of bug §16 in this module's CLAUDE.md already documents for Flyway
-                        migrations - protoc silently found nothing and the generated classes
-                        never existed, so anything importing them failed to compile.
-                    -->
                     <protoSourceRoot>${project.basedir}/src/main/proto</protoSourceRoot>
-                    <!--
-                        Each of the three files redeclares the same top-level enums (SourceType,
-                        TaskTier, etc. - each was drafted standalone, "copied verbatim" per their
-                        own header comments, not written to be compiled together). protoc rejects
-                        duplicate enum value names within one package if given all three files in
-                        a single invocation, so each gets its own execution/invocation instead -
-                        and clearOutputDirectory=false so a later execution doesn't delete the
-                        classes an earlier one just generated.
-                    -->
-                    <clearOutputDirectory>false</clearOutputDirectory>
                 </configuration>
                 <executions>
                     <execution>
-                        <id>compile-task-created-event</id>
                         <goals>
                             <goal>compile</goal>
                         </goals>
-                        <configuration>
-                            <includes>
-                                <include>task-created-event.proto</include>
-                            </includes>
-                        </configuration>
-                    </execution>
-                    <execution>
-                        <id>compile-task-updated-event</id>
-                        <goals>
-                            <goal>compile</goal>
-                        </goals>
-                        <configuration>
-                            <includes>
-                                <include>task-updated-event.proto</include>
-                            </includes>
-                        </configuration>
-                    </execution>
-                    <execution>
-                        <id>compile-task-completed-event</id>
-                        <goals>
-                            <goal>compile</goal>
-                        </goals>
-                        <configuration>
-                            <includes>
-                                <include>task-completed-event.proto</include>
-                            </includes>
-                        </configuration>
                     </execution>
                 </executions>
             </plugin>
