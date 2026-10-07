@@ -1,8 +1,8 @@
 package com.rnd.chain.service;
 
 import com.rnd.chain.dto.Task;
-import com.rnd.chain.event.SchedulingUpdatePublisher;
-import com.rnd.chain.event.TaskSchedulingUpdatedEvent;
+import com.rnd.chain.events.SchedulingUpdatePublisher;
+import com.rnd.chain.events.TaskSchedulingUpdatedEvent;
 
 import org.springframework.stereotype.Service;
 

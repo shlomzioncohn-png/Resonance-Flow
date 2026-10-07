@@ -176,11 +176,10 @@ a claim does and doesn't guarantee.
 `DONE`, `CANCELLED` and `REJECTED` map to `DONE`, because all three release dependents. `IN_PROGRESS`
 maps to `ACTIVE`, and every other status maps to `PENDING`.
 
-**Publishing**: the live publisher for `task.scheduling.updated` is `KafkaSchedulingUpdatePublisher`
-(`com.rnd.chain.event`), used by `SchedulingUpdateService`. It sends `TaskSchedulingUpdatedEvent` as
-JSON through the `KafkaTemplate` defined in `ChainProtobufKafkaConfig`. That JSON is interim until
-the Protobuf contract is settled (#545). `KafkaEventPublisher` (flat JSON, no envelope) is not
-wired to any caller and is scheduled for removal under #543.
+**Publishing**: the only publisher is `KafkaSchedulingUpdatePublisher` (`com.rnd.chain.events`, the
+same package as the consumers), used by `SchedulingUpdateService`, for `task.scheduling.updated`. It
+sends `TaskSchedulingUpdatedEvent` as JSON through the `KafkaTemplate` defined in
+`ChainProtobufKafkaConfig`. That JSON is interim until the Protobuf contract is settled (#545).
 
 **Schemas**: the `.proto` sources live in `src/main/proto/` and are committed. Messages are
 validated against the Schema Registry at `SCHEMA_REGISTRY_URL`. Tests use a mock registry
@@ -193,7 +192,7 @@ validated against the Schema Registry at `SCHEMA_REGISTRY_URL`. Tests use a mock
 | `chain.kafka.topics.task-created` (env `TASK_CREATED_TOPIC`) | Topic consumed for `task.created` | `task.created` |
 | `chain.kafka.topics.task-updated` (env `TASK_UPDATED_TOPIC`) | Topic consumed for `task.updated` | `task.updated` |
 | `chain.kafka.topics.dependencies-proposed` (env `DEPENDENCIES_PROPOSED_TOPIC`) | Topic consumed for `task.dependencies.proposed` | `task.dependencies.proposed` |
-| `chain.kafka.topics.task.scheduling.updated` (env `CHAIN_SCHEDULING_UPDATED_TOPIC`) | Topic published to for `task.scheduling.updated` | `task.scheduling.updated` |
+| `chain.kafka.topics.scheduling-updated` (env `CHAIN_SCHEDULING_UPDATED_TOPIC`) | Topic published to for `task.scheduling.updated` | `task.scheduling.updated` |
 | `KAFKA_BOOTSTRAP_SERVERS` (env var, not `chain.*`) | Kafka broker(s) address | `localhost:9092` |
 | `chain.kafka.consumer-group-id` (env `KAFKA_CONSUMER_GROUP_ID`) | Consumer group ID | `chain-service` |
 | `chain.kafka.schema-registry-url` (env `SCHEMA_REGISTRY_URL`) | Schema Registry URL (ccompat API) | `http://localhost:8082/apis/ccompat/v6` |
