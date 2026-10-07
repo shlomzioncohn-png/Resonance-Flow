@@ -1,9 +1,9 @@
 package com.rnd.bridge.crm.scheduler;
 
 import com.rnd.bridge.core.IntakeResult;
-import com.rnd.bridge.core.ReadCursor;
 import com.rnd.bridge.crm.CrmLane;
 import com.rnd.bridge.crm.repository.DealRepository;
+import com.rnd.bridge.crm.repository.DealSnapshot;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -14,17 +14,16 @@ import org.springframework.stereotype.Service;
  * Daily CRM sync - the team lead's call (2026-09-07) is to stay on a
  * once-a-day pull for now, not move to real-time, until told otherwise.
  * <p>
- * Runs the exact same {@code crmLane.run(...)} call {@code CrmBridgeController}'s
- * {@code POST /bridge/crm/sync} makes - calling the lane directly, not looping
- * back through Bridge's own HTTP endpoint - so a scheduled run and a manual
- * trigger are the same code path exercised two different ways. Mirrors
- * {@code GitHubSyncScheduler}'s shape for the same reason, with one deliberate
- * difference: a failure here is caught and logged rather than left to
- * propagate, so one bad scheduled run doesn't produce an unhandled-exception
- * log line in place of a clear "sync failed" message - {@code crmLane.run()}
- * already turns per-record failures into {@link IntakeResult#rejected()}
- * rather than throwing, so anything that does throw here is a run-level
- * failure (e.g. HubSpot unreachable, retries exhausted) worth its own message.
+ * Takes exactly one {@link DealSnapshot} per run and calls {@code crmLane.run(Stream, Instant)}
+ * against its {@code allDeals()}/{@code asOf()} together - the same single-snapshot-per-run shape
+ * {@code CrmBridgeController} uses, so a scheduled run and a manual trigger agree on what "one
+ * sync" means, and neither can see a mix of two different fetches the way calling {@code
+ * dealRepository.snapshot()} twice in one run could. A failure here is caught and logged rather
+ * than left to propagate, so one bad scheduled run doesn't produce an unhandled-exception log line
+ * in place of a clear "sync failed" message - {@code crmLane.run()} already turns per-record
+ * failures into {@link IntakeResult#rejected()} rather than throwing, so anything that does throw
+ * here (including the {@code snapshot()} fetch itself, e.g. HubSpot unreachable or retries
+ * exhausted) is a run-level failure worth its own message.
  */
 @Service
 public class CrmSyncScheduler {
@@ -51,7 +50,8 @@ public class CrmSyncScheduler {
 
         log.info("Starting scheduled CRM sync.");
         try {
-            IntakeResult result = crmLane.run(ReadCursor.full(), dealRepository.snapshot().asOf());
+            DealSnapshot snapshot = dealRepository.snapshot();
+            IntakeResult result = crmLane.run(snapshot.allDeals().stream(), snapshot.asOf());
             log.info("Scheduled CRM sync complete: {} read, {} published, {} rejected.",
                     result.read(), result.published(), result.rejected());
         } catch (RuntimeException e) {

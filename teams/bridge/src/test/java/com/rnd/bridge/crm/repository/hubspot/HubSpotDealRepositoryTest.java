@@ -14,6 +14,7 @@ import org.springframework.web.client.RestClient;
 import java.io.IOException;
 import java.time.Clock;
 import java.time.Instant;
+import java.time.ZoneId;
 import java.time.ZoneOffset;
 import java.util.List;
 
@@ -57,6 +58,15 @@ class HubSpotDealRepositoryTest {
     }
 
     private HubSpotDealRepository newRepository(int maxRetries, long initialBackoffMillis, long maxBackoffMillis) {
+        return newRepositoryWithClock(Clock.fixed(FIXED_NOW, ZoneOffset.UTC), maxRetries, initialBackoffMillis, maxBackoffMillis);
+    }
+
+    private HubSpotDealRepository newRepositoryWithClock(Clock clock) {
+        return newRepositoryWithClock(clock, 5, 0L, 0L);
+    }
+
+    private HubSpotDealRepository newRepositoryWithClock(
+            Clock clock, int maxRetries, long initialBackoffMillis, long maxBackoffMillis) {
         HubSpotClient client = new HubSpotClient(
                 RestClient.builder(),
                 server.url("/").toString(),
@@ -66,7 +76,7 @@ class HubSpotDealRepositoryTest {
                 initialBackoffMillis,
                 maxBackoffMillis,
                 millis -> { });
-        return new HubSpotDealRepository(client, Clock.fixed(FIXED_NOW, ZoneOffset.UTC));
+        return new HubSpotDealRepository(client, clock);
     }
 
     private void enqueueJson(String body) {
@@ -454,5 +464,123 @@ class HubSpotDealRepositoryTest {
             }
         }
         return last;
+    }
+
+    // ---- snapshot(): F1/F14 - a fresh fetch every call, never cached across calls ----
+
+    @Test
+    void secondSnapshotFetchesFreshDataAndReflectsAChangedStage() {
+        enqueueConstructorPipeline();
+        HubSpotDealRepository repository = newRepositoryWithClock(Clock.fixed(FIXED_NOW, ZoneOffset.UTC));
+
+        enqueuePipeline(); // snapshot #1's own fresh pipeline fetch
+        String dealV1 = dealJson("D-20", "Drifts over time", "1000", null, "2026-08-01T08:00:00Z",
+                historyEntry("st-100", "2026-08-01T08:00:00.000Z"));
+        enqueueJson(dealsPage(null, dealV1));
+
+        DealSnapshot first = repository.snapshot();
+        assertEquals(DealStage.PROSPECT, first.findLatestByDealId("D-20").orElseThrow().stage());
+
+        enqueuePipeline(); // snapshot #2's own fresh pipeline fetch
+        String dealV2 = dealJson("D-20", "Drifts over time", "1000", null, "2026-08-01T08:00:00Z",
+                String.join(",",
+                        historyEntry("st-500", "2026-08-28T09:00:00.000Z"),
+                        historyEntry("st-100", "2026-08-01T08:00:00.000Z")));
+        enqueueJson(dealsPage(null, dealV2));
+
+        DealSnapshot second = repository.snapshot();
+
+        assertEquals(DealStage.CLOSED_WON, second.findLatestByDealId("D-20").orElseThrow().stage());
+        assertEquals(5, server.getRequestCount(),
+                "constructor pipeline fetch + (pipeline + deals) for each of the two snapshot() calls");
+    }
+
+    @Test
+    void asOfOfTheSecondSnapshotIsLaterWhenTheClockAdvances() {
+        MutableClock clock = new MutableClock(Instant.parse("2026-08-30T12:00:00Z"));
+        enqueueConstructorPipeline();
+        HubSpotDealRepository repository = newRepositoryWithClock(clock);
+
+        enqueuePipeline();
+        String deal = dealJson("D-21", "Stable deal", "1000", null, "2026-08-01T08:00:00Z",
+                historyEntry("st-100", "2026-08-01T08:00:00.000Z"));
+        enqueueJson(dealsPage(null, deal));
+        Instant firstAsOf = repository.snapshot().asOf();
+
+        clock.advanceTo(Instant.parse("2026-09-05T08:00:00Z"));
+        enqueuePipeline();
+        enqueueJson(dealsPage(null, deal));
+        Instant secondAsOf = repository.snapshot().asOf();
+
+        assertEquals(Instant.parse("2026-08-30T12:00:00Z"), firstAsOf);
+        assertEquals(Instant.parse("2026-09-05T08:00:00Z"), secondAsOf);
+        assertTrue(secondAsOf.isAfter(firstAsOf));
+    }
+
+    @Test
+    void secondSnapshotPicksUpAStageIdAddedToThePipelineAfterTheFirstSnapshot() {
+        // F6 is out of scope here (the mapping RULES don't change) - this is about F1/F14's
+        // freshness: the old per-instance-cached path resolved stage ids once, at construction, and
+        // never saw a stage id added later. snapshot() re-fetches the pipeline every call, so it
+        // does.
+        enqueueConstructorPipeline(); // constructor - only the seven original default-pipeline stages
+        HubSpotDealRepository repository = newRepositoryWithClock(Clock.fixed(FIXED_NOW, ZoneOffset.UTC));
+
+        enqueuePipeline();
+        String dealOnOriginalStage = dealJson("D-22", "Original stage", "1000", null, "2026-08-01T08:00:00Z",
+                historyEntry("st-100", "2026-08-01T08:00:00.000Z"));
+        enqueueJson(dealsPage(null, dealOnOriginalStage));
+        repository.snapshot();
+
+        String pipelineWithStageAddedLater = """
+                {
+                  "results": [
+                    {
+                      "id": "pl-1",
+                      "label": "Sales Pipeline",
+                      "stages": [
+                        {"id": "st-100", "label": "Appointment Scheduled"},
+                        {"id": "st-700-new", "label": "Closed Won"}
+                      ]
+                    }
+                  ]
+                }
+                """;
+        enqueueJson(pipelineWithStageAddedLater);
+        String dealOnNewStage = dealJson("D-23", "On the newly added stage", "2000", null, "2026-08-20T08:00:00Z",
+                historyEntry("st-700-new", "2026-08-20T08:00:00.000Z"));
+        enqueueJson(dealsPage(null, dealOnNewStage));
+
+        DealSnapshot second = repository.snapshot();
+
+        assertEquals(DealStage.CLOSED_WON, second.findLatestByDealId("D-23").orElseThrow().stage());
+    }
+
+    /** A {@link Clock} whose {@link #instant()} can be advanced between calls, for proving asOf moves. */
+    private static final class MutableClock extends Clock {
+        private Instant instant;
+
+        MutableClock(Instant initial) {
+            this.instant = initial;
+        }
+
+        void advanceTo(Instant instant) {
+            this.instant = instant;
+        }
+
+        @Override
+        public ZoneId getZone() {
+            return ZoneOffset.UTC;
+        }
+
+        @Override
+        public Clock withZone(ZoneId zone) {
+            return this;
+        }
+
+        @Override
+        public Instant instant() {
+            return instant;
+        }
     }
 }

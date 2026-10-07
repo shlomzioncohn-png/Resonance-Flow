@@ -1,8 +1,8 @@
 package com.rnd.bridge.crm.controller;
 
-import com.rnd.bridge.core.ReadCursor;
 import com.rnd.bridge.crm.CrmLane;
 import com.rnd.bridge.crm.repository.DealRepository;
+import com.rnd.bridge.crm.repository.DealSnapshot;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
@@ -20,6 +20,12 @@ import org.springframework.web.bind.annotation.RestController;
  * the current {@code LoggingPayloadPublisher}; not harmless once Kafka is
  * wired (interleaved or duplicate publishes). Not solved here - needs a
  * single-flight guard or lock before that lands.
+ * <p>
+ * Takes exactly one {@link DealSnapshot} per request and runs the lane against its {@code
+ * allDeals()}/{@code asOf()} together, via {@code CrmLane.run(Stream, Instant)} - never the
+ * {@code ReadCursor} overload, which would fetch the deals and the {@code asOf} from two separate,
+ * potentially different snapshots (see {@code HubSpotDealRepository.snapshot()}'s Javadoc: every
+ * call is an independent fetch, so two calls can legitimately disagree).
  */
 @RestController
 @RequestMapping("/bridge/crm")
@@ -35,9 +41,7 @@ public class CrmBridgeController {
 
     @PostMapping("/sync")
     public CrmSyncResponse sync() {
-        // asOf comes from the repository's own time basis, never the clock -
-        // the whole lane is built so urgency and deadlines are reproducible
-        // from arguments alone; Instant.now() here would undo that.
-        return CrmSyncResponse.from(crmLane.run(ReadCursor.full(), dealRepository.snapshot().asOf()));
+        DealSnapshot snapshot = dealRepository.snapshot();
+        return CrmSyncResponse.from(crmLane.run(snapshot.allDeals().stream(), snapshot.asOf()));
     }
 }

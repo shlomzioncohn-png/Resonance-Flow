@@ -1,7 +1,6 @@
 package com.rnd.bridge.crm.scheduler;
 
 import com.rnd.bridge.core.IntakeResult;
-import com.rnd.bridge.core.ReadCursor;
 import com.rnd.bridge.crm.CrmLane;
 import com.rnd.bridge.crm.repository.DealRepository;
 import com.rnd.bridge.crm.repository.DealSnapshot;
@@ -11,6 +10,7 @@ import org.springframework.test.util.ReflectionTestUtils;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
+import java.util.stream.Stream;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.mockito.ArgumentMatchers.any;
@@ -42,7 +42,7 @@ class CrmSyncSchedulerTest {
         scheduler.syncCrmTasks();
 
         verify(dealRepository, never()).snapshot();
-        verify(crmLane, never()).run(any(ReadCursor.class), any());
+        verify(crmLane, never()).run(any(Stream.class), any());
     }
 
     @Test
@@ -50,19 +50,29 @@ class CrmSyncSchedulerTest {
         ReflectionTestUtils.setField(scheduler, "syncEnabled", true);
         Instant asOf = Instant.parse("2026-09-07T03:00:00Z");
         when(dealRepository.snapshot()).thenReturn(snapshotAt(asOf));
-        when(crmLane.run(any(ReadCursor.class), eq(asOf))).thenReturn(new IntakeResult(5, 5, 0, List.of()));
+        when(crmLane.run(any(Stream.class), eq(asOf))).thenReturn(new IntakeResult(5, 5, 0, List.of()));
 
         scheduler.syncCrmTasks();
 
-        verify(crmLane).run(any(ReadCursor.class), eq(asOf));
+        verify(crmLane).run(any(Stream.class), eq(asOf));
     }
 
     @Test
     void aRuntimeExceptionFromTheLaneIsCaughtNotPropagated() {
         ReflectionTestUtils.setField(scheduler, "syncEnabled", true);
         when(dealRepository.snapshot()).thenReturn(snapshotAt(Instant.now()));
-        when(crmLane.run(any(ReadCursor.class), any()))
+        when(crmLane.run(any(Stream.class), any()))
                 .thenThrow(new RuntimeException("HubSpot unreachable"));
+
+        assertDoesNotThrow(scheduler::syncCrmTasks);
+    }
+
+    @Test
+    void aRuntimeExceptionFromTheSnapshotFetchItselfIsCaughtNotPropagated() {
+        // HubSpot unreachable / retries exhausted - the fetch inside snapshot() throws before
+        // crmLane.run() is ever called.
+        ReflectionTestUtils.setField(scheduler, "syncEnabled", true);
+        when(dealRepository.snapshot()).thenThrow(new RuntimeException("HubSpot unreachable"));
 
         assertDoesNotThrow(scheduler::syncCrmTasks);
     }

@@ -1,7 +1,6 @@
 package com.rnd.bridge.crm.controller;
 
 import com.rnd.bridge.core.IntakeResult;
-import com.rnd.bridge.core.ReadCursor;
 import com.rnd.bridge.core.error.ValidationException;
 import com.rnd.bridge.crm.CrmLane;
 import com.rnd.bridge.crm.repository.DealRepository;
@@ -15,6 +14,7 @@ import org.springframework.test.web.servlet.MockMvc;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
+import java.util.stream.Stream;
 
 import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.not;
@@ -53,7 +53,7 @@ class CrmBridgeControllerTest {
     void postReturnsOkWithTheCountsFromTheLaneResult() throws Exception {
         Instant asOf = Instant.parse("2026-08-24T09:00:00Z");
         when(dealRepository.snapshot()).thenReturn(snapshotAt(asOf));
-        when(crmLane.run(any(ReadCursor.class), eq(asOf)))
+        when(crmLane.run(any(Stream.class), eq(asOf)))
                 .thenReturn(new IntakeResult(79, 79, 0, List.of()));
 
         mockMvc.perform(post("/bridge/crm/sync"))
@@ -67,7 +67,7 @@ class CrmBridgeControllerTest {
     void aRejectedRecordStillReturnsOkWithTheMessageAndNoStackTraceOrClassName() throws Exception {
         Instant asOf = Instant.parse("2026-08-24T09:00:00Z");
         when(dealRepository.snapshot()).thenReturn(snapshotAt(asOf));
-        when(crmLane.run(any(ReadCursor.class), eq(asOf)))
+        when(crmLane.run(any(Stream.class), eq(asOf)))
                 .thenReturn(new IntakeResult(79, 78, 1,
                         List.of(new ValidationException("Invalid Task.title = null: must not be null"))));
 
@@ -84,12 +84,12 @@ class CrmBridgeControllerTest {
     void asOfComesFromTheSnapshotNotTheClock() throws Exception {
         Instant configuredAsOf = Instant.parse("2020-01-01T00:00:00Z");
         when(dealRepository.snapshot()).thenReturn(snapshotAt(configuredAsOf));
-        when(crmLane.run(any(ReadCursor.class), any())).thenReturn(new IntakeResult(0, 0, 0, List.of()));
+        when(crmLane.run(any(Stream.class), any())).thenReturn(new IntakeResult(0, 0, 0, List.of()));
 
         mockMvc.perform(post("/bridge/crm/sync"))
                 .andExpect(status().isOk());
 
-        verify(crmLane).run(any(ReadCursor.class), eq(configuredAsOf));
+        verify(crmLane).run(any(Stream.class), eq(configuredAsOf));
     }
 
     @Test
