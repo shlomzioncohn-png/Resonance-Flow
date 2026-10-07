@@ -41,6 +41,7 @@ target, to be confirmed with mentors).
 """
 
 from mind.embeddings.base import SearchResult, VectorStore
+from mind.embeddings.dependency_resolution import resolve_dependency_targets
 from mind.embeddings.embeddings import embed
 from mind.embeddings.search import nearest_tasks
 
@@ -49,4 +50,5 @@ __all__ = [
     "VectorStore",
     "embed",
     "nearest_tasks",
+    "resolve_dependency_targets",
 ]

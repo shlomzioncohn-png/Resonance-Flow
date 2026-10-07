@@ -25,6 +25,7 @@ base.py               VectorStore abstract interface (the "contract") + SearchRe
 pgvector_store.py    the ONLY file that knows about Postgres/pgvector
 index_consumer.py    #470 -- Kafka task.{created,updated,completed} handlers that keep the store in sync (see ../../../scripts/index_consumer.py for the process that runs them)
 search.py             nearest_tasks() -- the shared embed()+search() primitive behind #471/#245
+dependency_resolution.py  #245 -- resolve_dependency_targets(): Yonit's free-text dependency mentions -> ranked candidate task_ids
 ```
 
 Config lives one level up, at `mind.config` (`Settings`/`VectorStoreSettings`)
@@ -127,6 +128,19 @@ await store.mark_completed(task_id)             # True if a row existed and was 
 behind duplicate detection (#471) and dependency-target resolution (#245):
 `embed(text)` then `store.search(vector, k=k)`, nothing else -- callers
 apply their own similarity threshold to the result.
+
+`resolve_dependency_targets(store, references, *, k=5)`
+(`dependency_resolution.py`) is #245 itself: given Yonit's extracted
+free-text dependency mentions (`list[str]`, one string per mention --
+the interface agreed with her), returns one ranked candidate-task list
+per reference, same order. Makes no match/no-match decision -- that's
+#244's confidence scoring, on top of these same similarity scores:
+
+```python
+from mind.embeddings import resolve_dependency_targets
+
+candidates = await resolve_dependency_targets(store, ["the DB upgrade"])  # [[SearchResult(...), ...]]
+```
 
 No caller anywhere else in the codebase should know that Postgres is
 involved. If we switch databases later, only `pgvector_store.py` (a new
