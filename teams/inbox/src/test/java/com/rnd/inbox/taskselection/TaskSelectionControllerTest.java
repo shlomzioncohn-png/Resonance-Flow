@@ -139,6 +139,20 @@ class TaskSelectionControllerTest extends PostgresIntegrationTest {
     }
 
     @Test
+    void selectTasks_whenATaskHasNoPriorityScoreYet_returns200AndStillSelectsIt() throws Exception {
+        // priority_score stays NULL until Chain scores the task; that used to fail the request.
+        Task unscored = persistTaskAssignedTo(tenant, actor, "Not scored yet", 30);
+        unscored.setPriorityScore(null);
+        taskRepository.saveAndFlush(unscored);
+
+        mockMvc.perform(get(SELECTION_URL + "?availableMinutes=45")
+                        .header(ACTOR_HEADER, actor.getId().toString()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.selected_tasks", hasSize(1)))
+                .andExpect(jsonPath("$.selected_tasks[0].title").value("Not scored yet"));
+    }
+
+    @Test
     void selectTasks_withTaskLongerThanWindow_returnsItWithFallbackFlag() throws Exception {
         persistTaskAssignedTo(tenant, actor, "Long task", 60);
 

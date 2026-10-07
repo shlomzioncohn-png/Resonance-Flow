@@ -490,6 +490,59 @@ class TaskSelectionServiceTest {
     }
 
     @Test
+    void selectTasksForWindow_missingPriorityScore_usesDefaultAndRemainsCandidate() {
+        Task t1 = task("T1");
+        t1.setPriorityScore(null);
+        t1.setEffortEstimateMinutes(15);
+        t1.setEffortEstimateConfidence(0.9f);
+
+        assertThat(selectionScoreCalculator.normalizedPriority(t1)).isEqualTo(0.5);
+
+        givenCandidates(t1);
+
+        TaskSelectionResponseDto result = selectTasks(15);
+
+        assertThat(titles(result)).containsExactly("T1");
+    }
+
+    @Test
+    void selectTasksForWindow_missingPriorityScore_ranksBetweenLowerAndHigherScoredTasks() {
+        Task high = task("High");
+        high.setPriorityScore(8f);
+        Task unscored = task("Unscored");
+        unscored.setPriorityScore(null);
+        Task low = task("Low");
+        low.setPriorityScore(2f);
+        for (Task candidate : List.of(high, unscored, low)) {
+            candidate.setEffortEstimateMinutes(15);
+            candidate.setEffortEstimateConfidence(0.9f);
+        }
+
+        givenCandidates(low, unscored, high);
+
+        assertThat(titles(selectTasks(20))).containsExactly("High");
+        assertThat(titles(selectTasks(30))).containsExactlyInAnyOrder("High", "Unscored");
+    }
+
+    @Test
+    void selectTasksForWindow_missingPriorityScoreWithDeadline_doesNotFail() {
+        Task t1 = task("T1");
+        t1.setPriorityScore(null);
+        t1.setEffortEstimateMinutes(15);
+        t1.setEffortEstimateConfidence(0.9f);
+        t1.setDeadline(NOW.plus(Duration.ofHours(6)));
+        Task overdue = task("Overdue");
+        overdue.setPriorityScore(null);
+        overdue.setEffortEstimateMinutes(15);
+        overdue.setEffortEstimateConfidence(0.9f);
+        overdue.setDeadline(NOW.minus(Duration.ofDays(2)));
+
+        givenCandidates(t1, overdue);
+
+        assertThat(titles(selectTasks(30))).containsExactlyInAnyOrder("T1", "Overdue");
+    }
+
+    @Test
     void selectTasksForWindow_effortPresentButConfidenceMissing_confidenceDefaultsToFull() {
         Task t1 = task("T1");
         t1.setPriorityScore(5f);
