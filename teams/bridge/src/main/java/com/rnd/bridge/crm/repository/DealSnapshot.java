@@ -15,8 +15,11 @@ import java.util.Optional;
  * into this snapshot at all). Immutable: {@link #asOf()} and every accessor here come from the
  * same fetch, so nothing here can disagree with itself the way {@code asOf()} and {@code
  * findAll()} used to when they were served from a repository field cached across separate calls
- * (see {@link DealRepository}'s old per-instance-cached finder methods, removed in favor of this
- * type, and finding F1 in the CRM-lane audit).
+ * (see {@link DealRepository}'s deprecated finder methods, and finding F1 in the CRM-lane audit).
+ * <p>
+ * {@link #allDeals()} / {@link #findHistoryByDealId(String)} keep the full stage-change history
+ * available for features that need it (Deal Health, stage velocity). {@link #latestPerDeal()} is
+ * what a lane should actually publish - see its own Javadoc for why.
  */
 public record DealSnapshot(
         Instant asOf,

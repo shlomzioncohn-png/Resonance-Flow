@@ -29,8 +29,7 @@ import java.util.Map;
  * Takes exactly one {@link DealSnapshot} per request and runs the lane against its {@code
  * latestPerDeal()}/{@code asOf()} together, via {@code CrmLane.run(Stream, Instant)} - never the
  * {@code ReadCursor} overload, which would fetch the deals and the {@code asOf} from two separate,
- * potentially different snapshots (see {@code HubSpotDealRepository.snapshot()}'s Javadoc: every
- * call is an independent fetch, so two calls can legitimately disagree).
+ * potentially different snapshots.
  * <p>
  * A fetch failure (HubSpot unreachable, retries exhausted, or - since {@code
  * HubSpotDealRepository.snapshot()} re-resolves the pipeline on every call, see its Javadoc - a

@@ -67,7 +67,11 @@ import java.util.Map;
  * mapping is a per-record skip - counted in {@link DealSnapshot#skippedAtRead()}, the rest of the
  * fetch proceeds. A pipeline whose STAGE LABEL itself isn't in {@link HubSpotStageMapping}'s table
  * fails {@link #snapshot()} entirely, before the deals endpoint is ever called - see
- * {@link HubSpotStageMapping#resolveIdsToStages}.
+ * {@link HubSpotStageMapping#resolveIdsToStages}. Since {@link #snapshot()} re-resolves the whole
+ * pipeline on every call (not just once at construction, the way the repository used to), a stage
+ * added to the portal under an unrecognized label now fails every sync from the moment it appears,
+ * not just the one deal that first references it - a known limitation for F6 (mapping-rule
+ * robustness, out of scope for this task's fix), documented in {@code CLAUDE.md}.
  * <p>
  * <b>Freshness.</b> {@link #snapshot()} performs one fresh, fully independent fetch - pipeline and
  * deals both - every time it is called, and returns an immutable {@link DealSnapshot} whose {@code

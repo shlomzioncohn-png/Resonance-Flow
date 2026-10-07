@@ -29,12 +29,12 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * with recorded-shape HubSpot response bodies. No test in this class talks
  * to the live HubSpot API.
  * <p>
- * Every test now goes through {@link HubSpotDealRepository#snapshot()} - the old per-instance-cache
- * finder methods (and the cache field behind them) were removed entirely (CRM-lane audit finding
- * F1). Because {@code snapshot()} does one fully independent fetch - pipeline AND deals - on every
- * call, and the constructor still does its own one-off pipeline fetch purely to fail fast on an
- * unrecognized stage label, every test here enqueues the pipeline TWICE: once for the constructor,
- * once for the {@code snapshot()} call under test.
+ * Every test now goes through {@link HubSpotDealRepository#snapshot()} - the deprecated
+ * per-instance-cache finder methods (and the cache field behind them) were removed entirely
+ * (CRM-lane audit finding F1). Because {@code snapshot()} does one fully independent fetch -
+ * pipeline AND deals - on every call, and the constructor still does its own one-off pipeline
+ * fetch purely to fail fast on an unrecognized stage label, every test here enqueues the pipeline
+ * TWICE: once for the constructor, once for the {@code snapshot()} call under test.
  */
 class HubSpotDealRepositoryTest {
 
@@ -281,11 +281,11 @@ class HubSpotDealRepositoryTest {
 
     @Test
     void unknownStageIdReferencedByADealIsSkippedNotFailingTheWholeSync() {
-        // Was "fails loudly naming the id" - AbstractIntakeLane.run()'s
-        // per-record try/catch never sees this (read() runs entirely
-        // outside it), so one deal with a bad stage id used to abort every
-        // deal in the sync, not just itself. snapshot() now catches this
-        // per record instead.
+        // A deal history entry whose stage ID isn't in the fetched pipeline (but every pipeline
+        // stage LABEL is still recognized) is a per-record skip - contrast with
+        // secondSnapshotFailsEntirelyWhenTheRefetchedPipelineHasAnUnrecognizedStageLabel below,
+        // where the PIPELINE itself has a label HubSpotStageMapping doesn't know at all, which
+        // fails the whole snapshot instead.
         enqueueConstructorPipeline();
         HubSpotDealRepository repository = newRepository();
 
@@ -322,6 +322,44 @@ class HubSpotDealRepositoryTest {
         UnknownHubSpotStageException exception =
                 assertThrows(UnknownHubSpotStageException.class, this::newRepository);
         assertTrue(exception.getMessage().contains("Some Custom Renamed Stage"));
+    }
+
+    @Test
+    void secondSnapshotFailsEntirelyWhenTheRefetchedPipelineHasAnUnrecognizedStageLabel() {
+        // A real behavior change from the F1 fix, not previously possible: the OLD/deprecated path
+        // resolved stage mapping once, at construction, so a stage id missing from THAT mapping was
+        // a per-deal skip (see the test above). snapshot() re-fetches and re-resolves the WHOLE
+        // pipeline on every call, so an unrecognized LABEL anywhere in the pipeline - even one no
+        // deal currently uses - now fails the entire snapshot before the deals endpoint is ever
+        // called. This is a known limitation for F6 (stage-mapping robustness, out of scope for this
+        // task) - documented in CLAUDE.md. The scheduler's existing catch(RuntimeException) + log and
+        // the controller's new @ExceptionHandler (see CrmBridgeControllerTest) are what keep this
+        // loud and clear instead of a generic failure.
+        enqueueConstructorPipeline();
+        HubSpotDealRepository repository = newRepository();
+
+        String pipelineWithAnUnrecognizedLabel = """
+                {
+                  "results": [
+                    {
+                      "id": "pl-1",
+                      "label": "Sales Pipeline",
+                      "stages": [
+                        {"id": "st-100", "label": "Appointment Scheduled"},
+                        {"id": "st-999", "label": "Some Brand New Custom Stage"}
+                      ]
+                    }
+                  ]
+                }
+                """;
+        enqueueJson(pipelineWithAnUnrecognizedLabel);
+
+        UnknownHubSpotStageException exception =
+                assertThrows(UnknownHubSpotStageException.class, repository::snapshot);
+
+        assertTrue(exception.getMessage().contains("Some Brand New Custom Stage"));
+        assertEquals(2, server.getRequestCount(),
+                "constructor pipeline + the failed snapshot pipeline fetch - never reaches the deals endpoint");
     }
 
     @Test
@@ -519,50 +557,12 @@ class HubSpotDealRepositoryTest {
     }
 
     @Test
-    void secondSnapshotFailsEntirelyWhenTheRefetchedPipelineHasAnUnrecognizedStageLabel() {
-        // A real behavior change from the F1 fix, not previously possible: the OLD/deprecated path
-        // resolved stage mapping once, at construction, so a stage id missing from THAT mapping was
-        // a per-deal skip (see unknownStageIdReferencedByADealIsSkippedNotFailingTheWholeSync).
-        // snapshot() re-fetches and re-resolves the WHOLE pipeline on every call, so an unrecognized
-        // LABEL anywhere in the pipeline - even one no deal currently uses - now fails the entire
-        // snapshot before the deals endpoint is ever called. Known limitation for F6, documented in
-        // CLAUDE.md. CrmBridgeController's @ExceptionHandler (see CrmBridgeControllerTest) and the
-        // scheduler's existing catch(RuntimeException) + log are what keep this loud and clear
-        // instead of a confusing failure.
-        enqueueConstructorPipeline();
-        HubSpotDealRepository repository = newRepository();
-
-        String pipelineWithAnUnrecognizedLabel = """
-                {
-                  "results": [
-                    {
-                      "id": "pl-1",
-                      "label": "Sales Pipeline",
-                      "stages": [
-                        {"id": "st-100", "label": "Appointment Scheduled"},
-                        {"id": "st-999", "label": "Some Brand New Custom Stage"}
-                      ]
-                    }
-                  ]
-                }
-                """;
-        enqueueJson(pipelineWithAnUnrecognizedLabel);
-
-        UnknownHubSpotStageException exception =
-                assertThrows(UnknownHubSpotStageException.class, repository::snapshot);
-
-        assertTrue(exception.getMessage().contains("Some Brand New Custom Stage"));
-        assertEquals(2, server.getRequestCount(),
-                "constructor pipeline + the failed snapshot pipeline fetch - never reaches the deals endpoint");
-    }
-
-    @Test
     void secondSnapshotPicksUpAStageIdAddedToThePipelineAfterTheFirstSnapshot() {
         // F6 is out of scope here (the mapping RULES don't change) - this is about F1/F14's
-        // freshness: the old per-instance-cached path resolved stage ids once, at construction, and
-        // never saw a stage id added later. snapshot() re-fetches the pipeline every call, so it
+        // freshness: the deprecated/cached path would resolve stage ids once, at construction, and
+        // never see a stage id added later. snapshot() re-fetches the pipeline every call, so it
         // does.
-        enqueueConstructorPipeline(); // constructor - only the seven original default-pipeline stages
+        enqueueConstructorPipeline(); // only the seven original default-pipeline stages
         HubSpotDealRepository repository = newRepositoryWithClock(Clock.fixed(FIXED_NOW, ZoneOffset.UTC));
 
         enqueuePipeline();
@@ -593,6 +593,25 @@ class HubSpotDealRepositoryTest {
         DealSnapshot second = repository.snapshot();
 
         assertEquals(DealStage.CLOSED_WON, second.findLatestByDealId("D-23").orElseThrow().stage());
+        assertEquals(0, second.skippedAtRead());
+    }
+
+    @Test
+    void snapshotCountsRecordsSkippedWhileParsingWithoutFailingTheWholeFetch() {
+        enqueueConstructorPipeline();
+        HubSpotDealRepository repository = newRepositoryWithClock(Clock.fixed(FIXED_NOW, ZoneOffset.UTC));
+
+        enqueuePipeline();
+        String badDeal = dealJson("D-30", "Bad stage", "1000", null, "2026-08-01T08:00:00Z",
+                historyEntry("st-999-does-not-exist", "2026-08-01T08:00:00.000Z"));
+        String goodDeal = dealJson("D-31", "Good deal alongside it", "2000", null, "2026-08-02T08:00:00Z",
+                historyEntry("st-100", "2026-08-02T08:00:00.000Z"));
+        enqueueJson(dealsPage(null, badDeal, goodDeal));
+
+        DealSnapshot snapshot = repository.snapshot();
+
+        assertEquals(List.of("D-31"), snapshot.dealIds());
+        assertEquals(1, snapshot.skippedAtRead());
     }
 
     @Test
@@ -613,24 +632,6 @@ class HubSpotDealRepositoryTest {
         assertEquals(3, snapshot.findHistoryByDealId("D-40").size());
         assertEquals(1, snapshot.latestPerDeal().size());
         assertEquals(DealStage.CLOSED_WON, snapshot.latestPerDeal().get(0).stage());
-    }
-
-    @Test
-    void snapshotCountsRecordsSkippedWhileParsingWithoutFailingTheWholeFetch() {
-        enqueueConstructorPipeline();
-        HubSpotDealRepository repository = newRepositoryWithClock(Clock.fixed(FIXED_NOW, ZoneOffset.UTC));
-
-        enqueuePipeline();
-        String badDeal = dealJson("D-30", "Bad stage", "1000", null, "2026-08-01T08:00:00Z",
-                historyEntry("st-999-does-not-exist", "2026-08-01T08:00:00.000Z"));
-        String goodDeal = dealJson("D-31", "Good deal alongside it", "2000", null, "2026-08-02T08:00:00Z",
-                historyEntry("st-100", "2026-08-02T08:00:00.000Z"));
-        enqueueJson(dealsPage(null, badDeal, goodDeal));
-
-        DealSnapshot snapshot = repository.snapshot();
-
-        assertEquals(List.of("D-31"), snapshot.dealIds());
-        assertEquals(1, snapshot.skippedAtRead());
     }
 
     /** A {@link Clock} whose {@link #instant()} can be advanced between calls, for proving asOf moves. */

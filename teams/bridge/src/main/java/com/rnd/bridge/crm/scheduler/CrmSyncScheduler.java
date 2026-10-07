@@ -15,15 +15,15 @@ import org.springframework.stereotype.Service;
  * once-a-day pull for now, not move to real-time, until told otherwise.
  * <p>
  * Takes exactly one {@link DealSnapshot} per run and calls {@code crmLane.run(Stream, Instant)}
- * against its {@code latestPerDeal()}/{@code asOf()} together - the same single-snapshot-per-run shape
- * {@code CrmBridgeController} uses, so a scheduled run and a manual trigger agree on what "one
- * sync" means, and neither can see a mix of two different fetches the way calling {@code
- * dealRepository.snapshot()} twice in one run could. A failure here is caught and logged rather
- * than left to propagate, so one bad scheduled run doesn't produce an unhandled-exception log line
- * in place of a clear "sync failed" message - {@code crmLane.run()} already turns per-record
- * failures into {@link IntakeResult#rejected()} rather than throwing, so anything that does throw
- * here (including the {@code snapshot()} fetch itself, e.g. HubSpot unreachable or retries
- * exhausted) is a run-level failure worth its own message.
+ * against its {@code latestPerDeal()}/{@code asOf()} together - the same single-snapshot-per-run
+ * shape {@code CrmBridgeController} uses, so a scheduled run and a manual trigger agree on what
+ * "one sync" means, and neither can see a mix of two different fetches the way calling {@code
+ * dealRepository.asOf()} and {@code CrmSourceReader.read()} separately could. A failure here is
+ * caught and logged rather than left to propagate, so one bad scheduled run doesn't produce an
+ * unhandled-exception log line in place of a clear "sync failed" message - {@code crmLane.run()}
+ * already turns per-record failures into {@link IntakeResult#rejected()} rather than throwing, so
+ * anything that does throw here (including the {@code snapshot()} fetch itself, e.g. HubSpot
+ * unreachable or retries exhausted) is a run-level failure worth its own message.
  */
 @Service
 public class CrmSyncScheduler {

@@ -30,8 +30,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 /**
  * Tests the HTTP layer only, with CrmLane and DealRepository mocked.
- * CrmLaneIntegrationTest already covers a real run over the 79-record
- * dataset; repeating that through HTTP would add nothing.
+ * CrmLaneIntegrationTest already covers a real run over the synthetic dataset;
+ * repeating that through HTTP would add nothing.
  */
 @WebMvcTest(CrmBridgeController.class)
 class CrmBridgeControllerTest {
@@ -54,12 +54,12 @@ class CrmBridgeControllerTest {
         Instant asOf = Instant.parse("2026-08-24T09:00:00Z");
         when(dealRepository.snapshot()).thenReturn(snapshotAt(asOf));
         when(crmLane.run(any(Stream.class), eq(asOf)))
-                .thenReturn(new IntakeResult(79, 79, 0, List.of()));
+                .thenReturn(new IntakeResult(32, 32, 0, List.of()));
 
         mockMvc.perform(post("/bridge/crm/sync"))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.read").value(79))
-                .andExpect(jsonPath("$.published").value(79))
+                .andExpect(jsonPath("$.read").value(32))
+                .andExpect(jsonPath("$.published").value(32))
                 .andExpect(jsonPath("$.rejected").value(0))
                 .andExpect(jsonPath("$.skippedAtRead").value(0));
     }
@@ -69,7 +69,7 @@ class CrmBridgeControllerTest {
         Instant asOf = Instant.parse("2026-08-24T09:00:00Z");
         when(dealRepository.snapshot()).thenReturn(snapshotAt(asOf));
         when(crmLane.run(any(Stream.class), eq(asOf)))
-                .thenReturn(new IntakeResult(79, 78, 1,
+                .thenReturn(new IntakeResult(32, 31, 1,
                         List.of(new ValidationException("Invalid Task.title = null: must not be null"))));
 
         mockMvc.perform(post("/bridge/crm/sync"))

@@ -32,15 +32,15 @@ class CrmTaskValidatorTest {
     }
 
     @Test
-    void rejectsABlankTenantId() {
-        Task task = withTenantId(baseTask(), "   ");
+    void rejectsANullTenantId() {
+        Task task = withTenantId(baseTask(), null);
         ValidationException ex = assertThrows(ValidationException.class, () -> VALIDATOR.validate(task));
         assertTrue(ex.getMessage().contains("organizationId"));
     }
 
     @Test
-    void rejectsANullTenantId() {
-        Task task = withTenantId(baseTask(), null);
+    void rejectsABlankTenantId() {
+        Task task = withTenantId(baseTask(), "   ");
         ValidationException ex = assertThrows(ValidationException.class, () -> VALIDATOR.validate(task));
         assertTrue(ex.getMessage().contains("organizationId"));
     }
@@ -55,7 +55,14 @@ class CrmTaskValidatorTest {
 
     @Test
     void rejectsABlankSourceRef() {
-        Task task = withSourceRef(baseTask(), "  ");
+        Task task = withSourceRef(baseTask(), "   ");
+        ValidationException ex = assertThrows(ValidationException.class, () -> VALIDATOR.validate(task));
+        assertTrue(ex.getMessage().contains("sourceRef"));
+    }
+
+    @Test
+    void rejectsANullSourceRef() {
+        Task task = withSourceRef(baseTask(), null);
         ValidationException ex = assertThrows(ValidationException.class, () -> VALIDATOR.validate(task));
         assertTrue(ex.getMessage().contains("sourceRef"));
     }
@@ -63,17 +70,17 @@ class CrmTaskValidatorTest {
     @Test
     void stillDelegatesToTheSharedTaskValidator() {
         // title is TaskValidator's job, not this class's - proves the delegation actually runs,
-        // not just the CRM-only checks added on top of it.
+        // not just the CRM-only checks layered on top of it.
         Task task = withTitle(baseTask(), null);
         ValidationException ex = assertThrows(ValidationException.class, () -> VALIDATOR.validate(task));
         assertTrue(ex.getMessage().contains("title"));
     }
 
     @Test
-    void theSharedTaskValidatorOnItsOwnStillAcceptsANullTenantGitHubAndJiraAreUnaffected() {
+    void theSharedTaskValidatorOnItsOwnStillAcceptsANullTenantSoGitHubAndJiraAreUnaffected() {
         // GitHubClient, GitHubKafkaProducer, JiraClient, JiraKafkaProducer and
         // TaskEnrichmentConsumer all share TaskValidator directly and never set
-        // Task.organizationId - this is what proves adding CRM's tenant check to
+        // Task.organizationId. This is what proves adding the tenant/sourceRef checks to
         // CrmTaskValidator, not to TaskValidator itself, doesn't break them.
         Task task = withTenantId(baseTask(), null);
         assertDoesNotThrow(() -> new TaskValidator().validate(task));
