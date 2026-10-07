@@ -206,6 +206,69 @@ Broker security (SASL, TLS) is set through Spring's `spring.kafka.properties.*`,
 `spring.kafka.properties.security.protocol=SASL_PLAINTEXT`. Every consumer factory and producer
 template starts from those properties, so the same settings apply everywhere.
 
+## priority_score (Issue #445)
+
+`priority_score` is Mind's per-task importance score, adjusted by Chain's own feasibility state
+(dependencies, constraints), stored on `Task` and published on `task.scheduling.updated` alongside
+`is_available`. It is `null` until Mind has scored the task; Mind clearing a score clears it again.
+Computed by `PriorityScoreService` (pure function, no repository access) and wired into
+`TaskEligibilityService`, which gathers its inputs from the dependency graph and publishes whenever
+either `priority_score` or `is_available` changes.
+
+### Formula
+
+```
+m = mindScore * confidence                          (confidence defaults to 1.0 if null)
+b = blockingConfidenceSum   / (1 + blockingConfidenceSum)
+c = openConstraintCount     / (1 + openConstraintCount)
+d = dependentConfidenceSum  / (1 + dependentConfidenceSum)
+s = 0.4 * (1 - b) + 0.3 * (1 - c) + 0.2 * d + 0.1 * m      // s is in [0, 1]
+priority_score = round(1 + 9 * s, 2)                        // always in [1, 10], no clamp needed
+```
+
+- `blockingConfidenceSum` is the sum of Mind's per-edge confidence over this task's *unresolved*
+  (not-DONE) blockers - a 0.3-confidence blocker moves the score less than a 0.9-confidence one.
+- `dependentConfidenceSum` is the same sum over every task that depends on this one, regardless of
+  that dependent's own status - a task other work confidently depends on ranks higher.
+- Both sums are normalized with `x / (1 + x)` into `[0, 1)` rather than divided into the formula
+  directly, so an unbounded sum can't blow the range. An earlier draft (`base / (1 + k * blockers)`,
+  then clamp to `[1, 10]`) collapsed every heavily-blocked task to the same floor value of 1 once
+  blockers got large enough - the weighted-sum form above doesn't have that failure mode, so no
+  clamp is needed.
+- Weights (`0.4` / `0.3` / `0.2` / `0.1`, summing to 1.0) and the normalization function are a team
+  decision (2026-10-06/07 planning for #445), not derived from data - revisit if the demo shows the
+  ranking feels wrong in practice. See `PriorityScoreService`'s own Javadoc for the authoritative
+  version of this section.
+
+### Confidence on dependency edges
+
+`TaskDependency.confidence` (0..1, defaults to full confidence for edges not sourced from Mind) is
+Mind's confidence in that specific edge, carried on `task.dependencies.proposed`'s `Dependency`
+message. Confirmed directly with Mind (2026-10-07): a delivery is **additive/upsert, not the full
+final set** - re-sending a task's dependencies adds new edges and updates the confidence of
+existing ones, it never removes an edge, and Mind has no removal event at all today. A stale edge
+has to be removed through Chain's own `DELETE /{taskId}/dependencies/{dependsOnTaskId}` endpoint.
+`DependencyProposedEventHandler` threads this confidence through to `TaskEligibilityService`,
+which recomputes `priority_score` for **both** ends of a changed edge - the task whose
+`blockingConfidenceSum` changed, and the task whose `dependentConfidenceSum` changed - not just
+the one the edge mutation call was made on.
+
+Mind-supplied `mindScore`/`confidence` outside `[0, 1]` are rejected (`InvalidRequestException` on
+the task-score path, `InvalidDependencyException` on the per-edge path, both non-retryable in
+their respective Kafka handlers - i.e. routed straight to `.errors`), never silently clamped.
+
+### Not yet wired (tracked separately from #445)
+
+- **Storage**: `priority_score`/`confidence` are in-memory `Task`/`TaskDependency` fields only -
+  the Flyway migration and Postgres entity/repository changes are a follow-up once #437's
+  persistence work is confirmed landed.
+- **`task.score.proposed` consumer**: `TaskEligibilityService.onScoreProposed` exists and is
+  covered by its own tests, but nothing calls it yet from a `@KafkaListener` - that's #386, pending
+  Mind's contract.
+- **Publish format**: `SchedulingUpdateService`/`KafkaSchedulingUpdatePublisher` still publish JSON
+  (see "Kafka event infrastructure" above) - the Protobuf `SchedulingUpdatedEvent` contract
+  (`event_id`, `task_id`, `available`, `priority_score`, all optional) is #545.
+
 ## Running locally with Maven
 
 Requires a local Maven installation (`mvn`) and JDK 21.

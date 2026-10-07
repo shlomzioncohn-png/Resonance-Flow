@@ -9,6 +9,7 @@ import com.rnd.chain.dto.TaskStatus;
 import com.rnd.chain.exception.DependencyNotFoundException;
 import com.rnd.chain.exception.DuplicateDependencyException;
 import com.rnd.chain.exception.InvalidDependencyException;
+import com.rnd.chain.exception.InvalidRequestException;
 import com.rnd.chain.exception.TaskNotFoundException;
 import com.rnd.chain.repository.ConstraintRepository;
 import com.rnd.chain.repository.TaskDependencyRepository;
@@ -26,6 +27,7 @@ import java.util.ArrayList;
 import java.util.Deque;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -59,19 +61,44 @@ public class TaskEligibilityService {
     private final TaskDependencyRepository taskDependencyRepository;
     private final SchedulingUpdateService schedulingUpdateService;
     private final ConstraintRepository constraintRepository;
+    private final PriorityScoreService priorityScoreService;
 
     private final Object dependencyGraphLock = new Object();
 
+    /**
+     * Issue #445: the constructor Spring actually wires up - {@code @Autowired} picks this one
+     * over the 4-arg overload below (Spring's single-constructor auto-detection only applies when
+     * there is exactly one constructor; with two, one of them must say which).
+     */
+    @org.springframework.beans.factory.annotation.Autowired
+    public TaskEligibilityService(
+            TaskRepository taskRepository,
+            TaskDependencyRepository taskDependencyRepository,
+            SchedulingUpdateService schedulingUpdateService,
+            ConstraintRepository constraintRepository,
+            PriorityScoreService priorityScoreService) {
+
+        this.taskRepository = taskRepository;
+        this.taskDependencyRepository = taskDependencyRepository;
+        this.schedulingUpdateService = schedulingUpdateService;
+        this.constraintRepository = constraintRepository;
+        this.priorityScoreService = priorityScoreService;
+    }
+
+    /**
+     * Same as the 5-arg constructor, with a plain {@code new PriorityScoreService()} (it's a pure,
+     * stateless function - see its own Javadoc - so there's nothing to fake or inject here). Kept
+     * only so the many existing tests that construct this class directly with 4 args don't all
+     * need updating for issue #445; prefer the 5-arg constructor in new code.
+     */
     public TaskEligibilityService(
             TaskRepository taskRepository,
             TaskDependencyRepository taskDependencyRepository,
             SchedulingUpdateService schedulingUpdateService,
             ConstraintRepository constraintRepository) {
 
-        this.taskRepository = taskRepository;
-        this.taskDependencyRepository = taskDependencyRepository;
-        this.schedulingUpdateService = schedulingUpdateService;
-        this.constraintRepository = constraintRepository;
+        this(taskRepository, taskDependencyRepository, schedulingUpdateService, constraintRepository,
+                new PriorityScoreService());
     }
 
     private Task requireTask(UUID taskId) {
@@ -98,6 +125,8 @@ public class TaskEligibilityService {
                 .openConstraintCount(task.getOpenConstraintCount())
                 .estimatedDurationMin(task.getEstimatedDurationMin())
                 .score(task.getScore())
+                .confidence(task.getConfidence())
+                .priorityScore(task.getPriorityScore())
                 .createdAt(task.getCreatedAt())
                 .updatedAt(task.getUpdatedAt())
                 .deletedAt(task.getDeletedAt());
@@ -154,14 +183,87 @@ public class TaskEligibilityService {
                     updated.isReady());
         }
 
-        if (oldTask != null
-                && oldTask.isReady() != updated.isReady()) {
+        return recomputePriorityScoreAndPublish(taskId, oldTask, updated);
+    }
 
-            schedulingUpdateService
-                    .publishSchedulingUpdate(updated);
+    /**
+     * Issue #445: recomputes {@code priorityScore} for {@code current} from its latest
+     * blocking/dependent/constraint state, persists it if it changed, and publishes
+     * {@code task.scheduling.updated} if either {@code isReady} or {@code priorityScore} differs
+     * from {@code oldTask} - the locked decision is "any change to priority_score or
+     * is_available", not just is_available the way this class published before #445.
+     *
+     * <p>Soft-deleted tasks are skipped entirely (no calculation, no publish - locked decision).
+     * {@code oldTask} is the pre-mutation snapshot; null means "no prior state to compare against"
+     * (e.g. a fresh task), in which case nothing is published - there's no change to report yet.
+     *
+     * <p>Not atomic with the counters update that produced {@code current}: recomputation reads
+     * the dependency graph in a separate step, under no lock here (score-only changes don't touch
+     * edges, and a graph change always goes through one of {@code addDependency}/
+     * {@code removeDependency}/{@code onTaskStatusChanged...}, each of which already holds
+     * {@code dependencyGraphLock} for its own mutation and calls back into this method while still
+     * holding it - see those methods). A known, accepted gap for Phase 1 - see CLAUDE.md "Open
+     * items" for the general pattern this class already lives with until real persistence makes
+     * every one of these a single atomic statement.
+     */
+    private Task recomputePriorityScoreAndPublish(UUID taskId, Task oldTask, Task current) {
+        if (current.getDeletedAt() != null) {
+            return current;
         }
 
-        return updated;
+        Double recomputed = priorityScoreService.compute(
+                current.getScore(),
+                current.getConfidence(),
+                blockingConfidenceSum(taskId),
+                current.getOpenConstraintCount(),
+                dependentConfidenceSum(taskId));
+
+        Task finalTask = current;
+        if (!Objects.equals(recomputed, current.getPriorityScore())) {
+            finalTask = requireUpdated(
+                    taskRepository.update(taskId, task -> copyOf(task).priorityScore(recomputed).build()),
+                    taskId);
+        }
+
+        if (oldTask != null) {
+            boolean availabilityChanged = oldTask.isReady() != finalTask.isReady();
+            boolean priorityChanged = !Objects.equals(oldTask.getPriorityScore(), finalTask.getPriorityScore());
+            if (availabilityChanged || priorityChanged) {
+                schedulingUpdateService.publishSchedulingUpdate(finalTask);
+            }
+        }
+
+        return finalTask;
+    }
+
+    /**
+     * Sum of Mind's confidence (see {@link TaskDependency#confidence()}) over {@code taskId}'s
+     * direct blockers that are not DONE - a DONE blocker no longer counts against readiness, so it
+     * shouldn't count against priority either. An edge with no stored confidence contributes
+     * {@link PriorityScoreService}'s default (full confidence), same as everywhere else.
+     */
+    private double blockingConfidenceSum(UUID taskId) {
+        double sum = 0.0;
+        for (TaskDependency edge : taskDependencyRepository.findByTaskId(taskId)) {
+            Task blocker = taskRepository.findById(edge.dependsOnTaskId()).orElse(null);
+            if (blocker == null || blocker.getStatus() != TaskStatus.DONE) {
+                sum += edge.confidence() != null ? edge.confidence() : 1.0;
+            }
+        }
+        return sum;
+    }
+
+    /**
+     * Sum of Mind's confidence over every edge where some other task depends on {@code taskId},
+     * regardless of that dependent's own status - a task other work confidently depends on is
+     * important independent of whether that other work is itself currently blocked.
+     */
+    private double dependentConfidenceSum(UUID taskId) {
+        double sum = 0.0;
+        for (TaskDependency edge : taskDependencyRepository.findByDependsOnTaskId(taskId)) {
+            sum += edge.confidence() != null ? edge.confidence() : 1.0;
+        }
+        return sum;
     }
 
     public void recalculateTaskEligibility(UUID taskId) {
@@ -213,6 +315,9 @@ public class TaskEligibilityService {
             Task task = requireTask(taskId);
             Task dependencyTask = requireTask(dependsOnTaskId);
 
+            // USER-sourced edge, no Mind confidence to carry - defaults to full confidence (1.0)
+            // via the two-arg TaskDependency constructor below, same as every other USER-facing
+            // call site in this class.
             Optional<TaskDependency> saved =
                     taskDependencyRepository.save(
                             new TaskDependency(
@@ -233,19 +338,33 @@ public class TaskEligibilityService {
                     task.getId(),
                     dependencyAlreadyDone,
                     1);
+            recomputeDependencyTargetPriority(dependsOnTaskId);
 
             return dependency;
         }
     }
 
-    private record PendingEdge(UUID dependsOnTaskId, boolean isNewEdge, boolean dependsOnAlreadyDone) {
+    /**
+     * Issue #445: {@code dependsOnTaskId} just gained (or lost, or had its confidence changed on)
+     * a dependent - its own {@code blockingCount}/{@code openConstraintCount} are untouched, but
+     * {@code dependentConfidenceSum(dependsOnTaskId)} changed, which can move its priorityScore.
+     * A no-op counters mutator routes it through the same {@link #recomputePriorityScoreAndPublish}
+     * every other change goes through, rather than duplicating that decision here.
+     */
+    private void recomputeDependencyTargetPriority(UUID dependsOnTaskId) {
+        updateCounters(dependsOnTaskId, UnaryOperator.identity());
+    }
+
+    private record PendingEdge(UUID dependsOnTaskId, Double confidence, boolean isNewEdge,
+                                boolean dependsOnAlreadyDone) {
     }
 
     /** Cycle/existence checks only - no writes. An edge that already exists is a redelivery and
-     * comes back as a no-op ({@code isNewEdge == false}), not an error. */
-    private PendingEdge validateEdge(UUID taskId, UUID dependsOnTaskId) {
+     * comes back as a no-op for blockingCount purposes ({@code isNewEdge == false}), not an error
+     * - though issue #445's {@link #applyEdge} still upserts its confidence. */
+    private PendingEdge validateEdge(UUID taskId, UUID dependsOnTaskId, Double confidence) {
         if (taskDependencyRepository.existsDependency(taskId, dependsOnTaskId)) {
-            return new PendingEdge(dependsOnTaskId, false, false);
+            return new PendingEdge(dependsOnTaskId, confidence, false, false);
         }
         if (wouldCreateCycle(taskId, dependsOnTaskId)) {
             throw new InvalidDependencyException(
@@ -253,27 +372,54 @@ public class TaskEligibilityService {
         }
         requireTask(taskId);
         boolean dependsOnAlreadyDone = requireTask(dependsOnTaskId).getStatus() == TaskStatus.DONE;
-        return new PendingEdge(dependsOnTaskId, true, dependsOnAlreadyDone);
+        return new PendingEdge(dependsOnTaskId, confidence, true, dependsOnAlreadyDone);
     }
 
     /** Writes one already-validated edge - no cycle/existence checks, see {@link #validateEdge}. */
     private void applyEdge(UUID taskId, PendingEdge edge) {
+        // Issue #445: always save, even for a redelivery - TaskDependencyRepository#save upserts
+        // confidence on an already-existing edge (Mind can republish the same task with an
+        // updated confidence; it only ever adds/updates, never removes).
+        taskDependencyRepository.save(new TaskDependency(taskId, edge.dependsOnTaskId(), edge.confidence()));
         if (!edge.isNewEdge()) {
-            log.info("Dependency {} -> {} already existed, blockingCount left unchanged",
-                    taskId, edge.dependsOnTaskId());
+            log.info("Dependency {} -> {} already existed, blockingCount left unchanged, confidence updated to {}",
+                    taskId, edge.dependsOnTaskId(), edge.confidence());
+            // blockingCount doesn't change, but the confidence update above can still move both
+            // ends' priority_score (taskId's blockingConfidenceSum, dependsOnTaskId's
+            // dependentConfidenceSum) - recompute both without touching any counters.
+            updateCounters(taskId, UnaryOperator.identity());
+            recomputeDependencyTargetPriority(edge.dependsOnTaskId());
             return;
         }
-        taskDependencyRepository.save(new TaskDependency(taskId, edge.dependsOnTaskId()));
         adjustBlockingCount(taskId, edge.dependsOnAlreadyDone(), 1);
+        recomputeDependencyTargetPriority(edge.dependsOnTaskId());
     }
 
     /**
-     * Same effect as calling {@link #addDependency} once per id, but validates every entry
+     * Same as {@link #addDependencies(UUID, Map)}, for a caller with no per-edge Mind confidence
+     * (e.g. a plain id list) - every edge defaults to full confidence (1.0).
+     */
+    @Transactional
+    public void addDependencies(UUID taskId, List<UUID> dependsOnTaskIds) {
+        Objects.requireNonNull(dependsOnTaskIds, "dependsOnTaskIds must not be null");
+        Map<UUID, Double> withDefaultConfidence = new LinkedHashMap<>();
+        for (UUID id : dependsOnTaskIds) {
+            Objects.requireNonNull(id, "dependsOnTaskIds must not contain null elements");
+            withDefaultConfidence.put(id, 1.0);
+        }
+        addDependencies(taskId, withDefaultConfidence);
+    }
+
+    /**
+     * Same effect as calling {@link #addDependency} once per entry, but validates every entry
      * against the current graph state before applying any of them, so one invalid entry (a
      * cycle, or a dependency target Chain hasn't seen yet) fails the whole batch with zero
      * partial effect (PR #467 review, on the Kafka handler that batches a task.dependencies.proposed
-     * event's array through this method). Entries that already exist are no-ops, so a redelivered
-     * event is safe to apply again.
+     * event's array through this method). Entries that already exist have their confidence
+     * upserted (issue #445) rather than being pure no-ops - see {@link #applyEdge}.
+     *
+     * @param dependsOnTaskIdsWithConfidence maps each blocker's id to Mind's confidence (0..1) in
+     * that specific edge. Duplicate ids aren't possible (it's a Map); a null value is rejected.
      *
      * <p>Validating up front is safe because {@link #wouldCreateCycle} only traverses edges that
      * already exist before this call, and every same-batch edge starts at {@code taskId}. The whole
@@ -281,19 +427,23 @@ public class TaskEligibilityService {
      * invalidate a validated entry before it is applied.
      */
     @Transactional
-    public void addDependencies(UUID taskId, List<UUID> dependsOnTaskIds) {
+    public void addDependencies(UUID taskId, Map<UUID, Double> dependsOnTaskIdsWithConfidence) {
         Objects.requireNonNull(taskId, "taskId must not be null");
-        Objects.requireNonNull(dependsOnTaskIds, "dependsOnTaskIds must not be null");
-        List<UUID> distinctIds = dependsOnTaskIds.stream()
-                .peek(id -> Objects.requireNonNull(id, "dependsOnTaskIds must not contain null elements"))
-                .distinct()
-                .toList();
-        log.info("Adding {} distinct dependency(ies) for task {}", distinctIds.size(), taskId);
+        Objects.requireNonNull(dependsOnTaskIdsWithConfidence, "dependsOnTaskIdsWithConfidence must not be null");
+        dependsOnTaskIdsWithConfidence.forEach((id, confidence) -> {
+            Objects.requireNonNull(id, "dependsOnTaskIdsWithConfidence must not contain a null id");
+            if (confidence == null || confidence < 0.0 || confidence > 1.0) {
+                throw new InvalidDependencyException(
+                        "confidence for dependency " + taskId + " -> " + id
+                                + " must be between 0 and 1, got " + confidence);
+            }
+        });
+        log.info("Adding {} distinct dependency(ies) for task {}", dependsOnTaskIdsWithConfidence.size(), taskId);
 
         synchronized (dependencyGraphLock) {
-            List<PendingEdge> validated = new ArrayList<>(distinctIds.size());
-            for (UUID dependsOnTaskId : distinctIds) {
-                validated.add(validateEdge(taskId, dependsOnTaskId));
+            List<PendingEdge> validated = new ArrayList<>(dependsOnTaskIdsWithConfidence.size());
+            for (Map.Entry<UUID, Double> entry : dependsOnTaskIdsWithConfidence.entrySet()) {
+                validated.add(validateEdge(taskId, entry.getKey(), entry.getValue()));
             }
             for (PendingEdge edge : validated) {
                 applyEdge(taskId, edge);
@@ -338,6 +488,7 @@ public class TaskEligibilityService {
                     taskId,
                     dependencyCurrentlyDone,
                     -1);
+            recomputeDependencyTargetPriority(dependsOnTaskId);
         }
     }
 
@@ -487,19 +638,20 @@ public class TaskEligibilityService {
 
         List<UUID> dependentIds = dependents.stream().map(TaskDependency::taskId).toList();
 
-        Map<UUID, Boolean> previousReadiness = new HashMap<>();
+        Map<UUID, Task> previousById = new HashMap<>();
         List<Task> updated = taskRepository.updateAll(dependentIds, task -> {
-            previousReadiness.put(task.getId(), task.isReady());
+            previousById.put(task.getId(), task);
             return withCounters(
                     task,
                     Math.max(0, task.getBlockingCount() + delta),
                     task.getOpenConstraintCount());
         });
 
+        // Issue #445: each dependent's blockingCount just changed, which can move its own
+        // priority_score (see blockingConfidenceSum) even on top of whatever isReady did -
+        // recomputePriorityScoreAndPublish decides whether that warrants a publish.
         for (Task task : updated) {
-            if (previousReadiness.get(task.getId()) != task.isReady()) {
-                schedulingUpdateService.publishSchedulingUpdate(task);
-            }
+            recomputePriorityScoreAndPublish(task.getId(), previousById.get(task.getId()), task);
         }
     }
 
@@ -572,6 +724,47 @@ public class TaskEligibilityService {
                         task,
                         task.getBlockingCount(),
                         Math.max(0, task.getOpenConstraintCount() + delta)));
+    }
+
+    /**
+     * Issue #445: receives Mind's score for a task (the event is {@code task.score.proposed} -
+     * wiring an actual Kafka consumer onto this method is #386, out of scope here). Updates
+     * {@code Task.score}/{@code confidence} and recomputes/publishes {@code priorityScore}
+     * accordingly.
+     *
+     * <p>{@code mindScore == null} is a legitimate "Mind cleared this task's score", not an
+     * error: it clears both {@code score} and {@code confidence} (a confidence without a score is
+     * meaningless) and - per the #445 locked decision - still publishes the clear, since
+     * {@code priorityScore} flipping to null is itself a priority change like any other.
+     *
+     * @throws InvalidRequestException if {@code mindScore} or {@code confidence} is non-null and
+     * outside [0, 1] - the locked decision is to reject, not silently clamp, so this is meant to
+     * route to the DLT once #386 wires a real consumer on top of this method.
+     * @throws TaskNotFoundException if no task with {@code taskId} exists, or it's soft-deleted
+     */
+    @Transactional
+    public void onScoreProposed(UUID taskId, Double mindScore, Double confidence) {
+        Objects.requireNonNull(taskId, "taskId must not be null");
+        requireInUnitRangeIfPresent(mindScore, "mindScore");
+        requireInUnitRangeIfPresent(confidence, "confidence");
+
+        synchronized (dependencyGraphLock) {
+            AtomicReference<Task> previous = new AtomicReference<>();
+            Task updated = requireUpdated(
+                    taskRepository.update(taskId, task -> {
+                        previous.set(task);
+                        return copyOf(task).score(mindScore).confidence(confidence).build();
+                    }),
+                    taskId);
+
+            recomputePriorityScoreAndPublish(taskId, previous.get(), updated);
+        }
+    }
+
+    private static void requireInUnitRangeIfPresent(Double value, String name) {
+        if (value != null && (value < 0.0 || value > 1.0)) {
+            throw new InvalidRequestException(name + " must be between 0 and 1, got " + value);
+        }
     }
 
     public TaskEligibilityResponse getTaskEligibility(UUID taskId) {

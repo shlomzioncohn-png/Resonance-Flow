@@ -20,6 +20,7 @@ import org.junit.jupiter.api.Test;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -643,6 +644,7 @@ class TaskEligibilityServiceTest {
     private record Fixture(InMemoryTaskRepository taskRepo,
                             InMemoryTaskDependencyRepository dependencyRepo,
                             InMemoryConstraintRepository constraintRepo,
+                            RecordingSchedulingUpdatePublisher publisher,
                             TaskEligibilityService service) {
     }
 
@@ -650,8 +652,9 @@ class TaskEligibilityServiceTest {
         InMemoryTaskRepository taskRepo = new InMemoryTaskRepository(tasks);
         InMemoryTaskDependencyRepository dependencyRepo = new InMemoryTaskDependencyRepository(edges);
         InMemoryConstraintRepository constraintRepo = new InMemoryConstraintRepository();
-        return new Fixture(taskRepo, dependencyRepo, constraintRepo, new TaskEligibilityService(taskRepo,
-                dependencyRepo, new SchedulingUpdateService(event -> {}), constraintRepo));
+        RecordingSchedulingUpdatePublisher publisher = new RecordingSchedulingUpdatePublisher();
+        return new Fixture(taskRepo, dependencyRepo, constraintRepo, publisher, new TaskEligibilityService(taskRepo,
+                dependencyRepo, new SchedulingUpdateService(publisher), constraintRepo));
     }
 
     private static Task buildTask(UUID id, int blockingCount, int openConstraintCount, boolean isReady) {
@@ -1283,6 +1286,182 @@ class TaskEligibilityServiceTest {
 
         assertDoesNotThrow(() -> fixture.service().onConstraintStatusChanged(
                 taskId, "c-waive", Constraint.ConstraintStatus.WAIVED, null));
+    }
+
+    // Issue #445: priority_score.
+
+    @Test
+    void onScoreProposed_setsScoreAndConfidence_andPublishesComputedPriorityScore() {
+        UUID taskId = UUID.randomUUID();
+        Fixture fixture = newFixture(List.of(buildTask(taskId, 0, 0, true)), List.of());
+
+        fixture.service().onScoreProposed(taskId, 0.8, 0.5);
+
+        Task task = fixture.taskRepo().findById(taskId).orElseThrow();
+        assertEquals(0.8, task.getScore());
+        assertEquals(0.5, task.getConfidence());
+
+        Double expected = new PriorityScoreService().compute(0.8, 0.5, 0, 0, 0);
+        assertEquals(expected, task.getPriorityScore());
+
+        List<TaskSchedulingUpdatedEvent> events = fixture.publisher().getEvents();
+        assertEquals(1, events.size());
+        assertEquals(expected, events.get(0).getPriorityScore());
+    }
+
+    @Test
+    void onScoreProposed_withNullMindScore_clearsPriorityScoreAndPublishesTheClear() {
+        UUID taskId = UUID.randomUUID();
+        Fixture fixture = newFixture(List.of(buildTask(taskId, 0, 0, true)), List.of());
+        fixture.service().onScoreProposed(taskId, 0.8, 0.5);
+        fixture.publisher().clear();
+
+        fixture.service().onScoreProposed(taskId, null, null);
+
+        Task task = fixture.taskRepo().findById(taskId).orElseThrow();
+        assertNull(task.getScore());
+        assertNull(task.getConfidence());
+        assertNull(task.getPriorityScore());
+
+        List<TaskSchedulingUpdatedEvent> events = fixture.publisher().getEvents();
+        assertEquals(1, events.size());
+        assertNull(events.get(0).getPriorityScore());
+    }
+
+    @Test
+    void onScoreProposed_mindScoreOutOfRange_throwsAndDoesNotPublish() {
+        UUID taskId = UUID.randomUUID();
+        Fixture fixture = newFixture(List.of(buildTask(taskId, 0, 0, true)), List.of());
+
+        assertThrows(com.rnd.chain.exception.InvalidRequestException.class,
+                () -> fixture.service().onScoreProposed(taskId, 1.5, 0.5));
+
+        assertTrue(fixture.publisher().getEvents().isEmpty());
+        assertNull(fixture.taskRepo().findById(taskId).orElseThrow().getScore());
+    }
+
+    @Test
+    void onScoreProposed_confidenceOutOfRange_throwsAndDoesNotPublish() {
+        UUID taskId = UUID.randomUUID();
+        Fixture fixture = newFixture(List.of(buildTask(taskId, 0, 0, true)), List.of());
+
+        assertThrows(com.rnd.chain.exception.InvalidRequestException.class,
+                () -> fixture.service().onScoreProposed(taskId, 0.5, -0.1));
+
+        assertTrue(fixture.publisher().getEvents().isEmpty());
+    }
+
+    @Test
+    void onScoreProposed_unknownTask_throwsAndDoesNotPublish() {
+        Fixture fixture = newFixture(List.of(), List.of());
+
+        assertThrows(TaskNotFoundException.class,
+                () -> fixture.service().onScoreProposed(UUID.randomUUID(), 0.5, 0.5));
+
+        assertTrue(fixture.publisher().getEvents().isEmpty());
+    }
+
+    @Test
+    void addDependencies_withMindConfidence_lowersPriorityScoreByBlockerConfidence() {
+        UUID taskId = UUID.randomUUID();
+        UUID blockerId = UUID.randomUUID();
+        Fixture fixture = newFixture(
+                List.of(buildTask(taskId, 0, 0, true), buildTask(blockerId, 0, 0, true)),
+                List.of());
+        fixture.service().onScoreProposed(taskId, 0.8, 1.0);
+        Double beforeBlocker = fixture.taskRepo().findById(taskId).orElseThrow().getPriorityScore();
+
+        fixture.service().addDependencies(taskId, Map.of(blockerId, 0.9));
+
+        Double afterBlocker = fixture.taskRepo().findById(taskId).orElseThrow().getPriorityScore();
+        assertTrue(afterBlocker < beforeBlocker,
+                "a 0.9-confidence blocker should lower priority_score, got before=" + beforeBlocker
+                        + " after=" + afterBlocker);
+    }
+
+    @Test
+    void addDependencies_republishingSameEdgeWithHigherConfidence_lowersPriorityScoreFurther() {
+        // Mind's republish semantics (#445 planning, confirmed with Ayala 2026-10-07): a repeat
+        // delivery upserts confidence on the existing edge, it does not replace the edge set.
+        UUID taskId = UUID.randomUUID();
+        UUID blockerId = UUID.randomUUID();
+        Fixture fixture = newFixture(
+                List.of(buildTask(taskId, 0, 0, true), buildTask(blockerId, 0, 0, true)),
+                List.of());
+        fixture.service().onScoreProposed(taskId, 0.8, 1.0);
+        fixture.service().addDependencies(taskId, Map.of(blockerId, 0.2));
+        Double withLowConfidence = fixture.taskRepo().findById(taskId).orElseThrow().getPriorityScore();
+
+        fixture.service().addDependencies(taskId, Map.of(blockerId, 0.9));
+
+        Double withHighConfidence = fixture.taskRepo().findById(taskId).orElseThrow().getPriorityScore();
+        assertTrue(withHighConfidence < withLowConfidence);
+        // Still exactly one edge - the republish upserted, it didn't duplicate.
+        assertEquals(1, fixture.dependencyRepo().findByTaskId(taskId).size());
+    }
+
+    @Test
+    void addDependencies_withMindConfidence_raisesDependentsPriorityScore() {
+        UUID dependentId = UUID.randomUUID();
+        UUID taskId = UUID.randomUUID();
+        Fixture fixture = newFixture(
+                List.of(buildTask(dependentId, 0, 0, true), buildTask(taskId, 0, 0, true)),
+                List.of());
+        fixture.service().onScoreProposed(taskId, 0.5, 1.0);
+        Double beforeDependent = fixture.taskRepo().findById(taskId).orElseThrow().getPriorityScore();
+
+        fixture.service().addDependencies(dependentId, Map.of(taskId, 0.8));
+
+        Double afterDependent = fixture.taskRepo().findById(taskId).orElseThrow().getPriorityScore();
+        assertTrue(afterDependent > beforeDependent,
+                "a task another task confidently depends on should rank higher, got before="
+                        + beforeDependent + " after=" + afterDependent);
+    }
+
+    @Test
+    void addDependencies_confidenceOutOfRange_throwsAndAddsNoEdge() {
+        UUID taskId = UUID.randomUUID();
+        UUID blockerId = UUID.randomUUID();
+        Fixture fixture = newFixture(
+                List.of(buildTask(taskId, 0, 0, true), buildTask(blockerId, 0, 0, true)),
+                List.of());
+
+        assertThrows(InvalidDependencyException.class,
+                () -> fixture.service().addDependencies(taskId, Map.of(blockerId, 1.5)));
+
+        assertTrue(fixture.dependencyRepo().findByTaskId(taskId).isEmpty());
+    }
+
+    @Test
+    void unresolvedBlockerCompleting_recomputesAndPublishesPriorityScoreOnce() {
+        // "A task whose last blocker completes gets a new score and exactly one published event"
+        // - #445 acceptance criterion.
+        UUID taskId = UUID.randomUUID();
+        UUID blockerId = UUID.randomUUID();
+        Fixture fixture = newFixture(
+                List.of(buildTask(taskId, 1, 0, false), buildTask(blockerId, 0, 0, true)),
+                List.of(new TaskDependency(taskId, blockerId, 0.9)));
+        fixture.service().onScoreProposed(taskId, 0.8, 1.0);
+        fixture.publisher().clear();
+
+        fixture.service().onTaskStatusChanged(blockerId, TaskStatus.DONE);
+
+        Task task = fixture.taskRepo().findById(taskId).orElseThrow();
+        assertTrue(task.isReady());
+        assertEquals(new PriorityScoreService().compute(0.8, 1.0, 0, 0, 0), task.getPriorityScore());
+        assertEquals(1, fixture.publisher().getEvents().size());
+    }
+
+    @Test
+    void noOpRecalculation_doesNotPublishAgain() {
+        UUID taskId = UUID.randomUUID();
+        Fixture fixture = newFixture(List.of(buildTask(taskId, 0, 0, true)), List.of());
+        fixture.service().onScoreProposed(taskId, 0.8, 1.0);
+        fixture.publisher().clear();
+
+        fixture.service().recalculateTaskEligibility(taskId);
+
+        assertTrue(fixture.publisher().getEvents().isEmpty());
     }
 
 }

@@ -3,6 +3,7 @@ package com.rnd.chain.events;
 import com.rnd.chain.exception.InvalidDependencyException;
 import com.rnd.chain.exception.TaskNotFoundException;
 import com.rnd.chain.service.TaskEligibilityService;
+import com.rnd.mind.event.Dependency;
 import com.rnd.mind.event.DependencyProposedEvent;
 import org.springframework.kafka.annotation.KafkaListener;
 import org.springframework.kafka.annotation.RetryableTopic;
@@ -11,7 +12,8 @@ import org.springframework.retry.annotation.Backoff;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.util.List;
+import java.util.LinkedHashMap;
+import java.util.Map;
 import java.util.UUID;
 
 import static com.rnd.chain.events.EventFields.parseUuid;
@@ -80,19 +82,22 @@ public class DependencyProposedEventHandler {
         UUID eventId = parseUuid(event.getEventId(), "event_id");
         UUID taskId = parseUuid(event.getTaskId(), "task_id");
 
-        // confidence (Dependency.getConfidence()) is deliberately never read - confirmed to have
-        // no effect on Chain's side, every entry is applied unconditionally.
-        List<UUID> dependsOnTaskIds = event.getDependenciesList().stream()
-                .map(dependency -> parseUuid(dependency.getDependsOnTaskId(), "dependencies[].depends_on_task_id"))
-                .toList();
+        // Issue #445: confidence now feeds PriorityScoreService's B/D terms (a 0.3-confidence
+        // blocker moves priority_score less than a 0.9-confidence one) - no longer ignored the
+        // way the class Javadoc above and the .proto file used to document.
+        Map<UUID, Double> dependsOnTaskIdsWithConfidence = new LinkedHashMap<>();
+        for (Dependency dependency : event.getDependenciesList()) {
+            UUID dependsOnTaskId = parseUuid(dependency.getDependsOnTaskId(), "dependencies[].depends_on_task_id");
+            dependsOnTaskIdsWithConfidence.put(dependsOnTaskId, (double) dependency.getConfidence());
+        }
 
         template.processClaimed(eventId, "task.dependencies.proposed",
-                () -> addDependencies(taskId, dependsOnTaskIds));
+                () -> addDependencies(taskId, dependsOnTaskIdsWithConfidence));
     }
 
-    private void addDependencies(UUID taskId, List<UUID> dependsOnTaskIds) {
+    private void addDependencies(UUID taskId, Map<UUID, Double> dependsOnTaskIdsWithConfidence) {
         try {
-            taskEligibilityService.addDependencies(taskId, dependsOnTaskIds);
+            taskEligibilityService.addDependencies(taskId, dependsOnTaskIdsWithConfidence);
         } catch (TaskNotFoundException e) {
             // Task not found - task_id or one of the dependsOnTaskIds hasn't landed via
             // task.created yet. The team spec guarantees Mind only ever sends final, valid ids,
@@ -101,11 +106,11 @@ public class DependencyProposedEventHandler {
             throw new ReferencedTaskNotFoundException(
                     "task.dependencies.proposed referenced a task Chain hasn't seen yet (task=" + taskId + ")", e);
         } catch (InvalidDependencyException e) {
-            // Cycle detected - a structural problem with the data itself, not a timing issue.
-            // Retrying won't help, straight to the error topic. Which pair would have cycled is
-            // in e's message.
+            // Either a cycle, or (issue #445) a confidence outside [0, 1] - both are structural
+            // problems with the data itself, not a timing issue. Retrying won't help, straight to
+            // the error topic. Which pair/value is in e's message.
             throw new NonRetryableEventException(
-                    "task.dependencies.proposed would create a cycle (task=" + taskId + ")", e);
+                    "task.dependencies.proposed was rejected (task=" + taskId + ")", e);
         }
     }
 

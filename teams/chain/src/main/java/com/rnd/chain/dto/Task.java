@@ -47,6 +47,16 @@ public final class Task {
     private final Integer estimatedDurationMin;
     private final Double score;
 
+    /** Mind's confidence (0..1) in its own {@link #score} for this task. Null until Mind sends
+     * one alongside the score (task.score.proposed). Issue #445: the m term of priority_score
+     * is {@code score * confidence}, not {@code score} alone. */
+    private final Double confidence;
+
+    /** Chain's feasibility-adjusted priority, 1..10, or null until {@link #score} is set. Issue
+     * #445: computed by {@code PriorityScoreService}, never set directly by a caller other than
+     * {@code TaskEligibilityService}. */
+    private final Double priorityScore;
+
     private final LocalDateTime createdAt;
     private final LocalDateTime updatedAt;
     private final LocalDateTime deletedAt;
@@ -61,6 +71,8 @@ public final class Task {
                  int openConstraintCount,
                  Integer estimatedDurationMin,
                  Double score,
+                 Double confidence,
+                 Double priorityScore,
                  LocalDateTime createdAt,
                  LocalDateTime updatedAt,
                  LocalDateTime deletedAt) {
@@ -88,6 +100,8 @@ public final class Task {
         this.openConstraintCount = openConstraintCount;
         this.estimatedDurationMin = estimatedDurationMin;
         this.score = score;
+        this.confidence = confidence;
+        this.priorityScore = priorityScore;
         this.createdAt = createdAt;
         this.updatedAt = updatedAt;
         this.deletedAt = deletedAt;
@@ -104,8 +118,8 @@ public final class Task {
         Objects.requireNonNull(source, "source must not be null");
         return new Task(source.id, source.parentTaskId, source.ownerId, source.status,
                 source.isReady, source.blockingCount, source.openConstraintCount,
-                source.estimatedDurationMin, source.score, source.createdAt, source.updatedAt,
-                source.deletedAt);
+                source.estimatedDurationMin, source.score, source.confidence, source.priorityScore,
+                source.createdAt, source.updatedAt, source.deletedAt);
     }
 
     @Override
@@ -115,6 +129,7 @@ public final class Task {
                 + ", isReady=" + isReady
                 + ", blockingCount=" + blockingCount
                 + ", openConstraintCount=" + openConstraintCount
+                + ", priorityScore=" + priorityScore
                 + ", deletedAt=" + deletedAt
                 + "}";
     }

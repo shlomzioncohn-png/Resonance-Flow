@@ -26,8 +26,16 @@ option java_multiple_files = true;
 // handler needs a different idempotency strategy (see its own Javadoc for a fallback: addDependency
 // is already naturally idempotent per-edge, independent of any event_id).
 //
-// confidence is received but has no effect on Chain's side (confirmed) - not a threshold, not
-// stored, not a gating state. Every entry in `dependencies` is applied unconditionally.
+// confidence IS used on Chain's side as of issue #445 (priority_score) - it's not a threshold or
+// a gating state (every entry in `dependencies` is still applied unconditionally), but it is
+// stored per edge and feeds PriorityScoreService's blocking/dependent terms. This supersedes the
+// "has no effect" note this file used to carry.
+//
+// Confirmed directly with Mind (Ayala, 2026-10-07): a delivery is additive/upsert, NOT the full,
+// final set - re-sending task_id's dependencies adds/updates entries, it does not replace the
+// existing set, and Mind has no removal event at all today (a stale edge has to be removed
+// through Chain's own DELETE endpoint). This supersedes this file's own earlier "sent as the
+// full, final set per delivery" note below, which turned out to be wrong a second time.
 //
 // Follow-up, tracked outside #271: get this reviewed and registered by Relay in
 // teams/relay/ci/schema-subjects.tsv once their process can take it - this file should then be
@@ -37,10 +45,11 @@ message DependencyProposedEvent {
                                          // confirmed to actually be sent.
   string task_id = 2;                   // UUID as string - the task the dependencies are on.
   repeated Dependency dependencies = 3;  // the tasks task_id depends on, plus Mind's confidence
-                                         // for each - sent as the full, final set per delivery.
+                                         // for each - additive/upsert per delivery, not the full
+                                         // final set. See class-level note above.
 }
 
 message Dependency {
   string depends_on_task_id = 1;  // UUID as string.
-  float confidence = 2;           // received, ignored - see class-level note above.
+  float confidence = 2;           // Mind's confidence (0..1) in this edge - see class-level note.
 }

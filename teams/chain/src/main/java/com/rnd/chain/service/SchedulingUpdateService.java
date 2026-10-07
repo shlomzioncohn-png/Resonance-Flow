@@ -19,11 +19,13 @@ public class SchedulingUpdateService {
 
     public void publishSchedulingUpdate(Task task) {
 
+        // Issue #445: priorityScore is Chain's feasibility-adjusted value (PriorityScoreService),
+        // not Mind's raw score - task.getScore() was a stand-in used before priorityScore existed.
         TaskSchedulingUpdatedEvent event =
                 new TaskSchedulingUpdatedEvent(
                         task.getId(),
                         task.isReady(),
-                        task.getScore()
+                        task.getPriorityScore()
                 );
 
         schedulingUpdatePublisher.publish(event);
