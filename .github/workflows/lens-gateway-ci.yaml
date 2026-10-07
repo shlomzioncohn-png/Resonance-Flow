@@ -34,3 +34,4 @@ jobs:
       service_name: lens-gateway
       service_dir: teams/lens/gateway
       language: java
+      container_port: 8080

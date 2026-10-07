@@ -4,7 +4,7 @@ apiVersion: batch/v1
 kind: CronJob
 
 metadata:
-  name: {{ include "resonance-flow.fullname" $ }}-pipe-consumer-group-sweep
+  name: {{ include "resonance-flow.pipeConsumerGroupSweepFullname" $ }}
   labels:
     {{- include "resonance-flow.labels" $ | nindent 4 }}
     app.kubernetes.io/component: pipe-consumer-group-sweep
@@ -51,6 +51,6 @@ spec:
           volumes:
             - name: sweep-script
               configMap:
-                name: {{ include "resonance-flow.fullname" $ }}-pipe-consumer-group-sweep
+                name: {{ include "resonance-flow.pipeConsumerGroupSweepFullname" $ }}
                 defaultMode: 0755
 {{- end }}

@@ -51,6 +51,33 @@ is the exception to the JPA approach: plain JDBC (`JdbcTemplate`), per the team-
 rationale/open items. The idempotency store described below is still in-memory only, unaffected
 by this.
 
+The DB password is not a `values.yaml` literal - it's an auto-generated `chain-db-credentials`
+Secret (`templates/services/chain/configmap.yaml`, kept stable across upgrades via `lookup`),
+mounted as a file into both Chain's own pod (at `/etc/resonance-flow/secrets/chain-db/password`)
+and the Postgres primary as `CHAIN_DB_PASSWORD` (which consumes it in the `CREATE USER` init
+script). Chain's mounted `config.yaml` uses Spring's `configtree:` support
+(`spring.config.import`) to bind that file to the `${password}` placeholder - not an env var, no
+app-code change needed. Inbox's own Postgres password isn't wired this way yet (still
+`postgresql.auth.postgresPassword` as a plaintext value) - same gap, not addressed here.
+
+**Kafka topics** (also wired in `components.chain.config.data.kafka` / the same configmap):
+
+| Topic | Direction | Drives |
+|---|---|---|
+| `task.dependencies.proposed` | consume (Mind) | `addDependency` |
+| `task.dependencies.removed` | consume (Mind) | `removeDependency` |
+| `task.status.updated` | consume (Inbox) | `onTaskStatusChanged` |
+| `task.scheduling.updated` | produce | consumed by Inbox |
+
+`task.dependencies.removed` and `task.status.updated` are still **PROPOSED**, not reviewed
+contracts yet - see the draft `.proto` schemas from the Chain team on #384. `task.status.updated`
+in particular assumes Inbox's full 8-value status enum, mapped internally to Chain's simplified
+3-value model - not yet confirmed with Inbox.
+
+`onConstraintAdded`/`onConstraintStatusChanged` stay REST-triggered through Chain's own API for
+now - draft `task.constraints.proposed`/`task.constraints.status.updated` schemas exist in case
+this becomes event-driven later, but there's no topic wired for them today.
+
 Task identifiers are `java.util.UUID` for now, pending the Inbox team publishing its own task id
 type (`Task`/`TaskDependency` will switch to that type once it exists).
 
@@ -577,6 +604,10 @@ support JDK 25, and Mockito then fails while loading the Spring context.
 Flyway/Hibernate need a live connection. Bring one up via `docker compose up postgres` from the
 repo root (creates the `chain` database/user on first init - see
 `shared/database/init/create-chain-database.sh`), or point at any reachable Postgres instance.
+
+In CI, like Inbox, the tests run against the kind cluster's Postgres (`values-chain.yaml` enables
+it). The `@Tag("postgres")` tests still run only with `mvn test -Ppostgres-integration`. Several
+of them also need a Kafka broker, so they aren't enabled in CI yet.
 
 ## Merge with main (2026-10-05)
 
