@@ -20,7 +20,7 @@ public class TaskSchedulingUpdatedEvent {
             Double priorityScore) {
 
         this.eventId = Objects.requireNonNull(eventId, "eventId must not be null");
-        this.taskId = taskId;
+        this.taskId = Objects.requireNonNull(taskId, "taskId must not be null");
         this.isAvailable = isAvailable;
         this.priorityScore = priorityScore;
     }

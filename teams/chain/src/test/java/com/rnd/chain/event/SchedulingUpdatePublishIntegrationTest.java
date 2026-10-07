@@ -1,7 +1,11 @@
 package com.rnd.chain.event;
 
+import com.rnd.chain.events.ChainEventTopicsProperties;
 import com.rnd.chain.events.ChainProtobufKafkaConfig;
 import com.rnd.inbox.event.SchedulingUpdatedEvent;
+import io.confluent.kafka.schemaregistry.protobuf.ProtobufSchema;
+import io.confluent.kafka.schemaregistry.protobuf.ProtobufSchemaProvider;
+import io.confluent.kafka.schemaregistry.testutil.MockSchemaRegistry;
 import io.confluent.kafka.serializers.protobuf.KafkaProtobufDeserializer;
 import io.confluent.kafka.serializers.protobuf.KafkaProtobufDeserializerConfig;
 import org.apache.kafka.clients.consumer.Consumer;
@@ -38,10 +42,14 @@ class SchedulingUpdatePublishIntegrationTest {
     private static final String REGISTRY = "mock://scheduling-publish-test";
 
     @Test
-    void publishedEvent_reachesTheBrokerAndDecodesAsInboxsMessage() {
+    void publishedEvent_reachesTheBrokerAndDecodesAsInboxsMessage() throws Exception {
+        // The producer never registers schemas; Relay's schema-sync does, so the test plays that part.
+        MockSchemaRegistry.getClientForScope("scheduling-publish-test", List.of(new ProtobufSchemaProvider()))
+                .register(TOPIC + "-value", new ProtobufSchema(SchedulingUpdatedEvent.getDescriptor()));
         EmbeddedKafkaBroker broker = EmbeddedKafkaCondition.getBroker();
         KafkaSchedulingUpdatePublisher publisher = new KafkaSchedulingUpdatePublisher(
-                producerTemplate(broker.getBrokersAsString()));
+                producerTemplate(broker.getBrokersAsString()),
+                new ChainEventTopicsProperties(Map.of("task.scheduling.updated", TOPIC), null));
         UUID eventId = UUID.randomUUID();
         UUID taskId = UUID.randomUUID();
 
@@ -60,7 +68,7 @@ class SchedulingUpdatePublishIntegrationTest {
         }
     }
 
-    private static org.springframework.kafka.core.KafkaTemplate<String, com.rnd.chain.event.SchedulingUpdatedEvent>
+    private static org.springframework.kafka.core.KafkaTemplate<String, SchedulingUpdatedEvent>
             producerTemplate(String bootstrapServers) {
         KafkaProperties kafkaProperties = new KafkaProperties();
         kafkaProperties.setBootstrapServers(List.of(bootstrapServers));
