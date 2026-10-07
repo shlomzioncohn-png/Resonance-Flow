@@ -5,6 +5,7 @@ import com.rnd.bridge.core.ReadCursor;
 import com.rnd.bridge.core.error.ValidationException;
 import com.rnd.bridge.crm.CrmLane;
 import com.rnd.bridge.crm.repository.DealRepository;
+import com.rnd.bridge.crm.repository.DealSnapshot;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
@@ -13,6 +14,7 @@ import org.springframework.test.web.servlet.MockMvc;
 
 import java.time.Instant;
 import java.util.List;
+import java.util.Map;
 
 import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.not;
@@ -43,10 +45,14 @@ class CrmBridgeControllerTest {
     @MockBean
     private DealRepository dealRepository;
 
+    private static DealSnapshot snapshotAt(Instant asOf) {
+        return new DealSnapshot(asOf, List.of(), Map.of(), List.of());
+    }
+
     @Test
     void postReturnsOkWithTheCountsFromTheLaneResult() throws Exception {
         Instant asOf = Instant.parse("2026-08-24T09:00:00Z");
-        when(dealRepository.asOf()).thenReturn(asOf);
+        when(dealRepository.snapshot()).thenReturn(snapshotAt(asOf));
         when(crmLane.run(any(ReadCursor.class), eq(asOf)))
                 .thenReturn(new IntakeResult(79, 79, 0, List.of()));
 
@@ -60,7 +66,7 @@ class CrmBridgeControllerTest {
     @Test
     void aRejectedRecordStillReturnsOkWithTheMessageAndNoStackTraceOrClassName() throws Exception {
         Instant asOf = Instant.parse("2026-08-24T09:00:00Z");
-        when(dealRepository.asOf()).thenReturn(asOf);
+        when(dealRepository.snapshot()).thenReturn(snapshotAt(asOf));
         when(crmLane.run(any(ReadCursor.class), eq(asOf)))
                 .thenReturn(new IntakeResult(79, 78, 1,
                         List.of(new ValidationException("Invalid Task.title = null: must not be null"))));
@@ -75,9 +81,9 @@ class CrmBridgeControllerTest {
     }
 
     @Test
-    void asOfComesFromTheRepositoryNotTheClock() throws Exception {
+    void asOfComesFromTheSnapshotNotTheClock() throws Exception {
         Instant configuredAsOf = Instant.parse("2020-01-01T00:00:00Z");
-        when(dealRepository.asOf()).thenReturn(configuredAsOf);
+        when(dealRepository.snapshot()).thenReturn(snapshotAt(configuredAsOf));
         when(crmLane.run(any(ReadCursor.class), any())).thenReturn(new IntakeResult(0, 0, 0, List.of()));
 
         mockMvc.perform(post("/bridge/crm/sync"))

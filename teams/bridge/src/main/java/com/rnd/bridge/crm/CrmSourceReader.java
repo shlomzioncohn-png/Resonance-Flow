@@ -23,6 +23,6 @@ public class CrmSourceReader implements SourceReader<Deal> {
         // synthetic feed has no since-timestamp query to run an incremental
         // read against. Wiring the parameter through now means adding real
         // incremental support later doesn't change this method's signature.
-        return dealRepository.findAll().stream();
+        return dealRepository.snapshot().allDeals().stream();
     }
 }

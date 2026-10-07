@@ -51,7 +51,7 @@ public class CrmSyncScheduler {
 
         log.info("Starting scheduled CRM sync.");
         try {
-            IntakeResult result = crmLane.run(ReadCursor.full(), dealRepository.asOf());
+            IntakeResult result = crmLane.run(ReadCursor.full(), dealRepository.snapshot().asOf());
             log.info("Scheduled CRM sync complete: {} read, {} published, {} rejected.",
                     result.read(), result.published(), result.rejected());
         } catch (RuntimeException e) {

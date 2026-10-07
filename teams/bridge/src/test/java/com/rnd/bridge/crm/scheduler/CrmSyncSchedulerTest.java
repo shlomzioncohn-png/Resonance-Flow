@@ -4,11 +4,13 @@ import com.rnd.bridge.core.IntakeResult;
 import com.rnd.bridge.core.ReadCursor;
 import com.rnd.bridge.crm.CrmLane;
 import com.rnd.bridge.crm.repository.DealRepository;
+import com.rnd.bridge.crm.repository.DealSnapshot;
 import org.junit.jupiter.api.Test;
 import org.springframework.test.util.ReflectionTestUtils;
 
 import java.time.Instant;
 import java.util.List;
+import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.mockito.ArgumentMatchers.any;
@@ -29,20 +31,25 @@ class CrmSyncSchedulerTest {
     private final DealRepository dealRepository = mock(DealRepository.class);
     private final CrmSyncScheduler scheduler = new CrmSyncScheduler(crmLane, dealRepository);
 
+    private static DealSnapshot snapshotAt(Instant asOf) {
+        return new DealSnapshot(asOf, List.of(), Map.of(), List.of());
+    }
+
     @Test
     void doesNothingWhenDisabled() {
         ReflectionTestUtils.setField(scheduler, "syncEnabled", false);
 
         scheduler.syncCrmTasks();
 
+        verify(dealRepository, never()).snapshot();
         verify(crmLane, never()).run(any(ReadCursor.class), any());
     }
 
     @Test
-    void runsTheLaneWithTheRepositorysAsOfWhenEnabled() {
+    void runsTheLaneWithTheSnapshotsAsOfWhenEnabled() {
         ReflectionTestUtils.setField(scheduler, "syncEnabled", true);
         Instant asOf = Instant.parse("2026-09-07T03:00:00Z");
-        when(dealRepository.asOf()).thenReturn(asOf);
+        when(dealRepository.snapshot()).thenReturn(snapshotAt(asOf));
         when(crmLane.run(any(ReadCursor.class), eq(asOf))).thenReturn(new IntakeResult(5, 5, 0, List.of()));
 
         scheduler.syncCrmTasks();
@@ -53,7 +60,7 @@ class CrmSyncSchedulerTest {
     @Test
     void aRuntimeExceptionFromTheLaneIsCaughtNotPropagated() {
         ReflectionTestUtils.setField(scheduler, "syncEnabled", true);
-        when(dealRepository.asOf()).thenReturn(Instant.now());
+        when(dealRepository.snapshot()).thenReturn(snapshotAt(Instant.now()));
         when(crmLane.run(any(ReadCursor.class), any()))
                 .thenThrow(new RuntimeException("HubSpot unreachable"));
 

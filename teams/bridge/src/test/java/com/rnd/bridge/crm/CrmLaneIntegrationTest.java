@@ -42,9 +42,9 @@ class CrmLaneIntegrationTest {
         DealRepository repository = repository();
         CrmLane lane = newLane(repository);
 
-        IntakeResult result = lane.run(ReadCursor.full(), repository.asOf());
+        IntakeResult result = lane.run(ReadCursor.full(), repository.snapshot().asOf());
 
-        int expected = repository.findAll().size();
+        int expected = repository.snapshot().allDeals().size();
 
         assertEquals(expected, result.read());
         assertTrue(result.errors().isEmpty(),
@@ -56,7 +56,7 @@ class CrmLaneIntegrationTest {
     @Test
     void theRunIsDeterministicAcrossRepeatedInvocations() {
         DealRepository repository = repository();
-        Instant asOf = repository.asOf();
+        Instant asOf = repository.snapshot().asOf();
 
         IntakeResult first = newLane(repository).run(ReadCursor.full(), asOf);
         IntakeResult second = newLane(repository).run(ReadCursor.full(), asOf);

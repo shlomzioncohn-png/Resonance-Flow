@@ -2,6 +2,7 @@ package com.rnd.bridge.crm.repository.hubspot;
 
 import com.rnd.bridge.crm.model.Deal;
 import com.rnd.bridge.crm.model.DealStage;
+import com.rnd.bridge.crm.repository.DealSnapshot;
 import okhttp3.mockwebserver.MockResponse;
 import okhttp3.mockwebserver.MockWebServer;
 import okhttp3.mockwebserver.RecordedRequest;
@@ -19,7 +20,6 @@ import java.util.List;
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
-import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -27,6 +27,13 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * Exercises {@link HubSpotDealRepository} against a {@link MockWebServer}
  * with recorded-shape HubSpot response bodies. No test in this class talks
  * to the live HubSpot API.
+ * <p>
+ * Every test now goes through {@link HubSpotDealRepository#snapshot()} - the old per-instance-cache
+ * finder methods (and the cache field behind them) were removed entirely (CRM-lane audit finding
+ * F1). Because {@code snapshot()} does one fully independent fetch - pipeline AND deals - on every
+ * call, and the constructor still does its own one-off pipeline fetch purely to fail fast on an
+ * unrecognized stage label, every test here enqueues the pipeline TWICE: once for the constructor,
+ * once for the {@code snapshot()} call under test.
  */
 class HubSpotDealRepositoryTest {
 
@@ -90,6 +97,12 @@ class HubSpotDealRepositoryTest {
             }
             """;
 
+    /** Consumed by the constructor's own fail-fast pipeline fetch. */
+    private void enqueueConstructorPipeline() {
+        enqueueJson(DEFAULT_PIPELINE);
+    }
+
+    /** Consumed by a {@code snapshot()} call's own fresh pipeline fetch. */
     private void enqueuePipeline() {
         enqueueJson(DEFAULT_PIPELINE);
     }
@@ -141,6 +154,9 @@ class HubSpotDealRepositoryTest {
 
     @Test
     void dealWithSeveralStageTransitionsProducesRecordsOrderedAscendingByStageChangedAt() {
+        enqueueConstructorPipeline();
+        HubSpotDealRepository repository = newRepository();
+
         enqueuePipeline();
         String deal = dealJson("D-1", "Acme deal", "50000", "2026-09-15T00:00:00.000Z", "2026-05-01T08:00:00Z",
                 String.join(",",
@@ -149,8 +165,7 @@ class HubSpotDealRepositoryTest {
                         historyEntry("st-100", "2026-05-01T08:00:00.000Z")));
         enqueueJson(dealsPage(null, deal));
 
-        HubSpotDealRepository repository = newRepository();
-        List<Deal> history = repository.findHistoryByDealId("D-1");
+        List<Deal> history = repository.snapshot().findHistoryByDealId("D-1");
 
         assertEquals(
                 List.of(DealStage.PROSPECT, DealStage.NEGOTIATION, DealStage.CLOSED_WON),
@@ -165,6 +180,9 @@ class HubSpotDealRepositoryTest {
 
     @Test
     void reopenedDealAfterClosedWonProducesRecordsInTheOrderItHappenedWithPostReopenStageLast() {
+        enqueueConstructorPipeline();
+        HubSpotDealRepository repository = newRepository();
+
         enqueuePipeline();
         String deal = dealJson("D-2", "Reopened deal", "10000", null, "2026-04-01T08:00:00Z",
                 String.join(",",
@@ -173,27 +191,29 @@ class HubSpotDealRepositoryTest {
                         historyEntry("st-200", "2026-04-01T08:00:00.000Z")));
         enqueueJson(dealsPage(null, deal));
 
-        HubSpotDealRepository repository = newRepository();
-        List<Deal> history = repository.findHistoryByDealId("D-2");
+        DealSnapshot snapshot = repository.snapshot();
+        List<Deal> history = snapshot.findHistoryByDealId("D-2");
 
         assertEquals(
                 List.of(DealStage.QUALIFIED, DealStage.CLOSED_WON, DealStage.NEGOTIATION),
                 history.stream().map(Deal::stage).toList());
 
-        Deal latest = repository.findLatestByDealId("D-2").orElseThrow();
+        Deal latest = snapshot.findLatestByDealId("D-2").orElseThrow();
         assertEquals(DealStage.NEGOTIATION, latest.stage());
         assertEquals(history.get(2), latest);
     }
 
     @Test
     void dealWithOneHistoryEntryProducesOneRecord() {
+        enqueueConstructorPipeline();
+        HubSpotDealRepository repository = newRepository();
+
         enqueuePipeline();
         String deal = dealJson("D-3", "Single event deal", "5000", "2026-10-01T00:00:00.000Z",
                 "2026-08-01T08:00:00Z", historyEntry("st-100", "2026-08-01T08:00:00.000Z"));
         enqueueJson(dealsPage(null, deal));
 
-        HubSpotDealRepository repository = newRepository();
-        List<Deal> history = repository.findHistoryByDealId("D-3");
+        List<Deal> history = repository.snapshot().findHistoryByDealId("D-3");
 
         assertEquals(1, history.size());
         assertEquals(DealStage.PROSPECT, history.get(0).stage());
@@ -201,13 +221,15 @@ class HubSpotDealRepositoryTest {
 
     @Test
     void dealWithNoCloseDateAndNoAmountRoundTripsAsNullsNotDefaults() {
+        enqueueConstructorPipeline();
+        HubSpotDealRepository repository = newRepository();
+
         enqueuePipeline();
         String deal = dealJson("D-4", "No close date or amount", null, null, "2026-08-01T08:00:00Z",
                 historyEntry("st-100", "2026-08-01T08:00:00.000Z"));
         enqueueJson(dealsPage(null, deal));
 
-        HubSpotDealRepository repository = newRepository();
-        Deal only = repository.findLatestByDealId("D-4").orElseThrow();
+        Deal only = repository.snapshot().findLatestByDealId("D-4").orElseThrow();
 
         assertNull(only.closeDate());
         assertNull(only.dealValue());
@@ -215,6 +237,9 @@ class HubSpotDealRepositoryTest {
 
     @Test
     void stageIdsResolveThroughTheFetchedPipelineMappingNotAHardcodedTable() {
+        enqueueConstructorPipeline();
+        HubSpotDealRepository repository = newRepository();
+
         // Same labels as HubSpot's default pipeline, but with stage ids that
         // would not appear in any hardcoded id table.
         String pipelineWithUnusualIds = """
@@ -238,8 +263,7 @@ class HubSpotDealRepositoryTest {
                         historyEntry("zzz-1", "2026-08-01T08:00:00.000Z")));
         enqueueJson(dealsPage(null, deal));
 
-        HubSpotDealRepository repository = newRepository();
-        List<Deal> history = repository.findHistoryByDealId("D-5");
+        List<Deal> history = repository.snapshot().findHistoryByDealId("D-5");
 
         assertEquals(List.of(DealStage.PROSPECT, DealStage.CLOSED_WON),
                 history.stream().map(Deal::stage).toList());
@@ -250,8 +274,11 @@ class HubSpotDealRepositoryTest {
         // Was "fails loudly naming the id" - AbstractIntakeLane.run()'s
         // per-record try/catch never sees this (read() runs entirely
         // outside it), so one deal with a bad stage id used to abort every
-        // deal in the sync, not just itself. fetchSync() now catches this
+        // deal in the sync, not just itself. snapshot() now catches this
         // per record instead.
+        enqueueConstructorPipeline();
+        HubSpotDealRepository repository = newRepository();
+
         enqueuePipeline();
         String badDeal = dealJson("D-6", "Bad stage", "1000", null, "2026-08-01T08:00:00Z",
                 historyEntry("st-999-does-not-exist", "2026-08-01T08:00:00.000Z"));
@@ -259,11 +286,9 @@ class HubSpotDealRepositoryTest {
                 historyEntry("st-100", "2026-08-02T08:00:00.000Z"));
         enqueueJson(dealsPage(null, badDeal, goodDeal));
 
-        HubSpotDealRepository repository = newRepository();
+        DealSnapshot snapshot = assertDoesNotThrow(repository::snapshot);
 
-        List<Deal> deals = assertDoesNotThrow(repository::findAll);
-
-        assertEquals(List.of("D-6b"), deals.stream().map(Deal::dealId).toList());
+        assertEquals(List.of("D-6b"), snapshot.allDeals().stream().map(Deal::dealId).toList());
     }
 
     @Test
@@ -290,6 +315,9 @@ class HubSpotDealRepositoryTest {
 
     @Test
     void paginationFollowsTheCursorAndConsumesBothPages() {
+        enqueueConstructorPipeline();
+        HubSpotDealRepository repository = newRepository();
+
         enqueuePipeline();
         String dealOnPageOne = dealJson("D-7", "Page one deal", "1000", null, "2026-08-01T08:00:00Z",
                 historyEntry("st-100", "2026-08-01T08:00:00.000Z"));
@@ -298,18 +326,20 @@ class HubSpotDealRepositoryTest {
         enqueueJson(dealsPage("cursor-2", dealOnPageOne));
         enqueueJson(dealsPage(null, dealOnPageTwo));
 
-        HubSpotDealRepository repository = newRepository();
-        List<String> dealIds = repository.findAllDealIds();
+        List<String> dealIds = repository.snapshot().dealIds();
 
         assertEquals(List.of("D-7", "D-8"), dealIds);
-        assertEquals(3, server.getRequestCount()); // pipeline + 2 deal pages
+        assertEquals(4, server.getRequestCount()); // constructor pipeline + snapshot pipeline + 2 deal pages
 
-        RecordedRequest secondPageRequest = takeRequest(3); // pipeline, page 1, page 2
+        RecordedRequest secondPageRequest = takeRequest(4); // constructor pipeline, snapshot pipeline, page 1, page 2
         assertTrue(secondPageRequest.getPath().contains("after=cursor-2"));
     }
 
     @Test
     void aTwoNineIsRetriedRatherThanPropagated() {
+        enqueueConstructorPipeline();
+        HubSpotDealRepository repository = newRepository();
+
         enqueuePipeline();
         server.enqueue(new MockResponse()
                 .setResponseCode(429)
@@ -320,8 +350,7 @@ class HubSpotDealRepositoryTest {
                 historyEntry("st-100", "2026-08-01T08:00:00.000Z"));
         enqueueJson(dealsPage(null, deal));
 
-        HubSpotDealRepository repository = newRepository();
-        List<Deal> all = repository.findAll();
+        List<Deal> all = repository.snapshot().allDeals();
 
         assertEquals(1, all.size());
         assertEquals("D-9", all.get(0).dealId());
@@ -329,6 +358,9 @@ class HubSpotDealRepositoryTest {
 
     @Test
     void exhaustingTheRetryBudgetOnRepeated429sFailsWithAClearError() {
+        enqueueConstructorPipeline();
+        HubSpotDealRepository repository = newRepository(3, 0L, 0L);
+
         enqueuePipeline();
         for (int i = 0; i < 3; i++) {
             server.enqueue(new MockResponse()
@@ -337,9 +369,7 @@ class HubSpotDealRepositoryTest {
                     .setBody("{}"));
         }
 
-        HubSpotDealRepository repository = newRepository(3, 0L, 0L);
-
-        HubSpotClientException exception = assertThrows(HubSpotClientException.class, repository::findAll);
+        HubSpotClientException exception = assertThrows(HubSpotClientException.class, repository::snapshot);
         assertTrue(exception.getMessage().contains("rate limit"));
         assertTrue(exception.getMessage().contains("/crm/v3/objects/deals"));
         assertTrue(exception.getMessage().toLowerCase().indexOf("test-token") < 0);
@@ -347,6 +377,9 @@ class HubSpotDealRepositoryTest {
 
     @Test
     void aFiveOhThreeIsRetriedRatherThanPropagated() {
+        enqueueConstructorPipeline();
+        HubSpotDealRepository repository = newRepository();
+
         enqueuePipeline();
         server.enqueue(new MockResponse()
                 .setResponseCode(503)
@@ -356,8 +389,7 @@ class HubSpotDealRepositoryTest {
                 historyEntry("st-100", "2026-08-01T08:00:00.000Z"));
         enqueueJson(dealsPage(null, deal));
 
-        HubSpotDealRepository repository = newRepository();
-        List<Deal> all = repository.findAll();
+        List<Deal> all = repository.snapshot().allDeals();
 
         assertEquals(1, all.size());
         assertEquals("D-11", all.get(0).dealId());
@@ -365,6 +397,9 @@ class HubSpotDealRepositoryTest {
 
     @Test
     void exhaustingTheRetryBudgetOnRepeatedFiveOhFoursFailsWithAClearError() {
+        enqueueConstructorPipeline();
+        HubSpotDealRepository repository = newRepository(3, 0L, 0L);
+
         enqueuePipeline();
         for (int i = 0; i < 3; i++) {
             server.enqueue(new MockResponse()
@@ -373,9 +408,7 @@ class HubSpotDealRepositoryTest {
                     .setBody("{}"));
         }
 
-        HubSpotDealRepository repository = newRepository(3, 0L, 0L);
-
-        HubSpotClientException exception = assertThrows(HubSpotClientException.class, repository::findAll);
+        HubSpotClientException exception = assertThrows(HubSpotClientException.class, repository::snapshot);
         assertTrue(exception.getMessage().contains("504"));
         assertTrue(exception.getMessage().contains("/crm/v3/objects/deals"));
         assertTrue(exception.getMessage().toLowerCase().indexOf("test-token") < 0);
@@ -383,34 +416,31 @@ class HubSpotDealRepositoryTest {
 
     @Test
     void aFatalFourOhFourFailsImmediatelyWithoutRetrying() {
+        enqueueConstructorPipeline();
+        HubSpotDealRepository repository = newRepository();
+
         enqueuePipeline();
         server.enqueue(new MockResponse()
                 .setResponseCode(404)
                 .setHeader("Content-Type", "application/json")
                 .setBody("{\"status\":\"error\",\"message\":\"not found\"}"));
 
-        HubSpotDealRepository repository = newRepository();
-
-        HubSpotClientException exception = assertThrows(HubSpotClientException.class, repository::findAll);
+        HubSpotClientException exception = assertThrows(HubSpotClientException.class, repository::snapshot);
         assertTrue(exception.getMessage().contains("404"));
-        assertEquals(2, server.getRequestCount()); // pipeline + one non-retried deal request
+        assertEquals(3, server.getRequestCount()); // constructor pipeline + snapshot pipeline + one non-retried deal request
     }
 
     @Test
-    void asOfIsStableAcrossCallsWithinOneSync() {
+    void asOfComesFromTheClockAtTheStartOfTheSnapshotsFetch() {
+        enqueueConstructorPipeline();
+        HubSpotDealRepository repository = newRepository();
+
         enqueuePipeline();
         String deal = dealJson("D-10", "Stable asOf", "1000", null, "2026-08-01T08:00:00Z",
                 historyEntry("st-100", "2026-08-01T08:00:00.000Z"));
         enqueueJson(dealsPage(null, deal));
 
-        HubSpotDealRepository repository = newRepository();
-
-        Instant firstCall = repository.asOf();
-        repository.findAll();
-        Instant secondCall = repository.asOf();
-
-        assertEquals(FIXED_NOW, firstCall);
-        assertSame(firstCall, secondCall);
+        assertEquals(FIXED_NOW, repository.snapshot().asOf());
     }
 
     private RecordedRequest takeRequest(int count) {

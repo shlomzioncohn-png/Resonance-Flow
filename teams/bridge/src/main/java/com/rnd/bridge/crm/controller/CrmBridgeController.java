@@ -38,6 +38,6 @@ public class CrmBridgeController {
         // asOf comes from the repository's own time basis, never the clock -
         // the whole lane is built so urgency and deadlines are reproducible
         // from arguments alone; Instant.now() here would undo that.
-        return CrmSyncResponse.from(crmLane.run(ReadCursor.full(), dealRepository.asOf()));
+        return CrmSyncResponse.from(crmLane.run(ReadCursor.full(), dealRepository.snapshot().asOf()));
     }
 }
