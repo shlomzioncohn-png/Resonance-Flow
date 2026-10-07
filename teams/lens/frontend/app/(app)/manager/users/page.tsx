@@ -2,27 +2,18 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import Button from '@mui/material/Button';
-import Chip from '@mui/material/Chip';
 import Dialog from '@mui/material/Dialog';
 import DialogActions from '@mui/material/DialogActions';
 import DialogContent from '@mui/material/DialogContent';
 import DialogContentText from '@mui/material/DialogContentText';
 import DialogTitle from '@mui/material/DialogTitle';
-import IconButton from '@mui/material/IconButton';
 import Menu from '@mui/material/Menu';
 import MenuItem from '@mui/material/MenuItem';
 import Stack from '@mui/material/Stack';
-import TablePagination from '@mui/material/TablePagination';
 import TextField from '@mui/material/TextField';
-import Tooltip from '@mui/material/Tooltip';
 import Typography from '@mui/material/Typography';
-import EditOutlinedIcon from '@mui/icons-material/EditOutlined';
-import MoreVertIcon from '@mui/icons-material/MoreVert';
 import PageContainer from '@/components/layout/PageContainer';
-import LoadingState from '@/components/feedback/LoadingState';
-import EmptyState from '@/components/feedback/EmptyState';
-import ErrorState from '@/components/feedback/ErrorState';
-import DataTable, { type DataTableColumn } from '@/components/ui/DataTable';
+import DataTable, { type DataTableSort } from '@/components/ui/DataTable';
 import {
   ApiError,
   getUser,
@@ -34,28 +25,10 @@ import {
   type UserRow,
   type UserStatus,
 } from '@/services/managerUsersApi';
-
-/**
- * TODO: this screen doesn't know who's logged in — Auth stage 3 (real
- * Keycloak session in the Frontend) hasn't landed, so there is no real
- * "current manager" to read. Gateway's ManagerUsersController forwards
- * every request under the same mock actor id (app.mock-actor-id,
- * default below) regardless of who's actually signed in — see that
- * class's javadoc. This constant exists only so the one row that *is*
- * that mock actor can have its status-change action disabled, matching
- * the backend's own "can't change your own status" rule. Replace with
- * the real signed-in user's id once a session exists.
- */
-const MOCK_CURRENT_USER_ID = '00000000-0000-0000-0000-000000000001';
+import { MOCK_CURRENT_USER_ID } from './mockCurrentUser';
+import { buildUserColumns } from './userColumns';
 
 type LoadState = 'loading' | 'loaded' | 'error';
-
-const STATUS_COLOR: Record<string, 'success' | 'warning' | 'error' | 'default'> = {
-  ACTIVE: 'success',
-  PENDING: 'warning',
-  SUSPENDED: 'warning',
-  DISABLED: 'error',
-};
 
 const STATUS_ACTIONS: Record<UserStatus, string> = {
   ACTIVE: 'Reactivate',
@@ -79,6 +52,7 @@ export default function ManagerUsersPage() {
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(0);
   const [size, setSize] = useState(20);
+  const [sort, setSort] = useState<DataTableSort>({ columnId: 'displayName', direction: 'asc' });
 
   const [editingUser, setEditingUser] = useState<UserDetails | null>(null);
   const [editForm, setEditForm] = useState<UserEditFields>({});
@@ -90,23 +64,30 @@ export default function ManagerUsersPage() {
   const [statusError, setStatusError] = useState<string | null>(null);
   const [statusSubmitting, setStatusSubmitting] = useState(false);
 
-  const fetchUsers = useCallback(() => {
-    return listUsers({ page, size, sort: 'displayName,asc' })
+  // `isCurrent` lets the effect below drop a response that arrives after page/size/sort moved on.
+  const fetchUsers = useCallback((isCurrent: () => boolean = () => true) => {
+    return listUsers({ page, size, sort: `${sort.columnId},${sort.direction}` })
       .then((response) => {
+        if (!isCurrent()) return;
         setUsers(response.items);
         setTotal(response.totalElements);
         setState('loaded');
       })
       .catch((error) => {
+        if (!isCurrent()) return;
         setErrorMessage(errorMessageFor(error));
         setState('error');
       });
-  }, [page, size]);
+  }, [page, size, sort]);
 
-  // Mount + page/size changes: effect body never calls setState synchronously —
-  // the loading transition for page/size changes happens in goToPage/changePageSize instead.
+  // Mount + page/size/sort changes: effect body never calls setState synchronously —
+  // the loading transition happens in goToPage/changePageSize/changeSort instead.
   useEffect(() => {
-    fetchUsers();
+    let current = true;
+    fetchUsers(() => current);
+    return () => {
+      current = false;
+    };
   }, [fetchUsers]);
 
   const retry = useCallback(() => {
@@ -122,6 +103,12 @@ export default function ManagerUsersPage() {
   const changePageSize = useCallback((newSize: number) => {
     setState('loading');
     setSize(newSize);
+    setPage(0);
+  }, []);
+
+  const changeSort = useCallback((newSort: DataTableSort) => {
+    setState('loading');
+    setSort(newSort);
     setPage(0);
   }, []);
 
@@ -207,88 +194,34 @@ export default function ManagerUsersPage() {
       });
   }, [statusTarget]);
 
-  const columns: DataTableColumn<UserRow>[] = [
-    {
-      key: 'name',
-      header: 'Name',
-      render: (user) => (
-        <Typography variant="body2" sx={{ fontWeight: 600 }}>
-          {user.displayName}
-        </Typography>
-      ),
-    },
-    { key: 'email', header: 'Email', render: (user) => user.email },
-    { key: 'role', header: 'Role', render: (user) => user.role },
-    {
-      key: 'status',
-      header: 'Status',
-      render: (user) => (
-        <Chip size="small" label={user.status} color={STATUS_COLOR[user.status] ?? 'default'} />
-      ),
-    },
-    {
-      key: 'lastLogin',
-      header: 'Last login',
-      render: (user) => (user.lastLoginAt ? new Date(user.lastLoginAt).toLocaleString() : '—'),
-    },
-    {
-      key: 'actions',
-      header: '',
-      align: 'right',
-      render: (user) => {
-        const isSelf = user.id === MOCK_CURRENT_USER_ID;
-        return (
-          <Stack direction="row" spacing={0.5} sx={{ justifyContent: 'flex-end' }}>
-            <Tooltip title="Edit">
-              <IconButton size="small" onClick={() => openEdit(user)} aria-label={`Edit ${user.displayName}`}>
-                <EditOutlinedIcon fontSize="small" />
-              </IconButton>
-            </Tooltip>
-            <Tooltip title={isSelf ? "You can't change your own status" : 'Change status'}>
-              <span>
-                <IconButton
-                  size="small"
-                  disabled={isSelf}
-                  onClick={(event) => openStatusMenu(event, user)}
-                  aria-label={`Change status for ${user.displayName}`}
-                >
-                  <MoreVertIcon fontSize="small" />
-                </IconButton>
-              </span>
-            </Tooltip>
-          </Stack>
-        );
-      },
-    },
-  ];
+  const columns = buildUserColumns({
+    currentUserId: MOCK_CURRENT_USER_ID,
+    onEdit: openEdit,
+    onChangeStatus: openStatusMenu,
+  });
 
   return (
     <PageContainer title="Users" description="Every user in your organization, from Inbox's canonical user table.">
-      {state === 'loading' && <LoadingState message="Loading users…" />}
-
-      {state === 'error' && <ErrorState description={errorMessage} onRetry={retry} />}
-
-      {state === 'loaded' && (
-        <>
-          <DataTable
-            columns={columns}
-            rows={users}
-            getRowId={(user) => user.id}
-            emptyState={<EmptyState title="No users found" description="Users in your organization will show up here." />}
-          />
-          {users.length > 0 && (
-            <TablePagination
-              component="div"
-              count={total}
-              page={page}
-              onPageChange={(_, newPage) => goToPage(newPage)}
-              rowsPerPage={size}
-              onRowsPerPageChange={(event) => changePageSize(parseInt(event.target.value, 10))}
-              rowsPerPageOptions={[10, 20, 50, 100]}
-            />
-          )}
-        </>
-      )}
+      <DataTable
+        ariaLabel="Users"
+        columns={columns}
+        rows={users}
+        getRowId={(user) => user.id}
+        loading={state === 'loading'}
+        error={state === 'error' ? errorMessage : null}
+        onRetry={retry}
+        emptyTitle="No users found"
+        emptyDescription="Users in your organization will show up here."
+        sort={sort}
+        onSortChange={changeSort}
+        pagination={{
+          page,
+          pageSize: size,
+          totalCount: total,
+          onPageChange: goToPage,
+          onPageSizeChange: changePageSize,
+        }}
+      />
 
       {/* Status menu */}
       <Menu anchorEl={menuAnchor?.el} open={!!menuAnchor} onClose={closeStatusMenu}>

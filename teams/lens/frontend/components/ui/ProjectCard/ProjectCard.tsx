@@ -43,8 +43,7 @@ function formatRelativeTime(iso: string): string {
 
 /**
  * Card is the clickable unit via a real anchor stretched over it (not an
- * `onClick` on the Card), matching DataTable's row-link pattern — keeps the
- * card keyboard- and screen-reader-accessible instead of a div pretending
+ * `onClick` on the Card) — keeps the card keyboard- and screen-reader-accessible instead of a div pretending
  * to be a link.
  */
 export default function ProjectCard({
