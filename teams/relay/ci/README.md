@@ -1,6 +1,6 @@
 # Relay schema CI
 
-Kafka event schemas (`../src/main/proto/*.proto`) are a contract between
+Kafka event schemas (`../../../shared/proto/*.proto`) are a contract between
 producers and consumers across teams. A change that breaks compatibility must
 be caught **before it merges**, not after it is already on the target branch.
 
@@ -8,7 +8,7 @@ be caught **before it merges**, not after it is already on the target branch.
 
 | | Pre-merge (CI) | Post-merge (CD) |
 |---|---|---|
-| Runs | on every PR touching `src/main/proto/**` | after merge to `main`, via ArgoCD |
+| Runs | on every PR touching `shared/proto/**` | after merge to `main`, via ArgoCD |
 | Where | GitHub Actions — [`relay-schema-ci.yaml`](../../../.github/workflows/relay-schema-ci.yaml) | in-cluster Job — [`../schema-sync-hook`](../schema-sync-hook) |
 | Schema Registry | a throwaway container in the runner (`services:`), same Apicurio image as prod | the real, live registry in the cluster |
 | Compared against | the schema versions on **whatever branch the PR targets** (its base branch, pulled from Git — not hardcoded to `main`) | whatever is currently registered live |

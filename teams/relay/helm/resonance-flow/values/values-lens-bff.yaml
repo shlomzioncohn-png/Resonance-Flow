@@ -3,7 +3,6 @@
 components:
   lens-bff:
     enabled: true
-
 kafka:
   enabled: true
 minio:

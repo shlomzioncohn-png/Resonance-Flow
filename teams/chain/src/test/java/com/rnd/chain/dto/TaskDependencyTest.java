@@ -87,6 +87,8 @@ class TaskDependencyTest {
 
     @Test
     void equals_isFalse_whenTaskIdAndDependsOnTaskIdAreSwapped() {
+        // TaskDependency(x, y) means "x depends on y" - the reverse edge is a different,
+        // non-equal edge, not the same relationship read backwards.
         UUID a = UUID.randomUUID();
         UUID b = UUID.randomUUID();
 
