@@ -108,6 +108,39 @@ For anything the TCP-reachability check can't express, drop a raw
 container spec into `initContainers` (globally or per-component) instead
 - it's appended after the generated `dependencies` containers.
 
+## Public entry point (`ingress`)
+
+Every component's Service is `ClusterIP`. Browsers reach the cluster through one
+Ingress (`templates/ingress.yaml`): a single host, routed by path prefix to a
+component's Service, so the browser sees one origin (no CORS, one cert):
+
+```text
+https://<host>/      -> lens-frontend
+https://<host>/api   -> lens-gateway
+https://<host>/auth  -> lens-gateway
+```
+
+`ingress.enabled` is `false` by default, so teams' kind CI never renders it. The
+shared cluster turns it on in [`environments/shared.yaml`](environments/shared.yaml),
+which ArgoCD loads after `values.yaml` and CI never loads. That file sets
+`ingress.host`, `ingress.className` (`traefik`, from
+[`apps/traefik.yaml`](../../argocd/apps/traefik.yaml)) and `ingress.tlsSecretName`.
+The chart doesn't install an ingress
+controller or issue the certificate; cert-manager is wired in through
+`ingress.annotations` (e.g. `cert-manager.io/cluster-issuer`). Traefik redirects
+every plain-HTTP request to HTTPS (`ports.web.http.redirections` in `apps/traefik.yaml`),
+since `/auth/*` carries LENS passwords. With `ingress.tlsSecretName` empty, HTTPS
+still works but serves Traefik's self-signed default certificate - fine for local
+testing only.
+
+Paths are forwarded as-is (no rewrite), so lens-gateway receives `/api/...` and
+`/auth/...`. Only browser-facing components belong in `ingress.paths`. A path
+that routes to a disabled or unknown component fails the render.
+
+The ingress controller reaches pods as a separate source, from its own namespace.
+Don't add `networkPolicy` to a component listed in `ingress.paths` unless you
+also allow the controller's namespace.
+
 ## Restricting callers (`networkPolicy`)
 
 By default any pod in the cluster can connect to any other. A component that
