@@ -181,21 +181,49 @@ def test_a_page_with_no_recognised_text_is_a_data_failure(monkeypatch: pytest.Mo
 
 
 @pytest.mark.usefixtures("tesseract_found")
-def test_a_pdf_over_max_pages_fails_before_any_ocr(monkeypatch: pytest.MonkeyPatch):
-    def must_not_run(*args, **kwargs):
-        raise AssertionError("OCR must not start on a PDF over the page cap")
+def test_a_pdf_over_max_pages_is_truncated_and_says_so(monkeypatch: pytest.MonkeyPatch):
+    # R2 (on PR #509): extraction needs title / description / source_ref, almost
+    # always in the first pages, so a long PDF returns its first pages plus a
+    # `truncated` flag she can score lower -- not an empty failure she'd drop.
+    rendered: list[int] = []
 
-    monkeypatch.setattr(ocr, "_run_tesseract_tsv", must_not_run)
+    class SpyDocument(ocr.pdfium.PdfDocument):  # type: ignore[misc]
+        def __getitem__(self, index):  # type: ignore[no-untyped-def]
+            rendered.append(index)
+            return super().__getitem__(index)
+
+    monkeypatch.setattr(ocr.pdfium, "PdfDocument", SpyDocument)
+    # exactly two outputs: a third tesseract call would run off the end of this list
+    tesseract_prints(monkeypatch, tsv(("first", 90.0)), tsv(("second", 80.0)))
+
     result = extract_text(pdf_of_blank_pages(3), max_pages=2)
-    assert (result.success, result.reason) == (False, OCRFailureReason.TOO_MANY_PAGES)
-    assert result.retryable is False
-    assert "3 pages" in (result.error or "") and "max_pages=2" in (result.error or "")
+
+    assert result.success
+    assert result.pages == ["first", "second"]
+    assert result.text == "first\nsecond"
+    assert result.pages_available == 3
+    assert result.truncated is True
+    assert rendered == [0, 1]  # the pages past the cap are not even rendered
 
 
 @pytest.mark.usefixtures("tesseract_found")
-def test_a_pdf_at_exactly_max_pages_is_processed(monkeypatch: pytest.MonkeyPatch):
+def test_a_pdf_at_exactly_max_pages_is_not_truncated(monkeypatch: pytest.MonkeyPatch):
     tesseract_prints(monkeypatch, tsv(("a", 90.0)), tsv(("b", 90.0)))
-    assert extract_text(pdf_of_blank_pages(2), max_pages=2).success
+    result = extract_text(pdf_of_blank_pages(2), max_pages=2)
+    assert result.success
+    assert (result.pages_available, result.truncated) == (2, False)
+
+
+@pytest.mark.usefixtures("tesseract_found")
+def test_a_single_image_reports_one_page_available(monkeypatch: pytest.MonkeyPatch):
+    tesseract_prints(monkeypatch, tsv(("one", 90.0)))
+    result = extract_text(png_bytes(), filename="a.png", max_pages=1)
+    assert (result.pages_available, result.truncated) == (1, False)
+
+
+def test_max_pages_below_one_is_a_programming_error():
+    with pytest.raises(ValueError, match="max_pages"):
+        extract_text(b"x", max_pages=0)
 
 
 def test_the_default_page_cap_is_the_module_constant():
@@ -317,11 +345,13 @@ def test_a_serialized_result_includes_the_derived_fields():
         success=True,
         text="x",
         pages=["x"],
+        pages_available=3,
         word_count=1,
         mean_confidence=50.0,
         low_confidence_words=[LowConfidenceWord(text="x", confidence=50.0)],
     ).model_dump()
     assert dumped["low_confidence_count"] == 1
+    assert dumped["truncated"] is True  # 1 page read of 3 available
     assert dumped["retryable"] is False
 
 

@@ -31,7 +31,9 @@ Local OCR + ASR preprocessing.
   rather than a filter — see `benchmarks/analyze_confidence.py` and the
   benchmark doc's "per-word confidence" section.
   Resource budget for capacity planning: ~0.5s latency, ~35MB peak
-  memory, ~0.45s CPU time per page on a dev machine (no GPU, no load).
+  memory, ~0.45s CPU time per page on a dev machine (no GPU, no load) --
+  for a bare, FUNSD-sized image (0.75 MP). A scanned PDF page costs more,
+  about 2s for a US-Letter page at 200 DPI: see `max_pages` below.
   See `benchmarks/ocr-asr-benchmark.md` for the full comparison and
   reasoning.
 - **OCR: built (`ocr.py`).** `extract_text(content: bytes, *, filename: str =
@@ -48,6 +50,12 @@ Local OCR + ASR preprocessing.
   - `pages: list[str]` -- the text of each page (with the same line breaks);
     the index is the page number (0-based), with `""` for a page where
     nothing was recognised, so a blank page keeps its slot.
+  - `pages_available: int`, `truncated: bool` -- a PDF longer than
+    `max_pages` is **truncated, not refused**: `pages` holds the first
+    `max_pages` pages, `pages_available` is the document's real page count and
+    `truncated` is `True`. A caller should treat that text as a partial
+    document (e.g. score a task inferred from it lower). A single image is one
+    page.
   - `word_count: int`, `mean_confidence: float | None` -- over every
     recognised word, so the low-confidence list has a denominator ("12 weak
     words of 40" is not "12 of 4000"), and a caller can calibrate its own
@@ -66,7 +74,7 @@ Local OCR + ASR preprocessing.
       decided by PIL / `pypdfium2` *before* tesseract runs, so a corrupt or
       truncated file is never confused with a broken install),
       `NO_TEXT_RECOGNIZED` (a valid image/PDF in which no text was found:
-      blank or too poor), `TOO_MANY_PAGES` (a PDF over `max_pages`);
+      blank or too poor);
     - environment failures, `retryable=True` (nothing is wrong with the
       document -- do not treat it as processed, e.g. do not commit a Kafka
       offset past it): `OCR_UNAVAILABLE` (the `tesseract` binary is not
@@ -83,13 +91,20 @@ Local OCR + ASR preprocessing.
       rather than dropping it silently. Only the expected environment errors
       above are `OCR_FAILED` -- a bug is never reported as one.
 
-  `max_pages` (default `MAX_PAGES = 10`) bounds the cost of a call: a longer
-  PDF fails with `TOO_MANY_PAGES` *before* any page is rendered. OCR runs
-  synchronously, so it is time the caller's handler is blocked: measured on the
-  dev machine, **about 2.6 s per PDF page** (rasterizing at ~200 DPI plus
-  Tesseract, a FUNSD-sized form page; a bare image is faster, ~0.5 s) -- 10
-  pages is about 26 s. The default is a guess at a sensible limit, not a
-  measured one; pass `max_pages` to change it.
+  `max_pages` (default `MAX_PAGES = 10`) bounds the cost of a call: only the
+  first `max_pages` pages of a PDF are rendered and read, and the result says
+  it was cut short (`truncated`, `pages_available`) -- the extraction that
+  consumes this text needs title / description / source reference, almost
+  always in the first pages, so a long document is not worth refusing. (A PDF
+  that cannot even be opened cannot be counted either, and is
+  `UNREADABLE_FORMAT`.) OCR runs synchronously, so it is time the caller's
+  handler is blocked. Measured on the dev machine, a US-Letter page scanned at
+  200 DPI (1700x2200 px) takes **about 2 s**: ~0.5 s to rasterize plus
+  ~1.5 s of Tesseract, whose time grows with the pixel count -- which is why
+  it is well above the ~0.7 s of the 0.75 MP bare image in the benchmark.
+  Dense pages cost more, sparse ones less, so 10 pages is about 20 s. The
+  default is a guess at a sensible limit, not a measured one; pass
+  `max_pages` to change it (at least 1; below that is a `ValueError`).
 
   The call is wrapped in `instrumented_call("tesseract-psm11-ocr")`
   (`src/mind/api/instrumentation.py`), so latency/cost are recorded like

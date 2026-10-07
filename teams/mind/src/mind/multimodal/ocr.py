@@ -15,7 +15,8 @@ The signature was agreed with R2 (Slack, confirmed on PR #509), who calls it fro
 reads the object to verify its content hash), a typed failure ``reason`` so a
 data failure can be told from an environment one, per-document counts
 (``word_count``, ``low_confidence_count``, ``mean_confidence``) so the
-low-confidence list has a denominator, text per page, and a page cap. Whether a
+low-confidence list has a denominator, text per page, and a page cap (a longer PDF
+is truncated and says so, not refused). Whether a
 document is scanned is decided by the caller (``RawObjectEvent.modality``), not
 guessed here -- ``filename`` is only a secondary hint for telling a PDF from an
 image. See this package's README.
@@ -63,13 +64,18 @@ OCR_PSM_ARGS = ["--psm", "11"]
 # See benchmarks/ocr-asr-benchmark.md "per-word confidence" for the tables.
 LOW_CONFIDENCE_THRESHOLD = 60.0
 
-# Longest PDF extract_text() will OCR by default; more pages fails with
-# TOO_MANY_PAGES before any page is rendered. OCR runs synchronously inside the
-# caller's Kafka handler, so its cost is time the consumer is blocked: measured
-# on the dev machine, about 2.6 s per PDF page (rasterizing at ~200 DPI plus
-# Tesseract, a FUNSD-sized form page; a bare image is faster, ~0.5 s), so 10
-# pages is about 26 s. A guess at a sensible default, not a measured limit --
-# callers can pass their own `max_pages`.
+# How many pages of a PDF extract_text() OCRs by default. Later pages are not
+# rendered or read, and the result says so (`truncated`, `pages_available`)
+# instead of the call failing: the extraction that consumes this text needs
+# title / description / source_ref, almost always in the first pages, and a task
+# inferred from a partial document should be scored as such, not be invisible.
+# OCR runs synchronously inside the caller's Kafka handler, so its cost is time
+# the consumer is blocked. Measured on the dev machine, a US-Letter page scanned
+# at 200 DPI (1700x2200 px) takes about 2 s: ~0.5 s to rasterize plus ~1.5 s of
+# tesseract. Tesseract's time grows with the pixel count, which is why it is far
+# above the ~0.7 s of the 0.75 MP bare FUNSD image in the benchmark; dense pages
+# cost more, sparse ones less. So 10 pages is about 20 s. A guess at a sensible
+# default, not a measured limit -- callers can pass their own `max_pages`.
 MAX_PAGES = 10
 
 _WINDOWS_DEFAULT_INSTALL = r"C:\Program Files\Tesseract-OCR\tesseract.exe"
@@ -94,7 +100,6 @@ class OCRFailureReason(str, Enum):
       UNREADABLE_FORMAT   not a readable image or PDF (corrupt, truncated, or another
                           format), decided by PIL/pypdfium2 before tesseract runs
       NO_TEXT_RECOGNIZED  a valid image/PDF in which no text was found (blank or too poor)
-      TOO_MANY_PAGES      a PDF longer than `max_pages`
 
     Environment failures -- nothing is wrong with the document; the caller must
     not treat the document as processed (e.g. commit a Kafka offset past it):
@@ -116,7 +121,6 @@ class OCRFailureReason(str, Enum):
     EMPTY_INPUT = "EMPTY_INPUT"
     UNREADABLE_FORMAT = "UNREADABLE_FORMAT"
     NO_TEXT_RECOGNIZED = "NO_TEXT_RECOGNIZED"
-    TOO_MANY_PAGES = "TOO_MANY_PAGES"
     OCR_UNAVAILABLE = "OCR_UNAVAILABLE"
     OCR_FAILED = "OCR_FAILED"
     INTERNAL_ERROR = "INTERNAL_ERROR"
@@ -134,6 +138,9 @@ class OCRResult(BaseModel):
     ``word_count`` / ``mean_confidence`` cover every recognised word, and
     ``low_confidence_words`` the ones below LOW_CONFIDENCE_THRESHOLD, with
     ``low_confidence_count`` their number -- the list alone has no denominator.
+    A PDF longer than ``max_pages`` is truncated, not refused: ``pages`` holds the
+    first ``max_pages`` pages, ``pages_available`` the document's real page count
+    and ``truncated`` is True -- a signal that the text is a partial document.
 
     ``success=False`` means "could not extract" -- ``reason`` says why (a
     classified code to branch on), ``error`` is the human-readable message for
@@ -145,6 +152,7 @@ class OCRResult(BaseModel):
     success: bool
     text: str = ""
     pages: list[str] = []
+    pages_available: int = 0
     word_count: int = 0
     mean_confidence: float | None = None
     low_confidence_words: list[LowConfidenceWord] = []
@@ -155,6 +163,11 @@ class OCRResult(BaseModel):
     @property
     def low_confidence_count(self) -> int:
         return len(self.low_confidence_words)
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def truncated(self) -> bool:
+        return self.pages_available > len(self.pages)
 
     @computed_field  # type: ignore[prop-decorator]
     @property
@@ -181,11 +194,6 @@ class _PageOCR(BaseModel):
     word_count: int
     confidence_sum: float
     low_confidence: list[LowConfidenceWord]
-
-
-class _TooManyPages(Exception):
-    def __init__(self, pages: int, max_pages: int) -> None:
-        super().__init__(f"PDF has {pages} pages, more than max_pages={max_pages}")
 
 
 class _TesseractFailed(Exception):
@@ -235,22 +243,24 @@ def _checked_image(content: bytes) -> bytes:
     return content
 
 
-def _pdf_to_page_images(content: bytes, max_pages: int) -> list[bytes]:
-    """Render each PDF page to PNG bytes, at a resolution Tesseract can read.
+def _pdf_to_page_images(content: bytes, max_pages: int) -> tuple[list[bytes], int]:
+    """The first `max_pages` pages as PNG bytes (at a resolution Tesseract can
+    read), and the PDF's real page count.
 
-    Raises _TooManyPages before rendering anything if the PDF is longer than
-    `max_pages` -- rendering is part of the cost the cap exists to bound.
+    Only those pages are rendered -- rendering is part of the cost `max_pages`
+    exists to bound. The page count comes from the document itself, so a PDF
+    that cannot be opened (and so cannot be counted) raises, and is reported
+    as UNREADABLE_FORMAT.
     """
     pdf = pdfium.PdfDocument(io.BytesIO(content))
-    if len(pdf) > max_pages:
-        raise _TooManyPages(len(pdf), max_pages)
+    total = len(pdf)
     page_images = []
-    for page in pdf:
-        bitmap = page.render(scale=_PDF_RENDER_SCALE)
+    for index in range(min(total, max_pages)):
+        bitmap = pdf[index].render(scale=_PDF_RENDER_SCALE)
         buf = io.BytesIO()
         bitmap.to_pil().save(buf, format="PNG")
         page_images.append(buf.getvalue())
-    return page_images
+    return page_images, total
 
 
 def _run_tesseract_tsv(tesseract_cmd: str, image_bytes: bytes) -> str:
@@ -327,11 +337,14 @@ def extract_text(content: bytes, *, filename: str = "", max_pages: int = MAX_PAG
             tell a PDF from an image when the content doesn't start with the
             ``%PDF-`` magic bytes; safe to omit. It is not used to decide
             whether the document is scanned -- that is the caller's call.
-        max_pages: Longest PDF to OCR; a longer one fails with TOO_MANY_PAGES
-            before any page is rendered. A single image counts as one page.
+        max_pages: How many pages of a PDF to OCR (at least 1). A longer PDF is
+            truncated, not refused: only the first `max_pages` pages are
+            rendered and read, and the result carries ``truncated=True`` and
+            ``pages_available`` (the real page count). A single image is one page.
 
-    Always returns an OCRResult, never raises: empty or corrupted input, too
-    long a PDF, an unreadable scan, or a missing/failing tesseract comes back
+    Raises ValueError if ``max_pages < 1`` (a programming error, not a document
+    failure). Otherwise it always returns an OCRResult and never raises: empty
+    or corrupted input, an unreadable scan, or a missing/failing tesseract comes back
     as ``success=False`` with a classified ``reason`` (see OCRFailureReason),
     an ``error`` message and a ``retryable`` flag -- not an exception and not
     garbage text.
@@ -341,6 +354,8 @@ def extract_text(content: bytes, *, filename: str = "", max_pages: int = MAX_PAG
     read it against -- so a caller (extraction) can flag or discount them
     instead of trusting all OCR output equally.
     """
+    if max_pages < 1:
+        raise ValueError(f"max_pages must be at least 1, got {max_pages}")
     try:
         return _extract(content, filename, max_pages)
     except Exception as exc:
@@ -361,13 +376,10 @@ def _extract(content: bytes, filename: str, max_pages: int) -> OCRResult:
         return _failure(OCRFailureReason.OCR_UNAVAILABLE, str(exc))
 
     try:
-        page_images = (
-            _pdf_to_page_images(content, max_pages)
-            if _is_pdf(content, filename)
-            else [_checked_image(content)]
-        )
-    except _TooManyPages as exc:
-        return _failure(OCRFailureReason.TOO_MANY_PAGES, str(exc))
+        if _is_pdf(content, filename):
+            page_images, pages_available = _pdf_to_page_images(content, max_pages)
+        else:
+            page_images, pages_available = [_checked_image(content)], 1
     except _UNREADABLE_FILE_ERRORS as exc:
         return _failure(
             OCRFailureReason.UNREADABLE_FORMAT, f"could not read input as image or PDF: {exc}"
@@ -401,6 +413,7 @@ def _extract(content: bytes, filename: str, max_pages: int) -> OCRResult:
         success=True,
         text=text,
         pages=pages,
+        pages_available=pages_available,
         word_count=word_count,
         mean_confidence=round(sum(page.confidence_sum for page in parsed) / word_count, 2),
         low_confidence_words=[word for page in parsed for word in page.low_confidence],
