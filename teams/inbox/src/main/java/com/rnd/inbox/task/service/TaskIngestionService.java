@@ -1,0 +1,154 @@
+package com.rnd.inbox.task.service;
+import com.rnd.inbox.task.assignment.AssigneeDto;
+import com.rnd.inbox.task.assignment.AssigneeType;
+import com.rnd.inbox.task.assignment.Assignment;
+import com.rnd.inbox.task.assignment.AssignmentMapper;
+import com.rnd.inbox.task.model.Task;
+import com.rnd.inbox.project.Project;
+import com.rnd.inbox.project.ProjectNotFoundException;
+import com.rnd.inbox.project.ProjectRepository;
+import com.rnd.inbox.structuredtask.StructuredTaskEventDto;
+import com.rnd.inbox.structuredtask.StructuredTaskMapper;
+import com.rnd.inbox.structuredtask.StructuredTaskReferences;
+import com.rnd.inbox.taskcreationrequest.TaskCreationRequestEventDto;
+import com.rnd.inbox.taskcreationrequest.TaskCreationRequestMapper;
+import com.rnd.inbox.team.model.Team;
+import com.rnd.inbox.team.exception.TeamNotFoundException;
+import com.rnd.inbox.team.repository.TeamRepository;
+import com.rnd.inbox.tenant.model.Tenant;
+import com.rnd.inbox.tenant.exception.TenantNotFoundException;
+import com.rnd.inbox.tenant.repository.TenantRepository;
+import com.rnd.inbox.user.model.User;
+import com.rnd.inbox.user.exception.UserNotFoundException;
+import com.rnd.inbox.user.repository.UserRepository;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.stereotype.Service;
+
+import java.util.List;
+import java.util.UUID;
+
+@Service
+public class TaskIngestionService {
+
+    private static final Logger log = LoggerFactory.getLogger(TaskIngestionService.class);
+
+    private final TaskService taskService;
+    private final StructuredTaskMapper structuredTaskMapper;
+    private final TaskCreationRequestMapper taskCreationRequestMapper;
+    private final AssignmentMapper assignmentMapper;
+    private final TenantRepository tenantRepository;
+    private final ProjectRepository projectRepository;
+    private final UserRepository userRepository;
+    private final TeamRepository teamRepository;
+
+    public TaskIngestionService(TaskService taskService,
+                                StructuredTaskMapper structuredTaskMapper,
+                                TaskCreationRequestMapper taskCreationRequestMapper,
+                                AssignmentMapper assignmentMapper,
+                                TenantRepository tenantRepository,
+                                ProjectRepository projectRepository,
+                                UserRepository userRepository,
+                                TeamRepository teamRepository) {
+        this.taskService = taskService;
+        this.structuredTaskMapper = structuredTaskMapper;
+        this.taskCreationRequestMapper = taskCreationRequestMapper;
+        this.assignmentMapper = assignmentMapper;
+        this.tenantRepository = tenantRepository;
+        this.projectRepository = projectRepository;
+        this.userRepository = userRepository;
+        this.teamRepository = teamRepository;
+    }
+
+    public Task ingest(StructuredTaskEventDto event) {
+        StructuredTaskReferences references = new StructuredTaskReferences(
+                requireTenant(event.getTenantId()),
+                findProject(event.getProjectId()),
+                findUser(event.getCreatedByUserId()));
+
+        Task task = structuredTaskMapper.map(event, references);
+        List<Assignment> assignments = mapAssignments(event.getAssignees());
+
+        return create(task, assignments, correlationId(event.getEventId()));
+    }
+
+    public Task ingest(TaskCreationRequestEventDto event) {
+        Tenant tenant = requireTenant(event.getTenantId());
+        Project project = findProject(event.getProjectId());
+        User createdBy = findUser(event.getCreatedByUserId());
+
+        Task task = taskCreationRequestMapper.map(event, tenant, project, createdBy);
+        List<Assignment> assignments = mapAssignments(event.getAssignees());
+
+        return create(task, assignments, correlationId(event.getCorrelationId()));
+    }
+
+    private List<Assignment> mapAssignments(List<AssigneeDto> assignees) {
+        if (assignees == null) {
+            return List.of();
+        }
+        return assignees.stream()
+                .map(this::mapAssignment)
+                .toList();
+    }
+
+    private Assignment mapAssignment(AssigneeDto dto) {
+        boolean isTeam = AssigneeType.TEAM.name().equals(dto.getAssigneeType());
+        User user = isTeam ? null : findUser(dto.getId());
+        Team team = isTeam ? findTeam(dto.getId()) : null;
+        User assignedBy = findUser(dto.getAssignedBy());
+
+        return assignmentMapper.mapAssignment(dto, user, team, assignedBy);
+    }
+
+    private Task create(Task task, List<Assignment> assignments, UUID correlationId) {
+        try {
+            return taskService.createTask(task, assignments, correlationId);
+        } catch (DataIntegrityViolationException e) {
+            return taskService.findExisting(task).orElseThrow(() -> e);
+        }
+    }
+
+    private Tenant requireTenant(String rawId) {
+        UUID id = UUID.fromString(rawId);
+        return tenantRepository.findById(id)
+                .orElseThrow(() -> rejected(new TenantNotFoundException(id)));
+    }
+
+    private Project findProject(String rawId) {
+        if (rawId == null) {
+            return null;
+        }
+        UUID id = UUID.fromString(rawId);
+        return projectRepository.findById(id)
+                .orElseThrow(() -> rejected(new ProjectNotFoundException(id)));
+    }
+
+    private User findUser(String rawId) {
+        if (rawId == null) {
+            return null;
+        }
+        UUID id = UUID.fromString(rawId);
+        return userRepository.findById(id)
+                .orElseThrow(() -> rejected(new UserNotFoundException(id)));
+    }
+
+    private Team findTeam(String rawId) {
+        if (rawId == null) {
+            return null;
+        }
+        UUID id = UUID.fromString(rawId);
+        return teamRepository.findById(id)
+                .orElseThrow(() -> rejected(new TeamNotFoundException(id)));
+    }
+
+    private <E extends RuntimeException> E rejected(E exception) {
+        log.warn("Rejecting ingestion event: {}", exception.getMessage());
+        return exception;
+    }
+
+    private UUID correlationId(String rawId) {
+        return rawId != null ? UUID.fromString(rawId) : UUID.randomUUID();
+    }
+}

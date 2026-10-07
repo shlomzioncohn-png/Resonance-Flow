@@ -1,7 +1,7 @@
 package com.rnd.inbox.audit;
 
-import com.rnd.inbox.tenant.Tenant;
-import com.rnd.inbox.user.User;
+import com.rnd.inbox.tenant.model.Tenant;
+import com.rnd.inbox.user.model.User;
 import org.springframework.stereotype.Service;
 
 import java.time.Clock;

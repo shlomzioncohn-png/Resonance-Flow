@@ -1,0 +1,14 @@
+{{- if .Values.postgresql.enabled }}
+---
+apiVersion: v1
+kind: ConfigMap
+
+metadata:
+  name: {{ include "resonance-flow.fullname" $ }}-postgresql-initdb
+  labels:
+    {{- include "resonance-flow.labels" $ | nindent 4 }}
+
+data:
+  {{- include "resonance-flow.chain.dbInitScript" $ | nindent 2 }}
+  {{- include "resonance-flow.mind.dbInitScript" $ | nindent 2 }}
+{{- end }}
