@@ -1,0 +1,168 @@
+{{- /*
+Creates lens-gateway-jwt once, before lens-gateway starts. Same hook pattern as
+Chain's and MIND's db-credentials-hook.yaml: ArgoCD renders offline, so a templated
+Secret would regenerate the key pair (and invalidate every signed-in user) on every
+sync. This hook only creates the Secret if it's missing.
+*/ -}}
+{{- if (index .Values.components "lens-gateway").enabled }}
+{{- $name := printf "%s-lens-gateway-jwt-init" (include "resonance-flow.fullname" .) }}
+{{- $secretName := printf "%s-lens-gateway-jwt" (include "resonance-flow.fullname" .) }}
+---
+apiVersion: v1
+kind: ServiceAccount
+
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "resonance-flow.labels" . | nindent 4 }}
+    app.kubernetes.io/component: lens-gateway
+  annotations:
+    helm.sh/hook: pre-install,pre-upgrade
+    helm.sh/hook-weight: "-10"
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "resonance-flow.labels" . | nindent 4 }}
+    app.kubernetes.io/component: lens-gateway
+  annotations:
+    helm.sh/hook: pre-install,pre-upgrade
+    helm.sh/hook-weight: "-10"
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+
+# create only - no get/update, so the Job can never read or overwrite a live key pair.
+rules:
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["create"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "resonance-flow.labels" . | nindent 4 }}
+    app.kubernetes.io/component: lens-gateway
+  annotations:
+    helm.sh/hook: pre-install,pre-upgrade
+    helm.sh/hook-weight: "-10"
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ $name }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ $name }}
+    namespace: {{ .Release.Namespace }}
+---
+apiVersion: batch/v1
+kind: Job
+
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "resonance-flow.labels" . | nindent 4 }}
+    app.kubernetes.io/component: lens-gateway
+  annotations:
+    helm.sh/hook: pre-install,pre-upgrade
+    helm.sh/hook-weight: "0"
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+
+spec:
+  backoffLimit: 3
+  ttlSecondsAfterFinished: 600
+  template:
+    metadata:
+      labels:
+        {{- include "resonance-flow.selectorLabels" . | nindent 8 }}
+        # Not "lens-gateway": that would match lens-gateway's own Service/Deployment selectors.
+        app.kubernetes.io/component: lens-gateway-jwt-init
+    spec:
+      serviceAccountName: {{ $name }}
+      restartPolicy: Never
+      # Lets both containers below read/write the shared "keys" emptyDir despite running
+      # as different users (openssl's image has no dedicated non-root user of its own).
+      securityContext:
+        fsGroup: 1000
+      initContainers:
+        - name: generate-keys
+          image: alpine/openssl:3.5.9
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1000
+            runAsGroup: 1000
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+          command:
+            - sh
+            - -c
+            - |
+              set -eu
+              openssl genrsa -out /keys/private.pem 2048
+              openssl rsa -in /keys/private.pem -pubout -out /keys/public.pem
+              chmod 640 /keys/private.pem
+          volumeMounts:
+            - name: keys
+              mountPath: /keys
+          resources:
+            requests:
+              cpu: 10m
+              memory: 16Mi
+            limits:
+              cpu: 100m
+              memory: 64Mi
+      containers:
+        - name: create-secret
+          image: curlimages/curl:8.11.1
+          securityContext:
+            runAsNonRoot: true
+            # The image's curl_user, numeric - runAsNonRoot can't verify a named user.
+            runAsUser: 100
+            runAsGroup: 101
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+          command:
+            - sh
+            - -c
+            - |
+              set -eu
+              SA=/var/run/secrets/kubernetes.io/serviceaccount
+              API="https://kubernetes.default.svc/api/v1/namespaces/{{ .Release.Namespace }}/secrets"
+              PRIVATE_ESCAPED="$(awk 'BEGIN{ORS="\\n"} {gsub(/"/,"\\\"")} 1' /keys/private.pem)"
+              PUBLIC_ESCAPED="$(awk 'BEGIN{ORS="\\n"} {gsub(/"/,"\\\"")} 1' /keys/public.pem)"
+              BODY="{\"apiVersion\":\"v1\",\"kind\":\"Secret\",\"metadata\":{\"name\":\"{{ $secretName }}\"},\"type\":\"Opaque\",\"stringData\":{\"private.pem\":\"$PRIVATE_ESCAPED\",\"public.pem\":\"$PUBLIC_ESCAPED\"}}"
+              # POST is create-if-absent: 409 means it already exists and is left untouched.
+              CODE=$(curl -sS -o /tmp/response -w '%{http_code}' \
+                --cacert "$SA/ca.crt" \
+                -H "Authorization: Bearer $(cat "$SA/token")" \
+                -H "Content-Type: application/json" \
+                -X POST "$API" -d "$BODY")
+              case "$CODE" in
+                201) echo "Created {{ $secretName }}" ;;
+                409) echo "{{ $secretName }} already exists - left as is" ;;
+                *) echo "Unexpected HTTP $CODE creating {{ $secretName }}:" >&2; cat /tmp/response >&2; exit 1 ;;
+              esac
+          volumeMounts:
+            - name: keys
+              mountPath: /keys
+              readOnly: true
+          resources:
+            requests:
+              cpu: 10m
+              memory: 16Mi
+            limits:
+              cpu: 100m
+              memory: 64Mi
+      volumes:
+        - name: keys
+          emptyDir: {}
+{{- end }}
