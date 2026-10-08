@@ -88,7 +88,7 @@ public class TaskController {
     @ApiResponses({
             @ApiResponse(responseCode = "200", description = "Page of tasks",
                     content = @Content(schema = @Schema(implementation = PageResponseDto.class))),
-            @ApiResponse(responseCode = "400", description = "deadlineFrom/deadlineTo not both provided, "
+            @ApiResponse(responseCode = "400", description = "deadlineTo is before deadlineFrom, "
                     + "noDeadline combined with a deadline range, a filter value that does not parse "
                     + "(e.g. userId is not a UUID), or sorting by an unsupported property"),
             @ApiResponse(responseCode = "401", description = "Missing or unrecognized actor identity")

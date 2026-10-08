@@ -221,14 +221,15 @@ public class TaskService {
         return PageRequest.of(pageable.getPageNumber(), pageable.getPageSize(), Sort.by(orders));
     }
 
-    // Both-or-neither (a range needs both ends), and noDeadline=true is mutually exclusive with
-    // the range (asking for "no deadline at all" and "deadline within this range" in the same
+    // Either end of the deadline range may be given alone (open-ended range); when both are given
+    // deadlineTo must not be before deadlineFrom. noDeadline=true is mutually exclusive with the
+    // range (asking for "no deadline at all" and "deadline within this range" in the same
     // request is self-contradictory).
     private void validateFilter(TaskFilterDto filter) {
         boolean hasFrom = filter.getDeadlineFrom() != null;
         boolean hasTo = filter.getDeadlineTo() != null;
-        if (hasFrom != hasTo) {
-            throw new InvalidTaskFilterException("deadlineFrom and deadlineTo must both be provided, or both omitted");
+        if (hasFrom && hasTo && filter.getDeadlineTo().isBefore(filter.getDeadlineFrom())) {
+            throw new InvalidTaskFilterException("deadlineTo must not be before deadlineFrom");
         }
         if (Boolean.TRUE.equals(filter.getNoDeadline()) && (hasFrom || hasTo)) {
             throw new InvalidTaskFilterException("noDeadline cannot be combined with deadlineFrom/deadlineTo");

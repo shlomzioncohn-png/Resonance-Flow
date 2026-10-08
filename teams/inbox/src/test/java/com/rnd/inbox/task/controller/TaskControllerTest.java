@@ -43,6 +43,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.hamcrest.Matchers.containsInAnyOrder;
 import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.hasSize;
+import static org.hamcrest.Matchers.matchesPattern;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -141,6 +142,12 @@ class TaskControllerTest extends PostgresIntegrationTest {
     private Task persistOwnedTask(Tenant tenant, String title, User owner) {
         Task task = persistTask(tenant, title);
         task.setOwner(owner);
+        return taskRepository.saveAndFlush(task);
+    }
+
+    private Task persistTaskWithDeadline(Tenant tenant, String title, Instant deadline) {
+        Task task = persistTask(tenant, title);
+        task.setDeadline(deadline);
         return taskRepository.saveAndFlush(task);
     }
 
@@ -261,6 +268,27 @@ class TaskControllerTest extends PostgresIntegrationTest {
     }
 
     @Test
+    void getTaskById_returnsDatesInIsraelDisplayFormat() throws Exception {
+        Task task = persistTaskWithDeadline(tenant, "Dated task", Instant.parse("2026-10-12T11:00:00Z"));
+
+        mockMvc.perform(get("/api/v1/tasks/{id}", task.getId()).header(ACTOR_HEADER, actor.getId().toString()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.deadline").value("12/10/2026"))
+                .andExpect(jsonPath("$.created_at").value(matchesPattern("\\d{2}/\\d{2}/\\d{4} \\d{2}:\\d{2}")));
+    }
+
+    @Test
+    void getTaskById_returnsOwnerDisplayNameAlongsideOwnerId() throws Exception {
+        User owner = persistUser(tenant, UserRole.EMPLOYEE);
+        Task task = persistOwnedTask(tenant, "Owned task", owner);
+
+        mockMvc.perform(get("/api/v1/tasks/{id}", task.getId()).header(ACTOR_HEADER, actor.getId().toString()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.owner_id").value(owner.getId().toString()))
+                .andExpect(jsonPath("$.owner_display_name").value(owner.getDisplayName()));
+    }
+
+    @Test
     void getTaskById_withoutActorHeader_returns401() throws Exception {
         Task task = persistTask(tenant, "Fix flaky test");
 
@@ -274,6 +302,14 @@ class TaskControllerTest extends PostgresIntegrationTest {
         mockMvc.perform(get("/api/v1/tasks/{id}", UUID.randomUUID()).header(ACTOR_HEADER, actor.getId().toString()))
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.error").value("TASK_NOT_FOUND"));
+    }
+
+    @Test
+    void getTaskById_withMalformedId_returns400() throws Exception {
+        mockMvc.perform(get("/api/v1/tasks/not-a-uuid").header(ACTOR_HEADER, actor.getId().toString()))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error").value("BAD_REQUEST"))
+                .andExpect(jsonPath("$.message").value("Bad Request"));
     }
 
     @Test
@@ -425,8 +461,34 @@ class TaskControllerTest extends PostgresIntegrationTest {
     }
 
     @Test
-    void listTasks_withDeadlineFromButNoDeadlineTo_returns400() throws Exception {
-        mockMvc.perform(get("/api/v1/tasks?deadlineFrom=2026-01-01T00:00:00Z")
+    void listTasks_withDeadlineFromOnly_returnsTasksDueOnOrAfterIt() throws Exception {
+        persistTaskWithDeadline(tenant, "Due before", Instant.parse("2026-09-15T12:00:00Z"));
+        Task dueAfter = persistTaskWithDeadline(tenant, "Due after", Instant.parse("2026-10-15T12:00:00Z"));
+        persistTask(tenant, "No deadline");
+
+        mockMvc.perform(get("/api/v1/tasks?deadlineFrom=2026-10-01T00:00:00Z")
+                        .header(ACTOR_HEADER, actor.getId().toString()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content", hasSize(1)))
+                .andExpect(jsonPath("$.content[0].id").value(dueAfter.getId().toString()));
+    }
+
+    @Test
+    void listTasks_withDeadlineToOnly_returnsTasksDueOnOrBeforeIt() throws Exception {
+        Task dueBefore = persistTaskWithDeadline(tenant, "Due before", Instant.parse("2026-09-15T12:00:00Z"));
+        persistTaskWithDeadline(tenant, "Due after", Instant.parse("2026-10-15T12:00:00Z"));
+        persistTask(tenant, "No deadline");
+
+        mockMvc.perform(get("/api/v1/tasks?deadlineTo=2026-10-01T00:00:00Z")
+                        .header(ACTOR_HEADER, actor.getId().toString()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content", hasSize(1)))
+                .andExpect(jsonPath("$.content[0].id").value(dueBefore.getId().toString()));
+    }
+
+    @Test
+    void listTasks_withDeadlineToBeforeDeadlineFrom_returns400() throws Exception {
+        mockMvc.perform(get("/api/v1/tasks?deadlineFrom=2026-10-10T00:00:00Z&deadlineTo=2026-10-05T00:00:00Z")
                         .header(ACTOR_HEADER, actor.getId().toString()))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.error").value("INVALID_TASK_FILTER"));
@@ -598,6 +660,19 @@ class TaskControllerTest extends PostgresIntegrationTest {
                         .content(objectMapper.writeValueAsString(request)))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.error").value("VALIDATION_ERROR"));
+    }
+
+    @Test
+    void updateStatus_withMalformedJson_returns400() throws Exception {
+        Task task = persistTask(tenant, "Task");
+
+        mockMvc.perform(patch("/api/v1/tasks/{id}/status", task.getId())
+                        .header(ACTOR_HEADER, actor.getId().toString())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"status\":"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error").value("BAD_REQUEST"))
+                .andExpect(jsonPath("$.message").value("Bad Request"));
     }
 
     @Test

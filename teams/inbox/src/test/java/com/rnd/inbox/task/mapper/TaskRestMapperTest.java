@@ -42,9 +42,11 @@ class TaskRestMapperTest {
         project = new Project();
         project.setId(UUID.randomUUID());
         project.setTenant(tenant);
+        project.setName("Platform Service");
 
         owner = new User();
         owner.setId(UUID.randomUUID());
+        owner.setDisplayName("Yael Cohen");
 
         actor = new User();
         actor.setId(UUID.randomUUID());
@@ -199,14 +201,16 @@ class TaskRestMapperTest {
         assertThat(dto.getTenant().getId()).isEqualTo(tenant.getId());
         assertThat(dto.getTenant().getSlug()).isEqualTo("acme");
         assertThat(dto.getProjectId()).isEqualTo(project.getId());
+        assertThat(dto.getProjectName()).isEqualTo("Platform Service");
         assertThat(dto.getTitle()).isEqualTo("Fix flaky test");
         assertThat(dto.getStatus()).isEqualTo(TaskStatus.NEW);
         assertThat(dto.getOwnerId()).isEqualTo(owner.getId());
+        assertThat(dto.getOwnerDisplayName()).isEqualTo("Yael Cohen");
         assertThat(dto.getCreatedById()).isEqualTo(actor.getId());
     }
 
     @Test
-    void toResponseDto_whenProjectAndOwnerAreNull_idsAreNull() {
+    void toResponseDto_whenProjectAndOwnerAreNull_idsAndNamesAreNull() {
         Task task = new Task();
         task.setId(UUID.randomUUID());
         task.setTenant(tenant);
@@ -217,7 +221,9 @@ class TaskRestMapperTest {
         TaskResponseDto dto = taskRestMapper.toResponseDto(task);
 
         assertThat(dto.getProjectId()).isNull();
+        assertThat(dto.getProjectName()).isNull();
         assertThat(dto.getOwnerId()).isNull();
+        assertThat(dto.getOwnerDisplayName()).isNull();
         assertThat(dto.getCreatedById()).isNull();
     }
 }

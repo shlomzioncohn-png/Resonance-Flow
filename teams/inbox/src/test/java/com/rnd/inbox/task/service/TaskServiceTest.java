@@ -487,9 +487,9 @@ class TaskServiceTest {
     // TaskResponseDto is final - constructed for real rather than mocked, per this codebase's
     // convention (mocking a final DTO depends on a Mockito setting that isn't a safe assumption).
     private TaskResponseDto sampleTaskResponseDto() {
-        return new TaskResponseDto(UUID.randomUUID(), null, null, "Fix flaky test", null, null, null, null, null,
-                null, null, null, TaskStatus.NEW, false, null, null, null, null, null, null, null, null, null,
-                NOW, NOW, null, null);
+        return new TaskResponseDto(UUID.randomUUID(), null, null, null, "Fix flaky test", null, null, null, null,
+                null, null, null, null, TaskStatus.NEW, false, null, null, null, null, null, null, null, null, null,
+                null, NOW, NOW, null, null);
     }
 
     private User actorWithRole(UserRole role) {
@@ -516,9 +516,9 @@ class TaskServiceTest {
         built.setStatus(TaskStatus.NEW);
         when(taskRestMapper.toEntity(request, tenant, null, actor, actor)).thenReturn(built);
         stubSaveAssigning(built, UUID.randomUUID());
-        TaskResponseDto responseDto = new TaskResponseDto(UUID.randomUUID(), null, null, "Fix flaky test",
+        TaskResponseDto responseDto = new TaskResponseDto(UUID.randomUUID(), null, null, null, "Fix flaky test",
                 null, null, null, null, null, null, null, null, TaskStatus.NEW, false, null, null, null, null,
-                actor.getId(), null, null, null, actor.getId(), NOW, NOW, null, null);
+                actor.getId(), null, null, null, null, actor.getId(), NOW, NOW, null, null);
         when(taskRestMapper.toResponseDto(built)).thenReturn(responseDto);
 
         TaskResponseDto result = taskService.createTaskFromRequest(request, actor.getId());
@@ -763,10 +763,57 @@ class TaskServiceTest {
     }
 
     @Test
-    void listTasks_whenOnlyDeadlineFromProvided_throwsInvalidTaskFilterException() {
+    void listTasks_whenOnlyDeadlineFromProvided_passesAnOpenEndedRange() {
+        User actor = actorWithRole(UserRole.TENANT_ADMIN);
+        when(userRepository.findById(actor.getId())).thenReturn(Optional.of(actor));
+        Pageable pageable = PageRequest.of(0, 20);
+        Task task = new Task();
+        Page<Task> page = new PageImpl<>(List.of(task), pageable, 1);
+        Instant deadlineFrom = Instant.parse("2026-10-01T00:00:00Z");
+        when(taskRepository.findFiltered(
+                eq(false), eq(tenantId), eq(false), isNull(), eq(false), isNull(), eq(false), isNull(), eq(false),
+                isNull(), eq(false), isNull(), eq(true), eq(deadlineFrom), eq(false), isNull(), eq(false),
+                eq(false), isNull(), eq(withDefaultSort(pageable))))
+                .thenReturn(page);
+        TaskResponseDto responseDto = sampleTaskResponseDto();
+        when(taskRestMapper.toResponseDto(task)).thenReturn(responseDto);
+        TaskFilterDto filter = new TaskFilterDto();
+        filter.setDeadlineFrom(deadlineFrom);
+
+        PageResponseDto<TaskResponseDto> result = taskService.listTasks(filter, pageable, actor.getId());
+
+        assertThat(result.getContent()).containsExactly(responseDto);
+    }
+
+    @Test
+    void listTasks_whenOnlyDeadlineToProvided_passesAnOpenEndedRange() {
+        User actor = actorWithRole(UserRole.TENANT_ADMIN);
+        when(userRepository.findById(actor.getId())).thenReturn(Optional.of(actor));
+        Pageable pageable = PageRequest.of(0, 20);
+        Task task = new Task();
+        Page<Task> page = new PageImpl<>(List.of(task), pageable, 1);
+        Instant deadlineTo = Instant.parse("2026-10-31T23:59:59Z");
+        when(taskRepository.findFiltered(
+                eq(false), eq(tenantId), eq(false), isNull(), eq(false), isNull(), eq(false), isNull(), eq(false),
+                isNull(), eq(false), isNull(), eq(false), isNull(), eq(true), eq(deadlineTo), eq(false),
+                eq(false), isNull(), eq(withDefaultSort(pageable))))
+                .thenReturn(page);
+        TaskResponseDto responseDto = sampleTaskResponseDto();
+        when(taskRestMapper.toResponseDto(task)).thenReturn(responseDto);
+        TaskFilterDto filter = new TaskFilterDto();
+        filter.setDeadlineTo(deadlineTo);
+
+        PageResponseDto<TaskResponseDto> result = taskService.listTasks(filter, pageable, actor.getId());
+
+        assertThat(result.getContent()).containsExactly(responseDto);
+    }
+
+    @Test
+    void listTasks_whenDeadlineToIsBeforeDeadlineFrom_throwsInvalidTaskFilterException() {
         User actor = actorWithRole(UserRole.TENANT_ADMIN);
         TaskFilterDto filter = new TaskFilterDto();
-        filter.setDeadlineFrom(Instant.now());
+        filter.setDeadlineFrom(Instant.parse("2026-10-10T00:00:00Z"));
+        filter.setDeadlineTo(Instant.parse("2026-10-05T00:00:00Z"));
 
         assertThatThrownBy(() -> taskService.listTasks(filter, PageRequest.of(0, 20), actor.getId()))
                 .isInstanceOf(InvalidTaskFilterException.class);

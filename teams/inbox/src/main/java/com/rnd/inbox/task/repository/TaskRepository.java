@@ -27,8 +27,8 @@ public interface TaskRepository extends JpaRepository<Task, UUID> {
     // from an explicit SYSTEM_ADMIN role check in TaskService (never from a possibly-null field),
     // so a bug that left tenantId null for a non-admin fails closed (matches nothing) instead of
     // silently granting cross-tenant access the way "tenantId IS NULL -> see everything" would.
-    // Validated by TaskFilterService before this is called: deadlineFrom/deadlineTo are
-    // both-or-neither, and noDeadline (when true) is mutually exclusive with them.
+    // Validated by TaskService.validateFilter before this is called: deadlineFrom/deadlineTo may
+    // each be given alone, and noDeadline (when true) is mutually exclusive with them.
     //
     // searchPattern is already "%lowercased-search%" by the time it gets here (built in
     // TaskService), not assembled in SQL via CONCAT/'%'||param||'%'. Discovered by an integration

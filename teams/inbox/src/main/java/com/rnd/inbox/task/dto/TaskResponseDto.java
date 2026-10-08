@@ -1,10 +1,13 @@
 package com.rnd.inbox.task.dto;
+import com.fasterxml.jackson.databind.annotation.JsonSerialize;
+import com.rnd.inbox.shared.json.DisplayDateFormat;
 import com.rnd.inbox.task.model.SourceType;
 import com.rnd.inbox.task.model.TaskExtractionProvenance;
 import com.rnd.inbox.task.model.TaskStatus;
 import com.rnd.inbox.task.model.TaskTier;
 import com.rnd.inbox.task.security.TaskRoleContext;
 import com.rnd.inbox.tenant.dto.TenantSummaryDto;
+import io.swagger.v3.oas.annotations.media.Schema;
 
 import java.time.Instant;
 import java.util.Map;
@@ -15,6 +18,7 @@ public final class TaskResponseDto {
     private final UUID id;
     private final TenantSummaryDto tenant;
     private final UUID projectId;
+    private final String projectName;
     private final String title;
     private final String description;
     private final SourceType sourceType;
@@ -23,34 +27,46 @@ public final class TaskResponseDto {
     private final TaskRoleContext roleContext;
     private final Short urgency;
     private final Integer effortEstimateMinutes;
+    @JsonSerialize(using = DisplayDateFormat.DateOnlySerializer.class)
+    @Schema(type = "string", example = "12/10/2026")
     private final Instant deadline;
     private final TaskStatus status;
     private final boolean available;
     private final Float priorityScore;
+    @JsonSerialize(using = DisplayDateFormat.DateTimeSerializer.class)
+    @Schema(type = "string", example = "12/10/2026 09:00")
     private final Instant snoozedUntil;
     private final TaskExtractionProvenance extractionProvenance;
     private final Float confidence;
     private final UUID ownerId;
+    private final String ownerDisplayName;
     private final Float effortEstimateConfidence;
     private final UUID suggestedOwnerUserId;
     private final Float suggestedOwnerConfidence;
     private final UUID createdById;
+    @JsonSerialize(using = DisplayDateFormat.DateTimeSerializer.class)
+    @Schema(type = "string", example = "01/10/2026 08:12")
     private final Instant createdAt;
+    @JsonSerialize(using = DisplayDateFormat.DateTimeSerializer.class)
+    @Schema(type = "string", example = "05/10/2026 13:30")
     private final Instant updatedAt;
+    @JsonSerialize(using = DisplayDateFormat.DateTimeSerializer.class)
+    @Schema(type = "string", example = "12/10/2026 14:30")
     private final Instant completedAt;
     private final Map<String, Object> metadata;
 
-    public TaskResponseDto(UUID id, TenantSummaryDto tenant, UUID projectId, String title, String description,
-                            SourceType sourceType, String sourceRef, TaskTier tier, TaskRoleContext roleContext,
-                            Short urgency, Integer effortEstimateMinutes, Instant deadline, TaskStatus status,
-                            boolean available, Float priorityScore, Instant snoozedUntil,
-                            TaskExtractionProvenance extractionProvenance, Float confidence, UUID ownerId,
-                            Float effortEstimateConfidence, UUID suggestedOwnerUserId, Float suggestedOwnerConfidence,
-                            UUID createdById, Instant createdAt, Instant updatedAt, Instant completedAt,
-                            Map<String, Object> metadata) {
+    public TaskResponseDto(UUID id, TenantSummaryDto tenant, UUID projectId, String projectName, String title,
+                            String description, SourceType sourceType, String sourceRef, TaskTier tier,
+                            TaskRoleContext roleContext, Short urgency, Integer effortEstimateMinutes,
+                            Instant deadline, TaskStatus status, boolean available, Float priorityScore,
+                            Instant snoozedUntil, TaskExtractionProvenance extractionProvenance, Float confidence,
+                            UUID ownerId, String ownerDisplayName, Float effortEstimateConfidence,
+                            UUID suggestedOwnerUserId, Float suggestedOwnerConfidence, UUID createdById,
+                            Instant createdAt, Instant updatedAt, Instant completedAt, Map<String, Object> metadata) {
         this.id = id;
         this.tenant = tenant;
         this.projectId = projectId;
+        this.projectName = projectName;
         this.title = title;
         this.description = description;
         this.sourceType = sourceType;
@@ -67,6 +83,7 @@ public final class TaskResponseDto {
         this.extractionProvenance = extractionProvenance;
         this.confidence = confidence;
         this.ownerId = ownerId;
+        this.ownerDisplayName = ownerDisplayName;
         this.effortEstimateConfidence = effortEstimateConfidence;
         this.suggestedOwnerUserId = suggestedOwnerUserId;
         this.suggestedOwnerConfidence = suggestedOwnerConfidence;
@@ -87,6 +104,10 @@ public final class TaskResponseDto {
 
     public UUID getProjectId() {
         return projectId;
+    }
+
+    public String getProjectName() {
+        return projectName;
     }
 
     public String getTitle() {
@@ -151,6 +172,10 @@ public final class TaskResponseDto {
 
     public UUID getOwnerId() {
         return ownerId;
+    }
+
+    public String getOwnerDisplayName() {
+        return ownerDisplayName;
     }
 
     public Float getEffortEstimateConfidence() {
