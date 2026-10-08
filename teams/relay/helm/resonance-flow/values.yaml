@@ -337,7 +337,17 @@ components:
     service: *defaultService
     resources: *defaultResources
     <<: *defaultHealthProbes
-    env: {}
+    volumeMounts:
+      - name: lens-gateway-jwt
+        mountPath: /etc/resonance-flow/secrets/lens-gateway-jwt
+        readOnly: true
+    volumes:
+      - name: lens-gateway-jwt
+        secret:
+          secretName: resonance-flow-lens-gateway-jwt
+    env:
+      LENS_JWT_PRIVATE_KEY_LOCATION: /etc/resonance-flow/secrets/lens-gateway-jwt/private.pem
+      LENS_JWT_PUBLIC_KEY_LOCATION: /etc/resonance-flow/secrets/lens-gateway-jwt/public.pem
 
   notification-delivery:
     enabled: true
