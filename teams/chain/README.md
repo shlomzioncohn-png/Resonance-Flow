@@ -272,13 +272,24 @@ to tell "newly inserted" from "already existed" without a separate query - neede
 `TaskDependencyRepository#save`'s contract changed (see that interface's Javadoc): re-saving an
 existing edge is now an upsert of `confidence`, not a pure no-op.
 
-**Not run in this sandbox**: the `@Tag("postgres")` tests that cover this (`PostgresTaskRepositoryTest`,
-`PostgresTaskDependencyRepositoryTest`) compile and are excluded from the default `mvn test` run the
-same way every other Postgres-tagged test here already is (see `pom.xml`'s `postgres-integration`
-profile) - this sandbox has a Postgres reachable on `localhost:5432`, but activating the profile
-produced zero surefire reports for them (worth someone with a confirmed-working local setup
-re-checking, rather than trusting this output). Logic is cross-checked against the equivalent
-in-memory behavior instead, which the default suite does run (389 tests, 0 failures).
+Verified against real PostgreSQL (`postgres:16` in Docker, matching `.env.example`'s
+`chain`/`chain`/`chain`): `PostgresTaskRepositoryTest` (3 tests) and
+`PostgresTaskDependencyRepositoryTest` (7 tests), 0 failures/errors.
+
+**`postgres-integration` Maven profile is broken, don't rely on it**: the `@Tag("postgres")` tests
+here are excluded from the default `mvn test` run (`pom.xml`'s top-level
+`maven-surefire-plugin`/`excludedGroups=postgres`), and `pom.xml` has a `postgres-integration`
+profile meant to clear that filter via `-P postgres-integration`. It doesn't work - `mvn -X`
+confirms `excludedGroups` still resolves to `postgres` with the profile active, so activating it
+silently runs zero Postgres tests instead of the intended set (no error - `mvn test` just reports
+success having skipped them, same as always). Worked around here by editing the plugin's
+`excludedGroups` value directly and reverting afterward, not via the profile.
+
+**This is bigger than #445**: nothing in `.github/workflows/` references `postgres-integration` or
+otherwise clears `excludedGroups` - CI's `mvn -B test` runs with the same default exclusion as a
+local `mvn test`. So every `@Tag("postgres")` test in this module (not just the two above) is
+silently skipped on every PR and every push, with no signal that they're not running. That's a gap
+worth raising with whoever owns `chain-ci.yaml`/`service-ci-java.yaml`, separate from #445.
 
 ### Not yet wired (tracked separately from #445)
 
