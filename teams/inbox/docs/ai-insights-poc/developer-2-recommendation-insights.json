@@ -3,23 +3,23 @@
   "insights": [
     {
       "id": 1,
-      "text": "שיעור העמידה שלך בזמנים השתפר מ־50% ל־67%."
+      "text": "Your on-time completion rate improved from 50% to 67%."
     },
     {
       "id": 2,
-      "text": "כל ארבע המשימות הארוכות שלך הסתיימו באיחור, וגם בתקופה הקודמת כל שלוש המשימות הארוכות הסתיימו באיחור."
+      "text": "All four of your long tasks finished late, and in the previous period all three long tasks also finished late."
     },
     {
       "id": 3,
-      "text": "במשימות בינוניות שיעור האיחורים ירד מ־50% ל־20%."
+      "text": "For medium tasks, the lateness rate dropped from 50% to 20%."
     },
     {
       "id": 4,
-      "text": "השלמת 18 משימות בתקופה הנוכחית, לעומת 14 בתקופה הקודמת."
+      "text": "You completed 18 tasks in the current period, compared to 14 in the previous period."
     },
     {
       "id": 5,
-      "text": "יש לך כרגע שתי משימות פתוחות שעברו את מועד היעד."
+      "text": "You currently have two open tasks that are past their due date."
     }
   ]
 }
