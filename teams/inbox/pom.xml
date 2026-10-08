@@ -206,6 +206,7 @@
                                 <include>task-updated-event.proto</include>
                                 <include>task-completed-event.proto</include>
                                 <include>task-creation-requested-event.proto</include>
+                                <include>scheduling-updated-event.proto</include>
                             </includes>
                         </configuration>
                     </execution>

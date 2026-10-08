@@ -171,7 +171,7 @@ An unknown task id returns `404` with an `ApiError` body; an invalid (non-UUID) 
 
 ## Kafka event infrastructure
 
-Chain consumes three Protobuf topics and publishes one flat-JSON topic. Each inbound topic has its
+Chain consumes three Protobuf topics and publishes one Protobuf topic. Each inbound topic has its
 own `@KafkaListener` handler, and the handlers share the claim/logging skeleton in
 `ChainEventProcessingTemplate`.
 
@@ -204,13 +204,19 @@ a claim does and doesn't guarantee.
 maps to `ACTIVE`, and every other status maps to `PENDING`.
 
 **Publishing**: the live publisher for `task.scheduling.updated` is `KafkaSchedulingUpdatePublisher`
-(`com.rnd.chain.event`), used by `SchedulingUpdateService`. It sends `TaskSchedulingUpdatedEvent` as
-JSON through the `KafkaTemplate` defined in `ChainProtobufKafkaConfig`. That JSON is interim until
-the Protobuf contract is settled (#545). `KafkaEventPublisher` (flat JSON, no envelope) is not
+(`com.rnd.chain.event`), used by `SchedulingUpdateService`. It maps `TaskSchedulingUpdatedEvent` to the
+`SchedulingUpdatedEvent` Protobuf message (`scheduling-updated-event.proto`) and sends it with
+`KafkaProtobufSerializer`. `scheduling-updated-event.proto` comes from `shared/proto` (package
+`com.rnd.inbox.event`), registered via `schema-subjects.tsv`; the producer never registers it
+(`auto.register.schemas=false`, `use.latest.version=true`). Field numbers match Inbox's consumer proto: `event_id=1`, `task_id=2`,
+`available=3`, `priority_score=4`. Every event carries an `event_id`, generated per emitted event in
+`SchedulingUpdateService`; it is unique per event, not a deduplication key across handler retries. An unscored task omits `priority_score`, which Inbox
+reads as "leave the stored value unchanged". `KafkaEventPublisher` (flat JSON, no envelope) is not
 wired to any caller and is scheduled for removal under #543.
 
 **Schemas**: the `.proto` sources come from the repo's [`shared/proto/`](../../shared/proto)
-(`task-created-event`, `task-updated-event`, `task-dependencies-proposed-event`). Messages are
+(`task-created-event`, `task-updated-event`, `task-dependencies-proposed-event`,
+`scheduling-updated-event`). Messages are
 validated against the Schema Registry at `SCHEMA_REGISTRY_URL`. Tests use a mock registry
 (`mock://...`), so no registry process is needed.
 

@@ -1,10 +1,5 @@
 package com.rnd.bridge.jira.service;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.SerializationFeature;
-import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
-import com.rnd.bridge.task.BridgeTaskEventDto;
 import com.rnd.bridge.task.TaskValidator;
 import com.rnd.bridge.task.model.ExtractionProvenance;
 import com.rnd.bridge.task.model.SourceType;
@@ -36,14 +31,8 @@ import static org.mockito.Mockito.when;
 @ExtendWith(MockitoExtension.class)
 class JiraKafkaProducerTest {
 
-    // ObjectMapper configured with Jackson's default (camelCase) - BridgeTaskEventDto
-    // uses @JsonNaming(SnakeCaseStrategy.class) for per-class snake_case serialization.
-    private static final ObjectMapper MAPPER = new ObjectMapper()
-            .registerModule(new JavaTimeModule())
-            .disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS);
-
     @Mock
-    private KafkaTemplate<String, BridgeTaskEventDto> kafkaTemplate;
+    private KafkaTemplate<String, byte[]> kafkaTemplate;
 
     @Spy
     private TaskValidator taskValidator;
@@ -52,29 +41,28 @@ class JiraKafkaProducerTest {
     private JiraKafkaProducer jiraKafkaProducer;
 
     @Test
-    void publish_shouldSendBridgeTaskEventDtoToStructuredTopic() {
+    void publish_shouldSendProtobufBytesToStructuredTopic() {
         Task task = createTask("jira:PROJ-1");
 
-        SendResult<String, BridgeTaskEventDto> sendResult = createSendResult(task);
-        when(kafkaTemplate.send(anyString(), anyString(), any(BridgeTaskEventDto.class)))
+        SendResult<String, byte[]> sendResult = createSendResult();
+        when(kafkaTemplate.send(anyString(), anyString(), any(byte[].class)))
                 .thenReturn(CompletableFuture.completedFuture(sendResult));
 
-        jiraKafkaProducer.publish(task);
+        CompletableFuture<SendResult<String, byte[]>> result = jiraKafkaProducer.publish(task);
+
+        assertThat(result).isCompletedWithValue(sendResult);
 
         ArgumentCaptor<String> topicCaptor = ArgumentCaptor.forClass(String.class);
         ArgumentCaptor<String> keyCaptor = ArgumentCaptor.forClass(String.class);
-        ArgumentCaptor<BridgeTaskEventDto> eventCaptor = ArgumentCaptor.forClass(BridgeTaskEventDto.class);
+        ArgumentCaptor<byte[]> bytesCaptor = ArgumentCaptor.forClass(byte[].class);
 
-        verify(kafkaTemplate).send(topicCaptor.capture(), keyCaptor.capture(), eventCaptor.capture());
+        verify(kafkaTemplate).send(topicCaptor.capture(), keyCaptor.capture(), bytesCaptor.capture());
 
-        BridgeTaskEventDto event = eventCaptor.getValue();
         assertThat(topicCaptor.getValue()).isEqualTo(jiraKafkaProducer.TOPIC);
         assertThat(jiraKafkaProducer.TOPIC).isEqualTo("bridge.structured.tasks");
-        assertThat(keyCaptor.getValue()).isEqualTo(task.dedupKey());
-        assertThat(event).isNotNull();
-        assertThat(event.sourceRef()).isEqualTo(task.sourceRef());
-        assertThat(event.sourceType()).isEqualTo(task.sourceType().name());
-        assertThat(event.status()).isEqualTo(task.status().name());
+        assertThat(keyCaptor.getValue()).isEqualTo(task.sourceRef());
+        assertThat(bytesCaptor.getValue()).isNotNull();
+        assertThat(bytesCaptor.getValue()).isNotEmpty();
     }
 
     @Test
@@ -99,9 +87,8 @@ class JiraKafkaProducerTest {
                 Tier.TACTICAL, ExtractionProvenance.ETL, null, SourceType.JIRA_ISSUE, sourceRef, null, null, null, null);
     }
 
-    private SendResult<String, BridgeTaskEventDto> createSendResult(Task task) {
-        BridgeTaskEventDto event = BridgeTaskEventDto.from(task);
-        ProducerRecord<String, BridgeTaskEventDto> record = new ProducerRecord<>(jiraKafkaProducer.TOPIC, task.dedupKey(), event);
+    private SendResult<String, byte[]> createSendResult() {
+        ProducerRecord<String, byte[]> record = new ProducerRecord<>(jiraKafkaProducer.TOPIC, "test-key", new byte[]{1, 2, 3});
         RecordMetadata metadata = new RecordMetadata(new TopicPartition(jiraKafkaProducer.TOPIC, 0), 0, 0, 0, 0, 0);
         return new SendResult<>(record, metadata);
     }

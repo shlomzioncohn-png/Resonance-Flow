@@ -39,6 +39,9 @@ jobs:
       # PAT, not GITHUB_TOKEN - see service-update-manifest.yaml. No-op when nothing changed.
       - name: Open a PR with the synced copies
         uses: peter-evans/create-pull-request@v7
+        # Self-hosted runners may lack $HOME; the action needs it for `git config --global`.
+        env:
+          HOME: ${{ runner.temp }}
         with:
           token: ${{ secrets.RELAY_CI_PUSH_TOKEN }}
           base: main
