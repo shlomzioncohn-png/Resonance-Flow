@@ -1,0 +1,25 @@
+{
+  "_comment": "Input for the Recommendation Generation experiment. Pair each insight with shared-data.json and ask the LLM for a practical recommendation, or null when none is justified.",
+  "insights": [
+    {
+      "id": 1,
+      "text": "שיעור העמידה שלך בזמנים השתפר מ־50% ל־67%."
+    },
+    {
+      "id": 2,
+      "text": "כל ארבע המשימות הארוכות שלך הסתיימו באיחור, וגם בתקופה הקודמת כל שלוש המשימות הארוכות הסתיימו באיחור."
+    },
+    {
+      "id": 3,
+      "text": "במשימות בינוניות שיעור האיחורים ירד מ־50% ל־20%."
+    },
+    {
+      "id": 4,
+      "text": "השלמת 18 משימות בתקופה הנוכחית, לעומת 14 בתקופה הקודמת."
+    },
+    {
+      "id": 5,
+      "text": "יש לך כרגע שתי משימות פתוחות שעברו את מועד היעד."
+    }
+  ]
+}

@@ -1,0 +1,13 @@
+{
+  "_comment": "Input for the Insight Verification experiment. Send each claim with shared-data.json and ask the LLM for SUPPORTED / CONTRADICTED / INSUFFICIENT_EVIDENCE plus cited evidence. Do NOT send developer-3-expected-results.json to the LLM — it's the answer key, kept separate for scoring.",
+  "claims": [
+    { "id": 1, "text": "שיעור העמידה בזמנים השתפר מ־50% ל־67%." },
+    { "id": 2, "text": "העובד עמד בכל מועדי היעד בתקופה הנוכחית." },
+    { "id": 3, "text": "כל ארבע המשימות הארוכות הסתיימו באיחור." },
+    { "id": 4, "text": "העובד איחר בכל המשימות הקצרות." },
+    { "id": 5, "text": "העובד מאחר משום שאינו משקיע מספיק." },
+    { "id": 6, "text": "העובד עובד שעות נוספות כדי להספיק משימות." },
+    { "id": 7, "text": "במשימות הארוכות קיים דפוס חוזר של איחורים בשתי התקופות." },
+    { "id": 8, "text": "העובד בוודאות ימשיך לאחר במשימות ארוכות בחודש הבא." }
+  ]
+}
