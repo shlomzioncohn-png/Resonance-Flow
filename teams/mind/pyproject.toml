@@ -49,6 +49,10 @@ benchmark = [
     # Whisper on CTranslate2 instead of PyTorch -- faster on CPU, lower peak
     # memory, and no multi-GB torch install. Same model weights/sizes.
     "faster-whisper",
+    # faster-whisper 1.2.1 decodes audio with av.open(..., metadata_errors=...),
+    # a keyword PyAV 19 no longer accepts (TypeError on every transcribe).
+    # 18.1.0 works; drop this pin once faster-whisper catches up.
+    "av<19",
 ]
 
 [build-system]
