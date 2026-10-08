@@ -12,6 +12,10 @@ is the single source of truth, shared with the pre-merge CI check
 `files/schema-subjects.tsv` and `templates/configmap.yaml` renders both the
 `schemas.tsv` list and the per-schema ConfigMap from it.
 
+Subjects marked `# reset: <subject>` in that tsv are hard-deleted (soft, then
+`?permanent=true`) before the check/register loop — see
+[`../ci/README.md`](../ci/README.md#reset-subject--pre-production-escape-hatch).
+
 Wired into ArgoCD as [`../argocd/apps/schema-sync-hook.yaml`](../argocd/apps/schema-sync-hook.yaml)
 (moved there 2026-09-09 so `root-app.yaml` actually picks it up — it used to sit
 in this directory as an inert, unwatched file).
