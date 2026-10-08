@@ -1,14 +1,9 @@
-"""#470: Kafka -> vector-store indexing. Pure async handler functions, one
-per topic, independent of Kafka itself -- testable against a fake
-VectorStore with no broker and no real Postgres (see
-tests/test_index_consumer.py). The process that wires these to real Kafka
-topics is scripts/index_consumer.py.
+"""#470: Kafka -> vector-store indexing handlers, one per topic,
+testable against a fake VectorStore with no broker. Wired to real Kafka
+topics by scripts/index_consumer.py.
 
-Every handler is defensive end-to-end (log, never raise): ProtobufConsumer.run()
-(messaging/consumer.py) commits the offset right after calling the handler,
-with no try/except around either -- an exception here would crash that
-topic's consumer thread before the commit, and a restart would reprocess
-(and likely re-crash on) the same message forever.
+Every handler is defensive end-to-end (log, never raise) -- an uncaught
+exception would crash that topic's consumer thread before the commit.
 """
 
 import logging
@@ -35,8 +30,7 @@ async def handle_task_created(store: VectorStore, event: TaskCreatedEvent) -> No
     vector = _embed_task_text(event.title, event.description)
     if vector is None:
         return
-    # upsert_if_absent, not upsert: a task already indexed via #353 (e.g.
-    # Inbox replaying task.created) must not be overwritten by this path.
+    # upsert_if_absent: a task already indexed via #353 must not be overwritten.
     inserted = await store.upsert_if_absent(event.id, vector)
     if not inserted:
         logger.debug("index_consumer: task %s already indexed, skipping", event.id)
@@ -46,16 +40,12 @@ async def handle_task_updated(store: VectorStore, event: TaskUpdatedEvent) -> No
     vector = _embed_task_text(event.title, event.description)
     if vector is None:
         return
-    # Plain upsert: an update for a task_id this consumer never saw a
-    # task.created for simply creates the row -- self-healing, not an error.
+    # Plain upsert: self-heals if this consumer never saw task.created.
     await store.upsert(event.task_id, vector)
 
 
 async def handle_task_completed(store: VectorStore, event: TaskCompletedEvent) -> None:
-    # No title/description on this event, so there's nothing to backfill
-    # from -- mark_completed() is a no-op update, never an insert. Inbox
-    # has no fetch-by-id API, so an unknown task_id is log-and-skip, not a
-    # recoverable error.
+    # No title/description on this event -- nothing to backfill from.
     marked = await store.mark_completed(event.task_id)
     if not marked:
         logger.warning(
