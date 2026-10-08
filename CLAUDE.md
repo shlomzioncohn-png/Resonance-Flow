@@ -39,8 +39,8 @@ docker compose down           # stop (add -v to also drop named volumes)
 |---|---|---|
 | bridge | 21 | 3.3.13 |
 | inbox | 21 | 3.3.13 |
-| Chain | 11 | 2.7.18 |
-| relay | 21 | 3.3.13 |
+| Chain | 21 | 3.3.13 |
+| relay | 11 | 2.7.18 |
 
 (`teams/inbox/README.md` still describes Java 11 / Spring Boot 2.7.18 — that's stale; its `pom.xml`
 and `teams/inbox/CLAUDE.md` are current and authoritative.)

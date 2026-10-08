@@ -2,7 +2,6 @@ package com.rnd.chain.dto;
 
 import org.junit.jupiter.api.Test;
 
-import java.time.LocalDateTime;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -12,7 +11,7 @@ class TaskTest {
 
     @Test
     void builder_throwsIllegalArgumentException_whenStatusIsNull() {
-        assertThatThrownBy(() -> newTaskBuilder()
+        assertThatThrownBy(() -> TaskTestFixtures.defaultTask(UUID.randomUUID())
                 .status(null)
                 .build())
                 .isInstanceOf(IllegalArgumentException.class)
@@ -21,16 +20,14 @@ class TaskTest {
 
     @Test
     void builder_throwsIllegalArgumentException_whenIdIsNull() {
-        assertThatThrownBy(() -> newTaskBuilder()
-                .id(null)
-                .build())
+        assertThatThrownBy(() -> TaskTestFixtures.defaultTask(null).build())
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("id");
     }
 
     @Test
     void builder_throwsIllegalArgumentException_whenOwnerIdIsNull() {
-        assertThatThrownBy(() -> newTaskBuilder()
+        assertThatThrownBy(() -> TaskTestFixtures.defaultTask(UUID.randomUUID())
                 .ownerId(null)
                 .build())
                 .isInstanceOf(IllegalArgumentException.class)
@@ -39,7 +36,7 @@ class TaskTest {
 
     @Test
     void builder_throwsIllegalArgumentException_whenBlockingCountIsNegative() {
-        assertThatThrownBy(() -> newTaskBuilder()
+        assertThatThrownBy(() -> TaskTestFixtures.defaultTask(UUID.randomUUID())
                 .blockingCount(-1)
                 .build())
                 .isInstanceOf(IllegalArgumentException.class)
@@ -48,7 +45,7 @@ class TaskTest {
 
     @Test
     void builder_throwsIllegalArgumentException_whenOpenConstraintCountIsNegative() {
-        assertThatThrownBy(() -> newTaskBuilder()
+        assertThatThrownBy(() -> TaskTestFixtures.defaultTask(UUID.randomUUID())
                 .openConstraintCount(-1)
                 .build())
                 .isInstanceOf(IllegalArgumentException.class)
@@ -56,22 +53,39 @@ class TaskTest {
     }
 
     @Test
+    void copyOf_throwsNullPointerException_whenSourceIsNull() {
+        assertThatThrownBy(() -> Task.copyOf(null))
+                .isInstanceOf(NullPointerException.class);
+    }
+
+    @Test
+    void copyOf_producesEqualButDistinctInstance() {
+        Task source = TaskTestFixtures.defaultTask(UUID.randomUUID()).blockingCount(1).build();
+
+        Task copy = Task.copyOf(source);
+
+        assertThat(copy).isNotSameAs(source).isEqualTo(source);
+        assertThat(copy.getBlockingCount()).isEqualTo(source.getBlockingCount());
+        assertThat(copy.getStatus()).isEqualTo(source.getStatus());
+    }
+
+    @Test
     void equals_isReflexive() {
-        Task task = newTaskBuilder().build();
+        Task task = TaskTestFixtures.defaultTask(UUID.randomUUID()).build();
 
         assertThat(task).isEqualTo(task);
     }
 
     @Test
     void equals_isFalse_whenComparedToNull() {
-        Task task = newTaskBuilder().build();
+        Task task = TaskTestFixtures.defaultTask(UUID.randomUUID()).build();
 
         assertThat(task.equals(null)).isFalse();
     }
 
     @Test
     void equals_isFalse_whenComparedToDifferentType() {
-        Task task = newTaskBuilder().build();
+        Task task = TaskTestFixtures.defaultTask(UUID.randomUUID()).build();
 
         assertThat(task.equals("not a task")).isFalse();
     }
@@ -79,8 +93,8 @@ class TaskTest {
     @Test
     void equals_andHashCode_dependOnlyOnId() {
         UUID id = UUID.randomUUID();
-        Task a = newTaskBuilder().id(id).ownerId("ownerA").status(TaskStatus.ACTIVE).build();
-        Task b = newTaskBuilder().id(id).ownerId("ownerB").status(TaskStatus.DONE).blockingCount(3).build();
+        Task a = TaskTestFixtures.defaultTask(id).ownerId("ownerA").status(TaskStatus.ACTIVE).build();
+        Task b = TaskTestFixtures.defaultTask(id).ownerId("ownerB").status(TaskStatus.DONE).blockingCount(3).build();
 
         assertThat(a).isEqualTo(b);
         assertThat(a.hashCode()).isEqualTo(b.hashCode());
@@ -88,8 +102,8 @@ class TaskTest {
 
     @Test
     void equals_isFalse_whenIdsDiffer_evenIfOtherFieldsMatch() {
-        Task a = newTaskBuilder().id(UUID.randomUUID()).build();
-        Task b = newTaskBuilder().id(UUID.randomUUID()).build();
+        Task a = TaskTestFixtures.defaultTask(UUID.randomUUID()).build();
+        Task b = TaskTestFixtures.defaultTask(UUID.randomUUID()).build();
 
         assertThat(a).isNotEqualTo(b);
     }
@@ -97,22 +111,12 @@ class TaskTest {
     @Test
     void toString_containsIdStatusAndCounts() {
         UUID id = UUID.randomUUID();
-        Task task = newTaskBuilder().id(id).status(TaskStatus.ACTIVE).blockingCount(2).openConstraintCount(1).build();
+        Task task = TaskTestFixtures.defaultTask(id).status(TaskStatus.ACTIVE).blockingCount(2).openConstraintCount(1).build();
 
         assertThat(task.toString())
                 .contains(id.toString())
                 .contains("ACTIVE")
                 .contains("blockingCount=2")
                 .contains("openConstraintCount=1");
-    }
-
-    private static Task.Builder newTaskBuilder() {
-        return Task.builder()
-                .id(UUID.randomUUID())
-                .ownerId("owner")
-                .status(TaskStatus.ACTIVE)
-                .blockingCount(0)
-                .openConstraintCount(0)
-                .createdAt(LocalDateTime.now());
     }
 }
