@@ -125,6 +125,17 @@ services:
     environment:
       - SERVER_PORT=8080
       - SPRING_PROFILES_ACTIVE=${SPRING_PROFILES_ACTIVE:-local}
+      # bridge.postgres.* (application.yml) has no default - control-plane state
+      # (GroupStateStore/CursorStore/CalendarEventStateStore) now lives here instead of MinIO,
+      # on the same shared Postgres as chain/inbox. "postgres" is the in-network service name,
+      # not localhost - matches DB_USER/DB_PASSWORD already used by the postgres/inbox blocks
+      # above so one .env controls all three.
+      - BRIDGE_DB_URL=jdbc:postgresql://postgres:5432/${DB_NAME:-resonance_flow}
+      - BRIDGE_DB_USER=${DB_USER:-postgres}
+      - BRIDGE_DB_PASSWORD=${DB_PASSWORD:-postgres}
+    depends_on:
+      postgres:
+        condition: service_healthy
 
   inbox:
     build: ./teams/inbox
