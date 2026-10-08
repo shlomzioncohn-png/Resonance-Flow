@@ -1,13 +1,3 @@
-# Overrides for the shared cluster only - loaded by ArgoCD after values.yaml
-# (teams/relay/argocd/apps/resonance-flow.yaml). CI never loads this file: it
-# uses values.yaml plus values/values-<component>.yaml. So settings that only make
-# sense on the real cluster (public host, TLS, ingress class) go here, not in
-# values.yaml, where they'd reach every team's kind CI.
-#
-# A render error here blocks the sync of every team's component (see "Known
-# limitation" in teams/relay/argocd/README.md) - run `helm template` with this file
-# before pushing.
-
 ingress:
   # Stays off until the host is known: an enabled Ingress without ingress.host
   # fails the render.
