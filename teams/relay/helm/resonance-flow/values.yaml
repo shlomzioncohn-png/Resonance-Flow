@@ -345,9 +345,14 @@ components:
       - name: lens-gateway-jwt
         secret:
           secretName: resonance-flow-lens-gateway-jwt
-    env:
-      LENS_JWT_PRIVATE_KEY_LOCATION: /etc/resonance-flow/secrets/lens-gateway-jwt/private.pem
-      LENS_JWT_PUBLIC_KEY_LOCATION: /etc/resonance-flow/secrets/lens-gateway-jwt/public.pem
+    config:
+      jwt:
+        key_id: "2026-10"
+        private_key_location: /etc/resonance-flow/secrets/lens-gateway-jwt/private.pem
+        public_key_location: /etc/resonance-flow/secrets/lens-gateway-jwt/public.pem
+      bff:
+        service:
+          url: http://resonance-flow-lens-bff:80
 
   notification-delivery:
     enabled: true
