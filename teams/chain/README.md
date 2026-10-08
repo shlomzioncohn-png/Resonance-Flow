@@ -257,17 +257,39 @@ Mind-supplied `mindScore`/`confidence` outside `[0, 1]` are rejected (`InvalidRe
 the task-score path, `InvalidDependencyException` on the per-edge path, both non-retryable in
 their respective Kafka handlers - i.e. routed straight to `.errors`), never silently clamped.
 
+### Storage (Phase 2)
+
+`V4__add_task_priority_score.sql` adds `task.confidence`/`task.priority_score` (both nullable,
+CHECK'd to `[0,1]`/`[1,10]`) and `task_dependency.confidence` (nullable, CHECK'd to `[0,1]`,
+backfilled to `1.0` for every edge that predates this migration). `TaskEntity`/`TaskDependencyEntity`
+and their Postgres repositories carry the two new `Task` fields and the edge's `confidence` the
+same way `score`/the rest of `Task` already did.
+
+`SpringDataTaskDependencyJpaRepository#upsert` replaces the old `insertIgnoringConflict`
+(`ON CONFLICT ... DO NOTHING`): it's now `ON CONFLICT ... DO UPDATE SET confidence = EXCLUDED.confidence`,
+using the same `RETURNING (xmax = 0)` technique `PostgresConstraintRepository#save` already uses
+to tell "newly inserted" from "already existed" without a separate query - needed because
+`TaskDependencyRepository#save`'s contract changed (see that interface's Javadoc): re-saving an
+existing edge is now an upsert of `confidence`, not a pure no-op.
+
+**Not run in this sandbox**: the `@Tag("postgres")` tests that cover this (`PostgresTaskRepositoryTest`,
+`PostgresTaskDependencyRepositoryTest`) compile and are excluded from the default `mvn test` run the
+same way every other Postgres-tagged test here already is (see `pom.xml`'s `postgres-integration`
+profile) - this sandbox has a Postgres reachable on `localhost:5432`, but activating the profile
+produced zero surefire reports for them (worth someone with a confirmed-working local setup
+re-checking, rather than trusting this output). Logic is cross-checked against the equivalent
+in-memory behavior instead, which the default suite does run (389 tests, 0 failures).
+
 ### Not yet wired (tracked separately from #445)
 
-- **Storage**: `priority_score`/`confidence` are in-memory `Task`/`TaskDependency` fields only -
-  the Flyway migration and Postgres entity/repository changes are a follow-up once #437's
-  persistence work is confirmed landed.
 - **`task.score.proposed` consumer**: `TaskEligibilityService.onScoreProposed` exists and is
   covered by its own tests, but nothing calls it yet from a `@KafkaListener` - that's #386, pending
   Mind's contract.
 - **Publish format**: `SchedulingUpdateService`/`KafkaSchedulingUpdatePublisher` still publish JSON
   (see "Kafka event infrastructure" above) - the Protobuf `SchedulingUpdatedEvent` contract
   (`event_id`, `task_id`, `available`, `priority_score`, all optional) is #545.
+- **AFTER_COMMIT publish, dedup, retry**: `TaskEligibilityService` still calls
+  `SchedulingUpdateService` synchronously, inside the same transaction as the mutation - Phase 3.
 
 ## Running locally with Maven
 

@@ -58,4 +58,45 @@ class PostgresTaskRepositoryTest {
         assertThat(persisted.getOpenConstraintCount()).isEqualTo(2);
         assertThat(persisted.getVersion()).isGreaterThan(versionAfterFirst);
     }
+
+    @Test
+    void save_persistsConfidenceAndPriorityScore() {
+        UUID id = UUID.randomUUID();
+        LocalDateTime now = LocalDateTime.now();
+        Task task = Task.builder()
+                .id(id).ownerId("owner").status(TaskStatus.ACTIVE)
+                .blockingCount(0).openConstraintCount(0)
+                .score(0.8).confidence(0.5).priorityScore(7.66)
+                .createdAt(now).updatedAt(now).build();
+
+        postgresTaskRepository.save(task);
+
+        Task persisted = postgresTaskRepository.findById(id).orElseThrow();
+        assertThat(persisted.getScore()).isEqualTo(0.8);
+        assertThat(persisted.getConfidence()).isEqualTo(0.5);
+        assertThat(persisted.getPriorityScore()).isEqualTo(7.66);
+    }
+
+    @Test
+    void save_clearingScoreAlsoClearsConfidenceAndPriorityScore() {
+        UUID id = UUID.randomUUID();
+        LocalDateTime now = LocalDateTime.now();
+        Task scored = Task.builder()
+                .id(id).ownerId("owner").status(TaskStatus.ACTIVE)
+                .blockingCount(0).openConstraintCount(0)
+                .score(0.8).confidence(0.5).priorityScore(7.66)
+                .createdAt(now).updatedAt(now).build();
+        postgresTaskRepository.save(scored);
+
+        Task cleared = Task.builder()
+                .id(id).ownerId("owner").status(TaskStatus.ACTIVE)
+                .blockingCount(0).openConstraintCount(0)
+                .createdAt(now).updatedAt(now).build(); // score/confidence/priorityScore left null
+        postgresTaskRepository.save(cleared);
+
+        Task persisted = postgresTaskRepository.findById(id).orElseThrow();
+        assertThat(persisted.getScore()).isNull();
+        assertThat(persisted.getConfidence()).isNull();
+        assertThat(persisted.getPriorityScore()).isNull();
+    }
 }

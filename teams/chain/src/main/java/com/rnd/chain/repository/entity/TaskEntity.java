@@ -46,6 +46,14 @@ public class TaskEntity {
 
     private Double score;
 
+    /** Issue #445: Mind's confidence (0..1) in {@link #score}. */
+    private Double confidence;
+
+    /** Issue #445: Chain's feasibility-adjusted priority, 1..10, or null until {@link #score}
+     * is set - see {@code PriorityScoreService}. */
+    @Column(name = "priority_score")
+    private Double priorityScore;
+
     @Version
     private long version;
 
@@ -131,6 +139,22 @@ public class TaskEntity {
 
     public void setScore(Double score) {
         this.score = score;
+    }
+
+    public Double getConfidence() {
+        return confidence;
+    }
+
+    public void setConfidence(Double confidence) {
+        this.confidence = confidence;
+    }
+
+    public Double getPriorityScore() {
+        return priorityScore;
+    }
+
+    public void setPriorityScore(Double priorityScore) {
+        this.priorityScore = priorityScore;
     }
 
     public long getVersion() {
