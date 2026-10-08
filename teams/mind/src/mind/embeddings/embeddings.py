@@ -3,11 +3,10 @@ Real text -> embedding generation. Replaces the earlier HashingVectorizer
 placeholder (see git history) -- this is the real model.
 
 Model: BAAI/bge-small-en-v1.5
-  - Local, open-source (MIT), CPU-only -- no GPU. Weights ship as a local
-    folder under `models/bge-small-en-v1.5/` (gitignored, never committed
-    -- see EMBEDDING_MODEL_LOCAL_DIR below); when present, loading makes
-    no network call at all. Falls back to downloading EMBEDDING_MODEL_NAME
-    from the Hugging Face Hub if that folder isn't there.
+  - Local, open-source (MIT), CPU-only -- no GPU. Reads `MODEL_CACHE_DIR`
+    (`mind.config.EmbeddingModelSettings`); if set and populated (see
+    `models/README.md`), no network call. Otherwise downloads from the
+    Hugging Face Hub -- today's Docker behavior, not yet a decided one.
   - Output dimension: 384 (EMBEDDING_DIM; must match
     `VectorStoreSettings.embedding_dim`, since the pgvector table schema
     in `pgvector_store.py` is created with `VECTOR(embedding_dim)`).
@@ -25,13 +24,13 @@ Query/passage asymmetry
 ------------------------
 BGE is an *asymmetric* retrieval model: the query side and the passage
 (stored document) side are NOT encoded the same way.
-  - Passages (what gets `upsert`-ed into the store) are encoded as-is --
-    `is_query=False`, the default. Every call site in this codebase today
-    (index_consumer.py, search.py's nearest_tasks()) does passage-to-passage
-    comparison, so none of them need to pass is_query at all.
-  - Queries (a future natural-language search endpoint) must have
-    BGE_QUERY_INSTRUCTION prepended first, or retrieval quality drops --
-    this is how the model was trained and is BAAI's documented usage.
+  - Passages (stored records, duplicate-detection comparisons) are
+    encoded as-is -- `is_query=False`, the default.
+  - Queries need BGE_QUERY_INSTRUCTION prepended, or retrieval quality
+    drops. Forgetting it doesn't raise -- it inflates the similarity
+    score (measured: up to 0.11), which matters against
+    `duplicate_similarity_threshold`. `is_query` is keyword-only; prefer
+    `PgVectorStore.search_text()` over `search(embed(...))` for queries.
 
 Long-text handling
 -------------------
@@ -79,11 +78,10 @@ from pathlib import Path
 
 from sentence_transformers import SentenceTransformer
 
+from mind.config import EmbeddingModelSettings
+
 # Must match VectorStoreSettings.embedding_dim's default -- both describe
-# the same fixed fact about this model. A plain constant, not read from
-# mind.config.Settings: this dimension is inherent to the model, needed to
-# build EMBEDDING_MODEL_LOCAL_DIR below at import time, and importing
-# mind.config.Settings requires a DSN.
+# the same fixed fact about this model.
 EMBEDDING_DIM = 384
 MAX_SEQ_LENGTH = 512  # tokens; longer text is truncated, see module docstring
 
@@ -91,13 +89,16 @@ MAX_SEQ_LENGTH = 512  # tokens; longer text is truncated, see module docstring
 # prefix prepended before encoding; stored passages/documents do not.
 BGE_QUERY_INSTRUCTION = "Represent this sentence for searching relevant passages: "
 
-EMBEDDING_MODEL_NAME = "BAAI/bge-small-en-v1.5"
-# Local copy of the model weights (models/ is gitignored -- never
-# committed). If this directory exists, loading reads straight from disk
-# with no network call at all. Falls back to EMBEDDING_MODEL_NAME
-# (downloaded and cached by sentence-transformers) if it doesn't.
-_MODELS_DIR = Path(__file__).resolve().parents[3] / "models"
-EMBEDDING_MODEL_LOCAL_DIR = _MODELS_DIR / EMBEDDING_MODEL_NAME.rsplit("/", 1)[-1]
+# EmbeddingModelSettings, not Settings -- no DSN needed.
+_embedding_model_settings = EmbeddingModelSettings()
+EMBEDDING_MODEL_NAME = _embedding_model_settings.name
+# None if MODEL_CACHE_DIR isn't set. Not __file__-based -- that breaks
+# once pip-installed (e.g. in Docker) rather than run editable.
+EMBEDDING_MODEL_LOCAL_DIR: Path | None = (
+    Path(_embedding_model_settings.model_cache_dir) / EMBEDDING_MODEL_NAME.rsplit("/", 1)[-1]
+    if _embedding_model_settings.model_cache_dir
+    else None
+)
 
 _model: SentenceTransformer | None = None
 _model_lock = threading.Lock()
@@ -120,7 +121,7 @@ def _get_model() -> SentenceTransformer:
             if _model is None:
                 model_source = (
                     str(EMBEDDING_MODEL_LOCAL_DIR)
-                    if EMBEDDING_MODEL_LOCAL_DIR.is_dir()
+                    if EMBEDDING_MODEL_LOCAL_DIR is not None and EMBEDDING_MODEL_LOCAL_DIR.is_dir()
                     else EMBEDDING_MODEL_NAME
                 )
                 _model = SentenceTransformer(model_source)
@@ -128,7 +129,7 @@ def _get_model() -> SentenceTransformer:
     return _model
 
 
-def embed(text: str, is_query: bool = False) -> list[float]:
+def embed(text: str, *, is_query: bool = False) -> list[float]:
     """Turn `text` into a deterministic, unit-length embedding vector.
 
     `is_query=True` for search queries (adds the BGE query instruction
@@ -145,7 +146,7 @@ def embed(text: str, is_query: bool = False) -> list[float]:
     return vector.tolist()
 
 
-def embed_batch(texts: list[str], is_query: bool = False) -> list[list[float]]:
+def embed_batch(texts: list[str], *, is_query: bool = False) -> list[list[float]]:
     """Batch version of embed() -- one model call for many texts, same
     is_query / truncation / empty-text behavior per-text as embed()."""
     if not texts:
@@ -159,14 +160,14 @@ def embed_batch(texts: list[str], is_query: bool = False) -> list[list[float]]:
     return vectors.tolist()
 
 
-async def embed_async(text: str, is_query: bool = False) -> list[float]:
+async def embed_async(text: str, *, is_query: bool = False) -> list[float]:
     """Non-blocking wrapper for embed() -- use this instead of embed()
     when calling from an `async def` route handler, so the CPU-bound
     model inference doesn't stall the event loop. See the module
     docstring's "Calling from async code" section."""
-    return await asyncio.to_thread(embed, text, is_query)
+    return await asyncio.to_thread(embed, text, is_query=is_query)
 
 
-async def embed_batch_async(texts: list[str], is_query: bool = False) -> list[list[float]]:
+async def embed_batch_async(texts: list[str], *, is_query: bool = False) -> list[list[float]]:
     """Non-blocking wrapper for embed_batch() -- see embed_async()."""
-    return await asyncio.to_thread(embed_batch, texts, is_query)
+    return await asyncio.to_thread(embed_batch, texts, is_query=is_query)

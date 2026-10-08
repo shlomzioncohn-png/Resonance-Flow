@@ -108,7 +108,7 @@ async def test_search_returns_similarity_scores_in_descending_order(store):
     await store.upsert(near_id, embed("Investigate slow database queries in the reporting module"))
     await store.upsert(far_id, embed("Order more coffee for the office kitchen"))
 
-    results = await store.search(embed(query_text), k=2)
+    results = await store.search_text(query_text, k=2)
     ids = [r.task_id for r in results]
     similarities = [r.similarity for r in results]
 
@@ -118,6 +118,18 @@ async def test_search_returns_similarity_scores_in_descending_order(store):
     # Cosine similarity of unit vectors is bounded in [-1, 1] --
     # SearchResult.similarity itself enforces this range too.
     assert all(-1.0 <= s <= 1.0 for s in similarities)
+
+
+async def test_search_text_embeds_as_a_query_not_a_passage(store):
+    """search_text() must use is_query=True internally."""
+    task_id = f"test-{uuid.uuid4()}"
+    text = "Investigate slow database queries in the reports module"
+    await store.upsert(task_id, embed(text))
+
+    via_search_text = (await store.search_text(text, k=1))[0].similarity
+    via_raw_search = (await store.search(embed(text), k=1))[0].similarity
+
+    assert via_search_text != via_raw_search
 
 
 async def test_search_respects_k_limit(store):
@@ -181,7 +193,7 @@ async def test_future_data_source_uses_same_interface(store):
     await store.upsert(github_issue_id, embed("Null pointer exception in checkout.py line 42"))
     await store.upsert(crm_ticket_id, embed("Customer asking for a refund on order #8831"))
 
-    results = await store.search(embed("Null pointer exception in checkout.py"), k=1)
+    results = await store.search_text("Null pointer exception in checkout.py", k=1)
     assert [r.task_id for r in results] == [github_issue_id]
 
 

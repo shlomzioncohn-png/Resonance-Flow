@@ -5,11 +5,9 @@ Local model weights. **Gitignored — never committed.**
 ## `bge-small-en-v1.5/`
 
 The embedding model used by `src/mind/embeddings` (`BAAI/bge-small-en-v1.5`
--- see that module's README for why). If this directory exists,
-`mind.embeddings.generate` loads it directly with no network call at all
-(`config.EMBEDDING_MODEL_LOCAL_DIR`); otherwise it falls back to
-downloading `BAAI/bge-small-en-v1.5` from the Hugging Face Hub on first
-use.
+-- see that module's README for why). If `MODEL_CACHE_DIR` points here
+(`.env.example`), loading needs no network call; otherwise it downloads
+from the Hugging Face Hub on first use.
 
 To populate it locally: download the model folder (e.g. via
 `huggingface-cli download BAAI/bge-small-en-v1.5 --local-dir models/bge-small-en-v1.5`,

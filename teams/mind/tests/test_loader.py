@@ -24,7 +24,7 @@ def test_verify_checksum_mismatch_raises_and_deletes_the_bad_file(tmp_path):
 
 
 def test_fetch_missing_files_does_not_redownload_a_cached_file(tmp_path, monkeypatch):
-    monkeypatch.setattr(loader, "DATASETS_DIR", tmp_path)
+    monkeypatch.setattr(loader, "_PROJECT_ROOT", tmp_path)
     cached = tmp_path / "local-data" / "funsd" / "dataset" / "testing_data" / "images" / "1.png"
     cached.parent.mkdir(parents=True)
     cached.write_bytes(b"already here")

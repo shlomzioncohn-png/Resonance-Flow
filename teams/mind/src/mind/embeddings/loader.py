@@ -9,13 +9,15 @@ What *does* exist is a real-data manifest for a small FUNSD slice --
 those two files). The manifest lists two real FUNSD test-split documents
 by id, with checksums, but not the documents themselves -- per
 `eval/datasets/README.md`'s own rule ("manifests + checksums only, never
-the corpora"), the raw files are gitignored under `eval/datasets/local-data/`.
+the corpora"), the raw files are gitignored under `local-data/` off
+`teams/mind/` (same convention as `ocr_asr_benchmark.py`'s
+`load_manifest()`, so both loaders share one cache).
 
 So "the loader" here does what a real object-storage loader would: given
 the manifest, fetch each record's raw content (from FUNSD's public source,
 the closest available equivalent to a real remote store for this slice),
 verify it against the committed checksum, and hand back plain text. Once
-cached under `local-data/` it's not re-downloaded.
+cached it's not re-downloaded.
 
 FUNSD annotation JSON is a list of form fields (`form: [{text, label,
 words, ...}, ...]`); the text handed to embed() is those fields' text
@@ -32,7 +34,11 @@ from pathlib import Path
 from typing import Any
 from urllib.request import urlopen
 
-DATASETS_DIR = Path(__file__).resolve().parents[3] / "eval" / "datasets"
+# teams/mind/ -- manifest paths are relative to here, matching
+# ocr_asr_benchmark.py's load_manifest() (not DATASETS_DIR, which
+# previously duplicated the local-data/ folder).
+_PROJECT_ROOT = Path(__file__).resolve().parents[3]
+DATASETS_DIR = _PROJECT_ROOT / "eval" / "datasets"
 MANIFEST_PATH = DATASETS_DIR / ".manifest.json"
 SHA256_PATH = DATASETS_DIR / ".sha256"
 
@@ -64,7 +70,7 @@ def _fetch_missing_files(manifest: dict[str, Any]) -> None:
     """Download the source zip once and extract only the files the
     manifest references that aren't already cached locally."""
     needed = [
-        DATASETS_DIR / rel_path
+        _PROJECT_ROOT / rel_path
         for record in manifest["records"]
         for rel_path in record["files"]
     ]
@@ -83,7 +89,7 @@ def _fetch_missing_files(manifest: dict[str, Any]) -> None:
     zip_root_prefix = manifest["zip_root_prefix"]
     with zipfile.ZipFile(io.BytesIO(zip_bytes)) as zf:
         for path in missing:
-            rel_path = path.relative_to(DATASETS_DIR).as_posix()
+            rel_path = path.relative_to(_PROJECT_ROOT).as_posix()
             if not rel_path.startswith(zip_root_prefix):
                 raise ValueError(
                     f"Manifest file {rel_path!r} does not start with its own "
@@ -122,7 +128,12 @@ def fetch_real_slice() -> list[Record]:
     for record in manifest["records"]:
         annotation_path: Path | None = None
         for rel_path in record["files"]:
-            full_path = DATASETS_DIR / rel_path
+            full_path = _PROJECT_ROOT / rel_path
+            if rel_path not in checksums:
+                raise ValueError(
+                    f"{rel_path!r} is listed in {MANIFEST_PATH.name} but has no entry in "
+                    f"{SHA256_PATH.name} -- the two files are out of sync."
+                )
             _verify_checksum(full_path, checksums[rel_path])
             if rel_path.endswith(".json"):
                 annotation_path = full_path
