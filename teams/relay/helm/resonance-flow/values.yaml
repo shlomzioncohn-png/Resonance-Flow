@@ -168,7 +168,9 @@ components:
     config:
       spring:
         config:
-          import: "configtree:/etc/resonance-flow/secrets/object-storage/"
+          import:
+            - "configtree:/etc/resonance-flow/secrets/object-storage/"
+            - "configtree:/etc/resonance-flow/secrets/kafka/"
         kafka:
           # GitHub currently publishes to bridge.github.tasks.
           # Issue #275 will decide whether to use the shared topic instead.
@@ -233,6 +235,9 @@ components:
       - name: object-storage-credentials
         mountPath: /etc/resonance-flow/secrets/object-storage
         readOnly: true
+      - name: kafka-credentials
+        mountPath: /etc/resonance-flow/secrets/kafka
+        readOnly: true
     dependencySecretVolumes:
       - name: object-storage-credentials
         dependencyName: object-storage
@@ -241,6 +246,11 @@ components:
             path: minio.access-key
           - key: root-password
             path: minio.secret-key
+      - name: kafka-credentials
+        dependencyName: kafka-user-passwords
+        items:
+          - key: client-passwords
+            path: kafka.password
     dependencies:
       - name: object-storage
         port: 9000
