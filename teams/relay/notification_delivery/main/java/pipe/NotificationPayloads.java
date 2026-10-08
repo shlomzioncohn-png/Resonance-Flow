@@ -1,5 +1,7 @@
 package pipe;
 
+import com.rnd.relay.event.TaskNotification;
+
 import java.util.LinkedHashMap;
 import java.util.Map;
 
