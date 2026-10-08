@@ -29,8 +29,7 @@ def test_embed_returns_correct_shape():
 
 
 def test_embed_long_text_does_not_crash():
-    # ~5000 words, far beyond the model's 512-token max_seq_length -- must
-    # truncate silently, not raise.
+    # Far beyond max_seq_length -- must truncate silently, not raise.
     long_text = " ".join(["invoice payment vendor purchase order"] * 1000)
     vec = embed(long_text)
     assert len(vec) == EMBEDDING_DIM
@@ -42,8 +41,6 @@ def test_embed_long_text_is_still_deterministic():
 
 
 def test_embed_is_query_changes_the_vector():
-    # BGE is asymmetric: the query instruction prefix should change the
-    # embedding relative to encoding the same text as a passage.
     text = "customer pricing proposal"
     assert embed(text, is_query=False) != embed(text, is_query=True)
 
@@ -58,11 +55,7 @@ def test_embed_batch_empty_list_returns_empty_list():
 
 
 async def test_embed_async_concurrent_calls_load_model_only_once():
-    """Regression test for the missing-lock race in _get_model():
-    embed_async()/embed_batch_async() run on real OS worker threads (via
-    asyncio.to_thread), so several concurrent calls hitting a cold
-    (unset) _model must still construct exactly one SentenceTransformer,
-    not one per thread that got there first."""
+    """Concurrent calls on a cold model build exactly one instance."""
     original_model = embeddings_module._model
     embeddings_module._model = None
     construction_count = 0
@@ -88,9 +81,7 @@ async def test_embed_async_concurrent_calls_load_model_only_once():
 
 
 def test_embed_batch_matches_individual_embed():
-    # Batched vs. single-item inference can differ by float32 rounding noise
-    # (padding/accumulation order) -- not exact equality, but should agree
-    # closely.
+    # Batch vs. individual can differ by float32 rounding noise.
     texts = [
         "Fax cover sheet from the Attorney General's office",
         "Progress report for Lorillard division",

@@ -1,8 +1,4 @@
-"""
-Tests for mind.embeddings.loader -- no network required (loader.py's
-own network call, _fetch_missing_files' urlopen, is exercised only via a
-patched stand-in that fails the test if it's ever actually called).
-"""
+"""Tests for mind.embeddings.loader -- no network, urlopen is patched."""
 
 from unittest.mock import patch
 
@@ -18,8 +14,6 @@ def test_verify_checksum_mismatch_raises_and_deletes_the_bad_file(tmp_path):
     with pytest.raises(ValueError, match="Checksum mismatch"):
         loader._verify_checksum(bad_file, expected_sha="0" * 64)
 
-    # Otherwise the next run sees the file exists, skips the download, and
-    # fails the same way forever -- see _verify_checksum's comment.
     assert not bad_file.exists()
 
 

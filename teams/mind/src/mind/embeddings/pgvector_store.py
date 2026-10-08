@@ -1,17 +1,10 @@
 """
-pgvector-backed implementation of VectorStore.
+pgvector-backed VectorStore. Only file that knows Postgres/pgvector
+details -- a different backend would be a sibling implementing
+base.VectorStore.
 
-This is the ONLY file in the codebase that is allowed to know pgvector /
-Postgres-specific details (SQL, connection strings, the `<=>` operator,
-psycopg, etc). If we ever swap databases, this file gets replaced by e.g.
-`qdrant_store.py` implementing the same `base.VectorStore` contract --
-callers construct it directly, wherever they currently construct
-`PgVectorStore`.
-
-Uses psycopg (v3), not psycopg2 -- FastAPI route handlers declared
-`async def` run on the event loop, and a blocking psycopg2 call there
-would stall every other request being served by that loop. psycopg3's
-async API keeps the DB call itself non-blocking.
+Uses psycopg3 (async), not psycopg2, so DB calls don't block the event
+loop under FastAPI.
 """
 
 import asyncio
@@ -33,9 +26,6 @@ class PgVectorStore(VectorStore):
         max_conn: int = 5,
         pool_timeout: float = 30.0,
     ) -> None:
-        # No I/O here -- opening the pool and creating the schema are async,
-        # so both happen lazily on first use (see _ensure_ready), unless
-        # open() is called explicitly first.
         self._settings = settings
         self._pool = AsyncConnectionPool(
             str(settings.dsn.get_secret_value()),
@@ -56,8 +46,7 @@ class PgVectorStore(VectorStore):
             self._ready = False
 
     async def _ensure_ready(self) -> None:
-        # Double-checked locking: two concurrent callers could otherwise
-        # both see _ready is False and both try to open the pool at once.
+        # Double-checked locking against concurrent first callers.
         if self._ready:
             return
         async with self._ready_lock:
@@ -84,7 +73,6 @@ class PgVectorStore(VectorStore):
                     """
                 ).format(table=table, dim=sql.Literal(self._settings.embedding_dim))
             )
-            # HNSW index for fast approximate cosine-distance search.
             await cur.execute(
                 sql.SQL(
                     """
@@ -120,16 +108,14 @@ class PgVectorStore(VectorStore):
             )
 
     async def clear(self) -> None:
-        """Remove every stored vector. Intended for test teardown, not production use."""
+        """Test teardown only."""
         await self._ensure_ready()
         async with self._pool.connection() as conn, conn.cursor() as cur:
             await cur.execute(sql.SQL("TRUNCATE TABLE {table};").format(table=self._table()))
 
     def _search_query(self) -> sql.Composed:
-        # ORDER BY the raw distance expression (embedding <=> $1), not a
-        # computed "similarity" alias -- pgvector can only match the HNSW
-        # index to the distance operator itself, so ordering by an alias
-        # (even one derived from it) forces a full table scan instead.
+        # ORDER BY the raw <=> expression, not the similarity alias --
+        # pgvector can't match the HNSW index to an alias.
         return sql.SQL(
             """
             SELECT task_id, 1 - (embedding <=> %s::vector) AS similarity
@@ -142,10 +128,7 @@ class PgVectorStore(VectorStore):
     async def search(self, query_vector: list[float], k: int) -> list[SearchResult]:
         await self._ensure_ready()
         async with self._pool.connection() as conn, conn.cursor() as cur:
-            # set_config(), not "SET LOCAL ... = %s": Postgres rejects a
-            # bound parameter inside a SET statement, and set_config() is a
-            # plain function call that accepts one. is_local=true keeps the
-            # same transaction-scoped semantics SET LOCAL would have had.
+            # set_config(), not SET LOCAL -- that can't take a bound param.
             await cur.execute(
                 "SELECT set_config('hnsw.ef_search', %s, true);",
                 (str(self._settings.search_effort),),
@@ -155,8 +138,6 @@ class PgVectorStore(VectorStore):
             return [SearchResult(task_id=row[0], similarity=row[1]) for row in rows]
 
     async def search_text(self, query: str, k: int) -> list[SearchResult]:
-        """search(), embedding `query` as a search query (is_query=True)
-        first -- use for query-vs-passage search. For passage-vs-passage
-        (e.g. duplicate detection), call search() directly."""
+        """search(), embedding `query` as is_query=True first."""
         vector = await embed_async(query, is_query=True)
         return await self.search(vector, k)

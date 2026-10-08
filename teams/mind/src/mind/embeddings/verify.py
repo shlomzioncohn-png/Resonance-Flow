@@ -20,12 +20,8 @@ def main() -> int:
     dsn = str(settings.dsn.get_secret_value())
     manifest_ids = [record["id"] for record in _load_manifest()["records"]]
 
-    # Plain sync psycopg here (not the async pool pgvector_store.py uses)
-    # -- this is a one-off CLI check, not a request-serving hot path, so
-    # there's no event loop to protect.
-    #
-    # Count only the manifest's ids -- `table` is the real task index too,
-    # so a bare COUNT(*) breaks once any real task is indexed.
+    # Plain sync psycopg -- one-off CLI check, no event loop to protect.
+    # Count only the manifest's ids -- `table` is the real task index too.
     with psycopg.connect(dsn) as conn, conn.cursor() as cur:
         cur.execute(
             sql.SQL("SELECT COUNT(*) FROM {table} WHERE task_id = ANY(%s);").format(

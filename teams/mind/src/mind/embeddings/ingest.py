@@ -14,9 +14,7 @@ from mind.embeddings.pgvector_store import PgVectorStore
 
 
 async def main() -> None:
-    # fetch_real_slice() can block on a network download (see loader.py's
-    # _fetch_missing_files) -- offload it to a thread so it doesn't stall
-    # the event loop this script's own asyncio.run() drives.
+    # fetch_real_slice() can block on a network download.
     records = await asyncio.to_thread(fetch_real_slice)
     print(f"Loaded {len(records)} real records from the FUNSD manifest slice.")
 

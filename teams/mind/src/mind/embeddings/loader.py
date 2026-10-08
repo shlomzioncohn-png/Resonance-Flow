@@ -1,28 +1,8 @@
 """
-Real-record loader for the embeddings ingest pipeline.
-
-There is no R2 loader anywhere in this repo (checked; Bridge's object
-storage work uses MinIO, not R2, and no loader code exists for either).
-What *does* exist is a real-data manifest for a small FUNSD slice --
-`eval/datasets/.manifest.json` + `.sha256` -- added in PR #141
-(`yonit/funsd-foundation-gate`, not yet merged; this branch pulled in just
-those two files). The manifest lists two real FUNSD test-split documents
-by id, with checksums, but not the documents themselves -- per
-`eval/datasets/README.md`'s own rule ("manifests + checksums only, never
-the corpora"), the raw files are gitignored under `local-data/` off
-`teams/mind/` (same convention as `ocr_asr_benchmark.py`'s
-`load_manifest()`, so both loaders share one cache).
-
-So "the loader" here does what a real object-storage loader would: given
-the manifest, fetch each record's raw content (from FUNSD's public source,
-the closest available equivalent to a real remote store for this slice),
-verify it against the committed checksum, and hand back plain text. Once
-cached it's not re-downloaded.
-
-FUNSD annotation JSON is a list of form fields (`form: [{text, label,
-words, ...}, ...]`); the text handed to embed() is those fields' text
-values joined in document order -- a reasonable plain-text reconstruction
-of the form, the same shape a real OCR/extraction pipeline would produce.
+Real FUNSD-slice loader for the embeddings ingest pipeline. No R2 loader
+exists in this repo, so this reads `eval/datasets/.manifest.json`/`.sha256`
+(PR #141), downloads/caches under `local-data/` (same convention as
+`ocr_asr_benchmark.py`), verifies checksums, and returns plain text.
 """
 
 import hashlib
@@ -35,8 +15,7 @@ from typing import Any
 from urllib.request import urlopen
 
 # teams/mind/ -- manifest paths are relative to here, matching
-# ocr_asr_benchmark.py's load_manifest() (not DATASETS_DIR, which
-# previously duplicated the local-data/ folder).
+# ocr_asr_benchmark.py's load_manifest().
 _PROJECT_ROOT = Path(__file__).resolve().parents[3]
 DATASETS_DIR = _PROJECT_ROOT / "eval" / "datasets"
 MANIFEST_PATH = DATASETS_DIR / ".manifest.json"
@@ -81,11 +60,7 @@ def _fetch_missing_files(manifest: dict[str, Any]) -> None:
     with urlopen(manifest["source_url"], timeout=60) as resp:
         zip_bytes = resp.read()
 
-    # manifest paths are "<zip_root_prefix>dataset/testing_data/..." --
-    # inside the zip it's just "dataset/testing_data/...". The prefix
-    # comes from the manifest, not hardcoded here, so a future manifest
-    # using a different layout doesn't hit an IndexError from a split()
-    # that silently assumed this one's.
+    # Prefix from the manifest, not hardcoded -- zip paths lack it.
     zip_root_prefix = manifest["zip_root_prefix"]
     with zipfile.ZipFile(io.BytesIO(zip_bytes)) as zf:
         for path in missing:
@@ -104,22 +79,17 @@ def _fetch_missing_files(manifest: dict[str, Any]) -> None:
 def _verify_checksum(path: Path, expected_sha: str) -> None:
     actual = hashlib.sha256(path.read_bytes()).hexdigest()
     if actual != expected_sha:
-        # Otherwise the bad file stays cached: the next run sees it exists,
-        # skips the download, and fails the same way forever.
-        path.unlink()
+        path.unlink()  # else it stays cached and fails the same way forever
         raise ValueError(f"Checksum mismatch for {path}: expected {expected_sha}, got {actual}")
 
 
 def _annotation_to_text(annotation: dict[str, Any]) -> str:
-    """FUNSD annotation -> plain text: join every non-empty form-field
-    text value, in document order."""
+    """FUNSD annotation -> plain text, form-field text joined in order."""
     return " ".join(item["text"] for item in annotation["form"] if item["text"].strip())
 
 
 def fetch_real_slice() -> list[Record]:
-    """Fetch (downloading + caching under local-data/ if needed), verify,
-    and return the FUNSD records described by the manifest, as (id, text)
-    pairs ready for embed()."""
+    """Fetch, verify, and return the manifest's FUNSD records as text."""
     manifest = _load_manifest()
     checksums = _load_checksums()
     _fetch_missing_files(manifest)
