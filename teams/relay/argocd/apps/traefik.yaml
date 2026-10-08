@@ -19,6 +19,9 @@ spec:
           name: traefik
         providers:
           kubernetesIngress:
+            # Match pathType: Prefix per path segment, as the Ingress spec says -
+            # otherwise /api also catches /apifoo and /auth catches /authorize.
+            strictPrefixMatching: true
             publishedService:
               enabled: true
         ports:
