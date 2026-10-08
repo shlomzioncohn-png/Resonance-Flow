@@ -1,19 +1,8 @@
 #!/usr/bin/env python3
-"""#470: the long-running process that keeps the vector store in sync with
-Inbox's task.{created,updated,completed} topics.
-
-Runs as its own process/container (see docker-compose.yml's
-mind-index-consumer service), not inside api/main.py's FastAPI lifespan:
-
-  - ProtobufConsumer.run() is a blocking loop with no external stop
-    signal -- running it via asyncio.to_thread() inside the app's lifespan
-    would leave uvicorn's graceful shutdown with no way to stop it cleanly.
-  - Three topics need three different protobuf types, and run(message_type,
-    handler, ...) binds exactly one type per call -- there's no single
-    ProtobufConsumer that multiplexes all three. That's naturally three
-    threads, each with its own blocking loop and its own event loop (an
-    AsyncConnectionPool is bound to the loop that opened it, so it can't be
-    shared across threads).
+"""#470: long-running process keeping the vector store in sync with
+Inbox's task.{created,updated,completed} topics. Own process/container,
+not inside the FastAPI lifespan -- ProtobufConsumer.run() blocks with no
+stop signal, and each topic needs its own type/thread/event loop.
 
 Usage:
     python scripts/index_consumer.py

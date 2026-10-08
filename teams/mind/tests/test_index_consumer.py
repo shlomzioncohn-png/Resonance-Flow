@@ -1,8 +1,5 @@
-"""#470 handler logic, tested against a fake in-memory VectorStore -- no
-broker, no real Postgres. See mind.embeddings.index_consumer for the
-handlers themselves and scripts/index_consumer.py for how they're wired to
-real Kafka topics.
-"""
+"""#470 handler logic, tested against a fake in-memory VectorStore --
+no broker, no real Postgres."""
 
 import pytest
 
@@ -18,9 +15,7 @@ from mind.messaging.task_updated_event_pb2 import TaskUpdatedEvent
 
 
 class FakeVectorStore(VectorStore):
-    """In-memory VectorStore double -- just enough of the real contract
-    (task_id -> (vector, is_completed)) for the handler-logic tests above
-    to exercise upsert/upsert_if_absent/mark_completed semantics."""
+    """In-memory VectorStore double: task_id -> (vector, is_completed)."""
 
     def __init__(self) -> None:
         self.rows: dict[str, tuple[list[float], bool]] = {}
@@ -73,8 +68,7 @@ async def test_handle_task_created_indexes_a_new_task(store):
 
 
 async def test_handle_task_created_does_not_overwrite_an_already_indexed_task(store):
-    """A task already indexed via #353 must not be re-embedded/overwritten
-    just because task.created was replayed."""
+    """A task already indexed via #353 must not be re-embedded on replay."""
     event = TaskCreatedEvent(id="task-1", title="Fix the login bug", description="On the payments page")
     await store.upsert_if_absent("task-1", [0.0] * 256)
     original = store.rows["task-1"][0]
@@ -91,8 +85,7 @@ async def test_handle_task_created_skips_text_with_no_extractable_tokens(store):
 
 
 async def test_handle_task_updated_creates_the_row_if_never_seen(store):
-    """An update for a task_id this consumer never saw a task.created for
-    self-heals by creating the row -- not an error."""
+    """An update for an unseen task_id self-heals by creating the row."""
     event = TaskUpdatedEvent(task_id="task-2", title="Write release notes", description="For v2.3")
     await handle_task_updated(store, event)
     assert "task-2" in store.rows
@@ -119,8 +112,7 @@ async def test_handle_task_completed_marks_a_known_task(store):
 
 
 async def test_handle_task_completed_logs_and_skips_an_unknown_task(store):
-    """No fetch-by-id API exists on Inbox's side, so an unknown task_id is
-    log-and-skip, not a raised error."""
+    """Unknown task_id is log-and-skip, not a raised error."""
     event = TaskCompletedEvent(task_id="never-indexed", is_completed=True)
     await handle_task_completed(store, event)  # should not raise
     assert "never-indexed" not in store.rows
