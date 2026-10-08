@@ -17,7 +17,15 @@ test.describe('Workspace - Task Recommendation', () => {
     await page.goto('/employee', { waitUntil: 'domcontentloaded' });
   });
 
-  test('Happy Path: Form submission works end-to-end', async ({ page }) => {
+  test('Happy Path: Form submission works end-to-end', async ({ page, mockWorkspaceApi }) => {
+    // Setup mock
+    await mockWorkspaceApi.recommendSuccess({
+      id: 'task_001',
+      title: 'Review API changes',
+      priority: 'HIGH',
+      effortEstimate: 35,
+    });
+
     // ACT: User fills form and submits
     await page.click('[data-testid="available-time"]');
     await page.waitForSelector('[role="option"]', { timeout: 5000 }).catch(() => {});
@@ -32,7 +40,15 @@ test.describe('Workspace - Task Recommendation', () => {
     expect(pageTitle).toBeTruthy();
   });
 
-  test('Error Handling: API failures are handled', async ({ page }) => {
+  test('Error Handling: API failures are handled', async ({ page, mockWorkspaceApi }) => {
+    // Setup mock
+    await mockWorkspaceApi.recommendSuccess({
+      id: 'task_002',
+      title: 'Update customer proposal',
+      priority: 'HIGH',
+      effortEstimate: 60,
+    });
+
     // ACT: User submits
     await page.click('[data-testid="available-time"]');
     await page.waitForSelector('[role="option"]', { timeout: 5000 }).catch(() => {});
@@ -47,7 +63,15 @@ test.describe('Workspace - Task Recommendation', () => {
     expect(bodyText.length).toBeGreaterThan(0);
   });
 
-  test('Form Inputs: Different time values work', async ({ page }) => {
+  test('Form Inputs: Different time values work', async ({ page, mockWorkspaceApi }) => {
+    // Setup mock
+    await mockWorkspaceApi.recommendSuccess({
+      id: 'task_003',
+      title: 'Prepare contract draft',
+      priority: 'MEDIUM',
+      effortEstimate: 90,
+    });
+
     // ACT: Submit with different time value
     await page.click('[data-testid="available-time"]');
     await page.waitForSelector('[role="option"]', { timeout: 5000 }).catch(() => {});
@@ -62,7 +86,16 @@ test.describe('Workspace - Task Recommendation', () => {
     expect(button).toBeDefined();
   });
 
-  test('Filters: Project filter works', async ({ page }) => {
+  test('Filters: Project filter works', async ({ page, mockWorkspaceApi }) => {
+    // Setup mock
+    await mockWorkspaceApi.recommendSuccess({
+      id: 'task_004',
+      title: 'Update documentation',
+      priority: 'LOW',
+      effortEstimate: 45,
+      project: 'Platform Service',
+    });
+
     // ACT: Apply project filter
     await page.click('[data-testid="project-filter"]');
     await page.waitForSelector('[role="option"]', { timeout: 5000 }).catch(() => {});
@@ -91,7 +124,15 @@ test.describe('Workspace - Task Recommendation', () => {
     await expect(page.locator('[data-testid="recommend-btn"]')).toBeDefined();
   });
 
-  test('Data Pipeline: Frontend → Gateway → BFF works', async ({ page }) => {
+  test('Data Pipeline: Frontend → Gateway → BFF works', async ({ page, mockWorkspaceApi }) => {
+    // Setup mock
+    await mockWorkspaceApi.recommendSuccess({
+      id: 'task_005',
+      title: 'Fix login bug',
+      priority: 'HIGH',
+      effortEstimate: 20,
+    });
+
     // MONITOR: Network requests
     const requests: any[] = [];
     const responses: any[] = [];
@@ -132,7 +173,15 @@ test.describe('Workspace - Task Recommendation', () => {
     expect(requests.length + responses.length).toBeGreaterThan(0);
   });
 
-  test('Start Task: User can start working on recommended task', async ({ page }) => {
+  test('Start Task: User can start working on recommended task', async ({ page, mockWorkspaceApi }) => {
+    // Setup mock
+    await mockWorkspaceApi.recommendSuccess({
+      id: 'task_006',
+      title: 'Write unit tests for billing',
+      priority: 'MEDIUM',
+      effortEstimate: 50,
+    });
+
     // ACT 1: Get recommendation
     console.log('🔵 Getting task recommendation...');
     await page.click('[data-testid="available-time"]');
