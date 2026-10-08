@@ -12,6 +12,10 @@ data:
   # before checking — Apicurio enforces nothing by default.
   compatibility-level: {{ include "schema-sync-hook.compatLevel" . | quote }}
 
+  # "# reset:" subjects, one per line - hard-deleted by run-all.sh before the loop.
+  reset-subjects: |
+    {{- include "schema-sync-hook.resetSubjects" . | nindent 4 }}
+
   # Orchestrator ONLY — the actual check/register logic lives in the two
   # verbatim copies below, not reinvented here. Sets the compatibility level,
   # then loops over every schema in schemas.tsv running check-then-register;
@@ -26,6 +30,16 @@ data:
     curl -sf -X PUT "${REGISTRY_URL}/config" \
       -H "Content-Type: application/vnd.schemaregistry.v1+json" \
       -d "{\"compatibility\": \"${LEVEL}\"}" > /dev/null
+
+    # Soft delete first - permanent delete only accepts soft-deleted subjects. 404 = already gone.
+    while read -r RESET; do
+      [ -n "$RESET" ] || continue
+      echo "=== ${RESET}: '# reset:' - hard-deleting before re-register ==="
+      for Q in "" "?permanent=true"; do
+        CODE=$(curl -s -o /dev/null -w "%{http_code}" -X DELETE "${REGISTRY_URL}/subjects/${RESET}${Q}")
+        case "$CODE" in 2*|404) ;; *) echo "DELETE ${RESET}${Q} failed (HTTP ${CODE})"; exit 1 ;; esac
+      done
+    done < /schema-list/reset-subjects
 
     FAILED=0
     while IFS=$'\t' read -r FILE SUBJECT; do

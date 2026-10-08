@@ -1,6 +1,6 @@
 package com.rnd.inbox.shared.model.type;
 
-import com.rnd.inbox.tenant.TenantStatus;
+import com.rnd.inbox.tenant.model.TenantStatus;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.hibernate.type.descriptor.ValueBinder;

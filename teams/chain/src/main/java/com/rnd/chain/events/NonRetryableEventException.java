@@ -1,20 +1,13 @@
 package com.rnd.chain.events;
 
 /**
- * Thrown when an incoming Kafka message cannot be processed no matter how
- * many times it is retried - malformed JSON, a missing or invalid eventId /
- * eventType / occurredAt, or a payload that doesn't match the target
- * handler's expected type.
+ * Thrown when an incoming Kafka message cannot be processed no matter how many times it is
+ * retried - an invalid UUID field, an unrecognized enum value, a proposed dependency that would
+ * create a cycle.
  *
- * Registered as a not-retryable exception on
- * ChainKafkaErrorHandlingConfig's DefaultErrorHandler, so messages that fail
- * this way go straight to the DLT instead of wasting the configured retry
- * attempts (see ChainKafkaRetryProperties / chain.kafka.retry.*) on
- * something that will never succeed. Deliberately thrown only for parsing/routing failures in
- * ChainEventConsumer - a failure inside handler.handle() itself (e.g. a
- * future handler hitting a database timeout) is exactly the transient case
- * that should keep retrying, so it is left to propagate as whatever
- * exception the handler throws.
+ * Each handler's {@code @RetryableTopic} excludes this type, so it skips straight to the
+ * {@code .errors} topic instead of wasting retry attempts on something that will never succeed.
+ * Every other exception is retried - see {@link ChainEventProcessingTemplate}.
  */
 public class NonRetryableEventException extends RuntimeException {
 

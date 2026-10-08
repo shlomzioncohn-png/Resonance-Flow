@@ -33,6 +33,13 @@ curl -sf -X PUT "${REGISTRY_URL}/config" \
 TMP_DIR="$(mktemp -d)"
 trap 'rm -rf "$TMP_DIR"' EXIT
 
+# "# reset:" subjects aren't seeded, so the check sees them as new - mirrors the hook's hard delete.
+while read -r RESET; do
+  [ -n "$RESET" ] || continue
+  echo "=== ${RESET}: marked '# reset:' on ${BASE_REF} — not seeded ==="
+  SCHEMA_LIST="$(printf '%s\n' "$SCHEMA_LIST" | awk -F'\t' -v s="$RESET" '{ sub(/\r$/, "") } $2 != s')"
+done <<< "$RESET_SUBJECTS"
+
 while IFS=$'\t' read -r FILE SUBJECT || [ -n "$FILE" ]; do
   case "$FILE" in ''|'#'*) continue ;; esac
 

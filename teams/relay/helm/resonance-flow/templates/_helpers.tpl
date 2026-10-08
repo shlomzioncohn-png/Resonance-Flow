@@ -118,23 +118,38 @@ re-derive it separately from the wait-for-<dep> initContainer.
 {{- end }}
 
 {{/*
-One initContainer per {name, port, host?} dependency, blocking until
-host:port is TCP-reachable.
+One initContainer per {name, port, host?} dependency, blocking until host:port is
+TCP-reachable. Dependencies whose target is disabled get no initContainer.
 */}}
 {{- define "resonance-flow.waitForDependencies" -}}
 {{- $root := .root }}
 {{- range .deps }}
-{{- $host := include "resonance-flow.dependencyHost" (dict "root" $root "dep" .) }}
-- name: wait-for-{{ .name }}
+{{- $dep := . }}
+{{- $enabled := true }}
+{{- if not $dep.host }}
+{{- if hasKey $root.Values.components $dep.name }}
+{{- if eq (index $root.Values.components $dep.name).enabled false }}
+{{- $enabled = false }}
+{{- end }}
+{{- else if hasKey $root.Values $dep.name }}
+{{- if eq (index $root.Values $dep.name).enabled false }}
+{{- $enabled = false }}
+{{- end }}
+{{- end }}
+{{- end }}
+{{- if $enabled }}
+{{- $host := include "resonance-flow.dependencyHost" (dict "root" $root "dep" $dep) }}
+- name: wait-for-{{ $dep.name }}
   image: busybox:1.36
   command:
     - sh
     - -c
     - |
-      until nc -z -w2 {{ $host }} {{ .port }}; do
-        echo "waiting for {{ .name }} ({{ $host }}:{{ .port }})..."
+      until nc -z -w2 {{ $host }} {{ $dep.port }}; do
+        echo "waiting for {{ $dep.name }} ({{ $host }}:{{ $dep.port }})..."
         sleep 2
       done
+{{- end }}
 {{- end }}
 {{- end }}
 

@@ -105,12 +105,18 @@ class PipeKafkaToWebSocketIntegrationTest {
     @Test
     void reconnectingWithLastEventIdReplaysWhatWasMissedWhileDisconnected() throws Exception {
         CapturingHandler firstConnection = connect(null);
+        // Stays connected so we know when the pod has consumed task-2; reconnecting before that
+        // finds a replay buffer that's behind, and only the refresh is replayed.
+        CapturingHandler observer = connect(null);
         publish(activityNotification("task-1"));
         Map<String, Object> firstEnvelope = decode(firstConnection.nextMessage());
         long firstOffset = ((Number) firstEnvelope.get("id")).longValue();
+        decode(observer.nextMessage());
         firstConnection.session.close();
 
         publish(activityNotification("task-2")); // arrives while the client is disconnected
+        assertThat(dataOf(decode(observer.nextMessage())).get("task_id")).isEqualTo("task-2");
+        observer.session.close();
 
         CapturingHandler secondConnection = connect(firstOffset);
 
