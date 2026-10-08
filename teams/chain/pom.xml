@@ -215,6 +215,17 @@
                         </configuration>
                     </execution>
                     <execution>
+                        <id>compile-task-completed-event</id>
+                        <goals>
+                            <goal>compile</goal>
+                        </goals>
+                        <configuration>
+                            <includes>
+                                <include>task-completed-event.proto</include>
+                            </includes>
+                        </configuration>
+                    </execution>
+                    <execution>
                         <id>compile-dependency-proposed-event</id>
                         <goals>
                             <goal>compile</goal>
