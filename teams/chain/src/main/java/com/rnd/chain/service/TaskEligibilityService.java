@@ -11,6 +11,7 @@ import com.rnd.chain.exception.DuplicateDependencyException;
 import com.rnd.chain.exception.InvalidDependencyException;
 import com.rnd.chain.exception.InvalidRequestException;
 import com.rnd.chain.exception.TaskNotFoundException;
+import com.rnd.chain.event.SchedulingPublishListener;
 import com.rnd.chain.repository.ConstraintRepository;
 import com.rnd.chain.repository.TaskDependencyRepository;
 import com.rnd.chain.repository.TaskRepository;
@@ -19,6 +20,8 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 import com.rnd.chain.dto.TaskEligibilityResponse;
 
 import java.time.LocalDateTime;
@@ -28,6 +31,7 @@ import java.util.Deque;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -59,18 +63,46 @@ public class TaskEligibilityService {
 
     private final TaskRepository taskRepository;
     private final TaskDependencyRepository taskDependencyRepository;
-    private final SchedulingUpdateService schedulingUpdateService;
     private final ConstraintRepository constraintRepository;
     private final PriorityScoreService priorityScoreService;
+    private final SchedulingPublishListener schedulingPublishListener;
 
     private final Object dependencyGraphLock = new Object();
 
+    /** {@link TransactionSynchronizationManager} resource key for the per-transaction set of
+     * taskIds queued to publish at commit - see {@link #requestPublishAfterCommit}. */
+    private static final String PENDING_PUBLISH_RESOURCE_KEY =
+            TaskEligibilityService.class.getName() + ".pendingSchedulingPublishes";
+
     /**
-     * Issue #445: the constructor Spring actually wires up - {@code @Autowired} picks this one
-     * over the 4-arg overload below (Spring's single-constructor auto-detection only applies when
-     * there is exactly one constructor; with two, one of them must say which).
+     * Issue #445 Phase 3: the constructor Spring actually wires up - {@code @Autowired} picks
+     * this one over the compat overloads below (Spring's single-constructor auto-detection only
+     * applies when there is exactly one constructor; with several, one of them must say which).
+     * No longer takes {@link SchedulingUpdateService} directly - publishing goes exclusively
+     * through {@code schedulingPublishListener}, after commit, never synchronously from this
+     * class (see {@link #requestPublishAfterCommit}).
      */
     @org.springframework.beans.factory.annotation.Autowired
+    public TaskEligibilityService(
+            TaskRepository taskRepository,
+            TaskDependencyRepository taskDependencyRepository,
+            ConstraintRepository constraintRepository,
+            PriorityScoreService priorityScoreService,
+            SchedulingPublishListener schedulingPublishListener) {
+
+        this.taskRepository = taskRepository;
+        this.taskDependencyRepository = taskDependencyRepository;
+        this.constraintRepository = constraintRepository;
+        this.priorityScoreService = priorityScoreService;
+        this.schedulingPublishListener = schedulingPublishListener;
+    }
+
+    /**
+     * Issue #445 Phase 1 compat: same as the pre-Phase-3 5-arg constructor (which took a
+     * {@link SchedulingUpdateService} directly), building its own {@link SchedulingPublishListener}
+     * from it so every existing test that still constructs this class that way keeps compiling.
+     * Prefer the {@code @Autowired} constructor above in new code.
+     */
     public TaskEligibilityService(
             TaskRepository taskRepository,
             TaskDependencyRepository taskDependencyRepository,
@@ -78,18 +110,14 @@ public class TaskEligibilityService {
             ConstraintRepository constraintRepository,
             PriorityScoreService priorityScoreService) {
 
-        this.taskRepository = taskRepository;
-        this.taskDependencyRepository = taskDependencyRepository;
-        this.schedulingUpdateService = schedulingUpdateService;
-        this.constraintRepository = constraintRepository;
-        this.priorityScoreService = priorityScoreService;
+        this(taskRepository, taskDependencyRepository, constraintRepository, priorityScoreService,
+                new SchedulingPublishListener(taskRepository, schedulingUpdateService));
     }
 
     /**
-     * Same as the 5-arg constructor, with a plain {@code new PriorityScoreService()} (it's a pure,
-     * stateless function - see its own Javadoc - so there's nothing to fake or inject here). Kept
-     * only so the many existing tests that construct this class directly with 4 args don't all
-     * need updating for issue #445; prefer the 5-arg constructor in new code.
+     * Issue #445 Phase 1 compat: same as the original (pre-#445) 4-arg constructor. Kept only so
+     * the many existing tests that construct this class directly with 4 args don't all need
+     * updating; prefer the {@code @Autowired} constructor above in new code.
      */
     public TaskEligibilityService(
             TaskRepository taskRepository,
@@ -229,11 +257,77 @@ public class TaskEligibilityService {
             boolean availabilityChanged = oldTask.isReady() != finalTask.isReady();
             boolean priorityChanged = !Objects.equals(oldTask.getPriorityScore(), finalTask.getPriorityScore());
             if (availabilityChanged || priorityChanged) {
-                schedulingUpdateService.publishSchedulingUpdate(finalTask);
+                requestPublishAfterCommit(taskId);
             }
         }
 
         return finalTask;
+    }
+
+    /**
+     * Issue #445 Phase 3: queues {@code taskId} to publish once the current transaction commits -
+     * never synchronously, and never at all if the transaction rolls back. Every public mutator on
+     * this class is {@code @Transactional} (enforced by {@code TaskEligibilityServiceTransactionalCoverageTest}),
+     * so in production a transaction is always active here; see the {@code else} branch for what
+     * happens if that invariant is ever violated.
+     *
+     * <p><b>Deduplication "by taskId within the transaction"</b> (locked decision): a
+     * {@link LinkedHashSet} bound to the current transaction via
+     * {@link TransactionSynchronizationManager} - {@code taskId} is added to it, and only the
+     * first time a given id is added in this transaction does a {@link TransactionSynchronization}
+     * get registered to flush the whole set at commit. So a task touched five times in one
+     * transaction (e.g. {@link #addDependencies}'s batch loop) still publishes at most once for
+     * it, with its final, post-commit state (the callback re-reads the task - see
+     * {@link SchedulingPublishListener#onCommit} - never a snapshot taken mid-transaction).
+     *
+     * <p><b>No synchronous fallback</b> ({@code fallbackExecution=false}, locked decision): if
+     * there is no active transaction when this is called, the publish is dropped (logged at
+     * ERROR, not silently) rather than fired immediately. The alternative (publish immediately)
+     * would mask exactly the bug this is meant to catch - a mutator that forgot
+     * {@code @Transactional} - behind "it happened to work anyway".
+     */
+    private void requestPublishAfterCommit(UUID taskId) {
+        if (!TransactionSynchronizationManager.isSynchronizationActive()) {
+            log.error("requestPublishAfterCommit({}) called with no active transaction - this "
+                    + "publish is dropped, not sent. Every public mutator on this class must be "
+                    + "@Transactional for issue #445's AFTER_COMMIT publishing to work.", taskId);
+            return;
+        }
+
+        @SuppressWarnings("unchecked")
+        Set<UUID> pending = (Set<UUID>) TransactionSynchronizationManager.getResource(PENDING_PUBLISH_RESOURCE_KEY);
+        if (pending == null) {
+            pending = new LinkedHashSet<>();
+            TransactionSynchronizationManager.bindResource(PENDING_PUBLISH_RESOURCE_KEY, pending);
+        }
+
+        if (!pending.add(taskId)) {
+            return; // already queued in this transaction - dedup, see Javadoc above.
+        }
+
+        if (pending.size() == 1) {
+            // First id queued in this transaction - register the one-time flush/cleanup hooks.
+            // (Registered once per transaction, not once per id: re-registering on every add
+            // would flush/publish the same ids multiple times at commit.)
+            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                @Override
+                public void afterCommit() {
+                    @SuppressWarnings("unchecked")
+                    Set<UUID> idsToPublish =
+                            (Set<UUID>) TransactionSynchronizationManager.getResource(PENDING_PUBLISH_RESOURCE_KEY);
+                    for (UUID id : idsToPublish) {
+                        schedulingPublishListener.onCommit(id);
+                    }
+                }
+
+                @Override
+                public void afterCompletion(int status) {
+                    // Runs after afterCommit() on commit, or alone on rollback - either way, the
+                    // next transaction on this thread must not inherit a stale pending set.
+                    TransactionSynchronizationManager.unbindResourceIfPossible(PENDING_PUBLISH_RESOURCE_KEY);
+                }
+            });
+        }
     }
 
     /**
@@ -266,6 +360,7 @@ public class TaskEligibilityService {
         return sum;
     }
 
+    @Transactional
     public void recalculateTaskEligibility(UUID taskId) {
 
         Objects.requireNonNull(
@@ -280,6 +375,7 @@ public class TaskEligibilityService {
                         task.getOpenConstraintCount()));
     }
 
+    @Transactional
     public TaskDependency addDependency(
             UUID taskId,
             UUID dependsOnTaskId) {
@@ -451,6 +547,7 @@ public class TaskEligibilityService {
         }
     }
 
+    @Transactional
     public void removeDependency(
             UUID taskId,
             UUID dependsOnTaskId) {
@@ -543,6 +640,7 @@ public class TaskEligibilityService {
         return false;
     }
 
+    @Transactional
     public void onTaskStatusChanged(
             UUID taskId,
             TaskStatus newStatus) {

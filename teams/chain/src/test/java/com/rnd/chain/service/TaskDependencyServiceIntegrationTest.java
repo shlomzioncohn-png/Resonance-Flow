@@ -11,6 +11,7 @@ import com.rnd.chain.repository.InMemoryTaskDependencyRepository;
 import com.rnd.chain.repository.InMemoryTaskRepository;
 import com.rnd.chain.repository.InMemoryTransactionRunner;
 import com.rnd.chain.testsupport.IncrementingClock;
+import com.rnd.chain.testsupport.TestTransactions;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -86,9 +87,9 @@ class TaskDependencyServiceIntegrationTest {
     void addDependency_shouldCreateDependencyAndUpdateEligibility() {
 
         TaskDependency created =
-                taskDependencyService.addDependency(
+                TestTransactions.runCommitted(() -> taskDependencyService.addDependency(
                         taskId,
-                        dependencyTaskId);
+                        dependencyTaskId));
 
         assertNotNull(created);
 
@@ -154,9 +155,9 @@ class TaskDependencyServiceIntegrationTest {
 
         schedulingPublisher.clear();
 
-        taskDependencyService.removeDependency(
+        TestTransactions.runCommitted(() -> taskDependencyService.removeDependency(
                 taskId,
-                dependencyTaskId);
+                dependencyTaskId));
 
         assertTrue(
                 dependencyRepository

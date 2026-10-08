@@ -14,6 +14,7 @@ import com.rnd.chain.exception.TaskNotFoundException;
 import com.rnd.chain.repository.InMemoryConstraintRepository;
 import com.rnd.chain.repository.InMemoryTaskDependencyRepository;
 import com.rnd.chain.repository.InMemoryTaskRepository;
+import com.rnd.chain.testsupport.TestTransactions;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -21,6 +22,7 @@ import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -101,9 +103,9 @@ class TaskEligibilityServiceTest {
                         0,
                         0));
 
-        service.addDependency(
+        TestTransactions.runCommitted(() -> service.addDependency(
                 taskId,
-                dependencyId);
+                dependencyId));
 
         Task updated =
                 taskRepository.findById(taskId)
@@ -293,9 +295,9 @@ class TaskEligibilityServiceTest {
 
         publisher.clear();
 
-        service.removeDependency(
+        TestTransactions.runCommitted(() -> service.removeDependency(
                 taskId,
-                dependencyId);
+                dependencyId));
 
         Task updated =
                 taskRepository.findById(taskId)
@@ -375,9 +377,9 @@ class TaskEligibilityServiceTest {
 
         publisher.clear();
 
-        service.onTaskStatusChanged(
+        TestTransactions.runCommitted(() -> service.onTaskStatusChanged(
                 dependencyId,
-                TaskStatus.DONE);
+                TaskStatus.DONE));
 
         Task updated =
                 taskRepository.findById(taskId)
@@ -423,9 +425,9 @@ class TaskEligibilityServiceTest {
 
         publisher.clear();
 
-        service.onTaskStatusChanged(
+        TestTransactions.runCommitted(() -> service.onTaskStatusChanged(
                 dependencyId,
-                TaskStatus.ACTIVE);
+                TaskStatus.ACTIVE));
 
         Task updated =
                 taskRepository.findById(taskId)
@@ -456,7 +458,8 @@ class TaskEligibilityServiceTest {
                         0,
                         0));
 
-        service.onConstraintAdded(newConstraint(taskId, "c-add", Constraint.ConstraintStatus.PENDING));
+        TestTransactions.runCommitted(() ->
+                service.onConstraintAdded(newConstraint(taskId, "c-add", Constraint.ConstraintStatus.PENDING)));
 
         Task updated =
                 taskRepository.findById(taskId)
@@ -489,11 +492,11 @@ class TaskEligibilityServiceTest {
 
         constraintRepository.save(newConstraint(taskId, "c-sat", Constraint.ConstraintStatus.PENDING));
 
-        service.onConstraintStatusChanged(
+        TestTransactions.runCommitted(() -> service.onConstraintStatusChanged(
                 taskId,
                 "c-sat",
                 Constraint.ConstraintStatus.SATISFIED,
-                null);
+                null));
 
         Task updated =
                 taskRepository.findById(taskId)
@@ -572,8 +575,8 @@ class TaskEligibilityServiceTest {
                         1,
                         0));
 
-        service.recalculateTaskEligibility(
-                taskId);
+        TestTransactions.runCommitted(() -> service.recalculateTaskEligibility(
+                taskId));
 
         Task updated =
                 taskRepository.findById(taskId)
@@ -1295,7 +1298,7 @@ class TaskEligibilityServiceTest {
         UUID taskId = UUID.randomUUID();
         Fixture fixture = newFixture(List.of(buildTask(taskId, 0, 0, true)), List.of());
 
-        fixture.service().onScoreProposed(taskId, 0.8, 0.5);
+        TestTransactions.runCommitted(() -> fixture.service().onScoreProposed(taskId, 0.8, 0.5));
 
         Task task = fixture.taskRepo().findById(taskId).orElseThrow();
         assertEquals(0.8, task.getScore());
@@ -1316,7 +1319,7 @@ class TaskEligibilityServiceTest {
         fixture.service().onScoreProposed(taskId, 0.8, 0.5);
         fixture.publisher().clear();
 
-        fixture.service().onScoreProposed(taskId, null, null);
+        TestTransactions.runCommitted(() -> fixture.service().onScoreProposed(taskId, null, null));
 
         Task task = fixture.taskRepo().findById(taskId).orElseThrow();
         assertNull(task.getScore());
@@ -1444,7 +1447,7 @@ class TaskEligibilityServiceTest {
         fixture.service().onScoreProposed(taskId, 0.8, 1.0);
         fixture.publisher().clear();
 
-        fixture.service().onTaskStatusChanged(blockerId, TaskStatus.DONE);
+        TestTransactions.runCommitted(() -> fixture.service().onTaskStatusChanged(blockerId, TaskStatus.DONE));
 
         Task task = fixture.taskRepo().findById(taskId).orElseThrow();
         assertTrue(task.isReady());
@@ -1461,6 +1464,72 @@ class TaskEligibilityServiceTest {
 
         fixture.service().recalculateTaskEligibility(taskId);
 
+        assertTrue(fixture.publisher().getEvents().isEmpty());
+    }
+
+    // Issue #445 Phase 3: AFTER_COMMIT publish - commit/rollback/dedup.
+
+    @Test
+    void rollback_neverPublishes() {
+        UUID taskId = UUID.randomUUID();
+        Fixture fixture = newFixture(List.of(buildTask(taskId, 0, 0, true)), List.of());
+
+        TestTransactions.runRolledBack(() -> fixture.service().onScoreProposed(taskId, 0.8, 1.0));
+
+        // The DB write itself is unconditional (issue #445 doesn't touch that) - only the
+        // Kafka-facing publish is gated on commit.
+        assertEquals(0.8, fixture.taskRepo().findById(taskId).orElseThrow().getScore());
+        assertTrue(fixture.publisher().getEvents().isEmpty());
+    }
+
+    @Test
+    void sameTaskChangedTwiceInOneTransaction_publishesExactlyOnce_withTheFinalState() {
+        // Locked decision: "Deduplication: By taskId within the transaction."
+        UUID taskId = UUID.randomUUID();
+        Fixture fixture = newFixture(List.of(buildTask(taskId, 0, 0, true)), List.of());
+
+        TestTransactions.runCommitted(() -> {
+            fixture.service().onScoreProposed(taskId, 0.5, 1.0);
+            fixture.service().onScoreProposed(taskId, 0.8, 1.0); // same task, changed again
+        });
+
+        List<TaskSchedulingUpdatedEvent> events = fixture.publisher().getEvents();
+        assertEquals(1, events.size());
+        assertEquals(new PriorityScoreService().compute(0.8, 1.0, 0, 0, 0), events.get(0).getPriorityScore());
+    }
+
+    @Test
+    void twoDifferentTasksChangedInOneTransaction_publishesOncePerTask() {
+        UUID taskA = UUID.randomUUID();
+        UUID taskB = UUID.randomUUID();
+        Fixture fixture = newFixture(
+                List.of(buildTask(taskA, 0, 0, true), buildTask(taskB, 0, 0, true)), List.of());
+
+        TestTransactions.runCommitted(() -> {
+            fixture.service().onScoreProposed(taskA, 0.5, 1.0);
+            fixture.service().onScoreProposed(taskB, 0.6, 1.0);
+        });
+
+        List<TaskSchedulingUpdatedEvent> events = fixture.publisher().getEvents();
+        assertEquals(2, events.size());
+        assertEquals(
+                Set.of(taskA, taskB),
+                events.stream().map(TaskSchedulingUpdatedEvent::getTaskId).collect(java.util.stream.Collectors.toSet()));
+    }
+
+    @Test
+    void noActiveTransaction_doesNotPublish() {
+        // fallbackExecution=false (locked decision): called with no transaction at all (as every
+        // pre-#445-Phase-3 test in this file used to call it) - the DB write still happens, but
+        // nothing is published. Every production call site is @Transactional (enforced by
+        // TaskEligibilityServiceTransactionalCoverageTest), so this only happens here, in a test
+        // that deliberately skips TestTransactions.
+        UUID taskId = UUID.randomUUID();
+        Fixture fixture = newFixture(List.of(buildTask(taskId, 0, 0, true)), List.of());
+
+        fixture.service().onScoreProposed(taskId, 0.8, 1.0);
+
+        assertEquals(0.8, fixture.taskRepo().findById(taskId).orElseThrow().getScore());
         assertTrue(fixture.publisher().getEvents().isEmpty());
     }
 

@@ -291,6 +291,46 @@ local `mvn test`. So every `@Tag("postgres")` test in this module (not just the 
 silently skipped on every PR and every push, with no signal that they're not running. That's a gap
 worth raising with whoever owns `chain-ci.yaml`/`service-ci-java.yaml`, separate from #445.
 
+### AFTER_COMMIT publish, dedup, retry (Phase 3)
+
+`TaskEligibilityService` no longer calls `SchedulingUpdateService` directly or synchronously.
+Every trigger (`recomputePriorityScoreAndPublish`) instead calls `requestPublishAfterCommit(taskId)`,
+which:
+
+- Binds a `Set<UUID>` to the current transaction via `TransactionSynchronizationManager` and adds
+  `taskId` to it - a task touched several times in one transaction (e.g. `addDependencies`'s batch
+  loop, or two separate mutations on the same task) still only queues once (locked decision:
+  "deduplication by taskId within the transaction").
+- Registers a `TransactionSynchronization` (once per transaction, not once per `taskId`) whose
+  `afterCommit()` calls `SchedulingPublishListener.onCommit(taskId)` for every queued id, and whose
+  `afterCompletion(status)` unbinds the set either way (commit or rollback), so the next
+  transaction on the same thread starts clean.
+- **If there is no active transaction, the publish is dropped** (logged at ERROR), not fired
+  immediately (`fallbackExecution=false`, a locked decision - deliberately not papering over a
+  mutator that forgot `@Transactional`, which would otherwise desync Inbox's copy of
+  `priority_score`/`is_available` permanently and silently). This is why every public method on
+  `TaskEligibilityService` is now `@Transactional` (four - `recalculateTaskEligibility`,
+  `addDependency`, `removeDependency`, `onTaskStatusChanged` - were missing it before Phase 3, a
+  pre-existing gap fixed as part of this change), and why
+  `TaskEligibilityServiceTransactionalCoverageTest` exists: a reflection-based guardrail that fails
+  the build if a future public mutator is added without `@Transactional`, since that failure mode
+  is otherwise silent at runtime.
+
+`SchedulingPublishListener` (`com.rnd.chain.event`) is the thing `afterCommit()` actually calls -
+re-reads the task fresh (never a mid-transaction snapshot) and retries `SchedulingUpdateService`
+3 times with exponential backoff starting at 200ms (200ms, then 400ms - locked decision), logging
+ERROR and dropping the message on persistent failure (a full fix - outbox, DLT - is tracked
+separately, not in #445).
+
+**Testing note**: none of this needed a real `PlatformTransactionManager`/Spring context -
+`TransactionSynchronizationManager` is a plain ThreadLocal-based utility, and
+`TransactionSynchronizationUtils.triggerAfterCommit()`/`triggerAfterCompletion(status)` are the
+same methods a real transaction manager calls, exposed for exactly this kind of test. See
+`testsupport/TestTransactions.java` (`runCommitted`/`runRolledBack`) - used both by the ~15
+pre-#445-Phase-3 tests that asserted synchronous publish behavior (updated to simulate a commit
+around the call) and by the new tests that specifically prove the commit/rollback/dedup behavior
+(`TaskEligibilityServiceTest`'s "Phase 3" section at the bottom of the file).
+
 ### Not yet wired (tracked separately from #445)
 
 - **`task.score.proposed` consumer**: `TaskEligibilityService.onScoreProposed` exists and is
@@ -299,8 +339,6 @@ worth raising with whoever owns `chain-ci.yaml`/`service-ci-java.yaml`, separate
 - **Publish format**: `SchedulingUpdateService`/`KafkaSchedulingUpdatePublisher` still publish JSON
   (see "Kafka event infrastructure" above) - the Protobuf `SchedulingUpdatedEvent` contract
   (`event_id`, `task_id`, `available`, `priority_score`, all optional) is #545.
-- **AFTER_COMMIT publish, dedup, retry**: `TaskEligibilityService` still calls
-  `SchedulingUpdateService` synchronously, inside the same transaction as the mutation - Phase 3.
 
 ## Running locally with Maven
 
