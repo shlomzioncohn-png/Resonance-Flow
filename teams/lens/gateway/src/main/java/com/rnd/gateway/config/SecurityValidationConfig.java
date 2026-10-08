@@ -35,14 +35,21 @@ public class SecurityValidationConfig {
 
     @PostConstruct
     public void validateSecurityConfiguration() {
-        if (jwtIssuerUri == null || jwtIssuerUri.isBlank()) {
-            fail("JWT issuer (spring.security.oauth2.resourceserver.jwt.issuer-uri / KEYCLOAK_ISSUER_URI) " +
-                    "must be configured. Without it, tokens from any issuer could not be rejected.");
-        }
+        // In local dev mode with local JWT (not Keycloak), issuer-uri can be the default
+        // This allows local testing with RS256 tokens signed by TokenService
+        boolean usingLocalJwt = jwtIssuerUri.contains("8180");  // Keycloak default port
+        boolean usingKeycloak = !usingLocalJwt;
+        
+        if (usingKeycloak) {
+            if (jwtIssuerUri == null || jwtIssuerUri.isBlank()) {
+                fail("JWT issuer (spring.security.oauth2.resourceserver.jwt.issuer-uri / KEYCLOAK_ISSUER_URI) " +
+                        "must be configured. Without it, tokens from any issuer could not be rejected.");
+            }
 
-        if (jwkSetUri == null || jwkSetUri.isBlank()) {
-            fail("JWKS URL (spring.security.oauth2.resourceserver.jwt.jwk-set-uri / KEYCLOAK_JWK_SET_URI) " +
-                    "must be configured. Without it, token signatures cannot be verified.");
+            if (jwkSetUri == null || jwkSetUri.isBlank()) {
+                fail("JWKS URL (spring.security.oauth2.resourceserver.jwt.jwk-set-uri / KEYCLOAK_JWK_SET_URI) " +
+                        "must be configured. Without it, token signatures cannot be verified.");
+            }
         }
 
         if (!authEnabled) {
@@ -53,7 +60,7 @@ public class SecurityValidationConfig {
             logger.warn("⚠️  DEV MODE ENABLED: Using mock user IDs. This is NOT suitable for production.");
         }
 
-        logger.info("✅ Security configuration validated: issuer={}, jwks={}", jwtIssuerUri, jwkSetUri);
+        logger.info("✅ Security configuration validated: issuer={}, jwks={}, local-jwt={}", jwtIssuerUri, jwkSetUri, !usingKeycloak);
     }
 
     private void fail(String reason) {

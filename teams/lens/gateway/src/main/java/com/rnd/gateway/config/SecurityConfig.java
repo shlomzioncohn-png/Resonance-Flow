@@ -8,6 +8,7 @@ import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
 import org.springframework.security.config.annotation.web.configurers.AbstractHttpConfigurer;
 import org.springframework.security.config.http.SessionCreationPolicy;
+import org.springframework.security.oauth2.jwt.JwtDecoder;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.web.cors.CorsConfigurationSource;
 
@@ -41,9 +42,11 @@ public class SecurityConfig {
     private boolean authEnabled;
 
     private final CorsConfigurationSource corsConfigurationSource;
+    private final JwtDecoder jwtDecoder;
 
-    public SecurityConfig(CorsConfigurationSource corsConfigurationSource) {
+    public SecurityConfig(CorsConfigurationSource corsConfigurationSource, JwtDecoder jwtDecoder) {
         this.corsConfigurationSource = corsConfigurationSource;
+        this.jwtDecoder = jwtDecoder;
     }
 
     @Bean
@@ -60,10 +63,11 @@ public class SecurityConfig {
         if (authEnabled) {
             http
                 .authorizeHttpRequests(auth -> auth
+                    .requestMatchers("/auth/me").authenticated()  // JWT required for /auth/me
                     .requestMatchers("/api/**").authenticated()
                     .anyRequest().permitAll())
                 .oauth2ResourceServer(oauth2 -> oauth2
-                    .jwt(Customizer.withDefaults())
+                    .jwt(jwt -> jwt.decoder(jwtDecoder))
                     .authenticationEntryPoint(securityErrorHandler)
                     .accessDeniedHandler(securityErrorHandler));
         } else {

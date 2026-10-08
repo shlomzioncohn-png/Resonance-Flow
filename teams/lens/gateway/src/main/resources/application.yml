@@ -33,7 +33,7 @@ app:
   auth:
     # When true, every /api/** request needs a valid Keycloak JWT (see SecurityConfig).
     # Off until the frontend sends tokens (Auth stage 3), so existing screens keep working.
-    enabled: ${APP_AUTH_ENABLED:false}
+    enabled: ${APP_AUTH_ENABLED:true}
 
 # BFF service configuration
 # Override BFF_SERVICE_URL to point at a different BFF without recompiling
@@ -48,8 +48,14 @@ bff:
     tasks: ${BFF_ENDPOINT_TASKS:/workspace/tasks}
     employee-task: ${BFF_ENDPOINT_EMPLOYEE_TASK:/workspace/employee-task}
 
+# JWT configuration for RS256 token signing/validation
+lens:
+  jwt:
+    private-key-location: ${JWT_PRIVATE_KEY_LOCATION:./jwt-private.pem}
+    public-key-location: ${JWT_PUBLIC_KEY_LOCATION:./jwt-public.pem}
+
 server:
-  port: ${SERVER_PORT:8080}
+  port: ${SERVER_PORT:8090}
 
 logging:
   level:
