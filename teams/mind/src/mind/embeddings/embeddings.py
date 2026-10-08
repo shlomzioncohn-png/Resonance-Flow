@@ -1,22 +1,11 @@
 """
-embed(): turns a piece of text into a fixed-length vector.
-
-Deterministic, fully offline placeholder (scikit-learn's HashingVectorizer)
--- not a real semantic model, so it has no notion of meaning: "car" and
-"automobile" hash to unrelated vectors. See
-`benchmarks/vector-store-comparison.md` for the measured impact. It lets
-the rest of the interface be built and tested without a real model;
-swapping one in later only means replacing `embed()`'s body, since every
-caller only ever sees `list[float]` of length EMBEDDING_DIM.
+embed(): deterministic, offline placeholder (HashingVectorizer) -- not a
+real semantic model. See benchmarks/vector-store-comparison.md.
 """
 
 from sklearn.feature_extraction.text import HashingVectorizer
 
-# A plain constant, not read from mind.config.Settings: this dimension is
-# inherent to this hashing vectorizer, needed to build it at import time,
-# and importing mind.config.Settings requires a DSN. Must match
-# migrations/versions/0001_initial_vector_schema.py's EMBEDDING_DIM --
-# both describe the same fixed fact about this placeholder implementation.
+# Must match migrations/versions/0001_initial_vector_schema.py's EMBEDDING_DIM.
 EMBEDDING_DIM = 256
 
 _vectorizer = HashingVectorizer(
@@ -27,15 +16,8 @@ _vectorizer = HashingVectorizer(
 
 
 def embed(text: str) -> list[float]:
-    """Turn `text` into a deterministic unit-length vector of EMBEDDING_DIM floats.
-
-    Raises ValueError if `text` has no extractable tokens (e.g. empty, or
-    only punctuation/whitespace). HashingVectorizer's `norm="l2"` can't
-    normalize an all-zero row and silently returns it as-is; pgvector's
-    cosine-distance operator then divides by that vector's zero norm and
-    returns NaN, which sorts unpredictably and corrupts search results.
-    Failing fast here surfaces the problem at the caller instead.
-    """
+    """Deterministic unit-length vector. Raises ValueError if `text` has
+    no extractable tokens -- an all-zero vector would give NaN similarity."""
     sparse_vec = _vectorizer.transform([text])
     vector = sparse_vec.toarray()[0]
     if not vector.any():
