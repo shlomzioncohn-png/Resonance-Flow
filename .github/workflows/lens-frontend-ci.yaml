@@ -74,6 +74,10 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      # The runner has no browsers - install the one the tests use
+      - name: Install Playwright browser
+        run: npx playwright install --with-deps chromium
+
       - name: E2E Tests (Playwright)
         run: npm run test:e2e
 
