@@ -101,6 +101,18 @@
             <version>${minio.version}</version>
         </dependency>
 
+        <!-- control-plane state (GroupStateStore/CursorStore/CalendarEventStateStore) -
+             small, frequently read/written key->blob records, moved off MinIO onto Postgres. -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-jdbc</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.postgresql</groupId>
+            <artifactId>postgresql</artifactId>
+            <scope>runtime</scope>
+        </dependency>
+
         <!-- Gmail/Calendar/Drive: shared Google OAuth2 client machinery plus one generated API
              client per product. All three real readers (RealEmailSourceReader,
              RealCalendarSourceReader, RealDriveSourceReader) share the same credential loading
@@ -164,6 +176,17 @@
             <groupId>com.squareup.okhttp3</groupId>
             <artifactId>mockwebserver</artifactId>
             <version>4.12.0</version>
+            <scope>test</scope>
+        </dependency>
+
+        <dependency>
+            <groupId>org.testcontainers</groupId>
+            <artifactId>postgresql</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.testcontainers</groupId>
+            <artifactId>junit-jupiter</artifactId>
             <scope>test</scope>
         </dependency>
 

@@ -10,6 +10,7 @@ import com.rnd.bridge.raw.model.ScopeDecision;
 import com.rnd.bridge.storage.ObjectStorageClient;
 import com.rnd.bridge.storage.ObjectStorageClient.PutResult;
 import com.rnd.bridge.storage.ObjectTags;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Service;
 
 import java.security.MessageDigest;
@@ -42,7 +43,7 @@ public class MediaIntakeService {
 
     private final ObjectStorageClient storageClient;
 
-    public MediaIntakeService(ObjectStorageClient storageClient) {
+    public MediaIntakeService(@Qualifier("minioObjectStorageClient") ObjectStorageClient storageClient) {
         this.storageClient = storageClient;
     }
 

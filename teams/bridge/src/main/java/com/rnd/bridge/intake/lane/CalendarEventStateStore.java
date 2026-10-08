@@ -8,6 +8,7 @@ import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.util.Optional;
 import java.util.function.UnaryOperator;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Component;
 
 /**
@@ -40,7 +41,8 @@ public class CalendarEventStateStore {
     private final ObjectMapper objectMapper;
 
     public CalendarEventStateStore(
-            ObjectStorageClient storageClient, ControlPlaneStateStore controlPlaneStateStore, ObjectMapper objectMapper) {
+            @Qualifier("postgresObjectStorageClient") ObjectStorageClient storageClient,
+            ControlPlaneStateStore controlPlaneStateStore, ObjectMapper objectMapper) {
         this.storageClient = storageClient;
         this.controlPlaneStateStore = controlPlaneStateStore;
         this.objectMapper = objectMapper;

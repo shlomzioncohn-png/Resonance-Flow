@@ -6,6 +6,7 @@ import com.rnd.bridge.storage.ObjectStorageClient;
 import com.rnd.bridge.storage.ObjectStorageClient.PutResult;
 import com.rnd.bridge.storage.ObjectTags;
 import java.time.Instant;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Service;
 
 /**
@@ -20,7 +21,7 @@ public class IntakeLandingService {
 
     private final ObjectStorageClient storageClient;
 
-    public IntakeLandingService(ObjectStorageClient storageClient) {
+    public IntakeLandingService(@Qualifier("minioObjectStorageClient") ObjectStorageClient storageClient) {
         this.storageClient = storageClient;
     }
 

@@ -6,6 +6,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.UnaryOperator;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Component;
 
 /**
@@ -28,7 +29,9 @@ public class ControlPlaneStateStore {
     private final ObjectMapper objectMapper;
     private final KeyedLock lock;
 
-    public ControlPlaneStateStore(ObjectStorageClient storage, ObjectMapper objectMapper, KeyedLock lock) {
+    public ControlPlaneStateStore(
+            @Qualifier("postgresObjectStorageClient") ObjectStorageClient storage, ObjectMapper objectMapper,
+            KeyedLock lock) {
         this.storage = storage;
         this.objectMapper = objectMapper;
         this.lock = lock;

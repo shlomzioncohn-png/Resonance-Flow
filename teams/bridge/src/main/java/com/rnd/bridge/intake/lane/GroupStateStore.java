@@ -17,6 +17,7 @@ import java.util.Optional;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Function;
 import java.util.function.UnaryOperator;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Component;
 
 /**
@@ -63,7 +64,8 @@ public class GroupStateStore {
     private final ObjectMapper objectMapper;
 
     public GroupStateStore(
-            ObjectStorageClient storageClient, ControlPlaneStateStore controlPlaneStateStore, ObjectMapper objectMapper) {
+            @Qualifier("postgresObjectStorageClient") ObjectStorageClient storageClient,
+            ControlPlaneStateStore controlPlaneStateStore, ObjectMapper objectMapper) {
         this.storageClient = storageClient;
         this.controlPlaneStateStore = controlPlaneStateStore;
         this.objectMapper = objectMapper;
