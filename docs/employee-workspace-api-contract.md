@@ -358,10 +358,6 @@ mocks.
 - **`GET /v1/tasks` (My Tasks list)** — included above for completeness
   since the nav item exists, but not required to ship the screenshot's
   Workspace screen; can follow in a second pass.
-- **"Chat about it"** — present in `docs/employee-ui-design.md` §4B but
-  **absent from the actual screenshot**, which instead shows "Can't do this
-  now". Recommend confirming with the manager which is authoritative for
-  this milestone before designing a chat endpoint.
 
 ---
 

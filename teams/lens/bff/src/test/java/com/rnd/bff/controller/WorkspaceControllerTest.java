@@ -10,9 +10,10 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.rnd.bff.client.ChainClient;
-import com.rnd.bff.client.EmployeeClient;
 import com.rnd.bff.client.InboxClient;
 import com.rnd.bff.client.MindClient;
+import com.rnd.bff.config.CorsConfig;
+import com.rnd.bff.config.SecurityConfig;
 import com.rnd.bff.dto.TaskStatusUpdateDTO;
 import com.rnd.bff.dto.WorkspaceRequestDTO;
 import com.rnd.bff.service.WorkspaceService;
@@ -28,8 +29,12 @@ import org.springframework.test.web.servlet.MockMvc;
 // they're all plain mock-data classes with no actual network calls yet, so
 // exercising them for real is cheap and verifies the actual response shape,
 // not a stubbed stand-in.
+// SecurityConfig/CorsConfig are imported because @WebMvcTest doesn't load
+// them on its own - without them Spring Security's default (deny everything,
+// 401) applies instead of the BFF's real permit-all chain.
 @WebMvcTest(WorkspaceController.class)
-@Import({WorkspaceService.class, InboxClient.class, ChainClient.class, MindClient.class, EmployeeClient.class})
+@Import({WorkspaceService.class, InboxClient.class, ChainClient.class, MindClient.class,
+        SecurityConfig.class, CorsConfig.class})
 class WorkspaceControllerTest {
 
     @Autowired private MockMvc mockMvc;
@@ -108,7 +113,7 @@ class WorkspaceControllerTest {
 
     @Test
     void updateTaskStatus_undocumentedEnumValue_returns400() throws Exception {
-        TaskStatusUpdateDTO body = new TaskStatusUpdateDTO("DELETED_BY_ME");
+        TaskStatusUpdateDTO body = new TaskStatusUpdateDTO("DELETED_BY_ME", null);
 
         mockMvc
                 .perform(
@@ -125,11 +130,11 @@ class WorkspaceControllerTest {
     // actually persists status changes (see InboxClient.updateStatus) instead
     // of rebuilding a fresh literal per call. Left uncleaned, task_001 would
     // stay IN_PROGRESS for every other test that reuses this cached context -
-    // @DirtiesContext forces a fresh InboxClient (task_001 back to READY) for
+    // @DirtiesContext forces a fresh InboxClient (task_001 back to NEW) for
     // whatever runs after this test.
     @DirtiesContext
     void updateTaskStatus_documentedEnumValue_returns200AndEchoesStatus() throws Exception {
-        TaskStatusUpdateDTO body = new TaskStatusUpdateDTO("IN_PROGRESS");
+        TaskStatusUpdateDTO body = new TaskStatusUpdateDTO("IN_PROGRESS", null);
 
         mockMvc
                 .perform(
@@ -143,7 +148,7 @@ class WorkspaceControllerTest {
 
     @Test
     void updateTaskStatus_unknownTaskId_returns404() throws Exception {
-        TaskStatusUpdateDTO body = new TaskStatusUpdateDTO("IN_PROGRESS");
+        TaskStatusUpdateDTO body = new TaskStatusUpdateDTO("IN_PROGRESS", null);
 
         mockMvc
                 .perform(
@@ -177,20 +182,19 @@ class WorkspaceControllerTest {
         mockMvc
                 .perform(get("/workspace/tasks").header("X-User-Id", "emp_001"))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.total", is(6)))
-                .andExpect(jsonPath("$.items.length()", is(6)))
+                .andExpect(jsonPath("$.total", is(8)))
+                .andExpect(jsonPath("$.items.length()", is(8)))
                 .andExpect(jsonPath("$.page", is(0)))
                 .andExpect(jsonPath("$.size", is(20)));
     }
 
     @Test
-    void listTasks_filterBlocked_returnsOnlyBlockedTasks() throws Exception {
+    void listTasks_filterInProgress_returnsOnlyInProgressTasks() throws Exception {
         mockMvc
-                .perform(get("/workspace/tasks?filter=blocked").header("X-User-Id", "emp_001"))
+                .perform(get("/workspace/tasks?filter=in_progress").header("X-User-Id", "emp_001"))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.total", is(2)))
-                .andExpect(jsonPath("$.items[0].status", is("BLOCKED")))
-                .andExpect(jsonPath("$.items[1].status", is("BLOCKED")));
+                .andExpect(jsonPath("$.total", is(1)))
+                .andExpect(jsonPath("$.items[0].status", is("IN_PROGRESS")));
     }
 
     @Test
@@ -207,8 +211,8 @@ class WorkspaceControllerTest {
         mockMvc
                 .perform(get("/workspace/tasks?page=1&size=4").header("X-User-Id", "emp_001"))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.total", is(6)))
-                .andExpect(jsonPath("$.items.length()", is(2)))
+                .andExpect(jsonPath("$.total", is(8)))
+                .andExpect(jsonPath("$.items.length()", is(4)))
                 .andExpect(jsonPath("$.page", is(1)))
                 .andExpect(jsonPath("$.size", is(4)));
     }
@@ -221,22 +225,35 @@ class WorkspaceControllerTest {
                 .andExpect(jsonPath("$.errorCode", is("BAD_REQUEST")));
     }
 
+    // -------------------------------------------------------------------------
+    // GET /workspace/tasks/selection (mock Inbox)
+    // -------------------------------------------------------------------------
+
     @Test
-    void getMyTask_returnsTheMockEmployeeTask() throws Exception {
+    void selectTasks_returnsTasksThatFitTogether() throws Exception {
         mockMvc
-                .perform(get("/workspace/employee-task").header("X-User-Id", "emp_001"))
+                .perform(get("/workspace/tasks/selection?availableMinutes=90").header("X-User-Id", "emp_001"))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.id", is("task-1")))
-                .andExpect(jsonPath("$.title", is("Review API changes")))
-                .andExpect(jsonPath("$.status", is("Blocked")))
-                .andExpect(jsonPath("$.blockedBy[0].id", is("task-0")));
+                .andExpect(jsonPath("$.availableMinutes", is(90)))
+                .andExpect(jsonPath("$.selectedTasks.length()", is(2)))
+                .andExpect(jsonPath("$.selectedTasks[0].id", is("task_001")))
+                .andExpect(jsonPath("$.totalEffortMinutes", is(80)))
+                .andExpect(jsonPath("$.usedFallback", is(false)));
     }
 
     @Test
-    void getMyTask_missingUserIdHeader_returns400() throws Exception {
+    void selectTasks_minutesOutOfRange_returns400() throws Exception {
         mockMvc
-                .perform(get("/workspace/employee-task"))
+                .perform(get("/workspace/tasks/selection?availableMinutes=0").header("X-User-Id", "emp_001"))
                 .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.errorCode", is("BAD_REQUEST")));
+                .andExpect(jsonPath("$.errorCode", is("BAD_REQUEST")))
+                .andExpect(jsonPath("$.message", containsString("between 1 and 480")));
+    }
+
+    @Test
+    void selectTasks_minutesMissing_returns400() throws Exception {
+        mockMvc
+                .perform(get("/workspace/tasks/selection").header("X-User-Id", "emp_001"))
+                .andExpect(status().isBadRequest());
     }
 }

@@ -223,23 +223,44 @@ class GatewayRoutingTests {
     // Employee task (My Workspace demo)
     // -------------------------------------------------------------------------
 
+    // -------------------------------------------------------------------------
+    // Manager Dashboard (workload + projects)
+    // -------------------------------------------------------------------------
+
     @Test
-    @Order(15)
-    @DisplayName("GET /api/workspace/employee-task routes to BFF /workspace/employee-task")
-    void testEmployeeTaskRoutesToBff() throws Exception {
+    @Order(16)
+    @DisplayName("GET /api/manager/workload routes to BFF /manager/workload")
+    void testManagerWorkloadRoutesToBff() throws Exception {
         mockBff.enqueue(new MockResponse()
                 .setResponseCode(200)
                 .setHeader("Content-Type", "application/json")
-                .setBody("{\"id\":\"task-1\",\"title\":\"Review API changes\",\"status\":\"Blocked\"}"));
+                .setBody("[]"));
 
-        mockMvc.perform(get("/api/workspace/employee-task").with(jwt()))
+        mockMvc.perform(get("/api/manager/workload").with(jwt()))
             .andExpect(status().isOk())
-            .andExpect(jsonPath("$.id").value("task-1"));
+            .andExpect(jsonPath("$.length()").value(0));
 
         RecordedRequest recorded = takeRequest();
-        assertThat(recorded.getPath()).isEqualTo("/workspace/employee-task");
+        assertThat(recorded.getPath()).isEqualTo("/manager/workload");
         assertThat(recorded.getMethod()).isEqualTo("GET");
-        assertThat(recorded.getHeader("X-User-Id")).isNotNull().isNotEmpty();
+    }
+
+    @Test
+    @Order(17)
+    @DisplayName("GET /api/manager/projects routes to BFF /manager/projects")
+    void testManagerProjectsRoutesToBff() throws Exception {
+        mockBff.enqueue(new MockResponse()
+                .setResponseCode(200)
+                .setHeader("Content-Type", "application/json")
+                .setBody("[{\"id\":\"p1\",\"name\":\"Checkout Revamp\"}]"));
+
+        mockMvc.perform(get("/api/manager/projects").with(jwt()))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$[0].id").value("p1"));
+
+        RecordedRequest recorded = takeRequest();
+        assertThat(recorded.getPath()).isEqualTo("/manager/projects");
+        assertThat(recorded.getMethod()).isEqualTo("GET");
     }
 
     // -------------------------------------------------------------------------
