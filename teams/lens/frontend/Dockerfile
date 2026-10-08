@@ -7,18 +7,6 @@ RUN npm ci
 COPY . .
 RUN npm run build
 
-FROM node:22-alpine AS runtime
-WORKDIR /app
-
-ENV NODE_ENV=production
-
-COPY --from=build /app/package*.json ./
-RUN npm ci --omit=dev
-COPY --from=build /app/.next ./.next
-
-EXPOSE 3000
-CMD ["npm", "run", "start"]
-
 # Development image with Playwright for E2E testing
 FROM node:22-alpine AS development
 WORKDIR /app
@@ -77,3 +65,16 @@ RUN npx playwright install-deps chromium && \
 COPY . .
 
 CMD ["npm", "run", "test:e2e"]
+
+# Must stay the last stage - CD builds the default (last) stage.
+FROM node:22-alpine AS runtime
+WORKDIR /app
+
+ENV NODE_ENV=production
+
+COPY --from=build /app/package*.json ./
+RUN npm ci --omit=dev
+COPY --from=build /app/.next ./.next
+
+EXPOSE 3000
+CMD ["npm", "run", "start"]
