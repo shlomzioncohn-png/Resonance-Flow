@@ -8,9 +8,10 @@ option java_multiple_files = true;
 import "google/protobuf/timestamp.proto";
 
 // kafkaTopic: bridge.raw.landed
-// DRAFT for review - mirrors Bridge's unstructured-intake lanes (Malki, Esther), branch
-// BRIDGE/malki/unstructured-intake-scoping. That team already validates against an official
-// JSON Schema today (additionalProperties: false) - NOT Protobuf. First-pass formalization
+// Bridge's unstructured-intake event (teams/bridge/.../raw/model/RawObjectEvent.java).
+// Sent as JSON today, not Protobuf - registered only for compatibility checking.
+// Out of date: the Java record also has correlation_id, attachment_index, attachment_count,
+// revision and change_type, which aren't here yet.
 
 message RawObjectEvent {
   string schema_version = 1;

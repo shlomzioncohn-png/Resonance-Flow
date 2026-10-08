@@ -6,7 +6,9 @@ COPY pom.xml .
 RUN mvn -B dependency:go-offline
 
 COPY src ./src
-RUN mvn -B package -DskipTests
+# "shared" is a named build context (repo-root shared/) - outside this dir
+COPY --from=shared proto ./shared/proto
+RUN mvn -B package -DskipTests -Dproto.root=/app/shared/proto
 
 # Run stage
 FROM eclipse-temurin:21-jre

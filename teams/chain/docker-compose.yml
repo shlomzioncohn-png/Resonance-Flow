@@ -1,6 +1,9 @@
 services:
   chain:
-    build: .
+    build:
+      context: .
+      additional_contexts:
+        shared: ../../shared
     container_name: chain-service
     ports:
       - "${SERVER_PORT:-8081}:8081"

@@ -9,6 +9,7 @@ import org.springframework.web.socket.WebSocketHandler;
 import org.springframework.web.socket.server.HandshakeInterceptor;
 
 import java.util.Map;
+import java.util.Optional;
 
 @Component
 class NotificationHandshakeInterceptor implements HandshakeInterceptor {
@@ -17,22 +18,23 @@ class NotificationHandshakeInterceptor implements HandshakeInterceptor {
     static final String USER_ID_ATTRIBUTE = "userId";
     static final String LAST_EVENT_ID_ATTRIBUTE = "lastEventId";
 
-    private final HeaderAuthenticationStub authenticationStub;
+    private final TrustedHeaderAuthenticator authenticator;
 
-    NotificationHandshakeInterceptor(HeaderAuthenticationStub authenticationStub) {
-        this.authenticationStub = authenticationStub;
+    NotificationHandshakeInterceptor(TrustedHeaderAuthenticator authenticator) {
+        this.authenticator = authenticator;
     }
 
     @Override
     public boolean beforeHandshake(ServerHttpRequest request, ServerHttpResponse response,
             WebSocketHandler wsHandler, Map<String, Object> attributes) {
-        String orgId = request.getHeaders().getFirst("X-Org-Id");
-        String userId = request.getHeaders().getFirst("X-User-Id");
-        if (orgId == null || userId == null) {
+        Optional<AuthenticatedPrincipal> authenticated = authenticator.authenticate(
+                request.getHeaders().getFirst("X-Org-Id"),
+                request.getHeaders().getFirst("X-User-Id"));
+        if (authenticated.isEmpty()) {
             response.setStatusCode(HttpStatus.BAD_REQUEST);
             return false;
         }
-        AuthenticatedPrincipal principal = authenticationStub.authenticate(orgId, userId);
+        AuthenticatedPrincipal principal = authenticated.get();
         attributes.put(ORG_ID_ATTRIBUTE, principal.orgId());
         attributes.put(USER_ID_ATTRIBUTE, principal.userId());
         String lastEventId = request.getHeaders().getFirst("Last-Event-ID");
