@@ -28,28 +28,33 @@ class JsonDealRepositoryTest {
     private static final DealToTaskMapper MAPPER = new DealToTaskMapper("org-test-0000", new EnrichmentProperties(), new NoOpTaskEnricher());
 
     private DealRepository repository;
+    private DealSnapshot snapshot;
 
     @BeforeEach
     void setUp() {
         repository = new JsonDealRepository(new DefaultResourceLoader(), "classpath:crm/synthetic-deals.json");
+        // JsonDealRepository.snapshot() returns the same fixed data every call (the fixture never
+        // changes at runtime), so capturing it once here is equivalent to calling it per-assertion.
+        snapshot = repository.snapshot();
     }
 
     @Test
     void loadsTheWholeFeed() {
-        assertEquals(79, repository.findAll().size());
-        assertEquals(32, repository.findAllDealIds().size());
-        assertEquals(Instant.parse("2026-08-24T09:00:00Z"), repository.asOf());
+        assertEquals(79, snapshot.allDeals().size());
+        assertEquals(32, snapshot.dealIds().size());
+        assertEquals(Instant.parse("2026-08-24T09:00:00Z"), snapshot.asOf());
+        assertEquals(0, snapshot.skippedAtRead());
     }
 
     @Test
     void returnsD10432HistoryInChronologicalOrder() {
-        List<Deal> history = repository.findHistoryByDealId("D-10432");
+        List<Deal> history = snapshot.findHistoryByDealId("D-10432");
 
         assertEquals(
                 List.of(DealStage.PROPOSAL, DealStage.NEGOTIATION, DealStage.CLOSED_WON, DealStage.NEGOTIATION),
                 history.stream().map(Deal::stage).toList());
 
-        Optional<Deal> latest = repository.findLatestByDealId("D-10432");
+        Optional<Deal> latest = snapshot.findLatestByDealId("D-10432");
         assertTrue(latest.isPresent());
         assertEquals(DealStage.NEGOTIATION, latest.get().stage());
         assertEquals(history.get(3), latest.get());
@@ -57,7 +62,7 @@ class JsonDealRepositoryTest {
 
     @Test
     void allD10432RecordsShareTheSameSourceRef() {
-        List<Deal> history = repository.findHistoryByDealId("D-10432");
+        List<Deal> history = snapshot.findHistoryByDealId("D-10432");
 
         Set<String> sourceRefs = history.stream()
                 .map(MAPPER::toSourceRef)
@@ -71,8 +76,8 @@ class JsonDealRepositoryTest {
     void everyDealStageAppearsAsSomeDealsLatestStageAndMapsWithoutThrowing() {
         Set<DealStage> latestStages = EnumSet.noneOf(DealStage.class);
 
-        for (String dealId : repository.findAllDealIds()) {
-            Deal latest = repository.findLatestByDealId(dealId).orElseThrow();
+        for (String dealId : snapshot.dealIds()) {
+            Deal latest = snapshot.findLatestByDealId(dealId).orElseThrow();
             latestStages.add(latest.stage());
             assertDoesNotThrow(() -> DealToTaskMapper.toTaskStatus(latest.stage()));
         }
@@ -82,18 +87,18 @@ class JsonDealRepositoryTest {
 
     @Test
     void recordsWithNullOrZeroFieldsLoadWithoutThrowing() {
-        Deal noCloseDate = repository.findLatestByDealId("D-10503").orElseThrow();
+        Deal noCloseDate = snapshot.findLatestByDealId("D-10503").orElseThrow();
         assertNull(noCloseDate.closeDate());
         assertNull(noCloseDate.ownerEmail());
         assertNull(noCloseDate.dealValue());
 
-        Deal zeroValue = repository.findLatestByDealId("D-10531").orElseThrow();
+        Deal zeroValue = snapshot.findLatestByDealId("D-10531").orElseThrow();
         assertEquals(0, zeroValue.dealValue().signum());
     }
 
     @Test
-    void findAllIsNonDecreasingByStageChangedAt() {
-        List<Deal> all = repository.findAll();
+    void allDealsIsNonDecreasingByStageChangedAt() {
+        List<Deal> all = snapshot.allDeals();
 
         for (int i = 1; i < all.size(); i++) {
             assertFalse(all.get(i).stageChangedAt().isBefore(all.get(i - 1).stageChangedAt()),
@@ -113,18 +118,18 @@ class JsonDealRepositoryTest {
 
     @Test
     void dealIdsHaveNoDuplicatesAndAreFewerThanTotalRecords() {
-        List<String> dealIds = repository.findAllDealIds();
+        List<String> dealIds = snapshot.dealIds();
 
         long distinctCount = dealIds.stream().distinct().count();
-        assertEquals(dealIds.size(), distinctCount, "findAllDealIds() must not contain duplicates");
-        assertTrue(dealIds.size() < repository.findAll().size(),
+        assertEquals(dealIds.size(), distinctCount, "dealIds() must not contain duplicates");
+        assertTrue(dealIds.size() < snapshot.allDeals().size(),
                 "there must be more stage-change records than distinct deals");
     }
 
     @Test
     void atLeastOneDealHasANullCloseDate() {
-        boolean anyNullCloseDate = repository.findAllDealIds().stream()
-                .map(id -> repository.findLatestByDealId(id).orElseThrow())
+        boolean anyNullCloseDate = snapshot.dealIds().stream()
+                .map(id -> snapshot.findLatestByDealId(id).orElseThrow())
                 .anyMatch(deal -> deal.closeDate() == null);
 
         assertTrue(anyNullCloseDate);
@@ -132,14 +137,35 @@ class JsonDealRepositoryTest {
 
     @Test
     void reopenedDealAfterClosedLostReturnsHistoryInOrderEndingOnThePostReopenStage() {
-        List<Deal> history = repository.findHistoryByDealId("D-11007");
+        List<Deal> history = snapshot.findHistoryByDealId("D-11007");
 
         assertEquals(
                 List.of(DealStage.PROSPECT, DealStage.QUALIFIED, DealStage.CLOSED_LOST, DealStage.QUALIFIED),
                 history.stream().map(Deal::stage).toList());
 
-        Deal latest = repository.findLatestByDealId("D-11007").orElseThrow();
+        Deal latest = snapshot.findLatestByDealId("D-11007").orElseThrow();
         assertEquals(DealStage.QUALIFIED, latest.stage());
         assertEquals(history.get(3), latest);
+    }
+
+    @Test
+    void repeatedSnapshotCallsReturnTheSameFixedDataNoFetchToRepeat() {
+        // There's no "fresh fetch" to prove here the way there is for HubSpotDealRepository - the
+        // fixture is loaded once at construction, so snapshot() has nothing to refresh. This just
+        // pins that calling it again doesn't produce different (or differently-ordered) data.
+        assertEquals(snapshot, repository.snapshot());
+    }
+
+    @Test
+    void latestPerDealReturnsOneEntryPerDealWithItsLatestStage() {
+        List<Deal> latest = snapshot.latestPerDeal();
+
+        assertEquals(32, latest.size());
+        assertEquals(
+                Set.copyOf(snapshot.dealIds()),
+                latest.stream().map(Deal::dealId).collect(Collectors.toSet()));
+
+        Deal d10432 = latest.stream().filter(d -> d.dealId().equals("D-10432")).findFirst().orElseThrow();
+        assertEquals(DealStage.NEGOTIATION, d10432.stage());
     }
 }

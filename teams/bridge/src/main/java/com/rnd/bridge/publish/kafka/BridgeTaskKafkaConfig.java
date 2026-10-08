@@ -2,6 +2,7 @@ package com.rnd.bridge.publish.kafka;
 
 import com.rnd.bridge.task.BridgeTaskEventDto;
 import org.apache.kafka.clients.producer.ProducerConfig;
+import org.apache.kafka.common.serialization.ByteArraySerializer;
 import org.apache.kafka.common.serialization.StringSerializer;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.kafka.KafkaProperties;
@@ -115,5 +116,24 @@ class BridgeTaskKafkaConfig {
     KafkaTemplate<String, BridgeTaskEventDto> bridgeTaskEventKafkaTemplate(
             ProducerFactory<String, BridgeTaskEventDto> bridgeTaskEventProducerFactory) {
         return new KafkaTemplate<>(bridgeTaskEventProducerFactory);
+    }
+
+    @Bean
+    ProducerFactory<String, byte[]> protobufProducerFactory(
+            @Value("${spring.kafka.bootstrap-servers}") String bootstrapServers) {
+        Map<String, Object> props = new HashMap<>();
+        props.put(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, bootstrapServers);
+        props.put(ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG, StringSerializer.class);
+        props.put(ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG, ByteArraySerializer.class);
+        props.put(ProducerConfig.ACKS_CONFIG, "all");
+        props.put(ProducerConfig.RETRIES_CONFIG, 3);
+        props.put(ProducerConfig.ENABLE_IDEMPOTENCE_CONFIG, true);
+        return new DefaultKafkaProducerFactory<>(props);
+    }
+
+    @Bean
+    KafkaTemplate<String, byte[]> protobufKafkaTemplate(
+            ProducerFactory<String, byte[]> protobufProducerFactory) {
+        return new KafkaTemplate<>(protobufProducerFactory);
     }
 }
