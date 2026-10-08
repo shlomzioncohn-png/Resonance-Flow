@@ -1,8 +1,5 @@
 {{- /*
-Creates lens-gateway-jwt once, before lens-gateway starts. Same hook pattern as
-Chain's and MIND's db-credentials-hook.yaml: ArgoCD renders offline, so a templated
-Secret would regenerate the key pair (and invalidate every signed-in user) on every
-sync. This hook only creates the Secret if it's missing.
+Creates a random RSA key pair Secret via a hook.
 */ -}}
 {{- if (index .Values.components "lens-gateway").enabled }}
 {{- $name := printf "%s-lens-gateway-jwt-init" (include "resonance-flow.fullname" .) }}
@@ -34,11 +31,15 @@ metadata:
     helm.sh/hook-weight: "-10"
     helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
 
-# create only - no get/update, so the Job can never read or overwrite a live key pair.
 rules:
   - apiGroups: [""]
     resources: ["secrets"]
     verbs: ["create"]
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["get", "delete"]
+    resourceNames:
+      - {{ $secretName }}
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
@@ -74,7 +75,6 @@ metadata:
     helm.sh/hook: pre-install,pre-upgrade
     helm.sh/hook-weight: "0"
     helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
-
 spec:
   backoffLimit: 3
   ttlSecondsAfterFinished: 600
@@ -82,13 +82,10 @@ spec:
     metadata:
       labels:
         {{- include "resonance-flow.selectorLabels" . | nindent 8 }}
-        # Not "lens-gateway": that would match lens-gateway's own Service/Deployment selectors.
         app.kubernetes.io/component: lens-gateway-jwt-init
     spec:
       serviceAccountName: {{ $name }}
       restartPolicy: Never
-      # Lets both containers below read/write the shared "keys" emptyDir despite running
-      # as different users (openssl's image has no dedicated non-root user of its own).
       securityContext:
         fsGroup: 1000
       initContainers:
@@ -124,7 +121,6 @@ spec:
           image: curlimages/curl:8.11.1
           securityContext:
             runAsNonRoot: true
-            # The image's curl_user, numeric - runAsNonRoot can't verify a named user.
             runAsUser: 100
             runAsGroup: 101
             allowPrivilegeEscalation: false
@@ -140,15 +136,49 @@ spec:
               PRIVATE_ESCAPED="$(awk 'BEGIN{ORS="\\n"} {gsub(/"/,"\\\"")} 1' /keys/private.pem)"
               PUBLIC_ESCAPED="$(awk 'BEGIN{ORS="\\n"} {gsub(/"/,"\\\"")} 1' /keys/public.pem)"
               BODY="{\"apiVersion\":\"v1\",\"kind\":\"Secret\",\"metadata\":{\"name\":\"{{ $secretName }}\"},\"type\":\"Opaque\",\"stringData\":{\"private.pem\":\"$PRIVATE_ESCAPED\",\"public.pem\":\"$PUBLIC_ESCAPED\"}}"
-              # POST is create-if-absent: 409 means it already exists and is left untouched.
-              CODE=$(curl -sS -o /tmp/response -w '%{http_code}' \
-                --cacert "$SA/ca.crt" \
-                -H "Authorization: Bearer $(cat "$SA/token")" \
-                -H "Content-Type: application/json" \
-                -X POST "$API" -d "$BODY")
+              create() {
+                curl -sS -o /tmp/response -w '%{http_code}' \
+                  --cacert "$SA/ca.crt" \
+                  -H "Authorization: Bearer $(cat "$SA/token")" \
+                  -H "Content-Type: application/json" \
+                  -X POST "$API" -d "$1"
+              }
+              CODE=$(create "$BODY")
               case "$CODE" in
                 201) echo "Created {{ $secretName }}" ;;
-                409) echo "{{ $secretName }} already exists - left as is" ;;
+                409)
+                  GET_CODE=$(curl -sS -o /tmp/get-response.json -w '%{http_code}' \
+                    --cacert "$SA/ca.crt" \
+                    -H "Authorization: Bearer $(cat "$SA/token")" \
+                    -X GET "$API/{{ $secretName }}?pretty=false")
+                  if [ "$GET_CODE" != "200" ]; then
+                    echo "Unexpected HTTP $GET_CODE reading {{ $secretName }}:" >&2
+                    cat /tmp/get-response.json >&2
+                    exit 1
+                  fi
+                  EXISTING_PRIVATE="$(sed -n 's/.*"private\.pem": *"\([^"]*\)".*/\1/p' /tmp/get-response.json)"
+                  EXISTING_PUBLIC="$(sed -n 's/.*"public\.pem": *"\([^"]*\)".*/\1/p' /tmp/get-response.json)"
+                  if [ -n "$EXISTING_PRIVATE" ] && [ -n "$EXISTING_PUBLIC" ]; then
+                    echo "{{ $secretName }} already exists and looks valid - left as is"
+                  else
+                    echo "{{ $secretName }} exists but is missing a key - recreating it" >&2
+                    DELETE_CODE=$(curl -sS -o /tmp/delete-response -w '%{http_code}' \
+                      --cacert "$SA/ca.crt" \
+                      -H "Authorization: Bearer $(cat "$SA/token")" \
+                      -X DELETE "$API/{{ $secretName }}")
+                    case "$DELETE_CODE" in
+                      200|202) ;;
+                      *) echo "Unexpected HTTP $DELETE_CODE deleting the broken {{ $secretName }}:" >&2; cat /tmp/delete-response >&2; exit 1 ;;
+                    esac
+                    RECREATE_CODE=$(create "$BODY")
+                    if [ "$RECREATE_CODE" != "201" ]; then
+                      echo "Unexpected HTTP $RECREATE_CODE recreating {{ $secretName }}:" >&2
+                      cat /tmp/response >&2
+                      exit 1
+                    fi
+                    echo "Recreated {{ $secretName }} with a new key pair"
+                  fi
+                  ;;
                 *) echo "Unexpected HTTP $CODE creating {{ $secretName }}:" >&2; cat /tmp/response >&2; exit 1 ;;
               esac
           volumeMounts:
