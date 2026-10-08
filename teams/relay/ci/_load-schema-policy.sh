@@ -6,7 +6,7 @@
 # lowering the level or dropping a schema from the list in the same PR.
 #
 # Requires in the environment: BASE_REF, REPO_ROOT, SCRIPT_DIR
-# Sets: SCHEMA_LIST (the tsv contents), COMPATIBILITY_LEVEL
+# Sets: SCHEMA_LIST (the tsv contents), COMPATIBILITY_LEVEL, RESET_SUBJECTS
 
 : "${BASE_REF:?_load-schema-policy.sh: BASE_REF not set}"
 
@@ -22,3 +22,7 @@ fi
 COMPATIBILITY_LEVEL="$(printf '%s\n' "$SCHEMA_LIST" \
   | awk -F: '/^#[[:space:]]*compatibility:/ {gsub(/[[:space:]]/,"",$2); print $2; exit}')"
 COMPATIBILITY_LEVEL="${COMPATIBILITY_LEVEL:-FULL}"
+
+# "# reset: <subject>" lines: subjects whose old versions are dropped, not checked against.
+RESET_SUBJECTS="$(printf '%s\n' "$SCHEMA_LIST" \
+  | awk -F: '/^#[[:space:]]*reset:/ {gsub(/[[:space:]]/,"",$2); print $2}')"

@@ -3,6 +3,9 @@
 #
 # Format:
 #   # compatibility: <LEVEL>                          one directive line, default FULL
+#   # reset: <subject>                                drop that subject's old versions instead of
+#                                                     checking against them. Pre-production only;
+#                                                     remove the line once the cluster has synced.
 #   <file-under-shared/proto>\t<subject>              one per schema (tab-separated)
 #   lines starting with # are otherwise ignored
 #
@@ -14,6 +17,7 @@
 # Add a schema here and nowhere else.
 
 # compatibility: FULL
+# reset: task.creation.requested-value
 
 task-event.proto	task-event-value
 task-created-event.proto	task.created-value

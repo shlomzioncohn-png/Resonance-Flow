@@ -79,6 +79,8 @@ spec:
                 path: schemas.tsv
               - key: compatibility-level
                 path: compatibility-level
+              - key: reset-subjects
+                path: reset-subjects
         - name: schemas
           configMap:
             name: {{ include "schema-sync-hook.fullname" . }}-schemas
