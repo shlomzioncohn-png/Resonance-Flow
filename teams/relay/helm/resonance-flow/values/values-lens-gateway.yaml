@@ -3,7 +3,6 @@
 components:
   lens-gateway:
     enabled: true
-
 kafka:
   enabled: true
 minio:

@@ -3,7 +3,11 @@
 components:
   chain:
     enabled: true
+  # Chain's Kafka topics carry Protobuf, registered in the schema registry.
+  schema-registry:
+    enabled: true
 
+# Minio is only used by mind/bridge, so it stays off for a chain-only install.
 kafka:
   enabled: true
 minio:

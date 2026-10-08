@@ -1,0 +1,16 @@
+services:
+  relay:
+    build:
+      context: .
+      additional_contexts:
+        shared: ../../../shared
+    container_name: relay-service
+    ports:
+      - "${SERVER_PORT:-8082}:8082"
+    environment:
+      - SERVER_PORT=${SERVER_PORT:-8082}
+      - SPRING_PROFILES_ACTIVE=${SPRING_PROFILES_ACTIVE:-local}
+      # application.yml falls back to a random INSTANCE_NAME when this is unset, so it's not
+      # required here - set to a fixed, readable value instead of a random one purely so
+      # local consumer-group ids (relay.pipe.consumer-group-id) are easier to read in logs.
+      - INSTANCE_NAME=${INSTANCE_NAME:-relay-local}

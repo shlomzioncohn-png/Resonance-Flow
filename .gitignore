@@ -53,3 +53,7 @@ Thumbs.db
 # Local Helm values overrides that may contain a personal PAT - never commit these.
 *.local.yaml
 values.local.yaml
+
+# Personal practicum weekly doc, generated locally - not part of the repo
+.claude/skills/practicum-weekly-log/prep-doc.html
+
