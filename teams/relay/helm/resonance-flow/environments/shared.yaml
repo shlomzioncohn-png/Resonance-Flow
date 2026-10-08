@@ -1,0 +1,12 @@
+ingress:
+  # Stays off until the host is known: an enabled Ingress without ingress.host
+  # fails the render.
+  enabled: false
+  # The Traefik controller from teams/relay/argocd/apps/traefik.yaml.
+  className: traefik
+  # TODO: the public host, e.g. lens.<domain>.
+  host: ""
+  # TLS (owned by whoever handles the certificate): the Secret holding the cert,
+  # plus cert-manager annotations if it issues it.
+  tlsSecretName: ""
+  annotations: {}

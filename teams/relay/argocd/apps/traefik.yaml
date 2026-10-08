@@ -1,0 +1,57 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: traefik
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "2"
+spec:
+  project: default
+  source:
+    repoURL: https://traefik.github.io/charts
+    chart: traefik
+    targetRevision: 41.6.1
+    helm:
+      valuesObject:
+        ingressClass:
+          enabled: true
+          isDefaultClass: false
+          name: traefik
+        providers:
+          kubernetesIngress:
+            # Match pathType: Prefix per path segment, as the Ingress spec says -
+            # otherwise /api also catches /apifoo and /auth catches /authorize.
+            strictPrefixMatching: true
+            publishedService:
+              enabled: true
+        ports:
+          web:
+            http:
+              redirections:
+                entryPoint:
+                  to: websecure
+                  scheme: https
+                  permanent: true
+          # Browsers hold a long-lived WebSocket through lens-gateway, which needs an
+          # edge timeout well above 60s (docs/pipe-design.md, "Edge idle timeout").
+          websecure:
+            transport:
+              respondingTimeouts:
+                readTimeout: 0s
+        service:
+          type: LoadBalancer
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: traefik
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+    retry:
+      limit: 5
+      backoff:
+        duration: 5s
+        factor: 2
+        maxDuration: 3m
