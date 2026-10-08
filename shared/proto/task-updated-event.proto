@@ -6,94 +6,33 @@ option java_package = "com.rnd.inbox.event";
 option java_multiple_files = true;
 
 import "google/protobuf/timestamp.proto";
+import "task-created-event.proto";
 
 // kafkaTopic: task.updated
-// Mirrors teams/inbox/src/main/java/com/rnd/inbox/task/TaskUpdatedPayload.java
-// (built via TaskUpdatedPayload.from(Task), published by TaskService on EventType.TASK_UPDATED).
-// Field types/nullability follow Task.java's JPA column definitions directly:
-//   - tenant_id: @JoinColumn(nullable = false) -> required.
-//   - project_id, tier, role_context, urgency, effort_estimate_minutes, deadline, confidence,
-//     effort_estimate_confidence, suggested_owner_user_id, suggested_owner_confidence: all
-//     boxed/optional-column in Task.java -> optional here.
-//   - suggested_owner_user_id / suggested_owner_confidence: filled in later by MIND, not present
-//     on every update.
-// Enum value lists (SourceType, TaskTier, TaskRoleContext, TaskStatus, ExtractionProvenance) are
-// copied verbatim from task-created-event.proto - same Postgres enum types, same Java enum
-// classes in teams/inbox/src/main/java/com/rnd/inbox/task/.
+// Published by Inbox - built from teams/inbox/src/main/java/com/rnd/inbox/task/event/TaskUpdatedPayload.java
+// by TaskUpdatedProtoMapper. Enums are imported from task-created-event.proto, registered as a
+// schema reference to task.created-value.
 
 message TaskUpdatedEvent {
   string task_id = 1;                                // UUID as string.
-  string tenant_id = 2;                               // UUID as string. Required - tasks.tenant_id is NOT NULL.
-  optional string project_id = 3;                     // UUID as string. Nullable (Task.java: project, nullable = true).
+  string tenant_id = 2;                              // UUID as string.
+  optional string project_id = 3;                    // UUID as string.
   string title = 4;
   string description = 5;
-  bool is_available = 6;                              // Chain-computed, materialized here per root CLAUDE.md - not computed by Inbox.
+  bool is_available = 6;                             // Computed by Chain; Inbox only stores it.
   SourceType source_type = 7;
   string source_ref = 8;
-  optional TaskTier tier = 9;                         // Nullable until MIND classification.
-  optional TaskRoleContext role_context = 10;         // Nullable until MIND classification.
-  optional int32 urgency = 11;
+  optional TaskTier tier = 9;                        // Unset until MIND classifies the task.
+  optional TaskRoleContext role_context = 10;        // Unset until MIND classifies the task.
+  optional int32 urgency = 11;                       // 1..5.
   optional int32 effort_estimate_minutes = 12;
   optional google.protobuf.Timestamp deadline = 13;
   TaskStatus status = 14;
   ExtractionProvenance extraction_provenance = 15;
-  optional float confidence = 16;
-  optional float effort_estimate_confidence = 17;
-  optional string suggested_owner_user_id = 18;       // UUID as string. Nullable - set later by MIND (Task.java: suggestedOwnerUser, no nullable = false).
-  optional float suggested_owner_confidence = 19;
+  optional float confidence = 16;                    // 0..1.
+  optional float effort_estimate_confidence = 17;    // 0..1.
+  optional string suggested_owner_user_id = 18;      // UUID as string. Set later by MIND.
+  optional float suggested_owner_confidence = 19;    // 0..1. Set later by MIND.
   google.protobuf.Timestamp updated_at = 20;
   optional string owner_id = 21;                     // UUID as string.
-}
-
-enum SourceType {
-  SOURCE_TYPE_UNSPECIFIED = 0;
-  SOURCE_TYPE_GITHUB_ISSUE = 1;
-  SOURCE_TYPE_GITHUB_PR = 2;
-  SOURCE_TYPE_CRM_DEAL = 3;
-  SOURCE_TYPE_EMAIL = 4;
-  SOURCE_TYPE_SLACK = 5;
-  SOURCE_TYPE_WHATSAPP = 6;
-  SOURCE_TYPE_MEETING = 7;
-  SOURCE_TYPE_DOC = 8;
-  SOURCE_TYPE_SCANNED_DOC = 9;
-  SOURCE_TYPE_CALENDAR = 10;
-  SOURCE_TYPE_MANUAL = 11;
-  SOURCE_TYPE_DRIVE = 12;
-  SOURCE_TYPE_JIRA_ISSUE = 13;
-}
-
-enum TaskTier {
-  TASK_TIER_UNSPECIFIED = 0;
-  TASK_TIER_OPERATIONAL = 1;
-  TASK_TIER_TACTICAL = 2;
-  TASK_TIER_STRATEGIC = 3;
-}
-
-enum TaskRoleContext {
-  TASK_ROLE_CONTEXT_UNSPECIFIED = 0;
-  TASK_ROLE_CONTEXT_DEVELOPER = 1;
-  TASK_ROLE_CONTEXT_MANAGER = 2;
-  TASK_ROLE_CONTEXT_HIGHER_MANAGER = 3;
-  TASK_ROLE_CONTEXT_FIELD_ENGINEER = 4;
-  TASK_ROLE_CONTEXT_SALESPERSON = 5;
-  TASK_ROLE_CONTEXT_CEO = 6;
-}
-
-enum TaskStatus {
-  TASK_STATUS_UNSPECIFIED = 0;
-  TASK_STATUS_NEW = 1;
-  TASK_STATUS_IN_REVIEW = 2;
-  TASK_STATUS_APPROVED = 3;
-  TASK_STATUS_IN_PROGRESS = 4;
-  TASK_STATUS_SNOOZED = 5;
-  TASK_STATUS_DONE = 6;
-  TASK_STATUS_REJECTED = 7;
-  TASK_STATUS_CANCELLED = 8;
-}
-
-enum ExtractionProvenance {
-  EXTRACTION_PROVENANCE_UNSPECIFIED = 0;
-  EXTRACTION_PROVENANCE_ETL = 1;
-  EXTRACTION_PROVENANCE_ML_INFERRED = 2;
-  EXTRACTION_PROVENANCE_MANUAL = 3;
 }

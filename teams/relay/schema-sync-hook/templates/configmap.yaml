@@ -63,6 +63,10 @@ data:
   register-schema.sh: |
 {{ .Files.Get "files/ci/register-schema.sh" | nindent 4 }}
 
+  # Verbatim copy of teams/relay/ci/_schema-references.sh (sourced by both scripts above).
+  _schema-references.sh: |
+{{ .Files.Get "files/ci/_schema-references.sh" | nindent 4 }}
+
   # One <file>\t<subject> pair per line. NOT configured here — derived from
   # teams/relay/ci/schema-subjects.tsv (copied in as files/schema-subjects.tsv
   # by relay-schema-sync.yaml), the single source of truth shared with the
