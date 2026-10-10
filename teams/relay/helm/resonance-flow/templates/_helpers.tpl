@@ -173,9 +173,10 @@ password drift from postgresql.auth.postgresPassword). Takes the root context ($
 not a scoped one, since kafka.sasl.client.* lives at the top level of Values.
 */}}
 {{- define "resonance-flow.kafkaSaslJaasConfig" -}}
-{{- printf "org.apache.kafka.common.security.plain.PlainLoginModule required username=\"%s\" password=\"%s\";" (first .Values.kafka.sasl.client.users) (first .Values.kafka.sasl.client.passwords) }}
+{{- $root := .root -}}
+{{- $password := .password | default (first $root.Values.kafka.sasl.client.passwords) -}}
+{{- printf "org.apache.kafka.common.security.plain.PlainLoginModule required username=\"%s\" password=\"%s\";" (first $root.Values.kafka.sasl.client.users) $password }}
 {{- end }}
-
 {{/*
 Standard ConfigMap header (apiVersion/kind/metadata) for a component's mounted
 config.yaml, named "<fullname>-<component>-config" - identical shape shared by
@@ -204,7 +205,7 @@ security:
   protocol: SASL_PLAINTEXT
 properties:
   sasl.mechanism: "PLAIN"
-  sasl.jaas.config: {{ include "resonance-flow.kafkaSaslJaasConfig" .root | quote }}
+  sasl.jaas.config: {{ include "resonance-flow.kafkaSaslJaasConfig" (dict "root" .root) | quote }}
 {{- end }}
 
 {{/*
