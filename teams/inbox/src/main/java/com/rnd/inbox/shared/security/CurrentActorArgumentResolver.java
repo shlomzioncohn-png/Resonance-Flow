@@ -1,6 +1,5 @@
 package com.rnd.inbox.shared.security;
 
-import com.rnd.inbox.shared.exception.UnauthenticatedException;
 import org.springframework.core.MethodParameter;
 import org.springframework.web.bind.support.WebDataBinderFactory;
 import org.springframework.web.context.request.NativeWebRequest;
@@ -17,8 +16,6 @@ import java.util.UUID;
  */
 public class CurrentActorArgumentResolver implements HandlerMethodArgumentResolver {
 
-    private static final String ACTOR_HEADER = "X-Actor-Id";
-
     @Override
     public boolean supportsParameter(MethodParameter parameter) {
         return parameter.hasParameterAnnotation(CurrentActor.class)
@@ -28,14 +25,7 @@ public class CurrentActorArgumentResolver implements HandlerMethodArgumentResolv
     @Override
     public Object resolveArgument(MethodParameter parameter, ModelAndViewContainer mavContainer,
                                    NativeWebRequest webRequest, WebDataBinderFactory binderFactory) {
-        String header = webRequest.getHeader(ACTOR_HEADER);
-        if (header == null || header.isBlank()) {
-            throw new UnauthenticatedException("Missing " + ACTOR_HEADER + " header");
-        }
-        try {
-            return UUID.fromString(header);
-        } catch (IllegalArgumentException e) {
-            throw new UnauthenticatedException(ACTOR_HEADER + " header is not a valid UUID");
-        }
+        String header = webRequest.getHeader(ActorHeaderExtractor.ACTOR_HEADER);
+        return ActorHeaderExtractor.resolveActorId(header);
     }
 }

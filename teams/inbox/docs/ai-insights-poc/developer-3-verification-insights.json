@@ -1,0 +1,13 @@
+{
+  "_comment": "Input for the Insight Verification experiment. Send each claim with shared-data.json and ask the LLM for SUPPORTED / CONTRADICTED / INSUFFICIENT_EVIDENCE plus cited evidence. Do NOT send developer-3-expected-results.json to the LLM — it's the answer key, kept separate for scoring.",
+  "claims": [
+    { "id": 1, "text": "The on-time completion rate improved from 50% to 67%." },
+    { "id": 2, "text": "The employee met all deadlines in the current period." },
+    { "id": 3, "text": "All four long tasks finished late." },
+    { "id": 4, "text": "The employee was late on all short tasks." },
+    { "id": 5, "text": "The employee is late because they don't put in enough effort." },
+    { "id": 6, "text": "The employee works overtime to get tasks done." },
+    { "id": 7, "text": "Long tasks show a recurring pattern of lateness across both periods." },
+    { "id": 8, "text": "The employee will certainly continue being late on long tasks next month." }
+  ]
+}

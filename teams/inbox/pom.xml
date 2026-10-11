@@ -21,6 +21,8 @@
         <java.version>21</java.version>
         <protobuf.version>3.25.3</protobuf.version>
         <confluent.version>7.1.15</confluent.version>
+        <!-- Dockerfile overrides it: the repo layout isn't there. -->
+        <proto.root>${project.basedir}/../../shared/proto</proto.root>
     </properties>
 
     <repositories>
@@ -74,12 +76,12 @@
 
         <dependency>
             <groupId>org.springframework.boot</groupId>
-            <artifactId>spring-boot-starter-actuator</artifactId>
+            <artifactId>spring-boot-starter-validation</artifactId>
         </dependency>
 
         <dependency>
             <groupId>org.springframework.boot</groupId>
-            <artifactId>spring-boot-starter-validation</artifactId>
+            <artifactId>spring-boot-starter-actuator</artifactId>
         </dependency>
 
         <dependency>
@@ -119,6 +121,13 @@
             <groupId>io.hypersistence</groupId>
             <artifactId>hypersistence-utils-hibernate-63</artifactId>
             <version>3.9.5</version>
+        </dependency>
+
+        <!-- Wraps the DataSource so every JDBC statement can be logged (see SqlLoggingConfig). -->
+        <dependency>
+            <groupId>net.ttddyy</groupId>
+            <artifactId>datasource-proxy</artifactId>
+            <version>1.11.0</version>
         </dependency>
 
         <dependency>
@@ -187,60 +196,39 @@
                 <version>0.6.1</version>
                 <configuration>
                     <protocArtifact>com.google.protobuf:protoc:${protobuf.version}:exe:${os.detected.classifier}</protocArtifact>
-                    <!--
-                        Schemas are owned by Relay - teams/relay/src/main/proto/ and
-                        teams/relay/ci/schema-subjects.tsv are the registered source of truth.
-                        Copied into src/main/proto (only the ones Inbox actually publishes)
-                        instead of referenced via a ../relay relative path: that path doesn't
-                        exist inside the Docker build context (teams/inbox only), the same class
-                        of bug §16 in this module's CLAUDE.md already documents for Flyway
-                        migrations - protoc silently found nothing and the generated classes
-                        never existed, so anything importing them failed to compile.
-                    -->
-                    <protoSourceRoot>${project.basedir}/src/main/proto</protoSourceRoot>
-                    <!--
-                        Each of the three files redeclares the same top-level enums (SourceType,
-                        TaskTier, etc. - each was drafted standalone, "copied verbatim" per their
-                        own header comments, not written to be compiled together). protoc rejects
-                        duplicate enum value names within one package if given all three files in
-                        a single invocation, so each gets its own execution/invocation instead -
-                        and clearOutputDirectory=false so a later execution doesn't delete the
-                        classes an earlier one just generated.
-                    -->
+                    <!-- Executions share one output dir - don't let a later one wipe an earlier one's classes. -->
                     <clearOutputDirectory>false</clearOutputDirectory>
                 </configuration>
                 <executions>
+                    <!-- Registered cross-team schemas, owned by Relay - see shared/proto/README.md. -->
                     <execution>
-                        <id>compile-task-created-event</id>
+                        <id>compile-shared-proto</id>
                         <goals>
                             <goal>compile</goal>
                         </goals>
                         <configuration>
+                            <protoSourceRoot>${proto.root}</protoSourceRoot>
                             <includes>
                                 <include>task-created-event.proto</include>
-                            </includes>
-                        </configuration>
-                    </execution>
-                    <execution>
-                        <id>compile-task-updated-event</id>
-                        <goals>
-                            <goal>compile</goal>
-                        </goals>
-                        <configuration>
-                            <includes>
                                 <include>task-updated-event.proto</include>
+                                <include>task-completed-event.proto</include>
+                                <include>task-creation-requested-event.proto</include>
+                                <include>scheduling-updated-event.proto</include>
                             </includes>
                         </configuration>
                     </execution>
+                    <!-- Inbox-only, unregistered -->
                     <execution>
-                        <id>compile-task-completed-event</id>
+                        <id>compile-local-proto</id>
                         <goals>
                             <goal>compile</goal>
                         </goals>
                         <configuration>
-                            <includes>
-                                <include>task-completed-event.proto</include>
-                            </includes>
+                            <protoSourceRoot>${project.basedir}/src/main/proto</protoSourceRoot>
+                            <!-- they import shared ones -->
+                            <additionalProtoPathElements>
+                                <additionalProtoPathElement>${proto.root}</additionalProtoPathElement>
+                            </additionalProtoPathElements>
                         </configuration>
                     </execution>
                 </executions>

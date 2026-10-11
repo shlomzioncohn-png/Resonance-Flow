@@ -1,28 +1,32 @@
 package com.rnd.chain.event;
 
-import com.fasterxml.jackson.annotation.JsonProperty;
-
+import java.util.Objects;
 import java.util.UUID;
 
 public class TaskSchedulingUpdatedEvent {
 
-    @JsonProperty("task_id")
+    private final UUID eventId;
+
     private final UUID taskId;
 
-    @JsonProperty("is_available")
     private final boolean isAvailable;
 
-    @JsonProperty("priority_score")
     private final Double priorityScore;
 
     public TaskSchedulingUpdatedEvent(
+            UUID eventId,
             UUID taskId,
             boolean isAvailable,
             Double priorityScore) {
 
-        this.taskId = taskId;
+        this.eventId = Objects.requireNonNull(eventId, "eventId must not be null");
+        this.taskId = Objects.requireNonNull(taskId, "taskId must not be null");
         this.isAvailable = isAvailable;
         this.priorityScore = priorityScore;
+    }
+
+    public UUID getEventId() {
+        return eventId;
     }
 
     public UUID getTaskId() {

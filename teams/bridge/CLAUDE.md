@@ -150,11 +150,15 @@ mechanism will fight `@Primary` resolution.
 - `AbstractIntakeLane`'s per-record error handling is exercised generically once
   (`AbstractIntakeLaneTest`) — a new publisher/mapper/validator only needs to prove it throws the
   right `LaneException` subtype, not re-test the lane's catch/continue behavior.
-- `application.yml` has **no default** for secrets/tenant config that must never silently take a
-  placeholder value in production (`HUBSPOT_TOKEN`, `CRM_ORGANIZATION_ID`) — missing → startup
-  fails loudly. A full-context test (`@SpringBootTest`) touching a profile that needs one of
-  these must supply a test-only value via `@TestPropertySource`/`properties = {...}`, not add a
-  production default.
+- `application.yml` has **no default** for `HUBSPOT_TOKEN` — missing → startup fails loudly
+  (`HubSpotClient`'s constructor). **`CRM_ORGANIZATION_ID` is different and this bullet used to
+  claim otherwise:** it defaults to the placeholder `local-crm-org`
+  (`bridge.crm.organization-id:local-crm-org` in `application.yml`), usable for a local run
+  without the `kafka` profile. `CrmLaneConfig.dealToTaskMapper` fails startup on a missing or
+  non-UUID value only once the `kafka` profile is active (added 2026-10-06, CRM-lane audit
+  finding F5) — a `@SpringBootTest` combining `kafka` with that placeholder needs a real UUID via
+  `@TestPropertySource`/`properties = {...}`, not a production default change. `HUBSPOT_TOKEN`
+  itself still has no profile-conditional default; it fails loudly regardless of profile.
 - Full suite as of the last run (2026-09-06): **126 tests, 0 failures** (was 121 before the
   `enrichment` package landed - 5 tests added in `NoOpEnrichmentServiceTest`; was 115 before that,
   before `HubSpotClient`'s retry logic was extended to 502/503/504 and transport failures - 3
@@ -224,8 +228,51 @@ suite (126 tests, 0 failures — see §7):
 - **`Deal` model + `DealToTaskMapper`** (`crm.model`, `crm.mapper`) — maps a CRM `Deal` to the
   canonical `Task`: stage→status, close-date→deadline (end-of-day UTC convention, provisional),
   urgency, `organizationId()` override backed by `${bridge.crm.organization-id}` /
-  `CRM_ORGANIZATION_ID` (no default — fails startup loudly if unset), `toCompletedAt()` override
-  (only set when status is DONE and the deal actually recorded a close date).
+  `CRM_ORGANIZATION_ID`, `toCompletedAt()` override (only set when status is DONE and the deal
+  actually recorded a close date). **Corrected 2026-10-06 (this bullet previously said "no
+  default — fails startup loudly if unset"; false — see §7):** the config key defaults to
+  `local-crm-org`, and only fails startup when the `kafka` profile is active
+  (`CrmLaneConfig.dealToTaskMapper`, CRM-lane audit finding F5).
+- **Snapshot-per-sync, latest-state-per-deal (added 2026-10-06, audit findings F1/F2/F14/F9).**
+  `DealRepository.snapshot()` performs one fresh fetch and returns an immutable `DealSnapshot`
+  (`asOf`, full history, `latestPerDeal()`, `skippedAtRead`). `CrmBridgeController` and
+  `CrmSyncScheduler` each take exactly one snapshot per run and call
+  `crmLane.run(snapshot.latestPerDeal().stream(), snapshot.asOf())` — never the old
+  `ReadCursor`/`ReadCursor.full()` overload, which would let the deals and `asOf` come from two
+  separate fetches. `CrmSourceReader.read()` also returns `latestPerDeal()`, so the generic
+  `AbstractIntakeLane.run(ReadCursor, Instant)` path (used by `CrmLaneIntegrationTest`) agrees.
+  **`DealRepository` has only `snapshot()` now** — the five old per-instance-cached finder methods
+  (`asOf()`, `findAll()`, …) were deprecated, then removed outright (2026-10-06, same day): nothing
+  called them except their own test suite, and leaving a cache field on `HubSpotDealRepository`
+  that nothing production-facing used was a trap for the next person who reached for the
+  "obvious" method. `HubSpotDealRepositoryTest`'s 14 pre-existing tests were migrated to
+  `snapshot()` rather than deleted. `HubSpotDealRepository.snapshot()` also re-fetches and
+  re-resolves the pipeline/stage mapping on every call (not just at construction), so a stage
+  added to the portal after startup is picked up — the mapping *rules* themselves are unchanged
+  (that's F6, still open). **Tradeoff worth knowing:** the constructor still eagerly resolves the
+  pipeline once too (result discarded), purely to fail fast at startup on an unrecognized stage
+  label — so the very first `snapshot()` call after startup does one redundant pipeline fetch.
+  **Known limitation for F6, worth knowing before a demo:** because the pipeline is now
+  re-resolved on *every* `snapshot()` call, a stage added to the portal under a label
+  `HubSpotStageMapping` doesn't recognize fails the **entire** sync from the moment it appears —
+  not just the one deal that first uses it, the way an unrecognized stage *id* (a recognized label,
+  just a portal-specific id gap) still does. See
+  `HubSpotDealRepositoryTest.secondSnapshotFailsEntirelyWhenTheRefetchedPipelineHasAnUnrecognizedStageLabel`.
+  The scheduler's existing `catch (RuntimeException e) { log.error(...) }` and
+  `CrmBridgeController.handleSnapshotFailure` (a 503 with the exception's message, not the
+  framework's default message-less 500) are what keep this loud and clear instead of a confusing
+  failure — neither one *fixes* F6's mapping-rule gap, which is still open.
+  Only a CRM-only `CrmTaskValidator` (wraps the shared `TaskValidator`, adds tenant-UUID/
+  `sourceRef` checks) is new for F5 — the shared `TaskValidator` itself is unchanged, since
+  GitHub/JIRA/`TaskEnrichmentConsumer` share it directly and never set a tenant id.
+  **`CRM_ORGANIZATION_ID`'s default changed from `local-crm-org` to
+  `CrmTaskValidator.LOCAL_PLACEHOLDER_TENANT_ID` (`00000000-0000-0000-0000-000000000000`),
+  2026-10-06, fixing a real regression caught before merge:** `CrmTaskValidator` validates
+  tenant-id shape unconditionally, not just under `kafka`, so the old non-UUID placeholder would
+  have made every task fail validation on a plain no-profile local run. The new placeholder is
+  UUID-shaped (passes `CrmTaskValidator`) but is rejected **by name**, not just by shape, in
+  `CrmLaneConfig`'s `kafka`-profile startup check — explicitly setting it to this exact value under
+  `kafka` still fails startup, same as leaving it unset.
 - **`JsonDealRepository`** (default bean) — reads the synthetic fixture
   `classpath:crm/synthetic-deals.json` via `SyntheticDealsLoader`/`SyntheticDealsFeed`. This is
   the *existing* CRM fixture data, not the new Stage-4 "dirty" synthetic corpus (§9.4.4) — don't
@@ -299,8 +346,11 @@ that brief, not a linked spec.
    - PR #161 merged (§9.1).
    - Verified (not changed, per instruction) that "the daily scheduled job pulling HubSpot +
      GitHub" **does not actually exist as described**:
-     - **CRM**: no scheduler at all. `POST /bridge/crm/sync` is the only trigger — something
-       external has to call it; nothing in Bridge does so on a cadence.
+     - **CRM**: **stale as of 2026-10-06 — a scheduler exists.** `CrmSyncScheduler` (`@Scheduled`,
+       default cron `0 0 3 * * ?`, gated by `bridge.crm.sync.cron.enabled`, off by default) was
+       added in PR #296 and runs the same `crmLane` as `POST /bridge/crm/sync`. This bullet
+       originally said "no scheduler at all" — true on 2026-09-06, false since. See §9.2 for what
+       it actually does today.
      - **GitHub**: `GitHubSyncScheduler` (`@Scheduled`, default cron `0 0 2 * * ?`, gated by
        `@EnableScheduling` in `GitHubSchedulerConfig`) exists, but is **disabled by default**
        (`github.sync.cron.enabled: ${GITHUB_SYNC_CRON_ENABLED:false}`, not set true anywhere in

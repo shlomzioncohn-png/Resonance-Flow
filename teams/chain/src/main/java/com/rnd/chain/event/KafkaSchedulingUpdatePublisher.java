@@ -1,59 +1,64 @@
 package com.rnd.chain.event;
 
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.rnd.chain.events.EventPublishException;
-
-import org.springframework.beans.factory.annotation.Value;
+import com.rnd.chain.events.ChainEventTopicsProperties;
+import com.rnd.inbox.event.SchedulingUpdatedEvent;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.stereotype.Component;
 
-import java.util.LinkedHashMap;
-import java.util.Map;
-import java.util.UUID;
-
+@Slf4j
 @Component
 public class KafkaSchedulingUpdatePublisher
         implements SchedulingUpdatePublisher {
 
-    private final KafkaTemplate<String, String> kafkaTemplate;
-    private final ObjectMapper objectMapper;
+    private static final String TOPIC_KEY = "task.scheduling.updated";
+
+    private final KafkaTemplate<String, SchedulingUpdatedEvent> kafkaTemplate;
     private final String topic;
 
     public KafkaSchedulingUpdatePublisher(
-            KafkaTemplate<String, String> kafkaTemplate,
-            ObjectMapper objectMapper,
-            @Value("${chain.kafka.topics.task.scheduling.updated}")
-            String topic) {
+            KafkaTemplate<String, SchedulingUpdatedEvent> kafkaTemplate,
+            ChainEventTopicsProperties topicsProperties) {
 
         this.kafkaTemplate = kafkaTemplate;
-        this.objectMapper = objectMapper;
-        this.topic = topic;
+        this.topic = topicsProperties.topics() == null ? null : topicsProperties.topics().get(TOPIC_KEY);
+        if (topic == null || topic.isBlank()) {
+            throw new IllegalStateException("Missing config: chain.kafka.topics.\"" + TOPIC_KEY + "\"");
+        }
     }
 
     @Override
     public void publish(TaskSchedulingUpdatedEvent event) {
 
-        UUID eventId = UUID.randomUUID();
-
-        Map<String, Object> message = new LinkedHashMap<>();
-        message.put("eventId", eventId.toString());
-        message.put("taskId", event.getTaskId().toString());
-        message.put("isAvailable", event.isAvailable());
-        message.put("priorityScore", event.getPriorityScore());
-
-        final String serialized;
-
+        SchedulingUpdatedEvent proto = toProto(event);
         try {
-            serialized = objectMapper.writeValueAsString(message);
-        } catch (JsonProcessingException e) {
-            throw new EventPublishException(
-                    "Failed to serialize task.scheduling.updated event", e);
+            kafkaTemplate.send(topic, event.getTaskId().toString(), proto)
+                    .whenComplete((result, ex) -> {
+                        if (ex != null) {
+                            logFailure(proto, ex);
+                        }
+                    });
+        } catch (RuntimeException ex) {
+            // Serialization (Schema Registry) failures are thrown synchronously from send().
+            logFailure(proto, ex);
+            throw ex;
         }
+    }
 
-        kafkaTemplate.send(
-                topic,
-                event.getTaskId().toString(),
-                serialized);
+    private static void logFailure(SchedulingUpdatedEvent proto, Throwable ex) {
+        log.error("Failed to publish task.scheduling.updated eventId={} taskId={}",
+                proto.getEventId(), proto.getTaskId(), ex);
+    }
+
+    static SchedulingUpdatedEvent toProto(TaskSchedulingUpdatedEvent event) {
+        SchedulingUpdatedEvent.Builder builder = SchedulingUpdatedEvent.newBuilder()
+                .setEventId(event.getEventId().toString())
+                .setTaskId(event.getTaskId().toString())
+                .setAvailable(event.isAvailable());
+        // Absent score means "leave Inbox's stored value unchanged", so it must not be sent as 0.
+        if (event.getPriorityScore() != null) {
+            builder.setPriorityScore(event.getPriorityScore());
+        }
+        return builder.build();
     }
 }

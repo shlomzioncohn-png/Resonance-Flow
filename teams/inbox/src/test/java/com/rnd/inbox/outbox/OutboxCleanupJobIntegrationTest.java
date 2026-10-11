@@ -10,6 +10,8 @@ import org.springframework.test.context.TestPropertySource;
 import java.time.Instant;
 import java.util.HashMap;
 import java.util.UUID;
+import java.util.ArrayList;
+import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -30,9 +32,20 @@ class OutboxCleanupJobIntegrationTest extends AbstractIntegrationTest {
     @Autowired
     private OutboxEventRepository outboxEventRepository;
 
+    private final List<UUID> createdEventIds = new ArrayList<>();
+
+    // Deletes only the events this test created, never the whole outbox table.
     @AfterEach
     void cleanUp() {
-        outboxEventRepository.deleteAll();
+        outboxEventRepository.deleteAllById(createdEventIds);
+        createdEventIds.clear();
+    }
+
+    // The id is generated on save, so it is only known from the saved instance.
+    private OutboxEvent saveTracked(OutboxEvent event) {
+        OutboxEvent saved = outboxEventRepository.save(event);
+        createdEventIds.add(saved.getEventId());
+        return saved;
     }
 
     private OutboxEvent save(OutboxStatus status, Instant createdAt) {
@@ -48,7 +61,7 @@ class OutboxCleanupJobIntegrationTest extends AbstractIntegrationTest {
         if (status == OutboxStatus.PUBLISHED) {
             event.setPublishedAt(createdAt);
         }
-        return outboxEventRepository.save(event);
+        return saveTracked(event);
     }
 
     @Test
