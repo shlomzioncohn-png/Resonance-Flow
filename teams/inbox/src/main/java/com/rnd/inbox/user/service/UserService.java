@@ -85,10 +85,11 @@ public class UserService {
         assertEmailAvailable(request.getEmail().orElse(null), id);
         assertUsernameAvailable(request.getUsername().orElse(null), id);
 
+        Map<String, Object> before = auditSnapshot(user);
         userMapper.applyUpdate(user, request);
         User saved = saveUser(user);
-        auditService.createAuditLog("USER_UPDATED", "User", saved.getId(), saved.getTenant(),
-                actor, auditSnapshot(saved), null);
+        auditService.createUpdateAuditLog("USER_UPDATED", "User", saved.getId(), saved.getTenant(),
+                actor, before, auditSnapshot(saved), null);
         return userMapper.toResponseDto(saved);
     }
 
@@ -110,11 +111,29 @@ public class UserService {
         User user = findUserOrThrow(id);
         userAuthorization.assertWithinScope(userAuthorization.scopeOf(actor), user);
 
+        Map<String, Object> before = auditSnapshot(user);
         userMapper.applyStatusChange(user, UserStatus.valueOf(request.getStatus()));
         User saved = userRepository.save(user);
-        auditService.createAuditLog("USER_STATUS_UPDATED", "User", saved.getId(), saved.getTenant(),
-                actor, auditSnapshot(saved), null);
+        auditService.createUpdateAuditLog("USER_STATUS_UPDATED", "User", saved.getId(), saved.getTenant(),
+                actor, before, auditSnapshot(saved), null);
         return userMapper.toResponseDto(saved);
+    }
+
+    // Appointing someone as team lead promotes a plain EMPLOYEE to TEAM_LEAD, but never demotes
+    // a TENANT_ADMIN/SYSTEM_ADMIN who happens to also lead a team - leading a team never reduces
+    // an actor's standing authority. Called from TeamService when a team lead is set; it lives
+    // here so that every change to a user's role is audited the same way, with the full user
+    // snapshot. actor is whoever made the appointment.
+    @Transactional
+    public void promoteToTeamLeadIfEmployee(User user, User actor) {
+        if (user.getRole() != UserRole.EMPLOYEE) {
+            return;
+        }
+        Map<String, Object> before = auditSnapshot(user);
+        user.setRole(UserRole.TEAM_LEAD);
+        User saved = userRepository.save(user);
+        auditService.createUpdateAuditLog("USER_UPDATED", "User", saved.getId(), saved.getTenant(),
+                actor, before, auditSnapshot(saved), null);
     }
 
     private Page<User> selfOnlyPage(User actor, Pageable pageable) {
@@ -145,7 +164,7 @@ public class UserService {
         snapshot.put("email", user.getEmail());
         snapshot.put("phone", user.getPhone());
         snapshot.put("username", user.getUsername());
-        snapshot.put("role", user.getRole());
+        snapshot.put("role", user.getRole().name());
         snapshot.put("status", user.getStatus().name());
         return snapshot;
     }

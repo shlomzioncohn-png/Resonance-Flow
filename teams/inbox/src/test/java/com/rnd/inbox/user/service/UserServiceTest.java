@@ -44,8 +44,10 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
+import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
@@ -501,8 +503,37 @@ class UserServiceTest {
         assertThat(result).isSameAs(responseDto);
         verify(userMapper).applyUpdate(user, request);
         verify(userRepository).save(user);
-        verify(auditService).createAuditLog(eq("USER_UPDATED"), eq("User"), eq(userId), eq(tenant),
-                eq(actor), any(), isNull());
+        verify(auditService).createUpdateAuditLog(eq("USER_UPDATED"), eq("User"), eq(userId), eq(tenant),
+                eq(actor), any(), any(), isNull());
+    }
+
+    @Test
+    void updateUser_auditsTheValuesFromBeforeAndAfterTheChange() {
+        stubActorFound();
+        user.setEmail("old@acme.com");
+        UserUpdateRequestDto request = updateRequest("new@acme.com", "newname");
+
+        when(userRepository.findById(userId)).thenReturn(Optional.of(user));
+        when(userRepository.findByEmail("new@acme.com")).thenReturn(Optional.empty());
+        when(userRepository.findByUsername("newname")).thenReturn(Optional.empty());
+        when(userRepository.save(user)).thenReturn(user);
+        // userMapper is a mock, so it changes nothing by itself: stand in for the real mapper
+        // changing the user in place, which is what makes "before" and "after" differ.
+        doAnswer(invocation -> {
+            user.setEmail("new@acme.com");
+            return null;
+        }).when(userMapper).applyUpdate(user, request);
+
+        userService.updateUser(userId, request, actorId);
+
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<Map<String, Object>> beforeCaptor = ArgumentCaptor.forClass(Map.class);
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<Map<String, Object>> afterCaptor = ArgumentCaptor.forClass(Map.class);
+        verify(auditService).createUpdateAuditLog(eq("USER_UPDATED"), eq("User"), eq(userId), eq(tenant),
+                eq(actor), beforeCaptor.capture(), afterCaptor.capture(), isNull());
+        assertThat(beforeCaptor.getValue()).containsEntry("email", "old@acme.com");
+        assertThat(afterCaptor.getValue()).containsEntry("email", "new@acme.com");
     }
 
     @Test
@@ -526,8 +557,8 @@ class UserServiceTest {
 
         @SuppressWarnings("unchecked")
         ArgumentCaptor<Map<String, Object>> snapshotCaptor = ArgumentCaptor.forClass(Map.class);
-        verify(auditService).createAuditLog(eq("USER_UPDATED"), eq("User"), eq(userId), eq(tenant),
-                eq(actor), snapshotCaptor.capture(), isNull());
+        verify(auditService).createUpdateAuditLog(eq("USER_UPDATED"), eq("User"), eq(userId), eq(tenant),
+                eq(actor), any(), snapshotCaptor.capture(), isNull());
         assertThat(snapshotCaptor.getValue())
                 .containsEntry("displayName", "Yehudit Cohen")
                 .containsEntry("firstName", "Yehudit")
@@ -535,7 +566,7 @@ class UserServiceTest {
                 .containsEntry("email", "yehudit@acme.com")
                 .containsEntry("phone", "0501234567")
                 .containsEntry("username", "yehudit")
-                .containsEntry("role", UserRole.EMPLOYEE)
+                .containsEntry("role", "EMPLOYEE")
                 .containsEntry("status", "ACTIVE");
     }
 
@@ -548,7 +579,7 @@ class UserServiceTest {
                 .isInstanceOf(UnauthenticatedException.class);
 
         verify(userMapper, never()).applyUpdate(any(), any());
-        verify(auditService, never()).createAuditLog(any(), any(), any(), any(), any(), any(), any());
+        verifyNoInteractions(auditService);
     }
 
     @Test
@@ -822,7 +853,7 @@ class UserServiceTest {
         assertThatThrownBy(() -> userService.updateUser(userId, request, actorId))
                 .isInstanceOf(DuplicateUsernameException.class);
 
-        verify(auditService, never()).createAuditLog(any(), any(), any(), any(), any(), any(), any());
+        verifyNoInteractions(auditService);
     }
 
     @Test
@@ -938,14 +969,25 @@ class UserServiceTest {
         when(userRepository.findById(userId)).thenReturn(Optional.of(user));
         when(userRepository.save(user)).thenReturn(user);
         when(userMapper.toResponseDto(user)).thenReturn(responseDto);
+        doAnswer(invocation -> {
+            user.setStatus(UserStatus.SUSPENDED);
+            return null;
+        }).when(userMapper).applyStatusChange(user, UserStatus.SUSPENDED);
 
         UserResponseDto result = userService.updateStatus(userId, request, actorId);
 
         assertThat(result).isSameAs(responseDto);
         verify(userMapper).applyStatusChange(user, UserStatus.SUSPENDED);
         verify(userRepository).save(user);
-        verify(auditService).createAuditLog(eq("USER_STATUS_UPDATED"), eq("User"), eq(userId), eq(tenant),
-                eq(actor), any(), isNull());
+
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<Map<String, Object>> beforeCaptor = ArgumentCaptor.forClass(Map.class);
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<Map<String, Object>> afterCaptor = ArgumentCaptor.forClass(Map.class);
+        verify(auditService).createUpdateAuditLog(eq("USER_STATUS_UPDATED"), eq("User"), eq(userId), eq(tenant),
+                eq(actor), beforeCaptor.capture(), afterCaptor.capture(), isNull());
+        assertThat(beforeCaptor.getValue()).containsEntry("status", "ACTIVE");
+        assertThat(afterCaptor.getValue()).containsEntry("status", "SUSPENDED");
     }
 
     @Test
@@ -958,7 +1000,7 @@ class UserServiceTest {
                 .isInstanceOf(UnauthenticatedException.class);
 
         verify(userMapper, never()).applyStatusChange(any(), any());
-        verify(auditService, never()).createAuditLog(any(), any(), any(), any(), any(), any(), any());
+        verifyNoInteractions(auditService);
     }
 
     @Test
@@ -1079,5 +1121,36 @@ class UserServiceTest {
 
         verify(userMapper, never()).applyStatusChange(any(), any());
         verify(userRepository, never()).save(any());
+    }
+
+    @Test
+    void promoteToTeamLeadIfEmployee_whenEmployee_promotesAndAuditsTheRoleFromBeforeAndAfter() {
+        user.setRole(UserRole.EMPLOYEE);
+        when(userRepository.save(user)).thenReturn(user);
+
+        userService.promoteToTeamLeadIfEmployee(user, actor);
+
+        assertThat(user.getRole()).isEqualTo(UserRole.TEAM_LEAD);
+        verify(userRepository).save(user);
+
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<Map<String, Object>> beforeCaptor = ArgumentCaptor.forClass(Map.class);
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<Map<String, Object>> afterCaptor = ArgumentCaptor.forClass(Map.class);
+        verify(auditService).createUpdateAuditLog(eq("USER_UPDATED"), eq("User"), eq(userId), eq(tenant),
+                eq(actor), beforeCaptor.capture(), afterCaptor.capture(), isNull());
+        assertThat(beforeCaptor.getValue()).containsEntry("role", "EMPLOYEE");
+        assertThat(afterCaptor.getValue()).containsEntry("role", "TEAM_LEAD");
+    }
+
+    @Test
+    void promoteToTeamLeadIfEmployee_whenAlreadyTenantAdmin_doesNotDowngradeRoleOrAudit() {
+        user.setRole(UserRole.TENANT_ADMIN);
+
+        userService.promoteToTeamLeadIfEmployee(user, actor);
+
+        assertThat(user.getRole()).isEqualTo(UserRole.TENANT_ADMIN);
+        verify(userRepository, never()).save(any());
+        verifyNoInteractions(auditService);
     }
 }

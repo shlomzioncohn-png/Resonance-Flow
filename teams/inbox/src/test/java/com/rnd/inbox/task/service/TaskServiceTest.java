@@ -32,6 +32,7 @@ import com.rnd.inbox.shared.dto.PageResponseDto;
 import com.rnd.inbox.shared.event.EventType;
 import com.rnd.inbox.shared.exception.ForbiddenActionException;
 import com.rnd.inbox.shared.exception.UnauthenticatedException;
+import com.rnd.inbox.team.model.Team;
 import com.rnd.inbox.tenant.model.Tenant;
 import com.rnd.inbox.tenant.repository.TenantRepository;
 import com.rnd.inbox.user.model.User;
@@ -53,6 +54,7 @@ import org.springframework.data.domain.Pageable;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -64,6 +66,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
+import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -218,7 +221,7 @@ class TaskServiceTest {
         assertThat(result).isSameAs(existing);
         verify(taskRepository, never()).saveAndFlush(any());
         verify(outboxEventRepository, never()).save(any());
-        verify(auditService, never()).createAuditLog(any(), any(), any(), any(), any(), any());
+        verifyNoInteractions(auditService);
         verify(assignmentRepository, never()).save(any());
     }
 
@@ -259,6 +262,60 @@ class TaskServiceTest {
     }
 
     @Test
+    void createTask_withAssignments_auditsThemInsideTheCreationRow() {
+        Task incoming = incomingTask();
+        UUID generatedId = UUID.randomUUID();
+        stubNoExistingTask();
+        stubSaveAssigning(incoming, generatedId);
+        User assignee = new User();
+        assignee.setId(UUID.randomUUID());
+        Assignment personal = new Assignment();
+        personal.setUser(assignee);
+        personal.setAssignmentRole(AssignmentRole.ASSIGNEE);
+        personal.setAssignedBy(incoming.getCreatedBy());
+        Team team = new Team();
+        team.setId(UUID.randomUUID());
+        Assignment toTeam = new Assignment();
+        toTeam.setTeam(team);
+        toTeam.setAssignmentRole(AssignmentRole.RESPONSIBLE);
+
+        taskService.createTask(incoming, List.of(personal, toTeam), UUID.randomUUID());
+
+        Map<String, Object> expectedPersonal = new LinkedHashMap<>();
+        expectedPersonal.put("userId", assignee.getId());
+        expectedPersonal.put("teamId", null);
+        expectedPersonal.put("assignmentRole", "ASSIGNEE");
+        expectedPersonal.put("assignedById", incoming.getCreatedBy().getId());
+        Map<String, Object> expectedTeam = new LinkedHashMap<>();
+        expectedTeam.put("userId", null);
+        expectedTeam.put("teamId", team.getId());
+        expectedTeam.put("assignmentRole", "RESPONSIBLE");
+        expectedTeam.put("assignedById", null);
+
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<Map<String, Object>> snapshotCaptor = ArgumentCaptor.forClass(Map.class);
+        verify(auditService).createAuditLog(eq("TASK_CREATED"), eq("Task"), eq(generatedId), eq(tenant),
+                eq(incoming.getCreatedBy()), snapshotCaptor.capture(), any());
+        assertThat(snapshotCaptor.getValue()).containsEntry("assignments", List.of(expectedPersonal, expectedTeam));
+    }
+
+    @Test
+    void createTask_withoutAssignments_auditsAnEmptyAssignmentList() {
+        Task incoming = incomingTask();
+        UUID generatedId = UUID.randomUUID();
+        stubNoExistingTask();
+        stubSaveAssigning(incoming, generatedId);
+
+        taskService.createTask(incoming, List.of(), UUID.randomUUID());
+
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<Map<String, Object>> snapshotCaptor = ArgumentCaptor.forClass(Map.class);
+        verify(auditService).createAuditLog(eq("TASK_CREATED"), eq("Task"), eq(generatedId), eq(tenant),
+                eq(incoming.getCreatedBy()), snapshotCaptor.capture(), any());
+        assertThat(snapshotCaptor.getValue()).containsEntry("assignments", List.of());
+    }
+
+    @Test
     void createTask_withoutAssignments_neverTouchesTheAssignmentRepository() {
         Task incoming = incomingTask();
         stubNoExistingTask();
@@ -270,27 +327,87 @@ class TaskServiceTest {
     }
 
     @Test
-    void updateTask_persistsChangesAndWritesAuditLog() {
+    void updateTask_persistsChangesAndAuditsTheValuesFromBeforeAndAfterTheChange() {
+        UUID taskId = UUID.randomUUID();
         Task task = incomingTask();
-        task.setId(UUID.randomUUID());
+        task.setId(taskId);
+        Task changes = new Task();
         UUID correlationId = UUID.randomUUID();
+        when(taskRepository.findById(taskId)).thenReturn(Optional.of(task));
         when(taskRepository.save(task)).thenReturn(task);
+        // taskMapper is a mock, so it changes nothing by itself: stand in for the real mapper
+        // changing the task in place, which is what makes "before" and "after" differ.
+        doAnswer(invocation -> {
+            task.setStatus(TaskStatus.IN_PROGRESS);
+            return null;
+        }).when(taskMapper).applyUpdate(task, changes);
 
-        Task result = taskService.updateTask(task, correlationId);
+        Task result = taskService.updateTask(taskId, changes, correlationId);
 
         assertThat(result).isSameAs(task);
         verify(taskRepository).save(task);
-        verify(auditService).createAuditLog(eq("TASK_UPDATED"), eq("Task"), eq(task.getId()), eq(tenant),
-                isNull(), any(), eq(correlationId));
+
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<Map<String, Object>> beforeCaptor = ArgumentCaptor.forClass(Map.class);
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<Map<String, Object>> afterCaptor = ArgumentCaptor.forClass(Map.class);
+        verify(auditService).createUpdateAuditLog(eq("TASK_UPDATED"), eq("Task"), eq(taskId), eq(tenant),
+                isNull(), beforeCaptor.capture(), afterCaptor.capture(), eq(correlationId));
+        assertThat(beforeCaptor.getValue()).containsEntry("status", "NEW");
+        assertThat(afterCaptor.getValue()).containsEntry("status", "IN_PROGRESS");
+    }
+
+    @Test
+    void updateTask_auditSnapshotCarriesTheFieldsAnUpdateCanChange() {
+        UUID taskId = UUID.randomUUID();
+        Task task = incomingTask();
+        task.setId(taskId);
+        Instant originalDeadline = NOW.plusSeconds(3600);
+        Instant postponedDeadline = NOW.plusSeconds(7200);
+        User owner = new User();
+        owner.setId(UUID.randomUUID());
+        task.setDeadline(originalDeadline);
+        task.setEffortEstimateMinutes(30);
+        Task changes = new Task();
+        when(taskRepository.findById(taskId)).thenReturn(Optional.of(task));
+        when(taskRepository.save(task)).thenReturn(task);
+        doAnswer(invocation -> {
+            task.setDeadline(postponedDeadline);
+            task.setEffortEstimateMinutes(90);
+            task.setOwner(owner);
+            task.setDescription("Reworded");
+            return null;
+        }).when(taskMapper).applyUpdate(task, changes);
+
+        taskService.updateTask(taskId, changes, UUID.randomUUID());
+
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<Map<String, Object>> beforeCaptor = ArgumentCaptor.forClass(Map.class);
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<Map<String, Object>> afterCaptor = ArgumentCaptor.forClass(Map.class);
+        verify(auditService).createUpdateAuditLog(eq("TASK_UPDATED"), eq("Task"), eq(taskId), eq(tenant),
+                isNull(), beforeCaptor.capture(), afterCaptor.capture(), any());
+        assertThat(beforeCaptor.getValue())
+                .containsEntry("deadline", originalDeadline)
+                .containsEntry("effortEstimateMinutes", 30)
+                .containsEntry("ownerId", null)
+                .containsEntry("description", "Investigate the intermittent failure");
+        assertThat(afterCaptor.getValue())
+                .containsEntry("deadline", postponedDeadline)
+                .containsEntry("effortEstimateMinutes", 90)
+                .containsEntry("ownerId", owner.getId())
+                .containsEntry("description", "Reworded");
     }
 
     @Test
     void updateTask_writesPendingOutboxEventWithTaskUpdatedType() {
+        UUID taskId = UUID.randomUUID();
         Task task = incomingTask();
-        task.setId(UUID.randomUUID());
+        task.setId(taskId);
+        when(taskRepository.findById(taskId)).thenReturn(Optional.of(task));
         when(taskRepository.save(task)).thenReturn(task);
 
-        taskService.updateTask(task, UUID.randomUUID());
+        taskService.updateTask(taskId, new Task(), UUID.randomUUID());
 
         OutboxEvent event = capturedOutboxEvent();
         assertThat(event.getEventType()).isEqualTo(EventType.TASK_UPDATED);
@@ -323,7 +440,7 @@ class TaskServiceTest {
                 .isInstanceOf(TaskNotFoundException.class);
 
         verify(outboxEventRepository, never()).save(any());
-        verify(auditService, never()).createAuditLog(any(), any(), any(), any(), any(), any());
+        verifyNoInteractions(auditService);
     }
 
     @Test
@@ -354,7 +471,7 @@ class TaskServiceTest {
     }
 
     @Test
-    void completeTask_writesAuditLogWithActor() {
+    void completeTask_auditsTheStatusFromBeforeAndAfterWithActor() {
         Task task = incomingTask();
         task.setId(UUID.randomUUID());
         User completedBy = new User();
@@ -363,8 +480,14 @@ class TaskServiceTest {
 
         taskService.completeTask(task, completedBy, UUID.randomUUID());
 
-        verify(auditService).createAuditLog(eq("TASK_COMPLETED"), eq("Task"), eq(task.getId()), eq(tenant),
-                eq(completedBy), any(), any());
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<Map<String, Object>> beforeCaptor = ArgumentCaptor.forClass(Map.class);
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<Map<String, Object>> afterCaptor = ArgumentCaptor.forClass(Map.class);
+        verify(auditService).createUpdateAuditLog(eq("TASK_COMPLETED"), eq("Task"), eq(task.getId()), eq(tenant),
+                eq(completedBy), beforeCaptor.capture(), afterCaptor.capture(), any());
+        assertThat(beforeCaptor.getValue()).containsEntry("status", "NEW");
+        assertThat(afterCaptor.getValue()).containsEntry("status", "DONE");
     }
 
     @Test
@@ -419,6 +542,29 @@ class TaskServiceTest {
         Task result = taskService.applySchedulingUpdate(schedulingEvent(taskId, UUID.randomUUID(), null));
 
         assertThat(result.getPriorityScore()).isEqualTo(4.0f);
+    }
+
+    @Test
+    void applySchedulingUpdate_auditsTheValuesFromBeforeAndAfterTheChangeWithoutAnActor() {
+        UUID taskId = UUID.randomUUID();
+        Task task = incomingTask();
+        task.setId(taskId);
+        task.setAvailable(false);
+        task.setPriorityScore(4.0f);
+        when(taskRepository.findById(taskId)).thenReturn(Optional.of(task));
+        when(taskRepository.saveAndFlush(task)).thenReturn(task);
+
+        UUID eventId = UUID.randomUUID();
+        taskService.applySchedulingUpdate(schedulingEvent(taskId, eventId, 7.5));
+
+        Map<String, Object> before = new LinkedHashMap<>();
+        before.put("isAvailable", false);
+        before.put("priorityScore", 4.0f);
+        Map<String, Object> after = new LinkedHashMap<>();
+        after.put("isAvailable", true);
+        after.put("priorityScore", 7.5f);
+        verify(auditService).createUpdateAuditLog(eq("TASK_SCHEDULING_UPDATED"), eq("Task"), eq(taskId), eq(tenant),
+                isNull(), eq(before), eq(after), eq(eventId));
     }
 
     @Test

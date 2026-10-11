@@ -13,6 +13,7 @@ import com.rnd.inbox.user.model.UserRole;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
@@ -20,6 +21,7 @@ import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -28,6 +30,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
@@ -174,6 +177,33 @@ class TeamMemberServiceTest {
     }
 
     @Test
+    void removeMember_auditsLeftAtFromBeforeAndAfterTheRemoval() {
+        when(userRepository.findById(actorId)).thenReturn(Optional.of(actor));
+        when(teamRepository.findById(teamId)).thenReturn(Optional.of(team));
+        UUID userId = UUID.randomUUID();
+        TeamMember membership = new TeamMember();
+        User user = new User();
+        user.setId(userId);
+        membership.setUser(user);
+        when(teamMemberRepository.findByTeam_IdAndUser_IdAndLeftAtIsNull(teamId, userId))
+                .thenReturn(Optional.of(membership));
+        when(teamMemberRepository.save(membership)).thenReturn(membership);
+
+        teamMemberService.removeMember(teamId, userId, actorId);
+
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<Map<String, Object>> beforeCaptor = ArgumentCaptor.forClass(Map.class);
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<Map<String, Object>> afterCaptor = ArgumentCaptor.forClass(Map.class);
+        verify(auditService).createUpdateAuditLog(org.mockito.ArgumentMatchers.eq("TEAM_MEMBER_REMOVED"),
+                org.mockito.ArgumentMatchers.eq("Team"), org.mockito.ArgumentMatchers.eq(teamId),
+                org.mockito.ArgumentMatchers.eq(tenant), org.mockito.ArgumentMatchers.eq(actor),
+                beforeCaptor.capture(), afterCaptor.capture(), org.mockito.ArgumentMatchers.isNull());
+        assertThat(beforeCaptor.getValue()).containsEntry("userId", userId).containsEntry("leftAt", null);
+        assertThat(afterCaptor.getValue()).containsEntry("userId", userId).containsEntry("leftAt", NOW);
+    }
+
+    @Test
     void removeMember_whenNotAnActiveMember_throwsTeamMembershipNotFoundException() {
         when(userRepository.findById(actorId)).thenReturn(Optional.of(actor));
         when(teamRepository.findById(teamId)).thenReturn(Optional.of(team));
@@ -214,14 +244,22 @@ class TeamMemberServiceTest {
     }
 
     @Test
-    void ensureMembership_whenNotAlreadyAMember_savesNewMembership() {
+    void ensureMembership_whenNotAlreadyAMember_savesNewMembershipAndAuditsItUnderTheActor() {
         User lead = userInTenant();
         when(teamMemberRepository.findByTeam_IdAndUser_IdAndLeftAtIsNull(teamId, lead.getId()))
                 .thenReturn(Optional.empty());
+        when(teamMemberRepository.save(any(TeamMember.class))).thenAnswer(inv -> inv.getArgument(0));
 
-        teamMemberService.ensureMembership(team, lead);
+        teamMemberService.ensureMembership(team, lead, actor);
 
         verify(teamMemberRepository).save(any(TeamMember.class));
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<Map<String, Object>> snapshotCaptor = ArgumentCaptor.forClass(Map.class);
+        verify(auditService).createAuditLog(org.mockito.ArgumentMatchers.eq("TEAM_MEMBER_ADDED"),
+                org.mockito.ArgumentMatchers.eq("Team"), org.mockito.ArgumentMatchers.eq(teamId),
+                org.mockito.ArgumentMatchers.eq(tenant), org.mockito.ArgumentMatchers.eq(actor),
+                snapshotCaptor.capture(), org.mockito.ArgumentMatchers.isNull());
+        assertThat(snapshotCaptor.getValue()).containsEntry("userId", lead.getId());
     }
 
     @Test
@@ -230,8 +268,9 @@ class TeamMemberServiceTest {
         when(teamMemberRepository.findByTeam_IdAndUser_IdAndLeftAtIsNull(teamId, lead.getId()))
                 .thenReturn(Optional.of(new TeamMember()));
 
-        teamMemberService.ensureMembership(team, lead);
+        teamMemberService.ensureMembership(team, lead, actor);
 
         verify(teamMemberRepository, never()).save(any());
+        verifyNoInteractions(auditService);
     }
 }

@@ -249,8 +249,9 @@ public class TaskService {
                 ? resolveUserInTenant(request.getOwnerId().get(), task.getTenant())
                 : null;
 
+        Map<String, Object> before = auditSnapshot(task);
         taskRestMapper.applyUpdate(task, request, resolvedProject, resolvedOwner);
-        Task saved = persistUpdatedTask(task, null, actor, "TASK_UPDATED");
+        Task saved = persistUpdatedTask(task, before, null, actor, "TASK_UPDATED");
         return taskRestMapper.toResponseDto(saved);
     }
 
@@ -265,8 +266,9 @@ public class TaskService {
             throw new InvalidTaskStatusTransitionException("snoozedUntil is required when status is SNOOZED");
         }
 
+        Map<String, Object> before = auditSnapshot(task);
         taskRestMapper.applyStatusChange(task, newStatus, request.getSnoozedUntil());
-        Task saved = persistUpdatedTask(task, null, actor, "TASK_STATUS_UPDATED");
+        Task saved = persistUpdatedTask(task, before, null, actor, "TASK_STATUS_UPDATED");
         return taskRestMapper.toResponseDto(saved);
     }
 
@@ -296,8 +298,12 @@ public class TaskService {
         }
 
         outboxEventRepository.save(buildOutboxEvent(EventType.TASK_CREATED, TaskCreatedPayload.from(saved), saved, correlationId));
+        // Assignments are only ever written here, together with the task, so they are audited
+        // as part of the creation row instead of one row each.
+        Map<String, Object> snapshot = auditSnapshot(saved);
+        snapshot.put("assignments", assignments.stream().map(this::assignmentSnapshot).toList());
         auditService.createAuditLog("TASK_CREATED", "Task", saved.getId(), saved.getTenant(), actor,
-                auditSnapshot(saved), correlationId);
+                snapshot, correlationId);
         return saved;
     }
 
@@ -305,25 +311,25 @@ public class TaskService {
     public Task updateTask(UUID taskId, Task changes, UUID correlationId) {
         Task existing = findTaskOrThrow(taskId);
 
+        Map<String, Object> before = auditSnapshot(existing);
         taskMapper.applyUpdate(existing, changes);
 
-        return updateTask(existing, correlationId);
-    }
-
-    @Transactional
-    public Task updateTask(Task task, UUID correlationId) {
-        return persistUpdatedTask(task, correlationId, null, "TASK_UPDATED");
+        return persistUpdatedTask(existing, before, correlationId, null, "TASK_UPDATED");
     }
 
     // Shared by the Kafka ingestion/scheduling path (updateTask above - no actor) and both REST
     // update paths (TaskController - plain update and status update, distinguished only by the
     // audit action label; both change a Task and publish the same TASK_UPDATED outbox event).
-    private Task persistUpdatedTask(Task task, UUID correlationId, User actor, String auditAction) {
+    // before is the audit snapshot the caller took while the task still held its old values -
+    // every caller changes the Task object in place before getting here, so it cannot be
+    // rebuilt at this point.
+    private Task persistUpdatedTask(Task task, Map<String, Object> before, UUID correlationId, User actor,
+                                    String auditAction) {
         Task saved = taskRepository.save(task);
 
         outboxEventRepository.save(buildOutboxEvent(EventType.TASK_UPDATED, TaskUpdatedPayload.from(saved), saved, correlationId));
-        auditService.createAuditLog(auditAction, "Task", saved.getId(), saved.getTenant(), actor,
-                auditSnapshot(saved), correlationId);
+        auditService.createUpdateAuditLog(auditAction, "Task", saved.getId(), saved.getTenant(), actor,
+                before, auditSnapshot(saved), correlationId);
         return saved;
     }
 
@@ -336,13 +342,14 @@ public class TaskService {
 
     @Transactional
     public Task completeTask(Task task, User completedBy, UUID correlationId) {
+        Map<String, Object> before = auditSnapshot(task);
         task.setStatus(TaskStatus.DONE);
         task.setCompletedAt(Instant.now(clock));
         Task saved = taskRepository.save(task);
 
         outboxEventRepository.save(buildOutboxEvent(EventType.TASK_COMPLETED, TaskCompletedPayload.from(saved), saved, correlationId));
-        auditService.createAuditLog("TASK_COMPLETED", "Task", saved.getId(), saved.getTenant(), completedBy,
-                auditSnapshot(saved), correlationId);
+        auditService.createUpdateAuditLog("TASK_COMPLETED", "Task", saved.getId(), saved.getTenant(), completedBy,
+                before, auditSnapshot(saved), correlationId);
         return saved;
     }
 
@@ -363,6 +370,9 @@ public class TaskService {
     @Transactional
     public Task applySchedulingUpdate(UUID taskId, boolean available, Float priorityScore, UUID correlationId) {
         Task task = findTaskOrThrow(taskId);
+        // Taken before the setters below: they change this same Task object in place, so the
+        // previous values are gone once they run.
+        Map<String, Object> before = schedulingSnapshot(task);
 
         task.setAvailable(available);
         if (priorityScore != null) {
@@ -373,8 +383,9 @@ public class TaskService {
         Task saved = taskRepository.saveAndFlush(task);
 
         outboxEventRepository.save(buildOutboxEvent(EventType.TASK_UPDATED, TaskUpdatedPayload.from(saved), saved, correlationId));
-        auditService.createAuditLog("TASK_SCHEDULING_UPDATED", "Task", saved.getId(), saved.getTenant(),
-                schedulingSnapshot(saved), correlationId);
+        // No actor: this is Chain's own calculation, not something a user did.
+        auditService.createUpdateAuditLog("TASK_SCHEDULING_UPDATED", "Task", saved.getId(), saved.getTenant(),
+                null, before, schedulingSnapshot(saved), correlationId);
         return saved;
     }
 
@@ -438,6 +449,16 @@ public class TaskService {
                 Instant.now(clock));
     }
 
+    private Map<String, Object> assignmentSnapshot(Assignment assignment) {
+        Map<String, Object> snapshot = new LinkedHashMap<>();
+        snapshot.put("userId", assignment.getUser() != null ? assignment.getUser().getId() : null);
+        snapshot.put("teamId", assignment.getTeam() != null ? assignment.getTeam().getId() : null);
+        snapshot.put("assignmentRole", assignment.getAssignmentRole().name());
+        snapshot.put("assignedById",
+                assignment.getAssignedBy() != null ? assignment.getAssignedBy().getId() : null);
+        return snapshot;
+    }
+
     private Map<String, Object> schedulingSnapshot(Task task) {
         Map<String, Object> snapshot = new LinkedHashMap<>();
         snapshot.put("isAvailable", task.isAvailable());
@@ -445,12 +466,29 @@ public class TaskService {
         return snapshot;
     }
 
+    // Every field an update path can change is here (plus sourceType/sourceRef, which identify
+    // the task). createUpdateAuditLog writes no row when the snapshot is unchanged, so a field
+    // left out of it would make an update of only that field go unaudited.
     private Map<String, Object> auditSnapshot(Task task) {
         Map<String, Object> snapshot = new LinkedHashMap<>();
         snapshot.put("title", task.getTitle());
+        snapshot.put("description", task.getDescription());
         snapshot.put("sourceType", task.getSourceType().name());
         snapshot.put("sourceRef", task.getSourceRef());
         snapshot.put("status", task.getStatus().name());
+        snapshot.put("tier", task.getTier() != null ? task.getTier().name() : null);
+        snapshot.put("roleContext", task.getRoleContext() != null ? task.getRoleContext().name() : null);
+        snapshot.put("urgency", task.getUrgency());
+        snapshot.put("effortEstimateMinutes", task.getEffortEstimateMinutes());
+        snapshot.put("effortEstimateConfidence", task.getEffortEstimateConfidence());
+        snapshot.put("deadline", task.getDeadline());
+        snapshot.put("snoozedUntil", task.getSnoozedUntil());
+        snapshot.put("completedAt", task.getCompletedAt());
+        snapshot.put("projectId", task.getProject() != null ? task.getProject().getId() : null);
+        snapshot.put("ownerId", task.getOwner() != null ? task.getOwner().getId() : null);
+        snapshot.put("suggestedOwnerUserId",
+                task.getSuggestedOwnerUser() != null ? task.getSuggestedOwnerUser().getId() : null);
+        snapshot.put("suggestedOwnerConfidence", task.getSuggestedOwnerConfidence());
         return snapshot;
     }
 }
