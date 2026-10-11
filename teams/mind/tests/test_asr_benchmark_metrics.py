@@ -9,7 +9,14 @@ in CI.
 from pathlib import Path
 
 import pytest
-from benchmarks.asr_benchmark import WordDiff, reference_words, word_diff
+from benchmarks.asr_benchmark import (
+    CHOSEN_WHISPER_SIZE,
+    SizeAverages,
+    WordDiff,
+    format_asr_conclusion,
+    reference_words,
+    word_diff,
+)
 
 
 def test_identical_transcripts_have_zero_rough_wer():
@@ -76,3 +83,43 @@ def test_reference_drops_punctuation_tokens_and_non_word_markers(tmp_path: Path)
     )
     # the <vocalsound> in every file is not a <w>, so it never shows up
     assert reference_words([a]) == ["um", "were"]
+
+
+def _avg(size: str, rough_wer: float, rtf: float = 0.1) -> SizeAverages:
+    return SizeAverages(
+        size=size,
+        load_s=0.5,
+        real_time_factor=rtf,
+        duration_s=190.0,
+        peak_rss_mb=2000.0,
+        cpu_time_s=750.0,
+        rough_wer=rough_wer,
+        word_recall=0.76,
+        word_precision=0.92,
+    )
+
+
+def test_asr_conclusion_recommends_the_decision_not_the_lowest_wer():
+    # small.en has the lowest rough WER, but the decision is base.en: the
+    # printout must recommend the decision, like the OCR conclusion does.
+    text = format_asr_conclusion(
+        {CHOSEN_WHISPER_SIZE: _avg(CHOSEN_WHISPER_SIZE, 0.263), "small.en": _avg("small.en", 0.254, 0.557)}
+    )
+    recommendation, lowest = text.splitlines()[0], text.splitlines()[1]
+    assert recommendation.startswith("ASR recommendation (the team's decision): Whisper " + CHOSEN_WHISPER_SIZE)
+    assert "small.en" not in recommendation
+    assert "not the pick" in lowest and "small.en" in lowest
+
+
+def test_asr_conclusion_says_so_when_the_decision_is_also_the_lowest_wer():
+    text = format_asr_conclusion(
+        {CHOSEN_WHISPER_SIZE: _avg(CHOSEN_WHISPER_SIZE, 0.20), "tiny.en": _avg("tiny.en", 0.276)}
+    )
+    assert "Also the lowest rough WER" in text
+    assert "not the pick" not in text
+
+
+def test_chosen_size_matches_env_example():
+    # The two places that state the decision must not drift apart.
+    env = (Path(__file__).parent.parent / ".env.example").read_text(encoding="utf-8")
+    assert f"WHISPER_MODEL={CHOSEN_WHISPER_SIZE}" in env.splitlines()

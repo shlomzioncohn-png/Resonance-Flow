@@ -23,14 +23,11 @@ slower than PaddleOCR is capable of on hardware where mkldnn works, so
 its latency numbers are a floor for this machine, not a ceiling for the
 tool.
 
-ASR: BLOCKED. No AMI audio (or any ASR) sample exists anywhere in this
-repo or on any branch -- checked again right before writing this. An
-AMI package does exist on `michal/real-data-slice`, but it's the
-manual-annotation package only (abstractive summaries, XML) -- no
-audio, by design (it's for a different ticket, extraction ground
-truth). There is nothing to run Whisper against yet. Documented here as
-a known risk (see ocr-asr-benchmark.md "Known risk"), not silently
-skipped.
+ASR: three Whisper sizes (tiny.en / base.en / small.en) on two AMI
+meetings -- lives in benchmarks/asr_benchmark.py (its own docstring has
+the details) and runs after the OCR half here. Needs the AMI audio from
+eval/datasets/ami-audio.manifest.json and the Whisper weights under
+models/whisper/ (see "ASR -- setup" in ocr-asr-benchmark.md).
 
 Latency and resource footprint are deliberately rough (see
 ocr-asr-benchmark.md): wall-clock time and a sampled peak-RSS/CPU-time
@@ -626,17 +623,6 @@ def run_paddle_benchmark() -> dict[str, ConfigAverages]:
     return _summarize("PaddleOCR", PADDLE_CONFIGS, rows)
 
 
-def run_asr_benchmark() -> None:
-    print("\n--- ASR (Whisper) ---")
-    print(
-        "BLOCKED: no AMI audio (or any ASR) sample exists in this repo or on "
-        "any branch. `michal/real-data-slice` has an AMI package, but it's "
-        "manual-annotation text only (abstractive summaries, XML) -- no "
-        "audio, by design (ground truth for a different ticket). Nothing to "
-        "run Whisper against. See ocr-asr-benchmark.md 'Known risk'."
-    )
-
-
 def format_conclusion(all_averages: dict[str, ConfigAverages]) -> str:
     """The final printout: the team's decision first, the measured leader second.
 
@@ -670,17 +656,21 @@ def format_conclusion(all_averages: dict[str, ConfigAverages]) -> str:
         "  Chosen on latency and memory, a knowing accuracy trade -- see "
         "ocr-asr-benchmark.md for the reasoning."
     )
-    lines.append("ASR: NO DECISION -- blocked on missing AMI audio (known risk, see doc).")
     return "\n".join(lines)
 
 
 def main() -> None:
+    # Imported here, not at the top: asr_benchmark imports this module's
+    # checksum helpers, so a top-level import would be circular.
+    from benchmarks.asr_benchmark import format_asr_conclusion, run_asr_benchmark
+
     tesseract_averages = run_ocr_benchmark()
     paddle_averages = run_paddle_benchmark()
-    run_asr_benchmark()
+    asr_averages = run_asr_benchmark()
 
     print("\n--- Conclusion ---")
     print(format_conclusion({**tesseract_averages, **paddle_averages}))
+    print(format_asr_conclusion(asr_averages))
 
 
 if __name__ == "__main__":

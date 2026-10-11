@@ -119,10 +119,12 @@ licensing constraints.
   ~45s / ~600MB per page). A trade made knowingly — PaddleOCR mobile has ~2.7x
   fewer character errors on FUNSD (grouped CER 0.074 vs. 0.200). See
   [`benchmarks/ocr-asr-benchmark.md`](./benchmarks/ocr-asr-benchmark.md).
-- ASR: **blocked**, not resolved — no AMI audio (or any audio) sample
-  exists anywhere in this repo to benchmark Whisper against. See
-  [`benchmarks/ocr-asr-benchmark.md`](./benchmarks/ocr-asr-benchmark.md)
-  "Known risk".
+- ~~ASR: which local Whisper size~~ Resolved: **Whisper `base.en`** (faster-whisper,
+  int8, CPU), chosen over `tiny.en` / `small.en` on two AMI meetings: rough WER
+  ~0.26 at ~10x real time, vs. `small.en` 0.9–1.6 points better but ~5x slower,
+  and `tiny.en` within noise on WER but less precise. n=2 and a rough word
+  diff — known risks documented in
+  [`benchmarks/ocr-asr-benchmark.md`](./benchmarks/ocr-asr-benchmark.md).
 - Evaluation metric: top-1 accuracy vs. MRR/nDCG
 - How the score is published to Chain: separate event vs. field on `Task`
 - Which real dataset slice to validate against first: FUNSD vs. AMI

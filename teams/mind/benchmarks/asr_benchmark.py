@@ -64,6 +64,17 @@ _TRANSCRIPTS_DIR = _PROJECT_ROOT / "local-data" / "ami" / "asr-output"
 WHISPER_SIZES = ["tiny.en", "base.en", "small.en"]
 COMPUTE_TYPE = "int8"  # CTranslate2's CPU quantization -- what a CPU host would run
 BEAM_SIZE = 5  # faster-whisper's default, stated so the runs are reproducible
+# CTranslate2's own default, set explicitly so the environment can't change it:
+# with cpu_threads left at 0, faster-whisper honors OMP_NUM_THREADS -- and
+# constructing a PaddleOCR() (the OCR half of ocr_asr_benchmark, run first)
+# sets OMP_NUM_THREADS=1 on the process, which the spawned ASR workers inherit.
+# That silently ran Whisper single-threaded at ~4x the latency.
+CPU_THREADS = 4
+
+# The size the team picked (#135) -- see "ASR -- final decision" in
+# ocr-asr-benchmark.md. The single place that says so: format_asr_conclusion()
+# prints it, and WHISPER_MODEL in .env.example must match it.
+CHOSEN_WHISPER_SIZE = "base.en"
 
 
 class Meeting(BaseModel):
@@ -113,6 +124,11 @@ class ASRRow(BaseModel):
     duration_s: float
     peak_rss_mb: float
     cpu_time_s: float
+    # Segments faster-whisper had to re-decode at a temperature above 0 (its
+    # fallback when a beam-search result fails the compression-ratio or
+    # log-prob checks). Those re-decodes *sample*, so a run with any of them
+    # is not guaranteed to repeat word for word.
+    fallback_segments: int
     diff: WordDiff
 
     @property
@@ -272,7 +288,12 @@ def benchmark_size(size: str, meetings: list[Meeting]) -> SizeResult:
     sampler.start()
     try:
         load_start = time.perf_counter()
-        model = WhisperModel(str(_model_dir(size)), device="cpu", compute_type=COMPUTE_TYPE)
+        model = WhisperModel(
+            str(_model_dir(size)),
+            device="cpu",
+            compute_type=COMPUTE_TYPE,
+            cpu_threads=CPU_THREADS,
+        )
         load_s = time.perf_counter() - load_start
 
         rows: list[ASRRow] = []
@@ -283,7 +304,8 @@ def benchmark_size(size: str, meetings: list[Meeting]) -> SizeResult:
                 str(meeting.audio), language="en", beam_size=BEAM_SIZE
             )
             # transcribe() is lazy: the decoding happens while iterating.
-            text = " ".join(segment.text.strip() for segment in segments)
+            decoded = list(segments)
+            text = " ".join(segment.text.strip() for segment in decoded)
             duration = time.perf_counter() - start
             cpu_after = proc.cpu_times()
 
@@ -303,6 +325,7 @@ def benchmark_size(size: str, meetings: list[Meeting]) -> SizeResult:
                         (cpu_after.user - cpu_before.user) + (cpu_after.system - cpu_before.system),
                         1,
                     ),
+                    fallback_segments=sum(1 for segment in decoded if segment.temperature > 0),
                     diff=word_diff(reference_words(meeting.words_files), hyp),
                 )
             )
@@ -338,7 +361,7 @@ def _format_row(row: ASRRow) -> str:
     return (
         f"{row.size} {row.meeting}: audio={row.audio_s / 60:.1f}min duration={row.duration_s:.1f}s "
         f"RTF={row.real_time_factor:.3f} peak_rss={row.peak_rss_mb:.0f}MB "
-        f"cpu_time={row.cpu_time_s:.1f}s | rough WER={d.rough_wer:.3f} "
+        f"cpu_time={row.cpu_time_s:.1f}s fallback_segments={row.fallback_segments} | rough WER={d.rough_wer:.3f} "
         f"(ref={d.ref_words} hyp={d.hyp_words} matched={d.matched} S={d.substituted} "
         f"D={d.deleted} I={d.inserted}) recall={d.word_recall:.3f} "
         f"precision={d.word_precision:.3f}"
@@ -352,6 +375,38 @@ def format_averages(avg: SizeAverages) -> str:
         f"load={avg.load_s:.1f}s | rough WER={avg.rough_wer:.3f} "
         f"recall={avg.word_recall:.3f} precision={avg.word_precision:.3f}"
     )
+
+
+def format_asr_conclusion(averages: dict[str, SizeAverages]) -> str:
+    """The ASR conclusion line: the team's pick first, the measured leader second.
+
+    Same shape as the OCR conclusion: the recommendation is CHOSEN_WHISPER_SIZE
+    (picked on the accuracy-per-latency trade), not whichever size had the
+    lowest rough WER -- small.en is a little more accurate and ~5x slower, and
+    the printout must not recommend the opposite of the docs.
+    """
+
+    def describe(size: str) -> str:
+        avg = averages[size]
+        return (
+            f"{size} (rough WER={avg.rough_wer:.3f}, precision={avg.word_precision:.3f}, "
+            f"RTF={avg.real_time_factor:.3f}, peak_rss={avg.peak_rss_mb:.0f}MB)"
+        )
+
+    lowest_wer = min(averages, key=lambda size: averages[size].rough_wer)
+    lines = [f"ASR recommendation (the team's decision): Whisper {describe(CHOSEN_WHISPER_SIZE)}"]
+    if lowest_wer == CHOSEN_WHISPER_SIZE:
+        lines.append("  Also the lowest rough WER measured.")
+    else:
+        lines.append(
+            f"  Lowest rough WER measured (not the pick, see ocr-asr-benchmark.md): "
+            f"{describe(lowest_wer)}"
+        )
+    lines.append(
+        "  Rough word diff, n=2 meetings, run-to-run noise ~1 point -- see "
+        "ocr-asr-benchmark.md 'ASR -- known risks'."
+    )
+    return "\n".join(lines)
 
 
 def run_asr_benchmark() -> dict[str, SizeAverages]:
@@ -377,4 +432,6 @@ def run_asr_benchmark() -> dict[str, SizeAverages]:
 
 
 if __name__ == "__main__":
-    run_asr_benchmark()
+    asr_averages = run_asr_benchmark()
+    print("\n--- Conclusion ---")
+    print(format_asr_conclusion(asr_averages))
