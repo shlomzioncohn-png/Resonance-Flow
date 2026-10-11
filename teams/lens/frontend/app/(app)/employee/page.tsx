@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import Alert from '@mui/material/Alert';
 import Avatar from '@mui/material/Avatar';
@@ -98,6 +98,22 @@ export default function EmployeeWorkspacePage() {
   const task = recommendation?.task ?? null;
   // The server decides (it also knows when the effort is unknown) - not recomputed here
   const fitsWindow = recommendation?.fitsInTime ?? false;
+
+  // Test utility: Allow tests to set form values directly
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      (window as any).__testUtils = {
+        setFormValues: (newMinutes: number, newProjectFilter?: string) => {
+          setMinutes(newMinutes);
+          if (newProjectFilter !== undefined) {
+            setProjectFilter(newProjectFilter);
+          }
+        },
+        getFormValues: () => ({ minutes, projectFilter }),
+        submitForm: async () => await findBestTask(),
+      };
+    }
+  }, []);
 
   return (
     <PageContainer title="My Workspace" description="Make the most of your available time.">
