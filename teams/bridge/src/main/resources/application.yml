@@ -32,7 +32,9 @@ spring:
     # producer - this block's producer.* below stays JSON and keeps serving GitHub/CRM/JIRA/
     # Media via the shared kafkaTemplate bean, per teams/relay/docs/kafka-producer-consumer-guide.md.
     properties:
-      schema.registry.url: ${SCHEMA_REGISTRY_URL:http://localhost:8081/apis/ccompat/v6}
+      # Port 8085, not 8081/8082 - those are already taken by Inbox's and Chain's own local
+      # registries. Apicurio, not Redpanda's built-in one - see .env.example for why.
+      schema.registry.url: ${SCHEMA_REGISTRY_URL:http://localhost:8085/apis/ccompat/v6}
     producer:
       key-serializer: org.apache.kafka.common.serialization.StringSerializer
       value-serializer: org.springframework.kafka.support.serializer.JsonSerializer
