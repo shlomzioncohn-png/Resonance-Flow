@@ -24,6 +24,13 @@ RUN mkdir -p src/mind/messaging && touch src/mind/__init__.py \
 RUN python -m venv /opt/venv
 ENV PATH="/opt/venv/bin:$PATH"
 
+# sentence-transformers pulls in torch; PyPI's default torch wheel is the
+# GPU (CUDA) build -- ~3.3GB of CUDA libraries that will never run here
+# and just slow the image and every CI pull. Install the CPU wheel into
+# the venv first, from PyTorch's own CPU index, so the install below
+# finds it already satisfied instead of replacing it.
+RUN pip install --no-cache-dir torch --index-url https://download.pytorch.org/whl/cpu
+
 # Install dependencies before the real source ever shows up in a layer
 # -- pyproject.toml/hatchling still needs *a* src/mind/ to build the
 # wheel, so give it an empty placeholder. Editing any file under the
