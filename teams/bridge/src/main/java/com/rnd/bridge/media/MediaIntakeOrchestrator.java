@@ -1,5 +1,9 @@
 package com.rnd.bridge.media;
 
+import com.rnd.bridge.media.classification.DocumentClassificationInput;
+import com.rnd.bridge.media.classification.MediaClassificationService;
+import com.rnd.bridge.media.classification.MeetingClassificationInput;
+import com.rnd.bridge.media.classification.Triage;
 import com.rnd.bridge.media.meeting.FixtureBbbMeetingMetadataReader;
 import com.rnd.bridge.media.meeting.FixtureZoomMeetingMetadataReader;
 import com.rnd.bridge.media.meeting.MeetingMetadata;
@@ -14,6 +18,7 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
@@ -50,7 +55,9 @@ import java.util.stream.Stream;
  * sidecar (Zoom: {@code .meeting.json}, BBB: {@code .metadata.xml}) are landed alongside it
  * as additional entries in the one event's {@code objects[]} list (see
  * {@link MediaIntakeService#landMeeting}), not as separate pointer fields; (4) land + publish
- * one event for the whole logical recording. Both sidecar kinds are moved to "uploaded/"
+ * one event for the whole logical recording, its scope_decision/classification set by
+ * {@link MediaClassificationService} (step 3b - after dedup, so a duplicate never costs a model
+ * call; before landing, so the MinIO tags carry the same scope_decision as the event). Both sidecar kinds are moved to "uploaded/"
  * alongside their recording even when the recording itself turns out to be a dedup skip, or
  * they'd sit unmatched forever (same reasoning already applied to transcripts).
  */
@@ -70,6 +77,7 @@ public class MediaIntakeOrchestrator {
     private final MediaIntakeService intakeService;
     private final MediaEventPublisher eventPublisher;
     private final MediaDedupIndex dedupIndex;
+    private final MediaClassificationService classificationService;
     private final String tenantId;
     private final long minFileSizeBytes;
     private final List<IntakeSource> intakeSources;
@@ -77,6 +85,7 @@ public class MediaIntakeOrchestrator {
     public MediaIntakeOrchestrator(MediaIntakeService intakeService,
                                     MediaEventPublisher eventPublisher,
                                     MediaDedupIndex dedupIndex,
+                                    MediaClassificationService classificationService,
                                     FixtureZoomMeetingMetadataReader zoomMeetingMetadataReader,
                                     FixtureBbbMeetingMetadataReader bbbMeetingMetadataReader,
                                     @Value("${bridge.media.zoom-recordings-dir}") String zoomRecordingsDir,
@@ -87,6 +96,7 @@ public class MediaIntakeOrchestrator {
         this.intakeService = intakeService;
         this.eventPublisher = eventPublisher;
         this.dedupIndex = dedupIndex;
+        this.classificationService = classificationService;
         this.tenantId = tenantId;
         this.minFileSizeBytes = minFileSizeBytes;
         this.intakeSources = List.of(
@@ -207,8 +217,11 @@ public class MediaIntakeOrchestrator {
 
                 RawObjectEvent event;
                 if (source.sourceType() == RawSourceType.SCANNED_DOC) {
-                    event = intakeService.landStandalone(content, contentHash, file.getFileName().toString(),
-                            tenantId, source.sourceType(), source.modality(), ingestedAt, correlationId);
+                    String filename = file.getFileName().toString();
+                    Triage triage = classificationService.triageDocument(
+                            new DocumentClassificationInput(content, filename));
+                    event = intakeService.landStandalone(content, contentHash, filename,
+                            tenantId, source.sourceType(), source.modality(), ingestedAt, correlationId, triage);
                 } else {
                     byte[] transcriptContent = transcript != null ? Files.readAllBytes(transcript) : null;
                     String transcriptFilename = transcript != null ? transcript.getFileName().toString() : null;
@@ -221,8 +234,9 @@ public class MediaIntakeOrchestrator {
                     List<String> participants = null;
                     Instant sourceTimestamp = null;
                     String sourceRef = null;
+                    MeetingMetadata meetingMetadata = null;
                     if (meetingMetadataFile != null) {
-                        MeetingMetadata meetingMetadata = readMeetingMetadata(source, meetingMetadataFile);
+                        meetingMetadata = readMeetingMetadata(source, meetingMetadataFile);
                         if (meetingMetadata != null) {
                             participants = meetingMetadata.participants().stream()
                                     .map(ParticipantActivity::name).toList();
@@ -236,10 +250,16 @@ public class MediaIntakeOrchestrator {
                         }
                     }
 
+                    String transcriptText = transcriptContent != null
+                            ? new String(transcriptContent, StandardCharsets.UTF_8) : null;
+                    Triage triage = classificationService.triageMeeting(
+                            new MeetingClassificationInput(meetingMetadata, transcriptText),
+                            file.getFileName().toString());
+
                     event = intakeService.landMeeting(content, contentHash, file.getFileName().toString(),
                             transcriptContent, transcriptFilename, meetingMetadataContent,
                             meetingMetadataFilename, tenantId, source.sourceType(), ingestedAt,
-                            participants, sourceTimestamp, sourceRef, correlationId);
+                            participants, sourceTimestamp, sourceRef, correlationId, triage);
                 }
                 eventPublisher.publish(event);
 

@@ -10,9 +10,19 @@ import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.rnd.bridge.media.classification.DocumentClassificationInput;
+import com.rnd.bridge.media.classification.MediaClassificationService;
+import com.rnd.bridge.media.classification.Triage;
 import com.rnd.bridge.media.meeting.FixtureBbbMeetingMetadataReader;
 import com.rnd.bridge.media.meeting.FixtureZoomMeetingMetadataReader;
 import com.rnd.bridge.raw.model.ChangeType;
+import com.rnd.bridge.raw.model.Classification;
+import com.rnd.bridge.raw.model.ClassifierInfo;
+import com.rnd.bridge.raw.model.DecidedBy;
+import com.rnd.bridge.raw.model.DocumentCategory;
+import com.rnd.bridge.raw.model.Label;
+import com.rnd.bridge.raw.model.Quality;
+import com.rnd.bridge.raw.model.Sensitivity;
 import com.rnd.bridge.raw.model.Modality;
 import com.rnd.bridge.raw.model.RawObjectEvent;
 import com.rnd.bridge.raw.model.RawObjectRef;
@@ -42,14 +52,17 @@ class MediaIntakeOrchestratorTest {
     private final MediaIntakeService intakeService = mock(MediaIntakeService.class);
     private final MediaEventPublisher eventPublisher = mock(MediaEventPublisher.class);
     private final MediaDedupIndex dedupIndex = mock(MediaDedupIndex.class);
+    private final MediaClassificationService classificationService = mock(MediaClassificationService.class);
 
     private MediaIntakeOrchestrator orchestrator;
 
     @BeforeEach
     void setUp() {
         when(dedupIndex.checkAndRecord(any(), any(), any())).thenReturn(false);
+        when(classificationService.triageMeeting(any(), any())).thenReturn(Triage.UNCLASSIFIED);
+        when(classificationService.triageDocument(any())).thenReturn(Triage.UNCLASSIFIED);
         orchestrator = new MediaIntakeOrchestrator(
-                intakeService, eventPublisher, dedupIndex,
+                intakeService, eventPublisher, dedupIndex, classificationService,
                 new FixtureZoomMeetingMetadataReader(new ObjectMapper()),
                 new FixtureBbbMeetingMetadataReader(),
                 zoomDir.toString(), bbbDir.toString(), scannedDocsDir.toString(),
@@ -84,7 +97,7 @@ class MediaIntakeOrchestratorTest {
         RawObjectEvent event = fakeMeetingEvent("MEETING/demo-tenant/2026-08-30/x.mp3");
         when(intakeService.landMeeting(any(), any(), eq("meeting.mp3"), isNull(), isNull(), isNull(),
                 isNull(), eq("demo-tenant"), eq(RawSourceType.MEETING), any(), isNull(), isNull(),
-                isNull(), any()))
+                isNull(), any(), eq(Triage.UNCLASSIFIED)))
                 .thenReturn(event);
 
         MediaIntakeOrchestrator.IntakeSummary summary = orchestrator.runIntake();
@@ -116,7 +129,7 @@ class MediaIntakeOrchestratorTest {
         RawObjectEvent event = fakeMeetingEvent("MEETING/demo-tenant/2026-08-30/x.mp3");
         when(intakeService.landMeeting(any(), any(), eq("meeting.mp3"), any(), eq("meeting.vtt"), isNull(),
                 isNull(), eq("demo-tenant"), eq(RawSourceType.MEETING), any(), isNull(), isNull(),
-                isNull(), any()))
+                isNull(), any(), eq(Triage.UNCLASSIFIED)))
                 .thenReturn(event);
 
         MediaIntakeOrchestrator.IntakeSummary summary = orchestrator.runIntake();
@@ -126,7 +139,7 @@ class MediaIntakeOrchestratorTest {
         assertThat(Files.exists(zoomDir.resolve("uploaded").resolve("meeting.vtt"))).isTrue();
         verify(intakeService).landMeeting(any(), any(), eq("meeting.mp3"), any(), eq("meeting.vtt"), isNull(),
                 isNull(), eq("demo-tenant"), eq(RawSourceType.MEETING), any(), isNull(), isNull(),
-                isNull(), any());
+                isNull(), any(), eq(Triage.UNCLASSIFIED));
     }
 
     @Test
@@ -143,7 +156,7 @@ class MediaIntakeOrchestratorTest {
         RawObjectEvent event = fakeMeetingEvent("MEETING/demo-tenant/2026-08-30/x.mp3");
         when(intakeService.landMeeting(any(), any(), eq("meeting.mp3"), isNull(), isNull(), any(),
                 eq("meeting.meeting.json"), eq("demo-tenant"), eq(RawSourceType.MEETING), any(),
-                eq(List.of("Dana Levi", "Esther Ora")), eq(meetingStartedAt), eq("1"), any()))
+                eq(List.of("Dana Levi", "Esther Ora")), eq(meetingStartedAt), eq("1"), any(), eq(Triage.UNCLASSIFIED)))
                 .thenReturn(event);
 
         MediaIntakeOrchestrator.IntakeSummary summary = orchestrator.runIntake();
@@ -158,7 +171,7 @@ class MediaIntakeOrchestratorTest {
         verify(intakeService).landMeeting(any(), any(), eq("meeting.mp3"), isNull(), isNull(), any(),
                 eq("meeting.meeting.json"), eq("demo-tenant"), eq(RawSourceType.MEETING), any(),
                 eq(List.of("Dana Levi", "Esther Ora")), eq(meetingStartedAt), eq("1"),
-                correlationId.capture());
+                correlationId.capture(), eq(Triage.UNCLASSIFIED));
         assertThat(correlationId.getValue()).isNotBlank();
     }
 
@@ -167,7 +180,7 @@ class MediaIntakeOrchestratorTest {
         Files.write(scannedDocsDir.resolve("receipt.pdf"), "f".repeat(2000).getBytes());
         RawObjectEvent event = fakeScannedDocEvent("SCANNED_DOC/demo-tenant/2026-08-30/x.pdf");
         when(intakeService.landStandalone(any(), any(), eq("receipt.pdf"), eq("demo-tenant"),
-                eq(RawSourceType.SCANNED_DOC), eq(Modality.SCANNED_DOC), any(), any()))
+                eq(RawSourceType.SCANNED_DOC), eq(Modality.SCANNED_DOC), any(), any(), eq(Triage.UNCLASSIFIED)))
                 .thenReturn(event);
 
         MediaIntakeOrchestrator.IntakeSummary summary = orchestrator.runIntake();
@@ -177,12 +190,37 @@ class MediaIntakeOrchestratorTest {
     }
 
     @Test
+    void scannedDocIsLandedWithTheTriageItWasClassifiedAs() throws Exception {
+        byte[] content = "g".repeat(2000).getBytes();
+        Files.write(scannedDocsDir.resolve("blank.png"), content);
+        Triage blankPage = new Triage(ScopeDecision.EXCLUDED, new Classification(
+                DecidedBy.RULE, Label.fromRule(DocumentCategory.BLANK), Label.fromRule(Quality.GOOD),
+                Label.fromRule(Sensitivity.NONE), "page has no visible content",
+                new ClassifierInfo(ClassifierInfo.RULES_MODEL, "v1")));
+        when(classificationService.triageDocument(any())).thenReturn(blankPage);
+        RawObjectEvent event = fakeScannedDocEvent("SCANNED_DOC/demo-tenant/2026-08-30/x.png");
+        when(intakeService.landStandalone(any(), any(), eq("blank.png"), eq("demo-tenant"),
+                eq(RawSourceType.SCANNED_DOC), eq(Modality.SCANNED_DOC), any(), any(), eq(blankPage)))
+                .thenReturn(event);
+
+        orchestrator.runIntake();
+
+        // Classified after dedup and before landing, from the file's own bytes and name - and
+        // an EXCLUDED item is still landed and published, never dropped.
+        ArgumentCaptor<DocumentClassificationInput> input = ArgumentCaptor.forClass(DocumentClassificationInput.class);
+        verify(classificationService).triageDocument(input.capture());
+        assertThat(input.getValue().content()).isEqualTo(content);
+        assertThat(input.getValue().filename()).isEqualTo("blank.png");
+        verify(eventPublisher).publish(event);
+    }
+
+    @Test
     void failedLandRollsBackTheDedupClaimSoARetryIsNotBlockedForever() throws Exception {
         byte[] content = "d".repeat(2000).getBytes();
         Files.write(zoomDir.resolve("broken.mp3"), content);
         when(intakeService.landMeeting(any(), any(), eq("broken.mp3"), isNull(), isNull(), isNull(),
                 isNull(), eq("demo-tenant"), eq(RawSourceType.MEETING), any(), isNull(), isNull(),
-                isNull(), any()))
+                isNull(), any(), eq(Triage.UNCLASSIFIED)))
                 .thenThrow(new IllegalStateException("MinIO unreachable"));
 
         MediaIntakeOrchestrator.IntakeSummary summary = orchestrator.runIntake();

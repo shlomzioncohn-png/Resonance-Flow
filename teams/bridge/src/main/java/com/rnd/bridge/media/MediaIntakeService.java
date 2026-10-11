@@ -1,5 +1,6 @@
 package com.rnd.bridge.media;
 
+import com.rnd.bridge.media.classification.Triage;
 import com.rnd.bridge.raw.model.ChangeType;
 import com.rnd.bridge.raw.model.Modality;
 import com.rnd.bridge.raw.model.RawObjectEvent;
@@ -26,6 +27,10 @@ import org.springframework.stereotype.Service;
  * through one MinIO client/bucket instead of each wiring its own - and builds the matching
  * RawObjectEvent, under the shared "one event, objects[] list" shape (see
  * {@link RawObjectEvent}'s javadoc) rather than one event per physical file.
+ * <p>
+ * The scope_decision on both the event and every landed object's MinIO tags, and the event's
+ * optional classification, come from the caller's {@link Triage} (see
+ * media.classification.MediaClassificationService) - this class only applies them.
  * <p>
  * Both this lane's items are brand-new on first landing and never revised afterward (a Zoom
  * recording doesn't get edited; a scanned doc doesn't either) - so every event this class
@@ -54,11 +59,11 @@ public class MediaIntakeService {
      */
     public RawObjectEvent landStandalone(byte[] content, String contentHash, String filename, String tenantId,
                                           RawSourceType sourceType, Modality modality, Instant ingestedAt,
-                                          String correlationId) {
+                                          String correlationId, Triage triage) {
         RawObjectRef object = landObject(content, contentHash, filename, tenantId, sourceType, ingestedAt,
-                correlationId, Role.BODY, modality);
+                correlationId, Role.BODY, modality, triage.scopeDecision());
         return buildEvent(sourceType, tenantId, correlationId, ingestedAt, null, null, null,
-                List.of(object));
+                List.of(object), triage);
     }
 
     /**
@@ -74,43 +79,45 @@ public class MediaIntakeService {
                                        String transcriptFilename, byte[] metadataContent,
                                        String metadataFilename, String tenantId, RawSourceType sourceType,
                                        Instant ingestedAt, List<String> participants, Instant sourceTimestamp,
-                                       String sourceRef, String correlationId) {
+                                       String sourceRef, String correlationId, Triage triage) {
+        ScopeDecision scopeDecision = triage.scopeDecision();
         List<RawObjectRef> objects = new ArrayList<>();
         objects.add(landObject(recordingContent, recordingContentHash, recordingFilename, tenantId, sourceType,
-                ingestedAt, correlationId, Role.RECORDING, Modality.AUDIO));
+                ingestedAt, correlationId, Role.RECORDING, Modality.AUDIO, scopeDecision));
 
         if (transcriptContent != null) {
             objects.add(landObject(transcriptContent, sha256Hex(transcriptContent), transcriptFilename, tenantId,
-                    sourceType, ingestedAt, correlationId, Role.TRANSCRIPT, Modality.TEXT));
+                    sourceType, ingestedAt, correlationId, Role.TRANSCRIPT, Modality.TEXT, scopeDecision));
         }
         if (metadataContent != null) {
             objects.add(landObject(metadataContent, sha256Hex(metadataContent), metadataFilename, tenantId,
-                    sourceType, ingestedAt, correlationId, Role.SOURCE_METADATA, Modality.TEXT));
+                    sourceType, ingestedAt, correlationId, Role.SOURCE_METADATA, Modality.TEXT, scopeDecision));
         }
 
         return buildEvent(sourceType, tenantId, correlationId, ingestedAt, participants, sourceTimestamp,
-                sourceRef, objects);
+                sourceRef, objects, triage);
     }
 
     private RawObjectEvent buildEvent(RawSourceType sourceType, String tenantId, String correlationId,
                                        Instant ingestedAt, List<String> participants, Instant sourceTimestamp,
-                                       String sourceRef, List<RawObjectRef> objects) {
+                                       String sourceRef, List<RawObjectRef> objects, Triage triage) {
         return RawObjectEvent.create(
-                sourceType, tenantId, correlationId, ingestedAt, ScopeDecision.INCLUDED,
+                sourceType, tenantId, correlationId, ingestedAt, triage.scopeDecision(),
                 NEW_ITEM_REVISION, ChangeType.UPSERT, NEW_ITEM_SIGNIFICANCE_SCORE,
-                participants, sourceTimestamp, sourceRef, objects);
+                participants, sourceTimestamp, sourceRef, objects)
+                .withClassification(triage.classification());
     }
 
     private RawObjectRef landObject(byte[] content, String contentHash, String filename, String tenantId,
                                      RawSourceType sourceType, Instant ingestedAt, String correlationId,
-                                     Role role, Modality modality) {
+                                     Role role, Modality modality, ScopeDecision scopeDecision) {
         String extension = extractExtension(filename);
         String contentType = contentTypeFor(role, extension);
         String objectKey = buildObjectKey(sourceType, tenantId, ingestedAt, correlationId, extension);
 
         PutResult putResult = storageClient.putObject(
                 objectKey, content, contentType,
-                ObjectTags.of(sourceType, tenantId, ingestedAt, ScopeDecision.INCLUDED));
+                ObjectTags.of(sourceType, tenantId, ingestedAt, scopeDecision));
 
         return new RawObjectRef(role, objectKey, contentHash, putResult.contentType(), putResult.sizeBytes(),
                 modality);

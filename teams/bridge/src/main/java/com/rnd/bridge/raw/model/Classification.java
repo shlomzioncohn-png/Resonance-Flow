@@ -11,8 +11,9 @@ import java.util.Objects;
  * people, dates or priority - extraction stays with Mind and priority with Chain, and reason
  * is held to the same rule.
  * <p>
- * Optional on the event: absent means no classifier ran (or it failed / wasn't confident), so
- * scopeDecision is the INCLUDED default rather than a judgement. Wire contract:
+ * Optional on the event: absent means nothing classified the item (disabled, or the classifier
+ * failed), so scopeDecision is the INCLUDED default rather than a judgement. A low-confidence
+ * result is still attached - it just never makes the item EXCLUDED. Wire contract:
  * shared/proto/raw-object-event.proto, where consumers are told to treat an unknown value as
  * "other" so new values stay non-breaking.
  *

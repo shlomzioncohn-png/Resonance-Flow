@@ -287,6 +287,39 @@ Per file, before it lands:
    Zoom API wiring needs a `meetingId` this lane's manual-folder trigger doesn't have yet, and
    real BBB per-participant data would need callback infrastructure this lane doesn't have.
 
+### Classification (scope_decision)
+
+After dedup and before landing, `media/classification/MediaClassificationService` decides each
+item's `scope_decision` and attaches the optional `classification` object it was derived from
+(category, file quality, sensitivity level, reason, and which model/prompt decided - see
+`raw/model/Classification` and `shared/proto/raw-object-event.proto`). It only tags the item as
+a whole; it never extracts tasks, people, dates or priority - that stays with Mind.
+
+1. **Rules first** (free, deterministic, `decided_by: RULE`): a meeting shorter than
+   `min-meeting-duration` or with no spoken transcript text → `TEST`; an all-white page →
+   `BLANK`.
+2. **Model second**, only for what the rules didn't settle (`decided_by: MODEL`): a meeting is
+   judged from its topic + transcript excerpt (never the audio, never participant names), a
+   scanned doc from its page image. Any OpenAI-compatible endpoint works - Gemini by default;
+   switching provider is a change to `bridge.media.classification.model.*` only. PDFs aren't
+   sent (images only).
+3. **Fails open**: disabled, model error, rate limit or a malformed reply → `INCLUDED`, no
+   `classification`. An item is `EXCLUDED` only when its category is in
+   `excluded-meeting-categories`/`excluded-document-categories` **and** its confidence reaches
+   `min-confidence-to-exclude` (0.6). `EXCLUDED` items are still landed and published - just
+   tagged, so mistakes can be reviewed.
+
+To try it, in `.env`:
+
+```bash
+BRIDGE_MEDIA_CLASSIFICATION_ENABLED=true
+BRIDGE_MEDIA_CLASSIFIER_API_KEY=<your Gemini key>   # omit to run the rules only
+```
+
+Each decision is logged (`MediaClassificationService`: category, confidence, reason), and shows up
+in the published event's `scope_decision`/`classification` and in the landed objects'
+`scope_decision` MinIO tag.
+
 **Known gaps (tracked in issue #45):**
 - Test samples aren't yet drawn from the real public corpora named in the spec (AMI/ICSI,
   RVL-CDIP/FUNSD) - current samples are placeholder files.
