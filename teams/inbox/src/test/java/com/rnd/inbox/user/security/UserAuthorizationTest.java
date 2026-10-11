@@ -8,6 +8,8 @@ import com.rnd.inbox.tenant.model.Tenant;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
@@ -166,5 +168,71 @@ class UserAuthorizationTest {
         assertThatThrownBy(() ->
                 userAuthorization.assertCanCreateIn(new ActorScope.SelfOnly(actorId), tenant))
                 .isInstanceOf(ForbiddenActionException.class);
+    }
+
+    @ParameterizedTest
+    @CsvSource({
+            "SYSTEM_ADMIN, SYSTEM_ADMIN, true",
+            "SYSTEM_ADMIN, TENANT_ADMIN, true",
+            "SYSTEM_ADMIN, TEAM_LEAD, true",
+            "SYSTEM_ADMIN, EMPLOYEE, true",
+            "TENANT_ADMIN, SYSTEM_ADMIN, false",
+            "TENANT_ADMIN, TENANT_ADMIN, true",
+            "TENANT_ADMIN, TEAM_LEAD, true",
+            "TENANT_ADMIN, EMPLOYEE, true",
+            "TEAM_LEAD, SYSTEM_ADMIN, false",
+            "TEAM_LEAD, TENANT_ADMIN, false",
+            "TEAM_LEAD, TEAM_LEAD, false",
+            "TEAM_LEAD, EMPLOYEE, false",
+            "EMPLOYEE, SYSTEM_ADMIN, false",
+            "EMPLOYEE, TENANT_ADMIN, false",
+            "EMPLOYEE, TEAM_LEAD, false",
+            "EMPLOYEE, EMPLOYEE, false"
+    })
+    void assertCanAssignRole_allowsOnlyRolesTheActorMayGrant(UserRole actorRole, UserRole role, boolean allowed) {
+        actor.setRole(actorRole);
+
+        if (allowed) {
+            assertThatNoException().isThrownBy(() -> userAuthorization.assertCanAssignRole(actor, role));
+        } else {
+            assertThatThrownBy(() -> userAuthorization.assertCanAssignRole(actor, role))
+                    .isInstanceOf(ForbiddenActionException.class);
+        }
+    }
+
+    @Test
+    void assertCanChangeRole_whenRoleIsUnchanged_neverThrowsEvenForEmployee() {
+        actor.setRole(UserRole.EMPLOYEE);
+        target.setRole(UserRole.EMPLOYEE);
+
+        assertThatNoException().isThrownBy(
+                () -> userAuthorization.assertCanChangeRole(actor, target, UserRole.EMPLOYEE));
+    }
+
+    @Test
+    void assertCanChangeRole_whenEmployeeChangesRole_throwsForbiddenActionException() {
+        actor.setRole(UserRole.EMPLOYEE);
+        target.setRole(UserRole.EMPLOYEE);
+
+        assertThatThrownBy(() -> userAuthorization.assertCanChangeRole(actor, target, UserRole.TEAM_LEAD))
+                .isInstanceOf(ForbiddenActionException.class);
+    }
+
+    @Test
+    void assertCanChangeRole_whenTenantAdminDemotesSystemAdmin_throwsForbiddenActionException() {
+        actor.setRole(UserRole.TENANT_ADMIN);
+        target.setRole(UserRole.SYSTEM_ADMIN);
+
+        assertThatThrownBy(() -> userAuthorization.assertCanChangeRole(actor, target, UserRole.EMPLOYEE))
+                .isInstanceOf(ForbiddenActionException.class);
+    }
+
+    @Test
+    void assertCanChangeRole_whenTenantAdminPromotesEmployeeToTenantAdmin_doesNotThrow() {
+        actor.setRole(UserRole.TENANT_ADMIN);
+        target.setRole(UserRole.EMPLOYEE);
+
+        assertThatNoException().isThrownBy(
+                () -> userAuthorization.assertCanChangeRole(actor, target, UserRole.TENANT_ADMIN));
     }
 }

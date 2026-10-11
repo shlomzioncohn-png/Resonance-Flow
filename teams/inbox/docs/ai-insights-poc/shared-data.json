@@ -1,0 +1,67 @@
+{
+  "period": {
+    "current": {
+      "from": "2026-09-07",
+      "to": "2026-10-06"
+    },
+    "previous": {
+      "from": "2026-08-08",
+      "to": "2026-09-06"
+    }
+  },
+  "currentPeriod": {
+    "tasksCompleted": 18,
+    "completedWithDeadline": 15,
+    "completedOnTime": 10,
+    "completedLate": 5,
+    "onTimeRate": 0.67,
+    "medianHoursLate": 14,
+    "byEstimatedEffort": {
+      "short": {
+        "completedWithDeadline": 6,
+        "completedLate": 0,
+        "lateRate": 0.0
+      },
+      "medium": {
+        "completedWithDeadline": 5,
+        "completedLate": 1,
+        "lateRate": 0.20
+      },
+      "long": {
+        "completedWithDeadline": 4,
+        "completedLate": 4,
+        "lateRate": 1.0
+      }
+    }
+  },
+  "previousPeriod": {
+    "tasksCompleted": 14,
+    "completedWithDeadline": 12,
+    "completedOnTime": 6,
+    "completedLate": 6,
+    "onTimeRate": 0.50,
+    "medianHoursLate": 21,
+    "byEstimatedEffort": {
+      "short": {
+        "completedWithDeadline": 5,
+        "completedLate": 1,
+        "lateRate": 0.20
+      },
+      "medium": {
+        "completedWithDeadline": 4,
+        "completedLate": 2,
+        "lateRate": 0.50
+      },
+      "long": {
+        "completedWithDeadline": 3,
+        "completedLate": 3,
+        "lateRate": 1.0
+      }
+    }
+  },
+  "openNow": {
+    "openTasks": 7,
+    "overdueTasks": 2,
+    "dueWithin7Days": 3
+  }
+}
