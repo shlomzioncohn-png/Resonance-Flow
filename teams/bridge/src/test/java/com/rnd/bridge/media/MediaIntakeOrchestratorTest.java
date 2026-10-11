@@ -12,15 +12,19 @@ import static org.mockito.Mockito.when;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.rnd.bridge.media.meeting.FixtureBbbMeetingMetadataReader;
 import com.rnd.bridge.media.meeting.FixtureZoomMeetingMetadataReader;
+import com.rnd.bridge.raw.model.ChangeType;
 import com.rnd.bridge.raw.model.Modality;
 import com.rnd.bridge.raw.model.RawObjectEvent;
+import com.rnd.bridge.raw.model.RawObjectRef;
 import com.rnd.bridge.raw.model.RawSourceType;
+import com.rnd.bridge.raw.model.Role;
 import com.rnd.bridge.raw.model.ScopeDecision;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.security.MessageDigest;
 import java.time.Instant;
 import java.util.HexFormat;
+import java.util.List;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -77,15 +81,15 @@ class MediaIntakeOrchestratorTest {
     @Test
     void validFileIsLandedPublishedAndMovedToUploaded() throws Exception {
         Files.write(zoomDir.resolve("meeting.mp3"), "a".repeat(2000).getBytes());
-        RawObjectEvent event = fakeEvent("MEETING/demo-tenant/2026-08-30/x.mp3");
-        when(intakeService.land(any(), any(), eq("meeting.mp3"), eq("demo-tenant"),
-                eq(RawSourceType.MEETING), eq(Modality.AUDIO), any(), isNull(), isNull(), isNull(),
+        RawObjectEvent event = fakeMeetingEvent("MEETING/demo-tenant/2026-08-30/x.mp3");
+        when(intakeService.landMeeting(any(), any(), eq("meeting.mp3"), isNull(), isNull(), isNull(),
+                isNull(), eq("demo-tenant"), eq(RawSourceType.MEETING), any(), isNull(), isNull(),
                 isNull(), any()))
                 .thenReturn(event);
 
         MediaIntakeOrchestrator.IntakeSummary summary = orchestrator.runIntake();
 
-        assertThat(summary.uploadedObjectKeys()).containsExactly(event.objectKey());
+        assertThat(summary.uploadedObjectKeys()).containsExactly(event.objects().get(0).objectKey());
         assertThat(Files.exists(zoomDir.resolve("uploaded").resolve("meeting.mp3"))).isTrue();
         verify(eventPublisher).publish(event);
         verify(dedupIndex).checkAndRecord(eq(RawSourceType.MEETING), eq("demo-tenant"), any());
@@ -109,74 +113,75 @@ class MediaIntakeOrchestratorTest {
     void transcriptSidecarIsLandedAndLinkedNotProcessedOnItsOwn() throws Exception {
         Files.write(zoomDir.resolve("meeting.mp3"), "c".repeat(2000).getBytes());
         Files.writeString(zoomDir.resolve("meeting.vtt"), "WEBVTT transcript");
-        String transcriptKey = "MEETING/demo-tenant/2026-08-30/t.vtt";
-        when(intakeService.landTranscript(any(), eq("meeting.vtt"), eq("demo-tenant"),
-                eq(RawSourceType.MEETING), any(), any()))
-                .thenReturn(transcriptKey);
-        RawObjectEvent event = fakeEvent("MEETING/demo-tenant/2026-08-30/x.mp3");
-        when(intakeService.land(any(), any(), eq("meeting.mp3"), eq("demo-tenant"),
-                eq(RawSourceType.MEETING), eq(Modality.AUDIO), any(), eq(transcriptKey), isNull(),
-                isNull(), isNull(), any()))
+        RawObjectEvent event = fakeMeetingEvent("MEETING/demo-tenant/2026-08-30/x.mp3");
+        when(intakeService.landMeeting(any(), any(), eq("meeting.mp3"), any(), eq("meeting.vtt"), isNull(),
+                isNull(), eq("demo-tenant"), eq(RawSourceType.MEETING), any(), isNull(), isNull(),
+                isNull(), any()))
                 .thenReturn(event);
 
         MediaIntakeOrchestrator.IntakeSummary summary = orchestrator.runIntake();
 
-        assertThat(summary.uploadedObjectKeys()).containsExactly(event.objectKey());
+        assertThat(summary.uploadedObjectKeys()).containsExactly(event.objects().get(0).objectKey());
         assertThat(summary.failedFiles()).isEmpty();
         assertThat(Files.exists(zoomDir.resolve("uploaded").resolve("meeting.vtt"))).isTrue();
-        verify(intakeService).landTranscript(any(), eq("meeting.vtt"), eq("demo-tenant"),
-                eq(RawSourceType.MEETING), any(), any());
+        verify(intakeService).landMeeting(any(), any(), eq("meeting.mp3"), any(), eq("meeting.vtt"), isNull(),
+                isNull(), eq("demo-tenant"), eq(RawSourceType.MEETING), any(), isNull(), isNull(),
+                isNull(), any());
     }
 
     @Test
-    void meetingMetadataSidecarIsLandedLinkedAndParticipantsExtracted() throws Exception {
+    void meetingMetadataSidecarIsLandedLinkedParticipantsAndSourceRefExtracted() throws Exception {
         Files.write(zoomDir.resolve("meeting.mp3"), "e".repeat(2000).getBytes());
         Files.writeString(zoomDir.resolve("meeting.meeting.json"), """
-                {"id": "1", "topic": "Sync", "host_name": "Dana",
+                {"id": "1", "topic": "Sync", "user_email": "dana@example.com",
                  "start_time": "2026-09-08T09:00:00Z", "end_time": "2026-09-08T09:30:00Z",
                  "participants": [
                    {"id": "a", "name": "Dana Levi", "join_time": "2026-09-08T09:00:00Z", "leave_time": "2026-09-08T09:30:00Z"},
                    {"id": "b", "name": "Esther Ora", "join_time": "2026-09-08T09:01:00Z", "leave_time": "2026-09-08T09:30:00Z"}
                  ]}""");
-        String meetingMetadataKey = "MEETING/demo-tenant/2026-08-30/m.json";
-        when(intakeService.landMeetingMetadata(any(), eq("meeting.meeting.json"), eq("demo-tenant"),
-                eq(RawSourceType.MEETING), any(), any()))
-                .thenReturn(meetingMetadataKey);
         Instant meetingStartedAt = Instant.parse("2026-09-08T09:00:00Z");
-        RawObjectEvent event = fakeEvent("MEETING/demo-tenant/2026-08-30/x.mp3");
-        when(intakeService.land(any(), any(), eq("meeting.mp3"), eq("demo-tenant"),
-                eq(RawSourceType.MEETING), eq(Modality.AUDIO), any(), isNull(),
-                eq(java.util.List.of("Dana Levi", "Esther Ora")), eq(meetingMetadataKey),
-                eq(meetingStartedAt), any()))
+        RawObjectEvent event = fakeMeetingEvent("MEETING/demo-tenant/2026-08-30/x.mp3");
+        when(intakeService.landMeeting(any(), any(), eq("meeting.mp3"), isNull(), isNull(), any(),
+                eq("meeting.meeting.json"), eq("demo-tenant"), eq(RawSourceType.MEETING), any(),
+                eq(List.of("Dana Levi", "Esther Ora")), eq(meetingStartedAt), eq("1"), any()))
                 .thenReturn(event);
 
         MediaIntakeOrchestrator.IntakeSummary summary = orchestrator.runIntake();
 
-        assertThat(summary.uploadedObjectKeys()).containsExactly(event.objectKey());
+        assertThat(summary.uploadedObjectKeys()).containsExactly(event.objects().get(0).objectKey());
         assertThat(summary.failedFiles()).isEmpty();
         assertThat(Files.exists(zoomDir.resolve("uploaded").resolve("meeting.meeting.json"))).isTrue();
-        verify(intakeService).landMeetingMetadata(any(), eq("meeting.meeting.json"), eq("demo-tenant"),
-                eq(RawSourceType.MEETING), any(), any());
 
-        // The whole point of recordingId: the recording and its sidecar must share the same
-        // one, so they land next to each other in MinIO (see MediaIntakeService.buildObjectKey).
-        ArgumentCaptor<String> metadataRecordingId = ArgumentCaptor.forClass(String.class);
-        verify(intakeService).landMeetingMetadata(any(), eq("meeting.meeting.json"), eq("demo-tenant"),
-                eq(RawSourceType.MEETING), any(), metadataRecordingId.capture());
-        ArgumentCaptor<String> landRecordingId = ArgumentCaptor.forClass(String.class);
-        verify(intakeService).land(any(), any(), eq("meeting.mp3"), eq("demo-tenant"),
-                eq(RawSourceType.MEETING), eq(Modality.AUDIO), any(), isNull(),
-                eq(java.util.List.of("Dana Levi", "Esther Ora")), eq(meetingMetadataKey),
-                eq(meetingStartedAt), landRecordingId.capture());
-        assertThat(landRecordingId.getValue()).isEqualTo(metadataRecordingId.getValue());
+        // The whole point of a shared correlationId: the recording and its sidecars all land
+        // under the same stem in MinIO, and the published event carries that same id.
+        ArgumentCaptor<String> correlationId = ArgumentCaptor.forClass(String.class);
+        verify(intakeService).landMeeting(any(), any(), eq("meeting.mp3"), isNull(), isNull(), any(),
+                eq("meeting.meeting.json"), eq("demo-tenant"), eq(RawSourceType.MEETING), any(),
+                eq(List.of("Dana Levi", "Esther Ora")), eq(meetingStartedAt), eq("1"),
+                correlationId.capture());
+        assertThat(correlationId.getValue()).isNotBlank();
+    }
+
+    @Test
+    void scannedDocIsLandedAsStandaloneBody() throws Exception {
+        Files.write(scannedDocsDir.resolve("receipt.pdf"), "f".repeat(2000).getBytes());
+        RawObjectEvent event = fakeScannedDocEvent("SCANNED_DOC/demo-tenant/2026-08-30/x.pdf");
+        when(intakeService.landStandalone(any(), any(), eq("receipt.pdf"), eq("demo-tenant"),
+                eq(RawSourceType.SCANNED_DOC), eq(Modality.SCANNED_DOC), any(), any()))
+                .thenReturn(event);
+
+        MediaIntakeOrchestrator.IntakeSummary summary = orchestrator.runIntake();
+
+        assertThat(summary.uploadedObjectKeys()).containsExactly(event.objects().get(0).objectKey());
+        verify(eventPublisher).publish(event);
     }
 
     @Test
     void failedLandRollsBackTheDedupClaimSoARetryIsNotBlockedForever() throws Exception {
         byte[] content = "d".repeat(2000).getBytes();
         Files.write(zoomDir.resolve("broken.mp3"), content);
-        when(intakeService.land(any(), any(), eq("broken.mp3"), eq("demo-tenant"),
-                eq(RawSourceType.MEETING), eq(Modality.AUDIO), any(), isNull(), isNull(), isNull(),
+        when(intakeService.landMeeting(any(), any(), eq("broken.mp3"), isNull(), isNull(), isNull(),
+                isNull(), eq("demo-tenant"), eq(RawSourceType.MEETING), any(), isNull(), isNull(),
                 isNull(), any()))
                 .thenThrow(new IllegalStateException("MinIO unreachable"));
 
@@ -187,10 +192,18 @@ class MediaIntakeOrchestratorTest {
         verifyNoInteractions(eventPublisher);
     }
 
-    private RawObjectEvent fakeEvent(String objectKey) {
-        return RawObjectEvent.create(objectKey, RawSourceType.MEETING, "demo-tenant", Instant.now(),
-                ScopeDecision.INCLUDED, "sha256:" + "0".repeat(64), Modality.AUDIO, null,
-                "audio/mpeg", 2000L, null, null, 0);
+    private RawObjectEvent fakeMeetingEvent(String objectKey) {
+        RawObjectRef recording = new RawObjectRef(
+                Role.RECORDING, objectKey, "sha256:" + "0".repeat(64), "audio/mpeg", 2000L, Modality.AUDIO);
+        return RawObjectEvent.create(RawSourceType.MEETING, "demo-tenant", "corr-fake", Instant.now(),
+                ScopeDecision.INCLUDED, 0, ChangeType.UPSERT, 100, null, null, null, List.of(recording));
+    }
+
+    private RawObjectEvent fakeScannedDocEvent(String objectKey) {
+        RawObjectRef body = new RawObjectRef(
+                Role.BODY, objectKey, "sha256:" + "1".repeat(64), "application/pdf", 2000L, Modality.SCANNED_DOC);
+        return RawObjectEvent.create(RawSourceType.SCANNED_DOC, "demo-tenant", "corr-fake-doc", Instant.now(),
+                ScopeDecision.INCLUDED, 0, ChangeType.UPSERT, 100, null, null, null, List.of(body));
     }
 
     private String sha256(byte[] content) throws Exception {

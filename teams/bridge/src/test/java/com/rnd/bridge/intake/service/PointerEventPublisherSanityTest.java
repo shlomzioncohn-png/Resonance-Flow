@@ -11,6 +11,7 @@ import com.rnd.bridge.raw.RawObjectValidator;
 import com.rnd.bridge.raw.model.Modality;
 import com.rnd.bridge.raw.model.RawObjectEvent;
 import com.rnd.bridge.raw.model.RawSourceType;
+import com.rnd.bridge.raw.model.Role;
 import com.rnd.bridge.raw.model.ScopeDecision;
 import com.rnd.bridge.storage.ObjectStorageClient.PutResult;
 import java.nio.charset.StandardCharsets;
@@ -40,10 +41,11 @@ class PointerEventPublisherSanityTest {
                 "DRIVE/kamatech/2026-08-16/x.json", record, ScopeDecision.INCLUDED,
                 new PutResult("image/jpeg", 42L), Instant.now());
 
-        assertThat(event.modality()).isEqualTo(Modality.SCANNED_DOC);
-        assertThat(CONTENT_HASH_PATTERN.matcher(event.contentHash()).matches()).isTrue();
+        assertThat(event.objects()).hasSize(1);
+        assertThat(event.objects().get(0).modality()).isEqualTo(Modality.SCANNED_DOC);
+        assertThat(CONTENT_HASH_PATTERN.matcher(event.objects().get(0).contentHash()).matches()).isTrue();
         assertThat(event.schemaVersion()).isEqualTo("1.0");
-        verify(kafkaTemplate).send(eq("bridge.raw.landed"), eq(event.contentHash()), any(RawObjectEvent.class));
+        verify(kafkaTemplate).send(eq("bridge.raw.landed"), eq(event.correlationId()), any(RawObjectEvent.class));
     }
 
     @Test
@@ -57,7 +59,7 @@ class PointerEventPublisherSanityTest {
                 "EMAIL/kamatech/2026-08-18/x.json", record, ScopeDecision.INCLUDED,
                 new PutResult("application/json", 10L), Instant.now());
 
-        assertThat(event.modality()).isNull();
+        assertThat(event.objects().get(0).modality()).isNull();
     }
 
     @Test
@@ -71,7 +73,8 @@ class PointerEventPublisherSanityTest {
                 "EMAIL/kamatech/2026-08-18/corr-3-1-voice-note.opus", record, ScopeDecision.INCLUDED,
                 new PutResult("audio/opus", 10L), Instant.now());
 
-        assertThat(event.modality()).isEqualTo(Modality.AUDIO);
+        assertThat(event.objects().get(0).modality()).isEqualTo(Modality.AUDIO);
+        assertThat(event.objects().get(0).role()).isEqualTo(Role.ATTACHMENT);
     }
 
     @Test
@@ -102,6 +105,6 @@ class PointerEventPublisherSanityTest {
                 "EMAIL/kamatech/2026-08-18/b.json", record, ScopeDecision.INCLUDED,
                 new PutResult("application/json", 10L), Instant.now());
 
-        assertThat(first.contentHash()).isEqualTo(second.contentHash());
+        assertThat(first.objects().get(0).contentHash()).isEqualTo(second.objects().get(0).contentHash());
     }
 }

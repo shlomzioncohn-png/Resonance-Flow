@@ -166,16 +166,33 @@ packages above. Bridge never builds a `Task` for this content itself - Mind read
 event and extracts the eventual Task from the object.
 
 **Code:** `media/MediaIntakeService.java` (lands already-read bytes through the shared
-`storage.ObjectStorageClient` and builds a `raw.model.RawObjectEvent`, plus
-`landTranscript(...)` for a transcript sidecar), `media/MediaEventPublisher.java` (validates
-via the shared `raw.RawObjectValidator`, then publishes), `media/MediaDedupIndex.java`
+`storage.ObjectStorageClient` and builds the matching `raw.model.RawObjectEvent` -
+`landMeeting(...)` for a recording plus whichever of its transcript/meeting-metadata
+sidecars were found, `landStandalone(...)` for a scanned doc), `media/MediaEventPublisher.java`
+(validates via the shared `raw.RawObjectValidator`, then publishes), `media/MediaDedupIndex.java`
 (content-hash dedup index stored in MinIO, see below), `media/MediaIntakeOrchestrator.java`
 (manual test intake, see below - holds a declarative list of `{directory, sourceType,
 modality}` mappings, so adding a new intake folder is a new list entry, not a new method),
 `media/controller/MediaIntakeController.java` (triggers it). `source_type` for this lane is
-`MEETING` (Zoom/BBB, `modality: audio`) or `SCANNED_DOC` (`modality: scanned_doc`) - both
-values on the shared `raw.model.RawSourceType` enum (`SCANNED_DOC` isn't in Mind's confirmed
-contract yet - tracked in [#188](https://github.com/KamaTechOrg/Resonance-Flow/issues/188)).
+`MEETING` (Zoom/BBB) or `SCANNED_DOC` - both values on the shared `raw.model.RawSourceType`
+enum (`SCANNED_DOC` isn't in Mind's confirmed contract yet - tracked in
+[#188](https://github.com/KamaTechOrg/Resonance-Flow/issues/188)).
+
+**Schema shape (as of issue [#31](https://github.com/KamaTechOrg/Resonance-Flow/issues/31)):**
+one `RawObjectEvent` per logical recording/doc, not one per physical file.
+`object_key`/`content_hash`/`content_type`/`size_bytes`/`modality` live on each entry of the
+event's `objects[]` list (`raw.model.RawObjectRef`), tagged with a `role`
+(`RECORDING`/`TRANSCRIPT`/`SOURCE_METADATA` for this lane; `BODY`/`ATTACHMENT` are Malki's).
+`transcript_object_key` and the former `additional_metadata_object_key` are gone - a
+transcript or meeting-metadata sidecar is just another entry in `objects[]` now, not a
+pointer field. `correlation_id` is required and is this lane's Kafka dedup key (not a content
+hash, since there's no longer one single hash on the event) - a fresh UUID per landed
+recording, shared by every object's `object_key` so they land next to each other in MinIO.
+`source_ref` is Zoom/BBB's own stable reference for the meeting (the Report API's `uuid`,
+falling back to `meetingId` for BBB) - distinct from any `object_key`, which only ever points
+into our own MinIO copy. `revision`/`change_type`/`change_significance_score` are always
+`0`/`UPSERT`/`100` on this lane - a Zoom/BBB recording or scanned doc is never revised once
+landed, unlike Malki's lane where an edited email/message bumps `revision`.
 
 ### Running it locally
 
@@ -215,8 +232,8 @@ Per file, before it lands:
    lane's sync cursor). A file whose content hash is already in the index is moved to
    `uploaded/` but not re-landed or re-published.
 3. **Transcript pairing** (`MEETING` only) - a same-basename sidecar file (`.vtt`, `.srt`, or
-   `.txt`) next to a recording is landed alongside it and linked via the recording's
-   `transcript_object_key` - it does not get its own `RawObjectEvent`. Both files move to
+   `.txt`) next to a recording is landed alongside it as a `role: TRANSCRIPT` entry in the
+   same event's `objects[]` - it does not get its own `RawObjectEvent`. Both files move to
    `uploaded/` together.
 
    For real Zoom, that `.vtt` is what Zoom's own Cloud Recording API returns: `GET
@@ -245,18 +262,15 @@ Per file, before it lands:
    subset once it's implemented.
 4. **Meeting-metadata pairing** (`MEETING` only) - a same-basename sidecar carrying the
    source platform's own meeting report is landed alongside the recording, in its native
-   format (no conversion), and linked via the recording's `additional_metadata_object_key`:
+   format (no conversion), as a `role: SOURCE_METADATA` entry in the same event's `objects[]`:
    `<basename>.meeting.json` in the Zoom folder, `<basename>.metadata.xml` in the BBB folder.
    Both fixtures are field-for-field copies of each platform's own **officially documented**
    API response shape (Zoom's Dashboard/Report API; BBB's `GET getRecordings` - verified
    live against https://docs.bigbluebutton.org/development/api/#get-getrecordings, not from
    memory), with fabricated example values where we have no live API access yet. It's parsed
-   once (`media/meeting/MeetingMetadataReader` + fixture implementations) purely to fill the
-   recording's `participants` field with names - the landed sidecar bytes themselves are
-   untouched. **`additionalMetadataObjectKey` is not yet in Mind's confirmed contract** - same
-   status as `SCANNED_DOC` before it was confirmed. Named generically (not
-   `meetingMetadataObjectKey`) since any source, not just `MEETING`, could eventually land its
-   own such sidecar - see `RawObjectEvent`'s javadoc.
+   once (`media/meeting/MeetingMetadataReader` + fixture implementations) to fill the event's
+   `participants`/`source_timestamp`/`source_ref` fields - the landed sidecar bytes themselves
+   are untouched.
 
    Note: BBB's `getRecordings` only returns a participant **count** (`<participants>3</participants>`),
    never a per-person list - BBB has no public documented endpoint for that. The only place

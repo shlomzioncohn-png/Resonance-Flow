@@ -46,13 +46,13 @@ import java.util.stream.Stream;
  * to "rejected/" and never lands; (2) dedup check against {@link MediaDedupIndex} (MinIO,
  * keyed per source_type/tenant) - a content hash already seen is moved to "uploaded/" but
  * not re-landed/re-published; (3) for a MEETING recording, a same-basename transcript
- * sidecar ({@code .vtt}/{@code .srt}/{@code .txt}) is landed alongside it and linked via
- * transcriptObjectKey, and a same-basename meeting-metadata sidecar (Zoom:
- * {@code .meeting.json}, BBB: {@code .metadata.xml}) is landed and linked via
- * additionalMetadataObjectKey, with its parsed participant names on the event's participants
- * field; (4) land + publish. Both sidecar kinds are moved to "uploaded/" alongside their
- * recording even when the recording itself turns out to be a dedup skip, or they'd sit
- * unmatched forever (same reasoning already applied to transcripts).
+ * sidecar ({@code .vtt}/{@code .srt}/{@code .txt}) and a same-basename meeting-metadata
+ * sidecar (Zoom: {@code .meeting.json}, BBB: {@code .metadata.xml}) are landed alongside it
+ * as additional entries in the one event's {@code objects[]} list (see
+ * {@link MediaIntakeService#landMeeting}), not as separate pointer fields; (4) land + publish
+ * one event for the whole logical recording. Both sidecar kinds are moved to "uploaded/"
+ * alongside their recording even when the recording itself turns out to be a dedup skip, or
+ * they'd sit unmatched forever (same reasoning already applied to transcripts).
  */
 @Service
 public class MediaIntakeOrchestrator {
@@ -197,40 +197,50 @@ public class MediaIntakeOrchestrator {
 
             try {
                 Instant ingestedAt = Instant.now();
-                // Shared by this recording's object_key and its sidecars' object_keys, so
-                // the (up to) 3 files land next to each other when browsing MinIO by name -
-                // object_key's schema-enforced pattern only allows sourceType/tenant/date/file
-                // (no extra subfolder), so a shared filename-stem is the only way to group them.
-                String recordingId = UUID.randomUUID().toString();
+                // One fresh id per logical recording, shared by every object_key its event's
+                // objects[] contains (see MediaIntakeService) - both to group the files when
+                // browsing MinIO by name, and as the event's correlationId (its Kafka
+                // dedup/identity key now that content_hash lives per-object, not on the
+                // event - see RawObjectEvent's javadoc). Not derived from content, so it
+                // stays stable even though this lane never actually revises anything.
+                String correlationId = UUID.randomUUID().toString();
 
-                String transcriptObjectKey = null;
-                if (transcript != null) {
-                    byte[] transcriptContent = Files.readAllBytes(transcript);
-                    transcriptObjectKey = intakeService.landTranscript(
-                            transcriptContent, transcript.getFileName().toString(), tenantId,
-                            source.sourceType(), ingestedAt, recordingId);
-                }
+                RawObjectEvent event;
+                if (source.sourceType() == RawSourceType.SCANNED_DOC) {
+                    event = intakeService.landStandalone(content, contentHash, file.getFileName().toString(),
+                            tenantId, source.sourceType(), source.modality(), ingestedAt, correlationId);
+                } else {
+                    byte[] transcriptContent = transcript != null ? Files.readAllBytes(transcript) : null;
+                    String transcriptFilename = transcript != null ? transcript.getFileName().toString() : null;
 
-                String additionalMetadataObjectKey = null;
-                List<String> participants = null;
-                Instant sourceTimestamp = null;
-                if (meetingMetadataFile != null) {
-                    byte[] meetingMetadataContent = Files.readAllBytes(meetingMetadataFile);
-                    additionalMetadataObjectKey = intakeService.landMeetingMetadata(
-                            meetingMetadataContent, meetingMetadataFile.getFileName().toString(),
-                            tenantId, source.sourceType(), ingestedAt, recordingId);
-                    MeetingMetadata meetingMetadata = readMeetingMetadata(source, meetingMetadataFile);
-                    if (meetingMetadata != null) {
-                        participants = meetingMetadata.participants().stream()
-                                .map(ParticipantActivity::name).toList();
-                        sourceTimestamp = meetingMetadata.startedAt();
+                    byte[] meetingMetadataContent = meetingMetadataFile != null
+                            ? Files.readAllBytes(meetingMetadataFile) : null;
+                    String meetingMetadataFilename = meetingMetadataFile != null
+                            ? meetingMetadataFile.getFileName().toString() : null;
+
+                    List<String> participants = null;
+                    Instant sourceTimestamp = null;
+                    String sourceRef = null;
+                    if (meetingMetadataFile != null) {
+                        MeetingMetadata meetingMetadata = readMeetingMetadata(source, meetingMetadataFile);
+                        if (meetingMetadata != null) {
+                            participants = meetingMetadata.participants().stream()
+                                    .map(ParticipantActivity::name).toList();
+                            sourceTimestamp = meetingMetadata.startedAt();
+                            // Zoom's own meeting uuid is the stable reference Zoom itself
+                            // uses; BBB has none, so its own meetingId is the next best
+                            // thing - either way, a pointer back to the source system
+                            // itself, not to our MinIO copy (see RawObjectEvent's javadoc).
+                            sourceRef = meetingMetadata.uuid() != null
+                                    ? meetingMetadata.uuid() : meetingMetadata.meetingId();
+                        }
                     }
-                }
 
-                RawObjectEvent event = intakeService.land(
-                        content, contentHash, file.getFileName().toString(), tenantId,
-                        source.sourceType(), source.modality(), ingestedAt, transcriptObjectKey,
-                        participants, additionalMetadataObjectKey, sourceTimestamp, recordingId);
+                    event = intakeService.landMeeting(content, contentHash, file.getFileName().toString(),
+                            transcriptContent, transcriptFilename, meetingMetadataContent,
+                            meetingMetadataFilename, tenantId, source.sourceType(), ingestedAt,
+                            participants, sourceTimestamp, sourceRef, correlationId);
+                }
                 eventPublisher.publish(event);
 
                 moveTo(file, uploadedDir);
@@ -241,8 +251,9 @@ public class MediaIntakeOrchestrator {
                     moveTo(meetingMetadataFile, uploadedDir);
                 }
 
-                log.info("Uploaded {} as {}", file.getFileName(), event.objectKey());
-                uploaded.add(event.objectKey());
+                String primaryObjectKey = event.objects().get(0).objectKey();
+                log.info("Uploaded {} as {}", file.getFileName(), primaryObjectKey);
+                uploaded.add(primaryObjectKey);
             } catch (Exception e) {
                 // checkAndRecord() already claimed contentHash above so a concurrent run
                 // couldn't land the same content twice - but this attempt failed before
@@ -291,16 +302,16 @@ public class MediaIntakeOrchestrator {
     }
 
     /**
-     * Parsed once and reused for both participants and sourceTimestamp (the meeting's own
-     * start time) - a single failure-to-parse affects both the same way: sidecar still lands,
-     * both fields left unset.
+     * Parsed once and reused for participants, sourceTimestamp, and sourceRef - a single
+     * failure-to-parse affects all three the same way: sidecar still lands, all three left
+     * unset.
      */
     private MeetingMetadata readMeetingMetadata(IntakeSource source, Path meetingMetadataFile) {
         try {
             return source.meetingMetadataReader().read(meetingMetadataFile);
         } catch (Exception e) {
             log.warn("Failed to parse meeting-metadata sidecar {} - landing it anyway, "
-                    + "participants/sourceTimestamp left unset", meetingMetadataFile, e);
+                    + "participants/sourceTimestamp/sourceRef left unset", meetingMetadataFile, e);
             return null;
         }
     }

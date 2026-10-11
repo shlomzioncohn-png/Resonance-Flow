@@ -1,38 +1,45 @@
 package com.rnd.bridge.media;
 
+import com.rnd.bridge.raw.model.ChangeType;
 import com.rnd.bridge.raw.model.Modality;
 import com.rnd.bridge.raw.model.RawObjectEvent;
+import com.rnd.bridge.raw.model.RawObjectRef;
 import com.rnd.bridge.raw.model.RawSourceType;
+import com.rnd.bridge.raw.model.Role;
 import com.rnd.bridge.raw.model.ScopeDecision;
 import com.rnd.bridge.storage.ObjectStorageClient;
 import com.rnd.bridge.storage.ObjectStorageClient.PutResult;
 import com.rnd.bridge.storage.ObjectTags;
-import org.springframework.stereotype.Service;
-
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
+import java.util.ArrayList;
+import java.util.HexFormat;
 import java.util.List;
-import java.util.UUID;
+import org.springframework.stereotype.Service;
 
 /**
  * Lands raw meeting/audio/scanned-doc content through the shared ObjectStorageClient
  * (storage/) - reused from the Unstructured-intake lane so both raw-landing lanes go
  * through one MinIO client/bucket instead of each wiring its own - and builds the matching
- * RawObjectEvent. Takes already-read bytes and an already-computed contentHash rather than
- * a Path: the caller (MediaIntakeOrchestrator) needs both before this is called anyway -
- * for the junk-file filter and the dedup check - so the file is only read off disk once
- * per upload, not once here and once there.
+ * RawObjectEvent, under the shared "one event, objects[] list" shape (see
+ * {@link RawObjectEvent}'s javadoc) rather than one event per physical file.
+ * <p>
+ * Both this lane's items are brand-new on first landing and never revised afterward (a Zoom
+ * recording doesn't get edited; a scanned doc doesn't either) - so every event this class
+ * builds is {@code revision 0}, {@link ChangeType#UPSERT}, {@code changeSignificanceScore
+ * 100}, always. If that ever stops being true for some new source this lane adds, those
+ * three stop being hardcoded here, not before.
  */
 @Service
 public class MediaIntakeService {
 
     private static final DateTimeFormatter DATE_FORMAT =
             DateTimeFormatter.ofPattern("yyyy-MM-dd").withZone(ZoneOffset.UTC);
-
-    // Mind's confirmed RawObjectEvent contract requires attachment_index; 0 marks a
-    // standalone item (this lane never splits one source item into a body + attachments).
-    private static final int ATTACHMENT_INDEX_STANDALONE = 0;
+    private static final int NEW_ITEM_REVISION = 0;
+    private static final int NEW_ITEM_SIGNIFICANCE_SCORE = 100;
 
     private final ObjectStorageClient storageClient;
 
@@ -40,106 +47,95 @@ public class MediaIntakeService {
         this.storageClient = storageClient;
     }
 
-    public RawObjectEvent land(byte[] content, String contentHash, String filename, String tenantId,
-                                RawSourceType sourceType, Modality modality, Instant ingestedAt,
-                                String transcriptObjectKey) {
-        return land(content, contentHash, filename, tenantId, sourceType, modality, ingestedAt,
-                transcriptObjectKey, null, null, null, UUID.randomUUID().toString());
+    /**
+     * A standalone item with exactly one object - today, scanned docs. Landed as
+     * {@link Role#BODY}: it's the primary (only) content of the logical item, the same
+     * structural slot an email body fills, not a Zoom-specific role.
+     */
+    public RawObjectEvent landStandalone(byte[] content, String contentHash, String filename, String tenantId,
+                                          RawSourceType sourceType, Modality modality, Instant ingestedAt,
+                                          String correlationId) {
+        RawObjectRef object = landObject(content, contentHash, filename, tenantId, sourceType, ingestedAt,
+                correlationId, Role.BODY, modality);
+        return buildEvent(sourceType, tenantId, correlationId, ingestedAt, null, null, null,
+                List.of(object));
     }
 
     /**
-     * Same as the 8-arg {@link #land} but also carries the participant names and
-     * meeting-metadata sidecar pointer derived from a landed Zoom/BBB meeting-metadata
-     * sidecar (see media.meeting package) - both null when no such sidecar was found -
-     * sourceTimestamp (the meeting's own start time, per that same sidecar - null when there
-     * isn't one, distinct from ingestedAt which is when Bridge landed it, not when the
-     * meeting happened) - and recordingId, the shared id this recording's object_key and its
-     * sidecars' object_keys all use (see landTranscript/landMeetingMetadata) so the three land
-     * next to each other when browsing MinIO by name, not scattered among unrelated
-     * recordings from the same day.
-     * <p>
-     * correlationId is left null (see the 12-arg create() below) rather than repurposed as
-     * recordingId - correlationId's documented meaning (see RawObjectEvent's javadoc) is
-     * linking a body event to separately-published attachment events, which this lane doesn't
-     * have (transcript/metadata are pointer fields on this one event, not events of their
-     * own). Considered reusing it so a consumer could find all 3 landed objects for one
-     * recording via an explicit field instead of parsing object_key's filename stem, but
-     * repurposing an already-defined field's meaning without Mind's sign-off is worse than
-     * living without that lookup for now - see plan.md.
+     * A meeting recording plus whichever of its two optional sidecars were found
+     * (transcript, platform meeting-metadata) - see MediaIntakeOrchestrator. All objects
+     * belonging to this one logical recording land here together and go out as a single
+     * event, sharing correlationId. transcript/metadata content+filename are null when that
+     * sidecar wasn't found; sourceRef is the platform's own stable reference for the meeting
+     * (e.g. Zoom's meeting uuid) - null if the metadata sidecar wasn't found or didn't parse.
      */
-    public RawObjectEvent land(byte[] content, String contentHash, String filename, String tenantId,
-                                RawSourceType sourceType, Modality modality, Instant ingestedAt,
-                                String transcriptObjectKey, List<String> participants,
-                                String additionalMetadataObjectKey, Instant sourceTimestamp,
-                                String recordingId) {
-        String contentType = guessContentType(extractExtension(filename));
-        String objectKey = buildObjectKey(sourceType, tenantId, ingestedAt, recordingId, extractExtension(filename));
+    public RawObjectEvent landMeeting(byte[] recordingContent, String recordingContentHash,
+                                       String recordingFilename, byte[] transcriptContent,
+                                       String transcriptFilename, byte[] metadataContent,
+                                       String metadataFilename, String tenantId, RawSourceType sourceType,
+                                       Instant ingestedAt, List<String> participants, Instant sourceTimestamp,
+                                       String sourceRef, String correlationId) {
+        List<RawObjectRef> objects = new ArrayList<>();
+        objects.add(landObject(recordingContent, recordingContentHash, recordingFilename, tenantId, sourceType,
+                ingestedAt, correlationId, Role.RECORDING, Modality.AUDIO));
+
+        if (transcriptContent != null) {
+            objects.add(landObject(transcriptContent, sha256Hex(transcriptContent), transcriptFilename, tenantId,
+                    sourceType, ingestedAt, correlationId, Role.TRANSCRIPT, Modality.TEXT));
+        }
+        if (metadataContent != null) {
+            objects.add(landObject(metadataContent, sha256Hex(metadataContent), metadataFilename, tenantId,
+                    sourceType, ingestedAt, correlationId, Role.SOURCE_METADATA, Modality.TEXT));
+        }
+
+        return buildEvent(sourceType, tenantId, correlationId, ingestedAt, participants, sourceTimestamp,
+                sourceRef, objects);
+    }
+
+    private RawObjectEvent buildEvent(RawSourceType sourceType, String tenantId, String correlationId,
+                                       Instant ingestedAt, List<String> participants, Instant sourceTimestamp,
+                                       String sourceRef, List<RawObjectRef> objects) {
+        return RawObjectEvent.create(
+                sourceType, tenantId, correlationId, ingestedAt, ScopeDecision.INCLUDED,
+                NEW_ITEM_REVISION, ChangeType.UPSERT, NEW_ITEM_SIGNIFICANCE_SCORE,
+                participants, sourceTimestamp, sourceRef, objects);
+    }
+
+    private RawObjectRef landObject(byte[] content, String contentHash, String filename, String tenantId,
+                                     RawSourceType sourceType, Instant ingestedAt, String correlationId,
+                                     Role role, Modality modality) {
+        String extension = extractExtension(filename);
+        String contentType = contentTypeFor(role, extension);
+        String objectKey = buildObjectKey(sourceType, tenantId, ingestedAt, correlationId, extension);
 
         PutResult putResult = storageClient.putObject(
                 objectKey, content, contentType,
                 ObjectTags.of(sourceType, tenantId, ingestedAt, ScopeDecision.INCLUDED));
 
-        return RawObjectEvent.create(
-                objectKey, sourceType, tenantId, ingestedAt, ScopeDecision.INCLUDED, contentHash,
-                modality, participants, putResult.contentType(), putResult.sizeBytes(),
-                transcriptObjectKey, sourceTimestamp, null, ATTACHMENT_INDEX_STANDALONE,
-                additionalMetadataObjectKey);
+        return new RawObjectRef(role, objectKey, contentHash, putResult.contentType(), putResult.sizeBytes(),
+                modality);
     }
 
-    /**
-     * Lands a platform-generated transcript sidecar file (see
-     * MediaIntakeOrchestrator.findTranscript) under the same source_type/tenant/date
-     * partition as its recording, tagged the same way, and sharing its recordingId (see
-     * {@link #land}) so the two land next to each other in MinIO. No RawObjectEvent/publish
-     * of its own - it's referenced from the recording's event via transcriptObjectKey, per
-     * Mind's confirmed contract ("MinIO pointer to a platform-generated transcript").
-     */
-    public String landTranscript(byte[] content, String filename, String tenantId,
-                                  RawSourceType sourceType, Instant ingestedAt, String recordingId) {
-        String extension = extractExtension(filename);
-        String contentType = switch (extension.toLowerCase()) {
-            case ".vtt" -> "text/vtt";
-            case ".srt" -> "application/x-subrip";
-            default -> "text/plain";
+    private String contentTypeFor(Role role, String extension) {
+        return switch (role) {
+            case TRANSCRIPT -> switch (extension.toLowerCase()) {
+                case ".vtt" -> "text/vtt";
+                case ".srt" -> "application/x-subrip";
+                default -> "text/plain";
+            };
+            case SOURCE_METADATA -> switch (extension.toLowerCase()) {
+                case ".json" -> "application/json";
+                case ".xml" -> "application/xml";
+                default -> "application/octet-stream";
+            };
+            case RECORDING, BODY, ATTACHMENT -> guessContentType(extension);
         };
-        String objectKey = buildObjectKey(sourceType, tenantId, ingestedAt, recordingId, extension);
-
-        storageClient.putObject(
-                objectKey, content, contentType,
-                ObjectTags.of(sourceType, tenantId, ingestedAt, ScopeDecision.INCLUDED));
-
-        return objectKey;
-    }
-
-    /**
-     * Lands a Zoom/BBB meeting-metadata sidecar file (see MediaIntakeOrchestrator and
-     * media.meeting) in its source-native format - Zoom's JSON as application/json, BBB's
-     * metadata.xml as application/xml - unconverted, under the same source_type/tenant/date
-     * partition as its recording, sharing its recordingId (see {@link #land}) so the two
-     * land next to each other in MinIO. No RawObjectEvent/publish of its own - referenced
-     * from the recording's event via additionalMetadataObjectKey, same pattern as landTranscript.
-     */
-    public String landMeetingMetadata(byte[] content, String filename, String tenantId,
-                                       RawSourceType sourceType, Instant ingestedAt, String recordingId) {
-        String extension = extractExtension(filename);
-        String contentType = switch (extension.toLowerCase()) {
-            case ".json" -> "application/json";
-            case ".xml" -> "application/xml";
-            default -> "application/octet-stream";
-        };
-        String objectKey = buildObjectKey(sourceType, tenantId, ingestedAt, recordingId, extension);
-
-        storageClient.putObject(
-                objectKey, content, contentType,
-                ObjectTags.of(sourceType, tenantId, ingestedAt, ScopeDecision.INCLUDED));
-
-        return objectKey;
     }
 
     private String buildObjectKey(RawSourceType sourceType, String tenantId, Instant ingestedAt,
-                                   String recordingId, String extension) {
+                                   String correlationId, String extension) {
         return "%s/%s/%s/%s%s".formatted(
-                sourceType.name(), tenantId, DATE_FORMAT.format(ingestedAt), recordingId, extension);
+                sourceType.name(), tenantId, DATE_FORMAT.format(ingestedAt), correlationId, extension);
     }
 
     private String extractExtension(String filename) {
@@ -158,5 +154,14 @@ public class MediaIntakeService {
             case ".tif", ".tiff" -> "image/tiff";
             default -> "application/octet-stream";
         };
+    }
+
+    private String sha256Hex(byte[] content) {
+        try {
+            MessageDigest sha256 = MessageDigest.getInstance("SHA-256");
+            return "sha256:" + HexFormat.of().formatHex(sha256.digest(content));
+        } catch (NoSuchAlgorithmException e) {
+            throw new IllegalStateException("SHA-256 not available", e);
+        }
     }
 }

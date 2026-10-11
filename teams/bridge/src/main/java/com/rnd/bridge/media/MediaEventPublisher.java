@@ -35,7 +35,8 @@ public class MediaEventPublisher {
 
     public void publish(RawObjectEvent event) {
         validator.validate(event);
-        kafkaTemplate.send(topic, event.contentHash(), event);
-        log.info("Published pointer event for {} to {}", event.objectKey(), topic);
+        kafkaTemplate.send(topic, event.dedupKey(), event);
+        log.info("Published pointer event for correlationId={} ({} object(s)) to {}",
+                event.correlationId(), event.objects().size(), topic);
     }
 }
