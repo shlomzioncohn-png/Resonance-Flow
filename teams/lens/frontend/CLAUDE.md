@@ -52,6 +52,8 @@ Do not commit, push, reset, or discard user changes unless explicitly requested.
 
 Frontend Pull Requests normally target the team's integration branch, `lens-team`.
 
+When opening a PR with `gh pr create`, always add `--label Lens`.
+
 ## Validation
 
 Run commands from `teams/lens/frontend`:

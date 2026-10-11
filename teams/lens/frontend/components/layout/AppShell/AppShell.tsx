@@ -1,16 +1,16 @@
-'use client'
+'use client';
 
-import { useState, type ReactNode } from 'react'
-import Box from '@mui/material/Box'
-import Header from '../Header'
-import Sidebar from '../Sidebar'
+import { useState, type ReactNode } from 'react';
+import Box from '@mui/material/Box';
+import Header from '../Header';
+import Sidebar from '../Sidebar';
 
 export interface AppShellProps {
-  children: ReactNode
+  children: ReactNode;
 }
 
 export default function AppShell({ children }: AppShellProps) {
-  const [mobileOpen, setMobileOpen] = useState(false)
+  const [mobileOpen, setMobileOpen] = useState(false);
 
   return (
     <Box sx={{ display: 'flex', minHeight: '100vh' }}>
@@ -24,5 +24,5 @@ export default function AppShell({ children }: AppShellProps) {
         </Box>
       </Box>
     </Box>
-  )
+  );
 }
