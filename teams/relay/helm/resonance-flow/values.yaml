@@ -124,6 +124,18 @@ components:
         port: 5432
       - name: schema-registry
         port: 8080
+    volumeMounts:
+      - name: object-storage-credentials
+        mountPath: /etc/resonance-flow/secrets/object-storage
+        readOnly: true
+    dependencySecretVolumes:
+      - name: object-storage-credentials
+        dependencyName: object-storage
+        items:
+          - key: root-user
+            path: minio.access-key
+          - key: root-password
+            path: minio.secret-key
     # Mounted as config.yaml at /etc/resonance-flow/config/ - keys are what MIND reads.
     config:
       vector_store:
