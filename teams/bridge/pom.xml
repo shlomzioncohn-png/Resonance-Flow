@@ -31,6 +31,8 @@
         <!-- Mirrored exactly from teams/inbox/pom.xml - same registry, same wire format. -->
         <protobuf.version>3.25.3</protobuf.version>
         <confluent.version>7.1.15</confluent.version>
+        <!-- Dockerfile overrides it: the repo layout isn't there. -->
+        <proto.root>${project.basedir}/../../shared/proto</proto.root>
     </properties>
 
     <repositories>
@@ -219,13 +221,38 @@
                 <version>0.6.1</version>
                 <configuration>
                     <protocArtifact>com.google.protobuf:protoc:${protobuf.version}:exe:${os.detected.classifier}</protocArtifact>
-                    <protoSourceRoot>${project.basedir}/src/main/proto</protoSourceRoot>
+                    <!-- Executions share one output dir - don't let a later one wipe an earlier one's classes. -->
+                    <clearOutputDirectory>false</clearOutputDirectory>
                 </configuration>
                 <executions>
+                    <!-- Registered cross-team schemas, owned by Relay - see shared/proto/README.md. -->
                     <execution>
+                        <id>compile-shared-proto</id>
                         <goals>
                             <goal>compile</goal>
                         </goals>
+                        <configuration>
+                            <protoSourceRoot>${proto.root}</protoSourceRoot>
+                            <includes>
+                                <include>task-created-event.proto</include>
+                                <include>task-creation-requested-event.proto</include>
+                            </includes>
+                        </configuration>
+                    </execution>
+                    <!-- Bridge-only: structured-task-event.proto (temporary local copy, see
+                         StructuredTaskProtoDriftTest) and Hadas's github-task.proto. -->
+                    <execution>
+                        <id>compile-local-proto</id>
+                        <goals>
+                            <goal>compile</goal>
+                        </goals>
+                        <configuration>
+                            <protoSourceRoot>${project.basedir}/src/main/proto</protoSourceRoot>
+                            <!-- structured-task-event.proto imports the two shared ones above -->
+                            <additionalProtoPathElements>
+                                <additionalProtoPathElement>${proto.root}</additionalProtoPathElement>
+                            </additionalProtoPathElements>
+                        </configuration>
                     </execution>
                 </executions>
             </plugin>
