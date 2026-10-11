@@ -308,22 +308,11 @@ existing edge is now an upsert of `confidence`, not a pure no-op.
 
 Verified against real PostgreSQL (`postgres:16` in Docker, matching `.env.example`'s
 `chain`/`chain`/`chain`): `PostgresTaskRepositoryTest` (3 tests) and
-`PostgresTaskDependencyRepositoryTest` (7 tests), 0 failures/errors.
-
-**`postgres-integration` Maven profile is broken, don't rely on it**: the `@Tag("postgres")` tests
-here are excluded from the default `mvn test` run (`pom.xml`'s top-level
-`maven-surefire-plugin`/`excludedGroups=postgres`), and `pom.xml` has a `postgres-integration`
-profile meant to clear that filter via `-P postgres-integration`. It doesn't work - `mvn -X`
-confirms `excludedGroups` still resolves to `postgres` with the profile active, so activating it
-silently runs zero Postgres tests instead of the intended set (no error - `mvn test` just reports
-success having skipped them, same as always). Worked around here by editing the plugin's
-`excludedGroups` value directly and reverting afterward, not via the profile.
-
-**This is bigger than #445**: nothing in `.github/workflows/` references `postgres-integration` or
-otherwise clears `excludedGroups` - CI's `mvn -B test` runs with the same default exclusion as a
-local `mvn test`. So every `@Tag("postgres")` test in this module (not just the two above) is
-silently skipped on every PR and every push, with no signal that they're not running. That's a gap
-worth raising with whoever owns `chain-ci.yaml`/`service-ci-java.yaml`, separate from #445.
+`PostgresTaskDependencyRepositoryTest` (7 tests), 0 failures/errors - run via
+`mvn test -Ppostgres-integration`, which now actually includes `@Tag("postgres")` tests (fixed on
+`main` after this section was first written here - `excludedGroups` is driven through the
+`surefire.excludedGroups` property, which a profile can blank out; a plain `<excludedGroups/>` in
+the profile didn't override the build's own value). CI runs them too now, against its own Postgres.
 
 ### AFTER_COMMIT publish, dedup, retry (Phase 3)
 
@@ -370,9 +359,10 @@ around the call) and by the new tests that specifically prove the commit/rollbac
 - **`task.score.proposed` consumer**: `TaskEligibilityService.onScoreProposed` exists and is
   covered by its own tests, but nothing calls it yet from a `@KafkaListener` - that's #386, pending
   Mind's contract.
-- **Publish format**: `SchedulingUpdateService`/`KafkaSchedulingUpdatePublisher` still publish JSON
-  (see "Kafka event infrastructure" above) - the Protobuf `SchedulingUpdatedEvent` contract
-  (`event_id`, `task_id`, `available`, `priority_score`, all optional) is #545.
+- ~~**Publish format**: #545~~ - done (merged from `main`, see "Kafka event infrastructure" above):
+  `KafkaSchedulingUpdatePublisher` publishes real Protobuf against the registered
+  `shared/proto/scheduling-updated-event.proto`, with a per-event `event_id`. Covered end-to-end by
+  `SchedulingUpdatedEventContractTest` and `SchedulingUpdatePublishIntegrationTest` (a real broker).
 
 ## Running locally with Maven
 
@@ -426,6 +416,14 @@ mvn test
 Includes `TaskEligibilityServiceConcurrencyTest`, which runs `TaskEligibilityService` against the
 real in-memory repositories (not mocks) under actual concurrent load, so lock-related races have
 a chance to surface.
+
+`@Tag("postgres")` tests (the `Postgres*RepositoryTest`/`*ConcurrencyTest` classes) are excluded by
+default - run them with a real Postgres reachable (`chain`/`chain`/`chain`, matching
+`.env.example`) via:
+
+```bash
+mvn test -Ppostgres-integration
+```
 
 ## Code review fixes (2026-08-30, PR #114 second review round)
 
