@@ -180,6 +180,37 @@ async def test_mark_completed_is_a_noop_for_an_unknown_task_id(store):
     assert marked is False
 
 
+async def test_mark_incomplete_resets_an_existing_task(store):
+    """mark_incomplete() flips is_completed back off (e.g. a reopened task)."""
+    task_id = f"test-{uuid.uuid4()}"
+    vec = embed("Ship the release notes")
+    await store.upsert(task_id, vec)
+    await store.mark_completed(task_id)
+
+    marked = await store.mark_incomplete(task_id)
+    assert marked is True
+
+    results = await store.search(vec, k=1)
+    assert results[0].task_id == task_id
+    assert results[0].is_completed is False
+
+
+async def test_mark_incomplete_is_a_noop_for_an_unknown_task_id(store):
+    """Unknown task_id returns False, not an error."""
+    marked = await store.mark_incomplete(f"test-{uuid.uuid4()}")
+    assert marked is False
+
+
+async def test_get_content_hash_round_trips_through_upsert(store):
+    task_id = f"test-{uuid.uuid4()}"
+    await store.upsert(task_id, embed("Ship the release notes"), content_hash="abc123")
+    assert await store.get_content_hash(task_id) == "abc123"
+
+
+async def test_get_content_hash_is_none_for_an_unknown_task_id(store):
+    assert await store.get_content_hash(f"test-{uuid.uuid4()}") is None
+
+
 async def test_delete_removes_a_stored_vector(store):
     """delete() alone: the vector stops being findable afterward."""
     task_id = f"test-{uuid.uuid4()}"

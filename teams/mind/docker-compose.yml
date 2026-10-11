@@ -25,16 +25,21 @@ services:
       context: .
       additional_contexts:
         shared: ../../shared
-    command: ["python", "scripts/index_consumer.py"]
+    command: ["python", "-m", "mind.embeddings.index_consumer_runner"]
+    # No HTTP server in this process -- the Dockerfile's HEALTHCHECK (hits
+    # :8000/health) doesn't apply here and would report unhealthy forever.
+    healthcheck:
+      disable: true
+    # No local Kafka broker wired into this compose file yet (only
+    # teams/inbox/docker-compose.yml has one today) -- gated behind a
+    # profile so `docker compose up`/`make docker-up` doesn't start a
+    # consumer with nothing to connect to. Bring it up explicitly once
+    # there's a broker: `docker compose --profile kafka up`.
+    profiles: ["kafka"]
     env_file:
       - .env
     environment:
       MIND_VECTOR_STORE__DSN: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@vector-store:5432/${POSTGRES_DB}
-      # Kafka bootstrap/schema-registry come from CONFIG_FILE_PATH/SECRETS_FILE_PATH
-      # (messaging/config.py), not env vars here -- there's no local Kafka
-      # broker wired into this compose file yet (only teams/inbox/docker-compose.yml
-      # has one today), so this service has nothing to actually connect to
-      # until that gap is closed.
     volumes:
       - ./models:/app/models
     depends_on:

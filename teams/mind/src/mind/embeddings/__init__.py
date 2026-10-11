@@ -7,7 +7,7 @@ directly wherever needed -- no factory/singleton.
 """
 
 from mind.embeddings.base import SearchResult, VectorStore
-from mind.embeddings.embeddings import embed, embed_async, embed_batch, embed_batch_async
+from mind.embeddings.embeddings import embed, embed_async, embed_batch, embed_batch_async, task_text
 from mind.embeddings.search import nearest_tasks
 
 __all__ = [
@@ -18,4 +18,5 @@ __all__ = [
     "embed_batch",
     "embed_batch_async",
     "nearest_tasks",
+    "task_text",
 ]

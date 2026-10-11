@@ -12,19 +12,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY pyproject.toml README.md ./
 COPY proto ./proto
 COPY --from=shared proto ./shared/proto
+COPY scripts/gen_proto.py ./scripts/gen_proto.py
 
 # Generate the proto classes with the system Python, before the venv
-# below exists, so grpcio-tools never ends up in it. task-{created,updated,
-# completed}-event.proto come from the shared/ build context above (the
-# single registered copy, not a local vendor) -- see shared/proto/README.md.
-RUN mkdir -p src/mind/messaging && touch src/mind/__init__.py \
-    && pip install --no-cache-dir grpcio-tools==1.71.0 \
-    && python -m grpc_tools.protoc --proto_path=proto --python_out=src/mind/messaging \
-        proto/mind-task-created.proto proto/mind-task-dependencies.proto \
-    && python -m grpc_tools.protoc --proto_path=shared/proto --python_out=src/mind/messaging \
-        shared/proto/task-created-event.proto \
-        shared/proto/task-updated-event.proto \
-        shared/proto/task-completed-event.proto
+# below exists, so grpcio-tools never ends up in it. See scripts/gen_proto.py
+# -- same script used by `make proto` and tests/conftest.py.
+RUN pip install --no-cache-dir grpcio-tools==1.71.0 \
+    && python scripts/gen_proto.py
 
 # Install into an isolated venv (not system site-packages) so the
 # runtime stage can copy over exactly the installed packages -- and

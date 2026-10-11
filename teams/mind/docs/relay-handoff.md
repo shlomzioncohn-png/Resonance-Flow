@@ -46,11 +46,13 @@ differing only in `command`:
 | Service | Command | Exposes HTTP? |
 |---|---|---|
 | `mind` | `uvicorn mind.api.main:app` | Yes, port `8000`. |
-| `mind-index-consumer` (#470) | `python scripts/index_consumer.py` | No — consumes `task.created`/`task.updated`/`task.completed` from Kafka and writes to the vector store. No port to expose. |
+| `mind-index-consumer` (#470) | `python -m mind.embeddings.index_consumer_runner` | No — consumes `task.created`/`task.updated`/`task.completed` from Kafka and writes to the vector store. No port to expose. |
 
-**Open item:** `mind-index-consumer` has no liveness/health signal today
-(stdout logging per message only) — flagging for Relay since `mind`'s own
-`/health` pattern below doesn't apply to it.
+**Open item:** `mind-index-consumer` has no positive liveness probe (no HTTP
+port, so `mind`'s `/health` pattern doesn't apply). It does exit non-zero
+if any of its three topic-consumer threads dies, so a restart policy can
+act on a crash — but there's still no "I'm alive and keeping up" signal
+for the healthy-but-stuck case. Flagging for Relay.
 
 ## Ports
 

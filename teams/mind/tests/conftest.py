@@ -20,7 +20,6 @@ if sys.platform == "win32":
     asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 
 _ROOT = Path(__file__).resolve().parent.parent
-_SHARED_PROTO = _ROOT.parent.parent / "shared" / "proto"
 
 # tests/test_vector_store.py reads MIND_VECTOR_STORE__DSN straight from
 # os.environ (deliberately, not via mind.config.Settings -- see its `store`
@@ -37,33 +36,8 @@ if "TEST_DATABASE_URL" in os.environ:
     os.environ.setdefault("MIND_VECTOR_STORE__DSN", os.environ["TEST_DATABASE_URL"])
 os.environ.setdefault("MIND_ENVIRONMENT", "ci")
 
-_MESSAGING = _ROOT / "src" / "mind" / "messaging"
-
-if not (_MESSAGING / "mind_task_created_pb2.py").exists():
-    subprocess.run(
-        [
-            "python", "-m", "grpc_tools.protoc",
-            "--proto_path", str(_ROOT / "proto"),
-            "--python_out", str(_MESSAGING),
-            str(_ROOT / "proto" / "mind-task-created.proto"),
-            str(_ROOT / "proto" / "mind-task-dependencies.proto"),
-        ],
-        check=True,
-    )
-
-# task-{created,updated,completed}-event.proto are Inbox's real, registered
-# schemas, used by the #470 index consumer. Built straight from shared/proto/
-# (the single registered copy, see shared/proto/README.md) -- never vendored,
-# or they'd silently drift from what Inbox actually publishes.
-if not (_MESSAGING / "task_created_event_pb2.py").exists():
-    subprocess.run(
-        [
-            "python", "-m", "grpc_tools.protoc",
-            "--proto_path", str(_SHARED_PROTO),
-            "--python_out", str(_MESSAGING),
-            str(_SHARED_PROTO / "task-created-event.proto"),
-            str(_SHARED_PROTO / "task-updated-event.proto"),
-            str(_SHARED_PROTO / "task-completed-event.proto"),
-        ],
-        check=True,
-    )
+# Always regenerate (not "if missing") -- a proto edit with the old pb2
+# still on disk would otherwise make tests run against stale generated
+# code. See scripts/gen_proto.py -- the one place that knows the actual
+# protoc invocations, also used by `make proto` and the Dockerfile.
+subprocess.run(["python", str(_ROOT / "scripts" / "gen_proto.py")], check=True)

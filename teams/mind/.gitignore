@@ -11,6 +11,7 @@ venv/
 
 # Generated from proto/*.proto by `make proto` — never commit
 src/mind/messaging/*_pb2.py
+src/mind/messaging/*_pb2.pyi
 
 # Local model weights — never commit
 models/*

@@ -81,6 +81,11 @@ class PgVectorStore(VectorStore):
             )
             await cur.execute(
                 sql.SQL(
+                    "ALTER TABLE {table} ADD COLUMN IF NOT EXISTS content_hash TEXT;"
+                ).format(table=table)
+            )
+            await cur.execute(
+                sql.SQL(
                     """
                     CREATE INDEX IF NOT EXISTS {idx}
                     ON {table} USING hnsw (embedding vector_cosine_ops);
@@ -91,40 +96,68 @@ class PgVectorStore(VectorStore):
                 )
             )
 
-    async def upsert(self, task_id: str, vector: list[float]) -> None:
+    async def upsert(
+        self, task_id: str, vector: list[float], *, content_hash: str | None = None
+    ) -> None:
         await self._ensure_ready()
         async with self._pool.connection() as conn, conn.cursor() as cur:
             await cur.execute(
                 sql.SQL(
                     """
-                    INSERT INTO {table} (task_id, embedding)
-                    VALUES (%s, %s)
-                    ON CONFLICT (task_id) DO UPDATE SET embedding = EXCLUDED.embedding;
+                    INSERT INTO {table} (task_id, embedding, content_hash)
+                    VALUES (%s, %s, %s)
+                    ON CONFLICT (task_id) DO UPDATE SET
+                        embedding = EXCLUDED.embedding, content_hash = EXCLUDED.content_hash;
                     """
                 ).format(table=self._table()),
-                (task_id, vector),
+                (task_id, vector, content_hash),
             )
 
-    async def upsert_if_absent(self, task_id: str, vector: list[float]) -> bool:
+    async def upsert_if_absent(
+        self, task_id: str, vector: list[float], *, content_hash: str | None = None
+    ) -> bool:
         await self._ensure_ready()
         async with self._pool.connection() as conn, conn.cursor() as cur:
             await cur.execute(
                 sql.SQL(
                     """
-                    INSERT INTO {table} (task_id, embedding)
-                    VALUES (%s, %s)
+                    INSERT INTO {table} (task_id, embedding, content_hash)
+                    VALUES (%s, %s, %s)
                     ON CONFLICT (task_id) DO NOTHING;
                     """
                 ).format(table=self._table()),
-                (task_id, vector),
+                (task_id, vector, content_hash),
             )
             return cur.rowcount > 0
+
+    async def get_content_hash(self, task_id: str) -> str | None:
+        await self._ensure_ready()
+        async with self._pool.connection() as conn, conn.cursor() as cur:
+            await cur.execute(
+                sql.SQL("SELECT content_hash FROM {table} WHERE task_id = %s;").format(
+                    table=self._table()
+                ),
+                (task_id,),
+            )
+            row = await cur.fetchone()
+            return row[0] if row else None
 
     async def mark_completed(self, task_id: str) -> bool:
         await self._ensure_ready()
         async with self._pool.connection() as conn, conn.cursor() as cur:
             await cur.execute(
                 sql.SQL("UPDATE {table} SET is_completed = TRUE WHERE task_id = %s;").format(
+                    table=self._table()
+                ),
+                (task_id,),
+            )
+            return cur.rowcount > 0
+
+    async def mark_incomplete(self, task_id: str) -> bool:
+        await self._ensure_ready()
+        async with self._pool.connection() as conn, conn.cursor() as cur:
+            await cur.execute(
+                sql.SQL("UPDATE {table} SET is_completed = FALSE WHERE task_id = %s;").format(
                     table=self._table()
                 ),
                 (task_id,),

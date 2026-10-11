@@ -6,17 +6,10 @@ install:
 dev:
 	pip install -e ".[dev]"
 
-# task-{created,updated,completed}-event.proto come from shared/proto/ (the
-# single registered copy, owned by Relay -- see shared/proto/README.md), not
-# from proto/ -- never vendor them locally, or they drift from what Inbox
-# actually publishes.
+# See scripts/gen_proto.py -- single source of truth, also called from
+# the Dockerfile and tests/conftest.py.
 proto:
-	python -m grpc_tools.protoc --proto_path=proto --python_out=src/mind/messaging \
-		proto/mind-task-created.proto proto/mind-task-dependencies.proto
-	python -m grpc_tools.protoc --proto_path=../../shared/proto --python_out=src/mind/messaging \
-		../../shared/proto/task-created-event.proto \
-		../../shared/proto/task-updated-event.proto \
-		../../shared/proto/task-completed-event.proto
+	python scripts/gen_proto.py
 
 test: proto
 	pytest --cov=src/mind
@@ -37,7 +30,7 @@ run: proto
 	uvicorn mind.api.main:app --reload --port 8000
 
 run-index-consumer: proto
-	python scripts/index_consumer.py
+	python -m mind.embeddings.index_consumer_runner
 
 eval:
 	python -m mind.evaluation.run --personas eval/personas
