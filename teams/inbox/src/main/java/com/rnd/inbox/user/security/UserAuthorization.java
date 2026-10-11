@@ -1,5 +1,6 @@
 package com.rnd.inbox.user.security;
 import com.rnd.inbox.user.model.User;
+import com.rnd.inbox.user.model.UserRole;
 import com.rnd.inbox.user.repository.UserRepository;
 import com.rnd.inbox.shared.exception.ForbiddenActionException;
 import com.rnd.inbox.shared.security.ActorScope;
@@ -61,5 +62,41 @@ public class UserAuthorization {
         if (!allowed) {
             throw new ForbiddenActionException("Actor cannot create users in tenant " + tenant.getId());
         }
+    }
+
+    // scopeOf/assertWithinScope answer "WHICH users may this actor touch"; this answers a
+    // different question they cannot: "which ROLE may this actor hand out". Without it, anyone
+    // allowed to edit a user (an EMPLOYEE editing themselves, a TEAM_LEAD editing a team member)
+    // could put any role in the request body, and a TENANT_ADMIN could mint a SYSTEM_ADMIN.
+    // SYSTEM_ADMIN grants any role; TENANT_ADMIN grants every role except SYSTEM_ADMIN;
+    // TEAM_LEAD and EMPLOYEE grant none.
+    public void assertCanAssignRole(User actor, UserRole role) {
+        if (!canAssignRole(actor.getRole(), role)) {
+            throw new ForbiddenActionException(
+                    "Role " + actor.getRole() + " is not permitted to assign role " + role);
+        }
+    }
+
+    // Sending the role the target already has is not a change and is always allowed, so a client
+    // that resends the whole profile on every edit isn't rejected. A real change needs the actor
+    // to be allowed to grant BOTH the new role and the target's current one - otherwise a
+    // TENANT_ADMIN could demote a SYSTEM_ADMIN who happens to sit in their tenant.
+    public void assertCanChangeRole(User actor, User target, UserRole newRole) {
+        if (newRole == target.getRole()) {
+            return;
+        }
+        if (!canAssignRole(actor.getRole(), newRole) || !canAssignRole(actor.getRole(), target.getRole())) {
+            throw new ForbiddenActionException(
+                    "Role " + actor.getRole() + " is not permitted to change the role of user "
+                            + target.getId() + " to " + newRole);
+        }
+    }
+
+    private boolean canAssignRole(UserRole actorRole, UserRole role) {
+        return switch (actorRole) {
+            case SYSTEM_ADMIN -> true;
+            case TENANT_ADMIN -> role != UserRole.SYSTEM_ADMIN;
+            case TEAM_LEAD, EMPLOYEE -> false;
+        };
     }
 }

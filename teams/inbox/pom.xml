@@ -123,6 +123,13 @@
             <version>3.9.5</version>
         </dependency>
 
+        <!-- Wraps the DataSource so every JDBC statement can be logged (see SqlLoggingConfig). -->
+        <dependency>
+            <groupId>net.ttddyy</groupId>
+            <artifactId>datasource-proxy</artifactId>
+            <version>1.11.0</version>
+        </dependency>
+
         <dependency>
             <groupId>org.springframework.kafka</groupId>
             <artifactId>spring-kafka</artifactId>
