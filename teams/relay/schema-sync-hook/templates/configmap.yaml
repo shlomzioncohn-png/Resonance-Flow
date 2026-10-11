@@ -86,11 +86,16 @@ metadata:
     {{- include "schema-sync-hook.labels" . | nindent 4 }}
 
 data:
+  {{- /* One .proto can back several subjects (one per topic) - emit each file once, or the key repeats. */}}
+  {{- $seen := dict }}
   {{- range .Files.Lines "files/schema-subjects.tsv" }}
   {{- $line := trim . }}
   {{- if and $line (not (hasPrefix "#" $line)) }}
   {{- $file := first (splitList "\t" $line) }}
+  {{- if not (hasKey $seen $file) }}
+  {{- $_ := set $seen $file true }}
   {{ $file }}: |
 {{ $.Files.Get (printf "files/schemas/%s" $file) | nindent 4 }}
+  {{- end }}
   {{- end }}
   {{- end }}
