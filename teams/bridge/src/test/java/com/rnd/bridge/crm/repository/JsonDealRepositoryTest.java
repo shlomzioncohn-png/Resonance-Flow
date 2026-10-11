@@ -157,6 +157,27 @@ class JsonDealRepositoryTest {
     }
 
     @Test
+    void fetchDealReturnsTheLatestStateOfAReopenedDeal() {
+        Optional<Deal> fetched = repository.fetchDeal("D-10432");
+
+        assertTrue(fetched.isPresent());
+        assertEquals(snapshot.findLatestByDealId("D-10432").orElseThrow(), fetched.get());
+        assertEquals(DealStage.NEGOTIATION, fetched.get().stage());
+    }
+
+    @Test
+    void fetchDealReturnsEmptyForAnUnknownId() {
+        assertEquals(Optional.empty(), repository.fetchDeal("D-does-not-exist"));
+    }
+
+    @Test
+    void fetchDealRejectsBlankOrNullIds() {
+        assertThrows(IllegalArgumentException.class, () -> repository.fetchDeal(""));
+        assertThrows(IllegalArgumentException.class, () -> repository.fetchDeal("   "));
+        assertThrows(IllegalArgumentException.class, () -> repository.fetchDeal(null));
+    }
+
+    @Test
     void latestPerDealReturnsOneEntryPerDealWithItsLatestStage() {
         List<Deal> latest = snapshot.latestPerDeal();
 
