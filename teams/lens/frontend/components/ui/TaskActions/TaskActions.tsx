@@ -139,7 +139,7 @@ export default function TaskActions({
       disabled={busy}
       onClick={onDone}
       startIcon={
-        busy ? <CircularProgress size={16} color="inherit" /> : <CheckCircleOutlinedIcon />
+        busy ? <CircularProgress size={16} color="inherit" aria-hidden /> : <CheckCircleOutlinedIcon />
       }
       data-testid="done-task-btn"
     >
@@ -150,7 +150,7 @@ export default function TaskActions({
       variant="contained"
       disabled={busy}
       onClick={onStart}
-      startIcon={busy ? <CircularProgress size={16} color="inherit" /> : <PlayArrowOutlinedIcon />}
+      startIcon={busy ? <CircularProgress size={16} color="inherit" aria-hidden /> : <PlayArrowOutlinedIcon />}
       data-testid="start-task-btn"
     >
       Start task

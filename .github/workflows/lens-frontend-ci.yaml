@@ -88,3 +88,36 @@ jobs:
           name: playwright-report
           path: teams/lens/frontend/playwright-report/
           retention-days: 7
+
+  storybook:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    needs: ci
+    if: always()
+    defaults:
+      run:
+        working-directory: teams/lens/frontend
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: teams/lens/frontend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      # The runner has no browsers - install the one the story tests run in
+      - name: Install Playwright browser
+        run: npx playwright install --with-deps chromium
+
+      # Runs every story's play function and its a11y checks (a11y.test: 'error')
+      - name: Story tests (Vitest)
+        run: npx vitest run --project=storybook
+
+      - name: Build Storybook
+        run: npm run build-storybook
