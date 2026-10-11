@@ -124,6 +124,7 @@ components:
     secret:
       create: false
     kafkaSasl: true
+    llmApiKey: ""
   lens-bff:
     enabled: true
     replicaCount: 1
@@ -447,6 +448,9 @@ kafka:
 minio:
   enabled: true
   mode: standalone
+  auth:
+    rootUser: minioadmin
+    rootPassword: minioadmin
   image:
     registry: docker.io
     repository: bitnamilegacy/minio
