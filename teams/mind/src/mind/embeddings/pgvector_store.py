@@ -53,37 +53,24 @@ class PgVectorStore(VectorStore):
             if self._ready:
                 return
             await self._pool.open()
-            await self._ensure_schema()
+            await self._check_schema_migrated()
             self._ready = True
 
     def _table(self) -> sql.Identifier:
         return sql.Identifier(self._settings.table)
 
-    async def _ensure_schema(self) -> None:
-        table = self._table()
+    async def _check_schema_migrated(self) -> None:
+        # Schema is created ahead of time by `alembic upgrade head`
+        # (migrations/) -- fail fast with a clear message instead of a
+        # bare UndefinedTable on the first real query.
         async with self._pool.connection() as conn, conn.cursor() as cur:
-            await cur.execute("CREATE EXTENSION IF NOT EXISTS vector;")
-            await cur.execute(
-                sql.SQL(
-                    """
-                    CREATE TABLE IF NOT EXISTS {table} (
-                        task_id TEXT PRIMARY KEY,
-                        embedding VECTOR({dim}) NOT NULL
-                    );
-                    """
-                ).format(table=table, dim=sql.Literal(self._settings.embedding_dim))
-            )
-            await cur.execute(
-                sql.SQL(
-                    """
-                    CREATE INDEX IF NOT EXISTS {idx}
-                    ON {table} USING hnsw (embedding vector_cosine_ops);
-                    """
-                ).format(
-                    idx=sql.Identifier(f"{self._settings.table}_embedding_hnsw_idx"),
-                    table=table,
+            await cur.execute("SELECT to_regclass(%s);", (self._settings.table,))
+            row = await cur.fetchone()
+            if row is None or row[0] is None:
+                raise RuntimeError(
+                    f"Vector store table {self._settings.table!r} does not exist -- "
+                    "schema not migrated. Run `alembic upgrade head` (or `make migrate`)."
                 )
-            )
 
     async def upsert(self, task_id: str, vector: list[float]) -> None:
         await self._ensure_ready()

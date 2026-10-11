@@ -14,6 +14,10 @@ dependencies = [
     # embeddings (src/mind/embeddings)
     "psycopg[binary,pool]>=3.1",
     "sentence-transformers>=3.0",
+    # migrations (migrations/) -- runs at deploy time, inside the image,
+    # not just in dev, so this belongs here and not in [dev].
+    "alembic>=1.13",
+    "sqlalchemy>=2.0",
     # messaging (src/mind/messaging)
     "confluent-kafka[protobuf,schemaregistry]>=2.5,<2.11",
     "protobuf>=5",
