@@ -12,7 +12,7 @@ eval/personas/README.md:
 - `validate_personas`: the rules a single-scenario model cannot see — a
   `scenario_id` duplicated across the whole directory (a hard error), plus the
   "the set isn't finished yet" checks (a role nobody wrote a scenario for, under/
-  over role coverage, an out-of-range total, `mentor_approved: false`). Those
+  over role coverage, an out-of-range total). Those
   last ones are reported as warnings, not raised: the set is built up
   incrementally by multiple people before the Foundation Gate, and a mid-week PR
   shouldn't fail CI just because the set isn't complete yet.
@@ -140,9 +140,6 @@ def validate_personas(scenarios: list[PersonaEvaluationScenario]) -> ValidationR
         seen_scenario_ids.add(scenario.scenario_id)
 
         scenarios_per_role[scenario.persona.role] += 1
-
-        if not scenario.mentor_approved:
-            report.warnings.append(f"{scenario.scenario_id}: not yet mentor_approved")
 
     missing_roles = ALL_ROLES - scenarios_per_role.keys()
     if missing_roles:

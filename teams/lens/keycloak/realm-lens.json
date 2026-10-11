@@ -1,0 +1,71 @@
+{
+  "realm": "lens",
+  "displayName": "LENS",
+  "enabled": true,
+  "sslRequired": "none",
+  "registrationAllowed": false,
+  "loginWithEmailAllowed": true,
+  "bruteForceProtected": true,
+  "accessTokenLifespan": 300,
+  "roles": {
+    "realm": [
+      { "name": "manager", "description": "LENS manager — team workload, projects, bottlenecks" },
+      { "name": "employee", "description": "LENS employee — own workspace and tasks" }
+    ]
+  },
+  "clients": [
+    {
+      "clientId": "lens-frontend",
+      "name": "LENS Frontend",
+      "description": "Next.js app (Auth.js, server-side code exchange). Used from Auth stage 3.",
+      "enabled": true,
+      "protocol": "openid-connect",
+      "publicClient": false,
+      "clientAuthenticatorType": "client-secret",
+      "secret": "lens-frontend-dev-secret",
+      "standardFlowEnabled": true,
+      "directAccessGrantsEnabled": false,
+      "implicitFlowEnabled": false,
+      "serviceAccountsEnabled": false,
+      "redirectUris": ["http://localhost:3000/*"],
+      "webOrigins": ["http://localhost:3000"],
+      "attributes": {
+        "pkce.code.challenge.method": "S256",
+        "post.logout.redirect.uris": "http://localhost:3000/*"
+      }
+    },
+    {
+      "clientId": "lens-dev-cli",
+      "name": "LENS dev CLI (local testing only)",
+      "description": "Lets developers fetch a token with curl (password grant) to test the Gateway. Never enable outside local dev.",
+      "enabled": true,
+      "protocol": "openid-connect",
+      "publicClient": true,
+      "standardFlowEnabled": false,
+      "directAccessGrantsEnabled": true,
+      "implicitFlowEnabled": false
+    }
+  ],
+  "users": [
+    {
+      "username": "manager1",
+      "email": "manager1@lens.local",
+      "emailVerified": true,
+      "firstName": "Maya",
+      "lastName": "Manager",
+      "enabled": true,
+      "credentials": [{ "type": "password", "value": "manager1", "temporary": false }],
+      "realmRoles": ["manager"]
+    },
+    {
+      "username": "employee1",
+      "email": "employee1@lens.local",
+      "emailVerified": true,
+      "firstName": "Eli",
+      "lastName": "Employee",
+      "enabled": true,
+      "credentials": [{ "type": "password", "value": "employee1", "temporary": false }],
+      "realmRoles": ["employee"]
+    }
+  ]
+}

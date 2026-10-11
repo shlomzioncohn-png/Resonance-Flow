@@ -21,6 +21,9 @@ models/*
 # Env / secrets
 .env
 .env.local
+# Local stand-ins for the config.yaml/secrets.yaml the Helm chart mounts
+# in the cluster. They hold real provider keys -- never commit them.
+*.local.yaml
 
 # OS / editor
 .DS_Store

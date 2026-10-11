@@ -1,6 +1,6 @@
-'use client'
+'use client';
 
-import { alpha, useTheme } from '@mui/material/styles'
+import { alpha, useTheme } from '@mui/material/styles';
 import {
   Box,
   Drawer,
@@ -10,38 +10,38 @@ import {
   ListItemText,
   Toolbar,
   Typography,
-} from '@/design-system/components'
-import Link from 'next/link'
-import { usePathname } from 'next/navigation'
-import Logo from '../Logo'
-import { useRole } from '../RoleProvider'
-import { navSections } from './navConfig'
+} from '@/design-system/components';
+import Link from 'next/link';
+import { usePathname } from 'next/navigation';
+import Logo from '../Logo';
+import { useRole } from '../RoleProvider';
+import { navSections } from './navConfig';
 
-export const SIDEBAR_WIDTH = 260
+export const SIDEBAR_WIDTH = 260;
 
 export interface SidebarProps {
-  open: boolean
-  onClose: () => void
-  variant: 'permanent' | 'temporary'
+  open: boolean;
+  onClose: () => void;
+  variant: 'permanent' | 'temporary';
 }
 
 export default function Sidebar({ open, onClose, variant }: SidebarProps) {
-  const pathname = usePathname()
-  const { role } = useRole()
-  const theme = useTheme()
+  const pathname = usePathname();
+  const { role } = useRole();
+  const theme = useTheme();
 
-  const sidebarBg = theme.palette.sidebar.background
-  const sidebarText = theme.palette.sidebar.text
-  const sidebarTextActive = theme.palette.sidebar.textActive
-  const sidebarDivider = theme.palette.sidebar.divider
-  const sidebarHover = theme.palette.sidebar.hover
+  const sidebarBg = theme.palette.sidebar.background;
+  const sidebarText = theme.palette.sidebar.text;
+  const sidebarTextActive = theme.palette.sidebar.textActive;
+  const sidebarDivider = theme.palette.sidebar.divider;
+  const sidebarHover = theme.palette.sidebar.hover;
 
   const visibleSections =
     role === 'manager'
       ? navSections.filter((section) => section.label !== 'Employee')
       : role === 'employee'
         ? navSections.filter((section) => section.label === 'Employee')
-        : navSections
+        : navSections;
 
   const content = (
     <Box
@@ -78,7 +78,7 @@ export default function Sidebar({ open, onClose, variant }: SidebarProps) {
             </Typography>
             <List disablePadding>
               {section.items.map((item) => {
-                const selected = pathname === item.href
+                const selected = pathname === item.href;
                 return (
                   <ListItemButton
                     key={item.href}
@@ -113,14 +113,14 @@ export default function Sidebar({ open, onClose, variant }: SidebarProps) {
                       }}
                     />
                   </ListItemButton>
-                )
+                );
               })}
             </List>
           </Box>
         ))}
       </Box>
     </Box>
-  )
+  );
 
   if (variant === 'permanent') {
     return (
@@ -135,7 +135,7 @@ export default function Sidebar({ open, onClose, variant }: SidebarProps) {
       >
         {content}
       </Box>
-    )
+    );
   }
 
   return (
@@ -151,5 +151,5 @@ export default function Sidebar({ open, onClose, variant }: SidebarProps) {
     >
       {content}
     </Drawer>
-  )
+  );
 }

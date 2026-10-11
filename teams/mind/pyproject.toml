@@ -14,16 +14,23 @@ dependencies = [
     # embeddings (src/mind/embeddings)
     "psycopg[binary,pool]>=3.1",
     "sentence-transformers>=3.0",
+    # migrations (migrations/) -- runs at deploy time, inside the image,
+    # not just in dev, so this belongs here and not in [dev].
+    "alembic>=1.13",
+    "sqlalchemy>=2.0",
     # messaging (src/mind/messaging)
     "confluent-kafka[protobuf,schemaregistry]>=2.5,<2.11",
     "protobuf>=5",
     "pyyaml",
+    # LLM provider calls (mind.extraction.providers); also what
+    # fastapi.testclient.TestClient runs on in the tests.
+    "httpx",
     # OCR (src/mind/multimodal/ocr.py) -- tesseract --psm 11, the decision
     # made in benchmarks/ocr-asr-benchmark.md. Also requires the
     # tesseract-ocr system binary (not pip-installable).
     "pillow",
     "pypdfium2",  # rasterizes PDF pages to images for the OCR pipeline
-    # add as decided: ASR libs, LLM client, etc.
+    # add as decided: vector-store client, ASR libs, etc.
 ]
 
 [project.optional-dependencies]
@@ -42,7 +49,6 @@ dev = [
                      # needed) is enough for mypy to resolve the import --
                      # verified locally: mypy passes on benchmarks/ with
                      # types-psutil installed and psutil itself uninstalled.
-    "httpx",  # required by fastapi.testclient.TestClient
     "grpcio-tools==1.71.0",  # protoc, for `make proto`
     "types-protobuf",  # stubs for google.protobuf, imported by the generated _pb2.pyi files
     "python-dotenv",  # tests/conftest.py loads .env for os.environ-reading fixtures

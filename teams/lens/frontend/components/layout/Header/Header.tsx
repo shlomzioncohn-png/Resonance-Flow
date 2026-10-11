@@ -1,33 +1,33 @@
-'use client'
+'use client';
 
-import AppBar from '@mui/material/AppBar'
-import Avatar from '@mui/material/Avatar'
-import Box from '@mui/material/Box'
-import IconButton from '@mui/material/IconButton'
-import InputBase from '@mui/material/InputBase'
-import Stack from '@mui/material/Stack'
-import Toolbar from '@mui/material/Toolbar'
-import Tooltip from '@mui/material/Tooltip'
-import Typography from '@mui/material/Typography'
-import Link from 'next/link'
-import ExpandMoreIcon from '@mui/icons-material/ExpandMore'
-import MenuIcon from '@mui/icons-material/Menu'
-import NotificationsNoneOutlinedIcon from '@mui/icons-material/NotificationsNoneOutlined'
-import SearchIcon from '@mui/icons-material/Search'
-import { useRole } from '../RoleProvider'
+import AppBar from '@mui/material/AppBar';
+import Avatar from '@mui/material/Avatar';
+import Box from '@mui/material/Box';
+import IconButton from '@mui/material/IconButton';
+import InputBase from '@mui/material/InputBase';
+import Stack from '@mui/material/Stack';
+import Toolbar from '@mui/material/Toolbar';
+import Tooltip from '@mui/material/Tooltip';
+import Typography from '@mui/material/Typography';
+import Link from 'next/link';
+import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
+import MenuIcon from '@mui/icons-material/Menu';
+import NotificationsNoneOutlinedIcon from '@mui/icons-material/NotificationsNoneOutlined';
+import SearchIcon from '@mui/icons-material/Search';
+import { useRole } from '../RoleProvider';
 
 export interface HeaderProps {
-  onMenuClick: () => void
+  onMenuClick: () => void;
 }
 
 const ROLE_DISPLAY = {
   manager: { initials: 'MG', title: 'Manager' },
   employee: { initials: 'EM', title: 'Employee' },
-} as const
+} as const;
 
 export default function Header({ onMenuClick }: HeaderProps) {
-  const { role } = useRole()
-  const display = role ? ROLE_DISPLAY[role] : { initials: 'LN', title: 'Guest user' }
+  const { role } = useRole();
+  const display = role ? ROLE_DISPLAY[role] : { initials: 'LN', title: 'Guest user' };
 
   return (
     <AppBar position="sticky" elevation={0}>
@@ -99,5 +99,5 @@ export default function Header({ onMenuClick }: HeaderProps) {
         </Tooltip>
       </Toolbar>
     </AppBar>
-  )
+  );
 }

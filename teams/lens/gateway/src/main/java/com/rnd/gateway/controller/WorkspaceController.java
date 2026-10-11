@@ -3,10 +3,17 @@ package com.rnd.gateway.controller;
 import com.rnd.gateway.dto.TaskDTO;
 import com.rnd.gateway.dto.TaskListResponseDTO;
 import com.rnd.gateway.dto.TaskRecommendationDTO;
+import com.rnd.gateway.dto.TaskSelectionDTO;
 import com.rnd.gateway.dto.TaskStatusUpdateDTO;
 import com.rnd.gateway.dto.WorkspaceRequestDTO;
 import com.rnd.gateway.exception.GatewayTimeoutException;
 import com.rnd.gateway.exception.ServiceUnavailableException;
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.Parameter;
+import io.swagger.v3.oas.annotations.tags.Tag;
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -38,8 +45,10 @@ import java.net.SocketTimeoutException;
  *
  * Endpoints:
  * POST  /api/workspace/recommend             - Get best task recommendation for available time
+ * GET   /api/workspace/tasks                 - My Tasks list (filter, search, pagination)
+ * GET   /api/workspace/tasks/selection       - Tasks that fit availableMinutes together
  * GET   /api/workspace/tasks/{taskId}        - Get full task details (dependencies, tags, etc.)
- * PATCH /api/workspace/tasks/{taskId}/status - Update task status (READY/IN_PROGRESS/BLOCKED/COMPLETED)
+ * PATCH /api/workspace/tasks/{taskId}/status - Update task status (one of the 8 Inbox statuses)
  *
  * Identity flow (current: MOCK):
  *   TODO: replace mock userId with real JWT extraction.
@@ -49,12 +58,16 @@ import java.net.SocketTimeoutException;
  */
 @RestController
 @RequestMapping("/api/workspace")
+@Tag(name = "Workspace", description = "Employee My Workspace / My Tasks screens — forwards to BFF")
 public class WorkspaceController {
 
     private static final Logger logger = LoggerFactory.getLogger(WorkspaceController.class);
 
     // TODO: replace with real JWT extraction service when Auth & Identity is implemented
     private static final String MOCK_USER_ID = "emp_001";
+
+    /** Reads BFF error bodies (see bffErrorReason). */
+    private static final ObjectMapper ERROR_BODY_READER = new ObjectMapper();
 
     private final RestTemplate restTemplate;
 
@@ -66,6 +79,9 @@ public class WorkspaceController {
 
     @Value("${bff.endpoints.tasks:/workspace/tasks}")
     private String bffTasksPath;
+
+    @Value("${bff.endpoints.task-selection:/workspace/tasks/selection}")
+    private String bffTaskSelectionPath;
 
     @Value("${bff.read-timeout-ms:10000}")
     private long bffReadTimeoutMs;
@@ -104,6 +120,29 @@ public class WorkspaceController {
     }
 
     /**
+     * The message to show for a BFF error. For a 4xx, BFF's own "message" is
+     * passed on (e.g. "Task not found", "Not allowed to access this task") -
+     * BFF writes those for clients, so they hold nothing internal. A 5xx keeps
+     * the generic text, so internal details (exception names, downstream
+     * errors) never reach the browser.
+     */
+    private String bffErrorReason(HttpStatusCodeException e) {
+        String generic = "Downstream service returned an error";
+        if (!e.getStatusCode().is4xxClientError()) {
+            return generic;
+        }
+        try {
+            JsonNode message = ERROR_BODY_READER.readTree(e.getResponseBodyAsString()).path("message");
+            if (message.isTextual() && !message.asText().isBlank()) {
+                return message.asText();
+            }
+        } catch (JsonProcessingException ignored) {
+            // Not JSON - fall back to the generic text
+        }
+        return generic;
+    }
+
+    /**
      * Builds the X-User-Id header for BFF requests.
      * Centralised here so JWT extraction only needs to change in one place.
      */
@@ -132,6 +171,8 @@ public class WorkspaceController {
      *   "confidenceScore": 85
      * }
      */
+    @Operation(summary = "Find my best task",
+            description = "\"I have X minutes — what should I work on?\" Returns one recommended task.")
     @PostMapping("/recommend")
     public ResponseEntity<TaskRecommendationDTO> getRecommendedTask(
             @Valid @RequestBody WorkspaceRequestDTO request) {
@@ -183,10 +224,9 @@ public class WorkspaceController {
             throw new ServiceUnavailableException("bff", "BFF is currently unavailable");
 
         } catch (HttpStatusCodeException e) {
-            // BFF returned a 4xx/5xx — preserve the status code, hide internal details
+            // BFF returned a 4xx/5xx — preserve the status code (see bffErrorReason)
             logger.warn("BFF returned {} for user: {}", e.getStatusCode(), userId);
-            throw new ResponseStatusException(e.getStatusCode(),
-                    "Downstream service returned an error");
+            throw new ResponseStatusException(e.getStatusCode(), bffErrorReason(e));
 
         } catch (Exception e) {
             logger.error("Unexpected error forwarding workspace request for user: {}", userId, e);
@@ -208,11 +248,18 @@ public class WorkspaceController {
      *
      * Response: TaskListResponseDTO { items, total, page, size }
      */
+    @Operation(summary = "List my tasks",
+            description = "\"My Tasks\" screen — filter, title search, and pagination.")
     @GetMapping("/tasks")
     public ResponseEntity<TaskListResponseDTO> getTaskList(
+            @Parameter(description = "all, or one of the 8 statuses in lowercase (new, in_review, approved, "
+                    + "in_progress, snoozed, done, rejected, cancelled). Default all")
             @RequestParam(required = false) String filter,
+            @Parameter(description = "Free-text, matched against task title (case-insensitive)")
             @RequestParam(required = false) String search,
+            @Parameter(description = "0-based page index (default 0)")
             @RequestParam(required = false) Integer page,
+            @Parameter(description = "Page size (default 20, clamped to 1-100)")
             @RequestParam(required = false) Integer size) {
 
         String userId = getMockUserId("workspace.tasks.list"); // TODO: extract from JWT
@@ -263,10 +310,71 @@ public class WorkspaceController {
 
         } catch (HttpStatusCodeException e) {
             logger.warn("BFF returned {} for task list - userId: {}", e.getStatusCode(), userId);
-            throw new ResponseStatusException(e.getStatusCode(), "Downstream service returned an error");
+            throw new ResponseStatusException(e.getStatusCode(), bffErrorReason(e));
 
         } catch (Exception e) {
             logger.error("Unexpected error fetching task list for userId: {}", userId, e);
+            throw new ServiceUnavailableException("bff", "Unexpected error communicating with BFF");
+        }
+    }
+
+    /**
+     * Inbox's pick of the tasks to do in the available time
+     *
+     * Request: GET /api/workspace/tasks/selection?availableMinutes=60
+     * Forwards to: GET {bff}/workspace/tasks/selection?availableMinutes=60
+     *
+     * availableMinutes is required, 1-480 (Inbox's limit) - checked here, so a
+     * bad value is a 400 without a round trip. Spring maps this literal path
+     * ahead of /tasks/{taskId}.
+     */
+    @Operation(summary = "Select tasks for the available time",
+            description = "The tasks that fit availableMinutes together, in suggested order. "
+                    + "usedFallback=true: nothing fit, so the shortest task was picked anyway.")
+    @GetMapping("/tasks/selection")
+    public ResponseEntity<TaskSelectionDTO> selectTasks(
+            @Parameter(description = "Free time in minutes, 1-480")
+            @RequestParam(required = false) Integer availableMinutes) {
+
+        if (availableMinutes == null || availableMinutes < 1 || availableMinutes > 480) {
+            throw new IllegalArgumentException("availableMinutes must be between 1 and 480");
+        }
+        String userId = getMockUserId("workspace.tasks.selection"); // TODO: extract from JWT
+
+        logger.info("Task selection request - userId: {}, availableMinutes: {}", userId, availableMinutes);
+
+        try {
+            String bffUrl = UriComponentsBuilder.fromHttpUrl(bffServiceUrl)
+                    .path(bffTaskSelectionPath)
+                    .queryParam("availableMinutes", availableMinutes)
+                    .toUriString();
+            logger.debug("Forwarding to BFF: {}", bffUrl);
+
+            ResponseEntity<TaskSelectionDTO> bffResponse = restTemplate.exchange(
+                    bffUrl, HttpMethod.GET, new HttpEntity<>(buildHeaders(userId)), TaskSelectionDTO.class);
+
+            TaskSelectionDTO selection = bffResponse.getBody();
+            if (selection == null) {
+                throw new ServiceUnavailableException("bff", "BFF returned empty response");
+            }
+            return ResponseEntity.ok(selection);
+
+        } catch (ServiceUnavailableException | GatewayTimeoutException | ResponseStatusException e) {
+            throw e;
+        } catch (ResourceAccessException e) {
+            if (e.getCause() instanceof SocketTimeoutException) {
+                logger.error("BFF read timeout for task selection - userId: {}", userId, e);
+                throw new GatewayTimeoutException("bff", bffReadTimeoutMs, "BFF did not respond in time");
+            }
+            logger.error("BFF unreachable for task selection - userId: {}", userId, e);
+            throw new ServiceUnavailableException("bff", "BFF is currently unavailable");
+
+        } catch (HttpStatusCodeException e) {
+            logger.warn("BFF returned {} for task selection - userId: {}", e.getStatusCode(), userId);
+            throw new ResponseStatusException(e.getStatusCode(), bffErrorReason(e));
+
+        } catch (Exception e) {
+            logger.error("Unexpected error fetching task selection for userId: {}", userId, e);
             throw new ServiceUnavailableException("bff", "Unexpected error communicating with BFF");
         }
     }
@@ -279,6 +387,7 @@ public class WorkspaceController {
      * Response: TaskDTO with all fields including dependencies, constraints,
      *           source, sprint, tags, blockingReason
      */
+    @Operation(summary = "Get task details", description = "Full task detail panel, by task id.")
     @GetMapping("/tasks/{taskId}")
     public ResponseEntity<TaskDTO> getTaskDetails(@PathVariable String taskId) {
 
@@ -318,7 +427,7 @@ public class WorkspaceController {
 
         } catch (HttpStatusCodeException e) {
             logger.warn("BFF returned {} for taskId: {}", e.getStatusCode(), taskId);
-            throw new ResponseStatusException(e.getStatusCode(), "Downstream service returned an error");
+            throw new ResponseStatusException(e.getStatusCode(), bffErrorReason(e));
 
         } catch (Exception e) {
             logger.error("Unexpected error fetching task details for taskId: {}", taskId, e);
@@ -330,12 +439,15 @@ public class WorkspaceController {
      * Update task status
      *
      * Request: PATCH /api/workspace/tasks/{taskId}/status
-     * Body: { "status": "IN_PROGRESS" }
+     * Body: { "status": "SNOOZED", "snoozedUntil": "2026-10-07T09:00:00Z" }
      *
-     * Allowed status values: READY, IN_PROGRESS, BLOCKED, COMPLETED
+     * Allowed status values: NEW, IN_REVIEW, APPROVED, IN_PROGRESS, SNOOZED,
+     * DONE, REJECTED, CANCELLED. snoozedUntil is required only for SNOOZED.
      *
      * Response: updated TaskDTO
      */
+    @Operation(summary = "Update task status",
+            description = "Allowed values: NEW, IN_REVIEW, APPROVED, IN_PROGRESS, SNOOZED, DONE, REJECTED, CANCELLED. See docs/employee-workspace-api-contract.md §5.0 for status model.")
     @PatchMapping("/tasks/{taskId}/status")
     public ResponseEntity<TaskDTO> updateTaskStatus(
             @PathVariable String taskId,
@@ -380,11 +492,12 @@ public class WorkspaceController {
 
         } catch (HttpStatusCodeException e) {
             logger.warn("BFF returned {} for taskId: {}", e.getStatusCode(), taskId);
-            throw new ResponseStatusException(e.getStatusCode(), "Downstream service returned an error");
+            throw new ResponseStatusException(e.getStatusCode(), bffErrorReason(e));
 
         } catch (Exception e) {
             logger.error("Unexpected error updating task status for taskId: {}", taskId, e);
             throw new ServiceUnavailableException("bff", "Unexpected error communicating with BFF");
         }
     }
+
 }
