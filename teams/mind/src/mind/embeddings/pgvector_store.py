@@ -14,6 +14,7 @@ from psycopg_pool import AsyncConnectionPool
 
 from mind.config import VectorStoreSettings
 from mind.embeddings.base import SearchResult, VectorStore
+from mind.embeddings.embeddings import embed_async
 
 
 class PgVectorStore(VectorStore):
@@ -122,3 +123,8 @@ class PgVectorStore(VectorStore):
             await cur.execute(self._search_query(), (query_vector, query_vector, k))
             rows = await cur.fetchall()
             return [SearchResult(task_id=row[0], similarity=row[1]) for row in rows]
+
+    async def search_text(self, query: str, k: int) -> list[SearchResult]:
+        """search(), embedding `query` as is_query=True first."""
+        vector = await embed_async(query, is_query=True)
+        return await self.search(vector, k)

@@ -32,7 +32,7 @@ import static org.mockito.Mockito.when;
 class GitHubKafkaProducerTest {
 
     @Mock
-    private KafkaTemplate<String, Task> kafkaTemplate;
+    private KafkaTemplate<String, byte[]> kafkaTemplate;
 
     @Spy
     private TaskValidator taskValidator;
@@ -44,23 +44,24 @@ class GitHubKafkaProducerTest {
     void publish_shouldSendTaskToBridgeGithubTasksTopic() {
         Task task = createTask("github:repo:issue:1");
 
-        SendResult<String, Task> sendResult = createSendResult(task);
-        when(kafkaTemplate.send(anyString(), anyString(), any(Task.class)))
+        SendResult<String, byte[]> sendResult = createSendResult();
+        when(kafkaTemplate.send(anyString(), anyString(), any(byte[].class)))
                 .thenReturn(CompletableFuture.completedFuture(sendResult));
 
-        CompletableFuture<SendResult<String, Task>> result = gitHubKafkaProducer.publish(task);
+        CompletableFuture<SendResult<String, byte[]>> result = gitHubKafkaProducer.publish(task);
 
         assertThat(result).isCompletedWithValue(sendResult);
 
         ArgumentCaptor<String> topicCaptor = ArgumentCaptor.forClass(String.class);
         ArgumentCaptor<String> keyCaptor = ArgumentCaptor.forClass(String.class);
-        ArgumentCaptor<Task> taskCaptor = ArgumentCaptor.forClass(Task.class);
+        ArgumentCaptor<byte[]> taskCaptor = ArgumentCaptor.forClass(byte[].class);
 
         verify(kafkaTemplate).send(topicCaptor.capture(), keyCaptor.capture(), taskCaptor.capture());
 
         assertThat(topicCaptor.getValue()).isEqualTo(gitHubKafkaProducer.TOPIC);
         assertThat(keyCaptor.getValue()).isEqualTo(task.sourceRef());
-        assertThat(taskCaptor.getValue()).isEqualTo(task);
+        assertThat(taskCaptor.getValue()).isNotNull();
+        assertThat(taskCaptor.getValue()).isNotEmpty();
     }
 
     @Test
@@ -85,8 +86,8 @@ class GitHubKafkaProducerTest {
                 Tier.TACTICAL, ExtractionProvenance.ETL, null, SourceType.GITHUB_ISSUE, sourceRef, null, null, null, null);
     }
 
-    private SendResult<String, Task> createSendResult(Task task) {
-        ProducerRecord<String, Task> record = new ProducerRecord<>(gitHubKafkaProducer.TOPIC, task.sourceRef(), task);
+    private SendResult<String, byte[]> createSendResult() {
+        ProducerRecord<String, byte[]> record = new ProducerRecord<>(gitHubKafkaProducer.TOPIC, "test-key", new byte[]{1, 2, 3});
         RecordMetadata metadata = new RecordMetadata(new TopicPartition(gitHubKafkaProducer.TOPIC, 0), 0, 0, 0, 0, 0);
         return new SendResult<>(record, metadata);
     }

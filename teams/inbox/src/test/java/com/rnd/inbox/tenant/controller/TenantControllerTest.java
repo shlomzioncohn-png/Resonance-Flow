@@ -123,7 +123,7 @@ class TenantControllerTest {
                         .content(objectMapper.writeValueAsString(new TenantCreateRequestDto())))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.error").value("VALIDATION_ERROR"))
-                .andExpect(jsonPath("$.fieldErrors").isArray());
+                .andExpect(jsonPath("$.field_errors").isArray());
     }
 
     @Test
@@ -218,7 +218,7 @@ class TenantControllerTest {
         mockMvc.perform(get("/api/v1/tenants").header(ACTOR_HEADER, actorId.toString()))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.content[0].id").value(tenantId.toString()))
-                .andExpect(jsonPath("$.totalElements").value(1));
+                .andExpect(jsonPath("$.total_elements").value(1));
     }
 
     @Test

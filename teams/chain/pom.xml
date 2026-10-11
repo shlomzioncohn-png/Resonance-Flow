@@ -21,6 +21,8 @@
         <java.version>21</java.version>
         <protobuf.version>3.25.3</protobuf.version>
         <confluent.version>7.1.15</confluent.version>
+        <!-- Dockerfile overrides it: the repo layout isn't there. -->
+        <proto.root>${project.basedir}/../../shared/proto</proto.root>
         <!-- A property, not plugin config: an empty <excludedGroups/> in a profile doesn't override. -->
         <surefire.excludedGroups>postgres</surefire.excludedGroups>
     </properties>
@@ -169,61 +171,20 @@
                 <version>0.6.1</version>
                 <configuration>
                     <protocArtifact>com.google.protobuf:protoc:${protobuf.version}:exe:${os.detected.classifier}</protocArtifact>
-                    <!--
-                        task-created-event.proto / task-updated-event.proto are copied verbatim
-                        from teams/relay/src/main/proto/ (schemas are owned by Relay - that
-                        directory and teams/relay/ci/schema-subjects.tsv are the registered
-                        source of truth). Copied into src/main/proto instead of referenced via a
-                        ../relay relative path: that path doesn't exist inside the Docker build
-                        context (teams/chain only) - see teams/inbox/pom.xml's identical comment
-                        for the same reasoning.
-                        dependency-proposed-event.proto is Chain's own working draft for
-                        task.dependencies.proposed (Mind) - no officially registered schema
-                        exists for this topic yet; see that file's own header comment.
-                    -->
-                    <protoSourceRoot>${project.basedir}/src/main/proto</protoSourceRoot>
-                    <!--
-                        Each file redeclares its own top-level enums independently - protoc
-                        rejects duplicate enum value names within one package if given multiple
-                        files in a single invocation, so each gets its own execution, and
-                        clearOutputDirectory=false so a later execution doesn't delete the
-                        classes an earlier one just generated (same pattern as teams/inbox/pom.xml).
-                    -->
-                    <clearOutputDirectory>false</clearOutputDirectory>
+                    <!-- Registered cross-team schemas, owned by Relay - see shared/proto/README.md. -->
+                    <protoSourceRoot>${proto.root}</protoSourceRoot>
+                    <includes>
+                        <include>task-created-event.proto</include>
+                        <include>task-updated-event.proto</include>
+                        <include>task-dependencies-proposed-event.proto</include>
+                        <include>scheduling-updated-event.proto</include>
+                    </includes>
                 </configuration>
                 <executions>
                     <execution>
-                        <id>compile-task-created-event</id>
                         <goals>
                             <goal>compile</goal>
                         </goals>
-                        <configuration>
-                            <includes>
-                                <include>task-created-event.proto</include>
-                            </includes>
-                        </configuration>
-                    </execution>
-                    <execution>
-                        <id>compile-task-updated-event</id>
-                        <goals>
-                            <goal>compile</goal>
-                        </goals>
-                        <configuration>
-                            <includes>
-                                <include>task-updated-event.proto</include>
-                            </includes>
-                        </configuration>
-                    </execution>
-                    <execution>
-                        <id>compile-dependency-proposed-event</id>
-                        <goals>
-                            <goal>compile</goal>
-                        </goals>
-                        <configuration>
-                            <includes>
-                                <include>dependency-proposed-event.proto</include>
-                            </includes>
-                        </configuration>
                     </execution>
                 </executions>
             </plugin>

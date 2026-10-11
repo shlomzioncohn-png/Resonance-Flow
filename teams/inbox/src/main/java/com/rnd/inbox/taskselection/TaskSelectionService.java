@@ -1,8 +1,14 @@
 package com.rnd.inbox.taskselection;
 
+import com.rnd.inbox.shared.exception.ForbiddenActionException;
+import com.rnd.inbox.shared.exception.UnauthenticatedException;
+import com.rnd.inbox.shared.security.ActorScope;
 import com.rnd.inbox.task.model.Task;
 import com.rnd.inbox.task.repository.TaskRepository;
 import com.rnd.inbox.task.model.TaskStatus;
+import com.rnd.inbox.task.security.TaskAuthorization;
+import com.rnd.inbox.user.model.User;
+import com.rnd.inbox.user.repository.UserRepository;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -22,6 +28,8 @@ public class TaskSelectionService {
             EnumSet.of(TaskStatus.DONE, TaskStatus.REJECTED, TaskStatus.CANCELLED);
 
     private final TaskRepository taskRepository;
+    private final UserRepository userRepository;
+    private final TaskAuthorization taskAuthorization;
     private final EffortEstimateResolver effortEstimateResolver;
     private final SelectionScoreCalculator selectionScoreCalculator;
     private final TaskSelectionKnapsackSolver knapsackSolver;
@@ -29,17 +37,43 @@ public class TaskSelectionService {
     private final Clock clock;
 
     public TaskSelectionService(TaskRepository taskRepository,
+                                 UserRepository userRepository,
+                                 TaskAuthorization taskAuthorization,
                                  EffortEstimateResolver effortEstimateResolver,
                                  SelectionScoreCalculator selectionScoreCalculator,
                                  TaskSelectionKnapsackSolver knapsackSolver,
                                  TaskSelectionMapper mapper,
                                  Clock clock) {
         this.taskRepository = taskRepository;
+        this.userRepository = userRepository;
+        this.taskAuthorization = taskAuthorization;
         this.effortEstimateResolver = effortEstimateResolver;
         this.selectionScoreCalculator = selectionScoreCalculator;
         this.knapsackSolver = knapsackSolver;
         this.mapper = mapper;
         this.clock = clock;
+    }
+
+    @Transactional(readOnly = true)
+    public TaskSelectionResponseDto selectTasksForUser(UUID actorId, UUID userId, int availableMinutes) {
+        User actor = userRepository.findById(actorId)
+                .orElseThrow(() -> new UnauthenticatedException("Actor " + actorId + " does not exist"));
+        UUID targetUserId = userId != null ? userId : actorId;
+
+        UUID tenantId = switch (taskAuthorization.scopeOf(actor)) {
+            case ActorScope.WithinTenant(UUID id) -> id;
+            case ActorScope.All ignored -> userRepository.findById(targetUserId)
+                    .map(target -> target.getTenant().getId())
+                    .orElse(null);
+            case ActorScope.WithinTeamsLedBy ignored ->
+                    throw new ForbiddenActionException("Actor has no valid scope for tasks");
+            case ActorScope.SelfOnly ignored ->
+                    throw new ForbiddenActionException("Actor has no valid scope for tasks");
+        };
+        if (tenantId == null) {
+            return mapper.noTasksAvailable(availableMinutes);
+        }
+        return selectTasks(tenantId, targetUserId, availableMinutes);
     }
 
     @Transactional(readOnly = true)

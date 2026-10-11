@@ -49,7 +49,8 @@ public class UserController {
             @ApiResponse(responseCode = "403",
                     description = "Actor's role cannot create users, or not in this tenant "
                             + "(SYSTEM_ADMIN: any tenant; TENANT_ADMIN: their own tenant only; "
-                            + "TEAM_LEAD/EMPLOYEE: cannot create users)"),
+                            + "TEAM_LEAD/EMPLOYEE: cannot create users), or the requested role is one the "
+                            + "actor may not grant (only SYSTEM_ADMIN can create a SYSTEM_ADMIN)"),
             @ApiResponse(responseCode = "404", description = "Tenant not found"),
             @ApiResponse(responseCode = "409", description = "Email or username already exists")
     })
@@ -100,7 +101,10 @@ public class UserController {
             @ApiResponse(responseCode = "403",
                     description = "User is outside the actor's scope "
                             + "(SYSTEM_ADMIN: everyone; TENANT_ADMIN: their tenant; "
-                            + "TEAM_LEAD: their teams; EMPLOYEE: themselves only)"),
+                            + "TEAM_LEAD: their teams; EMPLOYEE: themselves only), or the request changes "
+                            + "the user's role and the actor may not do that (SYSTEM_ADMIN: any role; "
+                            + "TENANT_ADMIN: any role except to or from SYSTEM_ADMIN; "
+                            + "TEAM_LEAD/EMPLOYEE: cannot change roles)"),
             @ApiResponse(responseCode = "404", description = "User not found"),
             @ApiResponse(responseCode = "409", description = "Email or username already exists")
     })

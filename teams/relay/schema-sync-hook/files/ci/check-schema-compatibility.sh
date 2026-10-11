@@ -4,14 +4,17 @@
 # change fails fast instead of reaching production.
 #
 # Usage: check-schema-compatibility.sh <path-to-.proto-file> <subject-name>
-# Example: check-schema-compatibility.sh teams/relay/src/main/proto/task-event.proto task-event-value
+# Example: check-schema-compatibility.sh shared/proto/task-event.proto task-event-value
 set -euo pipefail
 
 SCHEMA_FILE="$1"
 SUBJECT="$2"
 REGISTRY_URL="${SCHEMA_REGISTRY_URL:-http://localhost:8081/apis/ccompat/v6}"
 
-BODY=$(jq -n --arg schema "$(cat "$SCHEMA_FILE")" '{schema: $schema, schemaType: "PROTOBUF"}')
+source "$(dirname "${BASH_SOURCE[0]}")/_schema-references.sh"
+
+BODY=$(jq -n --arg schema "$(cat "$SCHEMA_FILE")" --argjson refs "$REFERENCES" \
+  '{schema: $schema, schemaType: "PROTOBUF", references: $refs}')
 
 HTTP_STATUS=$(curl -s -o /tmp/compat-response.json -w "%{http_code}" \
   -X POST "${REGISTRY_URL}/compatibility/subjects/${SUBJECT}/versions/latest" \
