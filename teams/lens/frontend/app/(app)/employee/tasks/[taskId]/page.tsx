@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useRef, useState } from 'react'
+import { use, useEffect, useRef, useState } from 'react'
 import Link from 'next/link'
 import { useSearchParams } from 'next/navigation'
 import Avatar from '@mui/material/Avatar'
@@ -22,24 +22,17 @@ import PersonOutlineIcon from '@mui/icons-material/PersonOutlined'
 import WarningAmberOutlinedIcon from '@mui/icons-material/WarningAmberOutlined'
 import { radiusTokens } from '@/theme'
 import { DetailRow, softToneSx, statusTone } from '../../shared'
-import { getTask, type ApiTask } from '@/services/workspaceApi'
+import { useTaskDetails } from '@/hooks/useTaskDetails'
 import ChatPanel from './ChatPanel'
 
-export default function TaskDetailsPage({ params }: { params: { taskId: string } }) {
+export default function TaskDetailsPage({ params }: { params: Promise<{ taskId: string }> }) {
+  // Next.js 16 passes params as a Promise; use() unwraps it
+  const { taskId } = use(params)
   const searchParams = useSearchParams()
   const [mode, setMode] = useState<'overview' | 'chat'>(
     searchParams.get('chat') === '1' ? 'chat' : 'overview',
   )
-  const [task, setTask] = useState<ApiTask | null>(null)
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
-
-  useEffect(() => {
-    getTask(params.taskId)
-      .then(setTask)
-      .catch((err) => setError(err instanceof Error ? err.message : 'Failed to load task'))
-      .finally(() => setLoading(false))
-  }, [params.taskId])
+  const { data: task, isPending, isError, error } = useTaskDetails(taskId)
 
   const contentRef = useRef<HTMLDivElement>(null)
   const isFirstRender = useRef(true)
@@ -48,7 +41,7 @@ export default function TaskDetailsPage({ params }: { params: { taskId: string }
     contentRef.current?.focus()
   }, [mode])
 
-  if (loading) {
+  if (isPending) {
     return (
       <Container maxWidth="lg" sx={{ py: 4, display: 'flex', justifyContent: 'center' }}>
         <CircularProgress />
@@ -56,12 +49,12 @@ export default function TaskDetailsPage({ params }: { params: { taskId: string }
     )
   }
 
-  if (error || !task) {
+  if (isError) {
     return (
       <Container maxWidth="lg" sx={{ py: 4 }}>
         <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
           <WarningAmberOutlinedIcon color="error" />
-          <Typography color="error.main">{error ?? 'Task not found'}</Typography>
+          <Typography color="error.main">{error.message}</Typography>
         </Stack>
       </Container>
     )
