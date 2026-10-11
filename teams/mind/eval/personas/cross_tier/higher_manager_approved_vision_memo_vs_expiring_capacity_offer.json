@@ -1,0 +1,52 @@
+{
+  "scenario_id": "higher_manager_approved_vision_memo_vs_expiring_capacity_offer",
+  "persona": {
+    "role": "Higher Manager",
+    "department": null
+  },
+  "context": {
+    "free_time_minutes": 75,
+    "current_datetime": "2026-10-27T14:20:00",
+    "time_horizon": "this_week",
+    "constraints": []
+  },
+  "tasks": [
+    {
+      "task_id": "task_vision",
+      "title": "Finalize the three-year platform vision memo for the board strategy committee",
+      "description": "The board chair approved the content and conclusions at last week's session; the remaining changes are a copy-edit and formatting pass. The committee secretary starts compiling the pre-read packet on Thursday at 12:00 and has asked every contributor to send final files by then, together with a one-page summary. The committee does not meet for three weeks.",
+      "deadline": "2026-10-29T12:00:00",
+      "effort_estimate": 50,
+      "tier": "strategic",
+      "blocked": false,
+      "parent_task_id": null
+    },
+    {
+      "task_id": "task_capacity",
+      "title": "Answer the GPU-capacity provider's renewal offer",
+      "description": "The only qualified second source of reserved training capacity has offered a one-quarter extension at the current rate, binding only until Friday at 09:00. After that the block goes to another buyer and the next availability is about four months out, after the Q1 release. Accepting means signing the revised commitment terms.",
+      "deadline": "2026-10-30T09:00:00",
+      "effort_estimate": 40,
+      "tier": "tactical",
+      "blocked": false,
+      "parent_task_id": null
+    },
+    {
+      "task_id": "task_travel_exceptions",
+      "title": "Approve the Q4 team-travel exception list",
+      "description": "Finance asked for your approval of the Q4 team-travel exception list by 17:00 today so it can go into the booking batch; the list covers fourteen trips across five teams. The batch runs again next Tuesday.",
+      "deadline": "2026-10-27T17:00:00",
+      "effort_estimate": 20,
+      "tier": "operational",
+      "blocked": false,
+      "parent_task_id": null
+    }
+  ],
+  "expected_top_task_id": "task_capacity",
+  "expected_reason": "task_capacity's offer lapses Friday morning and losing it leaves the ML team on one provider for four months; task_vision has a nearer deadline but its content is already board-approved with only formatting left, and task_travel_exceptions is a routine approval that is booked in next Tuesday's batch if it misses today's.",
+  "source": {
+    "type": "synthetic",
+    "source_detail": null
+  },
+  "team_lead_approved": false
+}

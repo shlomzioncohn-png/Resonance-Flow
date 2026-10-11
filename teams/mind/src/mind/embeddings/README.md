@@ -41,7 +41,7 @@ async def lifespan(app: FastAPI):
 
 ## Real data: the FUNSD slice (not R2)
 
-No R2 loader/storage exists in this repo. `loader.py` fetches the real 2-document FUNSD slice (PR #141's manifest), verifies checksums, caches under `local-data/`.
+No R2 (Cloudflare object storage) loader/storage exists in this repo. `loader.py` fetches the real 2-document FUNSD slice (PR #141's manifest), verifies checksums, caches under `local-data/`.
 
 ```bash
 python -m mind.embeddings.ingest    # fetch + verify + embed + upsert

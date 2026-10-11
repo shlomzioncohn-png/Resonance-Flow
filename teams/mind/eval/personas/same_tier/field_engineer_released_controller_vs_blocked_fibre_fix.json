@@ -1,0 +1,52 @@
+{
+  "scenario_id": "field_engineer_released_controller_vs_blocked_fibre_fix",
+  "persona": {
+    "role": "Field Engineer",
+    "department": null
+  },
+  "context": {
+    "free_time_minutes": 90,
+    "current_datetime": "2026-10-19T08:50:00",
+    "time_horizon": "today",
+    "constraints": []
+  },
+  "tasks": [
+    {
+      "task_id": "task_fibre",
+      "title": "Re-seat the faulty fibre patch at Customer H",
+      "description": "The link to Customer H has been dropping packets intermittently since Friday, their operations lead has escalated it twice, and the customer asked for it to be fixed by 13:00 today. The work needs a maintenance window that the customer's change-approval board must grant; they have said they will not convene before tomorrow, and nothing can be touched on site until they approve.",
+      "deadline": "2026-10-19T13:00:00",
+      "effort_estimate": 25,
+      "tier": "operational",
+      "blocked": true,
+      "parent_task_id": null
+    },
+    {
+      "task_id": "task_swap",
+      "title": "Swap the failed controller at Customer F",
+      "description": "Customer F's array has run on a single controller since its twin failed on Friday at 20:00. The contract requires redundancy to be restored within 72 hours, which ends tonight at 20:00, and a second failure would take their storage offline. The replacement part was held in customs, released at 07:40 and is now at the depot.",
+      "deadline": "2026-10-19T20:00:00",
+      "effort_estimate": 60,
+      "tier": "operational",
+      "blocked": false,
+      "parent_task_id": null
+    },
+    {
+      "task_id": "task_checklist",
+      "title": "Complete the quarterly safety checklist at Customer G",
+      "description": "The internal compliance tracker flags the quarterly safety checklist at Customer G as late after 17:00 today and notifies the regional compliance lead, who reports late items in next Monday's review. Nine of the checklist's fourteen items were already filled in on the last visit. Customer G's site is healthy with no open alerts, and its service contract is next reviewed in January.",
+      "deadline": "2026-10-19T17:00:00",
+      "effort_estimate": 30,
+      "tier": "operational",
+      "blocked": false,
+      "parent_task_id": null
+    }
+  ],
+  "expected_top_task_id": "task_swap",
+  "expected_reason": "task_swap has a contractual 72-hour redundancy deadline tonight with a customer's storage at risk, and its parts blocker was cleared at 07:40, so it is workable now; task_fibre is blocked on the customer's change-approval board despite the nearest deadline, and task_checklist's 17:00 flag is an internal tracker flag on a healthy site whose contract is not reviewed until January.",
+  "source": {
+    "type": "synthetic",
+    "source_detail": null
+  },
+  "team_lead_approved": false
+}
