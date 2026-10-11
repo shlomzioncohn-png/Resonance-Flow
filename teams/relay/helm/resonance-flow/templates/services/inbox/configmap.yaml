@@ -22,11 +22,12 @@ data:
         password: {{ $pg.postgresPassword | quote }}
       kafka:
         {{- include "resonance-flow.springKafkaBase" (dict "root" $) | nindent 8 }}
-          # Extends springKafkaBase's properties map. Consumed by the producer's KafkaProtobufSerializer
-          # (task.created/updated/completed - see #227 and teams/relay/docs/kafka-producer-consumer-guide.md).
-          schema.registry.url: {{ printf "http://%s/apis/ccompat/v6" (include "resonance-flow.dependencyAddress" (dict "root" $ "deps" $component.dependencies "name" "schema-registry")) | quote }}
         consumer:
           group-id: {{ $cfg.kafka.consumerGroupId | quote }}
+    kafka:
+      # The key KafkaConfig's @Value reads for every Protobuf serde, not spring.kafka.properties.
+      schema-registry:
+        url: {{ printf "http://%s/apis/ccompat/v6" (include "resonance-flow.dependencyAddress" (dict "root" $ "deps" $component.dependencies "name" "schema-registry")) | quote }}
     inbox:
       kafka:
         topics:
