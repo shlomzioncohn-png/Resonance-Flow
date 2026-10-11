@@ -17,8 +17,8 @@ were placed there by hand -- see "ASR -- setup" in ocr-asr-benchmark.md.
 Each size runs in its own fresh process, so its peak RSS is that model
 alone, not that model plus whatever the previous size left in the
 allocator. Peak RSS is the whole worker process (interpreter + model +
-audio decode), sampled every 50ms -- the number a host needs, rough like
-the OCR one. CPU time is user+system across all of CTranslate2's threads,
+audio decode), sampled every 50ms per meeting from after the model loads --
+the number a host needs, rough like the OCR one. CPU time is user+system across all of CTranslate2's threads,
 so it can exceed wall time.
 
 Accuracy is a rough word-level diff against AMI's human transcript (the
@@ -271,63 +271,66 @@ def _model_dir(size: str) -> Path:
 def benchmark_size(size: str, meetings: list[Meeting]) -> SizeResult:
     """Load one Whisper size and transcribe every meeting with it.
 
-    Meant to run in a fresh worker process (see run_asr_benchmark): the memory
-    sampler starts before the model loads, so peak RSS includes the model.
+    Meant to run in a fresh worker process (see run_asr_benchmark). Peak RSS is
+    sampled per meeting: a new sampler starts after the model has loaded, from
+    the current RSS -- so each row's peak includes the resident model and is
+    that meeting's alone, not a running max over the meetings before it
+    (review on #652). Same pattern as run_paddle_ocr.
     """
     import psutil  # optional [benchmark] extra
     from faster_whisper import WhisperModel  # optional [benchmark] extra
 
     proc = psutil.Process()
-    stop_event = threading.Event()
-    peak = [proc.memory_info().rss]
-    sampler = threading.Thread(target=sample_current_process, args=(stop_event, proc, peak))
-    sampler.start()
-    try:
-        load_start = time.perf_counter()
-        model = WhisperModel(
-            str(_model_dir(size)),
-            device="cpu",
-            compute_type=COMPUTE_TYPE,
-            cpu_threads=CPU_THREADS,
-        )
-        load_s = time.perf_counter() - load_start
+    load_start = time.perf_counter()
+    model = WhisperModel(
+        str(_model_dir(size)),
+        device="cpu",
+        compute_type=COMPUTE_TYPE,
+        cpu_threads=CPU_THREADS,
+    )
+    load_s = time.perf_counter() - load_start
 
-        rows: list[ASRRow] = []
-        for meeting in meetings:
-            cpu_before = proc.cpu_times()
+    rows: list[ASRRow] = []
+    for meeting in meetings:
+        stop_event = threading.Event()
+        peak = [proc.memory_info().rss]
+        sampler = threading.Thread(target=sample_current_process, args=(stop_event, proc, peak))
+        cpu_before = proc.cpu_times()
+        sampler.start()
+        try:
             start = time.perf_counter()
             segments, _info = model.transcribe(
                 str(meeting.audio), language="en", beam_size=BEAM_SIZE
             )
             # transcribe() is lazy: the decoding happens while iterating.
             decoded = list(segments)
-            text = " ".join(segment.text.strip() for segment in decoded)
             duration = time.perf_counter() - start
-            cpu_after = proc.cpu_times()
+        finally:
+            stop_event.set()
+            sampler.join()
+        cpu_after = proc.cpu_times()
+        text = " ".join(segment.text.strip() for segment in decoded)
 
-            out = _TRANSCRIPTS_DIR / size / f"{meeting.id}.txt"
-            out.parent.mkdir(parents=True, exist_ok=True)
-            out.write_text(text, encoding="utf-8")
+        out = _TRANSCRIPTS_DIR / size / f"{meeting.id}.txt"
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_text(text, encoding="utf-8")
 
-            hyp = [w for w in (_normalize(t) for t in text.split()) if w]
-            rows.append(
-                ASRRow(
-                    size=size,
-                    meeting=meeting.id,
-                    audio_s=meeting.duration_s,
-                    duration_s=round(duration, 1),
-                    peak_rss_mb=round(peak[0] / (1024 * 1024), 1),
-                    cpu_time_s=round(
-                        (cpu_after.user - cpu_before.user) + (cpu_after.system - cpu_before.system),
-                        1,
-                    ),
-                    fallback_segments=sum(1 for segment in decoded if segment.temperature > 0),
-                    diff=word_diff(reference_words(meeting.words_files), hyp),
-                )
+        hyp = [w for w in (_normalize(t) for t in text.split()) if w]
+        rows.append(
+            ASRRow(
+                size=size,
+                meeting=meeting.id,
+                audio_s=meeting.duration_s,
+                duration_s=round(duration, 1),
+                peak_rss_mb=round(peak[0] / (1024 * 1024), 1),
+                cpu_time_s=round(
+                    (cpu_after.user - cpu_before.user) + (cpu_after.system - cpu_before.system),
+                    1,
+                ),
+                fallback_segments=sum(1 for segment in decoded if segment.temperature > 0),
+                diff=word_diff(reference_words(meeting.words_files), hyp),
             )
-    finally:
-        stop_event.set()
-        sampler.join()
+        )
     return SizeResult(size=size, load_s=round(load_s, 1), rows=rows)
 
 

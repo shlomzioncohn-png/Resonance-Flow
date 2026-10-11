@@ -507,7 +507,8 @@ volume is known.
   same care.
 - **How it's measured.** Each size runs in a fresh process, so its peak RSS is
   that model alone (interpreter + model + audio decode, sampled every 50ms),
-  not leftovers from the previous size. Latency is wall time per meeting,
+  not leftovers from the previous size. It's sampled per meeting, from after
+  the model loads, so each row is that meeting's own peak. Latency is wall time per meeting,
   reported as a real-time factor (RTF = processing time / audio length; 0.1 is
   10x faster than real time). CPU time is user+system across CTranslate2's
   threads, so it exceeds wall time. Accuracy is a **rough word diff**:
@@ -550,6 +551,18 @@ Run 2, per meeting (with `fallback_segments`, added after run 1):
 | base.en | IB4003 | 0.156 | 315s | 1,953MB | 1,239s | 14 | 0.291 | 0.726 | 0.930 |
 | small.en | IS1008b | 0.738 | 1,305s | 1,935MB | 3,736s | 12 | 0.209 | 0.817 | 0.923 |
 | small.en | IB4003 | 1.395 | 2,823s | 2,118MB | 5,668s | 12 | 0.275 | 0.747 | 0.933 |
+
+**Note on the Peak RSS column (review on #652):** both runs above were
+measured before the sampler was reset per meeting. It ran once per size, so
+each IB4003 row (the second meeting) was the running max over both meetings.
+The values still hold as per-meeting peaks:
+- After IS1008b, the running max is exactly IS1008b's peak.
+- Every IB4003 value is higher than its IS1008b value, in all six rows.
+- So each new maximum was set during IB4003, and the number is IB4003's own
+  peak.
+
+The benchmark now samples each meeting separately, so later runs don't rely on
+that argument.
 
 Both meetings pooled (diff counts and time summed, so per minute of audio):
 
