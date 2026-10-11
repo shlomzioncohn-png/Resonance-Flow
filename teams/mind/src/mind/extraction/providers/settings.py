@@ -153,12 +153,33 @@ def _deep_merge(base: dict[str, Any], over: dict[str, Any]) -> dict[str, Any]:
     return out
 
 
-def _provider_section(provider: str) -> dict[str, Any]:
-    """The `llm.<provider>` subtree, merged across the two mounted files.
+def _present(section: dict[str, Any], key: str) -> Any | None:
+    """The value at `key`, or None when it is missing *or empty*.
+
+    A half-filled config file is the normal way a key goes missing: someone
+    writes `api_key:` and leaves the value for later. YAML reads that as None,
+    and wrapping it in `str()` turns it into the string "None" — which is
+    truthy, so `configured` would report yes, the provider would start, and
+    every call would come back 401 with nothing pointing at the real cause.
+
+    Whitespace counts as empty for the same reason: `api_key: "   "` is a
+    value nobody meant to set.
+    """
+
+    value = section.get(key)
+    if value is None:
+        return None
+    if isinstance(value, str) and not value.strip():
+        return None
+    return value
+
+
+def _llm_section() -> dict[str, Any]:
+    """The whole `llm` subtree, merged across the two mounted files.
 
     A missing file is not an error: on a developer machine neither exists, and
-    the result is simply an empty section. The provider is what refuses to
-    start without a key, not this.
+    the result is simply empty. The provider is what refuses to start without
+    a key, not this.
     """
 
     merged = _deep_merge(
@@ -166,8 +187,25 @@ def _provider_section(provider: str) -> dict[str, Any]:
         _read_yaml(os.environ.get("SECRETS_FILE_PATH", _DEFAULT_SECRETS)),
     )
     llm = merged.get("llm", {}) or {}
-    section = llm.get(provider, {}) or {}
+    return llm if isinstance(llm, dict) else {}
+
+
+def _provider_section(provider: str) -> dict[str, Any]:
+    """The `llm.<provider>` subtree: one provider's own settings."""
+
+    section = _llm_section().get(provider, {}) or {}
     return section if isinstance(section, dict) else {}
+
+
+def configured_provider_name() -> str | None:
+    """Which provider `llm.provider` names, or None if nobody chose.
+
+    A sibling of the per-provider sections rather than a key inside one:
+    it is the choice between them, not a setting of either.
+    """
+
+    chosen = _present(_llm_section(), "provider")
+    return str(chosen).strip().lower() if chosen is not None else None
 
 
 def load_deepseek_settings() -> DeepSeekSettings:
@@ -175,12 +213,16 @@ def load_deepseek_settings() -> DeepSeekSettings:
 
     deepseek = _provider_section("deepseek")
 
+    def value(key: str, fallback: Any) -> Any:
+        read = _present(deepseek, key)
+        return fallback if read is None else read
+
     return DeepSeekSettings(
-        api_key=str(deepseek.get("api_key", "")),
-        base_url=str(deepseek.get("base_url", DEFAULT_BASE_URL)),
-        model=str(deepseek.get("model", DEFAULT_MODEL)),
-        timeout_seconds=float(deepseek.get("timeout_seconds", DEFAULT_TIMEOUT_SECONDS)),
-        max_output_tokens=int(deepseek.get("max_output_tokens", DEFAULT_MAX_OUTPUT_TOKENS)),
+        api_key=str(value("api_key", "")),
+        base_url=str(value("base_url", DEFAULT_BASE_URL)),
+        model=str(value("model", DEFAULT_MODEL)),
+        timeout_seconds=float(value("timeout_seconds", DEFAULT_TIMEOUT_SECONDS)),
+        max_output_tokens=int(value("max_output_tokens", DEFAULT_MAX_OUTPUT_TOKENS)),
     )
 
 
@@ -193,14 +235,22 @@ def load_gemini_settings() -> GeminiSettings:
     """
 
     gemini = _provider_section("gemini")
+
+    def value(key: str, fallback: Any) -> Any:
+        read = _present(gemini, key)
+        return fallback if read is None else read
+
+    # thinking_budget is read straight off the section rather than through
+    # `value`: here an explicit `thinking_budget: null` means "leave the field
+    # out of the request", which is a real setting and not an empty one.
     budget = gemini.get("thinking_budget", GEMINI_DEFAULT_THINKING_BUDGET)
 
     return GeminiSettings(
-        api_key=str(gemini.get("api_key", "")),
-        base_url=str(gemini.get("base_url", GEMINI_DEFAULT_BASE_URL)),
-        api_version=str(gemini.get("api_version", GEMINI_DEFAULT_API_VERSION)),
-        model=str(gemini.get("model") or GEMINI_DEFAULT_MODEL),
-        timeout_seconds=float(gemini.get("timeout_seconds", DEFAULT_TIMEOUT_SECONDS)),
-        max_output_tokens=int(gemini.get("max_output_tokens", DEFAULT_MAX_OUTPUT_TOKENS)),
+        api_key=str(value("api_key", "")),
+        base_url=str(value("base_url", GEMINI_DEFAULT_BASE_URL)),
+        api_version=str(value("api_version", GEMINI_DEFAULT_API_VERSION)),
+        model=str(value("model", GEMINI_DEFAULT_MODEL)),
+        timeout_seconds=float(value("timeout_seconds", DEFAULT_TIMEOUT_SECONDS)),
+        max_output_tokens=int(value("max_output_tokens", DEFAULT_MAX_OUTPUT_TOKENS)),
         thinking_budget=None if budget is None else int(budget),
     )

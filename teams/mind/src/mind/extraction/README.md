@@ -192,3 +192,111 @@ On a network that intercepts TLS, add `--os-trust-store` (needs
 `pip install truststore`). Python verifies against certifi and will reject an
 interception certificate that the browser and curl accept; the flag hands
 verification to the OS, which already trusts it, rather than weakening it.
+
+## Review fixes
+
+Seven findings from the review of this PR, and what each one changed.
+
+### Choosing a provider
+
+`llm.provider` names one, and `providers/factory.build_provider` returns it:
+
+```yaml
+llm:
+  provider: gemini
+```
+
+There is deliberately no default. DeepSeek is the primary provider #350 names
+but is unreachable from some networks; defaulting to Gemini would be the code
+inventing a policy nobody set. Either silent default hands somebody a provider
+they did not pick, and the mistake surfaces much later as a timeout.
+
+`build_provider` returns a `ManagedLLMProvider` — the protocol plus `close()`
+and the context-manager methods. It is separate from `LLMProvider` on purpose:
+the extractor needs `complete` and nothing else, which is what lets a scripted
+fake with no socket satisfy it, while a caller that *built* a client has to
+release it. The extractor is handed a provider; it never owns its lifetime.
+
+### A config value that is present but empty
+
+`api_key:` with nothing after it reads as None in YAML, and `str(None)` is the
+string `"None"` — truthy, so the provider would start and 401 on every call.
+Every read now goes through one helper that treats None, and whitespace, as
+missing. `thinking_budget` is the one field read directly, because there `null`
+is a real setting meaning "leave the field out of the request".
+
+### A placeholder is not a title
+
+`description` and `source_ref` may be nothing, so a placeholder there becomes
+None. `title` is required, so it has nowhere to fall back to: `"N/A"` now fails
+validation and goes back for repair. The validator raises its own message
+rather than letting pydantic say "Input should be a valid string", which is
+useless to a model that wrote a string. A repair round only pays for itself if
+the model is told what was wrong.
+
+### A truncated answer is refused, not repaired
+
+Hitting the output cap used to log a warning and return the cut-off text. The
+loop then opened a repair round under the same cap and got the same fragment —
+three paid calls, and the item dropped at the end. Both clients now raise a
+non-retryable error naming the setting to change. In Gemini the check runs
+before the empty-answer check, because a cap tight enough to cut before the
+first character would otherwise read as an empty completion, which is retryable.
+
+### Every call is recorded, including the failures
+
+`record_call` sat after the `try`, so a provider that raised was never
+recorded — and the failures are the slowest calls we make, since a timeout
+waits out the whole deadline. They are recorded now, under the provider's name
+(no answer to read a model id from) and at cost 0.0 (no usage reported).
+
+`except LLMError` rather than `finally`, so that a bug in a client or a
+`KeyboardInterrupt` propagates without being counted as a model call.
+
+Known gap, unchanged: `estimate_cost` returns None for an unpriced model, but
+`record_call` only takes a float, so unpriced and free both land as 0.0. Fixing
+that means widening `ModelCallRecord`, which is shared surface.
+
+### A failed item can be found
+
+Both outcomes carry `item_key`, and the log names it:
+
+```
+giving up on tenant-7/email/4471-body.eml (EMAIL) after 3 attempt(s): ...
+```
+
+It is the intake event's `object_key`, not its `correlation_id` — a source
+body shares a correlation id with its attachments, so it cannot say *which* of
+them failed. `extract_many` takes `ExtractionItem` values for the same reason:
+a three-tuple of `(str, SourceType, str | None)` reads as a puzzle.
+
+### A pointer the content never contained
+
+`grounding.ground_source_ref` keeps `source_ref` only when the content really
+carries it: quoted in the text, at least four characters, and shaped like an
+identifier rather than like a word. `"Friday"` appears in plenty of emails and
+is not a pointer.
+
+It runs between parsing and scoring, the one place holding both the answer and
+the text it was supposed to come from. The scorer is told what happened and
+only reads — a module that scores should not also be changing what it measures.
+
+The scoring inversion this fixes, on one answer and one source text:
+
+| what the model returned | before | after |
+|---|---|---|
+| a pointer quoted from the content | 0.8708 | 0.8708 |
+| an honest `null` | 0.7837 | 0.7837 |
+| an invented URL | **0.8708** | **0.627**, and the value does not travel |
+
+An invented pointer used to outscore an honest null, which is the opposite of
+what the system prompt asks the model for.
+
+**What this does not do.** It closes fabrication, not injection. The content is
+written by whoever sent it, so a sender can put a link in their own message and
+tell the model to use it; the value genuinely is in the content and passes
+every check here. `test_a_link_the_content_itself_carries_is_still_kept` pins
+that limit so nobody mistakes the check for more than it is. The real answer is
+for `source_ref` to arrive from Bridge as event metadata — `RawObjectEvent`
+carries no such field today, and asking for one is open with them. Until then,
+this field says what the content claimed, not what is true.

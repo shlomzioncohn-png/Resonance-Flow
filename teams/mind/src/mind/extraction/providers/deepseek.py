@@ -200,11 +200,15 @@ class DeepSeekProvider:
             raise LLMUnavailable("DeepSeek returned an empty completion")
 
         if first.get("finish_reason") == "length":
-            # The JSON is truncated and will not parse. Logged here because
-            # the fix is a config change (max_output_tokens), not a retry.
-            logger.warning(
-                "DeepSeek hit max_tokens=%d; the answer is truncated",
-                self._settings.max_output_tokens,
+            # Refused rather than returned. The JSON is cut mid-object and
+            # will not parse, and handing it to the repair loop would ask the
+            # model to fix it under the same cap that cut it -- three paid
+            # calls, three identical fragments, and the item dropped at the
+            # end. The fix is a setting, so the message names the setting.
+            raise LLMRejected(
+                f"DeepSeek stopped at max_tokens={self._settings.max_output_tokens}, "
+                "leaving the answer truncated; raise max_output_tokens or shorten "
+                "the prompt -- repeating this call will cut it in the same place"
             )
 
         usage = payload.get("usage")

@@ -6,6 +6,7 @@ import pytest
 
 from mind.extraction.providers.settings import (
     DEFAULT_MODEL,
+    DEFAULT_TIMEOUT_SECONDS,
     GEMINI_DEFAULT_MODEL,
     DeepSeekSettings,
     GeminiSettings,
@@ -155,3 +156,59 @@ def test_the_generate_url_carries_the_model_and_the_api_version() -> None:
     settings = GeminiSettings(model="gemini-3.6-flash", base_url="https://host/")
 
     assert settings.generate_url == "https://host/v1beta/models/gemini-3.6-flash:generateContent"
+
+
+# --- a key that is present but empty --------------------------------------
+
+
+def test_a_key_present_but_empty_counts_as_missing(_mounted: Path) -> None:
+    """`api_key:` with nothing after it is how a half-filled file looks.
+
+    YAML reads that as None, and `str(None)` is the string "None" — which is
+    truthy, so `configured` would say yes and the provider would start and
+    then 401 on every call. The check exists to prevent exactly that.
+    """
+
+    (_mounted / "secrets.yaml").write_text("llm:\n  deepseek:\n    api_key:\n", encoding="utf-8")
+
+    settings = load_deepseek_settings()
+
+    assert settings.api_key == ""
+    assert settings.configured is False
+
+
+def test_a_key_of_only_spaces_counts_as_missing(_mounted: Path) -> None:
+    (_mounted / "secrets.yaml").write_text(
+        'llm:\n  deepseek:\n    api_key: "   "\n', encoding="utf-8"
+    )
+
+    assert load_deepseek_settings().configured is False
+
+
+def test_an_empty_value_falls_back_to_the_default_not_to_the_word_none(
+    _mounted: Path,
+) -> None:
+    """The same bug in a field that is not the key: an empty `model:` built a
+    URL pointing at a model literally called "None"."""
+
+    (_mounted / "config.yaml").write_text(
+        "llm:\n  deepseek:\n    model:\n    timeout_seconds:\n", encoding="utf-8"
+    )
+
+    settings = load_deepseek_settings()
+
+    assert settings.model == DEFAULT_MODEL
+    assert settings.timeout_seconds == DEFAULT_TIMEOUT_SECONDS
+
+
+def test_the_same_holds_for_gemini(_mounted: Path) -> None:
+    """Two loaders, one bug — so the test covers both rather than one."""
+
+    (_mounted / "secrets.yaml").write_text("llm:\n  gemini:\n    api_key:\n", encoding="utf-8")
+    (_mounted / "config.yaml").write_text("llm:\n  gemini:\n    model:\n", encoding="utf-8")
+
+    settings = load_gemini_settings()
+
+    assert settings.api_key == ""
+    assert settings.configured is False
+    assert settings.model == GEMINI_DEFAULT_MODEL

@@ -11,7 +11,6 @@ provider notes in `src/mind/extraction/README.md`.
 """
 
 import json
-import logging
 
 import httpx
 import pytest
@@ -171,16 +170,35 @@ def test_an_unreported_usage_block_leaves_the_counts_empty() -> None:
     assert response.completion_tokens is None
 
 
-def test_a_truncated_answer_is_logged_because_the_fix_is_configuration(
-    caplog: pytest.LogCaptureFixture,
-) -> None:
+def test_a_truncated_answer_is_refused_not_returned() -> None:
+    """Repeating the call cannot help: the same cap cuts it in the same place."""
+
     handler, _ = _always(_envelope('{"title": "half an ans', finish_reason="length"))
 
-    with caplog.at_level(logging.WARNING, logger="mind.extraction.providers"):
+    with pytest.raises(LLMRejected) as raised:
         _provider(handler, max_output_tokens=16).complete("system", "user")
 
-    assert "truncated" in caplog.text
-    assert "max_tokens=16" in caplog.text
+    assert raised.value.retryable is False
+    # The fix is a setting, so the message has to name the setting.
+    assert "max_tokens=16" in str(raised.value)
+
+
+def test_a_truncated_answer_costs_one_call_not_three() -> None:
+    """What the old behaviour cost: three paid calls, all cut off alike.
+
+    Returning the cut-off text sent it to the repair loop, which asked again
+    with the same cap and got the same fragment, until the attempt budget ran
+    out and the item was dropped.
+    """
+
+    handler, seen = _always(_envelope('{"title": "half an ans', finish_reason="length"))
+    extractor = BasicExtractor(_provider(handler), sleep=lambda _: None)
+
+    outcome = extractor.extract(SOURCE_TEXT, SourceType.EMAIL)
+
+    assert isinstance(outcome, ExtractionFailure)
+    assert outcome.reason == "provider_error"
+    assert len(seen) == 1
 
 
 # --- transport failures --------------------------------------------------
