@@ -1,5 +1,6 @@
 package com.rnd.bridge.raw.model;
 
+import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.databind.PropertyNamingStrategies;
 import com.fasterxml.jackson.databind.annotation.JsonNaming;
 import com.rnd.bridge.core.BridgePayload;
@@ -39,6 +40,10 @@ import java.util.List;
  * neither Zoom/BBB recordings nor scanned docs are ever revised once landed, so Esther's
  * lane always sends exactly that, never anything else.
  * <p>
+ * classification is Bridge's optional whole-item triage that scopeDecision was derived from -
+ * see {@link Classification}. Omitted from the JSON entirely (not sent as null) when no
+ * classifier ran; attach one with {@link #withClassification}.
+ * <p>
  * implements BridgePayload (see core.BridgePayload): tenantId() is satisfied by the record's
  * own tenantId component.
  */
@@ -56,7 +61,8 @@ public record RawObjectEvent(
         List<String> participants,
         Instant sourceTimestamp,
         String sourceRef,
-        List<RawObjectRef> objects) implements BridgePayload {
+        List<RawObjectRef> objects,
+        @JsonInclude(JsonInclude.Include.NON_NULL) Classification classification) implements BridgePayload {
 
     private static final String CURRENT_SCHEMA_VERSION = "1.0";
 
@@ -76,7 +82,15 @@ public record RawObjectEvent(
         return new RawObjectEvent(
                 CURRENT_SCHEMA_VERSION, sourceType, tenantId, correlationId, ingestedAt,
                 scopeDecision, revision, changeType, changeSignificanceScore, participants,
-                sourceTimestamp, sourceRef, objects);
+                sourceTimestamp, sourceRef, objects, null);
+    }
+
+    /** A copy of this event carrying {@code classification}. */
+    public RawObjectEvent withClassification(Classification classification) {
+        return new RawObjectEvent(
+                schemaVersion, sourceType, tenantId, correlationId, ingestedAt, scopeDecision,
+                revision, changeType, changeSignificanceScore, participants, sourceTimestamp,
+                sourceRef, objects, classification);
     }
 
     @Override

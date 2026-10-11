@@ -2,6 +2,8 @@ package com.rnd.bridge.raw;
 
 import com.rnd.bridge.core.PayloadValidator;
 import com.rnd.bridge.core.error.ValidationException;
+import com.rnd.bridge.raw.model.Classification;
+import com.rnd.bridge.raw.model.ItemCategory;
 import com.rnd.bridge.raw.model.RawObjectEvent;
 import com.rnd.bridge.raw.model.RawObjectRef;
 import org.springframework.stereotype.Component;
@@ -31,6 +33,26 @@ public final class RawObjectValidator implements PayloadValidator<RawObjectEvent
             requireNonNull(object.role(), "objects[].role");
             requireNonNull(object.objectKey(), "objects[].objectKey");
             requireNonNull(object.contentHash(), "objects[].contentHash");
+        }
+
+        validateClassification(event);
+    }
+
+    /**
+     * Classification's own invariants (non-null labels, confidence in [0, 1]) are enforced by
+     * its records' constructors - only the cross-field rule is left: the category must belong
+     * to this event's source type (no MeetingCategory on a SCANNED_DOC event).
+     */
+    private static void validateClassification(RawObjectEvent event) {
+        Classification classification = event.classification();
+        if (classification == null) {
+            return;
+        }
+        ItemCategory category = classification.category().value();
+        if (category.sourceType() != event.sourceType()) {
+            throw new ValidationException("Invalid RawObjectEvent.classification.category = "
+                    + category + ": belongs to source type " + category.sourceType()
+                    + ", event is " + event.sourceType());
         }
     }
 
