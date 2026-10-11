@@ -49,12 +49,22 @@ RUN pip install --no-cache-dir --no-deps .
 
 # ---- runtime ----
 # Lean image: only the venv built above crosses the stage boundary.
-# No compiler, no apt packages, no dev dependencies -- pip install .
+# No compiler, no dev dependencies, and only the runtime apt packages below -- pip install .
 # above only pulls in [project.dependencies], never the [dev] extra
 # (pytest/ruff/mypy), so those were never in this image regardless.
 FROM python:3.12-slim AS runtime
 
 WORKDIR /app
+
+# tesseract-ocr is a system binary, not pip-installable (see pyproject.toml)
+# -- src/mind/multimodal/ocr.py shells out to it via PATH. tesseract-ocr-eng
+# is named explicitly rather than relying on --install-recommends, since
+# Tesseract's own English traineddata is a separate package on Debian.
+# Installed as root, before the switch to the non-root user below.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    tesseract-ocr \
+    tesseract-ocr-eng \
+    && rm -rf /var/lib/apt/lists/*
 
 # Don't run as root -- standard hardening, matters more once this
 # handles uploaded files / talks to other services in production.

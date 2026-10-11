@@ -1,6 +1,9 @@
 services:
   inbox:
-    build: .
+    build:
+      context: .
+      additional_contexts:
+        shared: ../../shared
     container_name: inbox-service
     ports:
       - "${SERVER_PORT:-8080}:8080"

@@ -3,14 +3,17 @@
 # after check-schema-compatibility.sh has already passed. Never run this on a PR.
 #
 # Usage: register-schema.sh <path-to-.proto-file> <subject-name>
-# Example: register-schema.sh teams/relay/src/main/proto/task-event.proto task-event-value
+# Example: register-schema.sh shared/proto/task-event.proto task-event-value
 set -euo pipefail
 
 SCHEMA_FILE="$1"
 SUBJECT="$2"
 REGISTRY_URL="${SCHEMA_REGISTRY_URL:-http://localhost:8081/apis/ccompat/v6}"
 
-BODY=$(jq -n --arg schema "$(cat "$SCHEMA_FILE")" '{schema: $schema, schemaType: "PROTOBUF"}')
+source "$(dirname "${BASH_SOURCE[0]}")/_schema-references.sh"
+
+BODY=$(jq -n --arg schema "$(cat "$SCHEMA_FILE")" --argjson refs "$REFERENCES" \
+  '{schema: $schema, schemaType: "PROTOBUF", references: $refs}')
 
 HTTP_STATUS=$(curl -s -o /tmp/register-response.json -w "%{http_code}" \
   -X POST "${REGISTRY_URL}/subjects/${SUBJECT}/versions" \
