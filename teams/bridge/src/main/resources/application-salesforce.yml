@@ -1,0 +1,43 @@
+bridge:
+  crm:
+    salesforce:
+      # My Domain base URL for the org, e.g. https://my-org.my.salesforce.com. OAuth 2.0 Client
+      # Credentials Flow requires this exact host - login.salesforce.com/test.salesforce.com are
+      # not supported for it (crm-salesforce-design.md §1). Backed by SALESFORCE_LOGIN_URL - no
+      # default, so a missing value fails startup loudly instead of this repository silently
+      # making requests to nowhere.
+      login-url: ${SALESFORCE_LOGIN_URL}
+      # Consumer key/secret of the org's External Client App / Connected App (Client Credentials
+      # Flow enabled) - see crm-salesforce-design.md §1 for the admin setup. Backed by
+      # SALESFORCE_CLIENT_ID / SALESFORCE_CLIENT_SECRET, no default, fails startup loudly if
+      # unset - never logged or included in any SalesforceClientException message.
+      client-id: ${SALESFORCE_CLIENT_ID}
+      client-secret: ${SALESFORCE_CLIENT_SECRET}
+      max-retries: 5
+      initial-backoff-millis: 500
+      max-backoff-millis: 8000
+      connect-timeout-millis: 5000
+      read-timeout-millis: 15000
+      # Which Opportunity field SalesforceDealRepository reads as Deal.stageChangedAt.
+      # LastStageChangeDate's existence on a real org is UNVERIFIED (moderate-confidence only -
+      # see crm-salesforce-design.md §2, every official field-reference page returned a loading
+      # shell to automated fetching). If it turns out not to exist on the target org, switch this
+      # to LastModifiedDate - no code change needed - but note the real imprecision that comes
+      # with it: LastModifiedDate bumps on ANY field edit, not just a stage change, so a deal
+      # whose Description was edited looks like its stage "just changed" even though it didn't.
+      stage-changed-at-field: ${SALESFORCE_STAGE_CHANGED_AT_FIELD:LastStageChangeDate}
+      # Full OpportunityHistory read (every stage transition, not just current state) - NOT
+      # IMPLEMENTED YET. Enabling this fails startup immediately with a clear error instead of
+      # silently behaving like current-state-only mode. Leave this false until that mode exists -
+      # see SalesforceDealRepository's constructor Javadoc for what it would still need to do.
+      load-history: ${SALESFORCE_LOAD_HISTORY:false}
+      # Open-stage DefaultProbability (0-99) -> DealStage bands - Bridge's own policy, not a
+      # Salesforce convention (crm-salesforce-design.md §3). Each -max is the inclusive top of its
+      # band; validated at startup to be strictly increasing and to partition 0-99 with no gap, no
+      # overlap (SalesforceStageMapping's constructor) - a misconfiguration fails loudly instead of
+      # silently misclassifying every open deal.
+      stage-bands:
+        prospect-max: 20
+        qualified-max: 50
+        proposal-max: 80
+        negotiation-max: 99
