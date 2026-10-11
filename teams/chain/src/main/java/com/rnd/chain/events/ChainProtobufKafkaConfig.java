@@ -1,6 +1,7 @@
 package com.rnd.chain.events;
 
-import com.rnd.chain.event.TaskSchedulingUpdatedEvent;
+import com.google.protobuf.Message;
+import com.rnd.inbox.event.SchedulingUpdatedEvent;
 import com.rnd.inbox.event.TaskCreatedEvent;
 import com.rnd.inbox.event.TaskUpdatedEvent;
 import com.rnd.mind.event.DependencyProposedEvent;
@@ -25,14 +26,14 @@ import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.kafka.core.ProducerFactory;
 import org.springframework.kafka.listener.ContainerProperties;
 import org.springframework.kafka.support.serializer.ErrorHandlingDeserializer;
-import org.springframework.kafka.support.serializer.JsonSerializer;
 
 import java.util.HashMap;
 import java.util.Map;
 
 /**
  * Kafka consumer factories for Chain's Protobuf-based inbound topics: task.created, task.updated
- * (both Inbox), and task.dependencies.proposed (Mind). One factory per message type - Confluent's
+ * (both Inbox), and task.dependencies.proposed (Mind), plus the producer templates for the
+ * Protobuf topics Chain publishes (task.scheduling.updated). One factory per message type - Confluent's
  * KafkaProtobufDeserializer needs the concrete target class per consumer
  * (specific.protobuf.value.type), and each of these three topics carries a different message.
  *
@@ -97,10 +98,19 @@ public class ChainProtobufKafkaConfig {
     }
 
     private <T> KafkaTemplate<String, T> protobufTemplate() {
+        return protobufTemplate(false);
+    }
+
+    // Registry-governed topics: schemas are registered by Relay's schema-sync, never by a producer.
+    private <T> KafkaTemplate<String, T> protobufTemplate(boolean registryGoverned) {
         Map<String, Object> props = new HashMap<>(kafkaProperties.buildProducerProperties());
         props.put(ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG, StringSerializer.class);
         props.put(ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG, PassthroughOrProtobufSerializer.class);
         props.put(KafkaProtobufSerializerConfig.SCHEMA_REGISTRY_URL_CONFIG, schemaRegistryUrl);
+        if (registryGoverned) {
+            props.put(KafkaProtobufSerializerConfig.AUTO_REGISTER_SCHEMAS, false);
+            props.put(KafkaProtobufSerializerConfig.USE_LATEST_VERSION, true);
+        }
         ProducerFactory<String, T> producerFactory = new DefaultKafkaProducerFactory<>(props);
         return new KafkaTemplate<>(producerFactory);
     }
@@ -113,7 +123,7 @@ public class ChainProtobufKafkaConfig {
      */
     public static final class PassthroughOrProtobufSerializer implements Serializer<Object> {
 
-        private final KafkaProtobufSerializer<com.google.protobuf.Message> delegate = new KafkaProtobufSerializer<>();
+        private final KafkaProtobufSerializer<Message> delegate = new KafkaProtobufSerializer<>();
 
         @Override
         public void configure(Map<String, ?> configs, boolean isKey) {
@@ -129,7 +139,7 @@ public class ChainProtobufKafkaConfig {
                 // belongs on .errors.
                 return raw;
             }
-            return delegate.serialize(topic, (com.google.protobuf.Message) data);
+            return delegate.serialize(topic, (Message) data);
         }
 
         @Override
@@ -204,15 +214,8 @@ public class ChainProtobufKafkaConfig {
         return new KafkaTemplate<>(new DefaultKafkaProducerFactory<>(props));
     }
 
-    /**
-     * Template for the live task.scheduling.updated publisher in com.rnd.chain.event. Interim JSON
-     * wire format until the Protobuf contract is settled (#545); remove or switch when it is.
-     */
     @Bean
-    public KafkaTemplate<String, TaskSchedulingUpdatedEvent> taskSchedulingUpdatedEventKafkaTemplate() {
-        Map<String, Object> props = new HashMap<>(kafkaProperties.buildProducerProperties());
-        props.put(ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG, StringSerializer.class);
-        props.put(ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG, JsonSerializer.class);
-        return new KafkaTemplate<>(new DefaultKafkaProducerFactory<>(props));
+    public KafkaTemplate<String, SchedulingUpdatedEvent> schedulingUpdatedEventKafkaTemplate() {
+        return protobufTemplate(true);
     }
 }

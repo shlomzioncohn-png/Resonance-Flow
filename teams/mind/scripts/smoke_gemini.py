@@ -29,7 +29,7 @@ from uuid import uuid4
 from mind.contracts.base_enums import SourceType
 from mind.extraction.assembly import to_task_creation_requested
 from mind.extraction.extractor import BasicExtractor, ExtractionSuccess
-from mind.extraction.providers.gemini import GeminiProvider
+from mind.extraction.providers.factory import build_provider
 from mind.extraction.providers.settings import load_gemini_settings
 
 SAMPLE = (
@@ -70,8 +70,12 @@ def main() -> int:
     print(f"model: {settings.model}")
     print(f"endpoint: {settings.generate_url}")
 
-    with GeminiProvider(settings) as provider:
-        outcome = BasicExtractor(provider).extract(SAMPLE, SourceType.EMAIL)
+    # Named explicitly: this script exists to exercise Gemini, whatever
+    # llm.provider happens to say.
+    with build_provider("gemini") as provider:
+        outcome = BasicExtractor(provider).extract(
+            SAMPLE, SourceType.EMAIL, item_key="smoke-test/sample-email"
+        )
 
     if not isinstance(outcome, ExtractionSuccess):
         print(f"\nFAILED: {outcome.reason} - {outcome.detail}", file=sys.stderr)

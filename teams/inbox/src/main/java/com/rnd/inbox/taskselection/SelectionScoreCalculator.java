@@ -40,8 +40,12 @@ public class SelectionScoreCalculator {
                 + TIME_FIT_WEIGHT * normalizedTimeFit(task);
     }
 
+    // priority_score is NULL until Chain has scored the task. An unscored task is ranked as a
+    // mid-scale one rather than dropped: it stays a candidate, and the stored value stays NULL.
     public double normalizedPriority(Task task) {
-        return task.getPriorityScore() / 10.0;
+        Float priorityScore = task.getPriorityScore();
+        double resolved = priorityScore != null ? priorityScore : properties.getDefaultPriorityScore();
+        return resolved / 10.0;
     }
 
     public double normalizedDeadlineUrgency(Task task, Instant now) {

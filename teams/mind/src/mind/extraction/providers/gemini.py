@@ -211,15 +211,18 @@ class GeminiProvider:
         if finish_reason in _BLOCKED_FINISH_REASONS:
             raise LLMRejected(f"Gemini blocked the answer ({finish_reason})")
 
+        if finish_reason == "MAX_TOKENS":
+            # Refused for the same reason as in deepseek.py: the answer is cut
+            # mid-object, and asking again under the same cap reproduces it.
+            raise LLMRejected(
+                f"Gemini stopped at maxOutputTokens={self._settings.max_output_tokens}, "
+                "leaving the answer truncated; raise max_output_tokens or shorten "
+                "the prompt -- repeating this call will cut it in the same place"
+            )
+
         text = _candidate_text(first)
         if not text.strip():
             raise LLMUnavailable("Gemini returned an empty completion")
-
-        if finish_reason == "MAX_TOKENS":
-            logger.warning(
-                "Gemini hit maxOutputTokens=%d; the answer is truncated",
-                self._settings.max_output_tokens,
-            )
 
         usage = payload.get("usageMetadata")
         usage = usage if isinstance(usage, dict) else {}

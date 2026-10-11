@@ -65,3 +65,49 @@ def test_rejects_runaway_title() -> None:
 def test_requires_has_dependencies() -> None:
     with pytest.raises(ValidationError):
         ExtractedFields.model_validate({"title": "Send the Q3 report"})
+
+
+# --- a placeholder title is not a title -----------------------------------
+
+
+@pytest.mark.parametrize("placeholder", ["N/A", "n/a", "unknown", "-", "TBD", "none", "   "])
+def test_a_placeholder_title_fails_validation(placeholder: str) -> None:
+    """Unlike description and source_ref, title has nowhere to fall back to.
+
+    It is required by the contract, so a model that wrote "N/A" has not
+    answered. Failing here is what sends the answer back for repair; letting
+    it through puts a task literally called "N/A" in front of a user.
+    """
+
+    with pytest.raises(ValidationError):
+        ExtractedFields(title=placeholder, has_dependencies=False)
+
+
+def test_a_real_title_still_survives_the_same_check() -> None:
+    fields = ExtractedFields(title="  Send the Q3 report  ", has_dependencies=False)
+
+    assert fields.title == "Send the Q3 report"
+
+
+def test_a_title_that_merely_contains_a_placeholder_word_is_fine() -> None:
+    """Only a title that is *nothing but* a placeholder is rejected."""
+
+    fields = ExtractedFields(title="Replace the N/A values in the export", has_dependencies=False)
+
+    assert fields.title.startswith("Replace")
+
+
+def test_the_rejection_tells_the_model_what_was_wrong() -> None:
+    """The repair round only pays for itself if the message is actionable.
+
+    Pydantic's own complaint about a null title is "Input should be a valid
+    string", which is useless to a model that wrote "N/A" — that *is* a valid
+    string. The validator raises its own message instead.
+    """
+
+    with pytest.raises(ValidationError) as raised:
+        ExtractedFields(title="N/A", has_dependencies=False)
+
+    message = str(raised.value)
+    assert "placeholder" in message
+    assert "N/A" in message

@@ -8,11 +8,10 @@ option java_multiple_files = true;
 import "google/protobuf/timestamp.proto";
 
 // kafkaTopic: bridge.github.tasks
-// DRAFT for review - mirrors the fields sent to 'bridge.github.tasks' (branch
-// hadas-lavi/get-data-source, com.rnd.bridge.dto.Task via GitHubKafkaProducer). Serialized as
-// plain JSON there today, not Protobuf. Optional fields below are a best-effort guess based on
-// Java boxed types and field semantics (e.g. parent_task_id only applies to subtasks) - needs
-// confirmation with the Bridge team, not yet verified against real behavior.
+// Bridge's GitHub task event (GitHubKafkaProducer, teams/bridge/.../task/model/Task.java).
+// Sent as JSON today, not Protobuf - registered only for compatibility checking.
+// Out of date: doesn't match the current Java record's fields (e.g. organization_id, project_id,
+// snoozed_until, completed_at are missing; effort_estimate_minutes is an Integer there).
 
 message Task {
   string id = 1;

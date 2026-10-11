@@ -19,6 +19,7 @@ from dataclasses import dataclass
 from mind.contracts.base_enums import SourceType
 from mind.extraction.confidence import ConfidenceBreakdown, score_confidence
 from mind.extraction.config import ExtractionConfig
+from mind.extraction.grounding import ground_source_ref
 from mind.extraction.models import ExtractedFields, response_model
 from mind.extraction.parsing import MalformedOutput, parse_response
 from mind.extraction.prompts import extraction_prompt, repair_prompt, system_prompt
@@ -40,11 +41,30 @@ REASON_PROVIDER_ERROR = "provider_error"
 
 
 @dataclass(frozen=True)
+class ExtractionItem:
+    """One thing to extract, and enough to find it again afterwards.
+
+    A named shape rather than a tuple because `item_key` is the whole point
+    of this issue's "record the failure" requirement: a three-tuple of
+    `(str, SourceType, str | None)` reads as a puzzle at every call site.
+    """
+
+    text: str
+    source_type: SourceType
+
+    # The intake event's `object_key`: the one stored object this text came
+    # from. Deliberately not `correlation_id`, which a source body shares
+    # with its attachments and so cannot say *which* of them failed.
+    item_key: str | None = None
+
+
+@dataclass(frozen=True)
 class ExtractionSuccess:
     """A validated proposal, ready for classification (#351) and effort (#352)."""
 
     fields: ExtractedFields
     source_type: SourceType
+    item_key: str | None
     confidence: ConfidenceBreakdown
     model: str
 
@@ -60,6 +80,7 @@ class ExtractionFailure:
     """An item that was given up on, recorded so the run can be audited."""
 
     source_type: SourceType
+    item_key: str | None
     reason: str
     detail: str
     schema_attempts: int
@@ -86,8 +107,19 @@ class BasicExtractor:
         # Injected so tests exercise the backoff without waiting for it.
         self._sleep = sleep
 
-    def extract(self, text: str, source_type: SourceType) -> ExtractionOutcome:
-        """Extract one item. Returns a failure rather than raising one."""
+    def extract(
+        self,
+        text: str,
+        source_type: SourceType,
+        item_key: str | None = None,
+    ) -> ExtractionOutcome:
+        """Extract one item. Returns a failure rather than raising one.
+
+        `item_key` is what makes a recorded failure actionable: without it
+        an audit of a run can say three items failed but not which three.
+        It is optional because not every caller has an intake event behind
+        it -- the smoke script and the tests do not.
+        """
 
         # What we ask for and what we accept are the same decision, read
         # from one place: a prompt asking for seven fields and a schema
@@ -112,6 +144,7 @@ class BasicExtractor:
                 if not exc.retryable or exhausted:
                     return self._give_up(
                         source_type=source_type,
+                        item_key=item_key,
                         reason=REASON_PROVIDER_ERROR,
                         detail=detail,
                         schema_attempts=schema_attempts,
@@ -135,6 +168,7 @@ class BasicExtractor:
                 if schema_attempts >= self._config.max_attempts:
                     return self._give_up(
                         source_type=source_type,
+                        item_key=item_key,
                         reason=REASON_INVALID_OUTPUT,
                         detail=detail,
                         schema_attempts=schema_attempts,
@@ -146,10 +180,22 @@ class BasicExtractor:
                 user = repair_prompt(source_type, text, response.text, detail)
                 continue
 
+            # The content is untrusted, so a pointer it did not contain does
+            # not travel. Done here because this is the one place holding
+            # both the answer and the text it was supposed to come from.
+            fields, invented_ref = ground_source_ref(fields, text)
+
             return ExtractionSuccess(
                 fields=fields,
                 source_type=source_type,
-                confidence=score_confidence(fields, source_type, text, attempts=schema_attempts),
+                item_key=item_key,
+                confidence=score_confidence(
+                    fields,
+                    source_type,
+                    text,
+                    attempts=schema_attempts,
+                    invented_source_ref=invented_ref,
+                ),
                 model=response.model,
                 schema_attempts=schema_attempts,
                 provider_calls=provider_calls,
@@ -157,7 +203,7 @@ class BasicExtractor:
 
     def extract_many(
         self,
-        items: Iterable[tuple[str, SourceType]],
+        items: Iterable[ExtractionItem],
     ) -> Iterator[ExtractionOutcome]:
         """Extract a batch, yielding one outcome per item, failures included.
 
@@ -165,8 +211,8 @@ class BasicExtractor:
         end the run early.
         """
 
-        for text, source_type in items:
-            yield self.extract(text, source_type)
+        for item in items:
+            yield self.extract(item.text, item.source_type, item.item_key)
 
     def _call(self, system: str, user: str) -> LLMResponse:
         """Call the provider, timing it for the shared tracking point."""
@@ -174,18 +220,34 @@ class BasicExtractor:
         started = time.perf_counter()
         try:
             response = self._provider.complete(system, user)
-        finally:
-            duration_ms = (time.perf_counter() - started) * 1000
+        except LLMError:
+            # A call that failed is still a call, and the failures are the
+            # slowest ones we make: a timeout waits out the whole deadline
+            # before raising. Recording only the successes would leave the
+            # latency figures describing a better service than this one.
+            #
+            # There is no answer to read a model id off, so the provider
+            # names itself, and the cost is 0.0 because no usage was
+            # reported -- not because the call was known to be free.
+            record_call(
+                model_name=self._provider.name,
+                duration_ms=(time.perf_counter() - started) * 1000,
+                cost=0.0,
+            )
+            raise
+
+        duration_ms = (time.perf_counter() - started) * 1000
         # The model id comes off the response rather than off the provider:
         # a benchmark comparing two DeepSeek models needs to tell them apart,
         # and only the answer knows which one produced it.
         record_call(
             model_name=response.model or self._provider.name,
             duration_ms=duration_ms,
-            # `estimate_cost` returns None for an unpriced model or a
-            # provider that reported no usage. `record_call` wants a float,
-            # so that lands as 0.0 here; `pricing.is_priced` is how a cost
-            # report tells "free" apart from "unknown".
+            # `estimate_cost` returns None for an unpriced model or a provider
+            # that reported no usage, and `record_call` only takes a float, so
+            # both land here as 0.0. That flattening is a known gap: a cost
+            # report cannot currently tell "free" from "unknown", and closing
+            # it means widening ModelCallRecord, which is shared surface.
             cost=estimate_cost(
                 response.model,
                 response.prompt_tokens,
@@ -209,6 +271,7 @@ class BasicExtractor:
     def _give_up(
         self,
         source_type: SourceType,
+        item_key: str | None,
         reason: str,
         detail: str,
         schema_attempts: int,
@@ -218,7 +281,8 @@ class BasicExtractor:
         """Record a failed item and hand it back so the caller can move on."""
 
         logger.error(
-            "extraction: giving up on a %s item after %d attempt(s): %s - %s",
+            "extraction: giving up on %s (%s) after %d attempt(s): %s - %s",
+            item_key or "an item with no key",
             source_type.value,
             schema_attempts,
             reason,
@@ -226,6 +290,7 @@ class BasicExtractor:
         )
         return ExtractionFailure(
             source_type=source_type,
+            item_key=item_key,
             reason=reason,
             detail=detail,
             schema_attempts=schema_attempts,

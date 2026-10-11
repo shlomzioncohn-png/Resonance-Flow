@@ -1,9 +1,13 @@
-"""Knobs for the extraction loop.
+"""Knobs for the extraction loop: how hard to try, and how long to wait.
 
-Everything here is a value, not a constant buried in code, because two of
-them — the provider and the model name — change often enough that a code
-change per change would be absurd. DeepSeek retires model ids on a timescale
-of months.
+Only the loop's own behaviour lives here. Which provider to call, which
+model, and with what key are not settings of the loop and are read from the
+mounted config files instead — see `providers.settings` and
+`providers.factory`.
+
+Values rather than constants buried in the code because a run tunes them:
+the batch comparison raised `max_transient_retries` to ride out a free
+tier's 503s without touching anything else.
 """
 
 from dataclasses import dataclass

@@ -11,7 +11,6 @@ returned.
 """
 
 import json
-import logging
 
 import httpx
 import pytest
@@ -194,15 +193,16 @@ def test_an_unreported_usage_block_leaves_the_counts_empty() -> None:
     assert response.completion_tokens is None
 
 
-def test_a_truncated_answer_is_logged_because_the_fix_is_configuration(
-    caplog: pytest.LogCaptureFixture,
-) -> None:
+def test_a_truncated_answer_is_refused_not_returned() -> None:
+    """Repeating the call cannot help: the same cap cuts it in the same place."""
+
     handler, _ = _always(_envelope('{"title": "half an ans', finish_reason="MAX_TOKENS"))
 
-    with caplog.at_level(logging.WARNING, logger="mind.extraction.providers"):
+    with pytest.raises(LLMRejected) as raised:
         _provider(handler, max_output_tokens=16).complete("system", "user")
 
-    assert "truncated" in caplog.text
+    assert raised.value.retryable is False
+    assert "16" in str(raised.value)
 
 
 # --- refusals that look like answers -------------------------------------
@@ -444,3 +444,17 @@ def test_a_quota_wall_fails_the_item_rather_than_hanging_the_run() -> None:
     assert isinstance(outcome, ExtractionFailure)
     assert outcome.reason == "provider_error"
     assert len(seen) == 3  # the first call plus two transient retries
+
+
+def test_a_cap_tight_enough_to_cut_everything_is_still_a_refusal() -> None:
+    """Order matters: truncation is checked before emptiness.
+
+    A cap small enough to stop the model before its first character leaves no
+    text at all. Read as an empty completion that would be retryable — and
+    retrying under the same cap is precisely what cannot work.
+    """
+
+    handler, _ = _always(_envelope("", finish_reason="MAX_TOKENS"))
+
+    with pytest.raises(LLMRejected):
+        _provider(handler, max_output_tokens=1).complete("system", "user")

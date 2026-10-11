@@ -7,7 +7,10 @@ issue keeps working:
 """
 
 import json
+import logging
 from uuid import UUID
+
+import pytest
 
 from mind.contracts.base_enums import SourceType
 from mind.contracts.task_creation_requested import TaskCreationRequested
@@ -18,9 +21,11 @@ from mind.extraction.extractor import (
     REASON_PROVIDER_ERROR,
     BasicExtractor,
     ExtractionFailure,
+    ExtractionItem,
     ExtractionSuccess,
 )
 from mind.extraction.providers.base import LLMRejected, LLMTimeout
+from mind.observability.tracking import _reset_for_tests, get_recent_calls
 from tests.extraction.fakes import ScriptedProvider
 
 TENANT_ID = UUID("11111111-1111-1111-1111-111111111111")
@@ -197,9 +202,9 @@ def test_one_bad_item_does_not_stall_the_batch() -> None:
     outcomes = list(
         batch.extract_many(
             [
-                (EMAIL_TEXT, SourceType.EMAIL),
-                ("something unusable", SourceType.SLACK),
-                (EMAIL_TEXT, SourceType.EMAIL),
+                ExtractionItem(EMAIL_TEXT, SourceType.EMAIL),
+                ExtractionItem("something unusable", SourceType.SLACK),
+                ExtractionItem(EMAIL_TEXT, SourceType.EMAIL),
             ]
         )
     )
@@ -251,3 +256,116 @@ def test_placeholder_source_ref_is_normalised_to_none() -> None:
 
     assert isinstance(result, ExtractionSuccess)
     assert result.fields.source_ref is None
+
+
+# --- every call is recorded, including the ones that failed ---------------
+
+
+def test_a_failed_call_is_recorded_too() -> None:
+    """`tracking.py` says every model call goes through record_call.
+
+    The ones that disappear are the slowest we make: a timeout waits the full
+    deadline before raising. Leaving them out makes the latency record look
+    better than the service actually is.
+    """
+
+    _reset_for_tests()
+    provider = ScriptedProvider(LLMTimeout("too slow"), LLMTimeout("again"), LLMTimeout("again"))
+
+    outcome = BasicExtractor(provider, sleep=lambda _: None).extract(EMAIL_TEXT, SourceType.EMAIL)
+
+    assert isinstance(outcome, ExtractionFailure)
+    assert len(get_recent_calls()) == outcome.provider_calls
+
+
+def test_a_failed_call_is_recorded_under_the_provider_name() -> None:
+    """There is no answer to read a model id off, so the provider names it."""
+
+    _reset_for_tests()
+    provider = ScriptedProvider(LLMTimeout("too slow"), LLMTimeout("again"), LLMTimeout("again"))
+
+    BasicExtractor(provider, sleep=lambda _: None).extract(EMAIL_TEXT, SourceType.EMAIL)
+
+    record = get_recent_calls()[0]
+    assert record.model_name == provider.name
+    assert record.duration_ms >= 0.0
+    assert record.cost == 0.0
+
+
+def test_a_run_that_mixes_failure_and_success_records_both() -> None:
+    _reset_for_tests()
+    provider = ScriptedProvider(LLMTimeout("too slow"), GOOD_ANSWER)
+
+    outcome = BasicExtractor(provider, sleep=lambda _: None).extract(EMAIL_TEXT, SourceType.EMAIL)
+
+    assert isinstance(outcome, ExtractionSuccess)
+    assert len(get_recent_calls()) == 2
+
+
+# --- a failed item has to be findable -------------------------------------
+
+OBJECT_KEY = "tenant-7/email/2026-10-11/4471-body.eml"
+
+
+def test_a_successful_outcome_carries_the_key_it_came_from() -> None:
+    provider = ScriptedProvider(GOOD_ANSWER)
+
+    outcome = BasicExtractor(provider, sleep=lambda _: None).extract(
+        EMAIL_TEXT, SourceType.EMAIL, item_key=OBJECT_KEY
+    )
+
+    assert outcome.item_key == OBJECT_KEY
+
+
+def test_a_failed_outcome_carries_it_too() -> None:
+    """Without this, "recorded as failed" records nothing anyone can act on."""
+
+    provider = ScriptedProvider("not json", "still not json", "nope")
+
+    outcome = BasicExtractor(provider, sleep=lambda _: None).extract(
+        EMAIL_TEXT, SourceType.EMAIL, item_key=OBJECT_KEY
+    )
+
+    assert isinstance(outcome, ExtractionFailure)
+    assert outcome.item_key == OBJECT_KEY
+
+
+def test_the_log_line_names_the_item(caplog: pytest.LogCaptureFixture) -> None:
+    """A run is audited from the log, not from the returned objects."""
+
+    provider = ScriptedProvider("not json", "still not json", "nope")
+
+    with caplog.at_level(logging.ERROR, logger="mind.extraction"):
+        BasicExtractor(provider, sleep=lambda _: None).extract(
+            EMAIL_TEXT, SourceType.EMAIL, item_key=OBJECT_KEY
+        )
+
+    assert OBJECT_KEY in caplog.text
+
+
+def test_the_key_is_optional_for_callers_without_an_intake_event() -> None:
+    """The smoke script and the tests run text that never came from Bridge."""
+
+    provider = ScriptedProvider(GOOD_ANSWER)
+
+    outcome = BasicExtractor(provider, sleep=lambda _: None).extract(EMAIL_TEXT, SourceType.EMAIL)
+
+    assert outcome.item_key is None
+
+
+def test_a_batch_keeps_each_outcome_attached_to_its_own_item() -> None:
+    provider = ScriptedProvider("not json", "still not json", "nope", GOOD_ANSWER)
+    batch = BasicExtractor(provider, sleep=lambda _: None)
+
+    outcomes = list(
+        batch.extract_many(
+            [
+                ExtractionItem(EMAIL_TEXT, SourceType.EMAIL, "first-key"),
+                ExtractionItem(EMAIL_TEXT, SourceType.SLACK, "second-key"),
+            ]
+        )
+    )
+
+    assert [o.item_key for o in outcomes] == ["first-key", "second-key"]
+    assert isinstance(outcomes[0], ExtractionFailure)
+    assert isinstance(outcomes[1], ExtractionSuccess)

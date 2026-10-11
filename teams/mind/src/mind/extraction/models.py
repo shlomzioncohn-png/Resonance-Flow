@@ -189,6 +189,36 @@ class ExtractedFields(BaseModel):
             return None
         return None if value.strip().lower() in _NULL_PLACEHOLDERS else value
 
+    @field_validator("title", mode="before")
+    @classmethod
+    def a_placeholder_is_not_a_title(cls, value: object) -> object:
+        """The same reading as `blank_to_none`, with the opposite consequence.
+
+        `description` and `source_ref` are allowed to be nothing, so a
+        placeholder there becomes None and the answer stands. `title` is
+        required by the contract, so there is nowhere for it to fall back to:
+        a model that wrote "N/A" has not answered, and the answer has to go
+        back for repair rather than reach Inbox as a task called "N/A".
+
+        Raising rather than returning None, even though None would also fail:
+        the message is the whole point of failing. Pydantic's own complaint
+        about a None title reads "Input should be a valid string", and a model
+        that wrote "N/A" — which *is* a valid string — has no way to act on
+        that. The repair round only earns its cost if the model is told what
+        was wrong with the answer it gave.
+
+        `mode="before"` matters too: an `after` validator runs once the type
+        has already been accepted, so this check has to happen while the raw
+        value is still in hand.
+        """
+
+        if isinstance(value, str) and value.strip().lower() in _NULL_PLACEHOLDERS:
+            raise ValueError(
+                f"{value!r} is a placeholder, not a title; summarise the task as an action, "
+                f"and if the content truly describes no task, say so rather than filling "
+                f"the field in"
+            )
+        return value
 
 class ExtractedFieldsWithClassification(ExtractedFields, ClassificationFields):
     """The seven fields asked for when classification is switched on (#351).

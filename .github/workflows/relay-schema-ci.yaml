@@ -42,7 +42,7 @@ jobs:
         id: filter
         run: |
           if git diff --name-only "${{ github.event.pull_request.base.sha }}" HEAD \
-             | grep -qE '^teams/relay/(src/main/proto|ci|schema-sync-hook)/|^\.github/workflows/relay-schema-ci\.yaml$'; then
+             | grep -qE '^shared/proto/|^teams/relay/(ci|schema-sync-hook)/|^\.github/workflows/relay-schema-ci\.yaml$'; then
             echo "relevant=true" >> "$GITHUB_OUTPUT"
             echo "Relay schema / chart / ci files changed — running the checks."
           else

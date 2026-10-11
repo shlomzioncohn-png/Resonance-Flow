@@ -36,6 +36,13 @@ WEIGHT_TITLE_GROUNDING = 0.25
 
 PENALTY_MISSING_DESCRIPTION = 0.10
 PENALTY_MISSING_SOURCE_REF = 0.10
+
+# Charged when the model produced a source_ref that the content never
+# contained, so `grounding` dropped it. Heavier than simply not finding
+# one: an honest null is a gap, an invented pointer is a fabrication, and
+# the two must not score the same. It compounds with the missing-ref
+# penalty, because after the drop the field is also genuinely missing.
+PENALTY_INVENTED_SOURCE_REF = 0.20
 PENALTY_SHORT_TITLE = 0.10
 
 CONFIDENCE_FLOOR = 0.05
@@ -126,6 +133,7 @@ def _collect_signals(
     source_type: SourceType,
     raw_text: str,
     attempts: int,
+    invented_source_ref: bool,
 ) -> list[tuple[str, float]]:
     """Name every weakness observed in this extraction, with its weight."""
 
@@ -149,6 +157,9 @@ def _collect_signals(
     if fields.description is None:
         signals.append(("missing_description", PENALTY_MISSING_DESCRIPTION))
 
+    if invented_source_ref:
+        signals.append(("invented_source_ref", PENALTY_INVENTED_SOURCE_REF))
+
     if fields.source_ref is None and source_type in REFERENCE_BEARING_SOURCES:
         signals.append(("missing_source_ref", PENALTY_MISSING_SOURCE_REF))
 
@@ -160,12 +171,17 @@ def score_confidence(
     source_type: SourceType,
     raw_text: str,
     attempts: int = 1,
+    invented_source_ref: bool = False,
 ) -> ConfidenceBreakdown:
     """Score one extraction, keeping each deduction addressable.
 
-    `attempts` is the total number of LLM calls made for this item, so 1
-    means the first response validated and anything above it means a repair
-    round was needed.
+    `attempts` counts the rounds spent getting the schema right, so 1 means
+    the first response validated and anything above it means a repair round
+    was needed. Provider failures are not counted here: a timeout says
+    nothing about the quality of the answer that eventually arrived.
+
+    `invented_source_ref` is reported by `grounding`, which has already
+    dropped the offending value. This scorer only reads.
 
     The signals are applied in sequence, each taking its share of what is
     left. The final value does not depend on that order — multiplication
@@ -176,7 +192,9 @@ def score_confidence(
     penalties: list[ConfidencePenalty] = []
     value = BASE_CONFIDENCE
 
-    for reason, weight in _collect_signals(fields, source_type, raw_text, attempts):
+    for reason, weight in _collect_signals(
+        fields, source_type, raw_text, attempts, invented_source_ref
+    ):
         remaining = value * (1.0 - weight)
         penalties.append(
             ConfidencePenalty(
@@ -201,7 +219,10 @@ def compute_confidence(
     source_type: SourceType,
     raw_text: str,
     attempts: int = 1,
+    invented_source_ref: bool = False,
 ) -> float:
     """Convenience wrapper for callers that only need the number."""
 
-    return score_confidence(fields, source_type, raw_text, attempts).value
+    return score_confidence(
+        fields, source_type, raw_text, attempts, invented_source_ref
+    ).value

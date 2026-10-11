@@ -45,6 +45,10 @@ inbox:
       initial-backoff-ms: ${INBOX_KAFKA_RETRY_INITIAL_BACKOFF_MS:500}
       multiplier: ${INBOX_KAFKA_RETRY_MULTIPLIER:2.0}
       max-backoff-ms: ${INBOX_KAFKA_RETRY_MAX_BACKOFF_MS:10000}
+  sql-logging:
+    enabled: ${SQL_LOG_ENABLED:true}
+    include-parameters: ${SQL_LOG_INCLUDE_PARAMETERS:true}
+    slow-query-threshold-ms: ${SQL_LOG_SLOW_QUERY_THRESHOLD_MS:200}
 
 kafka:
   producer:
@@ -69,6 +73,8 @@ outbox:
     failed-retention-days: ${OUTBOX_CLEANUP_FAILED_RETENTION_DAYS:30}
 
 logging:
+  level:
+    com.rnd.inbox.shared.logging.SqlQueryLoggingListener: ${SQL_LOG_LEVEL:DEBUG}
   file:
     name: ${LOG_FILE_PATH:logs/inbox.log}
   logback:

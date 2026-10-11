@@ -1,12 +1,13 @@
 """The surface every LLM provider must present to the extractor.
 
 The extractor is written against this and nothing else, so swapping DeepSeek
-for Gemini — or for a scripted fake in tests — is a configuration change, not
-a code change. Adding a *third* provider needs Shmuel's sign-off first.
+for Gemini — or for a scripted fake in tests — is a configuration change
+rather than a code change: `llm.provider` names one and `factory.build_provider`
+returns it. Adding a *third* provider needs Shmuel's sign-off first.
 """
 
 from dataclasses import dataclass
-from typing import Protocol
+from typing import Protocol, Self
 
 
 class LLMError(Exception):
@@ -79,3 +80,26 @@ class LLMProvider(Protocol):
         a failure belongs to the extractor, not to the provider.
         """
         ...
+
+
+class ManagedLLMProvider(LLMProvider, Protocol):
+    """A provider that also owns a resource somebody has to release.
+
+    Separate from `LLMProvider` on purpose. The extractor needs `complete` and
+    nothing else, and keeping it that way is what lets a scripted fake — which
+    has no socket to close — satisfy the protocol without growing an empty
+    method. But a real client holds an HTTP connection, and whoever built it
+    has to close it. That is the caller's job, never the extractor's: the
+    extractor is handed a provider, it does not own its lifetime.
+
+    This is what `factory.build_provider` returns, so the obligation is visible
+    in the type rather than remembered.
+    """
+
+    def close(self) -> None:
+        """Release whatever the provider holds open."""
+        ...
+
+    def __enter__(self) -> Self: ...
+
+    def __exit__(self, *exc_info: object) -> None: ...
