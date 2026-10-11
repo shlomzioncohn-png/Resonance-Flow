@@ -65,7 +65,7 @@ data — only spins up a throwaway local `kind` cluster for smoke tests.
 - Three of the six schemas in `../ci/schema-subjects.tsv`
   (`task-created-event.proto`, `raw-object-event.proto`, `github-task.proto`)
   are **still unconfirmed drafts** — Inbox/Bridge haven't signed off on them.
-  (The other three — `task-event.proto` and the two added 2026-09-09,
+  (The two added 2026-09-09,
   `task-updated-event.proto` / `task-completed-event.proto` — are mechanical
   mirrors of already-existing Java payload classes, not independent drafts,
   but haven't gone through an explicit sign-off round either.) Being in this
