@@ -5,6 +5,7 @@
   "split": "testing_data",
   "source_url": "https://guillaumejaume.github.io/FUNSD/dataset.zip",
   "source_page": "https://guillaumejaume.github.io/FUNSD/download/",
+  "zip_root_prefix": "local-data/funsd/",
   "license": {
     "name": "FUNSD Terms of Use",
     "url": "https://guillaumejaume.github.io/FUNSD/work/",

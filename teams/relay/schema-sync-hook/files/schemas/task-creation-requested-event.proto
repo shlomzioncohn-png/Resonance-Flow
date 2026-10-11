@@ -6,40 +6,33 @@ option java_package = "com.rnd.inbox.event";
 option java_multiple_files = true;
 
 import "google/protobuf/timestamp.proto";
+import "task-created-event.proto";  // SourceType, TaskTier, TaskRoleContext, TaskStatus.
 
 // kafkaTopic: task.creation.requested
-// Registered for schema-compat checking only - Inbox's consumer still deserializes this topic as
-// JSON; switching it to Protobuf on the wire is a separate, later step.
+// Published by MIND, consumed by Inbox (TaskCreationRequestConsumer), which turns it into a task.
 //
-// correlation_id is a payload field here, not a Kafka header - unlike task-created, where it's
-// deliberately kept out of the payload (see task-created-event.proto).
-//
-// confidence is double, not float, since it's MIND's raw value, not yet mapped onto Task.java's
-// Float.
-//
-// created_by_user_id / assignees / assignee_type aren't on TaskCreationRequestEventDto yet -
-// added per the newer schema doc's multi-assignee shape. Confirm with MIND before Inbox builds
-// against them.
+// correlation_id is a payload field here - unlike task.created, where it's a Kafka header.
+// confidence is double: MIND's raw value, narrowed to Task.java's Float by Inbox.
 
 message TaskCreationRequestedEvent {
   optional string event_id = 1;                    // UUID as string.
-  string correlation_id = 2;                        // UUID as string - see note above.
-  string tenant_id = 3;                             // UUID as string.
-  optional string project_id = 4;                   // UUID as string.
+  string correlation_id = 2;                       // UUID as string.
+  string tenant_id = 3;                            // UUID as string.
+  optional string project_id = 4;                  // UUID as string.
   string title = 5;
   optional string description = 6;
   SourceType source_type = 7;
   string source_ref = 8;
   optional TaskTier tier = 9;
   optional TaskRoleContext role_context = 10;
-  optional int32 urgency = 11;                      // 1..5.
-  optional int32 effort_estimate_minutes = 12;      // > 0.
+  optional int32 urgency = 11;                     // 1..5.
+  optional int32 effort_estimate_minutes = 12;     // > 0.
   optional google.protobuf.Timestamp deadline = 13;
-  optional TaskStatus status = 14;                  // Downstream defaults to NEW when unset.
-  double confidence = 15;                           // 0.0..1.0 - see note above.
-  bool has_dependencies = 16;
-  optional string created_by_user_id = 17;          // UUID as string.
-  repeated Assignee assignees = 18;                 // Zero or more - see note above.
+  optional TaskStatus status = 14;                 // Inbox defaults to NEW when unset.
+  optional double confidence = 15;                 // 0..1. optional: 0.0 must differ from absent.
+  optional bool has_dependencies = 16;             // optional: false must differ from absent.
+  optional string created_by_user_id = 17;         // UUID as string.
+  repeated Assignee assignees = 18;
 }
 
 message Assignee {
@@ -61,49 +54,4 @@ enum AssignmentRole {
   ASSIGNMENT_ROLE_ASSIGNEE = 2;
   ASSIGNMENT_ROLE_RESPONSIBLE = 3;
   ASSIGNMENT_ROLE_COLLABORATOR = 4;
-}
-
-enum SourceType {
-  SOURCE_TYPE_UNSPECIFIED = 0;
-  SOURCE_TYPE_GITHUB_ISSUE = 1;
-  SOURCE_TYPE_GITHUB_PR = 2;
-  SOURCE_TYPE_CRM_DEAL = 3;
-  SOURCE_TYPE_EMAIL = 4;
-  SOURCE_TYPE_SLACK = 5;
-  SOURCE_TYPE_WHATSAPP = 6;
-  SOURCE_TYPE_MEETING = 7;
-  SOURCE_TYPE_DOC = 8;
-  SOURCE_TYPE_SCANNED_DOC = 9;
-  SOURCE_TYPE_CALENDAR = 10;
-  SOURCE_TYPE_MANUAL = 11;
-  SOURCE_TYPE_DRIVE = 12;
-}
-
-enum TaskTier {
-  TASK_TIER_UNSPECIFIED = 0;
-  TASK_TIER_OPERATIONAL = 1;
-  TASK_TIER_TACTICAL = 2;
-  TASK_TIER_STRATEGIC = 3;
-}
-
-enum TaskRoleContext {
-  TASK_ROLE_CONTEXT_UNSPECIFIED = 0;
-  TASK_ROLE_CONTEXT_DEVELOPER = 1;
-  TASK_ROLE_CONTEXT_MANAGER = 2;
-  TASK_ROLE_CONTEXT_HIGHER_MANAGER = 3;
-  TASK_ROLE_CONTEXT_FIELD_ENGINEER = 4;
-  TASK_ROLE_CONTEXT_SALESPERSON = 5;
-  TASK_ROLE_CONTEXT_CEO = 6;
-}
-
-enum TaskStatus {
-  TASK_STATUS_UNSPECIFIED = 0;
-  TASK_STATUS_NEW = 1;
-  TASK_STATUS_IN_REVIEW = 2;
-  TASK_STATUS_APPROVED = 3;
-  TASK_STATUS_IN_PROGRESS = 4;
-  TASK_STATUS_SNOOZED = 5;
-  TASK_STATUS_DONE = 6;
-  TASK_STATUS_REJECTED = 7;
-  TASK_STATUS_CANCELLED = 8;
 }

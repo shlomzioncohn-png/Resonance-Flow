@@ -31,6 +31,8 @@ import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -70,6 +72,8 @@ class TaskTenantIsolationIntegrationTest extends PostgresIntegrationTest {
     @Autowired
     private ProjectRepository projectRepository;
 
+    private final List<UUID> createdTenantIds = new ArrayList<>();
+    private final String runMarker = "run-" + UUID.randomUUID();
     private Tenant tenantA;
     private Tenant tenantB;
     private User tenantAEmployee;
@@ -92,15 +96,19 @@ class TaskTenantIsolationIntegrationTest extends PostgresIntegrationTest {
         // schema, so every user (including a system admin) still needs some tenant row.
         systemAdmin = persistUser(tenantA, UserRole.SYSTEM_ADMIN);
         taskA = persistTask(tenantA, "Tenant A confidential task");
+        taskA.setDescription(runMarker);
+        taskA = taskRepository.saveAndFlush(taskA);
         taskB = persistTask(tenantB, "Tenant B confidential task");
+        taskB.setDescription(runMarker);
+        taskB = taskRepository.saveAndFlush(taskB);
     }
 
+    // Only the two tenants this test created (and everything under them) - never a table-wide
+    // deleteAll(), because this runs against the shared local database (see
+    // PostgresIntegrationTest).
     @AfterEach
     void cleanUp() {
-        taskRepository.deleteAll();
-        projectRepository.deleteAll();
-        userRepository.deleteAll();
-        tenantRepository.deleteAll();
+        deleteTenantData(createdTenantIds);
     }
 
     private Tenant persistTenant() {
@@ -110,7 +118,9 @@ class TaskTenantIsolationIntegrationTest extends PostgresIntegrationTest {
         t.setStatus(TenantStatus.ACTIVE);
         t.setCreatedAt(Instant.now());
         t.setUpdatedAt(Instant.now());
-        return tenantRepository.saveAndFlush(t);
+        Tenant saved = tenantRepository.saveAndFlush(t);
+        createdTenantIds.add(saved.getId());
+        return saved;
     }
 
     private User persistUser(Tenant tenant, UserRole role) {
@@ -203,8 +213,43 @@ class TaskTenantIsolationIntegrationTest extends PostgresIntegrationTest {
     }
 
     @Test
+    void listTasks_withUserIdOfOtherTenantsUser_stillReturnsNothing() throws Exception {
+        // Same guarantee for the userId filter: tenant A's employee owns taskA, and tenant B's
+        // admin asks for that user's tasks by id. The tenant WHERE clause still applies, so the
+        // answer is an empty page - not taskA, and not a 404/403 that would confirm the user
+        // exists.
+        taskA.setOwner(tenantAEmployee);
+        taskRepository.saveAndFlush(taskA);
+
+        MvcResult result = mockMvc.perform(get("/api/v1/tasks?userId={userId}", tenantAEmployee.getId())
+                        .header(ACTOR_HEADER, tenantBAdmin.getId().toString()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.total_elements").value(0))
+                .andReturn();
+
+        String body = result.getResponse().getContentAsString();
+        assertThat(body).doesNotContain(taskA.getId().toString());
+        assertThat(body).doesNotContain("Tenant A confidential task");
+    }
+
+    @Test
+    void listTasks_withUserIdFilter_sameTenantActor_returnsThatUsersTask() throws Exception {
+        // Confirms the userId filter isn't just returning nothing for everyone.
+        taskA.setOwner(tenantAEmployee);
+        taskRepository.saveAndFlush(taskA);
+
+        mockMvc.perform(get("/api/v1/tasks?userId={userId}", tenantAEmployee.getId())
+                        .header(ACTOR_HEADER, tenantATeamLead.getId().toString()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.total_elements").value(1))
+                .andExpect(jsonPath("$.content[0].id").value(taskA.getId().toString()));
+    }
+
+    @Test
     void listTasks_systemAdmin_seesBothTenants() throws Exception {
-        MvcResult result = mockMvc.perform(get("/api/v1/tasks?size=100")
+        // Narrowed by a search term unique to this run, so the two tasks are on the first page
+        // no matter how many other tasks the database already holds.
+        MvcResult result = mockMvc.perform(get("/api/v1/tasks?size=100&search={marker}", runMarker)
                         .header(ACTOR_HEADER, systemAdmin.getId().toString()))
                 .andExpect(status().isOk())
                 .andReturn();
@@ -255,9 +300,7 @@ class TaskTenantIsolationIntegrationTest extends PostgresIntegrationTest {
                         .content(objectMapper.writeValueAsString(request)))
                 .andExpect(status().isForbidden());
 
-        assertThat(taskRepository.findAll())
-                .extracting(Task::getTitle)
-                .doesNotContain("Planted by tenant B admin");
+        assertThat(countTasksWithTitle("Planted by tenant B admin")).isZero();
     }
 
     @Test
@@ -354,9 +397,7 @@ class TaskTenantIsolationIntegrationTest extends PostgresIntegrationTest {
                         .content(objectMapper.writeValueAsString(request)))
                 .andExpect(status().isForbidden());
 
-        assertThat(taskRepository.findAll())
-                .extracting(Task::getTitle)
-                .doesNotContain("Task with cross-tenant project");
+        assertThat(countTasksWithTitle("Task with cross-tenant project")).isZero();
     }
 
     @Test
@@ -372,8 +413,6 @@ class TaskTenantIsolationIntegrationTest extends PostgresIntegrationTest {
                         .content(objectMapper.writeValueAsString(request)))
                 .andExpect(status().isForbidden());
 
-        assertThat(taskRepository.findAll())
-                .extracting(Task::getTitle)
-                .doesNotContain("Task with cross-tenant owner");
+        assertThat(countTasksWithTitle("Task with cross-tenant owner")).isZero();
     }
 }

@@ -24,6 +24,13 @@ RUN mkdir -p src/mind/messaging && touch src/mind/__init__.py \
 RUN python -m venv /opt/venv
 ENV PATH="/opt/venv/bin:$PATH"
 
+# sentence-transformers pulls in torch; PyPI's default torch wheel is the
+# GPU (CUDA) build -- ~3.3GB of CUDA libraries that will never run here
+# and just slow the image and every CI pull. Install the CPU wheel into
+# the venv first, from PyTorch's own CPU index, so the install below
+# finds it already satisfied instead of replacing it.
+RUN pip install --no-cache-dir torch --index-url https://download.pytorch.org/whl/cpu
+
 # Install dependencies before the real source ever shows up in a layer
 # -- pyproject.toml/hatchling still needs *a* src/mind/ to build the
 # wheel, so give it an empty placeholder. Editing any file under the
@@ -42,12 +49,22 @@ RUN pip install --no-cache-dir --no-deps .
 
 # ---- runtime ----
 # Lean image: only the venv built above crosses the stage boundary.
-# No compiler, no apt packages, no dev dependencies -- pip install .
+# No compiler, no dev dependencies, and only the runtime apt packages below -- pip install .
 # above only pulls in [project.dependencies], never the [dev] extra
 # (pytest/ruff/mypy), so those were never in this image regardless.
 FROM python:3.12-slim AS runtime
 
 WORKDIR /app
+
+# tesseract-ocr is a system binary, not pip-installable (see pyproject.toml)
+# -- src/mind/multimodal/ocr.py shells out to it via PATH. tesseract-ocr-eng
+# is named explicitly rather than relying on --install-recommends, since
+# Tesseract's own English traineddata is a separate package on Debian.
+# Installed as root, before the switch to the non-root user below.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    tesseract-ocr \
+    tesseract-ocr-eng \
+    && rm -rf /var/lib/apt/lists/*
 
 # Don't run as root -- standard hardening, matters more once this
 # handles uploaded files / talks to other services in production.

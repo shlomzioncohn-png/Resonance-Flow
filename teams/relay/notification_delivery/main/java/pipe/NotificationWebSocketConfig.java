@@ -19,6 +19,8 @@ class NotificationWebSocketConfig implements WebSocketConfigurer {
 
     @Override
     public void registerWebSocketHandlers(WebSocketHandlerRegistry registry) {
+        // Any origin: the only client is lens-bff (server-to-server), not a browser, so an
+        // Origin check protects nothing here. Browser-facing origin checks live in lens-gateway.
         registry.addHandler(handler, "/api/v1/events/stream")
                 .addInterceptors(handshakeInterceptor)
                 .setAllowedOrigins("*");

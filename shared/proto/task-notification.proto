@@ -22,6 +22,6 @@ message TaskNotification {
 
 enum PushPolicy {
   PUSH_POLICY_UNSPECIFIED = 0;
-  ACTIVITY = 1;      // Pushed immediately as its own SSE event, for the Recent Activity panel.
+  ACTIVITY = 1;      // Pushed immediately as its own WebSocket message, for the Recent Activity panel.
   ROLLUP_ONLY = 2;   // Never pushed individually — folds into a debounced refresh signal.
 }

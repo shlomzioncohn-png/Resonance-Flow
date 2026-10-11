@@ -13,6 +13,8 @@ import java.time.Instant;
 import java.util.HashMap;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
+import java.util.ArrayList;
+import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
@@ -37,9 +39,20 @@ class OutboxWorkerMaxRetriesTest extends AbstractIntegrationTest {
     @MockBean
     private EventPublisher eventPublisher;
 
+    private final List<UUID> createdEventIds = new ArrayList<>();
+
+    // Deletes only the events this test created, never the whole outbox table.
     @AfterEach
     void cleanUp() {
-        outboxEventRepository.deleteAll();
+        outboxEventRepository.deleteAllById(createdEventIds);
+        createdEventIds.clear();
+    }
+
+    // The id is generated on save, so it is only known from the saved instance.
+    private OutboxEvent saveTracked(OutboxEvent event) {
+        OutboxEvent saved = outboxEventRepository.save(event);
+        createdEventIds.add(saved.getEventId());
+        return saved;
     }
 
     @Test
@@ -53,7 +66,7 @@ class OutboxWorkerMaxRetriesTest extends AbstractIntegrationTest {
         event.setRetryCount((short) 0);
         event.setCreatedAt(Instant.now());
         event.setNextRetryAt(Instant.now());
-        OutboxEvent saved = outboxEventRepository.save(event);
+        OutboxEvent saved = saveTracked(event);
 
         CompletableFuture<Void> failed = new CompletableFuture<>();
         failed.completeExceptionally(new RuntimeException("permanent failure"));

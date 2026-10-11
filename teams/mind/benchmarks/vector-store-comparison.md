@@ -295,12 +295,13 @@ in three stages, whether pgvector actually meets the requirements above:
 
 **Net conclusion: pgvector stays the recommended choice for the read/write
 path validated here.** Nothing found in validation points at *query-time*
-HNSW tuning (`hnsw.ef_search`) as the bottleneck — the dominant gap is the
-embedding model (`embeddings.py` still uses a hashing-based placeholder,
-deliberately not swapped for a real semantic model yet). This does **not**
-yet rule out *build-time* HNSW quality (`hnsw.ef_construction`, and
-whether the index is built before or after the data load) — that wasn't
-tested; see the open follow-up issue below.
+HNSW tuning (`hnsw.ef_search`) as the bottleneck — the dominant gap was
+the embedding model (`embeddings.py` used a hashing-based placeholder at
+validation time, since swapped for the real BGE model -- see this
+directory's other reports for the before/after). This does **not** yet
+rule out *build-time* HNSW quality (`hnsw.ef_construction`, and whether
+the index is built before or after the data load) — that wasn't tested;
+see the open follow-up issue below.
 
 The full evaluation (mock corpus, query sets, recall test scripts, and
 the detailed writeups) lived in the PoC at `mind_vector_poc/evaluation/`.
