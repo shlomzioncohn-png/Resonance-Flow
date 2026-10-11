@@ -296,7 +296,7 @@ in three stages, whether pgvector actually meets the requirements above:
 **Net conclusion: pgvector stays the recommended choice.** Nothing found in
 validation points at *query-time* HNSW tuning (`hnsw.ef_search`) as the
 bottleneck — the gap was the embedding model. That gap is closed as of
-the production module: `generate.py` now uses a real retrieval-tuned
+the production module: `embeddings.py` now uses a real retrieval-tuned
 model (`BAAI/bge-small-en-v1.5`), not a hashing placeholder — see
 `src/mind/embeddings/README.md`. This does **not** yet rule out
 *build-time* HNSW quality (`hnsw.ef_construction`, and whether the index
@@ -352,7 +352,7 @@ earlier PoC finding that pgvector itself was never the bottleneck.
 | 10 | **87.5%** (7/8) |
 
 This uses BGE's query/passage asymmetry correctly (the query side is
-embedded with `is_query=True`, i.e. `config.BGE_QUERY_INSTRUCTION`
+embedded with `is_query=True`, i.e. `embeddings.BGE_QUERY_INSTRUCTION`
 prepended, matching how a real search call would work) — the earlier PoC
 recall numbers (42% avg top-5 precision, then 0% on the harder
 duplicate-pair test) were measured against the old hashing placeholder,
@@ -365,14 +365,19 @@ retrieval model, not a sign of a broken pipeline.
 ### Explicit conclusion
 
 **<300ms p95 is comfortably achievable at the target scale** (10,000+
-rows) — measured p95 is 16.06ms, not an estimate. **No index change is
-needed or was made.** The HNSW index + `hnsw.ef_search = 400` tuning
-already in `pgvector_store.py` (from the earlier PoC recall work) is
-sufficient; latency has ~18x headroom before <300ms would even become a
-concern, and the one recall miss is attributable to the embedding model's
-inherent limits on a hard paraphrase, not to index accuracy. Per the
-issue's instruction, no index was added or modified, and none is
-recommended at this scale.
+rows) — measured p95 is 16.06ms, not an estimate. Latency has ~18x
+headroom before <300ms would even become a concern, and the one recall
+miss is attributable to the embedding model's inherent limits on a hard
+paraphrase, not to index accuracy.
+
+**Open, not settled here:** review flagged (via `EXPLAIN`) that at this
+10,000-row scale, with `hnsw.ef_search = 400`, Postgres's planner may
+choose a sequential scan over the HNSW index for this query shape --
+not independently re-verified yet. If true, the latency numbers above
+don't actually validate the HNSW index at this scale; they'd just show
+that 10,000 rows is small enough for a seq scan to also be fast. Needs
+an `EXPLAIN ANALYZE` run against the real benchmark table to confirm
+before treating "no index change needed" as settled.
 
 ## Follow-up (open, not fixed here)
 
@@ -384,5 +389,10 @@ before vs. after loading the 10,000-row dataset changes recall. Tracked
 as [issue #270](https://github.com/KamaTechOrg/Resonance-Flow/issues/270)
 rather than fixed in this PR, since it needs its own benchmark run to
 answer.
+
+The benchmark still uses synthetic filler data (random word-soup), not
+real task text -- the original issue asked for the real FUNSD dataset.
+Not switched over in this PR; flagging rather than fixing, since it
+changes what the recall numbers above actually measure.
 
 ---

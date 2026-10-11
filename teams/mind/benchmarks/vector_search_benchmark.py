@@ -15,10 +15,11 @@ Addresses issue #87:
      produces the numbers (printed + a local, gitignored JSON for
      reference).
 
-Run:  python vector_search_benchmark.py
+Run:  python benchmarks/vector_search_benchmark.py
 (from teams/mind/, with MIND_VECTOR_STORE__DSN pointed at a real pgvector
 instance and the `mind` package installed -- same setup as the test
-suite.)
+suite.) Uses its own table (task_embeddings_benchmark), dropped after
+the run -- never touches the real task_embeddings table.
 """
 
 import asyncio
@@ -26,10 +27,16 @@ import json
 import random
 import statistics
 import time
+from pathlib import Path
 
 from mind.config import get_settings
 from mind.embeddings import embed, embed_batch
 from mind.embeddings.pgvector_store import PgVectorStore
+
+BENCHMARK_TABLE = "task_embeddings_benchmark"
+# Relative to this file, not cwd -- so it always lands in the gitignored
+# benchmarks/ dir regardless of where the script is invoked from.
+RESULTS_PATH = Path(__file__).resolve().parent / "vector_search_benchmark_results.json"
 
 N_FILLER = 10_000  # upper end of the 5,000-10,000 range asked for
 N_LATENCY_QUERIES = 100
@@ -93,11 +100,18 @@ def percentile(values: list[float], p: float) -> float:
 
 async def main() -> None:
     random.seed(87)
-    store = PgVectorStore(get_settings().vector_store)
+    # Own table, not the real task_embeddings -- dropped in finally below.
+    settings = get_settings().vector_store.model_copy(update={"table": BENCHMARK_TABLE})
+    store = PgVectorStore(settings)
     await store.open()
-    print("Resetting table...")
-    await store.clear()
+    try:
+        await _run_benchmark(store)
+    finally:
+        await store.clear()
+        await store.close()
 
+
+async def _run_benchmark(store: PgVectorStore) -> None:
     # --- 1. Load synthetic filler (clearly id-prefixed, batch-embedded) ---
     print(f"Generating {N_FILLER} synthetic filler texts...")
     filler_texts = [fake_filler_text() for _ in range(N_FILLER)]
@@ -206,15 +220,12 @@ async def main() -> None:
         print(f"  [{status}] \"{d['text_a']}\" -> \"{d['text_b']}\"")
 
     def _write_results() -> None:
-        with open("vector_search_benchmark_results.json", "w") as f:
-            json.dump(results, f, indent=2)
+        RESULTS_PATH.write_text(json.dumps(results, indent=2))
 
     # Blocking file I/O -- offload to a thread so this async function
     # never blocks the event loop, even for this one quick write.
     await asyncio.to_thread(_write_results)
-    print("\nWrote vector_search_benchmark_results.json (local reference, gitignored)")
-
-    await store.close()
+    print(f"\nWrote {RESULTS_PATH.name} (local reference, gitignored)")
 
 
 if __name__ == "__main__":
