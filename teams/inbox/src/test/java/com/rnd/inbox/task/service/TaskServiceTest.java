@@ -8,6 +8,7 @@ import com.rnd.inbox.task.dto.TaskResponseDto;
 import com.rnd.inbox.task.dto.TaskStatusUpdateRequestDto;
 import com.rnd.inbox.task.dto.TaskUpdateRequestDto;
 import com.rnd.inbox.task.exception.InvalidTaskFilterException;
+import com.rnd.inbox.task.exception.InvalidTaskSortException;
 import com.rnd.inbox.task.exception.InvalidTaskStatusTransitionException;
 import com.rnd.inbox.task.exception.TaskNotFoundException;
 import com.rnd.inbox.task.mapper.TaskMapper;
@@ -46,6 +47,7 @@ import org.openapitools.jackson.nullable.JsonNullable;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Sort;
 import org.springframework.data.domain.Pageable;
 
 import java.time.Clock;
@@ -59,6 +61,7 @@ import java.util.UUID;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.never;
@@ -505,9 +508,9 @@ class TaskServiceTest {
     // TaskResponseDto is final - constructed for real rather than mocked, per this codebase's
     // convention (mocking a final DTO depends on a Mockito setting that isn't a safe assumption).
     private TaskResponseDto sampleTaskResponseDto() {
-        return new TaskResponseDto(UUID.randomUUID(), null, null, "Fix flaky test", null, null, null, null, null,
-                null, null, null, TaskStatus.NEW, false, null, null, null, null, null, null, null, null, null,
-                NOW, NOW, null, null);
+        return new TaskResponseDto(UUID.randomUUID(), null, null, null, "Fix flaky test", null, null, null, null,
+                null, null, null, null, TaskStatus.NEW, false, null, null, null, null, null, null, null, null, null,
+                null, NOW, NOW, null, null);
     }
 
     private User actorWithRole(UserRole role) {
@@ -534,9 +537,9 @@ class TaskServiceTest {
         built.setStatus(TaskStatus.NEW);
         when(taskRestMapper.toEntity(request, tenant, null, actor, actor)).thenReturn(built);
         stubSaveAssigning(built, UUID.randomUUID());
-        TaskResponseDto responseDto = new TaskResponseDto(UUID.randomUUID(), null, null, "Fix flaky test",
+        TaskResponseDto responseDto = new TaskResponseDto(UUID.randomUUID(), null, null, null, "Fix flaky test",
                 null, null, null, null, null, null, null, null, TaskStatus.NEW, false, null, null, null, null,
-                actor.getId(), null, null, null, actor.getId(), NOW, NOW, null, null);
+                actor.getId(), null, null, null, null, actor.getId(), NOW, NOW, null, null);
         when(taskRestMapper.toResponseDto(built)).thenReturn(responseDto);
 
         TaskResponseDto result = taskService.createTaskFromRequest(request, actor.getId());
@@ -628,7 +631,8 @@ class TaskServiceTest {
         Page<Task> page = new PageImpl<>(List.of(task), pageable, 1);
         when(taskRepository.findFiltered(
                 eq(true), isNull(), eq(false), isNull(), eq(false), isNull(), eq(false), isNull(), eq(false),
-                isNull(), eq(false), isNull(), eq(false), isNull(), eq(false), isNull(), eq(false), eq(pageable)))
+                isNull(), eq(false), isNull(), eq(false), isNull(), eq(false), isNull(), eq(false),
+                eq(false), isNull(), eq(withDefaultSort(pageable))))
                 .thenReturn(page);
         TaskResponseDto responseDto = sampleTaskResponseDto();
         when(taskRestMapper.toResponseDto(task)).thenReturn(responseDto);
@@ -647,7 +651,8 @@ class TaskServiceTest {
         Page<Task> page = new PageImpl<>(List.of(task), pageable, 1);
         when(taskRepository.findFiltered(
                 eq(false), eq(tenantId), eq(false), isNull(), eq(false), isNull(), eq(false), isNull(), eq(false),
-                isNull(), eq(false), isNull(), eq(false), isNull(), eq(false), isNull(), eq(false), eq(pageable)))
+                isNull(), eq(false), isNull(), eq(false), isNull(), eq(false), isNull(), eq(false),
+                eq(false), isNull(), eq(withDefaultSort(pageable))))
                 .thenReturn(page);
         TaskResponseDto responseDto = sampleTaskResponseDto();
         when(taskRestMapper.toResponseDto(task)).thenReturn(responseDto);
@@ -658,10 +663,178 @@ class TaskServiceTest {
     }
 
     @Test
-    void listTasks_whenOnlyDeadlineFromProvided_throwsInvalidTaskFilterException() {
+    void listTasks_whenUserIdProvided_passesItAlongsideTheActorsOwnTenantScope() {
+        User actor = actorWithRole(UserRole.TENANT_ADMIN);
+        when(userRepository.findById(actor.getId())).thenReturn(Optional.of(actor));
+        Pageable pageable = PageRequest.of(0, 20);
+        Task task = new Task();
+        Page<Task> page = new PageImpl<>(List.of(task), pageable, 1);
+        UUID relatedUserId = UUID.randomUUID();
+        // The tenant scope (bypass=false, tenantId) must still be passed - userId narrows the
+        // result inside the actor's scope, it never replaces it.
+        when(taskRepository.findFiltered(
+                eq(false), eq(tenantId), eq(false), isNull(), eq(false), isNull(), eq(false), isNull(), eq(false),
+                isNull(), eq(false), isNull(), eq(false), isNull(), eq(false), isNull(), eq(false),
+                eq(true), eq(relatedUserId), eq(withDefaultSort(pageable))))
+                .thenReturn(page);
+        TaskResponseDto responseDto = sampleTaskResponseDto();
+        when(taskRestMapper.toResponseDto(task)).thenReturn(responseDto);
+        TaskFilterDto filter = new TaskFilterDto();
+        filter.setUserId(relatedUserId);
+
+        PageResponseDto<TaskResponseDto> result = taskService.listTasks(filter, pageable, actor.getId());
+
+        assertThat(result.getContent()).containsExactly(responseDto);
+    }
+
+    @Test
+    void listTasks_whenNoSortRequested_ordersNewestFirstWithIdAsTieBreaker() {
+        Pageable passed = sortPassedToRepositoryFor(PageRequest.of(3, 50));
+
+        assertThat(passed.getSort()).isEqualTo(Sort.by(Sort.Order.desc("createdAt"), Sort.Order.desc("id")));
+        assertThat(passed.getPageNumber()).isEqualTo(3);
+        assertThat(passed.getPageSize()).isEqualTo(50);
+    }
+
+    @Test
+    void listTasks_whenSortedBySupportedProperty_keepsItAndAppendsIdAsTieBreaker() {
+        Pageable passed = sortPassedToRepositoryFor(PageRequest.of(0, 20, Sort.by(Sort.Order.desc("deadline"))));
+
+        assertThat(passed.getSort()).isEqualTo(Sort.by(Sort.Order.desc("deadline"), Sort.Order.desc("id")));
+    }
+
+    @Test
+    void listTasks_whenSortedAscending_tieBreakerIsAscendingToo() {
+        Pageable passed = sortPassedToRepositoryFor(PageRequest.of(0, 20, Sort.by(Sort.Order.asc("deadline"))));
+
+        assertThat(passed.getSort()).isEqualTo(Sort.by(Sort.Order.asc("deadline"), Sort.Order.asc("id")));
+    }
+
+    @Test
+    void listTasks_whenSortedBySeveralSupportedProperties_keepsTheirOrder() {
+        Pageable passed = sortPassedToRepositoryFor(PageRequest.of(0, 20,
+                Sort.by(Sort.Order.desc("priorityScore"), Sort.Order.asc("createdAt"))));
+
+        assertThat(passed.getSort()).isEqualTo(Sort.by(
+                Sort.Order.desc("priorityScore"), Sort.Order.asc("createdAt"), Sort.Order.asc("id")));
+    }
+
+    @Test
+    void listTasks_whenSortUsesSnakeCaseName_mapsItToTheTaskProperty() {
+        Pageable passed = sortPassedToRepositoryFor(PageRequest.of(0, 20,
+                Sort.by(Sort.Order.desc("priority_score"), Sort.Order.asc("created_at"))));
+
+        assertThat(passed.getSort()).isEqualTo(Sort.by(
+                Sort.Order.desc("priorityScore"), Sort.Order.asc("createdAt"), Sort.Order.asc("id")));
+    }
+
+    @Test
+    void listTasks_whenSortedByUnsupportedProperty_throwsInvalidTaskSortExceptionNamingTheSupportedOnes() {
+        User actor = actorWithRole(UserRole.TENANT_ADMIN);
+        Pageable byTitle = PageRequest.of(0, 20, Sort.by("title"));
+
+        assertThatThrownBy(() -> taskService.listTasks(new TaskFilterDto(), byTitle, actor.getId()))
+                .isInstanceOf(InvalidTaskSortException.class)
+                .hasMessageContaining("'title'")
+                .hasMessageContaining("deadline")
+                .hasMessageContaining("priorityScore")
+                .hasMessageContaining("createdAt");
+        verifyNoInteractions(taskRepository);
+    }
+
+    @Test
+    void listTasks_whenOneOfSeveralSortPropertiesIsUnsupported_rejectsTheRequest() {
+        User actor = actorWithRole(UserRole.TENANT_ADMIN);
+        Pageable mixed = PageRequest.of(0, 20, Sort.by("deadline", "description"));
+
+        assertThatThrownBy(() -> taskService.listTasks(new TaskFilterDto(), mixed, actor.getId()))
+                .isInstanceOf(InvalidTaskSortException.class)
+                .hasMessageContaining("'description'");
+        verifyNoInteractions(taskRepository);
+    }
+
+    @Test
+    void listTasks_whenSortedByIdExplicitly_isRejectedLikeAnyOtherUnsupportedProperty() {
+        User actor = actorWithRole(UserRole.TENANT_ADMIN);
+
+        assertThatThrownBy(() -> taskService.listTasks(
+                new TaskFilterDto(), PageRequest.of(0, 20, Sort.by("id")), actor.getId()))
+                .isInstanceOf(InvalidTaskSortException.class);
+    }
+
+    // Runs listTasks as a tenant admin and returns the Pageable the repository was called with.
+    private Pageable sortPassedToRepositoryFor(Pageable requested) {
+        User actor = actorWithRole(UserRole.TENANT_ADMIN);
+        when(userRepository.findById(actor.getId())).thenReturn(Optional.of(actor));
+        ArgumentCaptor<Pageable> passed = ArgumentCaptor.forClass(Pageable.class);
+        when(taskRepository.findFiltered(
+                anyBoolean(), any(), anyBoolean(), any(), anyBoolean(), any(), anyBoolean(), any(), anyBoolean(),
+                any(), anyBoolean(), any(), anyBoolean(), any(), anyBoolean(), any(), anyBoolean(),
+                anyBoolean(), any(), passed.capture()))
+                .thenReturn(Page.empty());
+
+        taskService.listTasks(new TaskFilterDto(), requested, actor.getId());
+
+        return passed.getValue();
+    }
+
+    private static Pageable withDefaultSort(Pageable pageable) {
+        return PageRequest.of(pageable.getPageNumber(), pageable.getPageSize(),
+                Sort.by(Sort.Order.desc("createdAt"), Sort.Order.desc("id")));
+    }
+
+    @Test
+    void listTasks_whenOnlyDeadlineFromProvided_passesAnOpenEndedRange() {
+        User actor = actorWithRole(UserRole.TENANT_ADMIN);
+        when(userRepository.findById(actor.getId())).thenReturn(Optional.of(actor));
+        Pageable pageable = PageRequest.of(0, 20);
+        Task task = new Task();
+        Page<Task> page = new PageImpl<>(List.of(task), pageable, 1);
+        Instant deadlineFrom = Instant.parse("2026-10-01T00:00:00Z");
+        when(taskRepository.findFiltered(
+                eq(false), eq(tenantId), eq(false), isNull(), eq(false), isNull(), eq(false), isNull(), eq(false),
+                isNull(), eq(false), isNull(), eq(true), eq(deadlineFrom), eq(false), isNull(), eq(false),
+                eq(false), isNull(), eq(withDefaultSort(pageable))))
+                .thenReturn(page);
+        TaskResponseDto responseDto = sampleTaskResponseDto();
+        when(taskRestMapper.toResponseDto(task)).thenReturn(responseDto);
+        TaskFilterDto filter = new TaskFilterDto();
+        filter.setDeadlineFrom(deadlineFrom);
+
+        PageResponseDto<TaskResponseDto> result = taskService.listTasks(filter, pageable, actor.getId());
+
+        assertThat(result.getContent()).containsExactly(responseDto);
+    }
+
+    @Test
+    void listTasks_whenOnlyDeadlineToProvided_passesAnOpenEndedRange() {
+        User actor = actorWithRole(UserRole.TENANT_ADMIN);
+        when(userRepository.findById(actor.getId())).thenReturn(Optional.of(actor));
+        Pageable pageable = PageRequest.of(0, 20);
+        Task task = new Task();
+        Page<Task> page = new PageImpl<>(List.of(task), pageable, 1);
+        Instant deadlineTo = Instant.parse("2026-10-31T23:59:59Z");
+        when(taskRepository.findFiltered(
+                eq(false), eq(tenantId), eq(false), isNull(), eq(false), isNull(), eq(false), isNull(), eq(false),
+                isNull(), eq(false), isNull(), eq(false), isNull(), eq(true), eq(deadlineTo), eq(false),
+                eq(false), isNull(), eq(withDefaultSort(pageable))))
+                .thenReturn(page);
+        TaskResponseDto responseDto = sampleTaskResponseDto();
+        when(taskRestMapper.toResponseDto(task)).thenReturn(responseDto);
+        TaskFilterDto filter = new TaskFilterDto();
+        filter.setDeadlineTo(deadlineTo);
+
+        PageResponseDto<TaskResponseDto> result = taskService.listTasks(filter, pageable, actor.getId());
+
+        assertThat(result.getContent()).containsExactly(responseDto);
+    }
+
+    @Test
+    void listTasks_whenDeadlineToIsBeforeDeadlineFrom_throwsInvalidTaskFilterException() {
         User actor = actorWithRole(UserRole.TENANT_ADMIN);
         TaskFilterDto filter = new TaskFilterDto();
-        filter.setDeadlineFrom(Instant.now());
+        filter.setDeadlineFrom(Instant.parse("2026-10-10T00:00:00Z"));
+        filter.setDeadlineTo(Instant.parse("2026-10-05T00:00:00Z"));
 
         assertThatThrownBy(() -> taskService.listTasks(filter, PageRequest.of(0, 20), actor.getId()))
                 .isInstanceOf(InvalidTaskFilterException.class);

@@ -159,7 +159,8 @@ public class Tenant {
         if (this == o) return true;
         if (!(o instanceof Tenant)) return false;
         Tenant that = (Tenant) o;
-        return id != null && id.equals(that.id);
+        // getId(), not the field: "that" may be a lazy-loading proxy, whose own fields are empty.
+        return id != null && id.equals(that.getId());
     }
 
     @Override

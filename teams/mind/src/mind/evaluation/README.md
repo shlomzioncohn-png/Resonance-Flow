@@ -12,7 +12,7 @@ The harness is designed to:
 
 - **Immutable Scenarios:** Scores a ranking model against `eval/personas/` — a fixed scenario set, never touched mid-comparison.
 - **Foundation Gate:** Must be runnable by someone outside the MIND team.
-- **Lifecycle:** Used for both the baseline (week 6) and the stretch-goal comparison (week 7, demo day week 9).
+- **Lifecycle:** Used to score the baseline (week 5; R2 publishes those scores to Chain in week 6) and for the stretch-goal comparison (week 7, demo day week 9).
 
 ## The Model Interface (Contract) — closed, approved
 
@@ -92,9 +92,11 @@ Replace `dummy` with the name of the model you want to evaluate.
 scenario files live in two subdirectories — `same_tier/` and `cross_tier/` (see
 `eval/personas/README.md`) — and `load_personas` recurses into both;
 `scenario.schema.json` at the root is skipped. `make eval` scores each group
-separately and prints a combined number too, and `report.json` carries all
-three. Pass a single group dir (`--personas eval/personas/same_tier`) to score
-just that group. Loading goes through
+separately, breaks the result down per `persona.role`, and prints a combined
+number too; `report.json` carries all of them (`combined`, `groups`, `roles`).
+The per-role numbers are split out of the combined run, not re-scored, so
+they always add up to it. Pass a single group dir
+(`--personas eval/personas/same_tier`) to score just that group. Loading goes through
 `mind.evaluation.personas.load_personas`/`validate_personas` (the coverage /
 count checks run against the combined set). `load_personas`
 parses each file into a `PersonaEvaluationScenario` (Pydantic); a structurally
@@ -144,8 +146,8 @@ The harness evaluates models using **Top-1 Accuracy** (`metrics.top1_accuracy`).
 **Decision status: closed (final).** Top-1 was chosen over MRR / nDCG with the
 mentor; each scenario carries exactly one labelled correct answer
 (`expected_top_task_id`), which is what top-1 needs and what MRR/nDCG-with-graded-
-labels would not have. This will not change once baseline-vs-stretch scoring
-starts (week 6). See also the "Open decisions" table in `teams/mind/CLAUDE.md`.
+labels would not have. This will not change once baseline scoring starts
+(week 5). See also the "Open decisions" table in `teams/mind/CLAUDE.md`.
 
 For each scenario, the metric checks whether the task the model scored highest matches
 that scenario's `expected_top_task_id`. The final number is the proportion of scenarios
@@ -155,12 +157,87 @@ To keep the door open for a future switch to a different metric without re-runni
 model, the harness report keeps every candidate's score and reasoning per scenario
 (`ScenarioResult.candidates`), not just the winner.
 
+## Baseline score
+
+The number the week-7 stretch is measured against (#486). Once recorded, an
+entry here is not overwritten; a re-run gets its own dated entry.
+
+### How a baseline is recorded
+
+`report.json` is not the record: it is gitignored and rewritten on every run.
+The baseline is written to its own committed file:
+
+```bash
+git rev-parse HEAD                                 # -> <model-sha>
+git log -1 --format=%H -- eval/personas            # -> <persona-set-sha>
+python -m mind.evaluation.run --model <model> \
+    --record-baseline eval/baselines/baseline_score_<YYYY-MM-DD>.json \
+    --model-commit <model-sha> --persona-set-commit <persona-set-sha>
+```
+
+The file carries a `format_version`, the date, the model name, `model_commit`, the metric, the
+persona set (path, `checksum`, `commit`, scenario count, how many are
+`team_lead_approved`), the combined / per-group / per-role
+results, and every scenario's prediction with all candidate scores (for the
+manual spot-check and the week-7 comparison).
+
+- **It is never overwritten.** If the file exists, the run fails before
+  scoring; a re-run goes to a new, dated file.
+- **A failed run writes nothing.** The record is written last, after the
+  `--min-accuracy` / `--max-accuracy` gates; a run that exits non-zero on a gate
+  leaves no file behind (the file is write-once, so a leftover would block the
+  real run that follows).
+- **The persona set is identified by a checksum, computed automatically.** The
+  record stores `personas_checksum.compute_personas_checksum` of the persona
+  directory that was scored (the same checksum `make lint` checks against
+  `eval/personas/personas.sha256`). It is computed from the files themselves, so
+  it cannot be typed wrong, and it describes exactly what was scored, including
+  uncommitted edits to the scenarios. `load_baseline_record` refuses to load a
+  baseline when the current set's checksum differs from the recorded one: that is
+  the "same fixed set" guarantee for the baseline-vs-stretch comparison.
+- **Both commits are required and must look like a git sha** (7-40 lowercase
+  hex), so a forgotten argument, a branch name or a stray paste fails instead
+  of being recorded. That is a shape check only: it cannot tell a swapped pair
+  or a wrong sha, so take each one from the git command above. For the persona
+  set the commit is only an extra label; the checksum is what identifies it.
+- **Run the model from a clean working tree.** `model_commit` only describes
+  what was scored if nothing under `src/` is uncommitted; the tool does not
+  check this. (The persona set no longer depends on this: its checksum covers
+  uncommitted scenario edits.)
+
+The format is one Pydantic model, `baseline_record.BaselineRecord`, used for
+both writing and reading. Its checks run on every write and every read: each
+accuracy (combined, per group, per role) must equal its own
+`correct_top1 / total_scenarios`, `combined` must agree with the per-scenario
+results, and each scenario's `passed` must match its prediction. A record that
+fails any of them is refused, with an error naming the field. The per-group and
+per-role slices must also add up to `combined`.
+`format_version` (currently `1`) lets a reader say "this record is an older/newer
+format" if a field is ever renamed or removed, instead of a validation error.
+`baseline_record.load_baseline_record(path, personas_path=...)` reads a record back into the
+`Report` it was written from, so the week-7 comparison (#487) diffs the stretch
+run against the recorded baseline instead of a re-run.
+
+### 2026-09-23: no week-5 baseline number exists yet
+
+- **Checked:** `origin/main` @ `c7e6c507` (2026-09-23).
+- **Finding:** `src/mind/scoring/` contains only `README.md` and `__init__.py`,
+  with no ranking model. The harness has only ever scored `DummyModel` and the
+  heuristics in `baseline_models.py`, none of which is the baseline.
+- **Why:** the segmented-ranking model (#354) has not merged. It is open as
+  PR #498, which also depends on `ScoreResult.factors` (PR #497, open).
+- **Consequence:** there is no week-5 baseline number anywhere, so #428 step 3
+  ("re-confirm the baseline number") has nothing to confirm yet.
+- **Next:** measured over all 30 scenarios in `eval/personas/` once #354 lands
+  (expected start of week 7, 2026-10-04), then recorded here with the model
+  commit and the persona-set version.
+
 ## Real data slice
 
 The Foundation Gate requires the harness to run on a small slice of a **real**
 dataset, not only hand-written scenarios. That slice lives in `eval/real_slice/`,
 kept separate from `eval/personas/` on purpose: the persona set is fixed and
-mentor-approved so week-6 and week-7 scores stay comparable against it, whereas
+mentor-approved so the baseline and week-7 scores stay comparable against it, whereas
 the real slice exists only to prove the harness survives real data. The two are
 never mixed.
 
@@ -325,3 +402,108 @@ that drove `dummy`'s 66.7%. This is the answer the rebase was meant to
 establish: the real-data slice does not yet measure ranking quality for any
 model that has actually been run against it — it proves only that the harness
 pipes real AMI data through any `RankingModel` implementation end to end.
+
+## Extraction-quality eval
+
+A **second, separate** harness — not a variant of the ranking metric above, which
+is why it is its own section. Top-1 accuracy asks "given a list of tasks, did the
+model rank the right one first?". This asks a question one step upstream: **"did
+the pipeline extract the right action items from a meeting at all?"** — measured
+as precision / recall / F1 of the extracted items against a human-annotated
+reference (AMI's tagged action items). It lives in `extraction_eval.py`
+(`evaluate_extraction`), with a CLI at `python -m mind.evaluation.run_extraction_eval`.
+The full design, including the hand-sketch on real AMI meetings, is in
+`extraction_eval_design.md`.
+
+### What it measures
+
+Given `extracted` action items and `annotated` (reference) ones, both as strings:
+
+- **precision** = `TP / len(extracted)` — of what was extracted, how much was real.
+- **recall** = `TP / len(annotated)` — of the real action items, how many were found.
+- **f1** — harmonic mean. Micro-F1 over the whole slice is the number CI will
+  regress on (`extraction_eval_design.md` §3.5).
+- **counts** — `n_extracted` and `n_annotated` (the denominators above) and
+  `true_positives` (the numerator), so a report is readable on its own.
+
+The report (`ExtractionEvalReport`, a frozen pydantic model — `model_dump()` gives
+the JSON the CLI writes) also carries the matched pairs, the missed annotations,
+and the false positives — the raw evidence, kept for "why did this run score that?" analysis in
+later weeks, the same requirement `ScenarioResult.candidates` exists for above.
+
+### The matching rule
+
+An extracted task and an annotated sentence are almost never byte-identical
+("UI Designer to present the interface concept" vs. "The User Interface Designer
+will make a presentation on the user interface concept"). The rule
+(`extraction_eval_design.md` §3):
+
+1. Normalize both sides — lowercase, collapse whitespace, drop a trailing period.
+   "Whitespace" is whatever `str.split()` treats as such, which includes the
+   non-breaking space `\xa0` — so `\xa0` needs no separate `.replace`. It does
+   **not** include `\u200b` (zero-width space), which would survive
+   normalization. Neither matters for the AMI action items themselves: the 306
+   `<actions>` sentences contain no non-ASCII character at all (the `\xc2\xa0`
+   bytes found elsewhere in the package, see "Real data slice" above, are not in
+   them).
+2. Score every (extracted, annotated) pair with a `similarity(a, b) -> float` in
+   `[0, 1]`.
+3. Match greedily, one-to-one: highest similarity first, take a pair iff both
+   endpoints are still free and the score is `>= threshold`. A merge (two
+   annotations covered by one extracted item) therefore shows up as one true
+   positive plus one missed annotation, not hidden.
+4. `TP` = matched pairs, `FP` = unmatched extracted, `FN` = unmatched annotated.
+
+`similarity` and `threshold` are **required parameters of `evaluate_extraction`,
+never hardcoded**: Ayala's embedding-similarity function swaps in at the call site
+with no change to the harness, and the locked lexical threshold
+(`extraction_eval_design.md` §6 — τ = 0.60, for the `rapidfuzz` backend) can be
+revised as a visible call-site change rather than a silent code edit.
+
+**A bad score fails loudly.** `evaluate_extraction` raises `ValueError` if
+`threshold`, or any score `similarity` returns, is not a real number in `[0, 1]`
+(NaN, infinity, out of range, `None`, a string, a `bool`). This matters most for
+NaN: `nan < threshold` is `False`, so without the check a NaN score is matched as
+if it had cleared the bar and the eval reports a *perfect* run instead of
+failing. It also catches an embedding backend whose cosine in `[-1, 1]` was not
+rescaled to `[0, 1]`.
+
+### This eval is approximate
+
+It compares free text to free text. A "true positive" means *our rule* — a
+similarity function and a threshold that are judgement calls — decided two
+sentences are the same commitment. Two models' scores are comparable only because
+they were scored with the *same frozen* rule; the absolute number carries an
+error bar we do not quantify. The job is to catch regressions and large
+differences on a fixed reference, not to certify absolute extraction quality.
+
+### Running it
+
+```bash
+python -m mind.evaluation.run_extraction_eval                   # the bundled hand-built fixture
+python -m mind.evaluation.run_extraction_eval --input pair.json
+python -m mind.evaluation.run_extraction_eval --threshold 0.6   # default: PLACEHOLDER_THRESHOLD (0.5)
+```
+
+`pair.json` is `{"extracted": [...], "annotated": [...]}` — exactly those two keys,
+lists of strings only (validated by the `ExtractionEvalInput` pydantic model; an
+unknown key or a non-string item is rejected with the offending location, e.g.
+`extracted.1`). A bad input file or an invalid `--threshold` prints the error to
+stderr and exits with code 1. The full report is also written to
+`extraction_report.json` in the working directory (gitignored). With no `--input`, the
+fixture in `extraction_fixture.py` runs — three true positives, one false
+positive, one false negative, precision = recall = 0.75, worked out by hand in
+that file's docstring. The similarity the CLI uses is a pure-Python Jaccard placeholder
+(`placeholder_similarity`, paired with `PLACEHOLDER_THRESHOLD = 0.5`); the real backend (embeddings, or a `rapidfuzz` baseline)
+is not built yet — blocked on Ayala's answer (`extraction_eval_design.md` §4).
+`metrics.extraction_precision_recall` is a stricter placeholder still (exact
+string match); it is not this eval.
+
+### Current status
+
+**Fixture-validated, not yet run against real pipeline output** — see
+[Cross-team: should the Task model / API error format be shared contracts? #21](https://github.com/KamaTechOrg/Resonance-Flow/issues/21)
+(tracking issues for this eval: #176 design, #177 implementation).
+The extracted side needs Yonit's extraction pipeline and Michal's ASR to be
+producing output; the annotated side (AMI action items) wires in via a manifest
+edit, not a code change (`extraction_eval_design.md` §"Scope").

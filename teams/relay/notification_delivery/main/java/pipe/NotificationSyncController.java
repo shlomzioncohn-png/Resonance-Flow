@@ -1,0 +1,47 @@
+package pipe;
+
+import org.springframework.http.HttpStatus;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.RequestHeader;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
+import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.server.ResponseStatusException;
+
+import java.time.Instant;
+import java.util.List;
+import java.util.Map;
+
+// The REST poll fallback from design doc §01/§07
+@RestController
+@RequestMapping("/api/v1/events")
+public class NotificationSyncController {
+
+    private final ActivityReplayBuffer replayBuffer;
+    private final KafkaNotificationReplayService kafkaReplayService;
+    private final TrustedHeaderAuthenticator authenticator;
+
+    public NotificationSyncController(
+            ActivityReplayBuffer replayBuffer,
+            KafkaNotificationReplayService kafkaReplayService,
+            TrustedHeaderAuthenticator authenticator) {
+        this.replayBuffer = replayBuffer;
+        this.kafkaReplayService = kafkaReplayService;
+        this.authenticator = authenticator;
+    }
+
+    @GetMapping("/sync")
+    public List<Map<String, Object>> sync(
+            @RequestHeader("X-Org-Id") String orgId,
+            @RequestHeader("X-User-Id") String userId,
+            @RequestParam("since") long sinceEpochMillis) {
+        AuthenticatedPrincipal principal = authenticator.authenticate(orgId, userId)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.BAD_REQUEST, "X-Org-Id and X-User-Id must not be blank"));
+        Instant since = Instant.ofEpochMilli(sinceEpochMillis);
+        List<ActivityReplayBuffer.Entry> entries = replayBuffer.since(principal.orgId(), principal.userId(), since)
+                .orElseGet(() -> kafkaReplayService.replaySince(principal.orgId(), principal.userId(), since));
+        return entries.stream()
+                .map(entry -> NotificationPayloads.toMap(entry.event(), entry.offset()))
+                .toList();
+    }
+}

@@ -6,10 +6,14 @@ on:
     tags: [ "bridge-v*.*.*" ]
     paths:
       - "teams/bridge/**"
+      - "teams/inbox/src/main/proto/**"
+      - "shared/proto/**"
   pull_request:
     branches: [ "main" ]
     paths:
       - "teams/bridge/**"
+      - "teams/inbox/src/main/proto/**"
+      - "shared/proto/**"
   workflow_dispatch: {}
 
 jobs:
@@ -34,3 +38,5 @@ jobs:
       service_name: bridge
       service_dir: teams/bridge
       language: java
+      container_port: 8080
+      extra_build_contexts: shared=shared

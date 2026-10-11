@@ -1,0 +1,27 @@
+syntax = "proto3";
+
+package com.rnd.relay.event;
+
+option java_package = "pipe";
+option java_multiple_files = true;
+
+import "google/protobuf/timestamp.proto";
+
+// kafkaTopic: resonance.task-notifications
+message TaskNotification {
+  string event_id = 1;              // Unique id of this event instance. Dedup key on delivery — a producer retry gets a new offset but the same event_id.
+  string org_id = 2;                // Organization id (multi-tenancy). Combined with user_id as the Kafka partition key.
+  string user_id = 3;               // Recipient of the notification (task assignee).
+  string task_id = 4;               // Id of the task this notification is about.
+  PushPolicy push_policy = 10;      // How the pipe should deliver this. Set by the producer — see PushPolicy below.
+  double urgency_score = 6;              // Current urgency, 0-10. Context for activity items — not itself a reason to push.
+  int32 effort_estimate_minutes = 7;     // Current effort estimate. Same as above.
+  google.protobuf.Timestamp occurred_at = 8; // Source time the underlying change happened, not Kafka ingestion time.
+  string source_ref = 9;            // Pointer back to the originating record, e.g. "chain:task_4471". Traceability.
+}
+
+enum PushPolicy {
+  PUSH_POLICY_UNSPECIFIED = 0;
+  ACTIVITY = 1;      // Pushed immediately as its own WebSocket message, for the Recent Activity panel.
+  ROLLUP_ONLY = 2;   // Never pushed individually — folds into a debounced refresh signal.
+}

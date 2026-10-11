@@ -56,3 +56,18 @@ check reads from teams/relay/ci/schema-subjects.tsv.
 {{- end -}}
 {{- $level -}}
 {{- end }}
+
+{{/*
+Subjects from "# reset: <subject>" lines in files/schema-subjects.tsv, one per line.
+*/}}
+{{- define "schema-sync-hook.resetSubjects" -}}
+{{- $subjects := list -}}
+{{- range .Files.Lines "files/schema-subjects.tsv" -}}
+{{- $t := trim . -}}
+{{- /* Same match as _load-schema-policy.sh's awk - skips the "#   # reset:" format doc line. */ -}}
+{{- if regexMatch "^#[[:space:]]*reset:" $t -}}
+{{- $subjects = append $subjects ((splitList "reset:" $t | last) | trim) -}}
+{{- end -}}
+{{- end -}}
+{{- join "\n" $subjects -}}
+{{- end }}
