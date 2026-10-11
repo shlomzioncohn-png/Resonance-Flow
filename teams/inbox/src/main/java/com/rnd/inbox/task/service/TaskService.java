@@ -50,10 +50,12 @@ import org.springframework.transaction.annotation.Transactional;
 import java.time.Clock;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.EnumSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 
 @Service
@@ -72,6 +74,9 @@ public class TaskService {
         properties.put("created_at", "createdAt");
         return properties;
     }
+
+    private static final Map<TaskStatus, Set<TaskStatus>> FORBIDDEN_STATUS_TRANSITIONS = Map.of(
+            TaskStatus.DONE, Set.copyOf(EnumSet.complementOf(EnumSet.of(TaskStatus.DONE))));
 
     private static final TypeReference<Map<String, Object>> PAYLOAD_TYPE = new TypeReference<>() {
     };
@@ -236,6 +241,17 @@ public class TaskService {
         }
     }
 
+    private void validateStatusTransition(Task task, TaskStatus newStatus, Instant snoozedUntil) {
+        if (newStatus == TaskStatus.SNOOZED && snoozedUntil == null) {
+            throw new InvalidTaskStatusTransitionException("snoozedUntil is required when status is SNOOZED");
+        }
+        Set<TaskStatus> forbidden = FORBIDDEN_STATUS_TRANSITIONS.getOrDefault(task.getStatus(), Set.of());
+        if (forbidden.contains(newStatus)) {
+            throw new InvalidTaskStatusTransitionException(
+                    "A task in status " + task.getStatus() + " cannot move to " + newStatus);
+        }
+    }
+
     @Transactional
     public TaskResponseDto updateTaskFromRequest(UUID id, TaskUpdateRequestDto request, UUID actorId) {
         User actor = findActorOrThrow(actorId);
@@ -262,9 +278,7 @@ public class TaskService {
         taskAuthorization.assertWithinScope(taskAuthorization.scopeOf(actor), task);
 
         TaskStatus newStatus = TaskStatus.valueOf(request.getStatus());
-        if (newStatus == TaskStatus.SNOOZED && request.getSnoozedUntil() == null) {
-            throw new InvalidTaskStatusTransitionException("snoozedUntil is required when status is SNOOZED");
-        }
+        validateStatusTransition(task, newStatus, request.getSnoozedUntil());
 
         Map<String, Object> before = auditSnapshot(task);
         taskRestMapper.applyStatusChange(task, newStatus, request.getSnoozedUntil());

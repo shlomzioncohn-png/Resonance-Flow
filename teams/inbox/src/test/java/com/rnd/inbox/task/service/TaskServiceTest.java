@@ -1032,6 +1032,34 @@ class TaskServiceTest {
     }
 
     @Test
+    void updateTaskStatus_fromDoneToNew_throwsInvalidTaskStatusTransitionException() {
+        assertDoneTaskCannotMoveTo("NEW");
+    }
+
+    @Test
+    void updateTaskStatus_fromDoneToInProgress_throwsInvalidTaskStatusTransitionException() {
+        assertDoneTaskCannotMoveTo("IN_PROGRESS");
+    }
+
+    private void assertDoneTaskCannotMoveTo(String target) {
+        User actor = actorWithRole(UserRole.SYSTEM_ADMIN);
+        when(userRepository.findById(actor.getId())).thenReturn(Optional.of(actor));
+        Task task = new Task();
+        task.setTenant(tenant);
+        task.setStatus(TaskStatus.DONE);
+        UUID taskId = UUID.randomUUID();
+        when(taskRepository.findById(taskId)).thenReturn(Optional.of(task));
+
+        TaskStatusUpdateRequestDto request = new TaskStatusUpdateRequestDto();
+        request.setStatus(target);
+
+        assertThatThrownBy(() -> taskService.updateTaskStatus(taskId, request, actor.getId()))
+                .isInstanceOf(InvalidTaskStatusTransitionException.class);
+
+        verify(taskRepository, never()).save(any());
+    }
+
+    @Test
     void updateTaskStatus_whenTaskNotFound_throwsTaskNotFoundException() {
         User actor = actorWithRole(UserRole.SYSTEM_ADMIN);
         when(userRepository.findById(actor.getId())).thenReturn(Optional.of(actor));
