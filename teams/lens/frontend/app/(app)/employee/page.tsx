@@ -28,7 +28,14 @@ import WarningAmberOutlinedIcon from '@mui/icons-material/WarningAmberOutlined'
 import PageContainer from '@/components/layout/PageContainer'
 import { radiusTokens } from '@/theme'
 import { DetailRow, iconBadgeSx, softToneSx, statusTone } from './shared'
-import { recommendTask, updateTaskStatus, type TaskRecommendation } from '@/services/workspaceApi'
+import { ApiError } from '@/services/api'
+import {
+  INVALID_TASK_STATUS_TRANSITION,
+  isFinalStatus,
+  recommendTask,
+  updateTaskStatus,
+  type TaskRecommendation,
+} from '@/services/workspaceApi'
 
 const TIME_OPTIONS_MIN = [15, 30, 45, 60, 90]
 
@@ -64,7 +71,11 @@ export default function EmployeeWorkspacePage() {
       setRecommendation((prev) => prev ? { ...prev, task: updated } : prev)
       setStarted(true)
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to start task')
+      if (err instanceof ApiError && err.code === INVALID_TASK_STATUS_TRANSITION) {
+        setError('This task is already done, so its status can no longer be changed.')
+      } else {
+        setError(err instanceof Error ? err.message : 'Failed to start task')
+      }
     } finally {
       setStarting(false)
     }
@@ -72,6 +83,7 @@ export default function EmployeeWorkspacePage() {
 
   const task = recommendation?.task ?? null
   const fitsWindow = task ? minutes >= task.effortEstimate : false
+  const isDone = task ? isFinalStatus(task.status) : false
 
   return (
     <PageContainer title="My Workspace" description="Make the most of your available time.">
@@ -210,11 +222,11 @@ export default function EmployeeWorkspacePage() {
                     <Stack direction="row" spacing={1.5} sx={{ flexWrap: 'wrap' }}>
                       <Button
                         variant="contained"
-                        disabled={started || starting}
+                        disabled={started || starting || isDone}
                         onClick={startTask}
-                        startIcon={starting ? <CircularProgress size={16} color="inherit" /> : (!started && <PlayArrowOutlinedIcon />)}
+                        startIcon={starting ? <CircularProgress size={16} color="inherit" /> : (!started && !isDone && <PlayArrowOutlinedIcon />)}
                       >
-                        {started ? 'Task started' : starting ? 'Starting…' : 'Start task'}
+                        {isDone ? 'Task done' : started ? 'Task started' : starting ? 'Starting…' : 'Start task'}
                       </Button>
                       <Button
                         variant="outlined"

@@ -59,6 +59,18 @@ export function getTask(taskId: string): Promise<ApiTask> {
 
 export type TaskStatus = 'READY' | 'IN_PROGRESS' | 'BLOCKED' | 'COMPLETED'
 
+/** Error code the backend returns when a status change is not allowed (e.g. moving a DONE task). */
+export const INVALID_TASK_STATUS_TRANSITION = 'INVALID_TASK_STATUS_TRANSITION'
+
+/**
+ * A finished task can't move to any other status. Inbox calls it DONE, the BFF DTO
+ * documents COMPLETED — accept both until the name is settled.
+ */
+export function isFinalStatus(status: string): boolean {
+  const normalised = status.toUpperCase()
+  return normalised === 'DONE' || normalised === 'COMPLETED'
+}
+
 export function updateTaskStatus(taskId: string, status: TaskStatus): Promise<ApiTask> {
   return api.patch<ApiTask>(`/api/workspace/tasks/${taskId}/status`, { status })
 }
