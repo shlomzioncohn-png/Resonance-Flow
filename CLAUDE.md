@@ -39,7 +39,7 @@ docker compose down           # stop (add -v to also drop named volumes)
 |---|---|---|
 | bridge | 21 | 3.3.13 |
 | inbox | 21 | 3.3.13 |
-| Chain | 11 | 2.7.18 |
+| Chain | 21 | 3.3.13 |
 | relay | 11 | 2.7.18 |
 
 (`teams/inbox/README.md` still describes Java 11 / Spring Boot 2.7.18 — that's stale; its `pom.xml`
@@ -77,6 +77,9 @@ inside a team's own folder.
   `priority_score` on a task are Chain's computed values, delivered to inbox on
   `task.scheduling.updated` and only materialized (never computed) there.
 - **relay** is the event bus / service-communication layer; still a foundation skeleton.
+- Every registered Kafka `.proto` schema lives once, in `shared/proto/` (Relay-owned). Services
+  build against it via a `shared` named Docker build context — see `shared/proto/README.md`.
+  Don't copy those files into a team's `src/main/proto/`.
 - **mind** and **lens-*** are consumers/producers referenced by CI and Helm values but not yet
   present as code in this repo.
 

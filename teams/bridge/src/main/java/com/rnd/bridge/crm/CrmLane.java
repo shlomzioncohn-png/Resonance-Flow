@@ -7,7 +7,6 @@ import com.rnd.bridge.core.PayloadValidator;
 import com.rnd.bridge.core.SourceReader;
 import com.rnd.bridge.crm.mapper.DealToTaskMapper;
 import com.rnd.bridge.crm.model.Deal;
-import com.rnd.bridge.task.TaskValidator;
 import com.rnd.bridge.task.model.Task;
 import org.springframework.stereotype.Component;
 
@@ -20,13 +19,13 @@ public class CrmLane extends AbstractIntakeLane<Deal, Task> {
 
     private final CrmSourceReader sourceReader;
     private final DealToTaskMapper payloadMapper;
-    private final TaskValidator payloadValidator;
+    private final CrmTaskValidator payloadValidator;
     private final PayloadPublisher<Task> payloadPublisher;
 
     public CrmLane(
             CrmSourceReader sourceReader,
             DealToTaskMapper payloadMapper,
-            TaskValidator payloadValidator,
+            CrmTaskValidator payloadValidator,
             PayloadPublisher<Task> payloadPublisher) {
         this.sourceReader = sourceReader;
         this.payloadMapper = payloadMapper;

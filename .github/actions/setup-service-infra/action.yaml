@@ -14,6 +14,8 @@ inputs:
 runs:
   using: composite
   steps:
+    - uses: ./.github/actions/free-runner-disk
+
     - uses: azure/setup-helm@v5
 
     - name: Create kind cluster

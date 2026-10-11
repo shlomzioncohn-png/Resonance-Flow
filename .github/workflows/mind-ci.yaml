@@ -71,6 +71,7 @@ jobs:
       service_name: mind
       service_dir: teams/mind
       language: python
+      container_port: 8000
 
   # Deploys Kafka/Schema Registry/MIND via the real Helm chart; round-trip.py
   # then runs from the runner against the deployed Kafka/registry.
@@ -89,6 +90,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - uses: ./.github/actions/free-runner-disk
+
       - uses: azure/setup-helm@v5
 
       # No working-directory override on this or the helm/kubectl steps below -
@@ -101,7 +104,7 @@ jobs:
       - name: Fetch chart dependencies
         run: helm dependency build "$CHART_DIR"
 
-      # Phase 1: infra only, MIND's image isn't built yet (two-phase, like setup-service-infra + deploy-service).
+      # Phase 1: infra only, MIND's image isn't built yet (two-phase, like service-ci.yaml).
       - name: Deploy chart with MIND disabled (infra only)
         run: |
           helm upgrade --install "$RELEASE" "$CHART_DIR" \

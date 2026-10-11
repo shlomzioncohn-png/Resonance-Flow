@@ -11,6 +11,7 @@ import java.util.UUID;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class InMemoryTaskDependencyRepositoryTest {
 
@@ -26,6 +27,30 @@ class InMemoryTaskDependencyRepositoryTest {
     }
 
     @Test
+    void constructor_seedsFromNonEmptyList() {
+        InMemoryTaskDependencyRepository seeded = new InMemoryTaskDependencyRepository(
+                List.of(new TaskDependency(a, b)));
+
+        assertThat(seeded.existsDependency(a, b)).isTrue();
+        assertThat(seeded.findByTaskId(a))
+                .extracting(TaskDependency::dependsOnTaskId)
+                .containsExactly(b);
+        assertThat(seeded.findByDependsOnTaskId(b))
+                .extracting(TaskDependency::taskId)
+                .containsExactly(a);
+    }
+
+    @Test
+    void constructor_rejectsNullEdgeInList() {
+        List<TaskDependency> edgesWithNull = new java.util.ArrayList<>();
+        edgesWithNull.add(new TaskDependency(a, b));
+        edgesWithNull.add(null);
+
+        assertThatThrownBy(() -> new InMemoryTaskDependencyRepository(edgesWithNull))
+                .isInstanceOf(NullPointerException.class);
+    }
+
+    @Test
     void findByTaskId_returnsEmptyList_whenTaskHasNoDependencies() {
         assertThat(repository.findByTaskId(a)).isEmpty();
     }
@@ -33,6 +58,19 @@ class InMemoryTaskDependencyRepositoryTest {
     @Test
     void findByDependsOnTaskId_returnsEmptyList_whenNothingDependsOnTask() {
         assertThat(repository.findByDependsOnTaskId(a)).isEmpty();
+    }
+
+    @Test
+    void existsDependency_reflectsSavedEdge_inOneDirectionOnly() {
+        repository.save(new TaskDependency(a, b));
+
+        assertThat(repository.existsDependency(a, b)).isTrue();
+        assertThat(repository.existsDependency(b, a)).isFalse();
+    }
+
+    @Test
+    void existsDependency_falseWhenNeverSaved() {
+        assertThat(repository.existsDependency(a, b)).isFalse();
     }
 
     @Test

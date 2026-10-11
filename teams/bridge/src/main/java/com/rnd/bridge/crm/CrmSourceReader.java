@@ -8,6 +8,15 @@ import org.springframework.stereotype.Component;
 
 import java.util.stream.Stream;
 
+/**
+ * Generic {@link SourceReader} entry point, for {@code AbstractIntakeLane}'s
+ * {@code run(ReadCursor, Instant)} overload (used by {@code CrmLaneIntegrationTest} and any future
+ * generic caller). {@code CrmBridgeController} and {@code CrmSyncScheduler} don't go through this:
+ * each takes one {@code DealSnapshot} per run and calls the {@code run(Stream, Instant)} overload
+ * directly, so the deals and the {@code asOf} they publish are guaranteed to come from the same
+ * fetch. This reader exists so a caller using the {@code ReadCursor} overload sees the same
+ * latest-per-deal behavior those two do, not a second, inconsistent one.
+ */
 @Component
 public class CrmSourceReader implements SourceReader<Deal> {
 
@@ -23,6 +32,6 @@ public class CrmSourceReader implements SourceReader<Deal> {
         // synthetic feed has no since-timestamp query to run an incremental
         // read against. Wiring the parameter through now means adding real
         // incremental support later doesn't change this method's signature.
-        return dealRepository.findAll().stream();
+        return dealRepository.snapshot().latestPerDeal().stream();
     }
 }

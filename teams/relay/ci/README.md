@@ -1,6 +1,6 @@
 # Relay schema CI
 
-Kafka event schemas (`../src/main/proto/*.proto`) are a contract between
+Kafka event schemas (`../../../shared/proto/*.proto`) are a contract between
 producers and consumers across teams. A change that breaks compatibility must
 be caught **before it merges**, not after it is already on the target branch.
 
@@ -8,7 +8,7 @@ be caught **before it merges**, not after it is already on the target branch.
 
 | | Pre-merge (CI) | Post-merge (CD) |
 |---|---|---|
-| Runs | on every PR touching `src/main/proto/**` | after merge to `main`, via ArgoCD |
+| Runs | on every PR touching `shared/proto/**` | after merge to `main`, via ArgoCD |
 | Where | GitHub Actions — [`relay-schema-ci.yaml`](../../../.github/workflows/relay-schema-ci.yaml) | in-cluster Job — [`../schema-sync-hook`](../schema-sync-hook) |
 | Schema Registry | a throwaway container in the runner (`services:`), same Apicurio image as prod | the real, live registry in the cluster |
 | Compared against | the schema versions on **whatever branch the PR targets** (its base branch, pulled from Git — not hardcoded to `main`) | whatever is currently registered live |
@@ -57,6 +57,24 @@ a PR cannot weaken its own gate: lowering the level or dropping a schema from th
 list in the same PR has no effect on how that PR is judged. (The workflow file
 still runs from the PR — it is kept thin, with the enforced rules in the scripts
 and the tsv.)
+
+### Library rows — for files other files import
+
+A file that another `.proto` imports gets a row whose subject is its own file
+name (`task-created-event.proto	task-created-event.proto`), listed before its
+importers. Importers are registered with references to that subject, because
+Confluent serializers look an import up under its file name (#618). A library
+row the base branch doesn't have yet is still picked up from the PR: it only adds
+a check, and without it the base's importers can't even be seeded.
+
+### `# reset: <subject>` — pre-production escape hatch
+
+For a change the registry rejects that we accept because nothing is in production
+yet (e.g. making a proto3 field `optional`). With the line on the base branch,
+`seed-registry.sh` doesn't seed that subject, so the PR's version is checked as a
+new subject, and the hook's `run-all.sh` hard-deletes the subject before
+registering. Land it in its own PR before the breaking one, and remove it once
+the cluster has synced — otherwise every sync re-creates the subject with a new id.
 
 ## What schema changes are allowed
 

@@ -3,7 +3,7 @@ apiVersion: v1
 kind: ConfigMap
 
 metadata:
-  name: {{ include "resonance-flow.fullname" $ }}-pipe-consumer-group-sweep
+  name: {{ include "resonance-flow.pipeConsumerGroupSweepFullname" $ }}
   labels:
     {{- include "resonance-flow.labels" $ | nindent 4 }}
     app.kubernetes.io/component: pipe-consumer-group-sweep

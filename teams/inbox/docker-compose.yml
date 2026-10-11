@@ -1,6 +1,9 @@
 services:
   inbox:
-    build: .
+    build:
+      context: .
+      additional_contexts:
+        shared: ../../shared
     container_name: inbox-service
     ports:
       - "${SERVER_PORT:-8080}:8080"
@@ -13,14 +16,14 @@ services:
       - DB_USER=${DB_USER:-postgres}
       - DB_PASSWORD=${DB_PASSWORD:-postgres}
       - KAFKA_BOOTSTRAP_SERVERS=kafka:29092
-      # No local Apicurio/schema-registry container here yet - task.created/updated/completed
-      # publish will fail without one reachable at this URL.
-      - SCHEMA_REGISTRY_URL=${SCHEMA_REGISTRY_URL:-http://localhost:8081/apis/ccompat/v6}
+      - SCHEMA_REGISTRY_URL=http://schema-registry:8080/apis/ccompat/v6
     extra_hosts:
       - "host.docker.internal:host-gateway"
     depends_on:
       kafka:
         condition: service_healthy
+      schema-registry:
+        condition: service_started
 
   kafka:
     image: apache/kafka:4.2.1
@@ -49,6 +52,12 @@ services:
       timeout: 10s
       retries: 10
       start_period: 20s
+
+  schema-registry:
+    image: apicurio/apicurio-registry-mem:2.5.11.Final
+    container_name: inbox-schema-registry
+    ports:
+      - "${SCHEMA_REGISTRY_PORT:-8081}:8080"
 
   kafka-ui:
     image: provectuslabs/kafka-ui:latest

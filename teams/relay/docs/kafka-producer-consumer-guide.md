@@ -53,7 +53,7 @@ shapes through the same topic.
 
 **You don't write the `.proto` file yourself.** Bring the field names, their types, and the
 topic name — the schema gets created from that, the same way it happened for this repo's
-existing drafts (see `teams/relay/src/main/proto/task-event.proto` for what the result looks
+existing drafts (see `shared/proto/task-event.proto` for what the result looks
 like, including a `// kafkaTopic: ...` comment stating which topic it belongs to). Once it
 exists, you'll get it back to review before anyone builds on top of it.
 
@@ -98,6 +98,9 @@ spring:
         # never by a producer
         auto.register.schemas: false
         use.latest.version: true
+        # imports (e.g. task-created-event.proto) work as-is: Relay registers each imported
+        # file under its own file name, which is where the default reference strategy looks
+        # - don't set reference.subject.name.strategy
 
 your:
   kafka:
@@ -158,7 +161,7 @@ public class EventConsumer {
 publish/consume on. That's it — not a `.proto` file.
 
 **What you get back:** a reviewed `.proto` schema for that event, added to
-`teams/relay/src/main/proto/` (same place as the other teams' drafts).
+`shared/proto/` (same place as the other teams' drafts).
 
 **What whoever deploys your service needs from you:** just your group-id and topic name — the
 shared connection file and its path are already handled for every service the same way, you
