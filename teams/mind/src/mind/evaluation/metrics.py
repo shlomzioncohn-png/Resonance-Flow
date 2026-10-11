@@ -6,6 +6,13 @@ def extraction_precision_recall(
 ) -> dict[str, float]:
     """Entity-level precision and recall for extracted tasks vs. ground truth.
 
+    **Placeholder — exact string match only.** Real extraction output is almost
+    never byte-identical to the annotated sentence, so this scores near-zero on
+    real AMI text. The actual extraction-quality eval is
+    `extraction_eval.evaluate_extraction` (fuzzy one-to-one matching + F1); this
+    function is its `threshold = 1.0`, identity-`similarity` special case and
+    stays only for its existing callers and tests.
+
     Inputs are treated as sets: duplicate task strings are counted once, so
     repeated mentions of the same task do not affect the score.
 

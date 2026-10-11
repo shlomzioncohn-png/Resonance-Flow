@@ -1,9 +1,9 @@
 name: Relay / sync schema file copies
 
-# Keeps every copy of relay's schema files in sync with the real source files,
-# automatically — nobody should ever hand-edit the copies:
-#   - teams/relay/schema-sync-hook/files/  (a Helm chart can't read outside its dir)
-#   - teams/inbox/src/main/proto/          (outside inbox's Docker build context)
+# Keeps the schema-sync-hook chart's copy of shared/proto and relay's CI scripts
+# in sync, automatically — nobody should ever hand-edit it. The copy exists only
+# because a Helm chart can't read outside its dir; services read shared/proto
+# directly (named Docker build context).
 # Opens a PR rather than pushing: the main ruleset rejects direct pushes (GH013).
 on:
   push:
@@ -28,19 +28,13 @@ jobs:
       - name: Copy real schema + CI files into their copies
         run: |
           mkdir -p teams/relay/schema-sync-hook/files/schemas teams/relay/schema-sync-hook/files/ci
+          # rm first so a schema deleted from shared/proto disappears from the copy too
+          rm -f teams/relay/schema-sync-hook/files/schemas/*.proto
           cp shared/proto/*.proto teams/relay/schema-sync-hook/files/schemas/
-          # only the two scripts the chart actually mounts — not seed-registry.sh /
+          # only the scripts the chart actually mounts — not seed-registry.sh /
           # check-all-schemas.sh, which are CI-only
-          cp teams/relay/ci/check-schema-compatibility.sh teams/relay/ci/register-schema.sh teams/relay/schema-sync-hook/files/ci/
+          cp teams/relay/ci/check-schema-compatibility.sh teams/relay/ci/register-schema.sh teams/relay/ci/_schema-references.sh teams/relay/schema-sync-hook/files/ci/
           cp teams/relay/ci/schema-subjects.tsv teams/relay/schema-sync-hook/files/
-          # inbox keeps only the schemas it publishes - refresh those, don't add others.
-          # Skip inbox's own unregistered protos (no shared/proto source), or cp fails the step.
-          for f in teams/inbox/src/main/proto/*.proto; do
-            src="shared/proto/$(basename "$f")"
-            if [ -f "$src" ]; then
-              cp "$src" "$f"
-            fi
-          done
 
       # PAT, not GITHUB_TOKEN - see service-update-manifest.yaml. No-op when nothing changed.
       - name: Open a PR with the synced copies
@@ -54,7 +48,6 @@ jobs:
           branch: ci/relay-schema-sync
           add-paths: |
             teams/relay/schema-sync-hook/files
-            teams/inbox/src/main/proto
           commit-message: "chore(relay): sync schema file copies"
           title: "chore(relay): sync schema file copies"
           body: "Automated sync of `shared/proto` and `teams/relay/ci` into their copies, triggered by `${{ github.sha }}`. Needs review/approval per the `main` branch ruleset."
