@@ -8,9 +8,11 @@ import java.nio.charset.StandardCharsets;
 import java.util.Map;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.testcontainers.DockerClientFactory;
 import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
@@ -20,6 +22,12 @@ import org.testcontainers.junit.jupiter.Testcontainers;
  * code never hitting a real broker in tests (see teams/bridge/CLAUDE.md §7), just the DB-side
  * mirror of it: the thing worth proving here is the actual SQL (the upsert's ON CONFLICT
  * clause), which a mock can't verify.
+ * <p>
+ * Skips (not fails) when no Docker daemon is reachable - true today in CI, since
+ * .github/actions/test-java runs mvn itself inside a Docker container that doesn't forward the
+ * host's Docker socket, so Testcontainers (which needs to talk to Docker to start its own
+ * Postgres) has nothing to reach. Runs normally anywhere Docker Desktop/daemon is available,
+ * including a plain local `mvn test`.
  */
 @Testcontainers
 class PostgresObjectStorageClientTest {
@@ -31,6 +39,8 @@ class PostgresObjectStorageClientTest {
 
     @BeforeAll
     static void startContainerAndCreateSchema() {
+        Assumptions.assumeTrue(DockerClientFactory.instance().isDockerAvailable(),
+                "No Docker daemon reachable - skipping (see class Javadoc)");
         POSTGRES.start();
 
         HikariConfig config = new HikariConfig();
@@ -57,6 +67,9 @@ class PostgresObjectStorageClientTest {
 
     @AfterAll
     static void stopContainer() {
+        if (dataSource == null) {
+            return; // startContainerAndCreateSchema's assumption skipped before this was set up
+        }
         dataSource.close();
         POSTGRES.stop();
     }
