@@ -5,8 +5,11 @@ Owned by Relay: [`teams/relay/ci/schema-subjects.tsv`](../../teams/relay/ci/sche
 maps each file here to its subject, and
 [`relay-schema-ci.yaml`](../../.github/workflows/relay-schema-ci.yaml) blocks any PR
 that breaks compatibility. A file that imports another (e.g. `import "task-created-event.proto"`)
-is registered with a schema reference to that file's subject. The imported file must be listed
-earlier in the tsv.
+is registered with a schema reference to a subject named after the imported file
+(`task-created-event.proto`), because that's the subject Confluent serializers look imports up
+under. So every imported file has a "library" row in the tsv (`<file>\t<file>`), listed before its
+importers. Producers then need only `auto.register.schemas=false` + `use.latest.version=true`,
+with no custom reference strategy.
 
 Never copy these files into a team's `src/main/proto/`. That folder is only for a team's own
 unregistered schemas.

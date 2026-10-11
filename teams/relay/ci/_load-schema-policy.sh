@@ -18,6 +18,15 @@ else
   SCHEMA_LIST="$(cat "${SCRIPT_DIR}/schema-subjects.tsv")"
 fi
 
+# Library rows (file == subject) this checkout adds go first: they only add checks, and
+# _schema-references.sh can't resolve an import without one, even when seeding the base.
+_new_libraries="$(awk -F'\t' '{ sub(/\r$/, "") } NR == FNR { seen[$0] = 1; next }
+  $1 != "" && $1 !~ /^#/ && $1 == $2 && !seen[$0]' \
+  <(printf '%s\n' "$SCHEMA_LIST") "${SCRIPT_DIR}/schema-subjects.tsv")"
+if [ -n "$_new_libraries" ]; then
+  SCHEMA_LIST="$(printf '%s\n%s' "$_new_libraries" "$SCHEMA_LIST")"
+fi
+
 # "# compatibility: <LEVEL>" directive line in the tsv. Default FULL.
 COMPATIBILITY_LEVEL="$(printf '%s\n' "$SCHEMA_LIST" \
   | awk -F: '/^#[[:space:]]*compatibility:/ {gsub(/[[:space:]]/,"",$2); print $2; exit}')"

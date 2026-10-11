@@ -90,11 +90,15 @@ metadata:
     {{- include "schema-sync-hook.labels" . | nindent 4 }}
 
 data:
+  {{- /* A library row repeats its file under a second subject - one key per file. */}}
+  {{- $files := dict }}
   {{- range .Files.Lines "files/schema-subjects.tsv" }}
   {{- $line := trim . }}
   {{- if and $line (not (hasPrefix "#" $line)) }}
-  {{- $file := first (splitList "\t" $line) }}
+  {{- $_ := set $files (first (splitList "\t" $line)) true }}
+  {{- end }}
+  {{- end }}
+  {{- range $file, $_ := $files }}
   {{ $file }}: |
 {{ $.Files.Get (printf "files/schemas/%s" $file) | nindent 4 }}
-  {{- end }}
   {{- end }}
