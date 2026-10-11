@@ -128,6 +128,9 @@ components:
       - name: object-storage-credentials
         mountPath: /etc/resonance-flow/secrets/object-storage
         readOnly: true
+      - name: mind-llm-credentials
+        mountPath: /etc/resonance-flow/secrets/llm
+        readOnly: true
     dependencySecretVolumes:
       - name: object-storage-credentials
         dependencyName: object-storage
@@ -136,6 +139,11 @@ components:
             path: minio.access-key
           - key: root-password
             path: minio.secret-key
+    volumes:
+      - name: mind-llm-credentials
+        secret:
+          secretName: resonance-flow-mind-llm
+          optional: true
     # Mounted as config.yaml at /etc/resonance-flow/config/ - keys are what MIND reads.
     config:
       vector_store:
@@ -160,7 +168,6 @@ components:
     secret:
       create: false
     kafkaSasl: true
-    llmApiKey: ""
   lens-bff:
     enabled: true
     replicaCount: 1
