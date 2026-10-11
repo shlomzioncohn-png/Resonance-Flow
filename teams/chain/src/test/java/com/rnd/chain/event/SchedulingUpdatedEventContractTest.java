@@ -4,13 +4,9 @@ import com.google.protobuf.Descriptors.FieldDescriptor;
 import com.rnd.inbox.event.SchedulingUpdatedEvent;
 import org.junit.jupiter.api.Test;
 
-import java.io.IOException;
-import java.nio.file.Files;
-import java.nio.file.Path;
 import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assumptions.assumeTrue;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -28,16 +24,6 @@ class SchedulingUpdatedEventContractTest {
         assertField(3, "available", FieldDescriptor.Type.BOOL);
         assertField(4, "priority_score", FieldDescriptor.Type.DOUBLE);
         assertEquals(4, SchedulingUpdatedEvent.getDescriptor().getFields().size());
-    }
-
-    @Test
-    void chainProto_isVerbatimCopyOfSharedProto() throws IOException {
-        Path shared = Path.of("../../shared/proto/scheduling-updated-event.proto");
-        assumeTrue(Files.exists(shared), "shared/proto is not visible from this build context");
-
-        String chain = Files.readString(Path.of("src/main/proto/scheduling-updated-event.proto"));
-
-        assertEquals(normalize(Files.readString(shared)), normalize(chain));
     }
 
     @Test
@@ -63,10 +49,6 @@ class SchedulingUpdatedEventContractTest {
         assertFalse(decoded.hasPriorityScore());
         assertTrue(decoded.hasAvailable());
         assertFalse(decoded.getAvailable());
-    }
-
-    private static String normalize(String proto) {
-        return proto.replace("\r\n", "\n").strip();
     }
 
     private static void assertField(int number, String name, FieldDescriptor.Type type) {

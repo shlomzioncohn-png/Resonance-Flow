@@ -22,11 +22,14 @@ import com.rnd.inbox.user.model.User;
 import com.rnd.inbox.user.model.UserRole;
 import com.rnd.inbox.user.model.UserStatus;
 import com.rnd.inbox.user.repository.UserRepository;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 
 import java.time.Instant;
 import java.util.UUID;
+import java.util.ArrayList;
+import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -52,6 +55,14 @@ class TaskSelectionScopeIntegrationTest extends PostgresIntegrationTest {
 
     @Autowired
     private AssignmentRepository assignmentRepository;
+
+    private final List<UUID> createdTenantIds = new ArrayList<>();
+
+    // Only the tenants this test created are removed - see PostgresIntegrationTest.
+    @AfterEach
+    void cleanUp() {
+        deleteTenantData(createdTenantIds);
+    }
 
     @Test
     void selectTasksForWindow_scopeEligibility_directOrActiveTeamMembershipRequired() {
@@ -103,7 +114,9 @@ class TaskSelectionScopeIntegrationTest extends PostgresIntegrationTest {
         tenant.setStatus(TenantStatus.ACTIVE);
         tenant.setCreatedAt(Instant.now());
         tenant.setUpdatedAt(Instant.now());
-        return tenantRepository.saveAndFlush(tenant);
+        Tenant saved = tenantRepository.saveAndFlush(tenant);
+        createdTenantIds.add(saved.getId());
+        return saved;
     }
 
     private User persistUser(Tenant tenant, String username) {

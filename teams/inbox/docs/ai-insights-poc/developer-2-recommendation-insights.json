@@ -1,0 +1,25 @@
+{
+  "_comment": "Input for the Recommendation Generation experiment. Pair each insight with shared-data.json and ask the LLM for a practical recommendation, or null when none is justified.",
+  "insights": [
+    {
+      "id": 1,
+      "text": "Your on-time completion rate improved from 50% to 67%."
+    },
+    {
+      "id": 2,
+      "text": "All four of your long tasks finished late, and in the previous period all three long tasks also finished late."
+    },
+    {
+      "id": 3,
+      "text": "For medium tasks, the lateness rate dropped from 50% to 20%."
+    },
+    {
+      "id": 4,
+      "text": "You completed 18 tasks in the current period, compared to 14 in the previous period."
+    },
+    {
+      "id": 5,
+      "text": "You currently have two open tasks that are past their due date."
+    }
+  ]
+}

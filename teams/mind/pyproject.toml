@@ -13,8 +13,7 @@ dependencies = [
     "uvicorn",
     # embeddings (src/mind/embeddings)
     "psycopg[binary,pool]>=3.1",
-    "scikit-learn>=1.4",
-    "numpy>=1.26",
+    "sentence-transformers>=3.0",
     # messaging (src/mind/messaging)
     "confluent-kafka[protobuf,schemaregistry]>=2.5,<2.11",
     "protobuf>=5",
@@ -108,7 +107,3 @@ asyncio_mode = "auto"
 # the same way it does under a real server, not get recreated per test.
 asyncio_default_fixture_loop_scope = "session"
 asyncio_default_test_loop_scope = "session"
-
-[[tool.mypy.overrides]]
-module = "sklearn.*"
-ignore_missing_imports = true
