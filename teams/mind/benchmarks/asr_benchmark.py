@@ -44,11 +44,7 @@ from pathlib import Path
 from pydantic import BaseModel
 
 from benchmarks.aligned_metrics import normalize as _normalize
-from benchmarks.ocr_asr_benchmark import (
-    _load_checksums,
-    _sample_current_process,
-    _verify_checksum,
-)
+from benchmarks.common import load_checksums, sample_current_process, verify_checksum
 
 _PROJECT_ROOT = Path(__file__).parent.parent
 _DATASETS_DIR = _PROJECT_ROOT / "eval" / "datasets"
@@ -170,7 +166,7 @@ def load_meetings() -> list[Meeting]:
     if not _MANIFEST.exists():
         raise RuntimeError(f"{_MANIFEST} not found -- see eval/datasets/README.md")
     manifest = json.loads(_MANIFEST.read_text(encoding="utf-8"))
-    checksums = _load_checksums(_CHECKSUMS)
+    checksums = load_checksums(_CHECKSUMS)
     durations = {a["file"]: a["duration_s"] for a in manifest["package"]["audio"]}
 
     meetings: list[Meeting] = []
@@ -188,7 +184,7 @@ def load_meetings() -> list[Meeting]:
                 )
             if rel_path not in checksums:
                 raise RuntimeError(f"{rel_path} has no entry in {_CHECKSUMS.name}")
-            _verify_checksum(path, checksums[rel_path])
+            verify_checksum(path, checksums[rel_path])
             if path.suffix == ".wav":
                 audio = path
             else:
@@ -284,7 +280,7 @@ def benchmark_size(size: str, meetings: list[Meeting]) -> SizeResult:
     proc = psutil.Process()
     stop_event = threading.Event()
     peak = [proc.memory_info().rss]
-    sampler = threading.Thread(target=_sample_current_process, args=(stop_event, proc, peak))
+    sampler = threading.Thread(target=sample_current_process, args=(stop_event, proc, peak))
     sampler.start()
     try:
         load_start = time.perf_counter()

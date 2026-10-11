@@ -58,7 +58,6 @@ was emitted. See ocr-asr-benchmark.md.
 from __future__ import annotations
 
 import functools
-import hashlib
 import json
 import shutil
 import subprocess
@@ -73,19 +72,17 @@ from pydantic import BaseModel
 
 from benchmarks.aligned_metrics import WordBox, aligned_score, grouped_score
 from benchmarks.aligned_metrics import normalize as _normalize
+from benchmarks.asr_benchmark import format_asr_conclusion, run_asr_benchmark
+from benchmarks.common import load_checksums, sample_current_process, verify_checksum
 
 if TYPE_CHECKING:
-    # psutil is the optional [benchmark] extra (see module docstring) --
-    # imported lazily inside the functions that actually use it, so the
-    # rest of this module (word_recall, etc.) stays
-    # importable without it. This TYPE_CHECKING-only import exists purely
-    # so mypy/ruff can resolve the `psutil.Process` type hint below without
-    # requiring psutil to be installed to import this module at runtime.
-    # Same for PaddleOCR (the `ocr` argument of run_paddle_ocr): it ships no
-    # stubs, so mypy resolves it as Any (see [tool.mypy.overrides] in
+    # PaddleOCR is the optional [benchmark] extra (see module docstring), like
+    # psutil, which the functions that use it import lazily -- so the rest of
+    # this module (word_recall, etc.) stays importable without either. This
+    # TYPE_CHECKING-only import types the `ocr` argument of run_paddle_ocr: it
+    # ships no stubs, so mypy resolves it as Any (see [tool.mypy.overrides] in
     # pyproject.toml) -- the annotation documents the type without needing
     # paddleocr installed to import this module.
-    import psutil
     from paddleocr import PaddleOCR
 
 if hasattr(sys.stdout, "reconfigure"):
@@ -220,28 +217,6 @@ def find_tesseract() -> str:
 _FILE_ROLES = {".png": "image", ".json": "annotation"}
 
 
-def _load_checksums(sha256_path: Path) -> dict[str, str]:
-    """relative path (as written in the file) -> expected sha256, from a
-    standard `sha256sum`-format file (`<hex digest>  <path>` per line)."""
-    checksums: dict[str, str] = {}
-    for line in sha256_path.read_text(encoding="utf-8").splitlines():
-        line = line.strip()
-        if not line:
-            continue
-        digest, rel_path = line.split(None, 1)
-        checksums[rel_path.strip()] = digest
-    return checksums
-
-
-def _verify_checksum(path: Path, expected_sha256: str) -> None:
-    actual = hashlib.sha256(path.read_bytes()).hexdigest()
-    if actual != expected_sha256:
-        raise RuntimeError(
-            f"checksum mismatch for {path}: expected {expected_sha256}, got {actual} "
-            "-- the committed data slice doesn't match eval/datasets/.sha256"
-        )
-
-
 @functools.lru_cache(maxsize=1)
 def load_manifest() -> dict[str, DocPaths]:
     """doc_id -> {"image": Path, "annotation": Path}.
@@ -266,7 +241,7 @@ def load_manifest() -> dict[str, DocPaths]:
             "data this benchmark needs."
         )
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-    checksums = _load_checksums(datasets_dir / ".sha256")
+    checksums = load_checksums(datasets_dir / ".sha256")
 
     docs: dict[str, DocPaths] = {}
     for record in manifest["records"]:
@@ -288,7 +263,7 @@ def load_manifest() -> dict[str, DocPaths]:
                     "Add its `sha256sum` line to eval/datasets/.sha256 (see "
                     "eval/datasets/README.md)."
                 )
-            _verify_checksum(path, checksums[rel_path])
+            verify_checksum(path, checksums[rel_path])
             role = _FILE_ROLES.get(path.suffix.lower())
             if role is None:
                 raise RuntimeError(
@@ -518,17 +493,6 @@ def run_ocr_benchmark() -> dict[str, ConfigAverages]:
     return _summarize("OCR", OCR_CONFIGS, rows)
 
 
-def _sample_current_process(stop_event: threading.Event, proc: psutil.Process, peak: list[int]) -> None:
-    import psutil  # optional [benchmark] extra -- see module docstring
-
-    while not stop_event.is_set():
-        try:
-            peak[0] = max(peak[0], proc.memory_info().rss)
-        except psutil.NoSuchProcess:
-            break
-        time.sleep(0.05)
-
-
 def paddle_result_lines(res: Any) -> list[WordBox]:
     """One WordBox per text line of one PaddleOCR page result.
 
@@ -572,7 +536,7 @@ def run_paddle_ocr(ocr: PaddleOCR, image_path: Path) -> OCRRunResult:
     proc = psutil.Process()
     stop_event = threading.Event()
     peak = [proc.memory_info().rss]
-    sampler = threading.Thread(target=_sample_current_process, args=(stop_event, proc, peak))
+    sampler = threading.Thread(target=sample_current_process, args=(stop_event, proc, peak))
     cpu_before = proc.cpu_times()
     sampler.start()
     start = time.perf_counter()
@@ -660,10 +624,6 @@ def format_conclusion(all_averages: dict[str, ConfigAverages]) -> str:
 
 
 def main() -> None:
-    # Imported here, not at the top: asr_benchmark imports this module's
-    # checksum helpers, so a top-level import would be circular.
-    from benchmarks.asr_benchmark import format_asr_conclusion, run_asr_benchmark
-
     tesseract_averages = run_ocr_benchmark()
     paddle_averages = run_paddle_benchmark()
     asr_averages = run_asr_benchmark()
