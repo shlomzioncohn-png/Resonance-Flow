@@ -9,7 +9,10 @@ accuracy number already published against the old content.
 
 `compute_personas_checksum` hashes the combined content of every scenario file
 (not `scenario.schema.json` — that's a generated artifact, not part of the
-approved set). `tests/test_personas_checksum.py` asserts the result against the
+approved set) and of every file in `eval/hierarchy/`: scenario tasks point into
+`nodes.json` through `parent_task_id`, so a silent edit to a node's importance
+changes what a hierarchy-aware model sees as much as an edit to a scenario does.
+`tests/test_personas_checksum.py` asserts the result against the
 checksum recorded in `eval/personas/personas.sha256`, the same way `tests/test_schema_snapshot.py` pins
 `scenario.schema.json` against the models it's generated from. When the set
 legitimately changes, recompute and update the stored checksum in the same PR
@@ -23,19 +26,25 @@ import hashlib
 import sys
 from pathlib import Path
 
-from mind.evaluation.personas import PERSONAS_DIR, SCHEMA_FILENAME
+from mind.evaluation.personas import HIERARCHY_DIR, PERSONAS_DIR, SCHEMA_FILENAME
 
 CHECKSUM_PATH = PERSONAS_DIR / "personas.sha256"
 
 
-def compute_personas_checksum(personas_dir: str | Path) -> str:
-    """SHA-256 over every scenario file's content under `personas_dir`.
+def compute_personas_checksum(
+    personas_dir: str | Path, hierarchy_dir: str | Path | None = None
+) -> str:
+    """SHA-256 over every scenario file under `personas_dir`, plus `hierarchy_dir`.
 
     Recurses (same_tier/, cross_tier/, any future group), skips the generated
     `scenario.schema.json`, and hashes each file's path (relative to
     `personas_dir`, so it also catches renames/moves) together with its
     content, in a fixed sorted order so the result doesn't depend on
     filesystem iteration order.
+
+    When `hierarchy_dir` is given, its `*.json` files are hashed the same way
+    after the scenarios, each path prefixed with `hierarchy/` so a node file can
+    never hash the same as a scenario file with the same relative name.
 
     `read_text` already normalizes line endings to `\n`, so the checksum is the
     same on a Windows (CRLF) and a Linux (LF) checkout.
@@ -50,18 +59,28 @@ def compute_personas_checksum(personas_dir: str | Path) -> str:
     )
     for scenario_path in scenario_files:
         relative = scenario_path.relative_to(personas_path).as_posix()
-        content = scenario_path.read_text(encoding="utf-8")
-        digest.update(relative.encode("utf-8"))
-        digest.update(b"\0")
-        digest.update(content.encode("utf-8"))
-        digest.update(b"\0")
+        digest.update(_entry(relative, scenario_path))
+
+    if hierarchy_dir is not None:
+        hierarchy_path = Path(hierarchy_dir)
+        if not hierarchy_path.is_dir():
+            raise FileNotFoundError(f"Hierarchy directory not found: {hierarchy_path}")
+        for node_path in sorted(hierarchy_path.rglob("*.json")):
+            relative = node_path.relative_to(hierarchy_path).as_posix()
+            digest.update(_entry(f"hierarchy/{relative}", node_path))
 
     return digest.hexdigest()
 
 
+def _entry(relative: str, path: Path) -> bytes:
+    """One file's contribution: its relative path and content, NUL-separated."""
+    content = path.read_text(encoding="utf-8")
+    return relative.encode("utf-8") + b"\0" + content.encode("utf-8") + b"\0"
+
+
 def render_checksum() -> str:
     """The exact text that belongs in personas.sha256 (trailing newline included)."""
-    return compute_personas_checksum(PERSONAS_DIR) + "\n"
+    return compute_personas_checksum(PERSONAS_DIR, HIERARCHY_DIR) + "\n"
 
 
 def main() -> None:
@@ -74,7 +93,10 @@ def main() -> None:
     parser.add_argument(
         "--check",
         action="store_true",
-        help="Exit non-zero if the recorded checksum no longer matches eval/personas/.",
+        help=(
+            "Exit non-zero if the recorded checksum no longer matches eval/personas/ "
+            "and eval/hierarchy/."
+        ),
     )
     args = parser.parse_args()
 
@@ -83,7 +105,8 @@ def main() -> None:
         recorded = CHECKSUM_PATH.read_text(encoding="utf-8") if CHECKSUM_PATH.is_file() else ""
         if recorded != current:
             print(
-                f"{CHECKSUM_PATH} does not match the current content of {PERSONAS_DIR}.\n"
+                f"{CHECKSUM_PATH} does not match the current content of {PERSONAS_DIR} "
+                f"and {HIERARCHY_DIR}.\n"
                 "If this scenario-set change was reviewed and approved, regenerate it:\n"
                 "  python -m mind.evaluation.personas_checksum",
                 file=sys.stderr,

@@ -35,6 +35,11 @@ from mind.evaluation.interfaces import PersonaEvaluationScenario, TimeHorizon
 # is spelled out: schema.py and personas_checksum.py import it from here.
 PERSONAS_DIR = Path(__file__).resolve().parents[3] / "eval" / "personas"
 
+# The parent nodes that scenario tasks point at via parent_task_id
+# (teams/mind/eval/hierarchy). A sibling of eval/personas/, not inside it, so
+# load_personas never tries to parse the node file as a scenario.
+HIERARCHY_DIR = PERSONAS_DIR.parent / "hierarchy"
+
 # Present in eval/personas/ as a generated artifact (see mind.evaluation.schema);
 # skipped when scanning the directory for scenario files.
 SCHEMA_FILENAME = "scenario.schema.json"

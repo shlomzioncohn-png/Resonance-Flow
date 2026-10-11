@@ -19,7 +19,7 @@
       "effort_estimate": 45,
       "tier": "strategic",
       "blocked": false,
-      "parent_task_id": null
+      "parent_task_id": "dev_arch_payments_redesign"
     },
     {
       "task_id": "task_bump",

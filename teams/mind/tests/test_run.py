@@ -1,3 +1,4 @@
+import json
 import sys
 from pathlib import Path
 
@@ -9,6 +10,7 @@ from mind.evaluation.interfaces import ScoreFactors
 from mind.evaluation.run import _report_json, main
 
 REAL_PERSONAS_DIR = Path(__file__).resolve().parents[1] / "eval" / "personas"
+REAL_HIERARCHY_DIR = REAL_PERSONAS_DIR.parent / "hierarchy"
 
 
 def _output() -> EvaluationOutput:
@@ -83,8 +85,55 @@ def test_a_run_that_passes_its_gates_writes_a_record_that_loads_back(
     _run_cli(monkeypatch, tmp_path, "--record-baseline", str(record), "--min-accuracy", "0.1")
 
     assert "Baseline recorded to" in capsys.readouterr().out
-    report = load_baseline_record(record, personas_path=REAL_PERSONAS_DIR)
+    report = load_baseline_record(
+        record, personas_path=REAL_PERSONAS_DIR, hierarchy_dir=REAL_HIERARCHY_DIR
+    )
     assert report.model_name == "SkipBlockedNearestDeadlineModel"
+    stored = json.loads(record.read_text(encoding="utf-8"))["persona_set"]
+    assert stored["hierarchy_path"] == REAL_HIERARCHY_DIR.as_posix()
+
+
+def _broken_hierarchy(tmp_path: Path, nodes: dict) -> Path:
+    hierarchy = tmp_path / "hierarchy"
+    hierarchy.mkdir()
+    (hierarchy / "nodes.json").write_text(json.dumps(nodes), encoding="utf-8")
+    return hierarchy
+
+
+@pytest.mark.parametrize(
+    ("nodes", "message"),
+    [
+        # A node file that does not load at all (a parent that is not in the file).
+        (
+            {"nodes": [{"task_id": "x", "parent_task_id": "nowhere",
+                        "importance": 0.5, "label": "X"}]},
+            "Could not load the hierarchy",
+        ),
+        # A node file that loads, but the scenarios' parents are not in it.
+        (
+            {"nodes": [{"task_id": "unrelated", "parent_task_id": None,
+                        "importance": 0.5, "label": "Unrelated"}]},
+            "Hierarchy validation FAILED",
+        ),
+    ],
+)
+def test_a_broken_hierarchy_fails_the_run_before_scoring(
+    monkeypatch, tmp_path, capsys, nodes, message
+):
+    hierarchy = _broken_hierarchy(tmp_path, nodes)
+    record = tmp_path / "baseline.json"
+
+    with pytest.raises(SystemExit) as exit_info:
+        _run_cli(
+            monkeypatch, tmp_path, "--hierarchy", str(hierarchy),
+            "--record-baseline", str(record),
+        )
+
+    assert exit_info.value.code == 1
+    assert not record.exists()
+    captured = capsys.readouterr()
+    assert message in captured.out + captured.err
+    assert "Evaluation Summary" not in captured.out
 
 
 @pytest.mark.parametrize(

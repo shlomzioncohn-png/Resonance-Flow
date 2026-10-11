@@ -7,6 +7,12 @@ task. This set must be complete and team-lead-approved (see `team_lead_approved`
 below) by the Foundation Gate (end of week 3) and must not change once
 baseline/stretch comparisons start.
 
+`personas.sha256` pins the set against silent edits
+(`python -m mind.evaluation.personas_checksum --check`, run by `make lint`).
+Despite its name and location it covers **two** directories: the scenario files
+here *and* `../hierarchy/`, the parent nodes the scenarios' `parent_task_id`
+values point at — a changed node changes the set as much as a changed scenario.
+
 ## Two groups: `same_tier/` and `cross_tier/`
 
 Per the mentor's review, the set is split into two subdirectories that test
@@ -120,7 +126,7 @@ scenario — Chain consumes them downstream — they just can't be the reason.)
 | `effort_estimate` | How long the task takes, **in minutes** | The eval set's concrete, minutes-valued form of the canonical `Task.effort_estimate` (owned by Inbox). Recorded so Chain can do constraint satisfaction downstream | Positive integer (minutes) | Required | Chain (constraint satisfaction); the ranking model may use it as a weak per-task feature, but the correct answer must not hinge on comparing it to `free_time_minutes` | `20` |
 | `tier` | Kind of task (not the role!) | Separates "who the person is" from "what kind of work this is" — see Persona ≠ Tier above | `operational` / `tactical` / `strategic` (lowercase — matches the canonical Task schema and `src/mind/scoring/`) | Required | R2 (segmented ranking — a separate scoring rule per tier) | `"operational"` |
 | `blocked` | Whether the task can currently be worked on | A blocked task should generally not be the expected correct answer | Boolean | Required | The ranking model; Chain (actual task selection) | `false` |
-| `parent_task_id` | The `task_id` of this task's parent in the **cross-tier** org hierarchy (a dev task under a manager task), matching the canonical `Task.parent_task_id` | Reserved for the week-7 hierarchical value-propagation evaluation, where importance flows down the parent chain via Chain's traversal API. Added now so scenarios don't need a schema change mid-scoring. **Not** the old same-tier `dependencies` array — that was removed deliberately | String or `null`. Points *outside* the scenario, so it is not cross-referenced | Optional (nullable), `null` in every current scenario | R1/R3 (week-7 stretch) | `null` |
+| `parent_task_id` | The `task_id` of this task's parent in the **cross-tier** org hierarchy (a dev task under a manager task), matching the canonical `Task.parent_task_id` | Gives the week-7 hierarchical value-propagation model something to propagate. In production the ancestors come from Chain's traversal API; in the eval they come from the fixed node file [`eval/hierarchy/nodes.json`](../hierarchy/nodes.json), so the comparison stays reproducible. **Not** the old same-tier `dependencies` array — that was removed deliberately | String or `null`. Points *outside* the scenario, at a node in `eval/hierarchy/nodes.json` — never at a candidate task (checked by `mind.evaluation.hierarchy.validate_hierarchy_links`). `null` = an orphan, on purpose | Optional (nullable). Set in 21 of the 36 scenarios — which, and why, is in **Hierarchy** in `src/mind/evaluation/README.md` | R1/R3 (week-7 stretch) | `"mgr_reorg_quarterly_initiative"` |
 
 ### Scenario-level fields
 
