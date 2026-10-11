@@ -11,6 +11,7 @@ import com.rnd.inbox.task.event.TaskCompletedPayload;
 import com.rnd.inbox.task.event.TaskCreatedPayload;
 import com.rnd.inbox.task.event.TaskUpdatedPayload;
 import com.rnd.inbox.task.exception.InvalidTaskFilterException;
+import com.rnd.inbox.task.exception.InvalidTaskSortException;
 import com.rnd.inbox.task.exception.InvalidTaskStatusTransitionException;
 import com.rnd.inbox.task.exception.TaskNotFoundException;
 import com.rnd.inbox.task.mapper.TaskMapper;
@@ -40,12 +41,15 @@ import com.rnd.inbox.user.model.User;
 import com.rnd.inbox.user.exception.UserNotFoundException;
 import com.rnd.inbox.user.repository.UserRepository;
 import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Clock;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -54,6 +58,20 @@ import java.util.UUID;
 
 @Service
 public class TaskService {
+
+    // Request name -> Task property. Both spellings of a two-word name are accepted: the JSON
+    // this API returns is snake_case, the Task properties are camelCase.
+    private static final Map<String, String> SORTABLE_PROPERTIES = sortableProperties();
+
+    private static Map<String, String> sortableProperties() {
+        Map<String, String> properties = new LinkedHashMap<>();
+        properties.put("deadline", "deadline");
+        properties.put("priorityScore", "priorityScore");
+        properties.put("priority_score", "priorityScore");
+        properties.put("createdAt", "createdAt");
+        properties.put("created_at", "createdAt");
+        return properties;
+    }
 
     private static final TypeReference<Map<String, Object>> PAYLOAD_TYPE = new TypeReference<>() {
     };
@@ -126,6 +144,7 @@ public class TaskService {
     @Transactional(readOnly = true)
     public PageResponseDto<TaskResponseDto> listTasks(TaskFilterDto filter, Pageable pageable, UUID actorId) {
         validateFilter(filter);
+        Pageable sortedPageable = withSupportedSort(pageable);
         User actor = findActorOrThrow(actorId);
         // bypassTenantScope comes only from this explicit role check - never from tenantId
         // possibly being null - so a bug that left tenantId null for a non-admin fails closed
@@ -165,18 +184,52 @@ public class TaskService {
                 filter.getDeadlineTo() != null,
                 filter.getDeadlineTo(),
                 Boolean.TRUE.equals(filter.getNoDeadline()),
-                pageable);
+                filter.getUserId() != null,
+                filter.getUserId(),
+                sortedPageable);
         return PageResponseDto.from(tasks.map(taskRestMapper::toResponseDto));
     }
 
-    // Both-or-neither (a range needs both ends), and noDeadline=true is mutually exclusive with
-    // the range (asking for "no deadline at all" and "deadline within this range" in the same
+    // Sorting is a closed list, not "any Task property": every sortable column is a query the
+    // database has to serve at scale, and an arbitrary one (title, description) means sorting
+    // every matching row on each request. Adding a property here is a decision to support it -
+    // check its plan with EXPLAIN first, and give it an index if it needs one.
+    //
+    // With no sort requested the list is newest first (served by idx_tasks_tenant_created_at_id).
+    //
+    // The id is always appended as the last sort key. Without a unique tie-breaker the order of
+    // rows that share a value is undefined - every task with no deadline, every task of one bulk
+    // import - and paging through an undefined order can repeat a task on two pages or skip one.
+    // It takes the direction of the key before it, so an index on (that key, id) can serve the
+    // whole order in either direction.
+    private Pageable withSupportedSort(Pageable pageable) {
+        if (pageable.isUnpaged()) {
+            return pageable;
+        }
+        List<Sort.Order> orders = new ArrayList<>();
+        for (Sort.Order requested : pageable.getSort()) {
+            String property = SORTABLE_PROPERTIES.get(requested.getProperty());
+            if (property == null) {
+                throw new InvalidTaskSortException(requested.getProperty(), SORTABLE_PROPERTIES.keySet());
+            }
+            orders.add(new Sort.Order(requested.getDirection(), property));
+        }
+        if (orders.isEmpty()) {
+            orders.add(Sort.Order.desc("createdAt"));
+        }
+        orders.add(new Sort.Order(orders.get(orders.size() - 1).getDirection(), "id"));
+        return PageRequest.of(pageable.getPageNumber(), pageable.getPageSize(), Sort.by(orders));
+    }
+
+    // Either end of the deadline range may be given alone (open-ended range); when both are given
+    // deadlineTo must not be before deadlineFrom. noDeadline=true is mutually exclusive with the
+    // range (asking for "no deadline at all" and "deadline within this range" in the same
     // request is self-contradictory).
     private void validateFilter(TaskFilterDto filter) {
         boolean hasFrom = filter.getDeadlineFrom() != null;
         boolean hasTo = filter.getDeadlineTo() != null;
-        if (hasFrom != hasTo) {
-            throw new InvalidTaskFilterException("deadlineFrom and deadlineTo must both be provided, or both omitted");
+        if (hasFrom && hasTo && filter.getDeadlineTo().isBefore(filter.getDeadlineFrom())) {
+            throw new InvalidTaskFilterException("deadlineTo must not be before deadlineFrom");
         }
         if (Boolean.TRUE.equals(filter.getNoDeadline()) && (hasFrom || hasTo)) {
             throw new InvalidTaskFilterException("noDeadline cannot be combined with deadlineFrom/deadlineTo");

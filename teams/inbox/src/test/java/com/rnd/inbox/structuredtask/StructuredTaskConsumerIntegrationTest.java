@@ -24,6 +24,7 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.kafka.core.DefaultKafkaConsumerFactory;
 import org.springframework.kafka.core.DefaultKafkaProducerFactory;
 import org.springframework.kafka.core.KafkaTemplate;
@@ -36,6 +37,7 @@ import org.springframework.test.context.TestPropertySource;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -60,6 +62,9 @@ class StructuredTaskConsumerIntegrationTest extends PostgresIntegrationTest {
     private EmbeddedKafkaBroker embeddedKafkaBroker;
 
     @Autowired
+    private JdbcTemplate jdbcTemplate;
+
+    @Autowired
     private TaskRepository taskRepository;
 
     @Autowired
@@ -71,6 +76,7 @@ class StructuredTaskConsumerIntegrationTest extends PostgresIntegrationTest {
     private KafkaTemplate<String, StructuredTaskEvent> producer;
     private KafkaTemplate<String, byte[]> rawBytesProducer;
     private Consumer<String, String> errorConsumer;
+    private final List<UUID> createdTenantIds = new ArrayList<>();
 
     @BeforeEach
     void setUp() {
@@ -94,6 +100,13 @@ class StructuredTaskConsumerIntegrationTest extends PostgresIntegrationTest {
     @AfterEach
     void tearDown() {
         errorConsumer.close();
+        for (UUID tenantId : createdTenantIds) {
+            jdbcTemplate.update(
+                    "DELETE FROM audit_log WHERE entity_id IN (SELECT id FROM tasks WHERE tenant_id = ?)", tenantId);
+            jdbcTemplate.update(
+                    "DELETE FROM outbox WHERE aggregate_id IN (SELECT id FROM tasks WHERE tenant_id = ?)", tenantId);
+            jdbcTemplate.update("DELETE FROM tenants WHERE id = ?", tenantId);
+        }
     }
 
     private Tenant persistTenant() {
@@ -103,7 +116,9 @@ class StructuredTaskConsumerIntegrationTest extends PostgresIntegrationTest {
         tenant.setStatus(TenantStatus.ACTIVE);
         tenant.setCreatedAt(Instant.now());
         tenant.setUpdatedAt(Instant.now());
-        return tenantRepository.saveAndFlush(tenant);
+        Tenant saved = tenantRepository.saveAndFlush(tenant);
+        createdTenantIds.add(saved.getId());
+        return saved;
     }
 
     private StructuredTaskEvent.Builder validEventBuilder(UUID tenantId, com.rnd.inbox.event.SourceType sourceType,
