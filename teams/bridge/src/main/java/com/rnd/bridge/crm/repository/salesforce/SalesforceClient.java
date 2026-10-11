@@ -132,6 +132,17 @@ final class SalesforceClient {
     }
 
     /**
+     * The {@code instance_url} that came with the currently cached access token - acquiring one
+     * first (one token request) if none is cached yet. Every data call {@link #query} makes
+     * already targets this same host; exposed here only so {@code SalesforceDealRepository} can
+     * build a Salesforce record URL ({@code sourceUrl}), which needs the host but issues no query
+     * of its own.
+     */
+    String instanceUrl() {
+        return currentToken().instanceUrl();
+    }
+
+    /**
      * Runs one SOQL query to completion, following {@code nextRecordsUrl} until Salesforce
      * reports {@code done: true}, and returns every record across every page. Each record is a
      * raw, undeserialized {@code Map} - see {@link SalesforceQueryResult}'s Javadoc for why.

@@ -274,6 +274,29 @@ class SalesforceClientTest {
     }
 
     @Test
+    void instanceUrlAcquiresATokenWhenNoneIsCachedYet() {
+        enqueueJson(tokenResponse());
+
+        String instanceUrl = newClient().instanceUrl();
+
+        assertEquals(server.url("/").toString(), instanceUrl + "/");
+        assertEquals(1, server.getRequestCount(), "one token request - no query call needed");
+    }
+
+    @Test
+    void instanceUrlReusesTheCachedTokenAfterAQuery() {
+        enqueueJson(tokenResponse());
+        enqueueJson(queryPage(null, true, record("006A")));
+
+        SalesforceClient client = newClient();
+        client.query("SELECT Id FROM Opportunity");
+        String instanceUrl = client.instanceUrl();
+
+        assertEquals(server.url("/").toString(), instanceUrl + "/");
+        assertEquals(2, server.getRequestCount(), "token + query - instanceUrl() made no extra request");
+    }
+
+    @Test
     void neitherTheClientSecretNorTheAccessTokenEverAppearsInAnExceptionMessage() {
         enqueueJson(tokenResponse());
         enqueueStatus(403, "[{\"message\": \"TotalRequests Limit exceeded.\", \"errorCode\": \"REQUEST_LIMIT_EXCEEDED\"}]");
