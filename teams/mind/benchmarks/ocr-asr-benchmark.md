@@ -19,6 +19,19 @@ as a conservative bound — see "OCR — CER: grouped and strict". n=2 documents
 An earlier "91.2% character similarity" figure was **retracted** — it is not an
 accuracy (see "Retracted").
 
+**Decision: ASR uses Whisper `base.en`** (faster-whisper, int8, CPU), measured
+against `tiny.en` and `small.en` on two AMI meetings (63 min of audio), two
+runs:
+- **`base.en`:** rough WER 0.263–0.265, ~10x faster than real time on a quiet
+  machine (RTF 0.10; up to 0.3 measured under load).
+- **`small.en`:** 0.9–1.6 points more accurate, but ~5x slower.
+- **`tiny.en`:** a rough WER gap of only 0.4–1.3 points (inside the noise),
+  but lower word precision in both runs — the reason for base over tiny.
+
+**The evidence is thin and written down as such:** n=2 meetings, a rough word
+diff rather than a real WER, and run-to-run variance about the size of the
+gaps — see "ASR — final decision" and "ASR — known risks".
+
 ## Purpose
 
 Not "which config looks better" — a final, number-backed decision for
@@ -29,10 +42,10 @@ capacity planning.
 ## Scope
 
 **OCR: done, 5 configs (3 Tesseract + 2 PaddleOCR); Tesseract `--psm 11` chosen — see "OCR — final decision".**
-**ASR: blocked — see "Known risk."** No AMI audio (or any ASR) sample
-exists anywhere in this repo, or on any branch — checked directly
-right before writing this, not assumed. There's nothing to run Whisper
-against yet.
+**ASR: done, 3 Whisper sizes (`tiny.en` / `base.en` / `small.en`); `base.en` chosen — see "ASR — final decision".**
+Measured on the same three axes as OCR (latency, an accuracy proxy, resource
+footprint) so the two halves compare. A model-size decision only: the ASR
+pipeline itself and a real WER harness are out of scope (#135).
 
 ## OCR — setup
 
@@ -455,45 +468,238 @@ doesn't occur, will differ, likely favorably for PaddleOCR. Scale by
 expected page count and concurrency for real capacity numbers once
 volume is known.
 
-## ASR — known risk
+## ASR — setup
 
-**No decision. Blocked on data, not on tooling.** Local Whisper was the
-intended choice per team direction (local models only), but there is
-still no AMI audio (or any audio) sample anywhere in this repo or on
-any branch to benchmark against — re-checked across all remote
-branches, not just `main`, right before writing this.
+- **Engine: `faster-whisper` 1.2.1, not `openai-whisper`.** Both run the same
+  OpenAI Whisper weights locally; `faster-whisper` runs them on CTranslate2
+  instead of PyTorch — faster on CPU, lower memory, and no multi-GB `torch`
+  install in the image. `int8` quantization (`compute_type="int8"`), CPU, beam
+  size 5 (the library default), `language="en"`.
+- **Sizes: `tiny.en`, `base.en`, `small.en`** — three, not two, for the same
+  reason as the OCR configs (two points can't show whether accuracy keeps
+  improving or flattens out). English-only `.en` variants: MIND is
+  English-only, and the multilingual model of the same size costs the same.
+- **Data: AMI `Mix-Headset` audio** for IS1008b (29.5 min) and IB4003
+  (33.7 min) — the two meetings already in the real-data slice — 63 min in
+  all. Reference: AMI's human word-level transcript (`words/` layer of
+  `ami_public_manual_1.6.2`), the four speakers interleaved by word start
+  time. Pointers and checksums in `eval/datasets/ami-audio.manifest.json`;
+  CC BY 4.0. The wav files are gitignored under `local-data/`.
+- **Weights placed by hand, like PaddleOCR's.** NetFree blocks HuggingFace's
+  CDN on this dev network (`418 Blocked by NetFree`, with and without Xet), so
+  `model.bin` for each size was downloaded on an unfiltered network from
+  `https://huggingface.co/Systran/faster-whisper-<size>/tree/main` and placed
+  in `models/whisper/<size>/` with `config.json`, `tokenizer.json` and
+  `vocabulary.txt` (the small files download fine). Each `model.bin` was
+  checked against the sha256 HuggingFace publishes for it — all three match.
+  The benchmark loads from that folder and never touches the network.
+- **`av<19` pinned.** faster-whisper 1.2.1 passes a keyword to `av.open()`
+  that PyAV 19 no longer accepts — every `transcribe()` raised a `TypeError`.
+  PyAV 18.1.0 works.
+- **`cpu_threads=4` set explicitly.** With it left at 0, faster-whisper
+  honors `OMP_NUM_THREADS` — and constructing a `PaddleOCR()` sets
+  `OMP_NUM_THREADS=1` on the process (verified: it is set by the constructor,
+  not the import). In `python -m benchmarks.ocr_asr_benchmark` the OCR half
+  runs first, the ASR workers inherited that, and Whisper ran on one thread at
+  ~4x the latency (tiny.en RTF 0.221 instead of ~0.05, CPU time ≈ wall time).
+  4 is CTranslate2's default, so the ASR-only numbers below are unaffected.
+  Anything that later runs PaddleOCR and Whisper in one process tree needs the
+  same care.
+- **How it's measured.** Each size runs in a fresh process, so its peak RSS is
+  that model alone (interpreter + model + audio decode, sampled every 50ms),
+  not leftovers from the previous size. It's sampled per meeting, from after
+  the model loads, so each row is that meeting's own peak. Latency is wall time per meeting,
+  reported as a real-time factor (RTF = processing time / audio length; 0.1 is
+  10x faster than real time). CPU time is user+system across CTranslate2's
+  threads, so it exceeds wall time. Accuracy is a **rough word diff**:
+  `difflib` alignment of the lowercased, punctuation-stripped word sequences,
+  counted as substitutions/deletions/insertions — rough WER = (S+D+I)/N, plus
+  word recall and precision. Deliberately not a real WER (no `jiwer`, no
+  number/spelling normalization): that belongs to the ASR validation work.
 
-One near-miss worth recording: `michal/real-data-slice` (unmerged) does
-add an AMI package (`eval/datasets/ami.manifest.json` /
-`eval/real_slice/manager_ami_*.json`) — but its own manifest says
-explicitly *"text annotations only, no audio"*. It's the manual
-abstractive-summary XML layer, downloaded for a different ticket
-(extraction ground truth, #176), not the AMI signals/audio package.
-There is still nothing to feed Whisper. Whisper itself was never
-installed or run.
+Reproduce: `python -m benchmarks.ocr_asr_benchmark` (both halves) or
+`python -m benchmarks.asr_benchmark` (ASR only, ~25 min on a laptop CPU).
 
-This is a real, open risk for Checkpoint 1 capacity planning, not a
-recommendation dressed up to sound more certain than it is: **do not
-assume Whisper `base` (today's placeholder in `.env.example`) is
-correct** until this is actually measured. Unblocking this needs either
-(a) someone downloading AMI's separate signals/audio package (not the
-manual-annotations one already on `michal/real-data-slice`) into
-`eval/datasets/`, or (b) an explicit decision to fetch a small audio
-sample outside the normal "don't fetch new data" rule, since none
-exists to reuse.
+## ASR — results
 
-## Open item
+Two full runs on 2026-10-11, same dev laptop, CPU only, 4 threads:
 
-Once AMI data exists, benchmark Whisper (at least 2 sizes, e.g.
-`tiny`/`base`, plus a third per the same "don't stop at two" reasoning
-above) the same way this document does for OCR, and replace this
-section with a final decision.
+- **Run 1:** `python -m benchmarks.asr_benchmark`, nothing else running.
+- **Run 2:** `python -m benchmarks.ocr_asr_benchmark` (OCR first, then ASR), with
+  other desktop apps open (Zoom, Chrome) — **its latency is under CPU
+  contention**, so it shows what latency looks like on a busy host, not a clean
+  measurement. Its accuracy numbers are unaffected by load.
 
-**Test the English-only (`.en`) variants, not just the standard
-multilingual models** (`tiny.en`/`base.en`/`small.en`/`medium.en` --
-no `.en` variant exists for `large`) -- MIND's app is English-only
-(same reasoning as the data policy above: Enron/SAMSum/CRM data is all
-English), and Whisper's `.en` models are trained specifically for
-English, typically scoring better than the multilingual model of the
-same size on English audio. Include at least one `.en` config in
-whatever sizes get benchmarked, not only the multilingual default.
+Run 1, per meeting:
+
+| Size | Meeting | RTF | Wall time | Peak RSS | CPU time | Rough WER | Recall | Precision | S / D / I |
+|---|---|---|---|---|---|---|---|---|---|
+| tiny.en | IS1008b | 0.047 | 84s | 1,657MB | 325s | 0.226 | 0.803 | 0.898 | 270 / 582 / 125 |
+| tiny.en | IB4003 | 0.069 | 140s | 1,915MB | 524s | 0.308 | 0.720 | 0.902 | 329 / 1,522 / 186 |
+| base.en | IS1008b | 0.098 | 174s | 1,718MB | 684s | 0.226 | 0.803 | 0.907 | 231 / 619 / 124 |
+| base.en | IB4003 | 0.102 | 207s | 2,006MB | 811s | 0.288 | 0.734 | 0.927 | 237 / 1,523 / 145 |
+| small.en | IS1008b | 0.425 | 752s | 1,894MB | 2,360s | 0.219 | 0.813 | 0.916 | 181 / 625 / 140 |
+| small.en | IB4003 | 0.672 | 1,359s | 2,152MB | 3,798s | 0.277 | 0.743 | 0.934 | 219 / 1,484 / 130 |
+
+Run 2, per meeting (with `fallback_segments`, added after run 1):
+
+| Size | Meeting | RTF | Wall time | Peak RSS | CPU time | Fallback segs | Rough WER | Recall | Precision |
+|---|---|---|---|---|---|---|---|---|---|
+| tiny.en | IS1008b | 0.049 | 86s | 1,649MB | 335s | 2 | 0.219 | 0.803 | 0.912 |
+| tiny.en | IB4003 | 0.224 | 453s | 1,887MB | 1,086s | 23 | 0.301 | 0.721 | 0.908 |
+| base.en | IS1008b | 0.307 | 543s | 1,741MB | 1,436s | 30 | 0.224 | 0.803 | 0.913 |
+| base.en | IB4003 | 0.156 | 315s | 1,953MB | 1,239s | 14 | 0.291 | 0.726 | 0.930 |
+| small.en | IS1008b | 0.738 | 1,305s | 1,935MB | 3,736s | 12 | 0.209 | 0.817 | 0.923 |
+| small.en | IB4003 | 1.395 | 2,823s | 2,118MB | 5,668s | 12 | 0.275 | 0.747 | 0.933 |
+
+**Note on the Peak RSS column (review on #652):** both runs above were
+measured before the sampler was reset per meeting. It ran once per size, so
+each IB4003 row (the second meeting) was the running max over both meetings.
+The values still hold as per-meeting peaks:
+- After IS1008b, the running max is exactly IS1008b's peak.
+- Every IB4003 value is higher than its IS1008b value, in all six rows.
+- So each new maximum was set during IB4003, and the number is IB4003's own
+  peak.
+
+The benchmark now samples each meeting separately, so later runs don't rely on
+that argument.
+
+Both meetings pooled (diff counts and time summed, so per minute of audio):
+
+| Size | Rough WER (run 1 / run 2) | Precision (run 1 / run 2) | RTF run 1 (clean) | RTF run 2 (under load) | ~Time per 30-min meeting, run 1 | Peak RSS |
+|---|---|---|---|---|---|---|
+| tiny.en | 0.276 / 0.269 | 0.900 / 0.910 | 0.059 | 0.142 | ~2 min | 1.9GB |
+| **base.en** | **0.263 / 0.265** | **0.919 / 0.923** | **0.100** | **0.226** | **~3 min** | **2.0GB** |
+| small.en | 0.254 / 0.249 | 0.926 / 0.929 | 0.557 | 1.089 | ~17 min | 2.1–2.2GB |
+
+What the numbers say:
+
+1. **The accuracy ranking held in both runs:** small < base < tiny on rough
+   WER, small > base > tiny on precision. The gaps are what moved:
+   - tiny→base: −1.3 points in run 1, −0.4 in run 2;
+   - base→small: −0.9 in run 1, −1.6 in run 2.
+
+   All of these are within about 1–1.5 points, about the run-to-run noise
+   (see known risks).
+2. **Latency grows much faster than accuracy.** small is 5.6x base in run 1
+   and 4.8x in run 2. base is 1.7x tiny in run 1, 1.6x in run 2.
+3. **Latency varies a lot between runs on the same audio** — base.en on
+   IS1008b: RTF 0.098 in run 1, 0.307 in run 2. Two things push it up, and
+   run 2 had both:
+   - **Fallback re-decodes:** 30 fallback segments in that run (each one
+     re-decodes and samples several candidates — CPU time doubled, 684s →
+     1,436s).
+   - **CPU contention:** CPU time / wall time fell from ~4 to ~2–2.6 with
+     other apps open.
+
+   The ranking between sizes didn't change.
+4. **Memory barely moves with size** (1.6–2.2GB, same in both runs). The model
+   weights are 75–485MB on disk, so most of the peak is something else —
+   likely decoding a whole 30-min meeting into memory. **Not verified**; it's
+   the reading that fits these numbers, not a measured breakdown.
+5. **Precision is where base beats tiny in both runs:**
+   - Pooled, 0.919 vs. 0.900 and 0.923 vs. 0.910.
+   - Most clearly on IB4003: 0.927 vs. 0.902 and 0.930 vs. 0.908.
+
+   On IS1008b alone they are close: tied on rough WER in run 1, and tiny
+   slightly ahead in run 2 (0.219 vs. 0.224).
+6. **Deletions dominate, and they barely depend on size** (~1,500 on IB4003
+   for every size, both runs). A measured part of them is filler words:
+   - AMI's reference has 300 "uh"/"um" in IB4003 and 239 in IS1008b, and no
+     Whisper size emits a single one — Whisper drops disfluencies by design.
+   - "yeah" is 158 in IB4003's reference vs. 58–83 in the transcripts.
+
+   The rest is plausibly overlapping speech in the mixed channel — unverified.
+
+## ASR — final decision
+
+**Use Whisper `base.en`** (faster-whisper, int8, CPU) — `WHISPER_MODEL=base.en`
+in `.env.example`, `CHOSEN_WHISPER_SIZE` in `benchmarks/asr_benchmark.py`.
+
+- **Over `small.en`:** small is the most accurate in both runs, but by 0.9–1.6
+  points of rough WER, at ~5x the latency:
+  - ~17 min vs. ~3 min per 30-min meeting on a quiet machine.
+  - Slower than real time (RTF 1.1) on a busy one.
+
+  Not worth it on this evidence. small is the upgrade path if accuracy
+  becomes the binding constraint, and confirmed on more data.
+- **Over `tiny.en`:** base's rough WER advantage is small and inconsistent
+  (1.3 points in run 1, 0.4 in run 2) — **don't read it as a real gap**. What
+  held in both runs is precision: base puts fewer wrong words in the
+  transcript. That's the error that matters most downstream — a wrong word can
+  become a wrong task in extraction, while a dropped "uh" costs nothing. The
+  price is ~1.6x tiny's latency, about a minute more per meeting on a quiet
+  machine.
+
+  This is the closer of the two calls. If latency becomes the binding
+  constraint, tiny is a defensible fallback.
+
+**Resource budget for capacity planning (Checkpoint 1):**
+- **Typical:** RTF ~0.1 (~3 min per 30-min meeting), ~750s CPU time per 30-min
+  meeting.
+- **Plan for up to RTF ~0.3:** measured on a busy host with many fallback
+  re-decodes (~9 min per 30-min meeting, ~1,400s CPU).
+- **Memory:** ~2GB peak.
+
+All on a dev laptop CPU (4 threads, no GPU). Scale by meeting volume and
+concurrency once known.
+
+**Output for extraction (R2):**
+- Plain text per recording (segments joined).
+- No speaker labels — the `Mix-Headset` channel has every speaker in one
+  stream.
+- No filler words ("uh"/"um").
+- Phrases can repeat in short loops on hard audio (e.g. "I'm not sure."
+  repeated ~10 times in a row in one IS1008b transcript).
+
+## ASR — known risks
+
+The decision is the best reading of thin evidence, not a measured certainty:
+
+- **n=2 meetings, one corpus.** Both are AMI scenario meetings, mostly
+  non-native English speakers, recorded on headsets. The gaps between sizes
+  are small (0.4–1.6 points across two runs), so two more meetings could
+  reorder base and tiny in particular. Other
+  audio (phone calls, a single far-field microphone, native speakers) is
+  untested.
+- **The accuracy number is a rough proxy.** No normalization: filler words
+  Whisper never emits, numbers vs. digits, spelling variants and the order of
+  overlapping speech all count as errors, so the absolute rough WER (~0.26)
+  is pessimistic and should not be quoted as Whisper's WER. These errors hit
+  every size alike, which is why the *comparison* still holds. A real WER
+  (`jiwer` + normalization) is the ASR validation work.
+- **Run-to-run variance, about the size of the gaps.** The same model on the
+  same audio does not always produce the same transcript. Examples across
+  three runs:
+  - `base.en` on IS1008b: 0.219, 0.226 and 0.224.
+  - `tiny.en` on IS1008b: 0.226, then 0.219.
+  - `small.en` on IS1008b: 0.219, then 0.209.
+
+  **Cause — verified
+  for `base.en` on IS1008b only:** when a beam-search segment fails
+  faster-whisper's quality checks (compression ratio, average log-prob), it
+  is re-decoded at a higher temperature, which *samples*. In a default run,
+  40 of 392 segments fell back to temperature 0.2, and the transcript
+  differed from the previous run's. With fallback off (`temperature=0`), two
+  runs were identical word for word — so the randomness is the fallback
+  alone. **But fallback can't simply be turned off:** without it the model
+  got stuck in a loop ("it was supposed to change seats." 102 times) and
+  rough WER jumped to 0.458. The variance is the price of the loop guard.
+  For the other sizes this is still a hypothesis — though run 2 shows every
+  size falling back (2–30 segments per meeting), so all of them sample
+  sometimes.
+- **Latency varies even more than accuracy.** Same model, same audio:
+  `base.en` on IS1008b ran at RTF 0.098 in one run and 0.307 in another.
+  Fallback re-decodes cost extra CPU (that run had 30 fallback segments and
+  twice the CPU time), and other load on the host costs wall time. Plan
+  capacity on the worst case measured (RTF ~0.3), not the typical one.
+- **One machine, CPU only.** Latency and memory are from one dev laptop with
+  no GPU. A GPU, or a different CPU/thread count, changes the absolute
+  numbers; the ranking between sizes is unlikely to flip, since compute grows
+  with model size either way.
+- **Unexplained memory.** ~2GB peak for all three sizes; the breakdown
+  (model vs. audio decode) was not measured.
+
+What would firm this up: more meetings (AMI has ~100 hours under the same
+licence and layout), several runs per size to put error bars on the rough
+WER, and a real WER once the validation harness exists.

@@ -146,11 +146,28 @@ Local OCR + ASR preprocessing.
   PDF, a blank page in the middle, corrupted file and PDF, blank scan, empty
   input, low-confidence words) and skips without it; the FUNSD-backed ones
   additionally skip if `local-data/` isn't populated.
-- **ASR: known risk, not just "open"** — no decision exists, and it
-  cannot exist yet: there is no AMI audio (or any audio) sample
-  anywhere in this repo, on any branch, to benchmark Whisper against
-  (one branch, `michal/real-data-slice`, has an AMI package, but it's
-  the text-only manual-annotations package, not audio).
-  `WHISPER_MODEL=base` in `.env.example` is an **unverified
-  placeholder**, not a decision — do not use it for capacity planning.
-  See `benchmarks/ocr-asr-benchmark.md` "Known risk" / "Open item".
+- **ASR: resolved — Whisper `base.en`**, run locally with `faster-whisper`
+  (int8, CPU), `WHISPER_MODEL=base.en` in `.env.example`. Chosen over
+  `tiny.en` and `small.en` on two AMI meetings (IS1008b, IB4003; 63 min of
+  `Mix-Headset` audio), two runs, on accuracy per unit of latency:
+  - `base.en`: rough WER 0.263–0.265, word precision 0.919–0.923, ~10x faster
+    than real time on a quiet machine (RTF 0.10, ~3 min per 30-min meeting;
+    up to RTF ~0.3 measured under load), ~2GB peak memory.
+  - `small.en` is 0.9–1.6 points better on rough WER and ~5x slower (~17 min
+    per 30-min meeting; slower than real time under load).
+  - `tiny.en`'s rough WER is within noise of base's (0.4–1.3 points worse),
+    but its precision is lower in both runs (0.900–0.910): more wrong words
+    reaching `extraction/`. The closer call — tiny is the fallback if latency
+    becomes the binding constraint.
+
+  **Known risks, not hidden behind the pick:**
+  - n=2 meetings from one corpus.
+  - The accuracy number is a rough word diff against AMI's human transcript
+    (no normalization), not a real WER.
+  - Run-to-run variance (~1 point on the same input) is about the size of
+    the gaps between sizes, and latency varies up to 3x between runs.
+
+  Resource budget for capacity planning: RTF ~0.1 typical / ~0.3 worst
+  measured, ~2GB peak memory, ~750–1,400s CPU time per ~30-min meeting on a
+  dev machine (4 threads, no GPU). See `benchmarks/ocr-asr-benchmark.md` "ASR
+  — final decision" and "ASR — known risks".

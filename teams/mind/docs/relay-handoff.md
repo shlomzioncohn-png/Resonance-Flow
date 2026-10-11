@@ -77,7 +77,7 @@ standalone run needs one supplied directly.
 | `LLM_API_KEY` / `LLM_MODEL` | blank | Not used yet — MIND runs local models only (see team README "Important Updates"). |
 | `MODEL_CACHE_DIR` | `./models` | Where local model weights get mounted (see `docker-compose.yml`'s `models` volume). Never bake weights into the image. |
 | `OCR_PROVIDER` / `ASR_PROVIDER` | `local` | Which provider extraction uses once built. |
-| `WHISPER_MODEL` | `base` | Local Whisper size, once ASR is built. |
+| `WHISPER_MODEL` | `base.en` | Local Whisper size, once ASR is built — decided in #135, see `benchmarks/ocr-asr-benchmark.md`. |
 | `OBJECT_STORAGE_*` | blank | Bridge handoff credentials — not used until MIND reads from Bridge's object storage. |
 | `MIND_API_PORT` | `8000` | Documented for completeness; the port MIND actually binds to today is hardcoded to `8000` in the `Dockerfile` (`EXPOSE`/`CMD`) and `docker-compose.yml`. Changing this variable alone does not currently move the port — flagged here as a known gap, not a working override. |
 | `MIND_LOG_LEVEL` | `INFO` | Documented for completeness; not yet wired to `logging.basicConfig()` in `api/main.py`, which hardcodes `INFO`. Same gap as `MIND_API_PORT` above. |

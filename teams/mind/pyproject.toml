@@ -63,6 +63,14 @@ benchmark = [
     "psutil",  # cross-platform peak-RSS/CPU sampling; stdlib `resource` is Unix-only
     "paddleocr",
     "paddlepaddle",
+    # ASR size benchmark (#135). faster-whisper, not openai-whisper: it runs
+    # Whisper on CTranslate2 instead of PyTorch -- faster on CPU, lower peak
+    # memory, and no multi-GB torch install. Same model weights/sizes.
+    "faster-whisper",
+    # faster-whisper 1.2.1 decodes audio with av.open(..., metadata_errors=...),
+    # a keyword PyAV 19 no longer accepts (TypeError on every transcribe).
+    # 18.1.0 works; drop this pin once faster-whisper catches up.
+    "av<19",
 ]
 
 [build-system]
@@ -86,6 +94,12 @@ exclude = ["_pb2\\.py$"]
 # not a blanket ignore for the whole benchmarks/ tree.
 [[tool.mypy.overrides]]
 module = "paddleocr"
+ignore_missing_imports = true
+
+# Same reason for faster-whisper, and CI never installs `.[benchmark]` anyway,
+# so without this `make lint` fails on the import in CI.
+[[tool.mypy.overrides]]
+module = "faster_whisper"
 ignore_missing_imports = true
 
 [[tool.mypy.overrides]]
