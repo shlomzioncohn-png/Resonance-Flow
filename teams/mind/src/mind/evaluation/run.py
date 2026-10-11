@@ -9,6 +9,7 @@ from mind.evaluation.baseline_models import (
     SkipBlockedNearestDeadlineModel,
 )
 from mind.evaluation.baseline_record import (
+    BASELINE_EXISTS_MESSAGE,
     BaselineRecordError,
     Provenance,
     build_baseline_record,
@@ -108,8 +109,7 @@ def main() -> None:
                 )
             if args.record_baseline.exists():
                 raise BaselineRecordError(
-                    f"{args.record_baseline} already exists; a recorded baseline is "
-                    "never overwritten. Record a re-run to a new, dated file instead."
+                    BASELINE_EXISTS_MESSAGE.format(path=args.record_baseline)
                 )
             provenance = Provenance(
                 model_commit=args.model_commit,
@@ -171,6 +171,24 @@ def main() -> None:
     with open("report.json", "w") as f:
         f.write(report_text)
 
+    accuracy = combined_report.top1_accuracy
+    if args.min_accuracy is not None and accuracy < args.min_accuracy:
+        print(
+            f"Combined top-1 accuracy {accuracy:.1%} is below --min-accuracy "
+            f"{args.min_accuracy:.1%} — regression.",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+    if args.max_accuracy is not None and accuracy > args.max_accuracy:
+        print(
+            f"{combined_report.model_name} combined top-1 accuracy {accuracy:.1%} "
+            f"is above --max-accuracy {args.max_accuracy:.1%}.",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
+    # Written last, after both accuracy gates: a run the project's own CI treats as a
+    # regression must not leave a (write-once, therefore blocking) record behind.
     if args.record_baseline is not None and provenance is not None:
         record = build_baseline_record(
             recorded_on=datetime.now(UTC).date(),
@@ -187,22 +205,6 @@ def main() -> None:
             print(f"Cannot record baseline: {e}", file=sys.stderr)
             sys.exit(1)
         print(f"Baseline recorded to {args.record_baseline} (commit it).\n")
-
-    accuracy = combined_report.top1_accuracy
-    if args.min_accuracy is not None and accuracy < args.min_accuracy:
-        print(
-            f"Combined top-1 accuracy {accuracy:.1%} is below --min-accuracy "
-            f"{args.min_accuracy:.1%} — regression.",
-            file=sys.stderr,
-        )
-        sys.exit(1)
-    if args.max_accuracy is not None and accuracy > args.max_accuracy:
-        print(
-            f"{combined_report.model_name} combined top-1 accuracy {accuracy:.1%} "
-            f"is above --max-accuracy {args.max_accuracy:.1%}.",
-            file=sys.stderr,
-        )
-        sys.exit(1)
 
 
 if __name__ == "__main__":

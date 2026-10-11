@@ -175,29 +175,46 @@ python -m mind.evaluation.run --model <model> \
     --model-commit <model-sha> --persona-set-commit <persona-set-sha>
 ```
 
-The file carries the date, the model name, `model_commit`, the metric, the
-persona set (path, `commit`, scenario count, how many are
-`team_lead_approved` / `mentor_approved`), the combined / per-group / per-role
+The file carries a `format_version`, the date, the model name, `model_commit`, the metric, the
+persona set (path, `checksum`, `commit`, scenario count, how many are
+`team_lead_approved`), the combined / per-group / per-role
 results, and every scenario's prediction with all candidate scores (for the
 manual spot-check and the week-7 comparison).
 
 - **It is never overwritten.** If the file exists, the run fails before
   scoring; a re-run goes to a new, dated file.
+- **A failed run writes nothing.** The record is written last, after the
+  `--min-accuracy` / `--max-accuracy` gates; a run that exits non-zero on a gate
+  leaves no file behind (the file is write-once, so a leftover would block the
+  real run that follows).
+- **The persona set is identified by a checksum, computed automatically.** The
+  record stores `personas_checksum.compute_personas_checksum` of the persona
+  directory that was scored (the same checksum `make lint` checks against
+  `eval/personas/personas.sha256`). It is computed from the files themselves, so
+  it cannot be typed wrong, and it describes exactly what was scored, including
+  uncommitted edits to the scenarios. `load_baseline_record` refuses to load a
+  baseline when the current set's checksum differs from the recorded one: that is
+  the "same fixed set" guarantee for the baseline-vs-stretch comparison.
 - **Both commits are required and must look like a git sha** (7-40 lowercase
   hex), so a forgotten argument, a branch name or a stray paste fails instead
   of being recorded. That is a shape check only: it cannot tell a swapped pair
-  or a wrong sha, so take each one from the git command above.
-- **Run from a clean working tree.** The sha only describes what was scored if
-  nothing under `src/` or `eval/personas/` is uncommitted; the tool does not
-  check this.
+  or a wrong sha, so take each one from the git command above. For the persona
+  set the commit is only an extra label; the checksum is what identifies it.
+- **Run the model from a clean working tree.** `model_commit` only describes
+  what was scored if nothing under `src/` is uncommitted; the tool does not
+  check this. (The persona set no longer depends on this: its checksum covers
+  uncommitted scenario edits.)
 
 The format is one Pydantic model, `baseline_record.BaselineRecord`, used for
 both writing and reading. Its checks run on every write and every read: each
 accuracy (combined, per group, per role) must equal its own
 `correct_top1 / total_scenarios`, `combined` must agree with the per-scenario
 results, and each scenario's `passed` must match its prediction. A record that
-fails any of them is refused, with an error naming the field.
-`baseline_record.load_baseline_record(path)` reads a record back into the
+fails any of them is refused, with an error naming the field. The per-group and
+per-role slices must also add up to `combined`.
+`format_version` (currently `1`) lets a reader say "this record is an older/newer
+format" if a field is ever renamed or removed, instead of a validation error.
+`baseline_record.load_baseline_record(path, personas_path=...)` reads a record back into the
 `Report` it was written from, so the week-7 comparison (#487) diffs the stretch
 run against the recorded baseline instead of a re-run.
 

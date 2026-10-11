@@ -16,23 +16,40 @@ Its consistency rules run on every write and every read.
 """
 
 import dataclasses
+import json
 import re
 from datetime import date
 from pathlib import Path
-from typing import Self
+from typing import Literal, Self
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
 from mind.evaluation.harness import Report, ScenarioResult
 from mind.evaluation.interfaces import PersonaEvaluationScenario
+from mind.evaluation.personas_checksum import compute_personas_checksum
 
 METRIC = "top-1 accuracy"
+
+# The file format version. A record is written in one week and read weeks later by
+# different code; if a field is ever renamed or removed (which `extra="forbid"` cannot
+# absorb), this is what lets the reader say "older format" instead of a long validation
+# error. Bump it, and the `Literal` below, together with any such change.
+FORMAT_VERSION: Literal[1] = 1
+
+# One message for "this path is taken", used by the fast-fail in `run.py` and by the
+# real guard in `write_baseline_record`, so the two cannot drift apart.
+BASELINE_EXISTS_MESSAGE = (
+    "{path} already exists; a recorded baseline is never overwritten. "
+    "Record a re-run to a new, dated file instead."
+)
 
 # A git commit sha, full (40) or abbreviated (at least 7), as `git log` prints it.
 # Pydantic's `pattern` uses Rust regex, where `$` is the end of the text; Python's
 # `$` also accepts a trailing newline, so `Provenance` uses `fullmatch` instead.
 _COMMIT_SHA_PATTERN = r"^[0-9a-f]{7,40}$"
 _COMMIT_SHA = re.compile(r"[0-9a-f]{7,40}")
+# A SHA-256 hex digest, as `personas_checksum.compute_personas_checksum` returns.
+_CHECKSUM_PATTERN = r"^[0-9a-f]{64}$"
 
 _RECORD_CONFIG = ConfigDict(extra="forbid", frozen=True, allow_inf_nan=False)
 
@@ -49,7 +66,9 @@ class Provenance:
     `--persona-set-commit`). They are only checked to *look like* a commit sha:
     that catches an empty value, a branch name or a stray paste, but not a
     swapped pair or a wrong sha, which is why the README gives the exact git
-    command for each.
+    command for each. For the persona set they are only a label: what the set
+    *is* comes from its checksum, which is computed from the files
+    (`PersonaSetInfo.checksum`), never typed.
     """
 
     model_commit: str  # the commit holding the scored model's code
@@ -101,15 +120,21 @@ class ScoreSummary(BaseModel):
 
 
 class PersonaSetInfo(BaseModel):
-    """Which persona set was scored, and its approval state at the time."""
+    """Which persona set was scored, and how many of its scenarios the team lead had approved.
+
+    `checksum` is what identifies the set: `compute_personas_checksum` over the
+    scenario files themselves, filled in by `build_baseline_record`. Nobody types
+    it, so it cannot be wrong, and it describes exactly what was scored,
+    including uncommitted edits. `commit` is an extra, human-readable label.
+    """
 
     model_config = _RECORD_CONFIG
 
     path: str
+    checksum: str = Field(pattern=_CHECKSUM_PATTERN)
     commit: str = Field(pattern=_COMMIT_SHA_PATTERN)
     scenarios: int = Field(ge=0)
     team_lead_approved: int = Field(ge=0)
-    mentor_approved: int = Field(ge=0)
 
 
 class BaselineRecord(BaseModel):
@@ -123,6 +148,7 @@ class BaselineRecord(BaseModel):
 
     model_config = _RECORD_CONFIG
 
+    format_version: Literal[1] = FORMAT_VERSION
     recorded_on: date
     model_name: str
     model_commit: str = Field(pattern=_COMMIT_SHA_PATTERN)
@@ -154,6 +180,23 @@ class BaselineRecord(BaseModel):
             )
         return self
 
+    @model_validator(mode="after")
+    def _breakdowns_add_up_to_combined(self) -> Self:
+        # The per-group and per-role slices each partition the same scenarios, so they
+        # must add up to the combined numbers. A slice that does not is a corrupt record,
+        # the same way a stored accuracy that disagrees with its counts is.
+        for label, parts in (("groups", self.groups), ("roles", self.roles)):
+            if not parts:
+                continue
+            total = sum(p.total_scenarios for p in parts.values())
+            correct = sum(p.correct_top1 for p in parts.values())
+            if (total, correct) != (self.combined.total_scenarios, self.combined.correct_top1):
+                raise ValueError(
+                    f"{label} add up to {correct}/{total} but combined is "
+                    f"{self.combined.correct_top1}/{self.combined.total_scenarios}"
+                )
+        return self
+
     def to_report(self) -> Report:
         """The combined `Report` this record was written from."""
         return Report(
@@ -176,7 +219,13 @@ def build_baseline_record(
     roles: dict[str, Report],
 ) -> BaselineRecord:
     """Build the record from a finished run. The record's consistency checks run
-    here too, so an inconsistent record is refused before it is ever written."""
+    here too, so an inconsistent record is refused before it is ever written.
+
+    The persona set's checksum is computed here from `personas_path`, not passed in."""
+    try:
+        checksum = compute_personas_checksum(personas_path)
+    except FileNotFoundError as e:
+        raise BaselineRecordError(f"cannot checksum the persona set: {e}") from e
     return BaselineRecord(
         recorded_on=recorded_on,
         model_name=combined.model_name,
@@ -184,10 +233,10 @@ def build_baseline_record(
         metric=METRIC,
         persona_set=PersonaSetInfo(
             path=personas_path.as_posix(),
+            checksum=checksum,
             commit=provenance.persona_set_commit,
             scenarios=len(scenarios),
             team_lead_approved=sum(s.team_lead_approved for s in scenarios),
-            mentor_approved=sum(s.mentor_approved for s in scenarios),
         ),
         combined=ScoreSummary.of(combined),
         groups={name: ScoreSummary.of(r) for name, r in groups.items()},
@@ -208,17 +257,30 @@ def write_baseline_record(path: Path, record: BaselineRecord) -> None:
             f.write(record.model_dump_json(indent=4))
             f.write("\n")
     except FileExistsError:
-        raise BaselineRecordError(
-            f"{path} already exists; a recorded baseline is never overwritten. "
-            "Record a re-run to a new, dated file instead."
-        ) from None
+        raise BaselineRecordError(BASELINE_EXISTS_MESSAGE.format(path=path)) from None
 
 
-def load_baseline_record(path: Path) -> Report:
-    """Read a recorded baseline back into the combined `Report` it was written from.
+def _format_version_of(text: str) -> object | None:
+    """The `format_version` a raw record claims, or None if it is not a JSON object
+    that has one. Only used to make the error for an unreadable record clearer."""
+    try:
+        data = json.loads(text)
+    except ValueError:
+        return None
+    return data.get("format_version") if isinstance(data, dict) else None
+
+
+def load_baseline_record(path: Path, *, personas_path: Path) -> Report:
+    """Read a recorded baseline back into the combined `Report` it was written from,
+    but only if `personas_path` still holds the persona set it was scored on.
 
     This is what the week-7 comparison (#487) diffs the stretch run against:
-    the frozen, committed number, not a fresh re-run of the baseline model.
+    the frozen, committed number, not a fresh re-run of the baseline model. It is
+    only a meaningful comparison against the *same* fixed set, so the recorded
+    checksum is compared to the current set's checksum and a mismatch is
+    refused. `personas_path` is required for that reason: there is no way to
+    load a baseline without saying which set it is about to be compared on.
+
     Validated through `BaselineRecord`, so a hand-edited, truncated or
     malformed file is refused with an error naming the field at fault.
     """
@@ -229,5 +291,23 @@ def load_baseline_record(path: Path) -> Report:
     try:
         record = BaselineRecord.model_validate_json(text)
     except ValidationError as e:
+        version = _format_version_of(text)
+        if version is not None and version != FORMAT_VERSION:
+            raise BaselineRecordError(
+                f"{path} is baseline record format version {version!r}; this code "
+                f"reads version {FORMAT_VERSION}. Re-read it with the code that wrote it."
+            ) from e
         raise BaselineRecordError(f"{path} is not a valid baseline record:\n{e}") from e
+    try:
+        current = compute_personas_checksum(personas_path)
+    except FileNotFoundError as e:
+        raise BaselineRecordError(f"cannot checksum the persona set: {e}") from e
+    recorded = record.persona_set.checksum
+    if current != recorded:
+        raise BaselineRecordError(
+            f"{path} was scored on a persona set with checksum {recorded[:12]}..., but "
+            f"{personas_path} now has checksum {current[:12]}.... A baseline can only be "
+            "compared against the same fixed set. If the set was changed on purpose, "
+            "record a new baseline; if not, restore the scenario files."
+        )
     return record.to_report()
