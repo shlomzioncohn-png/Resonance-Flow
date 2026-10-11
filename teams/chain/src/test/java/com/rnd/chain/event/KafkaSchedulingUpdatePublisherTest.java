@@ -1,42 +1,57 @@
 package com.rnd.chain.event;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import com.rnd.chain.events.ChainEventTopicsProperties;
+import com.rnd.inbox.event.SchedulingUpdatedEvent;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.kafka.core.KafkaTemplate;
 
+import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
 
 class KafkaSchedulingUpdatePublisherTest {
 
-    private KafkaTemplate<String, String> kafkaTemplate;
-    private ObjectMapper objectMapper;
+    private KafkaTemplate<String, SchedulingUpdatedEvent> kafkaTemplate;
     private KafkaSchedulingUpdatePublisher publisher;
 
     @BeforeEach
     void setUp() {
+
         kafkaTemplate = mock(KafkaTemplate.class);
-        objectMapper = new ObjectMapper();
+
+        ChainEventTopicsProperties properties =
+                new ChainEventTopicsProperties(
+                        Map.of(
+                                "task.scheduling.updated",
+                                "task.scheduling.updated"),
+                        "chain-service");
+
+        when(kafkaTemplate.send(
+                anyString(),
+                anyString(),
+                any(SchedulingUpdatedEvent.class)))
+                .thenReturn(CompletableFuture.completedFuture(null));
 
         publisher = new KafkaSchedulingUpdatePublisher(
                 kafkaTemplate,
-                objectMapper,
-                "task.scheduling.updated");
+                properties);
     }
 
     @Test
-    void publish_shouldSendFlatInboxContract() throws Exception {
+    void publish_shouldSendProtobufSchedulingUpdatedEvent() {
 
+        UUID eventId = UUID.randomUUID();
         UUID taskId = UUID.randomUUID();
 
         TaskSchedulingUpdatedEvent event =
                 new TaskSchedulingUpdatedEvent(
+                        eventId,
                         taskId,
                         true,
                         7.5);
@@ -46,8 +61,9 @@ class KafkaSchedulingUpdatePublisherTest {
         ArgumentCaptor<String> keyCaptor =
                 ArgumentCaptor.forClass(String.class);
 
-        ArgumentCaptor<String> valueCaptor =
-                ArgumentCaptor.forClass(String.class);
+        ArgumentCaptor<SchedulingUpdatedEvent> valueCaptor =
+                ArgumentCaptor.forClass(
+                        SchedulingUpdatedEvent.class);
 
         verify(kafkaTemplate).send(
                 eq("task.scheduling.updated"),
@@ -58,25 +74,54 @@ class KafkaSchedulingUpdatePublisherTest {
                 taskId.toString(),
                 keyCaptor.getValue());
 
-        JsonNode json =
-                objectMapper.readTree(valueCaptor.getValue());
+        SchedulingUpdatedEvent proto =
+                valueCaptor.getValue();
 
-        assertTrue(json.hasNonNull("eventId"));
-        assertDoesNotThrow(
-                () -> UUID.fromString(
-                        json.get("eventId").asText()));
+        assertEquals(
+                eventId.toString(),
+                proto.getEventId());
 
         assertEquals(
                 taskId.toString(),
-                json.get("taskId").asText());
+                proto.getTaskId());
 
-        assertTrue(
-                json.get("isAvailable").asBoolean());
+        assertTrue(proto.getAvailable());
+
+        assertTrue(proto.hasPriorityScore());
 
         assertEquals(
                 7.5,
-                json.get("priorityScore").asDouble());
+                proto.getPriorityScore());
+    }
 
-        assertFalse(json.has("payload"));
+    @Test
+    void publish_shouldOmitPriorityScore_whenNull() {
+
+        UUID eventId = UUID.randomUUID();
+        UUID taskId = UUID.randomUUID();
+
+        TaskSchedulingUpdatedEvent event =
+                new TaskSchedulingUpdatedEvent(
+                        eventId,
+                        taskId,
+                        false,
+                        null);
+
+        publisher.publish(event);
+
+        ArgumentCaptor<SchedulingUpdatedEvent> valueCaptor =
+                ArgumentCaptor.forClass(
+                        SchedulingUpdatedEvent.class);
+
+        verify(kafkaTemplate).send(
+                eq("task.scheduling.updated"),
+                eq(taskId.toString()),
+                valueCaptor.capture());
+
+        SchedulingUpdatedEvent proto =
+                valueCaptor.getValue();
+
+        assertFalse(proto.getAvailable());
+        assertFalse(proto.hasPriorityScore());
     }
 }

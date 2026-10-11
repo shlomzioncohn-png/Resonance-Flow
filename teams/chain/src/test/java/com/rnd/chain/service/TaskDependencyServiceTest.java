@@ -604,10 +604,11 @@ void addDependency_whenSameMindEventIsRetried_shouldNotApplyDependencyTwice() {
                     publishedEvents::add);
 
     TaskEligibilityService eligibilityService =
-            new TaskEligibilityService(
-                    taskRepository,
-                    taskDependencyRepository,
-                    schedulingUpdateService);
+        new TaskEligibilityService(
+                taskRepository,
+                taskDependencyRepository,
+                schedulingUpdateService,
+                new InMemoryConstraintRepository());
 
     TaskDependencyService mindService =
             new TaskDependencyService(

@@ -1,3 +1,4 @@
+
 package com.rnd.chain.service;
 
 import com.rnd.chain.dto.DependencyChangeAction;
@@ -91,6 +92,11 @@ public class TaskDependencyService {
      * @throws TaskNotFoundException       if either task does not exist
      * @throws DuplicateDependencyException if the edge already exists
      */
+
+
+
+
+    //------addDependency------
     public TaskDependency addDependency(UUID taskId, UUID dependsOnTaskId,
                                          DependencyChangeSource source, String sourceRef) {
         Objects.requireNonNull(taskId, "taskId must not be null");
@@ -110,7 +116,7 @@ public class TaskDependencyService {
         // of reporting a fabricated success.
         requireTaskExists(taskId);
         requireTaskExists(dependsOnTaskId);
-
+//בודק אם אותה פעולה כבר בוצעה
         if (isMatchingRetry(taskId, dependsOnTaskId, DependencyChangeAction.ADDED, source, sourceRef)) {
             return new TaskDependency(taskId, dependsOnTaskId);
         }
@@ -123,6 +129,8 @@ public class TaskDependencyService {
             }
             // Record history before delegating graph and readiness mutation; remove the
             // speculative entry if the delegate rejects the change.
+
+            
             DependencyHistoryEntry recorded = recordHistory(taskId, dependsOnTaskId,
                     DependencyChangeAction.ADDED, source, sourceRef);
             try {

@@ -76,6 +76,9 @@ public final class Task {
         if (status == null) {
             throw new IllegalArgumentException("status must not be null");
         }
+        if (ownerId == null) {
+            throw new IllegalArgumentException("ownerId must not be null");
+        }
         this.id = id;
         this.parentTaskId = parentTaskId;
         this.ownerId = ownerId;
