@@ -12,7 +12,7 @@ on:
       - ".github/workflows/service-ci-node.yaml"
       - ".github/workflows/service-cd.yaml"
   pull_request:
-    branches: [ "main" ]
+    branches: [ "main", "lens-team" ]
     paths:
       - "teams/lens/frontend/**"
       - "!teams/lens/bff/**"
