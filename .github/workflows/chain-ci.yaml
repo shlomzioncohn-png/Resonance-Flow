@@ -6,10 +6,12 @@ on:
     tags: [ "chain-v*.*.*" ]
     paths:
       - "teams/chain/**"
+      - "shared/proto/**"
   pull_request:
     branches: [ "main" ]
     paths:
       - "teams/chain/**"
+      - "shared/proto/**"
   workflow_dispatch: {}
 
 jobs:
@@ -35,3 +37,4 @@ jobs:
       service_dir: teams/chain
       language: java
       container_port: 8081
+      extra_build_contexts: shared=shared

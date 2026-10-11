@@ -3,7 +3,6 @@
 components:
   bridge:
     enabled: true
-
 kafka:
   enabled: true
 minio:

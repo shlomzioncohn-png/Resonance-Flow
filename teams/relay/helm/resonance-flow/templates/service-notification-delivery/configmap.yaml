@@ -42,7 +42,7 @@ data:
         properties:
           security.protocol: SASL_PLAINTEXT
           sasl.mechanism: PLAIN
-          sasl.jaas.config: {{ include "resonance-flow.kafkaSaslJaasConfig" $ | quote }}
+          sasl.jaas.config: {{ include "resonance-flow.kafkaSaslJaasConfig" (dict "root" $) | quote }}
           schema.registry.url: {{ printf "http://%s/apis/ccompat/v6" (include "resonance-flow.dependencyAddress" (dict "root" $ "deps" .dependencies "name" "schema-registry")) | quote }}
 {{- end }}
 {{- end }}
