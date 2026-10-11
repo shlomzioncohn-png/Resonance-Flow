@@ -3,6 +3,8 @@ package com.rnd.chain.events;
 import com.rnd.chain.dto.Task;
 import com.rnd.chain.dto.TaskDependency;
 import com.rnd.chain.dto.TaskStatus;
+import com.rnd.chain.event.SchedulingUpdatePublisher;
+import com.rnd.chain.event.TaskSchedulingUpdatedEvent;
 import com.rnd.chain.repository.InMemoryTaskDependencyRepository;
 import com.rnd.chain.repository.InMemoryTaskRepository;
 import com.rnd.chain.repository.TaskDependencyRepository;
@@ -29,6 +31,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.CopyOnWriteArrayList;
 
 import static org.awaitility.Awaitility.await;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -62,7 +65,27 @@ class TaskCompletedEventHandlerIntegrationTest {
         TaskDependencyRepository testTaskDependencyRepository() {
             return new InMemoryTaskDependencyRepository(List.of());
         }
+
+        @Bean
+        @Primary
+        RecordingSchedulingUpdatePublisher testSchedulingUpdatePublisher() {
+            return new RecordingSchedulingUpdatePublisher();
+        }
     }
+
+    /** Keeps task.scheduling.updated events in memory; the listener thread writes, the test thread reads. */
+    static class RecordingSchedulingUpdatePublisher implements SchedulingUpdatePublisher {
+
+        final List<TaskSchedulingUpdatedEvent> published = new CopyOnWriteArrayList<>();
+
+        @Override
+        public void publish(TaskSchedulingUpdatedEvent event) {
+            published.add(event);
+        }
+    }
+
+    @org.springframework.beans.factory.annotation.Autowired
+    private RecordingSchedulingUpdatePublisher schedulingPublisher;
 
     @org.springframework.beans.factory.annotation.Autowired
     private TaskRepository taskRepository;
@@ -105,6 +128,10 @@ class TaskCompletedEventHandlerIntegrationTest {
                 .build());
     }
 
+    private List<TaskSchedulingUpdatedEvent> schedulingEventsFor(UUID taskId) {
+        return schedulingPublisher.published.stream().filter(e -> e.getTaskId().equals(taskId)).toList();
+    }
+
     @Test
     void blockerCompleted_releasesTheDependent() {
         UUID blocker = UUID.randomUUID();
@@ -120,6 +147,13 @@ class TaskCompletedEventHandlerIntegrationTest {
 
         assertEquals(0, taskRepository.findById(dependent).orElseThrow().getBlockingCount());
         assertEquals(TaskStatus.DONE, taskRepository.findById(blocker).orElseThrow().getStatus());
+
+        // The event is published right after the repository update, so wait for it rather than assert at once.
+        await().atMost(Duration.ofSeconds(5)).untilAsserted(() -> {
+            List<TaskSchedulingUpdatedEvent> events = schedulingEventsFor(dependent);
+            assertEquals(1, events.size());
+            assertTrue(events.get(0).isAvailable());
+        });
     }
 
     @Test
@@ -144,7 +178,27 @@ class TaskCompletedEventHandlerIntegrationTest {
             Task unchanged = taskRepository.findById(dependent).orElseThrow();
             assertEquals(1, unchanged.getBlockingCount());
             assertTrue(!unchanged.isReady());
+            assertTrue(schedulingEventsFor(dependent).isEmpty());
         });
+    }
+
+    @Test
+    void redeliveredCompleted_publishesSchedulingUpdateOnlyOnce() {
+        UUID blocker = UUID.randomUUID();
+        UUID dependent = UUID.randomUUID();
+        saveTask(buildTask(blocker, TaskStatus.ACTIVE, BASE_TIME, 0));
+        saveTask(buildTask(dependent, TaskStatus.PENDING, BASE_TIME, 1));
+        ((InMemoryTaskDependencyRepository) taskDependencyRepository).save(new TaskDependency(dependent, blocker));
+
+        sendCompleted(blocker);
+        sendCompleted(blocker);
+
+        await().atMost(Duration.ofSeconds(20)).alias("the release event").until(() ->
+                !schedulingEventsFor(dependent).isEmpty());
+
+        // A second event for the redelivered record would show up within this window.
+        await().during(Duration.ofSeconds(3)).atMost(Duration.ofSeconds(5)).untilAsserted(() ->
+                assertEquals(1, schedulingEventsFor(dependent).size()));
     }
 
     @Test
