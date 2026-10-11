@@ -141,9 +141,9 @@ Make a **compatible** change and push it (both the source and the chart's mirror
 copy — `relay-schema-sync.yaml` only refreshes the mirror on `main`):
 
 ```bash
-# add a field to teams/relay/src/main/proto/task-event.proto, e.g.
+# add a field to shared/proto/task-event.proto, e.g.
 #   string trace_id = 7;
-cp teams/relay/src/main/proto/task-event.proto \
+cp shared/proto/task-event.proto \
    teams/relay/schema-sync-hook/files/schemas/task-event.proto
 git add -A && git commit -m "env: compatible schema change" && git push
 ```
@@ -176,9 +176,9 @@ kubectl -n schema-sync-hook get configmap wave0-canary   # should exist
 Push a **breaking** change:
 
 ```bash
-# in teams/relay/src/main/proto/task-event.proto change
+# in shared/proto/task-event.proto change
 #   string task_id = 2;   ->   int64 task_id = 2;
-cp teams/relay/src/main/proto/task-event.proto \
+cp shared/proto/task-event.proto \
    teams/relay/schema-sync-hook/files/schemas/task-event.proto
 git add -A && git commit -m "env: breaking schema change" && git push
 ```

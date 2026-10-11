@@ -13,6 +13,7 @@ import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;
 import jakarta.persistence.Enumerated;
+import jakarta.persistence.FetchType;
 import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.Id;
 import jakarta.persistence.JoinColumn;
@@ -33,11 +34,11 @@ public class Task {
     @Column(updatable = false, nullable = false)
     private UUID id;
 
-    @ManyToOne
+    @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "tenant_id", nullable = false)
     private Tenant tenant;
 
-    @ManyToOne
+    @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "project_id", nullable = true)
     private Project project;
 
@@ -99,18 +100,18 @@ public class Task {
     @Column(name = "effort_estimate_confidence")
     private Float effortEstimateConfidence;
 
-    @ManyToOne
+    @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "owner_id")
     private User owner;
 
-    @ManyToOne
+    @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "suggested_owner_user_id")
     private User suggestedOwnerUser;
 
     @Column(name = "suggested_owner_confidence")
     private Float suggestedOwnerConfidence;
 
-    @ManyToOne
+    @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "created_by", nullable = true)
     private User createdBy;
 
@@ -352,7 +353,8 @@ public class Task {
         if (this == o) return true;
         if (!(o instanceof Task)) return false;
         Task that = (Task) o;
-        return id != null && id.equals(that.id);
+        // getId(), not the field: "that" may be a lazy-loading proxy, whose own fields are empty.
+        return id != null && id.equals(that.getId());
     }
 
     @Override

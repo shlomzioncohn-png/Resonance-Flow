@@ -1,10 +1,10 @@
 package com.rnd.bridge.crm.controller;
 
 import com.rnd.bridge.core.IntakeResult;
-import com.rnd.bridge.core.ReadCursor;
 import com.rnd.bridge.core.error.ValidationException;
 import com.rnd.bridge.crm.CrmLane;
 import com.rnd.bridge.crm.repository.DealRepository;
+import com.rnd.bridge.crm.repository.DealSnapshot;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
@@ -13,6 +13,8 @@ import org.springframework.test.web.servlet.MockMvc;
 
 import java.time.Instant;
 import java.util.List;
+import java.util.Map;
+import java.util.stream.Stream;
 
 import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.not;
@@ -28,8 +30,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 /**
  * Tests the HTTP layer only, with CrmLane and DealRepository mocked.
- * CrmLaneIntegrationTest already covers a real run over the 79-record
- * dataset; repeating that through HTTP would add nothing.
+ * CrmLaneIntegrationTest already covers a real run over the synthetic dataset;
+ * repeating that through HTTP would add nothing.
  */
 @WebMvcTest(CrmBridgeController.class)
 class CrmBridgeControllerTest {
@@ -43,26 +45,31 @@ class CrmBridgeControllerTest {
     @MockBean
     private DealRepository dealRepository;
 
+    private static DealSnapshot snapshotAt(Instant asOf) {
+        return new DealSnapshot(asOf, List.of(), Map.of(), List.of(), 0);
+    }
+
     @Test
     void postReturnsOkWithTheCountsFromTheLaneResult() throws Exception {
         Instant asOf = Instant.parse("2026-08-24T09:00:00Z");
-        when(dealRepository.asOf()).thenReturn(asOf);
-        when(crmLane.run(any(ReadCursor.class), eq(asOf)))
-                .thenReturn(new IntakeResult(79, 79, 0, List.of()));
+        when(dealRepository.snapshot()).thenReturn(snapshotAt(asOf));
+        when(crmLane.run(any(Stream.class), eq(asOf)))
+                .thenReturn(new IntakeResult(32, 32, 0, List.of()));
 
         mockMvc.perform(post("/bridge/crm/sync"))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.read").value(79))
-                .andExpect(jsonPath("$.published").value(79))
-                .andExpect(jsonPath("$.rejected").value(0));
+                .andExpect(jsonPath("$.read").value(32))
+                .andExpect(jsonPath("$.published").value(32))
+                .andExpect(jsonPath("$.rejected").value(0))
+                .andExpect(jsonPath("$.skippedAtRead").value(0));
     }
 
     @Test
     void aRejectedRecordStillReturnsOkWithTheMessageAndNoStackTraceOrClassName() throws Exception {
         Instant asOf = Instant.parse("2026-08-24T09:00:00Z");
-        when(dealRepository.asOf()).thenReturn(asOf);
-        when(crmLane.run(any(ReadCursor.class), eq(asOf)))
-                .thenReturn(new IntakeResult(79, 78, 1,
+        when(dealRepository.snapshot()).thenReturn(snapshotAt(asOf));
+        when(crmLane.run(any(Stream.class), eq(asOf)))
+                .thenReturn(new IntakeResult(32, 31, 1,
                         List.of(new ValidationException("Invalid Task.title = null: must not be null"))));
 
         mockMvc.perform(post("/bridge/crm/sync"))
@@ -75,15 +82,42 @@ class CrmBridgeControllerTest {
     }
 
     @Test
-    void asOfComesFromTheRepositoryNotTheClock() throws Exception {
+    void asOfComesFromTheSnapshotNotTheClock() throws Exception {
         Instant configuredAsOf = Instant.parse("2020-01-01T00:00:00Z");
-        when(dealRepository.asOf()).thenReturn(configuredAsOf);
-        when(crmLane.run(any(ReadCursor.class), any())).thenReturn(new IntakeResult(0, 0, 0, List.of()));
+        when(dealRepository.snapshot()).thenReturn(snapshotAt(configuredAsOf));
+        when(crmLane.run(any(Stream.class), any())).thenReturn(new IntakeResult(0, 0, 0, List.of()));
 
         mockMvc.perform(post("/bridge/crm/sync"))
                 .andExpect(status().isOk());
 
-        verify(crmLane).run(any(ReadCursor.class), eq(configuredAsOf));
+        verify(crmLane).run(any(Stream.class), eq(configuredAsOf));
+    }
+
+    @Test
+    void reportsSkippedAtReadFromTheSnapshot() throws Exception {
+        Instant asOf = Instant.parse("2026-08-24T09:00:00Z");
+        when(dealRepository.snapshot()).thenReturn(new DealSnapshot(asOf, List.of(), Map.of(), List.of(), 3));
+        when(crmLane.run(any(Stream.class), eq(asOf))).thenReturn(new IntakeResult(29, 29, 0, List.of()));
+
+        mockMvc.perform(post("/bridge/crm/sync"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.skippedAtRead").value(3));
+    }
+
+    @Test
+    void snapshotFailureReturnsAClearServiceUnavailableErrorNotAGenericFiveHundred() throws Exception {
+        // E.g. HubSpotDealRepository.snapshot() re-fetching a pipeline that now has an
+        // unrecognized stage label (see HubSpotDealRepositoryTest's
+        // secondSnapshotFailsEntirelyWhenTheRefetchedPipelineHasAnUnrecognizedStageLabel) - this
+        // test only needs a RuntimeException escaping dealRepository.snapshot() in general.
+        when(dealRepository.snapshot()).thenThrow(
+                new RuntimeException("HubSpot pipeline \"Sales Pipeline\" has a stage \"Some Brand New Custom Stage\" "
+                        + "with no known DealStage mapping"));
+
+        mockMvc.perform(post("/bridge/crm/sync"))
+                .andExpect(status().isServiceUnavailable())
+                .andExpect(jsonPath("$.error").value(
+                        org.hamcrest.Matchers.containsString("Some Brand New Custom Stage")));
     }
 
     @Test
