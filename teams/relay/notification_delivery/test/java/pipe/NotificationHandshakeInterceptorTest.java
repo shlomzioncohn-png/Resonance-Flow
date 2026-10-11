@@ -2,7 +2,6 @@ package pipe;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.http.server.ServerHttpRequest;
-import org.springframework.http.server.ServerHttpResponse;
 import org.springframework.http.server.ServletServerHttpRequest;
 import org.springframework.http.server.ServletServerHttpResponse;
 import org.springframework.mock.web.MockHttpServletRequest;
@@ -16,7 +15,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 class NotificationHandshakeInterceptorTest {
 
     private final NotificationHandshakeInterceptor interceptor =
-            new NotificationHandshakeInterceptor(new HeaderAuthenticationStub());
+            new NotificationHandshakeInterceptor(new TrustedHeaderAuthenticator());
 
     @Test
     void missingOrgIdIsRejectedWithBadRequest() {
@@ -39,6 +38,36 @@ class NotificationHandshakeInterceptorTest {
         boolean accepted = beforeHandshake(servletRequest, attributes);
 
         assertThat(accepted).isFalse();
+    }
+
+    @Test
+    void blankOrgIdIsRejectedWithBadRequest() {
+        MockHttpServletRequest servletRequest = new MockHttpServletRequest("GET", "/api/v1/events/stream");
+        servletRequest.addHeader("X-Org-Id", "  ");
+        servletRequest.addHeader("X-User-Id", "user-1");
+        Map<String, Object> attributes = new HashMap<>();
+        MockHttpServletResponse servletResponse = new MockHttpServletResponse();
+
+        boolean accepted = beforeHandshake(servletRequest, servletResponse, attributes);
+
+        assertThat(accepted).isFalse();
+        assertThat(servletResponse.getStatus()).isEqualTo(400);
+        assertThat(attributes).isEmpty();
+    }
+
+    @Test
+    void blankUserIdIsRejectedWithBadRequest() {
+        MockHttpServletRequest servletRequest = new MockHttpServletRequest("GET", "/api/v1/events/stream");
+        servletRequest.addHeader("X-Org-Id", "org-1");
+        servletRequest.addHeader("X-User-Id", "");
+        Map<String, Object> attributes = new HashMap<>();
+        MockHttpServletResponse servletResponse = new MockHttpServletResponse();
+
+        boolean accepted = beforeHandshake(servletRequest, servletResponse, attributes);
+
+        assertThat(accepted).isFalse();
+        assertThat(servletResponse.getStatus()).isEqualTo(400);
+        assertThat(attributes).isEmpty();
     }
 
     @Test
@@ -99,8 +128,13 @@ class NotificationHandshakeInterceptorTest {
     }
 
     private boolean beforeHandshake(MockHttpServletRequest servletRequest, Map<String, Object> attributes) {
+        return beforeHandshake(servletRequest, new MockHttpServletResponse(), attributes);
+    }
+
+    private boolean beforeHandshake(MockHttpServletRequest servletRequest, MockHttpServletResponse servletResponse,
+            Map<String, Object> attributes) {
         ServerHttpRequest request = new ServletServerHttpRequest(servletRequest);
-        ServerHttpResponse response = new ServletServerHttpResponse(new MockHttpServletResponse());
+        ServletServerHttpResponse response = new ServletServerHttpResponse(servletResponse);
         return interceptor.beforeHandshake(request, response, null, attributes);
     }
 }

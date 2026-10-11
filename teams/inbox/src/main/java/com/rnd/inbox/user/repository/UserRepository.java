@@ -3,6 +3,7 @@ import com.rnd.inbox.team.member.TeamMember;
 import com.rnd.inbox.user.model.User;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
+import org.springframework.data.jpa.repository.EntityGraph;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
@@ -16,6 +17,13 @@ public interface UserRepository extends JpaRepository<User, UUID> {
 
     Optional<User> findByUsername(String username);
 
+    // The list responses show each user's tenant. The relation is lazy, so without the entity graph
+    // the tenant of every row would be loaded by a SELECT of its own; with it, it is joined in.
+    @Override
+    @EntityGraph(attributePaths = "tenant")
+    Page<User> findAll(Pageable pageable);
+
+    @EntityGraph(attributePaths = "tenant")
     Page<User> findAllByTenantId(UUID tenantId, Pageable pageable);
 
     @Query(value = "SELECT DISTINCT tm.user FROM TeamMember tm "
