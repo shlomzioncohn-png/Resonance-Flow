@@ -20,6 +20,7 @@ if sys.platform == "win32":
     asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 
 _ROOT = Path(__file__).resolve().parent.parent
+_SHARED_PROTO = _ROOT.parent.parent / "shared" / "proto"
 
 # tests/test_vector_store.py reads MIND_VECTOR_STORE__DSN straight from
 # os.environ (deliberately, not via mind.config.Settings -- see its `store`
@@ -51,17 +52,18 @@ if not (_MESSAGING / "mind_task_created_pb2.py").exists():
     )
 
 # task-{created,updated,completed}-event.proto are Inbox's real, registered
-# schemas (vendored verbatim -- see each file's header), used by the #470
-# index consumer. Separate from the mind-task-* drafts above.
+# schemas, used by the #470 index consumer. Built straight from shared/proto/
+# (the single registered copy, see shared/proto/README.md) -- never vendored,
+# or they'd silently drift from what Inbox actually publishes.
 if not (_MESSAGING / "task_created_event_pb2.py").exists():
     subprocess.run(
         [
             "python", "-m", "grpc_tools.protoc",
-            "--proto_path", str(_ROOT / "proto"),
+            "--proto_path", str(_SHARED_PROTO),
             "--python_out", str(_MESSAGING),
-            str(_ROOT / "proto" / "task-created-event.proto"),
-            str(_ROOT / "proto" / "task-updated-event.proto"),
-            str(_ROOT / "proto" / "task-completed-event.proto"),
+            str(_SHARED_PROTO / "task-created-event.proto"),
+            str(_SHARED_PROTO / "task-updated-event.proto"),
+            str(_SHARED_PROTO / "task-completed-event.proto"),
         ],
         check=True,
     )

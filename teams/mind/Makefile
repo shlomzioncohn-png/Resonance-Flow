@@ -6,8 +6,17 @@ install:
 dev:
 	pip install -e ".[dev]"
 
+# task-{created,updated,completed}-event.proto come from shared/proto/ (the
+# single registered copy, owned by Relay -- see shared/proto/README.md), not
+# from proto/ -- never vendor them locally, or they drift from what Inbox
+# actually publishes.
 proto:
-	python -m grpc_tools.protoc --proto_path=proto --python_out=src/mind/messaging proto/*.proto
+	python -m grpc_tools.protoc --proto_path=proto --python_out=src/mind/messaging \
+		proto/mind-task-created.proto proto/mind-task-dependencies.proto
+	python -m grpc_tools.protoc --proto_path=../../shared/proto --python_out=src/mind/messaging \
+		../../shared/proto/task-created-event.proto \
+		../../shared/proto/task-updated-event.proto \
+		../../shared/proto/task-completed-event.proto
 
 test: proto
 	pytest --cov=src/mind
