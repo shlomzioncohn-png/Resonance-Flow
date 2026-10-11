@@ -55,7 +55,7 @@ jobs:
               { label: 'Inbox',  members: [] }, // fill in: INBOX team members
               { label: 'Bridge', members: [] }, // fill in: BRIDGE team members
               { label: 'Mind',   members: [] }, // fill in: MIND team members
-              { label: 'Chain',  members: [] }, // fill in: CHAIN team members
+              { label: 'Chain',  members: ['RuthHoltzman','Shifi-Aisenstain', 'rikiMittelman'] }, // fill in: CHAIN team members
               { label: 'Relay',  members: ['avigailrapa', 'Ayala679', 'ch-kap219', 'gittyafe'] },
             ];
 

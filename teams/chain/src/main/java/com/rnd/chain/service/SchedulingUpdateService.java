@@ -6,6 +6,8 @@ import com.rnd.chain.event.TaskSchedulingUpdatedEvent;
 
 import org.springframework.stereotype.Service;
 
+import java.util.UUID;
+
 @Service
 public class SchedulingUpdateService {
 
@@ -23,6 +25,7 @@ public class SchedulingUpdateService {
         // not Mind's raw score - task.getScore() was a stand-in used before priorityScore existed.
         TaskSchedulingUpdatedEvent event =
                 new TaskSchedulingUpdatedEvent(
+                        UUID.randomUUID(),
                         task.getId(),
                         task.isReady(),
                         task.getPriorityScore()

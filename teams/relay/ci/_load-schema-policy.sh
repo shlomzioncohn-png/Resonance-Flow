@@ -6,7 +6,7 @@
 # lowering the level or dropping a schema from the list in the same PR.
 #
 # Requires in the environment: BASE_REF, REPO_ROOT, SCRIPT_DIR
-# Sets: SCHEMA_LIST (the tsv contents), COMPATIBILITY_LEVEL
+# Sets: SCHEMA_LIST (the tsv contents), COMPATIBILITY_LEVEL, RESET_SUBJECTS
 
 : "${BASE_REF:?_load-schema-policy.sh: BASE_REF not set}"
 
@@ -18,7 +18,20 @@ else
   SCHEMA_LIST="$(cat "${SCRIPT_DIR}/schema-subjects.tsv")"
 fi
 
+# Library rows (file == subject) this checkout adds go first: they only add checks, and
+# _schema-references.sh can't resolve an import without one, even when seeding the base.
+_new_libraries="$(awk -F'\t' '{ sub(/\r$/, "") } NR == FNR { seen[$0] = 1; next }
+  $1 != "" && $1 !~ /^#/ && $1 == $2 && !seen[$0]' \
+  <(printf '%s\n' "$SCHEMA_LIST") "${SCRIPT_DIR}/schema-subjects.tsv")"
+if [ -n "$_new_libraries" ]; then
+  SCHEMA_LIST="$(printf '%s\n%s' "$_new_libraries" "$SCHEMA_LIST")"
+fi
+
 # "# compatibility: <LEVEL>" directive line in the tsv. Default FULL.
 COMPATIBILITY_LEVEL="$(printf '%s\n' "$SCHEMA_LIST" \
   | awk -F: '/^#[[:space:]]*compatibility:/ {gsub(/[[:space:]]/,"",$2); print $2; exit}')"
 COMPATIBILITY_LEVEL="${COMPATIBILITY_LEVEL:-FULL}"
+
+# "# reset: <subject>" lines: subjects whose old versions are dropped, not checked against.
+RESET_SUBJECTS="$(printf '%s\n' "$SCHEMA_LIST" \
+  | awk -F: '/^#[[:space:]]*reset:/ {gsub(/[[:space:]]/,"",$2); print $2}')"
