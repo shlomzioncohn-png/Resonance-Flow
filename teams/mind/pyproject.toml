@@ -13,13 +13,17 @@ dependencies = [
     "uvicorn",
     # embeddings (src/mind/embeddings)
     "psycopg[binary,pool]>=3.1",
-    "scikit-learn>=1.4",
-    "numpy>=1.26",
+    "sentence-transformers>=3.0",
     # messaging (src/mind/messaging)
     "confluent-kafka[protobuf,schemaregistry]>=2.5,<2.11",
     "protobuf>=5",
     "pyyaml",
-    # add as decided: OCR/ASR libs, LLM client, etc.
+    # OCR (src/mind/multimodal/ocr.py) -- tesseract --psm 11, the decision
+    # made in benchmarks/ocr-asr-benchmark.md. Also requires the
+    # tesseract-ocr system binary (not pip-installable).
+    "pillow",
+    "pypdfium2",  # rasterizes PDF pages to images for the OCR pipeline
+    # add as decided: ASR libs, LLM client, etc.
 ]
 
 [project.optional-dependencies]
@@ -42,11 +46,11 @@ dev = [
     "grpcio-tools==1.71.0",  # protoc, for `make proto`
     "python-dotenv",  # tests/conftest.py loads .env for os.environ-reading fixtures
 ]
-# Not a runtime dependency of src/mind/ -- extraction/multimodal isn't
-# built yet (Phase 2). Only benchmarks/ocr_asr_benchmark.py needs these;
-# Tesseract also requires the tesseract-ocr system binary (not
-# pip-installable); PaddleOCR also requires its model weights, which may
-# need manual placement under ~/.paddlex/official_models/ if the
+# Not a runtime dependency of src/mind/ -- only benchmarks/ocr_asr_benchmark.py
+# needs these (psutil for peak-RSS sampling, PaddleOCR as the comparison
+# engine). Tesseract itself, the chosen OCR, is a system binary and runtime
+# dependency -- see above. PaddleOCR also requires its model weights, which
+# may need manual placement under ~/.paddlex/official_models/ if the
 # auto-download hosters are network-filtered -- see
 # benchmarks/ocr-asr-benchmark.md "PaddleOCR -- setup".
 benchmark = [
@@ -82,6 +86,11 @@ ignore_missing_imports = true
 module = "confluent_kafka.*"
 ignore_missing_imports = true
 
+# No stubs/py.typed marker published for this dependency.
+[[tool.mypy.overrides]]
+module = "pypdfium2.*"
+ignore_missing_imports = true
+
 [tool.ruff.lint]
 # TID252 (flake8-tidy-imports): use absolute imports, not relative ("from .x").
 extend-select = ["TID252"]
@@ -98,7 +107,3 @@ asyncio_mode = "auto"
 # the same way it does under a real server, not get recreated per test.
 asyncio_default_fixture_loop_scope = "session"
 asyncio_default_test_loop_scope = "session"
-
-[[tool.mypy.overrides]]
-module = "sklearn.*"
-ignore_missing_imports = true

@@ -12,6 +12,7 @@ import com.rnd.inbox.support.PostgresIntegrationTest;
 import com.rnd.inbox.tenant.model.Tenant;
 import com.rnd.inbox.tenant.repository.TenantRepository;
 import com.rnd.inbox.tenant.model.TenantStatus;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.mock.mockito.MockBean;
@@ -19,6 +20,8 @@ import org.springframework.dao.DataIntegrityViolationException;
 
 import java.time.Instant;
 import java.util.UUID;
+import java.util.ArrayList;
+import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -38,6 +41,14 @@ class TaskAuditTransactionIntegrationTest extends PostgresIntegrationTest {
 
     @MockBean
     private AuditLogRepository auditLogRepository;
+
+    private final List<UUID> createdTenantIds = new ArrayList<>();
+
+    // Only the tenants this test created are removed - see PostgresIntegrationTest.
+    @AfterEach
+    void cleanUp() {
+        deleteTenantData(createdTenantIds);
+    }
 
     @Test
     void auditWriteFailureRollsBackTheTaskInsert() {
@@ -71,6 +82,8 @@ class TaskAuditTransactionIntegrationTest extends PostgresIntegrationTest {
         tenant.setStatus(TenantStatus.ACTIVE);
         tenant.setCreatedAt(Instant.now());
         tenant.setUpdatedAt(Instant.now());
-        return tenantRepository.saveAndFlush(tenant);
+        Tenant saved = tenantRepository.saveAndFlush(tenant);
+        createdTenantIds.add(saved.getId());
+        return saved;
     }
 }

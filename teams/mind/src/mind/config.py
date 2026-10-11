@@ -25,13 +25,25 @@ def _read_yaml(path: str) -> dict[str, Any]:
     return yaml.safe_load(p.read_text()) if p.is_file() else {}
 
 
+class EmbeddingModelSettings(BaseSettings):
+    """Standalone, not nested under Settings -- embed() needs no DSN."""
+
+    model_config = SettingsConfigDict(
+        env_prefix="MIND_EMBEDDING_MODEL__", env_file=_ENV_FILE, extra="ignore"
+    )
+
+    name: str = "BAAI/bge-small-en-v1.5"
+    model_cache_dir: str | None = Field(default=None, validation_alias="MODEL_CACHE_DIR")
+
+
 class VectorStoreSettings(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     dsn: Secret[PostgresDsn]
     table: str = "task_embeddings"
     search_effort: int = Field(default=400, ge=1)
-    embedding_dim: int = Field(default=256, ge=1)
+    # Must match embed()'s real output dimension.
+    embedding_dim: int = Field(default=384, ge=1)
 
 
 class _ChartVectorStoreSource(PydanticBaseSettingsSource):
@@ -70,6 +82,7 @@ class Settings(BaseSettings):
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"] = "INFO"
     duplicate_similarity_threshold: float = Field(default=0.90, ge=0.0, le=1.0)
     vector_store: VectorStoreSettings
+    embedding_model: EmbeddingModelSettings = Field(default_factory=EmbeddingModelSettings)
 
     @classmethod
     def settings_customise_sources(
