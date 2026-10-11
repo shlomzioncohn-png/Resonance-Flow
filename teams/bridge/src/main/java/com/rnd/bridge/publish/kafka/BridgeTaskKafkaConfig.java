@@ -116,6 +116,18 @@ class BridgeTaskKafkaConfig {
         // as a side effect of publishing, or Inbox would end up validating against whatever Bridge
         // happened to send first instead of a reviewed contract. See issue #567.
         props.put(KafkaProtobufSerializerConfig.AUTO_REGISTER_SCHEMAS, false);
+        // structured-task-event.proto's imports (task-created-event.proto,
+        // task-creation-requested-event.proto) are registered by Relay as schema references under
+        // file-name subjects (the Confluent default), per #618 - so the default
+        // reference.subject.name.strategy resolves them correctly and no custom strategy is
+        // configured here. use.latest.version makes the serializer use the latest registered
+        // version of bridge.structured.tasks-value. Exactly the pair Relay's own guide recommends
+        // (teams/relay/docs/kafka-producer-consumer-guide.md) and the same setup Chain uses
+        // (ChainProtobufKafkaConfig). Deploy only once #627 (the file-name-subject fix) and the
+        // bridge.structured.tasks-value registration have both landed - the real verification is
+        // the joint test against a live Apicurio registry, not a MockSchemaRegistryClient with
+        // hand-built references.
+        props.put(KafkaProtobufSerializerConfig.USE_LATEST_VERSION, true);
         return new DefaultKafkaProducerFactory<>(props);
     }
 
