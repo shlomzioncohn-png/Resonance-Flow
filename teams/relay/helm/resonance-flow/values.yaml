@@ -136,9 +136,9 @@ components:
         dependencyName: object-storage
         items:
           - key: root-user
-            path: minio.access-key
+            path: object-storage.access-key
           - key: root-password
-            path: minio.secret-key
+            path: object-storage.secret-key
     volumes:
       - name: mind-llm-credentials
         secret:
