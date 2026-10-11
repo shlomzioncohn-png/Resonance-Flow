@@ -415,6 +415,10 @@ components:
       pullPolicy: IfNotPresent
       tag: "2.5.11.Final"
     containerPort: 8080
+    env:
+      # ccompat lookups otherwise exact-match schema text, so Confluent serializers with
+      # auto.register=false (Chain) fail with 40403 on an identical proto.
+      REGISTRY_CCOMPAT_USE_CANONICAL_HASH: "true"
     service:
       type: ClusterIP
       port: 8080

@@ -4,47 +4,23 @@ Vectors, semantic search, duplicate/related-task detection.
 
 ## Decisions (closed)
 
-- **Vector store: Chosen: pgvector** — see
-  [`../../../benchmarks/vector-store-comparison.md`](../../../benchmarks/vector-store-comparison.md)
-  for the comparison, decision, and validation results (latency and recall,
-  at the real 10,000-vector load target).
-- **Embedding model: still a placeholder (`embeddings.py`, HashingVectorizer)
-  — not a real semantic model yet, deliberately.** See the comparison doc's
-  "Validation" section for what that costs in practice (near-zero recall
-  on paraphrased near-duplicates); swapping it is tracked separately and
-  is a one-function change (see `embeddings.py`'s docstring).
-- **Load target** (week 8, provisional): 10,000+ embedded records, semantic
-  query at <300ms p95.
+- **Vector store: pgvector** — see [`vector-store-comparison.md`](../../../benchmarks/vector-store-comparison.md).
+- **Embedding model: `BAAI/bge-small-en-v1.5`**, 384-dim, CPU-only, English-only. Asymmetric -- queries need `is_query=True`. Local weights optional via `MODEL_CACHE_DIR`.
+- **Load target** (week 8, provisional): 10,000+ records, <300ms p95.
 
 ## What's here
 
 ```
-__init__.py         the public interface -- embed(), SearchResult, VectorStore
-embeddings.py        embed() -- the (placeholder) text vectorizer
-base.py               VectorStore abstract interface (the "contract") + SearchResult -- dependency-free (besides pydantic)
-pgvector_store.py    the ONLY file that knows about Postgres/pgvector
+__init__.py          public interface -- embed()/embed_batch() (+ async), SearchResult, VectorStore
+embeddings.py         embed() family -- the real model
+base.py               VectorStore abstract contract + SearchResult
+pgvector_store.py     the ONLY file that knows Postgres/pgvector
+loader.py             fetches + verifies the real FUNSD manifest slice
+ingest.py             loader -> embed_batch_async -> upsert
+verify.py             table row count vs. manifest record count
 ```
 
-Config lives one level up, at `mind.config` (`Settings`/`VectorStoreSettings`)
--- it's app-wide, not specific to this module.
-
-Nothing outside `__init__.py` should be imported by callers elsewhere in
-the app, except `PgVectorStore` itself, which callers construct directly
-(see "Using the interface" below) -- there's no factory/singleton
-indirection. `base.py` deliberately has zero *backend-specific*
-dependencies (only `abc` and `pydantic`, already a core project
-dependency) so the interface itself can be imported -- for type-checking,
-mocking in tests, or sketching a new backend -- without requiring
-psycopg to be installed; only `pgvector_store.py` actually imports it.
-
-`upsert`/`search`/`delete`/`clear`/`open`/`close` are all `async def` --
-the store talks to Postgres over psycopg's async API so it doesn't block
-the event loop under FastAPI's `async def` route handlers.
-
-`open()`/`close()` control the backing store's resources (e.g. a
-connection pool) explicitly -- call them from a FastAPI lifespan handler
-so the pool's lifetime is tied to the app's, on a known event loop, from
-the start (see `api/main.py` for the real one):
+Config lives in `mind.config`. Only `PgVectorStore` is constructed directly outside `__init__.py` -- no factory/singleton.
 
 ```python
 from contextlib import asynccontextmanager
@@ -61,68 +37,52 @@ async def lifespan(app: FastAPI):
         yield
     finally:
         await store.close()
-
-app = FastAPI(lifespan=lifespan)
 ```
 
-If you never call `open()`, the store still initializes itself lazily on
-first `upsert`/`search`/`delete`/`clear` -- fine for standalone scripts,
-but for a long-running server prefer the explicit form above (see
-`base.VectorStore.open()`'s docstring for why).
+## Real data: the FUNSD slice (not R2)
+
+No R2 loader/storage exists in this repo. `loader.py` fetches the real 2-document FUNSD slice (PR #141's manifest), verifies checksums, caches under `local-data/`.
+
+```bash
+python -m mind.embeddings.ingest    # fetch + verify + embed + upsert
+python -m mind.embeddings.verify    # table row count vs. manifest
+```
 
 ## Setup
 
-Requires a local Postgres with the `vector` extension (build steps in
-`pgvector`'s repo: https://github.com/pgvector/pgvector), and the `mind`
-package installed with its normal dependencies:
-
 ```bash
-make dev        # from teams/mind/ -- installs everything, including this module's deps
+make dev
 export MIND_ENVIRONMENT=local
 export MIND_VECTOR_STORE__DSN="postgresql://mind:mind@localhost:5432/mind"
 ```
 
-`mind.config.Settings` fails fast if `MIND_ENVIRONMENT` or
-`MIND_VECTOR_STORE__DSN` aren't set, rather than silently connecting with
-guessed/default credentials. Importing `mind.embeddings` itself doesn't
-require either -- only constructing a `PgVectorStore` (or calling
-`mind.config.get_settings()`) does.
+`embed()` downloads `BAAI/bge-small-en-v1.5` on first use unless `MODEL_CACHE_DIR` points at a local copy.
 
 ## Run the tests
 
 ```bash
-pytest          # from teams/mind/ -- picks up tests/test_vector_store.py automatically
+pytest
 ```
 
 ## Using the interface elsewhere in the app
 
 ```python
 from mind.config import get_settings
-from mind.embeddings import embed
+from mind.embeddings import embed_async
 from mind.embeddings.pgvector_store import PgVectorStore
 
-store = PgVectorStore(get_settings().vector_store)  # or reuse app.state.vector_store
+store = PgVectorStore(get_settings().vector_store)
 
-vector = embed(task.title + " " + task.description)
+vector = await embed_async(task.title + " " + task.description)  # is_query=False (default) for indexing
 await store.upsert(task.id, vector)
 
-similar = await store.search(vector, k=5)  # [SearchResult(task_id=..., similarity=...), ...], best match first
-
-await store.delete(task.id)  # e.g. when the task itself is deleted
+similar = await store.search(vector, k=5)  # best match first
+await store.delete(task.id)
 ```
 
-No caller anywhere else in the codebase should know that Postgres is
-involved. If we switch databases later, only `pgvector_store.py` (a new
-sibling implementing `base.VectorStore`) needs to change.
+For a query against stored passages (e.g. a search endpoint), use `store.search_text(query, k)` instead -- it embeds with `is_query=True` so the flag can't be forgotten.
 
 ## Known limitations (flag these in review)
 
-- `embed()` uses a deterministic hashing-based text vectorizer, not a real
-  semantic embedding model — see the note at the top of `embeddings.py` for
-  why, and what to swap in. Quantified impact in
-  `benchmarks/vector-store-comparison.md`'s "Validation" section: this is
-  the dominant cause of near-zero recall on realistic near-duplicate
-  detection at scale — not pgvector or its HNSW index.
-- `Settings.duplicate_similarity_threshold` (`mind.config`) is an untuned
-  placeholder -- `search()` now returns a cosine similarity per result,
-  but no caller applies the threshold to it yet.
+- `Settings.duplicate_similarity_threshold` is an untuned placeholder -- no caller applies it yet.
+- Real-data coverage is just the 2-document FUNSD slice (PR #141) -- enough to validate pipeline shape, not recall quality.

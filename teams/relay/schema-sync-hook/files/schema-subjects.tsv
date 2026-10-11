@@ -7,6 +7,9 @@
 #                                                     checking against them. Pre-production only;
 #                                                     remove the line once the cluster has synced.
 #   <file-under-shared/proto>\t<subject>              one per schema (tab-separated)
+#   <file>\t<same file>                              "library" row for a file others import:
+#                                                     serializers look an import up under its
+#                                                     file name. List it before its importers.
 #   lines starting with # are otherwise ignored
 #
 # Single list for both stages:
@@ -18,6 +21,9 @@
 
 # compatibility: FULL
 # reset: task.creation.requested-value
+
+task-created-event.proto	task-created-event.proto
+task-creation-requested-event.proto	task-creation-requested-event.proto
 
 task-created-event.proto	task.created-value
 task-updated-event.proto	task.updated-value
