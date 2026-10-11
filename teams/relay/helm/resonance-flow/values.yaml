@@ -397,6 +397,14 @@ components:
         port: 5432
       - name: schema-registry
         port: 8080
+    volumeMounts:
+      - name: lens-admin-credentials
+        mountPath: /etc/resonance-flow/secrets/lens-admin
+        readOnly: true
+    volumes:
+      - name: lens-admin-credentials
+        secret:
+          secretName: resonance-flow-lens-admin
     config:
       data:
         # datasource credentials come from postgresql.auth below - no copy here.
