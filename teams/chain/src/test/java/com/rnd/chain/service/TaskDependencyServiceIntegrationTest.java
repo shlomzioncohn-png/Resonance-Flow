@@ -5,8 +5,12 @@ import com.rnd.chain.dto.TaskDependency;
 import com.rnd.chain.dto.TaskStatus;
 import com.rnd.chain.event.SchedulingUpdatePublisher;
 import com.rnd.chain.event.TaskSchedulingUpdatedEvent;
+import com.rnd.chain.repository.InMemoryConstraintRepository;
+import com.rnd.chain.repository.InMemoryDependencyHistoryRepository;
 import com.rnd.chain.repository.InMemoryTaskDependencyRepository;
 import com.rnd.chain.repository.InMemoryTaskRepository;
+import com.rnd.chain.repository.InMemoryTransactionRunner;
+import com.rnd.chain.testsupport.IncrementingClock;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -65,12 +69,16 @@ class TaskDependencyServiceIntegrationTest {
                 new TaskEligibilityService(
                         taskRepository,
                         dependencyRepository,
-                        schedulingUpdateService);
+                        schedulingUpdateService,
+                        new InMemoryConstraintRepository());
 
         taskDependencyService =
                 new TaskDependencyService(
                         taskRepository,
                         dependencyRepository,
+                        new InMemoryDependencyHistoryRepository(),
+                        new InMemoryTransactionRunner(),
+                        new IncrementingClock(),
                         taskEligibilityService);
     }
 
@@ -94,7 +102,7 @@ class TaskDependencyServiceIntegrationTest {
         assertEquals(
                 dependencyTaskId,
                 dependencies.get(0)
-                        .getDependsOnTaskId());
+                        .dependsOnTaskId());
 
         Task updatedTask =
                 taskRepository.findById(taskId)

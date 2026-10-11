@@ -20,6 +20,9 @@ models/*
 # Env / secrets
 .env
 .env.local
+# Local stand-ins for the config.yaml/secrets.yaml the Helm chart mounts
+# in the cluster. They hold real provider keys -- never commit them.
+*.local.yaml
 
 # OS / editor
 .DS_Store
@@ -48,8 +51,10 @@ eval/datasets/*
 !eval/datasets/*.manifest.json
 !eval/datasets/*.sha256
 
-# Harness run output (mind.evaluation.run writes report.json to the cwd)
+# Harness run output (mind.evaluation.run writes report.json to the cwd;
+# mind.evaluation.run_extraction_eval writes extraction_report.json)
 report.json
+extraction_report.json
 
 # Local raw datasets — never commit
 local-data/

@@ -1,13 +1,14 @@
 package com.rnd.inbox.audit;
 
-import com.rnd.inbox.tenant.Tenant;
-import com.rnd.inbox.user.User;
+import com.rnd.inbox.tenant.model.Tenant;
+import com.rnd.inbox.user.model.User;
 
 import io.hypersistence.utils.hibernate.type.json.JsonBinaryType;
 import org.hibernate.annotations.Type;
 
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
+import jakarta.persistence.FetchType;
 import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
@@ -28,11 +29,11 @@ public class AuditLog {
     @Column(updatable = false, nullable = false)
     private Long id;
 
-    @ManyToOne
+    @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "tenant_id", nullable = true)
     private Tenant tenant;
 
-    @ManyToOne
+    @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "actor_user_id", nullable = true)
     private User actor;
 

@@ -3,7 +3,13 @@
 #
 # Format:
 #   # compatibility: <LEVEL>                          one directive line, default FULL
-#   <file-under-src/main/proto>\t<subject>            one per schema (tab-separated)
+#   # reset: <subject>                                drop that subject's old versions instead of
+#                                                     checking against them. Pre-production only;
+#                                                     remove the line once the cluster has synced.
+#   <file-under-shared/proto>\t<subject>              one per schema (tab-separated)
+#   <file>\t<same file>                              "library" row for a file others import:
+#                                                     serializers look an import up under its
+#                                                     file name. List it before its importers.
 #   lines starting with # are otherwise ignored
 #
 # Single list for both stages:
@@ -15,6 +21,9 @@
 
 # compatibility: FULL
 
+task-created-event.proto	task-created-event.proto
+task-creation-requested-event.proto	task-creation-requested-event.proto
+
 task-event.proto	task-event-value
 task-created-event.proto	task.created-value
 task-updated-event.proto	task.updated-value
@@ -22,3 +31,6 @@ task-completed-event.proto	task.completed-value
 raw-object-event.proto	bridge.raw.landed-value
 github-task.proto	bridge.github.tasks-value
 task-creation-requested-event.proto	task.creation.requested-value
+task-dependencies-proposed-event.proto	task.dependencies.proposed-value
+task-score-proposed-event.proto	task.score.proposed-value
+scheduling-updated-event.proto	task.scheduling.updated-value

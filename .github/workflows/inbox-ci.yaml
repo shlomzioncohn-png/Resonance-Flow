@@ -6,10 +6,12 @@ on:
     tags: [ "inbox-v*.*.*" ]
     paths:
       - "teams/inbox/**"
+      - "shared/proto/**"
   pull_request:
     branches: [ "main" ]
     paths:
       - "teams/inbox/**"
+      - "shared/proto/**"
   workflow_dispatch: {}
 
 jobs:
@@ -35,3 +37,4 @@ jobs:
       service_dir: teams/inbox
       language: java
       container_port: 8080
+      extra_build_contexts: shared=shared

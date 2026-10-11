@@ -12,6 +12,8 @@ from __future__ import annotations
 import logging
 import time
 import uuid
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
 from starlette.middleware.base import RequestResponseEndpoint
@@ -21,8 +23,25 @@ from mind import __version__
 from mind.api.debug import router as debug_router
 from mind.api.instrumentation import instrumented_call
 from mind.api.v1 import router as v1_router
+from mind.config import get_settings
 from mind.contracts.errors import register_error_handlers
 from mind.contracts.health import HealthResponse
+from mind.embeddings.pgvector_store import PgVectorStore
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+    """Open the vector store's connection pool once, on the app's own
+    event loop, and close it on shutdown -- regardless of how shutdown
+    happens (an unhandled exception in a route must not leak the pool).
+    """
+    store = PgVectorStore(get_settings().vector_store)
+    try:
+        await store.open()
+        app.state.vector_store = store
+        yield
+    finally:
+        await store.close()
 
 # Configure logging once, centrally, here -- before anything else in the
 # app logs a thing. Python's logging module does nothing by default: with
@@ -35,7 +54,7 @@ from mind.contracts.health import HealthResponse
 # .info()/.error() normally -- no per-module handler setup needed.
 logging.basicConfig(level=logging.INFO, format="%(levelname)s:%(name)s:%(message)s")
 
-app = FastAPI(title="MIND API", version=__version__)
+app = FastAPI(title="MIND API", version=__version__, lifespan=lifespan)
 
 register_error_handlers(app)
 

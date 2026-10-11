@@ -8,23 +8,57 @@ license = { text = "Proprietary" }
 dependencies = [
     # core
     "pydantic>=2.0",
+    "pydantic-settings>=2.0",
     "fastapi",
     "uvicorn",
+    # embeddings (src/mind/embeddings)
+    "psycopg[binary,pool]>=3.1",
+    "sentence-transformers>=3.0",
+    # messaging (src/mind/messaging)
     "confluent-kafka[protobuf,schemaregistry]>=2.5,<2.11",
     "protobuf>=5",
     "pyyaml",
-    # add as decided: vector-store client, OCR/ASR libs, LLM client, etc.
+    # LLM provider calls (mind.extraction.providers); also what
+    # fastapi.testclient.TestClient runs on in the tests.
+    "httpx",
+    # OCR (src/mind/multimodal/ocr.py) -- tesseract --psm 11, the decision
+    # made in benchmarks/ocr-asr-benchmark.md. Also requires the
+    # tesseract-ocr system binary (not pip-installable).
+    "pillow",
+    "pypdfium2",  # rasterizes PDF pages to images for the OCR pipeline
+    # add as decided: vector-store client, ASR libs, etc.
 ]
 
 [project.optional-dependencies]
 dev = [
     "pytest",
+    "pytest-asyncio",
     "pytest-cov",
     "ruff",
     "mypy",
     "types-PyYAML",
-    "httpx",  # required by fastapi.testclient.TestClient
+    "types-psutil",  # CI's `make lint` runs `mypy ... benchmarks`, so this
+                     # stub needs to be here, not in [benchmark] below --
+                     # CI installs `.[dev]` only, never `.[benchmark]`
+                     # (that extra stays heavy/optional on purpose: paddleocr,
+                     # paddlepaddle). The stub alone (no runtime psutil
+                     # needed) is enough for mypy to resolve the import --
+                     # verified locally: mypy passes on benchmarks/ with
+                     # types-psutil installed and psutil itself uninstalled.
     "grpcio-tools==1.71.0",  # protoc, for `make proto`
+    "python-dotenv",  # tests/conftest.py loads .env for os.environ-reading fixtures
+]
+# Not a runtime dependency of src/mind/ -- only benchmarks/ocr_asr_benchmark.py
+# needs these (psutil for peak-RSS sampling, PaddleOCR as the comparison
+# engine). Tesseract itself, the chosen OCR, is a system binary and runtime
+# dependency -- see above. PaddleOCR also requires its model weights, which
+# may need manual placement under ~/.paddlex/official_models/ if the
+# auto-download hosters are network-filtered -- see
+# benchmarks/ocr-asr-benchmark.md "PaddleOCR -- setup".
+benchmark = [
+    "psutil",  # cross-platform peak-RSS/CPU sampling; stdlib `resource` is Unix-only
+    "paddleocr",
+    "paddlepaddle",
 ]
 
 [build-system]
@@ -36,14 +70,27 @@ packages = ["src/mind"]
 
 [tool.ruff]
 line-length = 100
-src = ["src", "tests"]
+src = ["src", "tests", "benchmarks"]
 extend-exclude = ["*_pb2.py"]
 
 [tool.mypy]
 exclude = ["_pb2\\.py$"]
 
+# paddleocr ships no type stubs and no py.typed marker -- no stub package
+# exists to install (unlike psutil's types-psutil above), so this is the
+# standard mypy way to silence "missing library stubs" for it specifically,
+# not a blanket ignore for the whole benchmarks/ tree.
+[[tool.mypy.overrides]]
+module = "paddleocr"
+ignore_missing_imports = true
+
 [[tool.mypy.overrides]]
 module = "confluent_kafka.*"
+ignore_missing_imports = true
+
+# No stubs/py.typed marker published for this dependency.
+[[tool.mypy.overrides]]
+module = "pypdfium2.*"
 ignore_missing_imports = true
 
 [tool.ruff.lint]
@@ -55,3 +102,10 @@ ban-relative-imports = "all"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+asyncio_mode = "auto"
+# One event loop for the whole session, not one per test -- see
+# tests/test_vector_store.py's _store_lifecycle fixture docstring for why:
+# the vector store's connection pool needs to live on one long-lived loop,
+# the same way it does under a real server, not get recreated per test.
+asyncio_default_fixture_loop_scope = "session"
+asyncio_default_test_loop_scope = "session"

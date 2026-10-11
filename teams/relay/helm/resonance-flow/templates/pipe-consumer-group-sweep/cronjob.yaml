@@ -4,7 +4,7 @@ apiVersion: batch/v1
 kind: CronJob
 
 metadata:
-  name: {{ include "resonance-flow.fullname" $ }}-pipe-consumer-group-sweep
+  name: {{ include "resonance-flow.pipeConsumerGroupSweepFullname" $ }}
   labels:
     {{- include "resonance-flow.labels" $ | nindent 4 }}
     app.kubernetes.io/component: pipe-consumer-group-sweep
@@ -33,7 +33,7 @@ spec:
 
               env:
                 - name: KAFKA_BOOTSTRAP_SERVERS
-                  value: {{ printf "%s:%s" (include "resonance-flow.dependencyHostByName" (dict "root" $ "deps" $.Values.dependencies "name" "kafka")) (include "resonance-flow.dependencyPort" (dict "deps" $.Values.dependencies "name" "kafka")) | quote }}
+                  value: {{ include "resonance-flow.dependencyAddress" (dict "root" $ "deps" $.Values.dependencies "name" "kafka") | quote }}
                 - name: KAFKA_SASL_JAAS_CONFIG
                   value: {{ include "resonance-flow.kafkaSaslJaasConfig" $ | quote }}
                 - name: GROUP_PATTERN
@@ -51,6 +51,6 @@ spec:
           volumes:
             - name: sweep-script
               configMap:
-                name: {{ include "resonance-flow.fullname" $ }}-pipe-consumer-group-sweep
+                name: {{ include "resonance-flow.pipeConsumerGroupSweepFullname" $ }}
                 defaultMode: 0755
 {{- end }}

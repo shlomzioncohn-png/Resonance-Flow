@@ -6,7 +6,13 @@ import com.rnd.bridge.task.model.RoleContext;
 import com.rnd.bridge.task.model.SourceType;
 import com.rnd.bridge.task.model.Task;
 import com.rnd.bridge.task.model.TaskStatus;
+import com.rnd.bridge.task.enrichment.EnrichmentInput;
+import com.rnd.bridge.task.enrichment.EnrichmentOutput;
+import com.rnd.bridge.task.enrichment.EnrichmentProperties;
+import com.rnd.bridge.task.enrichment.TaskEnricher;
 import com.rnd.bridge.task.model.Tier;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.time.Instant;
 import java.util.Objects;
@@ -19,6 +25,16 @@ import java.util.Objects;
  * per-record logic that vary.
  */
 public abstract class AbstractTaskMapper<S> implements PayloadMapper<S, Task> {
+
+    private static final Logger log = LoggerFactory.getLogger(AbstractTaskMapper.class);
+
+    private final EnrichmentProperties enrichmentProperties;
+    private final TaskEnricher taskEnricher;
+
+    protected AbstractTaskMapper(EnrichmentProperties enrichmentProperties, TaskEnricher taskEnricher) {
+        this.enrichmentProperties = enrichmentProperties;
+        this.taskEnricher = taskEnricher;
+    }
 
     protected abstract SourceType sourceType();
 
@@ -76,23 +92,51 @@ public abstract class AbstractTaskMapper<S> implements PayloadMapper<S, Task> {
         Objects.requireNonNull(source, "source must not be null");
         Objects.requireNonNull(asOf, "asOf must not be null");
 
+        String title = toTitle(source);
+        String description = toDescription(source);
+        TaskStatus status = toStatus(source);
+        String sourceRef = toSourceRef(source);
         Integer urgency = toUrgency(source, asOf);
+        Instant deadline = toDeadline(source);
+
+        EnrichmentOutput enrichment = EnrichmentOutput.empty();
+        if (enrichmentProperties.isEnabled()
+                && enrichmentProperties.getSupportedSources().contains(sourceType())) {
+            try {
+                EnrichmentInput input = new EnrichmentInput(
+                        sourceType(), title, description, status, sourceRef, asOf, urgency, deadline);
+                enrichment = taskEnricher.enrich(input);
+            } catch (Exception e) {
+                log.warn("Enrichment failed for sourceRef={} sourceType={}, falling back to ETL",
+                        sourceRef, sourceType(), e);
+                enrichment = EnrichmentOutput.empty();
+            }
+        }
+
+        Integer finalUrgency = enrichment.urgency() != null ? enrichment.urgency() : urgency;
+        Instant finalDeadline = enrichment.deadline() != null ? enrichment.deadline() : deadline;
+        String finalTitle = enrichment.title() != null ? enrichment.title() : title;
+        String finalDescription = enrichment.description() != null ? enrichment.description() : description;
+        Double finalConfidence = enrichment.confidence() != null ? enrichment.confidence() : confidence();
+        ExtractionProvenance provenance = enrichment.isEmpty()
+                ? ExtractionProvenance.ETL
+                : ExtractionProvenance.ML_INFERRED;
 
         return new Task(
                 organizationId(),
                 null, // projectId - no lane currently sources this
-                toTitle(source),
-                toDescription(source),
-                toStatus(source),
-                urgency == null ? null : clamp(urgency, 1, 5),
-                confidence(),
+                finalTitle,
+                finalDescription,
+                status,
+                finalUrgency == null ? null : clamp(finalUrgency, 1, 5),
+                finalConfidence,
                 tier(),
-                ExtractionProvenance.ETL,
+                provenance,
                 roleContext(),
                 sourceType(),
-                toSourceRef(source),
-                null, // effortEstimateMinutes - no lane currently sources this
-                toDeadline(source),
+                sourceRef,
+                enrichment.effortEstimateMinutes() != null ? enrichment.effortEstimateMinutes() : null,
+                finalDeadline,
                 toSnoozedUntil(source),
                 toCompletedAt(source));
     }

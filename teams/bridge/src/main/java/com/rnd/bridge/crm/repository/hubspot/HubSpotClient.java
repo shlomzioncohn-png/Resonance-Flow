@@ -13,7 +13,9 @@ import java.io.IOException;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
 import java.util.function.LongConsumer;
+import java.util.function.Supplier;
 import java.util.function.UnaryOperator;
 
 /**
@@ -126,6 +128,22 @@ final class HubSpotClient {
                 execute(PIPELINES_ENDPOINT, UnaryOperator.identity(), HubSpotPipelinesResponse.class);
         return response.results() == null ? List.of() : response.results();
     }
+
+    /**
+     * Reads one deal by id - {@code GET /crm/v3/objects/deals/{dealId}}, same {@code properties}
+     * and {@code propertiesWithHistory=dealstage} as {@link #fetchAllDeals()}'s list call, both
+     * documented as supported query parameters on this endpoint (HubSpot CRM API, "Deals" object
+     * reference, the single-object GET operation). {@link Optional#empty()} for a 404 - the only
+     * status this client treats as "doesn't exist" rather than a failure; every other retry/error
+     * rule from {@link #execute} still applies (429/502-504 retried, anything else fatal).
+     */
+    Optional<HubSpotDealRecord> fetchDeal(String dealId) {
+        return executeOptional(DEALS_ENDPOINT + "/" + dealId, uriBuilder -> uriBuilder
+                        .queryParam("properties", DEALS_PROPERTIES)
+                        .queryParam("propertiesWithHistory", HISTORY_PROPERTY),
+                HubSpotDealRecord.class);
+    }
+
     /** Follows {@code paging.next.after} until HubSpot stops returning one. */
     List<HubSpotDealRecord> fetchAllDeals() {
         List<HubSpotDealRecord> all = new ArrayList<>();
@@ -160,11 +178,26 @@ final class HubSpotClient {
     }
 
     private <T> T execute(String path, UnaryOperator<UriBuilder> customizer, Class<T> responseType) {
+        return withRetry(path, () -> attempt(path, customizer, responseType));
+    }
+
+    private <T> Optional<T> executeOptional(String path, UnaryOperator<UriBuilder> customizer, Class<T> responseType) {
+        return withRetry(path, () -> attemptOptional(path, customizer, responseType));
+    }
+
+    /**
+     * The retry/backoff loop shared by every HubSpot call - {@code action} is one attempt (one
+     * HTTP round trip, already classified by {@link #attempt}/{@link #attemptOptional} into a
+     * plain result or one of the three retryable failures below). Pulled out so {@link
+     * #fetchDeal(String)} gets the exact same 429/502-504/transport-failure retry behavior as
+     * {@link #fetchPipelines()} and {@link #fetchAllDeals()} without a second copy of this loop.
+     */
+    private <T> T withRetry(String path, Supplier<T> action) {
         int attempt = 0;
         while (true) {
             attempt++;
             try {
-                return attempt(path, customizer, responseType);
+                return action.get();
             } catch (RateLimited rateLimited) {
                 if (attempt >= maxRetries) {
                     throw new HubSpotClientException(
@@ -234,6 +267,45 @@ final class HubSpotClient {
             // rather than as the exception type itself. Checking the cause
             // chain for IOException catches both without also catching a
             // fatal one, like a converter failing on a malformed body.
+            if (isTransportFailure(restClientFailure)) {
+                throw new TransportFailure(restClientFailure);
+            }
+            throw restClientFailure;
+        }
+    }
+
+    /**
+     * Same request/response handling as {@link #attempt}, except a 404 is reported as {@link
+     * Optional#empty()} instead of a fatal {@link HubSpotClientException} - the one status this
+     * client treats as "the resource doesn't exist" rather than a failure. Only used by {@link
+     * #fetchDeal(String)}; {@link #fetchPipelines()} and {@link #fetchAllDeals()} keep going
+     * through {@link #attempt}, where a 404 is still fatal like any other unexpected status.
+     */
+    private <T> Optional<T> attemptOptional(String path, UnaryOperator<UriBuilder> customizer, Class<T> responseType) {
+        try {
+            return restClient.get()
+                    .uri(uriBuilder -> customizer.apply(uriBuilder.path(path)).build())
+                    .header(HttpHeaders.AUTHORIZATION, "Bearer " + token)
+                    .accept(MediaType.APPLICATION_JSON)
+                    .exchange((request, response) -> {
+                        int status = response.getStatusCode().value();
+                        if (status == 404) {
+                            return Optional.<T>empty();
+                        }
+                        if (status == 429) {
+                            throw new RateLimited(retryAfterMillis(response.getHeaders()));
+                        }
+                        if (isTransientServerError(status)) {
+                            throw new TransientServerError(status);
+                        }
+                        if (!response.getStatusCode().is2xxSuccessful()) {
+                            throw new HubSpotClientException(
+                                    "HubSpot request to " + path + " failed with status " + status
+                                            + errorBodySuffix(response));
+                        }
+                        return Optional.of(response.bodyTo(responseType));
+                    });
+        } catch (RestClientException restClientFailure) {
             if (isTransportFailure(restClientFailure)) {
                 throw new TransportFailure(restClientFailure);
             }

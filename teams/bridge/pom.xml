@@ -20,6 +20,7 @@
     <properties>
         <java.version>21</java.version>
         <minio.version>8.5.2</minio.version>
+        <protobuf.version>3.25.3</protobuf.version>
         <google-api-client.version>2.7.0</google-api-client.version>
         <google-oauth-client.version>1.36.0</google-oauth-client.version>
         <google-http-client.version>1.44.2</google-http-client.version>
@@ -27,8 +28,10 @@
         <google-api-services-calendar.version>v3-rev20260708-2.0.0</google-api-services-calendar.version>
         <google-api-services-drive.version>v3-rev20240521-2.0.0</google-api-services-drive.version>
         <slack-api-client.version>1.44.2</slack-api-client.version>
-        <protobuf.version>3.25.3</protobuf.version>
+        <!-- Mirrored exactly from teams/inbox/pom.xml - same registry, same wire format. -->
         <confluent.version>7.1.15</confluent.version>
+        <!-- Dockerfile overrides it: the repo layout isn't there. -->
+        <proto.root>${project.basedir}/../../shared/proto</proto.root>
     </properties>
 
     <repositories>
@@ -39,10 +42,10 @@
     </repositories>
 
     <!--
-        kafka-protobuf-serializer pulls in kotlinpoet-jvm, whose transitive kotlin-stdlib
-        resolves to 1.6.21 by default. That's too old: at runtime it's missing
-        kotlin.enums.EnumEntriesKt, added in Kotlin 1.9. Pin the Kotlin artifacts to a
-        version that has it - same fix as teams/relay and teams/inbox.
+        Mirrored exactly from teams/inbox/pom.xml: kafka-protobuf-serializer pulls in
+        kotlinpoet-jvm, whose transitive kotlin-stdlib resolves to 1.6.21 by default. That's too
+        old: at runtime it's missing kotlin.enums.EnumEntriesKt, added in Kotlin 1.9. Pin the
+        Kotlin artifacts to a version that has it.
     -->
     <dependencyManagement>
         <dependencies>
@@ -93,6 +96,12 @@
         <dependency>
             <groupId>org.springframework.kafka</groupId>
             <artifactId>spring-kafka</artifactId>
+        </dependency>
+
+        <dependency>
+            <groupId>com.google.protobuf</groupId>
+            <artifactId>protobuf-java</artifactId>
+            <version>3.25.3</version>
         </dependency>
 
         <dependency>
@@ -198,12 +207,6 @@
 
         <dependency>
             <groupId>com.google.protobuf</groupId>
-            <artifactId>protobuf-java</artifactId>
-            <version>${protobuf.version}</version>
-        </dependency>
-
-        <dependency>
-            <groupId>com.google.protobuf</groupId>
             <artifactId>protobuf-java-util</artifactId>
             <version>${protobuf.version}</version>
         </dependency>
@@ -228,27 +231,49 @@
                 <groupId>org.springframework.boot</groupId>
                 <artifactId>spring-boot-maven-plugin</artifactId>
             </plugin>
-
             <plugin>
                 <groupId>org.xolstice.maven.plugins</groupId>
                 <artifactId>protobuf-maven-plugin</artifactId>
                 <version>0.6.1</version>
                 <configuration>
                     <protocArtifact>com.google.protobuf:protoc:${protobuf.version}:exe:${os.detected.classifier}</protocArtifact>
-                    <!--
-                        Schema is owned by Relay - teams/relay/src/main/proto/raw-object-event.proto
-                        and teams/relay/ci/schema-subjects.tsv are the registered source of truth.
-                        Copied into src/main/proto here, same pattern teams/inbox already uses for
-                        its own proto copies (see that pom.xml's comment) - a ../relay relative path
-                        doesn't exist inside this module's own Docker build context.
-                    -->
-                    <protoSourceRoot>${project.basedir}/src/main/proto</protoSourceRoot>
+                    <!-- Executions share one output dir - don't let a later one wipe an earlier one's classes. -->
+                    <clearOutputDirectory>false</clearOutputDirectory>
                 </configuration>
                 <executions>
+                    <!-- Registered cross-team schemas, owned by Relay - see shared/proto/README.md.
+                         raw-object-event.proto (bridge.raw.landed-value) is registered under the
+                         pre-production reset in teams/relay/ci/schema-subjects.tsv - its wire shape
+                         (objects: repeated RawObjectRef) can still change without a FULL-compat
+                         fight until that line is removed. -->
                     <execution>
+                        <id>compile-shared-proto</id>
                         <goals>
                             <goal>compile</goal>
                         </goals>
+                        <configuration>
+                            <protoSourceRoot>${proto.root}</protoSourceRoot>
+                            <includes>
+                                <include>task-created-event.proto</include>
+                                <include>task-creation-requested-event.proto</include>
+                                <include>raw-object-event.proto</include>
+                            </includes>
+                        </configuration>
+                    </execution>
+                    <!-- Bridge-only: structured-task-event.proto (temporary local copy, see
+                         StructuredTaskProtoDriftTest) and Hadas's github-task.proto. -->
+                    <execution>
+                        <id>compile-local-proto</id>
+                        <goals>
+                            <goal>compile</goal>
+                        </goals>
+                        <configuration>
+                            <protoSourceRoot>${project.basedir}/src/main/proto</protoSourceRoot>
+                            <!-- structured-task-event.proto imports the two shared ones above -->
+                            <additionalProtoPathElements>
+                                <additionalProtoPathElement>${proto.root}</additionalProtoPathElement>
+                            </additionalProtoPathElements>
+                        </configuration>
                     </execution>
                 </executions>
             </plugin>

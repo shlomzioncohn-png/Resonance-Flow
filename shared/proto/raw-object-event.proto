@@ -1,0 +1,82 @@
+syntax = "proto3";
+
+package com.rnd.bridge.shared.unstructured.dto;
+
+option java_package = "com.rnd.bridge.shared.unstructured.dto";
+option java_multiple_files = true;
+
+import "google/protobuf/timestamp.proto";
+
+// kafkaTopic: bridge.raw.landed
+// Reconciled against the agreed Bridge/MIND RawObjectEvent contract
+// (teams/bridge/src/main/java/com/rnd/bridge/raw/model/RawObjectEvent.java): one RawObjectEvent
+// is one logical item carrying every MinIO object it owns (body/transcript and every attachment
+// alike) as a repeated RawObjectRef, instead of fanning out into several Kafka events keyed by
+// attachment_index. The schema_version field's runtime value stays "0.1" - this hasn't shipped
+// to any real consumer yet, so there's no released "1.0" to version past; bump it once this is
+// actually in production use.
+
+message RawObjectEvent {
+  string schema_version = 1;
+  SourceType source_type = 2;
+  string tenant_id = 3;
+  google.protobuf.Timestamp ingested_at = 4;
+  ScopeDecision scope_decision = 5;
+  repeated string participants = 6;
+  google.protobuf.Timestamp source_timestamp = 7;
+  string correlation_id = 8;
+  int32 revision = 9;
+  ChangeType change_type = 10;
+  int32 change_significance_score = 11;
+  repeated RawObjectRef objects = 12;
+}
+
+message RawObjectRef {
+  Role role = 1;
+  string object_key = 2;
+  string content_hash = 3;
+  string content_type = 4;
+  optional int64 size_bytes = 5;
+  Modality modality = 6;
+}
+
+enum Role {
+  ROLE_UNSPECIFIED = 0;
+  BODY = 1;
+  ATTACHMENT = 2;
+  TRANSCRIPT = 3;
+  RECORDING = 4;
+  SOURCE_METADATA = 5;
+}
+
+enum SourceType {
+  SOURCE_TYPE_UNSPECIFIED = 0;
+  EMAIL = 1;
+  SLACK = 2;
+  WHATSAPP = 3;
+  DRIVE = 4;
+  CALENDAR = 5;
+  MEETING = 6;
+  SOURCE_TYPE_SCANNED_DOC = 7; // prefixed - plain SCANNED_DOC collides with Modality.SCANNED_DOC
+                               // (proto3 enum values are siblings of the package, not their enum)
+  DOC = 8;
+}
+
+enum ScopeDecision {
+  SCOPE_DECISION_UNSPECIFIED = 0;
+  INCLUDED = 1;
+  EXCLUDED = 2;
+}
+
+enum Modality {
+  MODALITY_UNSPECIFIED = 0;
+  AUDIO = 1;
+  SCANNED_DOC = 2;
+  TEXT = 3;
+}
+
+enum ChangeType {
+  CHANGE_TYPE_UNSPECIFIED = 0;
+  UPSERT = 1;
+  DELETE_REVIEW = 2;
+}

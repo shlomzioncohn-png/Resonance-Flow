@@ -1,9 +1,11 @@
 # ArgoCD removed its built-in health check for the `argoproj.io/Application`
 # CRD in 1.8 (https://github.com/argoproj/argo-cd/issues/3781). Without it,
-# ArgoCD has no way to tell whether a child Application (e.g. `kafka`) is
-# actually Healthy, so the sync-wave annotations on apps/kafka.yaml and
-# apps/resonance-flow.yaml never gate anything - `root` creates both
-# Applications back-to-back regardless of kafka's readiness.
+# ArgoCD has no way to tell whether a child Application (e.g.
+# `resonance-flow`) is actually Healthy, so the sync-wave annotations on
+# apps/resonance-flow.yaml ("0") and apps/schema-sync-hook.yaml ("1") never
+# gate anything - `root` creates both Applications back-to-back regardless.
+# (Originally written for the since-removed apps/kafka.yaml; the examples
+# below still describe that case.)
 #
 # This restores that health check, with one deviation from the script in
 # the ArgoCD docs (https://argo-cd.readthedocs.io/en/stable/operator-manual/health/):

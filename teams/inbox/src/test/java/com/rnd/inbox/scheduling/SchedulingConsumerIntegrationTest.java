@@ -2,26 +2,32 @@ package com.rnd.inbox.scheduling;
 
 import com.rnd.inbox.audit.AuditLog;
 import com.rnd.inbox.audit.AuditLogRepository;
+import com.rnd.inbox.event.SchedulingUpdatedEvent;
 import com.rnd.inbox.outbox.OutboxEvent;
 import com.rnd.inbox.outbox.OutboxEventRepository;
 import com.rnd.inbox.support.PostgresIntegrationTest;
-import com.rnd.inbox.task.SourceType;
-import com.rnd.inbox.task.Task;
-import com.rnd.inbox.task.TaskExtractionProvenance;
-import com.rnd.inbox.task.TaskRepository;
-import com.rnd.inbox.task.TaskStatus;
-import com.rnd.inbox.tenant.Tenant;
-import com.rnd.inbox.tenant.TenantRepository;
-import com.rnd.inbox.tenant.TenantStatus;
+import com.rnd.inbox.task.model.SourceType;
+import com.rnd.inbox.task.model.Task;
+import com.rnd.inbox.task.model.TaskExtractionProvenance;
+import com.rnd.inbox.task.repository.TaskRepository;
+import com.rnd.inbox.task.model.TaskStatus;
+import com.rnd.inbox.tenant.model.Tenant;
+import com.rnd.inbox.tenant.repository.TenantRepository;
+import com.rnd.inbox.tenant.model.TenantStatus;
+import io.confluent.kafka.serializers.AbstractKafkaSchemaSerDeConfig;
+import io.confluent.kafka.serializers.protobuf.KafkaProtobufSerializer;
 import org.apache.kafka.clients.consumer.Consumer;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.kafka.clients.consumer.ConsumerRecords;
+import org.apache.kafka.common.serialization.ByteArraySerializer;
 import org.apache.kafka.common.serialization.StringDeserializer;
+import org.apache.kafka.common.serialization.StringSerializer;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.kafka.core.DefaultKafkaConsumerFactory;
 import org.springframework.kafka.core.DefaultKafkaProducerFactory;
 import org.springframework.kafka.core.KafkaTemplate;
@@ -29,9 +35,11 @@ import org.springframework.kafka.test.EmbeddedKafkaBroker;
 import org.springframework.kafka.test.context.EmbeddedKafka;
 import org.springframework.kafka.test.utils.KafkaTestUtils;
 import org.springframework.test.annotation.DirtiesContext;
+import org.springframework.test.context.TestPropertySource;
 
 import java.time.Duration;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -44,14 +52,19 @@ import static org.assertj.core.api.Assertions.assertThat;
         partitions = 1,
         topics = {"task.scheduling.updated", "task.scheduling.updated.errors"},
         bootstrapServersProperty = "spring.kafka.bootstrap-servers")
+@TestPropertySource(properties = "kafka.schema-registry.url=mock://scheduling-updated-test")
 @DirtiesContext
 class SchedulingConsumerIntegrationTest extends PostgresIntegrationTest {
 
     private static final String TOPIC = "task.scheduling.updated";
     private static final String ERROR_TOPIC = TOPIC + ".errors";
+    private static final String SCHEMA_REGISTRY_URL = "mock://scheduling-updated-test";
 
     @Autowired
     private EmbeddedKafkaBroker embeddedKafkaBroker;
+
+    @Autowired
+    private JdbcTemplate jdbcTemplate;
 
     @Autowired
     private TaskRepository taskRepository;
@@ -65,13 +78,21 @@ class SchedulingConsumerIntegrationTest extends PostgresIntegrationTest {
     @Autowired
     private TenantRepository tenantRepository;
 
-    private KafkaTemplate<String, String> producer;
+    private KafkaTemplate<String, SchedulingUpdatedEvent> producer;
+    private KafkaTemplate<String, byte[]> rawBytesProducer;
     private Consumer<String, String> errorConsumer;
+    private final List<UUID> createdTenantIds = new ArrayList<>();
 
     @BeforeEach
     void setUp() {
         Map<String, Object> producerProps = KafkaTestUtils.producerProps(embeddedKafkaBroker);
-        producer = new KafkaTemplate<>(new DefaultKafkaProducerFactory<>(producerProps));
+        producerProps.put(AbstractKafkaSchemaSerDeConfig.SCHEMA_REGISTRY_URL_CONFIG, SCHEMA_REGISTRY_URL);
+        producerProps.put(AbstractKafkaSchemaSerDeConfig.AUTO_REGISTER_SCHEMAS, true);
+        producer = new KafkaTemplate<>(new DefaultKafkaProducerFactory<>(
+                producerProps, new StringSerializer(), new KafkaProtobufSerializer<>()));
+
+        rawBytesProducer = new KafkaTemplate<>(new DefaultKafkaProducerFactory<>(
+                KafkaTestUtils.producerProps(embeddedKafkaBroker), new StringSerializer(), new ByteArraySerializer()));
 
         Map<String, Object> consumerProps = KafkaTestUtils.consumerProps(
                 "test-errors-" + UUID.randomUUID(), "true", embeddedKafkaBroker);
@@ -84,6 +105,13 @@ class SchedulingConsumerIntegrationTest extends PostgresIntegrationTest {
     @AfterEach
     void tearDown() {
         errorConsumer.close();
+        for (UUID tenantId : createdTenantIds) {
+            jdbcTemplate.update(
+                    "DELETE FROM audit_log WHERE entity_id IN (SELECT id FROM tasks WHERE tenant_id = ?)", tenantId);
+            jdbcTemplate.update(
+                    "DELETE FROM outbox WHERE aggregate_id IN (SELECT id FROM tasks WHERE tenant_id = ?)", tenantId);
+            jdbcTemplate.update("DELETE FROM tenants WHERE id = ?", tenantId);
+        }
     }
 
     private Task persistTask(boolean available, Float priorityScore) {
@@ -94,6 +122,7 @@ class SchedulingConsumerIntegrationTest extends PostgresIntegrationTest {
         tenant.setCreatedAt(Instant.now());
         tenant.setUpdatedAt(Instant.now());
         Tenant saved = tenantRepository.saveAndFlush(tenant);
+        createdTenantIds.add(saved.getId());
 
         Task task = new Task();
         task.setTenant(saved);
@@ -109,20 +138,22 @@ class SchedulingConsumerIntegrationTest extends PostgresIntegrationTest {
         return taskRepository.saveAndFlush(task);
     }
 
-    private String payload(UUID taskId, boolean available, String priorityScoreJson) {
-        return "{"
-                + "\"eventId\":\"" + UUID.randomUUID() + "\","
-                + "\"taskId\":\"" + taskId + "\","
-                + "\"isAvailable\":" + available
-                + (priorityScoreJson == null ? "" : ",\"priorityScore\":" + priorityScoreJson)
-                + "}";
+    private SchedulingUpdatedEvent event(UUID taskId, boolean available, Double priorityScore) {
+        SchedulingUpdatedEvent.Builder builder = SchedulingUpdatedEvent.newBuilder()
+                .setEventId(UUID.randomUUID().toString())
+                .setTaskId(taskId.toString())
+                .setAvailable(available);
+        if (priorityScore != null) {
+            builder.setPriorityScore(priorityScore);
+        }
+        return builder.build();
     }
 
     @Test
     void aSchedulingUpdateMaterializesBothValuesOnTheTask() {
         Task task = persistTask(false, null);
 
-        producer.send(TOPIC, payload(task.getId(), true, "7.5"));
+        producer.send(TOPIC, event(task.getId(), true, 7.5));
 
         Task updated = await(task.getId(), t -> t.isAvailable() && t.getPriorityScore() != null);
         assertThat(updated.isAvailable()).isTrue();
@@ -133,7 +164,7 @@ class SchedulingConsumerIntegrationTest extends PostgresIntegrationTest {
     void anUpdateWithoutAPriorityScoreLeavesTheStoredScoreAlone() {
         Task task = persistTask(true, 4.0f);
 
-        producer.send(TOPIC, payload(task.getId(), false, null));
+        producer.send(TOPIC, event(task.getId(), false, null));
 
         Task updated = await(task.getId(), t -> !t.isAvailable());
         assertThat(updated.getPriorityScore()).isEqualTo(4.0f);
@@ -143,10 +174,10 @@ class SchedulingConsumerIntegrationTest extends PostgresIntegrationTest {
     void theLastMessageWinsRatherThanBeingDeduplicated() {
         Task task = persistTask(false, null);
 
-        producer.send(TOPIC, payload(task.getId(), true, "2.0"));
+        producer.send(TOPIC, event(task.getId(), true, 2.0));
         await(task.getId(), t -> t.getPriorityScore() != null);
 
-        producer.send(TOPIC, payload(task.getId(), true, "9.0"));
+        producer.send(TOPIC, event(task.getId(), true, 9.0));
 
         Task updated = await(task.getId(), t -> Float.valueOf(9.0f).equals(t.getPriorityScore()));
         assertThat(updated.getPriorityScore()).isEqualTo(9.0f);
@@ -155,7 +186,7 @@ class SchedulingConsumerIntegrationTest extends PostgresIntegrationTest {
     @Test
     void reprocessingTheSameUpdateTwiceLandsOnTheSameState() {
         Task task = persistTask(false, null);
-        String message = payload(task.getId(), true, "6.0");
+        SchedulingUpdatedEvent message = event(task.getId(), true, 6.0);
 
         producer.send(TOPIC, message);
         await(task.getId(), t -> t.getPriorityScore() != null);
@@ -171,7 +202,7 @@ class SchedulingConsumerIntegrationTest extends PostgresIntegrationTest {
     void aSchedulingUpdateIsAuditedAndAnnouncedOnTheOutbox() {
         Task task = persistTask(false, null);
 
-        producer.send(TOPIC, payload(task.getId(), true, "3.5"));
+        producer.send(TOPIC, event(task.getId(), true, 3.5));
         await(task.getId(), Task::isAvailable);
 
         List<AuditLog> audits = auditLogRepository.findAll();
@@ -181,14 +212,14 @@ class SchedulingConsumerIntegrationTest extends PostgresIntegrationTest {
         });
 
         List<OutboxEvent> outboxEvents = outboxEventRepository.findAll();
-        assertThat(outboxEvents).anySatisfy(event -> assertThat(event.getAggregateId()).isEqualTo(task.getId()));
+        assertThat(outboxEvents).anySatisfy(outboxEvent -> assertThat(outboxEvent.getAggregateId()).isEqualTo(task.getId()));
     }
 
     @Test
     void aPriorityScoreOutsideOneToTenIsRejectedWithoutTouchingTheTask() {
         Task task = persistTask(false, 5.0f);
 
-        producer.send(TOPIC, payload(task.getId(), true, "42"));
+        producer.send(TOPIC, event(task.getId(), true, 42.0));
 
         String error = awaitErrorContaining(task.getId().toString());
         assertThat(error).contains("VALIDATION_FAILURE");
@@ -203,7 +234,7 @@ class SchedulingConsumerIntegrationTest extends PostgresIntegrationTest {
     void anUpdateForATaskThatDoesNotExistIsRoutedAndNotRetriedForever() {
         UUID unknownTaskId = UUID.randomUUID();
 
-        producer.send(TOPIC, payload(unknownTaskId, true, "5.0"));
+        producer.send(TOPIC, event(unknownTaskId, true, 5.0));
 
         assertThat(awaitErrorContaining(unknownTaskId.toString())).contains("not found");
     }
@@ -211,19 +242,30 @@ class SchedulingConsumerIntegrationTest extends PostgresIntegrationTest {
     @Test
     void aMessageWithoutIsAvailableIsRejected() {
         Task task = persistTask(false, null);
-        String missingField = "{\"eventId\":\"" + UUID.randomUUID() + "\",\"taskId\":\"" + task.getId() + "\"}";
+        SchedulingUpdatedEvent missingAvailable = SchedulingUpdatedEvent.newBuilder()
+                .setEventId(UUID.randomUUID().toString())
+                .setTaskId(task.getId().toString())
+                .build();
 
-        producer.send(TOPIC, missingField);
+        producer.send(TOPIC, missingAvailable);
 
         assertThat(awaitErrorContaining(task.getId().toString())).contains("VALIDATION_FAILURE");
         assertThat(taskRepository.findById(task.getId()).orElseThrow().isAvailable()).isFalse();
     }
 
-    /**
-     * Several tests here route to the same error topic, and the consumer reads it from the
-     * beginning - so {@code getSingleRecord} would trip over a previous test's record. Match on
-     * the id this test used instead of assuming the topic holds exactly one message.
-     */
+    @Test
+    void corruptProtobufBytesAreRoutedToTheErrorTopicAndDoNotBlockLaterMessages() {
+        rawBytesProducer.send(TOPIC, "poison-pill-key", "not a valid protobuf message".getBytes());
+
+        assertThat(awaitErrorContaining("Malformed protobuf payload")).contains("VALIDATION_FAILURE");
+
+        Task task = persistTask(false, null);
+        producer.send(TOPIC, event(task.getId(), true, 5.0));
+
+        Task updated = await(task.getId(), Task::isAvailable);
+        assertThat(updated.isAvailable()).isTrue();
+    }
+
     private String awaitErrorContaining(String needle) {
         long deadline = System.currentTimeMillis() + 25000;
         while (System.currentTimeMillis() < deadline) {
