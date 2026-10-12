@@ -41,10 +41,26 @@ class CrmLaneConfig {
         // message is silently rejected by Inbox's own tenant validation and routed to an error
         // topic nobody consumes (finding F5 in the CRM-lane audit) - fail here, at startup,
         // instead of discovering that later.
+        requireAtMostOneCrmSourceProfile(environment);
         if (environment.matchesProfiles("kafka")) {
             requireValidTenantIdForKafka(organizationId);
         }
         return new DealToTaskMapper(organizationId, enrichmentProperties, taskEnricher);
+    }
+
+    // HubSpotDealRepository (@Profile("hubspot")) and SalesforceDealRepository
+    // (@Profile("salesforce")) are each @Primary within their own profile, so Spring has no way to
+    // tell which one should win if both profiles are active at once - whichever bean definition
+    // happens to be processed last silently shadows the other instead of failing. Checked here,
+    // alongside the tenant check above, since this bean is unconditionally created in the CRM lane
+    // regardless of which source profile (if any) is active.
+    private static void requireAtMostOneCrmSourceProfile(Environment environment) {
+        if (environment.matchesProfiles("hubspot") && environment.matchesProfiles("salesforce")) {
+            throw new IllegalStateException(
+                    "Both 'hubspot' and 'salesforce' profiles are active - exactly one CRM source "
+                            + "profile may be active at a time (JsonDealRepository's synthetic feed is "
+                            + "the default when neither is)");
+        }
     }
 
     private static void requireValidTenantIdForKafka(String organizationId) {
