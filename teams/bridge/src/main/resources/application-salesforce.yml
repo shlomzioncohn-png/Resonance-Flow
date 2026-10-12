@@ -13,6 +13,11 @@ bridge:
       # unset - never logged or included in any SalesforceClientException message.
       client-id: ${SALESFORCE_CLIENT_ID}
       client-secret: ${SALESFORCE_CLIENT_SECRET}
+      # REST API version, e.g. 68.0 ("Winter '27"). Salesforce ships three releases a year and
+      # retires old API versions after a few years, so this is a config value, not a hardcoded
+      # constant - bump it here when the pinned version approaches retirement. No SOQL feature
+      # used today requires a specific version; this is purely about staying ahead of retirement.
+      api-version: ${SALESFORCE_API_VERSION:68.0}
       max-retries: 5
       initial-backoff-millis: 500
       max-backoff-millis: 8000

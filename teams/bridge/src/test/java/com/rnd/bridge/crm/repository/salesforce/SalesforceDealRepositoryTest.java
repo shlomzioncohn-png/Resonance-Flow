@@ -76,6 +76,7 @@ class SalesforceDealRepositoryTest {
                 server.url("/").toString(),
                 "test-client-id",
                 "test-client-secret",
+                "68.0",
                 5,
                 0L,
                 0L,
@@ -450,7 +451,7 @@ class SalesforceDealRepositoryTest {
     @Test
     void loadHistoryTrueFailsFastAtConstructionWithAClearMessage() {
         SalesforceClient client = new SalesforceClient(
-                RestClient.builder(), server.url("/").toString(), "id", "secret", 5, 0L, 0L, millis -> { });
+                RestClient.builder(), server.url("/").toString(), "id", "secret", "68.0", 5, 0L, 0L, millis -> { });
 
         IllegalStateException exception = assertThrows(IllegalStateException.class,
                 () -> new SalesforceDealRepository(

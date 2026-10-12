@@ -57,12 +57,12 @@ import java.util.function.Supplier;
 final class SalesforceClient {
 
     private static final String TOKEN_ENDPOINT = "/services/oauth2/token";
-    private static final String QUERY_ENDPOINT = "/services/data/v68.0/query/";
 
     private final RestClient restClient;
     private final String loginUrl;
     private final String clientId;
     private final String clientSecret;
+    private final String queryEndpoint;
     private final int maxRetries;
     private final long initialBackoffMillis;
     private final long maxBackoffMillis;
@@ -75,6 +75,7 @@ final class SalesforceClient {
             String loginUrl,
             String clientId,
             String clientSecret,
+            String apiVersion,
             int maxRetries,
             long initialBackoffMillis,
             long maxBackoffMillis,
@@ -91,10 +92,16 @@ final class SalesforceClient {
             throw new IllegalStateException(
                     "Salesforce client secret is not configured - set the SALESFORCE_CLIENT_SECRET environment variable");
         }
+        if (apiVersion == null || apiVersion.isBlank()) {
+            throw new IllegalStateException(
+                    "Salesforce API version is not configured - set bridge.crm.salesforce.api-version "
+                            + "(SALESFORCE_API_VERSION)");
+        }
         this.restClient = restClientBuilder.build();
         this.loginUrl = stripTrailingSlash(loginUrl);
         this.clientId = clientId;
         this.clientSecret = clientSecret;
+        this.queryEndpoint = "/services/data/v" + apiVersion + "/query/";
         this.maxRetries = maxRetries;
         this.initialBackoffMillis = initialBackoffMillis;
         this.maxBackoffMillis = maxBackoffMillis;
@@ -106,6 +113,7 @@ final class SalesforceClient {
             String loginUrl,
             String clientId,
             String clientSecret,
+            String apiVersion,
             int maxRetries,
             long initialBackoffMillis,
             long maxBackoffMillis,
@@ -115,7 +123,7 @@ final class SalesforceClient {
                 ClientHttpRequestFactories.get(ClientHttpRequestFactorySettings.DEFAULTS
                         .withConnectTimeout(Duration.ofMillis(connectTimeoutMillis))
                         .withReadTimeout(Duration.ofMillis(readTimeoutMillis))));
-        return new SalesforceClient(timeoutAwareBuilder, loginUrl, clientId, clientSecret, maxRetries,
+        return new SalesforceClient(timeoutAwareBuilder, loginUrl, clientId, clientSecret, apiVersion, maxRetries,
                 initialBackoffMillis, maxBackoffMillis, SalesforceClient::sleep);
     }
 
@@ -149,7 +157,7 @@ final class SalesforceClient {
      */
     List<Map<String, Object>> query(String soql) {
         List<Map<String, Object>> all = new ArrayList<>();
-        String path = QUERY_ENDPOINT + "?q=" + urlEncode(soql);
+        String path = queryEndpoint + "?q=" + urlEncode(soql);
         SalesforceQueryResult page = executeQuery(path);
         all.addAll(recordsOf(page));
         while (!page.done()) {

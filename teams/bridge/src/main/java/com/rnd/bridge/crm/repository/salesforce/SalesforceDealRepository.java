@@ -104,6 +104,7 @@ public class SalesforceDealRepository implements DealRepository {
             @Value("${bridge.crm.salesforce.login-url}") String loginUrl,
             @Value("${bridge.crm.salesforce.client-id}") String clientId,
             @Value("${bridge.crm.salesforce.client-secret}") String clientSecret,
+            @Value("${bridge.crm.salesforce.api-version:68.0}") String apiVersion,
             @Value("${bridge.crm.salesforce.max-retries:5}") int maxRetries,
             @Value("${bridge.crm.salesforce.initial-backoff-millis:500}") long initialBackoffMillis,
             @Value("${bridge.crm.salesforce.max-backoff-millis:8000}") long maxBackoffMillis,
@@ -115,8 +116,8 @@ public class SalesforceDealRepository implements DealRepository {
             @Value("${bridge.crm.salesforce.stage-bands.qualified-max:50}") int qualifiedMax,
             @Value("${bridge.crm.salesforce.stage-bands.proposal-max:80}") int proposalMax,
             @Value("${bridge.crm.salesforce.stage-bands.negotiation-max:99}") int negotiationMax) {
-        this(SalesforceClient.production(restClientBuilder, loginUrl, clientId, clientSecret, maxRetries,
-                        initialBackoffMillis, maxBackoffMillis, connectTimeoutMillis, readTimeoutMillis),
+        this(SalesforceClient.production(restClientBuilder, loginUrl, clientId, clientSecret, apiVersion,
+                        maxRetries, initialBackoffMillis, maxBackoffMillis, connectTimeoutMillis, readTimeoutMillis),
                 Clock.systemUTC(), stageChangedAtField, loadHistory,
                 new SalesforceStageMapping(prospectMax, qualifiedMax, proposalMax, negotiationMax));
     }

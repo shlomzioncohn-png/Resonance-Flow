@@ -55,6 +55,7 @@ class SalesforceClientTest {
                 server.url("/").toString(),
                 TEST_CLIENT_ID,
                 TEST_CLIENT_SECRET,
+                "68.0",
                 maxRetries,
                 initialBackoffMillis,
                 maxBackoffMillis,
@@ -105,6 +106,15 @@ class SalesforceClientTest {
     }
 
     @Test
+    void blankApiVersionFailsAtConstructionWithAClearMessage() {
+        IllegalStateException exception = assertThrows(IllegalStateException.class, () -> new SalesforceClient(
+                RestClient.builder(), server.url("/").toString(), TEST_CLIENT_ID, TEST_CLIENT_SECRET,
+                " ", 5, 0L, 0L, millis -> { }));
+
+        assertTrue(exception.getMessage().contains("API version"));
+    }
+
+    @Test
     void authSucceedsAndQueryReturnsRecords() {
         enqueueJson(tokenResponse());
         enqueueJson(queryPage(null, true, record("006A")));
@@ -114,6 +124,19 @@ class SalesforceClientTest {
         assertEquals(1, records.size());
         assertEquals("006A", records.get(0).get("Id"));
         assertEquals(2, server.getRequestCount(), "one token request + one query page");
+    }
+
+    @Test
+    void queryPathUsesTheConfiguredApiVersionNotAHardcodedOne() {
+        SalesforceClient client = new SalesforceClient(
+                RestClient.builder(), server.url("/").toString(), TEST_CLIENT_ID, TEST_CLIENT_SECRET,
+                "60.0", 5, 0L, 0L, millis -> { });
+        enqueueJson(tokenResponse());
+        enqueueJson(queryPage(null, true, record("006A")));
+
+        client.query("SELECT Id FROM Opportunity");
+
+        assertTrue(takeRequest(2).getPath().contains("/services/data/v60.0/query/"));
     }
 
     @Test
@@ -265,7 +288,7 @@ class SalesforceClientTest {
         enqueueJson(queryPage(null, true, record("006A")));
 
         SalesforceClient client = SalesforceClient.production(RestClient.builder(), server.url("/").toString(),
-                TEST_CLIENT_ID, TEST_CLIENT_SECRET, 3, 0L, 0L, 5000L, 100L);
+                TEST_CLIENT_ID, TEST_CLIENT_SECRET, "68.0", 3, 0L, 0L, 5000L, 100L);
 
         List<Map<String, Object>> records =
                 assertTimeoutPreemptively(Duration.ofSeconds(5), () -> client.query("SELECT Id FROM Opportunity"));
