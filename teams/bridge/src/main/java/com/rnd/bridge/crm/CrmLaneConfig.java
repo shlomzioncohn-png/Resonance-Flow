@@ -49,11 +49,12 @@ class CrmLaneConfig {
     }
 
     // HubSpotDealRepository (@Profile("hubspot")) and SalesforceDealRepository
-    // (@Profile("salesforce")) are each @Primary within their own profile, so Spring has no way to
-    // tell which one should win if both profiles are active at once - whichever bean definition
-    // happens to be processed last silently shadows the other instead of failing. Checked here,
-    // alongside the tenant check above, since this bean is unconditionally created in the CRM lane
-    // regardless of which source profile (if any) is active.
+    // (@Profile("salesforce")) are each @Primary within their own profile, so if both profiles are
+    // active at once Spring has two @Primary DealRepository beans and fails with a
+    // NoUniqueBeanDefinitionException - correct, but it names Spring's own bean machinery, not the
+    // actual mistake. Checked here, alongside the tenant check above, so the failure instead names
+    // both profiles; this bean is unconditionally created in the CRM lane regardless of which
+    // source profile (if any) is active.
     private static void requireAtMostOneCrmSourceProfile(Environment environment) {
         if (environment.matchesProfiles("hubspot") && environment.matchesProfiles("salesforce")) {
             throw new IllegalStateException(
