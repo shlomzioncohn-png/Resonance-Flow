@@ -471,10 +471,10 @@ rescaled to `[0, 1]`.
 ### The extracted-item contract
 
 `evaluate_extraction` compares strings, but a real extracted item is a structured
-object. `extraction_contract.py` pins the shape the eval depends on, as a Pydantic
-model — the same "R1 defines it, the pipeline implements it" pattern as
-`RankingModel`, and in code so the pipeline's output is *checked* against it, not
-just described.
+object. `extraction_contract.py` pins which fields of the pipeline's output the
+eval reads and what they must mean, as a Pydantic model — in code so the
+pipeline's output is *checked* against it, not just described. The pipeline's own
+outbound contract stays `TaskCreationRequested`.
 
 `ExtractedItem` carries only what the eval reads:
 
@@ -482,17 +482,24 @@ just described.
 |---|---|---|
 | `title` | yes | head of the comparison string |
 | `description` | no | appended to `title` (`title + ". " + description`) when present — design §3.3 |
-| `source_ref` | yes | the meeting-id join key (AMI code verbatim, e.g. `IS1008b`); required here even though `TaskCreationRequested.source_ref` is nullable, because the eval only consumes corpus-loader output |
+
+**Which field carries the meeting id (issue #233, step 1): none.** `source_ref` in
+the extraction pipeline is a pointer found *inside the content* (a message id, a
+URL) and is dropped when the text does not contain it (`extraction/grounding.py`),
+so for a meeting transcript it is `None`. The eval is what sends each meeting to
+the extractor, so it holds the meeting id itself: it passes it in as the
+extractor's `item_key` and reads it back from `ExtractionSuccess` /
+`ExtractionFailure`, grouping items by meeting before they are scored.
 
 `ExtractedItem.to_comparison_text()` produces the string `evaluate_extraction`
 matches. Pipeline output enters the eval through
 `evaluate_extracted_items(items, annotated, *, similarity, threshold)`, which takes
 `ExtractedItem`s — so the extracted side has to pass the contract before it is
 scored — and is otherwise a thin wrapper over `evaluate_extraction` (the
-string-level version the CLI and fixture use). Field names match `TaskCreationRequested`
-(`contracts/task_creation_requested.py`, PR #197) and `extra="ignore"`, so a full
-corpus-loader task payload validates as-is (a Bridge-path payload, with
-`source_ref=None`, is rejected by design) — extraction's classification fields
+string-level version the CLI and fixture use). Field names match the pipeline's
+`ExtractedFields` and `TaskCreationRequested` (`contracts/task_creation_requested.py`)
+and `extra="ignore"`, so a full payload validates as-is — `source_ref` is simply
+ignored, and extraction's classification fields
 (`tier`, `urgency`, `role_context`, `confidence`, `deadline`, …) are deliberately
 absent: extraction P/R measures "did we find the right action items", not "did we
 classify them right". `role_context` is also not *set* at extraction — the
@@ -500,7 +507,8 @@ classification stage fills it (`extraction/assembly.py`); it joins this contract
 as an optional field when the owner-match diagnostic (design §3.7) is built.
 
 **Status: proposed by R1, not yet agreed with Yonit** — pending her confirmation
-that the pipeline output fits this shape (`extraction_eval_design.md`
+that the pipeline output fits this shape and that `item_key` passes through
+unchanged (`extraction_eval_design.md`
 §"Meeting IDs", `TODO(Yonit)`).
 
 ### This eval is approximate

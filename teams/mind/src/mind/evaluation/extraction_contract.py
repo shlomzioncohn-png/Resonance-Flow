@@ -2,33 +2,40 @@
 
 `evaluate_extraction` (`extraction_eval.py`) compares *strings*. This module is the
 typed shape those strings come from: the minimal projection of an extracted task
-that the eval actually depends on — the title, the optional description, and the
-meeting-id join key. Nothing else: `role_context` is deliberately absent, because
-the classification stage fills it, not extraction (`extraction/assembly.py` leaves
-it unset). It joins as an optional field when the owner-match diagnostic
-(`extraction_eval_design.md` §3.7) is built — adding an optional field breaks no
-existing payload.
+that the eval actually depends on — the title and the optional description.
+Nothing else: `role_context` is deliberately absent, because the classification
+stage fills it, not extraction (`extraction/assembly.py` leaves it unset). It joins
+as an optional field when the owner-match diagnostic (`extraction_eval_design.md`
+§3.7) is built — adding an optional field breaks no existing payload.
 
-Same pattern as `RankingModel` in `interfaces.py`: R1 defines the contract here,
-the extraction pipeline (R2 / Yonit) produces output that satisfies it. Being a
-Pydantic model rather than a paragraph means the pipeline's output is *checked*
-against it, not merely described by it — the code cannot drift from the spec
-because the code is the spec. This is the same reason `PersonaEvaluationScenario`
-is a model and not a Word doc.
+**Which field carries the meeting id (issue #233, step 1): none.** No field of the
+pipeline's output carries it, and none should: `source_ref` in the extraction
+pipeline is a pointer found *inside the content* (a message id, a URL), dropped
+when the text does not contain it (`extraction/grounding.py`) — so for a meeting
+transcript it is `None`. The eval is what sends each meeting to the extractor, so
+the eval holds the meeting id itself: it passes it in as the extractor's
+`item_key` and reads it back from `ExtractionSuccess` / `ExtractionFailure`
+(`extraction/extractor.py`), grouping items by meeting before they reach
+`evaluate_extracted_items`.
 
-Field names match `TaskCreationRequested` (Yonit's MIND->Inbox event,
-`contracts/task_creation_requested.py`, from PR #197) exactly,
-so her pipeline feeds this eval with no translation layer. `extra="ignore"` (not
-`PersonaEvaluationScenario`'s `extra="forbid"`) so a full `TaskCreationRequested`
-payload validates as-is — this model is a deliberate subset of a larger upstream
-object, not a hand-authored file where an unknown key means a typo. "As-is" holds
-for corpus-loader payloads only: a Bridge-path payload has `source_ref=None` and
-is rejected, by design — the eval needs the meeting id to join against the
-annotations (see the `source_ref` field).
+R1 defines which fields of the pipeline's output the eval reads, and what they must
+mean; the pipeline's own outbound contract stays `TaskCreationRequested` (R2 /
+Yonit). Being a Pydantic model rather than a paragraph means the pipeline's output
+is *checked* against it, not merely described by it — the code cannot drift from
+the spec because the code is the spec. This is the same reason
+`PersonaEvaluationScenario` is a model and not a Word doc.
+
+Field names match the pipeline's `ExtractedFields` (`extraction/models.py`) and
+`TaskCreationRequested` (`contracts/task_creation_requested.py`) exactly, so its
+output feeds this eval with no translation layer. `extra="ignore"` (not
+`PersonaEvaluationScenario`'s `extra="forbid"`) so a full payload validates as-is —
+this model is a deliberate subset of a larger upstream object, not a hand-authored
+file where an unknown key means a typo.
 
 STATUS: proposed by R1, pending confirmation from Yonit that the extraction
-pipeline output fits this shape (issue step 4). Not yet agreed — see
-`extraction_eval_design.md` §"Meeting IDs" for the open `TODO(Yonit)`.
+pipeline output fits this shape and that `item_key` passes through unchanged
+(issue step 4). Not yet agreed — see `extraction_eval_design.md` §"Meeting IDs"
+for the open `TODO(Yonit)`.
 """
 
 from __future__ import annotations
@@ -43,6 +50,8 @@ class ExtractedItem(BaseModel):
     confidence, deadline, owner suggestions, etc. Extraction precision/recall asks
     "did the pipeline find the right action items", not "did it classify them
     right", so none of those are here and `evaluate_extraction` never sees them.
+    The meeting an item came from is not here either — the eval holds it (see the
+    module docstring).
     """
 
     model_config = ConfigDict(extra="ignore")
@@ -65,18 +74,6 @@ class ExtractedItem(BaseModel):
             "string is rejected, so a consumer has one case instead of two (the "
             "extraction pipeline already maps blank placeholders to `None`). "
             "Matches TaskCreationRequested.description."
-        ),
-    )
-    source_ref: str = Field(
-        min_length=1,
-        description=(
-            "The meeting this item was extracted from — the join key against the "
-            "annotation set. The AMI meeting code verbatim, e.g. 'IS1008b' (the "
-            "corpus loader sets it from the manifest record id; "
-            "extraction_eval_design.md §'Meeting IDs'). "
-            "TaskCreationRequested.source_ref is nullable because the Bridge "
-            "ingestion path carries no meeting id; it is REQUIRED here because the "
-            "eval only ever consumes corpus-loader output, where it is always set."
         ),
     )
 
