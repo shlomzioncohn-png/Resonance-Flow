@@ -116,7 +116,6 @@ public class TaskDependencyService {
         // of reporting a fabricated success.
         requireTaskExists(taskId);
         requireTaskExists(dependsOnTaskId);
-//בודק אם אותה פעולה כבר בוצעה
         if (isMatchingRetry(taskId, dependsOnTaskId, DependencyChangeAction.ADDED, source, sourceRef)) {
             return new TaskDependency(taskId, dependsOnTaskId);
         }
