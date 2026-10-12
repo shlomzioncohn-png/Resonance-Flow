@@ -4,7 +4,7 @@ Creates a random RSA key pair Secret via a hook.
 {{- if (index .Values.components "lens-gateway").enabled }}
 {{- $name := printf "%s-lens-gateway-jwt-init" (include "resonance-flow.fullname" .) }}
 {{- $secretName := printf "%s-lens-gateway-jwt" (include "resonance-flow.fullname" .) }}
-{{- $serviceAccountName := printf "%s-lens-secrets-init" (include "resonance-flow.fullname" .) }}
+{{ include "resonance-flow.lens.secretHookRbac" (dict "root" $ "name" "lens-gateway-jwt" "secretName" $secretName "component" "lens-gateway") }}
 ---
 apiVersion: batch/v1
 kind: Job
@@ -27,7 +27,7 @@ spec:
         {{- include "resonance-flow.selectorLabels" . | nindent 8 }}
         app.kubernetes.io/component: lens-gateway-jwt-init
     spec:
-      serviceAccountName: {{ $serviceAccountName }}
+      serviceAccountName: {{ $name }}
       restartPolicy: Never
       securityContext:
         fsGroup: 1000

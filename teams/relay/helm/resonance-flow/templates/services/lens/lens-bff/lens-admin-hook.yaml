@@ -5,7 +5,7 @@ Inbox (stores it on the seeded admin user).
 {{- if or (index .Values.components "lens-bff").enabled .Values.components.inbox.enabled }}
 {{- $name := printf "%s-lens-admin-init" (include "resonance-flow.fullname" .) }}
 {{- $secretName := printf "%s-lens-admin" (include "resonance-flow.fullname" .) }}
-{{- $serviceAccountName := printf "%s-lens-secrets-init" (include "resonance-flow.fullname" .) }}
+{{ include "resonance-flow.lens.secretHookRbac" (dict "root" $ "name" "lens-admin" "secretName" $secretName "component" "lens-bff") }}
 ---
 apiVersion: batch/v1
 kind: Job
@@ -29,7 +29,7 @@ spec:
         {{- include "resonance-flow.selectorLabels" . | nindent 8 }}
         app.kubernetes.io/component: lens-admin-init
     spec:
-      serviceAccountName: {{ $serviceAccountName }}
+      serviceAccountName: {{ $name }}
       restartPolicy: Never
       securityContext:
         runAsNonRoot: true
