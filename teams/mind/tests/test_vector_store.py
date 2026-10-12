@@ -40,9 +40,13 @@ async def _create_test_table(settings: VectorStoreSettings) -> None:
 
 
 @pytest.fixture(scope="module")
-async def store():
+async def store(migrated_db):
     """One store per module, not per test. Scoped here, not conftest.py,
-    so DB-free test files never need a connection."""
+    so DB-free test files never need a connection. Depends on
+    migrated_db (conftest.py) so `alembic upgrade head` actually runs
+    against the real `task_embeddings` table before any DB test does --
+    this suite's own `task_embeddings_test` table isn't covered by that
+    migration, so it still sets itself up separately below."""
     settings = VectorStoreSettings(
         dsn=os.environ["MIND_VECTOR_STORE__DSN"],
         table="task_embeddings_test",
@@ -212,6 +216,21 @@ async def test_search_raises_when_database_is_unreachable():
             await unreachable_store.search([0.0] * EMBEDDING_DIM, k=1)
     finally:
         await unreachable_store.close()  # the pool opened before timing out
+
+
+async def test_open_raises_a_clear_error_when_the_table_is_not_migrated():
+    """The most important new behavior here: an unmigrated DB fails with
+    a clear message, not a bare UndefinedTable from the first real query."""
+    missing_settings = VectorStoreSettings(
+        dsn=os.environ["MIND_VECTOR_STORE__DSN"],
+        table=f"missing_{uuid.uuid4().hex}",
+    )
+    missing_store = PgVectorStore(missing_settings)
+    try:
+        with pytest.raises(RuntimeError, match="schema not migrated"):
+            await missing_store.open()
+    finally:
+        await missing_store.close()
 
 
 @asynccontextmanager

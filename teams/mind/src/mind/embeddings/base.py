@@ -26,7 +26,8 @@ class SearchResult(BaseModel):
 class VectorStore(ABC):
     @abstractmethod
     async def open(self) -> None:
-        """Eagerly initialize. Optional -- other methods init lazily."""
+        """Eagerly initialize (open connections, confirm the schema has
+        already been migrated). Optional -- other methods init lazily."""
         ...
 
     @abstractmethod
