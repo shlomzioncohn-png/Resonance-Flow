@@ -30,7 +30,7 @@ import time
 from pathlib import Path
 
 from benchmarks.vector_store_test_table import create_vector_store_test_table
-from mind.config import get_settings
+from mind.config import VectorStoreSettings, get_settings
 from mind.embeddings import embed, embed_batch
 from mind.embeddings.pgvector_store import PgVectorStore
 
@@ -99,13 +99,18 @@ def percentile(values: list[float], p: float) -> float:
     return values[idx]
 
 
+async def _open_benchmark_store(settings: VectorStoreSettings) -> PgVectorStore:
+    await create_vector_store_test_table(settings)
+    store = PgVectorStore(settings)
+    await store.open()
+    return store
+
+
 async def main() -> None:
     random.seed(87)
     # Own table, not the real task_embeddings -- dropped in finally below.
     settings = get_settings().vector_store.model_copy(update={"table": BENCHMARK_TABLE})
-    await create_vector_store_test_table(settings)
-    store = PgVectorStore(settings)
-    await store.open()
+    store = await _open_benchmark_store(settings)
     try:
         await _run_benchmark(store)
     finally:
