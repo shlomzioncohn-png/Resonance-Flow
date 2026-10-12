@@ -2,7 +2,7 @@ package com.rnd.chain.events;
 
 import com.rnd.chain.exception.InvalidDependencyException;
 import com.rnd.chain.exception.TaskNotFoundException;
-import com.rnd.chain.service.TaskEligibilityService;
+import com.rnd.chain.service.DependencyEdgeService;
 import com.rnd.mind.event.DependencyProposedEvent;
 import org.springframework.kafka.annotation.KafkaListener;
 import org.springframework.kafka.annotation.RetryableTopic;
@@ -18,21 +18,21 @@ import static com.rnd.chain.events.EventFields.parseUuid;
 
 /**
  * Consumes task.dependencies.proposed (Mind, Protobuf) to feed
- * {@link TaskEligibilityService#addDependencies}.
+ * {@link DependencyEdgeService#addDependencies}.
  *
  * Idempotency: dedupe via {@link ChainEventProcessingTemplate#processClaimed} on event_id, same as
  * any other Mind-originated event - per the team lead's statement that Mind events carry their own
  * event_id. NOT YET CONFIRMED end-to-end though: Mind's actual draft schema (see
  * dependency-proposed-event.proto's header) doesn't show an event_id field - the user is actively
  * working to get Mind to add one. If it turns out not to materialize, this needs a different
- * idempotency strategy - but note {@code TaskEligibilityService.addDependency}/{@code addDependencies}
+ * idempotency strategy - but note {@code DependencyEdgeService.addDependency}/{@code addDependencies}
  * are already naturally idempotent per-edge (re-adding an existing edge is a documented no-op), so
  * even without an event_id, redelivery can't corrupt state - it would only lose the "duplicate
  * detected" observability this event_id-based claim otherwise gives for free.
  *
  * All-or-nothing per event (PR #467 review): every entry in {@code dependencies} is validated
  * against the graph before any of them is applied - see
- * {@link TaskEligibilityService#addDependencies}'s Javadoc for why that's safe to do even though
+ * {@link DependencyEdgeService#addDependencies}'s Javadoc for why that's safe to do even though
  * cycle detection is itself graph-state-dependent. So a single bad entry (a cycle, or a target
  * task Chain hasn't seen yet) fails the whole event with zero partial effect, rather than earlier
  * entries silently landing and the rest being dropped.
@@ -55,12 +55,12 @@ import static com.rnd.chain.events.EventFields.parseUuid;
 @Component
 public class DependencyProposedEventHandler {
 
-    private final TaskEligibilityService taskEligibilityService;
+    private final DependencyEdgeService dependencyEdgeService;
     private final ChainEventProcessingTemplate template;
 
-    public DependencyProposedEventHandler(TaskEligibilityService taskEligibilityService,
+    public DependencyProposedEventHandler(DependencyEdgeService dependencyEdgeService,
                                            ChainEventProcessingTemplate template) {
-        this.taskEligibilityService = taskEligibilityService;
+        this.dependencyEdgeService = dependencyEdgeService;
         this.template = template;
     }
 
@@ -92,7 +92,7 @@ public class DependencyProposedEventHandler {
 
     private void addDependencies(UUID taskId, List<UUID> dependsOnTaskIds) {
         try {
-            taskEligibilityService.addDependencies(taskId, dependsOnTaskIds);
+            dependencyEdgeService.addDependencies(taskId, dependsOnTaskIds);
         } catch (TaskNotFoundException e) {
             // Task not found - task_id or one of the dependsOnTaskIds hasn't landed via
             // task.created yet. The team spec guarantees Mind only ever sends final, valid ids,
