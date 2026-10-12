@@ -11,9 +11,10 @@ import javax.imageio.stream.ImageInputStream;
 import org.springframework.stereotype.Component;
 
 /**
- * Raster image formats the JDK's ImageIO decodes without extra libraries. TIFF can hold several
- * pages (a multi-page scan); every other format here is a single page. WEBP is deliberately
- * absent - the JDK has no decoder for it.
+ * The raster formats scanners actually produce, decoded by the JDK's ImageIO without extra
+ * libraries. TIFF can hold several pages (a multi-page scan); PNG and JPEG are a single page.
+ * Other formats ImageIO could decode (BMP, GIF) are left out on purpose - not what scanned
+ * documents arrive as.
  * <p>
  * The extension only decides whether a file is in scope; the decoder itself is chosen from the
  * file's actual bytes, so a mislabelled file still decodes as what it really is.
@@ -21,7 +22,7 @@ import org.springframework.stereotype.Component;
 @Component
 public class ImageIoDocumentReader implements PagedDocumentReader {
 
-    private static final Set<String> EXTENSIONS = Set.of("png", "jpg", "jpeg", "tif", "tiff", "bmp", "gif");
+    private static final Set<String> EXTENSIONS = Set.of("png", "jpg", "jpeg", "tif", "tiff");
 
     @Override
     public Set<String> extensions() {

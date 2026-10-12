@@ -309,8 +309,8 @@ a whole; it never extracts tasks, people, dates or priority - that stays with Mi
 both steps above work from that one scan:
 
 - **Formats** are an explicit list - the union of the `PagedDocumentReader` beans' extensions:
-  PNG, JPEG, TIFF (incl. multi-page), BMP, GIF via ImageIO, and PDF via Apache PDFBox. Anything
-  else (DOC/DOCX, WEBP, ...) is never opened or sent - it lands `INCLUDED`, unclassified. A new
+  PNG, JPEG, TIFF (incl. multi-page) via ImageIO, and PDF via Apache PDFBox. Anything
+  else (DOC/DOCX, WEBP, BMP, GIF, ...) is never opened or sent - it lands `INCLUDED`, unclassified. A new
   format is one new `PagedDocumentReader`.
 - **Pages** are rendered one at a time, in memory only, and checked for blankness locally; blank
   pages are skipped. The scan stops once `documents.pages-to-send` (2) content pages are found or

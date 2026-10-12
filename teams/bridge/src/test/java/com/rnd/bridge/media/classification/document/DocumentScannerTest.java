@@ -84,7 +84,7 @@ class DocumentScannerTest {
     }
 
     @ParameterizedTest
-    @ValueSource(strings = {"notes.docx", "sheet.xlsx", "photo.webp", "no-extension", "trailing-dot."})
+    @ValueSource(strings = {"notes.docx", "sheet.xlsx", "photo.webp", "image.bmp", "anim.gif", "no-extension", "trailing-dot."})
     void formatOutsideTheReadersIsUnsupportedAndNeverOpened(String filename) {
         assertThat(scanner.scan(new byte[] {1, 2, 3}, filename).outcome())
                 .isEqualTo(DocumentScan.Outcome.UNSUPPORTED_FORMAT);
