@@ -101,11 +101,11 @@ TRANSCRIBE_TIMEOUT_S = 240
 # The recording is transcribed in chunks of at most this many seconds, each cut in a
 # silence, not as one piece. Memory: faster-whisper computes its features over the
 # whole input at once, so peak memory grew ~0.9 MiB per second of audio (~790 MiB
-# for 600 s); in chunks it is bounded by the chunk, ~430-490 MiB on the same audio,
+# for 600 s); in chunks it is bounded by the chunk, ~440-550 MiB on the same audio,
 # whatever the recording's length. Accuracy: cut in silences, rough WER against
-# AMI's human transcript was the same as unchunked (mean 0.260 vs 0.260 on the
+# AMI's human transcript matched unchunked within noise (mean 0.261 vs 0.258 on the
 # first 600 s of the two #135 meetings, two runs each); fixed 60 s cuts were worse
-# (0.275, up to +4 points on one run), since they split words and sentences. See
+# (0.267, and up to +4 points on one earlier run), since they split words. See
 # benchmarks/ocr-asr-benchmark.md "ASR -- chunking" and benchmarks/asr_chunking.py.
 CHUNK_S = 60
 # A chunk is cut at the latest silence in its window, but not before this point: a

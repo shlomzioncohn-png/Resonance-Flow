@@ -652,6 +652,60 @@ concurrency once known.
 - Phrases can repeat in short loops on hard audio (e.g. "I'm not sure."
   repeated ~10 times in a row in one IS1008b transcript).
 
+## ASR — chunking (#478)
+
+**Decision: `transcribe()` runs Whisper in chunks of at most 60 s, each cut in a
+silence** (`CHUNK_S`, `MIN_CHUNK_S` in `src/mind/multimodal/asr.py`). Chunking
+cuts peak memory by ~300 MiB with no measurable accuracy cost; cutting at fixed
+times instead costs accuracy.
+
+**Why chunk:** faster-whisper computes its features over the whole input at
+once, so peak memory grows with the audio — measured on IS1008b with base.en:
+~395 MiB for 60 s, ~530 MiB for 300 s, ~790 MiB for 600 s (the `MAX_DURATION_S`
+cap), about 0.9 MiB per second on top of ~240 MiB fixed (Python, libraries,
+model). MIND's container limit in the shared Helm chart is 512Mi. Turning the
+VAD off saved only ~30 MiB, so the VAD is not the cause.
+
+**How chunks are cut:** each 60 s window is cut in the middle of its latest
+silence past 30 s, else hard-cut at 60 s. Silences come from Whisper's own VAD
+(Silero), run per window — it too scores its whole input in one pass, so running
+it on the whole recording would bring the memory growth back. A window with no
+speech is skipped and never reaches Whisper. Segment timestamps are offset by
+the chunk start, so they stay relative to the whole recording.
+
+**Measurement:** `python -m benchmarks.asr_chunking`, 2026-10-12, same dev laptop
+as above (CPU, 4 threads). The first 600 s of both #135 meetings — what
+production transcribes under its cap — scored against AMI's human words that
+start in those 600 s, with the same rough WER as above. Each (variant, meeting,
+run) in its own process; peak RSS covers decoding plus transcription, what one
+call costs. Two runs:
+
+| Variant | IS1008b WER | IB4003 WER | Mean WER | Mean precision | Peak RSS |
+|---|---|---|---|---|---|
+| `full` — one pass over the 600 s (before #478) | 0.242 / 0.242 | 0.274 / 0.275 | 0.258 | 0.913 | 783–836 MiB |
+| `fixed60` — cut every 60 s | 0.251 / 0.251 | 0.287 / 0.278 | 0.267 | 0.910 | 429–556 MiB |
+| `production` — `transcribe()`, cut in silences | 0.251 / 0.251 | 0.271 / 0.271 | **0.261** | 0.911 | **440–549 MiB** |
+
+- **Silence cuts ≈ unchunked.** 0.3 points apart on the mean, inside the
+  run-to-run noise documented above: 0.9 points worse on IS1008b, 0.3–0.4 better
+  on IB4003, the same in both runs. An earlier, pre-implementation run of the
+  same comparison (cut points from one VAD pass over the whole 600 s) gave 0.260
+  for both.
+- **Fixed cuts are worse:** 0.9 points on the mean and worse on both meetings in
+  both runs. In the pre-implementation run, one IB4003 run reached 0.317 (+4
+  points). A cut inside a word or sentence loses it on both sides.
+- **Peak memory still exceeds 512Mi** on IS1008b (549 MiB), before the
+  embedding model that shares the process is counted. Peaks vary by ~±60 MiB
+  between variants at the same chunk size (Windows allocator), so read them as
+  ranges. Wall times varied 2–3x between identical runs here (other load on the
+  laptop) and are not reported.
+
+**Limits of this evidence:** the same as "ASR — known risks" below (n=2
+meetings, one corpus, rough WER), plus: 600 s of each meeting, not the whole of
+it. In production most AMI-like meetings will not reach ASR at all: Bridge pairs
+a recording with its transcript sidecar (`transcript_object_key`), and R2's
+consumer skips ASR when one exists — ASR is the fallback path.
+
 ## ASR — known risks
 
 The decision is the best reading of thin evidence, not a measured certainty:

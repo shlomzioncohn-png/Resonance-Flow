@@ -76,8 +76,11 @@ def run_one(variant: str, meeting: Meeting, run: int) -> ChunkingRow:
 
     content = meeting.audio.read_bytes()
     _, model = asr._load_model()
-    audio, _ = asr._decode(content, asr.MAX_DURATION_S)
 
+    # The window covers what one call costs in production: decoding the bytes and
+    # transcribing them, for every variant alike. (A first version decoded before
+    # the window and then let transcribe() decode again inside it, so "production"
+    # held the audio twice and paid for a decode the others did not.)
     proc = psutil.Process()
     stop_event = threading.Event()
     peak = [proc.memory_info().rss]
@@ -92,6 +95,7 @@ def run_one(variant: str, meeting: Meeting, run: int) -> ChunkingRow:
                 raise RuntimeError(f"transcribe() failed: {result.reason}: {result.error}")
             texts = [s.text for s in result.segments]
         else:
+            audio, _ = asr._decode(content, asr.MAX_DURATION_S)
             step = len(audio) if variant == "full" else _FIXED_CHUNK_S * asr.SAMPLE_RATE
             for i in range(0, len(audio), step):
                 found, _ = model.transcribe(
