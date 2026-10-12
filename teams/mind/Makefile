@@ -1,4 +1,4 @@
-.PHONY: install dev test lint fmt run run-index-consumer eval eval-ci schema docker-build docker-up proto
+.PHONY: install dev test lint fmt run run-index-consumer eval eval-ci schema migrate docker-build docker-up proto
 
 install:
 	pip install -e .
@@ -6,8 +6,13 @@ install:
 dev:
 	pip install -e ".[dev]"
 
+# See scripts/gen_proto.py -- single source of truth, also called from
+# the Dockerfile and tests/conftest.py.
 proto:
-	python -m grpc_tools.protoc --proto_path=proto --python_out=src/mind/messaging proto/*.proto
+	python scripts/gen_proto.py
+
+migrate:
+	alembic upgrade head
 
 test: proto
 	pytest --cov=src/mind
@@ -28,7 +33,7 @@ run: proto
 	uvicorn mind.api.main:app --reload --port 8000
 
 run-index-consumer: proto
-	python scripts/index_consumer.py
+	python -m mind.embeddings.index_consumer_runner
 
 eval:
 	python -m mind.evaluation.run --personas eval/personas
@@ -57,10 +62,18 @@ eval:
 #    1 minute from now). 0.68 leaves ~1.7 points of margin above the measured
 #    66.7% instead of the ~7 points the original 0.70/63% design had; still
 #    fails well below the no-headroom 85% baseline the 2026-09-06 rebuild fixed.
+#  - LongestDescriptionModel run: a length-bias guard. It scores a task by the
+#    length of its description and nothing else, so it can only do well if the
+#    set's correct answers are, by construction, its longest descriptions (they
+#    carry the explanation of why they are correct). Gate is 0.65: the 30
+#    original scenarios already measure 22/30 on their own, so the combined set
+#    sits at 22/36 = 61.1% with the six hard scenarios (whose correct answer is
+#    never the longest), and a seventh would not fit under it.
 eval-ci:
 	python -m eval.check_time_horizon
 	python -m mind.evaluation.run --personas eval/personas --model dummy --min-accuracy 0.20 --max-accuracy 0.50
 	python -m mind.evaluation.run --personas eval/personas --model skip-blocked-nearest-deadline --max-accuracy 0.68
+	python -m mind.evaluation.run --personas eval/personas --model longest-description --max-accuracy 0.65
 
 docker-build:
 	docker compose build

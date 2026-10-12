@@ -274,6 +274,16 @@ components:
         port: http
       periodSeconds: 5
       failureThreshold: 3
+    # Password from the inbox-db-credentials Secret, mounted as a file - created by
+    # the inbox db-credentials hook Job, not a chart resource (same as Chain's).
+    volumeMounts:
+      - name: inbox-db-credentials
+        mountPath: /etc/resonance-flow/secrets/inbox-db
+        readOnly: true
+    volumes:
+      - name: inbox-db-credentials
+        secret:
+          secretName: resonance-flow-inbox-db-credentials
     dependencies:
       - name: postgresql
         port: 5432
@@ -281,7 +291,9 @@ components:
         port: 8080
     config:
       data:
-        # datasource credentials come from postgresql.auth below - no copy here.
+        datasource:
+          # Own user, owning postgresql.auth.database - not the subchart's superuser.
+          username: inbox
         kafka:
           consumerGroupId: inbox-service
           topics:
@@ -470,9 +482,8 @@ minio:
 postgresql:
   enabled: true
   architecture: standalone
-  # Also inbox's datasource credentials (services/inbox/configmap.yaml reads them from
-  # here). Pinned: the subchart otherwise generates a random password and only creates
-  # the default "postgres" database.
+  # Pinned: the subchart otherwise generates a random password and only creates the
+  # default "postgres" database. Inbox's user owns auth.database (inbox/_db-init.tpl).
   auth:
     postgresPassword: postgres
     database: resonance_flow
@@ -514,6 +525,10 @@ postgresql:
         secret:
           secretName: resonance-flow-mind-db-credentials
           optional: true
+      - name: inbox-db-credentials
+        secret:
+          secretName: resonance-flow-inbox-db-credentials
+          optional: true
     extraVolumeMounts:
       - name: pgvector
         mountPath: /opt/bitnami/postgresql/lib/vector.so
@@ -524,6 +539,9 @@ postgresql:
         readOnly: true
       - name: mind-db-credentials
         mountPath: /etc/resonance-flow/secrets/mind-db
+        readOnly: true
+      - name: inbox-db-credentials
+        mountPath: /etc/resonance-flow/secrets/inbox-db
         readOnly: true
     # HNSW index builds use maintenance_work_mem (64MB default) on top of
     # shared_buffers (128MB) - 192Mi left no headroom and OOMKills instead of erroring.

@@ -14,16 +14,23 @@ dependencies = [
     # embeddings (src/mind/embeddings)
     "psycopg[binary,pool]>=3.1",
     "sentence-transformers>=3.0",
+    # migrations (migrations/) -- runs at deploy time, inside the image,
+    # not just in dev, so this belongs here and not in [dev].
+    "alembic>=1.13",
+    "sqlalchemy>=2.0",
     # messaging (src/mind/messaging)
     "confluent-kafka[protobuf,schemaregistry]>=2.5,<2.11",
     "protobuf>=5",
     "pyyaml",
+    # LLM provider calls (mind.extraction.providers); also what
+    # fastapi.testclient.TestClient runs on in the tests.
+    "httpx",
     # OCR (src/mind/multimodal/ocr.py) -- tesseract --psm 11, the decision
     # made in benchmarks/ocr-asr-benchmark.md. Also requires the
     # tesseract-ocr system binary (not pip-installable).
     "pillow",
     "pypdfium2",  # rasterizes PDF pages to images for the OCR pipeline
-    # add as decided: ASR libs, LLM client, etc.
+    # add as decided: vector-store client, ASR libs, etc.
 ]
 
 [project.optional-dependencies]
@@ -42,8 +49,8 @@ dev = [
                      # needed) is enough for mypy to resolve the import --
                      # verified locally: mypy passes on benchmarks/ with
                      # types-psutil installed and psutil itself uninstalled.
-    "httpx",  # required by fastapi.testclient.TestClient
     "grpcio-tools==1.71.0",  # protoc, for `make proto`
+    "types-protobuf",  # stubs for google.protobuf, imported by the generated _pb2.pyi files
     "python-dotenv",  # tests/conftest.py loads .env for os.environ-reading fixtures
 ]
 # Not a runtime dependency of src/mind/ -- only benchmarks/ocr_asr_benchmark.py
@@ -107,20 +114,3 @@ asyncio_mode = "auto"
 # the same way it does under a real server, not get recreated per test.
 asyncio_default_fixture_loop_scope = "session"
 asyncio_default_test_loop_scope = "session"
-
-# Generated pb2 modules (see exclude above) have no static stubs -- protoc's
-# python_out generates classes dynamically from a serialized FileDescriptor,
-# so mypy can't see their attributes by reading the file. "exclude" above
-# only stops mypy from type-checking the pb2 file's own body; importing a
-# concrete message class FROM one (index_consumer.py, the first src/ file to
-# do so for real rather than in a docstring example) still needs this, or
-# mypy reports "has no attribute" for every message class. mypy's module
-# patterns only wildcard whole dotted components, not a "*_pb2" suffix, so
-# these are listed explicitly rather than matched with a glob.
-[[tool.mypy.overrides]]
-module = [
-    "mind.messaging.task_created_event_pb2",
-    "mind.messaging.task_updated_event_pb2",
-    "mind.messaging.task_completed_event_pb2",
-]
-follow_imports = "skip"

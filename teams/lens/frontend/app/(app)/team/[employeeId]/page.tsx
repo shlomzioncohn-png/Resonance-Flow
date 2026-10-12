@@ -1,12 +1,12 @@
-import PageContainer from '@/components/layout/PageContainer'
-import EmptyState from '@/components/feedback/EmptyState'
+import PageContainer from '@/components/layout/PageContainer';
+import EmptyState from '@/components/feedback/EmptyState';
 
 export default async function TeamMemberPage({
   params,
 }: {
-  params: Promise<{ employeeId: string }>
+  params: Promise<{ employeeId: string }>;
 }) {
-  const { employeeId } = await params
+  const { employeeId } = await params;
 
   return (
     <PageContainer
@@ -18,5 +18,5 @@ export default async function TeamMemberPage({
         description={`Workload and blocker detail for employee "${employeeId}" will appear here once connected to real data.`}
       />
     </PageContainer>
-  )
+  );
 }

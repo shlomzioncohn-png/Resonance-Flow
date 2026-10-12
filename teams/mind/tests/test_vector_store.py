@@ -7,6 +7,7 @@ import uuid
 from contextlib import asynccontextmanager
 from unittest.mock import AsyncMock, MagicMock
 
+import psycopg
 import pytest
 from psycopg import sql
 from psycopg_pool import PoolTimeout
@@ -17,6 +18,29 @@ from mind.embeddings.embeddings import EMBEDDING_DIM
 from mind.embeddings.pgvector_store import PgVectorStore
 
 
+async def _create_test_table(settings: VectorStoreSettings) -> None:
+    # The real table is created by `alembic upgrade head`; this suite's
+    # dedicated test table isn't covered by that, so it sets itself up here
+    # -- matching migrations/versions/0003 (is_completed, content_hash).
+    table = sql.Identifier(settings.table)
+    async with await psycopg.AsyncConnection.connect(
+        str(settings.dsn.get_secret_value()), autocommit=True
+    ) as conn:
+        await conn.execute("CREATE EXTENSION IF NOT EXISTS vector;")
+        await conn.execute(
+            sql.SQL(
+                "CREATE TABLE IF NOT EXISTS {table} "
+                "(task_id TEXT PRIMARY KEY, embedding VECTOR({dim}) NOT NULL, "
+                "is_completed BOOLEAN NOT NULL DEFAULT FALSE, content_hash TEXT);"
+            ).format(table=table, dim=sql.Literal(EMBEDDING_DIM))
+        )
+        await conn.execute(
+            sql.SQL(
+                "CREATE INDEX IF NOT EXISTS {idx} ON {table} USING hnsw (embedding vector_cosine_ops);"
+            ).format(idx=sql.Identifier(f"{settings.table}_embedding_hnsw_idx"), table=table)
+        )
+
+
 @pytest.fixture(scope="module")
 async def store():
     """One store per module, not per test. Scoped here, not conftest.py,
@@ -25,6 +49,7 @@ async def store():
         dsn=os.environ["MIND_VECTOR_STORE__DSN"],
         table="task_embeddings_test",
     )
+    await _create_test_table(settings)
     s = PgVectorStore(settings)
     await s.open()
     yield s
@@ -178,6 +203,37 @@ async def test_mark_completed_is_a_noop_for_an_unknown_task_id(store):
     """Unknown task_id returns False, not an error."""
     marked = await store.mark_completed(f"test-{uuid.uuid4()}")
     assert marked is False
+
+
+async def test_mark_incomplete_resets_an_existing_task(store):
+    """mark_incomplete() flips is_completed back off (e.g. a reopened task)."""
+    task_id = f"test-{uuid.uuid4()}"
+    vec = embed("Ship the release notes")
+    await store.upsert(task_id, vec)
+    await store.mark_completed(task_id)
+
+    marked = await store.mark_incomplete(task_id)
+    assert marked is True
+
+    results = await store.search(vec, k=1)
+    assert results[0].task_id == task_id
+    assert results[0].is_completed is False
+
+
+async def test_mark_incomplete_is_a_noop_for_an_unknown_task_id(store):
+    """Unknown task_id returns False, not an error."""
+    marked = await store.mark_incomplete(f"test-{uuid.uuid4()}")
+    assert marked is False
+
+
+async def test_get_content_hash_round_trips_through_upsert(store):
+    task_id = f"test-{uuid.uuid4()}"
+    await store.upsert(task_id, embed("Ship the release notes"), content_hash="abc123")
+    assert await store.get_content_hash(task_id) == "abc123"
+
+
+async def test_get_content_hash_is_none_for_an_unknown_task_id(store):
+    assert await store.get_content_hash(f"test-{uuid.uuid4()}") is None
 
 
 async def test_delete_removes_a_stored_vector(store):

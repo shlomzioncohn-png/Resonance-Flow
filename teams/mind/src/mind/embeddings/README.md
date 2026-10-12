@@ -15,7 +15,8 @@ __init__.py          public interface -- embed()/embed_batch() (+ async), Search
 embeddings.py         embed() family -- the real model
 base.py               VectorStore abstract contract + SearchResult
 pgvector_store.py     the ONLY file that knows Postgres/pgvector
-index_consumer.py     #470 -- Kafka task.{created,updated,completed} handlers (see scripts/index_consumer.py for the process)
+index_consumer.py     #470 -- Kafka task.{created,updated,completed} handlers
+index_consumer_runner.py  #470 -- the process: python -m mind.embeddings.index_consumer_runner
 search.py             nearest_tasks() -- the shared embed()+search() primitive behind #471/#245
 dependency_resolution.py  #245 -- resolve_dependency_targets(): free-text dependency mentions -> ranked candidate task_ids
 loader.py             fetches + verifies the real FUNSD manifest slice
@@ -71,12 +72,12 @@ pytest
 
 ```python
 from mind.config import get_settings
-from mind.embeddings import embed_async
+from mind.embeddings import embed_async, task_text
 from mind.embeddings.pgvector_store import PgVectorStore
 
 store = PgVectorStore(get_settings().vector_store)
 
-vector = await embed_async(task.title + " " + task.description)  # is_query=False (default) for indexing
+vector = await embed_async(task_text(task.title, task.description))  # is_query=False (default) for indexing
 await store.upsert(task.id, vector)
 
 similar = await store.search(vector, k=5)  # best match first
@@ -85,11 +86,14 @@ await store.delete(task.id)
 
 For a query against stored passages (e.g. a search endpoint), use `store.search_text(query, k)` instead -- it embeds with `is_query=True` so the flag can't be forgotten.
 
-`is_completed`, `upsert_if_absent()` and `mark_completed()` back the #470 index consumer:
+`task_text()` is the canonical title+description join -- every producer must use it, or their vectors aren't comparable to each other.
+
+`is_completed`, `upsert_if_absent()`, `mark_completed()` and `mark_incomplete()` back the #470 index consumer:
 
 ```python
 await store.upsert_if_absent(task_id, vector)
 await store.mark_completed(task_id)
+await store.mark_incomplete(task_id)  # e.g. a DONE task got reopened
 ```
 
 `nearest_tasks(store, text, *, k)` (`search.py`) is the shared primitive behind #471 and #245 -- `embed(text)` then `store.search(vector, k=k)`, no threshold.
