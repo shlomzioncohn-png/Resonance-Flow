@@ -431,17 +431,13 @@ most likely to trip someone up.
   token and no `expires_in`, so there is nothing to proactively refresh against; the token is
   refreshed *reactively* on a `401` (refreshed once, triggering call retried once — a second `401`
   after a genuinely fresh token is fatal, not looped).
-- **`dealId` is always the bare `Opportunity.Id` — never prefixed.** This used to not be true: an
-  earlier revision made `Deal.dealId()` return `"salesforce:<Id>"` so the source-agnostic
-  `DealToTaskMapper.toSourceRef` (`"crm:" + dealId`) would produce the required
-  `"crm:salesforce:<Id>"`. That broke `fetchDeal(deal.dealId())` round-tripping, since `fetchDeal`'s
-  own parameter was deliberately the bare id. Fixed by giving `Deal` a `sourceRefPrefix` field
-  instead (defaults to `"crm:"` in the builder and for HubSpot/JSON, both of which never set it;
-  `SalesforceDealRepository` sets it to `"crm:salesforce:"`). `toSourceRef` is now
-  `deal.sourceRefPrefix() + deal.dealId()` — still no per-source branch in the mapper, and
-  `dealId()` is the same bare value everywhere, so `fetchDeal(deal.dealId())` always round-trips.
-  Don't reintroduce a prefixed `dealId` to solve a future per-source `sourceRef` need — extend
-  `sourceRefPrefix` (or add a sibling field) instead.
+- **`dealId` is always the bare `Opportunity.Id` — never prefixed.** Per-source `sourceRef` needs
+  go through `Deal.sourceRefPrefix` instead (defaults to `"crm:"` in the builder and for
+  HubSpot/JSON, both of which never set it; `SalesforceDealRepository` sets it to
+  `"crm:salesforce:"`). `DealToTaskMapper.toSourceRef` is `deal.sourceRefPrefix() + deal.dealId()`
+  — no per-source branch in the mapper, and `dealId()` is the same bare value everywhere, so
+  `fetchDeal(deal.dealId())` always round-trips. Don't reintroduce a prefixed `dealId` to solve a
+  future per-source `sourceRef` need — extend `sourceRefPrefix` (or add a sibling field) instead.
 - **`fetchDeal(dealId)` takes the bare `Opportunity.Id`** — the same value `Deal#dealId()` returns.
   One query for the Opportunity; the stage-metadata query only fires if that lookup found a record
   (a miss costs one request, not two, mirroring `HubSpotDealRepository`'s 404 handling adapted to
