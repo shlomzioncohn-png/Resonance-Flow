@@ -36,14 +36,42 @@ import time
 from pathlib import Path
 from typing import Any
 
+import psycopg
+from psycopg import sql
+
 from mind.config import VectorStoreSettings
 from mind.embeddings import embed
+from mind.embeddings.embeddings import EMBEDDING_DIM
 from mind.embeddings.pgvector_store import PgVectorStore
 
 _ROOT = Path(__file__).resolve().parent.parent
 _REAL_SLICE_DIR = _ROOT / "eval" / "real_slice"
 _RESULTS_FILE = Path(__file__).resolve().parent / "foundation_gate_benchmark_results.json"
 _BENCH_TABLE = "task_embeddings_foundation_gate_bench"
+
+
+async def _create_bench_table(settings: VectorStoreSettings) -> None:
+    # PgVectorStore no longer creates its own schema (issue #441) -- the
+    # real task_embeddings table only exists once `alembic upgrade head`
+    # has run, and that migration doesn't cover this dedicated bench
+    # table. Same pattern as tests/test_vector_store.py's helper.
+    table = sql.Identifier(settings.table)
+    async with await psycopg.AsyncConnection.connect(
+        str(settings.dsn.get_secret_value()), autocommit=True
+    ) as conn:
+        await conn.execute("CREATE EXTENSION IF NOT EXISTS vector;")
+        await conn.execute(
+            sql.SQL(
+                "CREATE TABLE IF NOT EXISTS {table} "
+                "(task_id TEXT PRIMARY KEY, embedding VECTOR({dim}) NOT NULL, "
+                "is_completed BOOLEAN NOT NULL DEFAULT FALSE, content_hash TEXT);"
+            ).format(table=table, dim=sql.Literal(EMBEDDING_DIM))
+        )
+        await conn.execute(
+            sql.SQL(
+                "CREATE INDEX IF NOT EXISTS {idx} ON {table} USING hnsw (embedding vector_cosine_ops);"
+            ).format(idx=sql.Identifier(f"{settings.table}_embedding_hnsw_idx"), table=table)
+        )
 
 # Hand-identified from eval/real_slice/*.json (verbatim AMI action items,
 # see each file's "source" field). Each pair genuinely discusses the same
@@ -125,6 +153,7 @@ async def main() -> None:
         dsn=os.environ["MIND_VECTOR_STORE__DSN"],  # type: ignore[arg-type]
         table=_BENCH_TABLE,
     )
+    await _create_bench_table(settings)
     store = PgVectorStore(settings)
     await store.open()
     try:
