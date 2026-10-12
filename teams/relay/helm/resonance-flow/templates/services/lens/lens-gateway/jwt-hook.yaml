@@ -4,64 +4,7 @@ Creates a random RSA key pair Secret via a hook.
 {{- if (index .Values.components "lens-gateway").enabled }}
 {{- $name := printf "%s-lens-gateway-jwt-init" (include "resonance-flow.fullname" .) }}
 {{- $secretName := printf "%s-lens-gateway-jwt" (include "resonance-flow.fullname" .) }}
----
-apiVersion: v1
-kind: ServiceAccount
-
-metadata:
-  name: {{ $name }}
-  labels:
-    {{- include "resonance-flow.labels" . | nindent 4 }}
-    app.kubernetes.io/component: lens-gateway
-  annotations:
-    helm.sh/hook: pre-install,pre-upgrade
-    helm.sh/hook-weight: "-10"
-    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
----
-apiVersion: rbac.authorization.k8s.io/v1
-kind: Role
-
-metadata:
-  name: {{ $name }}
-  labels:
-    {{- include "resonance-flow.labels" . | nindent 4 }}
-    app.kubernetes.io/component: lens-gateway
-  annotations:
-    helm.sh/hook: pre-install,pre-upgrade
-    helm.sh/hook-weight: "-10"
-    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
-
-rules:
-  - apiGroups: [""]
-    resources: ["secrets"]
-    verbs: ["create"]
-  - apiGroups: [""]
-    resources: ["secrets"]
-    verbs: ["get", "delete"]
-    resourceNames:
-      - {{ $secretName }}
----
-apiVersion: rbac.authorization.k8s.io/v1
-kind: RoleBinding
-
-metadata:
-  name: {{ $name }}
-  labels:
-    {{- include "resonance-flow.labels" . | nindent 4 }}
-    app.kubernetes.io/component: lens-gateway
-  annotations:
-    helm.sh/hook: pre-install,pre-upgrade
-    helm.sh/hook-weight: "-10"
-    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
-
-roleRef:
-  apiGroup: rbac.authorization.k8s.io
-  kind: Role
-  name: {{ $name }}
-subjects:
-  - kind: ServiceAccount
-    name: {{ $name }}
-    namespace: {{ .Release.Namespace }}
+{{- $serviceAccountName := printf "%s-lens-secrets-init" (include "resonance-flow.fullname" .) }}
 ---
 apiVersion: batch/v1
 kind: Job
@@ -84,7 +27,7 @@ spec:
         {{- include "resonance-flow.selectorLabels" . | nindent 8 }}
         app.kubernetes.io/component: lens-gateway-jwt-init
     spec:
-      serviceAccountName: {{ $name }}
+      serviceAccountName: {{ $serviceAccountName }}
       restartPolicy: Never
       securityContext:
         fsGroup: 1000
