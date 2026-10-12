@@ -51,10 +51,7 @@ _BENCH_TABLE = "task_embeddings_foundation_gate_bench"
 
 
 async def _create_bench_table(settings: VectorStoreSettings) -> None:
-    # PgVectorStore no longer creates its own schema (issue #441) -- the
-    # real task_embeddings table only exists once `alembic upgrade head`
-    # has run, and that migration doesn't cover this dedicated bench
-    # table. Same pattern as tests/test_vector_store.py's helper.
+    # Dedicated bench table, not covered by `alembic upgrade head` (#441).
     table = sql.Identifier(settings.table)
     async with await psycopg.AsyncConnection.connect(
         str(settings.dsn.get_secret_value()), autocommit=True

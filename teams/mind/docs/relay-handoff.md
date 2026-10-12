@@ -87,7 +87,7 @@ standalone run needs one supplied directly.
 |---|---|---|
 | `MIND_ENVIRONMENT` | *(required, no default)* | `local` / `ci` / `staging` / `production` -- fails fast on anything else. |
 | `POSTGRES_USER` / `POSTGRES_PASSWORD` / `POSTGRES_DB` | *(required, no default)* | Configure the `vector-store` container itself, and are interpolated into `MIND_VECTOR_STORE__DSN` for the `mind` service -- see above. |
-| `MIND_VECTOR_STORE__TABLE` | `task_embeddings` | Test-only knob (the test suite points it at `task_embeddings_test`). The Alembic migration always creates `task_embeddings` specifically -- changing this in a real deploy points the app at a table that doesn't exist, not a different real table. A genuinely different table name needs a new migration, not this var. |
+| `MIND_VECTOR_STORE__TABLE` | `task_embeddings` | Test-only knob. The migration always creates `task_embeddings` -- changing this in a real deploy points at a table that doesn't exist. |
 | `MIND_VECTOR_STORE__SEARCH_EFFORT` | `400` | HNSW query-time accuracy/speed knob (pgvector's `hnsw.ef_search`). |
 | `MIND_DUPLICATE_SIMILARITY_THRESHOLD` | `0.90` | Untuned placeholder -- see `src/mind/embeddings/README.md` "Known limitations". |
 | `LLM_API_KEY` / `LLM_MODEL` | blank | Not used yet — MIND runs local models only (see team README "Important Updates"). |
