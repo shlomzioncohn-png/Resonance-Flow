@@ -59,25 +59,27 @@ async def clean_store(store):
 
 
 async def test_resolves_a_strong_match(store):
+    """A short, realistic mention (what Yonit's extraction would actually
+    send) -- not text that echoes the task's own embedded words."""
     await store.upsert("task-db-upgrade", embed("Upgrade the production database to the new version"))
 
-    [candidates] = await resolve_dependency_targets(
-        store, ["the DB upgrade: upgrade the production database"]
-    )
+    [candidates] = await resolve_dependency_targets(store, ["the DB upgrade"])
 
     assert candidates[0].task_id == "task-db-upgrade"
-    assert candidates[0].similarity > 0.7
 
 
 async def test_resolves_a_weak_match(store):
+    """A vaguer mention still resolves to the right task, just with a
+    lower score than a more specific one -- checked by task_id, not just
+    a similarity comparison that would pass almost regardless."""
     await store.upsert("task-db-upgrade", embed("Upgrade the production database to the new version"))
     await store.upsert("task-unrelated", embed("Plan the team offsite catering order"))
 
-    [strong] = await resolve_dependency_targets(
-        store, ["the DB upgrade: upgrade the production database"]
-    )
+    [strong] = await resolve_dependency_targets(store, ["the DB upgrade"])
     [weak] = await resolve_dependency_targets(store, ["something about a database maybe"])
 
+    assert strong[0].task_id == "task-db-upgrade"
+    assert weak[0].task_id == "task-db-upgrade"
     assert weak[0].similarity < strong[0].similarity
 
 
@@ -86,17 +88,27 @@ async def test_no_match_when_the_store_is_empty(store):
     assert candidates == []
 
 
+async def test_no_strong_match_when_the_store_has_only_unrelated_tasks(store):
+    """A populated store with nothing related to the query must score
+    clearly lower than a store that actually has the match -- #244 (not
+    this function) decides what counts as "no match"."""
+    await store.upsert("task-catering", embed("Plan the team offsite catering order"))
+    await store.upsert("task-standup-notes", embed("Write up notes from yesterday's standup"))
+
+    [unmatched] = await resolve_dependency_targets(store, ["the DB upgrade"])
+
+    await store.upsert("task-db-upgrade", embed("Upgrade the production database to the new version"))
+    [matched] = await resolve_dependency_targets(store, ["the DB upgrade"])
+
+    assert matched[0].task_id == "task-db-upgrade"
+    assert unmatched[0].similarity < matched[0].similarity
+
+
 async def test_resolves_multiple_references_independently_in_order(store):
     await store.upsert("task-db-upgrade", embed("Upgrade the production database to the new version"))
     await store.upsert("task-release-notes", embed("Write release notes for v2.3"))
 
-    results = await resolve_dependency_targets(
-        store,
-        [
-            "the DB upgrade: upgrade the production database",
-            "release notes: write release notes for v2.3",
-        ],
-    )
+    results = await resolve_dependency_targets(store, ["the DB upgrade", "release notes for v2.3"])
 
     assert len(results) == 2
     assert results[0][0].task_id == "task-db-upgrade"

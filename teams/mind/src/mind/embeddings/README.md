@@ -96,7 +96,7 @@ await store.mark_completed(task_id)
 await store.mark_incomplete(task_id)  # e.g. a DONE task got reopened
 ```
 
-`nearest_tasks(store, text, *, k)` (`search.py`) is the shared primitive behind #471 and #245 -- `embed(text)` then `store.search(vector, k=k)`, no threshold.
+`nearest_tasks(store, text, *, k, is_query=False)` (`search.py`) is the shared primitive behind #471 and #245 -- `embed(text, is_query=is_query)` then `store.search(vector, k=k)`, no threshold. `is_query` matches `embed()`'s own flag: `False` (default) for #471's symmetric document-vs-document comparison, `True` for a short mention searched against full task descriptions, same asymmetric shape as `search_text()`.
 
 `resolve_dependency_targets(store, references, *, k=5)` (`dependency_resolution.py`) is #245: a `list[str]` of free-text dependency mentions in, one ranked candidate list out per string. No match/no-match decision -- that's #244, on these same scores:
 
