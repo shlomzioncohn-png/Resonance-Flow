@@ -1,11 +1,8 @@
 {{/*
-Per-hook ServiceAccount/Role/RoleBinding for a Secret-creating hook Job,
-scoped via resourceNames to only that one Secret - so two unrelated hooks
-never share a Role that can get/delete each other's Secret. Takes
-{root, name, secretName, component}; name is the hook's own short name
-(e.g. "lens-gateway-jwt"), used as "<fullname>-<name>-init" for all three
-objects. The caller still owns the Job itself and can reuse that same name
-as its serviceAccountName.
+Per-hook ServiceAccount/Role/RoleBinding for a Secret-creating hook Job.
+Takes {root, name, secretName, component}; name is used as
+"<fullname>-<name>-init" for all three objects - the caller can reuse it
+as its Job's serviceAccountName.
 */}}
 {{- define "resonance-flow.lens.secretHookRbac" -}}
 {{- $root := .root }}
