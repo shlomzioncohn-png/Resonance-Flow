@@ -5,9 +5,11 @@ Implements the graph traversal API: given a task id, walk its direct or transiti
 dependents, ancestors, children, or descendants, or fetch a combined trace across both axes in
 one call. See "Graph Traversal API" below for the full endpoint list.
 
-`TaskEligibilityService` implements the dependency/constraint update flow (`addDependency`,
-`removeDependency`, `onTaskStatusChanged`, `recalculateTaskEligibility`, `onConstraintAdded`,
-`onConstraintStatusChanged`) against the same in-memory repositories. `config/MockDataConfig.java`
+The dependency/constraint update flow is split by domain (#649): `DependencyEdgeService`
+(`addDependency`, `addDependencies`, `removeDependency`), `TaskEligibilityService`
+(`onTaskStatusChanged`, `recalculateTaskEligibility`, `getTaskEligibility`) and
+`ConstraintEligibilityService` (`onConstraintAdded`, `onConstraintStatusChanged`), sharing
+`TaskCounterUpdater` and `DependencyGraphLock`, against the same in-memory repositories. `config/MockDataConfig.java`
 wires the in-memory `TaskRepository`/`TaskDependencyRepository` implementations as beans (seeded
 empty) so both it and `TaskTraversalService` are constructible via normal Spring dependency
 injection - not just unit-testable. Each bean is guarded with `@ConditionalOnMissingBean`, so once
