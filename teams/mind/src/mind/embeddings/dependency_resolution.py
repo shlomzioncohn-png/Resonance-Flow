@@ -16,10 +16,13 @@ DEFAULT_K = 5
 async def resolve_dependency_targets(
     store: VectorStore, references: list[str], *, k: int = DEFAULT_K
 ) -> list[list[SearchResult]]:
-    """Up to k candidates per reference, same order as the input. Empty
-    list = no match. Propagates ValueError on empty text, same as embed()."""
+    """Up to k candidates per reference, same order as the input. Always
+    returns candidates (no similarity-threshold filtering) -- never treat
+    a non-empty list as "found a real match", that call is #244's, on top
+    of these scores. Propagates ValueError on empty text, same as embed()."""
     results = []
     for text in references:
         # is_query=True: a mention vs. full task descriptions (see search.py).
+        # No threshold here -- #244 decides match/no-match from these scores.
         results.append(await nearest_tasks(store, text, k=k, is_query=True))
     return results
