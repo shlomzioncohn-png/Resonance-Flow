@@ -550,3 +550,19 @@ string match); it is not this eval.
 The extracted side needs Yonit's extraction pipeline and Michal's ASR to be
 producing output; the annotated side (AMI action items) wires in via a manifest
 edit, not a code change (`extraction_eval_design.md` §"Scope").
+
+### Known limitation: one task per text
+
+The basic extraction stage returns **exactly one task per input text**
+(`BasicExtractor.extract`, `extraction/extractor.py`). An AMI meeting carries
+several action items — 4 to 8 in the current slice — so a whole meeting sent as
+one text yields one task, and recall on that meeting is capped at `1/n` (IB4003:
+at most 1/8). A score measured under this limit reflects the pipeline's shape, not
+its extraction quality, and must not be read as one.
+
+This is a product gap, not an eval one — a real meeting arriving through Bridge
+hits the same limit — and is tracked in
+[#690](https://github.com/KamaTechOrg/Resonance-Flow/issues/690). Nothing in this
+eval changes when it is fixed: whether the pipeline returns a list per text or
+meetings are segmented upstream, the eval groups results by meeting through
+`item_key` (see "The extracted-item contract").
