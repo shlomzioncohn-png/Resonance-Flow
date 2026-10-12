@@ -61,7 +61,7 @@ class RawObjectEventSerializationTest {
     }
 
     @Test
-    void serializesModalityValuesLowercase() throws Exception {
+    void serializesModalityValuesAsUppercaseEnumNames() throws Exception {
         RawObjectRef object = new RawObjectRef(
                 Role.BODY, "EMAIL/kamatech/2026-08-18/x.json", "sha256:" + "a".repeat(64),
                 null, null, Modality.SCANNED_DOC);
@@ -72,7 +72,7 @@ class RawObjectEventSerializationTest {
 
         String json = objectMapper.writeValueAsString(event);
 
-        assertThat(json).contains("\"modality\":\"scanned_doc\"");
+        assertThat(json).contains("\"modality\":\"SCANNED_DOC\"");
     }
 
     @Test

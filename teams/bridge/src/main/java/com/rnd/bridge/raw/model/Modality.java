@@ -1,7 +1,5 @@
 package com.rnd.bridge.raw.model;
 
-import com.fasterxml.jackson.annotation.JsonProperty;
-
 /**
  * Per the official RawObjectEvent JSON Schema: a routing hint for which AI engine should
  * process one {@link RawObjectRef} (ASR for audio, OCR for scanned documents/images) — not a
@@ -14,9 +12,12 @@ import com.fasterxml.jackson.annotation.JsonProperty;
  * alongside the move from one event-level modality to one per {@link RawObjectRef}: under
  * the old single-object shape there was no object to attach TEXT to for a transcript sidecar
  * (it wasn't its own RawObjectEvent), so the question never came up.
+ * <p>
+ * Wire format is the enum name verbatim (TEXT/AUDIO/SCANNED_DOC), like every other enum on this
+ * event - Mind asked for uppercase SNAKE_CASE (issue #31, 2026-09-06).
  */
 public enum Modality {
-    @JsonProperty("text") TEXT,
-    @JsonProperty("audio") AUDIO,
-    @JsonProperty("scanned_doc") SCANNED_DOC
+    TEXT,
+    AUDIO,
+    SCANNED_DOC
 }

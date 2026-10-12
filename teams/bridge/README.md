@@ -206,9 +206,9 @@ curl -X POST http://localhost:8080/api/bridge/media/run
 
 | Env var | Uploads as |
 |---|---|
-| `BRIDGE_MEDIA_ZOOM_RECORDINGS_DIR` | `source_type=MEETING`, `modality=audio` |
-| `BRIDGE_MEDIA_BBB_RECORDINGS_DIR` | `source_type=MEETING`, `modality=audio` |
-| `BRIDGE_MEDIA_SCANNED_DOCS_DIR` | `source_type=SCANNED_DOC`, `modality=scanned_doc` |
+| `BRIDGE_MEDIA_ZOOM_RECORDINGS_DIR` | `source_type=MEETING`, `modality=AUDIO` |
+| `BRIDGE_MEDIA_BBB_RECORDINGS_DIR` | `source_type=MEETING`, `modality=AUDIO` |
+| `BRIDGE_MEDIA_SCANNED_DOCS_DIR` | `source_type=SCANNED_DOC`, `modality=SCANNED_DOC` |
 
 Zoom and BBB are split into separate folders only to keep sample files organized by where they
 came from - the schema has no separate platform field, both land as `MEETING`.
