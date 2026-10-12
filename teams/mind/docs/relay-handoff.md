@@ -38,6 +38,22 @@ Phase 2), but expect the image to grow next week when `apt-get install
 tesseract-ocr` gets added to the runtime stage for real OCR support —
 flagging so Relay isn't surprised by the size jump. (Decided: Tesseract. PaddleOCR was evaluated and not chosen — partly to avoid the larger image it would need, `paddlepaddle` plus model weights; see `benchmarks/ocr-asr-benchmark.md`.)
 
+## Containers
+
+Two MIND containers now exist, built from the same image (`Dockerfile`),
+differing only in `command`:
+
+| Service | Command | Exposes HTTP? |
+|---|---|---|
+| `mind` | `uvicorn mind.api.main:app` | Yes, port `8000`. |
+| `mind-index-consumer` (#470) | `python -m mind.embeddings.index_consumer_runner` | No — consumes `task.created`/`task.updated`/`task.completed` from Kafka and writes to the vector store. No port to expose. |
+
+**Open item:** `mind-index-consumer` has no positive liveness probe (no HTTP
+port, so `mind`'s `/health` pattern doesn't apply). It does exit non-zero
+if any of its three topic-consumer threads dies, so a restart policy can
+act on a crash — but there's still no "I'm alive and keeping up" signal
+for the healthy-but-stuck case. Flagging for Relay.
+
 ## Ports
 
 | Port | Service | Notes |
@@ -71,7 +87,7 @@ standalone run needs one supplied directly.
 |---|---|---|
 | `MIND_ENVIRONMENT` | *(required, no default)* | `local` / `ci` / `staging` / `production` -- fails fast on anything else. |
 | `POSTGRES_USER` / `POSTGRES_PASSWORD` / `POSTGRES_DB` | *(required, no default)* | Configure the `vector-store` container itself, and are interpolated into `MIND_VECTOR_STORE__DSN` for the `mind` service -- see above. |
-| `MIND_VECTOR_STORE__TABLE` | `task_embeddings` | Vector-store table name. |
+| `MIND_VECTOR_STORE__TABLE` | `task_embeddings` | Test-only knob (the test suite points it at `task_embeddings_test`). The Alembic migration always creates `task_embeddings` specifically -- changing this in a real deploy points the app at a table that doesn't exist, not a different real table. A genuinely different table name needs a new migration, not this var. |
 | `MIND_VECTOR_STORE__SEARCH_EFFORT` | `400` | HNSW query-time accuracy/speed knob (pgvector's `hnsw.ef_search`). |
 | `MIND_DUPLICATE_SIMILARITY_THRESHOLD` | `0.90` | Untuned placeholder -- see `src/mind/embeddings/README.md` "Known limitations". |
 | `LLM_API_KEY` / `LLM_MODEL` | blank | Not used yet — MIND runs local models only (see team README "Important Updates"). |

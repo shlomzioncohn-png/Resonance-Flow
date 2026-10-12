@@ -6,9 +6,11 @@ on:
     tags: [ "mind-v*.*.*" ]
     paths:
       - "teams/mind/**"
+      - "shared/proto/**"
   pull_request:
     paths:
       - "teams/mind/**"
+      - "shared/proto/**"
       - ".github/workflows/mind-ci.yaml"
   workflow_dispatch: {}
 
@@ -72,6 +74,7 @@ jobs:
       service_dir: teams/mind
       language: python
       container_port: 8000
+      extra_build_contexts: shared=shared
 
   # Deploys Kafka/Schema Registry/MIND via the real Helm chart; round-trip.py
   # then runs from the runner against the deployed Kafka/registry.
@@ -117,7 +120,7 @@ jobs:
       - name: Build and load the MIND image
         working-directory: teams/mind
         run: |
-          docker build -t mind:local .
+          docker build --build-context shared=../../shared -t mind:local .
           kind load docker-image mind:local --name mind-rt-cluster
 
       # No --wait here on purpose: the MIND deployment can't become Ready

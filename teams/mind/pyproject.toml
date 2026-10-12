@@ -60,6 +60,7 @@ dev = [
                      # verified locally: mypy passes on benchmarks/ with
                      # types-psutil installed and psutil itself uninstalled.
     "grpcio-tools==1.71.0",  # protoc, for `make proto`
+    "types-protobuf",  # stubs for google.protobuf, imported by the generated _pb2.pyi files
     "python-dotenv",  # tests/conftest.py loads .env for os.environ-reading fixtures
 ]
 # Not a runtime dependency of src/mind/ -- only benchmarks/ocr_asr_benchmark.py
