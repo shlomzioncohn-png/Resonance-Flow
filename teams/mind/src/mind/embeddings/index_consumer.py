@@ -1,17 +1,10 @@
-"""#470: Kafka -> vector-store indexing handlers, one per topic,
-testable against a fake VectorStore with no broker. Wired to real Kafka
-topics by mind.embeddings.index_consumer_runner.
+"""#470: Kafka -> vector-store indexing handlers, wired to real Kafka
+topics by index_consumer_runner.
 
-A handler must let an unexpected exception (e.g. a DB outage) propagate --
-ProtobufConsumer.run() only commits the offset after the handler returns,
-so a raised exception leaves the message to be redelivered on restart.
-Only genuinely unrecoverable input (empty/whitespace text) is caught here.
-
-Inbox's only real status-change path (PATCH /tasks/{id}/status) publishes
-task.updated with the new status -- task.completed has no caller in Inbox
-today, so task.created/task.updated's `status` field is what actually
-carries completion, not task.completed.
-"""
+A handler must let unexpected exceptions propagate (ProtobufConsumer only
+commits after it returns) -- only empty/whitespace text is caught here.
+Completion comes from task.updated's status, not task.completed (Inbox
+has no real caller for that topic)."""
 
 import hashlib
 import logging
@@ -24,8 +17,7 @@ from mind.messaging.task_updated_event_pb2 import TaskUpdatedEvent
 
 logger = logging.getLogger(__name__)
 
-# None of these are "active" from the index's point of view -- a duplicate
-# or dependency-target search shouldn't surface them as live matches.
+# None of these are "active" -- a search shouldn't surface them as live.
 _FINISHED_STATUSES = frozenset(
     {TaskStatus.TASK_STATUS_DONE, TaskStatus.TASK_STATUS_REJECTED, TaskStatus.TASK_STATUS_CANCELLED}
 )
@@ -65,9 +57,7 @@ async def handle_task_created(store: VectorStore, event: TaskCreatedEvent) -> No
 
 
 async def handle_task_updated(store: VectorStore, event: TaskUpdatedEvent) -> None:
-    # Chain's scheduling updates also publish task.updated without changing
-    # title/description -- skip the (expensive) re-embed when the text is
-    # unchanged from what's already indexed.
+    # Skip re-embedding if Chain's scheduling updates didn't change the text.
     text = task_text(event.title, event.description)
     content_hash = _content_hash(text)
     if await store.get_content_hash(event.task_id) != content_hash:
@@ -80,9 +70,7 @@ async def handle_task_updated(store: VectorStore, event: TaskUpdatedEvent) -> No
 
 
 async def handle_task_completed(store: VectorStore, event: TaskCompletedEvent) -> None:
-    # No title/description on this event -- nothing to backfill from.
-    # Honor the event's actual value -- don't assume True just because this
-    # topic fired (see module docstring: it has no real caller in Inbox today).
+    # Honor the event's actual value, don't assume True (see module docstring).
     if event.is_completed:
         marked = await store.mark_completed(event.task_id)
     else:

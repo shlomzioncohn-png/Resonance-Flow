@@ -1,10 +1,8 @@
-"""#470: long-running process keeping the vector store in sync with
-Inbox's task.{created,updated,completed} topics. Own process/container,
-not inside the FastAPI lifespan -- ProtobufConsumer.run() blocks with no
-stop signal, and each topic needs its own type/thread/event loop.
+"""#470: long-running process syncing the vector store with Inbox's
+task.{created,updated,completed} topics. Own process, not the FastAPI
+lifespan -- ProtobufConsumer.run() blocks, one thread per topic.
 
-Lives under src/ (not scripts/) so ruff/mypy actually check it -- `make
-lint` only covers src/tests/benchmarks.
+Lives under src/, not scripts/, so ruff/mypy actually check it.
 
 Usage:
     python -m mind.embeddings.index_consumer_runner
@@ -53,11 +51,8 @@ def _run_topic(topic: str, message_type: type[Message], handle: _Handler) -> Non
         loop.run_until_complete(store.open())
 
         def _handler(event: object, msg: object) -> None:
-            # No try/except -- an exception here must propagate so
-            # ProtobufConsumer.run() leaves the offset uncommitted (see
-            # mind.embeddings.index_consumer's module docstring).
-            # cast: ProtobufConsumer.run(message_type, ...) deserializes into
-            # exactly that type before calling this handler.
+            # No try/except -- must propagate so the offset stays uncommitted.
+            # cast: run() already deserialized event into this exact type.
             loop.run_until_complete(handle(store, cast(Message, event)))
 
         consumer = ProtobufConsumer(group_id=_GROUP_ID, topics=[topic])
@@ -68,9 +63,7 @@ def _run_topic(topic: str, message_type: type[Message], handle: _Handler) -> Non
 
 
 def _die_on_thread_crash(args: threading.ExceptHookArgs) -> None:
-    # A dead topic-thread must take the whole process down -- otherwise the
-    # other two topics keep running while this one silently stops indexing,
-    # with nothing to signal a restart.
+    # A dead topic-thread takes the whole process down, not just itself.
     thread_name = args.thread.name if args.thread is not None else "<unknown>"
     logger.critical("index_consumer: thread %s died, exiting process", thread_name, exc_info=args.exc_value)
     os._exit(1)

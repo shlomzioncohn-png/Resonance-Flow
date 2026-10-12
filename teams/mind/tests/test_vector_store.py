@@ -19,9 +19,7 @@ from mind.embeddings.pgvector_store import PgVectorStore
 
 
 async def _create_test_table(settings: VectorStoreSettings) -> None:
-    # The real table is created by `alembic upgrade head`; this suite's
-    # dedicated test table isn't covered by that, so it sets itself up here
-    # -- matching migrations/versions/0003 (is_completed, content_hash).
+    # Dedicated test table, not covered by `alembic upgrade head`.
     table = sql.Identifier(settings.table)
     async with await psycopg.AsyncConnection.connect(
         str(settings.dsn.get_secret_value()), autocommit=True
