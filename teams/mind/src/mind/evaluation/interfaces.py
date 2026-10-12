@@ -17,8 +17,7 @@ Two layers of rules live here:
   methods below, so a violating file fails to load.
 
 Cross-file rules (a `scenario_id` duplicated across the whole directory) and the
-"set isn't finished yet" checks (role coverage, 4-6 per role, 24-36 total,
-`mentor_approved: false`) are *not* expressible on a single-scenario model and
+"set isn't finished yet" checks (role coverage, 4-6 per role, 24-36 total) are *not* expressible on a single-scenario model and
 stay in `mind.evaluation.personas.validate_personas` — the latter as warnings,
 which Pydantic (raise-or-nothing) cannot represent.
 """
@@ -26,7 +25,7 @@ which Pydantic (raise-or-nothing) cannot represent.
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Literal, Protocol, runtime_checkable
+from typing import Annotated, Literal, Protocol, runtime_checkable
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -247,19 +246,9 @@ class PersonaEvaluationScenario(BaseModel):
     team_lead_approved: bool = Field(
         description=(
             "Whether the team lead has reviewed this scenario in a PR and signed off "
-            "on it — the first gate, before it goes to the mentor. Set explicitly by "
+            "on it. This is the only approval flag on a scenario. Set explicitly by "
             "the author: start at false, the team lead (not the author) flips it to "
-            "true. Not a Foundation Gate criterion itself, but mentor_approved should "
-            "not be set until this is true."
-        )
-    )
-    mentor_approved: bool = Field(
-        description=(
-            "Whether the mentor has reviewed this specific scenario and signed off on "
-            "it as correct ground truth. Set explicitly by the author — start at "
-            "false, flip to true only after mentor review. The full set must be all "
-            "true by the Foundation Gate; the harness/CI treats any false as "
-            "not-yet-ready rather than crashing."
+            "true."
         )
     )
 
@@ -292,6 +281,37 @@ class PersonaEvaluationScenario(BaseModel):
         return self
 
 
+class ScoreFactors(BaseModel):
+    """The contributions behind one `ScoreResult.score`.
+
+    Deliberately generic: the contract is shared by every ranking model, so it
+    does not name any model's factors. Each model owns its own fixed factor
+    vocabulary (and the test that its keys stay inside it) in its own package.
+    NaN/inf are rejected here; `run.py` also refuses to write them to report.json.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True, allow_inf_nan=False)
+
+    contributions: dict[Annotated[str, Field(min_length=1)], float] = Field(
+        min_length=1,
+        description=(
+            "Named contributions that produced the score, keyed by factor name. Each "
+            "model owns its own factor vocabulary (a fixed set, enforced in that "
+            "model's package, not here); a model with one rule per tier may return "
+            "different keys per tier. Any finite value, negative allowed (e.g. an "
+            "explicit penalty). Not required to sum to `score`."
+        ),
+    )
+    blocked: bool = Field(
+        default=False,
+        description="True when the model applied a blocked adjustment to this score.",
+    )
+    base_score: float | None = Field(
+        default=None,
+        description="The score before any blocked adjustment, when the model has one.",
+    )
+
+
 class ScoreResult(BaseModel):
     """What a ranking model returns for one task."""
 
@@ -312,6 +332,15 @@ class ScoreResult(BaseModel):
         description=(
             "Optional short explanation for the score — compared against a "
             "scenario's expected_reason in later analysis, not by the harness."
+        ),
+    )
+    factors: ScoreFactors | None = Field(
+        default=None,
+        description=(
+            "Optional breakdown of what produced `score`; None means no breakdown. "
+            "Written into the harness report per candidate, never used for ranking. "
+            "Exists so a later explanation step can be built from the factors that "
+            "actually produced the score, instead of reverse-engineering the formula."
         ),
     )
 

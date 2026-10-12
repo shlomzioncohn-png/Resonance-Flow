@@ -1,0 +1,35 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: resonance-flow
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "0"
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/KamaTechOrg/Resonance-Flow.git
+    targetRevision: main
+    path: teams/relay/helm/resonance-flow
+    helm:
+      valueFiles:
+        - values.yaml
+        # Shared-cluster-only overrides (ingress host/TLS) - never loaded by CI.
+        - environments/shared.yaml
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: resonance-flow
+  # Chain's DB credentials Secret is created by a PreSync hook Job, not rendered
+  # by this chart - so there's nothing here for ArgoCD to diff or prune.
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+    retry:
+      limit: 5
+      backoff:
+        duration: 5s
+        factor: 2
+        maxDuration: 3m

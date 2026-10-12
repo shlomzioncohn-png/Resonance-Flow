@@ -1,3 +1,17 @@
 node_modules/
 dist/
 .next/
+.env*.local
+
+# Playwright test artifacts
+playwright-report/
+test-results/
+
+# Config files
+.npmrc
+
+*storybook.log
+storybook-static
+
+# TypeScript incremental build cache - regenerated on every build
+*.tsbuildinfo

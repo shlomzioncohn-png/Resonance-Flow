@@ -3,25 +3,50 @@ spring:
     name: gateway
   profiles:
     active: ${SPRING_PROFILES_ACTIVE:local}
-  cloud:
-    gateway:
-      routes:
-        # Route to BFF (Backend for Frontend)
-        # BFF is responsible for all downstream team communication
-        - id: bff
-          uri: http://bff-service:8080
-          predicates:
-            - Path=/api/**
-          filters:
-            - StripPrefix=1
-      
-      # Global CORS configuration
-      globalcors:
-        corsConfigurations:
-          '[/**]':
-            allowedOrigins: "*"
-            allowedMethods: "*"
-            allowedHeaders: "*"
+  # Enable exception handling for unmapped routes (404)
+  mvc:
+    throw-exception-if-no-handler-found: true
+    static-path-pattern: /static/**
+  web:
+    resources:
+      add-mappings: false
+  # Every /api/** request must carry a Keycloak-issued JWT (see SecurityConfig).
+  # issuer-uri  — must equal the token's "iss" claim, i.e. the URL the browser
+  #               uses to reach Keycloak (KC_HOSTNAME in docker-compose).
+  # jwk-set-uri — where the Gateway fetches Keycloak's public signing keys. Inside
+  #               docker this is the internal hostname, which differs from issuer-uri.
+  #               Keys are fetched lazily on the first request, so the Gateway can
+  #               start before Keycloak is up.
+  security:
+    oauth2:
+      resourceserver:
+        jwt:
+          issuer-uri: ${KEYCLOAK_ISSUER_URI:http://localhost:8180/realms/lens}
+          jwk-set-uri: ${KEYCLOAK_JWK_SET_URI:http://localhost:8180/realms/lens/protocol/openid-connect/certs}
+
+# Application mode configuration
+app:
+  # dev-mode: set to true ONLY in local/dev environments.
+  # While true, WorkspaceController still forwards a mock userId to BFF —
+  # extracting it from the JWT is the next step (Auth stage 2).
+  dev-mode: ${APP_DEV_MODE:true}
+  auth:
+    # When true, every /api/** request needs a valid Keycloak JWT (see SecurityConfig).
+    # Off until the frontend sends tokens (Auth stage 3), so existing screens keep working.
+    enabled: ${APP_AUTH_ENABLED:false}
+
+# BFF service configuration
+# Override BFF_SERVICE_URL to point at a different BFF without recompiling
+bff:
+  service:
+    url: ${BFF_SERVICE_URL:http://localhost:8082}
+  connect-timeout-ms: ${BFF_CONNECT_TIMEOUT_MS:2000}
+  read-timeout-ms: ${BFF_READ_TIMEOUT_MS:10000}
+  # BFF endpoint paths — change here if BFF renames a route, no code changes needed
+  endpoints:
+    workspace-recommend: ${BFF_ENDPOINT_WORKSPACE_RECOMMEND:/workspace/recommend}
+    tasks: ${BFF_ENDPOINT_TASKS:/workspace/tasks}
+    task-selection: ${BFF_ENDPOINT_TASK_SELECTION:/workspace/tasks/selection}
 
 server:
   port: ${SERVER_PORT:8080}

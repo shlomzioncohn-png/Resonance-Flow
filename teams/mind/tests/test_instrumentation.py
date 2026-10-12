@@ -9,6 +9,7 @@ order alongside the rest of the suite.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import time
@@ -76,6 +77,23 @@ def test_error_inside_wrapped_call_is_recorded_and_reraised():
     assert after.error_count == error_count_before + 1
 
 
+def test_cancelled_error_is_recorded_as_error_and_reraised():
+    """asyncio.CancelledError (e.g. a client disconnect mid-request)
+    inherits from BaseException, not Exception -- a plain
+    `except Exception` would miss it and record status="success" for
+    a call that never actually completed."""
+    before = instrumentation_summary()
+    call_count_before = before.call_count
+    error_count_before = before.error_count
+
+    with pytest.raises(asyncio.CancelledError), instrumented_call("test_cancelled"):
+        raise asyncio.CancelledError()
+
+    after = instrumentation_summary()
+    assert after.call_count == call_count_before + 1
+    assert after.error_count == error_count_before + 1
+
+
 def test_health_endpoint_is_instrumented():
     before = instrumentation_summary().call_count
 
@@ -86,11 +104,14 @@ def test_health_endpoint_is_instrumented():
 
 
 def test_simulate_call_endpoint_is_instrumented():
+    """/debug/simulate-call fails ~5% of the time on purpose (see
+    debug.py) -- assert it's instrumented either way, not just on the
+    common success path."""
     before = instrumentation_summary().call_count
 
     response = client.get("/debug/simulate-call")
 
-    assert response.status_code == 200
+    assert response.status_code in (200, 500)
     assert instrumentation_summary().call_count == before + 1
 
 

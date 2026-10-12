@@ -1,12 +1,14 @@
-# Extraction-Quality Eval — Design Note (DRAFT / WIP)
+# Extraction-Quality Eval — Design Note
 
-> **Status: DRAFT — design locked except two external confirmations.** Design
-> for the *second* harness: "did the pipeline extract the right action items
-> from a meeting at all?" — precision / recall against AMI's human-tagged action
-> items. Paper design; no harness code written yet.
+> **Status: design locked except two external confirmations; core implemented
+> (#177).** Design for the *second* harness: "did the pipeline extract the right
+> action items from a meeting at all?" — precision / recall against AMI's
+> human-tagged action items. The matching core is `extraction_eval.py`
+> (`evaluate_extraction`), with a fixture and a CLI; per-meeting grouping, micro/macro
+> aggregation and the owner-match diagnostic (§3.7) are not built yet — see §9.
 >
-> Intended final location: a section of `src/mind/evaluation/README.md` or this
-> standalone file. Currently an untracked draft; branch is Michal's call.
+> Lives next to the code in `src/mind/evaluation/`; the README's "Extraction-quality
+> eval" section is the short version of this note.
 >
 > **The only open items** (everything else is decided):
 > - **`TODO(Ayala)`** — does she expose a reusable `similarity(a,b)->float` over
@@ -39,9 +41,15 @@
 - **Meeting id:** the filename stem (`IB4003.abssumm.xml` → `IB4003`); it is
   also the prefix of every `nite:id` inside the file
   (`IB4003.rdhillon.s.7`).
-- **Encoding:** the XML declares `encoding="ISO-8859-1"`. Parse with the
-  declared encoding, not UTF-8 — some AMI files carry bytes that are valid
-  ISO-8859-1 and invalid UTF-8.
+- **Encoding:** the XML header declares `encoding="ISO-8859-1"`, but that header is
+  wrong for this corpus. Read every file as UTF-8. All 5,080 XML files in the
+  package decode as UTF-8; the 63 that contain non-ASCII bytes hold
+  `\xc2\xa0` (a UTF-8-encoded non-breaking space), apart from two
+  `participantSummaries` files with an `ö`. Honoring the declared encoding would
+  decode `\xc2\xa0` as `Â` + a non-breaking space — corruption. (An earlier
+  version of this note said the opposite; README "Real data slice", item 3, has
+  the evidence.) None of this touches the action items themselves: the 306
+  `<actions>` sentences contain no non-ASCII character at all.
 
 ### Count — locked at 306
 
@@ -97,11 +105,19 @@ def similarity(a: str, b: str) -> float:
     """1.0 = same meaning, 0.0 = unrelated. Implementation is swappable."""
 ```
 
+The contract is enforced, not just stated: `evaluate_extraction` raises
+`ValueError` for any score (and any `threshold`) that is not a real number in
+`[0, 1]`. A NaN would otherwise slip past the "stop below `τ`" step of §3.4
+(`nan < τ` is `False`) and score as a perfect match.
+
 ### 3.2 Text normalization, before `similarity` is called — LOCKED
 
 Applied to every string on both sides, so the score never depends on
 formatting: lowercase; strip leading/trailing whitespace; collapse internal
-runs of whitespace to one space; strip a single trailing `.`. **Nothing else** —
+runs of whitespace to one space; strip a single trailing `.`. "Whitespace" is
+whatever `str.split()` treats as such — that includes the non-breaking space
+`\xa0` (so no separate replace is needed) but not the zero-width space
+`\u200b`, which is absent from this corpus. **Nothing else** —
 internal punctuation stays, stopword removal / stemming (if any) belong to the
 `similarity` implementation, not here.
 
@@ -495,6 +511,13 @@ scores ~0 TP on real AMI text, so it cannot be the extraction eval.
 - **F1** is added by the new module (the old one returns only P/R). Micro-F1 is
   the CI headline.
 
+**Implementation status (#177).** What landed is the matching core:
+`evaluate_extraction(extracted, annotated, *, similarity, threshold) ->
+ExtractionEvalReport` over one pair of string lists, with `placeholder_similarity`
+(Jaccard) and `PLACEHOLDER_THRESHOLD = 0.5` standing in until a real backend
+exists. The per-meeting `dict` signature above, micro/macro aggregation and the
+owner-match diagnostic are still to build on top of it.
+
 ---
 
 ## Open items
@@ -509,11 +532,11 @@ scores ~0 TP on real AMI text, so it cannot be the extraction eval.
 **Build-time (not blocking the design):**
 - [ ] Redo the §5 Jaccard numbers with code once `similarity.py` exists — they
       are hand estimates; if they move `τ`, re-derive §6 before any harness run.
-- [ ] Implement `extraction_eval.py` per §3/§9; add the docstring note to
-      `metrics.extraction_precision_recall`.
+- [x] Implement `extraction_eval.py` per §3/§9 (core: #177) and add the docstring
+      note to `metrics.extraction_precision_recall`. Still open: per-meeting
+      grouping, micro/macro F1, the owner-match diagnostic.
 - [ ] Wire the CI regression check to micro-F1.
 
 **Housekeeping:**
-- [ ] Fold this note into `src/mind/evaluation/README.md` or keep standalone;
-      pick a branch. (Design work only touches `src/mind/evaluation/` — no
-      `eval/personas/` changes.)
+- [x] Fold this note into `src/mind/evaluation/README.md` or keep standalone —
+      kept standalone, with a summary section in the README (PR #258).

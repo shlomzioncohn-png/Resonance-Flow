@@ -16,7 +16,7 @@ items are near-paraphrases of an annotation (a true positive each); one is a
 hallucination with no annotation (a false positive); one annotation has no
 extracted counterpart (a false negative).
 
-## The arithmetic (with `default_similarity` = Jaccard token overlap, `threshold = 0.5`)
+## The arithmetic (with `placeholder_similarity` = Jaccard token overlap, `threshold = 0.5`)
 
 After `_normalize` (lowercase, collapse whitespace, drop trailing "."), token-set
 Jaccard = |A ∩ B| / |A ∪ B| for each intended pair:
@@ -35,8 +35,6 @@ So `TP = 3`, `FP = 1`, `FN = 1`:
 - recall    = 3 / (3 + 1) = **0.75**
 - f1        = 2·0.75·0.75 / (0.75 + 0.75) = **0.75**
 """
-
-from __future__ import annotations
 
 FIXTURE_THRESHOLD = 0.5
 

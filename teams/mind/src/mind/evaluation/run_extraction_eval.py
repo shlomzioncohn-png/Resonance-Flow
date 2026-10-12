@@ -10,8 +10,8 @@ bootstrap, mirroring `run.py --model dummy`. Real pipeline output plugs in here
 once Yonit's extraction and Michal's ASR are producing it.
 
 `--threshold` and the similarity backend are the swappable matching rule (see
-`extraction_eval.evaluate_extraction`). The default similarity is the pure-Python
-`default_similarity` placeholder and the default threshold is the fixture's 0.5 —
+`extraction_eval.evaluate_extraction`). The similarity is the pure-Python
+`placeholder_similarity` and the default threshold is the fixture's 0.5 —
 **not** the locked lexical τ = 0.60 from `extraction_eval_design.md` §6, which is
 calibrated for the `rapidfuzz` backend that is not built yet.
 
@@ -20,32 +20,30 @@ written to `extraction_report.json`), so the matched/missed/false-positive detai
 is kept for later "why" analysis.
 """
 
-from __future__ import annotations
-
 import argparse
-import dataclasses
 import json
 import sys
 from pathlib import Path
 
+from pydantic import BaseModel, ConfigDict, StrictStr
+
 from mind.evaluation.extraction_eval import (
+    PLACEHOLDER_THRESHOLD,
     ExtractionEvalReport,
-    default_similarity,
     evaluate_extraction,
+    placeholder_similarity,
 )
 from mind.evaluation.extraction_fixture import FIXTURE_ANNOTATED, FIXTURE_EXTRACTED
-
-DEFAULT_THRESHOLD = 0.5
 
 
 def _summary_lines(report: ExtractionEvalReport) -> str:
     return (
         "[extraction-quality]\n"
         f"  Precision: {report.precision:.1%} "
-        f"({report.true_positives}/{report.true_positives + len(report.false_positives)} "
+        f"({report.true_positives}/{report.n_extracted} "
         f"extracted items matched an annotation)\n"
         f"  Recall:    {report.recall:.1%} "
-        f"({report.true_positives}/{report.true_positives + len(report.missed)} "
+        f"({report.true_positives}/{report.n_annotated} "
         f"annotations were found)\n"
         f"  F1:        {report.f1:.1%}"
     )
@@ -63,22 +61,23 @@ def _detail_lines(report: ExtractionEvalReport) -> str:
     return "\n".join(lines)
 
 
-def _load_input(path: Path) -> tuple[list[str], list[str]]:
-    with path.open(encoding="utf-8") as f:
-        raw = json.load(f)
-    try:
-        extracted = list(raw["extracted"])
-        annotated = list(raw["annotated"])
-    except (KeyError, TypeError) as e:
-        raise ValueError(
-            f'{path}: expected a JSON object with "extracted" and "annotated" lists'
-        ) from e
-    if not all(isinstance(s, str) for s in [*extracted, *annotated]):
-        raise ValueError(f"{path}: every item in both lists must be a string")
-    return extracted, annotated
+class ExtractionEvalInput(BaseModel):
+    """The `--input` file: `{"extracted": [...], "annotated": [...]}`, strings only."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    extracted: list[StrictStr]
+    annotated: list[StrictStr]
+
+
+def _load_input(path: Path) -> ExtractionEvalInput:
+    return ExtractionEvalInput.model_validate_json(path.read_text(encoding="utf-8"))
 
 
 def main() -> None:
+    # The report prints "↔" and "—"; a Windows console (cp1255/cp1252) cannot encode them.
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8")
     parser = argparse.ArgumentParser(
         description="Run the extraction-quality eval (precision/recall of extracted action items)."
     )
@@ -92,8 +91,8 @@ def main() -> None:
     parser.add_argument(
         "--threshold",
         type=float,
-        default=DEFAULT_THRESHOLD,
-        help=f"Similarity at/above which a pair counts as the same item (default {DEFAULT_THRESHOLD}). "
+        default=PLACEHOLDER_THRESHOLD,
+        help=f"Similarity at/above which a pair counts as the same item (default {PLACEHOLDER_THRESHOLD}). "
         "Not the locked lexical tau=0.60 — that is for the rapidfuzz backend, not the placeholder.",
     )
     args = parser.parse_args()
@@ -104,21 +103,26 @@ def main() -> None:
     else:
         source = args.input
         try:
-            extracted, annotated = _load_input(Path(args.input))
-        except (FileNotFoundError, ValueError, json.JSONDecodeError) as e:
+            loaded = _load_input(Path(args.input))
+        except (OSError, ValueError) as e:  # pydantic's ValidationError is a ValueError
             print(f"Could not load input from {args.input!r}: {e}", file=sys.stderr)
             sys.exit(1)
+        extracted, annotated = loaded.extracted, loaded.annotated
 
-    report = evaluate_extraction(
-        extracted,
-        annotated,
-        similarity=default_similarity,
-        threshold=args.threshold,
-    )
+    try:
+        report = evaluate_extraction(
+            extracted,
+            annotated,
+            similarity=placeholder_similarity,
+            threshold=args.threshold,
+        )
+    except ValueError as e:
+        print(f"Extraction eval aborted: {e}", file=sys.stderr)
+        sys.exit(1)
 
     print("\n=== Extraction-Quality Eval ===")
     print(f"Input:              {source}")
-    print("Similarity backend: default_similarity (placeholder — Jaccard token overlap)")
+    print("Similarity backend: placeholder_similarity (placeholder — Jaccard token overlap)")
     print(f"Threshold:          {args.threshold}")
     print(f"Items:              {len(extracted)} extracted, {len(annotated)} annotated\n")
     print(_summary_lines(report))
@@ -127,12 +131,11 @@ def main() -> None:
     print("===============================\n")
 
     output = {
-        "similarity_backend": "default_similarity",
+        "similarity_backend": "placeholder_similarity",
         "threshold": args.threshold,
         "input": source,
-        "report": dataclasses.asdict(report),
+        "report": report.model_dump(),
     }
-    output["report"]["true_positives"] = report.true_positives
 
     print("--- Extraction Eval Report (full detail, also written to extraction_report.json) ---")
     print(json.dumps(output, indent=4))

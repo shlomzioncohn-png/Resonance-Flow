@@ -92,7 +92,7 @@ def test_a_full_task_payload_validates_and_extra_fields_are_dropped():
 
 
 def test_extracted_item_feeds_evaluate_extraction():
-    from mind.evaluation.extraction_eval import default_similarity, evaluate_extraction
+    from mind.evaluation.extraction_eval import evaluate_extraction, placeholder_similarity
 
     items = [
         ExtractedItem(
@@ -109,7 +109,7 @@ def test_extracted_item_feeds_evaluate_extraction():
     report = evaluate_extraction(
         [item.to_comparison_text() for item in items],
         annotated,
-        similarity=default_similarity,
+        similarity=placeholder_similarity,
         threshold=0.5,
     )
 

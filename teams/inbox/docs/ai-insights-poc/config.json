@@ -1,0 +1,8 @@
+{
+  "_comment": "This is the only config that reaches the LLM — as a fixed line in the system prompt, never as a data file attached to the call. It's a static legend so the model can describe 'short'/'medium'/'long' in natural language; it never changes per employee. See README.he.md for the backend-only rules (analysisWindowDays, minSample) that never reach the LLM at all.",
+  "estimatedEffortBuckets": {
+    "short": { "maxMinutes": 30 },
+    "medium": { "minMinutes": 30, "maxMinutes": 120 },
+    "long": { "minMinutes": 120 }
+  }
+}
