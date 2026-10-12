@@ -24,13 +24,15 @@ refuses. Whether a raw object is audio is decided by the caller
 
 from __future__ import annotations
 
+import hashlib
 import io
 import logging
 import math
 import threading
 import time
 from enum import Enum
-from typing import TYPE_CHECKING, Any
+from pathlib import Path
+from typing import TYPE_CHECKING, Any, NamedTuple
 
 from pydantic import BaseModel, Field, computed_field
 
@@ -51,6 +53,25 @@ BEAM_SIZE = 5  # faster-whisper's default, stated so runs are reproducible
 # library in the process can lower to 1 (PaddleOCR did, in the benchmark) and
 # silently run Whisper at ~4x the latency.
 CPU_THREADS = 4
+
+
+class PinnedModel(NamedTuple):
+    repo: str
+    revision: str
+    model_sha256: str  # of model.bin, as Hugging Face publishes it for that revision
+
+
+# The exact weights a pod may run, per size: the Dockerfile bakes this revision
+# and checks this hash at build time (tests/test_asr_settings_sync.py keeps the two
+# in step), and _verified() checks it again on every load. The hash is the one the
+# #135 benchmark's weights were verified against.
+PINNED_WHISPER_MODELS = {
+    "base.en": PinnedModel(
+        repo="Systran/faster-whisper-base.en",
+        revision="3d3d5dee26484f91867d81cb899cfcf72b96be6c",
+        model_sha256="2a166925539a16005f14ff328359f9b9adb9dc4fb631bb3b227526862e93e2ef",
+    ),
+}
 
 # Whisper's input rate; every recording is resampled to 16 kHz mono first.
 SAMPLE_RATE = 16_000
@@ -218,22 +239,91 @@ _model_lock = threading.Lock()
 _model: tuple[str, Any] | None = None  # (model name for record_call, WhisperModel)
 
 
-def _load_model() -> tuple[str, Any]:
-    """The Whisper model, loaded once per process from a local folder.
+def _sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as f:
+        for block in iter(lambda: f.read(1 << 20), b""):
+            digest.update(block)
+    return digest.hexdigest()
 
-    Never downloads (see ASRSettings). A failed load is not cached, so a fixed
-    environment (weights mounted after start-up) works without a restart.
+
+def _verified(path: Path, size: str) -> Path:
+    """`path`, after checking its model.bin is the pinned one (when `size` is pinned).
+
+    Runs on every load, whichever way the weights got there -- baked into the
+    image, placed by hand, or downloaded just now -- so a pod can only ever run
+    the model #135 measured (team-lead review on #478). Once per process: ~0.5 s
+    for base.en's 145 MB.
+    """
+    pinned = PINNED_WHISPER_MODELS.get(size)
+    if pinned is None:
+        # Not a model we pinned (e.g. tiny.en / small.en from the benchmark):
+        # nothing to check against. Loaded from a local folder only, never
+        # downloaded -- see _model_path().
+        logger.warning("Whisper %s is not pinned; loading %s without a sha256 check", size, path)
+        return path
+    actual = _sha256(path / "model.bin")
+    if actual != pinned.model_sha256:
+        raise _ASRUnavailable(
+            f"{path / 'model.bin'} has sha256 {actual}, expected {pinned.model_sha256} "
+            f"({pinned.repo}@{pinned.revision}) -- corrupt or a different model"
+        )
+    return path
+
+
+def _model_path(settings: ASRSettings) -> Path:
+    """Where to load the weights from, downloading them only as a local-dev fallback.
+
+    1. ``WHISPER_MODELS_DIR/<size>/``: the copy baked into the image (Dockerfile).
+    2. ``MODEL_CACHE_DIR/whisper/<size>/``: local dev, placed by hand (models/README.md).
+    3. Neither has model.bin: download the pinned revision into (2), like the
+       embedding model does. Never reached in the image, which has (1); and
+       never for an unpinned size, which has no revision or checksum to trust.
+    """
+    size = settings.whisper_model
+    candidates = [settings.download_dir]
+    if settings.whisper_models_dir:
+        candidates.insert(0, Path(settings.whisper_models_dir) / size)
+    for path in candidates:
+        if (path / "model.bin").exists():
+            return path
+
+    pinned = PINNED_WHISPER_MODELS.get(size)
+    if pinned is None:
+        raise _ASRUnavailable(
+            f"Whisper weights not found at {' or '.join(map(str, candidates))}, and {size} "
+            "is not a pinned model, so it is not downloaded -- see models/README.md"
+        )
+    target = settings.download_dir
+    logger.info("Whisper %s not found locally; downloading %s to %s", size, pinned.repo, target)
+    try:
+        from faster_whisper import download_model
+
+        download_model(pinned.repo, output_dir=str(target), revision=pinned.revision)
+    except ImportError as exc:
+        raise _ASRUnavailable(f"faster-whisper is not installed: {exc}") from exc
+    except Exception as exc:
+        # The network layer under huggingface_hub raises its own, version-dependent
+        # errors (HTTP, connection, a proxy such as NetFree answering 418, a full
+        # disk); all of them are the environment, not the recording.
+        raise _ASRUnavailable(
+            f"Whisper weights not found locally and the download of {pinned.repo} failed: "
+            f"{type(exc).__name__}: {exc} -- see models/README.md to place them by hand"
+        ) from exc
+    return target
+
+
+def _load_model() -> tuple[str, Any]:
+    """The Whisper model, loaded once per process and checked against its pinned sha256.
+
+    See _model_path() for where it comes from. A failed load is not cached, so a
+    fixed environment (weights mounted after start-up) works without a restart.
     """
     global _model
     with _model_lock:
         if _model is None:
             settings = ASRSettings()
-            path = settings.model_dir
-            if not (path / "model.bin").exists():
-                raise _ASRUnavailable(
-                    f"Whisper weights not found at {path} (expected model.bin there) -- "
-                    "see models/README.md"
-                )
+            path = _verified(_model_path(settings), settings.whisper_model)
             try:
                 from faster_whisper import WhisperModel
             except ImportError as exc:

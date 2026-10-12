@@ -39,11 +39,10 @@ class EmbeddingModelSettings(BaseSettings):
 class ASRSettings(BaseSettings):
     """Standalone, like EmbeddingModelSettings -- transcribe() needs no DSN.
 
-    The weights are only ever loaded from a local folder, never downloaded at
-    run time: `<whisper_models_dir>/<whisper_model>/` if set (the Dockerfile
-    sets it to where the image holds them), else
-    `<model_cache_dir>/whisper/<whisper_model>/` (local dev: models/whisper/,
-    see models/README.md).
+    Where the weights are looked for, in order (see asr._model_path()):
+    `<whisper_models_dir>/<whisper_model>/` if set -- the Dockerfile sets it to
+    the copy baked into the image -- then `download_dir`, which is also where a
+    local-dev fallback download lands (models/whisper/, see models/README.md).
     """
 
     model_config = SettingsConfigDict(env_file=_ENV_FILE, extra="ignore")
@@ -54,9 +53,7 @@ class ASRSettings(BaseSettings):
     model_cache_dir: str = Field(default="./models", validation_alias="MODEL_CACHE_DIR")
 
     @property
-    def model_dir(self) -> Path:
-        if self.whisper_models_dir:
-            return Path(self.whisper_models_dir) / self.whisper_model
+    def download_dir(self) -> Path:
         return Path(self.model_cache_dir) / "whisper" / self.whisper_model
 
 

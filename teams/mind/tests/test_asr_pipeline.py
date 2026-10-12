@@ -15,6 +15,7 @@ finance team by Friday."
 
 from __future__ import annotations
 
+import hashlib
 import io
 import math
 import struct
@@ -25,7 +26,6 @@ from types import SimpleNamespace
 import pytest
 from PIL import Image
 
-from mind.config import ASRSettings
 from mind.multimodal import asr
 from mind.multimodal.asr import ASRFailureReason, transcribe
 from mind.observability.tracking import _reset_for_tests, get_recent_calls
@@ -253,16 +253,6 @@ def test_whisper_finding_nothing_is_no_speech(monkeypatch: pytest.MonkeyPatch):
     assert (result.success, result.reason) == (False, ASRFailureReason.NO_SPEECH_DETECTED)
 
 
-def test_missing_weights_are_an_environment_failure(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-):
-    monkeypatch.setenv("WHISPER_MODELS_DIR", str(tmp_path))  # an empty folder
-    result = transcribe(tone(1.0))
-    assert (result.success, result.reason) == (False, ASRFailureReason.ASR_UNAVAILABLE)
-    assert result.retryable is True
-    assert str(tmp_path) in (result.error or "")
-
-
 def test_whisper_failing_on_decoded_audio_is_an_environment_failure(
     monkeypatch: pytest.MonkeyPatch,
 ):
@@ -307,11 +297,95 @@ def test_a_call_past_the_timeout_returns_what_it_has_as_truncated(
     assert result.truncated is True
 
 
-def test_the_model_dir_prefers_the_image_path_over_the_local_cache(
-    monkeypatch: pytest.MonkeyPatch,
+# --- where the weights come from (team-lead decision on #478) --------------------------
+# Baked into the image, checked by sha256 on every load; downloaded only as a local-dev
+# fallback, and checked the same way. Real faster-whisper loading and downloading are
+# replaced, so these need neither weights nor network.
+
+FAKE_WEIGHTS = b"pretend these are 145 MB of Whisper"
+FAKE_SHA256 = hashlib.sha256(FAKE_WEIGHTS).hexdigest()
+
+
+def place_weights(folder: Path, content: bytes = FAKE_WEIGHTS) -> Path:
+    folder.mkdir(parents=True, exist_ok=True)
+    (folder / "model.bin").write_bytes(content)
+    return folder
+
+
+@pytest.fixture
+def fake_faster_whisper(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
+    """Pins base.en to FAKE_WEIGHTS, points both model dirs into tmp_path, and
+    records which folder WhisperModel loads and what download_model is asked for."""
+    import faster_whisper
+
+    seen: dict = {"loaded": None, "downloads": []}
+
+    class FakeWhisperModel:
+        def __init__(self, path: str, **kwargs):
+            seen["loaded"] = Path(path)
+
+    def fake_download(repo: str, output_dir: str, revision: str):
+        seen["downloads"].append((repo, revision))
+        place_weights(Path(output_dir))
+        return output_dir
+
+    monkeypatch.setattr(faster_whisper, "WhisperModel", FakeWhisperModel)
+    monkeypatch.setattr(faster_whisper, "download_model", fake_download)
+    monkeypatch.setitem(
+        asr.PINNED_WHISPER_MODELS,
+        "base.en",
+        asr.PinnedModel(
+            repo="Systran/faster-whisper-base.en", revision="abc", model_sha256=FAKE_SHA256
+        ),
+    )
+    monkeypatch.setenv("WHISPER_MODELS_DIR", str(tmp_path / "image"))
+    monkeypatch.setenv("MODEL_CACHE_DIR", str(tmp_path / "cache"))
+    return seen
+
+
+def test_the_baked_model_is_loaded_first_and_checked(fake_faster_whisper, tmp_path: Path):
+    baked = place_weights(tmp_path / "image" / "base.en")
+    place_weights(tmp_path / "cache" / "whisper" / "base.en")
+    name, _ = asr._load_model()
+    assert fake_faster_whisper["loaded"] == baked
+    assert fake_faster_whisper["downloads"] == []
+    assert name == "whisper-base.en-int8-local"
+
+
+def test_a_baked_model_with_the_wrong_hash_is_not_loaded(fake_faster_whisper, tmp_path: Path):
+    place_weights(tmp_path / "image" / "base.en", content=b"some other model")
+    result = transcribe(tone(1.0))
+    assert (result.success, result.reason) == (False, ASRFailureReason.ASR_UNAVAILABLE)
+    assert "sha256" in (result.error or "")
+    assert fake_faster_whisper["loaded"] is None
+
+
+def test_without_local_weights_the_pinned_revision_is_downloaded_and_checked(
+    fake_faster_whisper, tmp_path: Path
 ):
-    monkeypatch.setenv("WHISPER_MODELS_DIR", "/opt/models/whisper")
-    assert ASRSettings().model_dir == Path("/opt/models/whisper/base.en")
-    monkeypatch.delenv("WHISPER_MODELS_DIR")
-    monkeypatch.setenv("MODEL_CACHE_DIR", "./models")
-    assert ASRSettings().model_dir == Path("models/whisper/base.en")
+    asr._load_model()
+    assert fake_faster_whisper["downloads"] == [("Systran/faster-whisper-base.en", "abc")]
+    assert fake_faster_whisper["loaded"] == tmp_path / "cache" / "whisper" / "base.en"
+
+
+def test_a_failed_download_is_an_environment_failure(
+    fake_faster_whisper, monkeypatch: pytest.MonkeyPatch
+):
+    import faster_whisper
+
+    def blocked(*args, **kwargs):
+        raise ConnectionError("418 Blocked by NetFree")
+
+    monkeypatch.setattr(faster_whisper, "download_model", blocked)
+    result = transcribe(tone(1.0))
+    assert (result.success, result.reason) == (False, ASRFailureReason.ASR_UNAVAILABLE)
+    assert result.retryable is True
+    assert "418 Blocked by NetFree" in (result.error or "")
+
+
+def test_an_unpinned_size_is_never_downloaded(fake_faster_whisper, monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setenv("WHISPER_MODEL", "small.en")
+    result = transcribe(tone(1.0))
+    assert (result.success, result.reason) == (False, ASRFailureReason.ASR_UNAVAILABLE)
+    assert "not a pinned model" in (result.error or "")
+    assert fake_faster_whisper["downloads"] == []
