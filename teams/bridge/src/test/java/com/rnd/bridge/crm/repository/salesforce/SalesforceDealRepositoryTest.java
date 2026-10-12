@@ -98,13 +98,15 @@ class SalesforceDealRepositoryTest {
                 """.formatted(server.url("/").toString());
     }
 
-    private static String queryPage(String... recordsJson) {
+    // Package-private (not private): CrmSalesforceLaneIntegrationTest reuses these fixture
+    // builders rather than duplicating the SOQL response shape a second time.
+    static String queryPage(String... recordsJson) {
         return "{\"totalSize\": " + recordsJson.length + ", \"done\": true, \"nextRecordsUrl\": null, \"records\": ["
                 + String.join(",", recordsJson) + "]}";
     }
 
     /** Stages matching {@link SalesforceStageMapping}'s default bands (20/50/80/99). */
-    private static final String DEFAULT_STAGES = queryPage(
+    static final String DEFAULT_STAGES = queryPage(
             stageRow("Qualification", false, false, 30),
             stageRow("Closed Won", true, true, 100),
             stageRow("Closed Lost", true, false, 0));
@@ -113,13 +115,13 @@ class SalesforceDealRepositoryTest {
         enqueueJson(DEFAULT_STAGES);
     }
 
-    private static String stageRow(String masterLabel, boolean isClosed, boolean isWon, Integer probability) {
+    static String stageRow(String masterLabel, boolean isClosed, boolean isWon, Integer probability) {
         return "{\"MasterLabel\": \"" + masterLabel + "\", \"ApiName\": \"" + masterLabel.replace(" ", "_")
                 + "\", \"IsActive\": true, \"IsClosed\": " + isClosed + ", \"IsWon\": " + isWon
                 + ", \"DefaultProbability\": " + (probability == null ? "null" : probability) + "}";
     }
 
-    private static String opportunityRow(
+    static String opportunityRow(
             String id, String name, String description, String stageName, String amount, String closeDate,
             String createdDate, String stageChangedAtField, String stageChangedAtValue,
             String ownerName, String ownerEmail) {
@@ -144,7 +146,7 @@ class SalesforceDealRepositoryTest {
                 stageChangedAtField, jsonString(stageChangedAtValue), owner);
     }
 
-    private static String jsonString(String value) {
+    static String jsonString(String value) {
         return value == null ? "null" : "\"" + value + "\"";
     }
 
