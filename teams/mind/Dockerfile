@@ -47,6 +47,21 @@ COPY src ./src
 COPY scripts ./scripts
 RUN pip install --no-cache-dir --no-deps .
 
+# Whisper base.en weights for src/mind/multimodal/asr.py (the #135 decision),
+# baked into the image so the service never downloads a model at run time. The
+# build runs in CI, which reaches Hugging Face (only the dev network's NetFree
+# filter blocks it -- locally the weights come from models/whisper/ via the
+# compose volume, see models/README.md). Pinned to a revision and checked against
+# the sha256 Hugging Face publishes for model.bin, the same file the benchmark
+# measured. huggingface_hub comes in with faster-whisper. Placed under /opt, not
+# /app/models, so the local ./models:/app/models mount cannot hide it.
+ARG WHISPER_REPO=Systran/faster-whisper-base.en
+ARG WHISPER_REVISION=3d3d5dee26484f91867d81cb899cfcf72b96be6c
+ARG WHISPER_MODEL_SHA256=2a166925539a16005f14ff328359f9b9adb9dc4fb631bb3b227526862e93e2ef
+RUN python -c "from huggingface_hub import snapshot_download; snapshot_download('${WHISPER_REPO}', revision='${WHISPER_REVISION}', local_dir='/opt/models/whisper/base.en', allow_patterns=['config.json', 'model.bin', 'tokenizer.json', 'vocabulary.txt'])" \
+    && rm -rf /opt/models/whisper/base.en/.cache \
+    && echo "${WHISPER_MODEL_SHA256}  /opt/models/whisper/base.en/model.bin" | sha256sum -c -
+
 # ---- runtime ----
 # Lean image: only the venv built above crosses the stage boundary.
 # No compiler, no dev dependencies, and only the runtime apt packages below -- pip install .
@@ -73,6 +88,10 @@ RUN useradd --create-home --uid 1000 --shell /usr/sbin/nologin mind
 COPY --from=builder --chown=mind:mind /opt/venv /opt/venv
 ENV PATH="/opt/venv/bin:$PATH"
 COPY --from=builder --chown=mind:mind /app/scripts ./scripts
+# Read-only for the app (owned by root): weights are never written at run time.
+COPY --from=builder /opt/models /opt/models
+# asr.py loads <WHISPER_MODELS_DIR>/<WHISPER_MODEL>/ (see ASRSettings in config.py).
+ENV WHISPER_MODELS_DIR=/opt/models/whisper
 
 # alembic.ini/migrations/ aren't part of the pip-installed package (they
 # live beside pyproject.toml, not under src/mind/), so the venv copy

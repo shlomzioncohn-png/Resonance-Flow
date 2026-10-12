@@ -36,6 +36,30 @@ class EmbeddingModelSettings(BaseSettings):
     model_cache_dir: str | None = Field(default=None, validation_alias="MODEL_CACHE_DIR")
 
 
+class ASRSettings(BaseSettings):
+    """Standalone, like EmbeddingModelSettings -- transcribe() needs no DSN.
+
+    The weights are only ever loaded from a local folder, never downloaded at
+    run time: `<whisper_models_dir>/<whisper_model>/` if set (the Dockerfile
+    sets it to where the image holds them), else
+    `<model_cache_dir>/whisper/<whisper_model>/` (local dev: models/whisper/,
+    see models/README.md).
+    """
+
+    model_config = SettingsConfigDict(env_file=_ENV_FILE, extra="ignore")
+
+    # The #135 decision; must match CHOSEN_WHISPER_SIZE in benchmarks/asr_benchmark.py.
+    whisper_model: str = Field(default="base.en", validation_alias="WHISPER_MODEL")
+    whisper_models_dir: str | None = Field(default=None, validation_alias="WHISPER_MODELS_DIR")
+    model_cache_dir: str = Field(default="./models", validation_alias="MODEL_CACHE_DIR")
+
+    @property
+    def model_dir(self) -> Path:
+        if self.whisper_models_dir:
+            return Path(self.whisper_models_dir) / self.whisper_model
+        return Path(self.model_cache_dir) / "whisper" / self.whisper_model
+
+
 class VectorStoreSettings(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
