@@ -706,6 +706,60 @@ it. In production most AMI-like meetings will not reach ASR at all: Bridge pairs
 a recording with its transcript sidecar (`transcript_object_key`), and R2's
 consumer skips ASR when one exists — ASR is the fallback path.
 
+## ASR — memory and CPU in a container (#478)
+
+**What a MIND pod needs: ~1,000 MiB peak and more than half a CPU.** The shared
+Helm chart gives MIND 512Mi and 500m today; both need raising before ASR runs in
+the cluster (Relay owns the chart).
+
+**Measurement:** `benchmarks/asr_container_probe.py`, 2026-10-12, in a Linux
+container built like teams/mind's Dockerfile (CPU torch, the same packages;
+Whisper weights mounted, not baked), on Docker Desktop on the dev laptop. One
+process holding both models, as the service will: the embedding model (a
+same-architecture **stand-in** with random weights -- its real weights were not on
+the machine; memory depends on the tensors, not their values), then Whisper
+(`warm_up()`), then `transcribe()` of the 34-min IB4003 meeting as MP3 under the
+600 s cap, then one more embedding. Kernel numbers from `/proc/self/status`:
+
+| Stage | Peak (VmHWM) | Current (VmRSS) |
+|---|---|---|
+| Python start | 14 MiB | 14 MiB |
+| + embedding stand-in (torch, sentence-transformers, BERT) | 558 MiB | 558 MiB |
+| + Whisper loaded | 848 MiB | 760 MiB |
+| + `transcribe()`, 600 s cap | **~1,000 MiB** (952–1,003 over 7 runs) | ~830–900 MiB |
+
+So ASR adds ~440 MiB to the process (the model ~290, a call ~150); the embedding
+model and torch are the larger half. The peak is stable across runs, CPU limits
+and allocator settings.
+
+- **`MALLOC_ARENA_MAX=2`: not adopted.** 956 MiB against 982–1,003 MiB without
+  it -- inside the spread between identical runs.
+- **Decoding no longer copies** (`asr._decode`, same PR): its peak went from
+  112 MiB to 37 MiB for 600 s of audio (tracemalloc, WAV/MP3/M4A alike), already
+  included in the table.
+
+**CPU.** Two runs with the user at the machine:
+
+| CPU | Transcribed | Wall time | CPU time | Longest gap between segments |
+|---|---|---|---|---|
+| unlimited (16 visible, `cpu_threads=4`) | 600 s (the cap) | 41 s (RTF 0.07) | 165 s | 2.1 s |
+| `--cpus=0.5` (the chart's limit) | **402 s of 600** | 243 s: `TRANSCRIBE_TIMEOUT_S` | 121 s | 23 s |
+
+At the chart's 500m the timeout cuts a 10-min recording at ~6.7 min (RTF ~0.6),
+returned as `truncated`. The timeout held: it is checked between segments, and
+the overrun is at most one decoding window -- 3 s here, 23 s for the slowest
+window at half a CPU.
+
+**Stalls, not reproduced.** Three earlier runs of the same probe, left running in
+the background, transcribed only 50–63 s in 409–620 s, with single gaps of
+170–376 s between segments; the same probe with the user at the machine never
+gapped more than 23 s, and a decode of the same window in the container took
+0.8 s. Like the 38-minute run of `asr_chunking.py` that produced the same
+transcript as its 63 s twin, this is most likely the host (laptop suspended or
+throttled, the Docker VM starved), not Whisper -- but CPU time was not recorded
+during those stalls, so it is not proven. The cluster has no laptop to suspend;
+the timeout bounds a real slow window either way.
+
 ## ASR — known risks
 
 The decision is the best reading of thin evidence, not a measured certainty:

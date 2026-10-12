@@ -292,11 +292,20 @@ Local OCR + ASR preprocessing.
   `ocr.py` uses `instrumented_call` instead; which of the two is the one
   mechanism is for #479 to settle.
 
-  **Resource budget (the service, dev laptop, 4 threads, no GPU):** ~240 MiB
-  fixed (Python, libraries, the model) plus up to ~300 MiB per call, ~440–550 MiB
-  peak on a capped 10-min call -- **above the 512Mi the shared Helm chart gives
-  MIND**, before the embedding model in the same process is counted. Measured on
-  Windows; the Linux container number is still to be measured.
+  **Resource budget -- measured in a Linux container, one process holding the
+  embedding model and Whisper as the service does** (`benchmarks/asr_container_probe.py`;
+  `benchmarks/ocr-asr-benchmark.md` "ASR — memory and CPU in a container"):
+  - **Memory: ~1,000 MiB peak** (952–1,003 over 7 runs) on a capped 10-min call:
+    ~560 for the embedding model with torch, ~290 more for Whisper, ~150 more for
+    a call. **The shared Helm chart gives MIND 512Mi** -- it needs raising (Relay
+    owns the chart). `MALLOC_ARENA_MAX=2` was measured and not adopted (within
+    the spread between runs). Decoding no longer copies the audio: its own peak
+    went from 112 MiB to 37 MiB for 600 s.
+  - **CPU: at the chart's 500m, ~6.7 min of a 10-min recording fit in
+    `TRANSCRIBE_TIMEOUT_S`** (RTF ~0.6; the rest comes back as `truncated`);
+    unlimited, the whole 10 min took 41 s (RTF 0.07). Whether 500m is enough is
+    a trade-off for the cluster, not a bug: the timeout held either way, its
+    overrun at most one decoding window (23 s at half a CPU).
 
   **Interface: agreed with R2** (#478, on the issue thread). She calls
   `transcribe()` from her `bridge.raw.landed` consumer (#349) when `modality`
