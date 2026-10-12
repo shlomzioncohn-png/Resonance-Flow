@@ -93,10 +93,7 @@ assert 5 <= len(PAIRS) <= 10
 
 
 async def _create_benchmark_table(settings: VectorStoreSettings) -> None:
-    # PgVectorStore no longer creates its own schema (issue #441) -- this
-    # dedicated benchmark table isn't covered by `alembic upgrade head`,
-    # so it sets itself up here. Same pattern as
-    # tests/test_vector_store.py's `_create_test_table()` helper.
+    # Dedicated benchmark table, not covered by `alembic upgrade head` (#441).
     table = sql.Identifier(settings.table)
     async with await psycopg.AsyncConnection.connect(
         str(settings.dsn.get_secret_value()), autocommit=True

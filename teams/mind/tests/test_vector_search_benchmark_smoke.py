@@ -1,13 +1,7 @@
-"""Smoke test for benchmarks/vector_search_benchmark.py's real-DB path.
-
-Not the real benchmark (no 10,000 filler vectors) -- just confirms the
-dedicated benchmark table actually gets created and a basic
-upsert/search round-trip works. make test runs tests/, but never the
-benchmark scripts themselves (make lint only type/syntax-checks them),
-so "nobody creates the table anymore" (PgVectorStore stopped
-self-healing its schema, issue #441) went undetected by CI until a
-manual run. This closes that gap for this benchmark specifically.
-"""
+"""Smoke test for vector_search_benchmark.py's real-DB path -- not the
+real benchmark, just confirms the table gets created and a basic
+upsert/search round-trip works (make lint never runs benchmarks/, only
+type-checks it, so this gap went undetected until a manual run)."""
 
 import os
 
