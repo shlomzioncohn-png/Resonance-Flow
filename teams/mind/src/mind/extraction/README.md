@@ -394,47 +394,73 @@ change above that is now rare — an unusable value no longer causes a repair �
 but it is not impossible, and a low score with no obvious cause in the four
 basic fields may have come from here.
 
+### Where the tier definitions come from
+
+Tier is a **time horizon and a reach of consequence**, not a rank or a kind of
+activity. Two things in this repo fix that, and the prompt follows both:
+
+- `scoring/segmented_model.TIER_RULES` separates the tiers by `scale_hours` —
+  8, 72, 336 — and shifts the weight from time pressure to impact as the
+  horizon lengthens. A task labelled one tier at extraction and scored under
+  another tier's rule is worse than an unlabelled one.
+- `eval/personas/README.md` says it from the other side, under "Persona !=
+  Tier": a developer can hold a strategic task and a chief executive an
+  operational one. The prompt says so outright, because a model asked to sort
+  tasks by seniority will quietly do exactly that.
+
+An earlier version of this prompt sorted tasks by the kind of work — doing it,
+organising it, deciding it. That reads plausibly and is wrong: it has no
+horizon in it at all, so nothing tied extraction to how the task would later
+be scored.
+
 ### What was measured, and what was not
 
-Run against the live API on 2026-10-07 (`gemini-3.6-flash`), over six tasks
-from the **dev** half of the persona split — one per role, never the holdout,
-and never used as prompt examples.
+Run against the live API (`gemini-3.6-flash`), over six tasks from the **dev**
+half of the persona split — one per role, never the holdout, and never used as
+prompt examples.
 
 **Does asking for seven fields degrade the four?** No difference found. The
-same six tasks, run with the switch off and then on:
+same six tasks with the switch off and then on: 6/6 identical titles, 6/6
+`source_ref`, 6/6 `has_dependencies`, mean confidence 0.855 either way. All
+six titles came back byte-identical, and neither configuration needed a repair
+round.
 
-| | title | `source_ref` | `has_dependencies` | mean confidence |
-|---|---|---|---|---|
-| off vs on | 6/6 identical | 6/6 | 6/6 | 0.855 vs 0.855 |
+**Is the classification any good?** Partly, and the honest numbers are:
 
-All six titles came back byte-identical. Neither configuration needed a repair
-round; the two extra provider calls in the classified run were 503 retries.
+| | first version | with horizons, role descriptions and examples |
+|---|---|---|
+| `tier` | 3/6 | 3/6 |
+| `role_context` | 3/6 | 4/6 |
 
-Three caveats, all of them load-bearing:
+Describing the roles worked: two tasks that came back `null` — the CEO one and
+the field engineer one — are now right. One moved the wrong way, a quarterly
+budget review read as `HIGHER_MANAGER` instead of `MANAGER`, which is a
+defensible reading of a budget.
 
+Rewriting the tier definitions around time horizons did **not** move that
+number on this sample. The three disagreements are of three different kinds:
+
+| task | label | model |
+|---|---|---|
+| why last night's backup skipped two sites | `TACTICAL` | `OPERATIONAL` |
+| review the quarterly team budget before sign-off | `STRATEGIC` | `TACTICAL` |
+| write the monthly department newsletter | `STRATEGIC` | `OPERATIONAL` |
+
+The second looks like the model's mistake — a quarter is a strategic horizon.
+The first is a genuine judgement call. **The third is worth asking about**: by
+the definition this prompt now follows, and that `TIER_RULES` encodes, a
+monthly newsletter is not a weeks-or-longer commitment whose effect outlives
+the task. The label may be the thing that is off. Raised as a question with
+R1 rather than treated as a result.
+
+Caveats, all load-bearing:
+
+- n = 6, one model, one run per configuration. A signal, not a number to
+  quote, and six examples is far too few to tune a prompt against without
+  simply fitting them.
 - the noise floor — the same configuration run twice — rests on **two** items,
-  not six: the free tier's daily quota ran out part-way through the third run.
-  So "identical" is not fully separable from "deterministic at temperature 0".
-- n=6, one model, one run per configuration. This is a signal, not a number to
-  quote.
-- it does not test **one call for seven fields against two separate calls**,
-  which is the comparison #351 actually names. That one cannot be run at all
-  yet: no split path exists. The pieces for it do — `classification.md` is
-  already its own prompt and `ClassificationFields` its own model — so
-  building it is wiring rather than rewriting, but until it is built the
-  combined prompt is the issue's recommended starting point rather than a
-  measured winner.
-
-**Is the classification any good?** Unknown, and not claimed. A six-task spot
-check against the labelled dev scenarios agreed on `tier` three times out of
-six, with every disagreement a borderline judgement (a departmental newsletter
-labelled strategic, read as operational) rather than a nonsense answer. That
-points at the tier definitions in `classification.md` differing from the ones
-the scenario authors used — a prompt-calibration task to do against
-`MIND-05-Task-Flow-Explained.md` §3, not a code defect.
-
-`role_context` came back null in three of six, each time on a task whose text
-genuinely names no role. Worth knowing before anyone treats the persona labels
-as ground truth for it: the label is the persona whose inbox the task sits in,
-while this field is required to come from the content alone. The two are not
-the same quantity, and a null may be the honest answer where a label exists.
+  because the free tier's daily quota ran out part-way through that run.
+- **it does not test one call against two separate calls**, which is the
+  comparison #351 actually names. That cannot be run yet: no split path
+  exists. Until it is built, the combined prompt is the issue's recommended
+  starting point rather than a measured winner.

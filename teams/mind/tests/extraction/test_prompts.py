@@ -108,3 +108,58 @@ def test_the_classification_block_says_null_is_a_correct_answer() -> None:
 
     assert "null" in prompt
     assert "better than a guess" in prompt
+
+
+def test_the_tiers_are_defined_by_time_horizon_not_by_who_does_the_work() -> None:
+    """Keeps the prompt aligned with how tier is actually scored.
+
+    `scoring/segmented_model.TIER_RULES` separates the tiers by scale_hours —
+    8, 72, 336 — so a tier is a horizon, not a rank. The persona set says the
+    same from the other side ("Persona != Tier": a developer can hold a
+    strategic task). A prompt that sorted tasks by the kind of work instead
+    would label a task one way and have it scored as if it were another.
+    """
+
+    prompt = system_prompt(classify=True)
+
+    assert "hours to a day" in prompt
+    assert "days to a week" in prompt
+    assert "weeks or longer" in prompt
+    # And says outright that tier is not the person.
+    assert "not about who does it" in prompt
+
+
+def test_every_role_is_described_and_not_merely_listed() -> None:
+    """The issue asks for instructions per field, not a vocabulary list.
+
+    Naming six roles tells a model nothing about what separates MANAGER from
+    HIGHER_MANAGER, or FIELD_ENGINEER from DEVELOPER.
+    """
+
+    prompt = system_prompt(classify=True)
+
+    for role, marker in (
+        ("DEVELOPER", "code"),
+        ("MANAGER", "one team"),
+        ("HIGHER_MANAGER", "several teams"),
+        ("FIELD_ENGINEER", "incidents"),
+        ("SALESPERSON", "pipeline"),
+        ("CEO", "board"),
+    ):
+        assert role in prompt
+        assert marker in prompt
+
+
+def test_the_examples_include_one_whose_answer_is_null() -> None:
+    """An example of declining to answer is the one most worth giving."""
+
+    prompt = system_prompt(classify=True)
+
+    assert 'role_context: null' in prompt
+    assert "Null there is the right answer" in prompt
+
+
+def test_the_prompt_warns_against_answering_with_two_labels() -> None:
+    """The shape that used to end the whole run."""
+
+    assert "never answer with a list of two" in system_prompt(classify=True)

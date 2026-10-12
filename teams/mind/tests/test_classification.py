@@ -9,12 +9,15 @@ turn it off rather than merely leaving the fields empty.
 import json
 from uuid import uuid4
 
+import pytest
+
 from mind.contracts.base_enums import SourceType
 from mind.contracts.task_creation_requested import TaskCreationRequested
 from mind.contracts.task_enums import RoleContext, TaskTier
 from mind.extraction.assembly import to_task_creation_requested
 from mind.extraction.config import ExtractionConfig
 from mind.extraction.extractor import BasicExtractor, ExtractionSuccess
+from mind.extraction.prompts import repair_prompt, system_prompt
 from tests.extraction.fakes import ScriptedProvider
 
 SOURCE_TEXT = (
@@ -168,3 +171,81 @@ def test_the_effort_fields_stay_for_352() -> None:
 
     assert proposal.effort_estimate_minutes is None
     assert proposal.effort_estimate_confidence is None
+
+
+# --- the repair message must not contradict the system prompt -------------
+
+
+def test_a_repair_round_does_not_quietly_drop_the_classification() -> None:
+    """The failure this guards against leaves no trace at all.
+
+    The system prompt asks for seven keys. If the repair message asks for
+    four, a model that obeys it returns four — and that answer *passes*,
+    because the three classification fields are optional. No exception, no
+    log line, just three silent nulls on an item that was classified fine
+    until it needed one repair round.
+    """
+
+    bad_title = json.dumps({"title": "N/A", "has_dependencies": False})
+    provider = ScriptedProvider(bad_title, CLASSIFIED_ANSWER)
+
+    outcome = BasicExtractor(provider, sleep=lambda _: None).extract(
+        SOURCE_TEXT, SourceType.EMAIL
+    )
+
+    assert isinstance(outcome, ExtractionSuccess)
+    assert outcome.schema_attempts == 2
+
+    repair_message = provider.calls[1][1]
+    assert "four keys" not in repair_message
+    assert "seven keys" not in repair_message
+
+
+def test_the_key_list_is_stated_in_exactly_one_place() -> None:
+    """Why no switch on the repair prompt.
+
+    Every call resends the system prompt, so the permitted keys are already
+    stated authoritatively on a repair round. A count in the repair message
+    would be a second source of truth for the same fact — which is precisely
+    how the two came to disagree.
+    """
+
+    system = system_prompt(classify=True)
+    repair = repair_prompt(SourceType.EMAIL, "content", '{"bad": 1}', "an error")
+
+    assert "tier" in system
+    for field in ("tier", "urgency", "role_context"):
+        assert field not in repair
+
+
+@pytest.mark.parametrize("wrong_shape", [["STRATEGIC", "TACTICAL"], {"t": "STRATEGIC"}])
+def test_a_wrong_shaped_tier_does_not_end_the_run(wrong_shape: object) -> None:
+    """Through the extractor, because that is where it used to escape.
+
+    The promise being defended is `extract` never raising for a bad item. A
+    TypeError out of a validator broke it completely: not one item lost, the
+    whole run.
+    """
+
+    answer = json.dumps(
+        {
+            "title": "Write the German market entry recommendation",
+            "description": None,
+            "source_ref": None,
+            "has_dependencies": False,
+            "tier": wrong_shape,
+            "urgency": 4,
+            "role_context": "CEO",
+        }
+    )
+
+    outcome = BasicExtractor(ScriptedProvider(answer), sleep=lambda _: None).extract(
+        SOURCE_TEXT, SourceType.EMAIL
+    )
+
+    assert isinstance(outcome, ExtractionSuccess)
+    assert outcome.fields.tier is None
+    # The rest of the answer survives, which is the point of nulling rather
+    # than failing.
+    assert outcome.fields.role_context is RoleContext.CEO
+    assert outcome.fields.urgency == 4

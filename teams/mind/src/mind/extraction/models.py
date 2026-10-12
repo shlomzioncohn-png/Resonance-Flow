@@ -146,6 +146,22 @@ class ClassificationFields(BaseModel):
         if field == "urgency":
             return _usable_urgency(value, written)
 
+        if not isinstance(value, str):
+            # A list, an object, a number. The guard above skips the cleanup
+            # for a non-string; it does not reject one, and everything below
+            # assumes a word. Letting this reach the membership test raised
+            # `TypeError: unhashable type`, which pydantic does not turn into
+            # a ValidationError — so it escaped the parser, escaped `extract`,
+            # and ended the run instead of the item. A model answering `tier`
+            # with two labels is an ordinary mistake, not a freak one.
+            logger.warning(
+                "extraction: %s came back as %r, which is not a single value; "
+                "recording it as null",
+                field,
+                written,
+            )
+            return None
+
         permitted = _PERMITTED_VALUES[field]
         if value in permitted:
             return value

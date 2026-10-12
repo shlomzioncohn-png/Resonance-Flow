@@ -218,3 +218,33 @@ def test_the_combined_shape_is_also_a_basic_one() -> None:
 def test_the_switch_picks_the_shape() -> None:
     assert response_model(classify=True) is ExtractedFieldsWithClassification
     assert response_model(classify=False) is ExtractedFields
+
+
+# --- a value of the wrong shape entirely ----------------------------------
+
+
+@pytest.mark.parametrize(
+    "wrong_shape",
+    [["STRATEGIC", "TACTICAL"], {"value": "STRATEGIC"}, 7, True],
+)
+def test_a_value_that_is_not_a_word_becomes_null(wrong_shape: object) -> None:
+    """A model answering with two labels is a realistic case, not a freak one.
+
+    The string guard higher up skips the cleanup for a non-string; it does not
+    reject one. Without this check the value reached a `in frozenset` test and
+    raised `TypeError: unhashable type`, which pydantic does not convert into
+    a ValidationError — so it escaped `parse_response`, escaped `extract()`,
+    and ended the whole run on one bad item.
+    """
+
+    assert ClassificationFields(tier=wrong_shape).tier is None
+    assert ClassificationFields(role_context=wrong_shape).role_context is None
+
+
+def test_a_wrong_shape_is_logged_like_any_other_dropped_value(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    with caplog.at_level(logging.WARNING, logger="mind.extraction"):
+        ClassificationFields(tier=["STRATEGIC", "TACTICAL"])
+
+    assert "STRATEGIC" in caplog.text
