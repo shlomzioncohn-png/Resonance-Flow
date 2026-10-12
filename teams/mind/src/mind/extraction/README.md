@@ -300,3 +300,167 @@ that limit so nobody mistakes the check for more than it is. The real answer is
 for `source_ref` to arrive from Bridge as event metadata — `RawObjectEvent`
 carries no such field today, and asking for one is open with them. Until then,
 this field says what the content claimed, not what is true.
+
+## Classification at extraction time (#351)
+
+Three more fields, asked for in the same call: `tier`, `urgency` and
+`role_context`. All three are nullable, and that is the stance rather than a
+convenience — the prompt tells the model that `null` is the correct answer
+when the content does not make the value clear, because Chain's selection and
+the segmented ranking both act on `tier`, and a wrong value there is worse
+than a missing one.
+
+`role_context` is read from the content alone, never from who sent the message
+or who might be assigned it. A task can carry a role before it has an owner,
+which is most obvious for the CEO persona: it has no task tool of its own and
+reaches Mind only through unstructured content.
+
+### The switch
+
+`ExtractionConfig.classify` decides whether the three fields are asked for at
+all. It is read in exactly two places inside `extract()` — which prompt is
+built, and which schema the answer is validated against — because those are
+one decision: a prompt asking for seven fields and a schema accepting four
+would fail every answer it received.
+
+| | `classify=False` | `classify=True` |
+|---|---|---|
+| system prompt | `system.md` | `system.md` + `classification.md` |
+| schema | `ExtractedFields` | `ExtractedFieldsWithClassification` |
+
+With the switch off the prompt never mentions `tier` at all. That is
+deliberate: a model that has heard the word sometimes volunteers the field,
+and `extra="forbid"` would then reject an otherwise good answer.
+
+The combined model inherits from both halves, so it *is* an `ExtractedFields`.
+That is what lets `confidence.py`, `extractor.py` and every other caller stay
+untouched by the switch, and it is pinned by a test.
+
+The switch exists so that both configurations can be run from one build. The
+question it is there to answer — does asking for seven fields degrade the four
+basic ones? — needs the two run over the same inputs, and without it that
+comparison would mean checking out an old commit mid-run.
+
+### An unusable classification becomes null, not a repair round
+
+A value outside the permitted vocabulary (`"critical"` for a tier), or an
+urgency outside 1-5, is recorded as `None` and logged — it does not fail
+validation.
+
+This is the one place that departs from the "forgive formatting, never
+content" line, and the asymmetry behind it is the point. `title` is required
+by the contract, so a bad one is a real failure and still earns a repair
+round. These three are optional by design, and a model that reached outside
+the vocabulary has demonstrated exactly the uncertainty that `null` exists to
+express. Measured on the same answer, before and after:
+
+| | invented `tier`, repaired | invented `tier`, nulled |
+|---|---|---|
+| outcome | `ExtractionFailure` | `ExtractionSuccess` |
+| provider calls | 3 | 1 |
+| title, description, source_ref | discarded | kept |
+| the other two classification fields | discarded | kept |
+
+Losing a good title, description and source_ref — and paying three calls for
+it — because of one word in an optional field was the wrong trade.
+
+Urgency is **not** clamped into range. A `7` might mean "past the top of your
+scale", or it might mean the model scored on 1 to 10, where 7 is middling.
+Those are indistinguishable from here, and the costs are not symmetric: a
+missing urgency is visibly missing, while a clamped one is a plausible-looking
+number that quietly inflates every ranking downstream.
+
+Every dropped value is logged at WARNING with the text the model actually
+wrote. Without that, a model inventing values all day would be
+indistinguishable from an honest one declining to guess — both end in `null`.
+
+### Why `confidence` does not change
+
+`confidence` is the confidence in the *extraction*, and it is left exactly as
+#350 built it. An empty classification field costs nothing: the signals in
+`confidence.py` name `description` and `source_ref` explicitly, and the same
+answer scores identically whether the three fields are absent or present and
+empty.
+
+The contract itself argues for this. It carries `effort_estimate_confidence`
+as a separate field, so when it wants confidence about one field it says so.
+There is no `tier_confidence`, and inventing a meaning for the shared one
+would misread it for Inbox.
+
+One second-order effect is worth knowing rather than engineering around: if a
+classification problem does cause a repair round, the `repair_attempts`
+penalty fires and lowers the score for the extraction as a whole. After the
+change above that is now rare — an unusable value no longer causes a repair —
+but it is not impossible, and a low score with no obvious cause in the four
+basic fields may have come from here.
+
+### Where the tier definitions come from
+
+Tier is a **time horizon and a reach of consequence**, not a rank or a kind of
+activity. Two things in this repo fix that, and the prompt follows both:
+
+- `scoring/segmented_model.TIER_RULES` separates the tiers by `scale_hours` —
+  8, 72, 336 — and shifts the weight from time pressure to impact as the
+  horizon lengthens. A task labelled one tier at extraction and scored under
+  another tier's rule is worse than an unlabelled one.
+- `eval/personas/README.md` says it from the other side, under "Persona !=
+  Tier": a developer can hold a strategic task and a chief executive an
+  operational one. The prompt says so outright, because a model asked to sort
+  tasks by seniority will quietly do exactly that.
+
+An earlier version of this prompt sorted tasks by the kind of work — doing it,
+organising it, deciding it. That reads plausibly and is wrong: it has no
+horizon in it at all, so nothing tied extraction to how the task would later
+be scored.
+
+### What was measured, and what was not
+
+Run against the live API (`gemini-3.6-flash`), over six tasks from the **dev**
+half of the persona split — one per role, never the holdout, and never used as
+prompt examples.
+
+**Does asking for seven fields degrade the four?** No difference found. The
+same six tasks with the switch off and then on: 6/6 identical titles, 6/6
+`source_ref`, 6/6 `has_dependencies`, mean confidence 0.855 either way. All
+six titles came back byte-identical, and neither configuration needed a repair
+round.
+
+**Is the classification any good?** Partly, and the honest numbers are:
+
+| | first version | with horizons, role descriptions and examples |
+|---|---|---|
+| `tier` | 3/6 | 3/6 |
+| `role_context` | 3/6 | 4/6 |
+
+Describing the roles worked: two tasks that came back `null` — the CEO one and
+the field engineer one — are now right. One moved the wrong way, a quarterly
+budget review read as `HIGHER_MANAGER` instead of `MANAGER`, which is a
+defensible reading of a budget.
+
+Rewriting the tier definitions around time horizons did **not** move that
+number on this sample. The three disagreements are of three different kinds:
+
+| task | label | model |
+|---|---|---|
+| why last night's backup skipped two sites | `TACTICAL` | `OPERATIONAL` |
+| review the quarterly team budget before sign-off | `STRATEGIC` | `TACTICAL` |
+| write the monthly department newsletter | `STRATEGIC` | `OPERATIONAL` |
+
+The second looks like the model's mistake — a quarter is a strategic horizon.
+The first is a genuine judgement call. **The third is worth asking about**: by
+the definition this prompt now follows, and that `TIER_RULES` encodes, a
+monthly newsletter is not a weeks-or-longer commitment whose effect outlives
+the task. The label may be the thing that is off. Raised as a question with
+R1 rather than treated as a result.
+
+Caveats, all load-bearing:
+
+- n = 6, one model, one run per configuration. A signal, not a number to
+  quote, and six examples is far too few to tune a prompt against without
+  simply fitting them.
+- the noise floor — the same configuration run twice — rests on **two** items,
+  because the free tier's daily quota ran out part-way through that run.
+- **it does not test one call against two separate calls**, which is the
+  comparison #351 actually names. That cannot be run yet: no split path
+  exists. Until it is built, the combined prompt is the issue's recommended
+  starting point rather than a measured winner.
