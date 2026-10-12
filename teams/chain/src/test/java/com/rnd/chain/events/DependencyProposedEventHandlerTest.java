@@ -3,7 +3,9 @@ package com.rnd.chain.events;
 import com.rnd.chain.dto.Task;
 import com.rnd.chain.dto.TaskDependency;
 import com.rnd.chain.dto.TaskStatus;
+import com.rnd.chain.dto.TaskTestFixtures;
 import com.rnd.chain.repository.InMemoryConstraintRepository;
+import com.rnd.chain.repository.InMemoryDependencyHistoryRepository;
 import com.rnd.chain.service.SchedulingUpdateService;
 import static org.mockito.Mockito.mock;
 import com.rnd.chain.repository.InMemoryTaskDependencyRepository;
@@ -24,6 +26,7 @@ class DependencyProposedEventHandlerTest {
         return Task.builder()
                 .id(id)
                 .ownerId("owner")
+                .tenantId(TaskTestFixtures.DEFAULT_TENANT_ID)
                 .status(TaskStatus.PENDING)
                 .isReady(true)
                 .blockingCount(0)
@@ -33,16 +36,19 @@ class DependencyProposedEventHandlerTest {
                 .build();
     }
 
-    private record Fixture(InMemoryTaskRepository taskRepo, DependencyProposedEventHandler handler) {
+    private record Fixture(InMemoryTaskRepository taskRepo, InMemoryDependencyHistoryRepository historyRepo,
+                            DependencyProposedEventHandler handler) {
     }
 
     private static Fixture newFixture(List<Task> tasks) {
         InMemoryTaskRepository taskRepo = new InMemoryTaskRepository(tasks);
         InMemoryTaskDependencyRepository dependencyRepo = new InMemoryTaskDependencyRepository(List.of());
+        InMemoryDependencyHistoryRepository historyRepo = new InMemoryDependencyHistoryRepository();
         TaskEligibilityService eligibilityService = new TaskEligibilityService(taskRepo, dependencyRepo,
                 mock(SchedulingUpdateService.class), new InMemoryConstraintRepository());
         ChainEventProcessingTemplate template = new ChainEventProcessingTemplate(new InMemoryProcessedEventStore());
-        return new Fixture(taskRepo, new DependencyProposedEventHandler(eligibilityService, template));
+        return new Fixture(taskRepo, historyRepo,
+                new DependencyProposedEventHandler(eligibilityService, template, historyRepo));
     }
 
     @Test
@@ -83,6 +89,34 @@ class DependencyProposedEventHandlerTest {
     }
 
     @Test
+    void onMessage_crossTenantDependency_throwsNonRetryableEventException_andRecordsRejectedHistory() {
+        UUID taskId = UUID.randomUUID();
+        UUID otherTenantDep = UUID.randomUUID();
+        Task crossTenantTask = Task.builder()
+                .id(otherTenantDep).ownerId("owner").tenantId(TaskTestFixtures.OTHER_TENANT_ID)
+                .status(TaskStatus.PENDING).isReady(true).blockingCount(0).openConstraintCount(0)
+                .createdAt(LocalDateTime.now()).updatedAt(LocalDateTime.now()).build();
+        Fixture fixture = newFixture(List.of(buildTask(taskId), crossTenantTask));
+        UUID eventId = UUID.randomUUID();
+
+        DependencyProposedEvent event = DependencyProposedEvent.newBuilder()
+                .setEventId(eventId.toString())
+                .setTaskId(taskId.toString())
+                .addDependencies(com.rnd.mind.event.Dependency.newBuilder().setDependsOnTaskId(otherTenantDep.toString()).build())
+                .build();
+
+        assertThrows(NonRetryableEventException.class, () -> fixture.handler().onMessage(event));
+
+        assertTrue(fixture.taskRepo().findById(taskId).map(t -> t.getBlockingCount() == 0).orElse(false),
+                "a rejected edge must never be applied");
+        List<com.rnd.chain.dto.DependencyHistoryEntry> entries =
+                fixture.historyRepo().findByTaskId(taskId, 0, 10).content();
+        assertEquals(1, entries.size());
+        assertEquals(com.rnd.chain.dto.DependencyChangeAction.REJECTED, entries.get(0).action());
+        assertEquals(com.rnd.chain.dto.DependencyChangeSource.MIND, entries.get(0).source());
+    }
+
+    @Test
     void onMessage_referencingATaskThatDoesNotExistYet_throwsReferencedTaskNotFoundException() {
         UUID taskId = UUID.randomUUID();
         UUID unknownDep = UUID.randomUUID();
@@ -108,7 +142,8 @@ class DependencyProposedEventHandlerTest {
         TaskEligibilityService eligibilityService = new TaskEligibilityService(taskRepo, dependencyRepo,
                 mock(SchedulingUpdateService.class), new InMemoryConstraintRepository());
         ChainEventProcessingTemplate template = new ChainEventProcessingTemplate(new InMemoryProcessedEventStore());
-        DependencyProposedEventHandler handler = new DependencyProposedEventHandler(eligibilityService, template);
+        DependencyProposedEventHandler handler = new DependencyProposedEventHandler(eligibilityService, template,
+                new InMemoryDependencyHistoryRepository());
 
         DependencyProposedEvent event = DependencyProposedEvent.newBuilder()
                 .setEventId(UUID.randomUUID().toString())
@@ -134,7 +169,8 @@ class DependencyProposedEventHandlerTest {
         TaskEligibilityService eligibilityService = new TaskEligibilityService(taskRepo, dependencyRepo,
                 mock(SchedulingUpdateService.class), new InMemoryConstraintRepository());
         ChainEventProcessingTemplate template = new ChainEventProcessingTemplate(new InMemoryProcessedEventStore());
-        DependencyProposedEventHandler handler = new DependencyProposedEventHandler(eligibilityService, template);
+        DependencyProposedEventHandler handler = new DependencyProposedEventHandler(eligibilityService, template,
+                new InMemoryDependencyHistoryRepository());
 
         DependencyProposedEvent event = DependencyProposedEvent.newBuilder()
                 .setEventId(UUID.randomUUID().toString())

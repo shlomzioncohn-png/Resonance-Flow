@@ -93,6 +93,7 @@ class TaskCreatedEventHandlerIntegrationTest {
         producer.send(TOPIC, taskId.toString(), TaskCreatedEvent.newBuilder()
                 .setId(taskId.toString())
                 .setOwnerId("owner-1")
+                .setTenantId(UUID.randomUUID().toString())
                 .setStatus(com.rnd.inbox.event.TaskStatus.TASK_STATUS_NEW)
                 .setCreatedAt(timestamp(Instant.now()))
                 .build());
@@ -119,6 +120,7 @@ class TaskCreatedEventHandlerIntegrationTest {
         producer.send(TOPIC, taskId.toString(), TaskCreatedEvent.newBuilder()
                 .setId(taskId.toString())
                 .setOwnerId("real-owner")
+                .setTenantId(UUID.randomUUID().toString())
                 .setStatus(com.rnd.inbox.event.TaskStatus.TASK_STATUS_NEW)
                 .setCreatedAt(timestamp(Instant.now()))
                 .build());
@@ -148,6 +150,7 @@ class TaskCreatedEventHandlerIntegrationTest {
         producer.send(TOPIC, "bad-key", TaskCreatedEvent.newBuilder()
                 .setId("not-a-valid-uuid") // fails NonRetryableEventException's UUID parse
                 .setOwnerId("owner-1")
+                .setTenantId(UUID.randomUUID().toString())
                 .setStatus(com.rnd.inbox.event.TaskStatus.TASK_STATUS_NEW)
                 .setCreatedAt(timestamp(Instant.now()))
                 .build());

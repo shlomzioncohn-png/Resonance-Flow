@@ -9,6 +9,12 @@ import java.util.UUID;
 /** Shared test-fixture builder for a plain, ready, no-dependency Task. */
 public final class TaskFixtures {
 
+    /** Shared by every {@link #newTask(UUID)} (issue #580), so two tasks built from this fixture
+     * always pass the strict same-tenant dependency check without each call site needing to set
+     * one explicitly. */
+    public static final UUID DEFAULT_TENANT_ID = UUID.fromString("11111111-1111-1111-1111-111111111111");
+    public static final UUID OTHER_TENANT_ID = UUID.fromString("22222222-2222-2222-2222-222222222222");
+
     private TaskFixtures() {
     }
 
@@ -16,6 +22,7 @@ public final class TaskFixtures {
         return Task.builder()
                 .id(id)
                 .ownerId("owner")
+                .tenantId(DEFAULT_TENANT_ID)
                 .status(TaskStatus.ACTIVE)
                 .isReady(true)
                 .blockingCount(0)

@@ -68,11 +68,13 @@ public class TaskCreatedEventHandler {
     }
 
     private void persist(UUID taskId, TaskCreatedEvent event, TaskStatus status, LocalDateTime createdAt) {
+        UUID tenantId = parseUuid(event.getTenantId(), "tenant_id");
         try {
             boolean existed = taskRepository.update(taskId, existing -> Task.builder()
                     .id(existing.getId())
                     .parentTaskId(existing.getParentTaskId())
                     .ownerId(event.getOwnerId())
+                    .tenantId(tenantId)
                     .status(status)
                     .isReady(existing.isReady())
                     .blockingCount(existing.getBlockingCount())

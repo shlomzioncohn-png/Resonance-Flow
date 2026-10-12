@@ -100,6 +100,43 @@ already has (edgeExists() / the task's own stored previousStatus).
   `@EqualsAndHashCode` there, since it generates nothing alongside the hand-written methods.
 
 ## Open items
+- 2026-10-12, issue #580 (tenant isolation) - decisions made while implementing, each resolved
+  directly rather than left implicit:
+  - **Null-tenant policy is strict**: an edge needs both tasks' `tenant_id` non-null and equal;
+    null on either side is rejected, same as a mismatch. Confirmed with the user that existing/
+    test data without a tenant isn't meaningful enough to justify the weaker "skip when unknown"
+    alternative the issue offered. Follow-up: make `task.tenant_id` `NOT NULL` once every row is
+    backfilled through `TaskCreatedEventHandler`/`TaskUpdatedEventHandler`.
+  - **`task.updated` claiming a different tenant than stored is rejected** (`TenantReassignmentException`
+    -> `NonRetryableEventException`), not applied - confirmed directly with the Inbox team
+    (Shlomzion Cohn, Slack) that `tenant_id` never legitimately changes after task creation, so
+    this always signals a bug upstream. A still-null stored tenant is backfilled instead, not
+    treated as a mismatch.
+  - **Dropped the issue's item 3 (a Mind-side `tenant_id` cross-check) entirely, not deferred**:
+    the user confirmed Mind was never meant to be a tenant source (only Inbox is), and separately,
+    Mind's real event (`task-dependencies-proposed-event.proto`, now a cross-team, Relay-owned
+    registered schema under `shared/proto/`, not a private Chain draft) has no such field at all -
+    adding one would be a cross-team schema change, moot anyway since the per-edge same-tenant
+    check already covers an edge Mind proposes.
+  - **Mid-implementation discovery**: an earlier exploration pass for this issue was accidentally
+    done against the unmerged `shifra/chain-pending-task-buffer-tables` branch instead of `main`
+    (that branch's `PendingDependencyService`/pending-event-buffer feature does **not** exist on
+    `main` or this branch) - re-verified everything actually touched against the real `main`
+    before implementing. `DependencyProposedEventHandler` calls
+    `TaskEligibilityService.addDependencies` directly; there is no buffer/reconcile layer.
+  - Not fixed here, pre-existing: `DependencyProposedEventHandler`'s path never wrote to
+    `dependency_history` on a *successful* add either, even before this issue (see the
+    2026-09-22 note on `TaskEligibilityService` bypassing `TransactionRunner`/
+    `DependencyHistoryRepository`, below) - only the new rejection case gets a targeted fix
+    (writes `REJECTED` directly from the handler), not a full rewire of that path.
+  - Also found incidentally while running the `@Tag("postgres")` suite for the first time in a
+    while (unrelated to tenant work, not fixed, flagged to the team): `TaskRepositoryContractTest`'s
+    `findByParentTaskId_returnsDirectChildren`/`findByParentTaskId_excludesSoftDeletedChildren`
+    seed a child referencing a `parentTaskId` that's never itself inserted - fails the real FK
+    constraint under `PostgresTaskRepositoryContractTest` (passes under the in-memory
+    implementation, which doesn't enforce FKs). `PostgresConstraintRepositoryTest.save_nullReason_roundTripsAsNull`
+    also fails independently (`reason` round-trips as `{}` instead of `null`) - also pre-existing,
+    also unrelated.
 - PR #468 review (2026-09-23, leaRevivo) findings addressed 2026-09-24:
   - Critical: `PostgresConstraintRepositoryTest`/`PostgresConstraintRepositoryConcurrencyTest`
     were committed active with no exclusion, and `values-chain.yaml`'s `postgresql.enabled`

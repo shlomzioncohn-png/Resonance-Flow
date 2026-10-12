@@ -7,10 +7,12 @@ import com.rnd.chain.dto.TaskStatus;
 import com.rnd.chain.dto.TaskTestFixtures;
 import com.rnd.chain.event.SchedulingUpdatePublisher;
 import com.rnd.chain.event.TaskSchedulingUpdatedEvent;
+import com.rnd.chain.exception.CrossTenantDependencyException;
 import com.rnd.chain.exception.DependencyNotFoundException;
 import com.rnd.chain.exception.DuplicateDependencyException;
 import com.rnd.chain.exception.InvalidDependencyException;
 import com.rnd.chain.exception.TaskNotFoundException;
+import com.rnd.chain.exception.TenantReassignmentException;
 import com.rnd.chain.repository.InMemoryConstraintRepository;
 import com.rnd.chain.repository.InMemoryTaskDependencyRepository;
 import com.rnd.chain.repository.InMemoryTaskRepository;
@@ -604,6 +606,7 @@ class TaskEligibilityServiceTest {
                 .id(id)
                 .parentTaskId(null)
                 .ownerId("test-owner")
+                .tenantId(TaskTestFixtures.DEFAULT_TENANT_ID)
                 .status(status)
                 .isReady(ready)
                 .blockingCount(blockingCount)
@@ -1003,6 +1006,113 @@ class TaskEligibilityServiceTest {
 
         assertThrows(NullPointerException.class,
                 () -> fixture.service().addDependency(taskId, null));
+    }
+
+    // --- tenant isolation (issue #580) ------------------------------------
+
+    @Test
+    void addDependency_differentTenants_throwsCrossTenantDependencyException() {
+        UUID taskId = UUID.randomUUID();
+        UUID dependsOnTaskId = UUID.randomUUID();
+        Task task = buildTask(taskId, 0, 0, true);
+        Task dependsOnTask = TaskTestFixtures.defaultTask(dependsOnTaskId)
+                .isReady(true).tenantId(TaskTestFixtures.OTHER_TENANT_ID).build();
+        Fixture fixture = newFixture(List.of(task, dependsOnTask), List.of());
+
+        assertThrows(CrossTenantDependencyException.class,
+                () -> fixture.service().addDependency(taskId, dependsOnTaskId));
+        assertTrue(fixture.dependencyRepo().findByTaskId(taskId).isEmpty(),
+                "a rejected edge must never be written");
+    }
+
+    @Test
+    void addDependency_eitherTenantNull_throwsCrossTenantDependencyException() {
+        UUID taskId = UUID.randomUUID();
+        UUID dependsOnTaskId = UUID.randomUUID();
+        Task task = TaskTestFixtures.defaultTask(taskId).isReady(true).tenantId(null).build();
+        Task dependsOnTask = buildTask(dependsOnTaskId, 0, 0, true);
+        Fixture fixture = newFixture(List.of(task, dependsOnTask), List.of());
+
+        assertThrows(CrossTenantDependencyException.class,
+                () -> fixture.service().addDependency(taskId, dependsOnTaskId));
+    }
+
+    @Test
+    void addDependency_sameTenant_isAllowed() {
+        UUID taskId = UUID.randomUUID();
+        UUID dependsOnTaskId = UUID.randomUUID();
+        Fixture fixture = newFixture(
+                List.of(buildTask(taskId, 0, 0, true), buildTask(dependsOnTaskId, 0, 0, true)), List.of());
+
+        fixture.service().addDependency(taskId, dependsOnTaskId);
+
+        assertEquals(1, fixture.taskRepo().findById(taskId).orElseThrow().getBlockingCount());
+    }
+
+    @Test
+    void addDependencies_oneEntryCrossTenant_throwsAndAppliesNoneOfTheBatch() {
+        UUID taskId = UUID.randomUUID();
+        UUID sameTenantDep = UUID.randomUUID();
+        UUID crossTenantDep = UUID.randomUUID();
+        Task crossTenantTask = TaskTestFixtures.defaultTask(crossTenantDep)
+                .isReady(true).tenantId(TaskTestFixtures.OTHER_TENANT_ID).build();
+        Fixture fixture = newFixture(
+                List.of(buildTask(taskId, 0, 0, true), buildTask(sameTenantDep, 0, 0, true), crossTenantTask),
+                List.of());
+
+        assertThrows(CrossTenantDependencyException.class, () -> fixture.service().addDependencies(
+                taskId, List.of(sameTenantDep, crossTenantDep)));
+
+        assertTrue(fixture.dependencyRepo().findByTaskId(taskId).isEmpty(),
+                "the whole batch must be rejected, including the otherwise-valid same-tenant entry");
+    }
+
+    @Test
+    void onTaskStatusChangedIfNewer_backfillsNullStoredTenant() {
+        UUID taskId = UUID.randomUUID();
+        UUID tenantId = UUID.randomUUID();
+        Fixture fixture = newFixture(
+                List.of(TaskTestFixtures.defaultTask(taskId).isReady(true).tenantId(null).build()), List.of());
+
+        fixture.service().onTaskStatusChangedIfNewer(taskId, TaskStatus.ACTIVE,
+                LocalDateTime.now().plusMinutes(1), tenantId);
+
+        assertEquals(tenantId, fixture.taskRepo().findById(taskId).orElseThrow().getTenantId());
+    }
+
+    @Test
+    void onTaskStatusChangedIfNewer_matchingTenant_appliesNormally() {
+        UUID taskId = UUID.randomUUID();
+        Fixture fixture = newFixture(List.of(buildTask(taskId, 0, 0, true)), List.of());
+
+        fixture.service().onTaskStatusChangedIfNewer(taskId, TaskStatus.DONE,
+                LocalDateTime.now().plusMinutes(1), TaskTestFixtures.DEFAULT_TENANT_ID);
+
+        assertEquals(TaskStatus.DONE, fixture.taskRepo().findById(taskId).orElseThrow().getStatus());
+    }
+
+    @Test
+    void onTaskStatusChangedIfNewer_differentTenant_throwsTenantReassignmentException() {
+        UUID taskId = UUID.randomUUID();
+        Fixture fixture = newFixture(List.of(buildTask(taskId, 0, 0, true)), List.of());
+
+        assertThrows(TenantReassignmentException.class, () -> fixture.service().onTaskStatusChangedIfNewer(
+                taskId, TaskStatus.DONE, LocalDateTime.now().plusMinutes(1), TaskTestFixtures.OTHER_TENANT_ID));
+        assertEquals(TaskStatus.ACTIVE, fixture.taskRepo().findById(taskId).orElseThrow().getStatus(),
+                "the status change must not apply alongside the rejected tenant change");
+    }
+
+    @Test
+    void onTaskStatusChangedIfNewer_differentTenant_throwsEvenOnStaleRedelivery() {
+        // The tenant check must fire before the staleness short-circuit, not after - an older/
+        // equal eventUpdatedAt would otherwise silently swallow a genuine upstream bug signal.
+        UUID taskId = UUID.randomUUID();
+        LocalDateTime createdAt = LocalDateTime.now();
+        Task task = TaskTestFixtures.defaultTask(taskId).createdAt(createdAt).updatedAt(createdAt).build();
+        Fixture fixture = newFixture(List.of(task), List.of());
+
+        assertThrows(TenantReassignmentException.class, () -> fixture.service().onTaskStatusChangedIfNewer(
+                taskId, TaskStatus.DONE, createdAt.minusMinutes(1), TaskTestFixtures.OTHER_TENANT_ID));
     }
 
     @Test

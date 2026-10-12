@@ -64,10 +64,13 @@ class TaskEligibilityServicePostgresConcurrencyTest {
         createdTaskIds.clear();
     }
 
+    private static final UUID TENANT_ID = UUID.randomUUID();
+
     private Task seedTask(UUID id) {
         Task task = Task.builder()
                 .id(id)
                 .ownerId("owner")
+                .tenantId(TENANT_ID)
                 .status(TaskStatus.ACTIVE)
                 .isReady(false)
                 .blockingCount(0)

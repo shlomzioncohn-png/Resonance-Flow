@@ -104,9 +104,11 @@ class DependencyProposedEventHandlerIntegrationTest {
         producer = new KafkaTemplate<>(new DefaultKafkaProducerFactory<>(producerProps));
     }
 
+    private static final UUID TENANT_ID = UUID.randomUUID();
+
     private static Task buildTask(UUID id) {
         return Task.builder()
-                .id(id).ownerId("owner").status(TaskStatus.PENDING).isReady(true)
+                .id(id).ownerId("owner").tenantId(TENANT_ID).status(TaskStatus.PENDING).isReady(true)
                 .blockingCount(0).openConstraintCount(0)
                 .createdAt(LocalDateTime.now()).updatedAt(LocalDateTime.now())
                 .build();

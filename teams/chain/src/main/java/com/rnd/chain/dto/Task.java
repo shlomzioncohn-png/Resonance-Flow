@@ -30,6 +30,10 @@ public final class Task {
     private final UUID parentTaskId;
     private final String ownerId;
 
+    /** Owning tenant, per issue #580. Nullable: null means "not yet populated" (a legacy task
+     * predating this field, or not yet backfilled by Inbox) - never treated as "any tenant". */
+    private final UUID tenantId;
+
     private final TaskStatus status;
 
     /** Whether all of this task's dependencies and constraints are satisfied, so it can be worked on.
@@ -55,6 +59,7 @@ public final class Task {
     private Task(UUID id,
                  UUID parentTaskId,
                  String ownerId,
+                 UUID tenantId,
                  TaskStatus status,
                  boolean isReady,
                  int blockingCount,
@@ -82,6 +87,7 @@ public final class Task {
         this.id = id;
         this.parentTaskId = parentTaskId;
         this.ownerId = ownerId;
+        this.tenantId = tenantId;
         this.status = status;
         this.isReady = isReady;
         this.blockingCount = blockingCount;
@@ -102,7 +108,7 @@ public final class Task {
      */
     public static Task copyOf(Task source) {
         Objects.requireNonNull(source, "source must not be null");
-        return new Task(source.id, source.parentTaskId, source.ownerId, source.status,
+        return new Task(source.id, source.parentTaskId, source.ownerId, source.tenantId, source.status,
                 source.isReady, source.blockingCount, source.openConstraintCount,
                 source.estimatedDurationMin, source.score, source.createdAt, source.updatedAt,
                 source.deletedAt);

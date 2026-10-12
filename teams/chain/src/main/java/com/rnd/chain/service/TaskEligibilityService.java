@@ -6,10 +6,12 @@ import com.rnd.chain.dto.Task;
 import com.rnd.chain.dto.TaskDependency;
 import com.rnd.chain.dto.TaskEligibilityResponse;
 import com.rnd.chain.dto.TaskStatus;
+import com.rnd.chain.exception.CrossTenantDependencyException;
 import com.rnd.chain.exception.DependencyNotFoundException;
 import com.rnd.chain.exception.DuplicateDependencyException;
 import com.rnd.chain.exception.InvalidDependencyException;
 import com.rnd.chain.exception.TaskNotFoundException;
+import com.rnd.chain.exception.TenantReassignmentException;
 import com.rnd.chain.repository.ConstraintRepository;
 import com.rnd.chain.repository.TaskDependencyRepository;
 import com.rnd.chain.repository.TaskRepository;
@@ -92,6 +94,7 @@ public class TaskEligibilityService {
                 .id(task.getId())
                 .parentTaskId(task.getParentTaskId())
                 .ownerId(task.getOwnerId())
+                .tenantId(task.getTenantId())
                 .status(task.getStatus())
                 .isReady(task.isReady())
                 .blockingCount(task.getBlockingCount())
@@ -212,6 +215,7 @@ public class TaskEligibilityService {
 
             Task task = requireTask(taskId);
             Task dependencyTask = requireTask(dependsOnTaskId);
+            requireSameTenant(task, dependencyTask);
 
             Optional<TaskDependency> saved =
                     taskDependencyRepository.save(
@@ -251,9 +255,28 @@ public class TaskEligibilityService {
             throw new InvalidDependencyException(
                     "Dependency would create a cycle: " + taskId + " -> " + dependsOnTaskId);
         }
-        requireTask(taskId);
-        boolean dependsOnAlreadyDone = requireTask(dependsOnTaskId).getStatus() == TaskStatus.DONE;
+        Task task = requireTask(taskId);
+        Task dependsOnTask = requireTask(dependsOnTaskId);
+        requireSameTenant(task, dependsOnTask);
+        boolean dependsOnAlreadyDone = dependsOnTask.getStatus() == TaskStatus.DONE;
         return new PendingEdge(dependsOnTaskId, true, dependsOnAlreadyDone);
+    }
+
+    /**
+     * Rejects an edge between two tasks that don't share a confirmed tenant - either their
+     * {@code tenantId}s differ, or either one is still null. A null tenant is treated as
+     * "not yet known", not "any tenant" (issue #580's strict policy): existing/test data without
+     * a tenant is not meaningful enough to warrant the weaker "skip the check" alternative.
+     */
+    private static void requireSameTenant(Task task, Task dependsOnTask) {
+        UUID taskTenantId = task.getTenantId();
+        UUID dependsOnTenantId = dependsOnTask.getTenantId();
+        if (taskTenantId == null || dependsOnTenantId == null || !taskTenantId.equals(dependsOnTenantId)) {
+            throw new CrossTenantDependencyException(
+                    "Dependency rejected: task " + task.getId() + " (tenant " + taskTenantId
+                            + ") and task " + dependsOnTask.getId() + " (tenant " + dependsOnTenantId
+                            + ") do not share a confirmed tenant");
+        }
     }
 
     /** Writes one already-validated edge - no cycle/existence checks, see {@link #validateEdge}. */
@@ -449,15 +472,29 @@ public class TaskEligibilityService {
      * interleave between them (PR #467 review).
      *
      * @throws TaskNotFoundException if no task with {@code taskId} exists
+     * @throws TenantReassignmentException if {@code tenantId} differs from the task's already-stored,
+     * non-null tenant - confirmed with the Inbox team that {@code tenant_id} never legitimately
+     * changes after creation, so this always signals a bug upstream. Checked before the staleness
+     * short-circuit below, so a stale/duplicate redelivery carrying a wrong tenant is still flagged.
      */
     @Transactional
-    public void onTaskStatusChangedIfNewer(UUID taskId, TaskStatus newStatus, LocalDateTime eventUpdatedAt) {
+    public void onTaskStatusChangedIfNewer(UUID taskId, TaskStatus newStatus, LocalDateTime eventUpdatedAt,
+                                            UUID tenantId) {
         Objects.requireNonNull(taskId, "taskId must not be null");
         Objects.requireNonNull(newStatus, "newStatus must not be null");
         Objects.requireNonNull(eventUpdatedAt, "eventUpdatedAt must not be null");
 
         synchronized (dependencyGraphLock) {
             Task current = requireTask(taskId);
+
+            if (current.getTenantId() != null && !current.getTenantId().equals(tenantId)) {
+                log.error("task.updated for task {} claims tenant {} but Chain has {} stored - "
+                                + "tenant_id is immutable after creation, rejecting as a bug upstream",
+                        taskId, tenantId, current.getTenantId());
+                throw new TenantReassignmentException("Task " + taskId + " already has tenant "
+                        + current.getTenantId() + ", event claims " + tenantId);
+            }
+
             if (current.getUpdatedAt() != null && !eventUpdatedAt.isAfter(current.getUpdatedAt())) {
                 log.debug("Task {} status update ignored: event updatedAt {} is not newer than stored {}",
                         taskId, eventUpdatedAt, current.getUpdatedAt());
@@ -467,7 +504,7 @@ public class TaskEligibilityService {
             log.info("Task {} status changed to {}", taskId, newStatus);
             TaskStatus previousStatus = current.getStatus();
             requireUpdated(taskRepository.update(taskId, task ->
-                    copyOf(task).status(newStatus).updatedAt(eventUpdatedAt).build()), taskId);
+                    copyOf(task).status(newStatus).updatedAt(eventUpdatedAt).tenantId(tenantId).build()), taskId);
 
             if (previousStatus != TaskStatus.DONE && newStatus == TaskStatus.DONE) {
                 adjustDependentsBlockingCount(taskId, -1);

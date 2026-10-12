@@ -16,8 +16,17 @@ import java.util.UUID;
  * duplicating the {@code Task.builder()} construction, so this class is still the single place
  * the actual defaults live. {@code InMemoryTaskRepositoryTest} doesn't use either form - it
  * extends {@code TaskRepositoryContractTest}, which has its own fixture.
+ *
+ * <p>{@link #DEFAULT_TENANT_ID} (issue #580): every {@link #defaultTask(UUID)} shares this same
+ * constant, so two tasks built from this fixture always share a tenant and pass the strict
+ * same-tenant dependency check without every call site needing to set one explicitly. A test that
+ * specifically exercises the cross-tenant rejection should override with
+ * {@code .tenantId(OTHER_TENANT_ID)} (or any other value) on one side.
  */
 public final class TaskTestFixtures {
+
+    public static final UUID DEFAULT_TENANT_ID = UUID.fromString("11111111-1111-1111-1111-111111111111");
+    public static final UUID OTHER_TENANT_ID = UUID.fromString("22222222-2222-2222-2222-222222222222");
 
     private TaskTestFixtures() {
     }
@@ -26,6 +35,7 @@ public final class TaskTestFixtures {
         return Task.builder()
                 .id(id)
                 .ownerId("owner")
+                .tenantId(DEFAULT_TENANT_ID)
                 .status(TaskStatus.ACTIVE)
                 .isReady(false)
                 .blockingCount(0)

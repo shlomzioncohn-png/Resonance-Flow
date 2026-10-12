@@ -32,6 +32,7 @@ class TaskCreatedEventHandlerTest {
         return TaskCreatedEvent.newBuilder()
                 .setId(id.toString())
                 .setOwnerId(ownerId)
+                .setTenantId(UUID.randomUUID().toString())
                 .setStatus(com.rnd.inbox.event.TaskStatus.TASK_STATUS_NEW)
                 .setCreatedAt(timestamp(Instant.now()));
     }

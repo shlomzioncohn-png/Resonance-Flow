@@ -1,9 +1,16 @@
 package com.rnd.chain.events;
 
+import com.rnd.chain.dto.DependencyChangeAction;
+import com.rnd.chain.dto.DependencyChangeSource;
+import com.rnd.chain.dto.DependencyHistoryEntry;
+import com.rnd.chain.exception.CrossTenantDependencyException;
 import com.rnd.chain.exception.InvalidDependencyException;
 import com.rnd.chain.exception.TaskNotFoundException;
+import com.rnd.chain.repository.DependencyHistoryRepository;
 import com.rnd.chain.service.TaskEligibilityService;
 import com.rnd.mind.event.DependencyProposedEvent;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.kafka.annotation.KafkaListener;
 import org.springframework.kafka.annotation.RetryableTopic;
 import org.springframework.kafka.retrytopic.DltStrategy;
@@ -11,6 +18,7 @@ import org.springframework.retry.annotation.Backoff;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
 
@@ -55,13 +63,18 @@ import static com.rnd.chain.events.EventFields.parseUuid;
 @Component
 public class DependencyProposedEventHandler {
 
+    private static final Logger log = LoggerFactory.getLogger(DependencyProposedEventHandler.class);
+
     private final TaskEligibilityService taskEligibilityService;
     private final ChainEventProcessingTemplate template;
+    private final DependencyHistoryRepository historyRepository;
 
     public DependencyProposedEventHandler(TaskEligibilityService taskEligibilityService,
-                                           ChainEventProcessingTemplate template) {
+                                           ChainEventProcessingTemplate template,
+                                           DependencyHistoryRepository historyRepository) {
         this.taskEligibilityService = taskEligibilityService;
         this.template = template;
+        this.historyRepository = historyRepository;
     }
 
     @RetryableTopic(
@@ -87,10 +100,10 @@ public class DependencyProposedEventHandler {
                 .toList();
 
         template.processClaimed(eventId, "task.dependencies.proposed",
-                () -> addDependencies(taskId, dependsOnTaskIds));
+                () -> addDependencies(eventId, taskId, dependsOnTaskIds));
     }
 
-    private void addDependencies(UUID taskId, List<UUID> dependsOnTaskIds) {
+    private void addDependencies(UUID eventId, UUID taskId, List<UUID> dependsOnTaskIds) {
         try {
             taskEligibilityService.addDependencies(taskId, dependsOnTaskIds);
         } catch (TaskNotFoundException e) {
@@ -100,12 +113,44 @@ public class DependencyProposedEventHandler {
             // see class Javadoc. Which specific id was missing is in e's message/cause.
             throw new ReferencedTaskNotFoundException(
                     "task.dependencies.proposed referenced a task Chain hasn't seen yet (task=" + taskId + ")", e);
-        } catch (InvalidDependencyException e) {
-            // Cycle detected - a structural problem with the data itself, not a timing issue.
-            // Retrying won't help, straight to the error topic. Which pair would have cycled is
-            // in e's message.
+        } catch (CrossTenantDependencyException e) {
+            // Issue #580: a cross-tenant edge is a structural data problem, not a timing issue -
+            // non-retryable, same as a cycle (see the catch below) - but also must stay visible,
+            // not silently dropped: this path (unlike the REST addDependency path, see
+            // TaskDependencyService) never writes to dependency_history at all today even on
+            // success (a pre-existing, documented gap - see chain/CLAUDE.md), so the REJECTED row
+            // is recorded directly here rather than assuming some other layer will do it.
+            log.warn("task.dependencies.proposed rejected: cross-tenant edge(s) from task {} (event={})",
+                    taskId, eventId, e);
+            recordRejected(eventId, taskId, dependsOnTaskIds);
             throw new NonRetryableEventException(
-                    "task.dependencies.proposed would create a cycle (task=" + taskId + ")", e);
+                    "task.dependencies.proposed rejected a cross-tenant dependency (task=" + taskId + ")", e);
+        } catch (InvalidDependencyException e) {
+            // A self-reference or cycle - a structural problem with the data itself, not a timing
+            // issue. Retrying won't help, straight to the error topic. Which pair/id is in e's
+            // message.
+            throw new NonRetryableEventException(
+                    "task.dependencies.proposed rejected an invalid dependency (task=" + taskId + ")", e);
+        }
+    }
+
+    /** Best-effort visibility for a batch rejected before any edge in it was written - one entry
+     * per candidate target, since {@link TaskEligibilityService#addDependencies} validates the
+     * whole batch before applying any of it (zero partial effect either way). {@code sourceRef}
+     * includes the target id, not just {@code eventId}: {@code dependency_history} has a unique
+     * index on {@code (source, source_ref)}, so reusing the bare {@code eventId} for every entry
+     * in a multi-target batch would make every write after the first a silent no-op. */
+    private void recordRejected(UUID eventId, UUID taskId, List<UUID> dependsOnTaskIds) {
+        for (UUID dependsOnTaskId : dependsOnTaskIds) {
+            historyRepository.record(DependencyHistoryEntry.builder()
+                    .id(UUID.randomUUID())
+                    .taskId(taskId)
+                    .dependsOnTaskId(dependsOnTaskId)
+                    .action(DependencyChangeAction.REJECTED)
+                    .source(DependencyChangeSource.MIND)
+                    .sourceRef(eventId + ":" + dependsOnTaskId)
+                    .createdAt(Instant.now())
+                    .build());
         }
     }
 
