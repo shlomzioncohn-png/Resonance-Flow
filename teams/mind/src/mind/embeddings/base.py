@@ -21,6 +21,9 @@ class SearchResult(BaseModel):
         le=1.0,
         description="Cosine similarity, comparable to Settings.duplicate_similarity_threshold",
     )
+    is_completed: bool = Field(
+        default=False, description="DONE/REJECTED/CANCELLED -- any status the index treats as finished."
+    )
 
 
 class VectorStore(ABC):
@@ -35,8 +38,37 @@ class VectorStore(ABC):
         ...
 
     @abstractmethod
-    async def upsert(self, task_id: str, vector: list[float]) -> None:
-        """Save or update the vector for a given task_id."""
+    async def upsert(
+        self, task_id: str, vector: list[float], *, content_hash: str | None = None
+    ) -> None:
+        """Save or update the vector for a given task_id. content_hash (a
+        hash of whatever text embed() was given) lets a caller skip
+        re-embedding unchanged text later via get_content_hash()."""
+        ...
+
+    @abstractmethod
+    async def upsert_if_absent(
+        self, task_id: str, vector: list[float], *, content_hash: str | None = None
+    ) -> bool:
+        """Insert only if absent (unlike upsert's insert-or-update).
+        True if inserted, False if a row already existed."""
+        ...
+
+    @abstractmethod
+    async def get_content_hash(self, task_id: str) -> str | None:
+        """The content_hash last passed to upsert()/upsert_if_absent(), or
+        None if the task isn't indexed or was indexed without one."""
+        ...
+
+    @abstractmethod
+    async def mark_completed(self, task_id: str) -> bool:
+        """True if a row existed and was updated, False if unknown."""
+        ...
+
+    @abstractmethod
+    async def mark_incomplete(self, task_id: str) -> bool:
+        """Reset is_completed to False (e.g. a DONE task got reopened).
+        True if a row existed and was updated, False if unknown."""
         ...
 
     @abstractmethod

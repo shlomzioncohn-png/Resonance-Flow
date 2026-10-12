@@ -1,6 +1,9 @@
 services:
   mind:
-    build: .
+    build:
+      context: .
+      additional_contexts:
+        shared: ../../shared
     ports:
       - "8000:8000"
     env_file:
@@ -31,6 +34,32 @@ services:
     depends_on:
       vector-store:
         condition: service_healthy
+
+  mind-index-consumer:
+    build:
+      context: .
+      additional_contexts:
+        shared: ../../shared
+    command: ["python", "-m", "mind.embeddings.index_consumer_runner"]
+    # No HTTP server in this process -- the Dockerfile's HEALTHCHECK (hits
+    # :8000/health) doesn't apply here and would report unhealthy forever.
+    healthcheck:
+      disable: true
+    # No local Kafka broker wired into this compose file yet (only
+    # teams/inbox/docker-compose.yml has one today) -- gated behind a
+    # profile so `docker compose up`/`make docker-up` doesn't start a
+    # consumer with nothing to connect to. Bring it up explicitly once
+    # there's a broker: `docker compose --profile kafka up`.
+    profiles: ["kafka"]
+    env_file:
+      - .env
+    environment:
+      MIND_VECTOR_STORE__DSN: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@vector-store:5432/${POSTGRES_DB}
+    volumes:
+      - ./models:/app/models
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
 
   vector-store:
     image: pgvector/pgvector:pg16
