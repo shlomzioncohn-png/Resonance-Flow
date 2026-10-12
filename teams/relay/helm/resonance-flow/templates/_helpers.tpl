@@ -91,16 +91,26 @@ wait-for-schema-registry hung forever against "inbox-schema-registry",
 which is nothing - the real Service is "inbox-resonance-flow-schema-registry").
 Otherwise it's a Bitnami subchart's Service, <release-name>-<name>.
 */}}
+{{/*
+Resolve a logical dependency name to the concrete provider name.
+*/}}
+{{- define "resonance-flow.dependencyProviderName" -}}
+{{- if eq .name "object-storage" }}
+{{- .root.Values.objectStorage.provider }}
+{{- else }}
+{{- .name }}
+{{- end }}
+{{- end }}
 {{- define "resonance-flow.dependencyHost" -}}
+{{- $dependencyName := include "resonance-flow.dependencyProviderName" (dict "root" .root "name" .dep.name) }}
 {{- if .dep.host }}
 {{- .dep.host }}
-{{- else if hasKey .root.Values.components .dep.name }}
-{{- printf "%s-%s" (include "resonance-flow.fullname" .root) .dep.name }}
+{{- else if hasKey .root.Values.components $dependencyName }}
+{{- printf "%s-%s" (include "resonance-flow.fullname" .root) $dependencyName }}
 {{- else }}
-{{- printf "%s-%s" .root.Release.Name .dep.name }}
+{{- printf "%s-%s" .root.Release.Name $dependencyName }}
 {{- end }}
 {{- end }}
-
 {{/*
 Resolved host:port of a named entry in a {name, port, host?} list
 (dependencies' shape) - so a component's own connection string doesn't
@@ -125,14 +135,15 @@ TCP-reachable. Dependencies whose target is disabled get no initContainer.
 {{- $root := .root }}
 {{- range .deps }}
 {{- $dep := . }}
+{{- $dependencyName := include "resonance-flow.dependencyProviderName" (dict "root" $root "name" $dep.name) }}
 {{- $enabled := true }}
 {{- if not $dep.host }}
-{{- if hasKey $root.Values.components $dep.name }}
-{{- if eq (index $root.Values.components $dep.name).enabled false }}
+{{- if hasKey $root.Values.components $dependencyName }}
+{{- if eq (index $root.Values.components $dependencyName).enabled false }}
 {{- $enabled = false }}
 {{- end }}
-{{- else if hasKey $root.Values $dep.name }}
-{{- if eq (index $root.Values $dep.name).enabled false }}
+{{- else if hasKey $root.Values $dependencyName }}
+{{- if eq (index $root.Values $dependencyName).enabled false }}
 {{- $enabled = false }}
 {{- end }}
 {{- end }}
@@ -152,7 +163,6 @@ TCP-reachable. Dependencies whose target is disabled get no initContainer.
 {{- end }}
 {{- end }}
 {{- end }}
-
 {{/*
 Kafka SASL client JAAS config string, derived from kafka.sasl.client.users
 and kafka.sasl.client.passwords - the same values that seed the Kafka subchart's own
@@ -163,9 +173,10 @@ password drift from postgresql.auth.postgresPassword). Takes the root context ($
 not a scoped one, since kafka.sasl.client.* lives at the top level of Values.
 */}}
 {{- define "resonance-flow.kafkaSaslJaasConfig" -}}
-{{- printf "org.apache.kafka.common.security.plain.PlainLoginModule required username=\"%s\" password=\"%s\";" (first .Values.kafka.sasl.client.users) (first .Values.kafka.sasl.client.passwords) }}
+{{- $root := .root -}}
+{{- $password := .password | default (first $root.Values.kafka.sasl.client.passwords) -}}
+{{- printf "org.apache.kafka.common.security.plain.PlainLoginModule required username=\"%s\" password=\"%s\";" (first $root.Values.kafka.sasl.client.users) $password }}
 {{- end }}
-
 {{/*
 Standard ConfigMap header (apiVersion/kind/metadata) for a component's mounted
 config.yaml, named "<fullname>-<component>-config" - identical shape shared by
@@ -194,7 +205,7 @@ security:
   protocol: SASL_PLAINTEXT
 properties:
   sasl.mechanism: "PLAIN"
-  sasl.jaas.config: {{ include "resonance-flow.kafkaSaslJaasConfig" .root | quote }}
+  sasl.jaas.config: {{ include "resonance-flow.kafkaSaslJaasConfig" (dict "root" .root) | quote }}
 {{- end }}
 
 {{/*
