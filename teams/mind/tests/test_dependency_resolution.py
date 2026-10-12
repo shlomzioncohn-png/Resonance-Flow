@@ -3,12 +3,39 @@ needed for real similarity scores, which a fake store can't produce."""
 
 import os
 
+import psycopg
 import pytest
+from psycopg import sql
 
 from mind.config import VectorStoreSettings
 from mind.embeddings import embed
 from mind.embeddings.dependency_resolution import resolve_dependency_targets
+from mind.embeddings.embeddings import EMBEDDING_DIM
 from mind.embeddings.pgvector_store import PgVectorStore
+
+
+async def _create_test_table(settings: VectorStoreSettings) -> None:
+    # PgVectorStore no longer creates its own schema (issue #441) -- the
+    # real table is created by `alembic upgrade head`, which doesn't cover
+    # this suite's own dedicated test table. Same pattern as
+    # test_vector_store.py's helper of the same name.
+    table = sql.Identifier(settings.table)
+    async with await psycopg.AsyncConnection.connect(
+        str(settings.dsn.get_secret_value()), autocommit=True
+    ) as conn:
+        await conn.execute("CREATE EXTENSION IF NOT EXISTS vector;")
+        await conn.execute(
+            sql.SQL(
+                "CREATE TABLE IF NOT EXISTS {table} "
+                "(task_id TEXT PRIMARY KEY, embedding VECTOR({dim}) NOT NULL, "
+                "is_completed BOOLEAN NOT NULL DEFAULT FALSE, content_hash TEXT);"
+            ).format(table=table, dim=sql.Literal(EMBEDDING_DIM))
+        )
+        await conn.execute(
+            sql.SQL(
+                "CREATE INDEX IF NOT EXISTS {idx} ON {table} USING hnsw (embedding vector_cosine_ops);"
+            ).format(idx=sql.Identifier(f"{settings.table}_embedding_hnsw_idx"), table=table)
+        )
 
 
 @pytest.fixture(scope="module")
@@ -18,6 +45,7 @@ async def store():
         dsn=os.environ["MIND_VECTOR_STORE__DSN"],
         table="task_embeddings_test_deps",
     )
+    await _create_test_table(settings)
     s = PgVectorStore(settings)
     await s.open()
     yield s
