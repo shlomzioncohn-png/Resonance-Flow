@@ -1,13 +1,13 @@
-import Box from '@mui/material/Box'
-import Button from '@mui/material/Button'
-import Typography from '@mui/material/Typography'
-import ErrorOutlineIcon from '@mui/icons-material/ErrorOutlined'
+import Box from '@mui/material/Box';
+import Button from '@mui/material/Button';
+import Typography from '@mui/material/Typography';
+import ErrorOutlineIcon from '@mui/icons-material/ErrorOutlined';
 
 export interface ErrorStateProps {
-  title?: string
-  description?: string
-  onRetry?: () => void
-  retryLabel?: string
+  title?: string;
+  description?: string;
+  onRetry?: () => void;
+  retryLabel?: string;
 }
 
 export default function ErrorState({
@@ -43,5 +43,5 @@ export default function ErrorState({
         </Button>
       )}
     </Box>
-  )
+  );
 }

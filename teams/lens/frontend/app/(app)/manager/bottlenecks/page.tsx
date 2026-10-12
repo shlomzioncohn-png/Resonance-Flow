@@ -1,5 +1,5 @@
-import PageContainer from '@/components/layout/PageContainer'
-import EmptyState from '@/components/feedback/EmptyState'
+import PageContainer from '@/components/layout/PageContainer';
+import EmptyState from '@/components/feedback/EmptyState';
 
 export default function ManagerBottlenecksPage() {
   return (
@@ -12,5 +12,5 @@ export default function ManagerBottlenecksPage() {
         description="This view will visualize dependency and process bottlenecks once connected to Chain data."
       />
     </PageContainer>
-  )
+  );
 }

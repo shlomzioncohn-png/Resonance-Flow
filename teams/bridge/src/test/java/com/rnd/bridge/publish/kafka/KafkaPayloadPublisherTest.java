@@ -8,13 +8,14 @@ import com.rnd.bridge.core.PayloadValidator;
 import com.rnd.bridge.core.ReadCursor;
 import com.rnd.bridge.core.SourceReader;
 import com.rnd.bridge.core.error.PublishException;
-import com.rnd.bridge.task.BridgeTaskEventDto;
+import com.rnd.bridge.task.StructuredTaskEventMapper;
 import com.rnd.bridge.task.model.ExtractionProvenance;
 import com.rnd.bridge.task.model.RoleContext;
 import com.rnd.bridge.task.model.SourceType;
 import com.rnd.bridge.task.model.Task;
 import com.rnd.bridge.task.model.TaskStatus;
 import com.rnd.bridge.task.model.Tier;
+import com.rnd.inbox.event.StructuredTaskEvent;
 import org.apache.kafka.clients.producer.ProducerRecord;
 import org.apache.kafka.clients.producer.RecordMetadata;
 import org.apache.kafka.common.TopicPartition;
@@ -49,9 +50,10 @@ import static org.mockito.Mockito.when;
 class KafkaPayloadPublisherTest {
 
     private static final String TOPIC = "bridge.structured.tasks";
+    private static final String VALID_TENANT_ID = "11111111-1111-1111-1111-111111111111";
 
     @Mock
-    private KafkaTemplate<String, BridgeTaskEventDto> kafkaTemplate;
+    private KafkaTemplate<String, StructuredTaskEvent> kafkaTemplate;
 
     private KafkaPayloadPublisher publisher() {
         return new KafkaPayloadPublisher(kafkaTemplate, TOPIC);
@@ -59,7 +61,7 @@ class KafkaPayloadPublisherTest {
 
     private static Task task(String sourceRef) {
         return new Task(
-                null, null,
+                VALID_TENANT_ID, null,
                 "Title", "Description",
                 TaskStatus.NEW, 3, null,
                 Tier.TACTICAL, ExtractionProvenance.ETL, RoleContext.SALESPERSON,
@@ -67,9 +69,9 @@ class KafkaPayloadPublisherTest {
                 null, null, null, null);
     }
 
-    private static SendResult<String, BridgeTaskEventDto> sendResult(Task task) {
-        BridgeTaskEventDto event = BridgeTaskEventDto.from(task);
-        ProducerRecord<String, BridgeTaskEventDto> record = new ProducerRecord<>(TOPIC, task.dedupKey(), event);
+    private static SendResult<String, StructuredTaskEvent> sendResult(Task task) {
+        StructuredTaskEvent event = StructuredTaskEventMapper.from(task);
+        ProducerRecord<String, StructuredTaskEvent> record = new ProducerRecord<>(TOPIC, task.dedupKey(), event);
         RecordMetadata metadata = new RecordMetadata(new TopicPartition(TOPIC, 0), 0, 0, 0, 0, 0);
         return new SendResult<>(record, metadata);
     }
@@ -77,27 +79,27 @@ class KafkaPayloadPublisherTest {
     @Test
     void publishesToTheConfiguredTopicKeyedByDedupKey() {
         Task task = task("crm:D-1");
-        when(kafkaTemplate.send(anyString(), anyString(), any(BridgeTaskEventDto.class)))
+        when(kafkaTemplate.send(anyString(), anyString(), any(StructuredTaskEvent.class)))
                 .thenReturn(CompletableFuture.completedFuture(sendResult(task)));
 
         publisher().publish(task);
 
         ArgumentCaptor<String> topicCaptor = ArgumentCaptor.forClass(String.class);
         ArgumentCaptor<String> keyCaptor = ArgumentCaptor.forClass(String.class);
-        ArgumentCaptor<BridgeTaskEventDto> eventCaptor = ArgumentCaptor.forClass(BridgeTaskEventDto.class);
+        ArgumentCaptor<StructuredTaskEvent> eventCaptor = ArgumentCaptor.forClass(StructuredTaskEvent.class);
         verify(kafkaTemplate).send(topicCaptor.capture(), keyCaptor.capture(), eventCaptor.capture());
 
         assertEquals(TOPIC, topicCaptor.getValue());
         assertEquals(task.dedupKey(), keyCaptor.getValue());
-        assertEquals(task.sourceRef(), eventCaptor.getValue().sourceRef());
+        assertEquals(task.sourceRef(), eventCaptor.getValue().getSourceRef());
     }
 
     @Test
     void aSendFailureSurfacesAsAPublishException() {
         Task task = task("crm:D-1");
-        CompletableFuture<SendResult<String, BridgeTaskEventDto>> failed = new CompletableFuture<>();
+        CompletableFuture<SendResult<String, StructuredTaskEvent>> failed = new CompletableFuture<>();
         failed.completeExceptionally(new RuntimeException("broker unreachable"));
-        when(kafkaTemplate.send(anyString(), anyString(), any(BridgeTaskEventDto.class)))
+        when(kafkaTemplate.send(anyString(), anyString(), any(StructuredTaskEvent.class)))
                 .thenReturn(failed);
 
         assertThrows(PublishException.class, () -> publisher().publish(task));
@@ -108,11 +110,11 @@ class KafkaPayloadPublisherTest {
         Task failing = task("crm:D-1");
         Task succeeding = task("crm:D-2");
 
-        CompletableFuture<SendResult<String, BridgeTaskEventDto>> failedFuture = new CompletableFuture<>();
+        CompletableFuture<SendResult<String, StructuredTaskEvent>> failedFuture = new CompletableFuture<>();
         failedFuture.completeExceptionally(new RuntimeException("broker unreachable"));
-        when(kafkaTemplate.send(anyString(), eq(failing.dedupKey()), any(BridgeTaskEventDto.class)))
+        when(kafkaTemplate.send(anyString(), eq(failing.dedupKey()), any(StructuredTaskEvent.class)))
                 .thenReturn(failedFuture);
-        when(kafkaTemplate.send(anyString(), eq(succeeding.dedupKey()), any(BridgeTaskEventDto.class)))
+        when(kafkaTemplate.send(anyString(), eq(succeeding.dedupKey()), any(StructuredTaskEvent.class)))
                 .thenReturn(CompletableFuture.completedFuture(sendResult(succeeding)));
 
         PayloadPublisher<Task> publisher = publisher();

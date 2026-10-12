@@ -1,0 +1,52 @@
+{
+  "scenario_id": "manager_idle_new_hires_vs_informational_steering_deck",
+  "persona": {
+    "role": "Manager",
+    "department": null
+  },
+  "context": {
+    "free_time_minutes": 40,
+    "current_datetime": "2026-10-21T10:45:00",
+    "time_horizon": "today",
+    "constraints": []
+  },
+  "tasks": [
+    {
+      "task_id": "task_deck",
+      "title": "Finish and send the quarterly steering-committee deck",
+      "description": "The committee chair asked for the quarterly deck by 12:30 so it can go into the pre-read. The slides are built; the final numbers still have to be pasted in and the whole deck read through once, and the chair has asked every presenter to send theirs in the same format. This quarter the committee only reviews progress and takes no decisions, and every figure in the deck was already published in last week's status report.",
+      "deadline": "2026-10-21T12:30:00",
+      "effort_estimate": 40,
+      "tier": "strategic",
+      "blocked": false,
+      "parent_task_id": null
+    },
+    {
+      "task_id": "task_vendor",
+      "title": "Answer the analytics vendor's renewal questionnaire",
+      "description": "The analytics vendor has chased twice and asked for the completed renewal questionnaire by 11:45; their account manager wrote that the quote for the new term is issued within a week of receiving it. The questionnaire is the vendor's standard form of about thirty questions, procurement has asked you to confirm the answers because the vendor invoices your team's cost centre, and the current contract runs to the end of March.",
+      "deadline": "2026-10-21T11:45:00",
+      "effort_estimate": 30,
+      "tier": "operational",
+      "blocked": false,
+      "parent_task_id": null
+    },
+    {
+      "task_id": "task_access",
+      "title": "Approve the new hires' system-access requests",
+      "description": "Six engineers started this morning and cannot open a repository, the cloud console or the ticketing system until you approve their access requests, and their onboarding plan has nothing offline. IT's provisioning batch takes approvals until 11:30; later ones wait for tomorrow's batch.",
+      "deadline": "2026-10-21T11:30:00",
+      "effort_estimate": 15,
+      "tier": "tactical",
+      "blocked": false,
+      "parent_task_id": null
+    }
+  ],
+  "expected_top_task_id": "task_access",
+  "expected_reason": "task_access has the nearest deadline (11:30) and, if missed, leaves six new engineers without access for another day; task_deck's 12:30 deadline is real but the committee takes no decisions and every figure was already published, and task_vendor is a standard questionnaire for a contract that runs to March.",
+  "source": {
+    "type": "synthetic",
+    "source_detail": null
+  },
+  "team_lead_approved": false
+}

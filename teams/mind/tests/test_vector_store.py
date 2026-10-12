@@ -44,9 +44,7 @@ async def test_embed_is_independent():
     assert isinstance(vec, list)
     assert len(vec) == EMBEDDING_DIM
     assert all(isinstance(x, float) for x in vec)
-    # Deterministic: same text -> same vector.
     assert vec == embed("Fix the login bug on the payments page")
-    # Different text -> different vector.
     assert vec != embed("Completely unrelated marketing task")
 
 
@@ -62,7 +60,6 @@ async def test_upsert_is_independent(store):
     task_id = f"test-{uuid.uuid4()}"
     vec = embed("Write release notes for v2.3")
     await store.upsert(task_id, vec)  # should not raise
-    # Searching for the exact vector should surface it.
     result_ids = [r.task_id for r in await store.search(vec, k=5)]
     assert task_id in result_ids
 
@@ -80,7 +77,6 @@ async def test_search_is_independent(store):
 
     result_ids = [r.task_id for r in await store.search(embed(base_text), k=3)]
     assert base_id in result_ids
-    # The near-duplicate task should rank above the unrelated one.
     assert result_ids.index(near_id) < result_ids.index(far_id)
 
 
@@ -96,10 +92,7 @@ async def test_search_returns_similarity_scores_in_descending_order(store):
     similarities = [r.similarity for r in results]
 
     assert ids.index(near_id) < ids.index(far_id)
-    # Best match first: descending similarity.
     assert similarities == sorted(similarities, reverse=True)
-    # Cosine similarity of unit vectors is bounded in [-1, 1] --
-    # SearchResult.similarity itself enforces this range too.
     assert all(-1.0 <= s <= 1.0 for s in similarities)
 
 
@@ -140,7 +133,6 @@ async def test_full_cycle_embed_upsert_search(store):
 
     results = await store.search(vector, k=1)
     assert [r.task_id for r in results] == [task_id]
-    # Searching for the exact stored vector: similarity to itself is ~1.0.
     assert results[0].similarity == pytest.approx(1.0, abs=1e-6)
 
 

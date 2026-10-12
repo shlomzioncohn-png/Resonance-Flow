@@ -17,6 +17,7 @@ import java.time.Instant;
 import java.time.ZoneId;
 import java.time.ZoneOffset;
 import java.util.List;
+import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -632,6 +633,166 @@ class HubSpotDealRepositoryTest {
         assertEquals(3, snapshot.findHistoryByDealId("D-40").size());
         assertEquals(1, snapshot.latestPerDeal().size());
         assertEquals(DealStage.CLOSED_WON, snapshot.latestPerDeal().get(0).stage());
+    }
+
+    // ---- fetchDeal(String): a fresh, single-record lookup, never cached, never reusing snapshot() data ----
+
+    @Test
+    void fetchDealReturnsTheLatestStateOnASuccessfulResponse() {
+        enqueueConstructorPipeline();
+        HubSpotDealRepository repository = newRepository();
+
+        String deal = dealJson("D-50", "Fetched directly", "7000", "2026-09-01T00:00:00.000Z", "2026-08-01T08:00:00Z",
+                String.join(",",
+                        historyEntry("st-500", "2026-08-20T10:00:00.000Z"),
+                        historyEntry("st-100", "2026-08-01T08:00:00.000Z")));
+        enqueueJson(deal);
+        enqueuePipeline();
+
+        Optional<Deal> fetched = repository.fetchDeal("D-50");
+
+        assertTrue(fetched.isPresent());
+        assertEquals("D-50", fetched.get().dealId());
+        assertEquals(DealStage.CLOSED_WON, fetched.get().stage());
+        assertEquals(Instant.parse("2026-08-20T10:00:00Z"), fetched.get().stageChangedAt());
+    }
+
+    @Test
+    void fetchDealReturnsEmptyOnA404WithoutFetchingThePipeline() {
+        enqueueConstructorPipeline();
+        HubSpotDealRepository repository = newRepository();
+
+        server.enqueue(new MockResponse()
+                .setResponseCode(404)
+                .setHeader("Content-Type", "application/json")
+                .setBody("{\"status\":\"error\",\"message\":\"deal not found\"}"));
+
+        Optional<Deal> fetched = repository.fetchDeal("D-missing");
+
+        assertEquals(Optional.empty(), fetched);
+        assertEquals(2, server.getRequestCount(),
+                "constructor pipeline + the 404 deal lookup - no pipeline re-fetch needed when the deal isn't found");
+    }
+
+    @Test
+    void fetchDealRetriesOnA429ThenSucceeds() {
+        enqueueConstructorPipeline();
+        HubSpotDealRepository repository = newRepository();
+
+        server.enqueue(new MockResponse()
+                .setResponseCode(429)
+                .setHeader("Retry-After", "0")
+                .setHeader("Content-Type", "application/json")
+                .setBody("{\"status\":\"error\",\"message\":\"rate limited\"}"));
+        String deal = dealJson("D-51", "Survives a 429", "1000", null, "2026-08-01T08:00:00Z",
+                historyEntry("st-100", "2026-08-01T08:00:00.000Z"));
+        enqueueJson(deal);
+        enqueuePipeline();
+
+        Optional<Deal> fetched = repository.fetchDeal("D-51");
+
+        assertTrue(fetched.isPresent());
+        assertEquals("D-51", fetched.get().dealId());
+    }
+
+    @Test
+    void fetchDealRetriesOnA503ThenSucceeds() {
+        enqueueConstructorPipeline();
+        HubSpotDealRepository repository = newRepository();
+
+        server.enqueue(new MockResponse()
+                .setResponseCode(503)
+                .setHeader("Content-Type", "application/json")
+                .setBody("{\"status\":\"error\",\"message\":\"service unavailable\"}"));
+        String deal = dealJson("D-55", "Survives a 503", "1000", null, "2026-08-01T08:00:00Z",
+                historyEntry("st-100", "2026-08-01T08:00:00.000Z"));
+        enqueueJson(deal);
+        enqueuePipeline();
+
+        Optional<Deal> fetched = repository.fetchDeal("D-55");
+
+        assertTrue(fetched.isPresent());
+        assertEquals("D-55", fetched.get().dealId());
+    }
+
+    @Test
+    void fetchDealFailsFatallyOnA401WithoutTheTokenInTheMessage() {
+        enqueueConstructorPipeline();
+        HubSpotDealRepository repository = newRepository();
+
+        server.enqueue(new MockResponse()
+                .setResponseCode(401)
+                .setHeader("Content-Type", "application/json")
+                .setBody("{\"status\":\"error\",\"message\":\"Authentication credentials not found in request\","
+                        + "\"category\":\"EXPIRED_AUTHENTICATION\"}"));
+
+        HubSpotClientException exception =
+                assertThrows(HubSpotClientException.class, () -> repository.fetchDeal("D-52"));
+
+        assertTrue(exception.getMessage().contains("401"));
+        assertTrue(exception.getMessage().toLowerCase().indexOf("test-token") < 0);
+        assertEquals(2, server.getRequestCount(), "constructor pipeline + the one non-retried 401 lookup");
+    }
+
+    @Test
+    void fetchDealIsAFreshRequestEveryCallNeverCached() {
+        enqueueConstructorPipeline();
+        HubSpotDealRepository repository = newRepository();
+
+        String dealV1 = dealJson("D-53", "Drifts between fetches", "1000", null, "2026-08-01T08:00:00Z",
+                historyEntry("st-100", "2026-08-01T08:00:00.000Z"));
+        enqueueJson(dealV1);
+        enqueuePipeline();
+        Optional<Deal> first = repository.fetchDeal("D-53");
+        assertEquals(DealStage.PROSPECT, first.orElseThrow().stage());
+
+        String dealV2 = dealJson("D-53", "Drifts between fetches", "1000", null, "2026-08-01T08:00:00Z",
+                String.join(",",
+                        historyEntry("st-500", "2026-08-28T09:00:00.000Z"),
+                        historyEntry("st-100", "2026-08-01T08:00:00.000Z")));
+        enqueueJson(dealV2);
+        enqueuePipeline();
+        Optional<Deal> second = repository.fetchDeal("D-53");
+        assertEquals(DealStage.CLOSED_WON, second.orElseThrow().stage());
+
+        assertEquals(5, server.getRequestCount(),
+                "constructor pipeline + (deal lookup + pipeline) for each of the two fetchDeal() calls - "
+                        + "the second call could not have reflected the changed stage from a cached result");
+    }
+
+    @Test
+    void fetchDealResultMatchesTheSameDealsEntryInSnapshotLatestPerDeal() {
+        enqueueConstructorPipeline();
+        HubSpotDealRepository repository = newRepository();
+
+        String deal = dealJson("D-54", "Matches snapshot", "3000", "2026-09-10T00:00:00.000Z", "2026-07-01T08:00:00Z",
+                String.join(",",
+                        historyEntry("st-450", "2026-08-15T09:00:00.000Z"),
+                        historyEntry("st-100", "2026-07-01T08:00:00.000Z")));
+
+        enqueuePipeline();
+        enqueueJson(dealsPage(null, deal));
+        DealSnapshot snapshot = repository.snapshot();
+        Deal fromSnapshot = snapshot.findLatestByDealId("D-54").orElseThrow();
+
+        enqueueJson(deal);
+        enqueuePipeline();
+        Deal fromFetchDeal = repository.fetchDeal("D-54").orElseThrow();
+
+        assertEquals(fromSnapshot, fromFetchDeal);
+    }
+
+    @Test
+    void fetchDealRejectsBlankOrNullIdsWithoutMakingAnyRequest() {
+        enqueueConstructorPipeline();
+        HubSpotDealRepository repository = newRepository();
+
+        assertThrows(IllegalArgumentException.class, () -> repository.fetchDeal(""));
+        assertThrows(IllegalArgumentException.class, () -> repository.fetchDeal("   "));
+        assertThrows(IllegalArgumentException.class, () -> repository.fetchDeal(null));
+
+        assertEquals(1, server.getRequestCount(),
+                "only the constructor's own pipeline fetch - validation fails before any deal lookup");
     }
 
     /** A {@link Clock} whose {@link #instant()} can be advanced between calls, for proving asOf moves. */

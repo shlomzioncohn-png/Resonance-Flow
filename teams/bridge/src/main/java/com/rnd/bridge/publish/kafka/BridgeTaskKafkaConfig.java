@@ -1,6 +1,9 @@
 package com.rnd.bridge.publish.kafka;
 
-import com.rnd.bridge.task.BridgeTaskEventDto;
+import com.rnd.inbox.event.StructuredTaskEvent;
+import io.confluent.kafka.serializers.AbstractKafkaSchemaSerDeConfig;
+import io.confluent.kafka.serializers.protobuf.KafkaProtobufSerializer;
+import io.confluent.kafka.serializers.protobuf.KafkaProtobufSerializerConfig;
 import org.apache.kafka.clients.producer.ProducerConfig;
 import org.apache.kafka.common.serialization.ByteArraySerializer;
 import org.apache.kafka.common.serialization.StringSerializer;
@@ -18,9 +21,9 @@ import java.util.HashMap;
 import java.util.Map;
 
 /**
- * A dedicated producer for {@link BridgeTaskEventDto}, plus an explicit
- * replacement for the general-purpose {@code KafkaTemplate} every other lane
- * (GitHub, Media/Pointer) needs.
+ * A dedicated producer for {@code bridge.structured.tasks} ({@link StructuredTaskEvent}, Protobuf
+ * - see {@link com.rnd.bridge.task.StructuredTaskEventMapper}), plus an explicit replacement for
+ * the general-purpose {@code KafkaTemplate} every other lane (GitHub, Media/Pointer) needs.
  * <p>
  * <b>Why the general-purpose bean has to be redeclared here too.</b> Spring
  * Boot's {@code KafkaAutoConfiguration} only creates its own default
@@ -34,7 +37,9 @@ import java.util.Map;
  * at context startup ({@code BridgeApplicationTests} caught it).
  * {@link #kafkaTemplate} rebuilds exactly what {@code KafkaAutoConfiguration}
  * would have, from the same {@link KafkaProperties} (i.e.
- * {@code spring.kafka.producer.*}).
+ * {@code spring.kafka.producer.*}). It stays on {@link JsonSerializer} and is
+ * otherwise untouched by the Protobuf switch below - GitHub/Media/Pointer
+ * have no Protobuf schema of their own yet.
  * <p>
  * <b>{@code KafkaTemplate<?, ?>}, not {@code KafkaTemplate<Object, Object>} -
  * verified empirically, not assumed, after two wrong guesses.</b> Attempt 1
@@ -59,7 +64,7 @@ import java.util.Map;
  * <p>
  * Every consumer still needs an explicit {@code @Qualifier}, because once
  * {@link #bridgeTaskEventKafkaTemplate}'s fully-resolved
- * {@code KafkaTemplate<String, BridgeTaskEventDto>} exists alongside a
+ * {@code KafkaTemplate<String, StructuredTaskEvent>} exists alongside a
  * wildcard bean, the wildcard bean is - by the same "matches anything" logic
  * - *also* a candidate for the exact-type request, which is ambiguous
  * without a name to break the tie:
@@ -67,23 +72,20 @@ import java.util.Map;
  * {@code MediaEventPublisher} and {@code PointerEventPublisher};
  * {@code @Qualifier("bridgeTaskEventKafkaTemplate")} on
  * {@code CrmLaneConfig.kafkaTaskPublisher} and {@code JiraKafkaProducer}.
- * This version is confirmed against a real context load
- * ({@code BridgeApplicationTests}) plus the full {@code teams/bridge} suite,
- * not just reasoned through.
  * <p>
- * This is the seam a future CRM/JIRA-to-Protobuf migration needs: changing
- * {@link #bridgeTaskEventKafkaTemplate}'s {@code value-serializer} affects
- * only the CRM/JIRA path, never {@link #kafkaTemplate}'s. Still
- * {@link JsonSerializer} for now on both beans - this commit changes wiring
- * only, not wire format. There is no reviewed {@code .proto} for
- * {@code bridge.structured.tasks} yet, no {@code schema-subjects.tsv} row
- * for it, and Inbox's consumer still reads JSON - switching the serializer
- * now would re-break the pipe the tenantId fix just repaired. {@code
- * enable.idempotence} is turned on for {@link #bridgeTaskEventKafkaTemplate}
- * only ({@link #kafkaTemplate} mirrors the old shared default's config
- * exactly, including its lack of idempotence - GitHub/Media weren't asked
- * for that change): {@code retries: 3} without idempotence risks two
- * retried batches landing out of order within a partition.
+ * <b>Protobuf switch (finding F3 in the CRM-lane audit / issue #567).</b>
+ * {@link #bridgeTaskEventKafkaTemplate} now sends {@link StructuredTaskEvent} via Confluent's
+ * {@link KafkaProtobufSerializer}, matching Inbox's {@code KafkaProtobufDeserializer} on the
+ * consumer side - the two sides no longer disagree on wire format. {@code
+ * schema.registry.url} is read from {@code bridge.kafka.schema-registry.url} (no hardcoded
+ * default beyond the local-dev fallback in {@code application.yml}).
+ * {@code auto.register.schemas} is explicitly {@code false}: registering the schema is Relay's
+ * job (adding the {@code bridge.structured.tasks-value} row to {@code schema-subjects.tsv}, see
+ * issue #567), not something this producer should do as a side effect of its first publish -
+ * letting a producer auto-register would mean the schema Inbox ends up validating against was
+ * whatever Bridge happened to send first, not a reviewed contract. {@code enable.idempotence}
+ * stays on for this bean only, same as before the Protobuf switch: {@code retries: 3} without
+ * idempotence risks two retried batches landing out of order within a partition.
  */
 @Configuration
 class BridgeTaskKafkaConfig {
@@ -99,22 +101,39 @@ class BridgeTaskKafkaConfig {
     }
 
     @Bean
-    ProducerFactory<String, BridgeTaskEventDto> bridgeTaskEventProducerFactory(
-            @Value("${spring.kafka.bootstrap-servers}") String bootstrapServers) {
+    ProducerFactory<String, StructuredTaskEvent> bridgeTaskEventProducerFactory(
+            @Value("${spring.kafka.bootstrap-servers}") String bootstrapServers,
+            @Value("${bridge.kafka.schema-registry.url}") String schemaRegistryUrl) {
         Map<String, Object> props = new HashMap<>();
         props.put(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, bootstrapServers);
         props.put(ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG, StringSerializer.class);
-        props.put(ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG, JsonSerializer.class);
+        props.put(ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG, KafkaProtobufSerializer.class);
         props.put(ProducerConfig.ACKS_CONFIG, "all");
         props.put(ProducerConfig.RETRIES_CONFIG, 3);
         props.put(ProducerConfig.ENABLE_IDEMPOTENCE_CONFIG, true);
-        props.put(JsonSerializer.ADD_TYPE_INFO_HEADERS, false);
+        props.put(AbstractKafkaSchemaSerDeConfig.SCHEMA_REGISTRY_URL_CONFIG, schemaRegistryUrl);
+        // Relay registers the schema (schema-subjects.tsv) - this producer must never register one
+        // as a side effect of publishing, or Inbox would end up validating against whatever Bridge
+        // happened to send first instead of a reviewed contract. See issue #567.
+        props.put(KafkaProtobufSerializerConfig.AUTO_REGISTER_SCHEMAS, false);
+        // structured-task-event.proto's imports (task-created-event.proto,
+        // task-creation-requested-event.proto) are registered by Relay as schema references under
+        // file-name subjects (the Confluent default), per #618 - so the default
+        // reference.subject.name.strategy resolves them correctly and no custom strategy is
+        // configured here. use.latest.version makes the serializer use the latest registered
+        // version of bridge.structured.tasks-value. Exactly the pair Relay's own guide recommends
+        // (teams/relay/docs/kafka-producer-consumer-guide.md) and the same setup Chain uses
+        // (ChainProtobufKafkaConfig). Deploy only once #627 (the file-name-subject fix) and the
+        // bridge.structured.tasks-value registration have both landed - the real verification is
+        // the joint test against a live Apicurio registry, not a MockSchemaRegistryClient with
+        // hand-built references.
+        props.put(KafkaProtobufSerializerConfig.USE_LATEST_VERSION, true);
         return new DefaultKafkaProducerFactory<>(props);
     }
 
     @Bean
-    KafkaTemplate<String, BridgeTaskEventDto> bridgeTaskEventKafkaTemplate(
-            ProducerFactory<String, BridgeTaskEventDto> bridgeTaskEventProducerFactory) {
+    KafkaTemplate<String, StructuredTaskEvent> bridgeTaskEventKafkaTemplate(
+            ProducerFactory<String, StructuredTaskEvent> bridgeTaskEventProducerFactory) {
         return new KafkaTemplate<>(bridgeTaskEventProducerFactory);
     }
 
