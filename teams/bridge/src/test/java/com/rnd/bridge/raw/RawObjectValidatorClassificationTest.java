@@ -30,20 +30,28 @@ class RawObjectValidatorClassificationTest {
 
     @Test
     void acceptsEventWithoutClassification() {
-        assertThatCode(() -> validator.validate(event(RawSourceType.MEETING))).doesNotThrowAnyException();
+        assertThatCode(() -> validator.validate(event(RawSourceType.ZOOM))).doesNotThrowAnyException();
     }
 
     @Test
     void acceptsCategoryMatchingSourceType() {
-        RawObjectEvent event = event(RawSourceType.MEETING)
+        RawObjectEvent event = event(RawSourceType.ZOOM)
                 .withClassification(classification(MeetingCategory.TEST));
 
         assertThatCode(() -> validator.validate(event)).doesNotThrowAnyException();
     }
 
     @Test
+    void everyMeetingPlatformAcceptsMeetingCategories() {
+        RawObjectEvent event = event(RawSourceType.BIGBLUEBUTTON)
+                .withClassification(classification(MeetingCategory.STANDUP));
+
+        assertThatCode(() -> validator.validate(event)).doesNotThrowAnyException();
+    }
+
+    @Test
     void rejectsCategoryFromAnotherSourceType() {
-        RawObjectEvent event = event(RawSourceType.MEETING)
+        RawObjectEvent event = event(RawSourceType.ZOOM)
                 .withClassification(classification(DocumentCategory.INVOICE));
 
         assertThatThrownBy(() -> validator.validate(event))

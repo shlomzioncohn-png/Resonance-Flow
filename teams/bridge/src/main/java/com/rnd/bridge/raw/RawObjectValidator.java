@@ -49,9 +49,9 @@ public final class RawObjectValidator implements PayloadValidator<RawObjectEvent
             return;
         }
         ItemCategory category = classification.category().value();
-        if (category.sourceType() != event.sourceType()) {
+        if (!category.sourceTypes().contains(event.sourceType())) {
             throw new ValidationException("Invalid RawObjectEvent.classification.category = "
-                    + category + ": belongs to source type " + category.sourceType()
+                    + category + ": belongs to source type(s) " + category.sourceTypes()
                     + ", event is " + event.sourceType());
         }
     }

@@ -94,9 +94,9 @@ class MediaIntakeOrchestratorTest {
     @Test
     void validFileIsLandedPublishedAndMovedToUploaded() throws Exception {
         Files.write(zoomDir.resolve("meeting.mp3"), "a".repeat(2000).getBytes());
-        RawObjectEvent event = fakeMeetingEvent("MEETING/demo-tenant/2026-08-30/x.mp3");
+        RawObjectEvent event = fakeMeetingEvent("ZOOM/demo-tenant/2026-08-30/x.mp3");
         when(intakeService.landMeeting(any(), any(), eq("meeting.mp3"), isNull(), isNull(), isNull(),
-                isNull(), eq("demo-tenant"), eq(RawSourceType.MEETING), any(), isNull(), isNull(),
+                isNull(), eq("demo-tenant"), eq(RawSourceType.ZOOM), any(), isNull(), isNull(),
                 isNull(), any(), eq(Triage.UNCLASSIFIED)))
                 .thenReturn(event);
 
@@ -105,14 +105,29 @@ class MediaIntakeOrchestratorTest {
         assertThat(summary.uploadedObjectKeys()).containsExactly(event.objects().get(0).objectKey());
         assertThat(Files.exists(zoomDir.resolve("uploaded").resolve("meeting.mp3"))).isTrue();
         verify(eventPublisher).publish(event);
-        verify(dedupIndex).checkAndRecord(eq(RawSourceType.MEETING), eq("demo-tenant"), any());
+        verify(dedupIndex).checkAndRecord(eq(RawSourceType.ZOOM), eq("demo-tenant"), any());
+    }
+
+    @Test
+    void bigBlueButtonRecordingLandsAsItsOwnSourceType() throws Exception {
+        Files.write(bbbDir.resolve("meeting.mp4"), "h".repeat(2000).getBytes());
+        RawObjectEvent event = fakeMeetingEvent("BIGBLUEBUTTON/demo-tenant/2026-08-30/x.mp4");
+        when(intakeService.landMeeting(any(), any(), eq("meeting.mp4"), isNull(), isNull(), isNull(),
+                isNull(), eq("demo-tenant"), eq(RawSourceType.BIGBLUEBUTTON), any(), isNull(), isNull(),
+                isNull(), any(), eq(Triage.UNCLASSIFIED)))
+                .thenReturn(event);
+
+        orchestrator.runIntake();
+
+        verify(eventPublisher).publish(event);
+        verify(dedupIndex).checkAndRecord(eq(RawSourceType.BIGBLUEBUTTON), eq("demo-tenant"), any());
     }
 
     @Test
     void duplicateContentIsSkippedButStillMovedToUploaded() throws Exception {
         byte[] content = "b".repeat(2000).getBytes();
         Files.write(zoomDir.resolve("dup.mp3"), content);
-        when(dedupIndex.checkAndRecord(eq(RawSourceType.MEETING), eq("demo-tenant"), eq(sha256(content))))
+        when(dedupIndex.checkAndRecord(eq(RawSourceType.ZOOM), eq("demo-tenant"), eq(sha256(content))))
                 .thenReturn(true);
 
         MediaIntakeOrchestrator.IntakeSummary summary = orchestrator.runIntake();
@@ -126,9 +141,9 @@ class MediaIntakeOrchestratorTest {
     void transcriptSidecarIsLandedAndLinkedNotProcessedOnItsOwn() throws Exception {
         Files.write(zoomDir.resolve("meeting.mp3"), "c".repeat(2000).getBytes());
         Files.writeString(zoomDir.resolve("meeting.vtt"), "WEBVTT transcript");
-        RawObjectEvent event = fakeMeetingEvent("MEETING/demo-tenant/2026-08-30/x.mp3");
+        RawObjectEvent event = fakeMeetingEvent("ZOOM/demo-tenant/2026-08-30/x.mp3");
         when(intakeService.landMeeting(any(), any(), eq("meeting.mp3"), any(), eq("meeting.vtt"), isNull(),
-                isNull(), eq("demo-tenant"), eq(RawSourceType.MEETING), any(), isNull(), isNull(),
+                isNull(), eq("demo-tenant"), eq(RawSourceType.ZOOM), any(), isNull(), isNull(),
                 isNull(), any(), eq(Triage.UNCLASSIFIED)))
                 .thenReturn(event);
 
@@ -138,7 +153,7 @@ class MediaIntakeOrchestratorTest {
         assertThat(summary.failedFiles()).isEmpty();
         assertThat(Files.exists(zoomDir.resolve("uploaded").resolve("meeting.vtt"))).isTrue();
         verify(intakeService).landMeeting(any(), any(), eq("meeting.mp3"), any(), eq("meeting.vtt"), isNull(),
-                isNull(), eq("demo-tenant"), eq(RawSourceType.MEETING), any(), isNull(), isNull(),
+                isNull(), eq("demo-tenant"), eq(RawSourceType.ZOOM), any(), isNull(), isNull(),
                 isNull(), any(), eq(Triage.UNCLASSIFIED));
     }
 
@@ -153,9 +168,9 @@ class MediaIntakeOrchestratorTest {
                    {"id": "b", "name": "Esther Ora", "join_time": "2026-09-08T09:01:00Z", "leave_time": "2026-09-08T09:30:00Z"}
                  ]}""");
         Instant meetingStartedAt = Instant.parse("2026-09-08T09:00:00Z");
-        RawObjectEvent event = fakeMeetingEvent("MEETING/demo-tenant/2026-08-30/x.mp3");
+        RawObjectEvent event = fakeMeetingEvent("ZOOM/demo-tenant/2026-08-30/x.mp3");
         when(intakeService.landMeeting(any(), any(), eq("meeting.mp3"), isNull(), isNull(), any(),
-                eq("meeting.meeting.json"), eq("demo-tenant"), eq(RawSourceType.MEETING), any(),
+                eq("meeting.meeting.json"), eq("demo-tenant"), eq(RawSourceType.ZOOM), any(),
                 eq(List.of("Dana Levi", "Esther Ora")), eq(meetingStartedAt), eq("1"), any(), eq(Triage.UNCLASSIFIED)))
                 .thenReturn(event);
 
@@ -169,7 +184,7 @@ class MediaIntakeOrchestratorTest {
         // under the same stem in MinIO, and the published event carries that same id.
         ArgumentCaptor<String> correlationId = ArgumentCaptor.forClass(String.class);
         verify(intakeService).landMeeting(any(), any(), eq("meeting.mp3"), isNull(), isNull(), any(),
-                eq("meeting.meeting.json"), eq("demo-tenant"), eq(RawSourceType.MEETING), any(),
+                eq("meeting.meeting.json"), eq("demo-tenant"), eq(RawSourceType.ZOOM), any(),
                 eq(List.of("Dana Levi", "Esther Ora")), eq(meetingStartedAt), eq("1"),
                 correlationId.capture(), eq(Triage.UNCLASSIFIED));
         assertThat(correlationId.getValue()).isNotBlank();
@@ -219,21 +234,21 @@ class MediaIntakeOrchestratorTest {
         byte[] content = "d".repeat(2000).getBytes();
         Files.write(zoomDir.resolve("broken.mp3"), content);
         when(intakeService.landMeeting(any(), any(), eq("broken.mp3"), isNull(), isNull(), isNull(),
-                isNull(), eq("demo-tenant"), eq(RawSourceType.MEETING), any(), isNull(), isNull(),
+                isNull(), eq("demo-tenant"), eq(RawSourceType.ZOOM), any(), isNull(), isNull(),
                 isNull(), any(), eq(Triage.UNCLASSIFIED)))
                 .thenThrow(new IllegalStateException("MinIO unreachable"));
 
         MediaIntakeOrchestrator.IntakeSummary summary = orchestrator.runIntake();
 
         assertThat(summary.failedFiles()).containsExactly("broken.mp3");
-        verify(dedupIndex).forget(RawSourceType.MEETING, "demo-tenant", sha256(content));
+        verify(dedupIndex).forget(RawSourceType.ZOOM, "demo-tenant", sha256(content));
         verifyNoInteractions(eventPublisher);
     }
 
     private RawObjectEvent fakeMeetingEvent(String objectKey) {
         RawObjectRef recording = new RawObjectRef(
                 Role.RECORDING, objectKey, "sha256:" + "0".repeat(64), "audio/mpeg", 2000L, Modality.AUDIO);
-        return RawObjectEvent.create(RawSourceType.MEETING, "demo-tenant", "corr-fake", Instant.now(),
+        return RawObjectEvent.create(RawSourceType.ZOOM, "demo-tenant", "corr-fake", Instant.now(),
                 ScopeDecision.INCLUDED, 0, ChangeType.UPSERT, 100, null, null, null, List.of(recording));
     }
 

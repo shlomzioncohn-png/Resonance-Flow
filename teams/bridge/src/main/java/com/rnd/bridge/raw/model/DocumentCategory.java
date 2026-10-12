@@ -1,5 +1,7 @@
 package com.rnd.bridge.raw.model;
 
+import java.util.Set;
+
 /**
  * {@link ItemCategory} values for {@link RawSourceType#SCANNED_DOC}. The first 16 are the
  * RVL-CDIP dataset's classes, in its own label order, so a classifier's output can be scored
@@ -28,7 +30,7 @@ public enum DocumentCategory implements ItemCategory {
     OTHER;
 
     @Override
-    public RawSourceType sourceType() {
-        return RawSourceType.SCANNED_DOC;
+    public Set<RawSourceType> sourceTypes() {
+        return Set.of(RawSourceType.SCANNED_DOC);
     }
 }

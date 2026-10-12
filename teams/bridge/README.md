@@ -174,8 +174,10 @@ sidecars were found, `landStandalone(...)` for a scanned doc), `media/MediaEvent
 (manual test intake, see below - holds a declarative list of `{directory, sourceType,
 modality}` mappings, so adding a new intake folder is a new list entry, not a new method),
 `media/controller/MediaIntakeController.java` (triggers it). `source_type` for this lane is
-`MEETING` (Zoom/BBB) or `SCANNED_DOC` - both values on the shared `raw.model.RawSourceType`
-enum (`SCANNED_DOC` isn't in Mind's confirmed contract yet - tracked in
+`ZOOM`, `BIGBLUEBUTTON` or `SCANNED_DOC` - values on the shared `raw.model.RawSourceType`
+enum, which names the source *platform* (so a consumer can build a link back from
+`source_type` + `source_ref`; `RawSourceType.isMeeting()` is the one place that says which
+values are meetings) (`SCANNED_DOC` isn't in Mind's confirmed contract yet - tracked in
 [#188](https://github.com/KamaTechOrg/Resonance-Flow/issues/188)).
 
 **Schema shape (as of issue [#31](https://github.com/KamaTechOrg/Resonance-Flow/issues/31)):**
@@ -206,12 +208,12 @@ curl -X POST http://localhost:8080/api/bridge/media/run
 
 | Env var | Uploads as |
 |---|---|
-| `BRIDGE_MEDIA_ZOOM_RECORDINGS_DIR` | `source_type=MEETING`, `modality=AUDIO` |
-| `BRIDGE_MEDIA_BBB_RECORDINGS_DIR` | `source_type=MEETING`, `modality=AUDIO` |
+| `BRIDGE_MEDIA_ZOOM_RECORDINGS_DIR` | `source_type=ZOOM`, `modality=AUDIO` |
+| `BRIDGE_MEDIA_BBB_RECORDINGS_DIR` | `source_type=BIGBLUEBUTTON`, `modality=AUDIO` |
 | `BRIDGE_MEDIA_SCANNED_DOCS_DIR` | `source_type=SCANNED_DOC`, `modality=SCANNED_DOC` |
 
-Zoom and BBB are split into separate folders only to keep sample files organized by where they
-came from - the schema has no separate platform field, both land as `MEETING`.
+Each platform has its own folder and its own `source_type`; both share the same meeting handling
+(transcript and metadata sidecars, meeting categories).
 
 Each successfully uploaded file is moved into an `uploaded/` subfolder of wherever it came from,
 so re-triggering the endpoint only picks up genuinely new files instead of re-landing (and
@@ -231,7 +233,7 @@ Per file, before it lands:
    - same "MinIO as lightweight state store" approach `plan.md` uses for the Unstructured-intake
    lane's sync cursor). A file whose content hash is already in the index is moved to
    `uploaded/` but not re-landed or re-published.
-3. **Transcript pairing** (`MEETING` only) - a same-basename sidecar file (`.vtt`, `.srt`, or
+3. **Transcript pairing** (meetings only) - a same-basename sidecar file (`.vtt`, `.srt`, or
    `.txt`) next to a recording is landed alongside it as a `role: TRANSCRIPT` entry in the
    same event's `objects[]` - it does not get its own `RawObjectEvent`. Both files move to
    `uploaded/` together.
@@ -260,7 +262,7 @@ Per file, before it lands:
    entry - `findTranscript` is a convenience default method on top of it - so a future
    "additional info" sidecar built from this endpoint won't be working off a pre-filtered
    subset once it's implemented.
-4. **Meeting-metadata pairing** (`MEETING` only) - a same-basename sidecar carrying the
+4. **Meeting-metadata pairing** (meetings only) - a same-basename sidecar carrying the
    source platform's own meeting report is landed alongside the recording, in its native
    format (no conversion), as a `role: SOURCE_METADATA` entry in the same event's `objects[]`:
    `<basename>.meeting.json` in the Zoom folder, `<basename>.metadata.xml` in the BBB folder.

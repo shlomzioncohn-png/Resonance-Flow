@@ -1,6 +1,10 @@
 package com.rnd.bridge.raw.model;
 
-/** {@link ItemCategory} values for {@link RawSourceType#MEETING}. */
+import java.util.Arrays;
+import java.util.Set;
+import java.util.stream.Collectors;
+
+/** {@link ItemCategory} values shared by every meeting platform ({@link RawSourceType#isMeeting()}). */
 public enum MeetingCategory implements ItemCategory {
     PLANNING,
     STANDUP,
@@ -12,8 +16,12 @@ public enum MeetingCategory implements ItemCategory {
     TEST,
     OTHER;
 
+    private static final Set<RawSourceType> SOURCE_TYPES = Arrays.stream(RawSourceType.values())
+            .filter(RawSourceType::isMeeting)
+            .collect(Collectors.toUnmodifiableSet());
+
     @Override
-    public RawSourceType sourceType() {
-        return RawSourceType.MEETING;
+    public Set<RawSourceType> sourceTypes() {
+        return SOURCE_TYPES;
     }
 }

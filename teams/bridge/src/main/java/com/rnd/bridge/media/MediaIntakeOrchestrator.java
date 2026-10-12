@@ -50,7 +50,7 @@ import java.util.stream.Stream;
  * Per file, in order: (1) junk filter - empty or below {@code minFileSizeBytes} is moved
  * to "rejected/" and never lands; (2) dedup check against {@link MediaDedupIndex} (MinIO,
  * keyed per source_type/tenant) - a content hash already seen is moved to "uploaded/" but
- * not re-landed/re-published; (3) for a MEETING recording, a same-basename transcript
+ * not re-landed/re-published; (3) for a meeting recording (ZOOM/BIGBLUEBUTTON), a same-basename transcript
  * sidecar ({@code .vtt}/{@code .srt}/{@code .txt}) and a same-basename meeting-metadata
  * sidecar (Zoom: {@code .meeting.json}, BBB: {@code .metadata.xml}) are landed alongside it
  * as additional entries in the one event's {@code objects[]} list (see
@@ -101,10 +101,10 @@ public class MediaIntakeOrchestrator {
         this.minFileSizeBytes = minFileSizeBytes;
         this.intakeSources = List.of(
                 new IntakeSource("bridge.media.zoom-recordings-dir", zoomRecordingsDir,
-                        RawSourceType.MEETING, Modality.AUDIO,
+                        RawSourceType.ZOOM, Modality.AUDIO,
                         MEETING_METADATA_EXTENSION_ZOOM, zoomMeetingMetadataReader),
                 new IntakeSource("bridge.media.bbb-recordings-dir", bbbRecordingsDir,
-                        RawSourceType.MEETING, Modality.AUDIO,
+                        RawSourceType.BIGBLUEBUTTON, Modality.AUDIO,
                         MEETING_METADATA_EXTENSION_BBB, bbbMeetingMetadataReader),
                 new IntakeSource("bridge.media.scanned-docs-dir", scannedDocsDir,
                         RawSourceType.SCANNED_DOC, Modality.SCANNED_DOC, null, null)
@@ -146,7 +146,7 @@ public class MediaIntakeOrchestrator {
         // Transcript and meeting-metadata sidecars are consumed by their recording, not
         // processed as their own top-level upload.
         Set<Path> sidecars = new HashSet<>();
-        if (source.sourceType() == RawSourceType.MEETING) {
+        if (source.sourceType().isMeeting()) {
             for (Path file : files) {
                 findTranscript(file, dir).ifPresent(sidecars::add);
                 findMeetingMetadata(file, dir, source).ifPresent(sidecars::add);
@@ -179,10 +179,10 @@ public class MediaIntakeOrchestrator {
                 return;
             }
 
-            Path transcript = source.sourceType() == RawSourceType.MEETING
+            Path transcript = source.sourceType().isMeeting()
                     ? findTranscript(file, dir).orElse(null)
                     : null;
-            Path meetingMetadataFile = source.sourceType() == RawSourceType.MEETING
+            Path meetingMetadataFile = source.sourceType().isMeeting()
                     ? findMeetingMetadata(file, dir, source).orElse(null)
                     : null;
 
