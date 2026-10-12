@@ -1,5 +1,7 @@
 package com.rnd.bridge.media.classification;
 
+import com.rnd.bridge.media.classification.document.DocumentScan;
+import com.rnd.bridge.media.classification.document.DocumentScanner;
 import com.rnd.bridge.raw.model.Classification;
 import com.rnd.bridge.raw.model.ItemCategory;
 import com.rnd.bridge.raw.model.Label;
@@ -14,7 +16,9 @@ import org.springframework.stereotype.Service;
 /**
  * Decides each media item's scope_decision and the classification behind it: deterministic
  * {@link ClassificationRules} first, then the {@link ModelMediaClassifier} only for what the
- * rules couldn't settle (and only when a model API key is configured).
+ * rules couldn't settle (and only when a model API key is configured). A scanned document is
+ * first examined once by {@link DocumentScanner}, and that one scan is what both the rules and
+ * the model work from.
  * <p>
  * Fails open, always: disabled, nothing to judge, a model error or a malformed reply all give
  * {@link Triage#UNCLASSIFIED} (INCLUDED, no classification) - losing a real meeting is worse
@@ -29,12 +33,14 @@ public class MediaClassificationService {
 
     private final ClassificationRules rules;
     private final ModelMediaClassifier model;
+    private final DocumentScanner documentScanner;
     private final MediaClassificationProperties properties;
 
     public MediaClassificationService(ClassificationRules rules, ModelMediaClassifier model,
-                                      MediaClassificationProperties properties) {
+                                      DocumentScanner documentScanner, MediaClassificationProperties properties) {
         this.rules = rules;
         this.model = model;
+        this.documentScanner = documentScanner;
         this.properties = properties;
         log.info("Media classification {}", !properties.enabled() ? "disabled"
                 : properties.model().configured() ? "enabled (rules + model " + properties.model().name() + ")"
@@ -47,8 +53,12 @@ public class MediaClassificationService {
     }
 
     public Triage triageDocument(DocumentClassificationInput input) {
+        if (!properties.enabled()) {
+            return Triage.UNCLASSIFIED;
+        }
+        DocumentScan scan = documentScanner.scan(input.content(), input.filename());
         return triage(input.filename(), properties.excludedDocumentCategories(),
-                () -> rules.classifyDocument(input), () -> model.classifyDocument(input));
+                () -> rules.classifyDocument(scan), () -> model.classifyDocument(scan));
     }
 
     private Triage triage(String itemName, Set<? extends ItemCategory> excludedCategories,

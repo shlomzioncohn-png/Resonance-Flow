@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.rnd.bridge.media.classification.document.DocumentScan;
 import com.rnd.bridge.media.meeting.MeetingMetadata;
 import com.rnd.bridge.media.meeting.ParticipantActivity;
 import com.rnd.bridge.raw.model.Classification;
@@ -15,6 +16,8 @@ import com.rnd.bridge.raw.model.Sensitivity;
 import java.time.Instant;
 import java.util.List;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.EnumSource;
 
 class ModelMediaClassifierTest {
 
@@ -54,7 +57,7 @@ class ModelMediaClassifierTest {
         assertThat(chatClient.userText).contains("Topic: Sprint planning", "Participants: 2",
                 "let's plan the next sprint");
         assertThat(chatClient.userText).doesNotContain("Dana Levi", "Yossi Cohen", "-->", "WEBVTT");
-        assertThat(chatClient.image).isNull();
+        assertThat(chatClient.images).isEmpty();
     }
 
     @Test
@@ -105,30 +108,41 @@ class ModelMediaClassifierTest {
     }
 
     @Test
-    void documentIsSentAsPngImage() {
+    void documentContentPagesAreSentAsPngImagesWithTheirPageNumbers() {
         chatClient.reply = verdict("INVOICE");
 
-        Classification result = classifier.classifyDocument(
-                new DocumentClassificationInput(ClassificationTestSupport.textPagePng(), "scan.png")).orElseThrow();
+        Classification result = classifier.classifyDocument(ClassificationTestSupport.contentScan(12, 2, 3)).orElseThrow();
 
         assertThat(result.category().value()).isEqualTo(DocumentCategory.INVOICE);
-        assertThat(chatClient.image).startsWith(0x89, 'P', 'N', 'G');
-        assertThat(chatClient.systemPrompt).contains("INVOICE", "SCIENTIFIC_PUBLICATION", "BLANK");
+        assertThat(chatClient.images).hasSize(2);
+        assertThat(chatClient.images).allSatisfy(image -> assertThat(image).startsWith(0x89, 'P', 'N', 'G'));
+        assertThat(chatClient.userText).contains("12 page(s) in total", "page(s) [2, 3]");
     }
 
     @Test
-    void multiPageDocumentIsJudgedFromItsFirstPageOnly() {
-        chatClient.reply = verdict("LETTER");
+    void documentPromptOffersEveryCategoryExceptBlank() {
+        chatClient.reply = verdict("MEMO");
 
-        classifier.classifyDocument(new DocumentClassificationInput(ClassificationTestSupport.tiffWithBlankCoverPage(), "scan.tif"));
+        classifier.classifyDocument(ClassificationTestSupport.contentScan(1, 1));
 
-        assertThat(chatClient.calls).isEqualTo(1);
-        assertThat(chatClient.userText).contains("page 1 of 2");
+        assertThat(chatClient.systemPrompt).contains("INVOICE", "SCIENTIFIC_PUBLICATION", "MEMO", "OTHER");
+        assertThat(chatClient.systemPrompt).doesNotContain("BLANK");
     }
 
     @Test
-    void nonImageDocumentIsNotSentToTheModel() {
-        assertThat(classifier.classifyDocument(new DocumentClassificationInput("%PDF-1.7".getBytes(), "scan.pdf"))).isEmpty();
+    void blankVerdictOnAPageWithContentIsRecordedAsOther() {
+        chatClient.reply = verdict("BLANK");
+
+        Classification result = classifier.classifyDocument(ClassificationTestSupport.contentScan(1, 1)).orElseThrow();
+
+        assertThat(result.category().value()).isEqualTo(DocumentCategory.OTHER);
+        assertThat(result.category().confidence()).isEqualTo(0.9);
+    }
+
+    @ParameterizedTest
+    @EnumSource(value = DocumentScan.Outcome.class, names = "CONTENT_FOUND", mode = EnumSource.Mode.EXCLUDE)
+    void documentWithoutContentPagesIsNotSentToTheModel(DocumentScan.Outcome outcome) {
+        assertThat(classifier.classifyDocument(new DocumentScan(outcome, 3, 3, List.of()))).isEmpty();
         assertThat(chatClient.calls).isZero();
     }
 
@@ -151,14 +165,14 @@ class ModelMediaClassifierTest {
         String reply;
         String systemPrompt;
         String userText;
-        byte[] image;
+        List<byte[]> images;
         int calls;
 
         @Override
-        public String complete(String systemPrompt, String userText, byte[] pngImage) {
+        public String complete(String systemPrompt, String userText, List<byte[]> pngImages) {
             this.systemPrompt = systemPrompt;
             this.userText = userText;
-            this.image = pngImage;
+            this.images = pngImages;
             calls++;
             return reply;
         }

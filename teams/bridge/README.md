@@ -296,15 +296,32 @@ item's `scope_decision` and attaches the optional `classification` object it was
 a whole; it never extracts tasks, people, dates or priority - that stays with Mind.
 
 1. **Rules first** (free, deterministic, `decided_by: RULE`): a meeting shorter than
-   `min-meeting-duration` → `TEST`; a single-page document that's all white → `BLANK` (a
-   multi-page scan with a blank cover page is not). An empty transcript is deliberately *not* a
-   rule - it means transcription failed, not that the meeting was empty.
+   `min-meeting-duration` → `TEST`; a document whose pages were *all* checked and are all
+   blank → `BLANK`. An empty transcript is deliberately *not* a rule - it means transcription
+   failed, not that the meeting was empty.
 2. **Model second**, only for what the rules didn't settle (`decided_by: MODEL`): a meeting is
-   judged from its topic + transcript excerpt (never the audio, never participant names), a
-   scanned doc from its first page image (multi-page docs are judged from page 1 only). A
-   meeting with no spoken transcript text is never sent - it stays unclassified and `INCLUDED`. Any OpenAI-compatible endpoint works - Gemini by default;
-   switching provider is a change to `bridge.media.classification.model.*` only. PDFs aren't
-   sent (images only).
+   judged from its topic + transcript excerpt (never the audio, never participant names). A
+   meeting with no spoken transcript text is never sent - it stays unclassified and `INCLUDED`.
+   Any OpenAI-compatible endpoint works - Gemini by default; switching provider is a change to
+   `bridge.media.classification.model.*` only.
+
+**Scanned documents** are examined once by `media/classification/document/DocumentScanner`, and
+both steps above work from that one scan:
+
+- **Formats** are an explicit list - the union of the `PagedDocumentReader` beans' extensions:
+  PNG, JPEG, TIFF (incl. multi-page), BMP, GIF via ImageIO, and PDF via Apache PDFBox. Anything
+  else (DOC/DOCX, WEBP, ...) is never opened or sent - it lands `INCLUDED`, unclassified. A new
+  format is one new `PagedDocumentReader`.
+- **Pages** are rendered one at a time, in memory only, and checked for blankness locally; blank
+  pages are skipped. The scan stops once `documents.pages-to-send` (2) content pages are found or
+  `documents.max-pages-to-scan` (5) pages were checked - a 100-page PDF with content on page 1
+  costs two renders.
+- **Outcomes**: content found → those pages (with their page numbers) go to the model; every
+  page checked and blank → `BLANK` by rule; the limit reached with only blank pages and more
+  pages left → unclassified, `INCLUDED` (unchecked pages may have content); unsupported or
+  corrupt/password-protected → unclassified, `INCLUDED`.
+- The model never sees a blank page, so a `BLANK` verdict from it is recorded as `OTHER` - a
+  document with content can never be `EXCLUDED` as blank.
 3. **Fails open**: disabled, model error, rate limit or a malformed reply → `INCLUDED`, no
    `classification`. An item is `EXCLUDED` only when its category is in
    `excluded-meeting-categories`/`excluded-document-categories` **and** its confidence reaches

@@ -22,7 +22,36 @@ public record MediaClassificationProperties(
         @DefaultValue("4000") int transcriptExcerptChars,
         @DefaultValue({"TEST", "SOCIAL"}) Set<MeetingCategory> excludedMeetingCategories,
         @DefaultValue({"BLANK", "ADVERTISEMENT"}) Set<DocumentCategory> excludedDocumentCategories,
+        @DefaultValue Documents documents,
         @DefaultValue Model model) {
+
+    public MediaClassificationProperties {
+        if (!(minConfidenceToExclude >= 0.0 && minConfidenceToExclude <= 1.0)) {
+            throw new IllegalArgumentException(
+                    "min-confidence-to-exclude must be in [0, 1], was " + minConfidenceToExclude);
+        }
+    }
+
+    /**
+     * How a multi-page scanned document is examined - see media.classification.document.DocumentScanner.
+     *
+     * @param maxPagesToScan the most pages rendered and checked for content, however long the document
+     * @param pagesToSend    how many non-blank pages are sent to the model (the scan stops once found)
+     */
+    public record Documents(
+            @DefaultValue("5") int maxPagesToScan,
+            @DefaultValue("2") int pagesToSend) {
+
+        public Documents {
+            if (pagesToSend < 1) {
+                throw new IllegalArgumentException("documents.pages-to-send must be at least 1, was " + pagesToSend);
+            }
+            if (maxPagesToScan < pagesToSend) {
+                throw new IllegalArgumentException("documents.max-pages-to-scan (" + maxPagesToScan
+                        + ") must be at least documents.pages-to-send (" + pagesToSend + ")");
+            }
+        }
+    }
 
     /**
      * Any OpenAI-compatible chat-completions endpoint (Gemini, DeepSeek, Groq, ...) - switching
@@ -32,7 +61,7 @@ public record MediaClassificationProperties(
             @DefaultValue("https://generativelanguage.googleapis.com/v1beta/openai") String baseUrl,
             @DefaultValue("gemini-3.8-flash") String name,
             @DefaultValue("") String apiKey,
-            @DefaultValue("v1") String promptVersion,
+            @DefaultValue("v2") String promptVersion,
             @DefaultValue("60s") Duration timeout) {
 
         public boolean configured() {

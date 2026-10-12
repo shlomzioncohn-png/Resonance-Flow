@@ -40,10 +40,10 @@ public class OpenAiCompatibleChatClient implements ChatCompletionClient {
     }
 
     @Override
-    public String complete(String systemPrompt, String userText, byte[] pngImage) {
+    public String complete(String systemPrompt, String userText, List<byte[]> pngImages) {
         List<Map<String, Object>> userContent = new ArrayList<>();
         userContent.add(Map.of("type", "text", "text", userText));
-        if (pngImage != null) {
+        for (byte[] pngImage : pngImages) {
             String dataUrl = "data:image/png;base64," + Base64.getEncoder().encodeToString(pngImage);
             userContent.add(Map.of("type", "image_url", "image_url", Map.of("url", dataUrl)));
         }

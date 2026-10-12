@@ -127,6 +127,12 @@ bridge:
       transcript-excerpt-chars: 4000
       excluded-meeting-categories: TEST,SOCIAL
       excluded-document-categories: BLANK,ADVERTISEMENT
+      documents:
+        # Pages are rendered one at a time; the scan stops once pages-to-send non-blank pages
+        # are found, or after max-pages-to-scan pages. BLANK is only decided when every page
+        # was checked. Formats: whatever a PagedDocumentReader supports (images + PDF).
+        max-pages-to-scan: 5
+        pages-to-send: 2
       model:
         # Any OpenAI-compatible chat-completions endpoint - switching provider (DeepSeek,
         # Groq, ...) is a change to these three settings only. Scanned docs need a model that
@@ -135,7 +141,7 @@ bridge:
         name: ${BRIDGE_MEDIA_CLASSIFIER_MODEL:gemini-3.8-flash}
         api-key: ${BRIDGE_MEDIA_CLASSIFIER_API_KEY:}
         # Bump on every prompt change in ModelMediaClassifier, so results stay comparable.
-        prompt-version: v1
+        prompt-version: v2
         # Thinking models take ~20s per call - keep well above that.
         timeout: 60s
     zoom:

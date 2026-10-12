@@ -3,6 +3,7 @@ package com.rnd.bridge.media.classification;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.rnd.bridge.media.classification.document.DocumentScan;
 import com.rnd.bridge.media.meeting.MeetingMetadata;
 import com.rnd.bridge.raw.model.Classification;
 import com.rnd.bridge.raw.model.ClassifierInfo;
@@ -19,6 +20,7 @@ import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.time.Duration;
 import java.util.Arrays;
+import java.util.List;
 import java.util.Optional;
 import java.util.function.Function;
 import java.util.stream.Collectors;
@@ -30,13 +32,18 @@ import org.springframework.stereotype.Component;
 /**
  * Asks a chat model to triage one item as a whole - category, file quality, sensitivity - and
  * turns its reply into a {@link Classification}. Meetings are judged from their transcript and
- * topic (never the audio, never participant names); scanned docs from their first page image.
+ * topic (never the audio, never participant names); scanned docs from the content pages
+ * DocumentScanner picked (the first non-blank ones, up to documents.pages-to-send).
  * <p>
  * A meeting with no spoken transcript text is never sent: the transcript failing is not evidence
  * the meeting was empty, and a topic alone is too thin to risk an EXCLUDED on - such a meeting
- * stays unclassified (INCLUDED). A multi-page document is judged from page 1 only: the document
+ * stays unclassified (INCLUDED). A document is judged from its first content pages only: the
  * type is almost always evident there (RVL-CDIP itself labels documents by their first page),
  * and sending every page would multiply cost for little gain.
+ * <p>
+ * The model only ever sees non-blank pages, so a BLANK verdict from it contradicts what was
+ * measured locally - it's recorded as OTHER instead, so a document with content can never be
+ * EXCLUDED as blank. BLANK is decided by the rules alone.
  * <p>
  * The prompt holds the model to Bridge's boundary: it must not extract tasks, people, dates,
  * owners or priority - that is Mind's (and Chain's) job. The reply is a flat JSON object, simpler
@@ -89,10 +96,12 @@ public class ModelMediaClassifier {
 
     private static final String DOCUMENT_PROMPT = SHARED_RULES + """
 
-            The item is a scanned document, given as an image of its first page.
+            The item is a scanned document, given as images of its first non-blank pages.
             categories: %s.
-              BLANK: an empty page. OTHER: none of the above fits.
-            """.formatted(Arrays.stream(DocumentCategory.values()).map(Enum::name)
+              OTHER: none of the above fits.
+            """.formatted(Arrays.stream(DocumentCategory.values())
+                    .filter(category -> category != DocumentCategory.BLANK)
+                    .map(Enum::name)
                     .collect(Collectors.joining(", ")));
 
     private final ChatCompletionClient chatClient;
@@ -114,20 +123,32 @@ public class ModelMediaClassifier {
             return Optional.empty();
         }
         String topic = input.metadata() == null ? null : input.metadata().topic();
-        String reply = chatClient.complete(MEETING_PROMPT, describeMeeting(input.metadata(), topic, spoken), null);
+        String reply = chatClient.complete(MEETING_PROMPT, describeMeeting(input.metadata(), topic, spoken), List.of());
         return Optional.of(parse(reply, MeetingCategory::valueOf, MeetingCategory.OTHER));
     }
 
-    /** Empty when the file isn't a decodable image (e.g. a PDF) - those aren't sent to the model. */
-    public Optional<Classification> classifyDocument(DocumentClassificationInput input) {
-        ClassificationRules.DecodedDocument document = ClassificationRules.decode(input.content());
-        if (document == null) {
-            log.info("{} is not a decodable image - skipping model classification", input.filename());
+    /** Empty unless the scan found content pages - nothing else is ever sent to the model. */
+    public Optional<Classification> classifyDocument(DocumentScan scan) {
+        if (scan.outcome() != DocumentScan.Outcome.CONTENT_FOUND) {
             return Optional.empty();
         }
-        String userText = "Classify this scanned document. Showing page 1 of " + document.pageCount() + ".";
-        String reply = chatClient.complete(DOCUMENT_PROMPT, userText, toPng(document.firstPage()));
-        return Optional.of(parse(reply, DocumentCategory::valueOf, DocumentCategory.OTHER));
+        List<Integer> pageNumbers = scan.contentPages().stream().map(DocumentScan.ContentPage::pageNumber).toList();
+        String userText = "Classify this scanned document (" + scan.pageCount() + " page(s) in total). "
+                + "Attached: page(s) " + pageNumbers + ".";
+        List<byte[]> images = scan.contentPages().stream().map(page -> toPng(page.image())).toList();
+        Classification verdict = parse(chatClient.complete(DOCUMENT_PROMPT, userText, images),
+                DocumentCategory::valueOf, DocumentCategory.OTHER);
+        return Optional.of(withoutBlankVerdict(verdict));
+    }
+
+    private static Classification withoutBlankVerdict(Classification verdict) {
+        if (verdict.category().value() != DocumentCategory.BLANK) {
+            return verdict;
+        }
+        log.info("Model called a page with content BLANK - recording it as OTHER");
+        return new Classification(verdict.decidedBy(),
+                new Label<>(DocumentCategory.OTHER, verdict.category().confidence()),
+                verdict.quality(), verdict.sensitivity(), verdict.reason(), verdict.classifier());
     }
 
     /** Topic, length, headcount and transcript - deliberately no participant names or emails. */

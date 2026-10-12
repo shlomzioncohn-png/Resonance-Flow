@@ -2,6 +2,7 @@ package com.rnd.bridge.media.classification;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.rnd.bridge.media.classification.document.DocumentScan;
 import com.rnd.bridge.media.meeting.MeetingMetadata;
 import com.rnd.bridge.raw.model.Classification;
 import com.rnd.bridge.raw.model.ClassifierInfo;
@@ -11,6 +12,8 @@ import com.rnd.bridge.raw.model.MeetingCategory;
 import java.time.Instant;
 import java.util.List;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.EnumSource;
 
 class ClassificationRulesTest {
 
@@ -58,30 +61,24 @@ class ClassificationRulesTest {
     }
 
     @Test
-    void blankPageIsBlank() {
-        Classification result = rules.classifyDocument(
-                new DocumentClassificationInput(ClassificationTestSupport.blankPagePng(), "scan.png")).orElseThrow();
+    void documentWhosePagesWereAllCheckedAndBlankIsBlank() {
+        DocumentScan scan = new DocumentScan(DocumentScan.Outcome.ALL_BLANK, 3, 3, List.of());
+
+        Classification result = rules.classifyDocument(scan).orElseThrow();
 
         assertThat(result.category().value()).isEqualTo(DocumentCategory.BLANK);
         assertThat(result.decidedBy()).isEqualTo(DecidedBy.RULE);
+        assertThat(result.reason()).isEqualTo("all 3 pages have no visible content");
     }
 
-    @Test
-    void pageWithContentIsLeftForTheModel() {
-        assertThat(rules.classifyDocument(
-                new DocumentClassificationInput(ClassificationTestSupport.textPagePng(), "scan.png"))).isEmpty();
-    }
+    @ParameterizedTest
+    @EnumSource(value = DocumentScan.Outcome.class, names = "ALL_BLANK", mode = EnumSource.Mode.EXCLUDE)
+    void everyOtherScanOutcomeIsLeftUndecided(DocumentScan.Outcome outcome) {
+        DocumentScan scan = outcome == DocumentScan.Outcome.CONTENT_FOUND
+                ? ClassificationTestSupport.contentScan(4, 2)
+                : new DocumentScan(outcome, 10, 5, List.of());
 
-    @Test
-    void multiPageDocumentWithBlankCoverPageIsNotBlank() {
-        assertThat(rules.classifyDocument(
-                new DocumentClassificationInput(ClassificationTestSupport.tiffWithBlankCoverPage(), "scan.tif"))).isEmpty();
-    }
-
-    @Test
-    void nonImageDocumentIsLeftUndecided() {
-        assertThat(rules.classifyDocument(
-                new DocumentClassificationInput("%PDF-1.7 not an image".getBytes(), "scan.pdf"))).isEmpty();
+        assertThat(rules.classifyDocument(scan)).isEmpty();
     }
 
     private static MeetingMetadata metadata(Instant startedAt, Instant endedAt) {
