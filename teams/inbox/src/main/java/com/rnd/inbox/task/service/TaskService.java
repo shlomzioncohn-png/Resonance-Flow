@@ -61,19 +61,7 @@ import java.util.UUID;
 @Service
 public class TaskService {
 
-    // Request name -> Task property. Both spellings of a two-word name are accepted: the JSON
-    // this API returns is snake_case, the Task properties are camelCase.
     private static final Map<String, String> SORTABLE_PROPERTIES = sortableProperties();
-
-    private static Map<String, String> sortableProperties() {
-        Map<String, String> properties = new LinkedHashMap<>();
-        properties.put("deadline", "deadline");
-        properties.put("priorityScore", "priorityScore");
-        properties.put("priority_score", "priorityScore");
-        properties.put("createdAt", "createdAt");
-        properties.put("created_at", "createdAt");
-        return properties;
-    }
 
     private static final Map<TaskStatus, Set<TaskStatus>> FORBIDDEN_STATUS_TRANSITIONS = Map.of(
             TaskStatus.DONE, Set.copyOf(EnumSet.complementOf(EnumSet.of(TaskStatus.DONE))));
@@ -120,8 +108,6 @@ public class TaskService {
         this.taskRestMapper = taskRestMapper;
     }
 
-    // ---- REST-facing methods (TaskController) ----
-
     @Transactional
     public TaskResponseDto createTaskFromRequest(TaskCreateRequestDto request, UUID actorId) {
         User actor = findActorOrThrow(actorId);
@@ -151,9 +137,6 @@ public class TaskService {
         validateFilter(filter);
         Pageable sortedPageable = withSupportedSort(pageable);
         User actor = findActorOrThrow(actorId);
-        // bypassTenantScope comes only from this explicit role check - never from tenantId
-        // possibly being null - so a bug that left tenantId null for a non-admin fails closed
-        // (matches nothing) instead of silently granting cross-tenant access.
         boolean bypassTenantScope;
         UUID tenantId;
         switch (taskAuthorization.scopeOf(actor)) {
@@ -195,63 +178,6 @@ public class TaskService {
         return PageResponseDto.from(tasks.map(taskRestMapper::toResponseDto));
     }
 
-    // Sorting is a closed list, not "any Task property": every sortable column is a query the
-    // database has to serve at scale, and an arbitrary one (title, description) means sorting
-    // every matching row on each request. Adding a property here is a decision to support it -
-    // check its plan with EXPLAIN first, and give it an index if it needs one.
-    //
-    // With no sort requested the list is newest first (served by idx_tasks_tenant_created_at_id).
-    //
-    // The id is always appended as the last sort key. Without a unique tie-breaker the order of
-    // rows that share a value is undefined - every task with no deadline, every task of one bulk
-    // import - and paging through an undefined order can repeat a task on two pages or skip one.
-    // It takes the direction of the key before it, so an index on (that key, id) can serve the
-    // whole order in either direction.
-    private Pageable withSupportedSort(Pageable pageable) {
-        if (pageable.isUnpaged()) {
-            return pageable;
-        }
-        List<Sort.Order> orders = new ArrayList<>();
-        for (Sort.Order requested : pageable.getSort()) {
-            String property = SORTABLE_PROPERTIES.get(requested.getProperty());
-            if (property == null) {
-                throw new InvalidTaskSortException(requested.getProperty(), SORTABLE_PROPERTIES.keySet());
-            }
-            orders.add(new Sort.Order(requested.getDirection(), property));
-        }
-        if (orders.isEmpty()) {
-            orders.add(Sort.Order.desc("createdAt"));
-        }
-        orders.add(new Sort.Order(orders.get(orders.size() - 1).getDirection(), "id"));
-        return PageRequest.of(pageable.getPageNumber(), pageable.getPageSize(), Sort.by(orders));
-    }
-
-    // Either end of the deadline range may be given alone (open-ended range); when both are given
-    // deadlineTo must not be before deadlineFrom. noDeadline=true is mutually exclusive with the
-    // range (asking for "no deadline at all" and "deadline within this range" in the same
-    // request is self-contradictory).
-    private void validateFilter(TaskFilterDto filter) {
-        boolean hasFrom = filter.getDeadlineFrom() != null;
-        boolean hasTo = filter.getDeadlineTo() != null;
-        if (hasFrom && hasTo && filter.getDeadlineTo().isBefore(filter.getDeadlineFrom())) {
-            throw new InvalidTaskFilterException("deadlineTo must not be before deadlineFrom");
-        }
-        if (Boolean.TRUE.equals(filter.getNoDeadline()) && (hasFrom || hasTo)) {
-            throw new InvalidTaskFilterException("noDeadline cannot be combined with deadlineFrom/deadlineTo");
-        }
-    }
-
-    private void validateStatusTransition(Task task, TaskStatus newStatus, Instant snoozedUntil) {
-        if (newStatus == TaskStatus.SNOOZED && snoozedUntil == null) {
-            throw new InvalidTaskStatusTransitionException("snoozedUntil is required when status is SNOOZED");
-        }
-        Set<TaskStatus> forbidden = FORBIDDEN_STATUS_TRANSITIONS.getOrDefault(task.getStatus(), Set.of());
-        if (forbidden.contains(newStatus)) {
-            throw new InvalidTaskStatusTransitionException(
-                    "A task in status " + task.getStatus() + " cannot move to " + newStatus);
-        }
-    }
-
     @Transactional
     public TaskResponseDto updateTaskFromRequest(UUID id, TaskUpdateRequestDto request, UUID actorId) {
         User actor = findActorOrThrow(actorId);
@@ -286,8 +212,6 @@ public class TaskService {
         return taskRestMapper.toResponseDto(saved);
     }
 
-    // ---- Kafka ingestion / scheduling methods (TaskIngestionService, SchedulingConsumer) ----
-
     @Transactional
     public Task createTask(Task incoming, UUID correlationId) {
         return createTask(incoming, List.of(), correlationId);
@@ -303,22 +227,10 @@ public class TaskService {
         return persistNewTask(incoming, assignments, correlationId, incoming.getCreatedBy());
     }
 
-    private Task persistNewTask(Task task, List<Assignment> assignments, UUID correlationId, User actor) {
-        Task saved = insertTask(task);
-
-        for (Assignment assignment : assignments) {
-            assignment.setTask(saved);
-            assignmentRepository.save(assignment);
-        }
-
-        outboxEventRepository.save(buildOutboxEvent(EventType.TASK_CREATED, TaskCreatedPayload.from(saved), saved, correlationId));
-        // Assignments are only ever written here, together with the task, so they are audited
-        // as part of the creation row instead of one row each.
-        Map<String, Object> snapshot = auditSnapshot(saved);
-        snapshot.put("assignments", assignments.stream().map(this::assignmentSnapshot).toList());
-        auditService.createAuditLog("TASK_CREATED", "Task", saved.getId(), saved.getTenant(), actor,
-                snapshot, correlationId);
-        return saved;
+    @Transactional(readOnly = true)
+    public Optional<Task> findExisting(Task incoming) {
+        return taskRepository.findByTenant_IdAndSourceTypeAndSourceRef(
+                incoming.getTenant().getId(), incoming.getSourceType(), incoming.getSourceRef());
     }
 
     @Transactional
@@ -329,22 +241,6 @@ public class TaskService {
         taskMapper.applyUpdate(existing, changes);
 
         return persistUpdatedTask(existing, before, correlationId, null, "TASK_UPDATED");
-    }
-
-    // Shared by the Kafka ingestion/scheduling path (updateTask above - no actor) and both REST
-    // update paths (TaskController - plain update and status update, distinguished only by the
-    // audit action label; both change a Task and publish the same TASK_UPDATED outbox event).
-    // before is the audit snapshot the caller took while the task still held its old values -
-    // every caller changes the Task object in place before getting here, so it cannot be
-    // rebuilt at this point.
-    private Task persistUpdatedTask(Task task, Map<String, Object> before, UUID correlationId, User actor,
-                                    String auditAction) {
-        Task saved = taskRepository.save(task);
-
-        outboxEventRepository.save(buildOutboxEvent(EventType.TASK_UPDATED, TaskUpdatedPayload.from(saved), saved, correlationId));
-        auditService.createUpdateAuditLog(auditAction, "Task", saved.getId(), saved.getTenant(), actor,
-                before, auditSnapshot(saved), correlationId);
-        return saved;
     }
 
     @Transactional
@@ -367,12 +263,6 @@ public class TaskService {
         return saved;
     }
 
-    @Transactional(readOnly = true)
-    public Optional<Task> findExisting(Task incoming) {
-        return taskRepository.findByTenant_IdAndSourceTypeAndSourceRef(
-                incoming.getTenant().getId(), incoming.getSourceType(), incoming.getSourceRef());
-    }
-
     public Task applySchedulingUpdate(SchedulingEventDto event) {
         return applySchedulingUpdate(
                 UUID.fromString(event.getTaskId()),
@@ -384,8 +274,6 @@ public class TaskService {
     @Transactional
     public Task applySchedulingUpdate(UUID taskId, boolean available, Float priorityScore, UUID correlationId) {
         Task task = findTaskOrThrow(taskId);
-        // Taken before the setters below: they change this same Task object in place, so the
-        // previous values are gone once they run.
         Map<String, Object> before = schedulingSnapshot(task);
 
         task.setAvailable(available);
@@ -397,14 +285,80 @@ public class TaskService {
         Task saved = taskRepository.saveAndFlush(task);
 
         outboxEventRepository.save(buildOutboxEvent(EventType.TASK_UPDATED, TaskUpdatedPayload.from(saved), saved, correlationId));
-        // No actor: this is Chain's own calculation, not something a user did.
         auditService.createUpdateAuditLog("TASK_SCHEDULING_UPDATED", "Task", saved.getId(), saved.getTenant(),
                 null, before, schedulingSnapshot(saved), correlationId);
         return saved;
     }
 
+    private Task persistNewTask(Task task, List<Assignment> assignments, UUID correlationId, User actor) {
+        Task saved = insertTask(task);
+
+        for (Assignment assignment : assignments) {
+            assignment.setTask(saved);
+            assignmentRepository.save(assignment);
+        }
+
+        outboxEventRepository.save(buildOutboxEvent(EventType.TASK_CREATED, TaskCreatedPayload.from(saved), saved, correlationId));
+        Map<String, Object> snapshot = auditSnapshot(saved);
+        snapshot.put("assignments", assignments.stream().map(this::assignmentSnapshot).toList());
+        auditService.createAuditLog("TASK_CREATED", "Task", saved.getId(), saved.getTenant(), actor,
+                snapshot, correlationId);
+        return saved;
+    }
+
     private Task insertTask(Task incoming) {
         return taskRepository.saveAndFlush(incoming);
+    }
+
+    private Task persistUpdatedTask(Task task, Map<String, Object> before, UUID correlationId, User actor,
+                                    String auditAction) {
+        Task saved = taskRepository.save(task);
+
+        outboxEventRepository.save(buildOutboxEvent(EventType.TASK_UPDATED, TaskUpdatedPayload.from(saved), saved, correlationId));
+        auditService.createUpdateAuditLog(auditAction, "Task", saved.getId(), saved.getTenant(), actor,
+                before, auditSnapshot(saved), correlationId);
+        return saved;
+    }
+
+    private void validateFilter(TaskFilterDto filter) {
+        boolean hasFrom = filter.getDeadlineFrom() != null;
+        boolean hasTo = filter.getDeadlineTo() != null;
+        if (hasFrom && hasTo && filter.getDeadlineTo().isBefore(filter.getDeadlineFrom())) {
+            throw new InvalidTaskFilterException("deadlineTo must not be before deadlineFrom");
+        }
+        if (Boolean.TRUE.equals(filter.getNoDeadline()) && (hasFrom || hasTo)) {
+            throw new InvalidTaskFilterException("noDeadline cannot be combined with deadlineFrom/deadlineTo");
+        }
+    }
+
+    private Pageable withSupportedSort(Pageable pageable) {
+        if (pageable.isUnpaged()) {
+            return pageable;
+        }
+        List<Sort.Order> orders = new ArrayList<>();
+        for (Sort.Order requested : pageable.getSort()) {
+            String property = SORTABLE_PROPERTIES.get(requested.getProperty());
+            if (property == null) {
+                throw new InvalidTaskSortException(requested.getProperty(), SORTABLE_PROPERTIES.keySet());
+            }
+            orders.add(new Sort.Order(requested.getDirection(), property));
+        }
+        if (orders.isEmpty()) {
+            orders.add(Sort.Order.desc("createdAt"));
+        }
+        orders.add(new Sort.Order(orders.get(orders.size() - 1).getDirection(), "id"));
+        return PageRequest.of(pageable.getPageNumber(), pageable.getPageSize(), Sort.by(orders));
+    }
+
+    private void validateStatusTransition(Task task, TaskStatus newStatus, Instant snoozedUntil) {
+        if (newStatus == TaskStatus.SNOOZED && snoozedUntil == null) {
+            throw new InvalidTaskStatusTransitionException("snoozedUntil is required when status is SNOOZED");
+        }
+        Set<TaskStatus> forbidden = FORBIDDEN_STATUS_TRANSITIONS.getOrDefault(task.getStatus(), Set.of());
+        if (forbidden.contains(newStatus)) {
+            throw new InvalidTaskStatusTransitionException(
+                    "A task in status " + task.getStatus() + " cannot move to " + newStatus);
+        }
     }
 
     private Task findTaskOrThrow(UUID id) {
@@ -422,8 +376,6 @@ public class TaskService {
                 .orElseThrow(() -> new UnauthenticatedException("Actor " + actorId + " does not exist"));
     }
 
-    // rawId == null means "no project" - returns null unconditionally in that case, whether
-    // that's because create omitted it or update sent an explicit null to clear it.
     private Project resolveProjectInTenant(String rawId, Tenant tenant) {
         if (rawId == null) {
             return null;
@@ -437,7 +389,6 @@ public class TaskService {
         return project;
     }
 
-    // Same null-passthrough convention as resolveProjectInTenant above.
     private User resolveUserInTenant(String rawId, Tenant tenant) {
         if (rawId == null) {
             return null;
@@ -463,26 +414,6 @@ public class TaskService {
                 Instant.now(clock));
     }
 
-    private Map<String, Object> assignmentSnapshot(Assignment assignment) {
-        Map<String, Object> snapshot = new LinkedHashMap<>();
-        snapshot.put("userId", assignment.getUser() != null ? assignment.getUser().getId() : null);
-        snapshot.put("teamId", assignment.getTeam() != null ? assignment.getTeam().getId() : null);
-        snapshot.put("assignmentRole", assignment.getAssignmentRole().name());
-        snapshot.put("assignedById",
-                assignment.getAssignedBy() != null ? assignment.getAssignedBy().getId() : null);
-        return snapshot;
-    }
-
-    private Map<String, Object> schedulingSnapshot(Task task) {
-        Map<String, Object> snapshot = new LinkedHashMap<>();
-        snapshot.put("isAvailable", task.isAvailable());
-        snapshot.put("priorityScore", task.getPriorityScore());
-        return snapshot;
-    }
-
-    // Every field an update path can change is here (plus sourceType/sourceRef, which identify
-    // the task). createUpdateAuditLog writes no row when the snapshot is unchanged, so a field
-    // left out of it would make an update of only that field go unaudited.
     private Map<String, Object> auditSnapshot(Task task) {
         Map<String, Object> snapshot = new LinkedHashMap<>();
         snapshot.put("title", task.getTitle());
@@ -504,5 +435,32 @@ public class TaskService {
                 task.getSuggestedOwnerUser() != null ? task.getSuggestedOwnerUser().getId() : null);
         snapshot.put("suggestedOwnerConfidence", task.getSuggestedOwnerConfidence());
         return snapshot;
+    }
+
+    private Map<String, Object> assignmentSnapshot(Assignment assignment) {
+        Map<String, Object> snapshot = new LinkedHashMap<>();
+        snapshot.put("userId", assignment.getUser() != null ? assignment.getUser().getId() : null);
+        snapshot.put("teamId", assignment.getTeam() != null ? assignment.getTeam().getId() : null);
+        snapshot.put("assignmentRole", assignment.getAssignmentRole().name());
+        snapshot.put("assignedById",
+                assignment.getAssignedBy() != null ? assignment.getAssignedBy().getId() : null);
+        return snapshot;
+    }
+
+    private Map<String, Object> schedulingSnapshot(Task task) {
+        Map<String, Object> snapshot = new LinkedHashMap<>();
+        snapshot.put("isAvailable", task.isAvailable());
+        snapshot.put("priorityScore", task.getPriorityScore());
+        return snapshot;
+    }
+
+    private static Map<String, String> sortableProperties() {
+        Map<String, String> properties = new LinkedHashMap<>();
+        properties.put("deadline", "deadline");
+        properties.put("priorityScore", "priorityScore");
+        properties.put("priority_score", "priorityScore");
+        properties.put("createdAt", "createdAt");
+        properties.put("created_at", "createdAt");
+        return properties;
     }
 }
