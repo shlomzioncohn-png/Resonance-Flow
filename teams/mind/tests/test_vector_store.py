@@ -20,7 +20,8 @@ from mind.embeddings.pgvector_store import PgVectorStore
 
 async def _create_test_table(settings: VectorStoreSettings) -> None:
     # The real table is created by `alembic upgrade head`; this suite's
-    # dedicated test table isn't covered by that, so it sets itself up here.
+    # dedicated test table isn't covered by that, so it sets itself up here
+    # -- matching migrations/versions/0003 (is_completed, content_hash).
     table = sql.Identifier(settings.table)
     async with await psycopg.AsyncConnection.connect(
         str(settings.dsn.get_secret_value()), autocommit=True
@@ -29,7 +30,8 @@ async def _create_test_table(settings: VectorStoreSettings) -> None:
         await conn.execute(
             sql.SQL(
                 "CREATE TABLE IF NOT EXISTS {table} "
-                "(task_id TEXT PRIMARY KEY, embedding VECTOR({dim}) NOT NULL);"
+                "(task_id TEXT PRIMARY KEY, embedding VECTOR({dim}) NOT NULL, "
+                "is_completed BOOLEAN NOT NULL DEFAULT FALSE, content_hash TEXT);"
             ).format(table=table, dim=sql.Literal(EMBEDDING_DIM))
         )
         await conn.execute(
@@ -159,6 +161,81 @@ async def test_full_cycle_embed_upsert_search(store):
     assert results[0].similarity == pytest.approx(1.0, abs=1e-6)
 
 
+async def test_upsert_if_absent_inserts_a_new_vector(store):
+    """upsert_if_absent() on an unknown task_id inserts and returns True."""
+    task_id = f"test-{uuid.uuid4()}"
+    vec = embed("Draft the quarterly roadmap review")
+    inserted = await store.upsert_if_absent(task_id, vec)
+    assert inserted is True
+    assert task_id in [r.task_id for r in await store.search(vec, k=5)]
+
+
+async def test_upsert_if_absent_does_not_overwrite_an_existing_vector(store):
+    """upsert_if_absent() on an existing task_id is a no-op (False)."""
+    task_id = f"test-{uuid.uuid4()}"
+    original_vec = embed("Original task description")
+    await store.upsert(task_id, original_vec)
+
+    other_vec = embed("A completely different description")
+    inserted = await store.upsert_if_absent(task_id, other_vec)
+    assert inserted is False
+
+    results = await store.search(original_vec, k=1)
+    assert results[0].task_id == task_id
+    assert results[0].similarity == pytest.approx(1.0, abs=1e-6)
+
+
+async def test_mark_completed_marks_an_existing_task(store):
+    """mark_completed() flips is_completed on the row search() returns."""
+    task_id = f"test-{uuid.uuid4()}"
+    vec = embed("Ship the release notes")
+    await store.upsert(task_id, vec)
+
+    marked = await store.mark_completed(task_id)
+    assert marked is True
+
+    results = await store.search(vec, k=1)
+    assert results[0].task_id == task_id
+    assert results[0].is_completed is True
+
+
+async def test_mark_completed_is_a_noop_for_an_unknown_task_id(store):
+    """Unknown task_id returns False, not an error."""
+    marked = await store.mark_completed(f"test-{uuid.uuid4()}")
+    assert marked is False
+
+
+async def test_mark_incomplete_resets_an_existing_task(store):
+    """mark_incomplete() flips is_completed back off (e.g. a reopened task)."""
+    task_id = f"test-{uuid.uuid4()}"
+    vec = embed("Ship the release notes")
+    await store.upsert(task_id, vec)
+    await store.mark_completed(task_id)
+
+    marked = await store.mark_incomplete(task_id)
+    assert marked is True
+
+    results = await store.search(vec, k=1)
+    assert results[0].task_id == task_id
+    assert results[0].is_completed is False
+
+
+async def test_mark_incomplete_is_a_noop_for_an_unknown_task_id(store):
+    """Unknown task_id returns False, not an error."""
+    marked = await store.mark_incomplete(f"test-{uuid.uuid4()}")
+    assert marked is False
+
+
+async def test_get_content_hash_round_trips_through_upsert(store):
+    task_id = f"test-{uuid.uuid4()}"
+    await store.upsert(task_id, embed("Ship the release notes"), content_hash="abc123")
+    assert await store.get_content_hash(task_id) == "abc123"
+
+
+async def test_get_content_hash_is_none_for_an_unknown_task_id(store):
+    assert await store.get_content_hash(f"test-{uuid.uuid4()}") is None
+
+
 async def test_delete_removes_a_stored_vector(store):
     """delete() alone: the vector stops being findable afterward."""
     task_id = f"test-{uuid.uuid4()}"
@@ -228,7 +305,7 @@ async def test_search_issues_set_local_ef_search_before_the_select():
     store._ready = True  # skip _ensure_ready(): no real connection needed
 
     mock_cursor = AsyncMock()
-    mock_cursor.fetchall.return_value = [("task-1", 0.9)]
+    mock_cursor.fetchall.return_value = [("task-1", 0.9, False)]
 
     mock_conn = MagicMock()
     mock_conn.cursor = MagicMock(side_effect=lambda: _fake_async_ctx(mock_cursor))

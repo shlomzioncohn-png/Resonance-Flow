@@ -58,16 +58,8 @@ if "MIND_VECTOR_STORE__DSN" in os.environ:
         _conn.execute("CREATE EXTENSION IF NOT EXISTS vector;")
     subprocess.run(["alembic", "upgrade", "head"], cwd=_ROOT, check=True)
 
-_MESSAGING = _ROOT / "src" / "mind" / "messaging"
-
-if not (_MESSAGING / "mind_task_created_pb2.py").exists():
-    subprocess.run(
-        [
-            "python", "-m", "grpc_tools.protoc",
-            "--proto_path", str(_ROOT / "proto"),
-            "--python_out", str(_MESSAGING),
-            str(_ROOT / "proto" / "mind-task-created.proto"),
-            str(_ROOT / "proto" / "mind-task-dependencies.proto"),
-        ],
-        check=True,
-    )
+# Always regenerate (not "if missing") -- a proto edit with the old pb2
+# still on disk would otherwise make tests run against stale generated
+# code. See scripts/gen_proto.py -- the one place that knows the actual
+# protoc invocations, also used by `make proto` and the Dockerfile.
+subprocess.run(["python", str(_ROOT / "scripts" / "gen_proto.py")], check=True)
