@@ -97,6 +97,9 @@ spring:
         # never by a producer
         auto.register.schemas: false
         use.latest.version: true
+        # imports (e.g. task-created-event.proto) work as-is: Relay registers each imported
+        # file under its own file name, which is where the default reference strategy looks
+        # - don't set reference.subject.name.strategy
 
 your:
   kafka:

@@ -1,0 +1,52 @@
+{
+  "scenario_id": "salesperson_dead_rfp_vs_live_signing_round",
+  "persona": {
+    "role": "Salesperson",
+    "department": null
+  },
+  "context": {
+    "free_time_minutes": 60,
+    "current_datetime": "2026-10-20T10:00:00",
+    "time_horizon": "this_week",
+    "constraints": []
+  },
+  "tasks": [
+    {
+      "task_id": "task_rfp",
+      "title": "Submit final pricing in Northwind's RFP portal",
+      "description": "Northwind's RFP portal closes Thursday at 12:00, and your final pricing is the last open item; finance approved the pricing last week and the upload takes a few minutes. Northwind is your second-largest open opportunity this quarter by value. Yesterday your champion told you procurement has already signed with a competitor and that the RFP is being kept open only for audit purposes.",
+      "deadline": "2026-10-22T12:00:00",
+      "effort_estimate": 40,
+      "tier": "tactical",
+      "blocked": false,
+      "parent_task_id": null
+    },
+    {
+      "task_id": "task_signing",
+      "title": "Assemble and send Lakeshore the revised statement of work and security answers",
+      "description": "Lakeshore's CFO said that a revised statement of work and security questionnaire reaching her by Friday at 09:00 go into Friday's signing round; the next round is not until January, after the quarter closes. Legal on both sides has cleared the terms. The remaining security answers still have to be written and the package put together.",
+      "deadline": "2026-10-23T09:00:00",
+      "effort_estimate": 35,
+      "tier": "tactical",
+      "blocked": false,
+      "parent_task_id": null
+    },
+    {
+      "task_id": "task_qbr",
+      "title": "Prepare Orion Systems' quarterly-review slides",
+      "description": "Your manager asked for the Orion Systems quarterly-review slides by 09:00 tomorrow so she can read them before they go to the customer ahead of Thursday's review. Orion renewed in the spring, and the usage and ticket charts are already generated.",
+      "deadline": "2026-10-21T09:00:00",
+      "effort_estimate": 45,
+      "tier": "tactical",
+      "blocked": false,
+      "parent_task_id": null
+    }
+  ],
+  "expected_top_task_id": "task_signing",
+  "expected_reason": "task_signing has a hard Friday cut-off for a live signing round that otherwise slips the deal out of the quarter; task_rfp's Thursday deadline is nearer, but the deal is already lost to a competitor and the RFP is open only for audit purposes, and task_qbr is a routine review of a healthy account.",
+  "source": {
+    "type": "synthetic",
+    "source_detail": null
+  },
+  "team_lead_approved": false
+}

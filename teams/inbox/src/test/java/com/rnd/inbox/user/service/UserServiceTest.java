@@ -85,6 +85,7 @@ class UserServiceTest {
         user = new User();
         user.setId(userId);
         user.setTenant(tenant);
+        user.setRole(UserRole.EMPLOYEE);
         user.setStatus(UserStatus.ACTIVE);
 
         actorId = UUID.randomUUID();
@@ -233,6 +234,53 @@ class UserServiceTest {
                 .isInstanceOf(ForbiddenActionException.class);
 
         verify(userRepository, never()).save(any());
+    }
+
+    @Test
+    void createUser_whenTenantAdminAssignsSystemAdminRole_throwsForbiddenActionException() {
+        stubActorFound();
+        UserCreateRequestDto request = createRequest("yehudit@acme.com", "yehudit");
+        request.setRole("SYSTEM_ADMIN");
+
+        when(tenantRepository.findById(tenantId)).thenReturn(Optional.of(tenant));
+
+        assertThatThrownBy(() -> userService.createUser(request, actorId))
+                .isInstanceOf(ForbiddenActionException.class);
+
+        verify(userMapper, never()).toEntity(any(), any());
+        verify(userRepository, never()).save(any());
+        verify(auditService, never()).createAuditLog(any(), any(), any(), any(), any(), any(), any());
+    }
+
+    @Test
+    void createUser_whenTenantAdminAssignsTenantAdminRole_saves() {
+        stubActorFound();
+        UserCreateRequestDto request = createRequest("yehudit@acme.com", "yehudit");
+        request.setRole("TENANT_ADMIN");
+
+        when(tenantRepository.findById(tenantId)).thenReturn(Optional.of(tenant));
+        when(userMapper.toEntity(request, tenant)).thenReturn(user);
+        when(userRepository.save(user)).thenReturn(user);
+
+        userService.createUser(request, actorId);
+
+        verify(userRepository).save(user);
+    }
+
+    @Test
+    void createUser_whenSystemAdminAssignsSystemAdminRole_saves() {
+        actor.setRole(UserRole.SYSTEM_ADMIN);
+        stubActorFound();
+        UserCreateRequestDto request = createRequest("yehudit@acme.com", "yehudit");
+        request.setRole("SYSTEM_ADMIN");
+
+        when(tenantRepository.findById(tenantId)).thenReturn(Optional.of(tenant));
+        when(userMapper.toEntity(request, tenant)).thenReturn(user);
+        when(userRepository.save(user)).thenReturn(user);
+
+        userService.createUser(request, actorId);
+
+        verify(userRepository).save(user);
     }
 
     @Test
@@ -605,6 +653,91 @@ class UserServiceTest {
         userService.updateUser(actorId, request, actorId);
 
         verify(userMapper).applyUpdate(actor, request);
+    }
+
+    @Test
+    void updateUser_whenEmployeeChangesTheirOwnRole_throwsForbiddenActionException() {
+        actor.setRole(UserRole.EMPLOYEE);
+        stubActorFound();
+        UserUpdateRequestDto request = new UserUpdateRequestDto();
+        request.setRole("SYSTEM_ADMIN");
+
+        assertThatThrownBy(() -> userService.updateUser(actorId, request, actorId))
+                .isInstanceOf(ForbiddenActionException.class);
+
+        verify(userMapper, never()).applyUpdate(any(), any());
+        verify(userRepository, never()).save(any());
+    }
+
+    @Test
+    void updateUser_whenEmployeeOmitsRole_updatesTheirOwnProfile() {
+        actor.setRole(UserRole.EMPLOYEE);
+        stubActorFound();
+        UserUpdateRequestDto request = new UserUpdateRequestDto();
+        request.setDisplayName("New Name");
+        when(userRepository.save(actor)).thenReturn(actor);
+
+        userService.updateUser(actorId, request, actorId);
+
+        verify(userMapper).applyUpdate(actor, request);
+    }
+
+    @Test
+    void updateUser_whenTeamLeadChangesRoleOfTeamMember_throwsForbiddenActionException() {
+        actor.setRole(UserRole.TEAM_LEAD);
+        stubActorFound();
+        UserUpdateRequestDto request = new UserUpdateRequestDto();
+        request.setRole("TEAM_LEAD");
+        when(userRepository.findById(userId)).thenReturn(Optional.of(user));
+        when(userRepository.existsInTeamLedBy(userId, actorId)).thenReturn(true);
+
+        assertThatThrownBy(() -> userService.updateUser(userId, request, actorId))
+                .isInstanceOf(ForbiddenActionException.class);
+
+        verify(userMapper, never()).applyUpdate(any(), any());
+        verify(userRepository, never()).save(any());
+    }
+
+    @Test
+    void updateUser_whenTenantAdminPromotesToSystemAdmin_throwsForbiddenActionException() {
+        stubActorFound();
+        UserUpdateRequestDto request = new UserUpdateRequestDto();
+        request.setRole("SYSTEM_ADMIN");
+        when(userRepository.findById(userId)).thenReturn(Optional.of(user));
+
+        assertThatThrownBy(() -> userService.updateUser(userId, request, actorId))
+                .isInstanceOf(ForbiddenActionException.class);
+
+        verify(userMapper, never()).applyUpdate(any(), any());
+        verify(userRepository, never()).save(any());
+    }
+
+    @Test
+    void updateUser_whenTenantAdminDemotesSystemAdmin_throwsForbiddenActionException() {
+        stubActorFound();
+        user.setRole(UserRole.SYSTEM_ADMIN);
+        UserUpdateRequestDto request = new UserUpdateRequestDto();
+        request.setRole("EMPLOYEE");
+        when(userRepository.findById(userId)).thenReturn(Optional.of(user));
+
+        assertThatThrownBy(() -> userService.updateUser(userId, request, actorId))
+                .isInstanceOf(ForbiddenActionException.class);
+
+        verify(userMapper, never()).applyUpdate(any(), any());
+        verify(userRepository, never()).save(any());
+    }
+
+    @Test
+    void updateUser_whenTenantAdminPromotesEmployeeToTeamLead_updates() {
+        stubActorFound();
+        UserUpdateRequestDto request = new UserUpdateRequestDto();
+        request.setRole("TEAM_LEAD");
+        when(userRepository.findById(userId)).thenReturn(Optional.of(user));
+        when(userRepository.save(user)).thenReturn(user);
+
+        userService.updateUser(userId, request, actorId);
+
+        verify(userMapper).applyUpdate(user, request);
     }
 
     @Test

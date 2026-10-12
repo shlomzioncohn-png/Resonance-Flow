@@ -28,6 +28,9 @@ logs/
 # Node (Lens)
 node_modules/
 .next/
+playwright-report/
+test-results/
+.npmrc
 
 # Python (Mind)
 __pycache__/
@@ -37,8 +40,12 @@ venv/
 
 # Env & secrets
 .env
+.idea/workspace.xml
 .env.local
 *.pem
+
+# Documentation
+DOCKER_FULL_STACK.md
 
 # OS
 .DS_Store
@@ -50,4 +57,3 @@ values.local.yaml
 
 # Personal practicum weekly doc, generated locally - not part of the repo
 .claude/skills/practicum-weekly-log/prep-doc.html
-

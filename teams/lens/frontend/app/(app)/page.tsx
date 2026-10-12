@@ -1,13 +1,13 @@
-'use client'
+'use client';
 
-import Box from '@mui/material/Box'
-import Card from '@mui/material/Card'
-import CardActionArea from '@mui/material/CardActionArea'
-import CardContent from '@mui/material/CardContent'
-import Stack from '@mui/material/Stack'
-import Typography from '@mui/material/Typography'
-import Link from 'next/link'
-import PageContainer from '@/components/layout/PageContainer'
+import Box from '@mui/material/Box';
+import Card from '@mui/material/Card';
+import CardActionArea from '@mui/material/CardActionArea';
+import CardContent from '@mui/material/CardContent';
+import Stack from '@mui/material/Stack';
+import Typography from '@mui/material/Typography';
+import Link from 'next/link';
+import PageContainer from '@/components/layout/PageContainer';
 
 const zones = [
   {
@@ -20,7 +20,7 @@ const zones = [
     title: 'Employee overview',
     description: 'Your own workload snapshot and blocked work within the team context.',
   },
-]
+];
 
 export default function DashboardPage() {
   return (
@@ -51,5 +51,5 @@ export default function DashboardPage() {
         </Typography>
       </Box>
     </PageContainer>
-  )
+  );
 }

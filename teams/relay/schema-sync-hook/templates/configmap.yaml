@@ -63,6 +63,10 @@ data:
   register-schema.sh: |
 {{ .Files.Get "files/ci/register-schema.sh" | nindent 4 }}
 
+  # Verbatim copy of teams/relay/ci/_schema-references.sh (sourced by both scripts above).
+  _schema-references.sh: |
+{{ .Files.Get "files/ci/_schema-references.sh" | nindent 4 }}
+
   # One <file>\t<subject> pair per line. NOT configured here — derived from
   # teams/relay/ci/schema-subjects.tsv (copied in as files/schema-subjects.tsv
   # by relay-schema-sync.yaml), the single source of truth shared with the
@@ -86,16 +90,15 @@ metadata:
     {{- include "schema-sync-hook.labels" . | nindent 4 }}
 
 data:
-  {{- /* One .proto can back several subjects (one per topic) - emit each file once, or the key repeats. */}}
-  {{- $seen := dict }}
+  {{- /* A file can back several subjects (one per topic, or a library row) - one key per file. */}}
+  {{- $files := dict }}
   {{- range .Files.Lines "files/schema-subjects.tsv" }}
   {{- $line := trim . }}
   {{- if and $line (not (hasPrefix "#" $line)) }}
-  {{- $file := first (splitList "\t" $line) }}
-  {{- if not (hasKey $seen $file) }}
-  {{- $_ := set $seen $file true }}
+  {{- $_ := set $files (first (splitList "\t" $line)) true }}
+  {{- end }}
+  {{- end }}
+  {{- range $file, $_ := $files }}
   {{ $file }}: |
 {{ $.Files.Get (printf "files/schemas/%s" $file) | nindent 4 }}
-  {{- end }}
-  {{- end }}
   {{- end }}

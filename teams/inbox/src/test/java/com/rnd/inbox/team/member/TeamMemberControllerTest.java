@@ -76,7 +76,7 @@ class TeamMemberControllerTest {
 
         mockMvc.perform(get("/api/v1/teams/{id}/members", teamId).header(ACTOR_HEADER, actorId.toString()))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$[0].userId").value(member.getUserId().toString()));
+                .andExpect(jsonPath("$[0].user_id").value(member.getUserId().toString()));
     }
 
     @Test
@@ -99,7 +99,7 @@ class TeamMemberControllerTest {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(request)))
                 .andExpect(status().isCreated())
-                .andExpect(jsonPath("$.userId").value(userId.toString()));
+                .andExpect(jsonPath("$.user_id").value(userId.toString()));
     }
 
     @Test

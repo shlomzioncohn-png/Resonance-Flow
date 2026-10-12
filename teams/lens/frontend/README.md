@@ -57,7 +57,7 @@ the fast-start version.
   - `typography.ts` — the full type scale (h1–h6, body, caption, etc.).
   - `custom.ts` — tokens MUI has no built-in slot for: a border-radius scale
     (`radius.sm/md/lg/pill`) and named elevation shadows (`elevation.card/
-    raised/overlay`).
+raised/overlay`).
   - `components.ts` — per-component style overrides (`Button`, `Card`,
     `Chip`, `AppBar`, …), global/base styles via `MuiCssBaseline`, and the
     accessibility baseline (see below).
@@ -86,8 +86,8 @@ the fast-start version.
   ```
 - **Workflow-health status** — use `StatusBadge`, not a raw `Chip`:
   ```tsx
-  import StatusBadge from '@/components/ui/StatusBadge'
-  <StatusBadge status="healthy" label="On track" />
+  import StatusBadge from '@/components/ui/StatusBadge';
+  <StatusBadge status="healthy" label="On track" />;
   ```
 - **A style that should apply to every instance of a MUI component** (e.g.
   "buttons are never uppercase") goes in `theme/components.ts`, not repeated
