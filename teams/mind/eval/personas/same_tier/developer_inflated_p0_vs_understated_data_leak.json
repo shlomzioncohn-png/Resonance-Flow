@@ -1,0 +1,52 @@
+{
+  "scenario_id": "developer_inflated_p0_vs_understated_data_leak",
+  "persona": {
+    "role": "Developer",
+    "department": null
+  },
+  "context": {
+    "free_time_minutes": 60,
+    "current_datetime": "2026-10-14T08:30:00",
+    "time_horizon": "this_week",
+    "constraints": []
+  },
+  "tasks": [
+    {
+      "task_id": "task_cache",
+      "title": "Ship the caching change for the search service",
+      "description": "Today's release cut-off for the search-service caching change is 10:00, and the change is reviewed and tested. The release is held because the platform team has to raise the shared cluster's memory quota first, and they have said they cannot do that before tomorrow.",
+      "deadline": "2026-10-14T10:00:00",
+      "effort_estimate": 30,
+      "tier": "operational",
+      "blocked": true,
+      "parent_task_id": null
+    },
+    {
+      "task_id": "task_staging",
+      "title": "[P0] Staging health dashboard is red",
+      "description": "The alert template tags every staging failure as P0 and pages the on-call lead if nobody acknowledges it by 11:00 today. The dashboard has been red since last night's deploy, and the failing check is the payment-gateway health probe that three teams use to decide whether to promote a build. It fires only in the staging environment; no production traffic, customer data or release is affected, and the production probe has stayed green.",
+      "deadline": "2026-10-14T11:00:00",
+      "effort_estimate": 20,
+      "tier": "operational",
+      "blocked": false,
+      "parent_task_id": null
+    },
+    {
+      "task_id": "task_leak",
+      "title": "Minor: invoice PDFs occasionally show the wrong account name",
+      "description": "Support filed this ticket under that title, at the lowest priority. The logs show the PDF service sometimes attaches another customer's invoice to the wrong account's download link, and it is still happening. Legal needs the root cause and the affected accounts by Thursday at 12:00; the regulator notice is due Friday at 15:00.",
+      "deadline": "2026-10-15T12:00:00",
+      "effort_estimate": 45,
+      "tier": "operational",
+      "blocked": false,
+      "parent_task_id": null
+    }
+  ],
+  "expected_top_task_id": "task_leak",
+  "expected_reason": "task_leak is mislabelled 'Minor' but its description shows other customers' invoices being exposed right now, with a regulator-notification window closing Friday; task_staging's [P0] tag is a template default on a staging-only alert, and task_cache is blocked on the platform team's quota change.",
+  "source": {
+    "type": "synthetic",
+    "source_detail": null
+  },
+  "team_lead_approved": false
+}

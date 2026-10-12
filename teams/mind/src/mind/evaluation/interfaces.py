@@ -17,8 +17,7 @@ Two layers of rules live here:
   methods below, so a violating file fails to load.
 
 Cross-file rules (a `scenario_id` duplicated across the whole directory) and the
-"set isn't finished yet" checks (role coverage, 4-6 per role, 24-36 total,
-`mentor_approved: false`) are *not* expressible on a single-scenario model and
+"set isn't finished yet" checks (role coverage, 4-6 per role, 24-36 total) are *not* expressible on a single-scenario model and
 stay in `mind.evaluation.personas.validate_personas` — the latter as warnings,
 which Pydantic (raise-or-nothing) cannot represent.
 """
@@ -247,19 +246,9 @@ class PersonaEvaluationScenario(BaseModel):
     team_lead_approved: bool = Field(
         description=(
             "Whether the team lead has reviewed this scenario in a PR and signed off "
-            "on it — the first gate, before it goes to the mentor. Set explicitly by "
+            "on it. This is the only approval flag on a scenario. Set explicitly by "
             "the author: start at false, the team lead (not the author) flips it to "
-            "true. Not a Foundation Gate criterion itself, but mentor_approved should "
-            "not be set until this is true."
-        )
-    )
-    mentor_approved: bool = Field(
-        description=(
-            "Whether the mentor has reviewed this specific scenario and signed off on "
-            "it as correct ground truth. Set explicitly by the author — start at "
-            "false, flip to true only after mentor review. The full set must be all "
-            "true by the Foundation Gate; the harness/CI treats any false as "
-            "not-yet-ready rather than crashing."
+            "true."
         )
     )
 

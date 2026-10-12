@@ -1,5 +1,6 @@
 package pipe;
 
+import com.rnd.relay.event.TaskNotification;
 import io.confluent.kafka.serializers.protobuf.KafkaProtobufDeserializer;
 import io.confluent.kafka.serializers.protobuf.KafkaProtobufDeserializerConfig;
 import io.micrometer.core.instrument.MeterRegistry;

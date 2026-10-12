@@ -24,6 +24,7 @@ import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 
 /**
  * Reads the CRM deal feed straight from the live HubSpot API, instead of the
@@ -166,6 +167,30 @@ public class HubSpotDealRepository implements DealRepository {
 
         return new DealSnapshot(
                 asOf, allDeals, Collections.unmodifiableMap(unmodifiableHistory), dealIds, skippedAtRead);
+    }
+
+    /**
+     * One fresh fetch - the single deal, then the pipeline, both real HTTP round trips every call
+     * - never reusing a previous {@link #snapshot()} or {@link #fetchDeal(String)} call's data.
+     * The pipeline fetch only happens when the deal itself was found, so a 404 costs one request,
+     * not two. See the class Javadoc's "Freshness" and "Stage mapping" sections, and {@link
+     * DealRepository#fetchDeal(String)}'s own Javadoc for the "latest state" / "no asOf" contract
+     * this satisfies.
+     */
+    @Override
+    public Optional<Deal> fetchDeal(String dealId) {
+        if (dealId == null || dealId.isBlank()) {
+            throw new IllegalArgumentException("dealId must not be blank");
+        }
+
+        Optional<HubSpotDealRecord> record = client.fetchDeal(dealId);
+        if (record.isEmpty()) {
+            return Optional.empty();
+        }
+
+        Map<String, DealStage> stageMapping = HubSpotStageMapping.resolveIdsToStages(client.fetchPipelines());
+        List<Deal> history = toDealHistory(record.get(), stageMapping);
+        return Optional.of(history.get(history.size() - 1));
     }
 
     private List<Deal> toDealHistory(HubSpotDealRecord record, Map<String, DealStage> stageMapping) {

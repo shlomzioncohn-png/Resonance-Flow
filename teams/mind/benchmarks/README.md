@@ -9,11 +9,16 @@ resulting decision into the relevant README or an ADR.
 - `ocr-asr-benchmark.md` — OCR: 5 configs benchmarked (Tesseract psm 3/6/11,
   PaddleOCR mobile/server); Tesseract `--psm 11` chosen on latency and memory,
   with the accuracy trade (PaddleOCR is ~2.7x more accurate) documented. ASR:
-  known risk, blocked on missing AMI data, not benchmarked. Status also in
-  `src/mind/multimodal/README.md`.
-- `ocr_asr_benchmark.py` — reproduces the OCR half (`python -m
-  benchmarks.ocr_asr_benchmark` from `teams/mind/`; prints an explicit
-  "BLOCKED" notice for the ASR half instead of fake numbers). Needs
-  `pip install ".[benchmark]"` plus the `tesseract-ocr` system binary
-  (not pip-installable — e.g. `winget install UB-Mannheim.TesseractOCR`
-  on Windows, `apt install tesseract-ocr` on Debian/Ubuntu).
+  3 Whisper sizes benchmarked (tiny.en/base.en/small.en) on two AMI meetings;
+  base.en chosen, with the sample's limits written down as known risks. Status
+  also in `src/mind/multimodal/README.md`.
+- `ocr_asr_benchmark.py` — reproduces both halves (`python -m
+  benchmarks.ocr_asr_benchmark` from `teams/mind/`; ends in an explicit
+  conclusion line for OCR and for ASR). Needs `pip install ".[benchmark]"`
+  plus the `tesseract-ocr` system binary (not pip-installable — e.g.
+  `winget install UB-Mannheim.TesseractOCR` on Windows, `apt install
+  tesseract-ocr` on Debian/Ubuntu), the AMI audio from
+  `eval/datasets/ami-audio.manifest.json`, and the Whisper weights under
+  `models/whisper/` (see the doc's "ASR — setup").
+- `asr_benchmark.py` — the ASR half on its own (`python -m
+  benchmarks.asr_benchmark`, ~25 min on a laptop CPU, most of it `small.en`).

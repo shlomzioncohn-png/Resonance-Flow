@@ -53,51 +53,92 @@ class PgVectorStore(VectorStore):
             if self._ready:
                 return
             await self._pool.open()
-            await self._ensure_schema()
+            await self._check_schema_migrated()
             self._ready = True
 
     def _table(self) -> sql.Identifier:
         return sql.Identifier(self._settings.table)
 
-    async def _ensure_schema(self) -> None:
-        table = self._table()
+    async def _check_schema_migrated(self) -> None:
+        # Schema is created ahead of time by `alembic upgrade head`
+        # (migrations/) -- fail fast with a clear message instead of a
+        # bare UndefinedTable on the first real query.
         async with self._pool.connection() as conn, conn.cursor() as cur:
-            await cur.execute("CREATE EXTENSION IF NOT EXISTS vector;")
-            await cur.execute(
-                sql.SQL(
-                    """
-                    CREATE TABLE IF NOT EXISTS {table} (
-                        task_id TEXT PRIMARY KEY,
-                        embedding VECTOR({dim}) NOT NULL
-                    );
-                    """
-                ).format(table=table, dim=sql.Literal(self._settings.embedding_dim))
-            )
-            await cur.execute(
-                sql.SQL(
-                    """
-                    CREATE INDEX IF NOT EXISTS {idx}
-                    ON {table} USING hnsw (embedding vector_cosine_ops);
-                    """
-                ).format(
-                    idx=sql.Identifier(f"{self._settings.table}_embedding_hnsw_idx"),
-                    table=table,
+            await cur.execute("SELECT to_regclass(%s);", (self._settings.table,))
+            row = await cur.fetchone()
+            if row is None or row[0] is None:
+                raise RuntimeError(
+                    f"Vector store table {self._settings.table!r} does not exist -- "
+                    "schema not migrated. Run `alembic upgrade head` (or `make migrate`)."
                 )
-            )
 
-    async def upsert(self, task_id: str, vector: list[float]) -> None:
+    async def upsert(
+        self, task_id: str, vector: list[float], *, content_hash: str | None = None
+    ) -> None:
         await self._ensure_ready()
         async with self._pool.connection() as conn, conn.cursor() as cur:
             await cur.execute(
                 sql.SQL(
                     """
-                    INSERT INTO {table} (task_id, embedding)
-                    VALUES (%s, %s)
-                    ON CONFLICT (task_id) DO UPDATE SET embedding = EXCLUDED.embedding;
+                    INSERT INTO {table} (task_id, embedding, content_hash)
+                    VALUES (%s, %s, %s)
+                    ON CONFLICT (task_id) DO UPDATE SET
+                        embedding = EXCLUDED.embedding, content_hash = EXCLUDED.content_hash;
                     """
                 ).format(table=self._table()),
-                (task_id, vector),
+                (task_id, vector, content_hash),
             )
+
+    async def upsert_if_absent(
+        self, task_id: str, vector: list[float], *, content_hash: str | None = None
+    ) -> bool:
+        await self._ensure_ready()
+        async with self._pool.connection() as conn, conn.cursor() as cur:
+            await cur.execute(
+                sql.SQL(
+                    """
+                    INSERT INTO {table} (task_id, embedding, content_hash)
+                    VALUES (%s, %s, %s)
+                    ON CONFLICT (task_id) DO NOTHING;
+                    """
+                ).format(table=self._table()),
+                (task_id, vector, content_hash),
+            )
+            return cur.rowcount > 0
+
+    async def get_content_hash(self, task_id: str) -> str | None:
+        await self._ensure_ready()
+        async with self._pool.connection() as conn, conn.cursor() as cur:
+            await cur.execute(
+                sql.SQL("SELECT content_hash FROM {table} WHERE task_id = %s;").format(
+                    table=self._table()
+                ),
+                (task_id,),
+            )
+            row = await cur.fetchone()
+            return row[0] if row else None
+
+    async def mark_completed(self, task_id: str) -> bool:
+        await self._ensure_ready()
+        async with self._pool.connection() as conn, conn.cursor() as cur:
+            await cur.execute(
+                sql.SQL("UPDATE {table} SET is_completed = TRUE WHERE task_id = %s;").format(
+                    table=self._table()
+                ),
+                (task_id,),
+            )
+            return cur.rowcount > 0
+
+    async def mark_incomplete(self, task_id: str) -> bool:
+        await self._ensure_ready()
+        async with self._pool.connection() as conn, conn.cursor() as cur:
+            await cur.execute(
+                sql.SQL("UPDATE {table} SET is_completed = FALSE WHERE task_id = %s;").format(
+                    table=self._table()
+                ),
+                (task_id,),
+            )
+            return cur.rowcount > 0
 
     async def delete(self, task_id: str) -> None:
         await self._ensure_ready()
@@ -118,7 +159,7 @@ class PgVectorStore(VectorStore):
         # pgvector can't match the HNSW index to an alias.
         return sql.SQL(
             """
-            SELECT task_id, 1 - (embedding <=> %s::vector) AS similarity
+            SELECT task_id, 1 - (embedding <=> %s::vector) AS similarity, is_completed
             FROM {table}
             ORDER BY embedding <=> %s::vector
             LIMIT %s;
@@ -135,7 +176,10 @@ class PgVectorStore(VectorStore):
             )
             await cur.execute(self._search_query(), (query_vector, query_vector, k))
             rows = await cur.fetchall()
-            return [SearchResult(task_id=row[0], similarity=row[1]) for row in rows]
+            return [
+                SearchResult(task_id=row[0], similarity=row[1], is_completed=row[2])
+                for row in rows
+            ]
 
     async def search_text(self, query: str, k: int) -> list[SearchResult]:
         """search(), embedding `query` as is_query=True first."""
