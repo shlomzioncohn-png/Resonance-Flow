@@ -843,3 +843,22 @@ def test_a_bug_while_warming_up_is_logged_not_raised(
     with caplog.at_level("ERROR", logger=asr.logger.name):
         assert asr.warm_up() is False
     assert "unexpected error warming up ASR" in caplog.text
+
+
+@pytest.mark.parametrize(
+    "corrupt",
+    [
+        lambda d: bytes((i * 91 + 7) % 256 for i in range(44)) + d[44:],  # garbage header
+        lambda d: d[:12] + b"\x00" * 26 + d[38:],  # RIFF/WAVE kept, fmt chunk zeroed
+    ],
+    ids=["garbage-header", "zeroed-fmt-chunk"],
+)
+def test_a_corrupt_header_is_unreadable_format_not_a_crash(
+    monkeypatch: pytest.MonkeyPatch, corrupt
+):
+    # R2 on #478: a malformed header must be UNREADABLE_FORMAT, not a crash. The
+    # fixture's fmt chunk is 18 bytes at offset 12, its data chunk header at 38.
+    use_model(monkeypatch, FakeWhisper([fake_segment(" made up", 0, 1)]))
+    result = transcribe(corrupt(wav_fixture()))
+    assert (result.success, result.reason) == (False, ASRFailureReason.UNREADABLE_FORMAT)
+    assert result.failure_category is FailureCategory.DATA
