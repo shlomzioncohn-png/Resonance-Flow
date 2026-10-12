@@ -5,7 +5,8 @@ type-checks it, so this gap went undetected until a manual run)."""
 
 import os
 
-from benchmarks.foundation_gate_benchmark import _BENCH_TABLE, _create_bench_table
+from benchmarks.foundation_gate_benchmark import _BENCH_TABLE
+from benchmarks.vector_store_test_table import create_vector_store_test_table
 
 from mind.config import VectorStoreSettings
 from mind.embeddings import embed
@@ -17,11 +18,11 @@ async def test_bench_table_gets_created_and_is_usable():
         dsn=os.environ["MIND_VECTOR_STORE__DSN"],
         table=_BENCH_TABLE,
     )
-    await _create_bench_table(settings)
+    await create_vector_store_test_table(settings)
 
     store = PgVectorStore(settings)
     try:
-        await store.open()  # raises RuntimeError before _create_bench_table()
+        await store.open()  # raises RuntimeError before create_vector_store_test_table()
         await store.clear()
         await store.upsert("smoke-task", embed("Smoke test task"))
         results = await store.search(embed("Smoke test task"), k=1)

@@ -7,8 +7,8 @@ import uuid
 from contextlib import asynccontextmanager
 from unittest.mock import AsyncMock, MagicMock
 
-import psycopg
 import pytest
+from benchmarks.vector_store_test_table import create_vector_store_test_table
 from psycopg import sql
 from psycopg_pool import PoolTimeout
 
@@ -16,29 +16,6 @@ from mind.config import VectorStoreSettings
 from mind.embeddings import embed
 from mind.embeddings.embeddings import EMBEDDING_DIM
 from mind.embeddings.pgvector_store import PgVectorStore
-
-
-async def _create_test_table(settings: VectorStoreSettings) -> None:
-    # The real table is created by `alembic upgrade head`; this suite's
-    # dedicated test table isn't covered by that, so it sets itself up here
-    # -- matching migrations/versions/0003 (is_completed, content_hash).
-    table = sql.Identifier(settings.table)
-    async with await psycopg.AsyncConnection.connect(
-        str(settings.dsn.get_secret_value()), autocommit=True
-    ) as conn:
-        await conn.execute("CREATE EXTENSION IF NOT EXISTS vector;")
-        await conn.execute(
-            sql.SQL(
-                "CREATE TABLE IF NOT EXISTS {table} "
-                "(task_id TEXT PRIMARY KEY, embedding VECTOR({dim}) NOT NULL, "
-                "is_completed BOOLEAN NOT NULL DEFAULT FALSE, content_hash TEXT);"
-            ).format(table=table, dim=sql.Literal(EMBEDDING_DIM))
-        )
-        await conn.execute(
-            sql.SQL(
-                "CREATE INDEX IF NOT EXISTS {idx} ON {table} USING hnsw (embedding vector_cosine_ops);"
-            ).format(idx=sql.Identifier(f"{settings.table}_embedding_hnsw_idx"), table=table)
-        )
 
 
 @pytest.fixture(scope="module")
@@ -53,7 +30,7 @@ async def store(migrated_db):
         dsn=os.environ["MIND_VECTOR_STORE__DSN"],
         table="task_embeddings_test",
     )
-    await _create_test_table(settings)
+    await create_vector_store_test_table(settings)
     s = PgVectorStore(settings)
     await s.open()
     yield s
