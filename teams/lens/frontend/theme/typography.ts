@@ -1,7 +1,7 @@
-import type { TypographyVariantsOptions } from '@mui/material/styles'
-import { fontTokens } from './tokens'
+import type { TypographyVariantsOptions } from '@mui/material/styles';
+import { fontTokens } from './tokens';
 
-const { weight } = fontTokens
+const { weight } = fontTokens;
 
 export const typography: TypographyVariantsOptions = {
   fontFamily: fontTokens.family,
@@ -23,4 +23,4 @@ export const typography: TypographyVariantsOptions = {
     lineHeight: 1.5,
   },
   button: { fontWeight: weight.semibold, fontSize: '0.875rem', textTransform: 'none' },
-}
+};

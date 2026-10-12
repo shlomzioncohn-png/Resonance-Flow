@@ -180,6 +180,17 @@ shape as the kafka/tenant-id check, §7) — see §10 for the Salesforce source 
   too new for this Spring Boot/Mockito version — `@Spy` fields fail to initialize. Use JDK 23 at
   `C:\Program Files\Java\jdk-23` instead (`$env:JAVA_HOME` + prepend `bin` to `$env:PATH`); it
   compiles the pom's `java.version=21` target fine and Mockito works normally under it.
+- **`protobuf-maven-plugin`'s `protoc.exe` fails on a non-ASCII checkout path.** If the repo sits
+  under a path containing non-ASCII characters (this machine's checkout is under a Hebrew-named
+  folder), `mvn compile`/`test` fails with `PROTOC FAILED: ...: warning: directory does not
+  exist` even though the directory is right there — the native `protoc.exe` binary can't resolve
+  the path under this machine's active codepage. Reproduces identically for `teams/inbox`'s own
+  pre-existing `.proto` build, so it's an environment issue, not anything specific to Bridge's
+  schema. `-Dfile.encoding=UTF-8 -Dsun.jnu.encoding=UTF-8` via `MAVEN_OPTS` does not fix it.
+  Workaround: `subst` an ASCII drive letter to the parent folder and build from there, e.g.
+  `subst R: "C:\Users\1\Desktop\<non-ascii-folder>"`, then build from
+  `R:\Resonance-Flow\teams\bridge`. Not an issue in CI — `.github/actions/test-java` runs `mvn`
+  inside a Linux Maven Docker container, where this never comes up.
 
 ## 9. Project status & roadmap (as of 2026-09-06)
 

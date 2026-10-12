@@ -67,6 +67,20 @@ public class GlobalExceptionHandler {
                 HttpStatus.BAD_REQUEST);
     }
 
+    /**
+     * Triggered by an invalid argument the service checks itself, e.g.
+     * availableMinutes outside 1-480. Same mapping as the Gateway's handler.
+     */
+    @ExceptionHandler(IllegalArgumentException.class)
+    public ResponseEntity<ErrorResponse> handleIllegalArgumentException(
+            IllegalArgumentException ex, WebRequest request) {
+        String path = getRequestPath(request);
+        logger.warn("Invalid argument - Path: {}, Details: {}", path, ex.getMessage());
+        return new ResponseEntity<>(
+                new ErrorResponse("BAD_REQUEST", ex.getMessage(), path, null),
+                HttpStatus.BAD_REQUEST);
+    }
+
     /** Triggered by calling an endpoint with the wrong HTTP method. */
     @ExceptionHandler(HttpRequestMethodNotSupportedException.class)
     public ResponseEntity<ErrorResponse> handleMethodNotSupportedException(
@@ -98,6 +112,40 @@ public class GlobalExceptionHandler {
                         path,
                         "Service: " + ex.getServiceName()),
                 HttpStatus.SERVICE_UNAVAILABLE);
+    }
+
+    /**
+     * Inbox is up but refused the request (401/403/400). Passed on with the
+     * same status, so the screen can tell "not allowed" from "Inbox is down".
+     */
+    @ExceptionHandler(InboxRejectedException.class)
+    public ResponseEntity<ErrorResponse> handleInboxRejectedException(
+            InboxRejectedException ex, WebRequest request) {
+        String path = getRequestPath(request);
+        logger.warn("Inbox rejected request ({}) - Path: {}, Details: {}", ex.getStatus(), path, ex.getMessage());
+        HttpStatus status = HttpStatus.valueOf(ex.getStatus());
+        String message = switch (ex.getStatus()) {
+            case 401 -> "User is not recognized by Inbox";
+            case 403 -> "Not allowed to access this task";
+            default -> "Inbox rejected the request";
+        };
+        return new ResponseEntity<>(
+                new ErrorResponse(status.name(), message, path, ex.getMessage()), status);
+    }
+
+    /**
+     * Triggered when a project id has no details (ProjectDetailsService).
+     * Needs its own handler: the catch-all below would otherwise win over the
+     * exception's @ResponseStatus(NOT_FOUND) and turn it into a 500.
+     */
+    @ExceptionHandler(ProjectNotFoundException.class)
+    public ResponseEntity<ErrorResponse> handleProjectNotFoundException(
+            ProjectNotFoundException ex, WebRequest request) {
+        String path = getRequestPath(request);
+        logger.warn("Project not found - Path: {}, projectId: {}", path, ex.getProjectId());
+        return new ResponseEntity<>(
+                new ErrorResponse("NOT_FOUND", "Project not found", path, ex.getMessage()),
+                HttpStatus.NOT_FOUND);
     }
 
     /** Triggered when a task id doesn't exist in Inbox's task set. */

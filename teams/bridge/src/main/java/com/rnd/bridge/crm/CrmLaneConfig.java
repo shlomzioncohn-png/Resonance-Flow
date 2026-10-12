@@ -5,9 +5,9 @@ import com.rnd.bridge.publish.LoggingPayloadPublisher;
 import com.rnd.bridge.task.enrichment.EnrichmentProperties;
 import com.rnd.bridge.task.enrichment.TaskEnricher;
 import com.rnd.bridge.publish.kafka.KafkaPayloadPublisher;
-import com.rnd.bridge.task.BridgeTaskEventDto;
 import com.rnd.bridge.task.TaskValidator;
 import com.rnd.bridge.task.model.Task;
+import com.rnd.inbox.event.StructuredTaskEvent;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
@@ -101,7 +101,7 @@ class CrmLaneConfig {
     @Profile("kafka")
     @Primary
     KafkaPayloadPublisher kafkaTaskPublisher(
-            @Qualifier("bridgeTaskEventKafkaTemplate") KafkaTemplate<String, BridgeTaskEventDto> kafkaTemplate,
+            @Qualifier("bridgeTaskEventKafkaTemplate") KafkaTemplate<String, StructuredTaskEvent> kafkaTemplate,
             @Value("${bridge.structured-tasks-topic:bridge.structured.tasks}") String topic) {
         return new KafkaPayloadPublisher(kafkaTemplate, topic);
     }

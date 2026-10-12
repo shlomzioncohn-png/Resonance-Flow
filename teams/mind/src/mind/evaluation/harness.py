@@ -75,6 +75,8 @@ class EvaluationOutput(BaseModel):
     - `model_name`: the RankingModel implementation's class name.
     - `combined`: the report over every loaded scenario.
     - `groups`: one report per scenario group (e.g. `same_tier`, `cross_tier`).
+    - `roles`: one report per `persona.role`, split out of `combined` (see
+      `split_by_role`), so they always add up to it.
     """
 
     model_config = _REPORT_CONFIG
@@ -82,6 +84,7 @@ class EvaluationOutput(BaseModel):
     model_name: str
     combined: Report
     groups: dict[str, Report]
+    roles: dict[str, Report] = {}
 
 
 def run(model: RankingModel, scenarios: list[PersonaEvaluationScenario]) -> Report:
@@ -131,3 +134,41 @@ def run(model: RankingModel, scenarios: list[PersonaEvaluationScenario]) -> Repo
         top1_accuracy=top1_accuracy(predictions, scenarios),
         scenario_results=scenario_results,
     )
+
+
+def split_by_role(
+    scenarios: list[PersonaEvaluationScenario], report: Report
+) -> dict[str, Report]:
+    """Split an existing `report` into one `Report` per `persona.role`, keyed and
+    ordered by role name.
+
+    Built from the report's own `scenario_results` instead of re-running the
+    model, so the per-role numbers always add up to the combined one.
+    `scenarios` must be the list `report` was run on, in the same order. A role
+    with no scenario gets no entry (`validate_personas` warns about that
+    separately).
+    """
+    by_role: dict[str, list[tuple[PersonaEvaluationScenario, ScenarioResult]]] = {}
+    for scenario, result in zip(scenarios, report.scenario_results, strict=True):
+        if scenario.scenario_id != result.scenario_id:
+            raise ValueError(
+                f"scenarios and report are out of order: {scenario.scenario_id!r} "
+                f"vs {result.scenario_id!r}"
+            )
+        by_role.setdefault(scenario.persona.role, []).append((scenario, result))
+
+    # Accuracy goes through `metrics.top1_accuracy`, like `run()` does, so a change of
+    # metric updates the combined and the per-role numbers together.
+    return {
+        role: Report(
+            model_name=report.model_name,
+            total_scenarios=len(pairs),
+            correct_top1=sum(result.passed for _, result in pairs),
+            top1_accuracy=top1_accuracy(
+                [result.predicted_top_task_id for _, result in pairs],
+                [scenario for scenario, _ in pairs],
+            ),
+            scenario_results=[result for _, result in pairs],
+        )
+        for role, pairs in sorted(by_role.items())
+    }

@@ -200,7 +200,6 @@ Error format:
 | Render recommended task card (title, project, priority, effort) | ⬜ |
 | Render context flags (Fits in time / High priority / No blockers) | ⬜ |
 | Start task action | ⬜ |
-| Chat about it action | ⬜ |
 | View full details action | ⬜ |
 
 **Frontend can start once BFF returns a mock response.**

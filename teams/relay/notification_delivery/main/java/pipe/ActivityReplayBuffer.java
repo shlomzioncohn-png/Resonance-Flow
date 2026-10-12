@@ -1,5 +1,6 @@
 package pipe;
 
+import com.rnd.relay.event.TaskNotification;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 

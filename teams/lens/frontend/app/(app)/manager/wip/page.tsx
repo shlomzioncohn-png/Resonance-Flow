@@ -1,5 +1,5 @@
-import PageContainer from '@/components/layout/PageContainer'
-import EmptyState from '@/components/feedback/EmptyState'
+import PageContainer from '@/components/layout/PageContainer';
+import EmptyState from '@/components/feedback/EmptyState';
 
 export default function ManagerWipPage() {
   return (
@@ -12,5 +12,5 @@ export default function ManagerWipPage() {
         description="This view will list active tasks across the team once connected to Inbox and Chain data."
       />
     </PageContainer>
-  )
+  );
 }

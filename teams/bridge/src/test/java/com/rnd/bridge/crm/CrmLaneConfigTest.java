@@ -1,9 +1,9 @@
 package com.rnd.bridge.crm;
 
-import com.rnd.bridge.task.BridgeTaskEventDto;
 import com.rnd.bridge.task.enrichment.EnrichmentProperties;
 import com.rnd.bridge.task.enrichment.NoOpTaskEnricher;
 import com.rnd.bridge.task.enrichment.TaskEnricher;
+import com.rnd.inbox.event.StructuredTaskEvent;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
 import org.springframework.context.annotation.Bean;
@@ -41,7 +41,7 @@ class CrmLaneConfigTest {
         // (a different, unrelated @Configuration this test has nothing to do with).
         @SuppressWarnings("unchecked")
         @Bean(name = "bridgeTaskEventKafkaTemplate")
-        KafkaTemplate<String, BridgeTaskEventDto> bridgeTaskEventKafkaTemplate() {
+        KafkaTemplate<String, StructuredTaskEvent> bridgeTaskEventKafkaTemplate() {
             return mock(KafkaTemplate.class);
         }
     }
