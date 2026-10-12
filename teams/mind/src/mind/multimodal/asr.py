@@ -115,6 +115,19 @@ CHUNK_S = 60
 # no silence after it, the chunk is hard-cut at CHUNK_S.
 MIN_CHUNK_S = 30
 
+# A header-declared length longer than what decoded by more than this marks the
+# file incomplete: max(0.5 s, 5%). Not zero, because encoders pad (an MP3 of the
+# speech fixture decodes 5 ms short of its header; its M4A 20 ms long), and an MP3
+# without a Xing header only has a bitrate-based estimate of its length.
+DECLARED_LENGTH_TOLERANCE = (0.5, 0.05)  # (seconds, fraction of the declared length)
+
+# Segments ending this close to a break in the file are dropped (R2 on #478): the
+# sentence at the break is cut mid-word, which is where Whisper invents an ending
+# or loops on it. A margin rather than "the last segment", because the break can
+# fall in a silence after a complete sentence: one that ended more than
+# BREAK_MARGIN_S before the break is kept.
+BREAK_MARGIN_S = 1.0
+
 # A segment whose confidence is below this is flagged as low confidence. Not a
 # cut-off of ours: it is Whisper's own quality gate, faster-whisper's default
 # `log_prob_threshold=-1.0` (a segment with avg_logprob below -1.0 is the one
@@ -230,10 +243,34 @@ class ASRResult(MediaTextResult[ASRFailureReason]):
     the ones below LOW_CONFIDENCE_THRESHOLD, with ``low_confidence_count`` their
     number -- ``len(segments)`` is the denominator.
 
-    A recording longer than the duration cap is truncated, not refused (as OCR
-    does with pages): only the first ``duration_s`` seconds are transcribed,
-    ``duration_available_s`` is the recording's real length, and ``truncated`` is
-    True -- a signal that the transcript is a partial recording.
+    How much of the recording the transcript covers -- two independent flags,
+    stored rather than derived from the durations (R2 on #478: she weights them
+    differently, a break being evidence about the data and a cut only saying the
+    end was not read). Both can be True at once.
+
+    - ``truncated``: **we** stopped before the end -- the ``max_duration_s`` cap,
+      or TRANSCRIBE_TIMEOUT_S. Set from what transcribe() did, never from a length
+      comparison, so a broken file can never look like a deliberate cut.
+    - ``incomplete_file``: the **file** is shorter than it says it is -- a decode
+      error after valid audio, or a header that declares more audio than the file
+      holds (a WAV's RIFF data size; the container's length for MP3/M4A), by more
+      than DECLARED_LENGTH_TOLERANCE. What was decoded is transcribed, minus the
+      segments that touch the break (BREAK_MARGIN_S): a sentence cut there is where
+      Whisper invents or loops. Caveat: decoding stops at the cap, so for MP3/M4A a
+      break *past* the cap cannot be seen -- False means "no break found in what
+      was read". For WAV the header check needs no decoding, so it covers the
+      whole file.
+
+    ``duration_s`` is how much was transcribed. ``duration_available_s`` is the
+    recording's length as far as it is known, and ``duration_available_exact``
+    says how far that is:
+
+    - True: the file was decoded to its end, so ``duration_available_s`` is
+      exactly the audio it holds (for a broken file, what survived).
+    - False: decoding stopped at the cap. ``duration_available_s`` is the length
+      the file's header declares (exact for M4A, close for MP3, from the data
+      size for WAV), or, without one, just what was read: "at least this much".
+      **Not verified, not necessarily wrong.**
 
     ``success`` / ``reason`` / ``error`` / ``failure_category`` / ``retryable``
     come from MediaTextResult, the envelope OCR and ASR share (see result.py and
@@ -252,6 +289,9 @@ class ASRResult(MediaTextResult[ASRFailureReason]):
     segments: list[TranscriptSegment] = Field(default_factory=list)
     duration_s: float = 0.0
     duration_available_s: float = 0.0
+    duration_available_exact: bool = False
+    truncated: bool = False
+    incomplete_file: bool = False
 
     @computed_field  # type: ignore[prop-decorator]
     @property
@@ -273,11 +313,6 @@ class ASRResult(MediaTextResult[ASRFailureReason]):
     @property
     def low_confidence_count(self) -> int:
         return len(self.low_confidence_segments)
-
-    @computed_field  # type: ignore[prop-decorator]
-    @property
-    def truncated(self) -> bool:
-        return self.duration_available_s > self.duration_s
 
 
 def _failure(reason: ASRFailureReason, error: str) -> ASRResult:
@@ -396,15 +431,56 @@ def _load_model() -> tuple[str, Any]:
         return _model
 
 
-def _decode(content: bytes, max_duration_s: float) -> tuple[np.ndarray, float]:
-    """The first `max_duration_s` seconds as 16 kHz mono float32, and the real length.
+class _Decoded(NamedTuple):
+    """What _decode() read, and what it could tell about the rest of the file."""
+
+    audio: np.ndarray  # 16 kHz mono float32, at most max_duration_s of it
+    reached_end: bool  # decoded to the end of the stream (False: stopped at the cap)
+    broke: bool  # a decode error after valid audio: everything after it is lost
+    declared_s: float | None  # the length the file's header claims, if it claims one
+    present_s: float | None  # WAV only: the length its data bytes actually hold
+
+
+def _wav_extent(content: bytes) -> tuple[float, float] | None:
+    """(declared, present) seconds of a PCM WAV, from its RIFF header and its size.
+
+    FFmpeg recomputes a WAV's length from the file size, so a WAV cut short --
+    the recorder crashed, the copy stopped -- decodes cleanly and reports the
+    shorter length as if it were the whole recording. Only the header's data-chunk
+    size still says how long it was meant to be. O(1): no decoding. None when the
+    bytes are not a RIFF/WAVE file, or the header has no usable size (0 or
+    0xFFFFFFFF are what streaming writers put when the length is not known yet).
+    """
+    if len(content) < 12 or content[:4] != b"RIFF" or content[8:12] != b"WAVE":
+        return None
+    offset, byte_rate = 12, 0
+    while offset + 8 <= len(content):
+        chunk_id = content[offset : offset + 4]
+        size = int.from_bytes(content[offset + 4 : offset + 8], "little")
+        if chunk_id == b"fmt " and offset + 16 <= len(content):
+            byte_rate = int.from_bytes(content[offset + 16 : offset + 20], "little")
+        elif chunk_id == b"data":
+            if not byte_rate or size in (0, 0xFFFFFFFF):
+                return None
+            present = min(size, len(content) - (offset + 8))
+            return size / byte_rate, present / byte_rate
+        offset += 8 + size + (size & 1)  # chunks are padded to an even size
+    return None
+
+
+def _decode(content: bytes, max_duration_s: float) -> _Decoded:
+    """The first `max_duration_s` seconds as 16 kHz mono float32 -- and no more.
 
     Done before Whisper runs, so a bad file is UNREADABLE_FORMAT and a later
     failure inside Whisper can only be the environment (the same split as OCR's
-    _checked_image). Samples past the cap are decoded only to count them -- the
-    real length goes in `duration_available_s` -- and are not kept, so a two-hour
-    recording does not sit in memory. Raises _NotAudio on anything PyAV cannot
-    read as audio.
+    _checked_image). Decoding stops at the cap: past it nothing is decoded, not
+    even to count it -- a three-hour MP3 costs ~35 s to decode in full on the dev
+    laptop, time TRANSCRIBE_TIMEOUT_S does not cover. The length of the rest
+    comes from the file's header instead (see _Decoded, ASRResult).
+
+    A decode error after valid audio keeps the audio before it (``broke``)
+    rather than losing the whole recording; an error before any audio is
+    _NotAudio, like anything PyAV cannot read as audio at all.
     """
     import av
     import numpy as np
@@ -412,25 +488,84 @@ def _decode(content: bytes, max_duration_s: float) -> tuple[np.ndarray, float]:
     max_samples = int(max_duration_s * SAMPLE_RATE)
     kept: list[np.ndarray] = []
     kept_samples = 0
-    total_samples = 0
+    reached_end = True
+    broke = False
+    declared_s: float | None = None
     try:
         with av.open(io.BytesIO(content), mode="r") as container:
             if not container.streams.audio:
                 raise _NotAudio("no audio stream in the file")
+            if container.duration:
+                declared_s = container.duration / 1_000_000  # AV_TIME_BASE: microseconds
             resampler = av.AudioResampler(format="s16", layout="mono", rate=SAMPLE_RATE)
             frames = container.decode(container.streams.audio[0])
-            # a None frame at the end flushes what the resampler still buffers
-            for frame in [*frames, None]:
-                for out in resampler.resample(frame):
-                    total_samples += out.samples
-                    if kept_samples < max_samples:
+            try:
+                while kept_samples < max_samples:
+                    frame = next(frames, None)
+                    # a None frame at the end flushes what the resampler still buffers
+                    for out in resampler.resample(frame):
                         chunk = out.to_ndarray().reshape(-1)[: max_samples - kept_samples]
                         kept.append(chunk)
                         kept_samples += len(chunk)
+                    if frame is None:
+                        break
+                else:
+                    # At the cap: is there more? One more frame answers it (an error
+                    # here is a break right at the cap; either way, stop decoding).
+                    reached_end = next(frames, None) is None
+            except av.error.FFmpegError as exc:
+                if not kept_samples:
+                    raise
+                logger.warning(
+                    "audio decode broke after %.1f s: %s", kept_samples / SAMPLE_RATE, exc
+                )
+                broke = True
     except av.error.FFmpegError as exc:
         raise _NotAudio(str(exc)) from exc
+
+    wav = _wav_extent(content)
+    if wav is not None:
+        declared_s = wav[0]  # the RIFF header, not FFmpeg's size-based recomputation
     audio = np.concatenate(kept) if kept else np.zeros(0, dtype=np.int16)
-    return audio.astype(np.float32) / 32768.0, total_samples / SAMPLE_RATE
+    return _Decoded(
+        audio=audio.astype(np.float32) / 32768.0,
+        reached_end=reached_end or broke,
+        broke=broke,
+        declared_s=declared_s,
+        present_s=None if wav is None else wav[1],
+    )
+
+
+class _Extent(NamedTuple):
+    incomplete_file: bool
+    duration_available_s: float
+    duration_available_exact: bool
+    break_s: float | None  # where in the decoded audio the file breaks, if it does
+
+
+def _extent(decoded: _Decoded) -> _Extent:
+    """How long the recording is, and whether the file is shorter than it claims.
+
+    The rules ASRResult documents for ``incomplete_file`` and
+    ``duration_available_s`` / ``duration_available_exact``, in one place.
+    """
+    decoded_s = len(decoded.audio) / SAMPLE_RATE
+    seconds, fraction = DECLARED_LENGTH_TOLERANCE
+
+    def short_of_declared(actual_s: float) -> bool:
+        declared = decoded.declared_s
+        return declared is not None and declared - actual_s > max(seconds, fraction * declared)
+
+    if decoded.reached_end:
+        incomplete = decoded.broke or short_of_declared(decoded_s)
+        return _Extent(incomplete, decoded_s, True, decoded_s if incomplete else None)
+
+    # Stopped at the cap: the rest was not decoded, so its length is the header's.
+    if decoded.present_s is not None:  # WAV: what its data bytes hold, no decoding needed
+        return _Extent(
+            short_of_declared(decoded.present_s), max(decoded_s, decoded.present_s), False, None
+        )
+    return _Extent(False, max(decoded_s, decoded.declared_s or 0.0), False, None)
 
 
 def _speech_regions(window: np.ndarray) -> list[tuple[int, int]]:
@@ -484,14 +619,17 @@ def transcribe(
             format is detected from the bytes themselves.
         filename: Original filename, if known. Only used in error messages;
             safe to omit.
-        max_duration_s: How many seconds of audio to transcribe (more than 0). A
-            longer recording is truncated, not refused: the result carries
-            ``truncated=True`` and ``duration_available_s``.
+        max_duration_s: How many seconds of audio to decode and transcribe (more
+            than 0). A longer recording is truncated, not refused: the result
+            carries ``truncated=True``, and nothing past the cap is decoded.
 
     Raises ValueError if ``max_duration_s <= 0`` (a programming error, not a
     recording failure). Otherwise it always returns an ASRResult and never
     raises: empty, undecodable or silent audio, or missing/failing weights, come
     back as ``success=False`` with a classified ``reason`` (see ASRFailureReason).
+    A file cut off mid-way is transcribed up to its break and comes back with
+    ``incomplete_file=True`` -- never as if it were the whole recording (see
+    ASRResult for how ``truncated``, ``incomplete_file`` and the durations are set).
 
     Every call whose audio decodes is recorded through
     ``observability.record_call()`` -- the latency of the VAD and Whisper stage, cost
@@ -519,14 +657,16 @@ def _transcribe(content: bytes, filename: str, max_duration_s: float) -> ASRResu
         return _failure(ASRFailureReason.ASR_UNAVAILABLE, str(exc))
 
     try:
-        audio, duration_available_s = _decode(content, max_duration_s)
+        decoded = _decode(content, max_duration_s)
     except _NotAudio as exc:
         name = f" {filename!r}" if filename else ""
         return _failure(
             ASRFailureReason.UNREADABLE_FORMAT, f"could not read input{name} as audio: {exc}"
         )
+    audio = decoded.audio
     if len(audio) == 0:
         return _failure(ASRFailureReason.NO_SPEECH_DETECTED, "the recording has no audio samples")
+    extent = _extent(decoded)
 
     segments: list[TranscriptSegment] = []
     timed_out = False
@@ -567,32 +707,56 @@ def _transcribe(content: bytes, filename: str, max_duration_s: float) -> ASRResu
         record_call(model_name, duration_ms, cost=0.0)
         audio_s = len(audio) / SAMPLE_RATE
         logger.info(
-            "asr_call model=%s audio_s=%.1f rtf=%.3f cpu_s=%.1f segments=%d timed_out=%s",
+            "asr_call model=%s audio_s=%.1f rtf=%.3f cpu_s=%.1f segments=%d timed_out=%s "
+            "capped=%s incomplete_file=%s",
             model_name,
             audio_s,
             duration_ms / 1000 / audio_s,
             time.process_time() - cpu_start,
             len(segments),
             timed_out,
+            not decoded.reached_end,
+            extent.incomplete_file,
         )
+
+    if extent.break_s is not None and not timed_out:
+        # The sentence at the break is cut mid-word: drop it rather than pass on
+        # whatever Whisper made of it (see BREAK_MARGIN_S).
+        kept = [s for s in segments if s.end < extent.break_s - BREAK_MARGIN_S]
+        if len(kept) < len(segments):
+            logger.info(
+                "dropped %d segment(s) at the break at %.1f s",
+                len(segments) - len(kept),
+                extent.break_s,
+            )
+        segments = kept
 
     if not segments:
         if timed_out:
             return _failure(
                 ASRFailureReason.ASR_FAILED, f"no segment decoded within {TRANSCRIBE_TIMEOUT_S} s"
             )
+        if extent.incomplete_file:
+            return _failure(
+                ASRFailureReason.NO_SPEECH_DETECTED,
+                f"the file breaks at {extent.duration_available_s:.1f} s and no complete "
+                "speech segment comes before the break",
+            )
         return _failure(
             ASRFailureReason.NO_SPEECH_DETECTED,
             "no speech recognized (the recording may be silent or only noise)",
         )
 
-    # Cut short by the timeout: the transcript covers up to the last decoded
-    # segment, so `truncated` reports it the same way the duration cap does.
+    # Cut short by the timeout: the transcript covers up to the last decoded segment.
     duration_s = segments[-1].end if timed_out else len(audio) / SAMPLE_RATE
     return ASRResult(
         success=True,
         text="\n".join(s.text for s in segments),
         segments=segments,
         duration_s=round(duration_s, 3),
-        duration_available_s=round(duration_available_s, 3),
+        duration_available_s=round(extent.duration_available_s, 3),
+        duration_available_exact=extent.duration_available_exact,
+        # what we did, never a length comparison (see ASRResult)
+        truncated=timed_out or not decoded.reached_end,
+        incomplete_file=extent.incomplete_file,
     )

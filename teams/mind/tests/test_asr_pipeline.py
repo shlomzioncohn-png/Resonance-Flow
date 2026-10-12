@@ -172,18 +172,64 @@ def test_a_recording_over_the_cap_is_truncated_and_says_so():
 # --- decoding, no model ------------------------------------------------------------
 
 
-def test_decode_resamples_to_16k_mono_and_reports_the_real_length():
-    audio, available = asr._decode(tone(1.5, rate=44_100), max_duration_s=60)
-    assert len(audio) == pytest.approx(1.5 * asr.SAMPLE_RATE, abs=200)
-    assert available == pytest.approx(1.5, abs=0.02)
-    assert audio.dtype.name == "float32"
-    assert 0 < abs(audio).max() <= 1
+def test_decode_resamples_to_16k_mono_and_reads_to_the_end():
+    decoded = asr._decode(tone(1.5, rate=44_100), max_duration_s=60)
+    assert len(decoded.audio) == pytest.approx(1.5 * asr.SAMPLE_RATE, abs=200)
+    assert decoded.audio.dtype.name == "float32"
+    assert 0 < abs(decoded.audio).max() <= 1
+    assert (decoded.reached_end, decoded.broke) == (True, False)
+    assert decoded.declared_s == pytest.approx(1.5, abs=0.02)  # from the RIFF header
 
 
-def test_decode_keeps_only_the_capped_samples_but_counts_them_all():
-    audio, available = asr._decode(tone(3.0), max_duration_s=1)
-    assert len(audio) == asr.SAMPLE_RATE  # one second kept
-    assert available == pytest.approx(3.0, abs=0.02)  # three seconds counted
+def test_decode_stops_at_the_cap_and_takes_the_rest_from_the_header():
+    decoded = asr._decode(tone(3.0), max_duration_s=1)
+    assert len(decoded.audio) == asr.SAMPLE_RATE  # one second kept
+    assert decoded.reached_end is False
+    assert decoded.present_s == pytest.approx(3.0, abs=0.02)  # WAV: from the data size
+
+
+class _CountingContainer:
+    """An av container whose decode() counts the frames it hands out."""
+
+    def __init__(self, container, counter: list[int]):
+        self._container, self._counter = container, counter
+
+    def __enter__(self):
+        self._container.__enter__()
+        return self
+
+    def __exit__(self, *exc):
+        return self._container.__exit__(*exc)
+
+    def __getattr__(self, name):
+        return getattr(self._container, name)
+
+    def decode(self, *args, **kwargs):
+        for frame in self._container.decode(*args, **kwargs):
+            self._counter[0] += 1
+            yield frame
+
+
+def test_nothing_past_the_cap_is_decoded(monkeypatch: pytest.MonkeyPatch):
+    # R2 on #478: max_duration_s must bound the decode, not only the transcription --
+    # a three-hour compressed recording took ~35 s just to decode in full.
+    import av
+
+    real_open = av.open
+
+    def frames_decoded(content: bytes, cap_s: float) -> int:
+        counter = [0]
+        monkeypatch.setattr(
+            av, "open", lambda *a, **k: _CountingContainer(real_open(*a, **k), counter)
+        )
+        asr._decode(content, cap_s)
+        monkeypatch.setattr(av, "open", real_open)
+        return counter[0]
+
+    long_file = mp3_fixture() if _has_encoder("libmp3lame") else tone(60.0)
+    whole = frames_decoded(long_file, 3600)
+    capped = frames_decoded(long_file, 1)
+    assert capped < whole / 2  # stopped near the cap, plus the one frame that checks for more
 
 
 def test_max_duration_below_or_at_zero_is_a_programming_error():
@@ -515,38 +561,37 @@ def test_an_unpinned_size_is_never_downloaded(fake_faster_whisper, monkeypatch: 
 
 
 # --- a file cut off mid-way: partial, and never presented as complete -----------------
-# (change 3 of R2's review on #478). What the decoder does today, probed with PyAV
-# 18.1 on the speech fixture (2026-10-12) -- these tests are built on it:
-# - A WAV cut anywhere decodes with no error, and FFmpeg recomputes its length from
-#   the file size: nothing in the decode or its metadata says the file is short. Only
+# (change 3 of R2's review on #478). What the decoder did before it, probed with PyAV
+# 18.1 on the speech fixture (2026-10-12) -- these tests were written against it first:
+# - A WAV cut anywhere decoded with no error, and FFmpeg recomputes its length from
+#   the file size: nothing in the decode or its metadata said the file was short. Only
 #   the RIFF header's data-chunk size, which still holds the full length, does.
-# - An MP3 cut anywhere decodes up to the cut; its Xing header still says the full
+# - An MP3 cut anywhere decoded up to the cut; its Xing header still says the full
 #   length.
-# - An MP3 with garbage in the middle fails as a whole, losing the audio before it.
+# - An MP3 with garbage in the middle failed as a whole, losing the audio before it.
 # - An M4A whose index (moov) is at the end -- what Zoom/Teams-style writers produce
-#   -- cannot even be opened once cut: nothing to transcribe, so it must stay a DATA
+#   -- cannot even be opened once cut: nothing to transcribe, so it stays a DATA
 #   failure, never an empty success.
-#
-# The target behaviour (an `incomplete_file` flag next to `truncated`; R2 is asked to
-# confirm the shape) is marked xfail(strict=True): CI stays green until it is built,
-# and then strict xfail fails the run until the markers come off. The DATA-failure
-# guards already hold and run as plain tests.
-
-_incomplete_file_pending = pytest.mark.xfail(
-    strict=True, reason="incomplete_file is not built yet (change 3 of R2's review on #478)"
-)
 
 _FULL_S = 4.135  # the speech fixture's length
 
 
-def encoded(fmt: str, codec: str) -> bytes:
-    """The speech fixture re-encoded into another container/codec, with PyAV."""
+def _has_encoder(codec: str) -> bool:
     import av
     from av.codec.codec import UnknownCodecError
 
     try:
         av.codec.Codec(codec, "w")
     except UnknownCodecError:
+        return False
+    return True
+
+
+def encoded(fmt: str, codec: str) -> bytes:
+    """The speech fixture re-encoded into another container/codec, with PyAV."""
+    import av
+
+    if not _has_encoder(codec):
         pytest.skip(f"no {codec} encoder in this PyAV build")
     with av.open(io.BytesIO(_CLEAN_RECORDING.read_bytes())) as src:
         frames = list(src.decode(audio=0))
@@ -583,50 +628,57 @@ def with_garbage_in_the_middle(content: bytes, size: int = 2048) -> bytes:
     )
 
 
-@_incomplete_file_pending
+def whisper_before_and_at_the_break() -> FakeWhisper:
+    """Two segments for a file that breaks at ~2 s: one well before the break, and
+    one ending inside BREAK_MARGIN_S of it -- the one a cut sentence would be."""
+    return FakeWhisper([fake_segment(" Please", 0.0, 0.5), fake_segment(" send the", 0.6, 1.9)])
+
+
 @pytest.mark.parametrize("make", [wav_fixture, mp3_fixture], ids=["wav", "mp3"])
 def test_a_complete_file_is_not_marked_incomplete(monkeypatch: pytest.MonkeyPatch, make):
     use_model(monkeypatch, FakeWhisper([fake_segment(" Hi.", 0.0, 1.0)]))
     result = transcribe(make())
     assert result.success
-    assert result.incomplete_file is False
-    assert result.truncated is False
+    assert (result.incomplete_file, result.truncated) == (False, False)
+    assert result.duration_available_exact is True  # read to the end
+    assert result.text == "Hi."  # nothing dropped: there is no break
 
 
-@_incomplete_file_pending
 def test_a_wav_cut_mid_way_is_transcribed_and_marked_incomplete(monkeypatch: pytest.MonkeyPatch):
-    # The case that is silent today: decodes cleanly, presented as a complete recording.
-    use_model(monkeypatch, FakeWhisper([fake_segment(" Please send the", 0.0, 1.5)]))
+    # The case that used to be silent: decoded cleanly, passed as a complete recording.
+    use_model(monkeypatch, whisper_before_and_at_the_break())
     result = transcribe(cut(wav_fixture(), 0.5))
     assert result.success
     assert result.incomplete_file is True
-    assert result.duration_available_s == pytest.approx(_FULL_S / 2, abs=0.05)  # what is there
     assert result.truncated is False  # not cut by us: the cap was not reached
+    assert result.duration_available_s == pytest.approx(_FULL_S / 2, abs=0.05)  # what is there
+    assert result.duration_available_exact is True  # decoded to where the file ends
+    assert result.text == "Please"  # the segment at the break is dropped
 
 
-@_incomplete_file_pending
 def test_an_mp3_cut_mid_way_is_marked_incomplete_whatever_its_header_says(
     monkeypatch: pytest.MonkeyPatch,
 ):
-    use_model(monkeypatch, FakeWhisper([fake_segment(" Please send the", 0.0, 1.5)]))
+    use_model(monkeypatch, whisper_before_and_at_the_break())
     result = transcribe(cut(mp3_fixture(), 0.5))
     assert result.success
     assert result.incomplete_file is True
     # the length actually decoded, not the full length the MP3's header still claims
     assert result.duration_available_s < _FULL_S * 0.75
+    assert result.text == "Please"
 
 
-@_incomplete_file_pending
 def test_garbage_in_the_middle_keeps_the_audio_before_it(monkeypatch: pytest.MonkeyPatch):
-    use_model(monkeypatch, FakeWhisper([fake_segment(" Please send the", 0.0, 1.5)]))
+    use_model(monkeypatch, whisper_before_and_at_the_break())
     result = transcribe(with_garbage_in_the_middle(mp3_fixture()))
     assert result.success
     assert result.incomplete_file is True
     assert 0 < result.duration_available_s < _FULL_S
+    assert result.text == "Please"
 
 
-@_incomplete_file_pending
 def test_the_cap_and_a_broken_file_are_told_apart(monkeypatch: pytest.MonkeyPatch):
+    # Two independent flags: a file both broken and capped returns both (R2 on #478).
     use_model(monkeypatch, FakeWhisper([fake_segment(" Please", 0.0, 0.5)]))
     capped_complete = transcribe(wav_fixture(), max_duration_s=1)
     capped_broken = transcribe(cut(wav_fixture(), 0.5), max_duration_s=1)
@@ -634,10 +686,60 @@ def test_the_cap_and_a_broken_file_are_told_apart(monkeypatch: pytest.MonkeyPatc
     assert (capped_broken.truncated, capped_broken.incomplete_file) == (True, True)
 
 
-@_incomplete_file_pending
+def test_a_capped_file_reports_its_declared_length_as_not_exact(monkeypatch: pytest.MonkeyPatch):
+    use_model(monkeypatch, FakeWhisper([fake_segment(" Please", 0.0, 0.5)]))
+    for make in (wav_fixture, mp3_fixture):
+        result = transcribe(make(), max_duration_s=1)
+        assert result.success
+        assert result.duration_s == 1.0
+        # the header's length (RIFF data size, MP3 Xing), not the 1 s that was read --
+        # and flagged as not verified by decoding
+        assert result.duration_available_s == pytest.approx(_FULL_S, abs=0.05)
+        assert result.duration_available_exact is False
+
+
+def test_a_sentence_ending_well_before_the_break_is_kept(monkeypatch: pytest.MonkeyPatch):
+    # only segments inside BREAK_MARGIN_S of the break go, not simply "the last one"
+    use_model(monkeypatch, FakeWhisper([fake_segment(" Please", 0.0, 0.5)]))
+    result = transcribe(cut(wav_fixture(), 0.5))  # breaks at ~2.07 s
+    assert result.text == "Please"
+    assert result.incomplete_file is True
+
+
+def test_a_broken_file_with_nothing_complete_before_the_break_is_no_speech(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    use_model(monkeypatch, FakeWhisper([fake_segment(" Please send the", 0.0, 1.9)]))
+    result = transcribe(cut(wav_fixture(), 0.5))
+    assert (result.success, result.reason) == (False, ASRFailureReason.NO_SPEECH_DETECTED)
+    assert "breaks at" in (result.error or "")
+    assert result.failure_category is FailureCategory.DATA
+
+
 def test_incomplete_file_is_serialized_for_the_consumer(monkeypatch: pytest.MonkeyPatch):
-    use_model(monkeypatch, FakeWhisper([fake_segment(" Please send the", 0.0, 1.5)]))
-    assert transcribe(cut(wav_fixture(), 0.5)).model_dump()["incomplete_file"] is True
+    use_model(monkeypatch, whisper_before_and_at_the_break())
+    dumped = transcribe(cut(wav_fixture(), 0.5)).model_dump()
+    assert (dumped["incomplete_file"], dumped["truncated"]) == (True, False)
+    assert dumped["duration_available_exact"] is True
+
+
+@pytest.mark.parametrize(
+    ("header", "expected"),
+    [
+        (b"RIFF\x00\x00\x00\x00WAVE", None),  # no fmt/data chunk
+        (b"not a riff file at all", None),
+    ],
+)
+def test_a_wav_header_without_a_usable_size_declares_nothing(header: bytes, expected):
+    assert asr._wav_extent(header) is expected
+
+
+def test_a_streaming_wav_with_an_unknown_size_is_not_called_incomplete():
+    # streaming writers put 0xFFFFFFFF in the data size until they know the length
+    data = bytearray(wav_fixture())
+    data_offset = data.find(b"data")
+    data[data_offset + 4 : data_offset + 8] = (0xFFFFFFFF).to_bytes(4, "little")
+    assert asr._wav_extent(bytes(data)) is None
 
 
 @pytest.mark.parametrize(
@@ -652,8 +754,7 @@ def test_incomplete_file_is_serialized_for_the_consumer(monkeypatch: pytest.Monk
 def test_a_file_cut_before_any_usable_audio_is_a_data_failure_not_an_empty_success(
     monkeypatch: pytest.MonkeyPatch, make
 ):
-    # Guards behaviour that already holds, and must keep holding once partial
-    # transcripts exist. Whisper is replaced but the real VAD runs, as in production.
+    # Whisper is replaced but the real VAD runs, as in production.
     monkeypatch.setattr(
         asr,
         "_load_model",
@@ -669,13 +770,26 @@ def test_a_file_cut_before_any_usable_audio_is_a_data_failure_not_an_empty_succe
     assert result.text == ""
 
 
+def three_sentences_cut_in_the_third() -> tuple[bytes, float]:
+    """The fixture's sentence three times, 1 s of silence between them, cut in the
+    middle of the third -- and where the cut falls, in seconds."""
+    with wave.open(io.BytesIO(wav_fixture())) as w:  # 16 kHz mono 16-bit
+        pcm = w.readframes(w.getnframes())
+    sentence = list(struct.unpack(f"<{len(pcm) // 2}h", pcm))
+    # wav() writes a 44-byte header whose data size covers all three sentences
+    full = wav(sentence + [0] * SR + sentence + [0] * SR + sentence)
+    cut_sample = 2 * len(sentence) + 2 * SR + len(sentence) // 2
+    return full[: 44 + 2 * cut_sample], cut_sample / SR
+
+
 @_needs_weights
-@_incomplete_file_pending
-def test_a_cut_recording_keeps_its_beginning_and_says_it_is_incomplete():
-    # With the real Whisper: the words before the cut come back, the ones after it
-    # cannot, and the result says so instead of passing as the whole recording.
-    result = transcribe(cut(wav_fixture(), 0.5))
+def test_a_cut_recording_keeps_what_came_before_and_says_it_is_incomplete():
+    # With the real Whisper: the sentences before the cut come back, the one the cut
+    # falls in is dropped rather than half-transcribed, and the result says so
+    # instead of passing as the whole recording.
+    content, break_s = three_sentences_cut_in_the_third()
+    result = transcribe(content)
     assert result.success, result.error
-    assert "send" in result.text.lower()
-    assert "friday" not in result.text.lower()  # said after the cut
     assert result.incomplete_file is True
+    assert result.text.lower().count("quarterly report") == 2  # the two complete ones
+    assert result.segments[-1].end < break_s - asr.BREAK_MARGIN_S

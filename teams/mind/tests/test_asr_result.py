@@ -261,42 +261,47 @@ def test_an_out_of_range_compression_ratio_or_no_speech_prob_is_rejected():
         )
 
 
-# --- long recordings: truncated, not refused ------------------------------------
+# --- how much the transcript covers: two independent, stored flags ------------------
+# (R2 on #478). Unlike OCR's truncated (pages_available > len(pages)), ASR's flags
+# are set by transcribe() from what it did, not derived from the durations:
+# derived, a broken file would look like a deliberate cut. How transcribe() sets
+# them is tested in test_asr_pipeline.py.
 
 
-def test_a_recording_cut_at_the_cap_says_so():
+def test_truncated_is_not_derived_from_the_durations():
+    # a recording longer than what was transcribed, yet not cut by us: a broken file
     result = ASRResult(
         success=True,
         text="t",
         segments=[segment("t", 0.9)],
-        duration_s=600.0,
-        duration_available_s=1800.0,
-    )
-    assert result.truncated is True
-
-
-def test_a_recording_under_the_cap_is_not_truncated():
-    result = ASRResult(
-        success=True,
-        text="t",
-        segments=[segment("t", 0.9)],
-        duration_s=42.0,
-        duration_available_s=42.0,
+        duration_s=2.0,
+        duration_available_s=4.0,
+        incomplete_file=True,
     )
     assert result.truncated is False
 
 
-def test_a_serialized_result_includes_the_derived_fields():
+@pytest.mark.parametrize(
+    ("truncated", "incomplete_file"), [(False, False), (True, False), (False, True), (True, True)]
+)
+def test_the_two_flags_are_independent(truncated: bool, incomplete_file: bool):
+    result = ASRResult(success=True, text="t", truncated=truncated, incomplete_file=incomplete_file)
+    assert (result.truncated, result.incomplete_file) == (truncated, incomplete_file)
+
+
+def test_a_serialized_result_includes_the_derived_and_coverage_fields():
     dumped = ASRResult(
         success=True,
         text="a\nb",
         segments=[segment("a", 0.9), segment("b", 0.1)],
         duration_s=10.0,
         duration_available_s=20.0,
+        truncated=True,
     ).model_dump()
     assert dumped["mean_confidence"] == 0.5
     assert dumped["low_confidence_count"] == 1
     assert dumped["low_confidence_segments"][0]["text"] == "b"
-    assert dumped["truncated"] is True
+    assert (dumped["truncated"], dumped["incomplete_file"]) == (True, False)
+    assert dumped["duration_available_exact"] is False  # not verified unless set
     assert dumped["retryable"] is False
     assert dumped["failure_category"] is None

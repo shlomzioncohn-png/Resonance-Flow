@@ -95,7 +95,7 @@ def run_one(variant: str, meeting: Meeting, run: int) -> ChunkingRow:
                 raise RuntimeError(f"transcribe() failed: {result.reason}: {result.error}")
             texts = [s.text for s in result.segments]
         else:
-            audio, _ = asr._decode(content, asr.MAX_DURATION_S)
+            audio = asr._decode(content, asr.MAX_DURATION_S).audio
             step = len(audio) if variant == "full" else _FIXED_CHUNK_S * asr.SAMPLE_RATE
             for i in range(0, len(audio), step):
                 found, _ = model.transcribe(
