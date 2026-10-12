@@ -190,9 +190,12 @@ transcript or meeting-metadata sidecar is just another entry in `objects[]` now,
 pointer field. `correlation_id` is required and is this lane's Kafka dedup key (not a content
 hash, since there's no longer one single hash on the event) - a fresh UUID per landed
 recording, shared by every object's `object_key` so they land next to each other in MinIO.
-`source_ref` is Zoom/BBB's own stable reference for the meeting (the Report API's `uuid`,
-falling back to `meetingId` for BBB) - distinct from any `object_key`, which only ever points
-into our own MinIO copy. `revision`/`change_type`/`change_significance_score` are always
+`source_ref` is the platform's own unique identifier for this one meeting occurrence - Zoom's
+`uuid`, or BBB's `recordID` - and `null` when the metadata sidecar has neither. Never
+`meetingId`: Zoom reuses it across a recurring meeting and BBB across every session in the same
+room, and the issue #31 contract requires `source_ref` to be unique within its `source_type`.
+It's an identifier, not a link, distinct from any `object_key` (which only ever points into our
+own MinIO copy). `revision`/`change_type`/`change_significance_score` are always
 `0`/`UPSERT`/`100` on this lane - a Zoom/BBB recording or scanned doc is never revised once
 landed, unlike Malki's lane where an edited email/message bumps `revision`.
 
@@ -340,6 +343,47 @@ BRIDGE_MEDIA_CLASSIFIER_API_KEY=<your Gemini key>   # omit to run the rules only
 Each decision is logged (`MediaClassificationService`: category, confidence, reason), and shows up
 in the published event's `scope_decision`/`classification` and in the landed objects'
 `scope_decision` MinIO tag.
+
+### `SOURCE_METADATA` format (for consumers)
+
+The `role: SOURCE_METADATA` object is the platform's own meeting report, landed byte-for-byte -
+Bridge never converts or edits it. Its format depends on `source_type`, and its `content_type`
+says which one. Consumers aren't required to read it: everything Bridge derives from it is already
+on the event (`participants`, `source_timestamp`, `source_ref`).
+
+| `source_type` | `content_type` | Shape |
+|---|---|---|
+| `ZOOM` | `application/json` | Zoom Report API `GET /report/meetings/{meetingId}`, merged with its participants endpoint |
+| `BIGBLUEBUTTON` | `application/xml` | One `<recording>` element of BBB's `GET getRecordings` response |
+
+**`ZOOM`** - JSON object (sample: `fixtures/media/zoom-meeting-metadata.sample.json`):
+
+| Field | Meaning |
+|---|---|
+| `id` | Zoom meeting number - reused by a recurring meeting, so not unique |
+| `uuid` | Unique id of this meeting occurrence → `source_ref` |
+| `topic` | Meeting title |
+| `user_email`, `user_name` | Host |
+| `dept` | Host's department |
+| `start_time`, `end_time` | ISO-8601 UTC → `start_time` is `source_timestamp` |
+| `duration`, `total_minutes` | Meeting length / summed participant minutes |
+| `participants_count`, `type` | Head count; Zoom meeting type code |
+| `custom_keys[]`, `tracking_fields[]` | Account-defined key/value pairs |
+| `participants[]` | Per participant: `id`, `user_id`, `participant_user_id`, `name` (→ `participants`), `user_email`, `join_time`, `leave_time`, `duration`, `status`, `failover`, `customer_key`, `registrant_id`, `bo_mtg_id` |
+
+**`BIGBLUEBUTTON`** - XML (sample: `fixtures/media/bbb-metadata.sample.xml`):
+
+| Element | Meaning |
+|---|---|
+| `recordID` | Unique id of this recording → `source_ref` |
+| `meetingID` | Room id - reused by every session in the room, so not unique |
+| `internalMeetingID` | BBB's internal id for the session |
+| `name` | Meeting/room name |
+| `startTime`, `endTime` | Epoch milliseconds → `startTime` is `source_timestamp` |
+| `participants` | A head **count** only - BBB's public API has no per-person list, so `participants` on the event stays empty for BBB |
+| `isBreakout`, `published`, `state` | Recording flags/status |
+| `metadata` | Meeting metadata set by the integration (e.g. `meetingName`) |
+| `playback/format[]` | Playback links per format (`type`, `url`, `processingTime`, `length`) |
 
 **Known gaps (tracked in issue #45):**
 - Test samples aren't yet drawn from the real public corpora named in the spec (AMI/ICSI,

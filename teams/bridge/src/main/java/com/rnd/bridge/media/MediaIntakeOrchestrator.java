@@ -241,12 +241,9 @@ public class MediaIntakeOrchestrator {
                             participants = meetingMetadata.participants().stream()
                                     .map(ParticipantActivity::name).toList();
                             sourceTimestamp = meetingMetadata.startedAt();
-                            // Zoom's own meeting uuid is the stable reference Zoom itself
-                            // uses; BBB has none, so its own meetingId is the next best
-                            // thing - either way, a pointer back to the source system
-                            // itself, not to our MinIO copy (see RawObjectEvent's javadoc).
-                            sourceRef = meetingMetadata.uuid() != null
-                                    ? meetingMetadata.uuid() : meetingMetadata.meetingId();
+                            // The platform's unique id for this occurrence (Zoom uuid / BBB
+                            // recordID) - see MeetingMetadata.sourceRef for why never meetingId.
+                            sourceRef = meetingMetadata.sourceRef();
                         }
                     }
 

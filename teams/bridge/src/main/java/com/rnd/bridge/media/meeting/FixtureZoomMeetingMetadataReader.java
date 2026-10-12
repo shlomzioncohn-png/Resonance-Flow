@@ -93,7 +93,8 @@ public class FixtureZoomMeetingMetadataReader implements MeetingMetadataReader {
                 intOrNull(root.get("participants_count"), sidecarFile, "participants_count"),
                 intOrNull(root.get("type"), sidecarFile, "type"),
                 customFields(root.get("custom_keys"), "key"),
-                customFields(root.get("tracking_fields"), "field"));
+                customFields(root.get("tracking_fields"), "field"),
+                null);
     }
 
     private List<MeetingMetadata.CustomField> customFields(JsonNode arrayNode, String keyFieldName) {

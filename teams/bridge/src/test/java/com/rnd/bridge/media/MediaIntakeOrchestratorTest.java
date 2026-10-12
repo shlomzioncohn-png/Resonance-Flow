@@ -161,7 +161,7 @@ class MediaIntakeOrchestratorTest {
     void meetingMetadataSidecarIsLandedLinkedParticipantsAndSourceRefExtracted() throws Exception {
         Files.write(zoomDir.resolve("meeting.mp3"), "e".repeat(2000).getBytes());
         Files.writeString(zoomDir.resolve("meeting.meeting.json"), """
-                {"id": "1", "topic": "Sync", "user_email": "dana@example.com",
+                {"id": "1", "uuid": "aDYlohsHRtCd4ii1uC2+hA==", "topic": "Sync", "user_email": "dana@example.com",
                  "start_time": "2026-09-08T09:00:00Z", "end_time": "2026-09-08T09:30:00Z",
                  "participants": [
                    {"id": "a", "name": "Dana Levi", "join_time": "2026-09-08T09:00:00Z", "leave_time": "2026-09-08T09:30:00Z"},
@@ -171,7 +171,7 @@ class MediaIntakeOrchestratorTest {
         RawObjectEvent event = fakeMeetingEvent("ZOOM/demo-tenant/2026-08-30/x.mp3");
         when(intakeService.landMeeting(any(), any(), eq("meeting.mp3"), isNull(), isNull(), any(),
                 eq("meeting.meeting.json"), eq("demo-tenant"), eq(RawSourceType.ZOOM), any(),
-                eq(List.of("Dana Levi", "Esther Ora")), eq(meetingStartedAt), eq("1"), any(), eq(Triage.UNCLASSIFIED)))
+                eq(List.of("Dana Levi", "Esther Ora")), eq(meetingStartedAt), eq("aDYlohsHRtCd4ii1uC2+hA=="), any(), eq(Triage.UNCLASSIFIED)))
                 .thenReturn(event);
 
         MediaIntakeOrchestrator.IntakeSummary summary = orchestrator.runIntake();
@@ -185,7 +185,7 @@ class MediaIntakeOrchestratorTest {
         ArgumentCaptor<String> correlationId = ArgumentCaptor.forClass(String.class);
         verify(intakeService).landMeeting(any(), any(), eq("meeting.mp3"), isNull(), isNull(), any(),
                 eq("meeting.meeting.json"), eq("demo-tenant"), eq(RawSourceType.ZOOM), any(),
-                eq(List.of("Dana Levi", "Esther Ora")), eq(meetingStartedAt), eq("1"),
+                eq(List.of("Dana Levi", "Esther Ora")), eq(meetingStartedAt), eq("aDYlohsHRtCd4ii1uC2+hA=="),
                 correlationId.capture(), eq(Triage.UNCLASSIFIED));
         assertThat(correlationId.getValue()).isNotBlank();
     }

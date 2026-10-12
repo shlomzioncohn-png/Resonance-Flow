@@ -43,11 +43,13 @@ public class FixtureBbbMeetingMetadataReader implements MeetingMetadataReader {
         Element recording = doc.getDocumentElement();
 
         String meetingId = textOrNull(recording, "meetingID");
+        String recordId = textOrNull(recording, "recordID");
         String topic = textOrNull(recording, "name");
         Instant startedAt = epochMillisOrNull(textOrNull(recording, "startTime"));
         Instant endedAt = epochMillisOrNull(textOrNull(recording, "endTime"));
 
-        return new MeetingMetadata(meetingId, topic, null, startedAt, endedAt, List.of());
+        return new MeetingMetadata(meetingId, topic, null, startedAt, endedAt, List.of(),
+                null, null, null, null, null, null, null, null, recordId);
     }
 
     private Element firstElement(Element parent, String tag) {
