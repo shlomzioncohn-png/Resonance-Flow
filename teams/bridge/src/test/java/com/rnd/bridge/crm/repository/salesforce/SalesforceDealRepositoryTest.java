@@ -156,9 +156,9 @@ class SalesforceDealRepositoryTest {
                 "2026-08-20T10:00:00.000+0000", "Jane Doe", "jane@example.com");
         enqueueJson(queryPage(opportunity));
 
-        Deal deal = newRepository().snapshot().findLatestByDealId("salesforce:006A").orElseThrow();
+        Deal deal = newRepository().snapshot().findLatestByDealId("006A").orElseThrow();
 
-        assertEquals("salesforce:006A", deal.dealId());
+        assertEquals("006A", deal.dealId());
         assertEquals("Acme deal", deal.title());
         assertEquals("Big deal", deal.description());
         assertEquals(DealStage.QUALIFIED, deal.stage());
@@ -181,7 +181,7 @@ class SalesforceDealRepositoryTest {
                 "2026-05-01T08:00:00.000+0000", "LastStageChangeDate", "2026-08-20T10:00:00.000+0000", null, null);
         enqueueJson(queryPage(opportunity));
 
-        Deal deal = newRepository().snapshot().findLatestByDealId("salesforce:006B").orElseThrow();
+        Deal deal = newRepository().snapshot().findLatestByDealId("006B").orElseThrow();
 
         assertEquals("crm:salesforce:006B", TASK_MAPPER.toSourceRef(deal));
     }
@@ -198,8 +198,8 @@ class SalesforceDealRepositoryTest {
 
         DealSnapshot snapshot = newRepository().snapshot();
 
-        assertEquals(DealStage.CLOSED_WON, snapshot.findLatestByDealId("salesforce:006C").orElseThrow().stage());
-        assertEquals(DealStage.CLOSED_LOST, snapshot.findLatestByDealId("salesforce:006D").orElseThrow().stage());
+        assertEquals(DealStage.CLOSED_WON, snapshot.findLatestByDealId("006C").orElseThrow().stage());
+        assertEquals(DealStage.CLOSED_LOST, snapshot.findLatestByDealId("006D").orElseThrow().stage());
     }
 
     @Test
@@ -210,7 +210,7 @@ class SalesforceDealRepositoryTest {
                 "2026-05-01T08:00:00.000+0000", "LastStageChangeDate", "2026-08-20T10:00:00.000+0000", null, null);
         enqueueJson(queryPage(opportunity));
 
-        Deal deal = newRepository().snapshot().findLatestByDealId("salesforce:006E").orElseThrow();
+        Deal deal = newRepository().snapshot().findLatestByDealId("006E").orElseThrow();
 
         assertNull(deal.closeDate());
         assertNull(deal.dealValue());
@@ -227,7 +227,7 @@ class SalesforceDealRepositoryTest {
         enqueueJson(queryPage(opportunity));
 
         Deal deal = newRepositoryWithField("LastModifiedDate").snapshot()
-                .findLatestByDealId("salesforce:006F").orElseThrow();
+                .findLatestByDealId("006F").orElseThrow();
 
         assertEquals(Instant.parse("2026-08-25T11:00:00Z"), deal.stageChangedAt());
     }
@@ -245,7 +245,7 @@ class SalesforceDealRepositoryTest {
 
         DealSnapshot snapshot = assertDoesNotThrow(() -> newRepository().snapshot());
 
-        assertEquals(List.of("salesforce:006H"), snapshot.dealIds());
+        assertEquals(List.of("006H"), snapshot.dealIds());
         assertEquals(1, snapshot.skippedAtRead());
     }
 
@@ -263,9 +263,9 @@ class SalesforceDealRepositoryTest {
 
         assertEquals(2, snapshot.latestPerDeal().size());
         assertEquals(DealStage.QUALIFIED,
-                snapshot.findLatestByDealId("salesforce:006I").orElseThrow().stage());
+                snapshot.findLatestByDealId("006I").orElseThrow().stage());
         assertEquals(DealStage.CLOSED_WON,
-                snapshot.findLatestByDealId("salesforce:006J").orElseThrow().stage());
+                snapshot.findLatestByDealId("006J").orElseThrow().stage());
     }
 
     @Test
@@ -311,7 +311,7 @@ class SalesforceDealRepositoryTest {
                 "2026-05-01T08:00:00.000+0000", "LastStageChangeDate", "2026-08-01T08:00:00.000+0000", null, null);
         enqueueJson(queryPage(dealV1));
         DealSnapshot first = repository.snapshot();
-        assertEquals(DealStage.QUALIFIED, first.findLatestByDealId("salesforce:006M").orElseThrow().stage());
+        assertEquals(DealStage.QUALIFIED, first.findLatestByDealId("006M").orElseThrow().stage());
 
         enqueueDefaultStages();
         String dealV2 = opportunityRow("006M", "Drifts over time", null, "Closed Won", "1000", null,
@@ -319,7 +319,7 @@ class SalesforceDealRepositoryTest {
         enqueueJson(queryPage(dealV2));
         DealSnapshot second = repository.snapshot();
 
-        assertEquals(DealStage.CLOSED_WON, second.findLatestByDealId("salesforce:006M").orElseThrow().stage());
+        assertEquals(DealStage.CLOSED_WON, second.findLatestByDealId("006M").orElseThrow().stage());
         assertEquals(5, server.getRequestCount(),
                 "token + (stages + opportunities) for each of the two snapshot() calls");
     }
@@ -338,7 +338,7 @@ class SalesforceDealRepositoryTest {
         Optional<Deal> fetched = newRepository().fetchDeal("006N");
 
         assertTrue(fetched.isPresent());
-        assertEquals("salesforce:006N", fetched.get().dealId());
+        assertEquals("006N", fetched.get().dealId());
         assertEquals(DealStage.CLOSED_WON, fetched.get().stage());
     }
 
@@ -389,13 +389,51 @@ class SalesforceDealRepositoryTest {
         enqueueDefaultStages();
         enqueueJson(queryPage(opportunity));
         DealSnapshot snapshot = repository.snapshot();
-        Deal fromSnapshot = snapshot.findLatestByDealId("salesforce:006P").orElseThrow();
+        Deal fromSnapshot = snapshot.findLatestByDealId("006P").orElseThrow();
 
         enqueueJson(queryPage(opportunity));
         enqueueDefaultStages();
         Deal fromFetchDeal = repository.fetchDeal("006P").orElseThrow();
 
         assertEquals(fromSnapshot, fromFetchDeal);
+    }
+
+    @Test
+    void fetchDealRoundTripsUsingTheDealIdReturnedFromSnapshot() {
+        SalesforceDealRepository repository = newRepository();
+
+        String opportunity = opportunityRow("006R", "Round trips", "Desc", "Qualification", "4000",
+                "2026-09-20", "2026-07-10T08:00:00.000+0000", "LastStageChangeDate",
+                "2026-08-18T09:00:00.000+0000", null, null);
+
+        enqueueJson(tokenResponse());
+        enqueueDefaultStages();
+        enqueueJson(queryPage(opportunity));
+        Deal fromSnapshot = repository.snapshot().findLatestByDealId("006R").orElseThrow();
+
+        // The value snapshot() put in Deal.dealId() must itself be a valid fetchDeal() argument -
+        // previously dealId() carried a "salesforce:" prefix fetchDeal() did not accept.
+        enqueueJson(queryPage(opportunity));
+        enqueueDefaultStages();
+        Deal fetched = repository.fetchDeal(fromSnapshot.dealId()).orElseThrow();
+
+        assertEquals(fromSnapshot, fetched);
+    }
+
+    @Test
+    void fetchDealThrowsOnAnUnresolvableStageNameRatherThanSkippingIt() {
+        enqueueJson(tokenResponse());
+        String badOpportunity = opportunityRow("006Q", "Bad stage", null, "Some Deleted Custom Stage", "1000",
+                null, "2026-05-01T08:00:00.000+0000", "LastStageChangeDate", "2026-08-20T10:00:00.000+0000",
+                null, null);
+        enqueueJson(queryPage(badOpportunity));
+        enqueueDefaultStages();
+
+        IllegalStateException exception =
+                assertThrows(IllegalStateException.class, () -> newRepository().fetchDeal("006Q"));
+
+        assertTrue(exception.getMessage().contains("006Q"));
+        assertTrue(exception.getMessage().contains("Some Deleted Custom Stage"));
     }
 
     @Test

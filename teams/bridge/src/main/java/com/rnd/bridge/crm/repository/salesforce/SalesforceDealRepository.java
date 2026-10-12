@@ -40,18 +40,17 @@ import java.util.Optional;
  * per deal id. This does not violate {@link DealRepository}'s append-only-history contract, it
  * just means the history is always exactly one row long (design doc §2).
  * <p>
- * <b>{@code dealId} carries a {@code "salesforce:"} prefix the raw {@code Opportunity.Id} does
- * not.</b> {@code DealToTaskMapper.toSourceRef} (shared with every other CRM source) always
- * builds {@code sourceRef} as {@code "crm:" + deal.dealId()} - it has no per-source branch, and
- * giving it one would mean touching code HubSpot/JSON also depend on for zero benefit to them.
- * The design doc requires Salesforce's {@code sourceRef} to read {@code "crm:salesforce:<Id>"},
- * distinct from HubSpot's {@code "crm:<id>"} (§4) - the only way to get that through the
- * existing, source-agnostic mapper is for {@code dealId} itself to already be
- * {@code "salesforce:<Id>"}. {@link #fetchDeal(String)}'s own parameter is deliberately NOT
- * prefixed - it takes the bare Salesforce record Id (what a future CDC event's
- * {@code getRecordId()} would carry, design doc §7, and what every {@code WHERE Id = '...'} SOQL
- * clause needs), and returns a {@link Deal} whose {@code dealId()} carries the prefix, matching
- * the entry {@link DealSnapshot#latestPerDeal()} would hold for the same Opportunity.
+ * <b>{@code dealId} is always the bare {@code Opportunity.Id}.</b> {@link Deal#dealId()} never
+ * carries a source-specific prefix - {@link #fetchDeal(String)}'s own parameter (what a future CDC
+ * event's {@code getRecordId()} would carry, design doc §7, and what every
+ * {@code WHERE Id = '...'} SOQL clause needs) and the {@code dealId()} on every {@link Deal} this
+ * class returns are the same bare id, so {@code fetchDeal(deal.dealId())} always round-trips. The
+ * design doc requires Salesforce's {@code sourceRef} to read {@code "crm:salesforce:<Id>"},
+ * distinct from HubSpot's {@code "crm:<id>"} (§4) - that comes from {@link Deal#sourceRefPrefix()}
+ * instead: this class sets it to {@code "crm:salesforce:"} (see {@link #SOURCE_REF_PREFIX}), and
+ * {@code DealToTaskMapper.toSourceRef} (shared with every other CRM source) builds {@code
+ * sourceRef} as {@code deal.sourceRefPrefix() + deal.dealId()} - no per-source branch there, and
+ * HubSpot/JSON are unaffected since {@link Deal}'s default prefix is {@code "crm:"}.
  * <p>
  * <b>{@code stageChangedAt} - one configurable field, no automatic runtime fallback.</b> Read from
  * whichever Opportunity field {@code bridge.crm.salesforce.stage-changed-at-field} names (default
@@ -81,7 +80,7 @@ public class SalesforceDealRepository implements DealRepository {
 
     private static final Logger log = LoggerFactory.getLogger(SalesforceDealRepository.class);
 
-    private static final String DEAL_ID_PREFIX = "salesforce:";
+    private static final String SOURCE_REF_PREFIX = "crm:salesforce:";
 
     private static final String STAGE_METADATA_SOQL =
             "SELECT MasterLabel, ApiName, IsActive, IsClosed, IsWon, DefaultProbability FROM OpportunityStage";
@@ -195,8 +194,9 @@ public class SalesforceDealRepository implements DealRepository {
      * a nonexistent id costs one request, not two - same ordering {@code HubSpotDealRepository}
      * uses for its 404 case, adapted to Salesforce's "not found is zero records" (design doc §2).
      *
-     * @param dealId the bare Salesforce {@code Opportunity.Id} - NOT the {@code "salesforce:"}
-     *               -prefixed form {@link Deal#dealId()} returns; see the class Javadoc
+     * @param dealId the bare Salesforce {@code Opportunity.Id} - the same value {@link
+     *               Deal#dealId()} returns, so {@code fetchDeal(deal.dealId())} round-trips; see
+     *               the class Javadoc
      */
     @Override
     public Optional<Deal> fetchDeal(String dealId) {
@@ -227,7 +227,8 @@ public class SalesforceDealRepository implements DealRepository {
         Map<String, Object> owner = asMap(row.get("Owner"));
 
         return Deal.builder()
-                .dealId(DEAL_ID_PREFIX + rawId)
+                .dealId(rawId)
+                .sourceRefPrefix(SOURCE_REF_PREFIX)
                 .title((String) row.get("Name"))
                 .description((String) row.get("Description"))
                 .stage(stage)
