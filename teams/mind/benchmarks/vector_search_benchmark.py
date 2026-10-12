@@ -29,12 +29,9 @@ import statistics
 import time
 from pathlib import Path
 
-import psycopg
-from psycopg import sql
-
-from mind.config import VectorStoreSettings, get_settings
+from benchmarks.vector_store_test_table import create_vector_store_test_table
+from mind.config import get_settings
 from mind.embeddings import embed, embed_batch
-from mind.embeddings.embeddings import EMBEDDING_DIM
 from mind.embeddings.pgvector_store import PgVectorStore
 
 BENCHMARK_TABLE = "task_embeddings_benchmark"
@@ -92,30 +89,6 @@ PAIRS: list[tuple[str, str]] = [
 assert 5 <= len(PAIRS) <= 10
 
 
-async def _create_benchmark_table(settings: VectorStoreSettings) -> None:
-    # PgVectorStore no longer creates its own schema (issue #441) -- this
-    # dedicated benchmark table isn't covered by `alembic upgrade head`,
-    # so it sets itself up here. Same pattern as
-    # tests/test_vector_store.py's `_create_test_table()` helper.
-    table = sql.Identifier(settings.table)
-    async with await psycopg.AsyncConnection.connect(
-        str(settings.dsn.get_secret_value()), autocommit=True
-    ) as conn:
-        await conn.execute("CREATE EXTENSION IF NOT EXISTS vector;")
-        await conn.execute(
-            sql.SQL(
-                "CREATE TABLE IF NOT EXISTS {table} "
-                "(task_id TEXT PRIMARY KEY, embedding VECTOR({dim}) NOT NULL, "
-                "is_completed BOOLEAN NOT NULL DEFAULT FALSE, content_hash TEXT);"
-            ).format(table=table, dim=sql.Literal(EMBEDDING_DIM))
-        )
-        await conn.execute(
-            sql.SQL(
-                "CREATE INDEX IF NOT EXISTS {idx} ON {table} USING hnsw (embedding vector_cosine_ops);"
-            ).format(idx=sql.Identifier(f"{settings.table}_embedding_hnsw_idx"), table=table)
-        )
-
-
 def fake_filler_text() -> str:
     return " ".join(random.choices(FILLER_WORDS, k=random.randint(4, 10)))
 
@@ -130,7 +103,7 @@ async def main() -> None:
     random.seed(87)
     # Own table, not the real task_embeddings -- dropped in finally below.
     settings = get_settings().vector_store.model_copy(update={"table": BENCHMARK_TABLE})
-    await _create_benchmark_table(settings)
+    await create_vector_store_test_table(settings)
     store = PgVectorStore(settings)
     await store.open()
     try:
