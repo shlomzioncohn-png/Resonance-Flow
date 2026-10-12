@@ -608,6 +608,31 @@ def _chunks(audio: np.ndarray) -> Iterator[tuple[int, int, bool]]:
         start = end
 
 
+def warm_up() -> bool:
+    """Load the Whisper model (sha256-checked) and the VAD now, not on the first call.
+
+    For the consumer to call once at start-up (R2 on #478): otherwise the first
+    audio message pays ~1.5 s of loading inside its Kafka handler, on top of the
+    transcription. Never raises, like transcribe(): ASR is a fallback path, and a
+    broken ASR environment must not stop a consumer that also serves OCR and
+    text-native sources. Returns whether ASR is ready; on False the reason is
+    logged, and transcribe() tries the load again (a failed load is not cached),
+    reporting ASR_UNAVAILABLE if it still fails.
+    """
+    try:
+        _load_model()
+        from faster_whisper.vad import get_vad_model
+
+        get_vad_model()  # cached by faster-whisper; loads the Silero ONNX session
+    except _ASRUnavailable as exc:
+        logger.warning("ASR not ready at start-up: %s", exc)
+        return False
+    except Exception:
+        logger.exception("unexpected error warming up ASR")
+        return False
+    return True
+
+
 def transcribe(
     content: bytes, *, filename: str = "", max_duration_s: float = MAX_DURATION_S
 ) -> ASRResult:

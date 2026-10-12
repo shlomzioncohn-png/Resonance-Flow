@@ -793,3 +793,53 @@ def test_a_cut_recording_keeps_what_came_before_and_says_it_is_incomplete():
     assert result.incomplete_file is True
     assert result.text.lower().count("quarterly report") == 2  # the two complete ones
     assert result.segments[-1].end < break_s - asr.BREAK_MARGIN_S
+
+
+# --- warm_up(): the model load moves out of the first message's handler ------------
+
+
+def test_warm_up_loads_the_model_once_so_the_first_call_does_not(
+    fake_faster_whisper, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    place_weights(tmp_path / "image" / "base.en")
+    loads: list[int] = []
+    real_load = asr._load_model
+
+    def counting_load():
+        if asr._model is None:
+            loads.append(1)
+        return real_load()
+
+    monkeypatch.setattr(asr, "_load_model", counting_load)
+    assert asr.warm_up() is True
+    assert asr._model is not None
+    asr._load_model()  # what transcribe() calls first
+    assert loads == [1]  # loaded by warm_up(), reused afterwards
+
+
+def test_warm_up_never_raises_and_says_asr_is_not_ready(
+    fake_faster_whisper, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+):
+    # no weights anywhere under tmp_path, and the download fails
+    import faster_whisper
+
+    def blocked(*args, **kwargs):
+        raise ConnectionError("418 Blocked by NetFree")
+
+    monkeypatch.setattr(faster_whisper, "download_model", blocked)
+    with caplog.at_level("WARNING", logger=asr.logger.name):
+        assert asr.warm_up() is False
+    assert "ASR not ready" in caplog.text
+    assert asr._model is None  # not cached: transcribe() will try again
+
+
+def test_a_bug_while_warming_up_is_logged_not_raised(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+):
+    def buggy():
+        raise KeyError("a bug in our code")
+
+    monkeypatch.setattr(asr, "_load_model", buggy)
+    with caplog.at_level("ERROR", logger=asr.logger.name):
+        assert asr.warm_up() is False
+    assert "unexpected error warming up ASR" in caplog.text
