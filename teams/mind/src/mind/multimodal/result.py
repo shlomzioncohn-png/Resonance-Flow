@@ -14,10 +14,13 @@ handle the data / environment / bug split the same way for both.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from enum import Enum
 from typing import ClassVar
 
 from pydantic import BaseModel, computed_field, model_validator
+
+from mind.multimodal.failures import FailureCategory
 
 
 class MediaTextResult[ReasonT: Enum](BaseModel):
@@ -25,16 +28,16 @@ class MediaTextResult[ReasonT: Enum](BaseModel):
 
     ``success=False`` means "could not extract" -- ``reason`` says why (a
     classified code to branch on), ``error`` is the human-readable message for
-    logs, and ``retryable`` is True for environment failures (the input is fine;
-    try again once the environment is fixed). ``reason`` is set exactly when
-    ``success`` is False.
+    logs, ``failure_category`` says how to treat the input (DATA: drop it,
+    ENVIRONMENT: retry later, BUG: park it -- see failures.py), and
+    ``retryable`` is ``failure_category is ENVIRONMENT``. ``reason`` is set
+    exactly when ``success`` is False; ``failure_category`` with it.
 
-    A subclass names the reasons that are environment failures in
-    ``RETRYABLE_REASONS``; every other reason (a bad input, or a bug of ours) is
-    not retryable.
+    A subclass maps every one of its reasons to a category in
+    ``FAILURE_CATEGORIES`` (tests check none is left out).
     """
 
-    RETRYABLE_REASONS: ClassVar[frozenset[Enum]] = frozenset()
+    FAILURE_CATEGORIES: ClassVar[Mapping[Enum, FailureCategory]] = {}
 
     success: bool
     text: str = ""
@@ -43,8 +46,13 @@ class MediaTextResult[ReasonT: Enum](BaseModel):
 
     @computed_field  # type: ignore[prop-decorator]
     @property
+    def failure_category(self) -> FailureCategory | None:
+        return None if self.reason is None else self.FAILURE_CATEGORIES[self.reason]
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
     def retryable(self) -> bool:
-        return self.reason in self.RETRYABLE_REASONS
+        return self.failure_category is FailureCategory.ENVIRONMENT
 
     @model_validator(mode="after")
     def _reason_iff_failure(self) -> MediaTextResult[ReasonT]:

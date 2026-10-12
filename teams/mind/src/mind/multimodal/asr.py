@@ -4,17 +4,18 @@ Uses Whisper ``base.en`` via faster-whisper (int8, CPU) -- the model decision ma
 in ``benchmarks/ocr-asr-benchmark.md`` "ASR -- final decision" (#135), not reopened
 here.
 
-The result has the same envelope as OCR (``MediaTextResult``, see result.py):
-R2's ``bridge.raw.landed`` consumer (#349) calls OCR or ASR by ``modality`` and
-both feed the same extraction pipeline, so ``success`` / ``reason`` / ``error`` /
-``retryable`` mean the same thing in both. Where OCR has ``pages``, ASR has
-``segments``; where OCR flags ``low_confidence_words``, ASR flags
-``low_confidence_segments``.
+The result has the same envelope as OCR (``MediaTextResult``, see result.py, and
+the shared failure vocabulary in failures.py): R2's ``bridge.raw.landed`` consumer
+(#349) calls OCR or ASR by ``modality`` and both feed the same extraction pipeline,
+so ``success`` / ``reason`` / ``error`` / ``failure_category`` / ``retryable`` mean
+the same thing in both. Where OCR has ``pages``, ASR has ``segments``; where OCR
+flags ``low_confidence_words``, ASR flags ``low_confidence_segments``.
 
 Confidence is Whisper's own, passed through, not a score invented on top of it
-(#478): each segment's ``avg_logprob`` -- the mean log-probability of the tokens
-Whisper decoded for it -- is reported as ``confidence = exp(avg_logprob)``, the
-same number out of log space (the geometric-mean token probability, 0-1).
+(#478): every segment carries ``avg_logprob``, ``compression_ratio`` and
+``no_speech_prob`` as Whisper computed them, plus ``confidence = exp(avg_logprob)``,
+the same number out of log space (0-1). See TranscriptSegment for the scales and
+for why these are per decoding window rather than per segment.
 
 Signature mirrors OCR's ``extract_text`` (agreed with R2 on PR #509): raw ``bytes``
 in, never raises, a typed failure ``reason``, and a cap that truncates rather than
@@ -30,15 +31,16 @@ import logging
 import math
 import threading
 import time
-from collections.abc import Iterator
+from collections.abc import Iterator, Mapping
 from enum import Enum
 from itertools import pairwise
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, NamedTuple
+from typing import TYPE_CHECKING, Any, ClassVar, NamedTuple
 
 from pydantic import BaseModel, Field, computed_field
 
 from mind.config import ASRSettings
+from mind.multimodal.failures import FailureCategory
 from mind.multimodal.result import MediaTextResult
 from mind.observability.tracking import record_call
 
@@ -159,33 +161,58 @@ class ASRFailureReason(str, Enum):
 
 
 class TranscriptSegment(BaseModel):
-    """One segment Whisper decoded: its text, where it is, and how sure Whisper was.
+    """One segment Whisper decoded: its text, where it is, and Whisper's own scores for it.
 
-    ``start`` / ``end`` are seconds from the start of the recording.
-    ``confidence`` is ``exp(avg_logprob)`` (see the module docstring), 0-1.
-    ``no_speech_prob`` is Whisper's own probability that the segment is not
-    speech at all -- passed through as well, since a confident transcript of
-    background noise is the ASR version of OCR's "confident wrong word".
+    ``start`` / ``end``: seconds from the start of the recording (not of the chunk)
+    -- the audio counterpart of OCR's page number, for extraction provenance.
+
+    Whisper's scores, passed through unchanged (#478, R2):
+
+    - ``avg_logprob``: the mean log-probability of the tokens Whisper decoded,
+      **natural log, <= 0** (0 = every token certain; -1.0 = a geometric-mean token
+      probability of ~0.37). Not on Tesseract's 0-100 scale, so OCR's cut-off of 60
+      has no counterpart here.
+    - ``compression_ratio``: how much the text compresses (gzip). Whisper's
+      characteristic failure is a confident loop -- the same phrase repeated on a
+      quiet or hard stretch -- which avg_logprob can miss and this catches: Whisper
+      itself treats a value above 2.4 as a failed decode and retries it.
+    - ``no_speech_prob``: Whisper's probability (0-1) that there was no speech --
+      a confident transcript of background noise is the ASR version of OCR's
+      "confident wrong word".
+
+    **Granularity:** faster-whisper computes all three once per ~30 s decoding
+    window and gives every segment of that window the same values -- they are not
+    per segment. An aggregate over segments should weight by duration (as
+    ``ASRResult.mean_confidence`` does), or several short segments of one window
+    count it several times.
+
+    ``confidence`` is ``exp(avg_logprob)``: the same number out of log space, 0-1,
+    derived here rather than stored, so the two cannot disagree.
     """
 
     text: str
     start: float = Field(ge=0)
     end: float = Field(ge=0)
-    confidence: float = Field(ge=0, le=1)
+    avg_logprob: float
+    compression_ratio: float = Field(ge=0)
     no_speech_prob: float = Field(ge=0, le=1)
 
     @classmethod
-    def from_whisper(
-        cls, *, text: str, start: float, end: float, avg_logprob: float, no_speech_prob: float
-    ) -> TranscriptSegment:
-        """Build from a faster-whisper Segment's fields, converting avg_logprob to 0-1."""
+    def from_whisper(cls, seg: Any, *, offset_s: float = 0.0) -> TranscriptSegment:
+        """Build from a faster-whisper Segment, from `offset_s` into the recording."""
         return cls(
-            text=text.strip(),
-            start=start,
-            end=end,
-            confidence=min(1.0, math.exp(avg_logprob)),
-            no_speech_prob=no_speech_prob,
+            text=seg.text.strip(),
+            start=offset_s + seg.start,
+            end=offset_s + seg.end,
+            avg_logprob=seg.avg_logprob,
+            compression_ratio=seg.compression_ratio,
+            no_speech_prob=seg.no_speech_prob,
         )
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def confidence(self) -> float:
+        return min(1.0, math.exp(self.avg_logprob))
 
     @property
     def is_low_confidence(self) -> bool:
@@ -197,9 +224,10 @@ class ASRResult(MediaTextResult[ASRFailureReason]):
 
     On success: ``text`` is every segment's text joined with a newline (the
     convenience view, one line per segment); ``segments`` holds each segment
-    with its timestamps and its own ``confidence``, in order.
-    ``mean_confidence`` is over all segments, ``low_confidence_segments`` the
-    ones below LOW_CONFIDENCE_THRESHOLD, with ``low_confidence_count`` their
+    with its timestamps and Whisper's scores, in order.
+    ``mean_confidence`` is the duration-weighted mean of the segments'
+    ``confidence`` (see TranscriptSegment on why weighted), ``low_confidence_segments``
+    the ones below LOW_CONFIDENCE_THRESHOLD, with ``low_confidence_count`` their
     number -- ``len(segments)`` is the denominator.
 
     A recording longer than the duration cap is truncated, not refused (as OCR
@@ -207,11 +235,19 @@ class ASRResult(MediaTextResult[ASRFailureReason]):
     ``duration_available_s`` is the recording's real length, and ``truncated`` is
     True -- a signal that the transcript is a partial recording.
 
-    ``success`` / ``reason`` / ``error`` / ``retryable`` come from
-    MediaTextResult, the envelope OCR and ASR share (see result.py).
+    ``success`` / ``reason`` / ``error`` / ``failure_category`` / ``retryable``
+    come from MediaTextResult, the envelope OCR and ASR share (see result.py and
+    failures.py).
     """
 
-    RETRYABLE_REASONS = frozenset({ASRFailureReason.ASR_UNAVAILABLE, ASRFailureReason.ASR_FAILED})
+    FAILURE_CATEGORIES: ClassVar[Mapping[Enum, FailureCategory]] = {
+        ASRFailureReason.EMPTY_INPUT: FailureCategory.DATA,
+        ASRFailureReason.UNREADABLE_FORMAT: FailureCategory.DATA,
+        ASRFailureReason.NO_SPEECH_DETECTED: FailureCategory.DATA,
+        ASRFailureReason.ASR_UNAVAILABLE: FailureCategory.ENVIRONMENT,
+        ASRFailureReason.ASR_FAILED: FailureCategory.ENVIRONMENT,
+        ASRFailureReason.INTERNAL_ERROR: FailureCategory.BUG,
+    }
 
     segments: list[TranscriptSegment] = Field(default_factory=list)
     duration_s: float = 0.0
@@ -222,7 +258,11 @@ class ASRResult(MediaTextResult[ASRFailureReason]):
     def mean_confidence(self) -> float | None:
         if not self.segments:
             return None
-        return round(sum(s.confidence for s in self.segments) / len(self.segments), 4)
+        weights = [s.end - s.start for s in self.segments]
+        if sum(weights) <= 0:  # only zero-length segments: fall back to a plain mean
+            weights = [1.0] * len(self.segments)
+        weighted = sum(w * s.confidence for w, s in zip(weights, self.segments, strict=True))
+        return round(weighted / sum(weights), 4)
 
     @computed_field  # type: ignore[prop-decorator]
     @property
@@ -510,13 +550,8 @@ def _transcribe(content: bytes, filename: str, max_duration_s: float) -> ASRResu
             for seg in found:  # lazy: the decoding happens while iterating
                 if seg.text.strip():
                     segments.append(
-                        TranscriptSegment.from_whisper(
-                            text=seg.text,
-                            start=offset_s + seg.start,  # from the start of the recording
-                            end=offset_s + seg.end,
-                            avg_logprob=seg.avg_logprob,
-                            no_speech_prob=seg.no_speech_prob,
-                        )
+                        # timestamps from the start of the recording, not the chunk
+                        TranscriptSegment.from_whisper(seg, offset_s=offset_s)
                     )
                 if time.perf_counter() - start > TRANSCRIBE_TIMEOUT_S:
                     timed_out = True

@@ -91,8 +91,13 @@ def test_a_clean_short_recording_is_transcribed_with_confidence():
     for word in ("quarterly report", "finance", "friday"):
         assert word in text
     assert result.segments
-    assert all(0 < s.confidence <= 1 for s in result.segments)
+    for s in result.segments:  # Whisper's real scores, on the scales TranscriptSegment documents
+        assert s.avg_logprob <= 0
+        assert s.confidence == pytest.approx(math.exp(s.avg_logprob))
+        assert 0 < s.compression_ratio < 2.4  # under Whisper's own "failed decode" gate
+        assert 0 <= s.no_speech_prob <= 1
     assert result.mean_confidence is not None
+    assert result.failure_category is None
     assert result.duration_s == result.duration_available_s == pytest.approx(4.1, abs=0.2)
     assert result.truncated is False
 
@@ -190,7 +195,12 @@ def test_max_duration_below_or_at_zero_is_a_programming_error():
 
 def fake_segment(text: str, start: float, end: float, avg_logprob: float = -0.2):
     return SimpleNamespace(
-        text=text, start=start, end=end, avg_logprob=avg_logprob, no_speech_prob=0.01
+        text=text,
+        start=start,
+        end=end,
+        avg_logprob=avg_logprob,
+        compression_ratio=1.5,
+        no_speech_prob=0.01,
     )
 
 

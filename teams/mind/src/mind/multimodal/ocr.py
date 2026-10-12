@@ -30,14 +30,17 @@ import os
 import shutil
 import subprocess
 import tempfile
+from collections.abc import Mapping
 from enum import Enum
 from pathlib import Path
+from typing import ClassVar
 
 import pypdfium2 as pdfium
 from PIL import Image
 from pydantic import BaseModel, Field, computed_field
 
 from mind.api.instrumentation import instrumented_call
+from mind.multimodal.failures import FailureCategory
 from mind.multimodal.result import MediaTextResult
 
 logger = logging.getLogger(__name__)
@@ -152,14 +155,21 @@ class OCRResult(MediaTextResult[OCRFailureReason]):
     first ``max_pages`` pages, ``pages_available`` the document's real page count
     and ``truncated`` is True -- a signal that the text is a partial document.
 
-    ``success`` / ``reason`` / ``error`` / ``retryable`` come from
-    MediaTextResult, the envelope OCR and ASR share (see result.py): on failure
-    ``reason`` says why, ``error`` is the message for logs, and ``retryable`` is
-    True for the environment failures (the document is fine; try again once the
-    environment is fixed).
+    ``success`` / ``reason`` / ``error`` / ``failure_category`` / ``retryable``
+    come from MediaTextResult, the envelope OCR and ASR share (see result.py and
+    failures.py): on failure ``reason`` says why, ``error`` is the message for
+    logs, ``failure_category`` how to treat the document (drop / retry later /
+    park), and ``retryable`` is True for the environment failures.
     """
 
-    RETRYABLE_REASONS = frozenset({OCRFailureReason.OCR_UNAVAILABLE, OCRFailureReason.OCR_FAILED})
+    FAILURE_CATEGORIES: ClassVar[Mapping[Enum, FailureCategory]] = {
+        OCRFailureReason.EMPTY_INPUT: FailureCategory.DATA,
+        OCRFailureReason.UNREADABLE_FORMAT: FailureCategory.DATA,
+        OCRFailureReason.NO_TEXT_RECOGNIZED: FailureCategory.DATA,
+        OCRFailureReason.OCR_UNAVAILABLE: FailureCategory.ENVIRONMENT,
+        OCRFailureReason.OCR_FAILED: FailureCategory.ENVIRONMENT,
+        OCRFailureReason.INTERNAL_ERROR: FailureCategory.BUG,
+    }
 
     pages: list[str] = Field(default_factory=list)
     pages_available: int = 0
