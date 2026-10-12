@@ -132,11 +132,12 @@ bridge:
         # Groq, ...) is a change to these three settings only. Scanned docs need a model that
         # accepts images.
         base-url: ${BRIDGE_MEDIA_CLASSIFIER_BASE_URL:https://generativelanguage.googleapis.com/v1beta/openai}
-        name: ${BRIDGE_MEDIA_CLASSIFIER_MODEL:gemini-2.5-flash}
+        name: ${BRIDGE_MEDIA_CLASSIFIER_MODEL:gemini-3.8-flash}
         api-key: ${BRIDGE_MEDIA_CLASSIFIER_API_KEY:}
         # Bump on every prompt change in ModelMediaClassifier, so results stay comparable.
         prompt-version: v1
-        timeout: 30s
+        # Thinking models take ~20s per call - keep well above that.
+        timeout: 60s
     zoom:
       # Not consumed by MediaIntakeOrchestrator yet - see ZoomCloudRecordingClient's javadoc
       # for why (no meetingId source). "real" bean is a throw-stub like bridge.intake.*.mode's -

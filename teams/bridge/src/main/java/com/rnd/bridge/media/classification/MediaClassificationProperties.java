@@ -30,10 +30,10 @@ public record MediaClassificationProperties(
      */
     public record Model(
             @DefaultValue("https://generativelanguage.googleapis.com/v1beta/openai") String baseUrl,
-            @DefaultValue("gemini-2.5-flash") String name,
+            @DefaultValue("gemini-3.8-flash") String name,
             @DefaultValue("") String apiKey,
             @DefaultValue("v1") String promptVersion,
-            @DefaultValue("30s") Duration timeout) {
+            @DefaultValue("60s") Duration timeout) {
 
         public boolean configured() {
             return apiKey != null && !apiKey.isBlank();

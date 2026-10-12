@@ -98,8 +98,9 @@ class ModelMediaClassifierTest {
     }
 
     @Test
-    void meetingWithNothingToJudgeIsNotSentToTheModel() {
-        assertThat(classifier.classifyMeeting(new MeetingClassificationInput(null, null))).isEmpty();
+    void meetingWithoutSpokenTranscriptIsNotSentToTheModelEvenWithATopic() {
+        assertThat(classifier.classifyMeeting(new MeetingClassificationInput(metadata(), null))).isEmpty();
+        assertThat(classifier.classifyMeeting(new MeetingClassificationInput(metadata(), "WEBVTT\n"))).isEmpty();
         assertThat(chatClient.calls).isZero();
     }
 
@@ -113,6 +114,16 @@ class ModelMediaClassifierTest {
         assertThat(result.category().value()).isEqualTo(DocumentCategory.INVOICE);
         assertThat(chatClient.image).startsWith(0x89, 'P', 'N', 'G');
         assertThat(chatClient.systemPrompt).contains("INVOICE", "SCIENTIFIC_PUBLICATION", "BLANK");
+    }
+
+    @Test
+    void multiPageDocumentIsJudgedFromItsFirstPageOnly() {
+        chatClient.reply = verdict("LETTER");
+
+        classifier.classifyDocument(new DocumentClassificationInput(ClassificationTestSupport.tiffWithBlankCoverPage(), "scan.tif"));
+
+        assertThat(chatClient.calls).isEqualTo(1);
+        assertThat(chatClient.userText).contains("page 1 of 2");
     }
 
     @Test

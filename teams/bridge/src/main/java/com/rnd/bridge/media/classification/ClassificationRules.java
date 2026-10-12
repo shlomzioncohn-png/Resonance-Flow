@@ -14,21 +14,25 @@ import java.awt.image.BufferedImage;
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.time.Duration;
+import java.util.Iterator;
 import java.util.Optional;
 import javax.imageio.ImageIO;
+import javax.imageio.ImageReader;
+import javax.imageio.stream.ImageInputStream;
 import org.springframework.stereotype.Component;
 
 /**
  * Deterministic checks that run before the model: free, instant and reproducible, so anything
  * they can settle never costs a model call. Each returns empty when it can't decide - "not
  * obviously junk" is not a verdict, it just means the model gets to judge.
+ * <p>
+ * Deliberately no "empty transcript" rule: an empty transcript means transcription failed, not
+ * that the meeting had no content - a real meeting must never be EXCLUDED for that.
  */
 @Component
 public class ClassificationRules {
 
     static final String RULES_VERSION = "v1";
-    // Below this much spoken text a "meeting" is a mic check or an accidental recording.
-    private static final int MIN_SPOKEN_CHARS = 20;
     // A page counts as blank when under 0.2% of sampled pixels are darker than near-white.
     private static final int DARK_LUMINANCE_THRESHOLD = 200;
     private static final double MAX_DARK_PIXEL_RATIO_FOR_BLANK = 0.002;
@@ -46,15 +50,16 @@ public class ClassificationRules {
             return Optional.of(ruleVerdict(MeetingCategory.TEST,
                     "meeting shorter than " + minMeetingDuration.toSeconds() + "s"));
         }
-        if (input.transcript() != null && Transcripts.spokenText(input.transcript()).length() < MIN_SPOKEN_CHARS) {
-            return Optional.of(ruleVerdict(MeetingCategory.TEST, "transcript has no spoken content"));
-        }
         return Optional.empty();
     }
 
+    /**
+     * Only a single-page document can be BLANK: a multi-page scan with an empty cover or
+     * separator page is still a real document.
+     */
     public Optional<Classification> classifyDocument(DocumentClassificationInput input) {
-        BufferedImage image = decode(input.content());
-        if (image != null && isBlank(image)) {
+        DecodedDocument document = decode(input.content());
+        if (document != null && document.pageCount() == 1 && isBlank(document.firstPage())) {
             return Optional.of(ruleVerdict(DocumentCategory.BLANK, "page has no visible content"));
         }
         return Optional.empty();
@@ -74,13 +79,30 @@ public class ClassificationRules {
         return Optional.ofNullable(metadata.durationMinutes()).map(Duration::ofMinutes);
     }
 
-    /** null when ImageIO can't decode it (e.g. a PDF) - the image-based checks then don't apply. */
-    static BufferedImage decode(byte[] content) {
-        try {
-            return ImageIO.read(new ByteArrayInputStream(content));
+    /**
+     * The first page and the page count (a multi-page TIFF has several), or null when ImageIO
+     * can't decode it (e.g. a PDF) - the image-based checks then don't apply.
+     */
+    static DecodedDocument decode(byte[] content) {
+        try (ImageInputStream stream = ImageIO.createImageInputStream(new ByteArrayInputStream(content))) {
+            Iterator<ImageReader> readers = stream == null ? null : ImageIO.getImageReaders(stream);
+            if (readers == null || !readers.hasNext()) {
+                return null;
+            }
+            ImageReader reader = readers.next();
+            try {
+                reader.setInput(stream);
+                int pageCount = Math.max(1, reader.getNumImages(true));
+                return new DecodedDocument(reader.read(0), pageCount);
+            } finally {
+                reader.dispose();
+            }
         } catch (IOException | RuntimeException e) {
             return null;
         }
+    }
+
+    record DecodedDocument(BufferedImage firstPage, int pageCount) {
     }
 
     private static boolean isBlank(BufferedImage image) {

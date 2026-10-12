@@ -30,7 +30,13 @@ import org.springframework.stereotype.Component;
 /**
  * Asks a chat model to triage one item as a whole - category, file quality, sensitivity - and
  * turns its reply into a {@link Classification}. Meetings are judged from their transcript and
- * topic (never the audio, never participant names); scanned docs from the page image.
+ * topic (never the audio, never participant names); scanned docs from their first page image.
+ * <p>
+ * A meeting with no spoken transcript text is never sent: the transcript failing is not evidence
+ * the meeting was empty, and a topic alone is too thin to risk an EXCLUDED on - such a meeting
+ * stays unclassified (INCLUDED). A multi-page document is judged from page 1 only: the document
+ * type is almost always evident there (RVL-CDIP itself labels documents by their first page),
+ * and sending every page would multiply cost for little gain.
  * <p>
  * The prompt holds the model to Bridge's boundary: it must not extract tasks, people, dates,
  * owners or priority - that is Mind's (and Chain's) job. The reply is a flat JSON object, simpler
@@ -83,7 +89,7 @@ public class ModelMediaClassifier {
 
     private static final String DOCUMENT_PROMPT = SHARED_RULES + """
 
-            The item is a scanned document page, given as an image.
+            The item is a scanned document, given as an image of its first page.
             categories: %s.
               BLANK: an empty page. OTHER: none of the above fits.
             """.formatted(Arrays.stream(DocumentCategory.values()).map(Enum::name)
@@ -100,26 +106,27 @@ public class ModelMediaClassifier {
         this.properties = properties;
     }
 
-    /** Empty when there's nothing to judge from (no transcript and no topic). */
+    /** Empty when the transcript has no spoken text - see the class javadoc. */
     public Optional<Classification> classifyMeeting(MeetingClassificationInput input) {
         String spoken = Transcripts.spokenText(input.transcript());
-        String topic = input.metadata() == null ? null : input.metadata().topic();
-        if (spoken.isEmpty() && (topic == null || topic.isBlank())) {
-            log.info("Meeting has neither transcript nor topic - nothing for the model to classify");
+        if (spoken.isEmpty()) {
+            log.info("Meeting has no spoken transcript text - leaving it unclassified");
             return Optional.empty();
         }
+        String topic = input.metadata() == null ? null : input.metadata().topic();
         String reply = chatClient.complete(MEETING_PROMPT, describeMeeting(input.metadata(), topic, spoken), null);
         return Optional.of(parse(reply, MeetingCategory::valueOf, MeetingCategory.OTHER));
     }
 
     /** Empty when the file isn't a decodable image (e.g. a PDF) - those aren't sent to the model. */
     public Optional<Classification> classifyDocument(DocumentClassificationInput input) {
-        BufferedImage image = ClassificationRules.decode(input.content());
-        if (image == null) {
+        ClassificationRules.DecodedDocument document = ClassificationRules.decode(input.content());
+        if (document == null) {
             log.info("{} is not a decodable image - skipping model classification", input.filename());
             return Optional.empty();
         }
-        String reply = chatClient.complete(DOCUMENT_PROMPT, "Classify this scanned document page.", toPng(image));
+        String userText = "Classify this scanned document. Showing page 1 of " + document.pageCount() + ".";
+        String reply = chatClient.complete(DOCUMENT_PROMPT, userText, toPng(document.firstPage()));
         return Optional.of(parse(reply, DocumentCategory::valueOf, DocumentCategory.OTHER));
     }
 
@@ -138,7 +145,7 @@ public class ModelMediaClassifier {
             text.append("Participants: ").append(metadata.participants().size()).append('\n');
         }
         text.append("Transcript excerpt:\n")
-                .append(spoken.isEmpty() ? "(no transcript)" : truncate(spoken, properties.transcriptExcerptChars()));
+                .append(truncate(spoken, properties.transcriptExcerptChars()));
         return text.toString();
     }
 

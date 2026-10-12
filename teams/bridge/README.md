@@ -296,11 +296,13 @@ item's `scope_decision` and attaches the optional `classification` object it was
 a whole; it never extracts tasks, people, dates or priority - that stays with Mind.
 
 1. **Rules first** (free, deterministic, `decided_by: RULE`): a meeting shorter than
-   `min-meeting-duration` or with no spoken transcript text → `TEST`; an all-white page →
-   `BLANK`.
+   `min-meeting-duration` → `TEST`; a single-page document that's all white → `BLANK` (a
+   multi-page scan with a blank cover page is not). An empty transcript is deliberately *not* a
+   rule - it means transcription failed, not that the meeting was empty.
 2. **Model second**, only for what the rules didn't settle (`decided_by: MODEL`): a meeting is
    judged from its topic + transcript excerpt (never the audio, never participant names), a
-   scanned doc from its page image. Any OpenAI-compatible endpoint works - Gemini by default;
+   scanned doc from its first page image (multi-page docs are judged from page 1 only). A
+   meeting with no spoken transcript text is never sent - it stays unclassified and `INCLUDED`. Any OpenAI-compatible endpoint works - Gemini by default;
    switching provider is a change to `bridge.media.classification.model.*` only. PDFs aren't
    sent (images only).
 3. **Fails open**: disabled, model error, rate limit or a malformed reply → `INCLUDED`, no

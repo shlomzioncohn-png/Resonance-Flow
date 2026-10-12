@@ -9,7 +9,10 @@ import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.time.Duration;
 import java.util.Set;
+import javax.imageio.IIOImage;
 import javax.imageio.ImageIO;
+import javax.imageio.ImageWriter;
+import javax.imageio.stream.ImageOutputStream;
 
 /** Shared fixtures for the media.classification tests. */
 final class ClassificationTestSupport {
@@ -32,6 +35,25 @@ final class ClassificationTestSupport {
 
     static byte[] textPagePng() {
         return png(page(true));
+    }
+
+    /** A multi-page TIFF whose first page is blank - a scan with an empty cover page. */
+    static byte[] tiffWithBlankCoverPage() {
+        ImageWriter writer = ImageIO.getImageWritersByFormatName("tiff").next();
+        try (ByteArrayOutputStream out = new ByteArrayOutputStream();
+             ImageOutputStream stream = ImageIO.createImageOutputStream(out)) {
+            writer.setOutput(stream);
+            writer.prepareWriteSequence(null);
+            writer.writeToSequence(new IIOImage(page(false), null, null), null);
+            writer.writeToSequence(new IIOImage(page(true), null, null), null);
+            writer.endWriteSequence();
+            stream.flush();
+            return out.toByteArray();
+        } catch (IOException e) {
+            throw new IllegalStateException(e);
+        } finally {
+            writer.dispose();
+        }
     }
 
     private static BufferedImage page(boolean withText) {

@@ -38,13 +38,11 @@ class ClassificationRulesTest {
     }
 
     @Test
-    void transcriptWithOnlyTimestampsIsATest() {
-        String noSpeech = "WEBVTT\n\n1\n00:00:01.000 --> 00:00:03.000\n\n2\n00:00:04.000 --> 00:00:05.000\nhi\n";
+    void emptyTranscriptOfANormalLengthMeetingIsNotATest() {
+        // A failed transcription is not evidence the meeting was empty.
+        MeetingMetadata metadata = metadata(Instant.parse("2026-10-11T09:00:00Z"), Instant.parse("2026-10-11T09:30:00Z"));
 
-        Classification result = rules.classifyMeeting(new MeetingClassificationInput(null, noSpeech)).orElseThrow();
-
-        assertThat(result.category().value()).isEqualTo(MeetingCategory.TEST);
-        assertThat(result.reason()).isEqualTo("transcript has no spoken content");
+        assertThat(rules.classifyMeeting(new MeetingClassificationInput(metadata, "WEBVTT\n"))).isEmpty();
     }
 
     @Test
@@ -72,6 +70,12 @@ class ClassificationRulesTest {
     void pageWithContentIsLeftForTheModel() {
         assertThat(rules.classifyDocument(
                 new DocumentClassificationInput(ClassificationTestSupport.textPagePng(), "scan.png"))).isEmpty();
+    }
+
+    @Test
+    void multiPageDocumentWithBlankCoverPageIsNotBlank() {
+        assertThat(rules.classifyDocument(
+                new DocumentClassificationInput(ClassificationTestSupport.tiffWithBlankCoverPage(), "scan.tif"))).isEmpty();
     }
 
     @Test
