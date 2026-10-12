@@ -185,8 +185,8 @@ metadata:
 {{/*
 Kafka bootstrap-servers + SASL_PLAINTEXT security/properties block, identical
 across every component's mounted config.yaml - only extra client properties
-(e.g. inbox's schema.registry.url) and the producer serializer vary per
-component and stay in the caller. Takes {root}.
+and the producer serializer vary per component and stay in the caller.
+Takes {root}.
 */}}
 {{- define "resonance-flow.springKafkaBase" -}}
 bootstrap-servers: {{ include "resonance-flow.dependencyAddress" (dict "root" .root "deps" .root.Values.dependencies "name" "kafka") | quote }}
