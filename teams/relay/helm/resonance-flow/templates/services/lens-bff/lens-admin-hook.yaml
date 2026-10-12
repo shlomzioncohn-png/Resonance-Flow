@@ -1,4 +1,8 @@
-{{- if .Values.components.inbox.enabled }}
+{{- /*
+LENS admin login password, shared by lens-bff (checks it against Inbox) and
+Inbox (stores it on the seeded admin user).
+*/ -}}
+{{- if or (index .Values.components "lens-bff").enabled .Values.components.inbox.enabled }}
 {{- $name := printf "%s-lens-admin-init" (include "resonance-flow.fullname" .) }}
 {{- $secretName := printf "%s-lens-admin" (include "resonance-flow.fullname" .) }}
 ---
