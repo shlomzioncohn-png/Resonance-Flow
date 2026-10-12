@@ -483,14 +483,21 @@ just described.
 | `title` | yes | head of the comparison string |
 | `description` | no | appended to `title` (`title + ". " + description`) when present — design §3.3 |
 | `source_ref` | yes | the meeting-id join key (AMI code verbatim, e.g. `IS1008b`); required here even though `TaskCreationRequested.source_ref` is nullable, because the eval only consumes corpus-loader output |
-| `role_context` | no | reserved for the owner-match secondary diagnostic (design §3.7); not in v1 precision/recall |
 
 `ExtractedItem.to_comparison_text()` produces the string `evaluate_extraction`
-matches. Field names match `TaskCreationRequested`
+matches. Pipeline output enters the eval through
+`evaluate_extracted_items(items, annotated, *, similarity, threshold)`, which takes
+`ExtractedItem`s — so the extracted side has to pass the contract before it is
+scored — and is otherwise a thin wrapper over `evaluate_extraction` (the
+string-level version the CLI and fixture use). Field names match `TaskCreationRequested`
 (`contracts/task_creation_requested.py`, PR #197) and `extra="ignore"`, so a full
-task payload validates as-is — extraction's classification fields (`tier`,
-`urgency`, `confidence`, `deadline`, …) are deliberately absent: extraction P/R
-measures "did we find the right action items", not "did we classify them right".
+corpus-loader task payload validates as-is (a Bridge-path payload, with
+`source_ref=None`, is rejected by design) — extraction's classification fields
+(`tier`, `urgency`, `role_context`, `confidence`, `deadline`, …) are deliberately
+absent: extraction P/R measures "did we find the right action items", not "did we
+classify them right". `role_context` is also not *set* at extraction — the
+classification stage fills it (`extraction/assembly.py`); it joins this contract
+as an optional field when the owner-match diagnostic (design §3.7) is built.
 
 **Status: proposed by R1, not yet agreed with Yonit** — pending her confirmation
 that the pipeline output fits this shape (`extraction_eval_design.md`
