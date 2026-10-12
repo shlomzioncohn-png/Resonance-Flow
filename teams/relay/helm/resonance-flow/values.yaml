@@ -157,7 +157,8 @@ components:
         provider: local
       asr:
         provider: local
-        whisper_model: base
+        # English-only Whisper, decided in #135 / #652 (teams/mind/benchmarks/ocr-asr-benchmark.md).
+        whisper_model: base.en
       object_storage:
         bucket: bridge-raw
       kafka:
