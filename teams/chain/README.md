@@ -1,4 +1,3 @@
-
 Foundation module for Team Chain (Dependency Graph, Task Selection & Constraints).
 
 Implements the graph traversal API: given a task id, walk its direct or transitive dependencies,
@@ -154,16 +153,16 @@ All routes are read-only (`GET`) and take a task id as the path variable. A bare
 direct/one-level relationship; `/transitive` is the full closure over that same relation.
 Ancestors has no `/transitive` variant - the ancestor chain already is the transitive closure.
 
-| Method | Path                              | Returns                                    |
+| Method | Path                              | Returns                                    |
 |--------|------------------------------------|---------------------------------------------|
-| GET    | `/tasks/{id}/dependencies`         | Direct dependencies                          |
-| GET    | `/tasks/{id}/dependencies/transitive` | All (transitive) dependencies             |
-| GET    | `/tasks/{id}/dependents`           | Direct dependents                            |
-| GET    | `/tasks/{id}/dependents/transitive`   | All (transitive) dependents                |
-| GET    | `/tasks/{id}/ancestors`            | Full ancestor chain (hierarchy)              |
-| GET    | `/tasks/{id}/children`             | Direct children (hierarchy)                  |
-| GET    | `/tasks/{id}/descendants`          | All descendants (hierarchy)                  |
-| GET    | `/tasks/{id}/trace`                | Combined dependency graph + hierarchy trace  |
+| GET    | `/tasks/{id}/dependencies`         | Direct dependencies                          |
+| GET    | `/tasks/{id}/dependencies/transitive` | All (transitive) dependencies             |
+| GET    | `/tasks/{id}/dependents`           | Direct dependents                            |
+| GET    | `/tasks/{id}/dependents/transitive`   | All (transitive) dependents                |
+| GET    | `/tasks/{id}/ancestors`            | Full ancestor chain (hierarchy)              |
+| GET    | `/tasks/{id}/children`             | Direct children (hierarchy)                  |
+| GET    | `/tasks/{id}/descendants`          | All descendants (hierarchy)                  |
+| GET    | `/tasks/{id}/trace`                | Combined dependency graph + hierarchy trace  |
 
 Each route returns a `TaskResponse` list (or, for `/trace`, a `TaskTraceResponse` combining
 both axes) - see `dto/TaskResponse.java` and `dto/TaskTraceResponse.java` for the exact shape.
@@ -175,6 +174,27 @@ Chain consumes three Protobuf topics and publishes one Protobuf topic. Each inbo
 own `@KafkaListener` handler, and the handlers share the claim/logging skeleton in
 `ChainEventProcessingTemplate`.
 
+<<<<<<< HEAD
+**Publishing** for generic Chain events goes through `EventPublisher` / `KafkaEventPublisher`,
+which serializes an `EventEnvelope` and sends it to the topic configured for its event type under
+`chain.kafka.topics` in `application.yml`. `EventPublisher.publish(event)` itself is still
+fire-and-forget by design - a failed publish is logged, not retried or persisted for a later
+attempt, and business logic is not expected to know or care. A stronger delivery guarantee (e.g. a
+transactional outbox) is out of scope for this infrastructure layer.
+`task.scheduling.updated` is a dedicated integration contract and does not use the generic
+`EventEnvelope`. `KafkaSchedulingUpdatePublisher` publishes a flat JSON message that matches
+Inbox's consumer contract and uses `taskId` as the Kafka key so updates for the same task stay ordered.
+
+**Consuming** has two paths:
+The generic `ChainEventConsumer` routes JSON envelope messages to the `EventHandler<T>` bean
+registered for their `eventType`. It remains disabled by default via
+`@ConditionalOnProperty` on `chain.kafka.consumed-topics` until an approved cross-team topic
+and transport contract is configured. This is the path intended for Mind dependency events once
+that contract is finalized.
+`TaskCreatedEventConsumer` is a dedicated Inbox integration consumer for `task.created`.
+Inbox publishes that event as Confluent Protobuf, so Chain consumes it with
+`KafkaProtobufDeserializer` and Schema Registry rather than parsing raw protobuf bytes directly.
+=======
 | Topic | Producer | Handler | Idempotency | Retries before `.errors` |
 | --- | --- | --- | --- | --- |
 | `task.created` | Inbox | `TaskCreatedEventHandler` | state-based (no event id) | 3 attempts, 2s apart |
@@ -187,6 +207,7 @@ to retry never stalls the rest of its partition. Every exception is retried exce
 Retries are bounded (see the table), so an unexpected bug costs a few delayed attempts before it
 lands on `<topic>.errors`. A typical retried case is `ReferencedTaskNotFoundException`, raised when
 a referenced task has not arrived yet.
+>>>>>>> origin/main
 
 **Offsets**: auto-commit is disabled and each listener uses `AckMode.RECORD`. An offset is committed
 only after its record is handled or handed to its retry/DLT topic, so a crash mid-processing
@@ -233,12 +254,68 @@ validated against the Schema Registry at `SCHEMA_REGISTRY_URL`. Tests use a mock
 | `chain.kafka.schema-registry-url` (env `SCHEMA_REGISTRY_URL`) | Schema Registry URL (ccompat API) | `http://localhost:8082/apis/ccompat/v6` |
 | `chain.events.processed-store` | Which `ProcessedEventStore` implementation is active | `in-memory` |
 
+<<<<<<< HEAD
+## Inbox integration events
+
+### task.created (Inbox -> Chain)
+
+Inbox publishes canonical task creation events on:
+
+```text
+task.created
+```
+
+The event value is Confluent Protobuf. Chain consumes it through the dedicated
+`TaskCreatedEventConsumer` / `protobufKafkaListenerContainerFactory` path using
+`KafkaProtobufDeserializer` and the configured Schema Registry URL.
+
+When the task does not already exist in Chain, `TaskCreatedEventService` creates the local Chain
+state. A duplicate `task.created` event does not overwrite Chain-owned readiness/counters/score;
+it is still used as a trigger to retry unresolved dependencies that were waiting for that task.
+
+### task.scheduling.updated (Chain -> Inbox)
+
+Chain publishes scheduling state changes asynchronously to Inbox on:
+
+```text
+task.scheduling.updated
+```
+
+The message is flat JSON, not a generic `EventEnvelope`:
+
+```json
+{
+"eventId": "11111111-1111-1111-1111-111111111111",
+"taskId": "22222222-2222-2222-2222-222222222222",
+"isAvailable": true,
+"priorityScore": 7.5
+}
+```
+
+| Field | Description |
+| --- | --- |
+| `eventId` | Unique UUID generated for the scheduling update event |
+| `taskId` | UUID of the task |
+| `isAvailable` | Whether the task is currently available/ready according to Chain |
+| `priorityScore` | Current priority score; final accepted range/ownership is pending team confirmation |
+
+The Kafka message key is `taskId`, preserving ordering for updates belonging to the same task.
+Chain owns task readiness calculation; Inbox materializes the resulting scheduling state on the
+canonical task.
+
+### Open integration decisions
+
+The final Mind topic/transport contract is still pending approval, so the generic
+`ChainEventConsumer` remains disabled until `chain.kafka.consumed-topics` is explicitly configured.
+The final accepted range/ownership rules for `priorityScore` still require team confirmation.
+=======
 Retry attempts and backoff are not properties. Each handler sets them on its own `@RetryableTopic`
 annotation.
 
 Broker security (SASL, TLS) is set through Spring's `spring.kafka.properties.*`, for example
 `spring.kafka.properties.security.protocol=SASL_PLAINTEXT`. Every consumer factory and producer
 template starts from those properties, so the same settings apply everywhere.
+>>>>>>> origin/main
 
 ## Running locally with Maven
 
@@ -261,15 +338,15 @@ java -jar target/chain-0.1.0-SNAPSHOT.jar
 
 1. Copy the env file:
 
-   ```bash
-   cp .env.example .env
-   ```
+   ```bash
+   cp .env.example .env
+   ```
 
 2. Build and run:
 
-   ```bash
-   docker compose up --build
-   ```
+   ```bash
+   docker compose up --build
+   ```
 
 The app will be available at http://localhost:8081 (or whatever `SERVER_PORT` is set to in `.env`).
 Set `KAFKA_BOOTSTRAP_SERVERS` in `.env` to point the container at a real broker - `localhost:9092`
@@ -657,12 +734,12 @@ the real implementation backing this in production - `InMemoryTaskDependencyRepo
 issue #66:
 
 ```java
-addDependency(taskId, dependsOnTaskId)   // throws InvalidDependencyException on self-dependency,
-                                          // TaskNotFoundException if either task doesn't exist,
-                                          // DuplicateDependencyException if the edge already exists
+addDependency(taskId, dependsOnTaskId)   // throws InvalidDependencyException on self-dependency,
+                                          // TaskNotFoundException if either task doesn't exist,
+                                          // DuplicateDependencyException if the edge already exists
 removeDependency(taskId, dependsOnTaskId) // throws DependencyNotFoundException if the edge doesn't exist
-getDependencies(taskId)                   // ids of tasks that block taskId (empty list if none)
-getDependents(taskId)                     // ids of tasks that taskId blocks (empty list if none)
+getDependencies(taskId)                   // ids of tasks that block taskId (empty list if none)
+getDependents(taskId)                     // ids of tasks that taskId blocks (empty list if none)
 ```
 
 Callers that need those business rules enforced (duplicate edges, self-dependency, missing tasks)
@@ -771,25 +848,25 @@ findings deliberately not acted on here, documented-only, or handed off to the b
 originated the file in question):
 
 - **`GlobalExceptionHandler.handleValidationError` no longer assumes a field-level error exists.**
-  `MethodArgumentNotValidException` can carry only class-level errors (a cross-field constraint),
-  leaving `getFieldErrors()` empty - the unconditional `.get(0)` would throw
-  `IndexOutOfBoundsException` inside the handler itself, falling through to the generic 500
-  handler instead of the intended 400. Now falls back to `getAllErrors()` (guaranteed non-empty
-  whenever the exception exists) when there's no field-level error.
+  `MethodArgumentNotValidException` can carry only class-level errors (a cross-field constraint),
+  leaving `getFieldErrors()` empty - the unconditional `.get(0)` would throw
+  `IndexOutOfBoundsException` inside the handler itself, falling through to the generic 500
+  handler instead of the intended 400. Now falls back to `getAllErrors()` (guaranteed non-empty
+  whenever the exception exists) when there's no field-level error.
 - **`InMemoryTaskRepository.childrenByParentId` is no longer keyed by `Optional<UUID>`** - a
-  textbook `Optional` misuse (return-type-only by convention, never a collection key), used only
-  to work around `ConcurrentHashMap`'s no-null-keys restriction. Root tasks turn out to never need
-  indexing at all - nothing in this codebase queries `findByParentTaskId(null)` - so the map is
-  now a plain `Map<UUID, Set<UUID>>` and root tasks are simply not indexed.
+  textbook `Optional` misuse (return-type-only by convention, never a collection key), used only
+  to work around `ConcurrentHashMap`'s no-null-keys restriction. Root tasks turn out to never need
+  indexing at all - nothing in this codebase queries `findByParentTaskId(null)` - so the map is
+  now a plain `Map<UUID, Set<UUID>>` and root tasks are simply not indexed.
 - **Empty adjacency-map entries are now pruned** in both `InMemoryTaskDependencyRepository.delete`
-  and `InMemoryTaskRepository.reindexChild`, instead of leaking one permanent empty-`Set` entry
-  per id ever touched under write churn.
+  and `InMemoryTaskRepository.reindexChild`, instead of leaking one permanent empty-`Set` entry
+  per id ever touched under write churn.
 - **The performance benchmark (`TaskTraversalPerformanceTest`) now asserts its p95 target**
-  instead of only printing pass/fail - it previously ran on every default `mvn test` for zero
-  regression protection, since nothing ever failed the build on a miss.
+  instead of only printing pass/fail - it previously ran on every default `mvn test` for zero
+  regression protection, since nothing ever failed the build on a miss.
 - **`TaskTraversalService.collectReachableIds`'s `boolean directOnly` flag is gone**, replaced by
-  two named methods (`collectDirectNeighborIds`/`collectAllReachableIds`) sharing a private
-  BFS-step helper - each of the 6 call sites now reads self-documenting instead of requiring a
-  check of the method signature to know what `true`/`false` meant.
+  two named methods (`collectDirectNeighborIds`/`collectAllReachableIds`) sharing a private
+  BFS-step helper - each of the 6 call sites now reads self-documenting instead of requiring a
+  check of the method signature to know what `true`/`false` meant.
 
 Full test suite (47 tests, `mvn clean test`) passes.
