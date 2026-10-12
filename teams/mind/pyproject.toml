@@ -102,7 +102,7 @@ ignore_missing_imports = true
 
 # Same reason for faster-whisper (no stubs, no py.typed marker).
 [[tool.mypy.overrides]]
-module = "faster_whisper"
+module = ["faster_whisper", "faster_whisper.*"]
 ignore_missing_imports = true
 
 [[tool.mypy.overrides]]

@@ -30,7 +30,9 @@ import logging
 import math
 import threading
 import time
+from collections.abc import Iterator
 from enum import Enum
+from itertools import pairwise
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, NamedTuple
 
@@ -95,6 +97,21 @@ MAX_DURATION_S = 600
 # call can overrun it by about one segment. 240 s leaves ~60 s of the 300 s poll
 # interval for decoding the audio and, on a first call, loading the model.
 TRANSCRIBE_TIMEOUT_S = 240
+
+# The recording is transcribed in chunks of at most this many seconds, each cut in a
+# silence, not as one piece. Memory: faster-whisper computes its features over the
+# whole input at once, so peak memory grew ~0.9 MiB per second of audio (~790 MiB
+# for 600 s); in chunks it is bounded by the chunk, ~430-490 MiB on the same audio,
+# whatever the recording's length. Accuracy: cut in silences, rough WER against
+# AMI's human transcript was the same as unchunked (mean 0.260 vs 0.260 on the
+# first 600 s of the two #135 meetings, two runs each); fixed 60 s cuts were worse
+# (0.275, up to +4 points on one run), since they split words and sentences. See
+# benchmarks/ocr-asr-benchmark.md "ASR -- chunking" and benchmarks/asr_chunking.py.
+CHUNK_S = 60
+# A chunk is cut at the latest silence in its window, but not before this point: a
+# silence in the first seconds would give a tiny chunk and many more of them. With
+# no silence after it, the chunk is hard-cut at CHUNK_S.
+MIN_CHUNK_S = 30
 
 # A segment whose confidence is below this is flagged as low confidence. Not a
 # cut-off of ours: it is Whisper's own quality gate, faster-whisper's default
@@ -376,6 +393,46 @@ def _decode(content: bytes, max_duration_s: float) -> tuple[np.ndarray, float]:
     return audio.astype(np.float32) / 32768.0, total_samples / SAMPLE_RATE
 
 
+def _speech_regions(window: np.ndarray) -> list[tuple[int, int]]:
+    """Where `window` has speech, as (start, end) sample offsets into it.
+
+    Whisper's own VAD (Silero, bundled with faster-whisper), the same one
+    vad_filter=True runs. Called on one CHUNK_S window at a time, never on the
+    whole recording: it scores the whole input in one pass, so its memory grows
+    with the input like Whisper's own does. Each region is already padded with
+    silence on both sides (VadOptions.speech_pad_ms), so a cut in a gap between
+    regions is clear of the words around it.
+    """
+    from faster_whisper.vad import get_speech_timestamps
+
+    return [(s["start"], s["end"]) for s in get_speech_timestamps(window)]
+
+
+def _chunks(audio: np.ndarray) -> Iterator[tuple[int, int, bool]]:
+    """(start, end, has_speech) sample ranges covering `audio`, each cut in a silence.
+
+    Each window of CHUNK_S is cut in the middle of its latest silence gap that
+    lies past MIN_CHUNK_S -- between two speech regions, or after the last one --
+    else hard-cut at CHUNK_S. A chunk with no speech at all is still yielded
+    (has_speech=False) so the caller can skip it: silence never reaches Whisper,
+    which is where it would invent text.
+    """
+    window_len = CHUNK_S * SAMPLE_RATE
+    min_cut = MIN_CHUNK_S * SAMPLE_RATE
+    start = 0
+    while start < len(audio):
+        end = min(start + window_len, len(audio))
+        speech = _speech_regions(audio[start:end])
+        if end < len(audio) and speech:
+            gaps = [(a_end, b_start) for (_, a_end), (b_start, _) in pairwise(speech)]
+            gaps.append((speech[-1][1], end - start))  # after the last speech region
+            cuts = [(g0 + g1) // 2 for g0, g1 in gaps if g1 > g0 and (g0 + g1) // 2 >= min_cut]
+            if cuts:
+                end = start + max(cuts)
+        yield start, end, bool(speech)
+        start = end
+
+
 def transcribe(
     content: bytes, *, filename: str = "", max_duration_s: float = MAX_DURATION_S
 ) -> ASRResult:
@@ -396,9 +453,10 @@ def transcribe(
     raises: empty, undecodable or silent audio, or missing/failing weights, come
     back as ``success=False`` with a classified ``reason`` (see ASRFailureReason).
 
-    Every call that reaches the model is recorded through
-    ``observability.record_call()`` (latency; cost 0.0 until MIND has a cost model
-    for local compute, #479), whether it succeeded or not.
+    Every call whose audio decodes is recorded through
+    ``observability.record_call()`` -- the latency of the VAD and Whisper stage, cost
+    0.0 until MIND has a cost model for local compute (#479) -- whether it
+    succeeded or not, and even when the VAD found no speech for Whisper to run on.
     """
     if max_duration_s <= 0:
         raise ValueError(f"max_duration_s must be more than 0, got {max_duration_s}")
@@ -435,24 +493,35 @@ def _transcribe(content: bytes, filename: str, max_duration_s: float) -> ASRResu
     start = time.perf_counter()
     cpu_start = time.process_time()
     try:
-        # vad_filter: Whisper's own voice-activity filter (Silero, bundled with
-        # faster-whisper) drops silence before decoding. Without it Whisper tends
-        # to "hear" a stock phrase in silence or noise -- a confident, made-up
-        # transcript, which is worse than NO_SPEECH_DETECTED.
-        found, _info = model.transcribe(audio, language="en", beam_size=BEAM_SIZE, vad_filter=True)
-        for seg in found:  # lazy: the decoding happens while iterating
-            if seg.text.strip():
-                segments.append(
-                    TranscriptSegment.from_whisper(
-                        text=seg.text,
-                        start=seg.start,
-                        end=seg.end,
-                        avg_logprob=seg.avg_logprob,
-                        no_speech_prob=seg.no_speech_prob,
-                    )
-                )
+        for chunk_start, chunk_end, has_speech in _chunks(audio):
             if time.perf_counter() - start > TRANSCRIBE_TIMEOUT_S:
                 timed_out = True
+                break
+            if not has_speech:
+                continue
+            offset_s = chunk_start / SAMPLE_RATE
+            # vad_filter: Whisper's own voice-activity filter drops the silences
+            # inside the chunk too. Without it Whisper tends to "hear" a stock
+            # phrase in silence or noise -- a confident, made-up transcript, which
+            # is worse than NO_SPEECH_DETECTED.
+            found, _info = model.transcribe(
+                audio[chunk_start:chunk_end], language="en", beam_size=BEAM_SIZE, vad_filter=True
+            )
+            for seg in found:  # lazy: the decoding happens while iterating
+                if seg.text.strip():
+                    segments.append(
+                        TranscriptSegment.from_whisper(
+                            text=seg.text,
+                            start=offset_s + seg.start,  # from the start of the recording
+                            end=offset_s + seg.end,
+                            avg_logprob=seg.avg_logprob,
+                            no_speech_prob=seg.no_speech_prob,
+                        )
+                    )
+                if time.perf_counter() - start > TRANSCRIBE_TIMEOUT_S:
+                    timed_out = True
+                    break
+            if timed_out:
                 break
     except (RuntimeError, MemoryError, OSError) as exc:
         # The audio was already decoded, so this is CTranslate2/onnxruntime

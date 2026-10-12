@@ -20,9 +20,11 @@ import io
 import math
 import struct
 import wave
+from itertools import pairwise
 from pathlib import Path
 from types import SimpleNamespace
 
+import numpy as np
 import pytest
 from PIL import Image
 
@@ -214,7 +216,117 @@ class FakeWhisper:
 
 
 def use_model(monkeypatch: pytest.MonkeyPatch, model: FakeWhisper) -> None:
+    """Replace Whisper with `model`, and the VAD with one that hears speech everywhere
+    (a test tone is not speech to the real one, which would skip it)."""
     monkeypatch.setattr(asr, "_load_model", lambda: ("whisper-fake-local", model))
+    monkeypatch.setattr(asr, "_speech_regions", lambda window: [(0, len(window))])
+
+
+# --- chunking: cut in silences, timestamps from the start of the recording -----------
+
+SR = asr.SAMPLE_RATE
+
+
+def fake_vad(monkeypatch: pytest.MonkeyPatch, speech_s: list[tuple[float, float]]) -> None:
+    """A VAD that hears speech at these absolute times (seconds) of the recording.
+
+    _chunks() calls it per window, so it has to know where each window starts: the
+    windows are consecutive, each starting where the last chunk ended."""
+    position = [0]
+
+    def regions(window):
+        start = position[0]
+        found = []
+        for a, b in speech_s:
+            a, b = int(a * SR) - start, int(b * SR) - start
+            if b > 0 and a < len(window):
+                found.append((max(a, 0), min(b, len(window))))
+        return found
+
+    original = asr._chunks
+
+    def tracking_chunks(audio):
+        for chunk_start, chunk_end, has_speech in original(audio):
+            yield chunk_start, chunk_end, has_speech
+            position[0] = chunk_end
+
+    monkeypatch.setattr(asr, "_speech_regions", regions)
+    monkeypatch.setattr(asr, "_chunks", tracking_chunks)
+
+
+def chunk_bounds_s(monkeypatch, seconds: float, speech_s) -> list[tuple[float, float, bool]]:
+    fake_vad(monkeypatch, speech_s)
+    audio = np.zeros(int(seconds * SR), dtype=np.float32)
+    return [(a / SR, b / SR, s) for a, b, s in asr._chunks(audio)]
+
+
+def test_a_recording_shorter_than_a_chunk_is_one_chunk(monkeypatch: pytest.MonkeyPatch):
+    assert chunk_bounds_s(monkeypatch, 45, [(1, 44)]) == [(0, 45, True)]
+
+
+def test_a_chunk_is_cut_in_the_middle_of_its_latest_silence(monkeypatch: pytest.MonkeyPatch):
+    # speech 0-40 s and 50-70 s, then 75-100: the window 0-60 s has its silence at
+    # 40-50 s, so the first chunk ends at 45 s, not at 60 s in the middle of a word
+    bounds = chunk_bounds_s(monkeypatch, 100, [(0, 40), (50, 70), (75, 100)])
+    assert bounds[0] == (0, 45, True)
+    assert bounds[1][0] == 45
+
+
+def test_a_silence_before_the_minimum_is_not_used_as_the_cut(monkeypatch: pytest.MonkeyPatch):
+    # the only silence in 0-60 s is at 5-10 s, before MIN_CHUNK_S: hard cut at 60 s
+    bounds = chunk_bounds_s(monkeypatch, 120, [(0, 5), (10, 120)])
+    assert bounds[0] == (0, 60, True)
+
+
+def test_continuous_speech_is_hard_cut_at_the_chunk_length(monkeypatch: pytest.MonkeyPatch):
+    bounds = chunk_bounds_s(monkeypatch, 150, [(0, 150)])
+    assert bounds == [(0, 60, True), (60, 120, True), (120, 150, True)]
+
+
+def test_a_window_with_no_speech_is_marked_for_skipping(monkeypatch: pytest.MonkeyPatch):
+    bounds = chunk_bounds_s(monkeypatch, 130, [(70, 130)])
+    assert bounds[0] == (0, 60, False)
+    assert all(has_speech for _, _, has_speech in bounds[1:])
+
+
+def test_chunks_cover_the_whole_recording_without_overlap(monkeypatch: pytest.MonkeyPatch):
+    bounds = chunk_bounds_s(monkeypatch, 600, [(i * 13, i * 13 + 10) for i in range(47)])
+    assert bounds[0][0] == 0 and bounds[-1][1] == 600
+    assert all(a[1] == b[0] for a, b in pairwise(bounds))
+    assert all(asr.MIN_CHUNK_S <= b - a <= asr.CHUNK_S for a, b, _ in bounds[:-1])
+
+
+def test_segment_timestamps_are_from_the_start_of_the_recording(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    # Whisper sees each chunk on its own and times segments from the chunk's start
+    model = FakeWhisper([fake_segment(" Hi.", 1.0, 2.0)])
+    use_model(monkeypatch, model)
+    fake_vad(monkeypatch, [(0, 150)])  # continuous speech: chunks at 0, 60, 120 s
+    result = transcribe(wav(seconds=150))
+    assert [(s.start, s.end) for s in result.segments] == [(1, 2), (61, 62), (121, 122)]
+
+
+def test_a_silent_chunk_never_reaches_whisper(monkeypatch: pytest.MonkeyPatch):
+    calls: list[int] = []
+
+    class CountingWhisper(FakeWhisper):
+        def transcribe(self, audio, **kwargs):
+            calls.append(len(audio))
+            return super().transcribe(audio, **kwargs)
+
+    use_model(monkeypatch, CountingWhisper([fake_segment(" Hi.", 0.0, 1.0)]))
+    fake_vad(monkeypatch, [(70, 130)])  # 0-60 s is silence
+    assert transcribe(wav(seconds=130)).success
+    assert len(calls) == 2  # the chunks after the silent first one
+    assert get_recent_calls()  # still recorded
+
+
+def test_a_recording_the_vad_finds_no_speech_in_is_no_speech(monkeypatch: pytest.MonkeyPatch):
+    use_model(monkeypatch, FakeWhisper([fake_segment(" made up", 0.0, 1.0)]))
+    fake_vad(monkeypatch, [])
+    result = transcribe(wav(seconds=90))
+    assert (result.success, result.reason) == (False, ASRFailureReason.NO_SPEECH_DETECTED)
 
 
 def test_whisper_is_run_with_the_measured_settings_and_the_vad_filter(
