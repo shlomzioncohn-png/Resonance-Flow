@@ -1,4 +1,4 @@
-# Shell scripts run inside Linux containers, where a CRLF shebang line
-# ("#!/bin/bash") fails with "bad interpreter". Keep them LF on every OS,
-# whatever core.autocrlf is set to.
+# Shell scripts run inside Linux containers, where CRLF line endings break the
+# shebang line ("bad interpreter"). Keep them LF on every OS, whatever
+# core.autocrlf is set to.
 *.sh text eol=lf
