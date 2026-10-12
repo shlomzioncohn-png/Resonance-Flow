@@ -76,11 +76,15 @@ candidate); profile active → both beans exist, `@Primary` breaks the tie.
 
 | Concern | Default | Profile override |
 |---|---|---|
-| CRM deal source | `JsonDealRepository` (synthetic fixture) | `hubspot` → `HubSpotDealRepository` (live HubSpot API) |
+| CRM deal source | `JsonDealRepository` (synthetic fixture) | `hubspot` → `HubSpotDealRepository` (live HubSpot API); `salesforce` → `SalesforceDealRepository` (live Salesforce REST API) |
 | CRM task publisher | `LoggingPayloadPublisher<Task>` (logs, publishes nowhere) | `kafka` → `KafkaPayloadPublisher` (real Kafka via `BridgeTaskEventDto`) |
 
 Don't add a new switch without this pattern — a bespoke `if/else` in a `@Bean` method or a second
-mechanism will fight `@Primary` resolution.
+mechanism will fight `@Primary` resolution. `hubspot` and `salesforce` are mutually exclusive, not
+stackable the way `kafka` is: both repository beans are independently `@Primary` within their own
+profile, so Spring has no tiebreaker if both are active at once. `CrmLaneConfig.dealToTaskMapper`
+fails startup with a clear `IllegalStateException` naming both profiles if that happens (same
+shape as the kafka/tenant-id check, §7) — see §10 for the Salesforce source specifically.
 
 ## 6. Known gaps — don't silently "fix" these without asking
 
@@ -401,3 +405,71 @@ that brief, not a linked spec.
   "Bridge outbox integration", `yehudit/bridge-outbox-integration → inbox/bridge-assignment-outbox`).
   Neither blocks the CRM lane directly, but both touch shared `core`/`task` territory the same way
   `ruth/bridge-core` does — worth a glance before assuming `core`/`task` are stable.
+
+## 10. Salesforce CRM source
+
+`SalesforceDealRepository` (`@Repository @Profile("salesforce") @Primary`) is the third
+`DealRepository` implementation, alongside `JsonDealRepository` (default) and
+`HubSpotDealRepository` (`hubspot`). Full design rationale lives in
+`teams/bridge/docs/crm-salesforce-design.md` — this section is the short version plus the things
+most likely to trip someone up.
+
+- **Auth: OAuth 2.0 Client Credentials Flow, not a static token.** `SalesforceClient` acquires and
+  caches an access token (together with the `instance_url` it came with — every subsequent call
+  targets that host, not the login host). Salesforce's Client Credentials Flow issues no refresh
+  token and no `expires_in`, so there is nothing to proactively refresh against; the token is
+  refreshed *reactively* on a `401` (refreshed once, triggering call retried once — a second `401`
+  after a genuinely fresh token is fatal, not looped).
+- **`dealId` is always the bare `Opportunity.Id` — never prefixed.** This used to not be true: an
+  earlier revision made `Deal.dealId()` return `"salesforce:<Id>"` so the source-agnostic
+  `DealToTaskMapper.toSourceRef` (`"crm:" + dealId`) would produce the required
+  `"crm:salesforce:<Id>"`. That broke `fetchDeal(deal.dealId())` round-tripping, since `fetchDeal`'s
+  own parameter was deliberately the bare id. Fixed by giving `Deal` a `sourceRefPrefix` field
+  instead (defaults to `"crm:"` in the builder and for HubSpot/JSON, both of which never set it;
+  `SalesforceDealRepository` sets it to `"crm:salesforce:"`). `toSourceRef` is now
+  `deal.sourceRefPrefix() + deal.dealId()` — still no per-source branch in the mapper, and
+  `dealId()` is the same bare value everywhere, so `fetchDeal(deal.dealId())` always round-trips.
+  Don't reintroduce a prefixed `dealId` to solve a future per-source `sourceRef` need — extend
+  `sourceRefPrefix` (or add a sibling field) instead.
+- **`fetchDeal(dealId)` takes the bare `Opportunity.Id`** — the same value `Deal#dealId()` returns.
+  One query for the Opportunity; the stage-metadata query only fires if that lookup found a record
+  (a miss costs one request, not two, mirroring `HubSpotDealRepository`'s 404 handling adapted to
+  Salesforce's "not found is zero records"). No cache field anywhere on this class — `snapshot()`
+  and `fetchDeal()` are both a fresh set of SOQL queries every call (CRM-lane audit finding F1).
+- **Stage resolution is metadata-based, never label matching** (`SalesforceStageMapping`) — this is
+  the actual fix for HubSpot audit finding F6 (a renamed/custom stage label breaking the whole
+  sync). `IsClosed`/`IsWon` on the `OpportunityStage` row map directly to `CLOSED_WON`/
+  `CLOSED_LOST`; an open stage is bucketed by `DefaultProbability` into one of four configurable
+  bands read from `bridge.crm.salesforce.stage-bands.*` in `application-salesforce.yml` (defaults
+  0–20/21–50/51–80/81–99 → `PROSPECT`/`QUALIFIED`/`PROPOSAL`/`NEGOTIATION`), validated at actual
+  Spring startup (the mapping is a plain field of the eagerly-created `SalesforceDealRepository`
+  singleton) to be strictly increasing and partition `0..99` exactly — a misconfigured band fails
+  loudly with a clear `IllegalStateException` instead of silently misclassifying every open deal. A
+  `null` `DefaultProbability` on an open stage falls back to `PROSPECT`, the most conservative
+  bucket. **An unresolvable `StageName` is a per-record skip in `snapshot()`** (counted in
+  `DealSnapshot.skippedAtRead()`, never aborts the sync) **but throws `IllegalStateException` in
+  `fetchDeal()`** — there's no "sync" to protect for a single-record fetch, so failing loudly there
+  is correct, not a missed case of the same rule.
+- **REST API version is config, not hardcoded** (`bridge.crm.salesforce.api-version` /
+  `SALESFORCE_API_VERSION`, default `68.0`) — Salesforce ships three releases a year and retires
+  old API versions, so this is expected to need bumping periodically; it was hardcoded in
+  `SalesforceClient` until this was fixed.
+- **`load-history: true` is not implemented.** Unlike HubSpot (per-property history),
+  Salesforce's default read is current-state-only — one `Deal` per Opportunity, one history entry
+  long. Enabling `load-history` fails fast at `SalesforceDealRepository`'s construction with a
+  clear message rather than silently behaving like current-state-only mode.
+- **`REQUEST_LIMIT_EXCEEDED` (`403`) is fatal, never retried** — it's a rolling 24-hour budget, not
+  a short per-second bucket like HubSpot's `429`, so backing off cannot make it succeed sooner.
+  `500`/`502`/`503`/`504` and transport failures (connect/read timeout, DNS/IO errors) **are**
+  retried with exponential backoff, same as `HubSpotClient`.
+- **`hubspot` and `salesforce` are mutually exclusive profiles** — see §5's table note. Both active
+  at once fails startup with an `IllegalStateException` naming both, from
+  `CrmLaneConfig.dealToTaskMapper` (`CrmLaneConfigTest.failsToStartWhenBothHubspotAndSalesforceProfilesAreActive`).
+- **No Salesforce org exists for this work yet** (design doc §9) — everything above is verified
+  against `SalesforceClient`/`SalesforceDealRepository`'s own test suites
+  (`MockWebServer`-backed, no live calls), not against a real org. `stage-changed-at-field`
+  defaulting to `LastStageChangeDate` is specifically flagged in the design doc as
+  moderate-confidence/unverified — if it turns out not to exist on the target org, switch
+  `SALESFORCE_STAGE_CHANGED_AT_FIELD` to `LastModifiedDate` (config change only, no code change),
+  noting the real imprecision that comes with it (bumps on any field edit, not just a stage
+  change).
