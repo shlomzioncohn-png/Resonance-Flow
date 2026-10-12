@@ -60,8 +60,8 @@ def parse_response(
 ) -> ExtractedFields:
     """Read one answer into `schema`, or raise `MalformedOutput`.
 
-    `schema` is which shape was asked for: the four basic fields, or the
-    seven that include the classification. It defaults to the basic one so
+    `schema` is which shape was asked for: the basic fields alone, or with
+    the classification and effort estimate. It defaults to the basic one so
     that every existing caller keeps the behaviour it had.
 
     Every rejection path raises the same exception type: for the extractor a

@@ -464,3 +464,167 @@ Caveats, all load-bearing:
   comparison #351 actually names. That cannot be run yet: no split path
   exists. Until it is built, the combined prompt is the issue's recommended
   starting point rather than a measured winner.
+
+### Review fixes, closed in #352
+
+Three findings from an automated review of #351 arrived after the PR was
+approved, and were fixed on the #352 branch instead.
+
+- **Urgency was read by its spelling, not its value.** `"--3"` and `"²"`
+  passed an `isdigit()` check and then broke `int()`, which sent the answer to
+  repair and, after three identical answers, discarded the item — title and
+  all. The opposite way, `3.0`, ordinary JSON for three, became `null`. A
+  quoted number is now read only when it is written plainly (`-?[0-9]+(\.[0-9]+)?`,
+  ASCII digits only), and what decides is whether the value is whole. A test
+  through `BasicExtractor` pins the cost: one provider call, title kept.
+- **The examples in `classification.md` were not JSON.** They read
+  `tier: "OPERATIONAL"   urgency: 5`, while the prompt demands a single JSON
+  object, so a model imitating them would have written something the parser
+  rejects. They are now whole answer objects, and a test parses every one
+  against the response model and requires exactly its keys — which is what
+  forced them to grow when #352 added two.
+
+## Effort estimate (#352)
+
+`effort_estimate_minutes` — how long the work takes — is asked for in the same
+call and under the same `classify` switch as the three fields above. The two
+new keys sit on `ClassificationFields`, and the instructions in
+`classification.md`, under their own rules.
+
+### What was deliberately not built
+
+No clarification round, no waiting, no confidence threshold that holds a task
+back. Kayvan settled this before the issue was written, and SPEC-R2 says the
+same: a task is created either way, and a human can fill the estimate in later
+with a normal edit in Inbox. A task with no estimate is a normal task; it only
+drops out of "does this fit my free time" recommendations.
+
+That makes the empty case the common one. Every one of the 91 tasks in the
+persona set carries a labelled estimate, and **only one says anything about
+duration in its text** — "the upload takes a few minutes", a unit of assumed
+length and so `INFERRED`, on a task labelled 40 minutes. Most of what Mind sees
+will reach Inbox with no estimate.
+
+### Three answers, not two
+
+| the content | minutes | basis | confidence |
+|---|---|---|---|
+| fixes how long, in units of fixed length: "should take about an hour" | 60 | `STATED` | high |
+| fixes no duration, but the work is small and specific: "fix the typo on the login page" | a few | `INFERRED` | low |
+| names a unit whose length must be assumed: "about two sprints" | the model's reading | `INFERRED` | low |
+| gives no sense of size: "look into the billing issue" | `null` | `null` | `null` |
+
+The prompt's definitions of the two bases are the one place this is decided;
+an earlier separate rule about units contradicted them, and was folded in.
+
+The issue says "never an invented number" and also, quoting Kayvan, "or mark
+it low-confidence". The two `INFERRED` rows are how the two are read together: an
+inference from what the work is, labelled as one, is not an invention. An
+estimate with no grip on the size of the work is, and stays `null`.
+
+### The model names the basis; the number is ours
+
+The model is not asked how confident it is. Self-reported confidence clusters
+near the top regardless of content and shifts between models, while "did the
+text say this, or did you work it out?" is a question about the text, which a
+model answers far better. `confidence.py` turns the basis into the contract's
+`effort_estimate_confidence` (`EFFORT_CONFIDENCE`), the same way the overall
+`confidence` comes from signals we observe rather than from the model.
+
+The overall `confidence` is not touched. The contract gives effort a field of
+its own precisely so that it does not have to be folded in.
+
+`effort_estimate_basis` is internal. It never reaches Inbox; only the number
+derived from it does.
+
+### Toward a finer confidence
+
+Two values is a coarse scale, and that is a known limitation rather than a
+finished design. The two values live in `EFFORT_CONFIDENCE` and neither is
+calibrated. The ordering between them is what the tests pin; the values are
+expected to move, which is why they are not repeated here.
+
+Two ways to make it finer, both measurable, neither built here because the
+issue asks for nothing beyond the estimate itself:
+
+- **Calibrate against the persona labels.** Since none of them fixes a
+  duration, every one is effectively `INFERRED`, so they can say how often an inferred estimate lands near the
+  label, and set that number from data. They say nothing about `STATED`. This
+  is R1's harness, and the free tier's daily quota will not cover 91 calls in
+  a day.
+- **Check a `STATED` claim against the text.** A stated estimate should have a
+  duration phrase in the content to point at. Where there is none, the basis
+  could be downgraded to `INFERRED` and logged, the way `grounding.py` drops a
+  `source_ref` the content never contained. It would catch an invented
+  "stated" basis, but not a misread one: "down for 40 minutes" has a duration
+  phrase and still is not an estimate.
+
+### An unusable estimate becomes null, never a repair round
+
+The same rule as the classification fields, because both keys are optional:
+
+- minutes must be a whole positive number. A fraction is **rounded**, unlike
+  urgency: half a minute is precision nobody asked for, while 3.5 urgency
+  sits between two answers. Halves go up, so `0.5` is 1; `0.4` rounds to
+  zero and is rejected. There is no upper bound; the contract sets none, and
+  a month of working time is some 9600 honest minutes.
+- what counts as a whole number is decided once, in `_whole_number`, shared
+  with urgency so the two cannot drift apart.
+- the two keys travel together, checked after each has been read on its own.
+  A basis without usable minutes is dropped: nothing was estimated. Minutes
+  without a usable basis are kept as `INFERRED`, the weaker reading — a repair
+  round would risk the whole item over an optional field, and a `null` would
+  discard an answer the model did give.
+
+### The traps
+
+The phrases that look like a duration and are not one are the real risk, more
+than the plain case. In the persona set, every duration-shaped phrase but one
+is one of them (the exception, "a few minutes", is covered above):
+
+- **a deadline** — "before this afternoon" says when, not how long, and
+  "redundancy must be restored within 72 hours" is a deadline counted in hours.
+- **time already passed** — "has been down for 30 minutes" describes the
+  fault, not the work.
+
+The prompt names both, and two of its six examples carry one. Whether a live
+model actually avoids them is a question for a live run; a scripted provider
+returns what the test wrote.
+
+### What was measured, and what was not
+
+One run against the live API (`gemini-3.6-flash`), over six texts written for
+this check — none from the persona set, so it stays uncontaminated.
+
+| the text | expected | minutes | basis |
+|---|---|---|---|
+| "Should take about 20 minutes." | stated | 20 | `STATED` |
+| "it's roughly a two-day job" | stated | 960 | `STATED` |
+| rename a button on the signup form | inferred, small | 10 | `INFERRED` |
+| figure out why churn went up | none | `null` | `null` |
+| a questionnaire "due in three days" | not 3 days | `null` | `null` |
+| no Wi-Fi "for 45 minutes" | not 45 | `null` | `null` |
+
+Six of six, one provider call each, and the nine-key JSON parsed first time —
+the first live check of the rewritten examples too. "Two days" became 960, so
+the model read a day as eight working hours. At the time the prompt only
+implied that ("half a day is 240") and said nothing about a week, which could
+have come back as five working days or seven calendar ones — four times apart,
+both at `STATED` confidence. It now states working time outright, and sends
+units of assumed length such as sprints to `INFERRED`.
+
+A second run, on that wording, reached five of eight texts before the free
+tier's daily quota ran out (429; one 503). All five came back as expected:
+the four plain cases unchanged, and "about two sprints of work" as 9600
+minutes, `INFERRED` — the model assumed two-week sprints and labelled the
+number as its own reading. **Not yet run on the new wording:** the two traps,
+and "about a week of work", which should give 2400 as `STATED`.
+
+Caveats, all load-bearing:
+
+- n = 6, one run, and the texts were written by the same hand as the prompt.
+  The two traps in particular sit close to the prompt's own wording, so this
+  shows the instructions are understood, not that they hold on text written
+  by someone else.
+- it says nothing about the confidence values. Whether `INFERRED` estimates
+  land near the truth is the persona calibration above, and that is R1's run.

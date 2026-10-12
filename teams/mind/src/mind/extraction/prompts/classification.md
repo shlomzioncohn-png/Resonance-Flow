@@ -1,5 +1,5 @@
-In addition to the keys above, the object has these three. They say what kind
-of task this is, and each of them may be null.
+In addition to the keys above, the object has the keys below. They say what
+kind of task this is and how long it takes, and each of them may be null.
 
 - `tier` — string or null. Exactly one of `"OPERATIONAL"`, `"TACTICAL"`,
   `"STRATEGIC"`. Tier is about the **time horizon of the work and how far its
@@ -47,27 +47,55 @@ of task this is, and each of them may be null.
   - When the content describes work that several of these could own, or names
     no kind of work at all, use null.
 
-Examples:
+- `effort_estimate_minutes` — integer greater than 0, or null. How long the
+  work itself takes, in minutes. Count working time, not calendar time: an
+  hour is 60, a day is 480, a week is 2400 (five working days).
+
+- `effort_estimate_basis` — string or null. Exactly one of `"STATED"`,
+  `"INFERRED"`. What the estimate rests on.
+  - `STATED` — the content fixes how long the work takes, in units whose
+    length is fixed: "should take about an hour", "a twenty-minute job", "two
+    days of work".
+  - `INFERRED` — the content fixes no duration, and the minutes are your
+    reading. Either the work is small and specific enough that its length
+    follows from what it is (fixing a typo, forwarding a file, approving a
+    document that is already reviewed), or the content names a unit whose
+    length you would have to assume ("two sprints", "a few days").
+  - When neither applies, because the work is open-ended or its size is not
+    described ("look into the billing issue", "plan the migration"), both keys
+    are null.
+
+Examples. Each answer is the whole object, written exactly as you return it:
 
     "The checkout service is throwing null pointers since the deploy, users
     cannot pay."
-      tier: "OPERATIONAL"   urgency: 5   role_context: "DEVELOPER"
+    {"title": "Fix the checkout service null pointers", "description": "Users cannot pay since the deploy.", "source_ref": null, "has_dependencies": false, "tier": "OPERATIONAL", "urgency": 5, "role_context": "DEVELOPER", "effort_estimate_minutes": null, "effort_estimate_basis": null}
 
     "Before Thursday I need the recommendation on whether we enter the German
     market, the board is deciding."
-      tier: "STRATEGIC"     urgency: 4   role_context: "CEO"
+    {"title": "Write the recommendation on entering the German market", "description": "The board decides on Thursday and is waiting for it.", "source_ref": null, "has_dependencies": true, "tier": "STRATEGIC", "urgency": 4, "role_context": "CEO", "effort_estimate_minutes": null, "effort_estimate_basis": null}
 
     "Can you line up next sprint and work out who picks up the migration?"
-      tier: "TACTICAL"      urgency: 2   role_context: "MANAGER"
+    {"title": "Line up next sprint", "description": "Includes working out who picks up the migration.", "source_ref": null, "has_dependencies": false, "tier": "TACTICAL", "urgency": 2, "role_context": "MANAGER", "effort_estimate_minutes": null, "effort_estimate_basis": null}
 
     "Please fix the typo on the login page."
-      tier: "OPERATIONAL"   urgency: 1   role_context: null
+    {"title": "Fix the typo on the login page", "description": null, "source_ref": null, "has_dependencies": false, "tier": "OPERATIONAL", "urgency": 1, "role_context": null, "effort_estimate_minutes": 10, "effort_estimate_basis": "INFERRED"}
 
-    The last one shows the normal case for an empty field: a one-line request
+    "Could you review my pull request today? It should take about half an
+    hour."
+    {"title": "Review the pull request", "description": null, "source_ref": null, "has_dependencies": false, "tier": "OPERATIONAL", "urgency": 3, "role_context": "DEVELOPER", "effort_estimate_minutes": 30, "effort_estimate_basis": "STATED"}
+
+    "The badge readers at the warehouse gate stopped working about two hours
+    ago, can someone go check them?"
+    {"title": "Check the badge readers at the warehouse gate", "description": "They stopped working about two hours ago.", "source_ref": null, "has_dependencies": false, "tier": "OPERATIONAL", "urgency": 4, "role_context": "FIELD_ENGINEER", "effort_estimate_minutes": null, "effort_estimate_basis": null}
+
+    The typo shows the normal case for an empty field: a one-line request
     with no sign of whose work it is. Null there is the right answer, not a
-    failure to answer.
+    failure to answer. It is also the inferred estimate, and the pull request
+    the stated one. The German market and the badge readers each carry one of
+    the two traps in the rules below.
 
-Rules for these three:
+Rules for `tier`, `urgency` and `role_context`:
 
 - Use `null` whenever the content does not make the value clear. An empty
   field is the correct answer, and it is always better than a guess: another
@@ -75,5 +103,19 @@ Rules for these three:
 - Use the values exactly as written above, in capitals, as a single string.
   Do not invent a value, do not abbreviate one, do not substitute a word that
   seems close, and never answer with a list of two.
-- These three are judgements about the task, not about the writing. Decide
+- They are judgements about the task, not about the writing. Decide
   them from what the work actually is.
+
+Rules for the effort estimate:
+
+- A deadline is not a duration. "By Thursday" says when the work is due, not
+  how long it takes.
+- Time that has already passed is not a duration either. "Down for 40
+  minutes" or "waiting since Monday" describes the situation, not the work.
+- Give both keys or neither: an estimate always comes with its basis.
+- Unlike `tier`, `urgency` and `role_context`, an inferred estimate is welcome
+  here, because the basis tells the reader how far to trust it. It is the one
+  exception to basing every field on the content: how long a kind of work
+  usually takes is your own knowledge, and here you may use it. The work
+  itself must still come from the content, and every other field still rests
+  on the content alone.

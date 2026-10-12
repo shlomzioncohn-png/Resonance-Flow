@@ -15,8 +15,10 @@ from mind.contracts.base_enums import SourceType
 from mind.contracts.task_creation_requested import TaskCreationRequested
 from mind.contracts.task_enums import RoleContext, TaskTier
 from mind.extraction.assembly import to_task_creation_requested
+from mind.extraction.confidence import effort_confidence
 from mind.extraction.config import ExtractionConfig
 from mind.extraction.extractor import BasicExtractor, ExtractionSuccess
+from mind.extraction.models import EffortBasis
 from mind.extraction.prompts import repair_prompt, system_prompt
 from tests.extraction.fakes import ScriptedProvider
 
@@ -166,8 +168,33 @@ def test_a_model_that_declined_to_guess_looks_the_same_as_not_asking() -> None:
     assert _proposal(declined, classify=True).role_context is None
 
 
-def test_the_effort_fields_stay_for_352() -> None:
-    proposal = _proposal(CLASSIFIED_ANSWER, classify=True)
+ESTIMATED_ANSWER = json.dumps(
+    {
+        **json.loads(CLASSIFIED_ANSWER),
+        "effort_estimate_minutes": 60,
+        "effort_estimate_basis": "STATED",
+    }
+)
+
+
+def test_the_estimate_reaches_the_contract_with_its_own_confidence() -> None:
+    proposal = _proposal(ESTIMATED_ANSWER, classify=True)
+
+    assert proposal.effort_estimate_minutes == 60
+    assert proposal.effort_estimate_confidence == effort_confidence(EffortBasis.STATED)
+
+
+def test_the_estimate_leaves_the_overall_confidence_alone() -> None:
+    """The contract gives effort its own confidence so this one stays clean."""
+
+    with_estimate = _proposal(ESTIMATED_ANSWER, classify=True)
+    without_estimate = _proposal(CLASSIFIED_ANSWER, classify=True)
+
+    assert with_estimate.confidence == without_estimate.confidence
+
+
+def test_with_the_switch_off_there_is_no_estimate() -> None:
+    proposal = _proposal(BASIC_ANSWER, classify=False)
 
     assert proposal.effort_estimate_minutes is None
     assert proposal.effort_estimate_confidence is None
@@ -249,3 +276,27 @@ def test_a_wrong_shaped_tier_does_not_end_the_run(wrong_shape: object) -> None:
     # than failing.
     assert outcome.fields.role_context is RoleContext.CEO
     assert outcome.fields.urgency == 4
+
+
+@pytest.mark.parametrize("unreadable", ["--3", "²"])
+def test_an_unreadable_urgency_costs_one_call_and_keeps_the_title(unreadable: str) -> None:
+    """Through the extractor, because that is where the cost was paid.
+
+    These strings passed a "looks like digits" check and broke `int()`. The
+    ValueError became a ValidationError, the answer went to repair, the model
+    wrote the same thing back, and after three calls the item was discarded.
+    An optional field promised the opposite: a null, a log line, nothing more.
+    """
+
+    answer = json.dumps({**json.loads(CLASSIFIED_ANSWER), "urgency": unreadable})
+    # Three answers queued, so a repair round would be counted, not crash.
+    provider = ScriptedProvider(answer, answer, answer)
+
+    outcome = BasicExtractor(provider, sleep=lambda _: None).extract(
+        SOURCE_TEXT, SourceType.EMAIL
+    )
+
+    assert provider.call_count == 1
+    assert isinstance(outcome, ExtractionSuccess)
+    assert outcome.fields.title == "Write the German market entry recommendation"
+    assert outcome.fields.urgency is None
