@@ -4,7 +4,7 @@ import StatusBadge from './StatusBadge';
 
 const meta = {
   component: StatusBadge,
-  tags: ['ai-generated'],
+  tags: ['autodocs'],
 } satisfies Meta<typeof StatusBadge>;
 
 export default meta;
