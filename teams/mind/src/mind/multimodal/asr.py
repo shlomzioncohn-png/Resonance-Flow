@@ -486,17 +486,34 @@ def _decode(content: bytes, max_duration_s: float) -> _Decoded:
     import numpy as np
 
     max_samples = int(max_duration_s * SAMPLE_RATE)
-    kept: list[np.ndarray] = []
+    # One float32 buffer, written in place as frames decode -- not a list of chunks
+    # concatenated, converted and scaled afterwards, which peaked at ~3x the audio
+    # (112 MiB for 37 MiB of it at the 600 s cap). Sized by the header's length
+    # when it has one (most files), grown by doubling when it is short or missing.
+    audio = np.empty(0, dtype=np.float32)
     kept_samples = 0
     reached_end = True
     broke = False
     declared_s: float | None = None
+
+    def append(chunk: np.ndarray) -> None:
+        nonlocal audio, kept_samples
+        end = kept_samples + len(chunk)
+        if end > len(audio):
+            grown = np.empty(min(max_samples, max(end, 2 * len(audio))), dtype=np.float32)
+            grown[:kept_samples] = audio[:kept_samples]
+            audio = grown
+        np.multiply(chunk, 1 / 32768, out=audio[kept_samples:end], casting="unsafe")
+        kept_samples = end
+
     try:
         with av.open(io.BytesIO(content), mode="r") as container:
             if not container.streams.audio:
                 raise _NotAudio("no audio stream in the file")
             if container.duration:
                 declared_s = container.duration / 1_000_000  # AV_TIME_BASE: microseconds
+            expected = int((declared_s or 0) * SAMPLE_RATE) + SAMPLE_RATE  # + 1 s of slack
+            audio = np.empty(min(max_samples, expected), dtype=np.float32)
             resampler = av.AudioResampler(format="s16", layout="mono", rate=SAMPLE_RATE)
             frames = container.decode(container.streams.audio[0])
             try:
@@ -504,9 +521,7 @@ def _decode(content: bytes, max_duration_s: float) -> _Decoded:
                     frame = next(frames, None)
                     # a None frame at the end flushes what the resampler still buffers
                     for out in resampler.resample(frame):
-                        chunk = out.to_ndarray().reshape(-1)[: max_samples - kept_samples]
-                        kept.append(chunk)
-                        kept_samples += len(chunk)
+                        append(out.to_ndarray().reshape(-1)[: max_samples - kept_samples])
                     if frame is None:
                         break
                 else:
@@ -526,9 +541,13 @@ def _decode(content: bytes, max_duration_s: float) -> _Decoded:
     wav = _wav_extent(content)
     if wav is not None:
         declared_s = wav[0]  # the RIFF header, not FFmpeg's size-based recomputation
-    audio = np.concatenate(kept) if kept else np.zeros(0, dtype=np.int16)
+    # A slice is a view, so a buffer sized for a much longer file (a broken one,
+    # whose header overstates it) would stay allocated behind it: copy that case.
+    used = audio[:kept_samples]
+    if kept_samples < len(audio) // 2:
+        used = used.copy()
     return _Decoded(
-        audio=audio.astype(np.float32) / 32768.0,
+        audio=used,
         reached_end=reached_end or broke,
         broke=broke,
         declared_s=declared_s,

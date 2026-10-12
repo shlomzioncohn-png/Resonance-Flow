@@ -862,3 +862,42 @@ def test_a_corrupt_header_is_unreadable_format_not_a_crash(
     result = transcribe(corrupt(wav_fixture()))
     assert (result.success, result.reason) == (False, ASRFailureReason.UNREADABLE_FORMAT)
     assert result.failure_category is FailureCategory.DATA
+
+
+# --- decoding memory: one buffer, no copies (the memory work before the PR, #478) ---
+
+
+def test_decoding_holds_about_one_copy_of_the_audio():
+    # It peaked at ~3x the audio (112 MiB for 37 MiB at the 600 s cap): int16
+    # chunks, concatenated, converted, then scaled into yet another array.
+    import tracemalloc
+
+    content = tone(20.0)
+    asr._decode(content, 600)  # imports and first-use allocations outside the window
+    tracemalloc.start()
+    try:
+        decoded = asr._decode(content, 600)
+        _, peak = tracemalloc.get_traced_memory()
+    finally:
+        tracemalloc.stop()
+    assert peak < 1.3 * decoded.audio.nbytes
+
+
+class _NoDurationContainer(_CountingContainer):
+    """A container that declares no length, as some streams don't."""
+
+    duration = None
+
+
+def test_without_a_declared_length_the_buffer_grows_and_keeps_every_sample(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    import av
+
+    real_open = av.open
+    content = tone(5.0)
+    expected = asr._decode(content, 600).audio
+    monkeypatch.setattr(av, "open", lambda *a, **k: _NoDurationContainer(real_open(*a, **k), [0]))
+    grown = asr._decode(content, 600).audio  # starts at 1 s and doubles past it
+    assert len(grown) == len(expected)
+    assert np.array_equal(grown, expected)
