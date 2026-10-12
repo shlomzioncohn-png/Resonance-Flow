@@ -114,6 +114,13 @@ def _percentiles(latencies_ms: list[float]) -> dict[str, float]:
     }
 
 
+async def _open_bench_store(settings: VectorStoreSettings) -> PgVectorStore:
+    await create_vector_store_test_table(settings)
+    store = PgVectorStore(settings)
+    await store.open()
+    return store
+
+
 async def main() -> None:
     rng = random.Random(1234)  # deterministic filler across runs
 
@@ -126,9 +133,7 @@ async def main() -> None:
         dsn=os.environ["MIND_VECTOR_STORE__DSN"],  # type: ignore[arg-type]
         table=_BENCH_TABLE,
     )
-    await create_vector_store_test_table(settings)
-    store = PgVectorStore(settings)
-    await store.open()
+    store = await _open_bench_store(settings)
     try:
         await store.clear()  # dedicated bench table -- start from empty every run
 
