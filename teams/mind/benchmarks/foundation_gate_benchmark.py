@@ -161,10 +161,13 @@ async def main() -> None:
 
         # Latency: query with every real task's own embedding (k=5), not
         # the filler's -- the filler only needs to exist to pad the table.
+        # embed() runs outside the timer -- this measures search() alone,
+        # not model inference too.
         latencies_ms = []
         for task_id, text in real_tasks:
+            vector = embed(text)
             start = time.perf_counter()
-            await store.search(embed(text), k=5)
+            await store.search(vector, k=5)
             latencies_ms.append((time.perf_counter() - start) * 1000)
 
         # Recall: does the related real task outrank the control real task

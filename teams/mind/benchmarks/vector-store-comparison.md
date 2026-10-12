@@ -411,9 +411,16 @@ Two different things are measured, deliberately kept separate:
   seating preferences), does the related real task outrank an unrelated
   real control task from the *same* meeting?
 
-**Result (last real run, [`foundation_gate_benchmark_results.json`](foundation_gate_benchmark_results.json)):**
+**Result below is STALE** (review feedback on #559, 2026-10-12): it's
+from a run against `embeddings.py`'s old HashingVectorizer placeholder,
+before the real BGE model landed. The latency numbers also predate a
+fix -- the timer used to start before `embed(text)`, so it measured
+model inference and `search()` together. Both are fixed in code now
+(real model, timer moved past `embed()`); the table itself hasn't been
+re-run since -- needs a fresh `python -m benchmarks.foundation_gate_benchmark`
+against current `main` for real numbers.
 
-| Metric | Result |
+| Metric | Result (stale -- placeholder model) |
 |---|---|
 | Total vectors (16 real + 84 synthetic filler) | 100 |
 | Latency p50 / p95 / p99 | 3.73ms / 15.72ms / 21.84ms |
@@ -429,8 +436,8 @@ meeting ranks correctly 3/3 here. **This does not contradict the earlier
 finding** -- "the same sub-topic, different wording" (what these three
 pairs test) and "a near-exact paraphrase" (what the semantic-quality
 stage tested) are different difficulty levels for a word-overlap
-embedding model; the gap is still in `embeddings.py`'s placeholder
-model, not pgvector or its HNSW index.
+embedding model; the gap was in `embeddings.py`'s placeholder model
+(now replaced), not pgvector or its HNSW index.
 
 **HNSW confirmed in code, not just planned:** `pgvector_store.py`'s
 `_ensure_schema()` already creates a `USING hnsw (embedding
