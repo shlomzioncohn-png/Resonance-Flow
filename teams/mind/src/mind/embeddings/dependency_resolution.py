@@ -20,8 +20,6 @@ async def resolve_dependency_targets(
     list = no match. Propagates ValueError on empty text, same as embed()."""
     results = []
     for text in references:
-        # is_query=True: a short free-text mention searched against full
-        # task descriptions is the same asymmetric shape search_text()
-        # handles, not #471's symmetric document-vs-document comparison.
+        # is_query=True: a mention vs. full task descriptions (see search.py).
         results.append(await nearest_tasks(store, text, k=k, is_query=True))
     return results

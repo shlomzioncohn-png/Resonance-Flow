@@ -32,7 +32,7 @@ async def test_nearest_tasks_propagates_embeds_value_error_on_empty_text():
 
 
 async def test_nearest_tasks_defaults_to_is_query_false():
-    """#471's symmetric document-vs-document comparison -- the default."""
+    """#471's symmetric comparison -- the default."""
     store = AsyncMock()
     with patch("mind.embeddings.search.embed_async") as mock_embed_async:
         mock_embed_async.return_value = [0.0] * EMBEDDING_DIM
@@ -41,7 +41,7 @@ async def test_nearest_tasks_defaults_to_is_query_false():
 
 
 async def test_nearest_tasks_passes_through_is_query_true():
-    """#245's free-text mention vs. full task descriptions -- asymmetric."""
+    """#245's asymmetric mention-vs-passage case."""
     store = AsyncMock()
     with patch("mind.embeddings.search.embed_async") as mock_embed_async:
         mock_embed_async.return_value = [0.0] * EMBEDDING_DIM

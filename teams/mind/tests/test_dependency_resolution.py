@@ -15,10 +15,7 @@ from mind.embeddings.pgvector_store import PgVectorStore
 
 
 async def _create_test_table(settings: VectorStoreSettings) -> None:
-    # PgVectorStore no longer creates its own schema (issue #441) -- the
-    # real table is created by `alembic upgrade head`, which doesn't cover
-    # this suite's own dedicated test table. Same pattern as
-    # test_vector_store.py's helper of the same name.
+    # Dedicated test table, not covered by `alembic upgrade head` (#441).
     table = sql.Identifier(settings.table)
     async with await psycopg.AsyncConnection.connect(
         str(settings.dsn.get_secret_value()), autocommit=True
@@ -59,8 +56,7 @@ async def clean_store(store):
 
 
 async def test_resolves_a_strong_match(store):
-    """A short, realistic mention (what Yonit's extraction would actually
-    send) -- not text that echoes the task's own embedded words."""
+    """Realistic short mention, not a copy of the task's own words."""
     await store.upsert("task-db-upgrade", embed("Upgrade the production database to the new version"))
 
     [candidates] = await resolve_dependency_targets(store, ["the DB upgrade"])
@@ -69,9 +65,7 @@ async def test_resolves_a_strong_match(store):
 
 
 async def test_resolves_a_weak_match(store):
-    """A vaguer mention still resolves to the right task, just with a
-    lower score than a more specific one -- checked by task_id, not just
-    a similarity comparison that would pass almost regardless."""
+    """A vaguer mention still resolves to the right task, lower score."""
     await store.upsert("task-db-upgrade", embed("Upgrade the production database to the new version"))
     await store.upsert("task-unrelated", embed("Plan the team offsite catering order"))
 
@@ -89,9 +83,7 @@ async def test_no_match_when_the_store_is_empty(store):
 
 
 async def test_no_strong_match_when_the_store_has_only_unrelated_tasks(store):
-    """A populated store with nothing related to the query must score
-    clearly lower than a store that actually has the match -- #244 (not
-    this function) decides what counts as "no match"."""
+    """Unrelated store scores lower than one with the real match."""
     await store.upsert("task-catering", embed("Plan the team offsite catering order"))
     await store.upsert("task-standup-notes", embed("Write up notes from yesterday's standup"))
 
