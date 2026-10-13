@@ -426,10 +426,16 @@ components:
       - name: inbox-db-credentials
         mountPath: /etc/resonance-flow/secrets/inbox-db
         readOnly: true
+      - name: lens-admin-credentials
+        mountPath: /etc/resonance-flow/secrets/lens-admin
+        readOnly: true
     volumes:
       - name: inbox-db-credentials
         secret:
           secretName: resonance-flow-inbox-db-credentials
+      - name: lens-admin-credentials
+        secret:
+          secretName: resonance-flow-lens-admin
     dependencies:
       - name: postgresql
         port: 5432
