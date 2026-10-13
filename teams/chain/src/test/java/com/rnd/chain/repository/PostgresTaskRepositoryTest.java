@@ -34,7 +34,7 @@ class PostgresTaskRepositoryTest {
         UUID id = UUID.randomUUID();
         LocalDateTime now = LocalDateTime.now();
         Task first = Task.builder()
-                .id(id).ownerId("owner-1").status(TaskStatus.ACTIVE)
+                .id(id).status(TaskStatus.ACTIVE)
                 .blockingCount(1).openConstraintCount(0)
                 .createdAt(now).updatedAt(now).build();
 
@@ -42,7 +42,7 @@ class PostgresTaskRepositoryTest {
         long versionAfterFirst = jpaRepository.findById(id).orElseThrow().getVersion();
 
         Task second = Task.builder()
-                .id(id).ownerId("owner-2").status(TaskStatus.DONE)
+                .id(id).status(TaskStatus.DONE)
                 .blockingCount(5).openConstraintCount(2)
                 .createdAt(now).updatedAt(now).build();
 
@@ -52,7 +52,6 @@ class PostgresTaskRepositoryTest {
         assertThat(rowsForId).hasSize(1);
 
         TaskEntity persisted = rowsForId.get(0);
-        assertThat(persisted.getOwnerId()).isEqualTo("owner-2");
         assertThat(persisted.getStatus()).isEqualTo(TaskStatus.DONE);
         assertThat(persisted.getBlockingCount()).isEqualTo(5);
         assertThat(persisted.getOpenConstraintCount()).isEqualTo(2);

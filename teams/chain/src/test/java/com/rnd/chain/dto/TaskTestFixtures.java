@@ -25,7 +25,6 @@ public final class TaskTestFixtures {
     public static Task.Builder defaultTask(UUID id) {
         return Task.builder()
                 .id(id)
-                .ownerId("owner")
                 .status(TaskStatus.ACTIVE)
                 .isReady(false)
                 .blockingCount(0)

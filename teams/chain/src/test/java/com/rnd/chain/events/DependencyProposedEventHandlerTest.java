@@ -30,7 +30,6 @@ class DependencyProposedEventHandlerTest {
     private static Task buildTask(UUID id) {
         return Task.builder()
                 .id(id)
-                .ownerId("owner")
                 .status(TaskStatus.PENDING)
                 .isReady(true)
                 .blockingCount(0)

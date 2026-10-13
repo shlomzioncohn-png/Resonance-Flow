@@ -388,7 +388,6 @@ class TaskTraversalServiceTest {
     private static Task task(UUID id) {
         return Task.builder()
                 .id(id)
-                .ownerId("owner-" + id)
                 .status(TaskStatus.PENDING)
                 .build();
     }
@@ -400,7 +399,6 @@ class TaskTraversalServiceTest {
             result.add(Task.builder()
                     .id(e.getKey())
                     .parentTaskId(e.getValue())
-                    .ownerId("owner-" + e.getKey())
                     .status(TaskStatus.PENDING)
                     .build());
         }

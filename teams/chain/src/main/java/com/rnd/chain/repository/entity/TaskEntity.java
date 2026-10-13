@@ -24,10 +24,6 @@ public class TaskEntity {
 
     @Column(name = "parent_task_id")
     private UUID parentTaskId;
-
-    @Column(name = "owner_id", nullable = false)
-    private String ownerId;
-
     @Enumerated(EnumType.STRING)
     @Column(nullable = false)
     private TaskStatus status;
@@ -75,14 +71,6 @@ public class TaskEntity {
 
     public void setParentTaskId(UUID parentTaskId) {
         this.parentTaskId = parentTaskId;
-    }
-
-    public String getOwnerId() {
-        return ownerId;
-    }
-
-    public void setOwnerId(String ownerId) {
-        this.ownerId = ownerId;
     }
 
     public TaskStatus getStatus() {
