@@ -128,7 +128,7 @@ def test_urgency_outside_the_scale_becomes_null_rather_than_clamped(
     assert ClassificationFields(urgency=out_of_range).urgency is None
 
 
-@pytest.mark.parametrize("not_a_number", ["high", "3.5", True])
+@pytest.mark.parametrize("not_a_number", ["high", "3.5", 3.5, True])
 def test_an_urgency_that_is_not_a_whole_number_becomes_null(not_a_number: object) -> None:
     assert ClassificationFields(urgency=not_a_number).urgency is None
 
@@ -149,6 +149,36 @@ def test_a_numeric_string_urgency_is_still_a_number() -> None:
     """Models quote numbers. That is formatting, not content."""
 
     assert ClassificationFields(urgency="3").urgency == 3
+
+
+@pytest.mark.parametrize("whole", [3.0, "3.0"])
+def test_a_whole_number_written_with_a_decimal_point_is_still_that_number(
+    whole: object,
+) -> None:
+    """`3.0` is ordinary JSON for three; quoted, it is the same answer quoted.
+
+    What decides is the value, not how it was written: a decimal point with
+    nothing after it changes the spelling, not the number.
+    """
+
+    assert ClassificationFields(urgency=whole).urgency == 3
+
+
+@pytest.mark.parametrize("unreadable", ["--3", "²", "3-", "0_3"])
+def test_a_string_that_only_looks_numeric_becomes_null_without_failing(
+    unreadable: str, caplog: pytest.LogCaptureFixture
+) -> None:
+    """These passed a "looks like digits" check and then broke the conversion.
+
+    The ValueError became a ValidationError, the item went to repair, and after
+    three calls it was discarded, title and all. That is exactly what an
+    optional field promises never to cost.
+    """
+
+    with caplog.at_level(logging.WARNING, logger="mind.extraction"):
+        assert ClassificationFields(urgency=unreadable).urgency is None
+
+    assert repr(unreadable) in caplog.text
 
 
 def test_an_unexpected_field_is_rejected() -> None:

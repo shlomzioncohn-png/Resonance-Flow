@@ -9,10 +9,11 @@ from mind.extraction.confidence import (
     PENALTY_PER_REPAIR,
     ConfidenceBreakdown,
     compute_confidence,
+    effort_confidence,
     score_confidence,
     title_grounding,
 )
-from mind.extraction.models import ExtractedFields
+from mind.extraction.models import EffortBasis, ExtractedFields
 
 RAW_TEXT = (
     "Hi team, please send the Q3 revenue report to the board before Friday. "
@@ -145,3 +146,21 @@ def test_title_grounding_measures_overlap() -> None:
     assert title_grounding("Send the Q3 revenue report", RAW_TEXT) == 1.0
     assert title_grounding("Renegotiate warehouse lease", RAW_TEXT) == 0.0
     assert 0.0 < title_grounding("Send the warehouse report", RAW_TEXT) < 1.0
+
+
+# --- the effort estimate's own confidence (#352) ---------------------------
+
+
+def test_a_stated_estimate_is_trusted_more_than_an_inferred_one() -> None:
+    assert effort_confidence(EffortBasis.STATED) > effort_confidence(EffortBasis.INFERRED)
+
+
+def test_every_basis_lands_inside_the_contracts_range() -> None:
+    for basis in EffortBasis:
+        assert 0.0 <= effort_confidence(basis) <= 1.0
+
+
+def test_no_basis_means_no_confidence_rather_than_zero() -> None:
+    """None, not 0.0: no estimate is not the same as an estimate nobody trusts."""
+
+    assert effort_confidence(None) is None
