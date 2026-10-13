@@ -60,12 +60,11 @@ spec:
 
       {{- $dependencies := concat ($.Values.dependencies | default list) ($component.dependencies | default list) }}
       {{- $rawInitContainers := concat ($.Values.initContainers | default list) ($component.initContainers | default list) }}
-      {{- $migrationEnabled := false }}
-      {{- if $component.migration }}
-      {{- if $component.migration.enabled }}
-      {{- $migrationEnabled = true }}
-      {{- end }}
-      {{- end }}
+      {{- /* dig, not `and $component.migration $component.migration.enabled` -- Go
+             template function args are all evaluated eagerly (no short-circuit), so
+             `.enabled` would be a nil-pointer panic for every component that doesn't
+             set `migration` at all, i.e. every component except the opted-in ones. */}}
+      {{- $migrationEnabled := dig "migration" "enabled" false $component }}
       {{- if or $dependencies $rawInitContainers $migrationEnabled }}
       initContainers:
         {{- if $dependencies }}
@@ -106,13 +105,7 @@ spec:
                 fieldRef:
                   fieldPath: metadata.name
             {{- end }}
-            {{- if $component.config }}
-            {{- include "resonance-flow.configFilePathEnv" $ | nindent 12 }}
-            {{- end }}
-            {{- if $component.secret }}
-            - name: SECRETS_FILE_PATH
-              value: "/etc/resonance-flow/secret/secrets.yaml"
-            {{- end }}
+            {{- include "resonance-flow.configSecretEnv" (dict "root" $ "component" $component) | nindent 12 }}
             {{- range $name, $value := $component.env }}
             - name: {{ $name }}
               value: {{ $value | quote }}
@@ -141,19 +134,7 @@ spec:
           {{- $volumeMounts := concat ($.Values.volumeMounts | default list) ($component.volumeMounts | default list) }}
           {{- if or $component.config $component.secret $volumeMounts }}
           volumeMounts:
-            {{- if $component.config }}
-            - name: resonance-flow-config
-              mountPath: /etc/resonance-flow/config/config.yaml
-              subPath: config.yaml
-              readOnly: true
-            {{- end }}
-            {{- if $component.secret }}
-            # whole Secret as a dir (no subPath): an optional missing Secret then
-            # leaves an empty dir, not a phantom file, and updates propagate.
-            - name: resonance-flow-secret
-              mountPath: /etc/resonance-flow/secret
-              readOnly: true
-            {{- end }}
+            {{- include "resonance-flow.configSecretVolumeMounts" (dict "root" $ "component" $component) | nindent 12 }}
             {{- with $volumeMounts }}
             {{- toYaml . | nindent 12 }}
             {{- end }}
