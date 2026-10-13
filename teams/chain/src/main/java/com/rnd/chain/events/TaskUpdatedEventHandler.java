@@ -32,7 +32,7 @@ import static com.rnd.chain.events.EventFields.toLocalDateTime;
  *
  * Atomicity (PR #467 review): the staleness check, the status write, and the {@code updatedAt}
  * stamp all happen inside {@link TaskEligibilityService#onTaskStatusChangedIfNewer}'s single
- * {@code dependencyGraphLock} critical section - not three separate calls from here - so a
+ * the graph lock critical section - not three separate calls from here - so a
  * redelivered/out-of-order event racing a newer one for the same task can't interleave between
  * them. See that method's Javadoc for how this is meant to carry over once persistence is a real
  * transactional store.

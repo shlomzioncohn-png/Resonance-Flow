@@ -176,18 +176,14 @@ already has (edgeExists() / the task's own stored previousStatus).
   does not actually cover Task/TaskDependency mutations yet.
 - Waiting on team lead's answer about whether a real DB is coming,
   or whether the in-memory contract is final for now
-- Until real JPA-backed repositories exist, TaskEligibilityService ALSO
-  uses in-process locking to make read-modify-write on blockingCount /
-  openConstraintCount actually atomic - @Transactional alone doesn't
-  cover this today. This locking is only correct for a single JVM owning
-  the in-memory repositories — once persistence is real, add @Version or
-  an atomic UPDATE for the counters and the locking can be retired. Full
-  rationale is in the class Javadoc; summary: dependencyGraphLock guards
-  the edges plus any DONE-status read that decides whether an edge
-  currently counts against blockingCount, per-task locks (striped over a
-  fixed array, not one object per task id, to keep memory bounded) guard
-  a single task's counters, and dependencyGraphLock is always acquired
-  before a per-task lock, never after, so the two can't deadlock.
+- Graph lock: `TaskEligibilityService`'s graph-mutating methods run inside
+  `GraphLock#runExclusive` (the old in-process `dependencyGraphLock`
+  `synchronized` is gone - it released before commit). `PostgresGraphLock`
+  takes `pg_advisory_xact_lock` with one constant key, first in the
+  `@Transactional` method and before any row lock, and it is released only at
+  commit/rollback; `InMemoryGraphLock` (a `ReentrantLock`) backs in-memory
+  runs and the unit tests. Known limit: one key means all graph writes queue,
+  across every project (team-lead decision).
 - Resolved: real persistence layer now exists - Postgres-backed
   `Postgres*Repository`/`JpaTransactionRunner` implementations
   (`repository/`), own `chain` database + own `chain` DB user (not the
@@ -203,13 +199,9 @@ already has (edgeExists() / the task's own stored previousStatus).
   correctness mechanism for `blockingCount`/`openConstraintCount` under
   concurrent writes - `@Version` on `TaskEntity` is defense-in-depth for a
   different, not-yet-existing write path, not part of this guarantee.
-  `TaskEligibilityService`'s in-process `dependencyGraphLock` is
-  **unchanged and still required** - it isn't redundant with per-row
-  Postgres locking, since it serializes the multi-row cycle-detection DFS
-  and a read-together-with-an-edge-write decision, neither of which
-  reduces to locking one row. Full rationale is in the class Javadoc;
-  summary: dependencyGraphLock guards the edges plus any DONE-status read
-  that decides whether an edge currently counts against blockingCount.
+  The graph lock (see "Graph lock" above) is still required on top of it: it
+  serializes the multi-row cycle-detection DFS and the read-with-edge-write
+  decisions, which a single-row lock cannot.
 - Resolved (#384): Kafka topics wired in chart config - consume
   `task.dependencies.proposed` (addDependency), `task.dependencies.removed`
   (removeDependency, PROPOSED), `task.status.updated` (onTaskStatusChanged,
@@ -219,14 +211,14 @@ already has (edgeExists() / the task's own stored previousStatus).
   exist only in case that changes later.
 - 2026-08-30, addressed a teammate code review on PR #172:
   - Fixed: addDependency/removeDependency were only using
-    dependencyGraphLock, not the per-task lock the other methods use for
+    the graph lock, not the per-task lock the other methods use for
     the same Task fields - no mutual exclusion between them. Now the
     counter mutation itself goes through the per-task lock too.
   - Fixed: adding a dependency on an already-DONE task incremented
     blockingCount with no future status transition ever able to
     decrement it back off (DONE is terminal until reopened) - permanently
     stuck dependents. addDependency/removeDependency now read the
-    target's status (under dependencyGraphLock, so it can't race
+    target's status (under the graph lock, so it can't race
     onTaskStatusChanged's own DONE transition) and only touch the
     counter for a currently-not-DONE target.
   - Disagreed with: the reviewer's deadlock claim. Per-task lock nesting
