@@ -27,7 +27,6 @@
     "react-dom": "latest"
   },
   "devDependencies": {
-    "@chromatic-com/storybook": "latest",
     "@playwright/test": "^1.63.0",
     "@storybook/addon-a11y": "^10.6.0",
     "@storybook/addon-docs": "^10.6.0",
@@ -43,11 +42,11 @@
     "eslint-config-next": "^16.3.3",
     "eslint-plugin-jsx-a11y": "^6.10.2",
     "eslint-plugin-storybook": "^10.6.0",
-    "playwright": "^1.63.0",
+    "playwright": "1.63.0",
     "prettier": "^3.9.9",
     "storybook": "^10.6.0",
     "typescript": "5.9.3",
-    "vite": "latest",
+    "vite": "8.2.2",
     "vitest": "^4.1.11"
   }
 }

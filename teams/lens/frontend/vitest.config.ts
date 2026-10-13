@@ -31,6 +31,21 @@ export default defineConfig({
             configDir: path.join(dirname, '.storybook'),
           }),
         ],
+        // Scan every source file up front, so Vite pre-bundles all dependencies
+        // before the first story runs. Without this it discovers them one story
+        // at a time (each `@mui/material/<Component>` is its own entry) and reloads
+        // the browser mid-run - on a cold cache, i.e. every CI run, that fails or
+        // hangs whichever tests were in flight.
+        optimizeDeps: {
+          entries: [
+            '.storybook/**/*.{ts,tsx}',
+            'app/**/*.{ts,tsx}',
+            'components/**/*.{ts,tsx}',
+            'design-system/**/*.{ts,tsx}',
+            'services/**/*.{ts,tsx}',
+            'theme/**/*.{ts,tsx}',
+          ],
+        },
         test: {
           name: 'storybook',
           browser: {

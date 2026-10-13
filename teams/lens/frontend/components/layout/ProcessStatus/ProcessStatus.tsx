@@ -36,7 +36,7 @@ export default function ProcessStatus({ stages, title = 'Process Status' }: Proc
   return (
     <Card>
       <CardContent>
-        <Typography variant="h6" sx={{ mb: 3 }}>
+        <Typography variant="h6" component="h2" sx={{ mb: 3 }}>
           {title}
         </Typography>
         <Box sx={{ display: 'flex', gap: 1.5, overflowX: 'auto', pb: 1 }}>
@@ -90,6 +90,7 @@ export default function ProcessStatus({ stages, title = 'Process Status' }: Proc
                   </Typography>
                   <Typography
                     variant="h4"
+                    component="p"
                     sx={{
                       color: isLight ? '#000' : bgColor,
                       fontWeight: 'bold',
