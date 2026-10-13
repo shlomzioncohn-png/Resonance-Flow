@@ -1,7 +1,5 @@
-package com.rnd.chain.event;
+package com.rnd.chain.events;
 
-import com.rnd.chain.events.ChainEventTopicsProperties;
-import com.rnd.chain.events.ChainProtobufKafkaConfig;
 import com.rnd.inbox.event.SchedulingUpdatedEvent;
 import io.confluent.kafka.schemaregistry.protobuf.ProtobufSchema;
 import io.confluent.kafka.schemaregistry.protobuf.ProtobufSchemaProvider;
@@ -49,7 +47,7 @@ class SchedulingUpdatePublishIntegrationTest {
         EmbeddedKafkaBroker broker = EmbeddedKafkaCondition.getBroker();
         KafkaSchedulingUpdatePublisher publisher = new KafkaSchedulingUpdatePublisher(
                 producerTemplate(broker.getBrokersAsString()),
-                new ChainEventTopicsProperties(Map.of("task.scheduling.updated", TOPIC), null));
+                new ChainEventTopicsProperties(Map.of("scheduling-updated", TOPIC), null));
         UUID eventId = UUID.randomUUID();
         UUID taskId = UUID.randomUUID();
 

@@ -209,16 +209,15 @@ a claim does and doesn't guarantee.
 `DONE`, `CANCELLED` and `REJECTED` map to `DONE`, because all three release dependents. `IN_PROGRESS`
 maps to `ACTIVE`, and every other status maps to `PENDING`.
 
-**Publishing**: the live publisher for `task.scheduling.updated` is `KafkaSchedulingUpdatePublisher`
-(`com.rnd.chain.event`), used by `SchedulingUpdateService`. It maps `TaskSchedulingUpdatedEvent` to the
+**Publishing**: the only publisher for `task.scheduling.updated` is `KafkaSchedulingUpdatePublisher`
+(`com.rnd.chain.events` - the same package as the consumers, see #543), used by `SchedulingUpdateService`. It maps `TaskSchedulingUpdatedEvent` to the
 `SchedulingUpdatedEvent` Protobuf message (`scheduling-updated-event.proto`) and sends it with
 `KafkaProtobufSerializer`. `scheduling-updated-event.proto` comes from `shared/proto` (package
 `com.rnd.inbox.event`), registered via `schema-subjects.tsv`; the producer never registers it
 (`auto.register.schemas=false`, `use.latest.version=true`). Field numbers match Inbox's consumer proto: `event_id=1`, `task_id=2`,
 `available=3`, `priority_score=4`. Every event carries an `event_id`, generated per emitted event in
 `SchedulingUpdateService`; it is unique per event, not a deduplication key across handler retries. An unscored task omits `priority_score`, which Inbox
-reads as "leave the stored value unchanged". `KafkaEventPublisher` (flat JSON, no envelope) is not
-wired to any caller and is scheduled for removal under #543.
+reads as "leave the stored value unchanged". `KafkaEventPublisher` (flat JSON, no envelope) was removed under #543 - it had no production caller.
 
 **Schemas**: the `.proto` sources come from the repo's [`shared/proto/`](../../shared/proto)
 (`task-created-event`, `task-updated-event`, `task-dependencies-proposed-event`,
@@ -234,7 +233,7 @@ validated against the Schema Registry at `SCHEMA_REGISTRY_URL`. Tests use a mock
 | `chain.kafka.topics.task-updated` (env `TASK_UPDATED_TOPIC`) | Topic consumed for `task.updated` | `task.updated` |
 | `chain.kafka.topics.task-completed` (env `TASK_COMPLETED_TOPIC`) | Topic consumed for `task.completed` | `task.completed` |
 | `chain.kafka.topics.dependencies-proposed` (env `DEPENDENCIES_PROPOSED_TOPIC`) | Topic consumed for `task.dependencies.proposed` | `task.dependencies.proposed` |
-| `chain.kafka.topics.task.scheduling.updated` (env `CHAIN_SCHEDULING_UPDATED_TOPIC`) | Topic published to for `task.scheduling.updated` | `task.scheduling.updated` |
+| `chain.kafka.topics.scheduling-updated` (env `CHAIN_SCHEDULING_UPDATED_TOPIC`) | Topic published to for `task.scheduling.updated` | `task.scheduling.updated` |
 | `KAFKA_BOOTSTRAP_SERVERS` (env var, not `chain.*`) | Kafka broker(s) address | `localhost:9092` |
 | `chain.kafka.consumer-group-id` (env `KAFKA_CONSUMER_GROUP_ID`) | Consumer group ID | `chain-service` |
 | `chain.kafka.schema-registry-url` (env `SCHEMA_REGISTRY_URL`) | Schema Registry URL (ccompat API) | `http://localhost:8082/apis/ccompat/v6` |
@@ -323,9 +322,10 @@ the profile didn't override the build's own value). CI runs them too now, agains
 
 ### AFTER_COMMIT publish, dedup, retry (Phase 3)
 
-`TaskEligibilityService` no longer calls `SchedulingUpdateService` directly or synchronously.
-Every trigger (`recomputePriorityScoreAndPublish`) instead calls `requestPublishAfterCommit(taskId)`,
-which:
+None of `TaskEligibilityService`/`DependencyEdgeService`/`ConstraintEligibilityService` call
+`SchedulingUpdateService` directly or synchronously. Every trigger
+(`TaskCounterUpdater.recomputePriorityScoreAndPublish`) instead calls
+`requestPublishAfterCommit(taskId)`, which:
 
 - Binds a `Set<UUID>` to the current transaction via `TransactionSynchronizationManager` and adds
   `taskId` to it - a task touched several times in one transaction (e.g. `addDependencies`'s batch
@@ -338,15 +338,16 @@ which:
 - **If there is no active transaction, the publish is dropped** (logged at ERROR), not fired
   immediately (`fallbackExecution=false`, a locked decision - deliberately not papering over a
   mutator that forgot `@Transactional`, which would otherwise desync Inbox's copy of
-  `priority_score`/`is_available` permanently and silently). This is why every public method on
-  `TaskEligibilityService` is now `@Transactional` (four - `recalculateTaskEligibility`,
-  `addDependency`, `removeDependency`, `onTaskStatusChanged` - were missing it before Phase 3, a
-  pre-existing gap fixed as part of this change), and why
-  `TaskEligibilityServiceTransactionalCoverageTest` exists: a reflection-based guardrail that fails
-  the build if a future public mutator is added without `@Transactional`, since that failure mode
-  is otherwise silent at runtime.
+  `priority_score`/`is_available` permanently and silently). This is why every public mutator on
+  `TaskEligibilityService`, `DependencyEdgeService`, `ConstraintEligibilityService`, and
+  `TaskCounterUpdater` itself is `@Transactional` (issue #649 split
+  `TaskEligibilityService`'s original `addDependency`/`removeDependency`/`onScoreProposed` out
+  into the first two of those), and why `SchedulingPublishTransactionalCoverageTest` exists: a
+  reflection-based guardrail covering all four classes that fails the build if a future public
+  mutator is added without `@Transactional`, since that failure mode is otherwise silent at
+  runtime.
 
-`SchedulingPublishListener` (`com.rnd.chain.event`) is the thing `afterCommit()` actually calls -
+`SchedulingPublishListener` (`com.rnd.chain.events`) is the thing `afterCommit()` actually calls -
 re-reads the task fresh (never a mid-transaction snapshot) and retries `SchedulingUpdateService`
 3 times with exponential backoff starting at 200ms (200ms, then 400ms - locked decision), logging
 ERROR and dropping the message on persistent failure (a full fix - outbox, DLT - is tracked
@@ -370,6 +371,8 @@ around the call) and by the new tests that specifically prove the commit/rollbac
   `KafkaSchedulingUpdatePublisher` publishes real Protobuf against the registered
   `shared/proto/scheduling-updated-event.proto`, with a per-event `event_id`. Covered end-to-end by
   `SchedulingUpdatedEventContractTest` and `SchedulingUpdatePublishIntegrationTest` (a real broker).
+=======
+>>>>>>> origin/main
 
 ## Running locally with Maven
 

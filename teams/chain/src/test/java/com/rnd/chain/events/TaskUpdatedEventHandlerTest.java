@@ -9,7 +9,7 @@ import com.rnd.chain.service.SchedulingUpdateService;
 import static org.mockito.Mockito.mock;
 import com.rnd.chain.repository.InMemoryTaskDependencyRepository;
 import com.rnd.chain.repository.InMemoryTaskRepository;
-import com.rnd.chain.event.SchedulingPublishListener;
+import com.rnd.chain.events.SchedulingPublishListener;
 import com.rnd.chain.service.DependencyGraphLock;
 import com.rnd.chain.service.PriorityScoreService;
 import com.rnd.chain.service.TaskCounterUpdater;

@@ -1,4 +1,4 @@
-package com.rnd.chain.event;
+package com.rnd.chain.events;
 
 import java.util.Objects;
 import java.util.UUID;

@@ -1,4 +1,4 @@
-package com.rnd.chain.event;
+package com.rnd.chain.events;
 
 import com.rnd.chain.dto.Task;
 import com.rnd.chain.repository.TaskRepository;

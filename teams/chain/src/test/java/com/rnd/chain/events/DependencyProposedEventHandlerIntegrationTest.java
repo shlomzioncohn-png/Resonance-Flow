@@ -14,7 +14,7 @@ import com.rnd.chain.repository.TaskDependencyRepository;
 import com.rnd.chain.repository.TaskRepository;
 import com.rnd.chain.repository.TransactionRunner;
 import com.rnd.chain.repository.UnresolvedDependencyRepository;
-import com.rnd.chain.event.SchedulingPublishListener;
+import com.rnd.chain.events.SchedulingPublishListener;
 import com.rnd.chain.service.DependencyEdgeService;
 import com.rnd.chain.service.DependencyGraphLock;
 import com.rnd.chain.service.PriorityScoreService;

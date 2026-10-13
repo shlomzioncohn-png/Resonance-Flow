@@ -6,7 +6,7 @@ import com.rnd.chain.dto.TaskStatus;
 import com.rnd.chain.repository.InMemoryConstraintRepository;
 import com.rnd.chain.repository.InMemoryTaskDependencyRepository;
 import com.rnd.chain.repository.InMemoryTaskRepository;
-import com.rnd.chain.event.SchedulingPublishListener;
+import com.rnd.chain.events.SchedulingPublishListener;
 import com.rnd.chain.service.SchedulingUpdateService;
 import com.rnd.chain.service.DependencyGraphLock;
 import com.rnd.chain.service.PriorityScoreService;
