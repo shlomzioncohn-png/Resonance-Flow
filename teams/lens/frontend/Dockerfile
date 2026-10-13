@@ -7,11 +7,10 @@ RUN npm ci
 COPY . .
 RUN npm run build
 
-# Development image with Playwright for E2E testing
+# Development image (next dev). E2E tests run from the `playwright` stage.
 FROM node:22-alpine AS development
 WORKDIR /app
 
-# Install system dependencies for Playwright (Alpine compatible)
 RUN apk add --no-cache \
     ca-certificates \
     curl \
@@ -28,9 +27,8 @@ RUN npm config set fetch-timeout 120000 && \
     npm config set fetch-retry-maxtimeout 120000 && \
     npm install
 
-# Install Playwright browsers and system dependencies
-RUN npx playwright install-deps chromium && \
-    npx playwright install chromium
+# No Playwright browser here: `playwright install-deps` needs apt-get, which
+# Alpine does not have, so this stage could not be built with it.
 
 COPY . .
 

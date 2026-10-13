@@ -209,9 +209,35 @@ kubectl -n resonance-flow port-forward svc/resonance-flow-lens-storybook 6006:80
 
 then browse to http://localhost:6006.
 
+## Run all of LENS from the repo root
+
+The root `docker-compose.yml` starts the whole chain - Frontend -> Gateway -> BFF ->
+Inbox -> Postgres - plus Storybook:
+
+```bash
+cp .env.example .env          # first run only, from the repo root
+docker compose up --build
+```
+
+| Service   | URL                          | `.env` variable     |
+| --------- | ---------------------------- | ------------------- |
+| Frontend  | http://localhost:3000        | `FRONTEND_PORT`     |
+| Storybook | http://localhost:6006        | `STORYBOOK_PORT`    |
+| Gateway   | http://localhost:8086/health | `GATEWAY_PORT`      |
+| BFF       | http://localhost:8087/health | `BFF_PORT`          |
+| Inbox     | http://localhost:8082        | `INBOX_SERVER_PORT` |
+
+- **First run:** load Inbox's seed into `resonance-postgres` - step 3 of "Running
+  locally" in `docs/api-integration-status.md`. Without it Inbox answers 401 and the
+  task screens show an error.
+- **Without Inbox:** set `INBOX_MOCK_ENABLED=true` in `.env`; the BFF then serves its
+  own mock tasks.
+- Storybook here is the static build, so it does not hot-reload. While writing
+  stories use `npm run storybook`.
+
 ## Run with Docker
 
-Build and start the frontend:
+Build and start the frontend only:
 
 ```bash
 docker compose up --build
