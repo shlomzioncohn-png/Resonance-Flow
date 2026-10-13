@@ -6,6 +6,8 @@ Interface agreed with Yonit: plain list of strings in, one ranked result
 list out per string, same order.
 """
 
+import asyncio
+
 from mind.embeddings.base import SearchResult, VectorStore
 from mind.embeddings.search import nearest_tasks
 
@@ -20,9 +22,9 @@ async def resolve_dependency_targets(
     returns candidates (no similarity-threshold filtering) -- never treat
     a non-empty list as "found a real match", that call is #244's, on top
     of these scores. Propagates ValueError on empty text, same as embed()."""
-    results = []
-    for text in references:
-        # is_query=True: a mention vs. full task descriptions (see search.py).
-        # No threshold here -- #244 decides match/no-match from these scores.
-        results.append(await nearest_tasks(store, text, k=k, is_query=True))
-    return results
+    # is_query=True: a mention vs. full task descriptions (see search.py).
+    # No threshold here -- #244 decides match/no-match from these scores.
+    # gather(), not a sequential loop -- order is preserved regardless.
+    return await asyncio.gather(
+        *(nearest_tasks(store, text, k=k, is_query=True) for text in references)
+    )
