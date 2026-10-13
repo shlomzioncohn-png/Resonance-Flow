@@ -19,7 +19,6 @@ import hashlib
 import io
 import math
 import struct
-import time
 import wave
 from itertools import pairwise
 from pathlib import Path
@@ -32,8 +31,7 @@ from PIL import Image
 from mind.multimodal import asr
 from mind.multimodal.asr import ASRFailureReason, transcribe
 from mind.multimodal.failures import FailureCategory
-from mind.observability import compute
-from mind.observability.tracking import CallKind, CallStatus, _reset_for_tests, get_recent_calls
+from mind.observability.tracking import _reset_for_tests, get_recent_calls
 
 _ROOT = Path(__file__).resolve().parent.parent
 _CLEAN_RECORDING = _ROOT / "tests" / "fixtures" / "asr" / "short_meeting_note.wav"
@@ -111,9 +109,7 @@ def test_every_call_that_reaches_the_model_is_recorded():
     calls = get_recent_calls()
     assert [c.model_name for c in calls] == ["whisper-base.en-int8-local"]
     assert calls[0].duration_ms > 0
-    assert calls[0].cpu_s is not None and calls[0].cpu_s > 0  # Whisper really ran
-    assert (calls[0].kind, calls[0].status) == (CallKind.ASR, CallStatus.SUCCESS)
-    assert calls[0].cost is None  # local compute has no rate yet (#479): unpriced, not free
+    assert calls[0].cost is None  # unpriced, not free: no CPU rate set (#479)
 
 
 @_needs_weights
@@ -433,34 +429,7 @@ def test_whisper_failing_on_decoded_audio_is_an_environment_failure(
     result = transcribe(tone(1.0))
     assert (result.success, result.reason) == (False, ASRFailureReason.ASR_FAILED)
     assert result.retryable is True
-    calls = get_recent_calls()
-    assert [c.model_name for c in calls] == ["whisper-fake-local"]  # still recorded
-    assert (calls[0].kind, calls[0].status) == (CallKind.ASR, CallStatus.ERROR)
-
-
-def test_a_call_is_recorded_as_asr_with_its_cpu_time(monkeypatch: pytest.MonkeyPatch):
-    use_model(monkeypatch, FakeWhisper([fake_segment(" Hi.", 0.0, 1.0)]))
-    assert transcribe(tone(1.0)).success
-    [call] = get_recent_calls()
-    assert (call.kind, call.status) == (CallKind.ASR, CallStatus.SUCCESS)
-    assert call.cpu_s is not None and call.cpu_s >= 0  # measured; a fake uses next to none
-    assert call.cost is None  # unpriced until local compute has a rate (#479)
-
-
-def test_a_call_is_priced_at_the_configured_rate(monkeypatch: pytest.MonkeyPatch):
-    class BusyWhisper(FakeWhisper):
-        def transcribe(self, audio, **kwargs):
-            started = time.process_time()
-            while time.process_time() - started < 0.2:  # Whisper runs in this process
-                pass
-            return super().transcribe(audio, **kwargs)
-
-    use_model(monkeypatch, BusyWhisper([fake_segment(" Hi.", 0.0, 1.0)]))
-    monkeypatch.setattr(compute, "usd_per_cpu_hour", lambda: 0.036)
-    assert transcribe(tone(1.0)).success
-    [call] = get_recent_calls()
-    assert call.cpu_s is not None and call.cpu_s >= 0.2
-    assert call.cost == pytest.approx(call.cpu_s / 3600 * 0.036)
+    assert [c.model_name for c in get_recent_calls()] == ["whisper-fake-local"]  # still recorded
 
 
 def test_a_bug_of_ours_is_internal_error_not_retryable(

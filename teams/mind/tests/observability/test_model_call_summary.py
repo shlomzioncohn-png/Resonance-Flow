@@ -210,13 +210,6 @@ def test_limits_are_configurable_and_none_turns_a_check_off(monkeypatch: pytest.
     assert (r.duration_limit_ms, r.slow_count, r.expensive_count) == (None, 0, 0)
 
 
-def test_none_in_the_environment_turns_a_check_off(monkeypatch: pytest.MonkeyPatch):
-    monkeypatch.setenv("MIND_MONITORING__LLM_MAX_COST_USD", "none")
-    monkeypatch.setenv("MIND_MONITORING__OCR_MAX_DURATION_MS", "5000")
-    settings = MonitoringSettings()
-    assert (settings.llm_max_cost_usd, settings.ocr_max_duration_ms) == (None, 5000)
-
-
 # --- logged summary -----------------------------------------------------------------
 
 

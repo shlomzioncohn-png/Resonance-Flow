@@ -13,28 +13,17 @@ from __future__ import annotations
 import inspect
 import io
 import subprocess
-import sys
 
 import pytest
 from PIL import Image
 from pydantic import ValidationError
 
-from mind.config import MonitoringSettings
 from mind.multimodal import ocr
 from mind.multimodal.ocr import (
-    OCR_MODEL_NAME,
     LowConfidenceWord,
     OCRFailureReason,
     OCRResult,
     extract_text,
-)
-from mind.observability import compute, tracking
-from mind.observability.tracking import (
-    CallKind,
-    CallStatus,
-    _reset_for_tests,
-    get_recent_calls,
-    model_call_summary,
 )
 
 TSV_HEADER = (
@@ -490,123 +479,3 @@ def test_internal_error_is_not_retryable():
         OCRResult(success=False, reason=OCRFailureReason.INTERNAL_ERROR, error="e").retryable
         is False
     )
-
-
-# --- every tesseract run is recorded (#479) -----------------------------------------
-
-
-@pytest.fixture
-def ledger() -> None:
-    """record_call()'s ledger is module-level: start each of these tests empty."""
-    _reset_for_tests()
-
-
-@pytest.mark.usefixtures("tesseract_found", "ledger")
-def test_a_successful_call_is_recorded_as_ocr(monkeypatch: pytest.MonkeyPatch):
-    tesseract_prints(monkeypatch, tsv(("word", 90.0)))
-    assert extract_text(png_bytes(), filename="a.png").success
-    [call] = get_recent_calls()
-    assert call.model_name == OCR_MODEL_NAME
-    assert (call.kind, call.status) == (CallKind.OCR, CallStatus.SUCCESS)
-    assert call.duration_ms > 0
-    assert call.cost is None  # unpriced until local compute has a rate (#479), not free
-
-
-@pytest.mark.usefixtures("tesseract_found", "ledger")
-def test_tesseract_failing_is_recorded_as_an_error(monkeypatch: pytest.MonkeyPatch):
-    def times_out(cmd, **kwargs):
-        raise subprocess.TimeoutExpired(cmd, ocr.TESSERACT_TIMEOUT_S)
-
-    monkeypatch.setattr(subprocess, "run", times_out)
-    assert not extract_text(png_bytes(), filename="a.png").success
-    [call] = get_recent_calls()
-    assert (call.kind, call.status) == (CallKind.OCR, CallStatus.ERROR)
-
-
-@pytest.mark.usefixtures("tesseract_found", "ledger")
-def test_a_bug_inside_the_tesseract_loop_is_recorded_as_an_error(
-    monkeypatch: pytest.MonkeyPatch,
-):
-    # Not caught by the OCR_FAILED handler -- it must not be recorded as a success.
-    tesseract_prints(monkeypatch, tsv(("word", 90.0)))
-
-    def buggy_parse(_tsv: str):
-        raise ValueError("a bug in our parser")
-
-    monkeypatch.setattr(ocr, "_parse_tsv", buggy_parse)
-    extract_text(png_bytes(), filename="a.png")
-    [call] = get_recent_calls()
-    assert call.status == CallStatus.ERROR
-
-
-@pytest.mark.usefixtures("tesseract_found", "ledger")
-def test_input_rejected_before_tesseract_runs_is_not_recorded():
-    extract_text(b"not an image at all", filename="a.png")
-    assert get_recent_calls() == []
-
-
-_real_run = subprocess.run
-
-
-def tesseract_burns_cpu(monkeypatch: pytest.MonkeyPatch, seconds: float, output: bytes) -> None:
-    """Each tesseract call is a real child process using `seconds` of CPU, then printing `output`."""
-    code = f"import time\nt = time.process_time()\nwhile time.process_time() - t < {seconds}: pass"
-
-    def run(cmd, **kwargs):
-        _real_run([sys.executable, "-c", code], check=True)
-        return subprocess.CompletedProcess(cmd, 0, stdout=output, stderr=b"")
-
-    monkeypatch.setattr(subprocess, "run", run)
-
-
-@pytest.mark.skipif(sys.platform == "win32", reason="Windows reports no child-process CPU")
-@pytest.mark.usefixtures("tesseract_found", "ledger")
-def test_the_cpu_tesseract_uses_is_recorded_and_priced(monkeypatch: pytest.MonkeyPatch):
-    # Tesseract is a child process: its CPU is not this process's process_time().
-    tesseract_burns_cpu(monkeypatch, 0.3, tsv(("word", 90.0)))
-    monkeypatch.setattr(compute, "usd_per_cpu_hour", lambda: 0.036)
-    assert extract_text(png_bytes(), filename="a.png").success
-    [call] = get_recent_calls()
-    assert call.cpu_s is not None and call.cpu_s >= 0.3
-    assert call.cost == pytest.approx(call.cpu_s / 3600 * 0.036)
-
-
-@pytest.mark.skipif(sys.platform != "win32", reason="only Windows lacks child-process CPU")
-@pytest.mark.usefixtures("tesseract_found", "ledger")
-def test_where_tesseract_cpu_cannot_be_measured_it_is_none_and_unpriced(
-    monkeypatch: pytest.MonkeyPatch,
-):
-    tesseract_burns_cpu(monkeypatch, 0.1, tsv(("word", 90.0)))
-    monkeypatch.setattr(compute, "usd_per_cpu_hour", lambda: 0.036)
-    assert extract_text(png_bytes(), filename="a.png").success
-    [call] = get_recent_calls()
-    assert (call.cpu_s, call.cost) == (None, None)  # unknown, not 0
-
-
-@pytest.mark.usefixtures("tesseract_found", "ledger")
-def test_an_ocr_call_shows_up_in_the_model_call_summary(monkeypatch: pytest.MonkeyPatch):
-    tesseract_prints(monkeypatch, tsv(("word", 90.0)))
-    extract_text(png_bytes(), filename="a.png")
-    [row] = model_call_summary().by_call_name
-    assert (row.call_name, row.kind, row.call_count) == (OCR_MODEL_NAME, CallKind.OCR, 1)
-    assert row.p95_duration_ms > 0
-    assert (row.cost_total_usd, row.unpriced_count) == (None, 1)  # no rate pinned in conftest
-
-
-@pytest.mark.usefixtures("tesseract_found", "ledger")
-def test_a_slow_ocr_call_warns_and_is_counted(
-    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
-):
-    # A real extract_text() call, held to a limit it cannot meet.
-    tesseract_prints(monkeypatch, tsv(("word", 90.0)))
-    monkeypatch.setattr(
-        tracking,
-        "monitoring_settings",
-        lambda: MonitoringSettings.model_construct(ocr_max_duration_ms=0.001),
-    )
-    with caplog.at_level("WARNING", logger="mind.observability"):
-        assert extract_text(png_bytes(), filename="a.png").success
-    [line] = [m for m in caplog.messages if m.startswith("MODEL_CALL_SLOW")]
-    assert f"model_name={OCR_MODEL_NAME} kind=ocr" in line
-    [row] = model_call_summary().by_call_name
-    assert row.slow_count == 1

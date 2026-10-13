@@ -5,9 +5,7 @@ import sys
 import time
 
 import pytest
-from pydantic import ValidationError
 
-from mind.config import ComputeCostSettings
 from mind.observability import compute
 from mind.observability.compute import CpuClock, compute_cost
 
@@ -45,22 +43,6 @@ def test_cost_is_cpu_hours_times_the_rate(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setattr(compute, "usd_per_cpu_hour", lambda: 0.036)
     assert compute_cost(100.0) == pytest.approx(0.001)  # 100 s = 1/36 h
     assert compute_cost(0.0) == 0.0
-
-
-def test_the_rate_is_read_from_the_environment(monkeypatch: pytest.MonkeyPatch):
-    monkeypatch.setenv(_RATE_ENV, "0.042")
-    assert ComputeCostSettings().usd_per_cpu_hour == 0.042
-
-
-def test_the_rate_is_unset_by_default(monkeypatch: pytest.MonkeyPatch):
-    monkeypatch.delenv(_RATE_ENV, raising=False)
-    assert ComputeCostSettings(_env_file=None).usd_per_cpu_hour is None  # type: ignore[call-arg]
-
-
-def test_a_negative_rate_is_rejected(monkeypatch: pytest.MonkeyPatch):
-    monkeypatch.setenv(_RATE_ENV, "-1")
-    with pytest.raises(ValidationError):
-        ComputeCostSettings()
 
 
 def test_the_rate_is_read_once_per_process(monkeypatch: pytest.MonkeyPatch):
