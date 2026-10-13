@@ -12,7 +12,7 @@ import java.util.UUID;
  * Contract for persisting and looking up Constraints raised against a task.
  *
  * <p>This is a pure persistence contract - it does not enforce business rules such as valid
- * status transitions. Those live in {@code TaskEligibilityService}, which callers should use
+ * status transitions. Those live in {@code ConstraintEligibilityService}, which callers should use
  * instead of this repository directly whenever those rules need to be enforced.
  *
  * <p>{@link #save} and {@link #updateStatus} both report a DB-verified fact about what changed

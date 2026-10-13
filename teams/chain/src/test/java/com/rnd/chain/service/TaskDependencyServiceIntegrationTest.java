@@ -66,13 +66,13 @@ class TaskDependencyServiceIntegrationTest {
                 new SchedulingUpdateService(
                         schedulingPublisher);
 
-        TaskEligibilityService taskEligibilityService =
-                new TaskEligibilityService(
-                        new InMemoryGraphLock(),
-                        taskRepository,
+        DependencyEdgeService dependencyEdgeService =
+                new DependencyEdgeService(
                         dependencyRepository,
-                        schedulingUpdateService,
-                        new InMemoryConstraintRepository());
+                        new InMemoryGraphLock(),
+                        new TaskCounterUpdater(
+                                taskRepository,
+                                schedulingUpdateService));
 
         taskDependencyService =
                 new TaskDependencyService(
@@ -81,7 +81,7 @@ class TaskDependencyServiceIntegrationTest {
                         new InMemoryDependencyHistoryRepository(),
                         new InMemoryTransactionRunner(),
                         new IncrementingClock(),
-                        taskEligibilityService);
+                        dependencyEdgeService);
     }
 
     @Test

@@ -251,7 +251,7 @@ suite (126 tests, 0 failures — see §7):
 - **Snapshot-per-sync, latest-state-per-deal (added 2026-10-06, audit findings F1/F2/F14/F9).**
   `DealRepository.snapshot()` performs one fresh fetch and returns an immutable `DealSnapshot`
   (`asOf`, full history, `latestPerDeal()`, `skippedAtRead`). `CrmBridgeController` and
-  `CrmSyncScheduler` each take exactly one snapshot per run and call
+  `CrmSyncJob` each take exactly one snapshot per run and call
   `crmLane.run(snapshot.latestPerDeal().stream(), snapshot.asOf())` — never the old
   `ReadCursor`/`ReadCursor.full()` overload, which would let the deals and `asOf` come from two
   separate fetches. `CrmSourceReader.read()` also returns `latestPerDeal()`, so the generic
@@ -273,7 +273,8 @@ suite (126 tests, 0 failures — see §7):
   not just the one deal that first uses it, the way an unrecognized stage *id* (a recognized label,
   just a portal-specific id gap) still does. See
   `HubSpotDealRepositoryTest.secondSnapshotFailsEntirelyWhenTheRefetchedPipelineHasAnUnrecognizedStageLabel`.
-  The scheduler's existing `catch (RuntimeException e) { log.error(...) }` and
+  `SyncJobScheduler`'s shared `catch (RuntimeException e) { log.error(...) }` (every `SyncJob`'s
+  failure handling, not just CRM's — see §9.4) and
   `CrmBridgeController.handleSnapshotFailure` (a 503 with the exception's message, not the
   framework's default message-less 500) are what keep this loud and clear instead of a confusing
   failure — neither one *fixes* F6's mapping-rule gap, which is still open.
@@ -361,17 +362,25 @@ that brief, not a linked spec.
    - PR #161 merged (§9.1).
    - Verified (not changed, per instruction) that "the daily scheduled job pulling HubSpot +
      GitHub" **does not actually exist as described**:
-     - **CRM**: **stale as of 2026-10-06 — a scheduler exists.** `CrmSyncScheduler` (`@Scheduled`,
-       default cron `0 0 3 * * ?`, gated by `bridge.crm.sync.cron.enabled`, off by default) was
-       added in PR #296 and runs the same `crmLane` as `POST /bridge/crm/sync`. This bullet
-       originally said "no scheduler at all" — true on 2026-09-06, false since. See §9.2 for what
-       it actually does today.
+     - **CRM**: **stale as of 2026-10-12 — a scheduler exists, now via a shared mechanism.**
+       `CrmSyncJob` (`bridge.crm.sync.cron.enabled`/`...expression`, same keys and `0 0 3 * * ?`
+       default as before, off by default) runs the same `crmLane` as `POST /bridge/crm/sync`.
+       It's one of several `SyncJob` beans `SyncJobScheduler` (`core/sync`) now registers — a
+       single generic scheduler added 2026-10-12 to replace CRM/GitHub/Jira each having their own
+       copy-pasted `@Scheduled` method; `IntakeSyncJobs` added three more (EMAIL/CALENDAR/DRIVE,
+       `bridge.intake.<source>.sync.cron.*`, off by default, each a direct bean call to
+       `UnstructuredIntakeController.run(RawSourceType)`). This bullet originally said "no
+       scheduler at all" — true on 2026-09-06, false since. See §9.2 for what the CRM job itself
+       does today.
      - **GitHub**: `GitHubSyncScheduler` (`@Scheduled`, default cron `0 0 2 * * ?`, gated by
        `@EnableScheduling` in `GitHubSchedulerConfig`) exists, but is **disabled by default**
        (`github.sync.cron.enabled: ${GITHUB_SYNC_CRON_ENABLED:false}`, not set true anywhere in
        `.env.example` or any profile yml). Even if enabled, it publishes through
        `GitHubKafkaProducer`, which is the known-stale gap from §6 (wrong topic, wrong wire
-       shape) — so enabling it today would not correctly reach Inbox anyway.
+       shape) — so enabling it today would not correctly reach Inbox anyway. **Not migrated to
+       `SyncJob`** (2026-10-12) — GitHub/Jira are Hadas's own schedulers, and `GitHubSyncScheduler`
+       is reactive (`Mono`-based) rather than returning `IntakeResult`, unlike every `SyncJob`;
+       left exactly as-is, the owner's call.
    - This was reported, not fixed — left exactly as-is per instruction not to touch this logic.
 2. **Real-time ingestion infra prep (optional / time-permitting).** ❌ **Not started.** No
    `CrmWebhookReceiver`, `GitHubEventEndpoint`, or any webhook-shaped controller exists anywhere

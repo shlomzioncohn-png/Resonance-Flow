@@ -13,7 +13,6 @@ import com.rnd.chain.exception.InvalidDependencyException;
 import com.rnd.chain.exception.InvalidRequestException;
 import com.rnd.chain.exception.TaskNotFoundException;
 import com.rnd.chain.repository.DependencyHistoryRepository;
-import com.rnd.chain.repository.InMemoryConstraintRepository;
 import com.rnd.chain.repository.InMemoryDependencyHistoryRepository;
 import com.rnd.chain.repository.InMemoryGraphLock;
 import com.rnd.chain.repository.InMemoryTaskDependencyRepository;
@@ -60,7 +59,7 @@ class TaskDependencyServiceTest {
     private TaskDependencyRepository taskDependencyRepository;
     private DependencyHistoryRepository historyRepository;
     private TransactionRunner transactionRunner;
-    private TaskEligibilityService taskEligibilityService;
+    private DependencyEdgeService dependencyEdgeService;
     private TaskDependencyService service;
 
     @BeforeEach
@@ -76,12 +75,12 @@ class TaskDependencyServiceTest {
         taskDependencyRepository = new InMemoryTaskDependencyRepository(List.of());
         historyRepository = new InMemoryDependencyHistoryRepository();
         transactionRunner = new InMemoryTransactionRunner();
-        taskEligibilityService = new TaskEligibilityService(
-                new InMemoryGraphLock(),
-                taskRepository, taskDependencyRepository, new SchedulingUpdateService(event -> {}), new InMemoryConstraintRepository());
+        dependencyEdgeService = new DependencyEdgeService(
+                taskDependencyRepository, new InMemoryGraphLock(),
+                new TaskCounterUpdater(taskRepository, new SchedulingUpdateService(event -> {})));
 
         service = new TaskDependencyService(taskRepository, taskDependencyRepository,
-                historyRepository, transactionRunner, new IncrementingClock(), taskEligibilityService);
+                historyRepository, transactionRunner, new IncrementingClock(), dependencyEdgeService);
     }
 
     // --- constructor -----------------------------------------------------
@@ -89,13 +88,13 @@ class TaskDependencyServiceTest {
     @Test
     void constructor_throwsNullPointerException_whenTaskRepositoryIsNull() {
         TaskDependencyRepository taskDependencyRepository = new InMemoryTaskDependencyRepository(List.of());
-        TaskEligibilityService taskEligibilityService = new TaskEligibilityService(
-                new InMemoryGraphLock(),
-                new InMemoryTaskRepository(List.of()), taskDependencyRepository, new SchedulingUpdateService(event -> {}), new InMemoryConstraintRepository());
+        DependencyEdgeService dependencyEdgeService = new DependencyEdgeService(
+                taskDependencyRepository, new InMemoryGraphLock(),
+                new TaskCounterUpdater(new InMemoryTaskRepository(List.of()), new SchedulingUpdateService(event -> {})));
 
         assertThatThrownBy(() -> new TaskDependencyService(null, taskDependencyRepository,
                 new InMemoryDependencyHistoryRepository(), new InMemoryTransactionRunner(), new IncrementingClock(),
-                taskEligibilityService))
+                dependencyEdgeService))
                 .isInstanceOf(NullPointerException.class)
                 .hasMessageContaining("taskRepository");
     }
@@ -103,13 +102,13 @@ class TaskDependencyServiceTest {
     @Test
     void constructor_throwsNullPointerException_whenTaskDependencyRepositoryIsNull() {
         TaskRepository taskRepository = new InMemoryTaskRepository(List.of());
-        TaskEligibilityService taskEligibilityService = new TaskEligibilityService(
-                new InMemoryGraphLock(),
-                taskRepository, new InMemoryTaskDependencyRepository(List.of()), new SchedulingUpdateService(event -> {}), new InMemoryConstraintRepository());
+        DependencyEdgeService dependencyEdgeService = new DependencyEdgeService(
+                new InMemoryTaskDependencyRepository(List.of()), new InMemoryGraphLock(),
+                new TaskCounterUpdater(taskRepository, new SchedulingUpdateService(event -> {})));
 
         assertThatThrownBy(() -> new TaskDependencyService(taskRepository, null,
                 new InMemoryDependencyHistoryRepository(), new InMemoryTransactionRunner(), new IncrementingClock(),
-                taskEligibilityService))
+                dependencyEdgeService))
                 .isInstanceOf(NullPointerException.class)
                 .hasMessageContaining("taskDependencyRepository");
     }
@@ -344,12 +343,12 @@ class TaskDependencyServiceTest {
         DependencyHistoryRepository failingHistoryRepository = new ThrowingDependencyHistoryRepository();
         TaskRepository taskRepository = new InMemoryTaskRepository(
                 List.of(newTask(taskA), newTask(taskB)));
-        TaskEligibilityService taskEligibilityService = new TaskEligibilityService(
-                new InMemoryGraphLock(),
-                taskRepository, taskDependencyRepository, new SchedulingUpdateService(event -> {}), new InMemoryConstraintRepository());
+        DependencyEdgeService dependencyEdgeService = new DependencyEdgeService(
+                taskDependencyRepository, new InMemoryGraphLock(),
+                new TaskCounterUpdater(taskRepository, new SchedulingUpdateService(event -> {})));
         TaskDependencyService serviceWithFailingHistory = new TaskDependencyService(
                 taskRepository, taskDependencyRepository, failingHistoryRepository,
-                new InMemoryTransactionRunner(), new IncrementingClock(), taskEligibilityService);
+                new InMemoryTransactionRunner(), new IncrementingClock(), dependencyEdgeService);
 
         assertThatThrownBy(() -> serviceWithFailingHistory.addDependency(taskA, taskB))
                 .isInstanceOf(RuntimeException.class);
@@ -363,12 +362,12 @@ class TaskDependencyServiceTest {
         DependencyHistoryRepository failingHistoryRepository = new ThrowingDependencyHistoryRepository();
         TaskRepository taskRepository = new InMemoryTaskRepository(
                 List.of(newTask(taskA), newTask(taskB)));
-        TaskEligibilityService taskEligibilityService = new TaskEligibilityService(
-                new InMemoryGraphLock(),
-                taskRepository, taskDependencyRepository, new SchedulingUpdateService(event -> {}), new InMemoryConstraintRepository());
+        DependencyEdgeService dependencyEdgeService = new DependencyEdgeService(
+                taskDependencyRepository, new InMemoryGraphLock(),
+                new TaskCounterUpdater(taskRepository, new SchedulingUpdateService(event -> {})));
         TaskDependencyService serviceWithFailingHistory = new TaskDependencyService(
                 taskRepository, taskDependencyRepository, failingHistoryRepository,
-                new InMemoryTransactionRunner(), new IncrementingClock(), taskEligibilityService);
+                new InMemoryTransactionRunner(), new IncrementingClock(), dependencyEdgeService);
 
         assertThatThrownBy(() -> serviceWithFailingHistory.removeDependency(taskA, taskB))
                 .isInstanceOf(RuntimeException.class);
@@ -386,7 +385,7 @@ class TaskDependencyServiceTest {
                 new DeleteThrowingDependencyHistoryRepository(new InMemoryDependencyHistoryRepository());
         TaskDependencyService serviceWithBrokenCompensation = new TaskDependencyService(
                 taskRepository, taskDependencyRepository, deleteThrowingHistory,
-                new InMemoryTransactionRunner(), new IncrementingClock(), taskEligibilityService);
+                new InMemoryTransactionRunner(), new IncrementingClock(), dependencyEdgeService);
         serviceWithBrokenCompensation.addDependency(taskA, taskB);
 
         assertThatThrownBy(() -> serviceWithBrokenCompensation.addDependency(taskA, taskB))
@@ -401,7 +400,7 @@ class TaskDependencyServiceTest {
                 new DeleteThrowingDependencyHistoryRepository(new InMemoryDependencyHistoryRepository());
         TaskDependencyService serviceWithBrokenCompensation = new TaskDependencyService(
                 taskRepository, taskDependencyRepository, deleteThrowingHistory,
-                new InMemoryTransactionRunner(), new IncrementingClock(), taskEligibilityService);
+                new InMemoryTransactionRunner(), new IncrementingClock(), dependencyEdgeService);
 
         assertThatThrownBy(() -> serviceWithBrokenCompensation.removeDependency(taskA, taskB))
                 .isNotInstanceOf(DependencyNotFoundException.class)
@@ -609,13 +608,11 @@ void addDependency_whenSameMindEventIsRetried_shouldNotApplyDependencyTwice() {
             new SchedulingUpdateService(
                     publishedEvents::add);
 
-    TaskEligibilityService eligibilityService =
-        new TaskEligibilityService(
-                new InMemoryGraphLock(),
-                taskRepository,
+    DependencyEdgeService edgeService =
+        new DependencyEdgeService(
                 taskDependencyRepository,
-                schedulingUpdateService,
-                new InMemoryConstraintRepository());
+                new InMemoryGraphLock(),
+                new TaskCounterUpdater(taskRepository, schedulingUpdateService));
 
     TaskDependencyService mindService =
             new TaskDependencyService(
@@ -624,7 +621,7 @@ void addDependency_whenSameMindEventIsRetried_shouldNotApplyDependencyTwice() {
                     historyRepository,
                     transactionRunner,
                     new IncrementingClock(),
-                    eligibilityService);
+                    edgeService);
 
     // First delivery
     mindService.addDependency(

@@ -100,6 +100,10 @@ already has (edgeExists() / the task's own stored previousStatus).
   `@EqualsAndHashCode` there, since it generates nothing alongside the hand-written methods.
 
 ## Open items
+- #649: TaskEligibilityService was split by domain - edges in `DependencyEdgeService`, constraints in
+  `ConstraintEligibilityService`, counter helpers in `TaskCounterUpdater`. The graph lock is the
+  `GraphLock` bean (see "Graph lock" below) shared by `DependencyEdgeService` and
+  `TaskEligibilityService`; older notes below that name `TaskEligibilityService` for moved methods predate this.
 - PR #468 review (2026-09-23, leaRevivo) findings addressed 2026-09-24:
   - Critical: `PostgresConstraintRepositoryTest`/`PostgresConstraintRepositoryConcurrencyTest`
     were committed active with no exclusion, and `values-chain.yaml`'s `postgresql.enabled`
@@ -176,7 +180,7 @@ already has (edgeExists() / the task's own stored previousStatus).
   does not actually cover Task/TaskDependency mutations yet.
 - Waiting on team lead's answer about whether a real DB is coming,
   or whether the in-memory contract is final for now
-- Graph lock: `TaskEligibilityService`'s graph-mutating methods run inside
+- Graph lock: `DependencyEdgeService`'s and `TaskEligibilityService`'s graph-mutating methods run inside
   `GraphLock#runExclusive` (the old in-process `dependencyGraphLock`
   `synchronized` is gone - it released before commit). `PostgresGraphLock`
   takes `pg_advisory_xact_lock` with one constant key, first in the

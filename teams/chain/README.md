@@ -4,9 +4,11 @@ Implements the graph traversal API: given a task id, walk its direct or transiti
 dependents, ancestors, children, or descendants, or fetch a combined trace across both axes in
 one call. See "Graph Traversal API" below for the full endpoint list.
 
-`TaskEligibilityService` implements the dependency/constraint update flow (`addDependency`,
-`removeDependency`, `onTaskStatusChanged`, `recalculateTaskEligibility`, `onConstraintAdded`,
-`onConstraintStatusChanged`) against the same in-memory repositories. `config/MockDataConfig.java`
+The dependency/constraint update flow is split by domain (#649): `DependencyEdgeService`
+(`addDependency`, `addDependencies`, `removeDependency`), `TaskEligibilityService`
+(`onTaskStatusChanged`, `recalculateTaskEligibility`, `getTaskEligibility`) and
+`ConstraintEligibilityService` (`onConstraintAdded`, `onConstraintStatusChanged`), sharing
+`TaskCounterUpdater` and `GraphLock`, against the same in-memory repositories. `config/MockDataConfig.java`
 wires the in-memory `TaskRepository`/`TaskDependencyRepository` implementations as beans (seeded
 empty) so both it and `TaskTraversalService` are constructible via normal Spring dependency
 injection - not just unit-testable. Each bean is guarded with `@ConditionalOnMissingBean`, so once
@@ -879,7 +881,7 @@ Full test suite (47 tests, `mvn clean test`) passes.
 
 ## Transactional graph lock
 
-`TaskEligibilityService`'s in-JVM `dependencyGraphLock` (`synchronized`) is gone: it released before
+The in-JVM `dependencyGraphLock` (`synchronized`) used by `DependencyEdgeService` and `TaskEligibilityService` is gone: it released before
 the surrounding transaction committed, so a concurrent writer could miss uncommitted edges/counters,
 and it did not span replicas. Graph-mutating methods now run in `GraphLock#runExclusive`
 (`PostgresGraphLock`: `pg_advisory_xact_lock` with one constant key, taken first in the
