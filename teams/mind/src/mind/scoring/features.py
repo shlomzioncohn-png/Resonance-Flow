@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from mind.evaluation.interfaces import Task
+from mind.scoring.inputs import ScorableTask
 from mind.scoring.keywords import IMPACT_BASE, IMPACT_MATCHERS, URGENCY_MATCHERS
 
 #: An effort estimate at or above this many minutes earns no quick-win credit.
@@ -19,9 +19,13 @@ from mind.scoring.keywords import IMPACT_BASE, IMPACT_MATCHERS, URGENCY_MATCHERS
 QUICK_WIN_CAP_MINUTES = 120
 
 
-def task_text(task: Task) -> str:
-    """Title and description as one lowercased blob — what both lexicons read."""
-    return f"{task.title} {task.description}".lower()
+def task_text(task: ScorableTask) -> str:
+    """Title and description as one lowercased blob — what both lexicons read.
+
+    A missing description adds nothing: f"{None}" is the word "none", which
+    the lexicons would read as if the task had said it.
+    """
+    return f"{task.title} {task.description or ''}".lower()
 
 
 def deadline_proximity(
@@ -53,7 +57,7 @@ def deadline_proximity(
     return 1.0 / (1.0 + hours_remaining / scale_hours)
 
 
-def stated_urgency(task: Task) -> float:
+def stated_urgency(task: ScorableTask) -> float:
     """Time pressure asserted in words rather than in the `deadline` field.
 
     Taken as the **max** over matched phrases: several ways of saying a system
@@ -66,7 +70,7 @@ def stated_urgency(task: Task) -> float:
 
 
 def time_pressure(
-    task: Task,
+    task: ScorableTask,
     now: datetime,
     scale_hours: float,
     missing_value: float,
@@ -82,7 +86,7 @@ def time_pressure(
     return max(dated, stated_urgency(task))
 
 
-def impact(task: Task) -> float:
+def impact(task: ScorableTask) -> float:
     """How much this task matters, from the words of the task itself.
 
     Summed onto `IMPACT_BASE` and clamped: impact genuinely accumulates (a
@@ -95,19 +99,26 @@ def impact(task: Task) -> float:
     return min(1.0, max(0.0, total))
 
 
-def quick_win(task: Task) -> float:
+def quick_win(task: ScorableTask) -> float:
     """Shorter tasks score higher, on a 0-1 scale.
 
     Deliberately the weakest feature in every rule. `effort_estimate` belongs to
     Chain's constraint-satisfaction step, and `eval/personas/README.md` forbids
     a scenario's correct answer from hinging on it, so it must never be able to
     decide an ordering on its own — only to break a near-tie.
+
+    A missing estimate earns nothing: the bonus rewards a shortness we know
+    about, and without an estimate there is no evidence of one. That is the
+    same 0.0 a task past the cap gets, so a missing estimate is never a
+    penalty, only the absence of a bonus.
     """
+    if task.effort_estimate is None:
+        return 0.0
     capped = min(task.effort_estimate, QUICK_WIN_CAP_MINUTES)
     return 1.0 - capped / QUICK_WIN_CAP_MINUTES
 
 
-def belongs_to_initiative(task: Task) -> float:
+def belongs_to_initiative(task: ScorableTask) -> float:
     """1.0 when the task hangs under a parent task, 0.0 when it stands alone.
 
     `parent_task_id` points *outside* the scenario, so the parent cannot be
