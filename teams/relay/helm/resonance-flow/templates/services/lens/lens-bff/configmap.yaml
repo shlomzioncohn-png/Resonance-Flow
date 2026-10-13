@@ -1,0 +1,20 @@
+{{- $component := index .Values.components "lens-bff" }}
+{{- if $component.enabled }}
+{{- with $component.config }}
+{{- $cfg := . }}
+---
+{{ include "resonance-flow.configMapHeader" (dict "root" $ "component" "lens-bff") }}
+
+data:
+  config.yaml: |
+    inbox:
+      service:
+        url: {{ $cfg.inbox.service.url | quote }}
+    chain:
+      service:
+        url: {{ $cfg.chain.service.url | quote }}
+    notificationDelivery:
+      service:
+        url: {{ $cfg.notificationDelivery.service.url | quote }}
+{{- end }}
+{{- end }}

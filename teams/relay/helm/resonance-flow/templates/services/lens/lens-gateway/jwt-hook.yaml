@@ -1,0 +1,141 @@
+{{- /*
+Creates a random RSA key pair Secret via a hook.
+*/ -}}
+{{- if (index .Values.components "lens-gateway").enabled }}
+{{- $name := printf "%s-lens-gateway-jwt-init" (include "resonance-flow.fullname" .) }}
+{{- $secretName := printf "%s-lens-gateway-jwt" (include "resonance-flow.fullname" .) }}
+{{ include "resonance-flow.lens.secretHookRbac" (dict "root" $ "name" "lens-gateway-jwt" "secretName" $secretName "component" "lens-gateway") }}
+---
+apiVersion: batch/v1
+kind: Job
+
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "resonance-flow.labels" . | nindent 4 }}
+    app.kubernetes.io/component: lens-gateway
+  annotations:
+    helm.sh/hook: pre-install,pre-upgrade
+    helm.sh/hook-weight: "0"
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+spec:
+  backoffLimit: 3
+  ttlSecondsAfterFinished: 600
+  template:
+    metadata:
+      labels:
+        {{- include "resonance-flow.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: lens-gateway-jwt-init
+    spec:
+      serviceAccountName: {{ $name }}
+      restartPolicy: Never
+      securityContext:
+        fsGroup: 1000
+      initContainers:
+        - name: generate-keys
+          image: alpine/openssl:3.5.9
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1000
+            runAsGroup: 1000
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+          command:
+            - sh
+            - -c
+            - |
+              set -eu
+              openssl genrsa -out /keys/private.pem 2048
+              openssl rsa -in /keys/private.pem -pubout -out /keys/public.pem
+              chmod 640 /keys/private.pem
+          volumeMounts:
+            - name: keys
+              mountPath: /keys
+          resources:
+            requests:
+              cpu: 10m
+              memory: 16Mi
+            limits:
+              cpu: 100m
+              memory: 64Mi
+      containers:
+        - name: create-secret
+          image: curlimages/curl:8.11.1
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 100
+            runAsGroup: 101
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+          command:
+            - sh
+            - -c
+            - |
+              set -eu
+              SA=/var/run/secrets/kubernetes.io/serviceaccount
+              API="https://kubernetes.default.svc/api/v1/namespaces/{{ .Release.Namespace }}/secrets"
+              PRIVATE_ESCAPED="$(awk 'BEGIN{ORS="\\n"} {gsub(/"/,"\\\"")} 1' /keys/private.pem)"
+              PUBLIC_ESCAPED="$(awk 'BEGIN{ORS="\\n"} {gsub(/"/,"\\\"")} 1' /keys/public.pem)"
+              BODY="{\"apiVersion\":\"v1\",\"kind\":\"Secret\",\"metadata\":{\"name\":\"{{ $secretName }}\"},\"type\":\"Opaque\",\"stringData\":{\"private.pem\":\"$PRIVATE_ESCAPED\",\"public.pem\":\"$PUBLIC_ESCAPED\"}}"
+              create() {
+                curl -sS -o /tmp/response -w '%{http_code}' \
+                  --cacert "$SA/ca.crt" \
+                  -H "Authorization: Bearer $(cat "$SA/token")" \
+                  -H "Content-Type: application/json" \
+                  -X POST "$API" -d "$1"
+              }
+              CODE=$(create "$BODY")
+              case "$CODE" in
+                201) echo "Created {{ $secretName }}" ;;
+                409)
+                  GET_CODE=$(curl -sS -o /tmp/get-response.json -w '%{http_code}' \
+                    --cacert "$SA/ca.crt" \
+                    -H "Authorization: Bearer $(cat "$SA/token")" \
+                    -X GET "$API/{{ $secretName }}?pretty=false")
+                  if [ "$GET_CODE" != "200" ]; then
+                    echo "Unexpected HTTP $GET_CODE reading {{ $secretName }}:" >&2
+                    cat /tmp/get-response.json >&2
+                    exit 1
+                  fi
+                  EXISTING_PRIVATE="$(sed -n 's/.*"private\.pem": *"\([^"]*\)".*/\1/p' /tmp/get-response.json)"
+                  EXISTING_PUBLIC="$(sed -n 's/.*"public\.pem": *"\([^"]*\)".*/\1/p' /tmp/get-response.json)"
+                  if [ -n "$EXISTING_PRIVATE" ] && [ -n "$EXISTING_PUBLIC" ]; then
+                    echo "{{ $secretName }} already exists and looks valid - left as is"
+                  else
+                    echo "{{ $secretName }} exists but is missing a key - recreating it" >&2
+                    DELETE_CODE=$(curl -sS -o /tmp/delete-response -w '%{http_code}' \
+                      --cacert "$SA/ca.crt" \
+                      -H "Authorization: Bearer $(cat "$SA/token")" \
+                      -X DELETE "$API/{{ $secretName }}")
+                    case "$DELETE_CODE" in
+                      200|202) ;;
+                      *) echo "Unexpected HTTP $DELETE_CODE deleting the broken {{ $secretName }}:" >&2; cat /tmp/delete-response >&2; exit 1 ;;
+                    esac
+                    RECREATE_CODE=$(create "$BODY")
+                    if [ "$RECREATE_CODE" != "201" ]; then
+                      echo "Unexpected HTTP $RECREATE_CODE recreating {{ $secretName }}:" >&2
+                      cat /tmp/response >&2
+                      exit 1
+                    fi
+                    echo "Recreated {{ $secretName }} with a new key pair"
+                  fi
+                  ;;
+                *) echo "Unexpected HTTP $CODE creating {{ $secretName }}:" >&2; cat /tmp/response >&2; exit 1 ;;
+              esac
+          volumeMounts:
+            - name: keys
+              mountPath: /keys
+              readOnly: true
+          resources:
+            requests:
+              cpu: 10m
+              memory: 16Mi
+            limits:
+              cpu: 100m
+              memory: 64Mi
+      volumes:
+        - name: keys
+          emptyDir: {}
+{{- end }}
