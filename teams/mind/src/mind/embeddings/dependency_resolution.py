@@ -1,9 +1,8 @@
-"""#245: resolve a free-text dependency mention (Yonit's extraction has
-no task_id for it) into ranked candidate tasks, via `nearest_tasks()`.
-No match/no-match decision here -- that's #244, on top of these scores.
+"""#245/#244/#471: shared nearest-neighbor resolution, via `nearest_tasks()`.
 
-Interface agreed with Yonit: plain list of strings in, one ranked result
-list out per string, same order.
+#245: a free-text dependency mention (Yonit's extraction has no task_id
+for it) -> ranked candidates. Interface agreed with Yonit: plain list of
+strings in, one ranked result list out per string, same order.
 """
 
 import asyncio
@@ -11,20 +10,26 @@ import asyncio
 from mind.embeddings.base import SearchResult, VectorStore
 from mind.embeddings.search import nearest_tasks
 
-# Not #471's k=1 -- a guess, the issue doesn't specify a number.
 DEFAULT_K = 5
 
 
 async def resolve_dependency_targets(
-    store: VectorStore, references: list[str], *, k: int = DEFAULT_K
+    store: VectorStore,
+    references: list[str],
+    *,
+    k: int = DEFAULT_K,
+    threshold: float | None = None,
+    is_query: bool = True,
 ) -> list[list[SearchResult]]:
-    """Up to k candidates per reference, same order as the input. Always
-    returns candidates (no similarity-threshold filtering) -- never treat
-    a non-empty list as "found a real match", that call is #244's, on top
-    of these scores. Propagates ValueError on empty text, same as embed()."""
-    # is_query=True: a mention vs. full task descriptions (see search.py).
-    # No threshold here -- #244 decides match/no-match from these scores.
-    # gather(), not a sequential loop -- order is preserved regardless.
-    return await asyncio.gather(
-        *(nearest_tasks(store, text, k=k, is_query=True) for text in references)
+    """Up to k candidates per reference, same order as the input. #245's
+    default (threshold=None): no filtering, Yonit decides. #244: pass
+    Settings.dependency_match_threshold. is_query=True (default) is #245/
+    #244's mention-vs-passage case; #471 passes is_query=False (full task
+    vs full task -- symmetric, see nearest_tasks()). Propagates ValueError
+    on empty text, same as embed()."""
+    results = await asyncio.gather(
+        *(nearest_tasks(store, text, k=k, is_query=is_query) for text in references)
     )
+    if threshold is None:
+        return results
+    return [[c for c in candidates if c.similarity >= threshold] for candidates in results]

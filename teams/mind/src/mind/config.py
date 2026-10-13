@@ -81,6 +81,8 @@ class Settings(BaseSettings):
     api_port: int = Field(default=8000, ge=1, le=65535)
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"] = "INFO"
     duplicate_similarity_threshold: float = Field(default=0.90, ge=0.0, le=1.0)
+    # #244: a guess, same as duplicate_similarity_threshold -- untuned.
+    dependency_match_threshold: float = Field(default=0.80, ge=0.0, le=1.0)
     vector_store: VectorStoreSettings
     embedding_model: EmbeddingModelSettings = Field(default_factory=EmbeddingModelSettings)
 
