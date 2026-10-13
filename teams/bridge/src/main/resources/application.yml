@@ -115,6 +115,12 @@ bridge:
     # recording", not real audio-duration filtering (that needs a codec-aware library this
     # lane doesn't depend on). Tune based on what garbage actually shows up in practice.
     min-file-size-bytes: ${BRIDGE_MEDIA_MIN_FILE_SIZE_BYTES:1024}
+    # Automatic folder polling (MediaIntakeScheduler) - same run as POST /api/bridge/media/run.
+    # Off by default; interval is the gap between the end of one scan and the start of the next.
+    schedule:
+      enabled: ${BRIDGE_MEDIA_SCHEDULE_ENABLED:false}
+      interval: ${BRIDGE_MEDIA_SCHEDULE_INTERVAL:PT2M}
+      initial-delay: PT10S
     # Sets each item's scope_decision + classification (see media.classification). Off by
     # default: every item goes out INCLUDED and unclassified, as before. On with no api-key:
     # deterministic rules only (too-short meeting, empty transcript, blank page).

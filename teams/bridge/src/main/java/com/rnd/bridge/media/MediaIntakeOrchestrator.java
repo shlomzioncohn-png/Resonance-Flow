@@ -32,6 +32,7 @@ import java.util.List;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.locks.ReentrantLock;
 import java.util.stream.Stream;
 
 /**
@@ -81,6 +82,9 @@ public class MediaIntakeOrchestrator {
     private final String tenantId;
     private final long minFileSizeBytes;
     private final List<IntakeSource> intakeSources;
+    // One run at a time: a manual POST and a scheduled run (MediaIntakeScheduler) must never scan
+    // and move the same folders concurrently. A second caller waits for the first to finish.
+    private final ReentrantLock runLock = new ReentrantLock();
 
     public MediaIntakeOrchestrator(MediaIntakeService intakeService,
                                     MediaEventPublisher eventPublisher,
@@ -112,14 +116,19 @@ public class MediaIntakeOrchestrator {
     }
 
     public IntakeSummary runIntake() {
-        List<String> uploaded = new ArrayList<>();
-        List<String> duplicates = new ArrayList<>();
-        List<String> rejected = new ArrayList<>();
-        List<String> failed = new ArrayList<>();
-        for (IntakeSource source : intakeSources) {
-            processDir(source, uploaded, duplicates, rejected, failed);
+        runLock.lock();
+        try {
+            List<String> uploaded = new ArrayList<>();
+            List<String> duplicates = new ArrayList<>();
+            List<String> rejected = new ArrayList<>();
+            List<String> failed = new ArrayList<>();
+            for (IntakeSource source : intakeSources) {
+                processDir(source, uploaded, duplicates, rejected, failed);
+            }
+            return new IntakeSummary(uploaded, duplicates, rejected, failed);
+        } finally {
+            runLock.unlock();
         }
-        return new IntakeSummary(uploaded, duplicates, rejected, failed);
     }
 
     private void processDir(IntakeSource source, List<String> uploaded, List<String> duplicates,
