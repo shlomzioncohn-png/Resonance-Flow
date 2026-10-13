@@ -22,6 +22,7 @@ import com.rnd.inbox.task.repository.TaskRepository;
 import com.rnd.inbox.task.security.TaskAuthorization;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.PropertyNamingStrategies;
 import com.rnd.inbox.audit.AuditService;
 import com.rnd.inbox.outbox.OutboxEvent;
 import com.rnd.inbox.outbox.OutboxEventRepository;
@@ -99,7 +100,9 @@ public class TaskService {
         this.outboxEventRepository = outboxEventRepository;
         this.assignmentRepository = assignmentRepository;
         this.taskMapper = taskMapper;
-        this.objectMapper = objectMapper;
+        // Outbox payloads feed the Proto mappers' camelCase keys - not the REST SNAKE_CASE setting.
+        this.objectMapper = objectMapper.copy()
+                .setPropertyNamingStrategy(PropertyNamingStrategies.LOWER_CAMEL_CASE);
         this.clock = clock;
         this.tenantRepository = tenantRepository;
         this.projectRepository = projectRepository;

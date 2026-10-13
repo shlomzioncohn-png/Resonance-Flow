@@ -80,6 +80,30 @@ class TaskUpdatedProtoMapperTest {
     }
 
     @Test
+    void toProto_whenDescriptionAndSourceRefAreNull_sendsEmptyStrings() {
+        Map<String, Object> payload = minimalPayload();
+        payload.put("description", null);
+        payload.put("sourceRef", null);
+
+        TaskUpdatedEvent event = mapper.toProto(payload);
+
+        assertThat(event.getDescription()).isEmpty();
+        assertThat(event.getSourceRef()).isEmpty();
+    }
+
+    @Test
+    void toProto_whenDescriptionAndSourceRefAreAbsent_sendsEmptyStrings() {
+        Map<String, Object> payload = minimalPayload();
+        payload.remove("description");
+        payload.remove("sourceRef");
+
+        TaskUpdatedEvent event = mapper.toProto(payload);
+
+        assertThat(event.getDescription()).isEmpty();
+        assertThat(event.getSourceRef()).isEmpty();
+    }
+
+    @Test
     void toProto_mapsNewlyAddedDriveSourceType() {
         Map<String, Object> payload = minimalPayload();
         payload.put("sourceType", "DRIVE");

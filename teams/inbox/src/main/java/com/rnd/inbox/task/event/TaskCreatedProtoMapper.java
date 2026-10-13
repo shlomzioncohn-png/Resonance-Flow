@@ -36,15 +36,15 @@ public class TaskCreatedProtoMapper implements ProtoEventMapper<TaskCreatedEvent
         TaskCreatedEvent.Builder builder = TaskCreatedEvent.newBuilder()
                 .setId((String) payload.get("taskId"))
                 .setTitle((String) payload.get("title"))
-                .setDescription((String) payload.get("description"))
                 .setTenantId((String) payload.get("tenantId"))
                 .setSourceType(toProtoSourceType((String) payload.get("sourceType")))
-                .setSourceRef((String) payload.get("sourceRef"))
                 .setIsAvailable((Boolean) payload.get("available"))
                 .setStatus(toProtoStatus((String) payload.get("status")))
                 .setExtractionProvenance(toProtoProvenance((String) payload.get("extractionProvenance")))
                 .setCreatedAt(toTimestamp((String) payload.get("createdAt")));
 
+        setIfPresent(payload, "description", v -> builder.setDescription((String) v));
+        setIfPresent(payload, "sourceRef", v -> builder.setSourceRef((String) v));
         setIfPresent(payload, "projectId", v -> builder.setProjectId((String) v));
         setIfPresent(payload, "tier", v -> builder.setTier(toProtoTier((String) v)));
         setIfPresent(payload, "roleContext", v -> builder.setRoleContext(toProtoRoleContext((String) v)));
