@@ -68,6 +68,13 @@ an actual value, never a made-up one. `DealToTaskMapper` is the only override to
 `${bridge.crm.organization-id}` / `CRM_ORGANIZATION_ID` — one static value standing in for one
 account until Inbox supports resolving it per deal from `Deal.crmAccountSlug()`.
 
+`DealToTaskMapper.toUrgency` also adds +1 (before the 1..5 clamp) for a deal in an open stage
+(`PROSPECT`/`QUALIFIED`/`PROPOSAL`/`NEGOTIATION`) that's sat in that stage at least
+`${bridge.crm.stalled-after-days}` / `CRM_STALLED_AFTER_DAYS` days (default 14, `<= 0` disables
+it) as of the run's `asOf` — `ON_HOLD`/`CLOSED_*` are never bumped. Computed only from `asOf` and
+`Deal.stageChangedAt`, so a deal that becomes stalled after its Task already exists in Inbox won't
+get the bump there until Inbox's F2 (insert-only ingestion) is fixed to also update existing tasks.
+
 ## 5. Profile-switched beans
 
 Convention used throughout: a default, always-registered bean, overridden by a `@Profile("x")
