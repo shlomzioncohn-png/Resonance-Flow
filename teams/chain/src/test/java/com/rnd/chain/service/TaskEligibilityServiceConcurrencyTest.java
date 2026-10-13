@@ -1,10 +1,10 @@
 package com.rnd.chain.service;
 
-import com.rnd.chain.repository.InMemoryGraphLock;
 import com.rnd.chain.dto.Task;
 import com.rnd.chain.dto.TaskStatus;
 import com.rnd.chain.dto.TaskTestFixtures;
 import com.rnd.chain.repository.InMemoryConstraintRepository;
+import com.rnd.chain.repository.InMemoryGraphLock;
 import com.rnd.chain.repository.InMemoryTaskDependencyRepository;
 import com.rnd.chain.repository.InMemoryTaskRepository;
 import org.junit.jupiter.api.Test;
@@ -72,7 +72,9 @@ class TaskEligibilityServiceConcurrencyTest {
 
         InMemoryTaskRepository taskRepository = new InMemoryTaskRepository(allTasks);
         InMemoryTaskDependencyRepository dependencyRepository = new InMemoryTaskDependencyRepository(List.of());
-        TaskEligibilityService service = new TaskEligibilityService(new InMemoryGraphLock(), taskRepository, dependencyRepository, new SchedulingUpdateService(event -> {}),
+        TaskEligibilityService service = new TaskEligibilityService(
+                new InMemoryGraphLock(),
+                taskRepository, dependencyRepository, new SchedulingUpdateService(event -> {}),
                 new InMemoryConstraintRepository());
 
         List<Runnable> jobs = blockerIds.stream()
@@ -99,7 +101,9 @@ class TaskEligibilityServiceConcurrencyTest {
 
         InMemoryTaskRepository taskRepository = new InMemoryTaskRepository(allTasks);
         InMemoryTaskDependencyRepository dependencyRepository = new InMemoryTaskDependencyRepository(List.of());
-        TaskEligibilityService service = new TaskEligibilityService(new InMemoryGraphLock(), taskRepository, dependencyRepository, new SchedulingUpdateService(event -> {}),
+        TaskEligibilityService service = new TaskEligibilityService(
+                new InMemoryGraphLock(),
+                taskRepository, dependencyRepository, new SchedulingUpdateService(event -> {}),
                 new InMemoryConstraintRepository());
 
         for (UUID blockerId : blockerIds) {
@@ -146,7 +150,9 @@ class TaskEligibilityServiceConcurrencyTest {
             InMemoryTaskRepository taskRepository = new InMemoryTaskRepository(
                     List.of(TaskTestFixtures.defaultTask(dependentId).build(), TaskTestFixtures.defaultTask(targetId).build()));
             InMemoryTaskDependencyRepository dependencyRepository = new InMemoryTaskDependencyRepository(List.of());
-            TaskEligibilityService service = new TaskEligibilityService(new InMemoryGraphLock(), taskRepository, dependencyRepository, new SchedulingUpdateService(event -> {}),
+            TaskEligibilityService service = new TaskEligibilityService(
+                    new InMemoryGraphLock(),
+                    taskRepository, dependencyRepository, new SchedulingUpdateService(event -> {}),
                     new InMemoryConstraintRepository());
 
             List<Runnable> jobs = List.of(

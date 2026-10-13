@@ -100,7 +100,7 @@ public class InMemoryTaskDependencyRepository implements TaskDependencyRepositor
     /**
      * Overrides the interface default to skip {@link #lock} entirely - safe only because every
      * caller of this method already runs inside {@code TaskEligibilityService}'s
-     * the graph lock, which is exclusive with every write this repository ever
+     * graph lock, which is exclusive with every write this repository ever
      * makes ({@link #save}/{@link #delete} are only ever invoked from inside that same lock).
      * See the interface Javadoc ({@link TaskDependencyRepository#findByTaskIdUnderExternalLock})
      * for the full contract this override relies on. Avoids an uncontended (but not free)

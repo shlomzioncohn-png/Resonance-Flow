@@ -1,12 +1,11 @@
 package com.rnd.chain.events;
 
-import com.rnd.chain.repository.InMemoryGraphLock;
-
 import com.google.protobuf.Timestamp;
 import com.rnd.chain.dto.Task;
 import com.rnd.chain.dto.TaskDependency;
 import com.rnd.chain.dto.TaskStatus;
 import com.rnd.chain.repository.InMemoryConstraintRepository;
+import com.rnd.chain.repository.InMemoryGraphLock;
 import com.rnd.chain.service.SchedulingUpdateService;
 import static org.mockito.Mockito.mock;
 import com.rnd.chain.repository.InMemoryTaskDependencyRepository;

@@ -37,8 +37,8 @@ import java.util.concurrent.atomic.AtomicReference;
 
 /**
  * Graph-mutating methods run inside {@link GraphLock#runExclusive}: a Postgres transaction-scoped
- * advisory lock (one constant key for the whole graph), taken first in the transaction, before any
- * row lock, and held until commit/rollback - so the next writer sees committed state. It serializes
+ * advisory lock (one constant key for the whole graph), taken before any task row lock in the
+ * transaction and held until commit/rollback - so the next writer sees committed state. It serializes
  * the multi-row cycle-detection DFS and the edge-write-plus-DONE-status-read decisions; single-task
  * counters are still protected by {@link TaskRepository#update}'s row lock. Known limit: one key
  * means all graph writes queue, across every project.

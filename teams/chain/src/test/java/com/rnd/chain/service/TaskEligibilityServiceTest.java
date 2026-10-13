@@ -1,7 +1,5 @@
 package com.rnd.chain.service;
 
-import com.rnd.chain.repository.InMemoryGraphLock;
-
 import com.rnd.chain.dto.Constraint;
 import com.rnd.chain.dto.Task;
 import com.rnd.chain.dto.TaskDependency;
@@ -14,6 +12,7 @@ import com.rnd.chain.exception.DuplicateDependencyException;
 import com.rnd.chain.exception.InvalidDependencyException;
 import com.rnd.chain.exception.TaskNotFoundException;
 import com.rnd.chain.repository.InMemoryConstraintRepository;
+import com.rnd.chain.repository.InMemoryGraphLock;
 import com.rnd.chain.repository.InMemoryTaskDependencyRepository;
 import com.rnd.chain.repository.InMemoryTaskRepository;
 import org.junit.jupiter.api.BeforeEach;
@@ -56,7 +55,9 @@ class TaskEligibilityServiceTest {
                 new InMemoryConstraintRepository();
 
         service =
-                new TaskEligibilityService(new InMemoryGraphLock(), taskRepository,
+                new TaskEligibilityService(
+                        new InMemoryGraphLock(),
+                        taskRepository,
                         dependencyRepository,
                         schedulingUpdateService,
                         constraintRepository);

@@ -180,7 +180,7 @@ already has (edgeExists() / the task's own stored previousStatus).
   `GraphLock#runExclusive` (the old in-process `dependencyGraphLock`
   `synchronized` is gone - it released before commit). `PostgresGraphLock`
   takes `pg_advisory_xact_lock` with one constant key, first in the
-  `@Transactional` method and before any row lock, and it is released only at
+  `@Transactional` method and before any task row lock, and it is released only at
   commit/rollback; `InMemoryGraphLock` (a `ReentrantLock`) backs in-memory
   runs and the unit tests. Known limit: one key means all graph writes queue,
   across every project (team-lead decision).

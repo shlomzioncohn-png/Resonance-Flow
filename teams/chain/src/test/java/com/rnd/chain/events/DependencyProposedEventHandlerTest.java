@@ -1,12 +1,11 @@
 package com.rnd.chain.events;
 
-import com.rnd.chain.repository.InMemoryGraphLock;
-
 import com.rnd.chain.dto.Task;
 import com.rnd.chain.dto.TaskDependency;
 import com.rnd.chain.dto.TaskStatus;
 import com.rnd.chain.repository.InMemoryConstraintRepository;
 import com.rnd.chain.repository.InMemoryDependencyHistoryRepository;
+import com.rnd.chain.repository.InMemoryGraphLock;
 import com.rnd.chain.repository.InMemoryTaskDependencyRepository;
 import com.rnd.chain.repository.InMemoryTaskRepository;
 import com.rnd.chain.repository.InMemoryTransactionRunner;
@@ -64,7 +63,9 @@ class DependencyProposedEventHandlerTest {
                         existingDependencies);
 
         TaskEligibilityService eligibilityService =
-                new TaskEligibilityService(new InMemoryGraphLock(), taskRepo,
+                new TaskEligibilityService(
+                        new InMemoryGraphLock(),
+                        taskRepo,
                         dependencyRepo,
                         mock(SchedulingUpdateService.class),
                         new InMemoryConstraintRepository());

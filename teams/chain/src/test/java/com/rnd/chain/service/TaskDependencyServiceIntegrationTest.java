@@ -1,7 +1,5 @@
 package com.rnd.chain.service;
 
-import com.rnd.chain.repository.InMemoryGraphLock;
-
 import com.rnd.chain.dto.Task;
 import com.rnd.chain.dto.TaskDependency;
 import com.rnd.chain.dto.TaskStatus;
@@ -9,6 +7,7 @@ import com.rnd.chain.event.SchedulingUpdatePublisher;
 import com.rnd.chain.event.TaskSchedulingUpdatedEvent;
 import com.rnd.chain.repository.InMemoryConstraintRepository;
 import com.rnd.chain.repository.InMemoryDependencyHistoryRepository;
+import com.rnd.chain.repository.InMemoryGraphLock;
 import com.rnd.chain.repository.InMemoryTaskDependencyRepository;
 import com.rnd.chain.repository.InMemoryTaskRepository;
 import com.rnd.chain.repository.InMemoryTransactionRunner;
@@ -68,7 +67,9 @@ class TaskDependencyServiceIntegrationTest {
                         schedulingPublisher);
 
         TaskEligibilityService taskEligibilityService =
-                new TaskEligibilityService(new InMemoryGraphLock(), taskRepository,
+                new TaskEligibilityService(
+                        new InMemoryGraphLock(),
+                        taskRepository,
                         dependencyRepository,
                         schedulingUpdateService,
                         new InMemoryConstraintRepository());

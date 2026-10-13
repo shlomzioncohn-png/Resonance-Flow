@@ -886,3 +886,8 @@ and it did not span replicas. Graph-mutating methods now run in `GraphLock#runEx
 `@Transactional` method and held until commit/rollback; `InMemoryGraphLock` for in-memory runs and
 unit tests). Known limit: one key means all graph writes queue across every project. The older
 sections above that mention `dependencyGraphLock` describe history.
+
+Tests: `PostgresGraphLockTest` (runs in CI) checks that the lock refuses to run outside a transaction
+and takes the advisory lock before the action. `TaskEligibilityServicePostgresConcurrencyTest`
+(`postgres` tag, not run in CI) adds `concurrentAddDependency_closingCycle_onlyOneSucceeds`; it has not
+been run yet (no local Postgres): `mvn test -Ppostgres-integration -Dtest=TaskEligibilityServicePostgresConcurrencyTest`.
