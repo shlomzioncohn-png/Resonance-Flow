@@ -228,7 +228,6 @@ ChainEventProcessingTemplate chainEventProcessingTemplate() {
 
         return Task.builder()
                 .id(id)
-                .ownerId("owner")
                 .status(TaskStatus.PENDING)
                 .isReady(true)
                 .blockingCount(0)

@@ -33,13 +33,10 @@ class TaskCreatedEventHandlerTest {
                 .build();
     }
 
-    private static TaskCreatedEvent.Builder eventFor(
-            UUID id,
-            String ownerId) {
+    private static TaskCreatedEvent.Builder eventFor( UUID id) {
 
         return TaskCreatedEvent.newBuilder()
                 .setId(id.toString())
-                .setOwnerId(ownerId)
                 .setStatus(
                         com.rnd.inbox.event.TaskStatus.TASK_STATUS_NEW)
                 .setCreatedAt(timestamp(Instant.now()));
@@ -63,14 +60,11 @@ class TaskCreatedEventHandlerTest {
         UUID taskId = UUID.randomUUID();
 
         handler.onMessage(
-                eventFor(taskId, "owner-1").build());
+                eventFor(taskId).build());
 
         Task saved =
                 repository.findById(taskId).orElseThrow();
 
-        assertEquals(
-                "owner-1",
-                saved.getOwnerId());
 
         assertEquals(
                 TaskStatus.PENDING,
@@ -97,7 +91,6 @@ class TaskCreatedEventHandlerTest {
 
         Task existing = Task.builder()
                 .id(taskId)
-                .ownerId("stale-owner")
                 .status(TaskStatus.PENDING)
                 .isReady(false)
                 .blockingCount(2)
@@ -120,14 +113,11 @@ class TaskCreatedEventHandlerTest {
                         unresolvedService);
 
         handler.onMessage(
-                eventFor(taskId, "real-owner").build());
+                eventFor(taskId).build());
 
         Task merged =
                 repository.findById(taskId).orElseThrow();
 
-        assertEquals(
-                "real-owner",
-                merged.getOwnerId());
 
         assertEquals(
                 2,
@@ -157,8 +147,7 @@ class TaskCreatedEventHandlerTest {
 
         TaskCreatedEvent event =
                 eventFor(
-                        UUID.randomUUID(),
-                        "owner-1")
+                        UUID.randomUUID())
                         .setId("not-a-uuid")
                         .build();
 
@@ -199,6 +188,10 @@ class TaskCreatedEventHandlerTest {
                         throw new RuntimeException(
                                 "DB is down");
                     }
+                    @Override
+                    public boolean insertIfAbsent(Task task) {
+                        throw new RuntimeException("DB is down");
+                    }
 
                     @Override
                     public Optional<Task> update(
@@ -228,8 +221,8 @@ class TaskCreatedEventHandlerTest {
 
         TaskCreatedEvent event =
                 eventFor(
-                        UUID.randomUUID(),
-                        "owner-1")
+                        UUID.randomUUID()
+)
                         .build();
 
         assertThrows(

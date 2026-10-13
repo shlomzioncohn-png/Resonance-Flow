@@ -90,7 +90,6 @@ public class TaskEligibilityService {
         return Task.builder()
                 .id(task.getId())
                 .parentTaskId(task.getParentTaskId())
-                .ownerId(task.getOwnerId())
                 .status(task.getStatus())
                 .isReady(task.isReady())
                 .blockingCount(task.getBlockingCount())

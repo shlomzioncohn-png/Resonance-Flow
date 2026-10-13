@@ -45,8 +45,8 @@ import java.util.function.UnaryOperator;
  * (PLAN.md Finding #6), rather than leaving an ever-growing set of empty-Set entries behind as
  * tasks are reparented over the repository's lifetime.
  *
- * <p><b>Atomicity:</b> {@code save}/{@code update} take {@code writeLock} for the duration of
- * the write (updating {@code tasksById} and re-indexing {@code childrenByParentId} together),
+ * <p><b>Atomicity:</b> {@code save}/{@code insertIfAbsent}/{@code update} take
+ * {@code writeLock} for the duration of the write (updating {@code tasksById} and re-indexing {@code childrenByParentId} together),
  * so a concurrent {@code findByParentTaskId} never observes a task present in one structure but
  * not yet the other. {@code find*} calls take no lock, same as every other repository here.
  *
@@ -119,6 +119,20 @@ public class InMemoryTaskRepository implements TaskRepository {
         }
         return task;
     }
+    @Override
+public boolean insertIfAbsent(Task task) {
+    Objects.requireNonNull(task, "task must not be null");
+
+    synchronized (writeLock) {
+        if (tasksById.containsKey(task.getId())) {
+            return false;
+        }
+
+        tasksById.put(task.getId(), task);
+        indexChild(task);
+        return true;
+    }
+}
 
     @Override
     public Optional<Task> update(UUID id, UnaryOperator<Task> mutator) {

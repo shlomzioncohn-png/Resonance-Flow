@@ -67,7 +67,6 @@ class TaskEligibilityServicePostgresConcurrencyTest {
     private Task seedTask(UUID id) {
         Task task = Task.builder()
                 .id(id)
-                .ownerId("owner")
                 .status(TaskStatus.ACTIVE)
                 .isReady(false)
                 .blockingCount(0)

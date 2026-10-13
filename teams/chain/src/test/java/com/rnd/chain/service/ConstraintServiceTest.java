@@ -237,7 +237,6 @@ class ConstraintServiceTest {
         return Task.builder()
                 .id(id)
                 .parentTaskId(null)
-                .ownerId("test-owner")
                 .status(TaskStatus.ACTIVE)
                 .isReady(true)
                 .blockingCount(0)
