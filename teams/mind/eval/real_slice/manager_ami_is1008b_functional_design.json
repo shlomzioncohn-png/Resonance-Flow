@@ -52,6 +52,5 @@
   "expected_top_task_id": "task_research_vr_help",
   "expected_reason": "task_components_concept is blocked, pending the outside integration help task_research_vr_help is tasked with finding. This dependency is inferred for the scenario, not stated by AMI itself — the annotation only has the Project Manager 'offer to help' find that outside help, not a statement that the presentation cannot proceed without it. task_ui_concept and task_marketing_concept are unaffected by that dependency and remain independent preparation items. task_research_vr_help is the correct answer because completing it resolves the blocker on task_components_concept; enabling blocked work outranks parallel preparation.",
   "source": { "type": "AMI", "source_detail": "AMI Meeting Corpus meeting IS1008b, abssumm <actions> (ami_public_manual_1.6.2)" },
-  "team_lead_approved": false,
-  "mentor_approved": false
+  "team_lead_approved": false
 }

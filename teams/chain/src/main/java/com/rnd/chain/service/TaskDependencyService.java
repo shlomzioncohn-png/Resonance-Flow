@@ -1,3 +1,4 @@
+
 package com.rnd.chain.service;
 
 import com.rnd.chain.dto.DependencyChangeAction;
@@ -91,8 +92,26 @@ public class TaskDependencyService {
      * @throws TaskNotFoundException       if either task does not exist
      * @throws DuplicateDependencyException if the edge already exists
      */
+
+
+
+
+    //------addDependency------
     public TaskDependency addDependency(UUID taskId, UUID dependsOnTaskId,
                                          DependencyChangeSource source, String sourceRef) {
+        return addDependency(taskId, dependsOnTaskId, source, sourceRef, 1.0);
+    }
+
+    /**
+     * Same as {@link #addDependency(UUID, UUID, DependencyChangeSource, String)}, with an
+     * explicit Mind confidence (issue #445) for this specific edge instead of defaulting to full
+     * confidence. {@code DependencyProposedEventHandler} uses this overload for a dependency
+     * whose target task is already known; see that handler's class for the known gap on the
+     * "target not seen yet" path (confidence isn't preserved through
+     * {@code UnresolvedDependencyService} today).
+     */
+    public TaskDependency addDependency(UUID taskId, UUID dependsOnTaskId,
+                                         DependencyChangeSource source, String sourceRef, Double confidence) {
         Objects.requireNonNull(taskId, "taskId must not be null");
         Objects.requireNonNull(dependsOnTaskId, "dependsOnTaskId must not be null");
         Objects.requireNonNull(source, "source must not be null");
@@ -110,23 +129,24 @@ public class TaskDependencyService {
         // of reporting a fabricated success.
         requireTaskExists(taskId);
         requireTaskExists(dependsOnTaskId);
-
         if (isMatchingRetry(taskId, dependsOnTaskId, DependencyChangeAction.ADDED, source, sourceRef)) {
-            return new TaskDependency(taskId, dependsOnTaskId);
+            return new TaskDependency(taskId, dependsOnTaskId, confidence);
         }
 
         return transactionRunner.runInTransaction(() -> {
             // Re-checked under the transaction lock: the outer check above is only a fast
             // path and can race with a concurrent identical retry (see stage-3 concurrency test).
             if (isMatchingRetry(taskId, dependsOnTaskId, DependencyChangeAction.ADDED, source, sourceRef)) {
-                return new TaskDependency(taskId, dependsOnTaskId);
+                return new TaskDependency(taskId, dependsOnTaskId, confidence);
             }
             // Record history before delegating graph and readiness mutation; remove the
             // speculative entry if the delegate rejects the change.
+
+
             DependencyHistoryEntry recorded = recordHistory(taskId, dependsOnTaskId,
                     DependencyChangeAction.ADDED, source, sourceRef);
             try {
-                return taskEligibilityService.addDependency(taskId, dependsOnTaskId);
+                return taskEligibilityService.addDependency(taskId, dependsOnTaskId, confidence);
             } catch (RuntimeException failure) {
                 throw compensateHistory(recorded.id(), failure);
             }

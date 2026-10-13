@@ -20,12 +20,10 @@
 # Add a schema here and nowhere else.
 
 # compatibility: FULL
-# reset: task.creation.requested-value
 
 task-created-event.proto	task-created-event.proto
 task-creation-requested-event.proto	task-creation-requested-event.proto
 
-task-event.proto	task-event-value
 task-created-event.proto	task.created-value
 task-updated-event.proto	task.updated-value
 task-completed-event.proto	task.completed-value

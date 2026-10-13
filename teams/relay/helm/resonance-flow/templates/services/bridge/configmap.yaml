@@ -1,0 +1,18 @@
+{{- $component := .Values.components.bridge }}
+{{- if $component.enabled }}
+{{- with $component.config }}
+{{- $config := deepCopy . }}
+{{- $_ := set $config.spring.kafka "bootstrap-servers" (include "resonance-flow.dependencyAddress" (dict "root" $ "deps" $.Values.dependencies "name" "kafka")) }}
+
+{{- $_ := set $config.spring.kafka.properties "sasl.jaas.config" (include "resonance-flow.kafkaSaslJaasConfig" (dict "root" $ "password" "${kafka.password}")) }}
+{{- $objectStorageConfig := deepCopy $component.objectStorage }}
+{{- $_ := set $objectStorageConfig "endpoint" (printf "http://%s" (include "resonance-flow.dependencyAddress" (dict "root" $ "deps" $component.dependencies "name" "object-storage"))) }}
+{{- $_ := set $config "minio" $objectStorageConfig }}
+---
+{{ include "resonance-flow.configMapHeader" (dict "root" $ "component" "bridge") }}
+
+data:
+  config.yaml: |
+{{ toYaml $config | nindent 4 }}
+{{- end }}
+{{- end }}

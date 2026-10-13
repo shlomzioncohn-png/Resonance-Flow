@@ -293,24 +293,157 @@ in three stages, whether pgvector actually meets the requirements above:
 | Semantic-quality evaluation (80-task corpus, 20 queries) | Does semantic search return the *right* results across realistic query types? | Partial — 42% avg top-5 precision with the placeholder embedding model; a real model raised this to 68% on the same test |
 | Scale + recall evaluation (10,000-row load test, duplicate-pair recall, ANN-vs-exact recall) | Does pgvector meet the <300ms p95 / 10,000-vector goal **with recall measured, not just latency**? | **pgvector: meets it** — latency PASS with large headroom, and HNSW recall reaches 86% once `hnsw.ef_search` is tuned (applied in `src/mind/embeddings/pgvector_store.py`). **End-to-end: not yet** — 0% recall on realistic near-duplicate detection, traced to the placeholder embedding model, not pgvector or the index. |
 
-**Net conclusion: pgvector stays the recommended choice for the read/write
-path validated here.** Nothing found in validation points at *query-time*
-HNSW tuning (`hnsw.ef_search`) as the bottleneck — the dominant gap was
-the embedding model (`embeddings.py` used a hashing-based placeholder at
-validation time, since swapped for the real BGE model -- see this
-directory's other reports for the before/after). This does **not** yet
-rule out *build-time* HNSW quality (`hnsw.ef_construction`, and whether
-the index is built before or after the data load) — that wasn't tested;
-see the open follow-up issue below.
+**Net conclusion: pgvector stays the recommended choice.** Nothing found in
+validation points at *query-time* HNSW tuning (`hnsw.ef_search`) as the
+bottleneck — the gap was the embedding model. That gap is closed as of
+the production module: `embeddings.py` now uses a real retrieval-tuned
+model (`BAAI/bge-small-en-v1.5`), not a hashing placeholder — see
+`src/mind/embeddings/README.md`. This does **not** yet rule out
+*build-time* HNSW quality (`hnsw.ef_construction`, and whether the index
+is built before or after the data load) — that wasn't tested; see the
+open follow-up issue below.
 
-The full evaluation (mock corpus, query sets, recall test scripts, and
-the detailed writeups) lived in the PoC at `mind_vector_poc/evaluation/`.
+The full PoC-era evaluation (mock corpus, query sets, recall test
+scripts, and the detailed writeups) lived at `mind_vector_poc/evaluation/`.
 The two summary reports are copied into this directory —
 [`SCALE_AND_RECALL_REPORT.md`](SCALE_AND_RECALL_REPORT.md) and
 [`BENCHMARK_REPORT.md`](BENCHMARK_REPORT.md) — since the PoC PR (#54)
 won't be merged and its branch history won't be part of `main`. The PoC
 folder itself was removed once its logic was promoted into
-`src/mind/embeddings/`.
+`src/mind/embeddings/`. See "Benchmark results" below for the follow-up
+validation against the real model and production code.
+
+---
+
+## Benchmark results
+
+The validation above still used the PoC and its hashing-based placeholder
+embedding model. This re-runs the same kind of test against the actual
+**production code** (`src/mind/embeddings`) and the actual **real
+embedding model** (`BAAI/bge-small-en-v1.5`), addressing issue #87. Script:
+[`vector_search_benchmark.py`](vector_search_benchmark.py) (raw results:
+`vector_search_benchmark_results.json`, gitignored — regenerate by
+re-running the script).
+
+### Dataset
+
+| Kind | Count | id prefix | What it is |
+|---|---:|---|---|
+| Synthetic filler | 10,000 | `filler-` | Random word-soup, padding to a realistic load scale — **not real data** |
+| Manually-selected near-duplicate pairs | 16 (8 pairs) | `pair-#-a` / `pair-#-b` | Same underlying problem, different wording, for the recall test |
+| **Total** | **10,016** | | |
+
+### Latency — 100 similarity queries, `search()` only (embedding time excluded, same convention as the earlier PoC benchmarks)
+
+| avg (ms) | p50 (ms) | p95 (ms) | p99 (ms) | max (ms) |
+|---:|---:|---:|---:|---:|
+| 14.07 | 14.58 | 16.06 | 16.70 | 16.97 |
+
+**<300ms p95 target: PASS**, with roughly 18.7x headroom at 10,000 rows.
+Latency is dominated by the fixed cost of an HNSW scan at this scale, not
+by anything the real embedding model changed — consistent with the
+earlier PoC finding that pgvector itself was never the bottleneck.
+
+### Recall — does searching one pair member surface the other?
+
+| k | Recall |
+|---|---:|
+| 5 | **87.5%** (7/8) |
+| 10 | **87.5%** (7/8) |
+
+This uses BGE's query/passage asymmetry correctly (the query side is
+embedded with `is_query=True`, i.e. `embeddings.BGE_QUERY_INSTRUCTION`
+prepended, matching how a real search call would work) — the earlier PoC
+recall numbers (42% avg top-5 precision, then 0% on the harder
+duplicate-pair test) were measured against the old hashing placeholder,
+which had no notion of meaning at all. The one miss ("Customer reported
+duplicate invoices being generated" → "Client says the billing system is
+creating the same invoice twice") shares almost no literal words between
+the two phrasings — a genuinely hard paraphrase case even for a small
+retrieval model, not a sign of a broken pipeline.
+
+### Explicit conclusion
+
+**<300ms p95 is comfortably achievable at the target scale** (10,000+
+rows) — measured p95 is 16.06ms, not an estimate. Latency has ~18x
+headroom before <300ms would even become a concern, and the one recall
+miss is attributable to the embedding model's inherent limits on a hard
+paraphrase, not to index accuracy.
+
+**Open, not settled here:** review flagged (via `EXPLAIN`) that at this
+10,000-row scale, with `hnsw.ef_search = 400`, Postgres's planner may
+choose a sequential scan over the HNSW index for this query shape --
+not independently re-verified yet. If true, the latency numbers above
+don't actually validate the HNSW index at this scale; they'd just show
+that 10,000 rows is small enough for a seq scan to also be fast. Needs
+an `EXPLAIN ANALYZE` run against the real benchmark table to confirm
+before treating "no index change needed" as settled.
+
+## Foundation Gate benchmark (week 3)
+
+The three validation stages above all used synthetic or placeholder data
+-- real data was explicitly BLOCKED at the time (no loader existed, see
+`SCALE_AND_RECALL_REPORT.md` §1). That has changed: `eval/real_slice/`
+now has 16 real, human-annotated tasks (verbatim AMI Meeting Corpus
+action items, three real meetings -- see each file's `source` field) and
+the vector-store interface is final. [`foundation_gate_benchmark.py`](foundation_gate_benchmark.py)
+re-runs the benchmark against this real slice, run via:
+
+```bash
+cd teams/mind
+docker compose up -d vector-store
+source .venv/bin/activate   # or: make dev, then activate
+export MIND_VECTOR_STORE__DSN="postgresql://mind:mind@localhost:5432/mind"
+python -m benchmarks.foundation_gate_benchmark
+```
+
+Two different things are measured, deliberately kept separate:
+
+- **Latency (p50/p95/p99)** needs scale, not realism. The 16 real tasks
+  are padded with 84 synthetic filler rows to reach this doc's
+  >=100-vector minimum (§1) -- filler only ever affects scale, never the
+  recall measurement below.
+- **Recall** needs realism, not scale. There's no real near-duplicate
+  corpus in this data (no two AMI action items are paraphrases of each
+  other), so recall here asks a different, equally real question: for
+  three hand-identified task pairs that discuss the same sub-topic
+  within one real meeting (e.g. two action items both about collecting
+  seating preferences), does the related real task outrank an unrelated
+  real control task from the *same* meeting?
+
+**Result below is STALE** (review feedback on #559, 2026-10-12): it's
+from a run against `embeddings.py`'s old HashingVectorizer placeholder,
+before the real BGE model landed. The latency numbers also predate a
+fix -- the timer used to start before `embed(text)`, so it measured
+model inference and `search()` together. Both are fixed in code now
+(real model, timer moved past `embed()`); the table itself hasn't been
+re-run since -- needs a fresh `python -m benchmarks.foundation_gate_benchmark`
+against current `main` for real numbers.
+
+| Metric | Result (stale -- placeholder model) |
+|---|---|
+| Total vectors (16 real + 84 synthetic filler) | 100 |
+| Latency p50 / p95 / p99 | 3.73ms / 15.72ms / 21.84ms |
+| Recall (related outranks control, real pairs) | **3/3** |
+
+p99 is ~14x under the 300ms target, consistent with the earlier
+10,000-row synthetic result -- latency doesn't depend on content, only
+vector count and dimension, so this isn't a surprise. The real finding
+is the recall column: unlike the semantic-quality validation above
+(0% end-to-end recall on paraphrased near-duplicates, traced to the
+placeholder embedding model), plain topical relatedness within a real
+meeting ranks correctly 3/3 here. **This does not contradict the earlier
+finding** -- "the same sub-topic, different wording" (what these three
+pairs test) and "a near-exact paraphrase" (what the semantic-quality
+stage tested) are different difficulty levels for a word-overlap
+embedding model; the gap was in `embeddings.py`'s placeholder model
+(now replaced), not pgvector or its HNSW index.
+
+**HNSW confirmed in code, not just planned:** `pgvector_store.py`'s
+`_ensure_schema()` already creates a `USING hnsw (embedding
+vector_cosine_ops)` index (`CREATE INDEX IF NOT EXISTS ...`), and
+`search()` sets `hnsw.ef_search` before every query -- this benchmark
+ran against that real code path, not a bypass.
 
 ## Follow-up (open, not fixed here)
 
@@ -322,5 +455,10 @@ before vs. after loading the 10,000-row dataset changes recall. Tracked
 as [issue #270](https://github.com/KamaTechOrg/Resonance-Flow/issues/270)
 rather than fixed in this PR, since it needs its own benchmark run to
 answer.
+
+The benchmark still uses synthetic filler data (random word-soup), not
+real task text -- the original issue asked for the real FUNSD dataset.
+Not switched over in this PR; flagging rather than fixing, since it
+changes what the recall numbers above actually measure.
 
 ---

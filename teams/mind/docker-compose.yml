@@ -1,6 +1,9 @@
 services:
   mind:
-    build: .
+    build:
+      context: .
+      additional_contexts:
+        shared: ../../shared
     ports:
       - "8000:8000"
     env_file:
@@ -14,8 +17,44 @@ services:
     volumes:
       - ./models:/app/models
     depends_on:
+      migrate:
+        condition: service_completed_successfully
+
+  # One-shot: runs the schema migrations against `vector-store` and exits.
+  # `mind` waits on this completing successfully, not just on `vector-store`
+  # being healthy -- an unmigrated table must fail the whole stack here,
+  # not surface later as an UndefinedTable on the app's first query.
+  migrate:
+    build: .
+    env_file:
+      - .env
+    environment:
+      MIND_VECTOR_STORE__DSN: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@vector-store:5432/${POSTGRES_DB}
+    command: ["alembic", "upgrade", "head"]
+    depends_on:
       vector-store:
         condition: service_healthy
+
+  mind-index-consumer:
+    build:
+      context: .
+      additional_contexts:
+        shared: ../../shared
+    command: ["python", "-m", "mind.embeddings.index_consumer_runner"]
+    # No HTTP server here -- the Dockerfile's :8000/health check doesn't apply.
+    healthcheck:
+      disable: true
+    # No local Kafka broker wired up yet -- `docker compose --profile kafka up`.
+    profiles: ["kafka"]
+    env_file:
+      - .env
+    environment:
+      MIND_VECTOR_STORE__DSN: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@vector-store:5432/${POSTGRES_DB}
+    volumes:
+      - ./models:/app/models
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
 
   vector-store:
     image: pgvector/pgvector:pg16

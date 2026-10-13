@@ -46,13 +46,13 @@ navigation, so they get the root layout only, styled to match.
 
 ## App Shell
 
-| Component | Location | Responsibility |
-|---|---|---|
-| `AppShell` | `components/layout/AppShell` | Composes Header + Sidebar + main content area; holds the mobile-drawer open/close state. |
-| `Header` | `components/layout/Header` | Top bar: mobile menu toggle, search field (visual placeholder, not wired up), notifications icon, user avatar placeholder. |
-| `Sidebar` | `components/layout/Sidebar` | Left navigation. Dark, full-height. Permanent on desktop (`md` and up), a slide-over `Drawer` on mobile. Nav items come from `navConfig.tsx`. Highlights the active route via `usePathname()`. |
-| `Logo` | `components/layout/Logo` | Brand mark used in the Sidebar and on the public pages (`light`/`dark` variant for background contrast). |
-| `PageContainer` | `components/layout/PageContainer` | Consistent page wrapper: title, optional description, optional right-aligned actions, max-width content column. Every page under `(app)` renders its content through this. |
+| Component       | Location                          | Responsibility                                                                                                                                                                                 |
+| --------------- | --------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `AppShell`      | `components/layout/AppShell`      | Composes Header + Sidebar + main content area; holds the mobile-drawer open/close state.                                                                                                       |
+| `Header`        | `components/layout/Header`        | Top bar: mobile menu toggle, search field (visual placeholder, not wired up), notifications icon, user avatar placeholder.                                                                     |
+| `Sidebar`       | `components/layout/Sidebar`       | Left navigation. Dark, full-height. Permanent on desktop (`md` and up), a slide-over `Drawer` on mobile. Nav items come from `navConfig.tsx`. Highlights the active route via `usePathname()`. |
+| `Logo`          | `components/layout/Logo`          | Brand mark used in the Sidebar and on the public pages (`light`/`dark` variant for background contrast).                                                                                       |
+| `PageContainer` | `components/layout/PageContainer` | Consistent page wrapper: title, optional description, optional right-aligned actions, max-width content column. Every page under `(app)` renders its content through this.                     |
 
 `AppShell` is only applied by `app/(app)/layout.tsx`. Pages under `(public)/`
 build their own minimal centered layout instead (see `login/page.tsx`).
@@ -105,7 +105,7 @@ should follow once they call a real adapter instead of a mock.
    `/team/:id` are intentionally left out of the nav — they're only reached by
    a link from another page).
 5. Run `npm run lint` (accessibility, React, and Next.js rules) and `npm run
-   build` (typecheck + production build) before committing.
+build` (typecheck + production build) before committing.
 
 ## Notes for the next contributor
 

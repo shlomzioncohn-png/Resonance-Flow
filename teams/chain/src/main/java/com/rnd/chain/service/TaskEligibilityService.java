@@ -1,4 +1,3 @@
-
 package com.rnd.chain.service;
 
 import com.rnd.chain.dto.Constraint;
@@ -375,10 +374,33 @@ public class TaskEligibilityService {
                         task.getOpenConstraintCount()));
     }
 
+    /** Same as {@link #addDependency(UUID, UUID, Double)}, with no Mind confidence to carry -
+     * defaults to full confidence (1.0), same as every other USER-facing call site in this
+     * class. */
     @Transactional
     public TaskDependency addDependency(
             UUID taskId,
             UUID dependsOnTaskId) {
+
+        return addDependency(taskId, dependsOnTaskId, 1.0);
+    }
+
+    /**
+     * Same as {@link #addDependency(UUID, UUID)}, with an explicit Mind confidence (issue #445)
+     * for this specific edge instead of defaulting to full confidence. Used by
+     * {@code TaskDependencyService.addDependency}'s own confidence-aware overload, which
+     * {@code DependencyProposedEventHandler} calls for a dependency whose target task is already
+     * known - see that handler's class for the known gap on the "target not seen yet" path
+     * (confidence isn't preserved through {@code UnresolvedDependencyService} today).
+     *
+     * @throws InvalidDependencyException if {@code confidence} is non-null and outside [0, 1], or
+     * the edge would create a cycle
+     */
+    @Transactional
+    public TaskDependency addDependency(
+            UUID taskId,
+            UUID dependsOnTaskId,
+            Double confidence) {
 
         Objects.requireNonNull(
                 taskId,
@@ -387,6 +409,12 @@ public class TaskEligibilityService {
         Objects.requireNonNull(
                 dependsOnTaskId,
                 "dependsOnTaskId must not be null");
+
+        if (confidence != null && (confidence < 0.0 || confidence > 1.0)) {
+            throw new InvalidDependencyException(
+                    "confidence for dependency " + taskId + " -> " + dependsOnTaskId
+                            + " must be between 0 and 1, got " + confidence);
+        }
 
         synchronized (dependencyGraphLock) {
 
@@ -411,14 +439,12 @@ public class TaskEligibilityService {
             Task task = requireTask(taskId);
             Task dependencyTask = requireTask(dependsOnTaskId);
 
-            // USER-sourced edge, no Mind confidence to carry - defaults to full confidence (1.0)
-            // via the two-arg TaskDependency constructor below, same as every other USER-facing
-            // call site in this class.
             Optional<TaskDependency> saved =
                     taskDependencyRepository.save(
                             new TaskDependency(
                                     taskId,
-                                    dependsOnTaskId));
+                                    dependsOnTaskId,
+                                    confidence));
 
             TaskDependency dependency = saved.orElseThrow(
                     () -> new DuplicateDependencyException(
@@ -723,6 +749,35 @@ public class TaskEligibilityService {
             } else if (previousStatus == TaskStatus.DONE && newStatus != TaskStatus.DONE) {
                 adjustDependentsBlockingCount(taskId, 1);
             }
+        }
+    }
+
+    /**
+     * Applies task.completed. The Kafka record timestamp is only compared against the stored
+     * updatedAt (Inbox's clock) and never written to it, so a later task.updated is not skewed.
+     *
+     * @throws TaskNotFoundException if no task with {@code taskId} exists
+     */
+    @Transactional
+    public void onTaskCompleted(UUID taskId, LocalDateTime kafkaTimestamp) {
+        Objects.requireNonNull(taskId, "taskId must not be null");
+        Objects.requireNonNull(kafkaTimestamp, "kafkaTimestamp must not be null");
+
+        synchronized (dependencyGraphLock) {
+            Task current = requireTask(taskId);
+            if (current.getStatus() == TaskStatus.DONE) {
+                return;
+            }
+            if (current.getUpdatedAt() != null && !kafkaTimestamp.isAfter(current.getUpdatedAt())) {
+                log.debug("Task {} completion ignored: record timestamp {} is not newer than stored {}",
+                        taskId, kafkaTimestamp, current.getUpdatedAt());
+                return;
+            }
+
+            log.info("Task {} completed", taskId);
+            requireUpdated(taskRepository.update(taskId, task ->
+                    copyOf(task).status(TaskStatus.DONE).build()), taskId);
+            adjustDependentsBlockingCount(taskId, -1);
         }
     }
 
