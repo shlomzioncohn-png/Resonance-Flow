@@ -7,7 +7,11 @@ class SourceType(str, Enum):
     EMAIL = "EMAIL"
     SLACK = "SLACK"
     WHATSAPP = "WHATSAPP"
+    # Bridge sends ZOOM / BIGBLUEBUTTON instead; MEETING stays until the
+    # task output (and Inbox) move to the per-platform values.
     MEETING = "MEETING"
+    ZOOM = "ZOOM"
+    BIGBLUEBUTTON = "BIGBLUEBUTTON"
     CALENDAR = "CALENDAR"
     DOC = "DOC"
     SCANNED_DOC = "SCANNED_DOC"

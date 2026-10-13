@@ -17,6 +17,16 @@ class Modality(str, Enum):
     SCANNED_DOC = "SCANNED_DOC"
     TEXT = "TEXT"
     
+class ObjectRole(str, Enum):
+    """What one MinIO object is within its logical item."""
+
+    BODY = "BODY"
+    ATTACHMENT = "ATTACHMENT"
+    TRANSCRIPT = "TRANSCRIPT"
+    RECORDING = "RECORDING"
+    SOURCE_METADATA = "SOURCE_METADATA"
+
+
 class ChangeType(str, Enum):
     """Type of source-object change reported by Bridge."""
 
