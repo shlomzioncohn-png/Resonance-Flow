@@ -75,10 +75,11 @@ async def instrumentation() -> InstrumentationSummary:
 async def model_calls() -> ModelCallSummary:
     """Every OCR/ASR/LLM call recorded so far, per call name (#479).
 
-    Count, errors, p50/p95 latency, CPU, tokens and cost, with how many calls
-    had no CPU measurement / no reported usage / no price -- a total is None,
-    never 0, when none did -- and how many crossed the slow / expensive
-    limits (MonitoringSettings). Per-process and in-memory, like
+    Count, errors, p50/p95 latency, CPU seconds (OCR/ASR), tokens and US
+    dollars (LLM), with how many calls lacked each measure that applies --
+    a total is None, never 0, when none had it; a measure that does not
+    apply to the kind has a None count too -- and how many crossed the slow /
+    expensive limits (MonitoringSettings). Per-process and in-memory, like
     /debug/instrumentation above.
     """
     return model_call_summary()

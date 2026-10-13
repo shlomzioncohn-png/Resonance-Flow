@@ -1,9 +1,11 @@
 """The per-call-name model-call summary (src/mind/observability/tracking.py) -- #479.
 
-What it must get right is the difference between "none" and "zero": a call
-whose CPU was not measured, whose usage was not reported or that could not be
-priced is counted as missing, and a total that only missing calls fed is None,
-never 0.
+What it must get right is the difference between "not applicable", "unknown"
+and "zero". CPU seconds apply to OCR/ASR calls, tokens and US dollars to LLM
+calls: a measure that does not apply has a null total *and* a null count. Of
+the calls a measure applies to, one whose CPU was not measured, whose usage was
+not reported or that could not be priced is counted as missing, and a total
+that only missing calls fed is None -- never 0.
 """
 
 import logging
@@ -82,36 +84,34 @@ def test_totals_outlive_the_ring_buffer_of_recent_calls(monkeypatch: pytest.Monk
     monkeypatch.setattr(tracking, "_records", deque(maxlen=3))
     for _ in range(5):
         record_call("m", 1.0, 0.5)
-    assert (row("m").call_count, row("m").cost_total_usd) == (5, 2.5)
+    assert (row("m").call_count, row("m").cost_usd_total) == (5, 2.5)
 
 
 # --- missing is not zero ------------------------------------------------------------
 
 
 def test_cpu_never_measured_is_none_not_zero():
-    record_call("ocr-on-windows", 10.0, None, cpu_s=None)
-    record_call("ocr-on-windows", 10.0, None, cpu_s=None)
-    assert (row("ocr-on-windows").cpu_s_total, row("ocr-on-windows").cpu_unmeasured_count) == (
-        None,
-        2,
-    )
+    record_call("ocr-on-windows", 10.0, None, kind=CallKind.OCR, cpu_s=None)
+    record_call("ocr-on-windows", 10.0, None, kind=CallKind.OCR, cpu_s=None)
+    r = row("ocr-on-windows")
+    assert (r.cpu_seconds_total, r.cpu_unmeasured_count) == (None, 2)
 
 
 def test_cpu_measured_as_zero_is_zero_not_none():
-    record_call("idle", 10.0, None, cpu_s=0.0)
-    assert (row("idle").cpu_s_total, row("idle").cpu_unmeasured_count) == (0.0, 0)
+    record_call("idle", 10.0, None, kind=CallKind.ASR, cpu_s=0.0)
+    assert (row("idle").cpu_seconds_total, row("idle").cpu_unmeasured_count) == (0.0, 0)
 
 
 def test_cpu_partly_measured_sums_what_was_measured_and_counts_the_rest():
-    record_call("m", 10.0, None, cpu_s=1.25)
-    record_call("m", 10.0, None, cpu_s=None)
-    record_call("m", 10.0, None, cpu_s=2.0)
-    assert (row("m").cpu_s_total, row("m").cpu_unmeasured_count) == (3.25, 1)
+    record_call("m", 10.0, None, kind=CallKind.ASR, cpu_s=1.25)
+    record_call("m", 10.0, None, kind=CallKind.ASR, cpu_s=None)
+    record_call("m", 10.0, None, kind=CallKind.ASR, cpu_s=2.0)
+    assert (row("m").cpu_seconds_total, row("m").cpu_unmeasured_count) == (3.25, 1)
 
 
 def test_usage_never_reported_is_none():
-    record_call("ocr", 10.0, None, kind=CallKind.OCR)
-    r = row("ocr")
+    record_call("llm", 10.0, None, kind=CallKind.LLM)
+    r = row("llm")
     assert (r.prompt_tokens_total, r.completion_tokens_total, r.tokens_unreported_count) == (
         None,
         None,
@@ -138,19 +138,58 @@ def test_half_a_usage_pair_counts_as_unreported():
 
 
 def test_cost_never_priced_is_none_not_zero():
-    record_call("asr", 10.0, None)
-    assert (row("asr").cost_total_usd, row("asr").unpriced_count) == (None, 1)
+    record_call("gemini", 10.0, None, kind=CallKind.LLM)
+    assert (row("gemini").cost_usd_total, row("gemini").unpriced_count) == (None, 1)
 
 
 def test_a_priced_zero_cost_is_zero_not_none():
-    record_call("free", 10.0, 0.0)
-    assert (row("free").cost_total_usd, row("free").unpriced_count) == (0.0, 0)
+    record_call("free", 10.0, 0.0, kind=CallKind.LLM)
+    assert (row("free").cost_usd_total, row("free").unpriced_count) == (0.0, 0)
 
 
 def test_cost_partly_priced_is_a_lower_bound_with_the_gap_counted():
-    record_call("llm", 10.0, 0.25)
-    record_call("llm", 10.0, None)
-    assert (row("llm").cost_total_usd, row("llm").unpriced_count) == (0.25, 1)
+    record_call("llm", 10.0, 0.25, kind=CallKind.LLM)
+    record_call("llm", 10.0, None, kind=CallKind.LLM)
+    assert (row("llm").cost_usd_total, row("llm").unpriced_count) == (0.25, 1)
+
+
+# --- not applicable is neither unknown nor zero -------------------------------------
+
+
+@pytest.mark.parametrize("kind", [CallKind.OCR, CallKind.ASR])
+def test_tokens_and_dollars_do_not_apply_to_a_local_model(kind: CallKind):
+    record_call("local", 10.0, None, kind=kind, cpu_s=1.5)
+    r = row("local")
+    assert (r.cost_usd_total, r.unpriced_count) == (None, None)  # not "1 unpriced call"
+    assert (r.prompt_tokens_total, r.completion_tokens_total, r.tokens_unreported_count) == (
+        None,
+        None,
+        None,
+    )
+    assert (r.cpu_seconds_total, r.cpu_unmeasured_count) == (1.5, 0)
+
+
+def test_cpu_seconds_do_not_apply_to_an_llm_call():
+    record_call(
+        "deepseek-chat", 10.0, 0.001, kind=CallKind.LLM, prompt_tokens=9, completion_tokens=1
+    )
+    r = row("deepseek-chat")
+    assert (r.cpu_seconds_total, r.cpu_unmeasured_count) == (None, None)
+    assert (r.cost_usd_total, r.unpriced_count, r.tokens_unreported_count) == (0.001, 0, 0)
+
+
+def test_a_dollar_cost_passed_for_a_local_model_is_not_counted():
+    # OCR/ASR cost CPU seconds; a dollar figure for one is a caller mistake, not a total.
+    record_call("tesseract", 10.0, 0.5, kind=CallKind.OCR, cpu_s=1.0)
+    r = row("tesseract")
+    assert (r.cost_usd_total, r.unpriced_count) == (None, None)
+
+
+def test_every_measure_applies_to_a_call_without_a_kind():
+    # Nothing says which measures it should have, so none is ruled out.
+    record_call("unclassified", 10.0, None)
+    r = row("unclassified")
+    assert (r.cpu_unmeasured_count, r.tokens_unreported_count, r.unpriced_count) == (1, 1, 1)
 
 
 # --- limits -------------------------------------------------------------------------
@@ -199,15 +238,28 @@ def test_a_call_without_a_kind_has_no_limits():
 
 
 def test_limits_are_configurable_and_none_turns_a_check_off(monkeypatch: pytest.MonkeyPatch):
-    use_limits(monkeypatch, ocr_max_duration_ms=100.0, ocr_max_cost_usd=0.5)
-    record_call("tesseract", 150.0, 0.75, kind=CallKind.OCR)
-    assert (row("tesseract").slow_count, row("tesseract").expensive_count) == (1, 1)
+    use_limits(monkeypatch, llm_max_duration_ms=100.0, llm_max_cost_usd=0.5)
+    record_call("deepseek", 150.0, 0.75, kind=CallKind.LLM)
+    assert (row("deepseek").slow_count, row("deepseek").expensive_count) == (1, 1)
 
     _reset_for_tests()
-    use_limits(monkeypatch, ocr_max_duration_ms=None, ocr_max_cost_usd=None)
-    record_call("tesseract", 150.0, 0.75, kind=CallKind.OCR)
-    r = row("tesseract")
-    assert (r.duration_limit_ms, r.slow_count, r.expensive_count) == (None, 0, 0)
+    use_limits(monkeypatch, llm_max_duration_ms=None, llm_max_cost_usd=None)
+    record_call("deepseek", 150.0, 0.75, kind=CallKind.LLM)
+    r = row("deepseek")
+    assert (r.duration_limit_ms, r.cost_limit_usd, r.slow_count, r.expensive_count) == (
+        None,
+        None,
+        0,
+        0,
+    )
+
+
+@pytest.mark.parametrize("kind", [CallKind.OCR, CallKind.ASR])
+def test_a_local_model_has_no_cost_limit(kind: CallKind):
+    # Its cost is CPU seconds; a CPU-seconds limit waits for a measured baseline.
+    record_call("local", 10.0, 99.0, kind=kind)
+    r = row("local")
+    assert (r.cost_limit_usd, r.expensive_count) == (None, 0)
 
 
 # --- logged summary -----------------------------------------------------------------
@@ -236,16 +288,31 @@ def test_zero_turns_the_periodic_summary_off(
     assert not [m for m in caplog.messages if m.startswith("model_call_summary")]
 
 
-def test_the_logged_summary_names_what_is_missing(caplog: pytest.LogCaptureFixture):
+def test_the_logged_summary_names_units_and_what_does_not_apply(
+    caplog: pytest.LogCaptureFixture,
+):
     record_call("tesseract", 31_000.0, None, kind=CallKind.OCR)
     with caplog.at_level(logging.INFO, logger="mind.observability"):
         log_summary()
     [line] = [m for m in caplog.messages if m.startswith("model_call_summary")]
     assert "call_name=tesseract kind=ocr calls=1" in line
-    assert "cpu_s=unmeasured cpu_unmeasured=1" in line
-    assert "prompt_tokens=unreported" in line
-    assert "cost=unpriced unpriced=1" in line
+    assert "cpu_seconds=unmeasured cpu_unmeasured=1" in line  # applies, unknown
+    assert "prompt_tokens=n/a completion_tokens=n/a tokens_unreported=n/a" in line
+    assert "cost_usd=n/a unpriced=n/a" in line  # an OCR call has no dollar cost
     assert "slow=1" in line
+
+
+def test_the_logged_summary_of_llm_calls_is_in_dollars(caplog: pytest.LogCaptureFixture):
+    record_call(
+        "deepseek-chat", 10.0, 0.0002, kind=CallKind.LLM, prompt_tokens=9, completion_tokens=1
+    )
+    record_call("deepseek-chat", 10.0, None, kind=CallKind.LLM)
+    with caplog.at_level(logging.INFO, logger="mind.observability"):
+        log_summary()
+    [line] = [m for m in caplog.messages if m.startswith("model_call_summary")]
+    assert "cpu_seconds=n/a cpu_unmeasured=n/a" in line
+    assert "prompt_tokens=9 completion_tokens=1 tokens_unreported=1" in line
+    assert "cost_usd=0.000200 unpriced=1" in line
 
 
 def test_reset_clears_the_totals_too():
@@ -257,7 +324,7 @@ def test_reset_clears_the_totals_too():
 # --- over HTTP ----------------------------------------------------------------------
 
 
-def test_debug_model_calls_serves_the_summary_with_nulls_for_unknowns():
+def test_debug_model_calls_tells_unknown_from_not_applicable():
     record_call("tesseract", 1200.0, None, kind=CallKind.OCR, cpu_s=None)
     record_call(
         "deepseek-chat", 800.0, 0.0005, kind=CallKind.LLM, prompt_tokens=900, completion_tokens=150
@@ -267,13 +334,11 @@ def test_debug_model_calls_serves_the_summary_with_nulls_for_unknowns():
     assert body["total_calls"] == 2
     by_name = {r["call_name"]: r for r in body["by_call_name"]}
     ocr = by_name["tesseract"]
-    assert (ocr["kind"], ocr["cpu_s_total"], ocr["cost_total_usd"], ocr["unpriced_count"]) == (
-        "ocr",
-        None,
-        None,
-        1,
-    )
+    assert ocr["kind"] == "ocr"
+    assert (ocr["cpu_seconds_total"], ocr["cpu_unmeasured_count"]) == (None, 1)  # unknown
+    assert (ocr["cost_usd_total"], ocr["unpriced_count"]) == (None, None)  # not applicable
     llm = by_name["deepseek-chat"]
     assert (llm["prompt_tokens_total"], llm["completion_tokens_total"]) == (900, 150)
-    assert llm["cost_total_usd"] == 0.0005
+    assert (llm["cost_usd_total"], llm["unpriced_count"]) == (0.0005, 0)
+    assert (llm["cpu_seconds_total"], llm["cpu_unmeasured_count"]) == (None, None)
     assert (llm["duration_limit_ms"], llm["cost_limit_usd"]) == (30_000, 0.01)

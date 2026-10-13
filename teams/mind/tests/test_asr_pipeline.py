@@ -109,7 +109,7 @@ def test_every_call_that_reaches_the_model_is_recorded():
     calls = get_recent_calls()
     assert [c.model_name for c in calls] == ["whisper-base.en-int8-local"]
     assert calls[0].duration_ms > 0
-    assert calls[0].cost is None  # unpriced, not free: no CPU rate set (#479)
+    assert calls[0].cost is None  # a local model costs CPU seconds, not dollars (#479)
 
 
 @_needs_weights

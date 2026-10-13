@@ -102,19 +102,22 @@ incrementally before the Foundation Gate.
 ## Cost and latency monitoring (#479)
 
 Every OCR, ASR and LLM call goes through one ledger,
-`observability.record_call()`, which logs its latency, CPU time (OCR/ASR),
-token usage (LLM) and cost. `GET /debug/model-calls` (and a
-`model_call_summary` log line every 100 calls) shows the aggregate per call
-name -- count, errors, p50/p95, CPU, tokens, cost -- and a call over its
-kind's duration or cost limit logs a `MODEL_CALL_SLOW` /
-`MODEL_CALL_EXPENSIVE` WARNING. An unknown value is never shown as 0: an
-unpriced cost or an unmeasured CPU figure is `null`, with a count of how
-many calls it leaves out.
+`observability.record_call()`, which logs its latency and its cost -- in a
+unit per kind: **CPU seconds** for OCR/ASR (MIND does not pay for its machine
+by the hour, so local models have no dollar price), **US dollars** for LLM
+calls (the provider's price per token), plus the LLM's token usage. Every
+field and log key names its unit (`cpu_seconds`, `cost_usd`, `duration_ms`).
+`GET /debug/model-calls` (and a `model_call_summary` log line every 100 calls)
+shows the aggregate per call name -- count, errors, p50/p95, CPU seconds,
+tokens, dollars -- and a call over its kind's duration limit (or, for LLM, its
+dollar limit) logs a `MODEL_CALL_SLOW` / `MODEL_CALL_EXPENSIVE` WARNING. A
+measure that does not apply to a kind is `n/a` (null total, null count); one
+that applies but is unknown is never shown as 0 -- its total is `null`, with a
+count of how many calls lacked it.
 
 Not finished: LLM calls are recorded without a kind or token counts, and with
 an unknown cost as `0.0`, until R2 approves the change to `extractor.py` --
-three strict-xfail tests mark it and must stay until then. And no CPU-hour
-rate is configured yet (open decision below).
+three strict-xfail tests mark it and must stay until then.
 
 Metrics, limits, configuration, warnings and known limitations:
 [`src/mind/observability/README.md`](./src/mind/observability/README.md#status-of-479-cost-and-latency-monitoring).
@@ -145,12 +148,10 @@ licensing constraints.
 - How the score is published to Chain: separate event vs. field on `Task`
 - Which real dataset slice to validate against first: FUNSD vs. AMI
 - MIND's exact location/build integration in the monorepo (Python, not Maven — affects Relay's CI and the root `docker-compose.yml`)
-- Compute-cost rate for OCR/ASR (#479): the USD price of one CPU-hour on the
-  machine MIND runs on, and where `MIND_COMPUTE_COST__USD_PER_CPU_HOUR` is set:
-  `components.mind.env` in `teams/relay/helm/resonance-flow/values.yaml` (every
-  install, CI included) or `teams/relay/helm/resonance-flow/environments/shared.yaml`
-  (the shared cluster only). Open with R1; until it is set, every OCR/ASR cost
-  is recorded as unpriced.
+- ~~Compute cost of OCR/ASR in dollars~~ Resolved (#479, with the team lead):
+  MIND does not pay for its machine, so OCR/ASR cost is measured in **CPU
+  seconds**, not dollars; dollars apply only to LLM calls. No CPU-hour rate.
+  A CPU-seconds limit for OCR/ASR waits for a measured baseline.
 - LLM call instrumentation (#479): the `extractor.py` / `pricing.py` change
   proposed to R2 -- `kind`, token counts, unknown cost as `None`, Gemini's price.
 

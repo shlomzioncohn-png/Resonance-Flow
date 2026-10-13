@@ -1,4 +1,4 @@
-"""CPU time and estimated cost for local model calls (src/mind/observability/compute.py)."""
+"""CPU time for the local model calls (src/mind/observability/compute.py) -- #479."""
 
 import subprocess
 import sys
@@ -6,14 +6,7 @@ import time
 
 import pytest
 
-from mind.observability import compute
-from mind.observability.compute import CpuClock, compute_cost
-
-# The real one: tests/conftest.py replaces compute.usd_per_cpu_hour for every test,
-# after this module has been imported.
-_real_usd_per_cpu_hour = compute.usd_per_cpu_hour
-
-_RATE_ENV = "MIND_COMPUTE_COST__USD_PER_CPU_HOUR"
+from mind.observability.compute import CpuClock
 
 
 def burn_cpu(seconds: float) -> None:
@@ -25,35 +18,6 @@ def burn_cpu(seconds: float) -> None:
 def burn_cpu_in_a_child(seconds: float) -> None:
     code = f"import time\nt = time.process_time()\nwhile time.process_time() - t < {seconds}: pass"
     subprocess.run([sys.executable, "-c", code], check=True)
-
-
-# --- the rate -----------------------------------------------------------------------
-
-
-def test_no_rate_on_file_means_unpriced_not_free():
-    assert compute_cost(10.0) is None
-
-
-def test_cpu_that_was_not_measured_is_unpriced_even_with_a_rate(monkeypatch: pytest.MonkeyPatch):
-    monkeypatch.setattr(compute, "usd_per_cpu_hour", lambda: 0.05)
-    assert compute_cost(None) is None
-
-
-def test_cost_is_cpu_hours_times_the_rate(monkeypatch: pytest.MonkeyPatch):
-    monkeypatch.setattr(compute, "usd_per_cpu_hour", lambda: 0.036)
-    assert compute_cost(100.0) == pytest.approx(0.001)  # 100 s = 1/36 h
-    assert compute_cost(0.0) == 0.0
-
-
-def test_the_rate_is_read_once_per_process(monkeypatch: pytest.MonkeyPatch):
-    _real_usd_per_cpu_hour.cache_clear()
-    try:
-        monkeypatch.setenv(_RATE_ENV, "0.5")
-        assert _real_usd_per_cpu_hour() == 0.5
-        monkeypatch.setenv(_RATE_ENV, "9.0")
-        assert _real_usd_per_cpu_hour() == 0.5  # cached: a change needs a restart
-    finally:
-        _real_usd_per_cpu_hour.cache_clear()
 
 
 # --- the clock ----------------------------------------------------------------------

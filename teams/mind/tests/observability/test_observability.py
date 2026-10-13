@@ -68,12 +68,22 @@ def test_record_call_keeps_every_field_it_is_given():
     assert (record.prompt_tokens, record.completion_tokens) == (900, 150)
 
 
-def test_the_log_line_says_unpriced_rather_than_a_zero_cost(caplog: pytest.LogCaptureFixture):
+def test_the_log_line_names_its_units_and_what_does_not_apply(caplog: pytest.LogCaptureFixture):
     with caplog.at_level(logging.INFO, logger="mind.observability"):
         record_call("whisper-base.en-int8-local", 3500.0, None, kind=CallKind.ASR, cpu_s=7.25)
 
     line = caplog.messages[-1]
-    assert "kind=asr" in line
-    assert "status=success" in line
-    assert "cpu_s=7.250" in line
-    assert "cost=unpriced" in line
+    assert "kind=asr status=success duration_ms=3500.0" in line
+    assert "cpu_seconds=7.250" in line
+    # Tokens and dollars are LLM measures: not applicable to ASR, not unknown.
+    assert "prompt_tokens=n/a completion_tokens=n/a cost_usd=n/a" in line
+
+
+def test_the_log_line_tells_unknown_from_not_applicable(caplog: pytest.LogCaptureFixture):
+    with caplog.at_level(logging.INFO, logger="mind.observability"):
+        record_call("deepseek-chat", 900.0, None, kind=CallKind.LLM)
+
+    line = caplog.messages[-1]
+    assert "cpu_seconds=n/a" in line  # CPU is an OCR/ASR measure
+    assert "prompt_tokens=unreported completion_tokens=unreported" in line
+    assert "cost_usd=unpriced" in line  # applies, but unknown -- not 0

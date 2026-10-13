@@ -7,9 +7,15 @@ runs; it just records what happened. That keeps it usable for the
 benchmarking work described in the team README (comparing local model
 sizes on speed vs. accuracy) as well as for production call sites.
 
+Cost has a different unit per kind (#479): the local models (OCR, ASR) cost
+CPU seconds -- MIND does not pay for its machine by the hour, so they have no
+dollar price -- and only LLM calls cost US dollars, at the provider's price
+per token. Every field and log key carries its unit, and a measure that does
+not apply to a kind is reported as not applicable, never as unknown or 0.
+
 Not the same thing as `mind.api.instrumentation.instrumented_call`: that
 times HTTP-level work (e.g. /health). Model calls are recorded here, not
-there, so one ledger holds all of them (#479).
+there, so one ledger holds all of them.
 """
 
 from __future__ import annotations
@@ -33,6 +39,8 @@ _MAX_IN_MEMORY_RECORDS = 10_000
 _MAX_DURATION_SAMPLES = 10_000  # per call name, for p50/p95
 _lock = threading.Lock()
 
+_NOT_APPLICABLE = "n/a"
+
 
 class CallKind(StrEnum):
     """Which stage of the pipeline made the call -- what a summary groups by."""
@@ -49,6 +57,20 @@ class CallStatus(StrEnum):
     ERROR = "error"
 
 
+def _cpu_applies(kind: CallKind | None) -> bool:
+    """CPU seconds are the compute cost of the local models: OCR and ASR.
+
+    A call recorded without a kind gets every measure -- nothing says which
+    of them it should have.
+    """
+    return kind is None or kind in (CallKind.OCR, CallKind.ASR)
+
+
+def _llm_measures_apply(kind: CallKind | None) -> bool:
+    """Token usage and a US-dollar cost apply to LLM calls only."""
+    return kind is None or kind == CallKind.LLM
+
+
 @dataclass(frozen=True)
 class ModelCallRecord:
     """One completed call to a model.
@@ -59,14 +81,14 @@ class ModelCallRecord:
 
     model_name: str
     duration_ms: float
-    # USD. None means *unpriced* (an unknown model, a provider that reported no
-    # usage, local compute with no rate yet) -- not free. A cost report has to
-    # be able to tell those two apart.
+    # US dollars, for LLM calls (the provider's price per token). None means
+    # unpriced -- an unknown model, or a provider that reported no usage --
+    # not free. OCR/ASR calls pass None: their cost is cpu_s, not dollars.
     cost: float | None
     kind: CallKind | None = None
     status: CallStatus = CallStatus.SUCCESS
-    # CPU time the call used, in seconds -- the compute-cost signal for local
-    # models (OCR, ASR). None when it was not measured.
+    # CPU seconds the call used -- the compute cost of the local models (OCR,
+    # ASR). None when it was not measured.
     cpu_s: float | None = None
     # As the provider reported them; None when it did not.
     prompt_tokens: int | None = None
@@ -86,15 +108,16 @@ def monitoring_settings() -> MonitoringSettings:
 def _limits(kind: CallKind | None) -> tuple[float | None, float | None]:
     """(duration limit in ms, cost limit in USD) for a kind; None means no check.
 
-    A call recorded without a kind has no limits: there is nothing to say what
-    "expected" is for it.
+    Only LLM calls have a cost limit: they are the only ones priced in
+    dollars. A call recorded without a kind has no limits: there is nothing
+    to say what "expected" is for it.
     """
     settings = monitoring_settings()
     match kind:
         case CallKind.OCR:
-            return settings.ocr_max_duration_ms, settings.ocr_max_cost_usd
+            return settings.ocr_max_duration_ms, None
         case CallKind.ASR:
-            return settings.asr_max_duration_ms, settings.asr_max_cost_usd
+            return settings.asr_max_duration_ms, None
         case CallKind.LLM:
             return settings.llm_max_duration_ms, settings.llm_max_cost_usd
     return None, None
@@ -153,7 +176,8 @@ def _warn_if_over(record: ModelCallRecord, check: LimitCheck) -> None:
         )
     if check.expensive and check.cost_limit_usd is not None and record.cost is not None:
         logger.warning(
-            "MODEL_CALL_EXPENSIVE model_name=%s kind=%s status=%s cost=%.6f limit_usd=%.6f over=%s",
+            "MODEL_CALL_EXPENSIVE model_name=%s kind=%s status=%s cost_usd=%.6f "
+            "limit_usd=%.6f over=%s",
             record.model_name,
             record.kind or "-",
             record.status,
@@ -184,21 +208,29 @@ class _Totals:
     The counters and sums are never evicted, so a total stays a total however
     many calls happen; only the duration sample behind p50/p95 is bounded --
     the same split as api/instrumentation.py's _Aggregator, for the same reason.
-    A value a call did not have (CPU not measured, usage not reported, cost
-    unpriced) is left out of its sum and counted as missing, never added as 0.
+
+    Each measure is tallied only over the calls it applies to (see
+    _cpu_applies / _llm_measures_apply): `*_applicable` counts those calls,
+    and of them a value the call did not have (CPU not measured, usage not
+    reported, cost unpriced) is left out of the sum and counted as missing,
+    never added as 0. A value passed for a measure that does not apply to the
+    call's kind is not counted at all.
     """
 
     kind: CallKind | None = None
     durations: deque[float] = field(default_factory=lambda: deque(maxlen=_MAX_DURATION_SAMPLES))
     call_count: int = 0
     error_count: int = 0
-    cpu_s: float = 0.0
+    cpu_applicable: int = 0
     cpu_measured: int = 0
+    cpu_seconds: float = 0.0
+    tokens_applicable: int = 0
+    tokens_reported: int = 0
     prompt_tokens: int = 0
     completion_tokens: int = 0
-    tokens_reported: int = 0
-    cost: float = 0.0
+    usd_applicable: int = 0
     priced: int = 0
+    cost_usd: float = 0.0
     slow: int = 0
     expensive: int = 0
 
@@ -209,18 +241,23 @@ class _Totals:
         self.call_count += 1
         if record.status == CallStatus.ERROR:
             self.error_count += 1
-        if record.cpu_s is not None:
-            self.cpu_s += record.cpu_s
-            self.cpu_measured += 1
-        # Usage counts as reported only when both halves are: providers report
-        # both or neither, and half a pair would skew the ratio between them.
-        if record.prompt_tokens is not None and record.completion_tokens is not None:
-            self.prompt_tokens += record.prompt_tokens
-            self.completion_tokens += record.completion_tokens
-            self.tokens_reported += 1
-        if record.cost is not None:
-            self.cost += record.cost
-            self.priced += 1
+        if _cpu_applies(record.kind):
+            self.cpu_applicable += 1
+            if record.cpu_s is not None:
+                self.cpu_seconds += record.cpu_s
+                self.cpu_measured += 1
+        if _llm_measures_apply(record.kind):
+            self.tokens_applicable += 1
+            # Usage counts as reported only when both halves are: providers
+            # report both or neither, and half a pair would skew the ratio.
+            if record.prompt_tokens is not None and record.completion_tokens is not None:
+                self.prompt_tokens += record.prompt_tokens
+                self.completion_tokens += record.completion_tokens
+                self.tokens_reported += 1
+            self.usd_applicable += 1
+            if record.cost is not None:
+                self.cost_usd += record.cost
+                self.priced += 1
         # The same LimitCheck the WARNING lines read (see check_limits).
         if check.slow:
             self.slow += 1
@@ -235,10 +272,18 @@ _total_calls = 0
 class CallNameSummary(BaseModel):
     """Every call recorded under one name since the process started.
 
-    A total over values some calls did not have is the total of the ones they
-    did; the matching *_count says how many calls it leaves out, and the total
-    is None when it leaves out all of them -- unknown, never 0. So
-    cost_total_usd with unpriced_count > 0 is a lower bound.
+    Units are in the names: CPU in seconds, cost in US dollars, durations in
+    milliseconds. CPU seconds apply to OCR/ASR calls; tokens and dollars to
+    LLM calls.
+
+    For each measure, its *_count tells the two kinds of null apart:
+
+    * count None -- the measure does not apply to this kind (an OCR call has
+      no dollar cost); its total is None too.
+    * count a number -- it applies, and that many calls lacked it (CPU not
+      measured, usage not reported, model unpriced). The total covers the
+      rest, so a cost_usd_total with unpriced_count > 0 is a lower bound, and
+      it is None when every call lacked it -- unknown, never 0.
     """
 
     call_name: str
@@ -247,13 +292,13 @@ class CallNameSummary(BaseModel):
     error_count: int
     p50_duration_ms: float
     p95_duration_ms: float
-    cpu_s_total: float | None
-    cpu_unmeasured_count: int
+    cpu_seconds_total: float | None
+    cpu_unmeasured_count: int | None
     prompt_tokens_total: int | None
     completion_tokens_total: int | None
-    tokens_unreported_count: int
-    cost_total_usd: float | None
-    unpriced_count: int
+    tokens_unreported_count: int | None
+    cost_usd_total: float | None
+    unpriced_count: int | None
     # The limits in force for this kind (None: no check), and how many calls crossed them.
     duration_limit_ms: float | None
     slow_count: int
@@ -271,6 +316,9 @@ class ModelCallSummary(BaseModel):
 def _summarize(name: str, totals: _Totals) -> CallNameSummary:
     durations = sorted(totals.durations)
     duration_limit_ms, cost_limit_usd = _limits(totals.kind)
+    cpu_applies = totals.cpu_applicable > 0
+    tokens_apply = totals.tokens_applicable > 0
+    usd_applies = totals.usd_applicable > 0
     return CallNameSummary(
         call_name=name,
         kind=totals.kind,
@@ -278,13 +326,15 @@ def _summarize(name: str, totals: _Totals) -> CallNameSummary:
         error_count=totals.error_count,
         p50_duration_ms=round(percentile(durations, 50), 3),
         p95_duration_ms=round(percentile(durations, 95), 3),
-        cpu_s_total=round(totals.cpu_s, 3) if totals.cpu_measured else None,
-        cpu_unmeasured_count=totals.call_count - totals.cpu_measured,
+        cpu_seconds_total=round(totals.cpu_seconds, 3) if totals.cpu_measured else None,
+        cpu_unmeasured_count=(totals.cpu_applicable - totals.cpu_measured if cpu_applies else None),
         prompt_tokens_total=totals.prompt_tokens if totals.tokens_reported else None,
         completion_tokens_total=totals.completion_tokens if totals.tokens_reported else None,
-        tokens_unreported_count=totals.call_count - totals.tokens_reported,
-        cost_total_usd=totals.cost if totals.priced else None,
-        unpriced_count=totals.call_count - totals.priced,
+        tokens_unreported_count=(
+            totals.tokens_applicable - totals.tokens_reported if tokens_apply else None
+        ),
+        cost_usd_total=totals.cost_usd if totals.priced else None,
+        unpriced_count=totals.usd_applicable - totals.priced if usd_applies else None,
         duration_limit_ms=duration_limit_ms,
         slow_count=totals.slow,
         cost_limit_usd=cost_limit_usd,
@@ -305,8 +355,15 @@ def model_call_summary() -> ModelCallSummary:
     return ModelCallSummary(total_calls=total_calls, by_call_name=rows)
 
 
-def _or(value: float | None, missing: str, spec: str = "") -> str:
+def _shown(value: float | None, applies: bool, missing: str, spec: str = "") -> str:
+    """A log value: "n/a" if the measure does not apply, `missing` if it is unknown."""
+    if not applies:
+        return _NOT_APPLICABLE
     return missing if value is None else format(value, spec)
+
+
+def _count(value: int | None) -> str:
+    return _NOT_APPLICABLE if value is None else str(value)
 
 
 def log_summary() -> ModelCallSummary:
@@ -320,21 +377,26 @@ def log_summary() -> ModelCallSummary:
     for row in summary.by_call_name:
         logger.info(
             "model_call_summary call_name=%s kind=%s calls=%d errors=%d p50_ms=%.1f "
-            "p95_ms=%.1f cpu_s=%s cpu_unmeasured=%d prompt_tokens=%s completion_tokens=%s "
-            "tokens_unreported=%d cost=%s unpriced=%d slow=%d expensive=%d",
+            "p95_ms=%.1f cpu_seconds=%s cpu_unmeasured=%s prompt_tokens=%s "
+            "completion_tokens=%s tokens_unreported=%s cost_usd=%s unpriced=%s slow=%d "
+            "expensive=%d",
             row.call_name,
             row.kind or "-",
             row.call_count,
             row.error_count,
             row.p50_duration_ms,
             row.p95_duration_ms,
-            _or(row.cpu_s_total, "unmeasured", ".3f"),
-            row.cpu_unmeasured_count,
-            _or(row.prompt_tokens_total, "unreported"),
-            _or(row.completion_tokens_total, "unreported"),
-            row.tokens_unreported_count,
-            _or(row.cost_total_usd, "unpriced", ".6f"),
-            row.unpriced_count,
+            _shown(
+                row.cpu_seconds_total, row.cpu_unmeasured_count is not None, "unmeasured", ".3f"
+            ),
+            _count(row.cpu_unmeasured_count),
+            _shown(row.prompt_tokens_total, row.tokens_unreported_count is not None, "unreported"),
+            _shown(
+                row.completion_tokens_total, row.tokens_unreported_count is not None, "unreported"
+            ),
+            _count(row.tokens_unreported_count),
+            _shown(row.cost_usd_total, row.unpriced_count is not None, "unpriced", ".6f"),
+            _count(row.unpriced_count),
             row.slow_count,
             row.expensive_count,
         )
@@ -361,13 +423,15 @@ def record_call(
             apart -- this is what the benchmarking work in benchmarks/
             will read.
         duration_ms: Wall-clock time the call took, in milliseconds.
-        cost: Cost of the call in USD, or None if it cannot be priced.
-            Pass None rather than 0.0 for "unknown" -- and record the call
-            either way: every model call must be recorded.
-        kind: OCR, ASR or LLM.
+        cost: Cost of an LLM call in US dollars, or None if it cannot be
+            priced -- pass None rather than 0.0 for "unknown". OCR/ASR calls
+            pass None: their cost is `cpu_s`. Record the call either way:
+            every model call must be recorded.
+        kind: OCR, ASR or LLM -- also decides which measures apply (CPU
+            seconds for OCR/ASR; tokens and dollars for LLM).
         status: ERROR if the call raised, so failed calls -- often the
             slowest ones -- stay in the latency figures.
-        cpu_s: CPU seconds the call used, if measured.
+        cpu_s: CPU seconds the call used, if measured (OCR/ASR).
         prompt_tokens, completion_tokens: Token usage, for LLM calls whose
             provider reports it.
 
@@ -400,17 +464,19 @@ def record_call(
         _total_calls += 1
         every_n = monitoring_settings().summary_every_n_calls
         summary_due = every_n > 0 and _total_calls % every_n == 0
+    cpu_applies = _cpu_applies(record.kind)
+    llm_applies = _llm_measures_apply(record.kind)
     logger.info(
-        "model_call model_name=%s kind=%s status=%s duration_ms=%.1f cpu_s=%s "
-        "prompt_tokens=%s completion_tokens=%s cost=%s",
+        "model_call model_name=%s kind=%s status=%s duration_ms=%.1f cpu_seconds=%s "
+        "prompt_tokens=%s completion_tokens=%s cost_usd=%s",
         record.model_name,
         record.kind or "-",
         record.status,
         record.duration_ms,
-        "-" if record.cpu_s is None else f"{record.cpu_s:.3f}",
-        "-" if record.prompt_tokens is None else record.prompt_tokens,
-        "-" if record.completion_tokens is None else record.completion_tokens,
-        "unpriced" if record.cost is None else f"{record.cost:.6f}",
+        _shown(record.cpu_s, cpu_applies, "unmeasured", ".3f"),
+        _shown(record.prompt_tokens, llm_applies, "unreported"),
+        _shown(record.completion_tokens, llm_applies, "unreported"),
+        _shown(record.cost, llm_applies, "unpriced", ".6f"),
     )
     _warn_if_over(record, check)
     if summary_due:

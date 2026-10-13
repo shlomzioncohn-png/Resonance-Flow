@@ -55,8 +55,10 @@ call exists (extraction starts week 4):
   not a persistent metrics store, resets on process restart.
 - `GET /debug/model-calls` — the model-call summary (#479): every OCR / ASR /
   LLM call recorded through `record_call()`, per call name — count, errors,
-  p50/p95 latency, CPU, tokens, cost, and slow / expensive limit crossings.
-  Unknown totals are `null`, never 0; see `observability/README.md`.
+  p50/p95 latency, CPU seconds (OCR/ASR), tokens and US dollars (LLM), and
+  slow / expensive limit crossings. A measure that doesn't apply to a kind
+  has a `null` total and a `null` count; an unknown one a `null` total and a
+  count of the calls that lacked it — never 0. See `observability/README.md`.
 
 `/health` is wrapped too, purely to prove the mechanism end-to-end — a
 health check isn't a model call.
@@ -64,5 +66,5 @@ health check isn't a model call.
 Not the same thing as `observability/tracking.py`'s `record_call()`,
 the one ledger every model call goes through (#479): it records what a
 model call has and an HTTP handler does not — kind (OCR/ASR/LLM), CPU
-time, token usage, and a cost that can be *unpriced* rather than a
-misleading 0.0.
+seconds for local models, token usage and a dollar cost for LLM calls —
+one that can be *unpriced* rather than a misleading 0.0.

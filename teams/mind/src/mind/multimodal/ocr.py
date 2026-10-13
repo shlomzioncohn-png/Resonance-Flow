@@ -42,7 +42,7 @@ from pydantic import BaseModel, Field, computed_field
 
 from mind.multimodal.failures import FailureCategory
 from mind.multimodal.result import MediaTextResult
-from mind.observability.compute import CpuClock, compute_cost
+from mind.observability.compute import CpuClock
 from mind.observability.tracking import CallKind, CallStatus, record_call
 
 logger = logging.getLogger(__name__)
@@ -417,14 +417,14 @@ def _extract(content: bytes, filename: str, max_pages: int) -> OCRResult:
         # else -- e.g. a bug while parsing the output -- is not caught here.
         return _failure(OCRFailureReason.OCR_FAILED, f"tesseract failed: {exc}")
     finally:
-        cpu_s = cpu.elapsed_s()
+        # A local model's cost is its CPU seconds, not dollars (#479).
         record_call(
             OCR_MODEL_NAME,
             (time.perf_counter() - start) * 1000,
-            cost=compute_cost(cpu_s),
+            cost=None,
             kind=CallKind.OCR,
             status=status,
-            cpu_s=cpu_s,
+            cpu_s=cpu.elapsed_s(),
         )
 
     pages = [page.text for page in parsed]

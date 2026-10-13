@@ -41,23 +41,11 @@ os.environ.setdefault("MIND_ENVIRONMENT", "ci")
 
 
 @pytest.fixture(autouse=True)
-def _no_compute_cost_rate(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Pin MIND_COMPUTE_COST__USD_PER_CPU_HOUR to unset for every test.
-
-    A rate in a developer's .env (loaded above) must not change what a test
-    expects an OCR/ASR call to cost. A test that needs a rate sets one itself.
-    """
-    from mind.observability import compute
-
-    monkeypatch.setattr(compute, "usd_per_cpu_hour", lambda: None)
-
-
-@pytest.fixture(autouse=True)
 def _default_monitoring_limits(monkeypatch: pytest.MonkeyPatch) -> None:
     """Pin the slow/expensive limits and summary interval to their defaults.
 
-    Same reason as above: MIND_MONITORING__* in a developer's .env must not
-    change what a test expects. A test that needs other limits sets them itself.
+    MIND_MONITORING__* in a developer's .env (loaded above) must not change
+    what a test expects. A test that needs other limits sets them itself.
     """
     from mind.config import MonitoringSettings
     from mind.observability import tracking

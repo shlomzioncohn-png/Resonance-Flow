@@ -42,7 +42,7 @@ from pydantic import BaseModel, Field, computed_field
 from mind.config import ASRSettings
 from mind.multimodal.failures import FailureCategory
 from mind.multimodal.result import MediaTextResult
-from mind.observability.compute import CpuClock, compute_cost
+from mind.observability.compute import CpuClock
 from mind.observability.tracking import CallKind, CallStatus, record_call
 
 if TYPE_CHECKING:
@@ -678,10 +678,10 @@ def transcribe(
 
     Every call whose audio decodes is recorded through
     ``observability.record_call()`` -- the latency and CPU time of the VAD and
-    Whisper stage, and ``status=ERROR`` if Whisper raised; the cost is that CPU
-    time at MIND_COMPUTE_COST__USD_PER_CPU_HOUR, or None (unpriced) when no rate
-    is set (#479) -- whether it succeeded or not, and even when the VAD found no
-    speech for Whisper to run on.
+    Whisper stage, and ``status=ERROR`` if Whisper raised -- the CPU seconds are
+    the call's compute cost; a local model has no dollar price (#479) -- whether
+    it succeeded or not, and even when the VAD found no speech for Whisper to run
+    on.
     """
     if max_duration_s <= 0:
         raise ValueError(f"max_duration_s must be more than 0, got {max_duration_s}")
@@ -759,13 +759,9 @@ def _transcribe(content: bytes, filename: str, max_duration_s: float) -> ASRResu
     finally:
         duration_ms = (time.perf_counter() - start) * 1000
         cpu_s = cpu.elapsed_s()
+        # A local model's cost is its CPU seconds, not dollars (#479).
         record_call(
-            model_name,
-            duration_ms,
-            cost=compute_cost(cpu_s),
-            kind=CallKind.ASR,
-            status=status,
-            cpu_s=cpu_s,
+            model_name, duration_ms, cost=None, kind=CallKind.ASR, status=status, cpu_s=cpu_s
         )
         audio_s = len(audio) / SAMPLE_RATE
         logger.info(

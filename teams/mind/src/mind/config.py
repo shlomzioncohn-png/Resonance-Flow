@@ -57,22 +57,6 @@ class ASRSettings(BaseSettings):
         return Path(self.model_cache_dir) / "whisper" / self.whisper_model
 
 
-class ComputeCostSettings(BaseSettings):
-    """Standalone, like ASRSettings -- recording a model call's cost needs no DSN.
-
-    The price of one CPU-hour, which turns a local model call's measured CPU
-    seconds into an estimated USD cost (see observability/compute.py). Unset by
-    default: with no rate on file, a local call's cost is recorded as None
-    (unpriced) rather than a made-up number.
-    """
-
-    model_config = SettingsConfigDict(
-        env_prefix="MIND_COMPUTE_COST__", env_file=_ENV_FILE, extra="ignore"
-    )
-
-    usd_per_cpu_hour: float | None = Field(default=None, ge=0)
-
-
 class MonitoringSettings(BaseSettings):
     """Standalone -- recording a model call needs no DSN.
 
@@ -87,7 +71,10 @@ class MonitoringSettings(BaseSettings):
       recording ASR decodes (MAX_DURATION_S = 600 s).
     * LLM 30 s: half the provider deadline (60 s, extraction/providers).
     * LLM $0.01: several times a DeepSeek extraction of a few thousand tokens.
-      OCR/ASR have no cost check by default: their cost needs a CPU rate first.
+
+    Only LLM calls have a cost limit: they are the only calls priced in
+    dollars. OCR/ASR cost CPU seconds, and a CPU-seconds limit waits for a
+    measured baseline (#479).
     """
 
     # "none" in the env turns a check off (an empty value would not parse).
@@ -101,8 +88,6 @@ class MonitoringSettings(BaseSettings):
     ocr_max_duration_ms: float | None = Field(default=30_000, gt=0)
     asr_max_duration_ms: float | None = Field(default=120_000, gt=0)
     llm_max_duration_ms: float | None = Field(default=30_000, gt=0)
-    ocr_max_cost_usd: float | None = Field(default=None, ge=0)
-    asr_max_cost_usd: float | None = Field(default=None, ge=0)
     llm_max_cost_usd: float | None = Field(default=0.01, ge=0)
     # Log the summary every this many model calls; 0 turns it off.
     summary_every_n_calls: int = Field(default=100, ge=0)

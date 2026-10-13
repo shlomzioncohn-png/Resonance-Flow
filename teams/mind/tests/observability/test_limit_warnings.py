@@ -81,7 +81,7 @@ def test_a_call_over_its_cost_limit_warns_once(warnings_logged):
     record_call("deepseek-chat", 100.0, 0.025, kind=CallKind.LLM)
     [line] = warned(warnings_logged, "MODEL_CALL_EXPENSIVE")
     assert "model_name=deepseek-chat kind=llm" in line
-    assert "cost=0.025000 limit_usd=0.010000 over=2.5x" in line
+    assert "cost_usd=0.025000 limit_usd=0.010000 over=2.5x" in line
     assert warned(warnings_logged, "MODEL_CALL_SLOW") == []
 
 
@@ -96,7 +96,7 @@ def test_an_unpriced_call_is_never_expensive(warnings_logged):
     assert warned(warnings_logged, "MODEL_CALL_EXPENSIVE") == []
     assert check_limits(tracking.get_recent_calls()[0]).expensive is False
     [row] = model_call_summary().by_call_name
-    assert (row.expensive_count, row.unpriced_count, row.cost_total_usd) == (0, 1, None)
+    assert (row.expensive_count, row.unpriced_count, row.cost_usd_total) == (0, 1, None)
 
 
 def test_a_zero_cost_limit_flags_any_positive_cost_but_not_a_free_call(
@@ -145,7 +145,7 @@ def test_every_warning_has_its_count_in_the_summary_and_no_more(warnings_logged)
         ("tesseract", CallKind.OCR, 31_000.0, None, CallStatus.SUCCESS),  # slow
         ("tesseract", CallKind.OCR, 90_000.0, None, CallStatus.ERROR),  # slow
         ("whisper", CallKind.ASR, 119_000.0, None, CallStatus.SUCCESS),
-        ("whisper", CallKind.ASR, 121_000.0, 5.0, CallStatus.SUCCESS),  # slow; no ASR cost limit
+        ("whisper", CallKind.ASR, 121_000.0, None, CallStatus.SUCCESS),  # slow; no cost limit
         ("deepseek-chat", CallKind.LLM, 1_000.0, 0.002, CallStatus.SUCCESS),
         ("deepseek-chat", CallKind.LLM, 1_000.0, 0.05, CallStatus.SUCCESS),  # expensive
         ("deepseek-chat", CallKind.LLM, 45_000.0, 0.03, CallStatus.SUCCESS),  # both
