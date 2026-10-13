@@ -10,6 +10,7 @@ import com.rnd.chain.exception.DuplicateDependencyException;
 import com.rnd.chain.exception.InvalidDependencyException;
 import com.rnd.chain.exception.TaskNotFoundException;
 import com.rnd.chain.repository.ConstraintRepository;
+import com.rnd.chain.repository.GraphLock;
 import com.rnd.chain.repository.TaskDependencyRepository;
 import com.rnd.chain.repository.TaskRepository;
 
@@ -35,14 +36,12 @@ import java.util.function.UnaryOperator;
 import java.util.concurrent.atomic.AtomicReference;
 
 /**
- * See CLAUDE.md "Open items" for the locking rationale: dependencyGraphLock guards the
- * dependency edges plus any DONE-status read that decides whether an edge currently counts
- * against blockingCount. Per-task field mutations (blockingCount, openConstraintCount, status,
- * isReady) no longer need a hand-rolled per-task lock - {@link TaskRepository#update} already
- * performs an atomic per-id read-modify-write, so a single Task's fields can never be lost to a
- * race the way a separate findById/mutate/save pair could. dependencyGraphLock is still required
- * for decisions that span more than one Task/edge at once (cycle detection, and reading a
- * dependency's DONE status together with creating/removing the edge to it).
+ * Graph-mutating methods run inside {@link GraphLock#runExclusive}: a Postgres transaction-scoped
+ * advisory lock (one constant key for the whole graph), taken first in the transaction, before any
+ * row lock, and held until commit/rollback - so the next writer sees committed state. It serializes
+ * the multi-row cycle-detection DFS and the edge-write-plus-DONE-status-read decisions; single-task
+ * counters are still protected by {@link TaskRepository#update}'s row lock. Known limit: one key
+ * means all graph writes queue, across every project.
  *
  * <p>{@code @Transactional} on the methods below now provides real atomicity and rollback -
  * {@link #onTaskStatusChanged} holds a row lock on the changed task and every one of its
@@ -58,15 +57,16 @@ public class TaskEligibilityService {
     private final TaskDependencyRepository taskDependencyRepository;
     private final SchedulingUpdateService schedulingUpdateService;
     private final ConstraintRepository constraintRepository;
-
-    private final Object dependencyGraphLock = new Object();
+    private final GraphLock graphLock;
 
     public TaskEligibilityService(
+            GraphLock graphLock,
             TaskRepository taskRepository,
             TaskDependencyRepository taskDependencyRepository,
             SchedulingUpdateService schedulingUpdateService,
             ConstraintRepository constraintRepository) {
 
+        this.graphLock = graphLock;
         this.taskRepository = taskRepository;
         this.taskDependencyRepository = taskDependencyRepository;
         this.schedulingUpdateService = schedulingUpdateService;
@@ -177,6 +177,7 @@ public class TaskEligibilityService {
                         task.getOpenConstraintCount()));
     }
 
+    @Transactional
     public TaskDependency addDependency(
             UUID taskId,
             UUID dependsOnTaskId) {
@@ -189,7 +190,7 @@ public class TaskEligibilityService {
                 dependsOnTaskId,
                 "dependsOnTaskId must not be null");
 
-        synchronized (dependencyGraphLock) {
+        return graphLock.runExclusive(() -> {
 
             // Checked before the cycle check and the task lookups: a duplicate must not require
             // either task to still exist, and an existing edge cannot be introducing a new cycle.
@@ -234,7 +235,7 @@ public class TaskEligibilityService {
                     1);
 
             return dependency;
-        }
+        });
     }
 
     private record PendingEdge(UUID dependsOnTaskId, boolean isNewEdge, boolean dependsOnAlreadyDone) {
@@ -276,7 +277,7 @@ public class TaskEligibilityService {
      *
      * <p>Validating up front is safe because {@link #wouldCreateCycle} only traverses edges that
      * already exist before this call, and every same-batch edge starts at {@code taskId}. The whole
-     * batch runs under one {@code dependencyGraphLock} acquisition, so no concurrent writer can
+     * batch runs under one graph-lock acquisition, so no concurrent writer can
      * invalidate a validated entry before it is applied.
      */
     @Transactional
@@ -289,7 +290,7 @@ public class TaskEligibilityService {
                 .toList();
         log.info("Adding {} distinct dependency(ies) for task {}", distinctIds.size(), taskId);
 
-        synchronized (dependencyGraphLock) {
+        graphLock.runExclusive(() -> {
             List<PendingEdge> validated = new ArrayList<>(distinctIds.size());
             for (UUID dependsOnTaskId : distinctIds) {
                 validated.add(validateEdge(taskId, dependsOnTaskId));
@@ -297,9 +298,10 @@ public class TaskEligibilityService {
             for (PendingEdge edge : validated) {
                 applyEdge(taskId, edge);
             }
-        }
+        });
     }
 
+    @Transactional
     public void removeDependency(
             UUID taskId,
             UUID dependsOnTaskId) {
@@ -312,7 +314,7 @@ public class TaskEligibilityService {
                 dependsOnTaskId,
                 "dependsOnTaskId must not be null");
 
-        synchronized (dependencyGraphLock) {
+        graphLock.runExclusive(() -> {
 
             requireTask(taskId);
 
@@ -337,7 +339,7 @@ public class TaskEligibilityService {
                     taskId,
                     dependencyCurrentlyDone,
                     -1);
-        }
+        });
     }
 
     private void adjustBlockingCount(
@@ -379,7 +381,7 @@ public class TaskEligibilityService {
                 continue;
             }
 
-            // Under dependencyGraphLock, so the repository's own read lock is redundant here.
+            // Under the graph lock, so the repository's own read lock is redundant here.
             for (TaskDependency dependency :
                     taskDependencyRepository.findByTaskIdUnderExternalLock(current)) {
 
@@ -391,6 +393,7 @@ public class TaskEligibilityService {
         return false;
     }
 
+    @Transactional
     public void onTaskStatusChanged(
             UUID taskId,
             TaskStatus newStatus) {
@@ -403,7 +406,7 @@ public class TaskEligibilityService {
                 newStatus,
                 "newStatus must not be null");
 
-        synchronized (dependencyGraphLock) {
+        graphLock.runExclusive(() -> {
 
             AtomicReference<Task> previous =
                     new AtomicReference<>();
@@ -437,14 +440,14 @@ public class TaskEligibilityService {
                         taskId,
                         1);
             }
-        }
+        });
     }
 
     /**
      * Same status-change effect as {@link #onTaskStatusChanged}, but for a producer (task.updated)
      * whose events carry no id and must be ordered by the {@code updatedAt} on the event itself.
      * The staleness check, status write, and {@code updatedAt} stamp all happen inside one
-     * {@code dependencyGraphLock} critical section, so a redelivered or out-of-order event cannot
+     * graph-lock critical section, so a redelivered or out-of-order event cannot
      * interleave between them (PR #467 review).
      *
      * @throws TaskNotFoundException if no task with {@code taskId} exists
@@ -455,7 +458,7 @@ public class TaskEligibilityService {
         Objects.requireNonNull(newStatus, "newStatus must not be null");
         Objects.requireNonNull(eventUpdatedAt, "eventUpdatedAt must not be null");
 
-        synchronized (dependencyGraphLock) {
+        graphLock.runExclusive(() -> {
             Task current = requireTask(taskId);
             if (current.getUpdatedAt() != null && !eventUpdatedAt.isAfter(current.getUpdatedAt())) {
                 log.debug("Task {} status update ignored: event updatedAt {} is not newer than stored {}",
@@ -473,7 +476,7 @@ public class TaskEligibilityService {
             } else if (previousStatus == TaskStatus.DONE && newStatus != TaskStatus.DONE) {
                 adjustDependentsBlockingCount(taskId, 1);
             }
-        }
+        });
     }
 
     /**
@@ -487,7 +490,7 @@ public class TaskEligibilityService {
         Objects.requireNonNull(taskId, "taskId must not be null");
         Objects.requireNonNull(kafkaTimestamp, "kafkaTimestamp must not be null");
 
-        synchronized (dependencyGraphLock) {
+        graphLock.runExclusive(() -> {
             Task current = requireTask(taskId);
             if (current.getStatus() == TaskStatus.DONE) {
                 return;
@@ -502,7 +505,7 @@ public class TaskEligibilityService {
             requireUpdated(taskRepository.update(taskId, task ->
                     copyOf(task).status(TaskStatus.DONE).build()), taskId);
             adjustDependentsBlockingCount(taskId, -1);
-        }
+        });
     }
 
     private void adjustDependentsBlockingCount(

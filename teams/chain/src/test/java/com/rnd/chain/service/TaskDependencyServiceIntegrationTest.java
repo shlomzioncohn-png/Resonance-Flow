@@ -1,5 +1,7 @@
 package com.rnd.chain.service;
 
+import com.rnd.chain.repository.InMemoryGraphLock;
+
 import com.rnd.chain.dto.Task;
 import com.rnd.chain.dto.TaskDependency;
 import com.rnd.chain.dto.TaskStatus;
@@ -66,8 +68,7 @@ class TaskDependencyServiceIntegrationTest {
                         schedulingPublisher);
 
         TaskEligibilityService taskEligibilityService =
-                new TaskEligibilityService(
-                        taskRepository,
+                new TaskEligibilityService(new InMemoryGraphLock(), taskRepository,
                         dependencyRepository,
                         schedulingUpdateService,
                         new InMemoryConstraintRepository());

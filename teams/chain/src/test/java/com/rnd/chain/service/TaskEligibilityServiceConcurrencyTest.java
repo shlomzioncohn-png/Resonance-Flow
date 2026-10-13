@@ -1,5 +1,6 @@
 package com.rnd.chain.service;
 
+import com.rnd.chain.repository.InMemoryGraphLock;
 import com.rnd.chain.dto.Task;
 import com.rnd.chain.dto.TaskStatus;
 import com.rnd.chain.dto.TaskTestFixtures;
@@ -71,8 +72,7 @@ class TaskEligibilityServiceConcurrencyTest {
 
         InMemoryTaskRepository taskRepository = new InMemoryTaskRepository(allTasks);
         InMemoryTaskDependencyRepository dependencyRepository = new InMemoryTaskDependencyRepository(List.of());
-        TaskEligibilityService service = new TaskEligibilityService(
-                taskRepository, dependencyRepository, new SchedulingUpdateService(event -> {}),
+        TaskEligibilityService service = new TaskEligibilityService(new InMemoryGraphLock(), taskRepository, dependencyRepository, new SchedulingUpdateService(event -> {}),
                 new InMemoryConstraintRepository());
 
         List<Runnable> jobs = blockerIds.stream()
@@ -99,8 +99,7 @@ class TaskEligibilityServiceConcurrencyTest {
 
         InMemoryTaskRepository taskRepository = new InMemoryTaskRepository(allTasks);
         InMemoryTaskDependencyRepository dependencyRepository = new InMemoryTaskDependencyRepository(List.of());
-        TaskEligibilityService service = new TaskEligibilityService(
-                taskRepository, dependencyRepository, new SchedulingUpdateService(event -> {}),
+        TaskEligibilityService service = new TaskEligibilityService(new InMemoryGraphLock(), taskRepository, dependencyRepository, new SchedulingUpdateService(event -> {}),
                 new InMemoryConstraintRepository());
 
         for (UUID blockerId : blockerIds) {
@@ -127,7 +126,7 @@ class TaskEligibilityServiceConcurrencyTest {
      *
      * <p>The race: {@code addDependency(dependent, target)} and
      * {@code onTaskStatusChanged(target, DONE)} both read the target's DONE status under
-     * {@code dependencyGraphLock} before deciding whether the new edge counts against
+     * the graph lock before deciding whether the new edge counts against
      * {@code blockingCount} - see the comments in both methods. Run many times (not just once)
      * because a lock-ordering bug here would only reproduce on some interleavings, and a single
      * pass could pass by luck even with the bug present.
@@ -147,8 +146,7 @@ class TaskEligibilityServiceConcurrencyTest {
             InMemoryTaskRepository taskRepository = new InMemoryTaskRepository(
                     List.of(TaskTestFixtures.defaultTask(dependentId).build(), TaskTestFixtures.defaultTask(targetId).build()));
             InMemoryTaskDependencyRepository dependencyRepository = new InMemoryTaskDependencyRepository(List.of());
-            TaskEligibilityService service = new TaskEligibilityService(
-                    taskRepository, dependencyRepository, new SchedulingUpdateService(event -> {}),
+            TaskEligibilityService service = new TaskEligibilityService(new InMemoryGraphLock(), taskRepository, dependencyRepository, new SchedulingUpdateService(event -> {}),
                     new InMemoryConstraintRepository());
 
             List<Runnable> jobs = List.of(

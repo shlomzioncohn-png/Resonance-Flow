@@ -1,5 +1,7 @@
 package com.rnd.chain.events;
 
+import com.rnd.chain.repository.InMemoryGraphLock;
+
 import com.rnd.chain.dto.Task;
 import com.rnd.chain.dto.TaskDependency;
 import com.rnd.chain.dto.TaskStatus;
@@ -50,7 +52,7 @@ class TaskCompletedEventHandlerTest {
 
     private static Fixture newFixture(List<Task> tasks, List<TaskDependency> edges) {
         InMemoryTaskRepository taskRepo = new InMemoryTaskRepository(tasks);
-        TaskEligibilityService service = new TaskEligibilityService(taskRepo,
+        TaskEligibilityService service = new TaskEligibilityService(new InMemoryGraphLock(), taskRepo,
                 new InMemoryTaskDependencyRepository(edges), mock(SchedulingUpdateService.class),
                 new InMemoryConstraintRepository());
         ChainEventProcessingTemplate template = new ChainEventProcessingTemplate(new InMemoryProcessedEventStore());

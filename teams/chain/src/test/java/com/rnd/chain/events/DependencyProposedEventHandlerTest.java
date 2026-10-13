@@ -1,5 +1,7 @@
 package com.rnd.chain.events;
 
+import com.rnd.chain.repository.InMemoryGraphLock;
+
 import com.rnd.chain.dto.Task;
 import com.rnd.chain.dto.TaskDependency;
 import com.rnd.chain.dto.TaskStatus;
@@ -62,8 +64,7 @@ class DependencyProposedEventHandlerTest {
                         existingDependencies);
 
         TaskEligibilityService eligibilityService =
-                new TaskEligibilityService(
-                        taskRepo,
+                new TaskEligibilityService(new InMemoryGraphLock(), taskRepo,
                         dependencyRepo,
                         mock(SchedulingUpdateService.class),
                         new InMemoryConstraintRepository());

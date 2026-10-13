@@ -1,5 +1,7 @@
 package com.rnd.chain.events;
 
+import com.rnd.chain.repository.InMemoryGraphLock;
+
 import com.google.protobuf.Timestamp;
 import com.rnd.chain.dto.Task;
 import com.rnd.chain.dto.TaskDependency;
@@ -49,7 +51,7 @@ class TaskUpdatedEventHandlerTest {
     private static Fixture newFixture(List<Task> tasks, List<TaskDependency> edges) {
         InMemoryTaskRepository taskRepo = new InMemoryTaskRepository(tasks);
         InMemoryTaskDependencyRepository dependencyRepo = new InMemoryTaskDependencyRepository(edges);
-        TaskEligibilityService eligibilityService = new TaskEligibilityService(taskRepo, dependencyRepo,
+        TaskEligibilityService eligibilityService = new TaskEligibilityService(new InMemoryGraphLock(), taskRepo, dependencyRepo,
                 mock(SchedulingUpdateService.class), new InMemoryConstraintRepository());
         ChainEventProcessingTemplate template = new ChainEventProcessingTemplate(new InMemoryProcessedEventStore());
         return new Fixture(taskRepo, new TaskUpdatedEventHandler(eligibilityService, template));

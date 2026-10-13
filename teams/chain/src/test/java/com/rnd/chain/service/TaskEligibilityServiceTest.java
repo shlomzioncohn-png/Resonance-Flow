@@ -1,5 +1,7 @@
 package com.rnd.chain.service;
 
+import com.rnd.chain.repository.InMemoryGraphLock;
+
 import com.rnd.chain.dto.Constraint;
 import com.rnd.chain.dto.Task;
 import com.rnd.chain.dto.TaskDependency;
@@ -54,8 +56,7 @@ class TaskEligibilityServiceTest {
                 new InMemoryConstraintRepository();
 
         service =
-                new TaskEligibilityService(
-                        taskRepository,
+                new TaskEligibilityService(new InMemoryGraphLock(), taskRepository,
                         dependencyRepository,
                         schedulingUpdateService,
                         constraintRepository);
@@ -650,7 +651,7 @@ class TaskEligibilityServiceTest {
         InMemoryTaskRepository taskRepo = new InMemoryTaskRepository(tasks);
         InMemoryTaskDependencyRepository dependencyRepo = new InMemoryTaskDependencyRepository(edges);
         InMemoryConstraintRepository constraintRepo = new InMemoryConstraintRepository();
-        return new Fixture(taskRepo, dependencyRepo, constraintRepo, new TaskEligibilityService(taskRepo,
+        return new Fixture(taskRepo, dependencyRepo, constraintRepo, new TaskEligibilityService(new InMemoryGraphLock(), taskRepo,
                 dependencyRepo, new SchedulingUpdateService(event -> {}), constraintRepo));
     }
 

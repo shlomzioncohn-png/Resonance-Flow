@@ -1,5 +1,7 @@
 package com.rnd.chain.service;
 
+import com.rnd.chain.repository.InMemoryGraphLock;
+
 import com.rnd.chain.dto.DependencyChangeAction;
 import com.rnd.chain.dto.DependencyChangeSource;
 import com.rnd.chain.dto.DependencyHistoryEntry;
@@ -75,8 +77,7 @@ class TaskDependencyServiceTest {
         taskDependencyRepository = new InMemoryTaskDependencyRepository(List.of());
         historyRepository = new InMemoryDependencyHistoryRepository();
         transactionRunner = new InMemoryTransactionRunner();
-        taskEligibilityService = new TaskEligibilityService(
-                taskRepository, taskDependencyRepository, new SchedulingUpdateService(event -> {}), new InMemoryConstraintRepository());
+        taskEligibilityService = new TaskEligibilityService(new InMemoryGraphLock(), taskRepository, taskDependencyRepository, new SchedulingUpdateService(event -> {}), new InMemoryConstraintRepository());
 
         service = new TaskDependencyService(taskRepository, taskDependencyRepository,
                 historyRepository, transactionRunner, new IncrementingClock(), taskEligibilityService);
@@ -87,8 +88,7 @@ class TaskDependencyServiceTest {
     @Test
     void constructor_throwsNullPointerException_whenTaskRepositoryIsNull() {
         TaskDependencyRepository taskDependencyRepository = new InMemoryTaskDependencyRepository(List.of());
-        TaskEligibilityService taskEligibilityService = new TaskEligibilityService(
-                new InMemoryTaskRepository(List.of()), taskDependencyRepository, new SchedulingUpdateService(event -> {}), new InMemoryConstraintRepository());
+        TaskEligibilityService taskEligibilityService = new TaskEligibilityService(new InMemoryGraphLock(), new InMemoryTaskRepository(List.of()), taskDependencyRepository, new SchedulingUpdateService(event -> {}), new InMemoryConstraintRepository());
 
         assertThatThrownBy(() -> new TaskDependencyService(null, taskDependencyRepository,
                 new InMemoryDependencyHistoryRepository(), new InMemoryTransactionRunner(), new IncrementingClock(),
@@ -100,8 +100,7 @@ class TaskDependencyServiceTest {
     @Test
     void constructor_throwsNullPointerException_whenTaskDependencyRepositoryIsNull() {
         TaskRepository taskRepository = new InMemoryTaskRepository(List.of());
-        TaskEligibilityService taskEligibilityService = new TaskEligibilityService(
-                taskRepository, new InMemoryTaskDependencyRepository(List.of()), new SchedulingUpdateService(event -> {}), new InMemoryConstraintRepository());
+        TaskEligibilityService taskEligibilityService = new TaskEligibilityService(new InMemoryGraphLock(), taskRepository, new InMemoryTaskDependencyRepository(List.of()), new SchedulingUpdateService(event -> {}), new InMemoryConstraintRepository());
 
         assertThatThrownBy(() -> new TaskDependencyService(taskRepository, null,
                 new InMemoryDependencyHistoryRepository(), new InMemoryTransactionRunner(), new IncrementingClock(),
@@ -340,8 +339,7 @@ class TaskDependencyServiceTest {
         DependencyHistoryRepository failingHistoryRepository = new ThrowingDependencyHistoryRepository();
         TaskRepository taskRepository = new InMemoryTaskRepository(
                 List.of(newTask(taskA), newTask(taskB)));
-        TaskEligibilityService taskEligibilityService = new TaskEligibilityService(
-                taskRepository, taskDependencyRepository, new SchedulingUpdateService(event -> {}), new InMemoryConstraintRepository());
+        TaskEligibilityService taskEligibilityService = new TaskEligibilityService(new InMemoryGraphLock(), taskRepository, taskDependencyRepository, new SchedulingUpdateService(event -> {}), new InMemoryConstraintRepository());
         TaskDependencyService serviceWithFailingHistory = new TaskDependencyService(
                 taskRepository, taskDependencyRepository, failingHistoryRepository,
                 new InMemoryTransactionRunner(), new IncrementingClock(), taskEligibilityService);
@@ -358,8 +356,7 @@ class TaskDependencyServiceTest {
         DependencyHistoryRepository failingHistoryRepository = new ThrowingDependencyHistoryRepository();
         TaskRepository taskRepository = new InMemoryTaskRepository(
                 List.of(newTask(taskA), newTask(taskB)));
-        TaskEligibilityService taskEligibilityService = new TaskEligibilityService(
-                taskRepository, taskDependencyRepository, new SchedulingUpdateService(event -> {}), new InMemoryConstraintRepository());
+        TaskEligibilityService taskEligibilityService = new TaskEligibilityService(new InMemoryGraphLock(), taskRepository, taskDependencyRepository, new SchedulingUpdateService(event -> {}), new InMemoryConstraintRepository());
         TaskDependencyService serviceWithFailingHistory = new TaskDependencyService(
                 taskRepository, taskDependencyRepository, failingHistoryRepository,
                 new InMemoryTransactionRunner(), new IncrementingClock(), taskEligibilityService);
@@ -604,8 +601,7 @@ void addDependency_whenSameMindEventIsRetried_shouldNotApplyDependencyTwice() {
                     publishedEvents::add);
 
     TaskEligibilityService eligibilityService =
-        new TaskEligibilityService(
-                taskRepository,
+        new TaskEligibilityService(new InMemoryGraphLock(), taskRepository,
                 taskDependencyRepository,
                 schedulingUpdateService,
                 new InMemoryConstraintRepository());

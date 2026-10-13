@@ -1,5 +1,7 @@
 package com.rnd.chain.events;
 
+import com.rnd.chain.repository.InMemoryGraphLock;
+
 import com.rnd.chain.dto.Task;
 import com.rnd.chain.dto.TaskStatus;
 import com.rnd.chain.repository.ConstraintRepository;
@@ -149,8 +151,7 @@ ChainEventProcessingTemplate chainEventProcessingTemplate() {
                 SchedulingUpdateService schedulingUpdateService,
                 ConstraintRepository constraintRepository) {
 
-            return new TaskEligibilityService(
-                    taskRepository,
+            return new TaskEligibilityService(new InMemoryGraphLock(), taskRepository,
                     taskDependencyRepository,
                     schedulingUpdateService,
                     constraintRepository);
