@@ -100,6 +100,10 @@ already has (edgeExists() / the task's own stored previousStatus).
   `@EqualsAndHashCode` there, since it generates nothing alongside the hand-written methods.
 
 ## Open items
+- #649: TaskEligibilityService was split by domain - edges in `DependencyEdgeService`, constraints in
+  `ConstraintEligibilityService`, counter helpers in `TaskCounterUpdater`. The lock formerly called
+  `dependencyGraphLock` is now the `DependencyGraphLock` bean shared by `DependencyEdgeService` and
+  `TaskEligibilityService`; older notes below that name `TaskEligibilityService` for moved methods predate this.
 - PR #468 review (2026-09-23, leaRevivo) findings addressed 2026-09-24:
   - Critical: `PostgresConstraintRepositoryTest`/`PostgresConstraintRepositoryConcurrencyTest`
     were committed active with no exclusion, and `values-chain.yaml`'s `postgresql.enabled`
