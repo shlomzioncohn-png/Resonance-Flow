@@ -330,9 +330,12 @@ Local OCR + ASR preprocessing.
   loading (baked first, sha256 on every load, download fallback, `warm_up()`),
   `record_call()`, and files cut off mid-way (WAV, MP3, garbage in the middle,
   both flags at once, the segment at the break dropped) with Whisper replaced,
-  so it runs in CI; and, with the real `base.en` (skipped without
-  `models/whisper/base.en/`), a clean short recording, an unsupported format,
-  empty and silent audio, the cap, and three sentences cut in the third. The
+  so it runs in CI. An unsupported format, empty and silent audio also run in CI:
+  the input is decoded and run through the VAD before the model is touched, and
+  the model loads only for a chunk with speech in it -- those tests fail if it is
+  loaded at all, so they need no weights. With the real `base.en` (skipped without
+  `models/whisper/base.en/`): a clean short recording, the cap, and three
+  sentences cut in the third. The
   speech fixture `tests/fixtures/asr/short_meeting_note.wav` was generated with
   the Windows speech synthesizer (offline TTS).
 - **Shared by OCR and ASR** (`result.py`, `failures.py`). Both results derive

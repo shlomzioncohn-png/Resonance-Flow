@@ -112,7 +112,20 @@ def test_every_call_that_reaches_the_model_is_recorded():
     assert calls[0].cost == 0.0  # local compute has no price yet (#479)
 
 
-@_needs_weights
+def model_must_not_load(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Fail the test if transcribe() touches the Whisper model at all.
+
+    The input checks run before the model is needed (team-lead review on the PR), so
+    the tests below need no weights and run in CI. Replacing the loader -- rather than
+    relying on the weights being absent -- proves it on a machine that has them too.
+    """
+
+    def must_not_load():
+        raise AssertionError("the Whisper model was loaded for an input check")
+
+    monkeypatch.setattr(asr, "_load_model", must_not_load)
+
+
 @pytest.mark.parametrize(
     ("content", "filename"),
     [
@@ -120,7 +133,10 @@ def test_every_call_that_reaches_the_model_is_recorded():
         (png_bytes(), "scan.png"),  # a real file, just not audio
     ],
 )
-def test_an_unsupported_format_is_unreadable_format(content: bytes, filename: str):
+def test_an_unsupported_format_is_unreadable_format(
+    monkeypatch: pytest.MonkeyPatch, content: bytes, filename: str
+):
+    model_must_not_load(monkeypatch)
     result = transcribe(content, filename=filename)
     assert (result.success, result.reason) == (False, ASRFailureReason.UNREADABLE_FORMAT)
     assert result.retryable is False
@@ -145,18 +161,50 @@ def test_empty_input_is_a_data_failure():
     assert result.retryable is False
 
 
-@_needs_weights
-def test_a_silent_recording_is_no_speech_not_a_made_up_transcript():
+def test_a_silent_recording_is_no_speech_not_a_made_up_transcript(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    # the real VAD finds no speech, so the model is never needed
+    model_must_not_load(monkeypatch)
     result = transcribe(wav(seconds=5))
     assert (result.success, result.reason) == (False, ASRFailureReason.NO_SPEECH_DETECTED)
     assert result.text == ""
     assert result.retryable is False
 
 
-@_needs_weights
-def test_a_wav_with_no_samples_is_no_speech():
+def test_a_wav_with_no_samples_is_no_speech(monkeypatch: pytest.MonkeyPatch):
+    model_must_not_load(monkeypatch)
     result = transcribe(wav([]))
     assert (result.success, result.reason) == (False, ASRFailureReason.NO_SPEECH_DETECTED)
+
+
+def test_a_junk_file_without_the_model_is_unreadable_format_not_asr_unavailable(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+):
+    # The reviewer's case: a text file on a host without the weights. The file is the
+    # problem (DATA, drop it); ASR_UNAVAILABLE would make the consumer retry it forever.
+    monkeypatch.setenv("WHISPER_MODELS_DIR", str(tmp_path))  # no weights anywhere
+    monkeypatch.setenv("MODEL_CACHE_DIR", str(tmp_path))
+    monkeypatch.delitem(asr.PINNED_WHISPER_MODELS, "base.en")  # and no download either
+    result = transcribe(b"this is a text file, not audio" * 20, filename="notes.txt")
+    assert (result.success, result.reason) == (False, ASRFailureReason.UNREADABLE_FORMAT)
+    assert result.failure_category is FailureCategory.DATA
+    assert result.retryable is False
+
+
+def test_speech_without_the_model_is_still_asr_unavailable(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+):
+    # The other side: decodable audio with speech in it does need the model, and its
+    # absence is the environment -- retryable, as before.
+    monkeypatch.setenv("WHISPER_MODELS_DIR", str(tmp_path))
+    monkeypatch.setenv("MODEL_CACHE_DIR", str(tmp_path))
+    monkeypatch.delitem(asr.PINNED_WHISPER_MODELS, "base.en")  # no download either
+    monkeypatch.setattr(asr, "_speech_regions", lambda window: [(0, len(window))])
+    result = transcribe(tone(1.0))
+    assert (result.success, result.reason) == (False, ASRFailureReason.ASR_UNAVAILABLE)
+    assert result.retryable is True
+    assert get_recent_calls()  # the call got past decoding, so it is recorded
 
 
 @_needs_weights
@@ -509,6 +557,9 @@ def fake_faster_whisper(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
     )
     monkeypatch.setenv("WHISPER_MODELS_DIR", str(tmp_path / "image"))
     monkeypatch.setenv("MODEL_CACHE_DIR", str(tmp_path / "cache"))
+    # The model loads only for a chunk with speech in it; a test tone is not speech
+    # to the real VAD, so hear speech everywhere for the loading paths to run.
+    monkeypatch.setattr(asr, "_speech_regions", lambda window: [(0, len(window))])
     return seen
 
 

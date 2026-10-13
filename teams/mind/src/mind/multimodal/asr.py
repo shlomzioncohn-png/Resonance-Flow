@@ -405,6 +405,13 @@ def _model_path(settings: ASRSettings) -> Path:
     return target
 
 
+def _model_name(settings: ASRSettings | None = None) -> str:
+    """The name record_call() files a call under -- known without loading the model,
+    since a call can end (silence, a bad file) before the model is ever needed."""
+    size = (settings or ASRSettings()).whisper_model
+    return f"whisper-{size}-{COMPUTE_TYPE}-local"
+
+
 def _load_model() -> tuple[str, Any]:
     """The Whisper model, loaded once per process and checked against its pinned sha256.
 
@@ -427,7 +434,7 @@ def _load_model() -> tuple[str, Any]:
             except (RuntimeError, OSError, ValueError) as exc:
                 # CTranslate2 refusing the folder: missing/corrupt files, wrong format
                 raise _ASRUnavailable(f"could not load Whisper from {path}: {exc}") from exc
-            _model = (f"whisper-{settings.whisper_model}-{COMPUTE_TYPE}-local", model)
+            _model = (_model_name(settings), model)
         return _model
 
 
@@ -695,11 +702,12 @@ def _transcribe(content: bytes, filename: str, max_duration_s: float) -> ASRResu
     if not content:
         return _failure(ASRFailureReason.EMPTY_INPUT, "empty input")
 
-    try:
-        model_name, model = _load_model()
-    except _ASRUnavailable as exc:
-        return _failure(ASRFailureReason.ASR_UNAVAILABLE, str(exc))
-
+    # The input is checked before the model is touched, and the model is loaded
+    # only once a chunk with speech needs it (team-lead review on the PR): decoding
+    # and the VAD need no Whisper weights. Loading first made a junk file on a host
+    # without the weights ASR_UNAVAILABLE -- ENVIRONMENT, retried forever -- when
+    # the file itself is the problem (DATA). It also kept every input-check test
+    # from running without the weights, i.e. in CI.
     try:
         decoded = _decode(content, max_duration_s)
     except _NotAudio as exc:
@@ -714,6 +722,7 @@ def _transcribe(content: bytes, filename: str, max_duration_s: float) -> ASRResu
 
     segments: list[TranscriptSegment] = []
     timed_out = False
+    model_name, model = _model_name(), None
     start = time.perf_counter()
     cpu_start = time.process_time()
     try:
@@ -723,6 +732,8 @@ def _transcribe(content: bytes, filename: str, max_duration_s: float) -> ASRResu
                 break
             if not has_speech:
                 continue
+            if model is None:
+                model_name, model = _load_model()  # first chunk with speech
             offset_s = chunk_start / SAMPLE_RATE
             # vad_filter: Whisper's own voice-activity filter drops the silences
             # inside the chunk too. Without it Whisper tends to "hear" a stock
@@ -742,6 +753,9 @@ def _transcribe(content: bytes, filename: str, max_duration_s: float) -> ASRResu
                     break
             if timed_out:
                 break
+    except _ASRUnavailable as exc:
+        # Decodable audio with speech in it, and no model to transcribe it with.
+        return _failure(ASRFailureReason.ASR_UNAVAILABLE, str(exc))
     except (RuntimeError, MemoryError, OSError) as exc:
         # The audio was already decoded, so this is CTranslate2/onnxruntime
         # failing: the environment (out of memory, a broken install).
