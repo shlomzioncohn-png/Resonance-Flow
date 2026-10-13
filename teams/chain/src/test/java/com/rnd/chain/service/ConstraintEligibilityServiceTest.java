@@ -8,6 +8,7 @@ import com.rnd.chain.dto.TaskTestFixtures;
 import com.rnd.chain.events.SchedulingUpdatePublisher;
 import com.rnd.chain.events.TaskSchedulingUpdatedEvent;
 import com.rnd.chain.repository.InMemoryConstraintRepository;
+import com.rnd.chain.repository.InMemoryGraphLock;
 import com.rnd.chain.repository.InMemoryTaskDependencyRepository;
 import com.rnd.chain.repository.InMemoryTaskRepository;
 import org.junit.jupiter.api.BeforeEach;
@@ -35,7 +36,7 @@ class ConstraintEligibilityServiceTest {
         dependencyRepository = new InMemoryTaskDependencyRepository(List.of());
         publisher = new RecordingSchedulingUpdatePublisher();
         SchedulingUpdateService schedulingUpdateService = new SchedulingUpdateService(publisher);
-        DependencyGraphLock lock = new DependencyGraphLock();
+        InMemoryGraphLock lock = new InMemoryGraphLock();
         TaskCounterUpdater counterUpdater = new TaskCounterUpdater(taskRepository, schedulingUpdateService);
         constraintRepository = new InMemoryConstraintRepository();
         service = new ConstraintEligibilityService(constraintRepository, counterUpdater);

@@ -15,6 +15,7 @@ import com.rnd.chain.exception.InvalidRequestException;
 import com.rnd.chain.exception.TaskNotFoundException;
 import com.rnd.chain.repository.DependencyHistoryRepository;
 import com.rnd.chain.repository.InMemoryDependencyHistoryRepository;
+import com.rnd.chain.repository.InMemoryGraphLock;
 import com.rnd.chain.repository.InMemoryTaskDependencyRepository;
 import com.rnd.chain.repository.InMemoryTaskRepository;
 import com.rnd.chain.repository.InMemoryTransactionRunner;
@@ -77,7 +78,7 @@ class TaskDependencyServiceTest {
         historyRepository = new InMemoryDependencyHistoryRepository();
         transactionRunner = new InMemoryTransactionRunner();
         dependencyEdgeService = new DependencyEdgeService(
-                taskDependencyRepository, new DependencyGraphLock(),
+                taskDependencyRepository, new InMemoryGraphLock(),
                 new TaskCounterUpdater(taskRepository, new SchedulingUpdateService(event -> {})));
 
         service = new TaskDependencyService(taskRepository, taskDependencyRepository,
@@ -90,7 +91,7 @@ class TaskDependencyServiceTest {
     void constructor_throwsNullPointerException_whenTaskRepositoryIsNull() {
         TaskDependencyRepository taskDependencyRepository = new InMemoryTaskDependencyRepository(List.of());
         DependencyEdgeService dependencyEdgeService = new DependencyEdgeService(
-                taskDependencyRepository, new DependencyGraphLock(),
+                taskDependencyRepository, new InMemoryGraphLock(),
                 new TaskCounterUpdater(new InMemoryTaskRepository(List.of()), new SchedulingUpdateService(event -> {})));
 
         assertThatThrownBy(() -> new TaskDependencyService(null, taskDependencyRepository,
@@ -104,7 +105,7 @@ class TaskDependencyServiceTest {
     void constructor_throwsNullPointerException_whenTaskDependencyRepositoryIsNull() {
         TaskRepository taskRepository = new InMemoryTaskRepository(List.of());
         DependencyEdgeService dependencyEdgeService = new DependencyEdgeService(
-                new InMemoryTaskDependencyRepository(List.of()), new DependencyGraphLock(),
+                new InMemoryTaskDependencyRepository(List.of()), new InMemoryGraphLock(),
                 new TaskCounterUpdater(taskRepository, new SchedulingUpdateService(event -> {})));
 
         assertThatThrownBy(() -> new TaskDependencyService(taskRepository, null,
@@ -363,7 +364,7 @@ class TaskDependencyServiceTest {
         TaskRepository taskRepository = new InMemoryTaskRepository(
                 List.of(newTask(taskA), newTask(taskB)));
         DependencyEdgeService dependencyEdgeService = new DependencyEdgeService(
-                taskDependencyRepository, new DependencyGraphLock(),
+                taskDependencyRepository, new InMemoryGraphLock(),
                 new TaskCounterUpdater(taskRepository, new SchedulingUpdateService(event -> {})));
         TaskDependencyService serviceWithFailingHistory = new TaskDependencyService(
                 taskRepository, taskDependencyRepository, failingHistoryRepository,
@@ -382,7 +383,7 @@ class TaskDependencyServiceTest {
         TaskRepository taskRepository = new InMemoryTaskRepository(
                 List.of(newTask(taskA), newTask(taskB)));
         DependencyEdgeService dependencyEdgeService = new DependencyEdgeService(
-                taskDependencyRepository, new DependencyGraphLock(),
+                taskDependencyRepository, new InMemoryGraphLock(),
                 new TaskCounterUpdater(taskRepository, new SchedulingUpdateService(event -> {})));
         TaskDependencyService serviceWithFailingHistory = new TaskDependencyService(
                 taskRepository, taskDependencyRepository, failingHistoryRepository,
@@ -630,7 +631,7 @@ void addDependency_whenSameMindEventIsRetried_shouldNotApplyDependencyTwice() {
     DependencyEdgeService edgeService =
         new DependencyEdgeService(
                 taskDependencyRepository,
-                new DependencyGraphLock(),
+                new InMemoryGraphLock(),
                 new TaskCounterUpdater(taskRepository, schedulingUpdateService));
 
     TaskDependencyService mindService =

@@ -12,6 +12,7 @@ import com.rnd.chain.exception.DuplicateDependencyException;
 import com.rnd.chain.exception.InvalidDependencyException;
 import com.rnd.chain.exception.TaskNotFoundException;
 import com.rnd.chain.repository.InMemoryConstraintRepository;
+import com.rnd.chain.repository.InMemoryGraphLock;
 import com.rnd.chain.repository.InMemoryTaskDependencyRepository;
 import com.rnd.chain.repository.InMemoryTaskRepository;
 import org.junit.jupiter.api.BeforeEach;
@@ -37,7 +38,7 @@ class DependencyEdgeServiceTest {
         dependencyRepository = new InMemoryTaskDependencyRepository(List.of());
         publisher = new RecordingSchedulingUpdatePublisher();
         SchedulingUpdateService schedulingUpdateService = new SchedulingUpdateService(publisher);
-        DependencyGraphLock lock = new DependencyGraphLock();
+        InMemoryGraphLock lock = new InMemoryGraphLock();
         TaskCounterUpdater counterUpdater = new TaskCounterUpdater(taskRepository, schedulingUpdateService);
         service = new DependencyEdgeService(dependencyRepository, lock, counterUpdater);
     }
@@ -795,7 +796,7 @@ class DependencyEdgeServiceTest {
         InMemoryConstraintRepository constraintRepo = new InMemoryConstraintRepository();
         SchedulingUpdateService scheduling = new SchedulingUpdateService(event -> {});
         TaskCounterUpdater counterUpdater = new TaskCounterUpdater(taskRepo, scheduling);
-        return new Fixture(taskRepo, dependencyRepo, constraintRepo, new DependencyEdgeService(dependencyRepo, new DependencyGraphLock(), counterUpdater));
+        return new Fixture(taskRepo, dependencyRepo, constraintRepo, new DependencyEdgeService(dependencyRepo, new InMemoryGraphLock(), counterUpdater));
     }
 
     private static Task buildTask(UUID id, int blockingCount, int openConstraintCount, boolean isReady) {

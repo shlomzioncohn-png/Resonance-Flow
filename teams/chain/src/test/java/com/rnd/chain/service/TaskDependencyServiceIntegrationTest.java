@@ -7,6 +7,7 @@ import com.rnd.chain.events.SchedulingUpdatePublisher;
 import com.rnd.chain.events.TaskSchedulingUpdatedEvent;
 import com.rnd.chain.repository.InMemoryConstraintRepository;
 import com.rnd.chain.repository.InMemoryDependencyHistoryRepository;
+import com.rnd.chain.repository.InMemoryGraphLock;
 import com.rnd.chain.repository.InMemoryTaskDependencyRepository;
 import com.rnd.chain.repository.InMemoryTaskRepository;
 import com.rnd.chain.repository.InMemoryTransactionRunner;
@@ -70,7 +71,7 @@ class TaskDependencyServiceIntegrationTest {
         DependencyEdgeService dependencyEdgeService =
                 new DependencyEdgeService(
                         dependencyRepository,
-                        new DependencyGraphLock(),
+                        new InMemoryGraphLock(),
                         new TaskCounterUpdater(
                                 taskRepository,
                                 schedulingUpdateService));
