@@ -45,13 +45,13 @@ class TaskDependencyServicePostgresIntegrationTest {
     private Clock clock;
 
     @Autowired
-    private TaskEligibilityService taskEligibilityService;
+    private DependencyEdgeService dependencyEdgeService;
 
     @Test
     void addDependencyThenRemoveDependency_recordHistoryInTheSameTransaction() {
         TaskDependencyService service = new TaskDependencyService(
                 taskRepository, taskDependencyRepository, historyRepository, transactionRunner, clock,
-                taskEligibilityService);
+                dependencyEdgeService);
         Task a = taskRepository.save(newTask(UUID.randomUUID()));
         Task b = taskRepository.save(newTask(UUID.randomUUID()));
 
@@ -69,13 +69,13 @@ class TaskDependencyServicePostgresIntegrationTest {
     @Test
     void addDependency_compensatesSpeculativeHistoryEntry_whenEdgeWriteIsANoOp() {
         // Current ordering (post round-2 review on #373): history is recorded speculatively
-        // BEFORE the edge write, since the edge - once written - is what TaskEligibilityService
+        // BEFORE the edge write, since the edge - once written - is what DependencyEdgeService
         // reads outside this lock and must be final. If the edge write turns out to be a no-op
         // (duplicate), it's the speculative history entry that gets compensated (deleted), not
         // the edge - proven here against the real Postgres-backed repositories, no mocks needed.
         TaskDependencyService service = new TaskDependencyService(
                 taskRepository, taskDependencyRepository, historyRepository, transactionRunner, clock,
-                taskEligibilityService);
+                dependencyEdgeService);
         Task a = taskRepository.save(newTask(UUID.randomUUID()));
         Task b = taskRepository.save(newTask(UUID.randomUUID()));
         service.addDependency(a.getId(), b.getId());
