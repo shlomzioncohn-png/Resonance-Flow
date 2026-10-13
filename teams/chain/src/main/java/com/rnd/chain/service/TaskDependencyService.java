@@ -30,7 +30,7 @@ import java.util.UUID;
  * task cannot depend on itself, and a given edge cannot be added twice.
  * Also records an audit trail entry for every successful add/remove.
  *
- * Dependency mutations delegate to TaskEligibilityService to keep readiness in sync.
+ * Dependency mutations delegate to DependencyEdgeService to keep readiness in sync.
  */
 @Service
 public class TaskDependencyService {
@@ -42,26 +42,26 @@ public class TaskDependencyService {
     private final DependencyHistoryRepository historyRepository;
     private final TransactionRunner transactionRunner;
     private final Clock clock;
-    private final TaskEligibilityService taskEligibilityService;
+    private final DependencyEdgeService dependencyEdgeService;
 
     public TaskDependencyService(TaskRepository taskRepository,
                                   TaskDependencyRepository taskDependencyRepository,
                                   DependencyHistoryRepository historyRepository,
                                   TransactionRunner transactionRunner,
                                   Clock clock,
-                                  TaskEligibilityService taskEligibilityService) {
+                                  DependencyEdgeService dependencyEdgeService) {
         Objects.requireNonNull(taskRepository, "taskRepository must not be null");
         Objects.requireNonNull(taskDependencyRepository, "taskDependencyRepository must not be null");
         Objects.requireNonNull(historyRepository, "historyRepository must not be null");
         Objects.requireNonNull(transactionRunner, "transactionRunner must not be null");
         Objects.requireNonNull(clock, "clock must not be null");
-        Objects.requireNonNull(taskEligibilityService, "taskEligibilityService must not be null");
+        Objects.requireNonNull(dependencyEdgeService, "dependencyEdgeService must not be null");
         this.taskRepository = taskRepository;
         this.taskDependencyRepository = taskDependencyRepository;
         this.historyRepository = historyRepository;
         this.transactionRunner = transactionRunner;
         this.clock = clock;
-        this.taskEligibilityService = taskEligibilityService;
+        this.dependencyEdgeService = dependencyEdgeService;
     }
 
     /** Same as {@link #addDependency(UUID, UUID, DependencyChangeSource, String)} with source USER, no sourceRef. */
@@ -146,7 +146,7 @@ public class TaskDependencyService {
             DependencyHistoryEntry recorded = recordHistory(taskId, dependsOnTaskId,
                     DependencyChangeAction.ADDED, source, sourceRef);
             try {
-                return taskEligibilityService.addDependency(taskId, dependsOnTaskId, confidence);
+                return dependencyEdgeService.addDependency(taskId, dependsOnTaskId, confidence);
             } catch (RuntimeException failure) {
                 throw compensateHistory(recorded.id(), failure);
             }
@@ -188,7 +188,7 @@ public class TaskDependencyService {
             DependencyHistoryEntry recorded = recordHistory(taskId, dependsOnTaskId,
                     DependencyChangeAction.REMOVED, source, sourceRef);
             try {
-                taskEligibilityService.removeDependency(taskId, dependsOnTaskId);
+                dependencyEdgeService.removeDependency(taskId, dependsOnTaskId);
             } catch (RuntimeException failure) {
                 throw compensateHistory(recorded.id(), failure);
             }

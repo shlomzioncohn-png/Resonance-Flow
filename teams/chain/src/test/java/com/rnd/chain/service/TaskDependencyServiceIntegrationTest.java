@@ -3,6 +3,7 @@ package com.rnd.chain.service;
 import com.rnd.chain.dto.Task;
 import com.rnd.chain.dto.TaskDependency;
 import com.rnd.chain.dto.TaskStatus;
+import com.rnd.chain.event.SchedulingPublishListener;
 import com.rnd.chain.event.SchedulingUpdatePublisher;
 import com.rnd.chain.event.TaskSchedulingUpdatedEvent;
 import com.rnd.chain.repository.InMemoryConstraintRepository;
@@ -66,12 +67,15 @@ class TaskDependencyServiceIntegrationTest {
                 new SchedulingUpdateService(
                         schedulingPublisher);
 
-        TaskEligibilityService taskEligibilityService =
-                new TaskEligibilityService(
-                        taskRepository,
+        DependencyEdgeService dependencyEdgeService =
+                new DependencyEdgeService(
                         dependencyRepository,
-                        schedulingUpdateService,
-                        new InMemoryConstraintRepository());
+                        new DependencyGraphLock(),
+                        new TaskCounterUpdater(
+                                taskRepository,
+                                dependencyRepository,
+                                new PriorityScoreService(),
+                                new SchedulingPublishListener(taskRepository, schedulingUpdateService)));
 
         taskDependencyService =
                 new TaskDependencyService(
@@ -80,7 +84,7 @@ class TaskDependencyServiceIntegrationTest {
                         new InMemoryDependencyHistoryRepository(),
                         new InMemoryTransactionRunner(),
                         new IncrementingClock(),
-                        taskEligibilityService);
+                        dependencyEdgeService);
     }
 
     @Test

@@ -3,7 +3,7 @@ package com.rnd.chain.service;
 import com.rnd.chain.dto.Task;
 import com.rnd.chain.dto.TaskStatus;
 import com.rnd.chain.dto.TaskTestFixtures;
-import com.rnd.chain.repository.InMemoryConstraintRepository;
+import com.rnd.chain.event.SchedulingPublishListener;
 import com.rnd.chain.repository.InMemoryTaskDependencyRepository;
 import com.rnd.chain.repository.InMemoryTaskRepository;
 import org.junit.jupiter.api.Test;
@@ -71,12 +71,16 @@ class TaskEligibilityServiceConcurrencyTest {
 
         InMemoryTaskRepository taskRepository = new InMemoryTaskRepository(allTasks);
         InMemoryTaskDependencyRepository dependencyRepository = new InMemoryTaskDependencyRepository(List.of());
+        SchedulingUpdateService scheduling = new SchedulingUpdateService(event -> {});
+        DependencyGraphLock lock = new DependencyGraphLock();
+        TaskCounterUpdater counterUpdater = new TaskCounterUpdater(taskRepository, dependencyRepository,
+                new PriorityScoreService(), new SchedulingPublishListener(taskRepository, scheduling));
         TaskEligibilityService service = new TaskEligibilityService(
-                taskRepository, dependencyRepository, new SchedulingUpdateService(event -> {}),
-                new InMemoryConstraintRepository());
+                taskRepository, dependencyRepository, lock, counterUpdater);
+        DependencyEdgeService edgeService = new DependencyEdgeService(dependencyRepository, lock, counterUpdater);
 
         List<Runnable> jobs = blockerIds.stream()
-                .<Runnable>map(blockerId -> () -> service.addDependency(hubId, blockerId))
+                .<Runnable>map(blockerId -> () -> edgeService.addDependency(hubId, blockerId))
                 .collect(Collectors.toList());
 
         runConcurrently(jobs, THREAD_COUNT, 30);
@@ -99,12 +103,16 @@ class TaskEligibilityServiceConcurrencyTest {
 
         InMemoryTaskRepository taskRepository = new InMemoryTaskRepository(allTasks);
         InMemoryTaskDependencyRepository dependencyRepository = new InMemoryTaskDependencyRepository(List.of());
+        SchedulingUpdateService scheduling = new SchedulingUpdateService(event -> {});
+        DependencyGraphLock lock = new DependencyGraphLock();
+        TaskCounterUpdater counterUpdater = new TaskCounterUpdater(taskRepository, dependencyRepository,
+                new PriorityScoreService(), new SchedulingPublishListener(taskRepository, scheduling));
         TaskEligibilityService service = new TaskEligibilityService(
-                taskRepository, dependencyRepository, new SchedulingUpdateService(event -> {}),
-                new InMemoryConstraintRepository());
+                taskRepository, dependencyRepository, lock, counterUpdater);
+        DependencyEdgeService edgeService = new DependencyEdgeService(dependencyRepository, lock, counterUpdater);
 
         for (UUID blockerId : blockerIds) {
-            service.addDependency(hubId, blockerId);
+            edgeService.addDependency(hubId, blockerId);
         }
         assertEquals(THREAD_COUNT, taskRepository.findById(hubId).orElseThrow().getBlockingCount());
 
@@ -147,12 +155,16 @@ class TaskEligibilityServiceConcurrencyTest {
             InMemoryTaskRepository taskRepository = new InMemoryTaskRepository(
                     List.of(TaskTestFixtures.defaultTask(dependentId).build(), TaskTestFixtures.defaultTask(targetId).build()));
             InMemoryTaskDependencyRepository dependencyRepository = new InMemoryTaskDependencyRepository(List.of());
+            SchedulingUpdateService scheduling = new SchedulingUpdateService(event -> {});
+            DependencyGraphLock lock = new DependencyGraphLock();
+            TaskCounterUpdater counterUpdater = new TaskCounterUpdater(taskRepository, dependencyRepository,
+                    new PriorityScoreService(), new SchedulingPublishListener(taskRepository, scheduling));
             TaskEligibilityService service = new TaskEligibilityService(
-                    taskRepository, dependencyRepository, new SchedulingUpdateService(event -> {}),
-                    new InMemoryConstraintRepository());
+                    taskRepository, dependencyRepository, lock, counterUpdater);
+            DependencyEdgeService edgeService = new DependencyEdgeService(dependencyRepository, lock, counterUpdater);
 
             List<Runnable> jobs = List.of(
-                    () -> service.addDependency(dependentId, targetId),
+                    () -> edgeService.addDependency(dependentId, targetId),
                     () -> service.onTaskStatusChanged(targetId, TaskStatus.DONE));
 
             runConcurrently(jobs, jobs.size(), 10);

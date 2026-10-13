@@ -14,9 +14,13 @@ import com.rnd.chain.repository.TaskDependencyRepository;
 import com.rnd.chain.repository.TaskRepository;
 import com.rnd.chain.repository.TransactionRunner;
 import com.rnd.chain.repository.UnresolvedDependencyRepository;
+import com.rnd.chain.event.SchedulingPublishListener;
+import com.rnd.chain.service.DependencyEdgeService;
+import com.rnd.chain.service.DependencyGraphLock;
+import com.rnd.chain.service.PriorityScoreService;
 import com.rnd.chain.service.SchedulingUpdateService;
+import com.rnd.chain.service.TaskCounterUpdater;
 import com.rnd.chain.service.TaskDependencyService;
-import com.rnd.chain.service.TaskEligibilityService;
 import com.rnd.chain.service.UnresolvedDependencyService;
 import com.rnd.mind.event.DependencyProposedEvent;
 import io.confluent.kafka.serializers.protobuf.KafkaProtobufSerializer;
@@ -143,17 +147,17 @@ ChainEventProcessingTemplate chainEventProcessingTemplate() {
 
         @Bean
         @Primary
-        TaskEligibilityService testTaskEligibilityService(
+        DependencyEdgeService testDependencyEdgeService(
                 TaskRepository taskRepository,
                 TaskDependencyRepository taskDependencyRepository,
-                SchedulingUpdateService schedulingUpdateService,
-                ConstraintRepository constraintRepository) {
+                SchedulingUpdateService schedulingUpdateService) {
 
-            return new TaskEligibilityService(
-                    taskRepository,
+            return new DependencyEdgeService(
                     taskDependencyRepository,
-                    schedulingUpdateService,
-                    constraintRepository);
+                    new DependencyGraphLock(),
+                    new TaskCounterUpdater(taskRepository, taskDependencyRepository,
+                            new PriorityScoreService(),
+                            new SchedulingPublishListener(taskRepository, schedulingUpdateService)));
         }
 
         @Bean
@@ -163,7 +167,7 @@ ChainEventProcessingTemplate chainEventProcessingTemplate() {
                 TaskDependencyRepository taskDependencyRepository,
                 DependencyHistoryRepository dependencyHistoryRepository,
                 TransactionRunner transactionRunner,
-                TaskEligibilityService taskEligibilityService) {
+                DependencyEdgeService dependencyEdgeService) {
 
             return new TaskDependencyService(
                     taskRepository,
@@ -171,7 +175,7 @@ ChainEventProcessingTemplate chainEventProcessingTemplate() {
                     dependencyHistoryRepository,
                     transactionRunner,
                     Clock.systemUTC(),
-                    taskEligibilityService);
+                    dependencyEdgeService);
         }
 
         @Bean
