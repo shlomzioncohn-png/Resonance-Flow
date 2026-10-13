@@ -2,8 +2,12 @@ package com.rnd.chain.events;
 
 import org.springframework.boot.context.properties.ConfigurationProperties;
 
+import java.util.Map;
+
 /**
- * Binds Chain's chain.kafka.* consumer group configuration:
+ * Binds Chain's chain.kafka.* topic/group configuration:
+ * - topics: event type -> Kafka topic. Used by {@code events.KafkaSchedulingUpdatePublisher}
+ *   (#564) to resolve where to publish task.scheduling.updated.
  * - consumerGroupId: the consumer group id every one of Chain's
  *   per-topic @KafkaListener methods joins (TaskCreatedEventHandler,
  *   TaskUpdatedEventHandler, DependencyProposedEventHandler) - one shared
@@ -43,5 +47,6 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
  */
 @ConfigurationProperties(prefix = "chain.kafka")
 public record ChainEventTopicsProperties(
+        Map<String, String> topics,
         String consumerGroupId) {
 }

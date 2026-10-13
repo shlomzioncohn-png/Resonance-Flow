@@ -10,6 +10,7 @@ import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;
 import jakarta.persistence.Enumerated;
+import jakarta.persistence.FetchType;
 import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.Id;
 import jakarta.persistence.JoinColumn;
@@ -29,14 +30,14 @@ public class Team {
     @Column(updatable = false, nullable = false)
     private UUID id;
 
-    @ManyToOne
+    @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "tenant_id", nullable = false)
     private Tenant tenant;
 
     @Column(nullable = false)
     private String name;
 
-    @ManyToOne
+    @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "team_lead_id", nullable = false)
     private User teamLead;
 
@@ -115,7 +116,8 @@ public class Team {
         if (this == o) return true;
         if (!(o instanceof Team)) return false;
         Team that = (Team) o;
-        return id != null && id.equals(that.id);
+        // getId(), not the field: "that" may be a lazy-loading proxy, whose own fields are empty.
+        return id != null && id.equals(that.getId());
     }
 
     @Override

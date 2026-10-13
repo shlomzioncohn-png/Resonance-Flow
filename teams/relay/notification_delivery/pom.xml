@@ -155,8 +155,7 @@
                          package (documented in task-updated-event.proto as "copied verbatim"), which is
                          fine for standalone registry validation but makes protoc fail on a package-wide
                          symbol collision if they're ever compiled together as one Java codegen unit.
-                         task-event.proto (com.rnd.relay.event) is also left out: nothing in this service
-                         uses TaskEvent - both topics carry TaskNotification (docs/pipe-design.md). -->
+                         Both topics this service reads carry TaskNotification (docs/pipe-design.md). -->
                     <includes>
                         <include>task-notification.proto</include>
                     </includes>

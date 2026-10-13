@@ -11,6 +11,7 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
 from dotenv import load_dotenv
 
 if sys.platform == "win32":
@@ -36,16 +37,26 @@ if "TEST_DATABASE_URL" in os.environ:
     os.environ.setdefault("MIND_VECTOR_STORE__DSN", os.environ["TEST_DATABASE_URL"])
 os.environ.setdefault("MIND_ENVIRONMENT", "ci")
 
-_MESSAGING = _ROOT / "src" / "mind" / "messaging"
 
-if not (_MESSAGING / "mind_task_created_pb2.py").exists():
-    subprocess.run(
-        [
-            "python", "-m", "grpc_tools.protoc",
-            "--proto_path", str(_ROOT / "proto"),
-            "--python_out", str(_MESSAGING),
-            str(_ROOT / "proto" / "mind-task-created.proto"),
-            str(_ROOT / "proto" / "mind-task-dependencies.proto"),
-        ],
-        check=True,
-    )
+@pytest.fixture(scope="session")
+def migrated_db() -> None:
+    """Applies `alembic upgrade head` once per session. A fixture (not
+    module-level code) so only DB tests (the `store` fixtures) pull it
+    in -- DB-free files like test_config.py shouldn't need a live DB.
+    Alembic's Python API, not a subprocess -- no dependency on `alembic`
+    being on PATH."""
+    # CREATE EXTENSION needs superuser; CI's TEST_DATABASE_URL is one.
+    import psycopg
+    from alembic import command as alembic_command
+    from alembic.config import Config
+
+    with psycopg.connect(os.environ["MIND_VECTOR_STORE__DSN"], autocommit=True) as conn:
+        conn.execute("CREATE EXTENSION IF NOT EXISTS vector;")
+    alembic_command.upgrade(Config(str(_ROOT / "alembic.ini")), "head")
+
+
+# Always regenerate (not "if missing") -- a proto edit with the old pb2
+# still on disk would otherwise make tests run against stale generated
+# code. See scripts/gen_proto.py -- the one place that knows the actual
+# protoc invocations, also used by `make proto` and the Dockerfile.
+subprocess.run(["python", str(_ROOT / "scripts" / "gen_proto.py")], check=True)

@@ -13,18 +13,24 @@ dependencies = [
     "uvicorn",
     # embeddings (src/mind/embeddings)
     "psycopg[binary,pool]>=3.1",
-    "scikit-learn>=1.4",
-    "numpy>=1.26",
+    "sentence-transformers>=3.0",
+    # migrations (migrations/) -- runs at deploy time, inside the image,
+    # not just in dev, so this belongs here and not in [dev].
+    "alembic>=1.13",
+    "sqlalchemy>=2.0",
     # messaging (src/mind/messaging)
     "confluent-kafka[protobuf,schemaregistry]>=2.5,<2.11",
     "protobuf>=5",
     "pyyaml",
+    # LLM provider calls (mind.extraction.providers); also what
+    # fastapi.testclient.TestClient runs on in the tests.
+    "httpx",
     # OCR (src/mind/multimodal/ocr.py) -- tesseract --psm 11, the decision
     # made in benchmarks/ocr-asr-benchmark.md. Also requires the
     # tesseract-ocr system binary (not pip-installable).
     "pillow",
     "pypdfium2",  # rasterizes PDF pages to images for the OCR pipeline
-    # add as decided: ASR libs, LLM client, etc.
+    # add as decided: vector-store client, ASR libs, etc.
 ]
 
 [project.optional-dependencies]
@@ -43,8 +49,8 @@ dev = [
                      # needed) is enough for mypy to resolve the import --
                      # verified locally: mypy passes on benchmarks/ with
                      # types-psutil installed and psutil itself uninstalled.
-    "httpx",  # required by fastapi.testclient.TestClient
     "grpcio-tools==1.71.0",  # protoc, for `make proto`
+    "types-protobuf",  # stubs for google.protobuf, imported by the generated _pb2.pyi files
     "python-dotenv",  # tests/conftest.py loads .env for os.environ-reading fixtures
 ]
 # Not a runtime dependency of src/mind/ -- only benchmarks/ocr_asr_benchmark.py
@@ -58,6 +64,14 @@ benchmark = [
     "psutil",  # cross-platform peak-RSS/CPU sampling; stdlib `resource` is Unix-only
     "paddleocr",
     "paddlepaddle",
+    # ASR size benchmark (#135). faster-whisper, not openai-whisper: it runs
+    # Whisper on CTranslate2 instead of PyTorch -- faster on CPU, lower peak
+    # memory, and no multi-GB torch install. Same model weights/sizes.
+    "faster-whisper",
+    # faster-whisper 1.2.1 decodes audio with av.open(..., metadata_errors=...),
+    # a keyword PyAV 19 no longer accepts (TypeError on every transcribe).
+    # 18.1.0 works; drop this pin once faster-whisper catches up.
+    "av<19",
 ]
 
 [build-system]
@@ -81,6 +95,12 @@ exclude = ["_pb2\\.py$"]
 # not a blanket ignore for the whole benchmarks/ tree.
 [[tool.mypy.overrides]]
 module = "paddleocr"
+ignore_missing_imports = true
+
+# Same reason for faster-whisper, and CI never installs `.[benchmark]` anyway,
+# so without this `make lint` fails on the import in CI.
+[[tool.mypy.overrides]]
+module = "faster_whisper"
 ignore_missing_imports = true
 
 [[tool.mypy.overrides]]
@@ -108,7 +128,3 @@ asyncio_mode = "auto"
 # the same way it does under a real server, not get recreated per test.
 asyncio_default_fixture_loop_scope = "session"
 asyncio_default_test_loop_scope = "session"
-
-[[tool.mypy.overrides]]
-module = "sklearn.*"
-ignore_missing_imports = true

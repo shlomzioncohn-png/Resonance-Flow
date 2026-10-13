@@ -1,13 +1,13 @@
-'use client'
+'use client';
 
-import Box from '@mui/material/Box'
-import Button from '@mui/material/Button'
-import Paper from '@mui/material/Paper'
-import Stack from '@mui/material/Stack'
-import Typography from '@mui/material/Typography'
-import Link from 'next/link'
-import ErrorOutlineIcon from '@mui/icons-material/ErrorOutlined'
-import Logo from '@/components/layout/Logo'
+import Box from '@mui/material/Box';
+import Button from '@mui/material/Button';
+import Paper from '@mui/material/Paper';
+import Stack from '@mui/material/Stack';
+import Typography from '@mui/material/Typography';
+import Link from 'next/link';
+import ErrorOutlineIcon from '@mui/icons-material/ErrorOutlined';
+import Logo from '@/components/layout/Logo';
 
 export default function UnauthorizedPage() {
   return (
@@ -20,7 +20,11 @@ export default function UnauthorizedPage() {
         p: 2,
       }}
     >
-      <Paper sx={{ p: 4, maxWidth: 380, width: '100%', textAlign: 'center' }} elevation={0} variant="outlined">
+      <Paper
+        sx={{ p: 4, maxWidth: 380, width: '100%', textAlign: 'center' }}
+        elevation={0}
+        variant="outlined"
+      >
         <Stack spacing={2.5} sx={{ alignItems: 'center' }}>
           <Logo variant="light" />
           <ErrorOutlineIcon sx={{ fontSize: 40, color: 'error.main' }} />
@@ -37,5 +41,5 @@ export default function UnauthorizedPage() {
         </Stack>
       </Paper>
     </Box>
-  )
+  );
 }

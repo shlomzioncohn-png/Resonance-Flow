@@ -1,5 +1,5 @@
-import PageContainer from '@/components/layout/PageContainer'
-import EmptyState from '@/components/feedback/EmptyState'
+import PageContainer from '@/components/layout/PageContainer';
+import EmptyState from '@/components/feedback/EmptyState';
 
 export default function ManagerBlockedPage() {
   return (
@@ -12,5 +12,5 @@ export default function ManagerBlockedPage() {
         description="This view will surface blocked and delayed tasks once connected to Chain's blocker data."
       />
     </PageContainer>
-  )
+  );
 }

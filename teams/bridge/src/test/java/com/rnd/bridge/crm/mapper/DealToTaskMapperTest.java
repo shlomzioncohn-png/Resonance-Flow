@@ -175,6 +175,18 @@ class DealToTaskMapperTest {
     }
 
     @Test
+    void hubSpotAndJsonSourceDealsStayExactlyCrmPrefixedBareId() {
+        // Neither HubSpotDealRepository nor JsonDealRepository ever sets Deal.sourceRefPrefix -
+        // Salesforce is the only source that overrides the "crm:" default. Pinning this exact
+        // string (not just "starts with crm:") catches a regression where the default drifts or
+        // doubles up (e.g. "crm:crm:D-1").
+        Deal deal = Deal.builder().dealId("D-1").stageChangedAt(Instant.now()).build();
+
+        assertEquals("crm:", deal.sourceRefPrefix());
+        assertEquals("crm:D-1", MAPPER.toSourceRef(deal));
+    }
+
+    @Test
     void allFourD10432RecordsMapToTheSameSourceRef() {
         JsonDealRepository repo = repository();
         List<Deal> history = repo.snapshot().findHistoryByDealId("D-10432");

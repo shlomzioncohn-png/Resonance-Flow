@@ -12,6 +12,7 @@ public class TaskSelectionProperties {
     private double scale = 1;
     private int defaultEffortEstimateMinutes = 30;
     private double defaultEffortEstimateConfidence = 0.1;
+    private double defaultPriorityScore = 5;
 
     public double getDeadlineHalfLifeHours() {
         return deadlineHalfLifeHours;
@@ -67,5 +68,13 @@ public class TaskSelectionProperties {
 
     public void setDefaultEffortEstimateConfidence(double defaultEffortEstimateConfidence) {
         this.defaultEffortEstimateConfidence = defaultEffortEstimateConfidence;
+    }
+
+    public double getDefaultPriorityScore() {
+        return defaultPriorityScore;
+    }
+
+    public void setDefaultPriorityScore(double defaultPriorityScore) {
+        this.defaultPriorityScore = defaultPriorityScore;
     }
 }

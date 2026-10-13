@@ -2,8 +2,8 @@
 
 The fixed evaluation scenario set: 4-6 scenarios per role (Developer,
 Manager, Higher Manager, Field Engineer, Salesperson, CEO), ~24-36 total.
-Each scenario states a free-time window and a mentor-agreed "correct" top
-task. This set must be complete and mentor-approved (see `mentor_approved`
+Each scenario states a free-time window and an agreed "correct" top
+task. This set must be complete and team-lead-approved (see `team_lead_approved`
 below) by the Foundation Gate (end of week 3) and must not change once
 baseline/stretch comparisons start.
 
@@ -59,8 +59,7 @@ Scenario
 ├── expected_top_task_id
 ├── expected_reason
 ├── source          { type, source_detail? }
-├── team_lead_approved
-└── mentor_approved
+└── team_lead_approved
 ```
 
 ## What the ranking model actually sees
@@ -131,8 +130,7 @@ scenario — Chain consumes them downstream — they just can't be the reason.)
 | `expected_reason` | Short, data-grounded explanation for the correct answer | The difference between a "guess" and a checkable judgment; also used later to compare baseline vs. stretch (weeks 6–7) | String, at least 20 characters, grounded in **per-task** fields (`deadline`, `blocked`, `tier`, description) — never in `free_time_minutes` or a duration comparison, which are Chain's concern | Required | The mentor (plausibility check); R1 (evidence for baseline vs. stretch) | `"Task B has a same-day deadline and Task A is blocked, so Task B is the one to do now."` |
 | `source.type` | The scenario's origin | Transparency: lets us know later whether a model was tested on a fabricated example or on real data | `synthetic` / `real` / `AMI` / `FUNSD` / `other` | Required | R1 (performance analysis by source type); data-policy documentation | `"synthetic"` |
 | `source.source_detail` | The exact source details | Enables tracing back to the actual origin (e.g. a specific AMI meeting ID) | Free-text string or `null` | Optional (required in practice when `type` is AMI/FUNSD/other) | R1 (traceability) | `"AMI meeting ES2002a"` |
-| `team_lead_approved` | Whether the team lead has signed off on this scenario in a PR — the first review gate, before it goes to the mentor | Makes the two-stage review (team lead → mentor) visible per scenario instead of tracked in someone's head | `true` / `false` | Required (set explicitly; author starts it `false`, the team lead flips it) | The team lead / R1 as workflow state — not a Foundation Gate criterion and not checked by `validate_personas` | `false` |
-| `mentor_approved` | Whether the mentor has signed off on this specific scenario as correct ground truth | Without a per-scenario flag there is no way to distinguish "drafted" from "mentor-approved" — the set must be fully approved by the Foundation Gate, but gets built up scenario-by-scenario before that. Don't set it `true` until `team_lead_approved` is `true`. | `true` / `false` | Required (must be set explicitly, no implicit default) | The harness/CI (warns, doesn't crash, on any `false`); the mentor review process | `false` |
+| `team_lead_approved` | Whether the team lead has signed off on this scenario in a PR — the only approval gate | Makes the review visible per scenario instead of tracked in someone's head | `true` / `false` | Required (set explicitly; author starts it `false`, the team lead flips it) | The team lead / R1 as workflow state — not a Foundation Gate criterion and not checked by `validate_personas` | `false` |
 
 ## Constraints not expressible as plain structure
 
@@ -152,18 +150,20 @@ can only raise, not warn, which is why these stay in Python rather than in the m
 - A role has no scenario at all.
 - A role has scenarios, but not 4-6 of them.
 - The full set doesn't total 24-36 scenarios.
-- A scenario has `mentor_approved: false`.
 
 ## Status
 
-The full set is drafted: **30 scenarios** across all six roles (**5 per role**),
-split into `same_tier/` (17) and `cross_tier/` (13). All load cleanly through
+The full set is drafted: **36 scenarios** across all six roles (**6 per role** —
+the per-role and total maximum, see `MAX_SCENARIOS_PER_ROLE` / `MAX_TOTAL_SCENARIOS`),
+split into `same_tier/` (20) and `cross_tier/` (16). The first 30 are the
+2026-09-06 rebuild; the last 6 are the "hard scenarios" round described below
+(one per role, all still `team_lead_approved: false`). All load cleanly through
 `load_personas`; `validate_personas` reports no errors and no role-coverage /
-count warnings — the only warnings left are `mentor_approved: false` on every
-scenario, which is expected until the mentor review happens.
+count warnings.
 
-Each role's five scenarios test five *different* tradeoffs, no dimension repeated
-within a role:
+Each role's first five scenarios (the 2026-09 rebuild) test five *different* tradeoffs,
+no dimension repeated within a role; the sixth is one of the hard scenarios
+(see "Hard-scenarios round" below):
 
 - **A** — a hard deadline vs. a task with none (deadline is right)
 - **blocked** — the *blocked* task carries the *nearest* deadline, so a model that
@@ -179,36 +179,46 @@ within a role:
 
 The set is the measuring stick for baseline-vs-stretch. If a two-line heuristic
 already near-ceilings, there is no room to show a real model's improvement. Run
-against all 30:
+against all 36 (the 30-scenario figures were 33.3% / 46.7% / 66.7%):
 
 | Strategy | Score |
 |---|---|
-| pick the first task (`DummyModel`) | 33.3% (10/30) |
-| pick the nearest deadline, ignore `blocked` | 46.7% (14/30) |
-| **skip `blocked`, then nearest deadline** | **66.7% (20/30)** |
+| pick the first task (`DummyModel`) | 27.8% (10/36) — measured 2026-10 |
+| pick the nearest deadline, ignore `blocked` | 41.7% (15/36) — measured 2026-10 |
+| **skip `blocked`, then nearest deadline** | **58.3% (21/36)** — measured 2026-10 |
+| pick the longest description (`LongestDescriptionModel`) | 61.1% (22/36) — measured 2026-10 |
 
 (Measured by `mind.evaluation.baseline_models`, not hand-derived — see below.
-Originally designed as ~30%/~43%/~63%; the current numbers are a few points
-higher after the 2026-09-16 review round's rewrites, most notably
-`manager_overdue_preread_vs_tomorrow_review`, which the "skip `blocked`, then
-nearest deadline" baseline now gets right for a reason that isn't cheating —
-see the `eval-ci` target in the `Makefile`.)
+The 30-scenario set was designed for ~30%/~43%/~63%; after the 2026-09-16 review
+round's rewrites it measured 33.3%/46.7%/66.7%, a few points higher, most notably
+because of `manager_overdue_preread_vs_tomorrow_review`, which the "skip `blocked`,
+then nearest deadline" baseline gets right for a reason that isn't cheating —
+see the `eval-ci` target in the `Makefile`. The six hard scenarios then brought
+the two deadline rows down to 41.7% and 58.3%; one of them
+(`manager_idle_...`) has the nearest deadline as its correct answer on purpose.)
+
+The last row is a length-bias probe: it scores a task by the length of its
+description and nothing else. The six hard scenarios originally scored 6/6 on it
+(the correct answer was the longest text in every one, because it carried the
+explanation of why it is correct); after the rewrite it scores 0/6 on them. Its
+22/36 comes entirely from the 30 original scenarios (22/30), which is why the
+`eval-ci` ceiling is 0.65 and not lower.
 
 No trivial position rule beats ~50%. The ~20-point gap between the last two
 rows is deliberate — it is the headroom a model earns by recognising
-`blocked`; the ~33 points above 66.7% is the headroom it earns by reading
+`blocked`; the ~44 points above 55.6% is the headroom it earns by reading
 descriptions.
 
 **These two baselines are real code, not just a table.**
 `mind.evaluation.baseline_models.NearestDeadlineModel` and
 `SkipBlockedNearestDeadlineModel` implement the `RankingModel` contract (they
 only need one task plus `current_datetime`, exactly what `score(task, context)`
-already gives them) and produce the 46.7%/66.7% numbers above. `make eval-ci`
+already gives them) and produce the 41.7%/58.3% numbers above. `make eval-ci`
 runs `SkipBlockedNearestDeadlineModel` with `--max-accuracy 0.68` — that is the
 real headroom guard (see the `Makefile` comment for why 0.68 and not the
 originally-designed 0.63). `DummyModel`, which returns a constant score and so
 never reads `deadline` or `blocked` at all, is run separately with a `min`/`max`
-band around 33.3% as a *position-bias* guard only — it cannot tell you anything
+band (20-50%, around its 27.8%) as a *position-bias* guard only — it cannot tell you anything
 about whether a deadline heuristic is near the ceiling, because it never looks
 at `deadline` in the first place. See the `eval-ci` target in the `Makefile`
 for both.
@@ -235,7 +245,7 @@ Field Engineer 5, Salesperson 4, CEO 4).
 - `Task.task_id` now uses the same pattern as `scenario_id` (`^[a-z0-9_]+$`) —
   it had allowed uppercase by accident.
 - New scenario-level field **`team_lead_approved`** (bool), mirroring
-  `mentor_approved` — the team lead's sign-off is the first gate.
+  `mentor_approved` (since removed) — the team lead's sign-off.
 - **`seniority` was removed from every scenario** and dropped from the
   `scenario_id` naming (`developer_senior_blocked_oauth_...` →
   `developer_blocked_oauth_...`). It was being set decoratively on all 26 while
@@ -267,6 +277,90 @@ improvement. The set was rebuilt to **30 scenarios (5 per role)** so that:
 - every `deadline` is justified in the task's own `description`;
 - no scheduled-meeting start time is used as a `deadline`.
 
+**Hard-scenarios round (2026-10).** The mentor ran a real model on the set and
+it scored too high, so six deliberately misleading scenarios were added (one per
+role; set is now 36, the maximum). Each one makes the surface signals — nearest
+deadline, tier, urgent-sounding words, the `blocked` flag — point at the wrong
+task, while the right one is still decidable from per-task text alone. Same
+rules as above: nothing hinges on `free_time_minutes`, `seniority` or
+`constraints`; every deadline is explained in its description; a blocked task
+with a deadline holds the nearest deadline; both approvals start `false`.
+
+| Scenario | Disguise |
+|---|---|
+| `developer_inflated_p0_vs_understated_data_leak` | A `[P0]` title on a staging-only alert and a "Minor" title on a live customer-data exposure (with a regulator window); a blocked task holds the nearest deadline. |
+| `manager_idle_new_hires_vs_informational_steering_deck` | **The nearest deadline is the correct answer** (access approval, 11:30) against two longer, later, better-sounding tasks: a `strategic` deck nobody needs by then, and a vendor questionnaire that chased twice. Tier trap: `strategic` decoy vs `tactical` answer. |
+| `higher_manager_approved_vision_memo_vs_expiring_capacity_offer` | Big-sounding `strategic` memo whose content is already approved, and a travel-exception approval due today at 17:00 (the nearest deadline) vs a binding offer that lapses Friday morning. |
+| `field_engineer_released_controller_vs_blocked_fibre_fix` | The answer has the *latest* deadline (a 72-hour contractual redundancy clock); its parts blocker was cleared that morning, so `blocked: false`, though the text mentions the earlier wait. |
+| `salesperson_dead_rfp_vs_live_signing_round` | A future deadline whose purpose is dead (the RFP was already awarded to a competitor) and a customer-review deck due tomorrow morning vs a live signing-round cut-off. |
+| `ceo_own_investor_commitment_vs_unaccepted_keynote_request` | A deadline an outside party set for a request the CEO never accepted vs a deadline the CEO committed to in writing; plus a `strategic` filler with no deadline. |
+
+Measured effect: `SkipBlockedNearestDeadlineModel` gets **1 of the 6** (the
+`manager_idle_...` one, whose answer is the nearest deadline; 66.7% → 58.3% combined);
+`DummyModel` gets 0 of 6 (none has the answer in position 0), dropping to 27.8%,
+still inside its 20-50% band. Position distribution is index 0 in 10/36, 1 in 17,
+2 in 9 (no 3-task scenario has the answer first). `tests/test_personas.py` pins it
+(`EXPECTED_REAL_SCENARIO_COUNT = 36`, the position dict `{0: 10, 1: 17, 2: 9}`). The
+`make eval-ci` headroom gate (`--max-accuracy 0.68`) is unchanged and now has
+~10 points of slack instead of ~1. Known overlap, deliberate because stacking
+traps is what lowers the score: the Developer and Field Engineer scenarios each
+combine a blocked-nearest-deadline distractor with a second trap, so they echo
+`developer_blocked_oauth_vs_pr_review` / `field_engineer_blocked_rma_vs_runbook_update`
+in part.
+
+**Review round on the hard scenarios (2026-10, PR #535).** The mentor's comments, addressed:
+
+- Every new scenario has 3 candidates, and the third is a *second trap*, not filler:
+  it has a close deadline or a convincing reason to look important, and its text shows it
+  is not (`task_vendor`, `task_travel_exceptions`, `task_qbr`). With a third task the
+  answer may not be first, which is why `manager_idle_...` and `salesperson_...` were
+  reordered (position distribution above).
+- **Length bias.** The mentor found that picking the longest description scored 6/6 on
+  the new scenarios, because the correct answer was the one that explained itself. The
+  traps were rewritten to be long and detailed, and the correct answer short and dry
+  (it is never the longest text in a scenario). `LongestDescriptionModel` is now a
+  baseline with an `eval-ci` gate (`--max-accuracy 0.65`), and
+  `tests/test_personas.py` pins both the ceiling and "the correct answer is never the
+  longest description in the hard scenarios".
+- **The nearest deadline is not always a trap any more.** In `manager_idle_...` the
+  correct answer (the access approval, 11:30) has the nearest deadline; a test pins that
+  at least one hard scenario is like this.
+- Descriptions give facts, not conclusions: sentences that wrote out the answer
+  ("a late deck changes nothing for anyone", "no one is relying on you", "the lead has
+  said the fix can wait", "a late flag is simply cleared", "no further submissions will
+  be read") were removed from the new scenarios.
+- `manager_idle_...` states the cost of delay (each hour the approval waits, six
+  engineers sit idle). That stated fact is what makes `task_access` the answer; the
+  free-time window plays no part in it, because the model never sees
+  `free_time_minutes` (see "What the ranking model actually sees").
+
+**Real-model measurement (2026-10).** `SegmentedRankingModel` (`mind.scoring`, merged
+to `main` in #498), run on all 36 scenarios *after* this round's rewrite (same result before
+and after the last wording and length-balancing changes, so nothing was iterated on it):
+
+| | Correct |
+|---|---|
+| All 36 | **30/36 = 83.3%** |
+| dev (20 old scenarios the model was calibrated on) | 20/20 |
+| holdout (10 old scenarios) | 9/10 |
+| the 6 hard scenarios (never seen by the model) | 1/6 |
+
+For the record: 32/36 = 88.9% before this round (3/6 on the hard scenarios). An earlier
+attempt that re-worded three scenarios after reading the model's keyword lexicon
+(80.6%) was **reverted**, because a set built to fail one model at its known weak
+points makes every other model look better by comparison. This round was written
+from the mentor's length finding and from what is hard for a person, and measured
+after the fact; the three phrases that had come from the reverted attempt ("forwarded to the
+board and to investors", "shared with investors afterwards", "an audience of
+customers and industry analysts") were deliberately not reused. The author had
+read the model's lexicon earlier, so this is not a blind measurement.
+
+**`mentor_approved` removed (2026-10).** The scenario-level `mentor_approved` flag was
+removed at the mentor's request; `team_lead_approved` is now the only approval flag.
+The model forbids unknown fields, so a scenario file that still carries
+`mentor_approved` fails to load. Older notes below that mention it describe the
+state at the time.
+
 ## Contributing a scenario
 
 1. Pick one of your assigned roles. Write 4-6 scenarios for it, each testing a
@@ -286,9 +380,8 @@ improvement. The set was rebuilt to **30 scenarios (5 per role)** so that:
    `same_tier/` if every candidate task shares a `tier`, otherwise `cross_tier/`.
    Follow `scenario.schema.json` (generated from the `PersonaEvaluationScenario`
    model) — see the field tables above for what each field means and why.
-4. Set both `team_lead_approved: false` and `mentor_approved: false` — the author
-   never sets either to `true`. The team lead flips `team_lead_approved` in the
-   PR; R1 flips `mentor_approved` after an actual mentor review.
+4. Set `team_lead_approved: false` — the author never sets it to `true`. The
+   team lead flips it in the PR.
 5. Before pushing, validate locally from `teams/mind/`:
    ```bash
    python -c "from mind.evaluation.personas import load_personas, validate_personas as v; s = load_personas('eval/personas'); r = v(s); print('errors:', r.errors); print('warnings:', r.warnings)"
@@ -416,9 +509,11 @@ vs. internal), and `same_tier/manager_status_digest_vs_reorg_proposal.json`
 report if 100% isn't reached by the Foundation Gate.)*
 
 **Team-lead review (PR #198):**
+- **Update 2026-10:** the set is now 36. The 30 below were approved as described;
+  the six hard scenarios added in PR #535 are still `team_lead_approved: false`.
 - **Reviewed by:** estherora-tem, team lead. (The mentor is a different person
   and has not reviewed this set yet — that is a separate, still-pending gate;
-  `mentor_approved` stays `false` on all 30 until then.)
+  `mentor_approved` stayed `false` on all 30 until it was removed in 2026-10.)
 - **Approved:** 30 / 30 `team_lead_approved`. 27 from the 2026-09-15/16
   scenario-by-scenario sign-off pass (22 outright, 5 with a non-blocking note —
   see below); the remaining 3 (`manager_blocked_hire_vs_budget_review`,

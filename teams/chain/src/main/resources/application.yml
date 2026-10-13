@@ -33,6 +33,7 @@ chain:
       scheduling-updated: ${CHAIN_SCHEDULING_UPDATED_TOPIC:task.scheduling.updated}
       task-created: ${TASK_CREATED_TOPIC:task.created}
       task-updated: ${TASK_UPDATED_TOPIC:task.updated}
+      task-completed: ${TASK_COMPLETED_TOPIC:task.completed}
       dependencies-proposed: ${DEPENDENCIES_PROPOSED_TOPIC:task.dependencies.proposed}
     # One shared group for the whole service, matching Inbox's "inbox-service"
     # convention - set explicitly rather than left to ${spring.application.name}

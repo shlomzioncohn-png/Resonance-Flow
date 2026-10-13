@@ -8,6 +8,7 @@ import com.rnd.inbox.user.exception.DuplicateUsernameException;
 import com.rnd.inbox.user.exception.UserNotFoundException;
 import com.rnd.inbox.user.mapper.UserMapper;
 import com.rnd.inbox.user.model.User;
+import com.rnd.inbox.user.model.UserRole;
 import com.rnd.inbox.user.model.UserStatus;
 import com.rnd.inbox.user.repository.UserRepository;
 import com.rnd.inbox.user.security.UserAuthorization;
@@ -54,6 +55,7 @@ public class UserService {
         User actor = findActorOrThrow(actorId);
         Tenant tenant = findTenantOrThrow(UUID.fromString(request.getTenantId()));
         userAuthorization.assertCanCreateIn(userAuthorization.scopeOf(actor), tenant);
+        userAuthorization.assertCanAssignRole(actor, UserRole.valueOf(request.getRole()));
         assertEmailAvailable(request.getEmail(), null);
         assertUsernameAvailable(request.getUsername(), null);
 
@@ -77,6 +79,9 @@ public class UserService {
         User actor = findActorOrThrow(actorId);
         User user = findUserOrThrow(id);
         userAuthorization.assertWithinScope(userAuthorization.scopeOf(actor), user);
+        if (request.getRole() != null) {
+            userAuthorization.assertCanChangeRole(actor, user, UserRole.valueOf(request.getRole()));
+        }
         assertEmailAvailable(request.getEmail().orElse(null), id);
         assertUsernameAvailable(request.getUsername().orElse(null), id);
 

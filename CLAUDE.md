@@ -77,6 +77,9 @@ inside a team's own folder.
   `priority_score` on a task are Chain's computed values, delivered to inbox on
   `task.scheduling.updated` and only materialized (never computed) there.
 - **relay** is the event bus / service-communication layer; still a foundation skeleton.
+- Every registered Kafka `.proto` schema lives once, in `shared/proto/` (Relay-owned). Services
+  build against it via a `shared` named Docker build context — see `shared/proto/README.md`.
+  Don't copy those files into a team's `src/main/proto/`.
 - **mind** and **lens-*** are consumers/producers referenced by CI and Helm values but not yet
   present as code in this repo.
 
@@ -94,7 +97,10 @@ inside a team's own folder.
 - A team's CD, on push to `main`, builds and pushes a GHCR image, then opens a PR bumping the
   image tag in `teams/relay/helm/resonance-flow/values.yaml` (see
   `service-update-manifest.yaml`). ArgoCD (`teams/relay/argocd/`) watches the `resonance-flow`
-  and `schema-sync-hook` charts and reconciles the cluster — no image updater involved.
+  and `schema-sync-hook` charts and reconciles the cluster — no image updater involved. It also
+  installs the Traefik ingress controller (`apps/traefik.yaml`), and loads
+  `environments/shared.yaml` on top of `values.yaml` for shared-cluster-only settings (ingress
+  host/TLS) that CI never sees.
 - Because every team's component renders from the same Helm release into the same namespace, a
   broken value in one team's block (bad tag, template error) can block sync for every other team's
   service in the same `Application` — see `teams/relay/argocd/README.md` "Known limitation".

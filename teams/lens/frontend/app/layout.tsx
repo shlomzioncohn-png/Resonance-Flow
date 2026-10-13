@@ -1,13 +1,13 @@
-import type { Metadata } from 'next'
-import type { ReactNode } from 'react'
-import ThemeRegistry from './ThemeRegistry'
-import { RoleProvider } from '@/components/layout/RoleProvider'
-import './globals.css'
+import type { Metadata } from 'next';
+import type { ReactNode } from 'react';
+import ThemeRegistry from './ThemeRegistry';
+import { RoleProvider } from '@/components/layout/RoleProvider';
+import './globals.css';
 
 export const metadata: Metadata = {
-  title: 'LENS',
+  title: 'Resonance Flow',
   description: 'Resonance Flow LENS frontend',
-}
+};
 
 export default function RootLayout({ children }: Readonly<{ children: ReactNode }>) {
   return (
@@ -18,5 +18,5 @@ export default function RootLayout({ children }: Readonly<{ children: ReactNode 
         </ThemeRegistry>
       </body>
     </html>
-  )
+  );
 }

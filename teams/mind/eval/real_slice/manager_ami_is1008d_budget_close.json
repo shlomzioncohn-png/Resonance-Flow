@@ -52,6 +52,5 @@
   "expected_top_task_id": "task_negotiate_cost",
   "expected_reason": "task_marketing_plan and task_product_evaluation are both blocked - their own descriptions state they cannot start until production has begun and until real units exist. Of the two actionable items, task_negotiate_cost resolves a budget shortfall that is currently blocking a committed design decision (adding the LCD display), whereas task_present_promo_plan is routine reporting of an already-agreed plan. The budget negotiation comes first.",
   "source": { "type": "AMI", "source_detail": "AMI Meeting Corpus meeting IS1008d, abssumm <actions> (ami_public_manual_1.6.2)" },
-  "team_lead_approved": false,
-  "mentor_approved": false
+  "team_lead_approved": false
 }

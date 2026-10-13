@@ -1,4 +1,3 @@
-
 Foundation module for Team Chain (Dependency Graph, Task Selection & Constraints).
 
 Implements the graph traversal API: given a task id, walk its direct or transitive dependencies,
@@ -105,6 +104,7 @@ src/main/java/com/rnd/chain/
 │                           # claim record)
 ├── events/                 # Kafka consume/publish infrastructure - see below
 │   ├── TaskCreatedEventHandler.java / TaskUpdatedEventHandler.java /
+│   │   TaskCompletedEventHandler.java /
 │   │   DependencyProposedEventHandler.java   # one @KafkaListener per inbound topic
 │   ├── ChainEventProcessingTemplate.java     # shared claim/logging skeleton
 │   ├── EventFields.java                      # UUID / Timestamp parsing shared by the handlers
@@ -154,16 +154,16 @@ All routes are read-only (`GET`) and take a task id as the path variable. A bare
 direct/one-level relationship; `/transitive` is the full closure over that same relation.
 Ancestors has no `/transitive` variant - the ancestor chain already is the transitive closure.
 
-| Method | Path                              | Returns                                    |
+| Method | Path                              | Returns                                    |
 |--------|------------------------------------|---------------------------------------------|
-| GET    | `/tasks/{id}/dependencies`         | Direct dependencies                          |
-| GET    | `/tasks/{id}/dependencies/transitive` | All (transitive) dependencies             |
-| GET    | `/tasks/{id}/dependents`           | Direct dependents                            |
-| GET    | `/tasks/{id}/dependents/transitive`   | All (transitive) dependents                |
-| GET    | `/tasks/{id}/ancestors`            | Full ancestor chain (hierarchy)              |
-| GET    | `/tasks/{id}/children`             | Direct children (hierarchy)                  |
-| GET    | `/tasks/{id}/descendants`          | All descendants (hierarchy)                  |
-| GET    | `/tasks/{id}/trace`                | Combined dependency graph + hierarchy trace  |
+| GET    | `/tasks/{id}/dependencies`         | Direct dependencies                          |
+| GET    | `/tasks/{id}/dependencies/transitive` | All (transitive) dependencies             |
+| GET    | `/tasks/{id}/dependents`           | Direct dependents                            |
+| GET    | `/tasks/{id}/dependents/transitive`   | All (transitive) dependents                |
+| GET    | `/tasks/{id}/ancestors`            | Full ancestor chain (hierarchy)              |
+| GET    | `/tasks/{id}/children`             | Direct children (hierarchy)                  |
+| GET    | `/tasks/{id}/descendants`          | All descendants (hierarchy)                  |
+| GET    | `/tasks/{id}/trace`                | Combined dependency graph + hierarchy trace  |
 
 Each route returns a `TaskResponse` list (or, for `/trace`, a `TaskTraceResponse` combining
 both axes) - see `dto/TaskResponse.java` and `dto/TaskTraceResponse.java` for the exact shape.
@@ -171,7 +171,7 @@ An unknown task id returns `404` with an `ApiError` body; an invalid (non-UUID) 
 
 ## Kafka event infrastructure
 
-Chain consumes three Protobuf topics and publishes one flat-JSON topic. Each inbound topic has its
+Chain consumes four Protobuf topics and publishes one Protobuf topic. Each inbound topic has its
 own `@KafkaListener` handler, and the handlers share the claim/logging skeleton in
 `ChainEventProcessingTemplate`.
 
@@ -179,6 +179,7 @@ own `@KafkaListener` handler, and the handlers share the claim/logging skeleton 
 | --- | --- | --- | --- | --- |
 | `task.created` | Inbox | `TaskCreatedEventHandler` | state-based (no event id) | 3 attempts, 2s apart |
 | `task.updated` | Inbox | `TaskUpdatedEventHandler` | state-based, last-write-wins on `updated_at` | 3 attempts, 2s apart |
+| `task.completed` | Inbox | `TaskCompletedEventHandler` | state-based; Kafka record timestamp compared to stored `updated_at`, never written | 3 attempts, 2s apart |
 | `task.dependencies.proposed` | Mind | `DependencyProposedEventHandler` | `event_id` claim in `ProcessedEventStore` | 5 attempts, 5s apart |
 
 **Retry and dead-lettering**: retries are non-blocking, via `@RetryableTopic`, so a message waiting
@@ -193,8 +194,11 @@ only after its record is handled or handed to its retry/DLT topic, so a crash mi
 redelivers the record instead of losing it.
 
 **Idempotency**: `task.dependencies.proposed` is deduplicated by `event_id`. The claim is released if
-the handler fails, so a retry can process the event again. `task.created` and `task.updated` carry no
-event id, so they rely on their state changes being safe to repeat. The current
+the handler fails, so a retry can process the event again. `task.created`, `task.updated` and `task.completed` carry no
+event id, so they rely on their state changes being safe to repeat. `task.completed` has no
+timestamp either, so its Kafka record timestamp is compared against the stored `updated_at` (to
+ignore a completion that arrives after a reopen) but never written to it; this is interim until
+Inbox adds `completed_at` to the event. The current
 `InMemoryProcessedEventStore` guards a single running instance only and loses all claims on restart,
 so it is not safe for production or for several instances of this service. See its Javadoc for what
 a claim does and doesn't guarantee.
@@ -203,12 +207,19 @@ a claim does and doesn't guarantee.
 `DONE`, `CANCELLED` and `REJECTED` map to `DONE`, because all three release dependents. `IN_PROGRESS`
 maps to `ACTIVE`, and every other status maps to `PENDING`.
 
-**Publishing**: the only publisher is `KafkaSchedulingUpdatePublisher` (`com.rnd.chain.events`, the
-same package as the consumers), used by `SchedulingUpdateService`, for `task.scheduling.updated`. It
-sends `TaskSchedulingUpdatedEvent` as JSON through the `KafkaTemplate` defined in
-`ChainProtobufKafkaConfig`. That JSON is interim until the Protobuf contract is settled (#545).
+**Publishing**: the only publisher for `task.scheduling.updated` is `KafkaSchedulingUpdatePublisher`
+(`com.rnd.chain.events` - the same package as the consumers, see #543), used by `SchedulingUpdateService`. It maps `TaskSchedulingUpdatedEvent` to the
+`SchedulingUpdatedEvent` Protobuf message (`scheduling-updated-event.proto`) and sends it with
+`KafkaProtobufSerializer`. `scheduling-updated-event.proto` comes from `shared/proto` (package
+`com.rnd.inbox.event`), registered via `schema-subjects.tsv`; the producer never registers it
+(`auto.register.schemas=false`, `use.latest.version=true`). Field numbers match Inbox's consumer proto: `event_id=1`, `task_id=2`,
+`available=3`, `priority_score=4`. Every event carries an `event_id`, generated per emitted event in
+`SchedulingUpdateService`; it is unique per event, not a deduplication key across handler retries. An unscored task omits `priority_score`, which Inbox
+reads as "leave the stored value unchanged". `KafkaEventPublisher` (flat JSON, no envelope) was removed under #543 - it had no production caller.
 
-**Schemas**: the `.proto` sources live in `src/main/proto/` and are committed. Messages are
+**Schemas**: the `.proto` sources come from the repo's [`shared/proto/`](../../shared/proto)
+(`task-created-event`, `task-updated-event`, `task-dependencies-proposed-event`,
+`scheduling-updated-event`). Messages are
 validated against the Schema Registry at `SCHEMA_REGISTRY_URL`. Tests use a mock registry
 (`mock://...`), so no registry process is needed.
 
@@ -218,6 +229,7 @@ validated against the Schema Registry at `SCHEMA_REGISTRY_URL`. Tests use a mock
 | --- | --- | --- |
 | `chain.kafka.topics.task-created` (env `TASK_CREATED_TOPIC`) | Topic consumed for `task.created` | `task.created` |
 | `chain.kafka.topics.task-updated` (env `TASK_UPDATED_TOPIC`) | Topic consumed for `task.updated` | `task.updated` |
+| `chain.kafka.topics.task-completed` (env `TASK_COMPLETED_TOPIC`) | Topic consumed for `task.completed` | `task.completed` |
 | `chain.kafka.topics.dependencies-proposed` (env `DEPENDENCIES_PROPOSED_TOPIC`) | Topic consumed for `task.dependencies.proposed` | `task.dependencies.proposed` |
 | `chain.kafka.topics.scheduling-updated` (env `CHAIN_SCHEDULING_UPDATED_TOPIC`) | Topic published to for `task.scheduling.updated` | `task.scheduling.updated` |
 | `KAFKA_BOOTSTRAP_SERVERS` (env var, not `chain.*`) | Kafka broker(s) address | `localhost:9092` |
@@ -253,15 +265,15 @@ java -jar target/chain-0.1.0-SNAPSHOT.jar
 
 1. Copy the env file:
 
-   ```bash
-   cp .env.example .env
-   ```
+   ```bash
+   cp .env.example .env
+   ```
 
 2. Build and run:
 
-   ```bash
-   docker compose up --build
-   ```
+   ```bash
+   docker compose up --build
+   ```
 
 The app will be available at http://localhost:8081 (or whatever `SERVER_PORT` is set to in `.env`).
 Set `KAFKA_BOOTSTRAP_SERVERS` in `.env` to point the container at a real broker - `localhost:9092`
@@ -649,12 +661,12 @@ the real implementation backing this in production - `InMemoryTaskDependencyRepo
 issue #66:
 
 ```java
-addDependency(taskId, dependsOnTaskId)   // throws InvalidDependencyException on self-dependency,
-                                          // TaskNotFoundException if either task doesn't exist,
-                                          // DuplicateDependencyException if the edge already exists
+addDependency(taskId, dependsOnTaskId)   // throws InvalidDependencyException on self-dependency,
+                                          // TaskNotFoundException if either task doesn't exist,
+                                          // DuplicateDependencyException if the edge already exists
 removeDependency(taskId, dependsOnTaskId) // throws DependencyNotFoundException if the edge doesn't exist
-getDependencies(taskId)                   // ids of tasks that block taskId (empty list if none)
-getDependents(taskId)                     // ids of tasks that taskId blocks (empty list if none)
+getDependencies(taskId)                   // ids of tasks that block taskId (empty list if none)
+getDependents(taskId)                     // ids of tasks that taskId blocks (empty list if none)
 ```
 
 Callers that need those business rules enforced (duplicate edges, self-dependency, missing tasks)
@@ -763,25 +775,25 @@ findings deliberately not acted on here, documented-only, or handed off to the b
 originated the file in question):
 
 - **`GlobalExceptionHandler.handleValidationError` no longer assumes a field-level error exists.**
-  `MethodArgumentNotValidException` can carry only class-level errors (a cross-field constraint),
-  leaving `getFieldErrors()` empty - the unconditional `.get(0)` would throw
-  `IndexOutOfBoundsException` inside the handler itself, falling through to the generic 500
-  handler instead of the intended 400. Now falls back to `getAllErrors()` (guaranteed non-empty
-  whenever the exception exists) when there's no field-level error.
+  `MethodArgumentNotValidException` can carry only class-level errors (a cross-field constraint),
+  leaving `getFieldErrors()` empty - the unconditional `.get(0)` would throw
+  `IndexOutOfBoundsException` inside the handler itself, falling through to the generic 500
+  handler instead of the intended 400. Now falls back to `getAllErrors()` (guaranteed non-empty
+  whenever the exception exists) when there's no field-level error.
 - **`InMemoryTaskRepository.childrenByParentId` is no longer keyed by `Optional<UUID>`** - a
-  textbook `Optional` misuse (return-type-only by convention, never a collection key), used only
-  to work around `ConcurrentHashMap`'s no-null-keys restriction. Root tasks turn out to never need
-  indexing at all - nothing in this codebase queries `findByParentTaskId(null)` - so the map is
-  now a plain `Map<UUID, Set<UUID>>` and root tasks are simply not indexed.
+  textbook `Optional` misuse (return-type-only by convention, never a collection key), used only
+  to work around `ConcurrentHashMap`'s no-null-keys restriction. Root tasks turn out to never need
+  indexing at all - nothing in this codebase queries `findByParentTaskId(null)` - so the map is
+  now a plain `Map<UUID, Set<UUID>>` and root tasks are simply not indexed.
 - **Empty adjacency-map entries are now pruned** in both `InMemoryTaskDependencyRepository.delete`
-  and `InMemoryTaskRepository.reindexChild`, instead of leaking one permanent empty-`Set` entry
-  per id ever touched under write churn.
+  and `InMemoryTaskRepository.reindexChild`, instead of leaking one permanent empty-`Set` entry
+  per id ever touched under write churn.
 - **The performance benchmark (`TaskTraversalPerformanceTest`) now asserts its p95 target**
-  instead of only printing pass/fail - it previously ran on every default `mvn test` for zero
-  regression protection, since nothing ever failed the build on a miss.
+  instead of only printing pass/fail - it previously ran on every default `mvn test` for zero
+  regression protection, since nothing ever failed the build on a miss.
 - **`TaskTraversalService.collectReachableIds`'s `boolean directOnly` flag is gone**, replaced by
-  two named methods (`collectDirectNeighborIds`/`collectAllReachableIds`) sharing a private
-  BFS-step helper - each of the 6 call sites now reads self-documenting instead of requiring a
-  check of the method signature to know what `true`/`false` meant.
+  two named methods (`collectDirectNeighborIds`/`collectAllReachableIds`) sharing a private
+  BFS-step helper - each of the 6 call sites now reads self-documenting instead of requiring a
+  check of the method signature to know what `true`/`false` meant.
 
 Full test suite (47 tests, `mvn clean test`) passes.

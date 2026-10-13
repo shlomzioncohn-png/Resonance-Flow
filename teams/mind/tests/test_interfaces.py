@@ -115,7 +115,6 @@ def _scenario_kwargs(**overrides):
         "expected_reason": "Task b has a same-day deadline and Task a has none, so Task b is the pick.",
         "source": {"type": "synthetic"},
         "team_lead_approved": False,
-        "mentor_approved": False,
     }
     kwargs.update(overrides)
     return kwargs

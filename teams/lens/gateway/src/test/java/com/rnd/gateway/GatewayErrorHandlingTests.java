@@ -8,6 +8,7 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
 
+import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.jwt;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 
@@ -33,14 +34,15 @@ class GatewayErrorHandlingTests {
     }
 
     @Test
-    @DisplayName("Workspace endpoint has no auth check (SecurityConfig permitAll) — fails downstream instead, on BFF being unreachable")
+    @DisplayName("Authenticated workspace request passes security — fails downstream instead, on BFF being unreachable")
     void testWorkspaceEndpointAccess() throws Exception {
-        // SecurityConfig.permitAll() means this never 401s/403s for lacking credentials.
-        // With no BFF running in this test context, RestTemplate can't resolve
-        // bff-service, so the request fails downstream as 503 SERVICE_UNAVAILABLE —
-        // not a 4xx — which is itself proof no auth layer is rejecting the request first.
+        // With a valid JWT the request gets past SecurityConfig. With no BFF running
+        // in this test context, RestTemplate can't resolve bff-service, so the request
+        // fails downstream as 503 SERVICE_UNAVAILABLE — not a 401/403 — which is
+        // itself proof the auth layer let the authenticated request through.
+        // (Unauthenticated requests are covered by SecurityJwtValidationTests.)
         mockMvc
-            .perform(post("/api/workspace/recommend")
+            .perform(post("/api/workspace/recommend").with(jwt())
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"availableTime\": 45}"))
             .andExpect(status().isServiceUnavailable())
@@ -69,7 +71,7 @@ class GatewayErrorHandlingTests {
     @DisplayName("Malformed JSON body returns 400 BAD_REQUEST")
     void testMalformedJsonBody() throws Exception {
         mockMvc
-            .perform(post("/api/workspace/recommend")
+            .perform(post("/api/workspace/recommend").with(jwt())
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{invalid json}"))
             .andExpect(status().isBadRequest())
@@ -80,7 +82,7 @@ class GatewayErrorHandlingTests {
     @DisplayName("Missing required field returns 400 with details")
     void testMissingRequiredField() throws Exception {
         mockMvc
-            .perform(post("/api/workspace/recommend")
+            .perform(post("/api/workspace/recommend").with(jwt())
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{}"))
             .andExpect(status().isBadRequest())
@@ -91,7 +93,7 @@ class GatewayErrorHandlingTests {
     @DisplayName("Invalid availableTime returns 400")
     void testInvalidAvailableTime() throws Exception {
         mockMvc
-            .perform(post("/api/workspace/recommend")
+            .perform(post("/api/workspace/recommend").with(jwt())
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"availableTime\": 0}"))
             .andExpect(status().isBadRequest());

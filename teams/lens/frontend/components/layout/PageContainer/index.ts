@@ -1,2 +1,2 @@
-export { default } from './PageContainer'
-export type { PageContainerProps } from './PageContainer'
+export { default } from './PageContainer';
+export type { PageContainerProps } from './PageContainer';
