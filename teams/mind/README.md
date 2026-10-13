@@ -114,10 +114,12 @@ licensing constraints.
   ~45s / ~600MB per page). A trade made knowingly — PaddleOCR mobile has ~2.7x
   fewer character errors on FUNSD (grouped CER 0.074 vs. 0.200). See
   [`benchmarks/ocr-asr-benchmark.md`](./benchmarks/ocr-asr-benchmark.md).
-- ASR: **blocked**, not resolved — no AMI audio (or any audio) sample
-  exists anywhere in this repo to benchmark Whisper against. See
-  [`benchmarks/ocr-asr-benchmark.md`](./benchmarks/ocr-asr-benchmark.md)
-  "Known risk".
+- ~~ASR: which local Whisper size~~ Resolved: **Whisper `base.en`** (faster-whisper,
+  int8, CPU), chosen over `tiny.en` / `small.en` on two AMI meetings: rough WER
+  ~0.26 at ~10x real time, vs. `small.en` 0.9–1.6 points better but ~5x slower,
+  and `tiny.en` within noise on WER but less precise. n=2 and a rough word
+  diff — known risks documented in
+  [`benchmarks/ocr-asr-benchmark.md`](./benchmarks/ocr-asr-benchmark.md).
 - Evaluation metric: top-1 accuracy vs. MRR/nDCG
 - How the score is published to Chain: separate event vs. field on `Task`
 - Which real dataset slice to validate against first: FUNSD vs. AMI
@@ -130,6 +132,7 @@ cp .env.example .env             # already filled with working defaults today
 make dev                         # install with dev dependencies
 make lint                        # ruff + mypy
 docker compose up vector-store -d # bring up just the DB -- make test/make run need it
+make migrate                     # apply database migrations (alembic upgrade head)
 make test                        # run the test suite
 make eval                        # run the evaluation harness against eval/personas/
 make run                         # run the API locally
@@ -139,14 +142,18 @@ make docker-up                   # or run everything via docker compose (API + v
 `make test` and `make run` connect to Postgres over `MIND_VECTOR_STORE__DSN`
 (already set in `.env.example` against `localhost:5432`), so the
 `vector-store` container above must be up first even when you're running
-`mind` itself outside Docker. `make docker-up` doesn't need that step --
-it brings up `vector-store` itself.
+`mind` itself outside Docker. `make migrate` must then run once against a
+fresh database -- the app itself no longer creates its own schema (see
+[`migrations/`](./migrations) and issue #441); it only checks the schema
+is already there, and fails fast with a clear message if it isn't.
+`make docker-up` doesn't need either step -- it brings up `vector-store`
+and runs the migration itself.
 
 `make docker-up` (`docker compose up`) now brings up the full stack —
-the API **and** its `vector-store` (pgvector) dependency — with one
-command, waiting for `vector-store` to report healthy before starting
-`mind`. On a clean checkout: `docker compose down -v && docker compose
-up -d --build`.
+migrations, the API, **and** its `vector-store` (pgvector) dependency —
+with one command: `vector-store` becomes healthy, a one-shot `migrate`
+service runs against it and exits, then `mind` starts. On a clean
+checkout: `docker compose down -v && docker compose up -d --build`.
 
 Once running, `curl -f http://localhost:8000/health` should return `200`
 with `{"status": "ok", ...}`, and `docker compose ps` should show both

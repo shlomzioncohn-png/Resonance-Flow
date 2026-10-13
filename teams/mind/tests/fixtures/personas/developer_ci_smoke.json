@@ -32,6 +32,5 @@
   "expected_top_task_id": "task_fix",
   "expected_reason": "task_fix has a hard deadline this morning and is blocking every merge; task_doc has no deadline.",
   "source": { "type": "synthetic", "source_detail": null },
-  "team_lead_approved": false,
-  "mentor_approved": false
+  "team_lead_approved": false
 }

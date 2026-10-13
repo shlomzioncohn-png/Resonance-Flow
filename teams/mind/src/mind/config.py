@@ -42,8 +42,8 @@ class VectorStoreSettings(BaseModel):
     dsn: Secret[PostgresDsn]
     table: str = "task_embeddings"
     search_effort: int = Field(default=400, ge=1)
-    # Must match embed()'s real output dimension.
-    embedding_dim: int = Field(default=384, ge=1)
+    # No embedding_dim: the column width is baked into the migration
+    # (migrations/versions/0001_initial_vector_schema.py), not config.
 
 
 class _ChartVectorStoreSource(PydanticBaseSettingsSource):
@@ -106,4 +106,6 @@ class Settings(BaseSettings):
 @lru_cache
 def get_settings() -> Settings:
     """Construct (once, cached) and return the Settings."""
+    # vector_store has no default (see VectorStoreSettings) -- mypy can't
+    # see that pydantic-settings fills it in from the env/chart sources above.
     return Settings()  # type: ignore[call-arg]

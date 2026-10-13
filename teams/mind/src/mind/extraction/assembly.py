@@ -1,0 +1,54 @@
+"""Assembling an extraction into the outbound contract.
+
+This is the single place where what the model guessed meets what we already
+knew. `tenant_id` and `source_type` come from the intake event, `confidence`
+comes from our own scorer, and the rest comes from the LLM — keeping that
+boundary in one function is what stops an identity or a source type from ever
+being model-generated.
+
+The classification fields (tier, urgency, role_context) are filled in here when
+#351's switch was on and left as None when it was off. The effort fields stay
+unset either way: they belong to #352, which runs on top of this result.
+"""
+
+from uuid import UUID
+
+from mind.contracts.task_creation_requested import TaskCreationRequested
+from mind.extraction.extractor import ExtractionSuccess
+from mind.extraction.models import ClassificationFields
+
+
+def to_task_creation_requested(
+    result: ExtractionSuccess,
+    tenant_id: UUID,
+) -> TaskCreationRequested:
+    """Build the Inbox-facing proposal from a successful extraction.
+
+    The result is a proposal, not a decision: Inbox is the only team that
+    creates a task record and issues a real task id.
+    """
+
+    # With classification switched off the fields object genuinely has no
+    # `tier` attribute — reading one raises rather than returning None — so
+    # the shape has to be checked before it is read. An isinstance narrowing
+    # rather than `getattr(..., "tier", None)`: here the field names are real
+    # attributes that mypy verifies, where a misspelled string would quietly
+    # return None for ever.
+    classification = result.fields if isinstance(result.fields, ClassificationFields) else None
+
+    return TaskCreationRequested(
+        tenant_id=tenant_id,
+        title=result.fields.title,
+        description=result.fields.description,
+        source_type=result.source_type,
+        source_ref=result.fields.source_ref,
+        has_dependencies=result.fields.has_dependencies,
+        confidence=result.confidence.value,
+        # None here means two different things that happen to deserve the same
+        # answer: nobody asked for a classification, or the model was asked and
+        # honestly declined to guess. Both leave Inbox with an empty field,
+        # which is exactly the contract's default.
+        tier=classification.tier if classification else None,
+        urgency=classification.urgency if classification else None,
+        role_context=classification.role_context if classification else None,
+    )

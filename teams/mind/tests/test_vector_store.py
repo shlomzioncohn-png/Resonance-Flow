@@ -7,6 +7,7 @@ import uuid
 from contextlib import asynccontextmanager
 from unittest.mock import AsyncMock, MagicMock
 
+import psycopg
 import pytest
 from psycopg import sql
 from psycopg_pool import PoolTimeout
@@ -17,14 +18,42 @@ from mind.embeddings.embeddings import EMBEDDING_DIM
 from mind.embeddings.pgvector_store import PgVectorStore
 
 
+async def _create_test_table(settings: VectorStoreSettings) -> None:
+    # The real table is created by `alembic upgrade head`; this suite's
+    # dedicated test table isn't covered by that, so it sets itself up here
+    # -- matching migrations/versions/0003 (is_completed, content_hash).
+    table = sql.Identifier(settings.table)
+    async with await psycopg.AsyncConnection.connect(
+        str(settings.dsn.get_secret_value()), autocommit=True
+    ) as conn:
+        await conn.execute("CREATE EXTENSION IF NOT EXISTS vector;")
+        await conn.execute(
+            sql.SQL(
+                "CREATE TABLE IF NOT EXISTS {table} "
+                "(task_id TEXT PRIMARY KEY, embedding VECTOR({dim}) NOT NULL, "
+                "is_completed BOOLEAN NOT NULL DEFAULT FALSE, content_hash TEXT);"
+            ).format(table=table, dim=sql.Literal(EMBEDDING_DIM))
+        )
+        await conn.execute(
+            sql.SQL(
+                "CREATE INDEX IF NOT EXISTS {idx} ON {table} USING hnsw (embedding vector_cosine_ops);"
+            ).format(idx=sql.Identifier(f"{settings.table}_embedding_hnsw_idx"), table=table)
+        )
+
+
 @pytest.fixture(scope="module")
-async def store():
+async def store(migrated_db):
     """One store per module, not per test. Scoped here, not conftest.py,
-    so DB-free test files never need a connection."""
+    so DB-free test files never need a connection. Depends on
+    migrated_db (conftest.py) so `alembic upgrade head` actually runs
+    against the real `task_embeddings` table before any DB test does --
+    this suite's own `task_embeddings_test` table isn't covered by that
+    migration, so it still sets itself up separately below."""
     settings = VectorStoreSettings(
         dsn=os.environ["MIND_VECTOR_STORE__DSN"],
         table="task_embeddings_test",
     )
+    await _create_test_table(settings)
     s = PgVectorStore(settings)
     await s.open()
     yield s
@@ -44,9 +73,7 @@ async def test_embed_is_independent():
     assert isinstance(vec, list)
     assert len(vec) == EMBEDDING_DIM
     assert all(isinstance(x, float) for x in vec)
-    # Deterministic: same text -> same vector.
     assert vec == embed("Fix the login bug on the payments page")
-    # Different text -> different vector.
     assert vec != embed("Completely unrelated marketing task")
 
 
@@ -62,7 +89,6 @@ async def test_upsert_is_independent(store):
     task_id = f"test-{uuid.uuid4()}"
     vec = embed("Write release notes for v2.3")
     await store.upsert(task_id, vec)  # should not raise
-    # Searching for the exact vector should surface it.
     result_ids = [r.task_id for r in await store.search(vec, k=5)]
     assert task_id in result_ids
 
@@ -80,7 +106,6 @@ async def test_search_is_independent(store):
 
     result_ids = [r.task_id for r in await store.search(embed(base_text), k=3)]
     assert base_id in result_ids
-    # The near-duplicate task should rank above the unrelated one.
     assert result_ids.index(near_id) < result_ids.index(far_id)
 
 
@@ -96,10 +121,7 @@ async def test_search_returns_similarity_scores_in_descending_order(store):
     similarities = [r.similarity for r in results]
 
     assert ids.index(near_id) < ids.index(far_id)
-    # Best match first: descending similarity.
     assert similarities == sorted(similarities, reverse=True)
-    # Cosine similarity of unit vectors is bounded in [-1, 1] --
-    # SearchResult.similarity itself enforces this range too.
     assert all(-1.0 <= s <= 1.0 for s in similarities)
 
 
@@ -140,8 +162,82 @@ async def test_full_cycle_embed_upsert_search(store):
 
     results = await store.search(vector, k=1)
     assert [r.task_id for r in results] == [task_id]
-    # Searching for the exact stored vector: similarity to itself is ~1.0.
     assert results[0].similarity == pytest.approx(1.0, abs=1e-6)
+
+
+async def test_upsert_if_absent_inserts_a_new_vector(store):
+    """upsert_if_absent() on an unknown task_id inserts and returns True."""
+    task_id = f"test-{uuid.uuid4()}"
+    vec = embed("Draft the quarterly roadmap review")
+    inserted = await store.upsert_if_absent(task_id, vec)
+    assert inserted is True
+    assert task_id in [r.task_id for r in await store.search(vec, k=5)]
+
+
+async def test_upsert_if_absent_does_not_overwrite_an_existing_vector(store):
+    """upsert_if_absent() on an existing task_id is a no-op (False)."""
+    task_id = f"test-{uuid.uuid4()}"
+    original_vec = embed("Original task description")
+    await store.upsert(task_id, original_vec)
+
+    other_vec = embed("A completely different description")
+    inserted = await store.upsert_if_absent(task_id, other_vec)
+    assert inserted is False
+
+    results = await store.search(original_vec, k=1)
+    assert results[0].task_id == task_id
+    assert results[0].similarity == pytest.approx(1.0, abs=1e-6)
+
+
+async def test_mark_completed_marks_an_existing_task(store):
+    """mark_completed() flips is_completed on the row search() returns."""
+    task_id = f"test-{uuid.uuid4()}"
+    vec = embed("Ship the release notes")
+    await store.upsert(task_id, vec)
+
+    marked = await store.mark_completed(task_id)
+    assert marked is True
+
+    results = await store.search(vec, k=1)
+    assert results[0].task_id == task_id
+    assert results[0].is_completed is True
+
+
+async def test_mark_completed_is_a_noop_for_an_unknown_task_id(store):
+    """Unknown task_id returns False, not an error."""
+    marked = await store.mark_completed(f"test-{uuid.uuid4()}")
+    assert marked is False
+
+
+async def test_mark_incomplete_resets_an_existing_task(store):
+    """mark_incomplete() flips is_completed back off (e.g. a reopened task)."""
+    task_id = f"test-{uuid.uuid4()}"
+    vec = embed("Ship the release notes")
+    await store.upsert(task_id, vec)
+    await store.mark_completed(task_id)
+
+    marked = await store.mark_incomplete(task_id)
+    assert marked is True
+
+    results = await store.search(vec, k=1)
+    assert results[0].task_id == task_id
+    assert results[0].is_completed is False
+
+
+async def test_mark_incomplete_is_a_noop_for_an_unknown_task_id(store):
+    """Unknown task_id returns False, not an error."""
+    marked = await store.mark_incomplete(f"test-{uuid.uuid4()}")
+    assert marked is False
+
+
+async def test_get_content_hash_round_trips_through_upsert(store):
+    task_id = f"test-{uuid.uuid4()}"
+    await store.upsert(task_id, embed("Ship the release notes"), content_hash="abc123")
+    assert await store.get_content_hash(task_id) == "abc123"
+
+
+async def test_get_content_hash_is_none_for_an_unknown_task_id(store):
+    assert await store.get_content_hash(f"test-{uuid.uuid4()}") is None
 
 
 async def test_delete_removes_a_stored_vector(store):
@@ -199,6 +295,21 @@ async def test_search_raises_when_database_is_unreachable():
         await unreachable_store.close()  # the pool opened before timing out
 
 
+async def test_open_raises_a_clear_error_when_the_table_is_not_migrated():
+    """The most important new behavior here: an unmigrated DB fails with
+    a clear message, not a bare UndefinedTable from the first real query."""
+    missing_settings = VectorStoreSettings(
+        dsn=os.environ["MIND_VECTOR_STORE__DSN"],
+        table=f"missing_{uuid.uuid4().hex}",
+    )
+    missing_store = PgVectorStore(missing_settings)
+    try:
+        with pytest.raises(RuntimeError, match="schema not migrated"):
+            await missing_store.open()
+    finally:
+        await missing_store.close()
+
+
 @asynccontextmanager
 async def _fake_async_ctx(value):
     yield value
@@ -213,7 +324,7 @@ async def test_search_issues_set_local_ef_search_before_the_select():
     store._ready = True  # skip _ensure_ready(): no real connection needed
 
     mock_cursor = AsyncMock()
-    mock_cursor.fetchall.return_value = [("task-1", 0.9)]
+    mock_cursor.fetchall.return_value = [("task-1", 0.9, False)]
 
     mock_conn = MagicMock()
     mock_conn.cursor = MagicMock(side_effect=lambda: _fake_async_ctx(mock_cursor))

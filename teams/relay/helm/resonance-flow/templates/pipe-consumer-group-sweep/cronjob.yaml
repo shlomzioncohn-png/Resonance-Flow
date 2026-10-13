@@ -35,7 +35,7 @@ spec:
                 - name: KAFKA_BOOTSTRAP_SERVERS
                   value: {{ include "resonance-flow.dependencyAddress" (dict "root" $ "deps" $.Values.dependencies "name" "kafka") | quote }}
                 - name: KAFKA_SASL_JAAS_CONFIG
-                  value: {{ include "resonance-flow.kafkaSaslJaasConfig" $ | quote }}
+                  value: {{ include "resonance-flow.kafkaSaslJaasConfig" (dict "root" $) | quote }}
                 - name: GROUP_PATTERN
                   value: {{ $sweep.groupPattern | quote }}
 
