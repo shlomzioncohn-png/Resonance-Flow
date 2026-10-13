@@ -115,6 +115,12 @@ components:
     resources: *defaultResources
     <<: *defaultHealthProbes
     env: {}
+    # Schema is Alembic-only (#441) -- mind's own container no longer creates
+    # task_embeddings itself, so without this the pod crash-loops on startup
+    # against a fresh database.
+    migration:
+      enabled: true
+      command: ["alembic", "upgrade", "head"]
     # A list set in values-<service>.yaml replaces this one wholesale (Helm merges
     # maps, not lists) - repeat every entry there, don't just add yours.
     dependencies:
