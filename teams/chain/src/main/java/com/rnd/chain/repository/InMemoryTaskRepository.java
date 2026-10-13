@@ -120,19 +120,20 @@ public class InMemoryTaskRepository implements TaskRepository {
         return task;
     }
     @Override
-public boolean insertIfAbsent(Task task) {
-    Objects.requireNonNull(task, "task must not be null");
+    public boolean insertIfAbsent(Task task) {
+        Objects.requireNonNull(task, "task must not be null");
 
-    synchronized (writeLock) {
-        if (tasksById.containsKey(task.getId())) {
-            return false;
+        synchronized (writeLock) {
+            if (tasksById.containsKey(task.getId())) {
+                return false;
+            }
         }
 
         tasksById.put(task.getId(), task);
         indexChild(task);
         return true;
     }
-}
+
 
     @Override
     public Optional<Task> update(UUID id, UnaryOperator<Task> mutator) {

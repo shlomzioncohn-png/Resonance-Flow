@@ -63,26 +63,26 @@ public class PostgresTaskRepository implements TaskRepository {
                 .orElseThrow(() -> new IllegalStateException("Task " + task.getId() + " missing immediately after save"));
     }
     @Override
-@Transactional
-public boolean insertIfAbsent(Task task) {
-    Objects.requireNonNull(task, "task must not be null");
+    @Transactional
+    public boolean insertIfAbsent(Task task) {
+        Objects.requireNonNull(task, "task must not be null");
 
-    int insertedRows = jpaRepository.insertIfAbsent(
-            task.getId(),
-            task.getParentTaskId(),
-            task.getStatus().name(),
-            task.isReady(),
-            task.getBlockingCount(),
-            task.getOpenConstraintCount(),
-            task.getEstimatedDurationMin(),
-            task.getScore(),
-            task.getCreatedAt(),
-            task.getUpdatedAt(),
-            task.getDeletedAt()
-    );
+        int insertedRows = jpaRepository.insertIfAbsent(
+                task.getId(),
+                task.getParentTaskId(),
+                task.getStatus().name(),
+                task.isReady(),
+                task.getBlockingCount(),
+                task.getOpenConstraintCount(),
+                task.getEstimatedDurationMin(),
+                task.getScore(),
+                task.getCreatedAt(),
+                task.getUpdatedAt(),
+                task.getDeletedAt()
+        );
 
-    return insertedRows > 0;
-}
+        return insertedRows > 0;
+    }
 
     /** Locks the row with findByIdForUpdate, applies mutator, and lets the dirty-checked flush at
      * commit persist the result. */
