@@ -41,15 +41,10 @@ services:
       additional_contexts:
         shared: ../../shared
     command: ["python", "-m", "mind.embeddings.index_consumer_runner"]
-    # No HTTP server in this process -- the Dockerfile's HEALTHCHECK (hits
-    # :8000/health) doesn't apply here and would report unhealthy forever.
+    # No HTTP server here -- the Dockerfile's :8000/health check doesn't apply.
     healthcheck:
       disable: true
-    # No local Kafka broker wired into this compose file yet (only
-    # teams/inbox/docker-compose.yml has one today) -- gated behind a
-    # profile so `docker compose up`/`make docker-up` doesn't start a
-    # consumer with nothing to connect to. Bring it up explicitly once
-    # there's a broker: `docker compose --profile kafka up`.
+    # No local Kafka broker wired up yet -- `docker compose --profile kafka up`.
     profiles: ["kafka"]
     env_file:
       - .env

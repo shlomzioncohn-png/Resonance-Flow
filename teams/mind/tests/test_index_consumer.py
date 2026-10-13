@@ -113,9 +113,7 @@ async def test_handle_task_updated_overwrites_the_existing_vector(store):
 
 
 async def test_handle_task_updated_skips_reembedding_when_text_is_unchanged(store):
-    """Chain's scheduling updates also publish task.updated without
-    changing title/description -- re-embedding unchanged text is wasted
-    work (and wrong for anything expecting a stable vector)."""
+    """Unchanged text (e.g. a Chain scheduling update) shouldn't re-embed."""
     event = TaskUpdatedEvent(task_id="task-2", title="Write release notes", description="For v2.3")
     await handle_task_updated(store, event)
     first_vector = store.rows["task-2"][0]
@@ -142,8 +140,7 @@ async def test_handle_task_updated_marks_completed_when_status_is_done(store):
 
 
 async def test_handle_task_updated_reopens_a_previously_done_task(store):
-    """A DONE task moved back to an active status must reset is_completed,
-    not stay stuck True forever."""
+    """DONE -> active status must reset is_completed, not stay stuck True."""
     done_event = TaskUpdatedEvent(
         task_id="task-2", title="Write release notes", description="For v2.3",
         status=TaskStatus.TASK_STATUS_DONE,
