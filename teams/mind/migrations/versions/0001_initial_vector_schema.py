@@ -5,6 +5,13 @@ understand pgvector's VECTOR(n) type. Assumes the `vector` extension is
 already enabled (db/init/01-enable-pgvector.sql, run outside Alembic
 since it needs superuser).
 
+IF NOT EXISTS here only: adopts a table most real DBs already have from
+the old self-healing `_ensure_schema()`. Later migrations must not do
+this -- it would hide a real failure to apply them.
+
+EMBEDDING_DIM is baked in, not config -- a dimension change is a new
+migration (see 0002), never a config change.
+
 Revision ID: 0001
 Revises:
 Create Date: 2026-09-22
@@ -18,7 +25,6 @@ down_revision: str | None = None
 branch_labels: str | None = None
 depends_on: str | None = None
 
-# Baked in, not read from config -- a migration must be deterministic.
 TABLE = "task_embeddings"
 EMBEDDING_DIM = 256
 
@@ -26,15 +32,17 @@ EMBEDDING_DIM = 256
 def upgrade() -> None:
     op.execute(
         f"""
-        CREATE TABLE {TABLE} (
+        CREATE TABLE IF NOT EXISTS {TABLE} (
             task_id TEXT PRIMARY KEY,
             embedding VECTOR({EMBEDDING_DIM}) NOT NULL
         );
         """
     )
+    # A future NEW index on a populated table should use CONCURRENTLY
+    # (needs `op.get_context().autocommit_block()`) to avoid locking it.
     op.execute(
         f"""
-        CREATE INDEX {TABLE}_embedding_hnsw_idx
+        CREATE INDEX IF NOT EXISTS {TABLE}_embedding_hnsw_idx
         ON {TABLE} USING hnsw (embedding vector_cosine_ops);
         """
     )

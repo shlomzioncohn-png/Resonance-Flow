@@ -20,7 +20,7 @@ from mind.contracts.base_enums import SourceType
 from mind.extraction.confidence import ConfidenceBreakdown, score_confidence
 from mind.extraction.config import ExtractionConfig
 from mind.extraction.grounding import ground_source_ref
-from mind.extraction.models import ExtractedFields
+from mind.extraction.models import ExtractedFields, response_model
 from mind.extraction.parsing import MalformedOutput, parse_response
 from mind.extraction.prompts import extraction_prompt, repair_prompt, system_prompt
 from mind.extraction.providers.base import (
@@ -121,7 +121,11 @@ class BasicExtractor:
         it -- the smoke script and the tests do not.
         """
 
-        system = system_prompt()
+        # What we ask for and what we accept are the same decision, read
+        # from one place: a prompt asking for seven fields and a schema
+        # accepting four would fail every answer it received.
+        system = system_prompt(self._config.classify)
+        schema = response_model(self._config.classify)
         user = extraction_prompt(source_type, text)
 
         schema_attempts = 0
@@ -157,7 +161,7 @@ class BasicExtractor:
             last_output = response.text
 
             try:
-                fields = parse_response(response.text)
+                fields = parse_response(response.text, schema)
             except MalformedOutput as exc:
                 detail = str(exc)
 

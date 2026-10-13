@@ -1,6 +1,5 @@
-package com.rnd.chain.event;
+package com.rnd.chain.events;
 
-import com.rnd.chain.events.ChainEventTopicsProperties;
 import com.rnd.inbox.event.SchedulingUpdatedEvent;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.kafka.core.KafkaTemplate;
@@ -11,7 +10,7 @@ import org.springframework.stereotype.Component;
 public class KafkaSchedulingUpdatePublisher
         implements SchedulingUpdatePublisher {
 
-    private static final String TOPIC_KEY = "task.scheduling.updated";
+    private static final String TOPIC_KEY = "scheduling-updated";
 
     private final KafkaTemplate<String, SchedulingUpdatedEvent> kafkaTemplate;
     private final String topic;

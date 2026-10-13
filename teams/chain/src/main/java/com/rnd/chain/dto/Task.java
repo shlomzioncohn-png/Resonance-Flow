@@ -34,7 +34,7 @@ public final class Task {
 
     /** Whether all of this task's dependencies and constraints are satisfied, so it can be worked on.
      * Invariant: must equal {@code blockingCount == 0 && openConstraintCount == 0}. Not enforced by
-     * this class (a stored field, not derived) - {@code TaskEligibilityService.withCounters} is the
+     * this class (a stored field, not derived) - {@code TaskCounterUpdater.withCounters} is the
      * single place responsible for keeping it in sync whenever either counter changes. */
     private final boolean isReady;
 
@@ -67,9 +67,6 @@ public final class Task {
         if (id == null) {
             throw new IllegalArgumentException("id must not be null");
         }
-        if (ownerId == null) {
-            throw new IllegalArgumentException("ownerId must not be null");
-        }
         if (blockingCount < 0) {
             throw new IllegalArgumentException("blockingCount must not be negative");
         }
@@ -78,6 +75,9 @@ public final class Task {
         }
         if (status == null) {
             throw new IllegalArgumentException("status must not be null");
+        }
+        if (ownerId == null) {
+            throw new IllegalArgumentException("ownerId must not be null");
         }
         this.id = id;
         this.parentTaskId = parentTaskId;
