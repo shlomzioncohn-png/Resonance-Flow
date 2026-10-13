@@ -1,6 +1,5 @@
-package com.rnd.chain.event;
+package com.rnd.chain.events;
 
-import com.rnd.chain.events.ChainEventTopicsProperties;
 import com.rnd.inbox.event.SchedulingUpdatedEvent;
 
 import org.junit.jupiter.api.BeforeEach;
@@ -28,7 +27,7 @@ class KafkaSchedulingUpdatePublisherTest {
         ChainEventTopicsProperties properties =
                 new ChainEventTopicsProperties(
                         Map.of(
-                                "task.scheduling.updated",
+                                "scheduling-updated",
                                 "task.scheduling.updated"),
                         "chain-service");
 
