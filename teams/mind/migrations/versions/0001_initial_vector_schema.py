@@ -5,18 +5,12 @@ understand pgvector's VECTOR(n) type. Assumes the `vector` extension is
 already enabled (db/init/01-enable-pgvector.sql, run outside Alembic
 since it needs superuser).
 
-IF NOT EXISTS here only: this migration *adopts* a table/index that the
-old self-healing `_ensure_schema()` already created on most real
-databases before this migration existed. Alembic only tracks
-`alembic_version`, not what already exists in the DB, so a bare CREATE
-TABLE fails with DuplicateTable on any of those. A later migration must
-NOT use IF NOT EXISTS -- that would silently hide a real failure to
-apply it.
+IF NOT EXISTS here only: adopts a table most real DBs already have from
+the old self-healing `_ensure_schema()`. Later migrations must not do
+this -- it would hide a real failure to apply them.
 
-EMBEDDING_DIM is baked in here, not read from config -- a migration must
-be deterministic regardless of what's configured when it runs. If the
-real dimension ever changes, that's a new migration (ALTER COLUMN ...
-TYPE VECTOR(n), see 0002), never a config change.
+EMBEDDING_DIM is baked in, not config -- a dimension change is a new
+migration (see 0002), never a config change.
 
 Revision ID: 0001
 Revises:
@@ -44,13 +38,8 @@ def upgrade() -> None:
         );
         """
     )
-    # CONCURRENTLY, not here: this is adopting an index that (like the
-    # table) almost always already exists from the old _ensure_schema(),
-    # so IF NOT EXISTS makes it a no-op in practice, not a real build on
-    # a populated table. A future migration that creates a NEW index on
-    # a table that already has rows should use CONCURRENTLY (can't run
-    # inside Alembic's transaction -- needs `with op.get_context().autocommit_block():`),
-    # or it locks the table for the duration of the build.
+    # A future NEW index on a populated table should use CONCURRENTLY
+    # (needs `op.get_context().autocommit_block()`) to avoid locking it.
     op.execute(
         f"""
         CREATE INDEX IF NOT EXISTS {TABLE}_embedding_hnsw_idx

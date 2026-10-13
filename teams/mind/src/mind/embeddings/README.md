@@ -61,6 +61,25 @@ export MIND_VECTOR_STORE__DSN="postgresql://mind:mind@localhost:5432/mind"
 
 `embed()` downloads `BAAI/bge-small-en-v1.5` on first use unless `MODEL_CACHE_DIR` points at a local copy.
 
+## Foundation Gate benchmark (week 3)
+
+End-to-end walkthrough for someone outside the MIND team (#469's acceptance criterion):
+
+```bash
+cd teams/mind
+docker compose up -d vector-store
+make dev
+export MIND_ENVIRONMENT=local
+export MIND_VECTOR_STORE__DSN="postgresql://mind:mind@localhost:5432/mind"
+
+python scripts/load_real_slice.py   # loads eval/real_slice/'s 16 real tasks
+python scripts/query_sample.py      # one sample similarity query
+```
+
+Expected: `Loaded 16 real tasks from eval/real_slice/ into the vector store.`, then a deterministic ranked result for `query_sample.py` -- `embed()` has no randomness, so it's reproducible.
+
+Full latency/recall benchmark against the same real slice: [`benchmarks/vector-store-comparison.md`](../../../benchmarks/vector-store-comparison.md)'s "Foundation Gate benchmark (week 3)" section and [`benchmarks/foundation_gate_benchmark.py`](../../../benchmarks/foundation_gate_benchmark.py).
+
 ## Run the tests
 
 ```bash

@@ -106,6 +106,5 @@ class Settings(BaseSettings):
 @lru_cache
 def get_settings() -> Settings:
     """Construct (once, cached) and return the Settings."""
-    # vector_store has no default (see VectorStoreSettings) -- mypy can't
-    # see that pydantic-settings fills it in from the env/chart sources above.
+    # vector_store has no default -- mypy can't see pydantic-settings fills it in.
     return Settings()  # type: ignore[call-arg]
