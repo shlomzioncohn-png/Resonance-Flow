@@ -73,6 +73,41 @@ class ComputeCostSettings(BaseSettings):
     usd_per_cpu_hour: float | None = Field(default=None, ge=0)
 
 
+class MonitoringSettings(BaseSettings):
+    """Standalone -- recording a model call needs no DSN.
+
+    When a model call counts as "far slower / more expensive than expected" in
+    the model-call summary (observability/tracking.py), and how often that
+    summary is logged. None turns a check off. The defaults are starting
+    points from the numbers measured so far, not validated targets:
+
+    * OCR 30 s: ~2 s a page (multimodal/ocr.py, MAX_PAGES), so ~20 s for the
+      longest document OCR reads by default.
+    * ASR 120 s: base.en runs at ~10x real time, so ~60 s for the longest
+      recording ASR decodes (MAX_DURATION_S = 600 s).
+    * LLM 30 s: half the provider deadline (60 s, extraction/providers).
+    * LLM $0.01: several times a DeepSeek extraction of a few thousand tokens.
+      OCR/ASR have no cost check by default: their cost needs a CPU rate first.
+    """
+
+    # "none" in the env turns a check off (an empty value would not parse).
+    model_config = SettingsConfigDict(
+        env_prefix="MIND_MONITORING__",
+        env_file=_ENV_FILE,
+        extra="ignore",
+        env_parse_none_str="none",
+    )
+
+    ocr_max_duration_ms: float | None = Field(default=30_000, gt=0)
+    asr_max_duration_ms: float | None = Field(default=120_000, gt=0)
+    llm_max_duration_ms: float | None = Field(default=30_000, gt=0)
+    ocr_max_cost_usd: float | None = Field(default=None, ge=0)
+    asr_max_cost_usd: float | None = Field(default=None, ge=0)
+    llm_max_cost_usd: float | None = Field(default=0.01, ge=0)
+    # Log the summary every this many model calls; 0 turns it off.
+    summary_every_n_calls: int = Field(default=100, ge=0)
+
+
 class VectorStoreSettings(BaseModel):
     model_config = ConfigDict(extra="forbid")
 

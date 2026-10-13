@@ -43,6 +43,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     finally:
         await store.close()
 
+
 # Configure logging once, centrally, here -- before anything else in the
 # app logs a thing. Python's logging module does nothing by default: with
 # no handler configured anywhere, .info() calls are silently dropped, and
@@ -63,8 +64,8 @@ register_error_handlers(app)
 # stays outside it deliberately (unversioned).
 app.include_router(v1_router)
 
-# /debug/simulate-call and /debug/instrumentation -- temporary, see
-# api/debug.py and api/README.md "Instrumentation".
+# /debug/simulate-call, /debug/instrumentation and /debug/model-calls --
+# see api/debug.py and api/README.md "Instrumentation".
 app.include_router(debug_router)
 
 _START_TIME = time.time()

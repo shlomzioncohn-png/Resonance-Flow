@@ -28,7 +28,13 @@ from mind.multimodal.ocr import (
     extract_text,
 )
 from mind.observability import compute
-from mind.observability.tracking import CallKind, CallStatus, _reset_for_tests, get_recent_calls
+from mind.observability.tracking import (
+    CallKind,
+    CallStatus,
+    _reset_for_tests,
+    get_recent_calls,
+    model_call_summary,
+)
 
 TSV_HEADER = (
     "level\tpage_num\tblock_num\tpar_num\tline_num\tword_num\t"
@@ -574,3 +580,13 @@ def test_where_tesseract_cpu_cannot_be_measured_it_is_none_and_unpriced(
     assert extract_text(png_bytes(), filename="a.png").success
     [call] = get_recent_calls()
     assert (call.cpu_s, call.cost) == (None, None)  # unknown, not 0
+
+
+@pytest.mark.usefixtures("tesseract_found", "ledger")
+def test_an_ocr_call_shows_up_in_the_model_call_summary(monkeypatch: pytest.MonkeyPatch):
+    tesseract_prints(monkeypatch, tsv(("word", 90.0)))
+    extract_text(png_bytes(), filename="a.png")
+    [row] = model_call_summary().by_call_name
+    assert (row.call_name, row.kind, row.call_count) == (OCR_MODEL_NAME, CallKind.OCR, 1)
+    assert row.p95_duration_ms > 0
+    assert (row.cost_total_usd, row.unpriced_count) == (None, 1)  # no rate pinned in conftest

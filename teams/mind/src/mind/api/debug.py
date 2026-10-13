@@ -1,11 +1,10 @@
-"""Temporary /debug endpoints that exercise instrumented_call end-to-end
-before any real model call exists (extraction starts week 4). See
-api/README.md "Instrumentation". Not part of the versioned /v1 API
-surface -- /debug/simulate-call goes away once a real business endpoint
-can demonstrate the wrapper instead.
+"""/debug endpoints: the instrumented_call stand-in and aggregate, and the
+model-call summary (#479). See api/README.md "Instrumentation". Not part
+of the versioned /v1 API surface.
 
-# TODO: Remove this file in week 4, once a real business endpoint can
-# demonstrate instrumented_call instead of this stand-in.
+# TODO: Remove /debug/simulate-call once a real business endpoint can
+# demonstrate instrumented_call instead of this stand-in. /debug/model-calls
+# stays until the week-8 cost and latency report replaces it.
 """
 
 from __future__ import annotations
@@ -22,6 +21,7 @@ from mind.api.instrumentation import (
     instrumentation_summary,
     instrumented_call,
 )
+from mind.observability.tracking import ModelCallSummary, model_call_summary
 
 router = APIRouter(prefix="/debug", tags=["debug"])
 
@@ -69,3 +69,16 @@ async def instrumentation() -> InstrumentationSummary:
     a shared store (see team README "Open decisions").
     """
     return instrumentation_summary()
+
+
+@router.get("/model-calls", response_model=ModelCallSummary)
+async def model_calls() -> ModelCallSummary:
+    """Every OCR/ASR/LLM call recorded so far, per call name (#479).
+
+    Count, errors, p50/p95 latency, CPU, tokens and cost, with how many calls
+    had no CPU measurement / no reported usage / no price -- a total is None,
+    never 0, when none did -- and how many crossed the slow / expensive
+    limits (MonitoringSettings). Per-process and in-memory, like
+    /debug/instrumentation above.
+    """
+    return model_call_summary()

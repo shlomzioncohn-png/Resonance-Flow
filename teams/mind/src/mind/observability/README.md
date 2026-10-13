@@ -35,6 +35,26 @@ Single tracking point for every AI model call MIND makes -- latency and cost.
     for both.
 - `get_recent_calls(limit=None)` -- read back what's been recorded so far.
   For tests/debugging, not a metrics backend.
+- `model_call_summary()` -- the aggregate, per call name, since the process
+  started: count, errors, p50/p95 latency, CPU total, token totals, cost
+  total, and how many calls crossed the slow / expensive limits. Served at
+  `GET /debug/model-calls`, and logged as one `model_call_summary` line per
+  call name every `MIND_MONITORING__SUMMARY_EVERY_N_CALLS` calls (default
+  100, 0 = off); `log_summary()` logs it on demand, e.g. at the end of a batch
+  run or a benchmark.
+  - **Missing is not zero.** A call with no CPU measurement, no reported
+    usage, or no price is left out of that total and counted in
+    `cpu_unmeasured_count` / `tokens_unreported_count` / `unpriced_count`. A
+    total no call contributed to is `null`, never 0 -- and a cost total with
+    `unpriced_count > 0` is a lower bound.
+  - **Limits** are per kind (`MIND_MONITORING__OCR_MAX_DURATION_MS`, ...
+    `LLM_MAX_COST_USD`; defaults and where they come from in
+    `config.MonitoringSettings`; the value `none` turns a check off). An unpriced call is never "expensive" -- it
+    shows up in `unpriced_count` instead -- and a call recorded without a
+    `kind` has no limits.
+  - In-memory and per-process: resets on restart, and each worker process
+    only sees its own calls. Counters are running totals that never evict;
+    only the latency sample behind p50/p95 is bounded (last 10k per name).
 - Storage is currently an in-memory ring buffer (last 10k calls) plus an
   INFO-level log line per call. When a metrics backend is chosen (see the
   team README's "Open decisions"), only `tracking.py`'s storage needs to

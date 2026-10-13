@@ -31,6 +31,8 @@ from typing import Any
 
 from pydantic import BaseModel
 
+from mind.observability.tracking import percentile
+
 logger = logging.getLogger("mind.instrumentation")
 # uvicorn only attaches handlers to its own loggers, and the root
 # logger has no handler by default -- without this, every INFO record
@@ -74,26 +76,6 @@ class InstrumentationSummary(BaseModel):
     error_count: int
     p95_duration_ms: float | None
     cumulative_cost: float
-
-
-def _percentile(sorted_values: list[float], pct: float) -> float:
-    """Linear-interpolation percentile over an already-sorted list.
-
-    _Aggregator.summary() already guards the only call site against an
-    empty list (there's no meaningful percentile of zero
-    measurements), but guard here too in case this ever gets reused
-    elsewhere without that guard.
-    """
-    if not sorted_values:
-        return 0.0
-    if len(sorted_values) == 1:
-        return sorted_values[0]
-    rank = (pct / 100) * (len(sorted_values) - 1)
-    lo = int(rank)
-    hi = min(lo + 1, len(sorted_values) - 1)
-    if lo == hi:
-        return sorted_values[lo]
-    return sorted_values[lo] + (sorted_values[hi] - sorted_values[lo]) * (rank - lo)
 
 
 class _Aggregator:
@@ -145,7 +127,7 @@ class _Aggregator:
         return InstrumentationSummary(
             call_count=call_count,
             error_count=error_count,
-            p95_duration_ms=round(_percentile(durations, 95), 3),
+            p95_duration_ms=round(percentile(durations, 95), 3),
             cumulative_cost=round(cumulative_cost, 6),
         )
 

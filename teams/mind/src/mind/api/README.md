@@ -53,6 +53,10 @@ call exists (extraction starts week 4):
   `error_count`, `p95_duration_ms`, `cumulative_cost`. A minimal
   stand-in for the real monitoring dashboard Relay builds in week 8 —
   not a persistent metrics store, resets on process restart.
+- `GET /debug/model-calls` — the model-call summary (#479): every OCR / ASR /
+  LLM call recorded through `record_call()`, per call name — count, errors,
+  p50/p95 latency, CPU, tokens, cost, and slow / expensive limit crossings.
+  Unknown totals are `null`, never 0; see `observability/README.md`.
 
 `/health` is wrapped too, purely to prove the mechanism end-to-end — a
 health check isn't a model call.
