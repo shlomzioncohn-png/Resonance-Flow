@@ -15,7 +15,6 @@ public final class TaskFixtures {
     public static Task newTask(UUID id) {
         return Task.builder()
                 .id(id)
-                .ownerId("owner")
                 .status(TaskStatus.ACTIVE)
                 .isReady(true)
                 .blockingCount(0)

@@ -109,7 +109,7 @@ class TaskCompletedEventHandlerIntegrationTest {
 
     private static Task buildTask(UUID id, TaskStatus status, LocalDateTime updatedAt, int blockingCount) {
         return Task.builder()
-                .id(id).ownerId("owner").status(status)
+                .id(id).status(status)
                 .isReady(blockingCount == 0).blockingCount(blockingCount).openConstraintCount(0)
                 .createdAt(BASE_TIME).updatedAt(updatedAt)
                 .build();

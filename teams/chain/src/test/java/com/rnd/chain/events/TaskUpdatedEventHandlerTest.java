@@ -37,7 +37,6 @@ class TaskUpdatedEventHandlerTest {
     private static Task buildTask(UUID id, TaskStatus status, LocalDateTime updatedAt) {
         return Task.builder()
                 .id(id)
-                .ownerId("owner")
                 .status(status)
                 .isReady(true)
                 .blockingCount(0)
@@ -84,7 +83,7 @@ class TaskUpdatedEventHandlerTest {
         UUID dependent = UUID.randomUUID();
         Fixture fixture = newFixture(
                 List.of(buildTask(blocker, TaskStatus.ACTIVE, BASE_TIME),
-                        Task.builder().id(dependent).ownerId("owner").status(TaskStatus.PENDING)
+                        Task.builder().id(dependent).status(TaskStatus.PENDING)
                                 .isReady(false).blockingCount(1).openConstraintCount(0)
                                 .createdAt(BASE_TIME).updatedAt(BASE_TIME).build()),
                 List.of(new TaskDependency(dependent, blocker)));
@@ -106,7 +105,7 @@ class TaskUpdatedEventHandlerTest {
         UUID dependent = UUID.randomUUID();
         Fixture fixture = newFixture(
                 List.of(buildTask(blocker, TaskStatus.ACTIVE, BASE_TIME),
-                        Task.builder().id(dependent).ownerId("owner").status(TaskStatus.PENDING)
+                        Task.builder().id(dependent).status(TaskStatus.PENDING)
                                 .isReady(false).blockingCount(1).openConstraintCount(0)
                                 .createdAt(BASE_TIME).updatedAt(BASE_TIME).build()),
                 List.of(new TaskDependency(dependent, blocker)));
@@ -129,7 +128,7 @@ class TaskUpdatedEventHandlerTest {
         UUID dependent = UUID.randomUUID();
         Fixture fixture = newFixture(
                 List.of(buildTask(blocker, TaskStatus.ACTIVE, BASE_TIME),
-                        Task.builder().id(dependent).ownerId("owner").status(TaskStatus.PENDING)
+                        Task.builder().id(dependent).status(TaskStatus.PENDING)
                                 .isReady(false).blockingCount(1).openConstraintCount(0)
                                 .createdAt(BASE_TIME).updatedAt(BASE_TIME).build()),
                 List.of(new TaskDependency(dependent, blocker)));

@@ -244,7 +244,6 @@ class TaskStateReconciliationServiceTest {
 
         Task task = Task.builder()
                 .id(UUID.randomUUID())
-                .ownerId("test-owner")
                 .status(status)
                 .isReady(isReady)
                 .blockingCount(blockingCount)

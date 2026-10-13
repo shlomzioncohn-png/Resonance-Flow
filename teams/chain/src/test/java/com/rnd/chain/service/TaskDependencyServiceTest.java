@@ -477,7 +477,6 @@ class TaskDependencyServiceTest {
         service.addDependency(taskA, taskB, DependencyChangeSource.MIND, "evt-1");
         taskRepository.save(Task.builder()
                 .id(taskA)
-                .ownerId("owner")
                 .status(TaskStatus.ACTIVE)
                 .isReady(true)
                 .blockingCount(0)
