@@ -92,6 +92,8 @@ bridge:
     # pass that check. CrmLaneConfig's kafka-profile startup check still rejects this exact value
     # by name (not just by shape), so forgetting to override it for a real deployment is caught.
     organization-id: ${CRM_ORGANIZATION_ID:00000000-0000-0000-0000-000000000000}
+    # Days an open deal (PROSPECT/QUALIFIED/PROPOSAL/NEGOTIATION) may sit in the same stage before +1 urgency; <= 0 disables it.
+    stalled-after-days: ${CRM_STALLED_AFTER_DAYS:14}
     sync:
       # Set to true to enable the automatic daily HubSpot to Kafka sync.
       # Off by default, same convention as github.sync.cron - an operator
