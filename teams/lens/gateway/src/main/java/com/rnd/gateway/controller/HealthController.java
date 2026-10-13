@@ -12,6 +12,8 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.client.RestTemplate;
 import org.springframework.web.client.RestClientException;
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.tags.Tag;
 
 import java.time.Instant;
 import java.util.LinkedHashMap;
@@ -32,6 +34,7 @@ import jakarta.annotation.PreDestroy;
  *                     Calls BFF. Use this before routing traffic to the Gateway.
  */
 @RestController
+@Tag(name = "Health", description = "Gateway liveness/readiness — never checked by consumers other than orchestration")
 public class HealthController {
 
     private static final Logger logger = LoggerFactory.getLogger(HealthController.class);
@@ -84,6 +87,7 @@ public class HealthController {
      * Always returns 200 UP as long as the Gateway process is running.
      * Must not depend on BFF or any other service.
      */
+    @Operation(summary = "Gateway liveness", description = "Always UP if the process is running. Never calls BFF.")
     @GetMapping("/health")
     public ResponseEntity<Map<String, Object>> health() {
         logger.debug("Health check requested");
@@ -105,6 +109,7 @@ public class HealthController {
      * Callers should inspect dependencies.bff to decide whether to route traffic.
      * If dependencies.bff = "DOWN", expect 503/504 on /api/** requests.
      */
+    @Operation(summary = "Gateway readiness", description = "Includes BFF dependency status — check dependencies.bff.")
     @GetMapping("/health/ready")
     public ResponseEntity<Map<String, Object>> healthReady() {
         logger.debug("Readiness check requested");

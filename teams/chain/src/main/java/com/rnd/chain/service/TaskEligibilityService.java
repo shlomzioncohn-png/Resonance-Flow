@@ -1,4 +1,3 @@
-
 package com.rnd.chain.service;
 
 import com.rnd.chain.dto.Constraint;
@@ -474,6 +473,35 @@ public class TaskEligibilityService {
             } else if (previousStatus == TaskStatus.DONE && newStatus != TaskStatus.DONE) {
                 adjustDependentsBlockingCount(taskId, 1);
             }
+        }
+    }
+
+    /**
+     * Applies task.completed. The Kafka record timestamp is only compared against the stored
+     * updatedAt (Inbox's clock) and never written to it, so a later task.updated is not skewed.
+     *
+     * @throws TaskNotFoundException if no task with {@code taskId} exists
+     */
+    @Transactional
+    public void onTaskCompleted(UUID taskId, LocalDateTime kafkaTimestamp) {
+        Objects.requireNonNull(taskId, "taskId must not be null");
+        Objects.requireNonNull(kafkaTimestamp, "kafkaTimestamp must not be null");
+
+        synchronized (dependencyGraphLock) {
+            Task current = requireTask(taskId);
+            if (current.getStatus() == TaskStatus.DONE) {
+                return;
+            }
+            if (current.getUpdatedAt() != null && !kafkaTimestamp.isAfter(current.getUpdatedAt())) {
+                log.debug("Task {} completion ignored: record timestamp {} is not newer than stored {}",
+                        taskId, kafkaTimestamp, current.getUpdatedAt());
+                return;
+            }
+
+            log.info("Task {} completed", taskId);
+            requireUpdated(taskRepository.update(taskId, task ->
+                    copyOf(task).status(TaskStatus.DONE).build()), taskId);
+            adjustDependentsBlockingCount(taskId, -1);
         }
     }
 

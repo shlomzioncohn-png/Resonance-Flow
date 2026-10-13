@@ -107,6 +107,4 @@ clients in Step 1.5.
 - DTO package location: `com.rnd.gateway.dto` (as attached) vs.
   `com.rnd.bff.dto` (recommended, contract §6).
 - Error envelope shape shared across Inbox/Gateway/BFF (contract §5.6).
-- "Chat about it" (design doc) vs. "Can't do this now" (screenshot) —
-  confirm which is in scope for this milestone (contract §8).
 - One-line scope confirmation with the manager re: contract §9.

@@ -1,16 +1,15 @@
-import { useQuery } from '@tanstack/react-query'
-import { fetchManagerWorkload, fetchManagerWorkloadWithError } from '@/mocks/managerWorkload'
-import { workloadKeys } from '@/services/queryKeys'
+import { useQuery } from '@tanstack/react-query';
+import { getManagerWorkload } from '@/services/managerApi';
+import { workloadKeys } from '@/services/queryKeys';
 
-/** Team workload for the manager's Workload page (mock data until Inbox/Chain are wired in). */
-export function useManagerWorkload({ simulateError }: { simulateError: boolean }) {
+/**
+ * Team workload for the manager's Workload page. Comes through the Gateway
+ * from the BFF (still mocked there until Inbox/Chain provide it). Retries
+ * follow the QueryProvider defaults.
+ */
+export function useManagerWorkload() {
   return useQuery({
-    // simulateError changes what queryFn returns, so it must be part of the key
-    queryKey: [...workloadKeys.all, { simulateError }],
-    queryFn: simulateError ? fetchManagerWorkloadWithError : fetchManagerWorkload,
-    // Demo page: show the simulated error right away instead of retrying it
-    retry: false,
-    // Drop unused results at once, so recovering from the error shows Loading again, as before
-    gcTime: 0,
-  })
+    queryKey: workloadKeys.all,
+    queryFn: getManagerWorkload,
+  });
 }

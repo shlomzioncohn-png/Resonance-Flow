@@ -1,11 +1,11 @@
-'use client'
+'use client';
 
-import { useState, type ReactNode } from 'react'
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { ReactQueryDevtools } from '@tanstack/react-query-devtools'
-import { ApiError } from '@/services/api'
+import { useState, type ReactNode } from 'react';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { ReactQueryDevtools } from '@tanstack/react-query-devtools';
+import { ApiError } from '@/services/api';
 
-const MAX_RETRIES = 2
+const MAX_RETRIES = 2;
 
 /**
  * 4xx means the request itself is wrong (not found, forbidden...), so retrying can't fix it.
@@ -14,9 +14,9 @@ const MAX_RETRIES = 2
  */
 export function shouldRetry(failureCount: number, error: unknown): boolean {
   if (error instanceof ApiError && error.status >= 400 && error.status < 500) {
-    return false
+    return false;
   }
-  return failureCount < MAX_RETRIES
+  return failureCount < MAX_RETRIES;
 }
 
 export function QueryProvider({ children }: { children: ReactNode }) {
@@ -32,12 +32,12 @@ export function QueryProvider({ children }: { children: ReactNode }) {
           },
         },
       }),
-  )
+  );
 
   return (
     <QueryClientProvider client={queryClient}>
       {children}
       {process.env.NODE_ENV === 'development' && <ReactQueryDevtools />}
     </QueryClientProvider>
-  )
+  );
 }

@@ -1,7 +1,7 @@
 ---
 name: fix-reported-issue
 description: Analyze a reported problem in the LENS frontend - a GitHub issue, or PR review feedback requesting changes - and propose a minimal, validated code fix.
-argument-hint: "Paste the issue/review text, or leave empty when triggered automatically from a GitHub event"
+argument-hint: 'Paste the issue/review text, or leave empty when triggered automatically from a GitHub event'
 ---
 
 # Fix Reported Issue (LENS frontend)

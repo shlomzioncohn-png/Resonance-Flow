@@ -1,10 +1,10 @@
-'use client'
+'use client';
 
-import Box from '@mui/material/Box'
-import Button from '@mui/material/Button'
-import Paper from '@mui/material/Paper'
-import Link from 'next/link'
-import ErrorState from '@/components/feedback/ErrorState'
+import Box from '@mui/material/Box';
+import Button from '@mui/material/Button';
+import Paper from '@mui/material/Paper';
+import Link from 'next/link';
+import ErrorState from '@/components/feedback/ErrorState';
 
 export default function NotFound() {
   return (
@@ -18,10 +18,7 @@ export default function NotFound() {
       }}
     >
       <Paper sx={{ p: 4, maxWidth: 420, width: '100%' }} elevation={0} variant="outlined">
-        <ErrorState
-          title="Page not found"
-          description="There is no route at this address."
-        />
+        <ErrorState title="Page not found" description="There is no route at this address." />
         <Box sx={{ textAlign: 'center' }}>
           <Button component={Link} href="/" variant="contained">
             Back to dashboard
@@ -29,5 +26,5 @@ export default function NotFound() {
         </Box>
       </Paper>
     </Box>
-  )
+  );
 }

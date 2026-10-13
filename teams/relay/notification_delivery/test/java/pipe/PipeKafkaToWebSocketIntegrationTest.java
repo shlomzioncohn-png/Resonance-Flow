@@ -2,6 +2,8 @@ package pipe;
 
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.rnd.relay.event.PushPolicy;
+import com.rnd.relay.event.TaskNotification;
 import io.confluent.kafka.serializers.AbstractKafkaSchemaSerDeConfig;
 import io.confluent.kafka.serializers.protobuf.KafkaProtobufSerializer;
 import org.apache.kafka.clients.producer.KafkaProducer;
