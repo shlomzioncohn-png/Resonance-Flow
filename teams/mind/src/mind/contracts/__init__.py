@@ -14,6 +14,7 @@ from mind.contracts.raw_object_event_enums import (
     Modality,
     ObjectRole,
     Quality,
+    RawSourceType,
     ScopeDecision,
     Sensitivity,
 )
@@ -43,6 +44,7 @@ __all__ = [
     "Quality",
     "RawObjectEvent",
     "RawObjectRef",
+    "RawSourceType",
     "RoleContext",
     "ScopeDecision",
     "Sensitivity",

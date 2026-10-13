@@ -1,3 +1,5 @@
+import logging
+
 import pytest
 from pydantic import ValidationError
 
@@ -141,9 +143,10 @@ def test_delete_review_rejects_objects() -> None:
         RawObjectEvent.model_validate(payload)
 
 
-def test_rejects_meeting_source_type() -> None:
-    # Bridge sends ZOOM / BIGBLUEBUTTON; MEETING exists only for the task output.
-    payload = _valid_event() | {"source_type": "MEETING"}
+@pytest.mark.parametrize("source_type", ["MEETING", "GITHUB_PR", "MANUAL"])
+def test_rejects_source_types_outside_the_wire_list(source_type: str) -> None:
+    # MEETING is now ZOOM / BIGBLUEBUTTON; the others never come from this topic.
+    payload = _valid_event() | {"source_type": source_type}
 
     with pytest.raises(ValidationError):
         RawObjectEvent.model_validate(payload)
@@ -176,3 +179,46 @@ def test_accepts_bridge_classification() -> None:
     event = RawObjectEvent.model_validate(payload)
 
     assert isinstance(event.classification, Classification)
+
+
+@pytest.mark.parametrize(
+    "broken",
+    [
+        {"confidence_scale": "percent"},  # a field this version doesn't know
+        {"category": {"value": "INVOICE", "confidence": 92}},  # out of range
+    ],
+)
+def test_unusable_classification_is_dropped_not_the_event(
+    broken: dict[str, object], caplog: pytest.LogCaptureFixture
+) -> None:
+    # Mind doesn't read classification, so it must never cost us the item.
+    classification = {
+        "decided_by": "MODEL",
+        "category": {"value": "INVOICE", "confidence": 0.92},
+        "quality": {"value": "POOR", "confidence": 0.75},
+        "sensitivity": {"value": "LOW", "confidence": 0.85},
+        "reason": "vendor invoice, partially blurred scan",
+        "classifier": {"model": "gemini-3.8-flash", "prompt_version": "v2"},
+    } | broken
+    payload = _valid_event() | {"classification": classification}
+
+    with caplog.at_level(logging.WARNING, logger="mind.contracts"):
+        event = RawObjectEvent.model_validate(payload)
+
+    assert event.classification is None
+    assert "classification" in caplog.text
+
+
+def test_dropped_classification_is_logged_without_its_content(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    # reason is derived from the content and can be sensitive.
+    secret = "fired: Dana"  # short enough that Pydantic would not truncate it
+    payload = _valid_event() | {"classification": [{"reason": secret}]}
+
+    with caplog.at_level(logging.WARNING, logger="mind.contracts"):
+        event = RawObjectEvent.model_validate(payload)
+
+    assert event.classification is None
+    assert "classification" in caplog.text
+    assert secret not in caplog.text

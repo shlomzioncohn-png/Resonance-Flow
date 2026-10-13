@@ -54,6 +54,13 @@ def test_rejects_invalid_content_hash() -> None:
         RawObjectRef.model_validate(payload)
 
 
+def test_rejects_negative_size_bytes() -> None:
+    payload = _valid_ref() | {"size_bytes": -1}
+
+    with pytest.raises(ValidationError):
+        RawObjectRef.model_validate(payload)
+
+
 def test_rejects_fields_that_left_the_schema() -> None:
     payload = _valid_ref() | {"attachment_index": 0}
 

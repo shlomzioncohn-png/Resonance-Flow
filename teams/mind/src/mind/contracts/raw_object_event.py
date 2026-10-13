@@ -1,5 +1,6 @@
 """Contract for raw-object events received from Bridge."""
 
+import logging
 from datetime import timedelta
 from enum import Enum
 from uuid import UUID
@@ -9,11 +10,12 @@ from pydantic import (
     BaseModel,
     ConfigDict,
     Field,
+    ValidationError,
+    ValidatorFunctionWrapHandler,
     field_validator,
     model_validator,
 )
 
-from mind.contracts.base_enums import SourceType
 from mind.contracts.raw_object_event_enums import (
     Category,
     ChangeType,
@@ -21,9 +23,12 @@ from mind.contracts.raw_object_event_enums import (
     Modality,
     ObjectRole,
     Quality,
+    RawSourceType,
     ScopeDecision,
     Sensitivity,
 )
+
+logger = logging.getLogger(__name__)
 
 
 class RawObjectRef(BaseModel):
@@ -93,7 +98,7 @@ class Classification(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     decided_by: DecidedBy
-    category: CategoryLabel | None = None  # only for source types with a list
+    category: CategoryLabel | None = None
     quality: QualityLabel | None = None  # None also when Bridge's value is unknown
     sensitivity: SensitivityLabel
     reason: str
@@ -118,7 +123,7 @@ class RawObjectEvent(BaseModel):
 
     # Required fields
     # Business system/origin that produced the object.
-    source_type: SourceType
+    source_type: RawSourceType
     correlation_id: UUID = Field(
         description=(
             "Identity of the logical item, stable across its revisions. "
@@ -170,13 +175,24 @@ class RawObjectEvent(BaseModel):
             raise ValueError("timestamp must be normalized to UTC")
         return value
 
-    @field_validator("source_type")
+    @field_validator("classification", mode="wrap")
     @classmethod
-    def meeting_is_not_a_wire_value(cls, value: SourceType) -> SourceType:
-        # MEETING stays in SourceType only for the task output.
-        if value is SourceType.MEETING:
-            raise ValueError("Bridge sends ZOOM or BIGBLUEBUTTON, not MEETING")
-        return value
+    def unusable_classification_is_dropped(
+        cls, value: object, handler: ValidatorFunctionWrapHandler
+    ) -> Classification | None:
+        # Mind doesn't read classification, so it never costs us the item: the
+        # same "fails open" Bridge applies when its own classifier fails.
+        try:
+            return handler(value)
+        except ValidationError as error:
+            # Locations and error types only: the input can carry `reason`, which
+            # is derived from the content and may be sensitive.
+            problems = [
+                (".".join(str(part) for part in detail["loc"]), detail["type"])
+                for detail in error.errors(include_input=False, include_url=False)
+            ]
+            logger.warning("raw_object_event: dropping an unusable classification: %s", problems)
+            return None
 
     @model_validator(mode="after")
     def objects_match_change_type(self) -> "RawObjectEvent":

@@ -1,15 +1,26 @@
 import pytest
 
-from mind.contracts import ObjectRole, SourceType
+from mind.contracts import ObjectRole, RawSourceType, SourceType
 
 
-def test_meeting_platforms_are_distinct_source_types() -> None:
-    assert SourceType("ZOOM") is SourceType.ZOOM
-    assert SourceType("BIGBLUEBUTTON") is SourceType.BIGBLUEBUTTON
+def test_raw_source_type_is_exactly_the_wire_list() -> None:
+    # The list agreed with Bridge in #31.
+    assert {source.value for source in RawSourceType} == {
+        "EMAIL",
+        "SLACK",
+        "WHATSAPP",
+        "DRIVE",
+        "CALENDAR",
+        "ZOOM",
+        "BIGBLUEBUTTON",
+        "SCANNED_DOC",
+    }
 
 
-def test_meeting_is_kept_until_inbox_drops_it() -> None:
-    # Bridge no longer sends MEETING, but the task output still uses it.
+def test_task_source_type_does_not_take_the_meeting_platforms_yet() -> None:
+    # The task output follows Inbox, which still has MEETING only.
+    assert "ZOOM" not in {source.value for source in SourceType}
+    assert "BIGBLUEBUTTON" not in {source.value for source in SourceType}
     assert SourceType("MEETING") is SourceType.MEETING
 
 

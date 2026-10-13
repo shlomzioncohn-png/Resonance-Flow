@@ -29,7 +29,7 @@ together in `objects`. The schema was settled in
 | Field | Description | Status |
 |---|---|---|
 | `schema_version` | Version of the `RawObjectEvent` contract. | required |
-| `source_type` | Business origin/system: `EMAIL`, `SLACK`, `WHATSAPP`, `DRIVE`, `CALENDAR`, `ZOOM`, `BIGBLUEBUTTON`, `SCANNED_DOC`. `MEETING` is rejected here; it stays in `SourceType` only for the task output. | required |
+| `source_type` | Business origin/system: `EMAIL`, `SLACK`, `WHATSAPP`, `DRIVE`, `CALENDAR`, `ZOOM`, `BIGBLUEBUTTON`, `SCANNED_DOC`. Typed as `RawSourceType`, separate from the task output's `SourceType` (which follows Inbox and still has `MEETING`), so a value added for one contract never leaks into the other. | required |
 | `tenant_id` | Organization/tenant that owns the content. Non-empty. | required |
 | `correlation_id` | UUID of the logical item, stable across all its revisions. | required |
 | `ingested_at` | Time Bridge landed the item. UTC. | required |
@@ -62,8 +62,13 @@ humans only, and `classifier { model, prompt_version }`.
 
 - Unknown values do not break the event: an unknown `category` becomes
   `OTHER`, an unknown `sensitivity` becomes `HIGH` (fail safe), and an unknown
-  `quality` drops the label. Every other enum in the event rejects an unknown
-  value.
+  `quality` drops the label.
+- A classification that still fails validation (an unknown `decided_by`, a new
+  field, a confidence outside 0-1) is dropped, not the event: `classification`
+  becomes `None` and a warning names where it failed, never its content. MIND
+  doesn't read it, so it must never cost the item; Bridge "fails open" the same
+  way when its own classifier fails.
+- Outside `classification`, every enum in the event rejects an unknown value.
 - MIND does not enforce Bridge's own classification rules (which categories a
   `source_type` may have, confidence 1.0 for `RULE`, `EXCLUDED` only with a
   classification). A mismatch is a Bridge bug, not a reason to drop the event.

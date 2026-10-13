@@ -3,6 +3,23 @@
 from enum import Enum
 
 
+class RawSourceType(str, Enum):
+    """Where Bridge got the item: the wire list agreed in #31.
+
+    Separate from SourceType, which follows the task output (Inbox), so a value
+    added for one contract never leaks into the other.
+    """
+
+    EMAIL = "EMAIL"
+    SLACK = "SLACK"
+    WHATSAPP = "WHATSAPP"
+    DRIVE = "DRIVE"
+    CALENDAR = "CALENDAR"
+    ZOOM = "ZOOM"
+    BIGBLUEBUTTON = "BIGBLUEBUTTON"
+    SCANNED_DOC = "SCANNED_DOC"
+
+
 class ScopeDecision(str, Enum):
     """Bridge work-relevance decision."""
 
