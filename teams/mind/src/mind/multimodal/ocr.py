@@ -30,6 +30,7 @@ import os
 import shutil
 import subprocess
 import tempfile
+import time
 from collections.abc import Mapping
 from enum import Enum
 from pathlib import Path
@@ -39,9 +40,9 @@ import pypdfium2 as pdfium
 from PIL import Image
 from pydantic import BaseModel, Field, computed_field
 
-from mind.api.instrumentation import instrumented_call
 from mind.multimodal.failures import FailureCategory
 from mind.multimodal.result import MediaTextResult
+from mind.observability.tracking import CallKind, CallStatus, record_call
 
 logger = logging.getLogger(__name__)
 
@@ -51,6 +52,9 @@ logger = logging.getLogger(__name__)
 # CHOSEN_PSM_ARGS is a separate copy, and tests/test_ocr_psm_sync.py fails if
 # the two ever differ, so a future PSM change can't leave one of them behind.
 OCR_PSM_ARGS = ["--psm", "11"]
+
+# The name every OCR call is recorded under (observability.record_call).
+OCR_MODEL_NAME = "tesseract-psm11-ocr"
 
 # Confidence below which a recognized word is flagged as "low confidence"
 # instead of trusted outright. A starting point, not a validated detector:
@@ -394,16 +398,29 @@ def _extract(content: bytes, filename: str, max_pages: int) -> OCRResult:
         return _failure(OCRFailureReason.UNREADABLE_FORMAT, "PDF has no pages")
 
     parsed: list[_PageOCR] = []
+    start = time.perf_counter()
+    # ERROR until the loop completes, so anything that leaves it early --
+    # including a bug, which is not caught below -- is recorded as a failure.
+    status = CallStatus.ERROR
     try:
-        with instrumented_call("tesseract-psm11-ocr"):
-            for image_bytes in page_images:
-                parsed.append(_parse_tsv(_run_tesseract_tsv(tesseract_cmd, image_bytes)))
+        for image_bytes in page_images:
+            parsed.append(_parse_tsv(_run_tesseract_tsv(tesseract_cmd, image_bytes)))
+        status = CallStatus.SUCCESS
     except (_TesseractFailed, subprocess.TimeoutExpired, OSError) as exc:
         # Every page image was proven valid above, so these are the
         # environment: tesseract exiting non-zero (missing language pack...), a
         # timeout, or being unable to run it (binary gone, disk full). Anything
         # else -- e.g. a bug while parsing the output -- is not caught here.
         return _failure(OCRFailureReason.OCR_FAILED, f"tesseract failed: {exc}")
+    finally:
+        # cost None: local compute has no rate yet (#479).
+        record_call(
+            OCR_MODEL_NAME,
+            (time.perf_counter() - start) * 1000,
+            cost=None,
+            kind=CallKind.OCR,
+            status=status,
+        )
 
     pages = [page.text for page in parsed]
     text = "\n".join(page for page in pages if page)

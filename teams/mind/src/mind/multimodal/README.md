@@ -123,9 +123,10 @@ Local OCR + ASR preprocessing.
   on top, and a caller that raises `max_pages` should keep
   `max_pages x 20 s` under its own poll interval.
 
-  The call is wrapped in `instrumented_call("tesseract-psm11-ocr")`
-  (`src/mind/api/instrumentation.py`), so latency/cost are recorded like
-  every other call in the service.
+  Every Tesseract run is recorded through `observability.record_call()`
+  (`tesseract-psm11-ocr`, `kind=ocr`, `status=error` if it failed; cost
+  unpriced until MIND has a rate for local compute, #479), like every other
+  model call in the service.
 
   **Signature: agreed with R2** (in Slack, confirmed on PR #509; she calls this from her
   `bridge.raw.landed` consumer, #349). She asked for: raw `bytes` in (her
@@ -287,10 +288,10 @@ Local OCR + ASR preprocessing.
      into (2). An unpinned size is never downloaded.
 
   Every call whose audio decodes is recorded through
-  `observability.record_call()` (`whisper-base.en-int8-local`; cost 0.0 until
-  MIND has a cost model for local compute, #479), as #478 asks -- note that
-  `ocr.py` uses `instrumented_call` instead; which of the two is the one
-  mechanism is for #479 to settle.
+  `observability.record_call()` (`whisper-base.en-int8-local`, `kind=asr`,
+  with its CPU time; cost unpriced until MIND has a rate for local compute,
+  #479), as #478 asks. OCR is recorded the same way -- `record_call()` is
+  the one mechanism for model calls.
 
   **Resource budget -- measured in a Linux container, one process holding the
   embedding model and Whisper as the service does** (`benchmarks/asr_container_probe.py`;

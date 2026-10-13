@@ -20,11 +20,13 @@ from pydantic import ValidationError
 
 from mind.multimodal import ocr
 from mind.multimodal.ocr import (
+    OCR_MODEL_NAME,
     LowConfidenceWord,
     OCRFailureReason,
     OCRResult,
     extract_text,
 )
+from mind.observability.tracking import CallKind, CallStatus, _reset_for_tests, get_recent_calls
 
 TSV_HEADER = (
     "level\tpage_num\tblock_num\tpar_num\tline_num\tword_num\t"
@@ -479,3 +481,56 @@ def test_internal_error_is_not_retryable():
         OCRResult(success=False, reason=OCRFailureReason.INTERNAL_ERROR, error="e").retryable
         is False
     )
+
+
+# --- every tesseract run is recorded (#479) -----------------------------------------
+
+
+@pytest.fixture
+def ledger() -> None:
+    """record_call()'s ledger is module-level: start each of these tests empty."""
+    _reset_for_tests()
+
+
+@pytest.mark.usefixtures("tesseract_found", "ledger")
+def test_a_successful_call_is_recorded_as_ocr(monkeypatch: pytest.MonkeyPatch):
+    tesseract_prints(monkeypatch, tsv(("word", 90.0)))
+    assert extract_text(png_bytes(), filename="a.png").success
+    [call] = get_recent_calls()
+    assert call.model_name == OCR_MODEL_NAME
+    assert (call.kind, call.status) == (CallKind.OCR, CallStatus.SUCCESS)
+    assert call.duration_ms > 0
+    assert call.cost is None  # unpriced until local compute has a rate (#479), not free
+
+
+@pytest.mark.usefixtures("tesseract_found", "ledger")
+def test_tesseract_failing_is_recorded_as_an_error(monkeypatch: pytest.MonkeyPatch):
+    def times_out(cmd, **kwargs):
+        raise subprocess.TimeoutExpired(cmd, ocr.TESSERACT_TIMEOUT_S)
+
+    monkeypatch.setattr(subprocess, "run", times_out)
+    assert not extract_text(png_bytes(), filename="a.png").success
+    [call] = get_recent_calls()
+    assert (call.kind, call.status) == (CallKind.OCR, CallStatus.ERROR)
+
+
+@pytest.mark.usefixtures("tesseract_found", "ledger")
+def test_a_bug_inside_the_tesseract_loop_is_recorded_as_an_error(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    # Not caught by the OCR_FAILED handler -- it must not be recorded as a success.
+    tesseract_prints(monkeypatch, tsv(("word", 90.0)))
+
+    def buggy_parse(_tsv: str):
+        raise ValueError("a bug in our parser")
+
+    monkeypatch.setattr(ocr, "_parse_tsv", buggy_parse)
+    extract_text(png_bytes(), filename="a.png")
+    [call] = get_recent_calls()
+    assert call.status == CallStatus.ERROR
+
+
+@pytest.mark.usefixtures("tesseract_found", "ledger")
+def test_input_rejected_before_tesseract_runs_is_not_recorded():
+    extract_text(b"not an image at all", filename="a.png")
+    assert get_recent_calls() == []

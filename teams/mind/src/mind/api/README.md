@@ -19,14 +19,16 @@ lands) — see `v1/README.md`. `/health` deliberately stays here in
 
 ## Instrumentation
 
-`instrumentation.py` has `instrumented_call(name, cost=0.0)` — wrap any
-future model call (OCR, ASR, LLM extraction, embeddings, ranking) in it
-instead of writing your own timing/logging:
+`instrumentation.py` has `instrumented_call(name, cost=0.0)` — wrap
+HTTP-level work in it instead of writing your own timing/logging:
 
 ```python
-with instrumented_call("whisper-base-local", cost=0.0):
-    result = call_whisper_model(audio)
+with instrumented_call("health_check"):
+    ...
 ```
+
+Model calls (OCR, ASR, LLM) are **not** wrapped in it — they are recorded
+with `observability/tracking.py`'s `record_call()` instead (see below).
 
 It measures wall-clock duration, logs one structured JSON line
 (`call_name`, `duration_ms`, `cost`, `timestamp`, `status`), and folds
@@ -55,6 +57,8 @@ call exists (extraction starts week 4):
 `/health` is wrapped too, purely to prove the mechanism end-to-end — a
 health check isn't a model call.
 
-Not the same thing as `observability/tracking.py`'s `record_call()`
-(a manual ledger for benchmarking, fed pre-computed numbers). New call
-sites should prefer `instrumented_call`.
+Not the same thing as `observability/tracking.py`'s `record_call()`,
+the one ledger every model call goes through (#479): it records what a
+model call has and an HTTP handler does not — kind (OCR/ASR/LLM), CPU
+time, token usage, and a cost that can be *unpriced* rather than a
+misleading 0.0.

@@ -7,16 +7,14 @@ duration around it. On exit it writes one structured JSON log line
 the same numbers into an in-memory aggregate that GET
 /debug/instrumentation exposes.
 
-This is deliberately generic: it does not know or care whether it is
-wrapping a health check, the /debug/simulate-call stand-in, or (starting
-week 4) a real OCR/ASR/LLM/embedding/ranking call. Every future model
-call should wrap itself in this instead of inventing its own
-timing/logging -- see api/README.md "Instrumentation" for the pattern.
+This is deliberately generic: it times HTTP-level work such as the
+health check and the /debug/simulate-call stand-in -- see api/README.md
+"Instrumentation" for the pattern.
 
-Not the same thing as `mind.observability.tracking.record_call`: that
-is a manual ledger a caller feeds pre-computed numbers into (kept for
-the benchmarking work described in the team README). This module is
-the automatic, higher-level wrapper -- new call sites should prefer it.
+Model calls (OCR, ASR, LLM) do *not* go through this: they are recorded
+with `mind.observability.tracking.record_call`, which also carries what a
+model call has and an HTTP handler does not -- kind, CPU time, token
+usage, and an unpriced cost kept distinct from a free one (#479).
 """
 
 from __future__ import annotations
