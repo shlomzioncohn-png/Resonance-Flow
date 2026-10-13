@@ -4,9 +4,11 @@ Implements the graph traversal API: given a task id, walk its direct or transiti
 dependents, ancestors, children, or descendants, or fetch a combined trace across both axes in
 one call. See "Graph Traversal API" below for the full endpoint list.
 
-`TaskEligibilityService` implements the dependency/constraint update flow (`addDependency`,
-`removeDependency`, `onTaskStatusChanged`, `recalculateTaskEligibility`, `onConstraintAdded`,
-`onConstraintStatusChanged`) against the same in-memory repositories. `config/MockDataConfig.java`
+The dependency/constraint update flow is split by domain (#649): `DependencyEdgeService`
+(`addDependency`, `addDependencies`, `removeDependency`), `TaskEligibilityService`
+(`onTaskStatusChanged`, `recalculateTaskEligibility`, `getTaskEligibility`) and
+`ConstraintEligibilityService` (`onConstraintAdded`, `onConstraintStatusChanged`), sharing
+`TaskCounterUpdater` and `DependencyGraphLock`, against the same in-memory repositories. `config/MockDataConfig.java`
 wires the in-memory `TaskRepository`/`TaskDependencyRepository` implementations as beans (seeded
 empty) so both it and `TaskTraversalService` are constructible via normal Spring dependency
 injection - not just unit-testable. Each bean is guarded with `@ConditionalOnMissingBean`, so once
@@ -175,27 +177,6 @@ Chain consumes four Protobuf topics and publishes one Protobuf topic. Each inbou
 own `@KafkaListener` handler, and the handlers share the claim/logging skeleton in
 `ChainEventProcessingTemplate`.
 
-<<<<<<< HEAD
-**Publishing** for generic Chain events goes through `EventPublisher` / `KafkaEventPublisher`,
-which serializes an `EventEnvelope` and sends it to the topic configured for its event type under
-`chain.kafka.topics` in `application.yml`. `EventPublisher.publish(event)` itself is still
-fire-and-forget by design - a failed publish is logged, not retried or persisted for a later
-attempt, and business logic is not expected to know or care. A stronger delivery guarantee (e.g. a
-transactional outbox) is out of scope for this infrastructure layer.
-`task.scheduling.updated` is a dedicated integration contract and does not use the generic
-`EventEnvelope`. `KafkaSchedulingUpdatePublisher` publishes a flat JSON message that matches
-Inbox's consumer contract and uses `taskId` as the Kafka key so updates for the same task stay ordered.
-
-**Consuming** has two paths:
-The generic `ChainEventConsumer` routes JSON envelope messages to the `EventHandler<T>` bean
-registered for their `eventType`. It remains disabled by default via
-`@ConditionalOnProperty` on `chain.kafka.consumed-topics` until an approved cross-team topic
-and transport contract is configured. This is the path intended for Mind dependency events once
-that contract is finalized.
-`TaskCreatedEventConsumer` is a dedicated Inbox integration consumer for `task.created`.
-Inbox publishes that event as Confluent Protobuf, so Chain consumes it with
-`KafkaProtobufDeserializer` and Schema Registry rather than parsing raw protobuf bytes directly.
-=======
 | Topic | Producer | Handler | Idempotency | Retries before `.errors` |
 | --- | --- | --- | --- | --- |
 | `task.created` | Inbox | `TaskCreatedEventHandler` | state-based (no event id) | 3 attempts, 2s apart |
@@ -209,7 +190,6 @@ to retry never stalls the rest of its partition. Every exception is retried exce
 Retries are bounded (see the table), so an unexpected bug costs a few delayed attempts before it
 lands on `<topic>.errors`. A typical retried case is `ReferencedTaskNotFoundException`, raised when
 a referenced task has not arrived yet.
->>>>>>> origin/main
 
 **Offsets**: auto-commit is disabled and each listener uses `AckMode.RECORD`. An offset is committed
 only after its record is handled or handed to its retry/DLT topic, so a crash mid-processing
@@ -229,16 +209,15 @@ a claim does and doesn't guarantee.
 `DONE`, `CANCELLED` and `REJECTED` map to `DONE`, because all three release dependents. `IN_PROGRESS`
 maps to `ACTIVE`, and every other status maps to `PENDING`.
 
-**Publishing**: the live publisher for `task.scheduling.updated` is `KafkaSchedulingUpdatePublisher`
-(`com.rnd.chain.event`), used by `SchedulingUpdateService`. It maps `TaskSchedulingUpdatedEvent` to the
+**Publishing**: the only publisher for `task.scheduling.updated` is `KafkaSchedulingUpdatePublisher`
+(`com.rnd.chain.events` - the same package as the consumers, see #543), used by `SchedulingUpdateService`. It maps `TaskSchedulingUpdatedEvent` to the
 `SchedulingUpdatedEvent` Protobuf message (`scheduling-updated-event.proto`) and sends it with
 `KafkaProtobufSerializer`. `scheduling-updated-event.proto` comes from `shared/proto` (package
 `com.rnd.inbox.event`), registered via `schema-subjects.tsv`; the producer never registers it
 (`auto.register.schemas=false`, `use.latest.version=true`). Field numbers match Inbox's consumer proto: `event_id=1`, `task_id=2`,
 `available=3`, `priority_score=4`. Every event carries an `event_id`, generated per emitted event in
 `SchedulingUpdateService`; it is unique per event, not a deduplication key across handler retries. An unscored task omits `priority_score`, which Inbox
-reads as "leave the stored value unchanged". `KafkaEventPublisher` (flat JSON, no envelope) is not
-wired to any caller and is scheduled for removal under #543.
+reads as "leave the stored value unchanged". `KafkaEventPublisher` (flat JSON, no envelope) was removed under #543 - it had no production caller.
 
 **Schemas**: the `.proto` sources come from the repo's [`shared/proto/`](../../shared/proto)
 (`task-created-event`, `task-updated-event`, `task-dependencies-proposed-event`,
@@ -254,74 +233,18 @@ validated against the Schema Registry at `SCHEMA_REGISTRY_URL`. Tests use a mock
 | `chain.kafka.topics.task-updated` (env `TASK_UPDATED_TOPIC`) | Topic consumed for `task.updated` | `task.updated` |
 | `chain.kafka.topics.task-completed` (env `TASK_COMPLETED_TOPIC`) | Topic consumed for `task.completed` | `task.completed` |
 | `chain.kafka.topics.dependencies-proposed` (env `DEPENDENCIES_PROPOSED_TOPIC`) | Topic consumed for `task.dependencies.proposed` | `task.dependencies.proposed` |
-| `chain.kafka.topics.task.scheduling.updated` (env `CHAIN_SCHEDULING_UPDATED_TOPIC`) | Topic published to for `task.scheduling.updated` | `task.scheduling.updated` |
+| `chain.kafka.topics.scheduling-updated` (env `CHAIN_SCHEDULING_UPDATED_TOPIC`) | Topic published to for `task.scheduling.updated` | `task.scheduling.updated` |
 | `KAFKA_BOOTSTRAP_SERVERS` (env var, not `chain.*`) | Kafka broker(s) address | `localhost:9092` |
 | `chain.kafka.consumer-group-id` (env `KAFKA_CONSUMER_GROUP_ID`) | Consumer group ID | `chain-service` |
 | `chain.kafka.schema-registry-url` (env `SCHEMA_REGISTRY_URL`) | Schema Registry URL (ccompat API) | `http://localhost:8082/apis/ccompat/v6` |
 | `chain.events.processed-store` | Which `ProcessedEventStore` implementation is active | `in-memory` |
 
-<<<<<<< HEAD
-## Inbox integration events
-
-### task.created (Inbox -> Chain)
-
-Inbox publishes canonical task creation events on:
-
-```text
-task.created
-```
-
-The event value is Confluent Protobuf. Chain consumes it through the dedicated
-`TaskCreatedEventConsumer` / `protobufKafkaListenerContainerFactory` path using
-`KafkaProtobufDeserializer` and the configured Schema Registry URL.
-
-When the task does not already exist in Chain, `TaskCreatedEventService` creates the local Chain
-state. A duplicate `task.created` event does not overwrite Chain-owned readiness/counters/score;
-it is still used as a trigger to retry unresolved dependencies that were waiting for that task.
-
-### task.scheduling.updated (Chain -> Inbox)
-
-Chain publishes scheduling state changes asynchronously to Inbox on:
-
-```text
-task.scheduling.updated
-```
-
-The message is flat JSON, not a generic `EventEnvelope`:
-
-```json
-{
-"eventId": "11111111-1111-1111-1111-111111111111",
-"taskId": "22222222-2222-2222-2222-222222222222",
-"isAvailable": true,
-"priorityScore": 7.5
-}
-```
-
-| Field | Description |
-| --- | --- |
-| `eventId` | Unique UUID generated for the scheduling update event |
-| `taskId` | UUID of the task |
-| `isAvailable` | Whether the task is currently available/ready according to Chain |
-| `priorityScore` | Current priority score; final accepted range/ownership is pending team confirmation |
-
-The Kafka message key is `taskId`, preserving ordering for updates belonging to the same task.
-Chain owns task readiness calculation; Inbox materializes the resulting scheduling state on the
-canonical task.
-
-### Open integration decisions
-
-The final Mind topic/transport contract is still pending approval, so the generic
-`ChainEventConsumer` remains disabled until `chain.kafka.consumed-topics` is explicitly configured.
-The final accepted range/ownership rules for `priorityScore` still require team confirmation.
-=======
 Retry attempts and backoff are not properties. Each handler sets them on its own `@RetryableTopic`
 annotation.
 
 Broker security (SASL, TLS) is set through Spring's `spring.kafka.properties.*`, for example
 `spring.kafka.properties.security.protocol=SASL_PLAINTEXT`. Every consumer factory and producer
 template starts from those properties, so the same settings apply everywhere.
->>>>>>> origin/main
 
 ## Running locally with Maven
 

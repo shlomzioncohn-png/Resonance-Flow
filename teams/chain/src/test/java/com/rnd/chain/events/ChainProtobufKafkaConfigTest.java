@@ -34,11 +34,11 @@ class ChainProtobufKafkaConfigTest {
                 .getConfigurationProperties().get(CommonClientConfigs.SECURITY_PROTOCOL_CONFIG));
         assertEquals("SASL_PLAINTEXT", config.dependencyProposedEventConsumerFactory()
                 .getConfigurationProperties().get(CommonClientConfigs.SECURITY_PROTOCOL_CONFIG));
-        assertEquals("SASL_PLAINTEXT", config.kafkaTemplate().getProducerFactory()
+        assertEquals("SASL_PLAINTEXT", config.schedulingUpdatedEventKafkaTemplate().getProducerFactory()
                 .getConfigurationProperties().get(CommonClientConfigs.SECURITY_PROTOCOL_CONFIG));
         assertEquals("SASL_PLAINTEXT", config.taskCreatedEventKafkaTemplate().getProducerFactory()
                 .getConfigurationProperties().get(CommonClientConfigs.SECURITY_PROTOCOL_CONFIG));
-        assertEquals(List.of("localhost:9092"), config.kafkaTemplate().getProducerFactory()
+        assertEquals(List.of("localhost:9092"), config.schedulingUpdatedEventKafkaTemplate().getProducerFactory()
                 .getConfigurationProperties().get(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG));
     }
 

@@ -25,7 +25,7 @@ import java.util.stream.Collectors;
  * directions (see code review finding: "TaskEligibilityService cycle-check is O(V*E) instead
  * of O(V+E), held under the global lock"). The previous implementation stored edges as one
  * synchronized flat list, so both findByTaskId and findByDependsOnTaskId were a full O(E) linear
- * scan under a lock - and since TaskEligibilityService.wouldCreateCycle's DFS calls findByTaskId
+ * scan under a lock - and since DependencyEdgeService.wouldCreateCycle's DFS calls findByTaskId
  * once per visited node, one cycle check cost O(V*E) total, all of it held under
  * dependencyGraphLock (a de facto single-writer bottleneck that gets worse as the graph grows).
  *
@@ -99,8 +99,8 @@ public class InMemoryTaskDependencyRepository implements TaskDependencyRepositor
 
     /**
      * Overrides the interface default to skip {@link #lock} entirely - safe only because every
-     * caller of this method already runs inside {@code TaskEligibilityService}'s
-     * {@code dependencyGraphLock}, which is exclusive with every write this repository ever
+     * caller of this method already runs holding the
+     * {@code DependencyGraphLock}, which is exclusive with every write this repository ever
      * makes ({@link #save}/{@link #delete} are only ever invoked from inside that same lock).
      * See the interface Javadoc ({@link TaskDependencyRepository#findByTaskIdUnderExternalLock})
      * for the full contract this override relies on. Avoids an uncontended (but not free)

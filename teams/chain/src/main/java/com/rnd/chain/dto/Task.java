@@ -33,7 +33,7 @@ public final class Task {
 
     /** Whether all of this task's dependencies and constraints are satisfied, so it can be worked on.
      * Invariant: must equal {@code blockingCount == 0 && openConstraintCount == 0}. Not enforced by
-     * this class (a stored field, not derived) - {@code TaskEligibilityService.withCounters} is the
+     * this class (a stored field, not derived) - {@code TaskCounterUpdater.withCounters} is the
      * single place responsible for keeping it in sync whenever either counter changes. */
     private final boolean isReady;
 

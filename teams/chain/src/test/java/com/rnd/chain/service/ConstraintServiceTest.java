@@ -35,7 +35,7 @@ class ConstraintServiceTest {
     private TaskRepository taskRepository;
 
     @Mock
-    private TaskEligibilityService taskEligibilityService;
+    private ConstraintEligibilityService constraintEligibilityService;
 
     private ConstraintService constraintService;
 
@@ -44,7 +44,7 @@ class ConstraintServiceTest {
         constraintService = new ConstraintService(
                 constraintRepository,
                 taskRepository,
-                taskEligibilityService
+                constraintEligibilityService
         );
     }
 
@@ -73,7 +73,7 @@ class ConstraintServiceTest {
                 created.getStatus()
         );
 
-        verify(taskEligibilityService).onConstraintAdded(created);
+        verify(constraintEligibilityService).onConstraintAdded(created);
     }
 
     @Test
@@ -95,7 +95,7 @@ class ConstraintServiceTest {
         );
 
         verify(constraintRepository, never()).save(any());
-        verify(taskEligibilityService, never()).onConstraintAdded(any());
+        verify(constraintEligibilityService, never()).onConstraintAdded(any());
     }
 
     @Test
@@ -123,7 +123,7 @@ class ConstraintServiceTest {
                 updated.getStatus()
         );
 
-        verify(taskEligibilityService).onConstraintStatusChanged(
+        verify(constraintEligibilityService).onConstraintStatusChanged(
                 taskId,
                 "constraint-1",
                 Constraint.ConstraintStatus.SATISFIED,
@@ -149,7 +149,7 @@ class ConstraintServiceTest {
         );
 
         verify(constraintRepository, never()).save(any());
-        verifyNoInteractions(taskEligibilityService);
+        verifyNoInteractions(constraintEligibilityService);
     }
 
     @Test
@@ -177,7 +177,7 @@ class ConstraintServiceTest {
         );
 
         verify(constraintRepository, never()).save(any());
-        verifyNoInteractions(taskEligibilityService);
+        verifyNoInteractions(constraintEligibilityService);
     }
 
     @Test
