@@ -19,6 +19,7 @@ import pytest
 from PIL import Image
 from pydantic import ValidationError
 
+from mind.config import MonitoringSettings
 from mind.multimodal import ocr
 from mind.multimodal.ocr import (
     OCR_MODEL_NAME,
@@ -27,7 +28,7 @@ from mind.multimodal.ocr import (
     OCRResult,
     extract_text,
 )
-from mind.observability import compute
+from mind.observability import compute, tracking
 from mind.observability.tracking import (
     CallKind,
     CallStatus,
@@ -590,3 +591,22 @@ def test_an_ocr_call_shows_up_in_the_model_call_summary(monkeypatch: pytest.Monk
     assert (row.call_name, row.kind, row.call_count) == (OCR_MODEL_NAME, CallKind.OCR, 1)
     assert row.p95_duration_ms > 0
     assert (row.cost_total_usd, row.unpriced_count) == (None, 1)  # no rate pinned in conftest
+
+
+@pytest.mark.usefixtures("tesseract_found", "ledger")
+def test_a_slow_ocr_call_warns_and_is_counted(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+):
+    # A real extract_text() call, held to a limit it cannot meet.
+    tesseract_prints(monkeypatch, tsv(("word", 90.0)))
+    monkeypatch.setattr(
+        tracking,
+        "monitoring_settings",
+        lambda: MonitoringSettings.model_construct(ocr_max_duration_ms=0.001),
+    )
+    with caplog.at_level("WARNING", logger="mind.observability"):
+        assert extract_text(png_bytes(), filename="a.png").success
+    [line] = [m for m in caplog.messages if m.startswith("MODEL_CALL_SLOW")]
+    assert f"model_name={OCR_MODEL_NAME} kind=ocr" in line
+    [row] = model_call_summary().by_call_name
+    assert row.slow_count == 1

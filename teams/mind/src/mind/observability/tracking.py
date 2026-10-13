@@ -100,6 +100,69 @@ def _limits(kind: CallKind | None) -> tuple[float | None, float | None]:
     return None, None
 
 
+@dataclass(frozen=True)
+class LimitCheck:
+    """One call measured against its kind's limits.
+
+    Worked out once per call, in record_call(), and the only thing both the
+    per-call WARNING lines and the summary's slow/expensive counters read --
+    so a warning and a count can never disagree.
+    """
+
+    duration_limit_ms: float | None
+    cost_limit_usd: float | None
+    slow: bool
+    expensive: bool
+
+
+def check_limits(record: ModelCallRecord) -> LimitCheck:
+    """Whether `record` is over its kind's duration and cost limits.
+
+    Strictly over: a call exactly at a limit is not flagged. An unpriced call
+    (cost None) is never expensive -- its cost is unknown, not zero and not
+    high -- and shows up in the summary's unpriced_count instead.
+    """
+    duration_limit_ms, cost_limit_usd = _limits(record.kind)
+    return LimitCheck(
+        duration_limit_ms=duration_limit_ms,
+        cost_limit_usd=cost_limit_usd,
+        slow=duration_limit_ms is not None and record.duration_ms > duration_limit_ms,
+        expensive=(
+            cost_limit_usd is not None and record.cost is not None and record.cost > cost_limit_usd
+        ),
+    )
+
+
+def _times_over(value: float, limit: float) -> str:
+    """How far over its limit a value is, e.g. "2.4x" -- "-" against a limit of 0."""
+    return f"{value / limit:.1f}x" if limit > 0 else "-"
+
+
+def _warn_if_over(record: ModelCallRecord, check: LimitCheck) -> None:
+    """One WARNING line per limit crossed, with a fixed MODEL_CALL_* marker to grep for."""
+    if check.slow and check.duration_limit_ms is not None:
+        logger.warning(
+            "MODEL_CALL_SLOW model_name=%s kind=%s status=%s duration_ms=%.1f limit_ms=%.1f "
+            "over=%s",
+            record.model_name,
+            record.kind or "-",
+            record.status,
+            record.duration_ms,
+            check.duration_limit_ms,
+            _times_over(record.duration_ms, check.duration_limit_ms),
+        )
+    if check.expensive and check.cost_limit_usd is not None and record.cost is not None:
+        logger.warning(
+            "MODEL_CALL_EXPENSIVE model_name=%s kind=%s status=%s cost=%.6f limit_usd=%.6f over=%s",
+            record.model_name,
+            record.kind or "-",
+            record.status,
+            record.cost,
+            check.cost_limit_usd,
+            _times_over(record.cost, check.cost_limit_usd),
+        )
+
+
 def percentile(sorted_values: Sequence[float], pct: float) -> float:
     """Linear-interpolation percentile over an already-sorted sequence (0.0 if empty)."""
     if not sorted_values:
@@ -139,7 +202,7 @@ class _Totals:
     slow: int = 0
     expensive: int = 0
 
-    def add(self, record: ModelCallRecord) -> None:
+    def add(self, record: ModelCallRecord, check: LimitCheck) -> None:
         if record.kind is not None:
             self.kind = record.kind
         self.durations.append(record.duration_ms)
@@ -158,11 +221,10 @@ class _Totals:
         if record.cost is not None:
             self.cost += record.cost
             self.priced += 1
-        max_duration_ms, max_cost_usd = _limits(record.kind)
-        if max_duration_ms is not None and record.duration_ms > max_duration_ms:
+        # The same LimitCheck the WARNING lines read (see check_limits).
+        if check.slow:
             self.slow += 1
-        # An unpriced call is never "expensive": it is counted in unpriced_count.
-        if max_cost_usd is not None and record.cost is not None and record.cost > max_cost_usd:
+        if check.expensive:
             self.expensive += 1
 
 
@@ -315,7 +377,8 @@ def record_call(
 
     Storage: this currently keeps the last 10k calls in memory, folds each
     into per-call-name running totals (model_call_summary()), and logs it at
-    INFO level -- plus the whole summary every `summary_every_n_calls`
+    INFO level -- plus a WARNING line for each limit it crosses (see
+    check_limits) and the whole summary every `summary_every_n_calls`
     calls. When a metrics backend is chosen (see the team README's "Open
     decisions"), swap the storage here -- call sites do not change.
     """
@@ -330,9 +393,10 @@ def record_call(
         prompt_tokens=prompt_tokens,
         completion_tokens=completion_tokens,
     )
+    check = check_limits(record)
     with _lock:
         _records.append(record)
-        _totals.setdefault(record.model_name, _Totals()).add(record)
+        _totals.setdefault(record.model_name, _Totals()).add(record, check)
         _total_calls += 1
         every_n = monitoring_settings().summary_every_n_calls
         summary_due = every_n > 0 and _total_calls % every_n == 0
@@ -348,6 +412,7 @@ def record_call(
         "-" if record.completion_tokens is None else record.completion_tokens,
         "unpriced" if record.cost is None else f"{record.cost:.6f}",
     )
+    _warn_if_over(record, check)
     if summary_due:
         log_summary()
     return record

@@ -49,9 +49,19 @@ Single tracking point for every AI model call MIND makes -- latency and cost.
     `unpriced_count > 0` is a lower bound.
   - **Limits** are per kind (`MIND_MONITORING__OCR_MAX_DURATION_MS`, ...
     `LLM_MAX_COST_USD`; defaults and where they come from in
-    `config.MonitoringSettings`; the value `none` turns a check off). An unpriced call is never "expensive" -- it
-    shows up in `unpriced_count` instead -- and a call recorded without a
-    `kind` has no limits.
+    `config.MonitoringSettings`; the value `none` turns a check off). A call
+    strictly over a limit logs a WARNING line the moment it is recorded --
+    grep for `MODEL_CALL_SLOW` / `MODEL_CALL_EXPENSIVE`:
+
+    ```
+    MODEL_CALL_SLOW model_name=tesseract-psm11-ocr kind=ocr status=success duration_ms=45000.0 limit_ms=30000.0 over=1.5x
+    MODEL_CALL_EXPENSIVE model_name=deepseek-chat kind=llm status=success cost=0.025000 limit_usd=0.010000 over=2.5x
+    ```
+
+    Each warning and the summary's `slow_count` / `expensive_count` come from
+    the same `check_limits()` result, so they always agree. An unpriced call
+    is never "expensive" (nor free) -- it shows up in `unpriced_count`
+    instead -- and a call recorded without a `kind` has no limits.
   - In-memory and per-process: resets on restart, and each worker process
     only sees its own calls. Counters are running totals that never evict;
     only the latency sample behind p50/p95 is bounded (last 10k per name).
