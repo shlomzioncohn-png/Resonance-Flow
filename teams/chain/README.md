@@ -152,24 +152,32 @@ src/test/java/com/rnd/chain/
 
 ## Graph Traversal API
 
-All routes are read-only (`GET`) and take a task id as the path variable. A bare path is the
+All read/traversal routes use `GET` and take `taskId` as the path variable. A bare path is the
 direct/one-level relationship; `/transitive` is the full closure over that same relation.
+
 Ancestors has no `/transitive` variant - the ancestor chain already is the transitive closure.
 
-| Method | Path                              | Returns                                    |
-|--------|------------------------------------|---------------------------------------------|
-| GET    | `/tasks/{id}/dependencies`         | Direct dependencies                          |
-| GET    | `/tasks/{id}/dependencies/transitive` | All (transitive) dependencies             |
-| GET    | `/tasks/{id}/dependents`           | Direct dependents                            |
-| GET    | `/tasks/{id}/dependents/transitive`   | All (transitive) dependents                |
-| GET    | `/tasks/{id}/ancestors`            | Full ancestor chain (hierarchy)              |
-| GET    | `/tasks/{id}/children`             | Direct children (hierarchy)                  |
-| GET    | `/tasks/{id}/descendants`          | All descendants (hierarchy)                  |
-| GET    | `/tasks/{id}/trace`                | Combined dependency graph + hierarchy trace  |
+| Method | Path | Returns |
+|--------|------|---------|
+| GET | `/tasks/{taskId}/dependencies` | Direct dependencies |
+| GET | `/tasks/{taskId}/dependencies/transitive` | All (transitive) dependencies |
+| GET | `/tasks/{taskId}/dependencies/history` | Dependency change history |
+| GET | `/tasks/{taskId}/dependents` | Direct dependents |
+| GET | `/tasks/{taskId}/dependents/transitive` | All (transitive) dependents |
+| GET | `/tasks/{taskId}/ancestors` | Full ancestor chain (hierarchy) |
+| GET | `/tasks/{taskId}/children` | Direct children (hierarchy) |
+| GET | `/tasks/{taskId}/descendants` | All descendants (hierarchy) |
+| GET | `/tasks/{taskId}/trace` | Combined dependency graph + hierarchy trace |
+| GET | `/tasks/{taskId}/blockers` | Current blockers / task availability |
+| POST | `/tasks/{taskId}/dependencies` | Add a dependency |
+| DELETE | `/tasks/{taskId}/dependencies/{dependsOnTaskId}` | Remove a dependency |
 
-Each route returns a `TaskResponse` list (or, for `/trace`, a `TaskTraceResponse` combining
-both axes) - see `dto/TaskResponse.java` and `dto/TaskTraceResponse.java` for the exact shape.
-An unknown task id returns `404` with an `ApiError` body; an invalid (non-UUID) id returns `400`.
+Traversal routes return `TaskResponse` lists, except:
+- `/trace` returns `TaskTraceResponse`
+- `/blockers` returns `TaskAvailability`
+- `/dependencies/history` returns `PageResponse<DependencyHistoryResponse>`
+
+An unknown task id returns `404` with an `ApiError` body; an invalid (non-UUID) `taskId` returns `400`.
 
 ## Kafka event infrastructure
 
