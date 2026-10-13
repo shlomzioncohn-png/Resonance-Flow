@@ -42,6 +42,7 @@ from pydantic import BaseModel, Field, computed_field
 
 from mind.multimodal.failures import FailureCategory
 from mind.multimodal.result import MediaTextResult
+from mind.observability.compute import CpuClock, compute_cost
 from mind.observability.tracking import CallKind, CallStatus, record_call
 
 logger = logging.getLogger(__name__)
@@ -399,6 +400,9 @@ def _extract(content: bytes, filename: str, max_pages: int) -> OCRResult:
 
     parsed: list[_PageOCR] = []
     start = time.perf_counter()
+    # Tesseract runs as a child process, so its CPU is the children's counters,
+    # not ours -- None where the platform cannot report them (Windows).
+    cpu = CpuClock(include_children=True)
     # ERROR until the loop completes, so anything that leaves it early --
     # including a bug, which is not caught below -- is recorded as a failure.
     status = CallStatus.ERROR
@@ -413,13 +417,14 @@ def _extract(content: bytes, filename: str, max_pages: int) -> OCRResult:
         # else -- e.g. a bug while parsing the output -- is not caught here.
         return _failure(OCRFailureReason.OCR_FAILED, f"tesseract failed: {exc}")
     finally:
-        # cost None: local compute has no rate yet (#479).
+        cpu_s = cpu.elapsed_s()
         record_call(
             OCR_MODEL_NAME,
             (time.perf_counter() - start) * 1000,
-            cost=None,
+            cost=compute_cost(cpu_s),
             kind=CallKind.OCR,
             status=status,
+            cpu_s=cpu_s,
         )
 
     pages = [page.text for page in parsed]

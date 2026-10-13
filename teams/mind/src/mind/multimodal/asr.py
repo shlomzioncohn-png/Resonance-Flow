@@ -42,6 +42,7 @@ from pydantic import BaseModel, Field, computed_field
 from mind.config import ASRSettings
 from mind.multimodal.failures import FailureCategory
 from mind.multimodal.result import MediaTextResult
+from mind.observability.compute import CpuClock, compute_cost
 from mind.observability.tracking import CallKind, CallStatus, record_call
 
 if TYPE_CHECKING:
@@ -677,9 +678,10 @@ def transcribe(
 
     Every call whose audio decodes is recorded through
     ``observability.record_call()`` -- the latency and CPU time of the VAD and
-    Whisper stage, and ``status=ERROR`` if Whisper raised; cost None (unpriced)
-    until MIND has a rate for local compute (#479) -- whether it succeeded or not,
-    and even when the VAD found no speech for Whisper to run on.
+    Whisper stage, and ``status=ERROR`` if Whisper raised; the cost is that CPU
+    time at MIND_COMPUTE_COST__USD_PER_CPU_HOUR, or None (unpriced) when no rate
+    is set (#479) -- whether it succeeded or not, and even when the VAD found no
+    speech for Whisper to run on.
     """
     if max_duration_s <= 0:
         raise ValueError(f"max_duration_s must be more than 0, got {max_duration_s}")
@@ -716,7 +718,9 @@ def _transcribe(content: bytes, filename: str, max_duration_s: float) -> ASRResu
     segments: list[TranscriptSegment] = []
     timed_out = False
     start = time.perf_counter()
-    cpu_start = time.process_time()
+    # Whisper runs in this process (CTranslate2's threads included), so this
+    # process's own CPU covers all of it.
+    cpu = CpuClock()
     # ERROR until the loop completes, so anything that leaves it early is
     # recorded as a failure. A timeout is not: it returns what was decoded, and
     # the asr_call line below says it timed out.
@@ -754,12 +758,14 @@ def _transcribe(content: bytes, filename: str, max_duration_s: float) -> ASRResu
         return _failure(ASRFailureReason.ASR_FAILED, f"Whisper failed: {exc}")
     finally:
         duration_ms = (time.perf_counter() - start) * 1000
-        # Whisper runs in this process (CTranslate2's threads included), so
-        # process_time() covers all of its CPU. cost None: local compute has no
-        # rate yet (#479).
-        cpu_s = time.process_time() - cpu_start
+        cpu_s = cpu.elapsed_s()
         record_call(
-            model_name, duration_ms, cost=None, kind=CallKind.ASR, status=status, cpu_s=cpu_s
+            model_name,
+            duration_ms,
+            cost=compute_cost(cpu_s),
+            kind=CallKind.ASR,
+            status=status,
+            cpu_s=cpu_s,
         )
         audio_s = len(audio) / SAMPLE_RATE
         logger.info(

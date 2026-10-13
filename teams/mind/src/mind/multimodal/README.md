@@ -124,9 +124,12 @@ Local OCR + ASR preprocessing.
   `max_pages x 20 s` under its own poll interval.
 
   Every Tesseract run is recorded through `observability.record_call()`
-  (`tesseract-psm11-ocr`, `kind=ocr`, `status=error` if it failed; cost
-  unpriced until MIND has a rate for local compute, #479), like every other
-  model call in the service.
+  (`tesseract-psm11-ocr`, `kind=ocr`, `status=error` if it failed), like
+  every other model call in the service, with the CPU time Tesseract's child
+  processes used and that time priced at `MIND_COMPUTE_COST__USD_PER_CPU_HOUR`
+  -- `None` (unpriced) when no rate is set, and `cpu_s` itself `None` on
+  Windows, which reports no child-process CPU (#479,
+  `observability/compute.py`).
 
   **Signature: agreed with R2** (in Slack, confirmed on PR #509; she calls this from her
   `bridge.raw.landed` consumer, #349). She asked for: raw `bytes` in (her
@@ -289,8 +292,8 @@ Local OCR + ASR preprocessing.
 
   Every call whose audio decodes is recorded through
   `observability.record_call()` (`whisper-base.en-int8-local`, `kind=asr`,
-  with its CPU time; cost unpriced until MIND has a rate for local compute,
-  #479), as #478 asks. OCR is recorded the same way -- `record_call()` is
+  with its CPU time, priced at `MIND_COMPUTE_COST__USD_PER_CPU_HOUR` --
+  `None` when no rate is set, #479), as #478 asks. OCR is recorded the same way -- `record_call()` is
   the one mechanism for model calls.
 
   **Resource budget -- measured in a Linux container, one process holding the

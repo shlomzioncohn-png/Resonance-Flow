@@ -40,6 +40,18 @@ if "TEST_DATABASE_URL" in os.environ:
 os.environ.setdefault("MIND_ENVIRONMENT", "ci")
 
 
+@pytest.fixture(autouse=True)
+def _no_compute_cost_rate(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Pin MIND_COMPUTE_COST__USD_PER_CPU_HOUR to unset for every test.
+
+    A rate in a developer's .env (loaded above) must not change what a test
+    expects an OCR/ASR call to cost. A test that needs a rate sets one itself.
+    """
+    from mind.observability import compute
+
+    monkeypatch.setattr(compute, "usd_per_cpu_hour", lambda: None)
+
+
 @pytest.fixture(scope="session")
 def migrated_db() -> None:
     """Applies `alembic upgrade head` once per test session. PgVectorStore

@@ -21,6 +21,18 @@ Single tracking point for every AI model call MIND makes -- latency and cost.
   working unchanged.
 - Model calls are recorded here, not with `api/instrumentation.py`'s
   `instrumented_call` -- that one times HTTP-level work.
+- `compute.py` -- the compute cost of the local models (OCR, ASR):
+  - `CpuClock()` measures CPU seconds over a call: this process's own
+    (Whisper) or, with `include_children=True`, also the child processes it
+    waited for (Tesseract). Windows reports no child-process CPU, so there
+    an OCR call's `cpu_s` is `None` -- unknown, not 0.
+  - `compute_cost(cpu_s)` prices it at `MIND_COMPUTE_COST__USD_PER_CPU_HOUR`
+    (see `.env.example`). No rate set, or no CPU measured, gives `None`.
+  - It is CPU time, not wall time: Tesseract keeps several cores busy, so a
+    page measured in a Linux container took ~1.1 s wall but ~3.6 s of CPU.
+    And it is process-wide -- accurate while one call runs at a time, as in
+    MIND's consumers; two overlapping calls in one process are each charged
+    for both.
 - `get_recent_calls(limit=None)` -- read back what's been recorded so far.
   For tests/debugging, not a metrics backend.
 - Storage is currently an in-memory ring buffer (last 10k calls) plus an

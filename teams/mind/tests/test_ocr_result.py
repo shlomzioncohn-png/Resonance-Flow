@@ -13,6 +13,7 @@ from __future__ import annotations
 import inspect
 import io
 import subprocess
+import sys
 
 import pytest
 from PIL import Image
@@ -26,6 +27,7 @@ from mind.multimodal.ocr import (
     OCRResult,
     extract_text,
 )
+from mind.observability import compute
 from mind.observability.tracking import CallKind, CallStatus, _reset_for_tests, get_recent_calls
 
 TSV_HEADER = (
@@ -534,3 +536,41 @@ def test_a_bug_inside_the_tesseract_loop_is_recorded_as_an_error(
 def test_input_rejected_before_tesseract_runs_is_not_recorded():
     extract_text(b"not an image at all", filename="a.png")
     assert get_recent_calls() == []
+
+
+_real_run = subprocess.run
+
+
+def tesseract_burns_cpu(monkeypatch: pytest.MonkeyPatch, seconds: float, output: bytes) -> None:
+    """Each tesseract call is a real child process using `seconds` of CPU, then printing `output`."""
+    code = f"import time\nt = time.process_time()\nwhile time.process_time() - t < {seconds}: pass"
+
+    def run(cmd, **kwargs):
+        _real_run([sys.executable, "-c", code], check=True)
+        return subprocess.CompletedProcess(cmd, 0, stdout=output, stderr=b"")
+
+    monkeypatch.setattr(subprocess, "run", run)
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="Windows reports no child-process CPU")
+@pytest.mark.usefixtures("tesseract_found", "ledger")
+def test_the_cpu_tesseract_uses_is_recorded_and_priced(monkeypatch: pytest.MonkeyPatch):
+    # Tesseract is a child process: its CPU is not this process's process_time().
+    tesseract_burns_cpu(monkeypatch, 0.3, tsv(("word", 90.0)))
+    monkeypatch.setattr(compute, "usd_per_cpu_hour", lambda: 0.036)
+    assert extract_text(png_bytes(), filename="a.png").success
+    [call] = get_recent_calls()
+    assert call.cpu_s is not None and call.cpu_s >= 0.3
+    assert call.cost == pytest.approx(call.cpu_s / 3600 * 0.036)
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="only Windows lacks child-process CPU")
+@pytest.mark.usefixtures("tesseract_found", "ledger")
+def test_where_tesseract_cpu_cannot_be_measured_it_is_none_and_unpriced(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    tesseract_burns_cpu(monkeypatch, 0.1, tsv(("word", 90.0)))
+    monkeypatch.setattr(compute, "usd_per_cpu_hour", lambda: 0.036)
+    assert extract_text(png_bytes(), filename="a.png").success
+    [call] = get_recent_calls()
+    assert (call.cpu_s, call.cost) == (None, None)  # unknown, not 0

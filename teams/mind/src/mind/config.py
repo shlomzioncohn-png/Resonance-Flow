@@ -57,6 +57,22 @@ class ASRSettings(BaseSettings):
         return Path(self.model_cache_dir) / "whisper" / self.whisper_model
 
 
+class ComputeCostSettings(BaseSettings):
+    """Standalone, like ASRSettings -- recording a model call's cost needs no DSN.
+
+    The price of one CPU-hour, which turns a local model call's measured CPU
+    seconds into an estimated USD cost (see observability/compute.py). Unset by
+    default: with no rate on file, a local call's cost is recorded as None
+    (unpriced) rather than a made-up number.
+    """
+
+    model_config = SettingsConfigDict(
+        env_prefix="MIND_COMPUTE_COST__", env_file=_ENV_FILE, extra="ignore"
+    )
+
+    usd_per_cpu_hour: float | None = Field(default=None, ge=0)
+
+
 class VectorStoreSettings(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
