@@ -60,10 +60,19 @@ spec:
 
       {{- $dependencies := concat ($.Values.dependencies | default list) ($component.dependencies | default list) }}
       {{- $rawInitContainers := concat ($.Values.initContainers | default list) ($component.initContainers | default list) }}
-      {{- if or $dependencies $rawInitContainers }}
+      {{- $migrationEnabled := false }}
+      {{- if $component.migration }}
+      {{- if $component.migration.enabled }}
+      {{- $migrationEnabled = true }}
+      {{- end }}
+      {{- end }}
+      {{- if or $dependencies $rawInitContainers $migrationEnabled }}
       initContainers:
         {{- if $dependencies }}
         {{- include "resonance-flow.waitForDependencies" (dict "root" $ "deps" $dependencies) | nindent 8 }}
+        {{- end }}
+        {{- if $migrationEnabled }}
+        {{- include "resonance-flow.migrationInitContainer" (dict "root" $ "componentName" $componentName "component" $component) | nindent 8 }}
         {{- end }}
         {{- with $rawInitContainers }}
         {{- toYaml . | nindent 8 }}

@@ -164,6 +164,45 @@ TCP-reachable. Dependencies whose target is disabled get no initContainer.
 {{- end }}
 {{- end }}
 {{/*
+Opt-in migration initContainer (components.<name>.migration: {enabled, command}),
+e.g. `alembic upgrade head` -- runs components.<name>.image at the exact tag/config/
+secret the main container gets, so the migration always matches the code being
+deployed instead of drifting from a hand-run or CI-only step.
+*/}}
+{{- define "resonance-flow.migrationInitContainer" -}}
+{{- $componentName := .componentName }}
+{{- $component := .component }}
+- name: {{ $componentName }}-migrate
+  image: "{{ $component.image.repository }}:{{ $component.image.tag }}"
+  imagePullPolicy: {{ $component.image.pullPolicy }}
+  command:
+    {{- toYaml $component.migration.command | nindent 4 }}
+  {{- if or $component.config $component.secret }}
+  env:
+    {{- if $component.config }}
+    {{- include "resonance-flow.configFilePathEnv" . | nindent 4 }}
+    {{- end }}
+    {{- if $component.secret }}
+    - name: SECRETS_FILE_PATH
+      value: "/etc/resonance-flow/secret/secrets.yaml"
+    {{- end }}
+  {{- end }}
+  {{- if or $component.config $component.secret }}
+  volumeMounts:
+    {{- if $component.config }}
+    - name: resonance-flow-config
+      mountPath: /etc/resonance-flow/config/config.yaml
+      subPath: config.yaml
+      readOnly: true
+    {{- end }}
+    {{- if $component.secret }}
+    - name: resonance-flow-secret
+      mountPath: /etc/resonance-flow/secret
+      readOnly: true
+    {{- end }}
+  {{- end }}
+{{- end }}
+{{/*
 Kafka SASL client JAAS config string, derived from kafka.sasl.client.users
 and kafka.sasl.client.passwords - the same values that seed the Kafka subchart's own
 auto-generated Secret (see charts/kafka/templates/secrets.yaml). Every component that
