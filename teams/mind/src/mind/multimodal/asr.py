@@ -763,29 +763,39 @@ def _transcribe(content: bytes, filename: str, max_duration_s: float) -> ASRResu
             extent.incomplete_file,
         )
 
-    if extent.break_s is not None and not timed_out:
+    dropped_at_break = 0
+    if extent.break_s is not None:
         # The sentence at the break is cut mid-word: drop it rather than pass on
-        # whatever Whisper made of it (see BREAK_MARGIN_S).
+        # whatever Whisper made of it (see BREAK_MARGIN_S) -- whether or not the
+        # timeout also hit. It used to be skipped on a timeout, which let the half
+        # sentence through exactly when the timeout hit on the segment at the break
+        # (team-lead review on the PR); a timeout earlier in the file leaves every
+        # segment well before the break, so the filter drops nothing there anyway.
         kept = [s for s in segments if s.end < extent.break_s - BREAK_MARGIN_S]
-        if len(kept) < len(segments):
+        dropped_at_break = len(segments) - len(kept)
+        if dropped_at_break:
             logger.info(
-                "dropped %d segment(s) at the break at %.1f s",
-                len(segments) - len(kept),
-                extent.break_s,
+                "dropped %d segment(s) at the break at %.1f s", dropped_at_break, extent.break_s
             )
         segments = kept
 
     if not segments:
-        if timed_out:
+        no_complete_segment = (
+            f"the file breaks at {extent.duration_available_s:.1f} s and no complete "
+            "speech segment comes before the break"
+        )
+        # Before the timeout: if segments were decoded and the break took them all,
+        # the time did not run out empty-handed -- the broken file left nothing
+        # usable. That is DATA (drop it), not ASR_FAILED, which is ENVIRONMENT and
+        # would retry the same broken file.
+        if dropped_at_break:
+            return _failure(ASRFailureReason.NO_SPEECH_DETECTED, no_complete_segment)
+        if timed_out:  # nothing decoded at all in the time: the environment
             return _failure(
                 ASRFailureReason.ASR_FAILED, f"no segment decoded within {TRANSCRIBE_TIMEOUT_S} s"
             )
         if extent.incomplete_file:
-            return _failure(
-                ASRFailureReason.NO_SPEECH_DETECTED,
-                f"the file breaks at {extent.duration_available_s:.1f} s and no complete "
-                "speech segment comes before the break",
-            )
+            return _failure(ASRFailureReason.NO_SPEECH_DETECTED, no_complete_segment)
         return _failure(
             ASRFailureReason.NO_SPEECH_DETECTED,
             "no speech recognized (the recording may be silent or only noise)",

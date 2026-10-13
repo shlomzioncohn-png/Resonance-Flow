@@ -716,6 +716,72 @@ def test_a_broken_file_with_nothing_complete_before_the_break_is_no_speech(
     assert result.failure_category is FailureCategory.DATA
 
 
+def timeout_on_every_segment_after_the_first(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A clock that crosses TRANSCRIBE_TIMEOUT_S while the 2nd segment decodes."""
+    clock = [0.0]
+    monkeypatch.setattr(asr.time, "perf_counter", lambda: clock[0])
+    return lambda: clock.__setitem__(0, clock[0] + asr.TRANSCRIBE_TIMEOUT_S * 0.6)
+
+
+def test_the_segment_at_the_break_is_dropped_even_when_the_timeout_hits_on_it(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    # Team-lead review on the PR: the drop used to be skipped on a timeout, so a
+    # file cut off mid-way whose timeout hit on its last segment passed the half
+    # sentence at the break on to extraction. A WAV whose header says 40 s but which
+    # holds only 20 s, the timeout hitting on its last segment:
+    slow = timeout_on_every_segment_after_the_first(monkeypatch)
+    use_model(
+        monkeypatch,
+        FakeWhisper(
+            [
+                fake_segment(" First sentence.", 15.0, 17.0),
+                fake_segment(" Second sentence cut mid-wo", 18.5, 19.8),  # ends at the break
+            ],
+            on_segment=slow,
+        ),
+    )
+    result = transcribe(cut(wav(seconds=40), 0.5))
+    assert (result.incomplete_file, result.truncated) == (True, True)
+    assert result.text == "First sentence."
+    assert "mid-wo" not in result.text
+
+
+def test_a_timeout_with_every_segment_at_the_break_is_no_speech_not_an_environment_failure(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    # With the drop now running on a timeout too, nothing may be left -- that is the
+    # broken file (DATA: drop it), not a slow environment (ENVIRONMENT would retry
+    # the same broken file forever).
+    slow = timeout_on_every_segment_after_the_first(monkeypatch)
+    use_model(
+        monkeypatch,
+        FakeWhisper(
+            [fake_segment(" Cut", 18.5, 19.2), fake_segment(" mid-wo", 19.3, 19.8)],
+            on_segment=slow,
+        ),
+    )
+    result = transcribe(cut(wav(seconds=40), 0.5))
+    assert (result.success, result.reason) == (False, ASRFailureReason.NO_SPEECH_DETECTED)
+    assert result.failure_category is FailureCategory.DATA
+    assert result.retryable is False
+
+
+def test_an_incomplete_file_whose_timeout_decoded_nothing_is_still_an_environment_failure(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    # The other side of the test above: only segments actually dropped at the break
+    # make an empty result the file's fault. Here the file is incomplete (its RIFF
+    # header says 40 s, it holds 20 s) but the time ran out before any segment came
+    # out -- that is the environment, and stays retryable.
+    ticks = iter([0.0])
+    monkeypatch.setattr(asr.time, "perf_counter", lambda: next(ticks, 1000.0))
+    use_model(monkeypatch, FakeWhisper([fake_segment(" never reached", 0.0, 1.0)]))
+    result = transcribe(cut(wav(seconds=40), 0.5), max_duration_s=5)
+    assert (result.success, result.reason) == (False, ASRFailureReason.ASR_FAILED)
+    assert result.retryable is True
+
+
 def test_incomplete_file_is_serialized_for_the_consumer(monkeypatch: pytest.MonkeyPatch):
     use_model(monkeypatch, whisper_before_and_at_the_break())
     dumped = transcribe(cut(wav_fixture(), 0.5)).model_dump()
