@@ -8,11 +8,12 @@ tests build the shape the live path will hand the model.
 
 import logging
 from dataclasses import dataclass, replace
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta, tzinfo
 
 import pytest
 
 from mind.evaluation.interfaces import ScoreContext, Tier
+from mind.scoring import segmented_model
 from mind.scoring.confidence import ASSUMED_TIER_SHIFT, score_confidence
 from mind.scoring.factors import Factor
 from mind.scoring.features import task_text
@@ -29,6 +30,7 @@ TIERS: tuple[Tier, ...] = ("operational", "tactical", "strategic")
 class LiveTask:
     """What the live path builds from an Inbox task: some fields may be empty."""
 
+    task_id: str = "0f8c2a51-6d2e-4b1a-9c3e-7a5d1e2b4c60"  # an Inbox UUID, as a string
     title: str = "Do the thing"
     description: str | None = "A task with no particular signals in its wording."
     # A day and a bit out: near enough that each tier's sense of time reads it
@@ -78,6 +80,8 @@ def test_an_assumed_tier_is_logged(caplog: pytest.LogCaptureFixture) -> None:
         MODEL.score(replace(LiveTask(), tier=None), CONTEXT)
 
     assert "tier_assumed" in caplog.text
+    # The id, so that a task re-scored ten times counts as one task.
+    assert LiveTask().task_id in caplog.text
 
 
 # --- a missing effort estimate -----------------------------------------------
@@ -191,3 +195,76 @@ def test_a_missing_description_scores_like_an_empty_one() -> None:
     empty = MODEL.score(replace(LiveTask(), description=""), CONTEXT)
 
     assert missing.score == empty.score
+
+
+# --- a deadline and a "now" built differently ---------------------------------
+
+
+def test_an_aware_deadline_against_a_naive_now_fails_with_a_clear_message() -> None:
+    """A converter bug, not uncertain data, so it fails rather than becoming null.
+
+    Inbox's deadlines carry a timezone and the scenarios' do not. Whoever
+    builds the task also builds `now`, and only they know where the times
+    came from. Treating the deadline as missing would hide the bug and quietly
+    drop the task's time pressure.
+    """
+
+    aware = replace(LiveTask(), deadline=datetime(2026, 9, 8, 15, 0, tzinfo=UTC))
+
+    with pytest.raises(ValueError, match="build both the same way"):
+        MODEL.score(aware, CONTEXT)
+
+
+def test_an_aware_deadline_against_an_aware_now_scores_normally() -> None:
+    aware_now = ScoreContext(current_datetime=NOW.replace(tzinfo=UTC))
+    aware = replace(LiveTask(), deadline=(NOW + timedelta(hours=30)).replace(tzinfo=UTC))
+
+    assert MODEL.score(aware, aware_now).score == MODEL.score(LiveTask(), CONTEXT).score
+
+
+def test_the_model_and_the_confidence_assume_the_same_tier(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """One decision, not two copies of it.
+
+    Moving the assumed tier must move both: the rule the score is computed
+    by, and the rule whose bonus weight the confidence charges for a missing
+    estimate. A copy taken at import time would stay behind.
+    """
+
+    monkeypatch.setattr(segmented_model, "ASSUMED_TIER", "operational")
+    task = replace(LiveTask(), tier=None, effort_estimate=None)
+
+    assert MODEL.score(task, CONTEXT).score == MODEL.score(
+        replace(task, tier="operational"), CONTEXT
+    ).score
+    operational_bonus = TIER_RULES["operational"].weights[Factor.QUICK_WIN]
+    assert score_confidence(task) == pytest.approx(
+        (1.0 - ASSUMED_TIER_SHIFT) * (1.0 - operational_bonus)
+    )
+
+
+def test_a_naive_deadline_against_an_aware_now_fails_the_same_way() -> None:
+    """The other direction: an aware `now` with a deadline left unconverted."""
+
+    aware_now = ScoreContext(current_datetime=NOW.replace(tzinfo=UTC))
+
+    with pytest.raises(ValueError, match="build both the same way"):
+        MODEL.score(LiveTask(), aware_now)
+
+
+class _NoOffset(tzinfo):
+    """A tzinfo that gives no offset. Python counts such a datetime as naive."""
+
+    def utcoffset(self, dt: datetime | None) -> timedelta | None:
+        return None
+
+
+def test_awareness_is_judged_the_way_python_judges_it() -> None:
+    """By utcoffset(), not by whether a tzinfo object is attached."""
+
+    attached_but_naive = replace(LiveTask(), deadline=datetime(2026, 9, 8, 15, 0, tzinfo=_NoOffset()))
+    aware_now = ScoreContext(current_datetime=NOW.replace(tzinfo=UTC))
+
+    with pytest.raises(ValueError, match="build both the same way"):
+        MODEL.score(attached_but_naive, aware_now)

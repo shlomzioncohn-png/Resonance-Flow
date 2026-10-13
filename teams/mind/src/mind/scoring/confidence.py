@@ -17,12 +17,21 @@ no confidence field, and the live path (#357) can call this on its own.
 
 from mind.scoring.factors import Factor
 from mind.scoring.inputs import ScorableTask
-from mind.scoring.segmented_model import ASSUMED_TIER, TIER_RULES
+from mind.scoring.segmented_model import TIER_RULES, rule_tier
 
 #: Measured, not derived. How far a task's base score moves when its tier is
 #: replaced by the assumed one: the 90th percentile over all 91 persona tasks,
-#: 2026-10-13 (mean 0.063, median 0.039, max 0.352). Synthetic tasks, so the
-#: spread on real ones may differ; re-measure once #353 produces them.
+#: 2026-10-13 (mean 0.063, median 0.039, max 0.352).
+#:
+#: All 91 on purpose, the tactical ones included (they move by 0): Chain sees
+#: a null tier and cannot know whether the assumption was right, so the
+#: question is how far to trust such a score, not how far off it is when
+#: wrong. Over the 68 non-tactical tasks alone the figure is 0.20.
+#:
+#: The assumption underneath: tasks with no tier spread across the tiers the
+#: way the persona set does (43 operational, 25 strategic, 23 tactical).
+#: Nothing guarantees it, and the tasks are synthetic. Re-measure on real
+#: ones once #353 produces them, checking that spread first.
 ASSUMED_TIER_SHIFT = 0.17
 
 
@@ -31,14 +40,13 @@ def score_confidence(task: ScorableTask) -> float:
 
     confidence = 1.0
 
-    tier = task.tier
-    if tier is None:
+    if task.tier is None:
         confidence *= 1.0 - ASSUMED_TIER_SHIFT
-        tier = ASSUMED_TIER
 
     if task.effort_estimate is None:
         # Derived, not measured: the bonus cannot move a score by more than
-        # its own weight in the rule that was used, and strategic has none.
-        confidence *= 1.0 - TIER_RULES[tier].weights.get(Factor.QUICK_WIN, 0.0)
+        # its own weight in the rule the model used — assumed or not — and
+        # strategic has none.
+        confidence *= 1.0 - TIER_RULES[rule_tier(task)].weights.get(Factor.QUICK_WIN, 0.0)
 
     return confidence

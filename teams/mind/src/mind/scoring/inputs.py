@@ -15,7 +15,7 @@ from mind.evaluation.interfaces import Task, Tier
 
 
 class ScorableTask(Protocol):
-    """The seven fields the ranking model reads, and nothing else.
+    """The fields the ranking model reads, and the id that names the task.
 
     A Protocol, so anything with these fields fits without inheriting from
     anything: R1's scenario Task as it is, and whatever the live path builds
@@ -24,6 +24,13 @@ class ScorableTask(Protocol):
     narrower type in place of a wider one for a field nobody can write to.
     """
 
+    # Not read by the score. Here so the score can be traced to its task, and
+    # because `parent_task_id` points at an id: walking from a parent to its
+    # children (R3, week 7) needs the task's own. A string: R1's scenario ids
+    # and Inbox's UUIDs (converted) both fit.
+    @property
+    def task_id(self) -> str: ...
+
     @property
     def title(self) -> str: ...
 
@@ -31,14 +38,20 @@ class ScorableTask(Protocol):
     @property
     def description(self) -> str | None: ...
 
+    # Naive or timezone-aware, but the same kind as the context's
+    # `current_datetime`: Inbox's deadlines are aware, the scenarios' naive.
+    # Whoever builds the task builds `now` too, and converts; a mismatch fails.
     @property
     def deadline(self) -> datetime | None: ...
 
-    # Empty when the content gave no basis for one (#352).
+    # Minutes. Empty when the content gave no basis for one (#352). Inbox
+    # calls the same value `effort_estimate_minutes`.
     @property
     def effort_estimate(self) -> int | None: ...
 
-    # Empty when the content gave no sense of timescale (#351).
+    # Empty when the content gave no sense of timescale (#351). Lowercase,
+    # as `TIER_RULES` keys it: Inbox writes "OPERATIONAL", and a tier passed
+    # through unconverted is a KeyError on every task that has one.
     @property
     def tier(self) -> Tier | None: ...
 

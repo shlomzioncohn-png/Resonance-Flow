@@ -21,7 +21,9 @@ task at a time plus `context.current_datetime`, never the other candidates and
 never the persona. The harness builds the ranking from the per-task scores.
 
 The task it reads is a `ScorableTask` ([`inputs.py`](inputs.py)): the seven
-fields the model uses, and nothing else. R1's scenario `Task` fits it unchanged,
+fields the model uses, plus `task_id`, which the score does not read but which
+names the task — `parent_task_id` points at one, and walking from a parent to
+its children (R3, week 7) needs it. R1's scenario `Task` fits it unchanged,
 so the harness runs as before; the live path can hand it a task built from
 Inbox's, where three of those fields may be empty (see below). A mypy-only
 check in `inputs.py` fails if R1's `Task` ever stops fitting.
@@ -180,7 +182,11 @@ this changes a persona score — all 91 score identically with and without it.
   other two — so it assumes the least. Only the choice of rule is assumed: the
   task's tier stays null, in the database and in what is sent to Chain, and the
   explanation says "task of unknown tier, scored as tactical". Logged as
-  `tier_assumed`, so the null rate can be counted once real tasks flow.
+  `tier_assumed` with the task's id. A task is re-scored on every update, so
+  the null-tier rate is the number of **distinct ids**, never the number of
+  lines. Counting null tiers in Inbox's tasks answers a slightly wider
+  question — every task, not only the ones that were scored — so the two can
+  differ without either being wrong.
   Deliberately not a factor: a null tier already says it was assumed, and a
   flag among the contributions would distort the explanation's leading factor.
 - **No effort estimate: no quick_win bonus.** The bonus rewards a shortness we
@@ -199,7 +205,7 @@ badly off cannot be known in advance.
 
 | missing | penalty | where the number comes from |
 |---|---|---|
-| tier | `ASSUMED_TIER_SHIFT` (0.17) | **measured**: the 90th percentile of how far a persona task's base score moves when its tier is replaced by tactical (mean 0.063, max 0.352) |
+| tier | `ASSUMED_TIER_SHIFT` (0.17) | **measured**: the 90th percentile of how far a persona task's base score moves when its tier is replaced by tactical (mean 0.063, max 0.352), over all 91 tasks — tactical ones included, since Chain cannot know whether the assumption was right. Assumes tasks with no tier spread across the tiers as the persona set does |
 | effort estimate | quick_win's weight in the rule used | **derived**: the bonus cannot move a score further than its weight — 0.10 operational, 0.05 tactical, nothing at strategic |
 
 Both missing compound by multiplication. It is a separate function rather than

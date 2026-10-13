@@ -108,6 +108,16 @@ ASSUMED_TIER: Tier = "tactical"
 
 logger = logging.getLogger("mind.scoring")
 
+
+def rule_tier(task: ScorableTask) -> Tier:
+    """The tier whose rule scores this task: its own, or the assumed one.
+
+    The one place that decision is made. The model scores by it and
+    `score_confidence` charges by it, so the two cannot drift apart.
+    """
+    return ASSUMED_TIER if task.tier is None else task.tier
+
+
 #: How each factor reads in a one-line explanation.
 _FACTOR_PHRASING: dict[Factor, str] = {
     Factor.TIME_PRESSURE: "how soon this has to happen",
@@ -121,15 +131,15 @@ class SegmentedRankingModel:
     """Scores one task at a time, using its tier's rule. Implements `RankingModel`."""
 
     def score(self, task: ScorableTask, context: ScoreContext) -> ScoreResult:
-        tier = task.tier
-        if tier is None:
-            tier = ASSUMED_TIER
-            # Counted later to decide whether the assumption is good enough:
-            # rare, and it is; common, and a separate call for tier may pay.
+        tier = rule_tier(task)
+        if task.tier is None:
+            # Carries the id because a task is re-scored on every update: the
+            # null-tier rate is distinct ids, not lines. Rare, and the
+            # assumption is enough; common, and a separate call for tier may pay.
             logger.info(
-                "scoring: tier_assumed - %r has no tier, scored by the %s rule",
-                task.title,
-                ASSUMED_TIER,
+                "scoring: tier_assumed - task %s has no tier, scored by the %s rule",
+                task.task_id,
+                tier,
             )
         rule = TIER_RULES[tier]
         values = {

@@ -51,6 +51,20 @@ def deadline_proximity(
     """
     if deadline is None:
         return missing_value
+    # Inbox's deadlines carry a timezone and the scenarios' do not. Whoever
+    # builds the task also builds `now`, and only they know where the times
+    # came from, so they convert; this refuses to guess. Not treated as a
+    # missing deadline: that would hide the bug and drop the time pressure.
+    # Judged by utcoffset(), as Python itself judges it: a tzinfo that gives
+    # no offset still makes a naive datetime.
+    deadline_naive = deadline.utcoffset() is None
+    now_naive = now.utcoffset() is None
+    if deadline_naive != now_naive:
+        raise ValueError(
+            f"deadline is {'naive' if deadline_naive else 'timezone-aware'} "
+            f"but now is {'naive' if now_naive else 'timezone-aware'}; "
+            f"build both the same way"
+        )
     hours_remaining = (deadline - now).total_seconds() / 3600
     if hours_remaining <= 0:
         return 1.0
