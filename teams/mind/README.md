@@ -99,6 +99,27 @@ scenario for yet, or a scenario the mentor hasn't approved yet, prints a
 warning but does **not** fail the build — the set is expected to be built up
 incrementally before the Foundation Gate.
 
+## Cost and latency monitoring (#479)
+
+Every OCR, ASR and LLM call goes through one ledger,
+`observability.record_call()`, which logs its latency, CPU time (OCR/ASR),
+token usage (LLM) and cost. `GET /debug/model-calls` (and a
+`model_call_summary` log line every 100 calls) shows the aggregate per call
+name -- count, errors, p50/p95, CPU, tokens, cost -- and a call over its
+kind's duration or cost limit logs a `MODEL_CALL_SLOW` /
+`MODEL_CALL_EXPENSIVE` WARNING. An unknown value is never shown as 0: an
+unpriced cost or an unmeasured CPU figure is `null`, with a count of how
+many calls it leaves out.
+
+Not finished: LLM calls are recorded without a kind or token counts, and with
+an unknown cost as `0.0`, until R2 approves the change to `extractor.py` --
+three strict-xfail tests mark it and must stay until then. And no CPU-hour
+rate is configured yet (open decision below).
+
+Metrics, limits, configuration, warnings and known limitations:
+[`src/mind/observability/README.md`](./src/mind/observability/README.md#status-of-479-cost-and-latency-monitoring).
+Run the acceptance suite with `pytest tests/test_cost_latency_monitoring.py -v`.
+
 ## Data policy
 
 **No real Gong data at any point.** Real corpora (AMI, RVL-CDIP/FUNSD,
@@ -124,6 +145,14 @@ licensing constraints.
 - How the score is published to Chain: separate event vs. field on `Task`
 - Which real dataset slice to validate against first: FUNSD vs. AMI
 - MIND's exact location/build integration in the monorepo (Python, not Maven — affects Relay's CI and the root `docker-compose.yml`)
+- Compute-cost rate for OCR/ASR (#479): the USD price of one CPU-hour on the
+  machine MIND runs on, and where `MIND_COMPUTE_COST__USD_PER_CPU_HOUR` is set:
+  `components.mind.env` in `teams/relay/helm/resonance-flow/values.yaml` (every
+  install, CI included) or `teams/relay/helm/resonance-flow/environments/shared.yaml`
+  (the shared cluster only). Open with R1; until it is set, every OCR/ASR cost
+  is recorded as unpriced.
+- LLM call instrumentation (#479): the `extractor.py` / `pricing.py` change
+  proposed to R2 -- `kind`, token counts, unknown cost as `None`, Gemini's price.
 
 ## Getting started
 
