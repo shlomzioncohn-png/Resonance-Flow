@@ -82,6 +82,23 @@ async def test_empty_store_never_flags_a_duplicate(store):
     assert match is None
 
 
+async def test_a_completed_task_is_never_flagged_as_a_duplicate(store):
+    """find_duplicate() is built on resolve_dependency_targets() -- inherits
+    its is_completed filter, doesn't need its own separate logic."""
+    existing = task_text("Upgrade the production database", "Move to the new major version before Q2")
+    await store.upsert("task-db-upgrade", embed(existing))
+    await store.mark_completed("task-db-upgrade")
+
+    match = await find_duplicate(
+        store,
+        "Upgrade production DB",
+        "Move to the new major version before Q2 ends",
+        threshold=0.0,
+    )
+
+    assert match is None
+
+
 async def test_uses_symmetric_embedding_not_the_mention_vs_passage_case():
     """#471 compares full task vs full task -- is_query=False. Reusing
     resolve_dependency_targets()'s default (True, for #245's short-mention

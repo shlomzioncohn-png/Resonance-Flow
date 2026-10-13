@@ -228,3 +228,26 @@ async def test_propagates_a_store_search_failure():
 
     with pytest.raises(RuntimeError, match="connection reset"):
         await resolve_dependency_targets(store, ["the DB upgrade"])
+
+
+async def test_a_completed_task_is_never_returned_as_a_live_match(store):
+    """index_consumer.py only flips is_completed, never deletes -- a DONE
+    task must not come back as a dependency match even though it's still
+    the strongest-scoring candidate in the index."""
+    await store.upsert(
+        "task-db-upgrade", embed(task_text("Upgrade the production database", "Move to the new major version"))
+    )
+    await store.mark_completed("task-db-upgrade")
+
+    [candidates] = await resolve_dependency_targets(store, ["the DB upgrade"], threshold=0.0)
+
+    assert candidates == []
+
+
+async def test_completed_filter_is_deterministic_regardless_of_similarity():
+    store = AsyncMock()
+    store.search.return_value = [SearchResult(task_id="task-done", similarity=0.99, is_completed=True)]
+
+    [candidates] = await resolve_dependency_targets(store, ["the DB upgrade"], threshold=0.0)
+
+    assert candidates == []

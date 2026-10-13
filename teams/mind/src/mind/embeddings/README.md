@@ -98,7 +98,7 @@ await store.mark_incomplete(task_id)  # e.g. a DONE task got reopened
 
 `nearest_tasks(store, text, *, k, is_query=False)` (`search.py`) is the shared primitive behind #471 and #245 -- `embed(text, is_query=is_query)` then `store.search(vector, k=k)`, no threshold. `is_query=True` for #245 (mention vs. passage); `False` for #471's symmetric comparison.
 
-`resolve_dependency_targets(store, references, *, k=5, threshold=None, is_query=True)` (`dependency_resolution.py`) is #245/#244: a `list[str]` of free-text dependency mentions in, one ranked candidate list out per string. **"No match" is the default**: `threshold=None` reads `Settings.dependency_match_threshold` and filters, same as #244's own call. Pass `threshold=0.0` explicitly for the raw, unfiltered ranked list (Yonit's original #245 use case):
+`resolve_dependency_targets(store, references, *, k=5, threshold=None, is_query=True)` (`dependency_resolution.py`) is #245/#244: a `list[str]` of free-text dependency mentions in, one ranked candidate list out per string. **"No match" is the default**: `threshold=None` reads `Settings.dependency_match_threshold` and filters, same as #244's own call. Pass `threshold=0.0` explicitly for the raw, unfiltered ranked list (Yonit's original #245 use case). Always drops `is_completed` candidates (index_consumer.py never deletes, only flips the flag -- a DONE task must never come back as a live match), regardless of `threshold`:
 
 ```python
 from mind.embeddings import resolve_dependency_targets

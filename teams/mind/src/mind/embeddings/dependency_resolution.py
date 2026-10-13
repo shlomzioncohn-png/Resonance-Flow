@@ -34,4 +34,9 @@ async def resolve_dependency_targets(
     results = await asyncio.gather(
         *(nearest_tasks(store, text, k=k, is_query=is_query) for text in references)
     )
-    return [[c for c in candidates if c.similarity >= threshold] for candidates in results]
+    # Completed tasks are never deleted from the index (index_consumer.py
+    # only flips is_completed) -- a DONE/REJECTED/CANCELLED task must not
+    # come back as a live dependency/duplicate match.
+    return [
+        [c for c in candidates if c.similarity >= threshold and not c.is_completed] for candidates in results
+    ]
