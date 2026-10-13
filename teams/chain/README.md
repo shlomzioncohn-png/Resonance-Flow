@@ -8,7 +8,7 @@ The dependency/constraint update flow is split by domain (#649): `DependencyEdge
 (`addDependency`, `addDependencies`, `removeDependency`), `TaskEligibilityService`
 (`onTaskStatusChanged`, `recalculateTaskEligibility`, `getTaskEligibility`) and
 `ConstraintEligibilityService` (`onConstraintAdded`, `onConstraintStatusChanged`), sharing
-`TaskCounterUpdater` and `DependencyGraphLock`, against the same in-memory repositories. `config/MockDataConfig.java`
+`TaskCounterUpdater` and `GraphLock`, against the same in-memory repositories. `config/MockDataConfig.java`
 wires the in-memory `TaskRepository`/`TaskDependencyRepository` implementations as beans (seeded
 empty) so both it and `TaskTraversalService` are constructible via normal Spring dependency
 injection - not just unit-testable. Each bean is guarded with `@ConditionalOnMissingBean`, so once
@@ -799,3 +799,18 @@ originated the file in question):
   check of the method signature to know what `true`/`false` meant.
 
 Full test suite (47 tests, `mvn clean test`) passes.
+
+## Transactional graph lock
+
+The in-JVM `dependencyGraphLock` (`synchronized`) used by `DependencyEdgeService` and `TaskEligibilityService` is gone: it released before
+the surrounding transaction committed, so a concurrent writer could miss uncommitted edges/counters,
+and it did not span replicas. Graph-mutating methods now run in `GraphLock#runExclusive`
+(`PostgresGraphLock`: `pg_advisory_xact_lock` with one constant key, taken first in the
+`@Transactional` method and held until commit/rollback; `InMemoryGraphLock` for in-memory runs and
+unit tests). Known limit: one key means all graph writes queue across every project. The older
+sections above that mention `dependencyGraphLock` describe history.
+
+Tests: `PostgresGraphLockTest` (runs in CI) checks that the lock refuses to run outside a transaction
+and takes the advisory lock before the action. `TaskEligibilityServicePostgresConcurrencyTest`
+(`postgres` tag, not run in CI) adds `concurrentAddDependency_closingCycle_onlyOneSucceeds`; it has not
+been run yet (no local Postgres): `mvn test -Ppostgres-integration -Dtest=TaskEligibilityServicePostgresConcurrencyTest`.

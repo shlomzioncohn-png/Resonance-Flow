@@ -6,6 +6,7 @@ import com.rnd.chain.dto.TaskStatus;
 import com.rnd.chain.exception.DependencyNotFoundException;
 import com.rnd.chain.exception.DuplicateDependencyException;
 import com.rnd.chain.exception.InvalidDependencyException;
+import com.rnd.chain.repository.GraphLock;
 import com.rnd.chain.repository.TaskDependencyRepository;
 
 import org.slf4j.Logger;
@@ -30,19 +31,20 @@ public class DependencyEdgeService {
             LoggerFactory.getLogger(DependencyEdgeService.class);
 
     private final TaskDependencyRepository taskDependencyRepository;
-    private final DependencyGraphLock dependencyGraphLock;
+    private final GraphLock graphLock;
     private final TaskCounterUpdater taskCounterUpdater;
 
     public DependencyEdgeService(
             TaskDependencyRepository taskDependencyRepository,
-            DependencyGraphLock dependencyGraphLock,
+            GraphLock graphLock,
             TaskCounterUpdater taskCounterUpdater) {
 
         this.taskDependencyRepository = taskDependencyRepository;
-        this.dependencyGraphLock = dependencyGraphLock;
+        this.graphLock = graphLock;
         this.taskCounterUpdater = taskCounterUpdater;
     }
 
+    @Transactional
     public TaskDependency addDependency(
             UUID taskId,
             UUID dependsOnTaskId) {
@@ -55,7 +57,7 @@ public class DependencyEdgeService {
                 dependsOnTaskId,
                 "dependsOnTaskId must not be null");
 
-        synchronized (dependencyGraphLock) {
+        return graphLock.runExclusive(() -> {
 
             // Checked before the cycle check and the task lookups: a duplicate must not require
             // either task to still exist, and an existing edge cannot be introducing a new cycle.
@@ -100,7 +102,7 @@ public class DependencyEdgeService {
                     1);
 
             return dependency;
-        }
+        });
     }
 
     private record PendingEdge(UUID dependsOnTaskId, boolean isNewEdge, boolean dependsOnAlreadyDone) {
@@ -143,7 +145,7 @@ public class DependencyEdgeService {
      *
      * <p>Validating up front is safe because {@link #wouldCreateCycle} only traverses edges that
      * already exist before this call, and every same-batch edge starts at {@code taskId}. The whole
-     * batch runs under one {@code dependencyGraphLock} acquisition, so no concurrent writer can
+     * batch runs under one graph-lock acquisition, so no concurrent writer can
      * invalidate a validated entry before it is applied.
      */
     @Transactional
@@ -156,7 +158,7 @@ public class DependencyEdgeService {
                 .toList();
         log.info("Adding {} distinct dependency(ies) for task {}", distinctIds.size(), taskId);
 
-        synchronized (dependencyGraphLock) {
+        graphLock.runExclusive(() -> {
             List<PendingEdge> validated = new ArrayList<>(distinctIds.size());
             for (UUID dependsOnTaskId : distinctIds) {
                 validated.add(validateEdge(taskId, dependsOnTaskId));
@@ -164,9 +166,10 @@ public class DependencyEdgeService {
             for (PendingEdge edge : validated) {
                 applyEdge(taskId, edge);
             }
-        }
+        });
     }
 
+    @Transactional
     public void removeDependency(
             UUID taskId,
             UUID dependsOnTaskId) {
@@ -179,7 +182,7 @@ public class DependencyEdgeService {
                 dependsOnTaskId,
                 "dependsOnTaskId must not be null");
 
-        synchronized (dependencyGraphLock) {
+        graphLock.runExclusive(() -> {
 
             taskCounterUpdater.requireTask(taskId);
 
@@ -204,7 +207,7 @@ public class DependencyEdgeService {
                     taskId,
                     dependencyCurrentlyDone,
                     -1);
-        }
+        });
     }
 
     private boolean wouldCreateCycle(
@@ -228,7 +231,7 @@ public class DependencyEdgeService {
                 continue;
             }
 
-            // Under dependencyGraphLock, so the repository's own read lock is redundant here.
+            // Under the graph lock, so the repository's own read lock is redundant here.
             for (TaskDependency dependency :
                     taskDependencyRepository.findByTaskIdUnderExternalLock(current)) {
 
