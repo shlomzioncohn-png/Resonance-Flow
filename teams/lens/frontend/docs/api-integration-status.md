@@ -2,7 +2,8 @@
 
 Snapshot as of 2026-10-04. Current focus: connecting the BFF to Inbox's real Task API.
 The **My Tasks** list and **Task details** screens now work end to end against a local
-Inbox. The chat comes next.
+Inbox. The chat was dropped from the plan (2026-10-06) and its code removed
+(ChatPanel, taskStore, the `employee-task` endpoint).
 
 ## How a request flows today
 
@@ -30,15 +31,17 @@ still mocked inside the BFF.
   - `GET /workspace/tasks` (filter, search, page, size) — real Inbox in real mode
   - `GET /workspace/tasks/{taskId}` — real Inbox in real mode
   - `PATCH /workspace/tasks/{taskId}/status` — real Inbox in real mode
-  - `POST /workspace/recommend` — uses Inbox's first page (100 tasks) as candidates;
-    Chain and Mind still mocked
-  - `GET /workspace/employee-task`, `GET /manager/workload`, `GET /manager/projects`,
-    `GET /admin/projects[/{id}]` — mocked
-- **Frontend**: the employee screens call the Gateway through `services/workspaceApi.ts`
-  and `services/employeeApi.ts`. MSW (`mocks/handlers.ts`) now only mocks
-  `GET /api/admin/projects/:projectId`; everything else passes through to the Gateway.
-- **Chat** (`app/(app)/employee/tasks/[taskId]/ChatPanel.tsx`): a scripted demo with
-  canned replies. No chat endpoint exists in the Gateway, BFF or Inbox yet.
+  - `POST /workspace/recommend` — real mode: Inbox's task selection
+    (`GET /api/v1/tasks/selection?availableMinutes=&userId=`, inbox-team PR #550) picks
+    the tasks. If that call fails (other than a 4xx), it falls back to the BFF's own
+    ranking over the user's tasks (Chain and Mind still mocked).
+  - `GET /workspace/tasks/selection?availableMinutes=` — Inbox's task selection as-is
+    (no fallback; 1-480 minutes)
+  - `GET /manager/workload`, `GET /manager/projects`,
+    `GET /admin/projects[/{id}]` — mocked inside the BFF
+- **Frontend**: every screen calls the Gateway through `services/*Api.ts`. There is no
+  mocking in the browser anymore (MSW was removed on 2026-10-06): all mock data lives in
+  the BFF.
 
 ## Inbox Task API (branch `inbox-team`, commit `438c368`)
 
@@ -89,29 +92,35 @@ test UUID they send works for us too.
    `http://host.docker.internal:8083` instead. If the Gateway runs in Docker, the BFF
    container must be on the Gateway's network with the alias `bff-service`.
 
-Checked end to end through the Gateway on 2026-10-04: the list (828 tasks, status filter,
+Checked end to end through the Gateway on 2026-10-04/05: the list (the user's 60 tasks, status filter,
 search, paging), a single task, a status change (saved in Inbox), and an unknown id (404).
 
 ## Gaps — status
 
-| #   | Gap                                                                                           | Status                                                                                                                                                                                   |
-| --- | --------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 1   | User id: Inbox needs a real user UUID as `X-Actor-Id`                                         | ✅ For local testing: `INBOX_DEV_ACTOR_ID` replaces `emp_001`. The real fix waits for login (JWT → user).                                                                                |
-| 2   | **"My tasks" scoping:** Inbox returns every task in the tenant (828), not the user's own (60) | ❌ **Open — needs Inbox.** No owner/assignee filter exists, and in the seed `owner_id` is empty (ownership is in `assignments`). Raised with Inbox: they need to add an assignee filter. |
-| 3   | List shape `{content, total_elements}` → `{items, total}`                                     | ✅ Mapped in `InboxClient.listTasks`                                                                                                                                                     |
-| 4   | Our single `filter` → Inbox's `status`                                                        | ✅ `WorkspaceService.toStatusFilter`. `search`/`page`/`size` are passed straight through, and Inbox does the paging.                                                                     |
-| 5   | Task field names                                                                              | ✅ Mapped in `InboxClient.toTaskDTO`. `owner`/`project` stay empty (Inbox only has ids). `priority` is derived from `priority_score`. `dependencies`/`constraints` are empty.            |
-| 6   | `snoozedUntil` when snoozing                                                                  | ❌ Open — snoozing from our screen fails until `TaskStatusUpdateDTO` carries it                                                                                                          |
-| 7   | Inbox returns **500** (not 404) for a task id that isn't a UUID                               | ✅ Worked around: the BFF treats a non-UUID id as "not found" without calling Inbox. Needs reporting to Inbox.                                                                           |
+| #   | Gap                                                                                            | Status                                                                                                                                                                        |
+| --- | ---------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1   | User id: Inbox needs a real user UUID as `X-Actor-Id`                                          | ✅ For local testing: `INBOX_DEV_ACTOR_ID` replaces `emp_001`. The real fix waits for login (JWT → user).                                                                     |
+| 2   | **"My tasks" scoping:** Inbox returned every task in the tenant (828), not the user's own (60) | ✅ Inbox added a `userId` filter (inbox-team PR #534). The BFF sends it on every list call. Checked live: 60 tasks.                                                           |
+| 3   | List shape `{content, total_elements}` → `{items, total}`                                      | ✅ Mapped in `InboxClient.listTasks`                                                                                                                                          |
+| 4   | Our single `filter` → Inbox's `status`                                                         | ✅ `WorkspaceService.toStatusFilter`. `search`/`page`/`size` are passed straight through, and Inbox does the paging.                                                          |
+| 5   | Task field names                                                                               | ✅ Mapped in `InboxClient.toTaskDTO`. `owner`/`project` stay empty (Inbox only has ids). `priority` is derived from `priority_score`. `dependencies`/`constraints` are empty. |
+| 6   | `snoozedUntil` when snoozing                                                                   | ✅ `snoozedUntil` is passed from the frontend through Gateway and BFF to Inbox. Without it Inbox answers 400. (No snooze button on the screens yet.)                          |
+| 7   | Inbox returns **500** (not 404) for a task id that isn't a UUID                                | ✅ Worked around: the BFF treats a non-UUID id as "not found" without calling Inbox. Needs reporting to Inbox.                                                                |
+
+## Known Inbox bug (reported)
+
+`GET /api/v1/tasks/selection` answers **500** when a candidate task has no
+`priority_score` (`SelectionScoreCalculator.normalizedPriority` NPE). With the seed, that
+happens for most windows above ~20 minutes, so the BFF falls back to its own ranking
+there.
 
 ## Next steps
 
-1. Inbox: an assignee filter for "my tasks" (gap 2), and merging the Task API to `main`.
-   The seed role name is already fixed on `inbox-team` (PR #530).
-2. Error handling: Inbox 401/403/400 currently surface as 503 "unavailable". Map them to
-   clear messages on the screens.
-3. Snooze support (gap 6).
-4. Show owner/project names (needs a call to Inbox's users API, or names in the task
-   response).
-5. Agree with Inbox on a chat API (they mediate with Mind), then add it to the BFF and
-   Gateway and wire `ChatPanel`.
+1. Inbox: merging the Task API to `main`. The seed role name is already fixed on
+   `inbox-team` (PR #530).
+2. Show owner/project names. This needs names in Inbox's task response (Inbox only sends
+   ids).
+
+Done since the first snapshot: error handling (Inbox 401/403/400 keep their status and
+get a clear message on screen; the Gateway passes BFF's 4xx message on), snooze, "my
+tasks" scoping, and recommendations that only pick workable tasks.

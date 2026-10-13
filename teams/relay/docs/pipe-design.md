@@ -792,7 +792,7 @@ The per-instance ring buffer is only an optimization for small replay gaps.
 
 The numbers this doc treats as constants — topic retention, partition count, replay buffer size, and so on — should live in one config file instead of being scattered across prose here and hardcoded literals in the service. A single source makes them each swappable per-environment (e.g. shorter retention in staging) without hunting through the doc or the codebase, and without a rebuild.
 
-`teams/relay/src/main/resources/pipe-limits.yaml`, imported the same way `kafka-config.yaml` already is (`spring.config.import`, see `application.yml`):
+`teams/relay/notification_delivery/main/resources/pipe-limits.yaml`, imported the same way `kafka-config.yaml` already is (`spring.config.import`, see `application.yml`):
 
 ```yaml
 relay:

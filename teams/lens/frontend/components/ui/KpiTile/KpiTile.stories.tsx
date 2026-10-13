@@ -3,7 +3,7 @@ import KpiTile from './KpiTile';
 
 const meta = {
   component: KpiTile,
-  tags: ['ai-generated'],
+  tags: ['autodocs'],
 } satisfies Meta<typeof KpiTile>;
 
 export default meta;

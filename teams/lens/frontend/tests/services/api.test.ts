@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { api } from '@/services/api';
+import { api, ApiError, getErrorMessage } from '@/services/api';
 
 describe('api client', () => {
   afterEach(() => {
@@ -42,8 +42,8 @@ describe('api client', () => {
       statusText: 'Service Unavailable',
       json: () =>
         Promise.resolve({
-          status: 503,
-          error: 'SERVICE_UNAVAILABLE',
+          status: 'ERROR',
+          errorCode: 'SERVICE_UNAVAILABLE',
           message: 'Backend service unavailable',
           path: '/api/status',
           timestamp: '2026-09-01T00:00:00Z',
@@ -101,5 +101,28 @@ describe('api client', () => {
 
     const [, init] = fetchMock.mock.calls[0];
     expect(init.body).toBeUndefined();
+  });
+});
+
+describe('getErrorMessage', () => {
+  const apiError = (status: number) =>
+    new ApiError('Downstream service returned an error', status, '/x');
+
+  it.each([
+    [400, "This change isn't allowed for this task."],
+    [401, "We couldn't verify who you are. Please sign in again."],
+    [403, "You don't have access to this task."],
+    [404, "This task wasn't found. It may have been removed."],
+    [503, 'The task service is temporarily unavailable. Please try again in a moment.'],
+    [504, 'The task service is temporarily unavailable. Please try again in a moment.'],
+    [500, 'Something went wrong. Please try again.'],
+  ])('maps HTTP %i to a user-facing message, not the Gateway text', (status, expected) => {
+    expect(getErrorMessage(apiError(status))).toBe(expected);
+  });
+
+  it('treats a non-ApiError (fetch failed, Gateway unreachable) as a connection problem', () => {
+    expect(getErrorMessage(new TypeError('Failed to fetch'))).toBe(
+      'The task service is unreachable. Check your connection and try again.',
+    );
   });
 });

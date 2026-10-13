@@ -15,7 +15,6 @@ import org.springframework.web.client.ResourceAccessException;
 import org.springframework.web.client.RestTemplate;
 
 import java.net.SocketTimeoutException;
-import java.time.LocalDateTime;
 import java.util.List;
 
 import static org.hamcrest.Matchers.*;
@@ -141,7 +140,7 @@ class GatewayRoutingIntegrationTest {
         task.setPriority("HIGH");
         task.setStatus("READY");
         task.setEffortEstimate(35);
-        task.setDueDate(LocalDateTime.of(2026, 8, 30, 17, 0));
+        task.setDueDate(java.time.Instant.parse("2026-08-30T17:00:00Z"));
         task.setOwner("Alex Morgan");
 
         when(restTemplate.exchange(
@@ -156,6 +155,72 @@ class GatewayRoutingIntegrationTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.id").value("task_001"))
                 .andExpect(jsonPath("$.title").value("Review API changes"));
+    }
+
+    @Test
+    void getTaskDetails_whenBFFReturns403_passesBffMessageOn() throws Exception {
+        byte[] bffBody = ("{\"status\":\"ERROR\",\"errorCode\":\"FORBIDDEN\","
+                + "\"message\":\"Not allowed to access this task\"}").getBytes();
+        when(restTemplate.exchange(
+                contains("workspace/tasks/task_001"),
+                eq(org.springframework.http.HttpMethod.GET),
+                any(),
+                eq(TaskDTO.class)))
+                .thenThrow(org.springframework.web.client.HttpClientErrorException.create(
+                        org.springframework.http.HttpStatus.FORBIDDEN, "Forbidden",
+                        org.springframework.http.HttpHeaders.EMPTY, bffBody, null));
+
+        mockMvc.perform(get("/api/workspace/tasks/task_001").with(jwt()))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.errorCode").value("FORBIDDEN"))
+                .andExpect(jsonPath("$.message").value("Not allowed to access this task"));
+    }
+
+    @Test
+    void getTaskDetails_whenBFFReturns500_keepsGenericMessage() throws Exception {
+        byte[] bffBody = "{\"message\":\"NullPointerException in InboxClient\"}".getBytes();
+        when(restTemplate.exchange(
+                contains("workspace/tasks/task_001"),
+                eq(org.springframework.http.HttpMethod.GET),
+                any(),
+                eq(TaskDTO.class)))
+                .thenThrow(org.springframework.web.client.HttpServerErrorException.create(
+                        org.springframework.http.HttpStatus.INTERNAL_SERVER_ERROR, "Internal Server Error",
+                        org.springframework.http.HttpHeaders.EMPTY, bffBody, null));
+
+        mockMvc.perform(get("/api/workspace/tasks/task_001").with(jwt()))
+                .andExpect(status().isInternalServerError())
+                .andExpect(jsonPath("$.message").value("Downstream service returned an error"));
+    }
+
+    @Test
+    void selectTasks_forwardsMinutesToBffAndReturnsSelection() throws Exception {
+        com.rnd.gateway.dto.TaskSelectionDTO selection = new com.rnd.gateway.dto.TaskSelectionDTO(
+                60,
+                List.of(new com.rnd.gateway.dto.SelectedTaskDTO("t1", "Task t1", null, 30, null, 0.82)),
+                30, 30, false, null);
+        when(restTemplate.exchange(
+                contains("workspace/tasks/selection?availableMinutes=60"),
+                eq(org.springframework.http.HttpMethod.GET),
+                any(),
+                eq(com.rnd.gateway.dto.TaskSelectionDTO.class)))
+                .thenReturn(org.springframework.http.ResponseEntity.ok(selection));
+
+        mockMvc.perform(get("/api/workspace/tasks/selection?availableMinutes=60").with(jwt()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.availableMinutes").value(60))
+                .andExpect(jsonPath("$.selectedTasks[0].id").value("t1"))
+                .andExpect(jsonPath("$.remainingMinutes").value(30));
+    }
+
+    @Test
+    void selectTasks_minutesOutOfRange_returns400WithoutCallingBff() throws Exception {
+        mockMvc.perform(get("/api/workspace/tasks/selection?availableMinutes=500").with(jwt()))
+                .andExpect(status().isBadRequest());
+        mockMvc.perform(get("/api/workspace/tasks/selection").with(jwt()))
+                .andExpect(status().isBadRequest());
+
+        verifyNoInteractions(restTemplate);
     }
 
     // =========================================================================

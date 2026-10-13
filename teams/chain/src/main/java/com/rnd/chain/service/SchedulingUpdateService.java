@@ -6,6 +6,8 @@ import com.rnd.chain.event.TaskSchedulingUpdatedEvent;
 
 import org.springframework.stereotype.Service;
 
+import java.util.UUID;
+
 @Service
 public class SchedulingUpdateService {
 
@@ -21,6 +23,7 @@ public class SchedulingUpdateService {
 
         TaskSchedulingUpdatedEvent event =
                 new TaskSchedulingUpdatedEvent(
+                        UUID.randomUUID(),
                         task.getId(),
                         task.isReady(),
                         task.getScore()

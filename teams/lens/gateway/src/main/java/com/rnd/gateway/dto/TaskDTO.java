@@ -6,7 +6,7 @@ import lombok.Data;
 import lombok.NoArgsConstructor;
 import lombok.ToString;
 
-import java.time.LocalDateTime;
+import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 
@@ -50,7 +50,7 @@ public class TaskDTO {
 
     /**
      * Task status
-     * Values: READY, IN_PROGRESS, BLOCKED, COMPLETED
+     * Values: NEW, IN_REVIEW, APPROVED, IN_PROGRESS, SNOOZED, DONE, REJECTED, CANCELLED
      */
     private String status;
 
@@ -70,7 +70,7 @@ public class TaskDTO {
      * Due date and time
      * Example: "2026-08-28T17:00:00"
      */
-    private LocalDateTime dueDate;
+    private Instant dueDate;
 
     /**
      * Task owner/assigned to (usually manager name)
@@ -171,7 +171,7 @@ public class TaskDTO {
     private Double priorityScore;
 
     /** Real `snoozed_until`, set when inboxStatus = snoozed. */
-    private LocalDateTime snoozedUntil;
+    private Instant snoozedUntil;
 
     /** Real `extraction_provenance` enum (etl/ml_inferred/manual). */
     private String extractionProvenance;
@@ -191,9 +191,9 @@ public class TaskDTO {
     /** Real `created_by` (UUID, nullable). */
     private String createdBy;
 
-    private LocalDateTime createdAt;
-    private LocalDateTime updatedAt;
-    private LocalDateTime completedAt;
+    private Instant createdAt;
+    private Instant updatedAt;
+    private Instant completedAt;
 
     /**
      * Constructor for minimal task creation
@@ -211,7 +211,7 @@ public class TaskDTO {
      * Used when returning recommended task from BFF
      */
     public TaskDTO(String id, String title, String status, String priority,
-                   Integer effortEstimate, LocalDateTime dueDate, String owner) {
+                   Integer effortEstimate, Instant dueDate, String owner) {
         this.id = id;
         this.title = title;
         this.status = status;

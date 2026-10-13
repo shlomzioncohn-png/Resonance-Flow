@@ -24,14 +24,15 @@ export interface ApiTask {
    * See docs/employee-workspace-api-contract.md §5.0 for status model.
    */
   status: string;
-  /** LOW | MEDIUM | HIGH */
-  priority: string;
+  /** HIGH/MEDIUM/LOW. Missing when the task has no priority score. */
+  priority?: string;
   /** Estimated effort in minutes */
   effortEstimate: number;
   /** ISO-8601 datetime string */
   dueDate?: string;
-  owner: string;
-  project: string;
+  /** Display names. Missing for real Inbox tasks: Inbox only sends ids so far. */
+  owner?: string;
+  project?: string;
   /** IDs of tasks this task depends on */
   dependencies?: string[];
   /** Blocker labels, e.g. "approval_needed" */
@@ -61,6 +62,42 @@ export function recommendTask(request: WorkspaceRequest): Promise<TaskRecommenda
 
 export function getTask(taskId: string): Promise<ApiTask> {
   return api.get<ApiTask>(`/api/workspace/tasks/${taskId}`);
+}
+
+// ── Task selection ("which tasks fit in N minutes?") ─────────────────────
+
+export interface SelectedTask {
+  id: string;
+  title: string;
+  description?: string;
+  /** Minutes */
+  effortEstimate: number;
+  /** ISO-8601 datetime string */
+  dueDate?: string;
+  /** 0-1, higher is a better pick */
+  selectionScore: number;
+}
+
+export interface TaskSelection {
+  availableMinutes: number;
+  /** In suggested execution order. Empty when nothing can be done. */
+  selectedTasks: SelectedTask[];
+  totalEffortMinutes: number;
+  remainingMinutes: number;
+  /** True when nothing fit, so the shortest task was picked anyway (it takes longer). */
+  usedFallback: boolean;
+  /** Why, e.g. "window was automatically expanded to 21 minutes". May be missing. */
+  reason?: string;
+}
+
+/** Largest window the API accepts (Inbox's limit). */
+export const MAX_SELECTION_MINUTES = 480;
+
+/** The tasks that fit `availableMinutes` (1-480) together, picked by Inbox. */
+export function selectTasks(availableMinutes: number): Promise<TaskSelection> {
+  return api.get<TaskSelection>(
+    `/api/workspace/tasks/selection?availableMinutes=${availableMinutes}`,
+  );
 }
 
 // ── Task list ("My Tasks" screen) ──────────────────────────────────────────
@@ -114,6 +151,17 @@ export function listTasks(params: TaskListParams = {}): Promise<TaskListResponse
 export type TaskStatus =
   'NEW' | 'IN_REVIEW' | 'APPROVED' | 'IN_PROGRESS' | 'SNOOZED' | 'DONE' | 'REJECTED' | 'CANCELLED';
 
-export function updateTaskStatus(taskId: string, status: TaskStatus): Promise<ApiTask> {
-  return api.patch<ApiTask>(`/api/workspace/tasks/${taskId}/status`, { status });
+/**
+ * @param snoozedUntil required when status is 'SNOOZED' (Inbox rejects the change
+ *   with 400 without it): when the task wakes up again. Ignored for other statuses.
+ */
+export function updateTaskStatus(
+  taskId: string,
+  status: TaskStatus,
+  snoozedUntil?: Date,
+): Promise<ApiTask> {
+  return api.patch<ApiTask>(`/api/workspace/tasks/${taskId}/status`, {
+    status,
+    ...(snoozedUntil && { snoozedUntil: snoozedUntil.toISOString() }),
+  });
 }

@@ -41,6 +41,7 @@ export default function StatCard({ label, value, subtitle, color = 'default' }: 
         </Typography>
         <Typography
           variant="h4"
+          component="p"
           sx={{
             fontWeight: 'bold',
             color: colors.text,

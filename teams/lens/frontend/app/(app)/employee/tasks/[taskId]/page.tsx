@@ -1,8 +1,7 @@
 'use client';
 
-import { use, useEffect, useRef, useState } from 'react';
+import { use, useEffect, useState } from 'react';
 import Link from 'next/link';
-import { useSearchParams } from 'next/navigation';
 import Avatar from '@mui/material/Avatar';
 import Box from '@mui/material/Box';
 import Button from '@mui/material/Button';
@@ -17,20 +16,15 @@ import Tabs from '@mui/material/Tabs';
 import Typography from '@mui/material/Typography';
 import { alpha } from '@mui/material/styles';
 import ArrowBackOutlinedIcon from '@mui/icons-material/ArrowBackOutlined';
-import ChatBubbleOutlineOutlinedIcon from '@mui/icons-material/ChatBubbleOutlineOutlined';
 import PersonOutlineIcon from '@mui/icons-material/PersonOutlined';
 import WarningAmberOutlinedIcon from '@mui/icons-material/WarningAmberOutlined';
 import { radiusTokens } from '@/theme';
-import { DetailRow, softToneSx, statusTone } from '../../shared';
+import { DetailRow, PriorityChip, softToneSx, statusTone } from '../../shared';
+import { getErrorMessage } from '@/services/api';
 import { getTask, type ApiTask } from '@/services/workspaceApi';
-import ChatPanel from './ChatPanel';
 
 export default function TaskDetailsPage({ params }: { params: Promise<{ taskId: string }> }) {
   const { taskId } = use(params);
-  const searchParams = useSearchParams();
-  const [mode, setMode] = useState<'overview' | 'chat'>(
-    searchParams.get('chat') === '1' ? 'chat' : 'overview',
-  );
   const [task, setTask] = useState<ApiTask | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -42,7 +36,7 @@ export default function TaskDetailsPage({ params }: { params: Promise<{ taskId: 
         if (!ignore) setTask(result);
       })
       .catch((err) => {
-        if (!ignore) setError(err instanceof Error ? err.message : 'Failed to load task');
+        if (!ignore) setError(getErrorMessage(err));
       })
       .finally(() => {
         if (!ignore) setLoading(false);
@@ -51,16 +45,6 @@ export default function TaskDetailsPage({ params }: { params: Promise<{ taskId: 
       ignore = true;
     };
   }, [taskId]);
-
-  const contentRef = useRef<HTMLDivElement>(null);
-  const isFirstRender = useRef(true);
-  useEffect(() => {
-    if (isFirstRender.current) {
-      isFirstRender.current = false;
-      return;
-    }
-    contentRef.current?.focus();
-  }, [mode]);
 
   if (loading) {
     return (
@@ -110,13 +94,15 @@ export default function TaskDetailsPage({ params }: { params: Promise<{ taskId: 
               sx={[softToneSx(statusTone(task.status)), { fontWeight: 600 }]}
             />
           </Stack>
-          <Typography variant="body1" color="text.secondary">
-            {task.project}
-          </Typography>
+          {task.project && (
+            <Typography variant="body1" color="text.secondary">
+              {task.project}
+            </Typography>
+          )}
         </Box>
       </Stack>
 
-      <Tabs value={mode === 'chat' ? false : 'overview'} onChange={() => {}} sx={{ mt: 2, mb: 3 }}>
+      <Tabs value="overview" onChange={() => {}} sx={{ mt: 2, mb: 3 }}>
         <Tab value="overview" label="Overview" />
         <Tab
           value="dependencies"
@@ -128,29 +114,27 @@ export default function TaskDetailsPage({ params }: { params: Promise<{ taskId: 
 
       <Stack direction={{ xs: 'column', lg: 'row' }} spacing={3} sx={{ alignItems: 'flex-start' }}>
         <Card sx={{ flex: 1, minWidth: 0, width: '100%' }}>
-          <CardContent ref={contentRef} tabIndex={-1} sx={{ outline: 'none' }}>
-            {mode === 'chat' ? (
-              <ChatPanel onBack={() => setMode('overview')} />
-            ) : (
-              <>
-                <Typography variant="subtitle2" color="text.secondary">
-                  Description
-                </Typography>
-                <Typography variant="body1" sx={{ mb: 3 }}>
-                  {task.description}
-                </Typography>
+          <CardContent>
+            <>
+              <Typography variant="subtitle2" color="text.secondary">
+                Description
+              </Typography>
+              <Typography variant="body1" sx={{ mb: 3 }}>
+                {task.description}
+              </Typography>
 
-                <Box
-                  sx={{
-                    display: 'grid',
-                    gridTemplateColumns: { xs: '1fr', sm: 'repeat(3, 1fr)' },
-                    gap: 3,
-                    mb: 3,
-                  }}
-                >
-                  <DetailRow
-                    label="Owner"
-                    value={
+              <Box
+                sx={{
+                  display: 'grid',
+                  gridTemplateColumns: { xs: '1fr', sm: 'repeat(3, 1fr)' },
+                  gap: 3,
+                  mb: 3,
+                }}
+              >
+                <DetailRow
+                  label="Owner"
+                  value={
+                    task.owner ? (
                       <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
                         <Avatar
                           sx={{
@@ -164,34 +148,25 @@ export default function TaskDetailsPage({ params }: { params: Promise<{ taskId: 
                         </Avatar>
                         {task.owner}
                       </Stack>
-                    }
-                  />
-                  {task.dueDate && (
-                    <DetailRow label="Due" value={new Date(task.dueDate).toLocaleString()} />
-                  )}
-                  <DetailRow
-                    label="Priority"
-                    value={<Chip size="small" label={task.priority} sx={softToneSx('error')} />}
-                  />
-                  <DetailRow
-                    label="Estimated effort"
-                    value={task.effortEstimate != null ? `${task.effortEstimate} min` : '—'}
-                  />
-                  <DetailRow label="Project" value={task.project} />
-                  {(task.constraints ?? []).length > 0 && (
-                    <DetailRow label="Constraints" value={(task.constraints ?? []).join(', ')} />
-                  )}
-                </Box>
-
-                <Button
-                  variant="outlined"
-                  startIcon={<ChatBubbleOutlineOutlinedIcon />}
-                  onClick={() => setMode('chat')}
-                >
-                  Chat about this task
-                </Button>
-              </>
-            )}
+                    ) : (
+                      '—'
+                    )
+                  }
+                />
+                {task.dueDate && (
+                  <DetailRow label="Due" value={new Date(task.dueDate).toLocaleString()} />
+                )}
+                <DetailRow label="Priority" value={<PriorityChip priority={task.priority} />} />
+                <DetailRow
+                  label="Estimated effort"
+                  value={task.effortEstimate != null ? `${task.effortEstimate} min` : '—'}
+                />
+                <DetailRow label="Project" value={task.project ?? '—'} />
+                {(task.constraints ?? []).length > 0 && (
+                  <DetailRow label="Constraints" value={(task.constraints ?? []).join(', ')} />
+                )}
+              </Box>
+            </>
           </CardContent>
         </Card>
 

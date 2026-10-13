@@ -3,7 +3,7 @@ import ProjectCard from './ProjectCard';
 
 const meta = {
   component: ProjectCard,
-  tags: ['ai-generated'],
+  tags: ['autodocs'],
   // ProjectCard is a fixed-width grid tile (358px in the Figma frame), not a
   // full-bleed component - constrain the canvas so the card renders at its
   // real size instead of stretching to the story viewport.

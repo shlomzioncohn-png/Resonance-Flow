@@ -2,6 +2,7 @@ package com.rnd.bff.client;
 
 import com.rnd.bff.dto.TaskDTO;
 import com.rnd.bff.dto.TaskListResponseDTO;
+import com.rnd.bff.exception.InboxRejectedException;
 import com.sun.net.httpserver.HttpServer;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -10,12 +11,13 @@ import org.junit.jupiter.api.Test;
 import java.io.IOException;
 import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
-import java.time.LocalDateTime;
+import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /**
  * Unit tests for InboxClient's InboxTaskRecord -> TaskDTO translation layer
@@ -39,14 +41,14 @@ class InboxClientTest {
 
         // One task per status (8-status model), priority bucketed from priority_score:
         // >= 7 HIGH, >= 4 MEDIUM, else LOW.
-        assertStatusAndPriority(byId.get("task_001"), "NEW", "HIGH", "new", 8.0);
-        assertStatusAndPriority(byId.get("task_002"), "IN_REVIEW", "HIGH", "in_review", 8.0);
-        assertStatusAndPriority(byId.get("task_003"), "APPROVED", "MEDIUM", "approved", 5.0);
-        assertStatusAndPriority(byId.get("task_004"), "IN_PROGRESS", "LOW", "in_progress", 2.0);
-        assertStatusAndPriority(byId.get("task_005"), "DONE", "HIGH", "done", 8.0);
-        assertStatusAndPriority(byId.get("task_006"), "SNOOZED", "LOW", "snoozed", 3.0);
-        assertStatusAndPriority(byId.get("task_007"), "REJECTED", "MEDIUM", "rejected", 4.0);
-        assertStatusAndPriority(byId.get("task_008"), "CANCELLED", "LOW", "cancelled", 1.0);
+        assertStatusAndPriority(byId.get("task_001"), "NEW", "HIGH", "NEW", 8.0);
+        assertStatusAndPriority(byId.get("task_002"), "IN_REVIEW", "HIGH", "IN_REVIEW", 8.0);
+        assertStatusAndPriority(byId.get("task_003"), "APPROVED", "MEDIUM", "APPROVED", 5.0);
+        assertStatusAndPriority(byId.get("task_004"), "IN_PROGRESS", "LOW", "IN_PROGRESS", 2.0);
+        assertStatusAndPriority(byId.get("task_005"), "DONE", "HIGH", "DONE", 8.0);
+        assertStatusAndPriority(byId.get("task_006"), "SNOOZED", "LOW", "SNOOZED", 3.0);
+        assertStatusAndPriority(byId.get("task_007"), "REJECTED", "MEDIUM", "REJECTED", 4.0);
+        assertStatusAndPriority(byId.get("task_008"), "CANCELLED", "LOW", "CANCELLED", 1.0);
     }
 
     private void assertStatusAndPriority(
@@ -94,7 +96,7 @@ class InboxClientTest {
     void updateStatus_roundTripsAllEightStatuses() {
         for (String status : List.of(
                 "NEW", "IN_REVIEW", "APPROVED", "IN_PROGRESS", "SNOOZED", "DONE", "REJECTED", "CANCELLED")) {
-            TaskDTO updated = inboxClient.updateStatus("any-user", "task_001", status);
+            TaskDTO updated = inboxClient.updateStatus("any-user", "task_001", status, null);
             assertThat(updated.getStatus()).isEqualTo(status);
             // getTaskById after updateStatus reflects the same value - proves
             // the underlying InboxTaskRecord was actually mutated, not just
@@ -105,7 +107,7 @@ class InboxClientTest {
 
     @Test
     void updateStatus_unknownId_returnsNull() {
-        assertThat(inboxClient.updateStatus("any-user", "does-not-exist", "IN_PROGRESS")).isNull();
+        assertThat(inboxClient.updateStatus("any-user", "does-not-exist", "IN_PROGRESS", null)).isNull();
     }
 
     // -------------------------------------------------------------------------
@@ -170,9 +172,20 @@ class InboxClientTest {
             String path = exchange.getRequestURI().getPath();
             int status = 200;
             String body;
-            if (path.equals("/api/v1/tasks")) {
+            if (path.equals("/api/v1/tasks/selection")) {
+                body = "{\"selected_tasks\":[{\"id\":\"bd77b903-c5eb-3648-95cc-6e78adb0e126\","
+                        + "\"title\":\"Github issue task 175\",\"effort_estimate_minutes\":21,"
+                        + "\"deadline\":\"2026-10-11T10:00:08Z\",\"selection_score\":0.28}],"
+                        + "\"total_effort_minutes\":21,\"remaining_minutes\":0,\"used_fallback\":true,"
+                        + "\"reason\":\"window was automatically expanded to 21 minutes\"}";
+            } else if (path.equals("/api/v1/tasks")) {
                 body = "{\"content\":[" + INBOX_TASK_JSON + "],\"page\":0,\"size\":20,"
                         + "\"total_elements\":828,\"total_pages\":42}";
+            } else if (path.contains("11111111-1111-1111-1111-111111111111")) {
+                body = INBOX_TASK_JSON.replace("\"priority_score\":8.0", "\"priority_score\":null");
+            } else if (path.contains("99999999-9999-9999-9999-999999999999")) {
+                status = 403;
+                body = "{\"status\":403,\"error\":\"FORBIDDEN\",\"message\":\"Actor cannot act on task\"}";
             } else if (path.contains("00000000-0000-0000-0000-000000000000")) {
                 status = 404;
                 body = "{}";
@@ -202,6 +215,8 @@ class InboxClientTest {
         TaskListResponseDTO result = realClient(ACTOR).listTasks("emp_001", "IN_PROGRESS", "meeting", 0, 20);
 
         assertThat(lastQuery.get()).contains("status=IN_PROGRESS", "search=meeting", "page=0", "size=20");
+        // Only the user's own tasks ("my tasks"), not the whole tenant
+        assertThat(lastQuery.get()).contains("userId=" + ACTOR);
         // dev-actor-id replaces the Gateway's mock userId
         assertThat(lastActor.get()).isEqualTo(ACTOR);
 
@@ -210,10 +225,11 @@ class InboxClientTest {
         assertThat(task.getId()).isEqualTo("539e1548-18e9-3021-92c7-25567dfe1cc8");
         assertThat(task.getTitle()).isEqualTo("Meeting task 1");
         assertThat(task.getStatus()).isEqualTo("IN_PROGRESS");
-        assertThat(task.getInboxStatus()).isEqualTo("in_progress");
+        assertThat(task.getInboxStatus()).isEqualTo("IN_PROGRESS");
         assertThat(task.getPriority()).isEqualTo("HIGH");
         assertThat(task.getEffortEstimate()).isEqualTo(30);
-        assertThat(task.getDueDate()).isEqualTo(LocalDateTime.of(2026, 10, 20, 15, 0));
+        // Sent with its zone (UTC), so the browser shows the right local time
+        assertThat(task.getDueDate()).isEqualTo(Instant.parse("2026-10-20T15:00:00Z"));
         assertThat(task.getTenantId()).isEqualTo("1a2befb7-9bb3-39dd-89cd-6f1c47cd2db6");
         assertThat(task.getSourceType()).isEqualTo("meeting");
         assertThat(task.getIsAvailable()).isFalse();
@@ -224,6 +240,7 @@ class InboxClientTest {
         realClient("").listTasks("emp_001", null, null, 0, 20);
 
         assertThat(lastActor.get()).isEqualTo("emp_001");
+        assertThat(lastQuery.get()).contains("userId=emp_001");
         assertThat(lastQuery.get()).doesNotContain("status=", "search=");
     }
 
@@ -240,10 +257,80 @@ class InboxClientTest {
 
     @Test
     void updateStatus_real_sendsPatchWithUppercaseStatus() {
-        TaskDTO updated = realClient(ACTOR).updateStatus("emp_001", "539e1548-18e9-3021-92c7-25567dfe1cc8", "in_progress");
+        TaskDTO updated = realClient(ACTOR).updateStatus("emp_001", "539e1548-18e9-3021-92c7-25567dfe1cc8", "in_progress", null);
 
         assertThat(lastMethod.get()).isEqualTo("PATCH");
         assertThat(lastBody.get()).isEqualTo("{\"status\":\"IN_PROGRESS\"}");
         assertThat(updated.getStatus()).isEqualTo("IN_PROGRESS");
+    }
+
+    @Test
+    void getTaskById_real_inboxForbidden_throwsInboxRejectedWithInboxMessage() {
+        assertThatThrownBy(() -> realClient(ACTOR).getTaskById("emp_001", "99999999-9999-9999-9999-999999999999"))
+                .isInstanceOf(InboxRejectedException.class)
+                .hasMessage("Actor cannot act on task")
+                .satisfies(ex -> assertThat(((InboxRejectedException) ex).getStatus()).isEqualTo(403));
+    }
+
+    @Test
+    void updateStatus_real_snoozeSendsSnoozedUntil() {
+        realClient(ACTOR).updateStatus("emp_001", "539e1548-18e9-3021-92c7-25567dfe1cc8", "SNOOZED",
+                Instant.parse("2026-10-12T09:00:00Z"));
+
+        assertThat(lastBody.get()).isEqualTo("{\"status\":\"SNOOZED\",\"snoozed_until\":\"2026-10-12T09:00:00Z\"}");
+    }
+
+    @Test
+    void selectTasks_real_sendsWindowAndUserAndMapsSnakeCase() {
+        InboxSelectionResponse selection = realClient(ACTOR).selectTasks("emp_001", 15);
+
+        assertThat(lastQuery.get()).contains("availableMinutes=15", "userId=" + ACTOR);
+        assertThat(lastActor.get()).isEqualTo(ACTOR);
+        assertThat(selection.isUsedFallback()).isTrue();
+        assertThat(selection.getReason()).contains("expanded to 21 minutes");
+        assertThat(selection.getSelectedTasks()).hasSize(1);
+        assertThat(selection.getSelectedTasks().get(0).getEffortEstimateMinutes()).isEqualTo(21);
+        assertThat(selection.getSelectedTasks().get(0).getSelectionScore()).isEqualTo(0.28);
+    }
+
+    // -------------------------------------------------------------------------
+    // selectTasks - mock mode (workable + unblocked + has effort: task_001 35min, task_004 45min)
+    // -------------------------------------------------------------------------
+
+    @Test
+    void selectTasks_mock_picksMostImportantTasksThatFitTogether() {
+        InboxSelectionResponse selection = inboxClient.selectTasks("any-user", 90);
+
+        assertThat(selection.getSelectedTasks()).extracting(InboxSelectionResponse.SelectedTask::getId)
+                .containsExactly("task_001", "task_004");
+        assertThat(selection.getTotalEffortMinutes()).isEqualTo(80);
+        assertThat(selection.getRemainingMinutes()).isEqualTo(10);
+        assertThat(selection.isUsedFallback()).isFalse();
+    }
+
+    @Test
+    void selectTasks_mock_skipsTaskThatNoLongerFits() {
+        InboxSelectionResponse selection = inboxClient.selectTasks("any-user", 40);
+
+        assertThat(selection.getSelectedTasks()).extracting(InboxSelectionResponse.SelectedTask::getId)
+                .containsExactly("task_001");
+    }
+
+    @Test
+    void selectTasks_mock_nothingFits_picksShortestAndFlagsFallback() {
+        InboxSelectionResponse selection = inboxClient.selectTasks("any-user", 20);
+
+        assertThat(selection.getSelectedTasks()).extracting(InboxSelectionResponse.SelectedTask::getId)
+                .containsExactly("task_001");
+        assertThat(selection.isUsedFallback()).isTrue();
+        assertThat(selection.getReason()).contains("expanded to 35 minutes");
+    }
+
+    @Test
+    void getTaskById_real_noPriorityScore_hasNoPriorityInsteadOfMedium() {
+        TaskDTO task = realClient(ACTOR).getTaskById("emp_001", "11111111-1111-1111-1111-111111111111");
+
+        assertThat(task.getPriorityScore()).isNull();
+        assertThat(task.getPriority()).isNull();
     }
 }

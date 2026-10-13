@@ -21,6 +21,8 @@
         <java.version>21</java.version>
         <protobuf.version>3.25.3</protobuf.version>
         <confluent.version>7.1.15</confluent.version>
+        <!-- A property, not plugin config: an empty <excludedGroups/> in a profile doesn't override. -->
+        <surefire.excludedGroups>postgres</surefire.excludedGroups>
     </properties>
 
     <repositories>
@@ -168,8 +170,8 @@
                 <configuration>
                     <protocArtifact>com.google.protobuf:protoc:${protobuf.version}:exe:${os.detected.classifier}</protocArtifact>
                     <!--
-                        task-created-event.proto / task-updated-event.proto are copied verbatim
-                        from teams/relay/src/main/proto/ (schemas are owned by Relay - that
+                        task-created-event.proto / task-updated-event.proto / scheduling-updated-event.proto
+                        are copied verbatim from shared/proto/ (schemas are owned by Relay - that
                         directory and teams/relay/ci/schema-subjects.tsv are the registered
                         source of truth). Copied into src/main/proto instead of referenced via a
                         ../relay relative path: that path doesn't exist inside the Docker build
@@ -209,6 +211,17 @@
                         <configuration>
                             <includes>
                                 <include>task-updated-event.proto</include>
+                            </includes>
+                        </configuration>
+                    </execution>
+                    <execution>
+                        <id>compile-scheduling-updated-event</id>
+                        <goals>
+                            <goal>compile</goal>
+                        </goals>
+                        <configuration>
+                            <includes>
+                                <include>scheduling-updated-event.proto</include>
                             </includes>
                         </configuration>
                     </execution>
@@ -260,7 +273,7 @@
                         between classes - at the cost of a JVM startup per class, not per run.
                     -->
                     <reuseForks>false</reuseForks>
-                    <excludedGroups>postgres</excludedGroups>
+                    <excludedGroups>${surefire.excludedGroups}</excludedGroups>
                 </configuration>
             </plugin>
         </plugins>
@@ -269,17 +282,9 @@
     <profiles>
         <profile>
             <id>postgres-integration</id>
-            <build>
-                <plugins>
-                    <plugin>
-                        <groupId>org.apache.maven.plugins</groupId>
-                        <artifactId>maven-surefire-plugin</artifactId>
-                        <configuration>
-                            <excludedGroups/>
-                        </configuration>
-                    </plugin>
-                </plugins>
-            </build>
+            <properties>
+                <surefire.excludedGroups/>
+            </properties>
         </profile>
     </profiles>
 </project>

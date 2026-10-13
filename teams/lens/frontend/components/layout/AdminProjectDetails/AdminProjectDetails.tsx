@@ -181,7 +181,7 @@ export default function AdminProjectDetails({
           {/* Team Members Section */}
           <Card>
             <CardContent>
-              <Typography variant="h6" sx={{ fontWeight: 600, mb: 2 }}>
+              <Typography variant="h6" component="h2" sx={{ fontWeight: 600, mb: 2 }}>
                 Team
               </Typography>
               <TableContainer>
@@ -206,7 +206,8 @@ export default function AdminProjectDetails({
                             <Stack direction="row" spacing={1.5} sx={{ alignItems: 'center' }}>
                               <Avatar
                                 src={member.avatar}
-                                alt={member.name}
+                                // Decorative: the name is rendered as text right beside it.
+                                alt=""
                                 sx={{ width: 36, height: 36 }}
                               >
                                 {member.name.charAt(0)}

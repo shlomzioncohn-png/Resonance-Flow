@@ -2,6 +2,7 @@ package com.rnd.bff.client;
 
 import com.rnd.bff.dto.TaskDTO;
 import com.rnd.bff.dto.TaskListResponseDTO;
+import com.rnd.bff.exception.InboxRejectedException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -355,7 +356,9 @@ public class InboxClient {
     }
 
     /**
-     * One page of the My Tasks list.
+     * One page of the My Tasks list - only the user's own tasks. Inbox's userId
+     * filter returns tasks the user owns, is assigned to, or that are assigned
+     * to one of their teams with no one personally on them yet.
      *
      * @param status one of the 8 statuses in UPPERCASE, or null for all
      * @param search free text (Inbox matches title or description), or null
@@ -366,6 +369,7 @@ public class InboxClient {
         }
         URI uri = UriComponentsBuilder.fromHttpUrl(inboxServiceUrl)
                 .path(TASKS_PATH)
+                .queryParam("userId", actorId(userId))
                 .queryParamIfPresent("status", Optional.ofNullable(status))
                 .queryParamIfPresent("search", Optional.ofNullable(search).filter(s -> !s.isBlank()))
                 .queryParam("page", page)
@@ -373,9 +377,14 @@ public class InboxClient {
                 .encode()
                 .build()
                 .toUri();
-        InboxPageResponse body = restTemplate.exchange(
-                uri, HttpMethod.GET, new HttpEntity<>(actorHeaders(userId)), InboxPageResponse.class)
-                .getBody();
+        InboxPageResponse body;
+        try {
+            body = restTemplate.exchange(
+                    uri, HttpMethod.GET, new HttpEntity<>(actorHeaders(userId)), InboxPageResponse.class)
+                    .getBody();
+        } catch (HttpClientErrorException ex) {
+            throw rejected(ex);
+        }
         if (body == null) {
             throw new IllegalStateException("Inbox returned an empty task page");
         }
@@ -405,13 +414,18 @@ public class InboxClient {
                     InboxTaskResponse.class)
                     .getBody();
             return task == null ? null : toTaskDTO(task);
-        } catch (HttpClientErrorException.NotFound | HttpClientErrorException.BadRequest ex) {
+        } catch (HttpClientErrorException.NotFound ex) {
             return null;
+        } catch (HttpClientErrorException ex) {
+            throw rejected(ex);
         }
     }
 
-    /** @return the updated task, or null if Inbox doesn't have it */
-    public TaskDTO updateStatus(String userId, String taskId, String newStatus) {
+    /**
+     * @param snoozedUntil when a SNOOZED task wakes up; null for any other status
+     * @return the updated task, or null if Inbox doesn't have it
+     */
+    public TaskDTO updateStatus(String userId, String taskId, String newStatus, Instant snoozedUntil) {
         if (mockEnabled) {
             InboxTaskRecord record = tasksById.get(taskId);
             if (record == null) {
@@ -421,6 +435,7 @@ public class InboxClient {
             // @Pattern already validates this before this is called).
             // Store it as-is, converting only to lowercase for consistency with Inbox schema.
             record.setStatus(newStatus.toLowerCase());
+            record.setSnoozedUntil(snoozedUntil == null ? null : toLocalDateTime(snoozedUntil));
             return toTaskDTO(record);
         }
         if (!isUuid(taskId)) {
@@ -431,18 +446,74 @@ public class InboxClient {
         try {
             InboxTaskResponse task = restTemplate.exchange(
                     URI.create(taskUri(taskId) + "/status"), HttpMethod.PATCH,
-                    new HttpEntity<>(Map.of("status", newStatus.toUpperCase()), headers),
+                    new HttpEntity<>(statusBody(newStatus, snoozedUntil), headers),
                     InboxTaskResponse.class)
                     .getBody();
             return task == null ? null : toTaskDTO(task);
         } catch (HttpClientErrorException.NotFound ex) {
             return null;
+        } catch (HttpClientErrorException ex) {
+            throw rejected(ex);
+        }
+    }
+
+    /** True when running on the in-memory mock (no Inbox calls). */
+    public boolean isMockEnabled() {
+        return mockEnabled;
+    }
+
+    /**
+     * Inbox's own pick of the best tasks for the user's available time
+     * (GET /api/v1/tasks/selection). The mock does a simple stand-in, see
+     * selectMockTasks.
+     */
+    public InboxSelectionResponse selectTasks(String userId, int availableMinutes) {
+        if (mockEnabled) {
+            return selectMockTasks(availableMinutes);
+        }
+        URI uri = UriComponentsBuilder.fromHttpUrl(inboxServiceUrl)
+                .path(TASKS_PATH + "/selection")
+                .queryParam("availableMinutes", availableMinutes)
+                .queryParam("userId", actorId(userId))
+                .encode()
+                .build()
+                .toUri();
+        try {
+            InboxSelectionResponse body = restTemplate.exchange(
+                    uri, HttpMethod.GET, new HttpEntity<>(actorHeaders(userId)), InboxSelectionResponse.class)
+                    .getBody();
+            if (body == null) {
+                throw new IllegalStateException("Inbox returned an empty task selection");
+            }
+            return body;
+        } catch (HttpClientErrorException ex) {
+            throw rejected(ex);
         }
     }
 
     // -------------------------------------------------------------------------
     // Real-mode helpers
     // -------------------------------------------------------------------------
+
+    /**
+     * Inbox answered 4xx (other than 404). Keeps Inbox's own message when its
+     * error body has one ({ "message": ... }), so a 400 says *why*.
+     * Only 401/403 are kept as-is; any other 4xx is reported as 400.
+     */
+    private static InboxRejectedException rejected(HttpClientErrorException ex) {
+        int status = ex.getStatusCode().value();
+        String message = ex.getStatusText();
+        try {
+            Map<?, ?> body = ex.getResponseBodyAs(Map.class);
+            if (body != null && body.get("message") instanceof String inboxMessage) {
+                message = inboxMessage;
+            }
+        } catch (RuntimeException ignored) {
+            // Not JSON - keep the status text
+        }
+        logger.warn("Inbox rejected request: {} {}", status, message);
+        return new InboxRejectedException(status == 401 || status == 403 ? status : 400, message);
+    }
 
     private URI taskUri(String taskId) {
         return UriComponentsBuilder.fromHttpUrl(inboxServiceUrl)
@@ -465,16 +536,77 @@ public class InboxClient {
         }
     }
 
-    /** Inbox's X-Actor-Id - the dev override if set, otherwise the userId from the Gateway. */
+    /** The Inbox user we act as - the dev override if set, otherwise the userId from the Gateway. */
+    private String actorId(String userId) {
+        return devActorId.isBlank() ? userId : devActorId;
+    }
+
+    /** Inbox's PATCH .../status body - snoozed_until only when there is one. */
+    private static Map<String, Object> statusBody(String newStatus, Instant snoozedUntil) {
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("status", newStatus.toUpperCase());
+        if (snoozedUntil != null) {
+            body.put("snoozed_until", snoozedUntil.toString());
+        }
+        return body;
+    }
+
+    /** Inbox's X-Actor-Id header. */
     private HttpHeaders actorHeaders(String userId) {
         HttpHeaders headers = new HttpHeaders();
-        headers.set(ACTOR_HEADER, devActorId.isBlank() ? userId : devActorId);
+        headers.set(ACTOR_HEADER, actorId(userId));
         return headers;
     }
 
     // -------------------------------------------------------------------------
     // Mock-mode helpers
     // -------------------------------------------------------------------------
+
+    /**
+     * A simple stand-in for Inbox's selection, so the endpoint works without
+     * Inbox: workable, unblocked tasks with an effort estimate, most important
+     * first, added while they still fit. If none fits, the shortest one is
+     * picked anyway (usedFallback), like Inbox does. Not Inbox's real algorithm.
+     */
+    private InboxSelectionResponse selectMockTasks(int availableMinutes) {
+        List<InboxTaskRecord> candidates = tasksById.values().stream()
+                .filter(t -> List.of("new", "in_review", "approved", "in_progress").contains(t.getStatus()))
+                .filter(t -> !Boolean.FALSE.equals(t.getIsAvailable()))
+                .filter(t -> t.getEffortEstimateMinutes() != null)
+                .sorted((a, b) -> Double.compare(
+                        b.getPriorityScore() == null ? 0 : b.getPriorityScore(),
+                        a.getPriorityScore() == null ? 0 : a.getPriorityScore()))
+                .toList();
+
+        List<InboxSelectionResponse.SelectedTask> selected = new ArrayList<>();
+        int used = 0;
+        for (InboxTaskRecord task : candidates) {
+            if (used + task.getEffortEstimateMinutes() <= availableMinutes) {
+                selected.add(toSelectedTask(task));
+                used += task.getEffortEstimateMinutes();
+            }
+        }
+        if (!selected.isEmpty() || candidates.isEmpty()) {
+            return new InboxSelectionResponse(selected, used, 0, availableMinutes - used, false, null);
+        }
+        InboxTaskRecord shortest = candidates.stream()
+                .min((a, b) -> Integer.compare(a.getEffortEstimateMinutes(), b.getEffortEstimateMinutes()))
+                .orElseThrow();
+        int effort = shortest.getEffortEstimateMinutes();
+        return new InboxSelectionResponse(List.of(toSelectedTask(shortest)), effort, 0, 0, true,
+                "No task fit the original " + availableMinutes + " minutes; window was automatically expanded to "
+                        + effort + " minutes");
+    }
+
+    private static InboxSelectionResponse.SelectedTask toSelectedTask(InboxTaskRecord task) {
+        return new InboxSelectionResponse.SelectedTask(
+                task.getId(),
+                task.getTitle(),
+                task.getDescription(),
+                task.getEffortEstimateMinutes(),
+                task.getDeadline() == null ? null : task.getDeadline().toInstant(ZoneOffset.UTC),
+                task.getPriorityScore() == null ? 0 : task.getPriorityScore() / 10);
+    }
 
     private TaskListResponseDTO listMockTasks(String status, String search, int page, int size) {
         List<TaskDTO> matching = getTasksForUser(null).stream()
@@ -506,7 +638,7 @@ public class InboxClient {
                 .status(toUpperCase(record.getStatus()))
                 .priority(toFrontendPriority(record.getPriorityScore()))
                 .effortEstimate(record.getEffortEstimateMinutes())
-                .dueDate(record.getDeadline())
+                .dueDate(toInstant(record.getDeadline()))
                 .owner(record.getOwner())
                 .project(record.getProject())
                 .dependencies(record.getDependencies())
@@ -521,19 +653,19 @@ public class InboxClient {
                 .roleContext(record.getRoleContext())
                 .urgency(record.getUrgency())
                 .effortEstimateConfidence(record.getEffortEstimateConfidence())
-                .inboxStatus(record.getStatus())
+                .inboxStatus(toUpperCase(record.getStatus()))
                 .isAvailable(record.getIsAvailable())
                 .priorityScore(record.getPriorityScore())
-                .snoozedUntil(record.getSnoozedUntil())
+                .snoozedUntil(toInstant(record.getSnoozedUntil()))
                 .extractionProvenance(record.getExtractionProvenance())
                 .confidence(record.getConfidence())
                 .suggestedOwnerUserId(record.getSuggestedOwnerUserId())
                 .suggestedOwnerConfidence(record.getSuggestedOwnerConfidence())
                 .metadata(record.getMetadata())
                 .createdBy(record.getCreatedBy())
-                .createdAt(record.getCreatedAt())
-                .updatedAt(record.getUpdatedAt())
-                .completedAt(record.getCompletedAt())
+                .createdAt(toInstant(record.getCreatedAt()))
+                .updatedAt(toInstant(record.getUpdatedAt()))
+                .completedAt(toInstant(record.getCompletedAt()))
                 .build();
     }
 
@@ -551,7 +683,7 @@ public class InboxClient {
                 .status(task.getStatus())
                 .priority(toFrontendPriority(task.getPriorityScore()))
                 .effortEstimate(task.getEffortEstimateMinutes())
-                .dueDate(toLocalDateTime(task.getDeadline()))
+                .dueDate(task.getDeadline())
                 .tenantId(task.getTenant() == null ? null : task.getTenant().getId())
                 .projectId(task.getProjectId())
                 .sourceType(toLowerCase(task.getSourceType()))
@@ -560,23 +692,32 @@ public class InboxClient {
                 .roleContext(toLowerCase(task.getRoleContext()))
                 .urgency(task.getUrgency())
                 .effortEstimateConfidence(task.getEffortEstimateConfidence())
-                .inboxStatus(toLowerCase(task.getStatus()))
+                .inboxStatus(task.getStatus())
                 .isAvailable(task.getAvailable())
                 .priorityScore(task.getPriorityScore())
-                .snoozedUntil(toLocalDateTime(task.getSnoozedUntil()))
+                .snoozedUntil(task.getSnoozedUntil())
                 .extractionProvenance(toLowerCase(task.getExtractionProvenance()))
                 .confidence(task.getConfidence())
                 .suggestedOwnerUserId(task.getSuggestedOwnerUserId())
                 .suggestedOwnerConfidence(task.getSuggestedOwnerConfidence())
                 .metadata(task.getMetadata())
                 .createdBy(task.getCreatedById())
-                .createdAt(toLocalDateTime(task.getCreatedAt()))
-                .updatedAt(toLocalDateTime(task.getUpdatedAt()))
-                .completedAt(toLocalDateTime(task.getCompletedAt()))
+                .createdAt(task.getCreatedAt())
+                .updatedAt(task.getUpdatedAt())
+                .completedAt(task.getCompletedAt())
                 .build();
     }
 
-    /** TaskDTO uses zone-less LocalDateTime; Inbox sends UTC instants, kept as UTC. */
+    /**
+     * TaskDTO dates are Instants, sent as ISO-8601 UTC ("...Z"), so the browser
+     * converts them to local time correctly. The mock's records are zone-less
+     * LocalDateTime and are read as UTC.
+     */
+    private static Instant toInstant(LocalDateTime dateTime) {
+        return dateTime == null ? null : dateTime.toInstant(ZoneOffset.UTC);
+    }
+
+    /** For storing an Instant on a mock record (zone-less, UTC). */
     private static LocalDateTime toLocalDateTime(Instant instant) {
         return instant == null ? null : LocalDateTime.ofInstant(instant, ZoneOffset.UTC);
     }
@@ -593,7 +734,8 @@ public class InboxClient {
      */
     private static String toFrontendPriority(Double priorityScore) {
         if (priorityScore == null) {
-            return "MEDIUM";
+            // No score -> no priority. Showing MEDIUM here would be made up.
+            return null;
         }
         if (priorityScore >= 7) {
             return "HIGH";

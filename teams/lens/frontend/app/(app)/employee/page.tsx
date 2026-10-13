@@ -1,7 +1,8 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import Link from 'next/link';
+import Alert from '@mui/material/Alert';
 import Avatar from '@mui/material/Avatar';
 import Box from '@mui/material/Box';
 import Button from '@mui/material/Button';
@@ -10,24 +11,34 @@ import CardContent from '@mui/material/CardContent';
 import Chip from '@mui/material/Chip';
 import CircularProgress from '@mui/material/CircularProgress';
 import MenuItem from '@mui/material/MenuItem';
+import Snackbar from '@mui/material/Snackbar';
 import Stack from '@mui/material/Stack';
 import TextField from '@mui/material/TextField';
 import Typography from '@mui/material/Typography';
 import { alpha } from '@mui/material/styles';
-import ArrowForwardOutlinedIcon from '@mui/icons-material/ArrowForwardOutlined';
 import AutoAwesomeOutlinedIcon from '@mui/icons-material/AutoAwesomeOutlined';
 import CheckCircleOutlinedIcon from '@mui/icons-material/CheckCircleOutlined';
-import ChatBubbleOutlineOutlinedIcon from '@mui/icons-material/ChatBubbleOutlineOutlined';
 import CodeOutlinedIcon from '@mui/icons-material/CodeOutlined';
 import LinkOutlinedIcon from '@mui/icons-material/LinkOutlined';
 import NotificationsActiveOutlinedIcon from '@mui/icons-material/NotificationsActiveOutlined';
 import PersonOutlineIcon from '@mui/icons-material/PersonOutlined';
-import PlayArrowOutlinedIcon from '@mui/icons-material/PlayArrowOutlined';
 import ScheduleOutlinedIcon from '@mui/icons-material/ScheduleOutlined';
 import WarningAmberOutlinedIcon from '@mui/icons-material/WarningAmberOutlined';
 import PageContainer from '@/components/layout/PageContainer';
+import TaskActions, {
+  BLOCK_REASON_LABELS,
+  REJECT_CATEGORY_LABELS,
+} from '@/components/ui/TaskActions';
 import { radiusTokens } from '@/theme';
-import { DetailRow, iconBadgeSx, softToneSx, statusTone } from './shared';
+import {
+  DetailRow,
+  iconBadgeSx,
+  PriorityChip,
+  priorityTone,
+  softToneSx,
+  statusTone,
+} from './shared';
+import { getErrorMessage } from '@/services/api';
 import { recommendTask, updateTaskStatus, type TaskRecommendation } from '@/services/workspaceApi';
 
 const TIME_OPTIONS_MIN = [15, 30, 45, 60, 90];
@@ -39,8 +50,11 @@ export default function EmployeeWorkspacePage() {
   const [error, setError] = useState<string | null>(null);
   const [validationError, setValidationError] = useState<string | null>(null);
   const [recommendation, setRecommendation] = useState<TaskRecommendation | null>(null);
+  // The minutes the shown recommendation was asked for - `minutes` can change after it arrives
+  const [searchedMinutes, setSearchedMinutes] = useState(minutes);
   const [starting, setStarting] = useState(false);
-  const [started, setStarted] = useState(false);
+  // Phase 1 (design only): actions other than Start task aren't wired yet
+  const [preview, setPreview] = useState<string | null>(null);
 
   const findBestTask = async () => {
     // Validate input
@@ -49,7 +63,6 @@ export default function EmployeeWorkspacePage() {
       return;
     }
 
-    setStarted(false);
     setError(null);
     setValidationError(null);
     setLoading(true);
@@ -59,8 +72,9 @@ export default function EmployeeWorkspacePage() {
         projectFilter: projectFilter || undefined,
       });
       setRecommendation(result);
+      setSearchedMinutes(minutes);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to fetch recommendation');
+      setError(getErrorMessage(err));
       setRecommendation(null);
     } finally {
       setLoading(false);
@@ -74,16 +88,32 @@ export default function EmployeeWorkspacePage() {
       const updated = await updateTaskStatus(recommendation.task.id, 'IN_PROGRESS');
       // Reflect the new status in the displayed recommendation
       setRecommendation((prev) => (prev ? { ...prev, task: updated } : prev));
-      setStarted(true);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to start task');
+      setError(getErrorMessage(err));
     } finally {
       setStarting(false);
     }
   };
 
   const task = recommendation?.task ?? null;
-  const fitsWindow = task ? minutes >= task.effortEstimate : false;
+  // The server decides (it also knows when the effort is unknown) - not recomputed here
+  const fitsWindow = recommendation?.fitsInTime ?? false;
+
+  // Test utility: Allow tests to set form values directly
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      (window as any).__testUtils = {
+        setFormValues: (newMinutes: number, newProjectFilter?: string) => {
+          setMinutes(newMinutes);
+          if (newProjectFilter !== undefined) {
+            setProjectFilter(newProjectFilter);
+          }
+        },
+        getFormValues: () => ({ minutes, projectFilter }),
+        submitForm: async () => await findBestTask(),
+      };
+    }
+  }, []);
 
   return (
     <PageContainer title="My Workspace" description="Make the most of your available time.">
@@ -150,7 +180,8 @@ export default function EmployeeWorkspacePage() {
                     )
                   }
                   onClick={findBestTask}
-                  disabled={loading}
+                  // Not while a task is starting - its answer would land on the new recommendation
+                  disabled={loading || starting}
                   data-testid="recommend-btn"
                 >
                   {loading ? 'Finding…' : 'Find my best task'}
@@ -191,6 +222,20 @@ export default function EmployeeWorkspacePage() {
           </Card>
         )}
 
+        {/* No task found - show the server's reason instead of an empty screen */}
+        {recommendation && !task && (
+          <Card data-testid="no-recommendation">
+            <CardContent>
+              <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
+                <ScheduleOutlinedIcon color="action" />
+                <Typography variant="body2" color="text.secondary">
+                  {recommendation.explanation || 'No matching tasks available right now.'}
+                </Typography>
+              </Stack>
+            </CardContent>
+          </Card>
+        )}
+
         {/* Recommendation result */}
         {recommendation && task && (
           <Stack direction={{ xs: 'column', lg: 'row' }} spacing={3} sx={{ alignItems: 'stretch' }}>
@@ -225,16 +270,13 @@ export default function EmployeeWorkspacePage() {
                       <Typography variant="h6" data-testid="recommendation-task-title">
                         {task.title}
                       </Typography>
-                      <Chip
-                        size="small"
-                        label={task.priority}
-                        sx={[softToneSx('error'), { fontWeight: 600 }]}
-                        data-testid="task-priority"
-                      />
+                      <PriorityChip priority={task.priority} bold />
                     </Stack>
-                    <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-                      {task.project}
-                    </Typography>
+                    {task.project && (
+                      <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+                        {task.project}
+                      </Typography>
+                    )}
 
                     <Stack spacing={0.75} sx={{ mb: 3 }}>
                       <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
@@ -261,39 +303,20 @@ export default function EmployeeWorkspacePage() {
                       )}
                     </Stack>
 
-                    <Stack direction="row" spacing={1.5} sx={{ flexWrap: 'wrap' }}>
-                      <Button
-                        variant="contained"
-                        disabled={started || starting}
-                        onClick={startTask}
-                        startIcon={
-                          starting ? (
-                            <CircularProgress size={16} color="inherit" />
-                          ) : (
-                            !started && <PlayArrowOutlinedIcon />
-                          )
-                        }
-                        data-testid="start-task-btn"
-                      >
-                        {started ? 'Task started' : starting ? 'Starting…' : 'Start task'}
-                      </Button>
-                      <Button
-                        variant="outlined"
-                        component={Link}
-                        href={`/employee/tasks/${task.id}?chat=1`}
-                        startIcon={<ChatBubbleOutlineOutlinedIcon />}
-                      >
-                        Chat about it
-                      </Button>
-                      <Button
-                        variant="outlined"
-                        component={Link}
-                        href={`/employee/tasks/${task.id}`}
-                        endIcon={<ArrowForwardOutlinedIcon />}
-                      >
-                        View details
-                      </Button>
-                    </Stack>
+                    <TaskActions
+                      status={task.status}
+                      detailsHref={`/employee/tasks/${task.id}`}
+                      linkComponent={Link}
+                      busy={starting || loading}
+                      onStart={startTask}
+                      onDone={() => setPreview('Mark as done')}
+                      onBlock={(details) =>
+                        setPreview(`Can't do this now: ${BLOCK_REASON_LABELS[details.reason]}`)
+                      }
+                      onReject={(details) =>
+                        setPreview(`Reject task: ${REJECT_CATEGORY_LABELS[details.category]}`)
+                      }
+                    />
                   </Box>
                 </Stack>
               </CardContent>
@@ -317,22 +340,28 @@ export default function EmployeeWorkspacePage() {
                     sx={[softToneSx(statusTone(task.status)), { fontWeight: 600 }]}
                   />
                 </Stack>
-                <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-                  {task.project}
-                </Typography>
+                {task.project && (
+                  <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+                    {task.project}
+                  </Typography>
+                )}
 
                 <Stack direction="row" spacing={1} sx={{ flexWrap: 'wrap', mb: 3 }}>
                   <Chip
                     size="small"
                     icon={<NotificationsActiveOutlinedIcon />}
-                    label={task.priority}
-                    sx={softToneSx('error')}
+                    label={task.priority ?? '—'}
+                    sx={softToneSx(priorityTone(task.priority))}
                   />
                   <Chip
                     size="small"
                     icon={<ScheduleOutlinedIcon />}
                     label={
-                      fitsWindow ? `Fits in ${minutes} min` : `Needs ${task.effortEstimate} min`
+                      fitsWindow
+                        ? `Fits in ${searchedMinutes} min`
+                        : task.effortEstimate != null
+                          ? `Needs ${task.effortEstimate} min`
+                          : 'Effort unknown'
                     }
                     sx={softToneSx(fitsWindow ? 'info' : 'warning')}
                   />
@@ -351,26 +380,33 @@ export default function EmployeeWorkspacePage() {
                   <DetailRow
                     label="Owner"
                     value={
-                      <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
-                        <Avatar
-                          sx={{
-                            width: 24,
-                            height: 24,
-                            bgcolor: (theme) => alpha(theme.palette.primary.main, 0.12),
-                            color: 'primary.main',
-                          }}
-                        >
-                          <PersonOutlineIcon sx={{ fontSize: 16 }} />
-                        </Avatar>
-                        <span data-testid="task-owner">{task.owner}</span>
-                      </Stack>
+                      task.owner ? (
+                        <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
+                          <Avatar
+                            sx={{
+                              width: 24,
+                              height: 24,
+                              bgcolor: (theme) => alpha(theme.palette.primary.main, 0.12),
+                              color: 'primary.main',
+                            }}
+                          >
+                            <PersonOutlineIcon sx={{ fontSize: 16 }} />
+                          </Avatar>
+                          <span data-testid="task-owner">{task.owner}</span>
+                        </Stack>
+                      ) : (
+                        '—'
+                      )
                     }
                   />
                   {task.dueDate && (
                     <DetailRow label="Due" value={new Date(task.dueDate).toLocaleString()} />
                   )}
-                  <DetailRow label="Estimated effort" value={`${task.effortEstimate} min`} />
-                  <DetailRow label="Project" value={task.project} />
+                  <DetailRow
+                    label="Estimated effort"
+                    value={task.effortEstimate != null ? `${task.effortEstimate} min` : '—'}
+                  />
+                  <DetailRow label="Project" value={task.project ?? '—'} />
                   {(task.constraints ?? []).length > 0 && (
                     <DetailRow label="Constraints" value={(task.constraints ?? []).join(', ')} />
                   )}
@@ -380,6 +416,16 @@ export default function EmployeeWorkspacePage() {
           </Stack>
         )}
       </Stack>
+      <Snackbar
+        open={preview !== null}
+        autoHideDuration={4000}
+        onClose={() => setPreview(null)}
+        anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
+      >
+        <Alert severity="info" variant="filled" onClose={() => setPreview(null)}>
+          Preview only - not saved yet. {preview}
+        </Alert>
+      </Snackbar>
     </PageContainer>
   );
 }

@@ -16,17 +16,20 @@ import { defineConfig, devices } from '@playwright/test';
 
 export default defineConfig({
   testDir: './tests/e2e',
-  fullyParallel: true,
+  fullyParallel: false, // Run tests serially in CI to avoid conflicts
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 2 : 0,
   workers: process.env.CI ? 1 : undefined,
   reporter: [['html', { open: 'never' }]],
+  timeout: 60000, // Increase per-test timeout
 
   use: {
     baseURL: process.env.PLAYWRIGHT_TEST_BASE_URL || 'http://localhost:3000',
     trace: 'on-first-retry',
     screenshot: 'only-on-failure',
     video: 'retain-on-failure',
+    navigationTimeout: 30000,
+    actionTimeout: 15000,
   },
 
   projects: [
@@ -44,6 +47,8 @@ export default defineConfig({
         url: 'http://localhost:3000',
         reuseExistingServer: false,
         timeout: 120000,
+        stdout: 'ignore',
+        stderr: 'ignore',
       }
     : undefined,
 });

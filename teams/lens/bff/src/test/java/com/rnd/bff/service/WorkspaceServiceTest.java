@@ -6,19 +6,24 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import com.rnd.bff.client.ChainClient;
-import com.rnd.bff.client.EmployeeClient;
 import com.rnd.bff.client.InboxClient;
+import com.rnd.bff.client.InboxSelectionResponse;
 import com.rnd.bff.client.MindClient;
 import com.rnd.bff.dto.TaskDTO;
 import com.rnd.bff.dto.TaskDependenciesDTO;
 import com.rnd.bff.dto.TaskListResponseDTO;
+import com.rnd.bff.dto.SelectedTaskDTO;
 import com.rnd.bff.dto.TaskRecommendationDTO;
+import com.rnd.bff.dto.TaskSelectionDTO;
 import com.rnd.bff.dto.WorkspaceRequestDTO;
+import com.rnd.bff.exception.InboxRejectedException;
 import com.rnd.bff.exception.ServiceUnavailableException;
 import com.rnd.bff.exception.TaskNotFoundException;
 import java.util.List;
@@ -41,20 +46,23 @@ class WorkspaceServiceTest {
     @Mock private InboxClient inboxClient;
     @Mock private ChainClient chainClient;
     @Mock private MindClient mindClient;
-    @Mock private EmployeeClient employeeClient;
 
     private WorkspaceService workspaceService;
 
     @BeforeEach
     void setUp() {
-        workspaceService = new WorkspaceService(inboxClient, chainClient, mindClient, employeeClient);
+        workspaceService = new WorkspaceService(inboxClient, chainClient, mindClient);
+        // Most tests exercise the BFF's own ranking (mock mode); the
+        // "Inbox selection" tests below switch this off.
+        lenient().when(inboxClient.isMockEnabled()).thenReturn(true);
     }
 
     private static TaskDTO task(String id, String priority, Integer effortEstimate) {
         return TaskDTO.builder()
                 .id(id)
                 .title("Task " + id)
-                .status("READY")
+                .status("APPROVED")
+                .isAvailable(true)
                 .priority(priority)
                 .effortEstimate(effortEstimate)
                 .project("Platform Service")
@@ -135,6 +143,115 @@ class WorkspaceServiceTest {
         assertThat(result.getExplanation()).contains("ranking unavailable");
     }
 
+    @Test
+    void recommend_skipsClosedSnoozedAndBlockedTasks() {
+        TaskDTO done = task("done", "HIGH", 30);
+        done.setStatus("DONE");
+        TaskDTO snoozed = task("snoozed", "HIGH", 30);
+        snoozed.setStatus("SNOOZED");
+        TaskDTO blocked = task("blocked", "HIGH", 30);
+        blocked.setIsAvailable(false);
+        TaskDTO workable = task("workable", "LOW", 30);
+        when(inboxClient.getTasksForUser(anyString())).thenReturn(List.of(done, snoozed, blocked, workable));
+        when(chainClient.getFeasibility(anyString(), anyList())).thenReturn(Map.of());
+        when(mindClient.getScores(anyString(), anyList(), any())).thenReturn(Map.of("workable", 85));
+
+        TaskRecommendationDTO result =
+                workspaceService.recommend(new WorkspaceRequestDTO(60, null, null), "emp_001");
+
+        assertThat(result.getTask().getId()).isEqualTo("workable");
+        assertThat(result.getAlternatives()).isEmpty();
+    }
+
+    @Test
+    void recommend_equalScores_prefersTaskThatFitsThenHigherPriorityScore() {
+        TaskDTO tooLong = task("too_long", "HIGH", 120);
+        tooLong.setPriorityScore(9.0);
+        TaskDTO fitsLow = task("fits_low", "LOW", 30);
+        fitsLow.setPriorityScore(2.0);
+        TaskDTO fitsHigh = task("fits_high", "HIGH", 30);
+        fitsHigh.setPriorityScore(8.0);
+        when(inboxClient.getTasksForUser(anyString())).thenReturn(List.of(tooLong, fitsLow, fitsHigh));
+        when(chainClient.getFeasibility(anyString(), anyList())).thenReturn(Map.of());
+        // Same score for every task - like Mind's mock
+        when(mindClient.getScores(anyString(), anyList(), any()))
+                .thenReturn(Map.of("too_long", 85, "fits_low", 85, "fits_high", 85));
+
+        TaskRecommendationDTO result =
+                workspaceService.recommend(new WorkspaceRequestDTO(60, null, null), "emp_001");
+
+        assertThat(result.getTask().getId()).isEqualTo("fits_high");
+        assertThat(result.getFitsInTime()).isTrue();
+    }
+
+    // -------------------------------------------------------------------------
+    // recommend - real Inbox: Inbox's task selection
+    // -------------------------------------------------------------------------
+
+    private static InboxSelectionResponse.SelectedTask selected(String id, int effort, double score) {
+        return new InboxSelectionResponse.SelectedTask(id, "Task " + id, null, effort, null, score);
+    }
+
+    @Test
+    void recommend_realInbox_usesInboxSelectionFirstTaskAndAlternatives() {
+        when(inboxClient.isMockEnabled()).thenReturn(false);
+        when(inboxClient.selectTasks("emp_001", 60)).thenReturn(new InboxSelectionResponse(
+                List.of(selected("t1", 30, 0.82), selected("t2", 20, 0.4)), 50, 1.22, 10, false, null));
+        TaskDTO full = task("t1", "HIGH", 30);
+        when(inboxClient.getTaskById("emp_001", "t1")).thenReturn(full);
+
+        TaskRecommendationDTO result =
+                workspaceService.recommend(new WorkspaceRequestDTO(60, null, null), "emp_001");
+
+        assertThat(result.getTask()).isSameAs(full);
+        assertThat(result.getAlternatives()).extracting(TaskDTO::getId).containsExactly("t2");
+        assertThat(result.getFitsInTime()).isTrue();
+        assertThat(result.getIsHighPriority()).isTrue();
+        assertThat(result.getConfidenceScore()).isEqualTo(82);
+        // Inbox picked it - the BFF's own ranking (Chain/Mind) isn't used
+        verifyNoInteractions(chainClient, mindClient);
+    }
+
+    @Test
+    void recommend_realInbox_windowWidened_reportsDoesNotFitWithInboxReason() {
+        when(inboxClient.isMockEnabled()).thenReturn(false);
+        String reason = "No task fit the original 15 minutes; window was automatically expanded to 21 minutes";
+        when(inboxClient.selectTasks("emp_001", 15)).thenReturn(new InboxSelectionResponse(
+                List.of(selected("t1", 21, 0.28)), 21, 0.28, 0, true, reason));
+
+        TaskRecommendationDTO result =
+                workspaceService.recommend(new WorkspaceRequestDTO(15, null, null), "emp_001");
+
+        assertThat(result.getFitsInTime()).isFalse();
+        assertThat(result.getExplanation()).isEqualTo(reason);
+        // Full task not found -> the selected task's own fields are used
+        assertThat(result.getTask().getEffortEstimate()).isEqualTo(21);
+    }
+
+    @Test
+    void recommend_realInbox_selectionFails_fallsBackToBffRanking() {
+        when(inboxClient.isMockEnabled()).thenReturn(false);
+        when(inboxClient.selectTasks(anyString(), anyInt())).thenThrow(new RuntimeException("Inbox 500"));
+        when(inboxClient.getTasksForUser(anyString())).thenReturn(List.of(task("task_001", "HIGH", 30)));
+        when(chainClient.getFeasibility(anyString(), anyList())).thenReturn(Map.of());
+        when(mindClient.getScores(anyString(), anyList(), any())).thenReturn(Map.of("task_001", 85));
+
+        TaskRecommendationDTO result =
+                workspaceService.recommend(new WorkspaceRequestDTO(60, null, null), "emp_001");
+
+        assertThat(result.getTask().getId()).isEqualTo("task_001");
+    }
+
+    @Test
+    void recommend_realInbox_selectionRejected_isPassedOnNotHidden() {
+        when(inboxClient.isMockEnabled()).thenReturn(false);
+        when(inboxClient.selectTasks(anyString(), anyInt()))
+                .thenThrow(new InboxRejectedException(401, "Actor does not exist"));
+
+        assertThatThrownBy(() -> workspaceService.recommend(new WorkspaceRequestDTO(60, null, null), "emp_001"))
+                .isInstanceOf(InboxRejectedException.class);
+    }
+
     // -------------------------------------------------------------------------
     // listTasks — "My Tasks" screen. Filtering, search and paging happen in
     // Inbox (or InboxClient's mock), so these only check what the service
@@ -183,6 +300,15 @@ class WorkspaceServiceTest {
     }
 
     @Test
+    void getTask_inboxRejects_passesRejectionOnInsteadOfServiceUnavailable() {
+        when(inboxClient.getTaskById(anyString(), anyString()))
+                .thenThrow(new InboxRejectedException(403, "Actor cannot act on task"));
+
+        assertThatThrownBy(() -> workspaceService.getTask("emp_001", "task_001"))
+                .isInstanceOf(InboxRejectedException.class);
+    }
+
+    @Test
     void listTasks_inboxThrows_throwsServiceUnavailableForInbox() {
         when(inboxClient.listTasks(anyString(), any(), any(), anyInt(), anyInt()))
                 .thenThrow(new RuntimeException("connection refused"));
@@ -205,9 +331,56 @@ class WorkspaceServiceTest {
 
     @Test
     void updateTaskStatus_unknownId_throwsTaskNotFoundException() {
-        when(inboxClient.updateStatus(anyString(), anyString(), anyString())).thenReturn(null);
+        when(inboxClient.updateStatus(anyString(), anyString(), anyString(), any())).thenReturn(null);
 
-        assertThatThrownBy(() -> workspaceService.updateTaskStatus("emp_001", "task_missing", "BLOCKED"))
+        assertThatThrownBy(() -> workspaceService.updateTaskStatus("emp_001", "task_missing", "IN_PROGRESS", null))
                 .isInstanceOf(TaskNotFoundException.class);
+    }
+
+    // -------------------------------------------------------------------------
+    // selectTasks - "tasks for N minutes"
+    // -------------------------------------------------------------------------
+
+    @Test
+    void selectTasks_minutesOutOfRangeOrMissing_throwsIllegalArgument() {
+        for (Integer minutes : new Integer[] {null, 0, -5, 481}) {
+            assertThatThrownBy(() -> workspaceService.selectTasks("emp_001", minutes))
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessageContaining("between 1 and 480");
+        }
+        verifyNoInteractions(inboxClient);
+    }
+
+    @Test
+    void selectTasks_mapsInboxSelection() {
+        when(inboxClient.selectTasks("emp_001", 60)).thenReturn(new InboxSelectionResponse(
+                List.of(selected("t1", 30, 0.82), selected("t2", 20, 0.4)), 50, 1.22, 10, false, null));
+
+        TaskSelectionDTO result = workspaceService.selectTasks("emp_001", 60);
+
+        assertThat(result.getAvailableMinutes()).isEqualTo(60);
+        assertThat(result.getSelectedTasks()).extracting(SelectedTaskDTO::getId).containsExactly("t1", "t2");
+        assertThat(result.getSelectedTasks().get(0).getEffortEstimate()).isEqualTo(30);
+        assertThat(result.getSelectedTasks().get(0).getSelectionScore()).isEqualTo(0.82);
+        assertThat(result.getTotalEffortMinutes()).isEqualTo(50);
+        assertThat(result.getRemainingMinutes()).isEqualTo(10);
+        assertThat(result.getUsedFallback()).isFalse();
+    }
+
+    @Test
+    void selectTasks_inboxDown_throwsServiceUnavailable_noFallback() {
+        when(inboxClient.selectTasks(anyString(), anyInt())).thenThrow(new RuntimeException("Inbox 500"));
+
+        assertThatThrownBy(() -> workspaceService.selectTasks("emp_001", 60))
+                .isInstanceOf(ServiceUnavailableException.class);
+    }
+
+    @Test
+    void selectTasks_inboxRejects_isPassedOn() {
+        when(inboxClient.selectTasks(anyString(), anyInt()))
+                .thenThrow(new InboxRejectedException(401, "Actor does not exist"));
+
+        assertThatThrownBy(() -> workspaceService.selectTasks("emp_001", 60))
+                .isInstanceOf(InboxRejectedException.class);
     }
 }

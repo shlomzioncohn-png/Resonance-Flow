@@ -2,6 +2,7 @@ package com.rnd.bridge.crm.mapper;
 
 import com.rnd.bridge.crm.model.Deal;
 import com.rnd.bridge.crm.model.DealStage;
+import com.rnd.bridge.crm.repository.DealSnapshot;
 import com.rnd.bridge.crm.repository.JsonDealRepository;
 import com.rnd.bridge.task.enrichment.EnrichmentProperties;
 import com.rnd.bridge.task.enrichment.NoOpTaskEnricher;
@@ -41,7 +42,7 @@ class DealToTaskMapperTest {
     }
 
     private static Deal findLatest(JsonDealRepository repo, String dealId) {
-        return repo.findLatestByDealId(dealId).orElseThrow();
+        return repo.snapshot().findLatestByDealId(dealId).orElseThrow();
     }
 
     @Test
@@ -176,7 +177,7 @@ class DealToTaskMapperTest {
     @Test
     void allFourD10432RecordsMapToTheSameSourceRef() {
         JsonDealRepository repo = repository();
-        List<Deal> history = repo.findHistoryByDealId("D-10432");
+        List<Deal> history = repo.snapshot().findHistoryByDealId("D-10432");
 
         assertEquals(4, history.size());
 
@@ -192,9 +193,10 @@ class DealToTaskMapperTest {
     @Test
     void toUrgencyIsInRangeForEveryRecordInTheDataset() {
         JsonDealRepository repo = repository();
+        DealSnapshot snapshot = repo.snapshot();
 
-        for (Deal deal : repo.findAll()) {
-            Integer urgency = MAPPER.toUrgency(deal, repo.asOf());
+        for (Deal deal : snapshot.allDeals()) {
+            Integer urgency = MAPPER.toUrgency(deal, snapshot.asOf());
             assertTrue(urgency >= 1 && urgency <= 5,
                     () -> "urgency out of range for " + deal.dealId() + ": " + urgency);
         }

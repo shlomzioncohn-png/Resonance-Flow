@@ -3,14 +3,16 @@
 import { useCallback, useEffect, useState } from 'react';
 import Chip from '@mui/material/Chip';
 import Stack from '@mui/material/Stack';
+import TablePagination from '@mui/material/TablePagination';
 import Typography from '@mui/material/Typography';
 import PageContainer from '@/components/layout/PageContainer';
 import LoadingState from '@/components/feedback/LoadingState';
 import EmptyState from '@/components/feedback/EmptyState';
 import ErrorState from '@/components/feedback/ErrorState';
 import DataTable, { type DataTableColumn } from '@/components/ui/DataTable';
+import { getErrorMessage } from '@/services/api';
 import { listTasks, type ApiTask } from '@/services/workspaceApi';
-import { priorityTone, softToneSx, statusTone } from '../shared';
+import { PriorityChip, softToneSx, statusTone } from '../shared';
 
 type LoadState = 'loading' | 'loaded' | 'error';
 
@@ -23,9 +25,11 @@ const columns: DataTableColumn<ApiTask>[] = [
         <Typography variant="body2" sx={{ fontWeight: 600 }}>
           {task.title}
         </Typography>
-        <Typography variant="caption" color="text.secondary">
-          {task.project}
-        </Typography>
+        {task.project && (
+          <Typography variant="caption" color="text.secondary">
+            {task.project}
+          </Typography>
+        )}
       </Stack>
     ),
   },
@@ -39,14 +43,12 @@ const columns: DataTableColumn<ApiTask>[] = [
   {
     key: 'priority',
     header: 'Priority',
-    render: (task) => (
-      <Chip size="small" label={task.priority} sx={softToneSx(priorityTone(task.priority))} />
-    ),
+    render: (task) => <PriorityChip priority={task.priority} />,
   },
   {
     key: 'owner',
     header: 'Owner',
-    render: (task) => task.owner,
+    render: (task) => task.owner ?? '—',
   },
   {
     key: 'due',
@@ -64,24 +66,34 @@ const columns: DataTableColumn<ApiTask>[] = [
 export default function EmployeeTasksPage() {
   const [state, setState] = useState<LoadState>('loading');
   const [tasks, setTasks] = useState<ApiTask[]>([]);
+  const [total, setTotal] = useState(0);
+  const [page, setPage] = useState(0);
+  const [pageSize, setPageSize] = useState(20);
+  const [errorMessage, setErrorMessage] = useState('');
 
-  const fetchTasks = useCallback(() => {
-    return listTasks({ size: 100 }) // largest page the API allows — fine while the task set is this small; will need real pagination once it isn't
+  // One page at a time from the server (Inbox does the paging). Only sets
+  // state once the request settles, so it's safe to call from an effect.
+  const fetchTasks = useCallback((pageIndex: number, size: number) => {
+    return listTasks({ page: pageIndex, size })
       .then((response) => {
         setTasks(response.items);
+        setTotal(response.total);
         setState('loaded');
       })
-      .catch(() => setState('error'));
+      .catch((err) => {
+        setErrorMessage(getErrorMessage(err));
+        setState('error');
+      });
   }, []);
 
   useEffect(() => {
-    fetchTasks();
-  }, [fetchTasks]);
+    fetchTasks(page, pageSize);
+  }, [fetchTasks, page, pageSize]);
 
   const retry = useCallback(() => {
     setState('loading');
-    fetchTasks();
-  }, [fetchTasks]);
+    fetchTasks(page, pageSize);
+  }, [fetchTasks, page, pageSize]);
 
   return (
     <PageContainer
@@ -90,9 +102,7 @@ export default function EmployeeTasksPage() {
     >
       {state === 'loading' && <LoadingState message="Loading your tasks…" />}
 
-      {state === 'error' && (
-        <ErrorState description="Couldn't load your tasks. Please try again." onRetry={retry} />
-      )}
+      {state === 'error' && <ErrorState description={errorMessage} onRetry={retry} />}
 
       {state === 'loaded' && (
         <DataTable
@@ -106,6 +116,21 @@ export default function EmployeeTasksPage() {
               description="Tasks assigned to you will show up here."
             />
           }
+        />
+      )}
+
+      {state === 'loaded' && total > 0 && (
+        <TablePagination
+          component="div"
+          count={total}
+          page={page}
+          onPageChange={(_, newPage) => setPage(newPage)}
+          rowsPerPage={pageSize}
+          rowsPerPageOptions={[20, 50, 100]}
+          onRowsPerPageChange={(event) => {
+            setPageSize(Number(event.target.value));
+            setPage(0);
+          }}
         />
       )}
     </PageContainer>

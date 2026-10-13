@@ -46,7 +46,7 @@ bff:
   endpoints:
     workspace-recommend: ${BFF_ENDPOINT_WORKSPACE_RECOMMEND:/workspace/recommend}
     tasks: ${BFF_ENDPOINT_TASKS:/workspace/tasks}
-    employee-task: ${BFF_ENDPOINT_EMPLOYEE_TASK:/workspace/employee-task}
+    task-selection: ${BFF_ENDPOINT_TASK_SELECTION:/workspace/tasks/selection}
 
 # JWT configuration for RS256 token signing/validation
 lens:
