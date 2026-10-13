@@ -1,7 +1,7 @@
 import pytest
 from pydantic import ValidationError
 
-from mind.contracts import ObjectRole, RawObjectEvent, RawObjectRef
+from mind.contracts import Classification, ObjectRole, RawObjectEvent, RawObjectRef
 
 
 def _valid_event() -> dict[str, object]:
@@ -154,3 +154,25 @@ def test_accepts_meeting_platforms(source_type: str) -> None:
     payload = _valid_event() | {"source_type": source_type}
 
     assert RawObjectEvent.model_validate(payload).source_type.value == source_type
+
+
+def test_classification_is_optional() -> None:
+    # Absent means nothing classified the item, not that it was judged irrelevant.
+    assert RawObjectEvent.model_validate(_valid_event()).classification is None
+
+
+def test_accepts_bridge_classification() -> None:
+    payload = _valid_event() | {
+        "classification": {
+            "decided_by": "MODEL",
+            "category": {"value": "INVOICE", "confidence": 0.92},
+            "quality": {"value": "POOR", "confidence": 0.75},
+            "sensitivity": {"value": "LOW", "confidence": 0.85},
+            "reason": "vendor invoice, partially blurred scan",
+            "classifier": {"model": "gemini-3.8-flash", "prompt_version": "v2"},
+        }
+    }
+
+    event = RawObjectEvent.model_validate(payload)
+
+    assert isinstance(event.classification, Classification)

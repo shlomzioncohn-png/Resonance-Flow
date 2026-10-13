@@ -1,6 +1,7 @@
 """Contract for raw-object events received from Bridge."""
 
 from datetime import timedelta
+from enum import Enum
 from uuid import UUID
 
 from pydantic import (
@@ -14,10 +15,14 @@ from pydantic import (
 
 from mind.contracts.base_enums import SourceType
 from mind.contracts.raw_object_event_enums import (
+    Category,
     ChangeType,
+    DecidedBy,
     Modality,
     ObjectRole,
+    Quality,
     ScopeDecision,
+    Sensitivity,
 )
 
 
@@ -36,6 +41,70 @@ class RawObjectRef(BaseModel):
     size_bytes: int | None = Field(default=None, ge=0)
     # Required: a TEXT default would silently mislabel a RECORDING.
     modality: Modality
+
+
+def _is_unknown(value: object, enum: type[Enum]) -> bool:
+    """A string Bridge sent that this version of Mind doesn't know yet."""
+    return isinstance(value, str) and value not in {member.value for member in enum}
+
+
+class CategoryLabel(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    value: Category
+    confidence: float = Field(ge=0, le=1)
+
+    @field_validator("value", mode="before")
+    @classmethod
+    def unknown_category_is_other(cls, value: object) -> object:
+        return Category.OTHER if _is_unknown(value, Category) else value
+
+
+class QualityLabel(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    value: Quality
+    confidence: float = Field(ge=0, le=1)
+
+
+class SensitivityLabel(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    value: Sensitivity
+    confidence: float = Field(ge=0, le=1)
+
+    @field_validator("value", mode="before")
+    @classmethod
+    def unknown_sensitivity_is_high(cls, value: object) -> object:
+        # Fail safe: a level we don't know is treated as the most sensitive one.
+        return Sensitivity.HIGH if _is_unknown(value, Sensitivity) else value
+
+
+class ClassifierInfo(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    model: str
+    prompt_version: str
+
+
+class Classification(BaseModel):
+    """Bridge's triage of the item as a whole. `reason` is for humans only."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    decided_by: DecidedBy
+    category: CategoryLabel | None = None  # only for source types with a list
+    quality: QualityLabel | None = None  # None also when Bridge's value is unknown
+    sensitivity: SensitivityLabel
+    reason: str
+    classifier: ClassifierInfo
+
+    @field_validator("quality", mode="before")
+    @classmethod
+    def unknown_quality_is_ignored(cls, value: object) -> object:
+        if isinstance(value, dict) and _is_unknown(value.get("value"), Quality):
+            return None
+        return value
 
 
 class RawObjectEvent(BaseModel):
@@ -90,6 +159,8 @@ class RawObjectEvent(BaseModel):
             "Slack channel_id:ts, Message-ID...). An identifier, not a link."
         ),
     )
+    # Absent: nothing classified the item, and scope_decision is the INCLUDED default.
+    classification: Classification | None = None
 
 
     @field_validator("ingested_at", "source_timestamp")

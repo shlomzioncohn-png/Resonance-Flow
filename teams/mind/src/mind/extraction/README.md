@@ -297,9 +297,10 @@ written by whoever sent it, so a sender can put a link in their own message and
 tell the model to use it; the value genuinely is in the content and passes
 every check here. `test_a_link_the_content_itself_carries_is_still_kept` pins
 that limit so nobody mistakes the check for more than it is. The real answer is
-for `source_ref` to arrive from Bridge as event metadata — `RawObjectEvent`
-carries no such field today, and asking for one is open with them. Until then,
-this field says what the content claimed, not what is true.
+for `source_ref` to arrive from Bridge as event metadata. #31 added it as
+`RawObjectEvent.source_ref`, but extraction does not receive the event yet.
+Until the consumer passes it through, this field says what the content
+claimed, not what is true.
 
 ## Classification at extraction time (#351)
 

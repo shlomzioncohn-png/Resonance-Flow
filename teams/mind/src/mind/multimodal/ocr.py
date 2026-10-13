@@ -17,7 +17,7 @@ data failure can be told from an environment one, per-document counts
 (``word_count``, ``low_confidence_count``, ``mean_confidence``) so the
 low-confidence list has a denominator, text per page, and a page cap (a longer PDF
 is truncated and says so, not refused). Whether a
-document is scanned is decided by the caller (``RawObjectEvent.modality``), not
+document is scanned is decided by the caller (``RawObjectRef.modality``), not
 guessed here -- ``filename`` is only a secondary hint for telling a PDF from an
 image. See this package's README.
 """
