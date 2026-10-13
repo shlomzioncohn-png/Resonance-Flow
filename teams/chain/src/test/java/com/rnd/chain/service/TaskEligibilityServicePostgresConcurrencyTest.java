@@ -49,6 +49,9 @@ class TaskEligibilityServicePostgresConcurrencyTest {
     @Autowired
     private TaskEligibilityService service;
 
+    @Autowired
+    private DependencyEdgeService edgeService;
+
     // TaskRepository's port interface has no hard-delete (only soft-delete via update()) - the
     // JPA repository is used directly here, test-only, purely for cleanup.
     @Autowired
@@ -120,7 +123,7 @@ class TaskEligibilityServicePostgresConcurrencyTest {
         blockerIds.forEach(this::seedTask);
 
         List<Runnable> jobs = blockerIds.stream()
-                .<Runnable>map(blockerId -> () -> service.addDependency(hubId, blockerId))
+                .<Runnable>map(blockerId -> () -> edgeService.addDependency(hubId, blockerId))
                 .collect(Collectors.toList());
 
         runConcurrently(jobs);
@@ -141,7 +144,7 @@ class TaskEligibilityServicePostgresConcurrencyTest {
         blockerIds.forEach(this::seedTask);
 
         for (UUID blockerId : blockerIds) {
-            service.addDependency(hubId, blockerId);
+            edgeService.addDependency(hubId, blockerId);
         }
         assertEquals(THREAD_COUNT, taskRepository.findById(hubId).orElseThrow().getBlockingCount());
 
@@ -170,7 +173,7 @@ class TaskEligibilityServicePostgresConcurrencyTest {
             seedTask(blockerId);
 
             runConcurrently(List.of(
-                    () -> service.addDependency(dependentId, blockerId),
+                    () -> edgeService.addDependency(dependentId, blockerId),
                     () -> service.onTaskStatusChanged(blockerId, TaskStatus.DONE)));
 
             Task dependent = taskRepository.findById(dependentId).orElseThrow();

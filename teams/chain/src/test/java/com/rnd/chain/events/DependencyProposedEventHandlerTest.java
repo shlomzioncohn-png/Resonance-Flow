@@ -4,15 +4,16 @@ import com.rnd.chain.dto.Task;
 import com.rnd.chain.dto.TaskDependency;
 import com.rnd.chain.dto.TaskStatus;
 import com.rnd.chain.dto.TaskTestFixtures;
-import com.rnd.chain.repository.InMemoryConstraintRepository;
 import com.rnd.chain.repository.InMemoryDependencyHistoryRepository;
 import com.rnd.chain.repository.InMemoryTaskDependencyRepository;
 import com.rnd.chain.repository.InMemoryTaskRepository;
 import com.rnd.chain.repository.InMemoryTransactionRunner;
 import com.rnd.chain.repository.InMemoryUnresolvedDependencyRepository;
+import com.rnd.chain.service.DependencyEdgeService;
+import com.rnd.chain.service.DependencyGraphLock;
 import com.rnd.chain.service.SchedulingUpdateService;
+import com.rnd.chain.service.TaskCounterUpdater;
 import com.rnd.chain.service.TaskDependencyService;
-import com.rnd.chain.service.TaskEligibilityService;
 import com.rnd.chain.service.UnresolvedDependencyService;
 import com.rnd.mind.event.DependencyProposedEvent;
 import org.junit.jupiter.api.Test;
@@ -64,12 +65,11 @@ class DependencyProposedEventHandlerTest {
                 new InMemoryTaskDependencyRepository(
                         existingDependencies);
 
-        TaskEligibilityService eligibilityService =
-                new TaskEligibilityService(
-                        taskRepo,
+        DependencyEdgeService edgeService =
+                new DependencyEdgeService(
                         dependencyRepo,
-                        mock(SchedulingUpdateService.class),
-                        new InMemoryConstraintRepository());
+                        new DependencyGraphLock(),
+                        new TaskCounterUpdater(taskRepo, mock(SchedulingUpdateService.class)));
 
         InMemoryDependencyHistoryRepository historyRepo =
                 new InMemoryDependencyHistoryRepository();
@@ -81,7 +81,7 @@ class DependencyProposedEventHandlerTest {
                         historyRepo,
                         new InMemoryTransactionRunner(),
                         Clock.systemUTC(),
-                        eligibilityService);
+                        edgeService);
 
         InMemoryUnresolvedDependencyRepository unresolvedRepo =
                 new InMemoryUnresolvedDependencyRepository();
