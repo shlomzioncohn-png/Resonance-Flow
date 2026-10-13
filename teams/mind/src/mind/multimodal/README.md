@@ -71,8 +71,10 @@ Local OCR + ASR preprocessing.
     matters is *data* versus *environment* (and a third, a bug of ours):
     - data failures (retrying gives the same result, drop the document):
       `EMPTY_INPUT`, `UNREADABLE_FORMAT` (not a readable image or PDF --
-      decided by PIL / `pypdfium2` *before* tesseract runs, so a corrupt or
-      truncated file is never confused with a broken install),
+      decided by PIL / `pypdfium2` *before* tesseract runs -- or is even looked
+      for -- so a corrupt or truncated file is never confused with a broken
+      install: a junk file on a host without tesseract is still
+      `UNREADABLE_FORMAT`, not `OCR_UNAVAILABLE`),
       `NO_TEXT_RECOGNIZED` (a valid image/PDF in which no text was found:
       blank or too poor);
     - environment failures, `retryable=True` (nothing is wrong with the
