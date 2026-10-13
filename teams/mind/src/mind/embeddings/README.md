@@ -11,10 +11,13 @@ Vectors, semantic search, duplicate/related-task detection.
 ## What's here
 
 ```
-__init__.py          public interface -- embed()/embed_batch() (+ async), SearchResult, VectorStore
+__init__.py          public interface -- embed()/embed_batch() (+ async), SearchResult, VectorStore, nearest_tasks()
 embeddings.py         embed() family -- the real model
 base.py               VectorStore abstract contract + SearchResult
 pgvector_store.py     the ONLY file that knows Postgres/pgvector
+index_consumer.py     #470 -- Kafka task.{created,updated,completed} handlers
+index_consumer_runner.py  #470 -- the process: python -m mind.embeddings.index_consumer_runner
+search.py             nearest_tasks() -- the shared embed()+search() primitive behind #471/#245
 loader.py             fetches + verifies the real FUNSD manifest slice
 ingest.py             loader -> embed_batch_async -> upsert
 verify.py             table row count vs. manifest record count
@@ -58,6 +61,25 @@ export MIND_VECTOR_STORE__DSN="postgresql://mind:mind@localhost:5432/mind"
 
 `embed()` downloads `BAAI/bge-small-en-v1.5` on first use unless `MODEL_CACHE_DIR` points at a local copy.
 
+## Foundation Gate benchmark (week 3)
+
+End-to-end walkthrough for someone outside the MIND team (#469's acceptance criterion):
+
+```bash
+cd teams/mind
+docker compose up -d vector-store
+make dev
+export MIND_ENVIRONMENT=local
+export MIND_VECTOR_STORE__DSN="postgresql://mind:mind@localhost:5432/mind"
+
+python scripts/load_real_slice.py   # loads eval/real_slice/'s 16 real tasks
+python scripts/query_sample.py      # one sample similarity query
+```
+
+Expected: `Loaded 16 real tasks from eval/real_slice/ into the vector store.`, then a deterministic ranked result for `query_sample.py` -- `embed()` has no randomness, so it's reproducible.
+
+Full latency/recall benchmark against the same real slice: [`benchmarks/vector-store-comparison.md`](../../../benchmarks/vector-store-comparison.md)'s "Foundation Gate benchmark (week 3)" section and [`benchmarks/foundation_gate_benchmark.py`](../../../benchmarks/foundation_gate_benchmark.py).
+
 ## Run the tests
 
 ```bash
@@ -68,12 +90,12 @@ pytest
 
 ```python
 from mind.config import get_settings
-from mind.embeddings import embed_async
+from mind.embeddings import embed_async, task_text
 from mind.embeddings.pgvector_store import PgVectorStore
 
 store = PgVectorStore(get_settings().vector_store)
 
-vector = await embed_async(task.title + " " + task.description)  # is_query=False (default) for indexing
+vector = await embed_async(task_text(task.title, task.description))  # is_query=False (default) for indexing
 await store.upsert(task.id, vector)
 
 similar = await store.search(vector, k=5)  # best match first
@@ -81,6 +103,18 @@ await store.delete(task.id)
 ```
 
 For a query against stored passages (e.g. a search endpoint), use `store.search_text(query, k)` instead -- it embeds with `is_query=True` so the flag can't be forgotten.
+
+`task_text()` is the canonical title+description join -- every producer must use it, or their vectors aren't comparable to each other.
+
+`is_completed`, `upsert_if_absent()`, `mark_completed()` and `mark_incomplete()` back the #470 index consumer:
+
+```python
+await store.upsert_if_absent(task_id, vector)
+await store.mark_completed(task_id)
+await store.mark_incomplete(task_id)  # e.g. a DONE task got reopened
+```
+
+`nearest_tasks(store, text, *, k)` (`search.py`) is the shared primitive behind #471 and #245 -- `embed(text)` then `store.search(vector, k=k)`, no threshold.
 
 ## Known limitations (flag these in review)
 

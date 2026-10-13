@@ -31,7 +31,8 @@ dedicated project is needed for this repo's scope.
 |--------------------------|--------------------------------------------------------------------------|
 | `root-app.yaml`          | App-of-apps bootstrap `Application` - manages everything under `apps/` |
 | `argocd-cm-patch.yaml`   | Restores the `argoproj.io/Application` health check ArgoCD dropped in 1.8 (with a fix for a "Missing" status edge case) - kept in case a future child `Application` needs sync-wave gating on another `Application`'s health; nothing under `apps/` currently uses more than one wave |
-| `apps/resonance-flow.yaml` | `Application` syncing the [`resonance-flow`](../helm/resonance-flow) chart (all teams' services, including the Kafka/Postgres/MinIO subcharts) |
+| `apps/resonance-flow.yaml` | `Application` syncing the [`resonance-flow`](../helm/resonance-flow) chart (all teams' services, including the Kafka/Postgres/MinIO subcharts), with [`environments/shared.yaml`](../helm/resonance-flow/environments/shared.yaml) layered on top for shared-cluster-only settings |
+| `apps/traefik.yaml`      | `Application` installing the Traefik ingress controller (namespace `traefik`, ingress class `traefik`) that serves the chart's Ingress |
 
 ## Onboarding your team's service
 

@@ -27,7 +27,8 @@ import com.rnd.chain.testsupport.IncrementingClock;
 import com.rnd.chain.testsupport.TaskFixtures;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-
+import com.rnd.chain.event.TaskSchedulingUpdatedEvent;
+import java.util.ArrayList;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Optional;
@@ -40,6 +41,13 @@ import java.util.concurrent.atomic.AtomicInteger;
 import static com.rnd.chain.testsupport.TaskFixtures.newTask;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import java.time.Instant;
+import java.util.function.Supplier;
+
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
 class TaskDependencyServiceTest {
 
@@ -598,4 +606,76 @@ class TaskDependencyServiceTest {
             throw new RuntimeException("simulated compensation failure");
         }
     }
+   @Test
+void addDependency_whenSameMindEventIsRetried_shouldNotApplyDependencyTwice() {
+
+    String sourceRef =
+            UUID.randomUUID()
+                    + ":"
+                    + taskA
+                    + ":"
+                    + taskB;
+
+    List<TaskSchedulingUpdatedEvent> publishedEvents =
+            new ArrayList<>();
+
+    SchedulingUpdateService schedulingUpdateService =
+            new SchedulingUpdateService(
+                    publishedEvents::add);
+
+    TaskEligibilityService eligibilityService =
+        new TaskEligibilityService(
+                taskRepository,
+                taskDependencyRepository,
+                schedulingUpdateService,
+                new InMemoryConstraintRepository());
+
+    TaskDependencyService mindService =
+            new TaskDependencyService(
+                    taskRepository,
+                    taskDependencyRepository,
+                    historyRepository,
+                    transactionRunner,
+                    new IncrementingClock(),
+                    eligibilityService);
+
+    // First delivery
+    mindService.addDependency(
+            taskA,
+            taskB,
+            DependencyChangeSource.MIND,
+            sourceRef);
+
+    // Retry of exactly the same event
+    mindService.addDependency(
+            taskA,
+            taskB,
+            DependencyChangeSource.MIND,
+            sourceRef);
+
+    // Only one edge exists
+    assertThat(
+            mindService.getDependencies(taskA))
+            .containsExactly(taskB);
+
+    // blockingCount increased only once
+    Task updatedTask =
+            taskRepository.findById(taskA)
+                    .orElseThrow();
+
+    assertThat(
+            updatedTask.getBlockingCount())
+            .isEqualTo(1);
+
+    // Only one history entry was created
+    assertThat(
+            mindService
+                    .getHistory(taskA, 0, 20)
+                    .content())
+            .hasSize(1);
+
+    // Scheduling state was published only once
+    assertThat(publishedEvents)
+            .hasSize(1);
+}
 }

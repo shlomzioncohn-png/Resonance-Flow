@@ -8,12 +8,13 @@ import jakarta.annotation.PostConstruct;
 
 /**
  * Validates security configuration at startup.
- * 
- * Ensures that if dev-mode is disabled (production), the Gateway is configured
- * to use JWT-based authentication rather than hardcoded mock user IDs.
- * 
- * This prevents IDOR vulnerabilities where production deployments might accidentally
- * use mock credentials if the configuration is misconfigured.
+ *
+ * Ensures the Gateway knows which Keycloak realm to trust (issuer) and where
+ * to fetch its signing keys (JWKS). Without these, JWT validation can't work,
+ * so it's better to fail fast at startup than to reject every request later.
+ *
+ * Also warns loudly while dev-mode is on, since WorkspaceController still
+ * forwards a mock userId to BFF in that mode (replaced in Auth stage 2).
  */
 @Configuration
 public class SecurityValidationConfig {
@@ -23,47 +24,41 @@ public class SecurityValidationConfig {
     @Value("${app.dev-mode:false}")
     private boolean devMode;
 
-    @Value("${app.jwt.issuer:#{null}}")
-    private String jwtIssuer;
+    @Value("${app.auth.enabled:false}")
+    private boolean authEnabled;
 
-    @Value("${app.jwt.secret:#{null}}")
-    private String jwtSecret;
+    @Value("${spring.security.oauth2.resourceserver.jwt.issuer-uri:#{null}}")
+    private String jwtIssuerUri;
 
-    /**
-     * Validates security configuration at startup.
-     * 
-     * Rules:
-     * - If dev-mode is TRUE: mock authentication is allowed, JWT configuration is optional
-     * - If dev-mode is FALSE (production):
-     *   - JWT issuer and secret MUST be configured
-     *   - Fail fast if they are missing to prevent IDOR vulnerabilities
-     */
+    @Value("${spring.security.oauth2.resourceserver.jwt.jwk-set-uri:#{null}}")
+    private String jwkSetUri;
+
     @PostConstruct
     public void validateSecurityConfiguration() {
+        if (jwtIssuerUri == null || jwtIssuerUri.isBlank()) {
+            fail("JWT issuer (spring.security.oauth2.resourceserver.jwt.issuer-uri / KEYCLOAK_ISSUER_URI) " +
+                    "must be configured. Without it, tokens from any issuer could not be rejected.");
+        }
+
+        if (jwkSetUri == null || jwkSetUri.isBlank()) {
+            fail("JWKS URL (spring.security.oauth2.resourceserver.jwt.jwk-set-uri / KEYCLOAK_JWK_SET_URI) " +
+                    "must be configured. Without it, token signatures cannot be verified.");
+        }
+
+        if (!authEnabled) {
+            logger.warn("⚠️  AUTH DISABLED (app.auth.enabled=false): /api/** accepts requests without a JWT.");
+        }
+
         if (devMode) {
             logger.warn("⚠️  DEV MODE ENABLED: Using mock user IDs. This is NOT suitable for production.");
-            return;
         }
 
-        // Production mode: ensure JWT is properly configured
-        logger.info("Production mode enabled. Validating JWT configuration...");
+        logger.info("✅ Security configuration validated: issuer={}, jwks={}", jwtIssuerUri, jwkSetUri);
+    }
 
-        if (jwtIssuer == null || jwtIssuer.isBlank()) {
-            String message = "SECURITY ERROR: Production mode (dev-mode=false) requires JWT issuer (app.jwt.issuer) to be configured. " +
-                    "Without JWT validation, all requests would use hardcoded mock user IDs, creating an IDOR vulnerability. " +
-                    "Set app.jwt.issuer or enable dev-mode for local testing.";
-            logger.error(message);
-            throw new IllegalStateException(message);
-        }
-
-        if (jwtSecret == null || jwtSecret.isBlank()) {
-            String message = "SECURITY ERROR: Production mode (dev-mode=false) requires JWT secret (app.jwt.secret) to be configured. " +
-                    "Without a secret, JWT tokens cannot be validated, creating an authentication bypass. " +
-                    "Set app.jwt.secret or enable dev-mode for local testing.";
-            logger.error(message);
-            throw new IllegalStateException(message);
-        }
-
-        logger.info("✅ Security configuration validated: JWT issuer and secret are configured.");
+    private void fail(String reason) {
+        String message = "SECURITY ERROR: " + reason;
+        logger.error(message);
+        throw new IllegalStateException(message);
     }
 }

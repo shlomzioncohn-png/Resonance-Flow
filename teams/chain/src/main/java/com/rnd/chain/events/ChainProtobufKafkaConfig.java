@@ -2,6 +2,7 @@ package com.rnd.chain.events;
 
 import com.google.protobuf.Message;
 import com.rnd.inbox.event.SchedulingUpdatedEvent;
+import com.rnd.inbox.event.TaskCompletedEvent;
 import com.rnd.inbox.event.TaskCreatedEvent;
 import com.rnd.inbox.event.TaskUpdatedEvent;
 import com.rnd.mind.event.DependencyProposedEvent;
@@ -177,6 +178,22 @@ public class ChainProtobufKafkaConfig {
 
     @Bean
     public KafkaTemplate<String, TaskUpdatedEvent> taskUpdatedEventKafkaTemplate() {
+        return protobufTemplate();
+    }
+
+    @Bean
+    public ConsumerFactory<String, TaskCompletedEvent> taskCompletedEventConsumerFactory() {
+        return new DefaultKafkaConsumerFactory<>(consumerProps(TaskCompletedEvent.class));
+    }
+
+    @Bean
+    public ConcurrentKafkaListenerContainerFactory<String, TaskCompletedEvent> taskCompletedEventKafkaListenerContainerFactory(
+            ConsumerFactory<String, TaskCompletedEvent> taskCompletedEventConsumerFactory) {
+        return listenerContainerFactory(taskCompletedEventConsumerFactory);
+    }
+
+    @Bean
+    public KafkaTemplate<String, TaskCompletedEvent> taskCompletedEventKafkaTemplate() {
         return protobufTemplate();
     }
 

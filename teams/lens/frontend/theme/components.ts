@@ -1,4 +1,4 @@
-import type { Components, Theme } from '@mui/material/styles'
+import type { Components, Theme } from '@mui/material/styles';
 
 /**
  * Component-level theme overrides. This is the *only* place styling that
@@ -104,4 +104,4 @@ export const components: Components<Theme> = {
       },
     },
   },
-}
+};

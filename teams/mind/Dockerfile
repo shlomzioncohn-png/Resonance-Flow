@@ -11,12 +11,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 COPY pyproject.toml README.md ./
 COPY proto ./proto
+COPY --from=shared proto ./shared/proto
+COPY scripts/gen_proto.py ./scripts/gen_proto.py
 
-# Generate the proto classes with the system Python, before the venv
-# below exists, so grpcio-tools never ends up in it.
-RUN mkdir -p src/mind/messaging && touch src/mind/__init__.py \
-    && pip install --no-cache-dir grpcio-tools==1.71.0 \
-    && python -m grpc_tools.protoc --proto_path=proto --python_out=src/mind/messaging proto/*.proto
+# System Python, before the venv exists, so grpcio-tools never ends up in it.
+RUN pip install --no-cache-dir grpcio-tools==1.71.0 \
+    && python scripts/gen_proto.py
 
 # Install into an isolated venv (not system site-packages) so the
 # runtime stage can copy over exactly the installed packages -- and
@@ -73,6 +73,13 @@ RUN useradd --create-home --uid 1000 --shell /usr/sbin/nologin mind
 COPY --from=builder --chown=mind:mind /opt/venv /opt/venv
 ENV PATH="/opt/venv/bin:$PATH"
 COPY --from=builder --chown=mind:mind /app/scripts ./scripts
+
+# alembic.ini/migrations/ aren't part of the pip-installed package (they
+# live beside pyproject.toml, not under src/mind/), so the venv copy
+# above doesn't carry them -- needed here so the `migrate` service
+# (docker-compose.yml) can run `alembic upgrade head` from this same image.
+COPY --chown=mind:mind alembic.ini ./
+COPY --chown=mind:mind migrations ./migrations
 
 USER mind
 

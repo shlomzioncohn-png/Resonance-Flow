@@ -121,14 +121,21 @@ already has (edgeExists() / the task's own stored previousStatus).
   - **Mid-implementation discovery**: an earlier exploration pass for this issue was accidentally
     done against the unmerged `shifra/chain-pending-task-buffer-tables` branch instead of `main`
     (that branch's `PendingDependencyService`/pending-event-buffer feature does **not** exist on
-    `main` or this branch) - re-verified everything actually touched against the real `main`
-    before implementing. `DependencyProposedEventHandler` calls
-    `TaskEligibilityService.addDependencies` directly; there is no buffer/reconcile layer.
-  - Not fixed here, pre-existing: `DependencyProposedEventHandler`'s path never wrote to
-    `dependency_history` on a *successful* add either, even before this issue (see the
-    2026-09-22 note on `TaskEligibilityService` bypassing `TransactionRunner`/
-    `DependencyHistoryRepository`, below) - only the new rejection case gets a targeted fix
-    (writes `REJECTED` directly from the handler), not a full rewire of that path.
+    `main`) - re-verified everything actually touched against the real `main` before implementing.
+    At that point `DependencyProposedEventHandler` called `TaskEligibilityService.addDependencies`
+    directly (no buffer/reconcile layer), so the cross-tenant check/REJECTED-history write was
+    added directly in that handler.
+  - **Superseded by a concurrent rewrite merged the next day (2026-10-13, PR #609 +
+    `chain/ruthHoltzman/582-task-completed-consumer` + the separate
+    "Riki-Mind-Dependency-Events"/`2c425890` work)**: `DependencyProposedEventHandler` no longer
+    calls `TaskEligibilityService.addDependencies` at all - it now calls
+    `TaskDependencyService.addDependency` once per edge (missing target -> buffered via the new
+    `UnresolvedDependencyService`/`unresolved_dependencies` table instead of retried; missing
+    source task is still retried). Merged this branch's tenant check/REJECTED-history code down
+    into `TaskEligibilityService`/`TaskDependencyService` to match, which actually **closes** the
+    gap noted below for Mind's path too: since Mind's edges now go through the same
+    `TaskDependencyService.addDependency` the REST path uses, a *successful* Mind-sourced add is
+    recorded in `dependency_history` as well, not just a rejected one.
   - Also found incidentally while running the `@Tag("postgres")` suite for the first time in a
     while (unrelated to tenant work, not fixed, flagged to the team): `TaskRepositoryContractTest`'s
     `findByParentTaskId_returnsDirectChildren`/`findByParentTaskId_excludesSoftDeletedChildren`
