@@ -24,7 +24,7 @@ import com.rnd.chain.testsupport.ConcurrentTestRunner;
 import com.rnd.chain.testsupport.IncrementingClock;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import com.rnd.chain.event.TaskSchedulingUpdatedEvent;
+import com.rnd.chain.events.TaskSchedulingUpdatedEvent;
 import java.util.ArrayList;
 import java.time.LocalDateTime;
 import java.util.List;
