@@ -5,6 +5,8 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import java.time.Duration;
+import java.util.ArrayList;
 import java.util.List;
 import okhttp3.mockwebserver.MockResponse;
 import okhttp3.mockwebserver.MockWebServer;
@@ -20,6 +22,7 @@ class OpenAiCompatibleChatClientTest {
     private final ObjectMapper objectMapper = new ObjectMapper();
     private MockWebServer server;
     private OpenAiCompatibleChatClient client;
+    private final List<Duration> sleeps = new ArrayList<>();
 
     @BeforeEach
     void setUp() throws Exception {
@@ -28,7 +31,7 @@ class OpenAiCompatibleChatClientTest {
         MediaClassificationProperties properties = ClassificationTestSupport.properties(
                 true, "secret-key", server.url("/v1beta/openai/").toString(),
                 new MediaClassificationProperties.Documents(5, 2));
-        client = new OpenAiCompatibleChatClient(RestClient.builder(), properties);
+        client = new OpenAiCompatibleChatClient(RestClient.builder(), properties, sleeps::add);
     }
 
     @AfterEach
@@ -67,11 +70,45 @@ class OpenAiCompatibleChatClientTest {
     }
 
     @Test
-    void errorStatusPropagates() {
-        server.enqueue(new MockResponse().setResponseCode(429).setBody("{\"error\":\"rate limited\"}"));
+    void transientOverloadIsRetriedThenSucceeds() {
+        server.enqueue(new MockResponse().setResponseCode(503).setBody("{\"error\":\"high demand\"}"));
+        server.enqueue(jsonResponse("{\"choices\":[{\"message\":{\"content\":\"ok\"}}]}"));
+
+        assertThat(client.complete("system", "text", List.of())).isEqualTo("ok");
+        assertThat(server.getRequestCount()).isEqualTo(2);
+        assertThat(sleeps).containsExactly(Duration.ofSeconds(2));
+    }
+
+    @Test
+    void retriesRunOutAfterTwoRetriesWithGrowingBackoff() {
+        for (int i = 0; i < 3; i++) {
+            server.enqueue(new MockResponse().setResponseCode(429).setBody("{\"error\":\"rate limited\"}"));
+        }
 
         assertThatThrownBy(() -> client.complete("system", "text", List.of()))
                 .isInstanceOf(HttpClientErrorException.TooManyRequests.class);
+        assertThat(server.getRequestCount()).isEqualTo(3);
+        assertThat(sleeps).containsExactly(Duration.ofSeconds(2), Duration.ofSeconds(5));
+    }
+
+    @Test
+    void providersRetryAfterIsHonoured() {
+        server.enqueue(new MockResponse().setResponseCode(429).setHeader("Retry-After", "7"));
+        server.enqueue(jsonResponse("{\"choices\":[{\"message\":{\"content\":\"ok\"}}]}"));
+
+        client.complete("system", "text", List.of());
+
+        assertThat(sleeps).containsExactly(Duration.ofSeconds(7));
+    }
+
+    @Test
+    void nonTransientErrorFailsAtOnce() {
+        server.enqueue(new MockResponse().setResponseCode(401).setBody("{\"error\":\"bad key\"}"));
+
+        assertThatThrownBy(() -> client.complete("system", "text", List.of()))
+                .isInstanceOf(HttpClientErrorException.Unauthorized.class);
+        assertThat(server.getRequestCount()).isEqualTo(1);
+        assertThat(sleeps).isEmpty();
     }
 
     @Test
