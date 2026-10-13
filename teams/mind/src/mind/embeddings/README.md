@@ -109,7 +109,54 @@ candidates = await resolve_dependency_targets(store, ["the DB upgrade"], thresho
 
 `find_duplicate(store, title, description, *, threshold=None)` (`duplicate_detection.py`, #471) is the same pattern: `threshold=None` reads `Settings.duplicate_similarity_threshold`.
 
+## Threshold calibration
+
+`benchmarks/threshold_calibration.py` picks both thresholds from real similarity scores, not a guess. Method: a 21-task pool (`benchmarks/threshold_calibration_tasks.json`, hand-authored -- kept separate from `eval/real_slice`/`eval/datasets` on purpose, to avoid overlapping with R2/Michal's own evaluation data), 14 test sentences per calibration (true matches + deliberately hard near-miss pairs: `prod` vs `staging`, `v2.3` vs `v2.4`, `login` vs `logout` crashes + pure negatives), scored against the real store. The threshold reported is whichever value misclassifies the fewest cases in the sample (ties broken toward the stricter/higher value). Re-run anytime: `python -m benchmarks.threshold_calibration`.
+
+**`duplicate_similarity_threshold` = 0.801** (`is_query=False`, full task vs. full task):
+
+| text | expected | exp. sim | best other | other sim |
+|---|---|---|---|---|
+| Move the prod DB to the newer version | task-db-upgrade | 0.804 | task-deploy-staging | 0.692 |
+| Order food for the company offsite | task-catering | 0.801 | task-offboard-employee | 0.642 |
+| Set up accounts for the new engineer joining | task-onboard-hire | 0.859 | task-ui-redesign | 0.613 |
+| Review access logs across services this quarter | task-security-audit | 0.805 | task-perf-review | 0.640 |
+| Investigate the urgent support ticket from a customer | task-customer-escalation | 0.841 | task-load-test | 0.603 |
+| Document the new endpoints from this sprint | task-api-docs | 0.855 | task-release-notes | 0.638 |
+| Push the DB migration out to prod | task-deploy-prod | 0.712 | **task-db-backup (0.749, higher than expected)** | 0.749 |
+| Push the DB migration out to staging | task-deploy-staging | 0.828 | task-db-backup | 0.756 |
+| Publish the 2.3 release notes | task-release-v23 | 0.881 | task-release-v24 | 0.843 |
+| Publish the 2.4 release notes | task-release-v24 | 0.886 | task-release-v23 | 0.848 |
+| App crashes when logging in on phones | task-login-bug | 0.867 | task-logout-bug | 0.829 |
+| App crashes when logging out on phones | task-logout-bug | 0.869 | task-login-bug | 0.833 |
+| Water the office plants | (none) | - | task-api-docs | 0.533 |
+| Book a conference room for Friday | (none) | - | task-catering | 0.598 |
+
+**`dependency_match_threshold` = 0.754** (`is_query=True`, mention vs. passage):
+
+| text | expected | exp. sim | best other | other sim |
+|---|---|---|---|---|
+| the DB upgrade | task-db-upgrade | 0.790 | task-deploy-staging | 0.667 |
+| team offsite food | task-catering | 0.757 | task-offboard-employee | 0.527 |
+| onboarding the new hire | task-onboard-hire | 0.803 | task-offboard-employee | 0.564 |
+| security audit | task-security-audit | **0.650 (below the chosen threshold -- a false negative)** | task-offboard-employee | 0.510 |
+| customer escalation | task-customer-escalation | 0.754 | task-offboard-employee | 0.559 |
+| API docs | task-api-docs | 0.674 | task-release-v23 | 0.517 |
+| prod deploy | task-deploy-prod | 0.681 | task-deploy-staging | 0.670 |
+| staging deploy | task-deploy-staging | 0.848 | task-deploy-prod | 0.738 |
+| v2.3 notes | task-release-v23 | 0.768 | task-release-v24 | 0.707 |
+| v2.4 notes | task-release-v24 | 0.772 | task-release-v23 | 0.717 |
+| login crash | task-login-bug | 0.834 | task-logout-bug | 0.797 |
+| logout crash | task-logout-bug | 0.866 | task-login-bug | 0.744 |
+| the weather forecast | (none) | - | task-budget-forecast | 0.580 |
+| lunch plans for today | (none) | - | task-catering | 0.634 |
+
+**Real findings, not smoothed over:**
+- Neither threshold is clean. At 0.801, "security audit"-style true matches near 0.65-0.68 would be rejected by the dependency threshold; at 0.754, the sweep already accepts that one false negative because lowering further would let in a worse false positive. There is no value that gets every case right in this sample.
+- `prod`/`staging` and `v2.3`/`v2.4` and `login`/`logout` pairs score within ~0.03-0.06 of each other. BGE similarity alone does not reliably separate these -- a consumer that truly needs that distinction should not rely on this threshold alone (e.g. exact substring/number matching as a second check).
+
+**Known limitation:** chosen on 21 hand-authored synthetic tasks and 28 synthetic test sentences, not real production data. Must be re-validated once real tasks/mentions exist (week 8) -- re-run the same script against real data without changing the method.
+
 ## Known limitations (flag these in review)
 
-- `Settings.duplicate_similarity_threshold` (0.90) and `dependency_match_threshold` (0.80) are both untuned guesses -- neither has been checked against labeled data.
 - Real-data coverage is just the 2-document FUNSD slice (PR #141) -- enough to validate pipeline shape, not recall quality.
