@@ -104,6 +104,7 @@ src/main/java/com/rnd/chain/
 │                           # claim record)
 ├── events/                 # Kafka consume/publish infrastructure - see below
 │   ├── TaskCreatedEventHandler.java / TaskUpdatedEventHandler.java /
+│   │   TaskCompletedEventHandler.java /
 │   │   DependencyProposedEventHandler.java   # one @KafkaListener per inbound topic
 │   ├── ChainEventProcessingTemplate.java     # shared claim/logging skeleton
 │   ├── EventFields.java                      # UUID / Timestamp parsing shared by the handlers
@@ -170,7 +171,7 @@ An unknown task id returns `404` with an `ApiError` body; an invalid (non-UUID) 
 
 ## Kafka event infrastructure
 
-Chain consumes three Protobuf topics and publishes one Protobuf topic. Each inbound topic has its
+Chain consumes four Protobuf topics and publishes one Protobuf topic. Each inbound topic has its
 own `@KafkaListener` handler, and the handlers share the claim/logging skeleton in
 `ChainEventProcessingTemplate`.
 
@@ -199,6 +200,7 @@ Inbox publishes that event as Confluent Protobuf, so Chain consumes it with
 | --- | --- | --- | --- | --- |
 | `task.created` | Inbox | `TaskCreatedEventHandler` | state-based (no event id) | 3 attempts, 2s apart |
 | `task.updated` | Inbox | `TaskUpdatedEventHandler` | state-based, last-write-wins on `updated_at` | 3 attempts, 2s apart |
+| `task.completed` | Inbox | `TaskCompletedEventHandler` | state-based; Kafka record timestamp compared to stored `updated_at`, never written | 3 attempts, 2s apart |
 | `task.dependencies.proposed` | Mind | `DependencyProposedEventHandler` | `event_id` claim in `ProcessedEventStore` | 5 attempts, 5s apart |
 
 **Retry and dead-lettering**: retries are non-blocking, via `@RetryableTopic`, so a message waiting
@@ -214,8 +216,11 @@ only after its record is handled or handed to its retry/DLT topic, so a crash mi
 redelivers the record instead of losing it.
 
 **Idempotency**: `task.dependencies.proposed` is deduplicated by `event_id`. The claim is released if
-the handler fails, so a retry can process the event again. `task.created` and `task.updated` carry no
-event id, so they rely on their state changes being safe to repeat. The current
+the handler fails, so a retry can process the event again. `task.created`, `task.updated` and `task.completed` carry no
+event id, so they rely on their state changes being safe to repeat. `task.completed` has no
+timestamp either, so its Kafka record timestamp is compared against the stored `updated_at` (to
+ignore a completion that arrives after a reopen) but never written to it; this is interim until
+Inbox adds `completed_at` to the event. The current
 `InMemoryProcessedEventStore` guards a single running instance only and loses all claims on restart,
 so it is not safe for production or for several instances of this service. See its Javadoc for what
 a claim does and doesn't guarantee.
@@ -247,6 +252,7 @@ validated against the Schema Registry at `SCHEMA_REGISTRY_URL`. Tests use a mock
 | --- | --- | --- |
 | `chain.kafka.topics.task-created` (env `TASK_CREATED_TOPIC`) | Topic consumed for `task.created` | `task.created` |
 | `chain.kafka.topics.task-updated` (env `TASK_UPDATED_TOPIC`) | Topic consumed for `task.updated` | `task.updated` |
+| `chain.kafka.topics.task-completed` (env `TASK_COMPLETED_TOPIC`) | Topic consumed for `task.completed` | `task.completed` |
 | `chain.kafka.topics.dependencies-proposed` (env `DEPENDENCIES_PROPOSED_TOPIC`) | Topic consumed for `task.dependencies.proposed` | `task.dependencies.proposed` |
 | `chain.kafka.topics.task.scheduling.updated` (env `CHAIN_SCHEDULING_UPDATED_TOPIC`) | Topic published to for `task.scheduling.updated` | `task.scheduling.updated` |
 | `KAFKA_BOOTSTRAP_SERVERS` (env var, not `chain.*`) | Kafka broker(s) address | `localhost:9092` |
