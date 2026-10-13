@@ -64,6 +64,11 @@ _PERMITTED_VALUES: dict[str, frozenset[str]] = {
 
 URGENCY_RANGE = range(1, 6)
 
+# A month of working time. The product works in short free windows, so a longer
+# estimate is a model error or a project, not a task. Far below the int32 that
+# effort_estimate_minutes is on the wire.
+MAX_EFFORT_MINUTES = 9600
+
 # ASCII digits only, spelled out rather than \d: \d also matches "٣" and other
 # scripts' digits, which float() would then happily read.
 _PLAIN_NUMBER = re.compile(r"-?[0-9]+(\.[0-9]+)?")
@@ -111,18 +116,17 @@ def _whole_number(
 
 
 def _usable_minutes(value: object, written: object) -> int | None:
-    """A positive whole number of minutes, or None. No upper bound: the
-    contract sets none, and a month of working time is some 9600 honest
-    minutes."""
+    """A whole number of minutes from 1 to MAX_EFFORT_MINUTES, or None."""
 
     number = _whole_number("effort_estimate_minutes", value, written, round_fractions=True)
-    if number is None or number > 0:
+    if number is None or 0 < number <= MAX_EFFORT_MINUTES:
         return number
 
     logger.warning(
-        "extraction: effort_estimate_minutes came back as %r, which is not a positive "
-        "number of minutes; recording it as null",
+        "extraction: effort_estimate_minutes came back as %r, which is not a number of "
+        "minutes from 1 to %d; recording it as null",
         written,
+        MAX_EFFORT_MINUTES,
     )
     return None
 

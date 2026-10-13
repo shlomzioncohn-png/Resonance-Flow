@@ -63,6 +63,24 @@ def test_minutes_that_cannot_be_used_become_null_and_are_logged(
     assert "effort_estimate_minutes" in caplog.text
 
 
+def test_a_month_of_working_time_is_still_an_estimate() -> None:
+    assert _minutes(9600) == 9600
+
+
+@pytest.mark.parametrize("too_long", [9601, 2**31])
+def test_minutes_beyond_a_month_become_null_and_are_logged(
+    too_long: int, caplog: pytest.LogCaptureFixture
+) -> None:
+    """The product works in short free windows, so more than a month of working
+    time is a model error or a project, not a task. 2**31 would not even fit the
+    int32 that effort_estimate_minutes is on the wire."""
+
+    with caplog.at_level(logging.WARNING, logger="mind.extraction"):
+        assert _minutes(too_long) is None
+
+    assert "effort_estimate_minutes" in caplog.text
+
+
 @pytest.mark.parametrize("written", ["stated", "Inferred", "  STATED  "])
 def test_the_basis_forgives_case_and_spacing(written: str) -> None:
     fields = ClassificationFields(effort_estimate_minutes=30, effort_estimate_basis=written)
