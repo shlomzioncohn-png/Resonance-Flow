@@ -1,12 +1,12 @@
-import type { ReactNode } from 'react'
-import Box from '@mui/material/Box'
-import Typography from '@mui/material/Typography'
-import InboxOutlinedIcon from '@mui/icons-material/InboxOutlined'
+import type { ReactNode } from 'react';
+import Box from '@mui/material/Box';
+import Typography from '@mui/material/Typography';
+import InboxOutlinedIcon from '@mui/icons-material/InboxOutlined';
 
 export interface EmptyStateProps {
-  title?: string
-  description?: string
-  action?: ReactNode
+  title?: string;
+  description?: string;
+  action?: ReactNode;
 }
 
 export default function EmptyState({
@@ -39,5 +39,5 @@ export default function EmptyState({
       )}
       {action && <Box sx={{ mt: 2 }}>{action}</Box>}
     </Box>
-  )
+  );
 }

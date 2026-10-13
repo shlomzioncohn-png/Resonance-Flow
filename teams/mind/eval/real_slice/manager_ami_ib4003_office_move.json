@@ -92,6 +92,5 @@
   "expected_top_task_id": "task_walls_feasibility",
   "expected_reason": "task_merge_proposal is blocked until both teams' proposals exist, and task_followup_meeting is a fixed calendar event rather than work to be done now. Among the remaining unblocked items, task_walls_feasibility settles a structural open question - whether offices can be physically divided at all - that the seating-arrangement proposal depends on, so it should be done first.",
   "source": { "type": "AMI", "source_detail": "AMI Meeting Corpus meeting IB4003, abssumm <actions> (ami_public_manual_1.6.2)" },
-  "team_lead_approved": false,
-  "mentor_approved": false
+  "team_lead_approved": false
 }

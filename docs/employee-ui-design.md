@@ -12,8 +12,7 @@ The central product question is:
 
 The Employee UI should therefore be focused on: - available time →
 recommended task - clear explanation of why the task was selected -
-ability to start the task - ability to provide feedback through chat -
-ability to inspect and manually update task/dependency/blocker
+ability to start the task - ability to inspect and manually update task/dependency/blocker
 information
 
 This is a **UX concept example**. It does not redefine team
@@ -68,7 +67,7 @@ Do not duplicate the full task list inside My Workspace.
 │ ✓ High importance                                           │
 │ ✓ No blocking dependency                                    │
 │                                                              │
-│ [ Start task ]   [ Chat about it ]   [ View details ]       │
+│ [ Start task ]   [ View details ]                           │
 └──────────────────────────────────────────────────────────────┘
 ```
 
@@ -110,55 +109,7 @@ This is the primary action.
 
 ------------------------------------------------------------------------
 
-## B. Chat about it
-
-Allows the employee to interact with Resonance Flow about the
-recommendation.
-
-Examples:
-
-``` text
-"Why did you choose this task?"
-
-"I need manager approval before I can start."
-
-"This task is already completed."
-
-"I'm waiting for the customer."
-```
-
-The chat should not be treated as a disconnected conversation.
-
-If the employee provides information that changes the task state, the
-relevant task data should be updated.
-
-Example:
-
-``` text
-Employee:
-"I need manager approval before I can do this."
-
-          ↓
-
-Resonance Flow
-
-"I'll record that this task is blocked
-by the required approval."
-
-          ↓
-
-Task
-
-Status: Blocked
-Constraint: approval_needed
-```
-
-The plan explicitly includes an **employee feedback loop** where
-employee responses refine stored task data over time.
-
-------------------------------------------------------------------------
-
-## C. View details
+## B. View details
 
 Opens the complete task details.
 
@@ -289,20 +240,20 @@ task and its dependencies.
               ┌────────────────────┐
               │ Best task for you  │
               └────────────────────┘
-                    │    │    │
-          ┌─────────┘    │    └────────────┐
-          ▼              ▼                 ▼
-     Start task     Chat about it     View details
-                         │                 │
-                         │                 ├── Edit task
-                         │                 └── Edit dependencies
-                         │
-                         ▼
-                 Task data updated
-                         │
-                         ▼
-              Chain / task state
-                  is recalculated
+                    │              │
+          ┌─────────┘              └────────┐
+          ▼                                 ▼
+     Start task                        View details
+                                            │
+                                            ├── Edit task
+                                            └── Edit dependencies
+                                                    │
+                                                    ▼
+                                            Task data updated
+                                                    │
+                                                    ▼
+                                           Chain / task state
+                                             is recalculated
 ```
 
 ------------------------------------------------------------------------
@@ -346,23 +297,22 @@ Provides real-time push infrastructure where required.
     -   "What should I do now?"
 3.  **One recommended task**
     -   Make the recommendation the visual focus.
-4.  **Three clear actions**
+4.  **Two clear actions**
     -   Start task
-    -   Chat about it
     -   View details
-5.  **Chat can change the task**
-    -   Feedback is not merely conversational; relevant information
-        should update stored task data.
-6.  **Details are the explicit management surface**
+5.  **Details are the explicit management surface**
     -   Editing task data, dependencies and blockers belongs in Task
         Details.
-7.  **Blocked is actionable**
+6.  **Blocked is actionable**
     -   When a task cannot be performed, capture the reason/dependency
         rather than silently dismissing it.
 
 ------------------------------------------------------------------------
 
 # 11. Scope / ownership note
+
+**Chat is out of scope (decided 2026-10-06):** there is no time to build it, so the
+"Chat about it" action and the chat screen were removed from the plan.
 
 The uploaded LENS team specification says LENS owns the **manager
 workload & process insights** experience in Phase 2 and explicitly
