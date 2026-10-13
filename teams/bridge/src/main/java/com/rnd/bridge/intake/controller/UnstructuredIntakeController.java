@@ -5,6 +5,7 @@ import com.rnd.bridge.core.KeyedLock;
 import com.rnd.bridge.core.ReadCursor;
 import com.rnd.bridge.intake.lane.CursorStore;
 import com.rnd.bridge.intake.lane.UnstructuredIntakeLane;
+import com.rnd.bridge.intake.model.SourceRecord;
 import com.rnd.bridge.intake.parser.SourceRecordGrouper;
 import com.rnd.bridge.intake.parser.calendar.CalendarReadResult;
 import com.rnd.bridge.intake.parser.calendar.CalendarSourceReader;
@@ -15,6 +16,7 @@ import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.BiFunction;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -35,21 +37,21 @@ public class UnstructuredIntakeController {
     private final CursorStore cursorStore;
     private final CalendarSourceReader calendarSourceReader;
     private final EmailSourceReader emailSourceReader;
-    private final KeyedLock calendarCursorLock;
+    private final KeyedLock tokenCursorLock;
 
     public UnstructuredIntakeController(
             List<UnstructuredIntakeLane> lanes, CursorStore cursorStore, CalendarSourceReader calendarSourceReader,
-            EmailSourceReader emailSourceReader, KeyedLock calendarCursorLock) {
+            EmailSourceReader emailSourceReader, KeyedLock tokenCursorLock) {
         this.lanesBySource = lanes.stream()
                 .collect(Collectors.toMap(UnstructuredIntakeLane::sourceType, Function.identity()));
         this.cursorStore = cursorStore;
         this.calendarSourceReader = calendarSourceReader;
         this.emailSourceReader = emailSourceReader;
-        // Same KeyedLock instance as Calendar's - it's a per-key lock, and the key already
-        // includes the sourceType (see calendarCursorLockKey/emailCursorLockKey), so one shared
-        // bean safely serializes both sources' independent load-read-process-save cycles without
-        // them ever contending on each other's key.
-        this.calendarCursorLock = calendarCursorLock;
+        // One shared KeyedLock instance for every token-cursor source (Calendar, Email, and any
+        // future one) - it's a per-key lock, and the key already includes the sourceType (see
+        // cursorLockKey), so this one bean safely serializes each source's independent
+        // load-read-process-save cycle without them ever contending on each other's key.
+        this.tokenCursorLock = tokenCursorLock;
     }
 
     @PostMapping("/{sourceType}/run")
@@ -88,97 +90,76 @@ public class UnstructuredIntakeController {
     }
 
     /**
-     * Calendar's cursor is a Google syncToken, not a timestamp - Google's contract is that
-     * presenting a syncToken means "only what changed since the sync that produced it", so
-     * advancing to a new token before every record from the read that produced it was actually
-     * published would permanently lose whatever failed (a later poll would never see it again).
-     * Calendar therefore takes a different path through this controller than every other
-     * source: it reads via calendarSourceReader.read(cursor) directly (one single call, exactly
-     * as many events.list round trips as before), not through lane.run(ReadCursor, Instant) -
-     * so the nextSyncToken that call produces comes back as part of the SAME CalendarReadResult
-     * as the records themselves, tied to this one invocation, never to shared reader state that
-     * a second concurrent call could overwrite first (see CalendarReadResult/
-     * RealCalendarSourceReader's javadoc). The already-fetched records are then run through the
-     * lane's normal map/validate/publish loop via the Stream overload of run(). The persistence
-     * rule is otherwise identical to Slack's freeze: only advance on a fully successful run
-     * (rejected == 0); Calendar has no equivalent of Slack's own unconfirmed-group retry path,
-     * so on a partial failure it simply keeps polling from the same syncToken next run.
-     * <p>
-     * The whole load-read-process-save sequence runs under {@link #calendarCursorLock}, keyed by
-     * (CALENDAR, tenantId): without it, two overlapping runs could both load the same stored
-     * token, each fetch their own next token from Google, and then race on cursorStore.save -
-     * the loser's save silently regresses the cursor back behind the winner's, even though the
-     * winner already published everything up to its own token. Holding the lock for the full
-     * transaction (not just around save, and not around load/save separately) is what actually
-     * prevents that: a second run's load() cannot happen until the first run has saved and
-     * released, so it always starts from the first run's result rather than its stale input.
+     * Calendar's cursor is a Google syncToken, not a timestamp - presenting one means "only what
+     * changed since the sync that produced it", tied to the single calendarSourceReader.read(
+     * cursor) call that returned it (see CalendarReadResult/RealCalendarSourceReader's javadoc).
+     * See {@link #runTokenBasedSource} for the shared persistence/locking rules this and
+     * {@link #runEmail} both follow.
      */
     private IntakeResult runCalendar(UnstructuredIntakeLane lane) {
-        AtomicReference<IntakeResult> result = new AtomicReference<>();
-        calendarCursorLock.run(calendarCursorLockKey(TENANT_ID), () -> result.set(runCalendarLocked(lane)));
-        return result.get();
-    }
-
-    private IntakeResult runCalendarLocked(UnstructuredIntakeLane lane) {
-        ReadCursor cursor = cursorStore.load(RawSourceType.CALENDAR, TENANT_ID);
-        Instant asOf = Instant.now();
-        CalendarReadResult calendarRead = calendarSourceReader.read(cursor);
-        IntakeResult result = lane.run(SourceRecordGrouper.groupByCorrelationId(calendarRead.records()).stream(), asOf);
-        if (result.rejected() == 0) {
-            String nextSyncToken = calendarRead.nextSyncToken();
-            // Null means this read never produced a new cursor to advance to (e.g. fixture
-            // mode) - leave whatever's already stored untouched rather than overwriting a real
-            // token with nothing.
-            if (nextSyncToken != null) {
-                cursorStore.save(RawSourceType.CALENDAR, TENANT_ID, new ReadCursor(asOf, nextSyncToken));
-            }
-        }
-        return result;
-    }
-
-    private static String calendarCursorLockKey(String tenantId) {
-        return "%s/%s".formatted(RawSourceType.CALENDAR.name(), tenantId);
+        return runTokenBasedSource(RawSourceType.CALENDAR, cursorLockKey(RawSourceType.CALENDAR, TENANT_ID), lane,
+                cursor -> {
+                    CalendarReadResult read = calendarSourceReader.read(cursor);
+                    return new TokenRead(read.records(), read.nextSyncToken());
+                },
+                ReadCursor::new);
     }
 
     /**
      * Gmail's cursor is a historyId, not a timestamp - same reasoning as Calendar's syncToken
-     * (see runCalendar/runCalendarLocked's javadoc): advancing to a new historyId before every
-     * record from the read that produced it was actually published would permanently lose
-     * whatever failed, since Gmail's history API only ever returns what changed since a given
-     * id, not a replay of everything again. Email therefore takes the same dedicated path as
-     * Calendar - reads via emailSourceReader.read(cursor) directly, with the resulting
-     * nextHistoryId tied to that one call (see EmailReadResult/RealEmailSourceReader's javadoc),
-     * then runs the already-fetched records through the lane's normal map/validate/publish loop
-     * via the Stream overload of run(). Persistence rule is identical to Calendar's: only
-     * advance on a fully successful run (rejected == 0).
-     * Shares calendarCursorLock (not a separate lock) - see the constructor's comment for why
+     * (see {@link #runCalendar}'s javadoc), tied to the single emailSourceReader.read(cursor)
+     * call that returned it (see EmailReadResult/RealEmailSourceReader's javadoc). Shares
+     * tokenCursorLock with Calendar (not a separate lock) - see the constructor's comment for why
      * that's safe: the lock key already encodes the sourceType, so Email and Calendar never
      * contend on each other's key despite using the same KeyedLock instance.
      */
     private IntakeResult runEmail(UnstructuredIntakeLane lane) {
+        return runTokenBasedSource(RawSourceType.EMAIL, cursorLockKey(RawSourceType.EMAIL, TENANT_ID), lane,
+                cursor -> {
+                    EmailReadResult read = emailSourceReader.read(cursor);
+                    return new TokenRead(read.records(), read.nextHistoryId());
+                },
+                (asOf, historyId) -> new ReadCursor(asOf, null, historyId));
+    }
+
+    /**
+     * Shared skeleton for every token-cursor source (Calendar, Email, and any future one): load
+     * the stored cursor, read under that cursor, run the already-fetched records through the
+     * lane's normal map/validate/publish loop, and only advance the stored cursor to the token
+     * this read produced if the run was fully successful (rejected == 0) - a partial failure
+     * simply keeps polling from the same token next run, since the cursor API contract for both
+     * Calendar's syncToken and Email's historyId is "only what changed since this token", so
+     * advancing past a token before everything it produced was actually published would
+     * permanently lose whatever failed.
+     * <p>
+     * {@code reader} is applied inside {@code lock}, not before it - the whole
+     * load-read-process-save sequence must run as one critical section (see
+     * {@link #tokenCursorLock}'s constructor comment), otherwise two overlapping runs could
+     * both load the same stored cursor and race on which one's save wins.
+     */
+    private IntakeResult runTokenBasedSource(
+            RawSourceType sourceType, String lockKey, UnstructuredIntakeLane lane,
+            Function<ReadCursor, TokenRead> reader, BiFunction<Instant, String, ReadCursor> buildCursor) {
         AtomicReference<IntakeResult> result = new AtomicReference<>();
-        calendarCursorLock.run(emailCursorLockKey(TENANT_ID), () -> result.set(runEmailLocked(lane)));
+        tokenCursorLock.run(lockKey, () -> {
+            ReadCursor cursor = cursorStore.load(sourceType, TENANT_ID);
+            Instant asOf = Instant.now();
+            TokenRead read = reader.apply(cursor);
+            IntakeResult r = lane.run(SourceRecordGrouper.groupByCorrelationId(read.records()).stream(), asOf);
+            // Null token means this read never produced a new cursor to advance to (e.g. fixture
+            // mode) - leave whatever's already stored untouched rather than overwriting a real
+            // token with nothing.
+            if (r.rejected() == 0 && read.token() != null) {
+                cursorStore.save(sourceType, TENANT_ID, buildCursor.apply(asOf, read.token()));
+            }
+            result.set(r);
+        });
         return result.get();
     }
 
-    private IntakeResult runEmailLocked(UnstructuredIntakeLane lane) {
-        ReadCursor cursor = cursorStore.load(RawSourceType.EMAIL, TENANT_ID);
-        Instant asOf = Instant.now();
-        EmailReadResult emailRead = emailSourceReader.read(cursor);
-        IntakeResult result = lane.run(SourceRecordGrouper.groupByCorrelationId(emailRead.records()).stream(), asOf);
-        if (result.rejected() == 0) {
-            String nextHistoryId = emailRead.nextHistoryId();
-            // Null means this read never produced a new cursor to advance to (e.g. fixture
-            // mode) - leave whatever's already stored untouched rather than overwriting a real
-            // historyId with nothing.
-            if (nextHistoryId != null) {
-                cursorStore.save(RawSourceType.EMAIL, TENANT_ID, new ReadCursor(asOf, null, nextHistoryId));
-            }
-        }
-        return result;
-    }
+    private record TokenRead(List<SourceRecord> records, String token) {}
 
-    private static String emailCursorLockKey(String tenantId) {
-        return "%s/%s".formatted(RawSourceType.EMAIL.name(), tenantId);
+    private static String cursorLockKey(RawSourceType sourceType, String tenantId) {
+        return "%s/%s".formatted(sourceType.name(), tenantId);
     }
 }
