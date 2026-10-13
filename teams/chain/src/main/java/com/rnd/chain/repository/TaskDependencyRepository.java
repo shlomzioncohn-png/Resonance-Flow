@@ -30,7 +30,7 @@ public interface TaskDependencyRepository {
     /**
      * Same as {@link #findByTaskId(UUID)}, but may be called only from a context that already
      * holds external synchronization equivalent to this repository's own write-exclusivity
-     * guarantee (e.g. {@code DependencyGraphLock}, which every
+     * guarantee (e.g. {@link GraphLock}, which every
      * edge mutation and every cycle-detection traversal already runs under). The default
      * implementation is simply {@link #findByTaskId(UUID)} - safe to call from anywhere, at the
      * cost of this repository's normal internal locking. An implementation MAY override this to

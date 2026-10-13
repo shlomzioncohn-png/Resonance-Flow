@@ -15,6 +15,7 @@ import com.rnd.chain.exception.TaskNotFoundException;
 import com.rnd.chain.events.SchedulingPublishListener;
 import com.rnd.chain.repository.DependencyHistoryRepository;
 import com.rnd.chain.repository.InMemoryDependencyHistoryRepository;
+import com.rnd.chain.repository.InMemoryGraphLock;
 import com.rnd.chain.repository.InMemoryTaskDependencyRepository;
 import com.rnd.chain.repository.InMemoryTaskRepository;
 import com.rnd.chain.repository.InMemoryTransactionRunner;
@@ -77,7 +78,7 @@ class TaskDependencyServiceTest {
         historyRepository = new InMemoryDependencyHistoryRepository();
         transactionRunner = new InMemoryTransactionRunner();
         dependencyEdgeService = new DependencyEdgeService(
-                taskDependencyRepository, new DependencyGraphLock(),
+                taskDependencyRepository, new InMemoryGraphLock(),
                 new TaskCounterUpdater(taskRepository, taskDependencyRepository,
                         new PriorityScoreService(),
                         new SchedulingPublishListener(taskRepository, new SchedulingUpdateService(event -> {}))));
@@ -93,7 +94,7 @@ class TaskDependencyServiceTest {
         TaskDependencyRepository taskDependencyRepository = new InMemoryTaskDependencyRepository(List.of());
         TaskRepository dummyTaskRepository = new InMemoryTaskRepository(List.of());
         DependencyEdgeService dependencyEdgeService = new DependencyEdgeService(
-                taskDependencyRepository, new DependencyGraphLock(),
+                taskDependencyRepository, new InMemoryGraphLock(),
                 new TaskCounterUpdater(dummyTaskRepository, taskDependencyRepository,
                         new PriorityScoreService(),
                         new SchedulingPublishListener(dummyTaskRepository, new SchedulingUpdateService(event -> {}))));
@@ -110,7 +111,7 @@ class TaskDependencyServiceTest {
         TaskRepository taskRepository = new InMemoryTaskRepository(List.of());
         TaskDependencyRepository dummyDependencyRepository = new InMemoryTaskDependencyRepository(List.of());
         DependencyEdgeService dependencyEdgeService = new DependencyEdgeService(
-                dummyDependencyRepository, new DependencyGraphLock(),
+                dummyDependencyRepository, new InMemoryGraphLock(),
                 new TaskCounterUpdater(taskRepository, dummyDependencyRepository,
                         new PriorityScoreService(),
                         new SchedulingPublishListener(taskRepository, new SchedulingUpdateService(event -> {}))));
@@ -353,7 +354,7 @@ class TaskDependencyServiceTest {
         TaskRepository taskRepository = new InMemoryTaskRepository(
                 List.of(newTask(taskA), newTask(taskB)));
         DependencyEdgeService dependencyEdgeService = new DependencyEdgeService(
-                taskDependencyRepository, new DependencyGraphLock(),
+                taskDependencyRepository, new InMemoryGraphLock(),
                 new TaskCounterUpdater(taskRepository, taskDependencyRepository,
                         new PriorityScoreService(),
                         new SchedulingPublishListener(taskRepository, new SchedulingUpdateService(event -> {}))));
@@ -374,7 +375,7 @@ class TaskDependencyServiceTest {
         TaskRepository taskRepository = new InMemoryTaskRepository(
                 List.of(newTask(taskA), newTask(taskB)));
         DependencyEdgeService dependencyEdgeService = new DependencyEdgeService(
-                taskDependencyRepository, new DependencyGraphLock(),
+                taskDependencyRepository, new InMemoryGraphLock(),
                 new TaskCounterUpdater(taskRepository, taskDependencyRepository,
                         new PriorityScoreService(),
                         new SchedulingPublishListener(taskRepository, new SchedulingUpdateService(event -> {}))));
@@ -624,7 +625,7 @@ void addDependency_whenSameMindEventIsRetried_shouldNotApplyDependencyTwice() {
     DependencyEdgeService edgeService =
         new DependencyEdgeService(
                 taskDependencyRepository,
-                new DependencyGraphLock(),
+                new InMemoryGraphLock(),
                 new TaskCounterUpdater(taskRepository, taskDependencyRepository,
                         new PriorityScoreService(),
                         new SchedulingPublishListener(taskRepository, schedulingUpdateService)));

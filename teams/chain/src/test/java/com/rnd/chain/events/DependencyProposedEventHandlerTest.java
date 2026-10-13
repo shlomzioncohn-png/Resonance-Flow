@@ -4,13 +4,13 @@ import com.rnd.chain.dto.Task;
 import com.rnd.chain.dto.TaskDependency;
 import com.rnd.chain.dto.TaskStatus;
 import com.rnd.chain.repository.InMemoryDependencyHistoryRepository;
+import com.rnd.chain.repository.InMemoryGraphLock;
 import com.rnd.chain.repository.InMemoryTaskDependencyRepository;
 import com.rnd.chain.repository.InMemoryTaskRepository;
 import com.rnd.chain.repository.InMemoryTransactionRunner;
 import com.rnd.chain.repository.InMemoryUnresolvedDependencyRepository;
 import com.rnd.chain.events.SchedulingPublishListener;
 import com.rnd.chain.service.DependencyEdgeService;
-import com.rnd.chain.service.DependencyGraphLock;
 import com.rnd.chain.service.PriorityScoreService;
 import com.rnd.chain.service.SchedulingUpdateService;
 import com.rnd.chain.service.TaskCounterUpdater;
@@ -68,7 +68,7 @@ class DependencyProposedEventHandlerTest {
         DependencyEdgeService edgeService =
                 new DependencyEdgeService(
                         dependencyRepo,
-                        new DependencyGraphLock(),
+                        new InMemoryGraphLock(),
                         new TaskCounterUpdater(taskRepo, dependencyRepo, new PriorityScoreService(),
                                 new SchedulingPublishListener(taskRepo, schedulingUpdateService)));
 

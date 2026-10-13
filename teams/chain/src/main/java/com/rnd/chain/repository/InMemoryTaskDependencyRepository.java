@@ -27,7 +27,7 @@ import java.util.stream.Collectors;
  * synchronized flat list, so both findByTaskId and findByDependsOnTaskId were a full O(E) linear
  * scan under a lock - and since DependencyEdgeService.wouldCreateCycle's DFS calls findByTaskId
  * once per visited node, one cycle check cost O(V*E) total, all of it held under
- * dependencyGraphLock (a de facto single-writer bottleneck that gets worse as the graph grows).
+ * the graph lock (a de facto single-writer bottleneck that gets worse as the graph grows).
  *
  * <p><b>Invariant</b> (must hold after every {@link #save} / {@link #delete}):
  * for every dependency edge {@code A -> B} (A depends on B):
@@ -102,7 +102,7 @@ public class InMemoryTaskDependencyRepository implements TaskDependencyRepositor
     /**
      * Overrides the interface default to skip {@link #lock} entirely - safe only because every
      * caller of this method already runs holding the
-     * {@code DependencyGraphLock}, which is exclusive with every write this repository ever
+     * {@link GraphLock}, which is exclusive with every write this repository ever
      * makes ({@link #save}/{@link #delete} are only ever invoked from inside that same lock).
      * See the interface Javadoc ({@link TaskDependencyRepository#findByTaskIdUnderExternalLock})
      * for the full contract this override relies on. Avoids an uncontended (but not free)

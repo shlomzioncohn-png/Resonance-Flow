@@ -6,6 +6,7 @@ import com.rnd.chain.repository.ConstraintRepository;
 import com.rnd.chain.repository.DependencyHistoryRepository;
 import com.rnd.chain.repository.InMemoryConstraintRepository;
 import com.rnd.chain.repository.InMemoryDependencyHistoryRepository;
+import com.rnd.chain.repository.InMemoryGraphLock;
 import com.rnd.chain.repository.InMemoryTaskDependencyRepository;
 import com.rnd.chain.repository.InMemoryTaskRepository;
 import com.rnd.chain.repository.InMemoryTransactionRunner;
@@ -16,7 +17,6 @@ import com.rnd.chain.repository.TransactionRunner;
 import com.rnd.chain.repository.UnresolvedDependencyRepository;
 import com.rnd.chain.events.SchedulingPublishListener;
 import com.rnd.chain.service.DependencyEdgeService;
-import com.rnd.chain.service.DependencyGraphLock;
 import com.rnd.chain.service.PriorityScoreService;
 import com.rnd.chain.service.SchedulingUpdateService;
 import com.rnd.chain.service.TaskCounterUpdater;
@@ -154,7 +154,7 @@ ChainEventProcessingTemplate chainEventProcessingTemplate() {
 
             return new DependencyEdgeService(
                     taskDependencyRepository,
-                    new DependencyGraphLock(),
+                    new InMemoryGraphLock(),
                     new TaskCounterUpdater(taskRepository, taskDependencyRepository,
                             new PriorityScoreService(),
                             new SchedulingPublishListener(taskRepository, schedulingUpdateService)));

@@ -5,6 +5,7 @@ import com.rnd.chain.dto.TaskDependency;
 import com.rnd.chain.dto.TaskEligibilityResponse;
 import com.rnd.chain.dto.TaskStatus;
 import com.rnd.chain.exception.TaskNotFoundException;
+import com.rnd.chain.repository.GraphLock;
 import com.rnd.chain.repository.TaskDependencyRepository;
 import com.rnd.chain.repository.TaskRepository;
 
@@ -22,7 +23,7 @@ import java.util.UUID;
 import java.util.concurrent.atomic.AtomicReference;
 
 /**
- * Task status transitions and the readiness they imply; see {@link DependencyGraphLock} for the
+ * Task status transitions and the readiness they imply; see {@link GraphLock} for the
  * locking rationale.
  *
  * <p>{@code @Transactional} on the methods below now provides real atomicity and rollback -
@@ -37,18 +38,18 @@ public class TaskEligibilityService {
 
     private final TaskRepository taskRepository;
     private final TaskDependencyRepository taskDependencyRepository;
-    private final DependencyGraphLock dependencyGraphLock;
+    private final GraphLock graphLock;
     private final TaskCounterUpdater taskCounterUpdater;
 
     public TaskEligibilityService(
             TaskRepository taskRepository,
             TaskDependencyRepository taskDependencyRepository,
-            DependencyGraphLock dependencyGraphLock,
+            GraphLock graphLock,
             TaskCounterUpdater taskCounterUpdater) {
 
         this.taskRepository = taskRepository;
         this.taskDependencyRepository = taskDependencyRepository;
-        this.dependencyGraphLock = dependencyGraphLock;
+        this.graphLock = graphLock;
         this.taskCounterUpdater = taskCounterUpdater;
     }
 
@@ -80,7 +81,7 @@ public class TaskEligibilityService {
                 newStatus,
                 "newStatus must not be null");
 
-        synchronized (dependencyGraphLock) {
+        graphLock.runExclusive(() -> {
 
             AtomicReference<Task> previous =
                     new AtomicReference<>();
@@ -114,14 +115,14 @@ public class TaskEligibilityService {
                         taskId,
                         1);
             }
-        }
+        });
     }
 
     /**
      * Same status-change effect as {@link #onTaskStatusChanged}, but for a producer (task.updated)
      * whose events carry no id and must be ordered by the {@code updatedAt} on the event itself.
      * The staleness check, status write, and {@code updatedAt} stamp all happen inside one
-     * {@code dependencyGraphLock} critical section, so a redelivered or out-of-order event cannot
+     * graph-lock critical section, so a redelivered or out-of-order event cannot
      * interleave between them (PR #467 review).
      *
      * @throws TaskNotFoundException if no task with {@code taskId} exists
@@ -132,7 +133,7 @@ public class TaskEligibilityService {
         Objects.requireNonNull(newStatus, "newStatus must not be null");
         Objects.requireNonNull(eventUpdatedAt, "eventUpdatedAt must not be null");
 
-        synchronized (dependencyGraphLock) {
+        graphLock.runExclusive(() -> {
             Task current = taskCounterUpdater.requireTask(taskId);
             if (current.getUpdatedAt() != null && !eventUpdatedAt.isAfter(current.getUpdatedAt())) {
                 log.debug("Task {} status update ignored: event updatedAt {} is not newer than stored {}",
@@ -150,7 +151,7 @@ public class TaskEligibilityService {
             } else if (previousStatus == TaskStatus.DONE && newStatus != TaskStatus.DONE) {
                 adjustDependentsBlockingCount(taskId, 1);
             }
-        }
+        });
     }
 
     /**
@@ -164,7 +165,7 @@ public class TaskEligibilityService {
         Objects.requireNonNull(taskId, "taskId must not be null");
         Objects.requireNonNull(kafkaTimestamp, "kafkaTimestamp must not be null");
 
-        synchronized (dependencyGraphLock) {
+        graphLock.runExclusive(() -> {
             Task current = taskCounterUpdater.requireTask(taskId);
             if (current.getStatus() == TaskStatus.DONE) {
                 return;
@@ -179,7 +180,7 @@ public class TaskEligibilityService {
             TaskCounterUpdater.requireUpdated(taskRepository.update(taskId, task ->
                     TaskCounterUpdater.copyOf(task).status(TaskStatus.DONE).build()), taskId);
             adjustDependentsBlockingCount(taskId, -1);
-        }
+        });
     }
 
     private void adjustDependentsBlockingCount(

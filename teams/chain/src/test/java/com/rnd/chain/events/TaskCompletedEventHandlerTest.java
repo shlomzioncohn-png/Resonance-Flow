@@ -4,11 +4,11 @@ import com.rnd.chain.dto.Task;
 import com.rnd.chain.dto.TaskDependency;
 import com.rnd.chain.dto.TaskStatus;
 import com.rnd.chain.repository.InMemoryConstraintRepository;
+import com.rnd.chain.repository.InMemoryGraphLock;
 import com.rnd.chain.repository.InMemoryTaskDependencyRepository;
 import com.rnd.chain.repository.InMemoryTaskRepository;
 import com.rnd.chain.events.SchedulingPublishListener;
 import com.rnd.chain.service.SchedulingUpdateService;
-import com.rnd.chain.service.DependencyGraphLock;
 import com.rnd.chain.service.PriorityScoreService;
 import com.rnd.chain.service.TaskCounterUpdater;
 import com.rnd.chain.service.TaskEligibilityService;
@@ -57,7 +57,7 @@ class TaskCompletedEventHandlerTest {
         InMemoryTaskDependencyRepository dependencyRepo = new InMemoryTaskDependencyRepository(edges);
         SchedulingUpdateService scheduling = mock(SchedulingUpdateService.class);
         TaskEligibilityService service = new TaskEligibilityService(taskRepo, dependencyRepo,
-                new DependencyGraphLock(), new TaskCounterUpdater(taskRepo, dependencyRepo,
+                new InMemoryGraphLock(), new TaskCounterUpdater(taskRepo, dependencyRepo,
                         new PriorityScoreService(), new SchedulingPublishListener(taskRepo, scheduling)));
         ChainEventProcessingTemplate template = new ChainEventProcessingTemplate(new InMemoryProcessedEventStore());
         return new Fixture(taskRepo, new TaskCompletedEventHandler(service, template));

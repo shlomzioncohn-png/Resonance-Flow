@@ -9,6 +9,7 @@ import com.rnd.chain.events.SchedulingPublishListener;
 import com.rnd.chain.events.SchedulingUpdatePublisher;
 import com.rnd.chain.events.TaskSchedulingUpdatedEvent;
 import com.rnd.chain.repository.InMemoryConstraintRepository;
+import com.rnd.chain.repository.InMemoryGraphLock;
 import com.rnd.chain.repository.InMemoryTaskDependencyRepository;
 import com.rnd.chain.repository.InMemoryTaskRepository;
 import com.rnd.chain.testsupport.TestTransactions;
@@ -37,7 +38,7 @@ class ConstraintEligibilityServiceTest {
         dependencyRepository = new InMemoryTaskDependencyRepository(List.of());
         publisher = new RecordingSchedulingUpdatePublisher();
         SchedulingUpdateService schedulingUpdateService = new SchedulingUpdateService(publisher);
-        DependencyGraphLock lock = new DependencyGraphLock();
+        InMemoryGraphLock lock = new InMemoryGraphLock();
         TaskCounterUpdater counterUpdater = new TaskCounterUpdater(taskRepository, dependencyRepository,
                 new PriorityScoreService(), new SchedulingPublishListener(taskRepository, schedulingUpdateService));
         constraintRepository = new InMemoryConstraintRepository();

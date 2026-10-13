@@ -11,6 +11,7 @@ import com.rnd.chain.exception.InvalidDependencyException;
 import com.rnd.chain.exception.InvalidRequestException;
 import com.rnd.chain.exception.TaskNotFoundException;
 import com.rnd.chain.repository.InMemoryConstraintRepository;
+import com.rnd.chain.repository.InMemoryGraphLock;
 import com.rnd.chain.repository.InMemoryTaskDependencyRepository;
 import com.rnd.chain.repository.InMemoryTaskRepository;
 import com.rnd.chain.testsupport.TestTransactions;
@@ -41,7 +42,7 @@ class TaskEligibilityServiceTest {
         dependencyRepository = new InMemoryTaskDependencyRepository(List.of());
         publisher = new RecordingSchedulingUpdatePublisher();
         SchedulingUpdateService schedulingUpdateService = new SchedulingUpdateService(publisher);
-        DependencyGraphLock lock = new DependencyGraphLock();
+        InMemoryGraphLock lock = new InMemoryGraphLock();
         TaskCounterUpdater counterUpdater = new TaskCounterUpdater(
                 taskRepository, dependencyRepository, new PriorityScoreService(),
                 new SchedulingPublishListener(taskRepository, schedulingUpdateService));
@@ -445,7 +446,7 @@ class TaskEligibilityServiceTest {
         InMemoryConstraintRepository constraintRepo = new InMemoryConstraintRepository();
         RecordingSchedulingUpdatePublisher fixturePublisher = new RecordingSchedulingUpdatePublisher();
         SchedulingUpdateService scheduling = new SchedulingUpdateService(fixturePublisher);
-        DependencyGraphLock lock = new DependencyGraphLock();
+        InMemoryGraphLock lock = new InMemoryGraphLock();
         TaskCounterUpdater counterUpdater = new TaskCounterUpdater(
                 taskRepo, dependencyRepo, new PriorityScoreService(),
                 new SchedulingPublishListener(taskRepo, scheduling));

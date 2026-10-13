@@ -4,6 +4,7 @@ import com.rnd.chain.dto.Task;
 import com.rnd.chain.dto.TaskStatus;
 import com.rnd.chain.dto.TaskTestFixtures;
 import com.rnd.chain.events.SchedulingPublishListener;
+import com.rnd.chain.repository.InMemoryGraphLock;
 import com.rnd.chain.repository.InMemoryTaskDependencyRepository;
 import com.rnd.chain.repository.InMemoryTaskRepository;
 import org.junit.jupiter.api.Test;
@@ -72,7 +73,7 @@ class TaskEligibilityServiceConcurrencyTest {
         InMemoryTaskRepository taskRepository = new InMemoryTaskRepository(allTasks);
         InMemoryTaskDependencyRepository dependencyRepository = new InMemoryTaskDependencyRepository(List.of());
         SchedulingUpdateService scheduling = new SchedulingUpdateService(event -> {});
-        DependencyGraphLock lock = new DependencyGraphLock();
+        InMemoryGraphLock lock = new InMemoryGraphLock();
         TaskCounterUpdater counterUpdater = new TaskCounterUpdater(taskRepository, dependencyRepository,
                 new PriorityScoreService(), new SchedulingPublishListener(taskRepository, scheduling));
         TaskEligibilityService service = new TaskEligibilityService(
@@ -104,7 +105,7 @@ class TaskEligibilityServiceConcurrencyTest {
         InMemoryTaskRepository taskRepository = new InMemoryTaskRepository(allTasks);
         InMemoryTaskDependencyRepository dependencyRepository = new InMemoryTaskDependencyRepository(List.of());
         SchedulingUpdateService scheduling = new SchedulingUpdateService(event -> {});
-        DependencyGraphLock lock = new DependencyGraphLock();
+        InMemoryGraphLock lock = new InMemoryGraphLock();
         TaskCounterUpdater counterUpdater = new TaskCounterUpdater(taskRepository, dependencyRepository,
                 new PriorityScoreService(), new SchedulingPublishListener(taskRepository, scheduling));
         TaskEligibilityService service = new TaskEligibilityService(
@@ -135,7 +136,7 @@ class TaskEligibilityServiceConcurrencyTest {
      *
      * <p>The race: {@code addDependency(dependent, target)} and
      * {@code onTaskStatusChanged(target, DONE)} both read the target's DONE status under
-     * {@code dependencyGraphLock} before deciding whether the new edge counts against
+     * the graph lock before deciding whether the new edge counts against
      * {@code blockingCount} - see the comments in both methods. Run many times (not just once)
      * because a lock-ordering bug here would only reproduce on some interleavings, and a single
      * pass could pass by luck even with the bug present.
@@ -156,7 +157,7 @@ class TaskEligibilityServiceConcurrencyTest {
                     List.of(TaskTestFixtures.defaultTask(dependentId).build(), TaskTestFixtures.defaultTask(targetId).build()));
             InMemoryTaskDependencyRepository dependencyRepository = new InMemoryTaskDependencyRepository(List.of());
             SchedulingUpdateService scheduling = new SchedulingUpdateService(event -> {});
-            DependencyGraphLock lock = new DependencyGraphLock();
+            InMemoryGraphLock lock = new InMemoryGraphLock();
             TaskCounterUpdater counterUpdater = new TaskCounterUpdater(taskRepository, dependencyRepository,
                     new PriorityScoreService(), new SchedulingPublishListener(taskRepository, scheduling));
             TaskEligibilityService service = new TaskEligibilityService(
