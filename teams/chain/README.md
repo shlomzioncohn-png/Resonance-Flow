@@ -208,7 +208,8 @@ the handler fails, so a retry can process the event again. `task.created`, `task
 event id, so they rely on their state changes being safe to repeat. `task.completed` has no
 timestamp either, so its Kafka record timestamp is compared against the stored `updated_at` (to
 ignore a completion that arrives after a reopen) but never written to it; this is interim until
-Inbox adds `completed_at` to the event. The current
+Inbox adds `completed_at` to the event. `TaskStateReconciliationService` likewise never writes
+`updated_at` when it corrects counters, so it can't make a genuine `task.updated` look stale. The current
 `InMemoryProcessedEventStore` guards a single running instance only and loses all claims on restart,
 so it is not safe for production or for several instances of this service. See its Javadoc for what
 a claim does and doesn't guarantee.
