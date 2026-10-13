@@ -108,5 +108,5 @@ candidates = await resolve_dependency_targets(store, ["the DB upgrade"])  # [[Se
 
 ## Known limitations (flag these in review)
 
-- `Settings.duplicate_similarity_threshold` is an untuned placeholder -- no caller applies it yet.
+- `Settings.duplicate_similarity_threshold` (0.90) and `dependency_match_threshold` (0.80) are both untuned guesses -- neither has been checked against labeled data.
 - Real-data coverage is just the 2-document FUNSD slice (PR #141) -- enough to validate pipeline shape, not recall quality.
