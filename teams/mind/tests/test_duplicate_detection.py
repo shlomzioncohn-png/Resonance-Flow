@@ -62,6 +62,17 @@ async def test_different_tasks_with_surface_wording_similarity_are_not_flagged(s
     assert match is None
 
 
+async def test_threshold_defaults_to_settings_when_not_passed(store):
+    await store.upsert(
+        "task-db-upgrade",
+        embed(task_text("Upgrade the production database", "Move to the new major version")),
+    )
+
+    match = await find_duplicate(store, "Database onboarding doc", "Write a guide for new hires on our DB setup")
+
+    assert match is None
+
+
 async def test_empty_store_never_flags_a_duplicate(store):
     match = await find_duplicate(
         store, "Upgrade the production database", "Move to the new version",

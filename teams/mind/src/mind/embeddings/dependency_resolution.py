@@ -7,6 +7,7 @@ strings in, one ranked result list out per string, same order.
 
 import asyncio
 
+from mind.config import get_settings
 from mind.embeddings.base import SearchResult, VectorStore
 from mind.embeddings.search import nearest_tasks
 
@@ -21,15 +22,16 @@ async def resolve_dependency_targets(
     threshold: float | None = None,
     is_query: bool = True,
 ) -> list[list[SearchResult]]:
-    """Up to k candidates per reference, same order as the input. #245's
-    default (threshold=None): no filtering, Yonit decides. #244: pass
-    Settings.dependency_match_threshold. is_query=True (default) is #245/
-    #244's mention-vs-passage case; #471 passes is_query=False (full task
-    vs full task -- symmetric, see nearest_tasks()). Propagates ValueError
+    """Up to k candidates per reference, same order as the input. "No
+    match" is the default: threshold=None reads Settings.dependency_match_threshold,
+    not "no filtering" -- pass threshold=0.0 explicitly for the raw,
+    unfiltered ranked list. is_query=True (default) is #245/#244's
+    mention-vs-passage case; #471 passes is_query=False (full task vs
+    full task -- symmetric, see nearest_tasks()). Propagates ValueError
     on empty text, same as embed()."""
+    if threshold is None:
+        threshold = get_settings().dependency_match_threshold
     results = await asyncio.gather(
         *(nearest_tasks(store, text, k=k, is_query=is_query) for text in references)
     )
-    if threshold is None:
-        return results
     return [[c for c in candidates if c.similarity >= threshold] for candidates in results]
