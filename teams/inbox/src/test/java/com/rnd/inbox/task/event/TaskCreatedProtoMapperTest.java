@@ -119,6 +119,36 @@ class TaskCreatedProtoMapperTest {
     }
 
     @Test
+    void toProto_mapsZoomSourceType() {
+        Map<String, Object> payload = minimalPayload();
+        payload.put("sourceType", "ZOOM");
+
+        TaskCreatedEvent event = mapper.toProto(payload);
+
+        assertThat(event.getSourceType()).isEqualTo(SourceType.SOURCE_TYPE_ZOOM);
+    }
+
+    @Test
+    void toProto_mapsBigBlueButtonSourceType() {
+        Map<String, Object> payload = minimalPayload();
+        payload.put("sourceType", "BIGBLUEBUTTON");
+
+        TaskCreatedEvent event = mapper.toProto(payload);
+
+        assertThat(event.getSourceType()).isEqualTo(SourceType.SOURCE_TYPE_BIGBLUEBUTTON);
+    }
+
+    @Test
+    void toProto_stillMapsMeetingSourceType() {
+        Map<String, Object> payload = minimalPayload();
+        payload.put("sourceType", "MEETING");
+
+        TaskCreatedEvent event = mapper.toProto(payload);
+
+        assertThat(event.getSourceType()).isEqualTo(SourceType.SOURCE_TYPE_MEETING);
+    }
+
+    @Test
     void toProto_throwsForSourceTypeNotYetInProtoSchema() {
         Map<String, Object> payload = minimalPayload();
         payload.put("sourceType", "NOT_A_REAL_VALUE");
