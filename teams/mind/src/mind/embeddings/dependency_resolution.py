@@ -37,6 +37,9 @@ async def resolve_dependency_targets(
     # nothing but completed rows; filtering afterward would then discard
     # everything even with a real open match just outside that window.
     results = await asyncio.gather(
-        *(nearest_tasks(store, text, k=k, is_query=is_query, exclude_completed=True) for text in references)
+        *(
+            nearest_tasks(store, text, k=k, is_query=is_query, exclude_completed=True)
+            for text in references
+        )
     )
     return [[c for c in candidates if c.similarity >= threshold] for candidates in results]

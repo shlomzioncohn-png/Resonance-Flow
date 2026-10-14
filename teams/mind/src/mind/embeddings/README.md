@@ -32,6 +32,7 @@ from fastapi import FastAPI
 from mind.config import get_settings
 from mind.embeddings.pgvector_store import PgVectorStore
 
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     store = PgVectorStore(get_settings().vector_store)
@@ -77,7 +78,9 @@ from mind.embeddings.pgvector_store import PgVectorStore
 
 store = PgVectorStore(get_settings().vector_store)
 
-vector = await embed_async(task_text(task.title, task.description))  # is_query=False (default) for indexing
+vector = await embed_async(
+    task_text(task.title, task.description)
+)  # is_query=False (default) for indexing
 await store.upsert(task.id, vector)
 
 similar = await store.search(vector, k=5)  # best match first
@@ -103,8 +106,12 @@ await store.mark_incomplete(task_id)  # e.g. a DONE task got reopened
 ```python
 from mind.embeddings import resolve_dependency_targets
 
-candidates = await resolve_dependency_targets(store, ["the DB upgrade"])  # filtered, [[SearchResult(...), ...]]
-candidates = await resolve_dependency_targets(store, ["the DB upgrade"], threshold=0.0)  # raw, unfiltered
+candidates = await resolve_dependency_targets(
+    store, ["the DB upgrade"]
+)  # filtered, [[SearchResult(...), ...]]
+candidates = await resolve_dependency_targets(
+    store, ["the DB upgrade"], threshold=0.0
+)  # raw, unfiltered
 ```
 
 `find_duplicate(store, title, description, *, threshold=None)` (`duplicate_detection.py`, #471) is the same pattern: `threshold=None` reads `Settings.duplicate_similarity_threshold`.

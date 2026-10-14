@@ -22,7 +22,8 @@ class SearchResult(BaseModel):
         description="Cosine similarity, comparable to Settings.duplicate_similarity_threshold",
     )
     is_completed: bool = Field(
-        default=False, description="DONE/REJECTED/CANCELLED -- any status the index treats as finished."
+        default=False,
+        description="DONE/REJECTED/CANCELLED -- any status the index treats as finished.",
     )
 
 

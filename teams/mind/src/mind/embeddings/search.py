@@ -6,7 +6,12 @@ from mind.embeddings.embeddings import embed_async
 
 
 async def nearest_tasks(
-    store: VectorStore, text: str, *, k: int, is_query: bool = False, exclude_completed: bool = False
+    store: VectorStore,
+    text: str,
+    *,
+    k: int,
+    is_query: bool = False,
+    exclude_completed: bool = False,
 ) -> list[SearchResult]:
     """embed_async(text) then store.search(vector, k=k). is_query=True for
     #245 (asymmetric mention-vs-passage); False (default) for #471's

@@ -34,7 +34,9 @@ async def clean_store(store):
 
 
 async def test_a_near_identical_task_is_flagged_as_a_likely_duplicate(store):
-    existing = task_text("Upgrade the production database", "Move to the new major version before Q2")
+    existing = task_text(
+        "Upgrade the production database", "Move to the new major version before Q2"
+    )
     await store.upsert("task-db-upgrade", embed(existing))
 
     match = await find_duplicate(
@@ -54,9 +56,15 @@ async def test_different_tasks_with_surface_wording_similarity_are_not_flagged(s
         embed(task_text("Upgrade the production database", "Move to the new major version")),
     )
 
-    candidate_title, candidate_description = "Database onboarding doc", "Write a guide for new hires on our DB setup"
+    candidate_title, candidate_description = (
+        "Database onboarding doc",
+        "Write a guide for new hires on our DB setup",
+    )
     match = await find_duplicate(
-        store, candidate_title, candidate_description, threshold=get_settings().duplicate_similarity_threshold
+        store,
+        candidate_title,
+        candidate_description,
+        threshold=get_settings().duplicate_similarity_threshold,
     )
 
     assert match is None
@@ -68,14 +76,18 @@ async def test_threshold_defaults_to_settings_when_not_passed(store):
         embed(task_text("Upgrade the production database", "Move to the new major version")),
     )
 
-    match = await find_duplicate(store, "Database onboarding doc", "Write a guide for new hires on our DB setup")
+    match = await find_duplicate(
+        store, "Database onboarding doc", "Write a guide for new hires on our DB setup"
+    )
 
     assert match is None
 
 
 async def test_empty_store_never_flags_a_duplicate(store):
     match = await find_duplicate(
-        store, "Upgrade the production database", "Move to the new version",
+        store,
+        "Upgrade the production database",
+        "Move to the new version",
         threshold=get_settings().duplicate_similarity_threshold,
     )
 
@@ -85,7 +97,9 @@ async def test_empty_store_never_flags_a_duplicate(store):
 async def test_a_completed_task_is_never_flagged_as_a_duplicate(store):
     """find_duplicate() is built on resolve_dependency_targets() -- inherits
     its is_completed filter, doesn't need its own separate logic."""
-    existing = task_text("Upgrade the production database", "Move to the new major version before Q2")
+    existing = task_text(
+        "Upgrade the production database", "Move to the new major version before Q2"
+    )
     await store.upsert("task-db-upgrade", embed(existing))
     await store.mark_completed("task-db-upgrade")
 
@@ -106,12 +120,16 @@ async def test_a_completed_top_match_does_not_starve_out_an_open_runner_up(store
     duplicate exists just outside that k=1 window."""
     await store.upsert(
         "task-db-upgrade-done",
-        embed(task_text("Upgrade the production database", "Move to the new major version before Q2")),
+        embed(
+            task_text("Upgrade the production database", "Move to the new major version before Q2")
+        ),
     )
     await store.mark_completed("task-db-upgrade-done")
     await store.upsert(
         "task-db-upgrade-open",
-        embed(task_text("Upgrade the production database", "Move to a newer major version before Q3")),
+        embed(
+            task_text("Upgrade the production database", "Move to a newer major version before Q3")
+        ),
     )
 
     match = await find_duplicate(

@@ -38,7 +38,8 @@ async def clean_store(store):
 async def test_resolves_a_strong_match(store):
     """Realistic short mention, not a copy of the task's own words."""
     await store.upsert(
-        "task-db-upgrade", embed(task_text("Upgrade the production database", "Move to the new major version"))
+        "task-db-upgrade",
+        embed(task_text("Upgrade the production database", "Move to the new major version")),
     )
 
     [candidates] = await resolve_dependency_targets(store, ["the DB upgrade"])
@@ -51,14 +52,18 @@ async def test_resolves_a_weak_match(store):
     threshold=0.0 on purpose: this test is about ranking, not filtering
     (see test_threshold_* below for that)."""
     await store.upsert(
-        "task-db-upgrade", embed(task_text("Upgrade the production database", "Move to the new major version"))
+        "task-db-upgrade",
+        embed(task_text("Upgrade the production database", "Move to the new major version")),
     )
     await store.upsert(
-        "task-unrelated", embed(task_text("Plan the team offsite catering", "Order food for the offsite"))
+        "task-unrelated",
+        embed(task_text("Plan the team offsite catering", "Order food for the offsite")),
     )
 
     [strong] = await resolve_dependency_targets(store, ["the DB upgrade"], threshold=0.0)
-    [weak] = await resolve_dependency_targets(store, ["something about a database maybe"], threshold=0.0)
+    [weak] = await resolve_dependency_targets(
+        store, ["something about a database maybe"], threshold=0.0
+    )
 
     assert strong[0].task_id == "task-db-upgrade"
     assert weak[0].task_id == "task-db-upgrade"
@@ -69,13 +74,16 @@ async def test_weak_match_with_a_similar_sibling_still_lands_in_top_k(store):
     """Correct = in top k, not necessarily #1 -- a real near-duplicate
     sibling is allowed to outrank it. threshold=0.0: ranking, not filtering."""
     await store.upsert(
-        "task-db-upgrade", embed(task_text("Upgrade the production database", "Move to the new major version"))
+        "task-db-upgrade",
+        embed(task_text("Upgrade the production database", "Move to the new major version")),
     )
     await store.upsert(
-        "task-db-backup", embed(task_text("Back up the production database", "Create a backup before the migration"))
+        "task-db-backup",
+        embed(task_text("Back up the production database", "Create a backup before the migration")),
     )
     await store.upsert(
-        "task-catering", embed(task_text("Plan the team offsite catering", "Order food for the offsite"))
+        "task-catering",
+        embed(task_text("Plan the team offsite catering", "Order food for the offsite")),
     )
 
     [candidates] = await resolve_dependency_targets(
@@ -107,10 +115,12 @@ async def test_no_strong_match_when_the_store_has_only_unrelated_tasks(store):
     """Threshold rejects every candidate outright -- not just a relatively
     lower score, an actually empty result (#133's real contract)."""
     await store.upsert(
-        "task-catering", embed(task_text("Plan the team offsite catering", "Order food for the offsite"))
+        "task-catering",
+        embed(task_text("Plan the team offsite catering", "Order food for the offsite")),
     )
     await store.upsert(
-        "task-standup-notes", embed(task_text("Write up standup notes", "Notes from yesterday's standup"))
+        "task-standup-notes",
+        embed(task_text("Write up standup notes", "Notes from yesterday's standup")),
     )
 
     [candidates] = await resolve_dependency_targets(
@@ -122,13 +132,16 @@ async def test_no_strong_match_when_the_store_has_only_unrelated_tasks(store):
 
 async def test_resolves_multiple_references_independently_in_order(store):
     await store.upsert(
-        "task-db-upgrade", embed(task_text("Upgrade the production database", "Move to the new major version"))
+        "task-db-upgrade",
+        embed(task_text("Upgrade the production database", "Move to the new major version")),
     )
     await store.upsert(
         "task-release-notes", embed(task_text("Write release notes", "Release notes for v2.3"))
     )
 
-    results = await resolve_dependency_targets(store, ["the DB upgrade", "release notes for v2.3"], threshold=0.0)
+    results = await resolve_dependency_targets(
+        store, ["the DB upgrade", "release notes for v2.3"], threshold=0.0
+    )
 
     assert len(results) == 2
     assert results[0][0].task_id == "task-db-upgrade"
@@ -147,10 +160,12 @@ async def test_threshold_defaults_to_settings_not_unfiltered(store):
     explicit threshold=None call must filter exactly like passing
     Settings.dependency_match_threshold would."""
     await store.upsert(
-        "task-db-upgrade", embed(task_text("Upgrade the production database", "Move to the new major version"))
+        "task-db-upgrade",
+        embed(task_text("Upgrade the production database", "Move to the new major version")),
     )
     await store.upsert(
-        "task-catering", embed(task_text("Plan the team offsite catering", "Order food for the offsite"))
+        "task-catering",
+        embed(task_text("Plan the team offsite catering", "Order food for the offsite")),
     )
 
     [candidates] = await resolve_dependency_targets(store, ["the DB upgrade"])
@@ -160,10 +175,12 @@ async def test_threshold_defaults_to_settings_not_unfiltered(store):
 
 async def test_threshold_drops_weak_candidates(store):
     await store.upsert(
-        "task-db-upgrade", embed(task_text("Upgrade the production database", "Move to the new major version"))
+        "task-db-upgrade",
+        embed(task_text("Upgrade the production database", "Move to the new major version")),
     )
     await store.upsert(
-        "task-catering", embed(task_text("Plan the team offsite catering", "Order food for the offsite"))
+        "task-catering",
+        embed(task_text("Plan the team offsite catering", "Order food for the offsite")),
     )
 
     [candidates] = await resolve_dependency_targets(
@@ -235,7 +252,8 @@ async def test_a_completed_task_is_never_returned_as_a_live_match(store):
     task must not come back as a dependency match even though it's still
     the strongest-scoring candidate in the index."""
     await store.upsert(
-        "task-db-upgrade", embed(task_text("Upgrade the production database", "Move to the new major version"))
+        "task-db-upgrade",
+        embed(task_text("Upgrade the production database", "Move to the new major version")),
     )
     await store.mark_completed("task-db-upgrade")
 

@@ -182,12 +182,12 @@ class PgVectorStore(VectorStore):
                 (str(self._settings.search_effort),),
             )
             await cur.execute(
-                self._search_query(exclude_completed=exclude_completed), (query_vector, query_vector, k)
+                self._search_query(exclude_completed=exclude_completed),
+                (query_vector, query_vector, k),
             )
             rows = await cur.fetchall()
             return [
-                SearchResult(task_id=row[0], similarity=row[1], is_completed=row[2])
-                for row in rows
+                SearchResult(task_id=row[0], similarity=row[1], is_completed=row[2]) for row in rows
             ]
 
     async def search_text(self, query: str, k: int) -> list[SearchResult]:
