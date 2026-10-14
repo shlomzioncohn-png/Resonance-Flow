@@ -1,10 +1,12 @@
 """Tests for mind.evaluation.extraction_contract.ExtractedItem.
 
 Covers: the required/optional fields (and that there are exactly two), the
-non-empty constraints on `title` and `description`, `to_comparison_text` (both
-branches), that the extraction pipeline's real models — `ExtractedFields` and
-`TaskCreationRequested` — validate as-is, including a meeting's output whose
-`source_ref` is `None`, and that `ExtractedItem`s feed
+non-empty constraints on `title` and `description`, that an item is frozen,
+`to_comparison_text` (both
+branches), that the extraction pipeline's real models — `ExtractedFields`,
+`ExtractedFieldsWithClassification` and `TaskCreationRequested` — validate as-is,
+including a meeting's output whose `source_ref` is `None` and output with the
+classification switched on, and that `ExtractedItem`s feed
 the eval end to end through `evaluate_extracted_items`, a thin wrapper over
 `evaluate_extraction`.
 """
@@ -16,14 +18,18 @@ from pydantic import ValidationError
 
 from mind.contracts.base_enums import SourceType
 from mind.contracts.task_creation_requested import TaskCreationRequested
-from mind.contracts.task_enums import RoleContext
+from mind.contracts.task_enums import RoleContext, TaskTier
 from mind.evaluation.extraction_contract import ExtractedItem
 from mind.evaluation.extraction_eval import (
     evaluate_extracted_items,
     evaluate_extraction,
     placeholder_similarity,
 )
-from mind.extraction.models import ExtractedFields
+from mind.extraction.models import (
+    EffortBasis,
+    ExtractedFields,
+    ExtractedFieldsWithClassification,
+)
 
 
 def test_minimal_valid_item_has_only_a_title():
@@ -74,7 +80,16 @@ def test_empty_description_is_rejected():
         ExtractedItem(title="PM to book a meeting room", description="")
 
 
-# The two tests below build the extraction pipeline's *real* models, not
+def test_an_item_is_frozen_after_validation():
+    # An item that passed the contract cannot be edited into one that would not
+    # have — so evaluate_extracted_items only ever scores validated items.
+    item = ExtractedItem(title="PM to book a meeting room", description="before Friday")
+
+    with pytest.raises(ValidationError):
+        item.description = ""  # type: ignore[misc]
+
+
+# The tests below build the extraction pipeline's *real* models, not
 # hand-written dicts that only look like them: a renamed or retyped field on
 # either side fails here instead of surfacing when the eval first runs on real
 # output.
@@ -97,8 +112,7 @@ def test_the_pipelines_extracted_fields_for_a_meeting_validate():
     assert item.to_comparison_text() == (
         "PM to present the components concept. at the next meeting"
     )
-    assert not hasattr(item, "source_ref")
-    assert not hasattr(item, "has_dependencies")
+    assert set(item.model_dump()) == {"title", "description"}
 
 
 def test_the_pipelines_blank_description_arrives_as_none():
@@ -113,10 +127,30 @@ def test_the_pipelines_blank_description_arrives_as_none():
     assert item.description is None
 
 
+def test_the_pipelines_classified_fields_validate_and_classification_is_dropped():
+    # With ExtractionConfig.classify on, the same call also returns tier, urgency,
+    # role_context and an effort estimate. The switch must not break the contract,
+    # and none of it reaches the eval: it measures finding, not classifying.
+    fields = ExtractedFieldsWithClassification(
+        title="PM to present the components concept",
+        has_dependencies=False,
+        tier=TaskTier.TACTICAL,
+        role_context=RoleContext.MANAGER,
+        urgency=3,
+        effort_estimate_minutes=60,
+        effort_estimate_basis=EffortBasis.INFERRED,
+    )
+
+    item = ExtractedItem.model_validate(fields.model_dump())
+
+    assert item.to_comparison_text() == "PM to present the components concept"
+    assert set(item.model_dump()) == {"title", "description"}
+
+
 def test_a_task_creation_requested_validates_and_extra_fields_are_dropped():
     # The pipeline's outbound contract feeds this model directly: the eval keeps
     # its two fields, everything else is ignored (extra="ignore") — including
-    # role_context (classification fills it, not extraction) and source_ref
+    # role_context (classification, not finding) and source_ref
     # (not the meeting id).
     task = TaskCreationRequested(
         tenant_id=UUID(int=1),
@@ -133,9 +167,24 @@ def test_a_task_creation_requested_validates_and_extra_fields_are_dropped():
 
     assert item.title == "PM to present the components concept"
     assert item.description is None
-    assert not hasattr(item, "source_ref")
-    assert not hasattr(item, "role_context")
-    assert not hasattr(item, "urgency")
+    assert set(item.model_dump()) == {"title", "description"}
+
+
+def test_a_hand_built_task_with_an_empty_description_is_rejected():
+    # The one rule stricter than TaskCreationRequested: it allows description="",
+    # this contract spells "no description" as None only. The pipeline never
+    # produces "" (ExtractedFields maps blanks to None); a hand-built payload can.
+    task = TaskCreationRequested(
+        tenant_id=UUID(int=1),
+        title="PM to present the components concept",
+        description="",
+        source_type=SourceType.MEETING,
+        has_dependencies=False,
+        confidence=0.9,
+    )
+
+    with pytest.raises(ValidationError, match="description"):
+        ExtractedItem.model_validate(task.model_dump())
 
 
 _ITEMS = [

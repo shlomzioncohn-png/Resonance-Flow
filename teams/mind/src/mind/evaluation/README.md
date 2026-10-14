@@ -483,13 +483,17 @@ outbound contract stays `TaskCreationRequested`.
 | `title` | yes | head of the comparison string |
 | `description` | no | appended to `title` (`title + ". " + description`) when present — design §3.3 |
 
-**Which field carries the meeting id (issue #233, step 1): none.** `source_ref` in
-the extraction pipeline is a pointer found *inside the content* (a message id, a
-URL) and is dropped when the text does not contain it (`extraction/grounding.py`),
-so for a meeting transcript it is `None`. The eval is what sends each meeting to
-the extractor, so it holds the meeting id itself: it passes it in as the
-extractor's `item_key` and reads it back from `ExtractionSuccess` /
-`ExtractionFailure`, grouping items by meeting before they are scored.
+**Which field carries the meeting id (issue #233, step 1): none.** `source_ref` is a
+pointer back to the original item: today it is read from *inside the content* and
+dropped when the text does not contain it (`extraction/grounding.py`), so for a
+meeting transcript it is `None`; once the Bridge consumer passes
+`RawObjectEvent.source_ref` through (#31) it becomes the source system's own id (a
+Zoom meeting uuid, a Slack `channel_id:ts`). Neither is the AMI meeting code, and
+the eval does not go through Bridge. The eval is what sends each meeting to the
+extractor, so it holds the meeting id itself: it passes it in as the extractor's
+`item_key` and reads it back from `ExtractionSuccess` / `ExtractionFailure` — both
+outcomes carry it (`extraction/README.md`, "A failed item can be found") —
+grouping items by meeting before they are scored.
 
 `ExtractedItem.to_comparison_text()` produces the string `evaluate_extraction`
 matches. Pipeline output enters the eval through
@@ -497,19 +501,25 @@ matches. Pipeline output enters the eval through
 `ExtractedItem`s — so the extracted side has to pass the contract before it is
 scored — and is otherwise a thin wrapper over `evaluate_extraction` (the
 string-level version the CLI and fixture use). Field names match the pipeline's
-`ExtractedFields` and `TaskCreationRequested` (`contracts/task_creation_requested.py`)
-and `extra="ignore"`, so a full payload validates as-is — `source_ref` is simply
-ignored, and extraction's classification fields
-(`tier`, `urgency`, `role_context`, `confidence`, `deadline`, …) are deliberately
-absent: extraction P/R measures "did we find the right action items", not "did we
-classify them right". `role_context` is also not *set* at extraction — the
-classification stage fills it (`extraction/assembly.py`); it joins this contract
-as an optional field when the owner-match diagnostic (design §3.7) is built.
+`ExtractedFields` (and its subclass `ExtractedFieldsWithClassification`) and
+`TaskCreationRequested` (`contracts/task_creation_requested.py`), and
+`extra="ignore"`, so the pipeline's full payload validates as-is — `source_ref`
+is simply ignored. One rule is stricter than `TaskCreationRequested`: an empty
+`description` is rejected, so "no description" is spelled `None` only (the
+pipeline already maps blank answers to `None`). Items are frozen, so one that
+passed validation cannot be edited into one that would not have. The
+classification fields (`tier`, `urgency`, `role_context`, the effort
+estimate) are deliberately absent even though the pipeline can now fill them in
+the extraction call itself (#351/#352, `ExtractionConfig.classify`): extraction
+P/R measures "did we find the right action items", not "did we classify them
+right". `role_context` joins this contract as an optional field when the
+owner-match diagnostic (design §3.7) is built.
 
-**Status: proposed by R1, not yet agreed with Yonit** — pending her confirmation
-that the pipeline output fits this shape and that `item_key` passes through
-unchanged (`extraction_eval_design.md`
-§"Meeting IDs", `TODO(Yonit)`).
+**Status: agreed with Yonit (R2), 2026-10-14** (#233 step 5): `title` +
+`description` is the comparison text, and the meeting id travels as the
+extractor's `item_key`, which reaches both outcomes unchanged (documented on the
+pipeline's side, `extraction/README.md`). This is the one place the contract's
+status is kept; the module docstring and `extraction_eval_design.md` point here.
 
 ### This eval is approximate
 
