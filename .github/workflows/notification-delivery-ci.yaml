@@ -56,9 +56,13 @@ jobs:
     env:
       CHART_DIR: teams/relay/helm/resonance-flow
       SERVICE: notification-delivery
-      # Not setup-service-infra's "<service>-cluster": the ci job may be running that one on
-      # the same self-hosted machine.
-      KIND_CLUSTER: notification-delivery-e2e-cluster
+      # Unique per run: several branches/PRs (and the ci job's setup-service-infra cluster) may
+      # be running on the same self-hosted machine, which shares one Docker daemon. The image
+      # tags are per-run for the same reason - a concurrent build would overwrite a shared tag
+      # before `kind load` picks it up.
+      KIND_CLUSTER: nd-e2e-${{ github.run_id }}-${{ github.run_attempt }}
+      IMAGE_TAG: e2e-${{ github.run_id }}-${{ github.run_attempt }}
+      E2E_IMAGE: notification-delivery-e2e:e2e-${{ github.run_id }}-${{ github.run_attempt }}
 
     steps:
       - uses: actions/checkout@v7
@@ -95,8 +99,8 @@ jobs:
 
       - name: Build and load the notification-delivery image
         run: |
-          docker build --build-context shared=shared -t "$SERVICE:local" teams/relay/notification_delivery
-          kind load docker-image "$SERVICE:local" --name "$KIND_CLUSTER"
+          docker build --build-context shared=shared -t "$SERVICE:$IMAGE_TAG" teams/relay/notification_delivery
+          kind load docker-image "$SERVICE:$IMAGE_TAG" --name "$KIND_CLUSTER"
 
       - name: Deploy chart with notification-delivery enabled
         run: |
@@ -105,7 +109,7 @@ jobs:
             -f "$RUNNER_TEMP/components-all-off.yaml" \
             -f "$CHART_DIR/values/values-${SERVICE}.yaml" \
             --set "components.${SERVICE}.image.repository=${SERVICE}" \
-            --set "components.${SERVICE}.image.tag=local" \
+            --set "components.${SERVICE}.image.tag=${IMAGE_TAG}" \
             --set "components.${SERVICE}.image.pullPolicy=Never" \
             --namespace "$SERVICE" \
             --wait --timeout 420s
@@ -124,3 +128,9 @@ jobs:
             kubectl -n "$SERVICE" logs "$pod" --all-containers --previous --tail=100 || true
             echo "::endgroup::"
           done
+
+      # Per-run tags would otherwise pile up on the self-hosted runner's Docker daemon
+      # (helm/kind-action's post step already deletes the cluster).
+      - name: Remove per-run images
+        if: always()
+        run: docker image rm -f "$SERVICE:$IMAGE_TAG" "$E2E_IMAGE" >/dev/null 2>&1 || true
