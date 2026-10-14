@@ -7,6 +7,7 @@ import java.util.Objects;
 
 public record Deal(
         String dealId,
+        String sourceRefPrefix,
         String title,
         String description,
         DealStage stage,
@@ -28,6 +29,13 @@ public record Deal(
         if (dealId.isBlank()) {
             throw new IllegalArgumentException("dealId must not be blank");
         }
+        // HubSpot/JSON never set this explicitly (the synthetic dataset has no such field, and
+        // Jackson leaves an absent record component null) - "crm:" is every source's prefix
+        // except Salesforce's, so null defaults to it rather than every other call site having to
+        // repeat it.
+        if (sourceRefPrefix == null) {
+            sourceRefPrefix = "crm:";
+        }
     }
 
     public static Builder builder() {
@@ -40,6 +48,7 @@ public record Deal(
      */
     public static final class Builder {
         private String dealId = "D-00000";
+        private String sourceRefPrefix = "crm:";
         private String title = "Untitled deal";
         private String description;
         private DealStage stage = DealStage.PROSPECT;
@@ -58,6 +67,11 @@ public record Deal(
 
         public Builder dealId(String dealId) {
             this.dealId = dealId;
+            return this;
+        }
+
+        public Builder sourceRefPrefix(String sourceRefPrefix) {
+            this.sourceRefPrefix = sourceRefPrefix;
             return this;
         }
 
@@ -122,7 +136,7 @@ public record Deal(
         }
 
         public Deal build() {
-            return new Deal(dealId, title, description, stage, ownerEmail, ownerName,
+            return new Deal(dealId, sourceRefPrefix, title, description, stage, ownerEmail, ownerName,
                     closeDate, dealValue, currency, crmAccountSlug, sourceUrl, createdAt, stageChangedAt);
         }
     }

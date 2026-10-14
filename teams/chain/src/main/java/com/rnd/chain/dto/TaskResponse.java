@@ -9,7 +9,7 @@ import java.util.UUID;
  * list, same purpose (don't leak the domain object directly into API responses) - adapted only
  * where that branch's own field list disagrees with the real {@link Task}, now sourced verbatim
  * from chain/ruthHoltzman/dependency-repository-66 (immutable, no setters): here score is a
- * {@code Double}, not an {@code Integer}, and there is no ownerId field on this response,
+ * {@code Double}, not an {@code Integer},
  * matching the Riki-Kaplan branch precedent's field list rather than adding a field it didn't
  * have.
  */

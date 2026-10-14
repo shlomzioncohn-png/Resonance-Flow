@@ -1,4 +1,4 @@
-import { elevationTokens, radiusTokens } from './tokens'
+import { elevationTokens, radiusTokens } from './tokens';
 
 /**
  * Tokens that don't have a home in MUI's built-in theme shape (MUI's own
@@ -8,20 +8,20 @@ import { elevationTokens, radiusTokens } from './tokens'
  * `theme.custom.radius.lg` instead of a local magic number.
  */
 export interface LensCustomTokens {
-  radius: typeof radiusTokens
-  elevation: typeof elevationTokens
+  radius: typeof radiusTokens;
+  elevation: typeof elevationTokens;
 }
 
 declare module '@mui/material/styles' {
   interface Theme {
-    custom: LensCustomTokens
+    custom: LensCustomTokens;
   }
   interface ThemeOptions {
-    custom?: LensCustomTokens
+    custom?: LensCustomTokens;
   }
 }
 
 export const custom: LensCustomTokens = {
   radius: radiusTokens,
   elevation: elevationTokens,
-}
+};

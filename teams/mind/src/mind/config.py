@@ -36,14 +36,35 @@ class EmbeddingModelSettings(BaseSettings):
     model_cache_dir: str | None = Field(default=None, validation_alias="MODEL_CACHE_DIR")
 
 
+class ASRSettings(BaseSettings):
+    """Standalone, like EmbeddingModelSettings -- transcribe() needs no DSN.
+
+    Where the weights are looked for, in order (see asr._model_path()):
+    `<whisper_models_dir>/<whisper_model>/` if set -- the Dockerfile sets it to
+    the copy baked into the image -- then `download_dir`, which is also where a
+    local-dev fallback download lands (models/whisper/, see models/README.md).
+    """
+
+    model_config = SettingsConfigDict(env_file=_ENV_FILE, extra="ignore")
+
+    # The #135 decision; must match CHOSEN_WHISPER_SIZE in benchmarks/asr_benchmark.py.
+    whisper_model: str = Field(default="base.en", validation_alias="WHISPER_MODEL")
+    whisper_models_dir: str | None = Field(default=None, validation_alias="WHISPER_MODELS_DIR")
+    model_cache_dir: str = Field(default="./models", validation_alias="MODEL_CACHE_DIR")
+
+    @property
+    def download_dir(self) -> Path:
+        return Path(self.model_cache_dir) / "whisper" / self.whisper_model
+
+
 class VectorStoreSettings(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     dsn: Secret[PostgresDsn]
     table: str = "task_embeddings"
     search_effort: int = Field(default=400, ge=1)
-    # Must match embed()'s real output dimension.
-    embedding_dim: int = Field(default=384, ge=1)
+    # No embedding_dim: the column width is baked into the migration
+    # (migrations/versions/0001_initial_vector_schema.py), not config.
 
 
 class _ChartVectorStoreSource(PydanticBaseSettingsSource):
@@ -80,7 +101,10 @@ class Settings(BaseSettings):
     environment: Literal["local", "ci", "staging", "production"] = "local"
     api_port: int = Field(default=8000, ge=1, le=65535)
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"] = "INFO"
-    duplicate_similarity_threshold: float = Field(default=0.90, ge=0.0, le=1.0)
+    # Calibrated via benchmarks/threshold_calibration.py, not a guess -- see
+    # embeddings/README.md "Threshold calibration" for the table and method.
+    duplicate_similarity_threshold: float = Field(default=0.761, ge=0.0, le=1.0)
+    dependency_match_threshold: float = Field(default=0.666, ge=0.0, le=1.0)
     vector_store: VectorStoreSettings
     embedding_model: EmbeddingModelSettings = Field(default_factory=EmbeddingModelSettings)
 
@@ -106,4 +130,5 @@ class Settings(BaseSettings):
 @lru_cache
 def get_settings() -> Settings:
     """Construct (once, cached) and return the Settings."""
+    # vector_store has no default -- mypy can't see pydantic-settings fills it in.
     return Settings()  # type: ignore[call-arg]

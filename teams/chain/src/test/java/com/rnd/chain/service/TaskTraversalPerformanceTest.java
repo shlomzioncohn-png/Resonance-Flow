@@ -122,7 +122,6 @@ class TaskTraversalPerformanceTest {
             tasks.add(Task.builder()
                     .id(ids[i])
                     .parentTaskId(parentTaskId[i])
-                    .ownerId("owner")
                     .status(TaskStatus.PENDING)
                     .build());
         }

@@ -37,11 +37,11 @@ file.
 
 ### Colors
 
-| Token | Value | Used for |
-|---|---|---|
-| `colorTokens.brand[600]` | `#4f46e5` | `palette.primary.main` — buttons, links, active nav, focus ring |
-| `colorTokens.slate[50..950]` | `#f8fafc` → `#0b1120` | `palette.grey`, text, dividers, the dark sidebar surface |
-| `colorTokens.green` / `amber` / `red` | — | `palette.success` / `warning` / `error` (form & feedback semantics) |
+| Token                                 | Value                 | Used for                                                            |
+| ------------------------------------- | --------------------- | ------------------------------------------------------------------- |
+| `colorTokens.brand[600]`              | `#4f46e5`             | `palette.primary.main` — buttons, links, active nav, focus ring     |
+| `colorTokens.slate[50..950]`          | `#f8fafc` → `#0b1120` | `palette.grey`, text, dividers, the dark sidebar surface            |
+| `colorTokens.green` / `amber` / `red` | —                     | `palette.success` / `warning` / `error` (form & feedback semantics) |
 
 ### Status palette (`theme.palette.status`)
 
@@ -52,12 +52,12 @@ meaning — task/project/blocker state — as opposed to MUI's `success` /
 "this task is blocked" would make snackbar styling and workflow-health
 styling impossible to change independently.
 
-| Tone | `main` (dot / border) | `bg` (fill) | `text` (label) | Meaning |
-|---|---|---|---|---|
-| `healthy` | green 600 | green 50 | green 700 | Healthy / Good / Completed |
-| `warning` | amber 600 | amber 50 | amber 700 | At risk / In progress / Delayed |
-| `critical` | red 600 | red 50 | red 700 | Critical / Blocked |
-| `neutral` | slate 500 | slate 100 | slate 700 | Unknown / N/A |
+| Tone       | `main` (dot / border) | `bg` (fill) | `text` (label) | Meaning                         |
+| ---------- | --------------------- | ----------- | -------------- | ------------------------------- |
+| `healthy`  | green 600             | green 50    | green 700      | Healthy / Good / Completed      |
+| `warning`  | amber 600             | amber 50    | amber 700      | At risk / In progress / Delayed |
+| `critical` | red 600               | red 50      | red 700        | Critical / Blocked              |
+| `neutral`  | slate 500             | slate 100   | slate 700      | Unknown / N/A                   |
 
 Usage: `theme.palette.status.healthy.main`, or via `StatusBadge` (see below).
 `text` is always a dark, accessible shade — never white-on-tint — so labels
@@ -85,12 +85,12 @@ for spacing.
 most components) is `10px`. For places that need a different step, use
 `theme.custom.radius`:
 
-| Token | Value | Used for |
-|---|---|---|
-| `radius.sm` | 6px | Buttons, list items, small controls |
-| `radius.md` | 10px | Cards, panels (`theme.shape.borderRadius`) |
-| `radius.lg` | 16px | Larger surfaces, modals |
-| `radius.pill` | 999px | Chips, status badges |
+| Token         | Value | Used for                                   |
+| ------------- | ----- | ------------------------------------------ |
+| `radius.sm`   | 6px   | Buttons, list items, small controls        |
+| `radius.md`   | 10px  | Cards, panels (`theme.shape.borderRadius`) |
+| `radius.lg`   | 16px  | Larger surfaces, modals                    |
+| `radius.pill` | 999px | Chips, status badges                       |
 
 ### Elevation
 
@@ -100,11 +100,11 @@ use a hairline border and a very soft shadow, not heavy elevation). Instead of
 redefining all 25 steps, `theme.custom.elevation` gives three named,
 purpose-built shadows:
 
-| Token | Used for |
-|---|---|
-| `elevation.card` | Default card/panel shadow (very subtle) |
-| `elevation.raised` | Hover/dragging state |
-| `elevation.overlay` | Menus, popovers, dialogs |
+| Token               | Used for                                |
+| ------------------- | --------------------------------------- |
+| `elevation.card`    | Default card/panel shadow (very subtle) |
+| `elevation.raised`  | Hover/dragging state                    |
+| `elevation.overlay` | Menus, popovers, dialogs                |
 
 ### Breakpoints
 
@@ -131,8 +131,8 @@ color/theme-related belongs in `theme/components.ts`, not there.
 ## MUI usage conventions
 
 1. **Read colors, spacing, and radii from the theme, not literals.** `sx={{
-   bgcolor: 'primary.main' }}` or `bgcolor: 'grey.100'`, not `bgcolor:
-   '#4f46e5'`. If a value doesn't exist on the theme yet, add it to
+bgcolor: 'primary.main' }}` or `bgcolor: 'grey.100'`, not `bgcolor:
+'#4f46e5'`. If a value doesn't exist on the theme yet, add it to
    `theme/tokens.ts` rather than inlining it — see `Sidebar.tsx` and
    `Header.tsx` for the pattern (no component in `components/layout` hardcodes
    a color).
@@ -162,9 +162,9 @@ color/theme-related belongs in `theme/components.ts`, not there.
 ## When to create a LENS-specific component
 
 Only when there's a real **product abstraction or behavior** MUI doesn't
-express — not to rename or reskin an existing MUI component. Ask: *does this
+express — not to rename or reskin an existing MUI component. Ask: _does this
 encode domain knowledge (a mapping, a business rule, a composed
-interaction), or is it just MUI with different default styling?* The latter
+interaction), or is it just MUI with different default styling?_ The latter
 belongs in `theme/components.ts`.
 
 **Example that qualifies:** `components/ui/StatusBadge`. Workflow-health
@@ -176,9 +176,9 @@ text label (never color alone — see Accessibility), which is exactly the
 kind of small, justified abstraction this rule allows:
 
 ```tsx
-import StatusBadge from '@/components/ui/StatusBadge'
+import StatusBadge from '@/components/ui/StatusBadge';
 
-<StatusBadge status="critical" label="Blocked" />
+<StatusBadge status="critical" label="Blocked" />;
 ```
 
 See it in use in `app/(app)/manager/workload/page.tsx`.
@@ -196,7 +196,7 @@ is the theme's first real consumer and demonstrates the conventions above:
 - `Sidebar.tsx` is a permanently dark surface (a deliberate product choice,
   independent of light/dark mode) built entirely from theme values —
   `theme.palette.grey[900]` for the background, `alpha(theme.palette.common.white,
-  …)` for text/hover/divider opacity steps, `theme.typography.*.fontWeight`
+…)` for text/hover/divider opacity steps, `theme.typography.*.fontWeight`
   for active vs. inactive nav item weight. No hex literal appears in the file.
 - `Header.tsx` uses `theme.custom.radius.sm` for the search field and
   `grey.100` for its background.
@@ -220,7 +220,7 @@ is the theme's first real consumer and demonstrates the conventions above:
   `IconButton` itself (not just a `Tooltip` title) — see the notifications
   button in `Header.tsx`.
 - **Live regions for async state**: `LoadingState` uses `role="status"
-  aria-live="polite"`; `ErrorState` uses `role="alert"`. Reuse these
+aria-live="polite"`; `ErrorState` uses `role="alert"`. Reuse these
   components for new async views instead of building ad hoc loading/error UI.
 - **Contrast**: `text.primary` on `background.default`/`paper` and all four
   `status` tones' `text` color on their `bg` fill meet WCAG AA (≥4.5:1) at

@@ -54,8 +54,15 @@ def describe_validation_error(error: ValidationError) -> str:
     return "; ".join(parts)
 
 
-def parse_response(text: str) -> ExtractedFields:
-    """Read one answer into `ExtractedFields`, or raise `MalformedOutput`.
+def parse_response(
+    text: str,
+    schema: type[ExtractedFields] = ExtractedFields,
+) -> ExtractedFields:
+    """Read one answer into `schema`, or raise `MalformedOutput`.
+
+    `schema` is which shape was asked for: the basic fields alone, or with
+    the classification and effort estimate. It defaults to the basic one so
+    that every existing caller keeps the behaviour it had.
 
     Every rejection path raises the same exception type: for the extractor a
     failed parse and a failed validation are the same normal event, and both
@@ -76,6 +83,6 @@ def parse_response(text: str) -> ExtractedFields:
     # { ... } span above, so anything json.loads accepts here is an object.
 
     try:
-        return ExtractedFields.model_validate(payload)
+        return schema.model_validate(payload)
     except ValidationError as exc:
         raise MalformedOutput(describe_validation_error(exc)) from exc

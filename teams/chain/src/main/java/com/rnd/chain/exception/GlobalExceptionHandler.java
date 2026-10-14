@@ -51,6 +51,20 @@ public class GlobalExceptionHandler {
                         request.getRequestURI()));
     }
 
+    @ExceptionHandler(CrossTenantDependencyException.class)
+    public ResponseEntity<ApiError> handleCrossTenantDependency(
+            CrossTenantDependencyException ex,
+            HttpServletRequest request) {
+
+        return ResponseEntity
+                .status(HttpStatus.BAD_REQUEST)
+                .body(new ApiError(
+                        HttpStatus.BAD_REQUEST.value(),
+                        "CROSS_TENANT_DEPENDENCY",
+                        ex.getMessage(),
+                        request.getRequestURI()));
+    }
+
     @ExceptionHandler(BadRequestException.class)
     public ResponseEntity<ApiError> handleBadRequest(
             BadRequestException ex,

@@ -5,6 +5,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from mind.evaluation.baseline_models import (
+    LongestDescriptionModel,
     NearestDeadlineModel,
     SkipBlockedNearestDeadlineModel,
 )
@@ -45,8 +46,8 @@ def main() -> None:
     parser.add_argument(
         "--model", type=str, default="dummy",
         help="Model to evaluate: 'dummy' (constant score, plumbing only), "
-             "'nearest-deadline' or 'skip-blocked-nearest-deadline' (the cheap "
-             "baselines from eval/personas/README.md's 'Cheap-baseline scores' table).",
+             "'nearest-deadline', 'skip-blocked-nearest-deadline' or 'longest-description' "
+             "(the cheap baselines from eval/personas/README.md's 'Cheap-baseline scores' table).",
     )
     parser.add_argument(
         "--personas", type=str, default="eval/personas",
@@ -91,6 +92,7 @@ def main() -> None:
         "dummy": DummyModel(),
         "nearest-deadline": NearestDeadlineModel(),
         "skip-blocked-nearest-deadline": SkipBlockedNearestDeadlineModel(),
+        "longest-description": LongestDescriptionModel(),
     }
     try:
         model = models[args.model]

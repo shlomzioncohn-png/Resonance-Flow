@@ -3,7 +3,8 @@
 Local OCR + ASR preprocessing.
 
 - OCR: scanned documents / PDFs (validated against RVL-CDIP / FUNSD).
-- ASR: meeting audio / recordings (validated against AMI, ICSI, QMSum, MeetingBank).
+- ASR: meeting audio / recordings (validated against AMI so far -- two meetings;
+  ICSI, QMSum, MeetingBank not yet).
 - Output feeds `extraction/` through the same interface as text-native sources.
 - **OCR: resolved — Tesseract, `--psm 11`** (sparse text), decided with the
   mentor on latency and memory: ~0.5s and ~34MB per page vs. ~40–46s and
@@ -65,14 +66,20 @@ Local OCR + ASR preprocessing.
     `LOW_CONFIDENCE_THRESHOLD` (**60**, a module constant: a starting point
     rather than a tuned value, it flags 12% of correct words and catches ~55%
     of real errors -- see above and the comment on the constant in `ocr.py`).
-  - `reason: OCRFailureReason | None`, `error: str | None`, `retryable: bool`
-    -- set when `success` is `False` (`reason` exactly then). `error` is the
-    message for logs; `reason` is what to branch on, and the split that
-    matters is *data* versus *environment* (and a third, a bug of ours):
+  - `reason: OCRFailureReason | None`, `error: str | None`,
+    `failure_category: FailureCategory | None`, `retryable: bool` -- set when
+    `success` is `False` (`reason` exactly then). `error` is the message for
+    logs; `reason` is what to branch on finely, `failure_category` (`DATA` /
+    `ENVIRONMENT` / `BUG`, shared with ASR -- see "Shared by OCR and ASR" below)
+    how to treat the document, and `retryable` is `failure_category ==
+    ENVIRONMENT`. The split that matters is *data* versus *environment* (and a
+    third, a bug of ours):
     - data failures (retrying gives the same result, drop the document):
       `EMPTY_INPUT`, `UNREADABLE_FORMAT` (not a readable image or PDF --
-      decided by PIL / `pypdfium2` *before* tesseract runs, so a corrupt or
-      truncated file is never confused with a broken install),
+      decided by PIL / `pypdfium2` *before* tesseract runs -- or is even looked
+      for -- so a corrupt or truncated file is never confused with a broken
+      install: a junk file on a host without tesseract is still
+      `UNREADABLE_FORMAT`, not `OCR_UNAVAILABLE`),
       `NO_TEXT_RECOGNIZED` (a valid image/PDF in which no text was found:
       blank or too poor);
     - environment failures, `retryable=True` (nothing is wrong with the
@@ -129,13 +136,13 @@ Local OCR + ASR preprocessing.
   `%PDF-` magic-byte check covers the real cases); a typed failure reason so a
   data failure can be told from an environment one; the per-document counts;
   `pages`; and the page cap. *Whether a document is scanned* is the caller's
-  decision, not `ocr.py`'s: `RawObjectEvent.modality` already has
+  decision, not `ocr.py`'s: `RawObjectRef.modality` (per object) already has
   `Modality.SCANNED_DOC` and `SourceType.SCANNED_DOC` exists, so no new
   `source_type` value is needed (#188 looks stale). The open question is on
   Bridge's side: Bridge sets `modality` for the media lane (a scanned-docs
   directory is always `SCANNED_DOC`) and, for unstructured attachments, derives
   it from the MIME type (`image/*` and `application/pdf` give `SCANNED_DOC`; no
-  MIME type gives `TEXT`, the contract's default), so a scanned file whose MIME
+  MIME type gives `TEXT`), so a scanned file whose MIME
   type is missing would be routed down the text path -- R2 keeps `content_type`
   plus a magic-byte check as a fallback.
 
@@ -146,11 +153,215 @@ Local OCR + ASR preprocessing.
   PDF, a blank page in the middle, corrupted file and PDF, blank scan, empty
   input, low-confidence words) and skips without it; the FUNSD-backed ones
   additionally skip if `local-data/` isn't populated.
-- **ASR: known risk, not just "open"** — no decision exists, and it
-  cannot exist yet: there is no AMI audio (or any audio) sample
-  anywhere in this repo, on any branch, to benchmark Whisper against
-  (one branch, `michal/real-data-slice`, has an AMI package, but it's
-  the text-only manual-annotations package, not audio).
-  `WHISPER_MODEL=base` in `.env.example` is an **unverified
-  placeholder**, not a decision — do not use it for capacity planning.
-  See `benchmarks/ocr-asr-benchmark.md` "Known risk" / "Open item".
+- **ASR: resolved — Whisper `base.en`**, run locally with `faster-whisper`
+  (int8, CPU), `WHISPER_MODEL=base.en` in `.env.example`. Chosen over
+  `tiny.en` and `small.en` on two AMI meetings (IS1008b, IB4003; 63 min of
+  `Mix-Headset` audio), two runs, on accuracy per unit of latency:
+  - `base.en`: rough WER 0.263–0.265, word precision 0.919–0.923, ~10x faster
+    than real time on a quiet machine (RTF 0.10, ~3 min per 30-min meeting;
+    up to RTF ~0.3 measured under load), ~2GB peak memory *in the benchmark*
+    (a whole 30-min meeting in one pass -- `asr.py` transcribes in chunks and
+    peaks at ~440–550 MiB, see "ASR: built" below).
+  - `small.en` is 0.9–1.6 points better on rough WER and ~5x slower (~17 min
+    per 30-min meeting; slower than real time under load).
+  - `tiny.en`'s rough WER is within noise of base's (0.4–1.3 points worse),
+    but its precision is lower in both runs (0.900–0.910): more wrong words
+    reaching `extraction/`. The closer call — tiny is the fallback if latency
+    becomes the binding constraint.
+
+  **Known risks, not hidden behind the pick:**
+  - n=2 meetings from one corpus.
+  - The accuracy number is a rough word diff against AMI's human transcript
+    (no normalization), not a real WER.
+  - Run-to-run variance (~1 point on the same input) is about the size of
+    the gaps between sizes, and latency varies up to 3x between runs.
+
+  Benchmark numbers (whole meetings, one pass): RTF ~0.1 typical / ~0.3 worst
+  measured, ~2GB peak memory, ~750–1,400s CPU time per ~30-min meeting on a
+  dev machine (4 threads, no GPU). See `benchmarks/ocr-asr-benchmark.md` "ASR
+  — final decision" and "ASR — known risks". For what the service itself
+  costs, see the resource budget under "ASR: built".
+- **ASR: built (`asr.py`, #478).** `transcribe(content: bytes, *, filename: str =
+  "", max_duration_s: float = 600) -> ASRResult` -- the raw bytes of any audio
+  FFmpeg reads (wav, mp3, m4a, ogg, webm, mp4 audio; detected from the bytes),
+  decoded with PyAV to 16 kHz mono and transcribed with Whisper `base.en`. It
+  never raises. Fields:
+  - `success: bool`, `text: str` -- every segment's text, one line per segment.
+  - `segments: list[TranscriptSegment]`, in order, each with:
+    - `text`, and `start` / `end` in seconds **from the start of the recording**
+      (not of a chunk) -- the audio counterpart of OCR's page index, for R2's
+      `extraction_provenance` ("from 14:32 to 14:40"). Not for `source_ref`,
+      which Bridge now sends as event metadata.
+    - Whisper's own scores, passed through unchanged (#478: no score invented on
+      top of them): `avg_logprob` -- mean token log-probability, **natural log,
+      <= 0** (not Tesseract's 0–100: OCR's cut-off of 60 has no counterpart);
+      `compression_ratio` -- catches Whisper's characteristic failure, a confident
+      loop on a hard stretch, that `avg_logprob` misses (Whisper treats > 2.4 as a
+      failed decode); `no_speech_prob` (0–1).
+    - `confidence = exp(avg_logprob)`, the same number out of log space (0–1),
+      derived rather than stored.
+    - **Granularity:** faster-whisper computes those three scores once per ~30 s
+      decoding window and gives every segment of the window the same values --
+      they are not per segment. Aggregate by duration, not by segment count.
+  - `mean_confidence: float | None` -- the **duration-weighted** mean of the
+    segments' `confidence` (R2 consumes this rather than computing her own);
+    `low_confidence_segments` / `low_confidence_count` -- the segments below
+    `LOW_CONFIDENCE_THRESHOLD = exp(-1.0) ~= 0.37`, which is Whisper's own
+    `log_prob_threshold` (the point at which it re-decodes a segment), not a
+    cut-off of ours; a starting point to calibrate against extraction, like OCR's.
+  - How much of the recording the transcript covers -- **two independent,
+    stored booleans** (not derived from the durations, unlike OCR's
+    `truncated`; both can be true at once):
+    - `truncated` -- **we** stopped before the end: the `max_duration_s` cap, or
+      `TRANSCRIBE_TIMEOUT_S`.
+    - `incomplete_file` -- the **file** is shorter than it says: a decode error
+      after valid audio, or a header declaring more audio than the file holds (a
+      WAV's RIFF data size, read without decoding; the container's length for
+      MP3/M4A), beyond max(0.5 s, 5%). What decoded is transcribed, minus the
+      segments ending within `BREAK_MARGIN_S = 1` s of the break (a sentence cut
+      there is where Whisper invents or loops; R2 preferred dropping them to
+      flagging them). Before this, a WAV or MP3 cut off mid-way decoded cleanly
+      and passed as a complete recording: FFmpeg recomputes a WAV's length from
+      the file size. **Caveat:** decoding stops at the cap, so for MP3/M4A a
+      break *past* the cap cannot be seen -- `False` means "no break found in
+      what was read". For WAV the header check covers the whole file.
+  - `duration_s` -- how much was transcribed; `duration_available_s` -- the
+    recording's length as far as it is known; `duration_available_exact` --
+    `True` when the file was decoded to its end (then `duration_available_s` is
+    exactly the audio it holds, for a broken file what survived), `False` when
+    decoding stopped at the cap (then it is the header's declared length --
+    exact for M4A, close for MP3, from the data size for WAV -- or, without one,
+    "at least" what was read). **`False` means not verified by decoding, not
+    necessarily wrong.**
+  - `reason: ASRFailureReason | None`, `error`, `failure_category`, `retryable`
+    -- the same envelope and categories as OCR (see "Shared by OCR and ASR"):
+    - `DATA`: `EMPTY_INPUT`; `UNREADABLE_FORMAT` (not decodable audio, decided by
+      PyAV *before* Whisper runs -- the same name as OCR's, so one branch; a
+      corrupt header lands here, not a crash); `NO_SPEECH_DETECTED`
+      (silence, noise, or a broken file with no complete segment before its
+      break -- never an empty success or a made-up transcript).
+    - `ENVIRONMENT`: `ASR_UNAVAILABLE` (weights missing, failing their sha256
+      check, or faster-whisper not installed), `ASR_FAILED` (Whisper failing on
+      audio already proven decodable, e.g. out of memory).
+    - `BUG`: `INTERNAL_ERROR` (an unexpected exception, logged with its traceback).
+
+  **How a call runs.** Decoding stops at `max_duration_s`: nothing past the cap
+  is decoded, not even to count it (34 min of MP3: 0.6 s instead of 6.1 s
+  decoding the whole file; a 3 h one would have taken ~35 s). The decoded audio
+  is transcribed in **chunks of at most `CHUNK_S = 60` s, each cut in the
+  middle of a silence** past `MIN_CHUNK_S = 30` s (Whisper's own Silero VAD, run
+  per window), else hard-cut at 60 s. Why: faster-whisper computes its features
+  over the whole input, so peak memory grew ~0.9 MiB per second of audio
+  (~790 MiB at the 600 s cap); chunked it is ~440–550 MiB whatever the length,
+  with rough WER against AMI's human transcript within noise of unchunked
+  (0.261 vs 0.258; fixed 60 s cuts were worse, 0.267) -- `benchmarks/ocr-asr-benchmark.md`
+  "ASR — chunking", reproducible with `python -m benchmarks.asr_chunking`. A
+  chunk with no speech never reaches Whisper, and `vad_filter=True` drops the
+  silences inside each chunk: without it Whisper "hears" stock phrases in
+  silence. Whisper runs as #135 measured it: int8, CPU, beam 5, `language="en"`,
+  `cpu_threads=4` set explicitly (`tests/test_asr_settings_sync.py` keeps these
+  equal to the benchmark's) -- explicit, so `OMP_NUM_THREADS=1` (which
+  PaddleOCR sets on its process) does not make it single-threaded; measured.
+
+  **Worst case, which is what a consumer must be sized against.** RTF is not
+  stable: ~0.1 typical and ~0.3 on whole meetings under load, but **~2 on one
+  hard minute of IB4003** (temperature-fallback re-decodes and a repetition
+  loop -- the run-to-run variance in "ASR — known risks", triggered here by a
+  tiny numerical difference in the environment). So the bound is not the cap
+  times an RTF but `TRANSCRIBE_TIMEOUT_S = 240` s, checked between segments and
+  chunks: past it `transcribe()` returns what it has, `truncated=True` (or
+  `ASR_FAILED` if nothing was decoded yet). On top of it: decoding up to the
+  cap (~1 s) and, on a first call without `warm_up()`, loading the model
+  (~1.5 s). R2 sets `max.poll.interval.ms` explicitly in her consumer; 360 s or
+  more leaves room for both.
+
+  **The model** is a per-process singleton, loaded on first use or by
+  `warm_up()`, which R2's consumer calls once at start-up (it never raises, and
+  returns whether ASR is ready). The weights are pinned (`PINNED_WHISPER_MODELS`:
+  repo, revision, sha256 of `model.bin`) and checked against that sha256 on
+  every load, whatever their source:
+  1. baked into the image at build time (`WHISPER_MODELS_DIR=/opt/models/whisper`,
+     see the Dockerfile -- the team-lead decision on #478: fast pod start, no
+     egress to Hugging Face from the cluster, one model in every pod);
+  2. `MODEL_CACHE_DIR/whisper/<size>/` for local dev, placed by hand (see
+     `models/README.md`);
+  3. else, as a local-dev fallback only, downloaded at that pinned revision
+     into (2). An unpinned size is never downloaded.
+
+  Every call whose audio decodes is recorded through
+  `observability.record_call()` (`whisper-base.en-int8-local`; cost 0.0 until
+  MIND has a cost model for local compute, #479), as #478 asks -- note that
+  `ocr.py` uses `instrumented_call` instead; which of the two is the one
+  mechanism is for #479 to settle.
+
+  **Resource budget -- measured in a Linux container, one process holding the
+  embedding model and Whisper as the service does** (`benchmarks/asr_container_probe.py`;
+  `benchmarks/ocr-asr-benchmark.md` "ASR — memory and CPU in a container"):
+  - **Memory: ~1,000 MiB peak** (952–1,003 over 7 runs) on a capped 10-min call:
+    ~560 for the embedding model with torch, ~290 more for Whisper, ~150 more for
+    a call. **The shared Helm chart gives MIND 512Mi** -- it needs raising (Relay
+    owns the chart). `MALLOC_ARENA_MAX=2` was measured and not adopted (within
+    the spread between runs). Decoding no longer copies the audio: its own peak
+    went from 112 MiB to 37 MiB for 600 s.
+  - **CPU: at the chart's 500m, ~6.7 min of a 10-min recording fit in
+    `TRANSCRIBE_TIMEOUT_S`** (RTF ~0.6; the rest comes back as `truncated`);
+    unlimited, the whole 10 min took 41 s (RTF 0.07). Whether 500m is enough is
+    a trade-off for the cluster, not a bug: the timeout held either way, its
+    overrun at most one decoding window (23 s at half a CPU).
+
+  **Interface: agreed with R2** (#478, on the issue thread). She calls
+  `transcribe()` from her `bridge.raw.landed` consumer (#349) when `modality`
+  is `AUDIO`, the same seam as OCR: bytes in, no exceptions, the three failure
+  categories, a cap that truncates rather than refuses, passing her own
+  `max_duration_s` per call as she does `max_pages`. **ASR is the fallback
+  path**: for a `MEETING` recording Bridge lands a same-basename transcript
+  sidecar (`.vtt` / `.srt` / `.txt`) and links it from the event's
+  `transcript_object_key`; when there is one, her consumer reads it and skips
+  ASR -- AMI-style meetings with a human transcript will mostly never reach
+  `asr.py`. No shared `to_text(event, content)` wrapper: routing on `modality`
+  and `transcript_object_key` is hers, and would tie `multimodal/` to
+  `contracts.RawObjectEvent` and to object storage, which belong to ingestion.
+  No speaker diarization: `ExtractedFields` has no speaker field, assignment is
+  Inbox's, and `participants` already comes on the event.
+
+  Tests: `tests/test_asr_result.py` covers the result shape, scores, the
+  duration-weighted mean, the failure categories (shared with OCR) and the two
+  flags, without the model. `tests/test_asr_pipeline.py` covers decoding (stops
+  at the cap; nothing past it decoded), chunking (cuts in silences, timestamps
+  from the start of the recording, silent chunks skipped), the timeout, model
+  loading (baked first, sha256 on every load, download fallback, `warm_up()`),
+  `record_call()`, and files cut off mid-way (WAV, MP3, garbage in the middle,
+  both flags at once, the segment at the break dropped) with Whisper replaced,
+  so it runs in CI. An unsupported format, empty and silent audio also run in CI:
+  the input is decoded and run through the VAD before the model is touched, and
+  the model loads only for a chunk with speech in it -- those tests fail if it is
+  loaded at all, so they need no weights. With the real `base.en` (skipped without
+  `models/whisper/base.en/`): a clean short recording, the cap, and three
+  sentences cut in the third. The
+  speech fixture `tests/fixtures/asr/short_meeting_note.wav` was generated with
+  the Windows speech synthesizer (offline TTS).
+- **Shared by OCR and ASR** (`result.py`, `failures.py`). Both results derive
+  from `MediaTextResult`: `success`, `text`, `reason` (each pipeline's own enum),
+  `error`, `failure_category`, `retryable`, with `reason` set exactly on
+  failure. Every reason belongs to one `FailureCategory` (a test fails if a new
+  reason has none), which tells the caller what to do with the raw object:
+
+  | Category | Meaning | What the caller does |
+  |---|---|---|
+  | `DATA` | the input itself is the problem | drop it, commit past it |
+  | `ENVIRONMENT` | the input is fine; a model, binary or host is not | do not commit past it; retry later, with a bound |
+  | `BUG` | an unexpected exception in our code | park it (dead-letter), do not drop it silently |
+
+  `retryable` is `failure_category == ENVIRONMENT`; on its own it could not
+  tell `DATA` (drop) from `BUG` (park). Reason names with the same meaning are
+  the same in both (`EMPTY_INPUT`, `UNREADABLE_FORMAT`, `INTERNAL_ERROR`).
+
+  **Reserved for OCR, not built yet: `incomplete_file`**, with the same name and
+  meaning as in ASR (the file holds less than it declares; what survived is
+  returned, and the flag is independent of `truncated`). Not now, by R2's
+  call (#478): in Bridge's path a file cut in transfer is already caught by
+  her `content_hash` check before OCR runs, so what is left is a file broken at
+  its source, not yet seen in practice; and a broken PDF needs a decision first
+  on what `pages_available` means, since `pypdfium2` may report a page count
+  from the xref while only some of the pages render. Today such a PDF fails
+  loudly as `UNREADABLE_FORMAT`, not silently.

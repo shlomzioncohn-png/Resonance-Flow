@@ -3,14 +3,17 @@ package com.rnd.chain.service;
 import com.rnd.chain.dto.Task;
 import com.rnd.chain.dto.TaskDependency;
 import com.rnd.chain.dto.TaskStatus;
-import com.rnd.chain.event.SchedulingUpdatePublisher;
-import com.rnd.chain.event.TaskSchedulingUpdatedEvent;
+import com.rnd.chain.events.SchedulingPublishListener;
+import com.rnd.chain.events.SchedulingUpdatePublisher;
+import com.rnd.chain.events.TaskSchedulingUpdatedEvent;
 import com.rnd.chain.repository.InMemoryConstraintRepository;
 import com.rnd.chain.repository.InMemoryDependencyHistoryRepository;
+import com.rnd.chain.repository.InMemoryGraphLock;
 import com.rnd.chain.repository.InMemoryTaskDependencyRepository;
 import com.rnd.chain.repository.InMemoryTaskRepository;
 import com.rnd.chain.repository.InMemoryTransactionRunner;
 import com.rnd.chain.testsupport.IncrementingClock;
+import com.rnd.chain.testsupport.TestTransactions;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -23,6 +26,8 @@ import java.util.UUID;
 import static org.junit.jupiter.api.Assertions.*;
 
 class TaskDependencyServiceIntegrationTest {
+
+    private static final UUID TENANT_ID = UUID.randomUUID();
 
     private UUID taskId;
     private UUID dependencyTaskId;
@@ -65,12 +70,15 @@ class TaskDependencyServiceIntegrationTest {
                 new SchedulingUpdateService(
                         schedulingPublisher);
 
-        TaskEligibilityService taskEligibilityService =
-                new TaskEligibilityService(
-                        taskRepository,
+        DependencyEdgeService dependencyEdgeService =
+                new DependencyEdgeService(
                         dependencyRepository,
-                        schedulingUpdateService,
-                        new InMemoryConstraintRepository());
+                        new InMemoryGraphLock(),
+                        new TaskCounterUpdater(
+                                taskRepository,
+                                dependencyRepository,
+                                new PriorityScoreService(),
+                                new SchedulingPublishListener(taskRepository, schedulingUpdateService)));
 
         taskDependencyService =
                 new TaskDependencyService(
@@ -79,16 +87,16 @@ class TaskDependencyServiceIntegrationTest {
                         new InMemoryDependencyHistoryRepository(),
                         new InMemoryTransactionRunner(),
                         new IncrementingClock(),
-                        taskEligibilityService);
+                        dependencyEdgeService);
     }
 
     @Test
     void addDependency_shouldCreateDependencyAndUpdateEligibility() {
 
         TaskDependency created =
-                taskDependencyService.addDependency(
+                TestTransactions.runCommitted(() -> taskDependencyService.addDependency(
                         taskId,
-                        dependencyTaskId);
+                        dependencyTaskId));
 
         assertNotNull(created);
 
@@ -154,9 +162,9 @@ class TaskDependencyServiceIntegrationTest {
 
         schedulingPublisher.clear();
 
-        taskDependencyService.removeDependency(
+        TestTransactions.runCommitted(() -> taskDependencyService.removeDependency(
                 taskId,
-                dependencyTaskId);
+                dependencyTaskId));
 
         assertTrue(
                 dependencyRepository
@@ -277,7 +285,7 @@ class TaskDependencyServiceIntegrationTest {
         return Task.builder()
                 .id(id)
                 .parentTaskId(null)
-                .ownerId("test-owner")
+                .tenantId(TENANT_ID)
                 .status(status)
                 .isReady(ready)
                 .blockingCount(0)

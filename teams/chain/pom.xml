@@ -176,6 +176,7 @@
                     <includes>
                         <include>task-created-event.proto</include>
                         <include>task-updated-event.proto</include>
+                        <include>task-completed-event.proto</include>
                         <include>task-dependencies-proposed-event.proto</include>
                         <include>scheduling-updated-event.proto</include>
                     </includes>

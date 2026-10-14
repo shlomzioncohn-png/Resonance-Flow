@@ -28,6 +28,9 @@ logs/
 # Node (Lens)
 node_modules/
 .next/
+playwright-report/
+test-results/
+.npmrc
 
 # Python (Mind)
 __pycache__/
@@ -40,6 +43,9 @@ venv/
 .idea/workspace.xml
 .env.local
 *.pem
+
+# Documentation
+DOCKER_FULL_STACK.md
 
 # OS
 .DS_Store

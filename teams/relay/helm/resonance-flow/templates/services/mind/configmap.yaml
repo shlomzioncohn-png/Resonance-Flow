@@ -20,7 +20,7 @@ data:
       provider: {{ $cfg.asr.provider | quote }}
       whisper_model: {{ $cfg.asr.whisper_model | quote }}
     object_storage:
-      endpoint: {{ printf "http://%s" (include "resonance-flow.dependencyAddress" (dict "root" $ "deps" $component.dependencies "name" "minio")) | quote }}
+      endpoint: {{ printf "http://%s" (include "resonance-flow.dependencyAddress" (dict "root" $ "deps" $component.dependencies "name" "object-storage")) | quote }}
       bucket: {{ $cfg.object_storage.bucket | quote }}
     kafka:
       bootstrap_servers: {{ include "resonance-flow.dependencyAddress" (dict "root" $ "deps" $.Values.dependencies "name" "kafka") | quote }}

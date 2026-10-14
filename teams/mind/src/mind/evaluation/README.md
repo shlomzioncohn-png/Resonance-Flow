@@ -104,7 +104,7 @@ invalid file or a broken intra-scenario invariant (a dangling
 `expected_top_task_id`, a missing `source_detail`) raises and fails the run.
 `validate_personas` then adds the cross-file check (a duplicate `scenario_id`
 fails the run) and the not-ready-yet checks (a role with no scenario, an
-under/over count, a scenario that isn't `mentor_approved`) which only print a
+under/over count) which only print a
 warning.
 
 `placeholder_scenarios.PLACEHOLDER_SCENARIOS` still exists, but only as a
@@ -130,9 +130,9 @@ With GNU `make` installed you can use the shortcuts instead: `make dev` then
 and run the test tools as `python -m pytest` / `python -m ruff check src tests` /
 `python -m mypy src` (the bare `pytest`/`ruff` names may not be on PATH).
 
-The run exits `0` on success. Several `[persona set warning] ... not yet
-mentor_approved` lines are **expected** — they just mean the scenarios haven't
-been through mentor sign-off yet; the run still completes and reports a score.
+The run exits `0` on success. Any `[persona set warning] ...` lines (a role with
+no scenario, an out-of-range count) are informational; the run still completes and
+reports a score.
 Only a non-zero exit code, or text under "Persona set validation FAILED", means
 something is actually broken. When running the default `eval/personas` set, a
 "missing role" / "expected 4-6" warning would mean the set is incomplete — there
@@ -237,7 +237,7 @@ run against the recorded baseline instead of a re-run.
 The Foundation Gate requires the harness to run on a small slice of a **real**
 dataset, not only hand-written scenarios. That slice lives in `eval/real_slice/`,
 kept separate from `eval/personas/` on purpose: the persona set is fixed and
-mentor-approved so the baseline and week-7 scores stay comparable against it, whereas
+team-lead-approved so the baseline and week-7 scores stay comparable against it, whereas
 the real slice exists only to prove the harness survives real data. The two are
 never mixed.
 
@@ -259,7 +259,7 @@ Action items come from the abstractive-summary layer: each
 elements are the human-annotated action items. Those sentences become a
 scenario's `tasks`. All three scenarios use persona role **Manager** — the AMI
 Project Manager is the participant who leaves a meeting owning the action-item
-list — and are `mentor_approved: false` / `team_lead_approved: false`, which is
+list — and are `team_lead_approved: false`, which is
 expected: the real slice is not part of the graded set.
 
 ### Meetings used

@@ -91,16 +91,26 @@ wait-for-schema-registry hung forever against "inbox-schema-registry",
 which is nothing - the real Service is "inbox-resonance-flow-schema-registry").
 Otherwise it's a Bitnami subchart's Service, <release-name>-<name>.
 */}}
+{{/*
+Resolve a logical dependency name to the concrete provider name.
+*/}}
+{{- define "resonance-flow.dependencyProviderName" -}}
+{{- if eq .name "object-storage" }}
+{{- .root.Values.objectStorage.provider }}
+{{- else }}
+{{- .name }}
+{{- end }}
+{{- end }}
 {{- define "resonance-flow.dependencyHost" -}}
+{{- $dependencyName := include "resonance-flow.dependencyProviderName" (dict "root" .root "name" .dep.name) }}
 {{- if .dep.host }}
 {{- .dep.host }}
-{{- else if hasKey .root.Values.components .dep.name }}
-{{- printf "%s-%s" (include "resonance-flow.fullname" .root) .dep.name }}
+{{- else if hasKey .root.Values.components $dependencyName }}
+{{- printf "%s-%s" (include "resonance-flow.fullname" .root) $dependencyName }}
 {{- else }}
-{{- printf "%s-%s" .root.Release.Name .dep.name }}
+{{- printf "%s-%s" .root.Release.Name $dependencyName }}
 {{- end }}
 {{- end }}
-
 {{/*
 Resolved host:port of a named entry in a {name, port, host?} list
 (dependencies' shape) - so a component's own connection string doesn't
@@ -125,14 +135,15 @@ TCP-reachable. Dependencies whose target is disabled get no initContainer.
 {{- $root := .root }}
 {{- range .deps }}
 {{- $dep := . }}
+{{- $dependencyName := include "resonance-flow.dependencyProviderName" (dict "root" $root "name" $dep.name) }}
 {{- $enabled := true }}
 {{- if not $dep.host }}
-{{- if hasKey $root.Values.components $dep.name }}
-{{- if eq (index $root.Values.components $dep.name).enabled false }}
+{{- if hasKey $root.Values.components $dependencyName }}
+{{- if eq (index $root.Values.components $dependencyName).enabled false }}
 {{- $enabled = false }}
 {{- end }}
-{{- else if hasKey $root.Values $dep.name }}
-{{- if eq (index $root.Values $dep.name).enabled false }}
+{{- else if hasKey $root.Values $dependencyName }}
+{{- if eq (index $root.Values $dependencyName).enabled false }}
 {{- $enabled = false }}
 {{- end }}
 {{- end }}
@@ -152,7 +163,71 @@ TCP-reachable. Dependencies whose target is disabled get no initContainer.
 {{- end }}
 {{- end }}
 {{- end }}
-
+{{/*
+env entries for a component's mounted config/secret -- shared between the
+main container (deployment.yaml) and resonance-flow.migrationInitContainer
+so the two can't drift apart.
+*/}}
+{{- define "resonance-flow.configSecretEnv" -}}
+{{- $component := .component }}
+{{- if $component.config }}
+{{- include "resonance-flow.configFilePathEnv" . }}
+{{- end }}
+{{- if $component.secret }}
+- name: SECRETS_FILE_PATH
+  value: "/etc/resonance-flow/secret/secrets.yaml"
+{{- end }}
+{{- end }}
+{{/*
+volumeMounts for a component's mounted config/secret. See
+resonance-flow.configSecretEnv.
+*/}}
+{{- define "resonance-flow.configSecretVolumeMounts" -}}
+{{- $component := .component }}
+{{- if $component.config }}
+- name: resonance-flow-config
+  mountPath: /etc/resonance-flow/config/config.yaml
+  subPath: config.yaml
+  readOnly: true
+{{- end }}
+{{- if $component.secret }}
+# whole Secret as a dir (no subPath): an optional missing Secret then
+# leaves an empty dir, not a phantom file, and updates propagate.
+- name: resonance-flow-secret
+  mountPath: /etc/resonance-flow/secret
+  readOnly: true
+{{- end }}
+{{- end }}
+{{/*
+Opt-in migration initContainer (components.<name>.migration: {enabled, command}),
+e.g. `alembic upgrade head` -- runs components.<name>.image at the exact tag/config/
+secret/resources the main container gets, so the migration always matches the
+code being deployed instead of drifting from a hand-run or CI-only step.
+*/}}
+{{- define "resonance-flow.migrationInitContainer" -}}
+{{- $componentName := .componentName }}
+{{- $component := .component }}
+{{- if not $component.migration.command }}
+{{- fail (printf "components.%s.migration.enabled is true but migration.command is unset/empty -- a nil command falls back to the image's default entrypoint, which never exits, and the initContainer hangs forever" $componentName) }}
+{{- end }}
+- name: {{ $componentName }}-migrate
+  image: "{{ $component.image.repository }}:{{ $component.image.tag }}"
+  imagePullPolicy: {{ $component.image.pullPolicy }}
+  command:
+    {{- toYaml $component.migration.command | nindent 4 }}
+  {{- if or $component.config $component.secret }}
+  env:
+    {{- include "resonance-flow.configSecretEnv" . | nindent 4 }}
+  {{- end }}
+  {{- if or $component.config $component.secret }}
+  volumeMounts:
+    {{- include "resonance-flow.configSecretVolumeMounts" . | nindent 4 }}
+  {{- end }}
+  {{- with $component.resources }}
+  resources:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+{{- end }}
 {{/*
 Kafka SASL client JAAS config string, derived from kafka.sasl.client.users
 and kafka.sasl.client.passwords - the same values that seed the Kafka subchart's own
@@ -163,9 +238,10 @@ password drift from postgresql.auth.postgresPassword). Takes the root context ($
 not a scoped one, since kafka.sasl.client.* lives at the top level of Values.
 */}}
 {{- define "resonance-flow.kafkaSaslJaasConfig" -}}
-{{- printf "org.apache.kafka.common.security.plain.PlainLoginModule required username=\"%s\" password=\"%s\";" (first .Values.kafka.sasl.client.users) (first .Values.kafka.sasl.client.passwords) }}
+{{- $root := .root -}}
+{{- $password := .password | default (first $root.Values.kafka.sasl.client.passwords) -}}
+{{- printf "org.apache.kafka.common.security.plain.PlainLoginModule required username=\"%s\" password=\"%s\";" (first $root.Values.kafka.sasl.client.users) $password }}
 {{- end }}
-
 {{/*
 Standard ConfigMap header (apiVersion/kind/metadata) for a component's mounted
 config.yaml, named "<fullname>-<component>-config" - identical shape shared by
@@ -194,7 +270,7 @@ security:
   protocol: SASL_PLAINTEXT
 properties:
   sasl.mechanism: "PLAIN"
-  sasl.jaas.config: {{ include "resonance-flow.kafkaSaslJaasConfig" .root | quote }}
+  sasl.jaas.config: {{ include "resonance-flow.kafkaSaslJaasConfig" (dict "root" .root) | quote }}
 {{- end }}
 
 {{/*
