@@ -1,0 +1,61 @@
+# TEMPORARY (#689) -- DELETE THIS FILE BEFORE MERGE.
+#
+# deploy-service and smoke-test.sh normally run only in CD, after a merge to
+# main. This runs the CD path on the PR instead, with push: 'false' so nothing
+# is published to GHCR and no manifest PR is opened.
+#
+# Two separate jobs, not a matrix: matrix legs share github.job, so they would
+# share a kind cluster name. bridge is here because it is Java (ci-java runs
+# test-java against the dynamic Postgres port, like service-cd does) and its
+# smoke test uses port 8080.
+name: TEMP (#689) deploy-service test
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+    paths:
+      - ".github/actions/**"
+      - ".github/workflows/tmp-689-deploy-test.yaml"
+
+concurrency:
+  group: tmp-689-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  deploy-mind:
+    if: github.event.pull_request.draft == false
+    runs-on: self-hosted
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      # Mind's tests already run in mind-ci's `ci / test` on this PR.
+      - uses: ./.github/actions/setup-service-infra
+        with:
+          service_name: mind
+      - uses: ./.github/actions/deploy-service
+        with:
+          service_name: mind
+          service_dir: teams/mind
+          extra_build_contexts: shared=shared
+          push: 'false'
+
+  deploy-bridge:
+    if: github.event.pull_request.draft == false
+    runs-on: self-hosted
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      # Same as service-cd's Java build job: setup-service-infra + test-java.
+      - uses: ./.github/actions/ci-java
+        with:
+          service_name: bridge
+          service_dir: teams/bridge
+      - uses: ./.github/actions/deploy-service
+        with:
+          service_name: bridge
+          service_dir: teams/bridge
+          extra_build_contexts: shared=shared
+          push: 'false'

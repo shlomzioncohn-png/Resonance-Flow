@@ -158,6 +158,11 @@ jobs:
       CHART_DIR: teams/relay/helm/resonance-flow
       RELEASE: mind-rt
       NAMESPACE: mind-rt
+      # Per-run names: runners on one host share a Docker daemon, so fixed
+      # names collide when two runs overlap. Only this job uses the "mind-rt-"
+      # prefix, so run_id+run_attempt are enough here.
+      KIND_CLUSTER: mind-rt-${{ github.run_id }}-${{ github.run_attempt }}
+      KIND_IMAGE_TAG: local-${{ github.run_id }}-${{ github.run_attempt }}
 
     steps:
       - uses: actions/checkout@v4
@@ -166,12 +171,16 @@ jobs:
 
       - uses: azure/setup-helm@v5
 
-      # No working-directory override on this or the helm/kubectl steps below -
-      # kind's kubeconfig write-up is tied to where it runs, keep it at the repo root.
+      # Own kubeconfig per job, not the shared ~/.kube/config -- otherwise a
+      # parallel job switching context makes helm here install into its cluster.
+      # (runner.temp isn't available in job-level env, hence a step.)
+      - name: Use a per-job kubeconfig
+        run: echo "KUBECONFIG=$RUNNER_TEMP/kubeconfig" >> "$GITHUB_ENV"
+
       - name: Create kind cluster
         uses: helm/kind-action@v1
         with:
-          cluster_name: mind-rt-cluster
+          cluster_name: ${{ env.KIND_CLUSTER }}
 
       - name: Fetch chart dependencies
         run: helm dependency build "$CHART_DIR"
@@ -189,8 +198,8 @@ jobs:
       - name: Build and load the MIND image
         working-directory: teams/mind
         run: |
-          docker build --build-context shared=../../shared -t mind:local .
-          kind load docker-image mind:local --name mind-rt-cluster
+          docker build --build-context shared=../../shared -t "mind:$KIND_IMAGE_TAG" .
+          kind load docker-image "mind:$KIND_IMAGE_TAG" --name "$KIND_CLUSTER"
 
       # Migration now runs as mind's own initContainer (see
       # teams/relay/helm/resonance-flow/values.yaml's components.mind.migration
@@ -201,6 +210,7 @@ jobs:
           helm upgrade --install "$RELEASE" "$CHART_DIR" \
             -f "$CHART_DIR/values.yaml" \
             -f "$CHART_DIR/values/values-mind.yaml" \
+            --set components.mind.image.tag="$KIND_IMAGE_TAG" \
             --namespace "$NAMESPACE"
 
       - name: Wait for MIND deployment to be ready
