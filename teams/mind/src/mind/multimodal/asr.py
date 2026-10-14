@@ -684,8 +684,8 @@ def transcribe(
     ASRResult for how ``truncated``, ``incomplete_file`` and the durations are set).
 
     Every call whose audio decodes is recorded through
-    ``observability.record_call()`` -- the latency and CPU time of the VAD and
-    Whisper stage, and ``status=ERROR`` if Whisper raised -- the CPU seconds are
+    ``observability.record_call()`` -- the latency and CPU time of decoding the
+    audio, the VAD and Whisper, and ``status=ERROR`` if Whisper raised -- the CPU seconds are
     the call's compute cost; a local model has no dollar price (#479) -- whether
     it succeeded or not, and even when the VAD found no speech for Whisper to run
     on.
