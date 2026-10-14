@@ -4,7 +4,7 @@ import Header from './Header';
 
 const meta = {
   component: Header,
-  tags: ['ai-generated'],
+  tags: ['autodocs'],
 } satisfies Meta<typeof Header>;
 
 export default meta;

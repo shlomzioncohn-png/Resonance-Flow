@@ -152,24 +152,32 @@ src/test/java/com/rnd/chain/
 
 ## Graph Traversal API
 
-All routes are read-only (`GET`) and take a task id as the path variable. A bare path is the
+All read/traversal routes use `GET` and take `taskId` as the path variable. A bare path is the
 direct/one-level relationship; `/transitive` is the full closure over that same relation.
+
 Ancestors has no `/transitive` variant - the ancestor chain already is the transitive closure.
 
-| Method | Path                              | Returns                                    |
-|--------|------------------------------------|---------------------------------------------|
-| GET    | `/tasks/{id}/dependencies`         | Direct dependencies                          |
-| GET    | `/tasks/{id}/dependencies/transitive` | All (transitive) dependencies             |
-| GET    | `/tasks/{id}/dependents`           | Direct dependents                            |
-| GET    | `/tasks/{id}/dependents/transitive`   | All (transitive) dependents                |
-| GET    | `/tasks/{id}/ancestors`            | Full ancestor chain (hierarchy)              |
-| GET    | `/tasks/{id}/children`             | Direct children (hierarchy)                  |
-| GET    | `/tasks/{id}/descendants`          | All descendants (hierarchy)                  |
-| GET    | `/tasks/{id}/trace`                | Combined dependency graph + hierarchy trace  |
+| Method | Path | Returns |
+|--------|------|---------|
+| GET | `/tasks/{taskId}/dependencies` | Direct dependencies |
+| GET | `/tasks/{taskId}/dependencies/transitive` | All (transitive) dependencies |
+| GET | `/tasks/{taskId}/dependencies/history` | Dependency change history |
+| GET | `/tasks/{taskId}/dependents` | Direct dependents |
+| GET | `/tasks/{taskId}/dependents/transitive` | All (transitive) dependents |
+| GET | `/tasks/{taskId}/ancestors` | Full ancestor chain (hierarchy) |
+| GET | `/tasks/{taskId}/children` | Direct children (hierarchy) |
+| GET | `/tasks/{taskId}/descendants` | All descendants (hierarchy) |
+| GET | `/tasks/{taskId}/trace` | Combined dependency graph + hierarchy trace |
+| GET | `/tasks/{taskId}/blockers` | Current blockers / task availability |
+| POST | `/tasks/{taskId}/dependencies` | Add a dependency |
+| DELETE | `/tasks/{taskId}/dependencies/{dependsOnTaskId}` | Remove a dependency |
 
-Each route returns a `TaskResponse` list (or, for `/trace`, a `TaskTraceResponse` combining
-both axes) - see `dto/TaskResponse.java` and `dto/TaskTraceResponse.java` for the exact shape.
-An unknown task id returns `404` with an `ApiError` body; an invalid (non-UUID) id returns `400`.
+Traversal routes return `TaskResponse` lists, except:
+- `/trace` returns `TaskTraceResponse`
+- `/blockers` returns `TaskAvailability`
+- `/dependencies/history` returns `PageResponse<DependencyHistoryResponse>`
+
+An unknown task id returns `404` with an `ApiError` body; an invalid (non-UUID) `taskId` returns `400`.
 
 ## Kafka event infrastructure
 
@@ -200,7 +208,8 @@ the handler fails, so a retry can process the event again. `task.created`, `task
 event id, so they rely on their state changes being safe to repeat. `task.completed` has no
 timestamp either, so its Kafka record timestamp is compared against the stored `updated_at` (to
 ignore a completion that arrives after a reopen) but never written to it; this is interim until
-Inbox adds `completed_at` to the event. The current
+Inbox adds `completed_at` to the event. `TaskStateReconciliationService` likewise never writes
+`updated_at` when it corrects counters, so it can't make a genuine `task.updated` look stale. The current
 `InMemoryProcessedEventStore` guards a single running instance only and loses all claims on restart,
 so it is not safe for production or for several instances of this service. See its Javadoc for what
 a claim does and doesn't guarantee.
