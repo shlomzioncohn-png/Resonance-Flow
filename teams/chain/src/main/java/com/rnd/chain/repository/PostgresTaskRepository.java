@@ -55,6 +55,7 @@ public class PostgresTaskRepository implements TaskRepository {
         jpaRepository.upsert(task.getId(), task.getParentTaskId(), task.getTenantId(),
                 task.getStatus().name(), task.isReady(), task.getBlockingCount(),
                 task.getOpenConstraintCount(), task.getEstimatedDurationMin(), task.getScore(),
+                task.getConfidence(), task.getPriorityScore(),
                 task.getCreatedAt(), task.getUpdatedAt(), task.getDeletedAt());
         // Read-back after the row-count-only native upsert; unlike findByIdAndDeletedAtIsNull(),
         // findById() also returns soft-deleted rows.
@@ -143,6 +144,8 @@ public class PostgresTaskRepository implements TaskRepository {
                 .openConstraintCount(entity.getOpenConstraintCount())
                 .estimatedDurationMin(entity.getEstimatedDurationMin())
                 .score(entity.getScore())
+                .confidence(entity.getConfidence())
+                .priorityScore(entity.getPriorityScore())
                 .createdAt(entity.getCreatedAt())
                 .updatedAt(entity.getUpdatedAt())
                 .deletedAt(entity.getDeletedAt())
@@ -160,6 +163,8 @@ public class PostgresTaskRepository implements TaskRepository {
         entity.setOpenConstraintCount(updated.getOpenConstraintCount());
         entity.setEstimatedDurationMin(updated.getEstimatedDurationMin());
         entity.setScore(updated.getScore());
+        entity.setConfidence(updated.getConfidence());
+        entity.setPriorityScore(updated.getPriorityScore());
         entity.setCreatedAt(updated.getCreatedAt());
         entity.setUpdatedAt(updated.getUpdatedAt());
         entity.setDeletedAt(updated.getDeletedAt());

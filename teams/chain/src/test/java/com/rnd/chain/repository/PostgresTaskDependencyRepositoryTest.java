@@ -84,6 +84,33 @@ class PostgresTaskDependencyRepositoryTest {
     }
 
     @Test
+    void save_onAlreadyExistingEdge_upsertsConfidenceInsteadOfNoOp() {
+        // Issue #445: confirmed with Mind - a republish of the same edge upserts confidence, it
+        // is not a pure no-op the way the pre-#445 "ON CONFLICT DO NOTHING" behaved.
+        Task task = seedTask();
+        Task dependsOn = seedTask();
+        postgresTaskDependencyRepository.save(new TaskDependency(task.getId(), dependsOn.getId(), 0.2));
+
+        Optional<TaskDependency> result = postgresTaskDependencyRepository.save(
+                new TaskDependency(task.getId(), dependsOn.getId(), 0.9));
+
+        assertThat(result).isEmpty(); // not a new edge...
+        assertThat(postgresTaskDependencyRepository.findByTaskId(task.getId())) // ...but upserted.
+                .containsExactly(new TaskDependency(task.getId(), dependsOn.getId(), 0.9));
+    }
+
+    @Test
+    void findByTaskId_returnsTheStoredConfidence() {
+        Task task = seedTask();
+        Task dependsOn = seedTask();
+        postgresTaskDependencyRepository.save(new TaskDependency(task.getId(), dependsOn.getId(), 0.42));
+
+        assertThat(postgresTaskDependencyRepository.findByTaskId(task.getId()))
+                .extracting(TaskDependency::confidence)
+                .containsExactly(0.42);
+    }
+
+    @Test
     void save_throwsDataIntegrityViolation_whenReferencedTaskDoesNotExist() {
         TaskDependencyId id = new TaskDependencyId(UUID.randomUUID(), UUID.randomUUID());
 

@@ -66,10 +66,17 @@ public interface TaskDependencyRepository {
      * operation, so concurrent callers saving the same edge cannot both
      * observe "it didn't exist yet".
      *
+     * <p>Issue #445: if the edge already exists, this is an <b>upsert of
+     * {@code confidence}</b>, not a pure no-op - Mind can republish the same edge with an updated
+     * confidence (it only ever adds/updates, never removes - see
+     * {@code DependencyProposedEventHandler}), and that new confidence must land even though the
+     * edge itself isn't new. Only the {@code blockingCount}/cycle-detection bookkeeping in
+     * {@code TaskEligibilityService} treats an existing edge as a no-op, not this method.
+     *
      * @return {@code Optional.of(dependency)} if the edge was actually
      * created (it did not exist before this call).
-     * {@code Optional.empty()} if the edge already existed and no change
-     * was made (no-op).
+     * {@code Optional.empty()} if the edge already existed - {@code confidence} was still
+     * updated on it, if it differs from what's stored.
      */
     Optional<TaskDependency> save(TaskDependency dependency);
 

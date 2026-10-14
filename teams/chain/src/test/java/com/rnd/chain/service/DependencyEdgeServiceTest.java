@@ -4,6 +4,7 @@ import com.rnd.chain.dto.Task;
 import com.rnd.chain.dto.TaskDependency;
 import com.rnd.chain.dto.TaskStatus;
 import com.rnd.chain.dto.TaskTestFixtures;
+import com.rnd.chain.events.SchedulingPublishListener;
 import com.rnd.chain.events.SchedulingUpdatePublisher;
 import com.rnd.chain.events.TaskSchedulingUpdatedEvent;
 import com.rnd.chain.exception.CrossTenantDependencyException;
@@ -15,6 +16,7 @@ import com.rnd.chain.repository.InMemoryConstraintRepository;
 import com.rnd.chain.repository.InMemoryGraphLock;
 import com.rnd.chain.repository.InMemoryTaskDependencyRepository;
 import com.rnd.chain.repository.InMemoryTaskRepository;
+import com.rnd.chain.testsupport.TestTransactions;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import java.time.LocalDateTime;
@@ -39,7 +41,8 @@ class DependencyEdgeServiceTest {
         publisher = new RecordingSchedulingUpdatePublisher();
         SchedulingUpdateService schedulingUpdateService = new SchedulingUpdateService(publisher);
         InMemoryGraphLock lock = new InMemoryGraphLock();
-        TaskCounterUpdater counterUpdater = new TaskCounterUpdater(taskRepository, schedulingUpdateService);
+        TaskCounterUpdater counterUpdater = new TaskCounterUpdater(taskRepository, dependencyRepository,
+                new PriorityScoreService(), new SchedulingPublishListener(taskRepository, schedulingUpdateService));
         service = new DependencyEdgeService(dependencyRepository, lock, counterUpdater);
     }
 
@@ -65,9 +68,9 @@ class DependencyEdgeServiceTest {
                         0,
                         0));
 
-        service.addDependency(
+        TestTransactions.runCommitted(() -> service.addDependency(
                 taskId,
-                dependencyId);
+                dependencyId));
 
         Task updated =
                 taskRepository.findById(taskId)
@@ -251,15 +254,15 @@ class DependencyEdgeServiceTest {
                         0,
                         0));
 
-        service.addDependency(
+        TestTransactions.runCommitted(() -> service.addDependency(
                 taskId,
-                dependencyId);
+                dependencyId));
 
         publisher.clear();
 
-        service.removeDependency(
+        TestTransactions.runCommitted(() -> service.removeDependency(
                 taskId,
-                dependencyId);
+                dependencyId));
 
         Task updated =
                 taskRepository.findById(taskId)
@@ -794,7 +797,8 @@ class DependencyEdgeServiceTest {
         InMemoryTaskDependencyRepository dependencyRepo = new InMemoryTaskDependencyRepository(edges);
         InMemoryConstraintRepository constraintRepo = new InMemoryConstraintRepository();
         SchedulingUpdateService scheduling = new SchedulingUpdateService(event -> {});
-        TaskCounterUpdater counterUpdater = new TaskCounterUpdater(taskRepo, scheduling);
+        TaskCounterUpdater counterUpdater = new TaskCounterUpdater(taskRepo, dependencyRepo,
+                new PriorityScoreService(), new SchedulingPublishListener(taskRepo, scheduling));
         return new Fixture(taskRepo, dependencyRepo, constraintRepo, new DependencyEdgeService(dependencyRepo, new InMemoryGraphLock(), counterUpdater));
     }
 

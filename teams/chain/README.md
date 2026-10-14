@@ -260,6 +260,134 @@ Broker security (SASL, TLS) is set through Spring's `spring.kafka.properties.*`,
 `spring.kafka.properties.security.protocol=SASL_PLAINTEXT`. Every consumer factory and producer
 template starts from those properties, so the same settings apply everywhere.
 
+## priority_score (Issue #445)
+
+`priority_score` is Mind's per-task importance score, adjusted by Chain's own feasibility state
+(dependencies, constraints), stored on `Task` and published on `task.scheduling.updated` alongside
+`is_available`. It is `null` until Mind has scored the task; Mind clearing a score clears it again.
+Computed by `PriorityScoreService` (pure function, no repository access) and wired into
+`TaskEligibilityService`, which gathers its inputs from the dependency graph and publishes whenever
+either `priority_score` or `is_available` changes.
+
+### Formula
+
+```
+m = mindScore * confidence                          (confidence defaults to 1.0 if null)
+b = blockingConfidenceSum   / (1 + blockingConfidenceSum)
+c = openConstraintCount     / (1 + openConstraintCount)
+d = dependentConfidenceSum  / (1 + dependentConfidenceSum)
+s = 0.4 * (1 - b) + 0.3 * (1 - c) + 0.2 * d + 0.1 * m      // s is in [0, 1]
+priority_score = round(1 + 9 * s, 2)                        // always in [1, 10], no clamp needed
+```
+
+- `blockingConfidenceSum` is the sum of Mind's per-edge confidence over this task's *unresolved*
+  (not-DONE) blockers - a 0.3-confidence blocker moves the score less than a 0.9-confidence one.
+- `dependentConfidenceSum` is the same sum over every task that depends on this one, regardless of
+  that dependent's own status - a task other work confidently depends on ranks higher.
+- Both sums are normalized with `x / (1 + x)` into `[0, 1)` rather than divided into the formula
+  directly, so an unbounded sum can't blow the range. An earlier draft (`base / (1 + k * blockers)`,
+  then clamp to `[1, 10]`) collapsed every heavily-blocked task to the same floor value of 1 once
+  blockers got large enough - the weighted-sum form above doesn't have that failure mode, so no
+  clamp is needed.
+- Weights (`0.4` / `0.3` / `0.2` / `0.1`, summing to 1.0) and the normalization function are a team
+  decision (2026-10-06/07 planning for #445), not derived from data - revisit if the demo shows the
+  ranking feels wrong in practice. See `PriorityScoreService`'s own Javadoc for the authoritative
+  version of this section.
+
+### Confidence on dependency edges
+
+`TaskDependency.confidence` (0..1, defaults to full confidence for edges not sourced from Mind) is
+Mind's confidence in that specific edge, carried on `task.dependencies.proposed`'s `Dependency`
+message. Confirmed directly with Mind (2026-10-07): a delivery is **additive/upsert, not the full
+final set** - re-sending a task's dependencies adds new edges and updates the confidence of
+existing ones, it never removes an edge, and Mind has no removal event at all today. A stale edge
+has to be removed through Chain's own `DELETE /{taskId}/dependencies/{dependsOnTaskId}` endpoint.
+`DependencyProposedEventHandler` threads this confidence through to `TaskEligibilityService`,
+which recomputes `priority_score` for **both** ends of a changed edge - the task whose
+`blockingConfidenceSum` changed, and the task whose `dependentConfidenceSum` changed - not just
+the one the edge mutation call was made on.
+
+Mind-supplied `mindScore`/`confidence` outside `[0, 1]` are rejected (`InvalidRequestException` on
+the task-score path, `InvalidDependencyException` on the per-edge path, both non-retryable in
+their respective Kafka handlers - i.e. routed straight to `.errors`), never silently clamped.
+
+### Storage (Phase 2)
+
+`V4__add_task_priority_score.sql` adds `task.confidence`/`task.priority_score` (both nullable,
+CHECK'd to `[0,1]`/`[1,10]`) and `task_dependency.confidence` (nullable, CHECK'd to `[0,1]`,
+backfilled to `1.0` for every edge that predates this migration). `TaskEntity`/`TaskDependencyEntity`
+and their Postgres repositories carry the two new `Task` fields and the edge's `confidence` the
+same way `score`/the rest of `Task` already did.
+
+`SpringDataTaskDependencyJpaRepository#upsert` replaces the old `insertIgnoringConflict`
+(`ON CONFLICT ... DO NOTHING`): it's now `ON CONFLICT ... DO UPDATE SET confidence = EXCLUDED.confidence`,
+using the same `RETURNING (xmax = 0)` technique `PostgresConstraintRepository#save` already uses
+to tell "newly inserted" from "already existed" without a separate query - needed because
+`TaskDependencyRepository#save`'s contract changed (see that interface's Javadoc): re-saving an
+existing edge is now an upsert of `confidence`, not a pure no-op.
+
+Verified against real PostgreSQL (`postgres:16` in Docker, matching `.env.example`'s
+`chain`/`chain`/`chain`): `PostgresTaskRepositoryTest` (3 tests) and
+`PostgresTaskDependencyRepositoryTest` (7 tests), 0 failures/errors - run via
+`mvn test -Ppostgres-integration`, which now actually includes `@Tag("postgres")` tests (fixed on
+`main` after this section was first written here - `excludedGroups` is driven through the
+`surefire.excludedGroups` property, which a profile can blank out; a plain `<excludedGroups/>` in
+the profile didn't override the build's own value). CI runs them too now, against its own Postgres.
+
+### AFTER_COMMIT publish, dedup, retry (Phase 3)
+
+None of `TaskEligibilityService`/`DependencyEdgeService`/`ConstraintEligibilityService` call
+`SchedulingUpdateService` directly or synchronously. Every trigger
+(`TaskCounterUpdater.recomputePriorityScoreAndPublish`) instead calls
+`requestPublishAfterCommit(taskId)`, which:
+
+- Binds a `Set<UUID>` to the current transaction via `TransactionSynchronizationManager` and adds
+  `taskId` to it - a task touched several times in one transaction (e.g. `addDependencies`'s batch
+  loop, or two separate mutations on the same task) still only queues once (locked decision:
+  "deduplication by taskId within the transaction").
+- Registers a `TransactionSynchronization` (once per transaction, not once per `taskId`) whose
+  `afterCommit()` calls `SchedulingPublishListener.onCommit(taskId)` for every queued id, and whose
+  `afterCompletion(status)` unbinds the set either way (commit or rollback), so the next
+  transaction on the same thread starts clean.
+- **If there is no active transaction, the publish is dropped** (logged at ERROR), not fired
+  immediately (`fallbackExecution=false`, a locked decision - deliberately not papering over a
+  mutator that forgot `@Transactional`, which would otherwise desync Inbox's copy of
+  `priority_score`/`is_available` permanently and silently). This is why every public mutator on
+  `TaskEligibilityService`, `DependencyEdgeService`, `ConstraintEligibilityService`, and
+  `TaskCounterUpdater` itself is `@Transactional` (issue #649 split
+  `TaskEligibilityService`'s original `addDependency`/`removeDependency`/`onScoreProposed` out
+  into the first two of those), and why `SchedulingPublishTransactionalCoverageTest` exists: a
+  reflection-based guardrail covering all four classes that fails the build if a future public
+  mutator is added without `@Transactional`, since that failure mode is otherwise silent at
+  runtime.
+
+`SchedulingPublishListener` (`com.rnd.chain.events`) is the thing `afterCommit()` actually calls -
+re-reads the task fresh (never a mid-transaction snapshot) and retries `SchedulingUpdateService`
+3 times with exponential backoff starting at 200ms (200ms, then 400ms - locked decision), logging
+ERROR and dropping the message on persistent failure (a full fix - outbox, DLT - is tracked
+separately, not in #445).
+
+**Testing note**: none of this needed a real `PlatformTransactionManager`/Spring context -
+`TransactionSynchronizationManager` is a plain ThreadLocal-based utility, and
+`TransactionSynchronizationUtils.triggerAfterCommit()`/`triggerAfterCompletion(status)` are the
+same methods a real transaction manager calls, exposed for exactly this kind of test. See
+`testsupport/TestTransactions.java` (`runCommitted`/`runRolledBack`) - used both by the ~15
+pre-#445-Phase-3 tests that asserted synchronous publish behavior (updated to simulate a commit
+around the call) and by the new tests that specifically prove the commit/rollback/dedup behavior
+(`TaskEligibilityServiceTest`'s "Phase 3" section at the bottom of the file).
+
+### Not yet wired (tracked separately from #445)
+
+- **`task.score.proposed` consumer**: `TaskEligibilityService.onScoreProposed` exists and is
+  covered by its own tests, but nothing calls it yet from a `@KafkaListener` - that's #386, pending
+  Mind's contract.
+- ~~**Publish format**: #545~~ - done (merged from `main`, see "Kafka event infrastructure" above):
+  `KafkaSchedulingUpdatePublisher` publishes real Protobuf against the registered
+  `shared/proto/scheduling-updated-event.proto`, with a per-event `event_id`. Covered end-to-end by
+  `SchedulingUpdatedEventContractTest` and `SchedulingUpdatePublishIntegrationTest` (a real broker).
+=======
+>>>>>>> origin/main
+
 ## Running locally with Maven
 
 Requires a local Maven installation (`mvn`) and JDK 21.
@@ -312,6 +440,14 @@ mvn test
 Includes `TaskEligibilityServiceConcurrencyTest`, which runs `TaskEligibilityService` against the
 real in-memory repositories (not mocks) under actual concurrent load, so lock-related races have
 a chance to surface.
+
+`@Tag("postgres")` tests (the `Postgres*RepositoryTest`/`*ConcurrencyTest` classes) are excluded by
+default - run them with a real Postgres reachable (`chain`/`chain`/`chain`, matching
+`.env.example`) via:
+
+```bash
+mvn test -Ppostgres-integration
+```
 
 ## Code review fixes (2026-08-30, PR #114 second review round)
 
