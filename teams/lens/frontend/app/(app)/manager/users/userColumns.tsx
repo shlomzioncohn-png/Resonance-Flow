@@ -1,5 +1,4 @@
 import type { MouseEvent } from 'react';
-import Chip from '@mui/material/Chip';
 import IconButton from '@mui/material/IconButton';
 import Stack from '@mui/material/Stack';
 import Tooltip from '@mui/material/Tooltip';
@@ -7,13 +6,14 @@ import Typography from '@mui/material/Typography';
 import EditOutlinedIcon from '@mui/icons-material/EditOutlined';
 import MoreVertIcon from '@mui/icons-material/MoreVert';
 import type { Column } from '@/components/ui/DataTable';
+import StatusBadge, { type StatusTone } from '@/components/ui/StatusBadge';
 import type { UserRow } from '@/services/managerUsersApi';
 
-const STATUS_COLOR: Record<string, 'success' | 'warning' | 'error' | 'default'> = {
-  ACTIVE: 'success',
+const STATUS_TONE: Record<string, StatusTone> = {
+  ACTIVE: 'healthy',
   PENDING: 'warning',
   SUSPENDED: 'warning',
-  DISABLED: 'error',
+  DISABLED: 'critical',
 };
 
 export interface UserColumnsOptions {
@@ -50,7 +50,7 @@ export function buildUserColumns({
       id: 'status',
       header: 'Status',
       render: (user) => (
-        <Chip size="small" label={user.status} color={STATUS_COLOR[user.status] ?? 'default'} />
+        <StatusBadge status={STATUS_TONE[user.status] ?? 'neutral'} label={user.status} />
       ),
     },
     {
