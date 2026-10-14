@@ -3,6 +3,7 @@ package com.rnd.chain.events;
 import com.rnd.chain.dto.Task;
 import com.rnd.chain.dto.TaskDependency;
 import com.rnd.chain.dto.TaskStatus;
+import com.rnd.chain.dto.TaskTestFixtures;
 import com.rnd.chain.repository.InMemoryDependencyHistoryRepository;
 import com.rnd.chain.repository.InMemoryGraphLock;
 import com.rnd.chain.repository.InMemoryTaskDependencyRepository;
@@ -32,6 +33,7 @@ class DependencyProposedEventHandlerTest {
     private static Task buildTask(UUID id) {
         return Task.builder()
                 .id(id)
+                .tenantId(TaskTestFixtures.DEFAULT_TENANT_ID)
                 .status(TaskStatus.PENDING)
                 .isReady(true)
                 .blockingCount(0)
@@ -45,6 +47,7 @@ class DependencyProposedEventHandlerTest {
             InMemoryTaskRepository taskRepo,
             InMemoryTaskDependencyRepository dependencyRepo,
             InMemoryUnresolvedDependencyRepository unresolvedRepo,
+            InMemoryDependencyHistoryRepository historyRepo,
             DependencyProposedEventHandler handler) {
     }
 
@@ -71,11 +74,14 @@ class DependencyProposedEventHandlerTest {
                         new TaskCounterUpdater(taskRepo, dependencyRepo, new PriorityScoreService(),
                                 new SchedulingPublishListener(taskRepo, schedulingUpdateService)));
 
+        InMemoryDependencyHistoryRepository historyRepo =
+                new InMemoryDependencyHistoryRepository();
+
         TaskDependencyService dependencyService =
                 new TaskDependencyService(
                         taskRepo,
                         dependencyRepo,
-                        new InMemoryDependencyHistoryRepository(),
+                        historyRepo,
                         new InMemoryTransactionRunner(),
                         Clock.systemUTC(),
                         edgeService);
@@ -104,6 +110,7 @@ class DependencyProposedEventHandlerTest {
                 taskRepo,
                 dependencyRepo,
                 unresolvedRepo,
+                historyRepo,
                 handler);
     }
 
@@ -194,6 +201,34 @@ class DependencyProposedEventHandlerTest {
                 fixture.dependencyRepo()
                         .findByTaskId(taskId)
                         .size());
+    }
+
+    @Test
+    void onMessage_crossTenantDependency_throwsNonRetryableEventException_andRecordsRejectedHistory() {
+        UUID taskId = UUID.randomUUID();
+        UUID otherTenantDep = UUID.randomUUID();
+        Task crossTenantTask = Task.builder()
+                .id(otherTenantDep).tenantId(TaskTestFixtures.OTHER_TENANT_ID)
+                .status(TaskStatus.PENDING).isReady(true).blockingCount(0).openConstraintCount(0)
+                .createdAt(LocalDateTime.now()).updatedAt(LocalDateTime.now()).build();
+        Fixture fixture = newFixture(List.of(buildTask(taskId), crossTenantTask));
+        UUID eventId = UUID.randomUUID();
+
+        DependencyProposedEvent event = DependencyProposedEvent.newBuilder()
+                .setEventId(eventId.toString())
+                .setTaskId(taskId.toString())
+                .addDependencies(com.rnd.mind.event.Dependency.newBuilder().setDependsOnTaskId(otherTenantDep.toString()).build())
+                .build();
+
+        assertThrows(NonRetryableEventException.class, () -> fixture.handler().onMessage(event));
+
+        assertTrue(fixture.taskRepo().findById(taskId).map(t -> t.getBlockingCount() == 0).orElse(false),
+                "a rejected edge must never be applied");
+        List<com.rnd.chain.dto.DependencyHistoryEntry> entries =
+                fixture.historyRepo().findByTaskId(taskId, 0, 10).content();
+        assertEquals(1, entries.size());
+        assertEquals(com.rnd.chain.dto.DependencyChangeAction.REJECTED, entries.get(0).action());
+        assertEquals(com.rnd.chain.dto.DependencyChangeSource.MIND, entries.get(0).source());
     }
 
     @Test

@@ -69,6 +69,7 @@ public class TaskCounterUpdater {
         return Task.builder()
                 .id(task.getId())
                 .parentTaskId(task.getParentTaskId())
+                .tenantId(task.getTenantId())
                 .status(task.getStatus())
                 .isReady(task.isReady())
                 .blockingCount(task.getBlockingCount())

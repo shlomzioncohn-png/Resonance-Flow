@@ -5,6 +5,7 @@ import com.rnd.chain.dto.TaskDependency;
 import com.rnd.chain.dto.TaskEligibilityResponse;
 import com.rnd.chain.dto.TaskStatus;
 import com.rnd.chain.exception.TaskNotFoundException;
+import com.rnd.chain.exception.TenantReassignmentException;
 import com.rnd.chain.repository.GraphLock;
 import com.rnd.chain.repository.TaskDependencyRepository;
 import com.rnd.chain.repository.TaskRepository;
@@ -126,15 +127,29 @@ public class TaskEligibilityService {
      * interleave between them (PR #467 review).
      *
      * @throws TaskNotFoundException if no task with {@code taskId} exists
+     * @throws TenantReassignmentException if {@code tenantId} differs from the task's already-stored,
+     * non-null tenant - confirmed with the Inbox team that {@code tenant_id} never legitimately
+     * changes after creation, so this always signals a bug upstream. Checked before the staleness
+     * short-circuit below, so a stale/duplicate redelivery carrying a wrong tenant is still flagged.
      */
     @Transactional
-    public void onTaskStatusChangedIfNewer(UUID taskId, TaskStatus newStatus, LocalDateTime eventUpdatedAt) {
+    public void onTaskStatusChangedIfNewer(UUID taskId, TaskStatus newStatus, LocalDateTime eventUpdatedAt,
+                                            UUID tenantId) {
         Objects.requireNonNull(taskId, "taskId must not be null");
         Objects.requireNonNull(newStatus, "newStatus must not be null");
         Objects.requireNonNull(eventUpdatedAt, "eventUpdatedAt must not be null");
 
         graphLock.runExclusive(() -> {
             Task current = taskCounterUpdater.requireTask(taskId);
+
+            if (current.getTenantId() != null && !current.getTenantId().equals(tenantId)) {
+                log.error("task.updated for task {} claims tenant {} but Chain has {} stored - "
+                                + "tenant_id is immutable after creation, rejecting as a bug upstream",
+                        taskId, tenantId, current.getTenantId());
+                throw new TenantReassignmentException("Task " + taskId + " already has tenant "
+                        + current.getTenantId() + ", event claims " + tenantId);
+            }
+
             if (current.getUpdatedAt() != null && !eventUpdatedAt.isAfter(current.getUpdatedAt())) {
                 log.debug("Task {} status update ignored: event updatedAt {} is not newer than stored {}",
                         taskId, eventUpdatedAt, current.getUpdatedAt());
@@ -144,7 +159,8 @@ public class TaskEligibilityService {
             log.info("Task {} status changed to {}", taskId, newStatus);
             TaskStatus previousStatus = current.getStatus();
             TaskCounterUpdater.requireUpdated(taskRepository.update(taskId, task ->
-                    TaskCounterUpdater.copyOf(task).status(newStatus).updatedAt(eventUpdatedAt).build()), taskId);
+                    TaskCounterUpdater.copyOf(task).status(newStatus).updatedAt(eventUpdatedAt)
+                            .tenantId(tenantId).build()), taskId);
 
             if (previousStatus != TaskStatus.DONE && newStatus == TaskStatus.DONE) {
                 adjustDependentsBlockingCount(taskId, -1);

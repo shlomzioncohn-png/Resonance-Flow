@@ -42,11 +42,13 @@ class PostgresTaskDependencyRepositoryTest {
     @Autowired
     private SpringDataTaskDependencyJpaRepository jpaRepository;
 
+    private static final UUID TENANT_ID = UUID.randomUUID();
+
     private Task seedTask() {
         UUID id = UUID.randomUUID();
         LocalDateTime now = LocalDateTime.now();
         Task task = Task.builder()
-                .id(id).status(TaskStatus.ACTIVE)
+                .id(id).tenantId(TENANT_ID).status(TaskStatus.ACTIVE)
                 .blockingCount(0).openConstraintCount(0)
                 .createdAt(now).updatedAt(now).build();
         return postgresTaskRepository.save(task);
@@ -132,7 +134,7 @@ class PostgresTaskDependencyRepositoryTest {
         Task blocker = seedTask();
         postgresTaskRepository.update(blocker.getId(), t ->
                 Task.builder()
-                        .id(t.getId()).status(t.getStatus())
+                        .id(t.getId()).tenantId(t.getTenantId()).status(t.getStatus())
                         .blockingCount(t.getBlockingCount()).openConstraintCount(t.getOpenConstraintCount())
                         .createdAt(t.getCreatedAt()).updatedAt(t.getUpdatedAt())
                         .deletedAt(LocalDateTime.now())

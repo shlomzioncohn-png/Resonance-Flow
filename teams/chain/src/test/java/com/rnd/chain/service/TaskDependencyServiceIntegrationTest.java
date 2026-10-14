@@ -27,6 +27,8 @@ import static org.junit.jupiter.api.Assertions.*;
 
 class TaskDependencyServiceIntegrationTest {
 
+    private static final UUID TENANT_ID = UUID.randomUUID();
+
     private UUID taskId;
     private UUID dependencyTaskId;
 
@@ -283,6 +285,7 @@ class TaskDependencyServiceIntegrationTest {
         return Task.builder()
                 .id(id)
                 .parentTaskId(null)
+                .tenantId(TENANT_ID)
                 .status(status)
                 .isReady(ready)
                 .blockingCount(0)

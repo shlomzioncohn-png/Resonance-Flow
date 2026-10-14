@@ -120,6 +120,15 @@ abstract class TaskRepositoryContractTest {
     // --- save ----------------------------------------------------------
 
     @Test
+    void save_preservesTenantId_roundTrip() {
+        UUID id = UUID.randomUUID();
+        UUID tenantId = UUID.randomUUID();
+        TaskRepository repository = createRepository(List.of(newTaskBuilder(id).tenantId(tenantId).build()));
+
+        assertThat(repository.findById(id).orElseThrow().getTenantId()).isEqualTo(tenantId);
+    }
+
+    @Test
     void save_insertsNewTask() {
         UUID id = UUID.randomUUID();
         TaskRepository repository = createRepository(List.of());

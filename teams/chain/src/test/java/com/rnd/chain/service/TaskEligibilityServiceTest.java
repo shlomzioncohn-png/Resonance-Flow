@@ -10,6 +10,7 @@ import com.rnd.chain.events.TaskSchedulingUpdatedEvent;
 import com.rnd.chain.exception.InvalidDependencyException;
 import com.rnd.chain.exception.InvalidRequestException;
 import com.rnd.chain.exception.TaskNotFoundException;
+import com.rnd.chain.exception.TenantReassignmentException;
 import com.rnd.chain.repository.InMemoryConstraintRepository;
 import com.rnd.chain.repository.InMemoryGraphLock;
 import com.rnd.chain.repository.InMemoryTaskDependencyRepository;
@@ -383,6 +384,56 @@ class TaskEligibilityServiceTest {
                 () -> fixture.service().onTaskStatusChanged(null, TaskStatus.DONE));
     }
 
+    // --- tenant isolation (issue #580) ------------------------------------
+
+    @Test
+    void onTaskStatusChangedIfNewer_backfillsNullStoredTenant() {
+        UUID taskId = UUID.randomUUID();
+        UUID tenantId = UUID.randomUUID();
+        Fixture fixture = newFixture(
+                List.of(TaskTestFixtures.defaultTask(taskId).isReady(true).tenantId(null).build()), List.of());
+
+        fixture.service().onTaskStatusChangedIfNewer(taskId, TaskStatus.ACTIVE,
+                LocalDateTime.now().plusMinutes(1), tenantId);
+
+        assertEquals(tenantId, fixture.taskRepo().findById(taskId).orElseThrow().getTenantId());
+    }
+
+    @Test
+    void onTaskStatusChangedIfNewer_matchingTenant_appliesNormally() {
+        UUID taskId = UUID.randomUUID();
+        Fixture fixture = newFixture(List.of(buildTask(taskId, 0, 0, true)), List.of());
+
+        fixture.service().onTaskStatusChangedIfNewer(taskId, TaskStatus.DONE,
+                LocalDateTime.now().plusMinutes(1), TaskTestFixtures.DEFAULT_TENANT_ID);
+
+        assertEquals(TaskStatus.DONE, fixture.taskRepo().findById(taskId).orElseThrow().getStatus());
+    }
+
+    @Test
+    void onTaskStatusChangedIfNewer_differentTenant_throwsTenantReassignmentException() {
+        UUID taskId = UUID.randomUUID();
+        Fixture fixture = newFixture(List.of(buildTask(taskId, 0, 0, true)), List.of());
+
+        assertThrows(TenantReassignmentException.class, () -> fixture.service().onTaskStatusChangedIfNewer(
+                taskId, TaskStatus.DONE, LocalDateTime.now().plusMinutes(1), TaskTestFixtures.OTHER_TENANT_ID));
+        assertEquals(TaskStatus.ACTIVE, fixture.taskRepo().findById(taskId).orElseThrow().getStatus(),
+                "the status change must not apply alongside the rejected tenant change");
+    }
+
+    @Test
+    void onTaskStatusChangedIfNewer_differentTenant_throwsEvenOnStaleRedelivery() {
+        // The tenant check must fire before the staleness short-circuit, not after - an older/
+        // equal eventUpdatedAt would otherwise silently swallow a genuine upstream bug signal.
+        UUID taskId = UUID.randomUUID();
+        LocalDateTime createdAt = LocalDateTime.now();
+        Task task = TaskTestFixtures.defaultTask(taskId).createdAt(createdAt).updatedAt(createdAt).build();
+        Fixture fixture = newFixture(List.of(task), List.of());
+
+        assertThrows(TenantReassignmentException.class, () -> fixture.service().onTaskStatusChangedIfNewer(
+                taskId, TaskStatus.DONE, createdAt.minusMinutes(1), TaskTestFixtures.OTHER_TENANT_ID));
+    }
+
     private Task createTask(
             UUID id,
             TaskStatus status,
@@ -396,6 +447,7 @@ class TaskEligibilityServiceTest {
         return Task.builder()
                 .id(id)
                 .parentTaskId(null)
+                .tenantId(TaskTestFixtures.DEFAULT_TENANT_ID)
                 .status(status)
                 .isReady(ready)
                 .blockingCount(blockingCount)

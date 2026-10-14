@@ -7,6 +7,7 @@ import com.rnd.chain.dto.PageResponse;
 import com.rnd.chain.dto.Task;
 import com.rnd.chain.dto.TaskDependency;
 import com.rnd.chain.dto.TaskStatus;
+import com.rnd.chain.exception.CrossTenantDependencyException;
 import com.rnd.chain.exception.DependencyNotFoundException;
 import com.rnd.chain.exception.DuplicateDependencyException;
 import com.rnd.chain.exception.InvalidDependencyException;
@@ -24,6 +25,7 @@ import com.rnd.chain.repository.TaskRepository;
 import com.rnd.chain.repository.TransactionRunner;
 import com.rnd.chain.testsupport.ConcurrentTestRunner;
 import com.rnd.chain.testsupport.IncrementingClock;
+import com.rnd.chain.testsupport.TaskFixtures;
 import com.rnd.chain.testsupport.TestTransactions;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -325,6 +327,24 @@ class TaskDependencyServiceTest {
         List<DependencyHistoryEntry> entries = service.getHistory(taskA, 0, 20).content();
         assertThat(entries).extracting(DependencyHistoryEntry::action)
                 .containsExactly(DependencyChangeAction.REMOVED, DependencyChangeAction.ADDED);
+    }
+
+    @Test
+    void addDependency_crossTenant_recordsRejectedHistoryEntry_notDeleted() {
+        // Issue #580: unlike a duplicate/missing-task no-op, a cross-tenant rejection must stay
+        // visible in history, not just vanish along with the speculative ADDED entry.
+        taskRepository.save(Task.builder()
+                .id(taskB).tenantId(TaskFixtures.OTHER_TENANT_ID).status(TaskStatus.ACTIVE)
+                .isReady(true).blockingCount(0).openConstraintCount(0)
+                .createdAt(LocalDateTime.now()).updatedAt(LocalDateTime.now()).build());
+
+        assertThatThrownBy(() -> service.addDependency(taskA, taskB))
+                .isInstanceOf(CrossTenantDependencyException.class);
+
+        List<DependencyHistoryEntry> entries = service.getHistory(taskA, 0, 20).content();
+        assertThat(entries).hasSize(1);
+        assertThat(entries.get(0).action()).isEqualTo(DependencyChangeAction.REJECTED);
+        assertThat(taskDependencyRepository.findByTaskId(taskA)).isEmpty();
     }
 
     @Test
