@@ -14,8 +14,8 @@ price per token. Every field and log key carries its unit (`cpu_seconds`,
   model invocation. Do not log model calls any other way; this is the one
   source of truth the benchmarking work (see `benchmarks/README.md`) and
   any future cost dashboard will read from. Today: OCR (`ocr.py`), ASR
-  (`asr.py`) and LLM extraction (`extractor.py`) -- the last one only
-  partly, see "Status of #479" below.
+  (`asr.py`) and LLM extraction (`extractor.py`); see "Status of #479"
+  below.
   - `cost` is the dollar cost of an **LLM** call, or **`None` for
     unpriced** (unknown model, no usage reported). Never pass 0.0 to mean
     "don't know": a report must be able to tell unpriced from free. OCR/ASR
@@ -59,7 +59,7 @@ price per token. Every field and log key carries its unit (`cpu_seconds`,
 |---|---|---|---|---|---|
 | OCR (`ocr.extract_text`) | `duration_ms` | `cpu_s`: Tesseract's child-process CPU seconds; `None` on Windows | n/a | n/a | `ocr` -- duration limit |
 | ASR (`asr.transcribe`) | `duration_ms` | `cpu_s`: this process's CPU seconds (Whisper runs in it) | n/a | n/a | `asr` -- duration limit |
-| LLM (`BasicExtractor._call`, R2's) | `duration_ms` | n/a | `cost`: tokens x provider price; **unknown recorded as `0.0`** | **not recorded yet** | **no `kind` yet** -- no limits, no warnings |
+| LLM (`BasicExtractor._call`, R2's) | `duration_ms` | n/a | `cost`: tokens x provider price in US dollars; `None` when unpriced or failed | `prompt_tokens`, `completion_tokens` | `llm` -- duration and dollar limits |
 
 ### The summary
 
@@ -86,7 +86,7 @@ and the limits in force (`duration_limit_ms`, `cost_limit_usd`) with
   The log line says `unmeasured` / `unreported` / `unpriced`.
 
 A call recorded without a `kind` gets every measure, since nothing says
-which of them it should have -- which is where R2's LLM calls are today.
+which of them it should have. Every call site in MIND passes one today.
 
 Counters are running totals that never evict; only the latency sample
 behind p50/p95 is bounded (last 10k per name). In-memory and per-process:
@@ -126,27 +126,22 @@ and defaults: `config.MonitoringSettings`, and `.env.example`.
 are starting points from the measurements so far, not validated targets --
 see the `MonitoringSettings` docstring for where each comes from.
 
-### LLM calls: incomplete, pending R2
+### LLM calls
 
-LLM calls are made in R2's `extraction/extractor.py`, and three changes
-there are proposed to her and **not made in this module's PR**: pass
-`kind=CallKind.LLM`, `status`, and the token counts to `record_call`; stop
-turning an unknown cost into `0.0` (`estimate_cost(...) or 0.0`, and `0.0` on
-the failure path); add Gemini's price to `pricing.py`. Until they land:
+LLM calls are made in R2's `extraction/extractor.py`, in `BasicExtractor._call`
+-- the one call site for every LLM call, repair rounds and #351/#352
+included (confirmed by R2). The change there was agreed with her on the PR:
+every call is recorded with `kind=CallKind.LLM`, its status and token
+counts, and an unknown cost stays `None` instead of `0.0`:
 
-- LLM calls have no `kind`, so no LLM limit applies and no LLM call ever
-  warns, and their summary rows treat every measure as applicable (so they
-  show `cpu_unmeasured_count` = their call count);
-- token totals in the summary are `null` for every LLM call name;
-- a failed call, an unpriced model and every Gemini call are counted as
-  priced at $0, not as unpriced -- so an LLM `cost_usd_total` is not yet the
-  lower bound it is meant to be.
-
-`tests/test_cost_latency_monitoring.py` holds three `xfail(strict=True)`
-tests that spell out that change (`kind` and tokens recorded; no price and
-no usage both give `cost is None`). **Do not remove or weaken them before
-R2's change lands.** When it does, they pass, `strict` turns the pass into
-a failure, and the right fix is to drop the `xfail` marker -- nothing else.
+- a failed call (no usage reported) and a model with no price on file are
+  `None` -- unpriced, counted in `unpriced_count`;
+- the dollar price comes from `extraction/providers/pricing.py`. **Gemini has
+  no price on this branch:** R2 added one on her own branch
+  (`yonit/mind-gemini-pricing`, not merged yet), so until that lands, Gemini
+  calls are recorded as unpriced -- correctly, not as $0;
+- with R2's pricing branch, Gemini's `completion_tokens` include its
+  thinking tokens, which Google bills at the output price.
 
 ### Tests
 
@@ -182,5 +177,8 @@ a failure, and the right fix is to drop the `xfail` marker -- nothing else.
   slowdown produces one warning per call.
 - An unpriced LLM call never warns on its own; unpriced calls show only as
   `unpriced_count` in the summary.
+- A failed LLM call is recorded as unpriced, but some failures are billed
+  (`MAX_TOKENS`, a blocked answer). R2 tracks that on her side; until then an
+  LLM `cost_usd_total` can undercount them.
 - In-memory and per-process; resets on restart. The readable week-8 report
   is a separate issue.

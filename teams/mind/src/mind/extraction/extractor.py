@@ -30,7 +30,7 @@ from mind.extraction.providers.base import (
     LLMResponse,
 )
 from mind.extraction.providers.pricing import estimate_cost
-from mind.observability.tracking import record_call
+from mind.observability.tracking import CallKind, CallStatus, record_call
 
 logger = logging.getLogger("mind.extraction")
 
@@ -223,12 +223,14 @@ class BasicExtractor:
             # latency figures describing a better service than this one.
             #
             # There is no answer to read a model id off, so the provider
-            # names itself, and the cost is 0.0 because no usage was
-            # reported -- not because the call was known to be free.
+            # names itself, and the cost is None: no usage was reported, so
+            # it is unknown -- not known to be free.
             record_call(
                 model_name=self._provider.name,
                 duration_ms=(time.perf_counter() - started) * 1000,
-                cost=0.0,
+                cost=None,
+                kind=CallKind.LLM,
+                status=CallStatus.ERROR,
             )
             raise
 
@@ -239,17 +241,16 @@ class BasicExtractor:
         record_call(
             model_name=response.model or self._provider.name,
             duration_ms=duration_ms,
-            # `estimate_cost` returns None for an unpriced model or a provider
-            # that reported no usage, and `record_call` only takes a float, so
-            # both land here as 0.0. That flattening is a known gap: a cost
-            # report cannot currently tell "free" from "unknown", and closing
-            # it means widening ModelCallRecord, which is shared surface.
+            # None for an unpriced model or a provider that reported no
+            # usage: unknown, which the cost report keeps apart from free.
             cost=estimate_cost(
                 response.model,
                 response.prompt_tokens,
                 response.completion_tokens,
-            )
-            or 0.0,
+            ),
+            kind=CallKind.LLM,
+            prompt_tokens=response.prompt_tokens,
+            completion_tokens=response.completion_tokens,
         )
         return response
 

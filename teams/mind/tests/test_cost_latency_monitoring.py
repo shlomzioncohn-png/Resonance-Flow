@@ -24,10 +24,9 @@ The rules underneath have their own unit tests, not repeated here:
 * tests/observability/test_limit_warnings.py -- each limit rule and warning,
   including the dollar-cost boundary, which needs LLM calls with a kind
 
-LLM calls are R2's (extraction/extractor.py), and recording them with a kind,
-token counts and an unpriced cost is a change proposed to her, not made here.
-The xfail(strict=True) tests below spell out that change; once it lands they
-pass, strict turns them into failures, and the marker comes off.
+LLM calls are made in R2's extraction/extractor.py; recording them with a
+kind, token counts and an unpriced cost was agreed with her on the PR. The
+tests that spelled that change out ran as xfail(strict=True) until it landed.
 """
 
 from __future__ import annotations
@@ -301,7 +300,6 @@ def test_an_llm_call_is_recorded_with_its_latency_and_dollar_cost():
     assert call.cost is not None and call.cost > 0
 
 
-@pytest.mark.xfail(strict=True, reason="pending R2's approval: kind and tokens on LLM calls")
 def test_an_llm_call_is_recorded_as_llm_with_its_token_counts():
     llm_call({"prompt_tokens": 400, "completion_tokens": 40})
     [call] = get_recent_calls()
@@ -309,9 +307,6 @@ def test_an_llm_call_is_recorded_as_llm_with_its_token_counts():
     assert (call.prompt_tokens, call.completion_tokens) == (400, 40)
 
 
-@pytest.mark.xfail(
-    strict=True, reason="pending R2's approval: unpriced LLM calls cost None, not 0.0"
-)
 @pytest.mark.parametrize(
     ("usage", "model"),
     [
@@ -396,7 +391,7 @@ def test_warnings_and_summary_counters_agree_across_a_mixed_run(
             one_ocr_call()
         one_asr_call(monkeypatch)  # slow -- never expensive: no dollar cost
         one_asr_call(monkeypatch, BusyWhisper([fake_segment(" Hi.", 0.0, 1.0)]))  # slow
-        llm_call({"prompt_tokens": 400, "completion_tokens": 40})  # no kind yet: no limits
+        llm_call({"prompt_tokens": 400, "completion_tokens": 40})  # within both LLM limits
 
     summary = model_call_summary()
     assert summary.total_calls == 6
