@@ -1,0 +1,44 @@
+{
+  "dataset": "AMI Meeting Corpus",
+  "dataset_version": "ami_public_manual_1.6.2",
+  "purpose": "Foundation Gate real-data slice for the persona harness; also the ground-truth source for #176",
+  "split": "manual annotations - abstractive summary (abssumm), <actions> layer",
+  "source_url": "https://groups.inf.ed.ac.uk/ami/AMICorpusAnnotations/ami_public_manual_1.6.2.zip",
+  "source_page": "https://groups.inf.ed.ac.uk/ami/download/",
+  "license": {
+    "name": "Creative Commons Attribution 4.0 International (CC BY 4.0)",
+    "url": "https://creativecommons.org/licenses/by/4.0/",
+    "summary": "The AMI download page (https://groups.inf.ed.ac.uk/ami/download/) states, verbatim: \"All of the signals and transcription, and some of the annotations, have been released publicly under the Creative Commons Attribution 4.0 International Licence (CC BY 4.0).\" LICENCE.txt bundled inside ami_public_manual_1.6.2.zip states, verbatim: \"The AMI corpus and its annotations are released under the Creative Commons Attribution 4.0 International Public License agreement (CC BY 4.0). Use of this data implies agreement with the terms below.\" CC BY 4.0 permits use (including commercial) and adaptation, requires attribution (credit the creators, link to the licence, indicate any changes), and is provided as-is with no warranty."
+  },
+  "package": {
+    "file": "ami_public_manual_1.6.2.zip",
+    "bytes": 22887865,
+    "sha256": "b56e5babb2496b8795deeeda7e71178d7fbc9963f94276cf2a3f4b56ebbc9f9d",
+    "manual_annotations_release": "1.7 (2014-06-16), per 00README_MANUAL.txt",
+    "note": "Only this package is downloaded - text annotations only, no audio. Unzip to local-data/ami/ami_public_manual_1.6.2/. The corpus files themselves are gitignored (local-data/); this manifest + ami.sha256 are the reproducible pointer."
+  },
+  "records": [
+    {
+      "id": "IB4003",
+      "files": [
+        "local-data/ami/ami_public_manual_1.6.2/abstractive/IB4003.abssumm.xml",
+        "local-data/ami/ami_public_manual_1.6.2/corpusResources/meetings.xml"
+      ]
+    },
+    {
+      "id": "IS1008b",
+      "files": [
+        "local-data/ami/ami_public_manual_1.6.2/abstractive/IS1008b.abssumm.xml",
+        "local-data/ami/ami_public_manual_1.6.2/corpusResources/meetings.xml"
+      ]
+    },
+    {
+      "id": "IS1008d",
+      "files": [
+        "local-data/ami/ami_public_manual_1.6.2/abstractive/IS1008d.abssumm.xml",
+        "local-data/ami/ami_public_manual_1.6.2/corpusResources/meetings.xml"
+      ]
+    }
+  ],
+  "note": "meetings.xml's `dateOnly` attribute per meeting is the source of each scenario's context.current_datetime and (for IB4003) the follow-up meeting's deadline, added when the scenarios switched from synthetic to real dates."
+}

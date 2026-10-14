@@ -1,9 +1,25 @@
 services:
   chain:
-    build: .
+    build:
+      context: .
+      additional_contexts:
+        shared: ../../shared
     container_name: chain-service
     ports:
       - "${SERVER_PORT:-8081}:8081"
     environment:
       - SERVER_PORT=${SERVER_PORT:-8081}
       - SPRING_PROFILES_ACTIVE=${SPRING_PROFILES_ACTIVE:-local}
+      - KAFKA_BOOTSTRAP_SERVERS=${KAFKA_BOOTSTRAP_SERVERS:-localhost:9092}
+      # No local Apicurio/schema-registry container here yet - task.created/task.updated/
+      # task.dependencies.proposed consumption will fail without one reachable at this URL.
+      - SCHEMA_REGISTRY_URL=${SCHEMA_REGISTRY_URL:-http://localhost:8082/apis/ccompat/v6}
+      # Own database + own DB user on the shared root docker-compose's postgres service - see
+      # PR #417. Reaches it the same way teams/inbox/docker-compose.yml does when run standalone.
+      - DB_HOST=host.docker.internal
+      - DB_PORT=${DB_PORT:-5432}
+      - DB_NAME=${DB_NAME:-chain}
+      - DB_USER=${DB_USER:-chain}
+      - DB_PASSWORD=${CHAIN_DB_PASSWORD:-chain}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"

@@ -1,0 +1,283 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://resonance-flow.internal/mind/eval/personas/scenario.schema.json",
+  "$defs": {
+    "Context": {
+      "additionalProperties": false,
+      "description": "The situation the persona is in right now.",
+      "properties": {
+        "free_time_minutes": {
+          "description": "How much free time the persona has right now. The single most load-bearing field in the scenario — the same task list can have a different correct answer at 20 minutes vs. 120 minutes.",
+          "minimum": 1,
+          "title": "Free Time Minutes",
+          "type": "integer"
+        },
+        "current_datetime": {
+          "description": "ISO 8601 timestamp establishing 'now' for this scenario, so task.deadline can be evaluated as near/far/passed.",
+          "format": "date-time",
+          "title": "Current Datetime",
+          "type": "string"
+        },
+        "time_horizon": {
+          "description": "The window the persona is planning within. A CEO scenario will typically use a wider horizon than a Developer scenario.",
+          "enum": [
+            "today",
+            "this_week",
+            "this_month"
+          ],
+          "title": "Time Horizon",
+          "type": "string"
+        },
+        "constraints": {
+          "description": "Any additional situational constraint the model must know about to answer correctly (e.g. 'no meetings can be scheduled'). Empty list when there are none.",
+          "items": {
+            "type": "string"
+          },
+          "title": "Constraints",
+          "type": "array"
+        }
+      },
+      "required": [
+        "free_time_minutes",
+        "current_datetime",
+        "time_horizon"
+      ],
+      "title": "Context",
+      "type": "object"
+    },
+    "Persona": {
+      "additionalProperties": false,
+      "description": "Who the user is, in the terms the system cares about.",
+      "properties": {
+        "role": {
+          "description": "Who the user is (see MIND-01-System-Overview.md role table). Same six values across the whole persona set.",
+          "enum": [
+            "Developer",
+            "Manager",
+            "Higher Manager",
+            "Field Engineer",
+            "Salesperson",
+            "CEO"
+          ],
+          "title": "Role",
+          "type": "string"
+        },
+        "seniority": {
+          "anyOf": [
+            {
+              "enum": [
+                "Junior",
+                "Mid",
+                "Senior",
+                "Executive"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Only set when seniority genuinely changes the correct answer for this scenario (e.g. a Junior Developer is not expected to pick up an architecture-review task a Senior would). Omit or null otherwise.",
+          "title": "Seniority"
+        },
+        "department": {
+          "anyOf": [
+            {
+              "enum": [
+                "Engineering",
+                "Sales",
+                "Operations"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Optional, nullable. Some roles (e.g. CEO) are not scoped to a single department; leave null rather than forcing a value.",
+          "title": "Department"
+        }
+      },
+      "required": [
+        "role"
+      ],
+      "title": "Persona",
+      "type": "object"
+    },
+    "Source": {
+      "additionalProperties": false,
+      "description": "Where this scenario came from — for later performance analysis by origin.",
+      "properties": {
+        "type": {
+          "description": "'real' = hand-written from a genuine (non-Gong) situation; 'AMI'/'FUNSD' = derived from those public corpora; 'synthetic' = fabricated for coverage; 'other' = anything else, explained in source_detail.",
+          "enum": [
+            "synthetic",
+            "real",
+            "AMI",
+            "FUNSD",
+            "other"
+          ],
+          "title": "Type",
+          "type": "string"
+        },
+        "source_detail": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Free-text pointer to the concrete origin (e.g. an AMI meeting ID). Required in practice when type is 'AMI', 'FUNSD' or 'other'.",
+          "title": "Source Detail"
+        }
+      },
+      "required": [
+        "type"
+      ],
+      "title": "Source",
+      "type": "object"
+    },
+    "Task": {
+      "additionalProperties": false,
+      "description": "A single candidate task within a persona evaluation scenario.\n\nThe harness calls `RankingModel.score()` once per Task and builds the ranking\nfrom the returned scores — a model never sees the whole scenario.",
+      "properties": {
+        "task_id": {
+          "description": "Unique within this scenario. Referenced by expected_top_task_id. Same character rule as scenario_id (lowercase, digits, underscore).",
+          "pattern": "^[a-z0-9_]+$",
+          "title": "Task Id",
+          "type": "string"
+        },
+        "title": {
+          "minLength": 1,
+          "title": "Title",
+          "type": "string"
+        },
+        "description": {
+          "description": "Enough detail that a model (and a human reader) can judge duration, urgency and relevance without outside knowledge.",
+          "minLength": 1,
+          "title": "Description",
+          "type": "string"
+        },
+        "deadline": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "ISO 8601 timestamp, or null if the task has no hard deadline. Evaluated against context.current_datetime.",
+          "title": "Deadline"
+        },
+        "effort_estimate": {
+          "description": "Effort estimate for the task, in minutes — the eval set's concrete form of the canonical Task.effort_estimate (owned by Inbox). Recorded for Chain's downstream constraint-satisfaction step; the ranking model sees it, but a scenario's correct answer must not hinge on comparing it to context.free_time_minutes (see eval/personas/README.md).",
+          "minimum": 1,
+          "title": "Effort Estimate",
+          "type": "integer"
+        },
+        "tier": {
+          "description": "What KIND of task this is — independent of persona. A Developer can receive an operational or a tactical task; tier is not implied by role. Lowercase values, matching the canonical Task schema (Inbox) and src/mind/scoring/. See 'Persona ≠ Tier' in eval/personas/README.md.",
+          "enum": [
+            "operational",
+            "tactical",
+            "strategic"
+          ],
+          "title": "Tier",
+          "type": "string"
+        },
+        "blocked": {
+          "description": "True if this task cannot currently be worked on right now (e.g. waiting on something outside this scenario). A blocked task should generally not be the expected_top_task_id.",
+          "title": "Blocked",
+          "type": "boolean"
+        },
+        "parent_task_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The task_id of this task's parent in the cross-tier organizational hierarchy (a developer task under a manager task, etc.), matching the canonical Task.parent_task_id. Points outside this scenario, so it is not cross-referenced here. Reserved for the week-7 hierarchical value-propagation evaluation; null in every scenario until then. This is NOT the old same-tier `dependencies` array — that was removed deliberately and is not coming back.",
+          "title": "Parent Task Id"
+        }
+      },
+      "required": [
+        "task_id",
+        "title",
+        "description",
+        "effort_estimate",
+        "tier",
+        "blocked"
+      ],
+      "title": "Task",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "description": "One fixed evaluation scenario for MIND's persona evaluation harness.\n\nEvery scenario in eval/personas/, regardless of persona (Developer, Manager,\nHigher Manager, Field Engineer, Salesperson, CEO), conforms to this one\nmodel. Only the values differ between personas — never the structure.",
+  "properties": {
+    "scenario_id": {
+      "description": "Unique identifier across the whole eval/personas/ set. Convention: <role>_<short_slug>, e.g. developer_late_pr_review.",
+      "pattern": "^[a-z0-9_]+$",
+      "title": "Scenario Id",
+      "type": "string"
+    },
+    "persona": {
+      "$ref": "#/$defs/Persona"
+    },
+    "context": {
+      "$ref": "#/$defs/Context"
+    },
+    "tasks": {
+      "description": "The candidate tasks the persona is choosing between. At least two, so the scenario actually tests a choice.",
+      "items": {
+        "$ref": "#/$defs/Task"
+      },
+      "minItems": 2,
+      "title": "Tasks",
+      "type": "array"
+    },
+    "expected_top_task_id": {
+      "description": "The task_id (from `tasks`) a correct model must pick as the single best use of the persona's free time. Must equal the task_id of exactly one entry in `tasks` (enforced below).",
+      "title": "Expected Top Task Id",
+      "type": "string"
+    },
+    "expected_reason": {
+      "description": "Short, checkable explanation of why expected_top_task_id is correct, grounded in per-task signals the ranking model can actually see: a hard deadline, blocked, tier, or an importance/scope judgment from the description. Must NOT hinge on context.free_time_minutes or a duration comparison — that is Chain's concern, not the ranking model's.",
+      "minLength": 20,
+      "title": "Expected Reason",
+      "type": "string"
+    },
+    "source": {
+      "$ref": "#/$defs/Source"
+    },
+    "team_lead_approved": {
+      "description": "Whether the team lead has reviewed this scenario in a PR and signed off on it. This is the only approval flag on a scenario. Set explicitly by the author: start at false, the team lead (not the author) flips it to true.",
+      "title": "Team Lead Approved",
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "scenario_id",
+    "persona",
+    "context",
+    "tasks",
+    "expected_top_task_id",
+    "expected_reason",
+    "source",
+    "team_lead_approved"
+  ],
+  "title": "PersonaEvaluationScenario",
+  "type": "object"
+}

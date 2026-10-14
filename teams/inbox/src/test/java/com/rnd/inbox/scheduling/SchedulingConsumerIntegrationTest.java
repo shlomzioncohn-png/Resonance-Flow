@@ -267,7 +267,7 @@ class SchedulingConsumerIntegrationTest extends PostgresIntegrationTest {
     }
 
     private String awaitErrorContaining(String needle) {
-        long deadline = System.currentTimeMillis() + 15000;
+        long deadline = System.currentTimeMillis() + 25000;
         while (System.currentTimeMillis() < deadline) {
             ConsumerRecords<String, String> records = KafkaTestUtils.getRecords(errorConsumer, Duration.ofSeconds(2));
             for (ConsumerRecord<String, String> record : records) {

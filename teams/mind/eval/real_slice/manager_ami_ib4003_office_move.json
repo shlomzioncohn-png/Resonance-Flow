@@ -1,0 +1,96 @@
+{
+  "scenario_id": "manager_ami_ib4003_office_move",
+  "persona": { "role": "Manager", "department": null },
+  "context": {
+    "free_time_minutes": 60,
+    "current_datetime": "2004-11-02T09:00:00",
+    "time_horizon": "this_month",
+    "constraints": []
+  },
+  "tasks": [
+    {
+      "task_id": "task_walls_feasibility",
+      "title": "Find out whether offices can be divided with walls and doors",
+      "description": "Verbatim action item (AMI IB4003): 'The project manager will find out if it is possible to split up offices by putting up walls and doors.' The meeting left open whether rooms can be physically divided for privacy; the seating-arrangement proposal cannot be finalised until this is known.",
+      "deadline": null,
+      "effort_estimate": 30,
+      "tier": "operational",
+      "blocked": false,
+      "parent_task_id": null
+    },
+    {
+      "task_id": "task_gisella_placement",
+      "title": "Check whether Gisella can share with the other school admin",
+      "description": "Verbatim action item (AMI IB4003): 'The project manager will find out whether putting Gisella with the other admin of the school is an option.' Where to seat Gisella was an open question in the meeting because she tends to be noisy.",
+      "deadline": null,
+      "effort_estimate": 20,
+      "tier": "operational",
+      "blocked": false,
+      "parent_task_id": null
+    },
+    {
+      "task_id": "task_team_preferences",
+      "title": "Collect the team members' own seating preferences",
+      "description": "Verbatim action item (AMI IB4003): 'The group members will come up with their own preferences regarding the arrangement of people in the space.' An input to the seating-arrangement proposal.",
+      "deadline": null,
+      "effort_estimate": 30,
+      "tier": "operational",
+      "blocked": false,
+      "parent_task_id": null
+    },
+    {
+      "task_id": "task_poll_others",
+      "title": "Poll other staff about seating preferences",
+      "description": "Verbatim action item (AMI IB4003): 'The group members will poll other people regarding preferences regarding the arrangement of people in the space.' An input to the seating-arrangement proposal.",
+      "deadline": null,
+      "effort_estimate": 45,
+      "tier": "operational",
+      "blocked": false,
+      "parent_task_id": null
+    },
+    {
+      "task_id": "task_build_proposal",
+      "title": "Draft the seating-arrangement proposal",
+      "description": "Verbatim action item (AMI IB4003): 'The team will try to build a proposal on the arrangement of people based on personal preferences.' This is the deliverable the meeting is working towards; it draws on the collected preferences.",
+      "deadline": null,
+      "effort_estimate": 120,
+      "tier": "tactical",
+      "blocked": false,
+      "parent_task_id": null
+    },
+    {
+      "task_id": "task_merge_proposal",
+      "title": "Merge the seating proposal with the other team's",
+      "description": "Verbatim action item (AMI IB4003): 'The team will merge their proposal on the arrangement of people in the space with that of a different team.' Cannot start until both this team's proposal and the other team's proposal exist.",
+      "deadline": null,
+      "effort_estimate": 60,
+      "tier": "tactical",
+      "blocked": true,
+      "parent_task_id": null
+    },
+    {
+      "task_id": "task_ask_colleagues",
+      "title": "Ask Maggie and Pierrette for their seating preferences",
+      "description": "Verbatim action item (AMI IB4003): 'One team member will ask Maggie and Pierrette about their preferences on the arrangement of people.' An input to the seating-arrangement proposal.",
+      "deadline": null,
+      "effort_estimate": 15,
+      "tier": "operational",
+      "blocked": false,
+      "parent_task_id": null
+    },
+    {
+      "task_id": "task_followup_meeting",
+      "title": "Attend the follow-up meeting next Tuesday at 14:00",
+      "description": "Verbatim action item (AMI IB4003): 'The team will meet next Tuesday at two o'clock' (no terminal punctuation in the source). A fixed calendar event, not work that can be done ahead of time.",
+      "deadline": "2004-11-09T14:00:00",
+      "effort_estimate": 60,
+      "tier": "operational",
+      "blocked": false,
+      "parent_task_id": null
+    }
+  ],
+  "expected_top_task_id": "task_walls_feasibility",
+  "expected_reason": "task_merge_proposal is blocked until both teams' proposals exist, and task_followup_meeting is a fixed calendar event rather than work to be done now. Among the remaining unblocked items, task_walls_feasibility settles a structural open question - whether offices can be physically divided at all - that the seating-arrangement proposal depends on, so it should be done first.",
+  "source": { "type": "AMI", "source_detail": "AMI Meeting Corpus meeting IB4003, abssumm <actions> (ami_public_manual_1.6.2)" },
+  "team_lead_approved": false
+}

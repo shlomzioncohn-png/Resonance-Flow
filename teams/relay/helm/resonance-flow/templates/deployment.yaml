@@ -1,0 +1,186 @@
+{{- range $componentName, $component := .Values.components }}
+{{- if $component.enabled }}
+---
+apiVersion: apps/v1
+kind: Deployment
+
+metadata:
+  name: {{ include "resonance-flow.fullname" $ }}-{{ $componentName }}
+  labels:
+    {{- include "resonance-flow.labels" $ | nindent 4 }}
+    app.kubernetes.io/component: {{ $componentName }}
+
+spec:
+  replicas: {{ $component.replicaCount }}
+
+  {{- with $component.updateStrategy }}
+  strategy:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+
+  selector:
+    matchLabels:
+      {{- include "resonance-flow.selectorLabels" $ | nindent 6 }}
+      app.kubernetes.io/component: {{ $componentName }}
+
+  template:
+    metadata:
+      {{- with $.Values.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+
+      labels:
+        {{- include "resonance-flow.selectorLabels" $ | nindent 8 }}
+        app.kubernetes.io/component: {{ $componentName }}
+        {{- with $.Values.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+
+    spec:
+      {{- $imagePullSecrets := $.Values.imagePullSecrets }}
+      {{- if $.Values.imagePullSecret.create }}
+      {{- $imagePullSecrets = append $imagePullSecrets (dict "name" (printf "%s-image-pull" (include "resonance-flow.fullname" $))) }}
+      {{- end }}
+      {{- with $imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+
+      serviceAccountName: {{ include "resonance-flow.serviceAccountName" $ }}
+
+      {{- with $component.terminationGracePeriodSeconds }}
+      terminationGracePeriodSeconds: {{ . }}
+      {{- end }}
+
+      {{- with $.Values.podSecurityContext }}
+      securityContext:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+
+      {{- $dependencies := concat ($.Values.dependencies | default list) ($component.dependencies | default list) }}
+      {{- $rawInitContainers := concat ($.Values.initContainers | default list) ($component.initContainers | default list) }}
+      {{- /* dig, not `and $component.migration $component.migration.enabled` -- Go
+             template function args are all evaluated eagerly (no short-circuit), so
+             `.enabled` would be a nil-pointer panic for every component that doesn't
+             set `migration` at all, i.e. every component except the opted-in ones. */}}
+      {{- $migrationEnabled := dig "migration" "enabled" false $component }}
+      {{- if or $dependencies $rawInitContainers $migrationEnabled }}
+      initContainers:
+        {{- if $dependencies }}
+        {{- include "resonance-flow.waitForDependencies" (dict "root" $ "deps" $dependencies) | nindent 8 }}
+        {{- end }}
+        {{- if $migrationEnabled }}
+        {{- include "resonance-flow.migrationInitContainer" (dict "root" $ "componentName" $componentName "component" $component) | nindent 8 }}
+        {{- end }}
+        {{- with $rawInitContainers }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      {{- end }}
+
+      containers:
+        - name: {{ $componentName }}
+
+          {{- with $.Values.securityContext }}
+          securityContext:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+
+          image: "{{ $component.image.repository }}:{{ $component.image.tag }}"
+          imagePullPolicy: {{ $component.image.pullPolicy }}
+
+          ports:
+            - name: http
+              containerPort: {{ $component.containerPort }}
+              protocol: TCP
+
+          {{- if or $component.config $component.secret $component.env (eq $componentName "notification-delivery") }}
+          env:
+            {{- if eq $componentName "notification-delivery" }}
+            {{/* Populates the app's generic INSTANCE_NAME contract (see application.yml /
+                 InstanceNameGuard) with this pod's own name - a Kubernetes concept the chart
+                 knows about so the app itself doesn't have to. */}}
+            - name: INSTANCE_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            {{- end }}
+            {{- include "resonance-flow.configSecretEnv" (dict "root" $ "component" $component) | nindent 12 }}
+            {{- range $name, $value := $component.env }}
+            - name: {{ $name }}
+              value: {{ $value | quote }}
+            {{- end }}
+          {{- end }}
+
+          {{- with $component.startupProbe }}
+          startupProbe:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+
+          {{- with $component.livenessProbe }}
+          livenessProbe:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+
+          {{- with $component.readinessProbe }}
+          readinessProbe:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+
+          {{- with $component.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- $volumeMounts := concat ($.Values.volumeMounts | default list) ($component.volumeMounts | default list) }}
+          {{- if or $component.config $component.secret $volumeMounts }}
+          volumeMounts:
+            {{- include "resonance-flow.configSecretVolumeMounts" (dict "root" $ "component" $component) | nindent 12 }}
+            {{- with $volumeMounts }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          {{- end }}
+
+      {{- $dependencySecretVolumes := $component.dependencySecretVolumes | default list }}
+      {{- $volumes := concat ($.Values.volumes | default list) ($component.volumes | default list) }}
+      {{- if or $component.config $component.secret $volumes $dependencySecretVolumes }}
+      volumes:
+        {{- if $component.config }}
+        - name: resonance-flow-config
+          configMap:
+            name: {{ include "resonance-flow.fullname" $ }}-{{ $componentName }}-config
+        {{- end }}
+        {{- if $component.secret }}
+        - name: resonance-flow-secret
+          secret:
+            secretName: {{ include "resonance-flow.fullname" $ }}-{{ $componentName }}-secret
+            optional: true
+        {{- end }}
+        {{- range $secretVolume := $dependencySecretVolumes }}
+        - name: {{ $secretVolume.name }}
+          secret:
+            secretName: {{ include "resonance-flow.dependencyHost" (dict "root" $ "dep" (dict "name" $secretVolume.dependencyName)) }}
+            items:
+              {{- toYaml $secretVolume.items | nindent 14 }}
+        {{- end }}
+        {{- with $volumes }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      {{- end }}
+      {{- with $.Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+
+      {{- with $.Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+
+      {{- with $.Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+
+{{- end }}
+
+{{- end }}

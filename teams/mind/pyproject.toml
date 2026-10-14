@@ -3,22 +3,79 @@ name = "mind"
 version = "0.1.0"
 description = "MIND — extraction, embeddings, and scoring for Resonance Flow (Team MIND, KamaTech x Gong Bootcamp)"
 readme = "README.md"
-requires-python = ">=3.11"
+requires-python = ">=3.12"
 license = { text = "Proprietary" }
 dependencies = [
     # core
     "pydantic>=2.0",
+    "pydantic-settings>=2.0",
     "fastapi",
     "uvicorn",
-    # add as decided: vector-store client, OCR/ASR libs, LLM client, etc.
+    # embeddings (src/mind/embeddings)
+    "psycopg[binary,pool]>=3.1",
+    "sentence-transformers>=3.0",
+    # migrations (migrations/) -- runs at deploy time, inside the image,
+    # not just in dev, so this belongs here and not in [dev].
+    "alembic>=1.13",
+    "sqlalchemy>=2.0",
+    # messaging (src/mind/messaging)
+    "confluent-kafka[protobuf,schemaregistry]>=2.5,<2.11",
+    "protobuf>=5",
+    "pyyaml",
+    # LLM provider calls (mind.extraction.providers); also what
+    # fastapi.testclient.TestClient runs on in the tests.
+    "httpx",
+    # OCR (src/mind/multimodal/ocr.py) -- tesseract --psm 11, the decision
+    # made in benchmarks/ocr-asr-benchmark.md. Also requires the
+    # tesseract-ocr system binary (not pip-installable).
+    "pillow",
+    "pypdfium2",  # rasterizes PDF pages to images for the OCR pipeline
+    # ASR (src/mind/multimodal/asr.py) -- Whisper base.en, the decision made in
+    # benchmarks/ocr-asr-benchmark.md (#135). faster-whisper, not openai-whisper:
+    # it runs Whisper on CTranslate2 instead of PyTorch -- faster on CPU, lower
+    # peak memory. The weights are not pip-installable: the Dockerfile bakes them
+    # into the image, locally they live in models/whisper/ (models/README.md).
+    "faster-whisper",
+    # PyAV decodes the audio for asr.py. faster-whisper 1.2.1's own decoder calls
+    # av.open(..., metadata_errors=...), a keyword PyAV 19 no longer accepts
+    # (TypeError on every transcribe of a file path, as the benchmark does).
+    # 18.1.0 works; drop this pin once faster-whisper catches up.
+    "av<19",
 ]
 
 [project.optional-dependencies]
 dev = [
     "pytest",
+    "pytest-asyncio",
     "pytest-cov",
     "ruff",
     "mypy",
+    "types-PyYAML",
+    "types-psutil",  # CI's `make lint` runs `mypy ... benchmarks`, so this
+                     # stub needs to be here, not in [benchmark] below --
+                     # CI installs `.[dev]` only, never `.[benchmark]`
+                     # (that extra stays heavy/optional on purpose: paddleocr,
+                     # paddlepaddle). The stub alone (no runtime psutil
+                     # needed) is enough for mypy to resolve the import --
+                     # verified locally: mypy passes on benchmarks/ with
+                     # types-psutil installed and psutil itself uninstalled.
+    "grpcio-tools==1.71.0",  # protoc, for `make proto`
+    "types-protobuf",  # stubs for google.protobuf, imported by the generated _pb2.pyi files
+    "python-dotenv",  # tests/conftest.py loads .env for os.environ-reading fixtures
+]
+# Not a runtime dependency of src/mind/ -- only benchmarks/ocr_asr_benchmark.py
+# needs these (psutil for peak-RSS sampling, PaddleOCR as the comparison
+# engine). Tesseract itself, the chosen OCR, is a system binary and runtime
+# dependency -- see above. PaddleOCR also requires its model weights, which
+# may need manual placement under ~/.paddlex/official_models/ if the
+# auto-download hosters are network-filtered -- see
+# benchmarks/ocr-asr-benchmark.md "PaddleOCR -- setup".
+benchmark = [
+    "psutil",  # cross-platform peak-RSS/CPU sampling; stdlib `resource` is Unix-only
+    "paddleocr",
+    "paddlepaddle",
+    # The ASR size benchmark (#135) also needs faster-whisper and av, now
+    # runtime dependencies above (asr.py).
 ]
 
 [build-system]
@@ -30,7 +87,47 @@ packages = ["src/mind"]
 
 [tool.ruff]
 line-length = 100
-src = ["src", "tests"]
+src = ["src", "tests", "benchmarks"]
+extend-exclude = ["*_pb2.py"]
+
+[tool.mypy]
+exclude = ["_pb2\\.py$"]
+
+# paddleocr ships no type stubs and no py.typed marker -- no stub package
+# exists to install (unlike psutil's types-psutil above), so this is the
+# standard mypy way to silence "missing library stubs" for it specifically,
+# not a blanket ignore for the whole benchmarks/ tree.
+[[tool.mypy.overrides]]
+module = "paddleocr"
+ignore_missing_imports = true
+
+# Same reason for faster-whisper (no stubs, no py.typed marker).
+[[tool.mypy.overrides]]
+module = ["faster_whisper", "faster_whisper.*"]
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = "confluent_kafka.*"
+ignore_missing_imports = true
+
+# No stubs/py.typed marker published for this dependency.
+[[tool.mypy.overrides]]
+module = "pypdfium2.*"
+ignore_missing_imports = true
+
+[tool.ruff.lint]
+# TID252 (flake8-tidy-imports): use absolute imports, not relative ("from .x").
+extend-select = ["TID252"]
+
+[tool.ruff.lint.flake8-tidy-imports]
+ban-relative-imports = "all"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+asyncio_mode = "auto"
+# One event loop for the whole session, not one per test -- see
+# tests/test_vector_store.py's _store_lifecycle fixture docstring for why:
+# the vector store's connection pool needs to live on one long-lived loop,
+# the same way it does under a real server, not get recreated per test.
+asyncio_default_fixture_loop_scope = "session"
+asyncio_default_test_loop_scope = "session"

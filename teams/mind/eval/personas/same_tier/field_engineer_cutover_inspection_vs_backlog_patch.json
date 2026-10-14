@@ -1,0 +1,42 @@
+{
+  "scenario_id": "field_engineer_cutover_inspection_vs_backlog_patch",
+  "persona": {
+    "role": "Field Engineer",
+    "department": null
+  },
+  "context": {
+    "free_time_minutes": 60,
+    "current_datetime": "2026-09-07T13:30:00",
+    "time_horizon": "today",
+    "constraints": []
+  },
+  "tasks": [
+    {
+      "task_id": "task_inspection",
+      "title": "Inspect Customer E's replacement switch before cutover",
+      "description": "The new switch is racked and must be physically inspected and labelled before tonight's 18:00 cutover.",
+      "deadline": "2026-09-07T18:00:00",
+      "effort_estimate": 45,
+      "tier": "operational",
+      "blocked": false,
+      "parent_task_id": null
+    },
+    {
+      "task_id": "task_patch",
+      "title": "Apply a queued config tweak to Customer E's cluster",
+      "description": "A backlog change to tidy rate-limit rules; no customer impact, no deadline.",
+      "deadline": null,
+      "effort_estimate": 20,
+      "tier": "operational",
+      "blocked": false,
+      "parent_task_id": null
+    }
+  ],
+  "expected_top_task_id": "task_inspection",
+  "expected_reason": "task_inspection has a hard deadline before tonight's cutover; task_patch is a no-impact backlog change with no deadline.",
+  "source": {
+    "type": "synthetic",
+    "source_detail": null
+  },
+  "team_lead_approved": true
+}

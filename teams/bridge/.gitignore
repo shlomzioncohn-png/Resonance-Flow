@@ -4,4 +4,9 @@ target/
 *.iml
 .vscode/
 .env
+application-local.yml
+.secrets/
 .DS_Store
+application-local.yml
+application-local.properties
+

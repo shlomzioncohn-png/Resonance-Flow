@@ -19,7 +19,63 @@
 
     <properties>
         <java.version>21</java.version>
+        <minio.version>8.5.2</minio.version>
+        <protobuf.version>3.25.3</protobuf.version>
+        <google-api-client.version>2.7.0</google-api-client.version>
+        <google-oauth-client.version>1.36.0</google-oauth-client.version>
+        <google-http-client.version>1.44.2</google-http-client.version>
+        <google-api-services-gmail.version>v1-rev20240520-2.0.0</google-api-services-gmail.version>
+        <google-api-services-calendar.version>v3-rev20260708-2.0.0</google-api-services-calendar.version>
+        <google-api-services-drive.version>v3-rev20240521-2.0.0</google-api-services-drive.version>
+        <slack-api-client.version>1.44.2</slack-api-client.version>
+        <!-- Mirrored exactly from teams/inbox/pom.xml - same registry, same wire format. -->
+        <confluent.version>7.1.15</confluent.version>
+        <!-- Dockerfile overrides it: the repo layout isn't there. -->
+        <proto.root>${project.basedir}/../../shared/proto</proto.root>
     </properties>
+
+    <repositories>
+        <repository>
+            <id>confluent</id>
+            <url>https://packages.confluent.io/maven/</url>
+        </repository>
+    </repositories>
+
+    <!--
+        Mirrored exactly from teams/inbox/pom.xml: kafka-protobuf-serializer pulls in
+        kotlinpoet-jvm, whose transitive kotlin-stdlib resolves to 1.6.21 by default. That's too
+        old: at runtime it's missing kotlin.enums.EnumEntriesKt, added in Kotlin 1.9. Pin the
+        Kotlin artifacts to a version that has it.
+    -->
+    <dependencyManagement>
+        <dependencies>
+            <dependency>
+                <groupId>org.jetbrains.kotlin</groupId>
+                <artifactId>kotlin-stdlib</artifactId>
+                <version>1.9.22</version>
+            </dependency>
+            <dependency>
+                <groupId>org.jetbrains.kotlin</groupId>
+                <artifactId>kotlin-stdlib-common</artifactId>
+                <version>1.9.22</version>
+            </dependency>
+            <dependency>
+                <groupId>org.jetbrains.kotlin</groupId>
+                <artifactId>kotlin-stdlib-jdk7</artifactId>
+                <version>1.9.22</version>
+            </dependency>
+            <dependency>
+                <groupId>org.jetbrains.kotlin</groupId>
+                <artifactId>kotlin-stdlib-jdk8</artifactId>
+                <version>1.9.22</version>
+            </dependency>
+            <dependency>
+                <groupId>org.jetbrains.kotlin</groupId>
+                <artifactId>kotlin-reflect</artifactId>
+                <version>1.9.22</version>
+            </dependency>
+        </dependencies>
+    </dependencyManagement>
 
     <dependencies>
         <dependency>
@@ -29,16 +85,169 @@
 
         <dependency>
             <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-webflux</artifactId>
+        </dependency>
+
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-actuator</artifactId>
+        </dependency>
+
+        <dependency>
+            <groupId>org.springframework.kafka</groupId>
+            <artifactId>spring-kafka</artifactId>
+        </dependency>
+
+        <dependency>
+            <groupId>com.google.protobuf</groupId>
+            <artifactId>protobuf-java</artifactId>
+            <version>3.25.3</version>
+        </dependency>
+
+        <dependency>
+            <groupId>io.minio</groupId>
+            <artifactId>minio</artifactId>
+            <version>${minio.version}</version>
+        </dependency>
+
+        <!-- Gmail/Calendar/Drive: shared Google OAuth2 client machinery plus one generated API
+             client per product. All three real readers (RealEmailSourceReader,
+             RealCalendarSourceReader, RealDriveSourceReader) share the same credential loading
+             (see intake.google.GoogleCredentialsProvider) built on these. Personal Gmail
+             accounts can't use service-account domain-wide delegation, so this is the
+             installed-app OAuth2 user-consent flow (one-time browser approval via
+             google-oauth-client-jetty's local redirect receiver, cached refresh token
+             thereafter) - the resulting Credential implements HttpRequestInitializer directly,
+             so no separate credentials-adapter library is needed. -->
+        <dependency>
+            <groupId>com.google.api-client</groupId>
+            <artifactId>google-api-client</artifactId>
+            <version>${google-api-client.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>com.google.oauth-client</groupId>
+            <artifactId>google-oauth-client</artifactId>
+            <version>${google-oauth-client.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>com.google.oauth-client</groupId>
+            <artifactId>google-oauth-client-jetty</artifactId>
+            <version>${google-oauth-client.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>com.google.http-client</groupId>
+            <artifactId>google-http-client-gson</artifactId>
+            <version>${google-http-client.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>com.google.apis</groupId>
+            <artifactId>google-api-services-gmail</artifactId>
+            <version>${google-api-services-gmail.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>com.google.apis</groupId>
+            <artifactId>google-api-services-calendar</artifactId>
+            <version>${google-api-services-calendar.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>com.google.apis</groupId>
+            <artifactId>google-api-services-drive</artifactId>
+            <version>${google-api-services-drive.version}</version>
+        </dependency>
+
+        <!-- Slack: RealSlackSourceReader talks to the Web API (conversations.history) through
+             this instead of hand-rolled HTTP. -->
+        <dependency>
+            <groupId>com.slack.api</groupId>
+            <artifactId>slack-api-client</artifactId>
+            <version>${slack-api-client.version}</version>
+        </dependency>
+
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-test</artifactId>
             <scope>test</scope>
+        </dependency>
+
+        <dependency>
+            <groupId>com.squareup.okhttp3</groupId>
+            <artifactId>mockwebserver</artifactId>
+            <version>4.12.0</version>
+            <scope>test</scope>
+        </dependency>
+
+        <dependency>
+            <groupId>org.springdoc</groupId>
+            <artifactId>springdoc-openapi-starter-webmvc-ui</artifactId>
+            <version>2.6.0</version>
+        </dependency>
+
+        <dependency>
+            <groupId>com.google.protobuf</groupId>
+            <artifactId>protobuf-java-util</artifactId>
+            <version>${protobuf.version}</version>
+        </dependency>
+
+        <dependency>
+            <groupId>io.confluent</groupId>
+            <artifactId>kafka-protobuf-serializer</artifactId>
+            <version>${confluent.version}</version>
         </dependency>
     </dependencies>
 
     <build>
+        <extensions>
+            <extension>
+                <groupId>kr.motd.maven</groupId>
+                <artifactId>os-maven-plugin</artifactId>
+                <version>1.7.1</version>
+            </extension>
+        </extensions>
         <plugins>
             <plugin>
                 <groupId>org.springframework.boot</groupId>
                 <artifactId>spring-boot-maven-plugin</artifactId>
+            </plugin>
+            <plugin>
+                <groupId>org.xolstice.maven.plugins</groupId>
+                <artifactId>protobuf-maven-plugin</artifactId>
+                <version>0.6.1</version>
+                <configuration>
+                    <protocArtifact>com.google.protobuf:protoc:${protobuf.version}:exe:${os.detected.classifier}</protocArtifact>
+                    <!-- Executions share one output dir - don't let a later one wipe an earlier one's classes. -->
+                    <clearOutputDirectory>false</clearOutputDirectory>
+                </configuration>
+                <executions>
+                    <!-- Registered cross-team schemas, owned by Relay - see shared/proto/README.md. -->
+                    <execution>
+                        <id>compile-shared-proto</id>
+                        <goals>
+                            <goal>compile</goal>
+                        </goals>
+                        <configuration>
+                            <protoSourceRoot>${proto.root}</protoSourceRoot>
+                            <includes>
+                                <include>task-created-event.proto</include>
+                                <include>task-creation-requested-event.proto</include>
+                            </includes>
+                        </configuration>
+                    </execution>
+                    <!-- Bridge-only: structured-task-event.proto (temporary local copy, see
+                         StructuredTaskProtoDriftTest) and Hadas's github-task.proto. -->
+                    <execution>
+                        <id>compile-local-proto</id>
+                        <goals>
+                            <goal>compile</goal>
+                        </goals>
+                        <configuration>
+                            <protoSourceRoot>${project.basedir}/src/main/proto</protoSourceRoot>
+                            <!-- structured-task-event.proto imports the two shared ones above -->
+                            <additionalProtoPathElements>
+                                <additionalProtoPathElement>${proto.root}</additionalProtoPathElement>
+                            </additionalProtoPathElements>
+                        </configuration>
+                    </execution>
+                </executions>
             </plugin>
         </plugins>
     </build>

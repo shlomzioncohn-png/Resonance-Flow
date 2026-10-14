@@ -1,0 +1,28 @@
+name: Run Java tests
+description: Runs mvn -B test for one service, via the Maven Docker image (no local JDK needed on the runner).
+
+inputs:
+  service_dir:
+    description: "Path to the service, e.g. teams/bridge"
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Run Java tests (via Docker)
+      shell: bash
+      run: |
+        DB_ENV=()
+        if [ -n "${PGHOST:-}" ]; then
+          # setup-service-infra exports libpq's PG*; the services read DB_*.
+          export DB_HOST="$PGHOST" DB_PORT="$PGPORT" DB_USER="$PGUSER" \
+            DB_PASSWORD="$PGPASSWORD" DB_NAME="$PGDATABASE"
+          # Name-only -e: values never appear on the command line.
+          DB_ENV=(-e DB_HOST -e DB_PORT -e DB_USER -e DB_PASSWORD -e DB_NAME -e TEST_DATABASE_URL)
+        fi
+        docker run --rm --network host \
+          "${DB_ENV[@]}" \
+          -v "$PWD:/workspace" -w "/workspace/${{ inputs.service_dir }}" \
+          -v "$HOME/.m2:/root/.m2" \
+          maven:3.9.9-eclipse-temurin-21 \
+          mvn -B test

@@ -4,7 +4,7 @@ WORKDIR /app
 
 COPY pom.xml .
 COPY src ./src
-RUN mvn -B package -DskipTests
+RUN mvn -B -q package -DskipTests -Dorg.slf4j.simpleLogger.defaultLogLevel=warn
 
 # Run stage
 FROM eclipse-temurin:21-jre

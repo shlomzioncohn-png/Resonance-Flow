@@ -1,0 +1,42 @@
+{
+  "scenario_id": "higher_manager_regulatory_filing_vs_strategy_section",
+  "persona": {
+    "role": "Higher Manager",
+    "department": null
+  },
+  "context": {
+    "free_time_minutes": 60,
+    "current_datetime": "2026-09-07T09:00:00",
+    "time_horizon": "this_week",
+    "constraints": []
+  },
+  "tasks": [
+    {
+      "task_id": "task_filing",
+      "title": "Submit the quarterly regulatory filing",
+      "description": "A statutory filing is due to the regulator by 15:00 today; a late filing carries a fine.",
+      "deadline": "2026-09-07T15:00:00",
+      "effort_estimate": 40,
+      "tier": "strategic",
+      "blocked": false,
+      "parent_task_id": null
+    },
+    {
+      "task_id": "task_strategy",
+      "title": "Write the next section of the three-year strategy doc",
+      "description": "Your section of the long-range plan is due to the board office by Friday ahead of next month's offsite.",
+      "deadline": "2026-09-11T17:00:00",
+      "effort_estimate": 50,
+      "tier": "strategic",
+      "blocked": false,
+      "parent_task_id": null
+    }
+  ],
+  "expected_top_task_id": "task_filing",
+  "expected_reason": "Both tasks are strategic with hard deadlines, but task_filing's is today with a statutory penalty while task_strategy's is Friday.",
+  "source": {
+    "type": "synthetic",
+    "source_detail": null
+  },
+  "team_lead_approved": true
+}

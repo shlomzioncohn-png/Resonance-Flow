@@ -3,8 +3,9 @@ Intelligent Work Prioritization Platform
 
 ## Database
 
-A single shared PostgreSQL instance is used across all services. Schema migrations live in
-[`shared/database/migrations`](shared/database/migrations) and are applied by Flyway.
+A single shared PostgreSQL instance is used across all services. Inbox is the sole owner of the
+canonical schema; its Flyway migrations live in
+[`teams/inbox/src/main/resources/db/migration`](teams/inbox/src/main/resources/db/migration).
 
 To run the shared Postgres plus all team services:
 
