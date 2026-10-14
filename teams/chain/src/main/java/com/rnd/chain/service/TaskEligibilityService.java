@@ -134,43 +134,95 @@ public class TaskEligibilityService {
      * changes after creation, so this always signals a bug upstream. Checked before the staleness
      * short-circuit below, so a stale/duplicate redelivery carrying a wrong tenant is still flagged.
      */
-    @Transactional
-    public void onTaskStatusChangedIfNewer(UUID taskId, TaskStatus newStatus, LocalDateTime eventUpdatedAt,
-                                            UUID tenantId) {
-        Objects.requireNonNull(taskId, "taskId must not be null");
-        Objects.requireNonNull(newStatus, "newStatus must not be null");
-        Objects.requireNonNull(eventUpdatedAt, "eventUpdatedAt must not be null");
+   @Transactional
+public void onTaskStatusChangedIfNewer(
+        UUID taskId,
+        TaskStatus newStatus,
+        LocalDateTime eventUpdatedAt,
+        UUID tenantId) {
 
-        graphLock.runExclusive(() -> {
-            Task current = taskCounterUpdater.requireTask(taskId);
+    Objects.requireNonNull(taskId, "taskId must not be null");
+    Objects.requireNonNull(newStatus, "newStatus must not be null");
+    Objects.requireNonNull(eventUpdatedAt, "eventUpdatedAt must not be null");
 
-            if (current.getTenantId() != null && !current.getTenantId().equals(tenantId)) {
-                log.error("task.updated for task {} claims tenant {} but Chain has {} stored - "
-                                + "tenant_id is immutable after creation, rejecting as a bug upstream",
-                        taskId, tenantId, current.getTenantId());
-                throw new TenantReassignmentException("Task " + taskId + " already has tenant "
-                        + current.getTenantId() + ", event claims " + tenantId);
-            }
+    graphLock.runExclusive(() -> {
 
-            if (current.getUpdatedAt() != null && !eventUpdatedAt.isAfter(current.getUpdatedAt())) {
-                log.debug("Task {} status update ignored: event updatedAt {} is not newer than stored {}",
-                        taskId, eventUpdatedAt, current.getUpdatedAt());
-                return;
-            }
+        Task current = taskRepository.findById(taskId).orElse(null);
 
-            log.info("Task {} status changed to {}", taskId, newStatus);
-            TaskStatus previousStatus = current.getStatus();
-            TaskCounterUpdater.requireUpdated(taskRepository.update(taskId, task ->
-                    TaskCounterUpdater.copyOf(task).status(newStatus).updatedAt(eventUpdatedAt)
-                            .tenantId(tenantId).build()), taskId);
+        if (current == null) {
+            Task newTask = Task.builder()
+                    .id(taskId)
+                    .parentTaskId(null)
+                    .tenantId(tenantId)
+                    .status(newStatus)
+                    .isReady(true)
+                    .blockingCount(0)
+                    .openConstraintCount(0)
+                    .estimatedDurationMin(null)
+                    .score(null)
+                    .createdAt(null)
+                    .updatedAt(eventUpdatedAt)
+                    .deletedAt(null)
+                    .build();
 
-            if (previousStatus != TaskStatus.DONE && newStatus == TaskStatus.DONE) {
-                adjustDependentsBlockingCount(taskId, -1);
-            } else if (previousStatus == TaskStatus.DONE && newStatus != TaskStatus.DONE) {
-                adjustDependentsBlockingCount(taskId, 1);
-            }
-        });
-    }
+            taskRepository.insertIfAbsent(newTask);
+            return;
+        }
+
+        if (current.getTenantId() != null
+                && !current.getTenantId().equals(tenantId)) {
+
+            log.error(
+                    "task.updated for task {} claims tenant {} but Chain has {} stored - "
+                            + "tenant_id is immutable after creation, rejecting as a bug upstream",
+                    taskId,
+                    tenantId,
+                    current.getTenantId());
+
+            throw new TenantReassignmentException(
+                    "Task " + taskId
+                            + " already has tenant " + current.getTenantId()
+                            + ", event claims " + tenantId);
+        }
+
+        if (current.getUpdatedAt() != null
+                && !eventUpdatedAt.isAfter(current.getUpdatedAt())) {
+
+            log.debug(
+                    "Task {} status update ignored: event updatedAt {} is not newer than stored {}",
+                    taskId,
+                    eventUpdatedAt,
+                    current.getUpdatedAt());
+
+            return;
+        }
+
+        log.info("Task {} status changed to {}", taskId, newStatus);
+
+        TaskStatus previousStatus = current.getStatus();
+
+        TaskCounterUpdater.requireUpdated(
+                taskRepository.update(
+                        taskId,
+                        task -> TaskCounterUpdater.copyOf(task)
+                                .status(newStatus)
+                                .updatedAt(eventUpdatedAt)
+                                .tenantId(tenantId)
+                                .build()),
+                taskId);
+
+        if (previousStatus != TaskStatus.DONE
+                && newStatus == TaskStatus.DONE) {
+
+            adjustDependentsBlockingCount(taskId, -1);
+
+        } else if (previousStatus == TaskStatus.DONE
+                && newStatus != TaskStatus.DONE) {
+
+            adjustDependentsBlockingCount(taskId, 1);
+        }
+    });
+}
 
     /**
      * Applies task.completed. The Kafka record timestamp is only compared against the stored
