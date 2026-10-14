@@ -46,7 +46,8 @@ public class KafkaConfig {
 
     @Bean
     public ProducerFactory<String, String> inboxKafkaProducerFactory(KafkaProperties kafkaProperties) {
-        return new DefaultKafkaProducerFactory<>(kafkaProperties.buildProducerProperties());
+        return new DefaultKafkaProducerFactory<>(
+                kafkaProperties.buildProducerProperties(), new StringSerializer(), new StringSerializer());
     }
 
     @Bean

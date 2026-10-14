@@ -1,0 +1,30 @@
+{
+  "dataset": "FUNSD",
+  "dataset_version": "original",
+  "purpose": "Foundation Gate real-data slice",
+  "split": "testing_data",
+  "source_url": "https://guillaumejaume.github.io/FUNSD/dataset.zip",
+  "source_page": "https://guillaumejaume.github.io/FUNSD/download/",
+  "zip_root_prefix": "local-data/funsd/",
+  "license": {
+    "name": "FUNSD Terms of Use",
+    "url": "https://guillaumejaume.github.io/FUNSD/work/",
+    "summary": "Non-commercial, research and educational purposes only. Use of the original images is also governed by copyright."
+  },
+  "records": [
+    {
+      "id": "82092117",
+      "files": [
+        "local-data/funsd/dataset/testing_data/images/82092117.png",
+        "local-data/funsd/dataset/testing_data/annotations/82092117.json"
+      ]
+    },
+    {
+      "id": "82200067_0069",
+      "files": [
+        "local-data/funsd/dataset/testing_data/images/82200067_0069.png",
+        "local-data/funsd/dataset/testing_data/annotations/82200067_0069.json"
+      ]
+    }
+  ]
+}

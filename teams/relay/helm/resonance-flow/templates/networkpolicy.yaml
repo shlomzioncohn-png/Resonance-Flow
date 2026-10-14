@@ -1,0 +1,45 @@
+{{/*
+Opt-in per component: components.<name>.networkPolicy.allowFrom lists the other
+components whose pods may open connections to this one; all other in-cluster
+ingress is denied. Meant for services that trust identity headers set by an
+upstream caller (e.g. notification-delivery trusting lens-bff) - without it,
+any pod in the cluster could forge those headers. Egress is left untouched.
+kubelet probes and `kubectl port-forward` (the CD smoke test) don't pass
+through pod networking, so they aren't affected.
+*/}}
+{{- range $componentName, $component := .Values.components }}
+{{- if and $component.enabled $component.networkPolicy }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+
+metadata:
+  name: {{ include "resonance-flow.fullname" $ }}-{{ $componentName }}
+  labels:
+    {{- include "resonance-flow.labels" $ | nindent 4 }}
+    app.kubernetes.io/component: {{ $componentName }}
+
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "resonance-flow.selectorLabels" $ | nindent 6 }}
+      app.kubernetes.io/component: {{ $componentName }}
+
+  policyTypes:
+    - Ingress
+
+  ingress:
+    {{- with $component.networkPolicy.allowFrom }}
+    - from:
+        {{- range . }}
+        - podSelector:
+            matchLabels:
+              {{- include "resonance-flow.selectorLabels" $ | nindent 14 }}
+              app.kubernetes.io/component: {{ . }}
+        {{- end }}
+      ports:
+        - port: http
+          protocol: TCP
+    {{- end }}
+{{- end }}
+{{- end }}

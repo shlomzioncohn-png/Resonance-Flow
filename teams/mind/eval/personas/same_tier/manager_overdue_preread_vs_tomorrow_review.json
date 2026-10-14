@@ -1,0 +1,42 @@
+{
+  "scenario_id": "manager_overdue_preread_vs_tomorrow_review",
+  "persona": {
+    "role": "Manager",
+    "department": null
+  },
+  "context": {
+    "free_time_minutes": 45,
+    "current_datetime": "2026-09-07T09:00:00",
+    "time_horizon": "this_week",
+    "constraints": []
+  },
+  "tasks": [
+    {
+      "task_id": "task_preread",
+      "title": "Finish the compliance report for last week's audit",
+      "description": "This was due last Friday for the routine audit cycle, but the auditor emailed this morning asking for it directly ahead of today's follow-up call -- it is now more urgent than when it was merely late.",
+      "deadline": "2026-09-04T09:00:00",
+      "effort_estimate": 20,
+      "tier": "tactical",
+      "blocked": false,
+      "parent_task_id": null
+    },
+    {
+      "task_id": "task_review",
+      "title": "Prep for tomorrow's stakeholder review",
+      "description": "You present a routine migration status update to stakeholders at 09:00 tomorrow; it's the standing weekly slot, nothing new to report, and stakeholders said a short delay wouldn't matter.",
+      "deadline": "2026-09-08T08:30:00",
+      "effort_estimate": 40,
+      "tier": "tactical",
+      "blocked": false,
+      "parent_task_id": null
+    }
+  ],
+  "expected_top_task_id": "task_preread",
+  "expected_reason": "task_preread's original deadline has passed, but the auditor is now asking for it directly ahead of today's follow-up call -- being overdue has made it more urgent, not less; task_review is a routine weekly status slot tomorrow that stakeholders said could slip without consequence.",
+  "source": {
+    "type": "synthetic",
+    "source_detail": null
+  },
+  "team_lead_approved": true
+}

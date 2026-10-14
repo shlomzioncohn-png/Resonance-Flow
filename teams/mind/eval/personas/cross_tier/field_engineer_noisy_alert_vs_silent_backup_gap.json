@@ -1,0 +1,52 @@
+{
+  "scenario_id": "field_engineer_noisy_alert_vs_silent_backup_gap",
+  "persona": {
+    "role": "Field Engineer",
+    "department": null
+  },
+  "context": {
+    "free_time_minutes": 60,
+    "current_datetime": "2026-09-07T09:00:00",
+    "time_horizon": "this_week",
+    "constraints": []
+  },
+  "tasks": [
+    {
+      "task_id": "task_filler_inventory",
+      "title": "Reconcile the spare-parts inventory sheet",
+      "description": "Tidy the spare-parts tracking spreadsheet; housekeeping, no deadline.",
+      "deadline": null,
+      "effort_estimate": 15,
+      "tier": "operational",
+      "blocked": false,
+      "parent_task_id": null
+    },
+    {
+      "task_id": "task_backup",
+      "title": "Find why last night's backup skipped two sites",
+      "description": "The backup job silently skipped two customer sites overnight and nobody was alerted; data is at risk until it is understood and re-run. Confirming the scope and kicking off the re-run is the immediate step. No deadline, discovered this morning.",
+      "deadline": null,
+      "effort_estimate": 30,
+      "tier": "tactical",
+      "blocked": false,
+      "parent_task_id": null
+    },
+    {
+      "task_id": "task_alert",
+      "title": "Silence the flapping capacity alert",
+      "description": "A disk-space alert has been flapping and paging the on-call rotation; the team wants it root-caused and quietened by end of shift today.",
+      "deadline": "2026-09-07T18:00:00",
+      "effort_estimate": 40,
+      "tier": "operational",
+      "blocked": false,
+      "parent_task_id": null
+    }
+  ],
+  "expected_top_task_id": "task_backup",
+  "expected_reason": "task_alert has a deadline but is annoyance-level (a noisy page); task_backup has no deadline but two sites went unprotected last night and data is at risk until it is resolved.",
+  "source": {
+    "type": "synthetic",
+    "source_detail": null
+  },
+  "team_lead_approved": true
+}

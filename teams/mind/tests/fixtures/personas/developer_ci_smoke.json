@@ -1,0 +1,36 @@
+{
+  "scenario_id": "developer_ci_smoke",
+  "persona": { "role": "Developer", "department": "Engineering" },
+  "context": {
+    "free_time_minutes": 30,
+    "current_datetime": "2026-08-25T09:00:00",
+    "time_horizon": "today",
+    "constraints": []
+  },
+  "tasks": [
+    {
+      "task_id": "task_fix",
+      "title": "Fix the failing build",
+      "description": "The build is red on main and blocking every merge.",
+      "deadline": "2026-08-25T11:00:00",
+      "effort_estimate": 20,
+      "tier": "operational",
+      "blocked": false,
+      "parent_task_id": null
+    },
+    {
+      "task_id": "task_doc",
+      "title": "Write a design doc",
+      "description": "Draft a design doc for a feature planned next quarter; no deadline.",
+      "deadline": null,
+      "effort_estimate": 120,
+      "tier": "tactical",
+      "blocked": false,
+      "parent_task_id": null
+    }
+  ],
+  "expected_top_task_id": "task_fix",
+  "expected_reason": "task_fix has a hard deadline this morning and is blocking every merge; task_doc has no deadline.",
+  "source": { "type": "synthetic", "source_detail": null },
+  "team_lead_approved": false
+}

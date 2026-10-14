@@ -11,10 +11,13 @@ spring:
     username: ${DB_USER:postgres}
     password: ${DB_PASSWORD:postgres}
   flyway:
-    locations: ${DB_MIGRATIONS_LOCATION:filesystem:../../shared/database/migrations}
     baseline-on-migrate: true
   kafka:
     bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+    properties:
+      # Apicurio doesn't expose the Confluent-compatible API at the root path - see
+      # teams/relay/docs/kafka-producer-consumer-guide.md.
+      schema.registry.url: ${SCHEMA_REGISTRY_URL:http://localhost:8081/apis/ccompat/v6}
     consumer:
       group-id: ${KAFKA_CONSUMER_GROUP_ID:inbox-service}
       auto-offset-reset: earliest
@@ -23,7 +26,13 @@ spring:
       value-deserializer: org.apache.kafka.common.serialization.StringDeserializer
     producer:
       key-serializer: org.apache.kafka.common.serialization.StringSerializer
-      value-serializer: org.springframework.kafka.support.serializer.JsonSerializer
+      value-serializer: io.confluent.kafka.serializers.protobuf.KafkaProtobufSerializer
+
+management:
+  endpoint:
+    health:
+      probes:
+        enabled: true
 
 inbox:
   kafka:

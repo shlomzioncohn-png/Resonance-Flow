@@ -1,0 +1,112 @@
+package com.rnd.bridge.media;
+
+import com.rnd.bridge.raw.model.ChangeType;
+import com.rnd.bridge.raw.model.Modality;
+import com.rnd.bridge.raw.model.RawObjectEvent;
+import com.rnd.bridge.raw.model.RawSourceType;
+import com.rnd.bridge.raw.model.ScopeDecision;
+import com.rnd.bridge.storage.ObjectStorageClient;
+import com.rnd.bridge.storage.ObjectStorageClient.PutResult;
+import com.rnd.bridge.storage.ObjectTags;
+import org.springframework.stereotype.Service;
+
+import java.time.Instant;
+import java.time.ZoneOffset;
+import java.time.format.DateTimeFormatter;
+import java.util.UUID;
+
+/**
+ * Lands raw meeting/audio/scanned-doc content through the shared ObjectStorageClient
+ * (storage/) - reused from the Unstructured-intake lane so both raw-landing lanes go
+ * through one MinIO client/bucket instead of each wiring its own - and builds the matching
+ * RawObjectEvent. Takes already-read bytes and an already-computed contentHash rather than
+ * a Path: the caller (MediaIntakeOrchestrator) needs both before this is called anyway -
+ * for the junk-file filter and the dedup check - so the file is only read off disk once
+ * per upload, not once here and once there.
+ */
+@Service
+public class MediaIntakeService {
+
+    private static final DateTimeFormatter DATE_FORMAT =
+            DateTimeFormatter.ofPattern("yyyy-MM-dd").withZone(ZoneOffset.UTC);
+
+    // Mind's confirmed RawObjectEvent contract requires attachment_index; 0 marks a
+    // standalone item (this lane never splits one source item into a body + attachments).
+    private static final int ATTACHMENT_INDEX_STANDALONE = 0;
+
+    // This lane never splits a logical item into body + attachments and never republishes
+    // an existing correlationId, so attachmentCount/revision are always 0 and changeType is
+    // always UPSERT - see RawObjectEvent's javadoc.
+    private static final int ATTACHMENT_COUNT_STANDALONE = 0;
+    private static final int REVISION_INITIAL = 0;
+
+    private final ObjectStorageClient storageClient;
+
+    public MediaIntakeService(ObjectStorageClient storageClient) {
+        this.storageClient = storageClient;
+    }
+
+    public RawObjectEvent land(byte[] content, String contentHash, String filename, String tenantId,
+                                RawSourceType sourceType, Modality modality, Instant ingestedAt,
+                                String transcriptObjectKey) {
+        String contentType = guessContentType(extractExtension(filename));
+        String objectKey = buildObjectKey(sourceType, tenantId, ingestedAt, extractExtension(filename));
+
+        PutResult putResult = storageClient.putObject(
+                objectKey, content, contentType,
+                ObjectTags.of(sourceType, tenantId, ingestedAt, ScopeDecision.INCLUDED));
+
+        return RawObjectEvent.create(
+                objectKey, sourceType, tenantId, ingestedAt, ScopeDecision.INCLUDED, contentHash,
+                modality, null, putResult.contentType(), putResult.sizeBytes(), transcriptObjectKey,
+                null, null, ATTACHMENT_INDEX_STANDALONE, ATTACHMENT_COUNT_STANDALONE, REVISION_INITIAL,
+                ChangeType.UPSERT);
+    }
+
+    /**
+     * Lands a platform-generated transcript sidecar file (see
+     * MediaIntakeOrchestrator.findTranscript) under the same source_type/tenant/date
+     * partition as its recording, tagged the same way. No RawObjectEvent/publish of its
+     * own - it's referenced from the recording's event via transcriptObjectKey, per Mind's
+     * confirmed contract ("MinIO pointer to a platform-generated transcript").
+     */
+    public String landTranscript(byte[] content, String filename, String tenantId,
+                                  RawSourceType sourceType, Instant ingestedAt) {
+        String extension = extractExtension(filename);
+        String contentType = switch (extension.toLowerCase()) {
+            case ".vtt" -> "text/vtt";
+            case ".srt" -> "application/x-subrip";
+            default -> "text/plain";
+        };
+        String objectKey = buildObjectKey(sourceType, tenantId, ingestedAt, extension);
+
+        storageClient.putObject(
+                objectKey, content, contentType,
+                ObjectTags.of(sourceType, tenantId, ingestedAt, ScopeDecision.INCLUDED));
+
+        return objectKey;
+    }
+
+    private String buildObjectKey(RawSourceType sourceType, String tenantId, Instant ingestedAt, String extension) {
+        return "%s/%s/%s/%s%s".formatted(
+                sourceType.name(), tenantId, DATE_FORMAT.format(ingestedAt), UUID.randomUUID(), extension);
+    }
+
+    private String extractExtension(String filename) {
+        int dot = filename.lastIndexOf('.');
+        return dot >= 0 ? filename.substring(dot) : "";
+    }
+
+    private String guessContentType(String extension) {
+        return switch (extension.toLowerCase()) {
+            case ".mp3" -> "audio/mpeg";
+            case ".wav" -> "audio/wav";
+            case ".mp4", ".m4a" -> "audio/mp4";
+            case ".pdf" -> "application/pdf";
+            case ".png" -> "image/png";
+            case ".jpg", ".jpeg" -> "image/jpeg";
+            case ".tif", ".tiff" -> "image/tiff";
+            default -> "application/octet-stream";
+        };
+    }
+}

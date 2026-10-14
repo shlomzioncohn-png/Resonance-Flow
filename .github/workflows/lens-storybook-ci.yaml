@@ -1,0 +1,32 @@
+name: Lens Storybook CD
+
+# Deploys the lens-frontend Storybook as its own service (lens-storybook).
+# PR checks for stories run in lens-frontend-ci.yaml's `storybook` job.
+on:
+  push:
+    branches: [ "main" ]
+    paths:
+      - "teams/lens/frontend/**"
+  workflow_dispatch: {}
+
+concurrency:
+  group: lens-storybook-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  cd:
+    permissions:
+      contents: write
+      packages: write
+      pull-requests: write
+    uses: ./.github/workflows/service-cd.yaml
+    secrets: inherit
+    with:
+      service_name: lens-storybook
+      service_dir: teams/lens/frontend
+      language: node
+      target: storybook
+      container_port: 8084

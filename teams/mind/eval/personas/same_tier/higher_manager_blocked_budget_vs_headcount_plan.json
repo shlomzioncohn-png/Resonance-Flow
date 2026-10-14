@@ -1,0 +1,42 @@
+{
+  "scenario_id": "higher_manager_blocked_budget_vs_headcount_plan",
+  "persona": {
+    "role": "Higher Manager",
+    "department": null
+  },
+  "context": {
+    "free_time_minutes": 60,
+    "current_datetime": "2026-09-07T11:00:00",
+    "time_horizon": "this_week",
+    "constraints": []
+  },
+  "tasks": [
+    {
+      "task_id": "task_budget",
+      "title": "Submit the annual department budget",
+      "description": "The board reviews it Wednesday, but the CFO's office still has not sent the revised cost-center figures you need to finish it.",
+      "deadline": "2026-09-09T09:00:00",
+      "effort_estimate": 45,
+      "tier": "strategic",
+      "blocked": true,
+      "parent_task_id": null
+    },
+    {
+      "task_id": "task_headcount",
+      "title": "Approve the Q4 headcount plan",
+      "description": "Sign off on which open roles the department fills next quarter; all inputs are in hand. The planning review is Friday afternoon, and sign-off needs to be in by end of day Thursday so it can be folded into the review materials.",
+      "deadline": "2026-09-10T17:00:00",
+      "effort_estimate": 40,
+      "tier": "strategic",
+      "blocked": false,
+      "parent_task_id": null
+    }
+  ],
+  "expected_top_task_id": "task_headcount",
+  "expected_reason": "task_budget is blocked on the CFO's outstanding figures and cannot be completed now despite the nearer deadline; task_headcount is unblocked with all inputs in hand and a firm deadline Thursday, ahead of Friday's planning review.",
+  "source": {
+    "type": "synthetic",
+    "source_detail": null
+  },
+  "team_lead_approved": true
+}

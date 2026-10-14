@@ -1,0 +1,742 @@
+imagePullSecrets: []
+imagePullSecret:
+  create: false
+  registry: ghcr.io
+  username: ""
+  password: ""
+  email: "noreply@kamatech.org"
+nameOverride: ""
+# Pinned, not "": Chain's DB Secret/ConfigMap names are hardcoded in this file
+# (volumes, postgresql.initdb.scriptsConfigMap, postgresql.primary.extraVolumes)
+# because values.yaml can't call the resonance-flow.fullname template itself.
+# This override guarantees fullname is always "resonance-flow" so those
+# literals can't drift from what configmap.yaml actually renders - installing
+# under any other release name broke that wiring (verified against a real
+# cluster, see PR #417 review).
+fullnameOverride: "resonance-flow"
+serviceAccount:
+  create: true
+  automount: true
+  annotations: {}
+  name: ""
+podAnnotations: {}
+podLabels: {}
+podSecurityContext: {}
+securityContext: {}
+volumes: []
+volumeMounts: []
+objectStorage:
+  provider: minio
+dependencies:
+  - name: kafka
+    port: 9092
+initContainers: []
+nodeSelector: {}
+tolerations: []
+affinity: {}
+# Public entry point (templates/ingress.yaml): one host, routed by path to components'
+# Services. Off by default so teams' kind CI never renders it; the shared environment
+# turns it on with its own host/TLS. Needs an ingress controller - not installed here.
+ingress:
+  enabled: false
+  className: ""
+  # Controller/cert-manager specifics, e.g. cert-manager.io/cluster-issuer.
+  annotations: {}
+  host: ""
+  # TLS cert for host - created by cert-manager or by hand. Empty = plain HTTP, which
+  # sends LENS passwords (/auth/*) unencrypted.
+  # Flat, not ingress.tls.secretName: minio has its own ingress.tls (false), and
+  # Helm warns on every render when the two shapes differ.
+  tlsSecretName: ""
+  # Prefix match; the longest matching path wins. The path is forwarded as-is (no rewrite).
+  paths:
+    - path: /
+      component: lens-frontend
+    - path: /api
+      component: lens-gateway
+    - path: /auth
+      component: lens-gateway
+pipeConsumerGroupSweep:
+  enabled: true
+  schedule: "0 * * * *"
+  groupPattern: "pipe-*"
+  image:
+    repository: apache/kafka
+    tag: "4.2.1"
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+    limits:
+      cpu: 200m
+      memory: 256Mi
+x-defaults:
+  resources: &defaultResources
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+  healthProbes: &defaultHealthProbes
+    startupProbe:
+      httpGet:
+        path: /health
+        port: http
+      periodSeconds: 5
+      failureThreshold: 40
+    livenessProbe:
+      httpGet:
+        path: /health
+        port: http
+      periodSeconds: 10
+      failureThreshold: 3
+    readinessProbe:
+      httpGet:
+        path: /health
+        port: http
+      periodSeconds: 5
+      failureThreshold: 3
+  service: &defaultService
+    type: ClusterIP
+    port: 80
+components:
+  mind:
+    enabled: true
+    replicaCount: 1
+    image:
+      repository: "ghcr.io/kamatechorg/resonance-flow/mind"
+      pullPolicy: IfNotPresent
+      tag: "22a8e01"
+    containerPort: 8000
+    service: *defaultService
+    resources: *defaultResources
+    <<: *defaultHealthProbes
+    env: {}
+    # Schema is Alembic-only (#441) -- mind's own container no longer creates
+    # task_embeddings itself, so without this the pod crash-loops on startup
+    # against a fresh database.
+    migration:
+      enabled: true
+      command: ["alembic", "upgrade", "head"]
+    # A list set in values-<service>.yaml replaces this one wholesale (Helm merges
+    # maps, not lists) - repeat every entry there, don't just add yours.
+    dependencies:
+      - name: object-storage
+        port: 9000
+      - name: postgresql
+        port: 5432
+      - name: schema-registry
+        port: 8080
+    volumeMounts:
+      - name: object-storage-credentials
+        mountPath: /etc/resonance-flow/secrets/object-storage
+        readOnly: true
+      - name: mind-llm-credentials
+        mountPath: /etc/resonance-flow/secrets/llm
+        readOnly: true
+    dependencySecretVolumes:
+      - name: object-storage-credentials
+        dependencyName: object-storage
+        items:
+          - key: root-user
+            path: object-storage.access-key
+          - key: root-password
+            path: object-storage.secret-key
+    volumes:
+      - name: mind-llm-credentials
+        secret:
+          secretName: resonance-flow-mind-llm
+          optional: true
+    # Mounted as config.yaml at /etc/resonance-flow/config/ - keys are what MIND reads.
+    config:
+      vector_store:
+        # pgvector needs user/password/db, not an API key.
+        user: mind
+        db: mind
+      llm:
+        model: ""
+        cache_dir: ./models
+      ocr:
+        provider: local
+      asr:
+        provider: local
+        # English-only Whisper, decided in #135 / #652 (teams/mind/benchmarks/ocr-asr-benchmark.md).
+        whisper_model: base.en
+      object_storage:
+        bucket: bridge-raw
+      kafka:
+        producer:
+          task_creation_requested_topic: task.creation.requested
+      service:
+        log_level: INFO
+    secret:
+      create: false
+    kafkaSasl: true
+  lens-bff:
+    enabled: true
+    replicaCount: 1
+    image:
+      repository: "ghcr.io/kamatechorg/resonance-flow/lens-bff"
+      pullPolicy: IfNotPresent
+      tag: "placeholder"
+    containerPort: 8082
+    service: *defaultService
+    resources: *defaultResources
+    <<: *defaultHealthProbes
+    env: {}
+    dependencies:
+      - name: notification-delivery
+        port: 80
+    config:
+      inbox:
+        service:
+          url: http://resonance-flow-inbox:80
+      chain:
+        service:
+          url: http://resonance-flow-chain:80
+      notificationDelivery:
+        service:
+          url: http://resonance-flow-notification-delivery:80
+    # /internal/auth/* checks passwords for lens-gateway, so only lens-gateway may reach
+    # it - see templates/networkpolicy.yaml. Covers the whole pod, not just that path.
+    networkPolicy:
+      allowFrom:
+        - lens-gateway
+  bridge:
+    enabled: true
+    replicaCount: 1
+    image:
+      repository: "ghcr.io/kamatechorg/resonance-flow/bridge"
+      pullPolicy: IfNotPresent
+      tag: "94c3259"
+    containerPort: 8080
+    service: *defaultService
+    resources: *defaultResources
+    <<: *defaultHealthProbes
+    env: {}
+    objectStorage:
+      bucket: "bridge-raw"
+    config:
+      spring:
+        config:
+          import:
+            - "configtree:/etc/resonance-flow/secrets/object-storage/"
+            - "configtree:/etc/resonance-flow/secrets/kafka/"
+        kafka:
+          # GitHub currently publishes to bridge.github.tasks.
+          # Issue #275 will decide whether to use the shared topic instead.
+          topic: "bridge.github.tasks"
+          properties:
+            security.protocol: "SASL_PLAINTEXT"
+            sasl.mechanism: "PLAIN"
+      github:
+        api:
+          base-url: "https://api.github.com"
+          token: "${GITHUB_TOKEN:}"
+        target:
+          owner: "KamaTechOrg"
+          repo: "Resonance-Flow"
+      jira:
+        api:
+          base-url: "${JIRA_API_BASE_URL:https://example.atlassian.net}"
+          token: "${JIRA_TOKEN:}"
+        target:
+          project: "${JIRA_TARGET_PROJECT:}"
+      bridge:
+        structured-tasks-topic: "bridge.structured.tasks"
+        crm:
+          organization-id: "${CRM_ORGANIZATION_ID:}"
+          hubspot:
+            base-url: "https://api.hubspot.com"
+            token: "${HUBSPOT_TOKEN:}"
+            page-size: 50
+            max-retries: 5
+            initial-backoff-millis: 500
+            max-backoff-millis: 8000
+            connect-timeout-millis: 5000
+            read-timeout-millis: 15000
+        intake:
+          raw-landed-topic: "bridge.raw.landed"
+          google:
+            client-secrets-path: "${BRIDGE_GOOGLE_CLIENT_SECRETS_PATH:}"
+            tokens-directory: "${BRIDGE_GOOGLE_TOKENS_DIR:}"
+          email:
+            mode: fixture
+          drive:
+            # The real Drive reader is still a placeholder in Malki's branch.
+            mode: fixture
+          calendar:
+            mode: fixture
+            calendar-id: "${BRIDGE_CALENDAR_ID:primary}"
+          slack:
+            mode: fixture
+            bot-token: "${BRIDGE_SLACK_BOT_TOKEN:}"
+            channels: "${BRIDGE_SLACK_CHANNELS:}"
+          whatsapp:
+            mode: fixture
+            import-dir: "${BRIDGE_WHATSAPP_IMPORT_DIR:}"
+            zone-id: "${BRIDGE_WHATSAPP_ZONE_ID:Asia/Jerusalem}"
+        media:
+          zoom-recordings-dir: "${BRIDGE_MEDIA_ZOOM_RECORDINGS_DIR:}"
+          bbb-recordings-dir: "${BRIDGE_MEDIA_BBB_RECORDINGS_DIR:}"
+          scanned-docs-dir: "${BRIDGE_MEDIA_SCANNED_DOCS_DIR:}"
+          tenant-id: "${BRIDGE_MEDIA_TENANT_ID:kamatech}"
+          min-file-size-bytes: "${BRIDGE_MEDIA_MIN_FILE_SIZE_BYTES:1}"
+    volumeMounts:
+      - name: object-storage-credentials
+        mountPath: /etc/resonance-flow/secrets/object-storage
+        readOnly: true
+      - name: kafka-credentials
+        mountPath: /etc/resonance-flow/secrets/kafka
+        readOnly: true
+    dependencySecretVolumes:
+      - name: object-storage-credentials
+        dependencyName: object-storage
+        items:
+          - key: root-user
+            path: minio.access-key
+          - key: root-password
+            path: minio.secret-key
+      - name: kafka-credentials
+        dependencyName: kafka-user-passwords
+        items:
+          - key: client-passwords
+            path: kafka.password
+    dependencies:
+      - name: object-storage
+        port: 9000
+  lens-frontend:
+    enabled: true
+    replicaCount: 1
+    image:
+      repository: "ghcr.io/kamatechorg/resonance-flow/lens-frontend"
+      pullPolicy: IfNotPresent
+      tag: "placeholder"
+    containerPort: 3000
+    service: *defaultService
+    resources:
+      requests:
+        cpu: 100m
+        memory: 128Mi
+      limits:
+        cpu: 250m
+        memory: 256Mi
+    startupProbe:
+      httpGet:
+        path: /
+        port: http
+      periodSeconds: 5
+      failureThreshold: 40
+    livenessProbe:
+      httpGet:
+        path: /
+        port: http
+      periodSeconds: 10
+      failureThreshold: 3
+    readinessProbe:
+      httpGet:
+        path: /
+        port: http
+      periodSeconds: 5
+      failureThreshold: 3
+  # Static Storybook for lens-frontend (nginx) - same source dir, built from the
+  # Dockerfile's `storybook` stage.
+  lens-storybook:
+    enabled: true
+    replicaCount: 1
+    image:
+      repository: "ghcr.io/kamatechorg/resonance-flow/lens-storybook"
+      pullPolicy: IfNotPresent
+      tag: "placeholder"
+    containerPort: 8080
+    service: *defaultService
+    resources:
+      requests:
+        cpu: 25m
+        memory: 32Mi
+      limits:
+        cpu: 100m
+        memory: 64Mi
+    startupProbe:
+      httpGet:
+        path: /
+        port: http
+      periodSeconds: 5
+      failureThreshold: 12
+    livenessProbe:
+      httpGet:
+        path: /
+        port: http
+      periodSeconds: 10
+      failureThreshold: 3
+    readinessProbe:
+      httpGet:
+        path: /
+        port: http
+      periodSeconds: 5
+      failureThreshold: 3
+  chain:
+    enabled: true
+    replicaCount: 1
+    image:
+      repository: "ghcr.io/kamatechorg/resonance-flow/chain"
+      pullPolicy: IfNotPresent
+      tag: "placeholder"
+    containerPort: 8081
+    service: *defaultService
+    resources: *defaultResources
+    <<: *defaultHealthProbes
+    # Password comes from the chain-db-credentials Secret, mounted as a file below -
+    # not a literal here, not an env var; created once by the chain db-credentials
+    # hook Job, not rendered as a chart resource. secretName must match the fullname-prefixed name
+    # templates/services/chain/configmap.yaml renders (fullname resolves to the
+    # fixed "resonance-flow" release name this chart is always installed as).
+    volumeMounts:
+      - name: chain-db-credentials
+        mountPath: /etc/resonance-flow/secrets/chain-db
+        readOnly: true
+    volumes:
+      - name: chain-db-credentials
+        secret:
+          secretName: resonance-flow-chain-db-credentials
+    dependencies:
+      - name: postgresql
+        port: 5432
+      - name: schema-registry
+        port: 8080
+    config:
+      data:
+        datasource:
+          # Own database and user - not Inbox's tasks schema or its superuser.
+          database: chain
+          username: chain
+        kafka:
+          consumerGroupId: chain-service
+          topics:
+            taskSchedulingUpdated: task.scheduling.updated # produced, consumed by Inbox
+            # Consumed, Protobuf (#467): task.created/updated from Inbox, proposals from Mind.
+            taskCreated: task.created
+            taskUpdated: task.updated
+            taskCompleted: task.completed
+            dependenciesProposed: task.dependencies.proposed
+            # taskDependenciesRemoved intentionally omitted: Chain confirmed (#385 follow-up)
+            # removeDependency is REST-only (Lens BFF -> Chain), no Kafka topic behind it today -
+            # task.dependencies.removed was proposed but is not active. May return once #133
+            # settles whether Mind can retract a proposed dependency.
+        # No topic for onConstraintAdded/onConstraintStatusChanged - still REST-triggered.
+  inbox:
+    enabled: true
+    replicaCount: 1
+    image:
+      repository: "ghcr.io/kamatechorg/resonance-flow/inbox"
+      pullPolicy: IfNotPresent
+      tag: "085a2e7"
+    containerPort: 8080
+    service: *defaultService
+    resources: *defaultResources
+    startupProbe:
+      httpGet:
+        path: /actuator/health/liveness
+        port: http
+      periodSeconds: 5
+      # 300s budget - CI's constrained runner needs more than the ~186s observed locally.
+      failureThreshold: 60
+    livenessProbe:
+      httpGet:
+        path: /actuator/health/liveness
+        port: http
+      periodSeconds: 10
+      failureThreshold: 3
+    readinessProbe:
+      httpGet:
+        path: /actuator/health/readiness
+        port: http
+      periodSeconds: 5
+      failureThreshold: 3
+    # Password from the inbox-db-credentials Secret, mounted as a file - created by
+    # the inbox db-credentials hook Job, not a chart resource (same as Chain's).
+    volumeMounts:
+      - name: inbox-db-credentials
+        mountPath: /etc/resonance-flow/secrets/inbox-db
+        readOnly: true
+    volumes:
+      - name: inbox-db-credentials
+        secret:
+          secretName: resonance-flow-inbox-db-credentials
+    dependencies:
+      - name: postgresql
+        port: 5432
+      - name: schema-registry
+        port: 8080
+    config:
+      data:
+        datasource:
+          # Own user, owning postgresql.auth.database - not the subchart's superuser.
+          username: inbox
+        kafka:
+          consumerGroupId: inbox-service
+          topics:
+            bridgeStructuredTasks: bridge.structured.tasks
+            chainSchedulingUpdated: task.scheduling.updated
+            mindTaskCreationRequested: task.creation.requested
+  schema-registry:
+    enabled: true
+    replicaCount: 1
+    image:
+      # In-memory Apicurio registry - not durable, fine for dev/CI only.
+      repository: "apicurio/apicurio-registry-mem"
+      pullPolicy: IfNotPresent
+      tag: "2.5.11.Final"
+    containerPort: 8080
+    env:
+      # ccompat lookups otherwise exact-match schema text, so Confluent serializers with
+      # auto.register=false (Chain) fail with 40403 on an identical proto.
+      REGISTRY_CCOMPAT_USE_CANONICAL_HASH: "true"
+    service:
+      type: ClusterIP
+      port: 8080
+    resources:
+      requests:
+        cpu: 250m
+        memory: 256Mi
+      limits:
+        cpu: 500m
+        memory: 512Mi
+    startupProbe:
+      httpGet:
+        path: /health/live
+        port: http
+      periodSeconds: 5
+      # Quarkus boot measured ~200s+ under a constrained CPU request - needs the margin.
+      failureThreshold: 60
+    livenessProbe:
+      httpGet:
+        path: /health/live
+        port: http
+      periodSeconds: 10
+      failureThreshold: 3
+    readinessProbe:
+      httpGet:
+        path: /health/ready
+        port: http
+      periodSeconds: 5
+      failureThreshold: 3
+  lens-gateway:
+    enabled: true
+    replicaCount: 1
+    image:
+      repository: "ghcr.io/kamatechorg/resonance-flow/lens-gateway"
+      pullPolicy: IfNotPresent
+      tag: "placeholder"
+    containerPort: 8080
+    service: *defaultService
+    resources: *defaultResources
+    <<: *defaultHealthProbes
+    env: {}
+
+  notification-delivery:
+    enabled: true
+    replicaCount: 1
+    image:
+      repository: "ghcr.io/kamatechorg/resonance-flow/notification-delivery"
+      pullPolicy: IfNotPresent
+      tag: "placeholder"
+    containerPort: 8082
+    service:
+      type: ClusterIP
+      port: 80
+    resources:
+      requests:
+        cpu: 100m
+        memory: 256Mi
+      limits:
+        cpu: 500m
+        memory: 512Mi
+    terminationGracePeriodSeconds: 30
+    updateStrategy:
+      type: RollingUpdate
+      rollingUpdate:
+        maxUnavailable: 0
+        maxSurge: 25%
+    startupProbe:
+      httpGet:
+        path: /healthz
+        port: http
+      periodSeconds: 5
+      failureThreshold: 40
+    livenessProbe:
+      httpGet:
+        path: /healthz
+        port: http
+      periodSeconds: 10
+      failureThreshold: 3
+    readinessProbe:
+      httpGet:
+        path: /readyz
+        port: http
+      periodSeconds: 5
+      failureThreshold: 3
+    env: {}
+    dependencies:
+      - name: schema-registry
+        port: 8080
+    # Trusts X-Org-Id/X-User-Id as-is (lens-gateway validates the token, lens-bff forwards
+    # the identity), so only lens-bff may reach it - see templates/networkpolicy.yaml.
+    networkPolicy:
+      allowFrom:
+        - lens-bff
+    config:
+      managed: true
+    # Interim CPU-based HPA (templates/pipe-hpa.yaml). §10 open question: the real scaling
+    # signal is active WebSocket connections/pod, but that needs a custom-metrics adapter
+    # (e.g. Prometheus Adapter) plus a load-tested target-per-pod value. Swap this for a
+    # custom-metric HPA once both exist.
+    autoscaling:
+      enabled: true
+      minReplicas: 2
+      maxReplicas: 10
+      targetCPUUtilizationPercentage: 70
+kafka:
+  enabled: true
+  # bitnami/kafka was pruned from Docker Hub's free tier in 2025; bitnamilegacy/kafka
+  # is the same image content, relocated by Broadcom, kept free/unmaintained.
+  image:
+    registry: docker.io
+    repository: bitnamilegacy/kafka
+  # The client listener defaults to SASL_PLAINTEXT (chart-level, not something we chose here),
+  # but nothing was ever configured to authenticate against it - every consuming service's
+  # client silently failed the handshake and retried forever without ever actually connecting
+  # or crashing (verified locally). Pinning explicit client credentials here (instead of the
+  # chart's own randomly-generated ones) so every component's mounted config can reference the
+  # same known username/password - see resonance-flow.kafkaSaslJaasConfig in _helpers.tpl.
+  sasl:
+    client:
+      users:
+        - inbox
+      passwords:
+        - "resonance-flow-dev-sasl"
+  # Single combined controller+broker node (controller.replicaCount: 1, broker.replicaCount: 0
+  # below) - Kafka's built-in defaults for these three (3, 3, 2) can never be satisfied with
+  # only one broker, so __consumer_offsets/__transaction_state auto-creation retries forever
+  # and silently blocks every consumer group from ever getting a partition assignment (verified
+  # locally: a brand new consumer group never received an assignment; broker logs showed
+  # "Sent auto-creation request for Set(__consumer_offsets)..." repeating indefinitely).
+  overrideConfiguration:
+    offsets.topic.replication.factor: "1"
+    transaction.state.log.replication.factor: "1"
+    transaction.state.log.min.isr: "1"
+  controller:
+    replicaCount: 1
+    controllerOnly: false
+    resources:
+      # 192Mi was OOMKilling the JVM before it finished KRaft storage formatting on
+      # startup (verified locally - combined broker+controller needs more headroom).
+      requests:
+        cpu: 100m
+        memory: 128Mi
+      limits:
+        cpu: 500m
+        memory: 768Mi
+  broker:
+    replicaCount: 0
+minio:
+  enabled: true
+  mode: standalone
+  defaultBuckets: bridge-raw
+ # Bitnami moved the MinIO images to bitnamilegacy/*.
+# This chart uses the new image location.
+  image:
+    registry: docker.io
+    repository: bitnamilegacy/minio
+  console:
+    image:
+      registry: docker.io
+      repository: bitnamilegacy/minio-object-browser
+  persistence:
+    enabled: false
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 150m
+      memory: 192Mi
+postgresql:
+  enabled: true
+  architecture: standalone
+  # Pinned: the subchart otherwise generates a random password and only creates the
+  # default "postgres" database. Inbox's user owns auth.database (inbox/_db-init.tpl).
+  auth:
+    postgresPassword: postgres
+    database: resonance_flow
+  # Pinned: the pgvector overlay below is built for PG 18 and must match its major.
+  # From bitnami/postgresql:latest, built 2026-09-20 (PG 18.6, pgvector 0.8.6).
+  image:
+    digest: "sha256:7d77a46bbf200709237318c27dec0eaeae2520e403dd18fdebde2be7a6b04993"
+  primary:
+    persistence:
+      enabled: false
+    # Bitnami's own vector.so crashes (SIGILL) building HNSW indexes on non-AVX-512 CPUs
+    # (#490); overlay the official portable build. Its version must match Bitnami's
+    # bundled vector--*.sql / .control (0.8.6), which stay in place.
+    initContainers:
+      - name: copy-pgvector
+        # vector.so needs only GLIBC_2.14; Bitnami's image (Photon OS 5) has 2.43.
+        image: pgvector/pgvector:0.8.6-pg18-bookworm@sha256:2ba9ca5f2e7daa0f0e7723cba1ee9167bab54efd3640516a44ac1a928dd67e7a
+        command: ["cp", "/usr/lib/postgresql/18/lib/vector.so", "/pgvector/vector.so"]
+        securityContext:
+          runAsUser: 1001
+          runAsNonRoot: true
+          readOnlyRootFilesystem: true
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop: ["ALL"]
+        volumeMounts:
+          - name: pgvector
+            mountPath: /pgvector
+    extraVolumes:
+      - name: pgvector
+        emptyDir: {}
+      # Chain's DB password for the init script - a file, not an env var. Optional:
+      # Postgres without Chain (inbox/mind CI) must still start; the script skips Chain then.
+      - name: chain-db-credentials
+        secret:
+          secretName: resonance-flow-chain-db-credentials
+          optional: true
+      - name: mind-db-credentials
+        secret:
+          secretName: resonance-flow-mind-db-credentials
+          optional: true
+      - name: inbox-db-credentials
+        secret:
+          secretName: resonance-flow-inbox-db-credentials
+          optional: true
+    extraVolumeMounts:
+      - name: pgvector
+        mountPath: /opt/bitnami/postgresql/lib/vector.so
+        subPath: vector.so
+        readOnly: true
+      - name: chain-db-credentials
+        mountPath: /etc/resonance-flow/secrets/chain-db
+        readOnly: true
+      - name: mind-db-credentials
+        mountPath: /etc/resonance-flow/secrets/mind-db
+        readOnly: true
+      - name: inbox-db-credentials
+        mountPath: /etc/resonance-flow/secrets/inbox-db
+        readOnly: true
+    # HNSW index builds use maintenance_work_mem (64MB default) on top of
+    # shared_buffers (128MB) - 192Mi left no headroom and OOMKills instead of erroring.
+    resources:
+      requests:
+        cpu: 100m
+        memory: 256Mi
+      limits:
+        cpu: 250m
+        memory: 512Mi
+    initdb:
+      # Rendered by templates/postgresql-initdb.yaml
+      scriptsConfigMap: resonance-flow-postgresql-initdb

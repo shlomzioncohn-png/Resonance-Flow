@@ -1,0 +1,11 @@
+# CI applies an all-components-off overlay first (setup-service-infra), so only
+# list what this service needs enabled - everything else is already off.
+components:
+  lens-bff:
+    enabled: true
+kafka:
+  enabled: true
+minio:
+  enabled: false
+postgresql:
+  enabled: false

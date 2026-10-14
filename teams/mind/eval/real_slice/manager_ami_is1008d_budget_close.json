@@ -1,0 +1,56 @@
+{
+  "scenario_id": "manager_ami_is1008d_budget_close",
+  "persona": { "role": "Manager", "department": "Engineering" },
+  "context": {
+    "free_time_minutes": 90,
+    "current_datetime": "2004-12-10T09:00:00",
+    "time_horizon": "this_month",
+    "constraints": []
+  },
+  "tasks": [
+    {
+      "task_id": "task_negotiate_cost",
+      "title": "Negotiate lower production cost with suppliers and management",
+      "description": "Verbatim action item (AMI IS1008d): 'The Project Manager will negotiate with production companies and with management to decrease the cost of production.' The meeting's cost analysis showed the current budget will not cover all chosen components; the decision to include the LCD display is contingent on this negotiation succeeding.",
+      "deadline": null,
+      "effort_estimate": 90,
+      "tier": "tactical",
+      "blocked": false,
+      "parent_task_id": null
+    },
+    {
+      "task_id": "task_present_promo_plan",
+      "title": "Present the new promotion plan to management",
+      "description": "Verbatim action item (AMI IS1008d): 'He will also present the new promotion plan to management.' ('He' is the Project Manager, from the previous action item.) Routine reporting of a plan already agreed in the meeting.",
+      "deadline": null,
+      "effort_estimate": 45,
+      "tier": "tactical",
+      "blocked": false,
+      "parent_task_id": null
+    },
+    {
+      "task_id": "task_marketing_plan",
+      "title": "Start the marketing plan (Marketing Expert)",
+      "description": "Verbatim action item (AMI IS1008d): 'The Marketing Expert will begin his marketing plan after production has begun.' The description states this cannot start until production has begun, which has not happened.",
+      "deadline": null,
+      "effort_estimate": 120,
+      "tier": "tactical",
+      "blocked": true,
+      "parent_task_id": null
+    },
+    {
+      "task_id": "task_product_evaluation",
+      "title": "Evaluate the product once real units exist",
+      "description": "Verbatim action item (AMI IS1008d): 'The group will evaluate the product after real units have been produced.' The description states this waits on real production units, which do not exist yet.",
+      "deadline": null,
+      "effort_estimate": 60,
+      "tier": "operational",
+      "blocked": true,
+      "parent_task_id": null
+    }
+  ],
+  "expected_top_task_id": "task_negotiate_cost",
+  "expected_reason": "task_marketing_plan and task_product_evaluation are both blocked - their own descriptions state they cannot start until production has begun and until real units exist. Of the two actionable items, task_negotiate_cost resolves a budget shortfall that is currently blocking a committed design decision (adding the LCD display), whereas task_present_promo_plan is routine reporting of an already-agreed plan. The budget negotiation comes first.",
+  "source": { "type": "AMI", "source_detail": "AMI Meeting Corpus meeting IS1008d, abssumm <actions> (ami_public_manual_1.6.2)" },
+  "team_lead_approved": false
+}

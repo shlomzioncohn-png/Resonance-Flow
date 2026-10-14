@@ -1,0 +1,42 @@
+{
+  "scenario_id": "ceo_investor_update_vs_allhands_prep",
+  "persona": {
+    "role": "CEO",
+    "department": null
+  },
+  "context": {
+    "free_time_minutes": 60,
+    "current_datetime": "2026-09-07T16:00:00",
+    "time_horizon": "this_week",
+    "constraints": []
+  },
+  "tasks": [
+    {
+      "task_id": "task_investor",
+      "title": "Send the monthly investor update",
+      "description": "The update goes to investors on the 8th every month without exception; tomorrow is the 8th and it still needs your final pass.",
+      "deadline": "2026-09-08T09:00:00",
+      "effort_estimate": 45,
+      "tier": "strategic",
+      "blocked": false,
+      "parent_task_id": null
+    },
+    {
+      "task_id": "task_allhands",
+      "title": "Outline talking points for next month's all-hands",
+      "description": "Themes for the October all-hands; weeks away, no date pressure.",
+      "deadline": null,
+      "effort_estimate": 40,
+      "tier": "strategic",
+      "blocked": false,
+      "parent_task_id": null
+    }
+  ],
+  "expected_top_task_id": "task_investor",
+  "expected_reason": "task_investor has a hard deadline tomorrow morning against a fixed monthly commitment; task_allhands is weeks out with no date pressure.",
+  "source": {
+    "type": "synthetic",
+    "source_detail": null
+  },
+  "team_lead_approved": true
+}

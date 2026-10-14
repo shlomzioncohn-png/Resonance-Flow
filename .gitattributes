@@ -1,0 +1,4 @@
+# Shell scripts run inside Linux containers, where CRLF line endings break the
+# shebang line ("bad interpreter"). Keep them LF on every OS, whatever
+# core.autocrlf is set to.
+*.sh text eol=lf
