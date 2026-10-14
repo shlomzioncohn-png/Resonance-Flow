@@ -256,6 +256,21 @@ async def test_search_exclude_task_id_does_not_let_self_consume_the_k_budget(sto
     assert [r.task_id for r in results] == [other_id]
 
 
+async def test_search_combines_exclude_completed_and_exclude_task_id(store):
+    """Both filters at once -- not exercised by find_related()/find_duplicate()
+    today, but part of search()'s public contract."""
+    query_vec = embed("Ship the release notes for v2.3")
+    self_id, done_id, open_id = (f"test-{uuid.uuid4()}" for _ in range(3))
+    await store.upsert(self_id, query_vec)
+    await store.upsert(done_id, embed("Write up the v2.3 release notes"))
+    await store.mark_completed(done_id)
+    await store.upsert(open_id, embed("v2.3 release notes draft"))
+
+    results = await store.search(query_vec, k=5, exclude_completed=True, exclude_task_id=self_id)
+
+    assert [r.task_id for r in results] == [open_id]
+
+
 async def test_delete_removes_a_stored_vector(store):
     """delete() alone: the vector stops being findable afterward."""
     task_id = f"test-{uuid.uuid4()}"

@@ -13,6 +13,7 @@ import statistics
 import time
 from pathlib import Path
 
+from benchmarks.vector_store_test_table import create_vector_store_test_table
 from mind.config import VectorStoreSettings
 from mind.embeddings import embed, embed_batch, find_related, task_text
 from mind.embeddings.pgvector_store import PgVectorStore
@@ -86,8 +87,6 @@ async def main() -> None:
         dsn=os.environ["MIND_VECTOR_STORE__DSN"],  # type: ignore[arg-type]
         table=_TABLE,
     )
-    from benchmarks.vector_store_test_table import create_vector_store_test_table
-
     await create_vector_store_test_table(settings)
     store = PgVectorStore(settings)
     await store.open()
