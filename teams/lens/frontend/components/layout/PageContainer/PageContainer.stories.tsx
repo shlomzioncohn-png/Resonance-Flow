@@ -6,7 +6,7 @@ import PageContainer from './PageContainer';
 
 const meta = {
   component: PageContainer,
-  tags: ['ai-generated'],
+  tags: ['autodocs'],
 } satisfies Meta<typeof PageContainer>;
 
 export default meta;

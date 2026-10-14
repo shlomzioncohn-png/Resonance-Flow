@@ -41,7 +41,7 @@ class PostgresConstraintRepositoryTest {
     }
 
     private void seedTask(UUID taskId) {
-        jdbcTemplate.update("INSERT INTO task (id, owner_id, status) VALUES (?, 'owner', 'ACTIVE') ON CONFLICT (id) DO NOTHING", taskId);
+        jdbcTemplate.update("INSERT INTO task (id, status) VALUES (?, 'ACTIVE') ON CONFLICT (id) DO NOTHING", taskId);
     }
 
     private Constraint newConstraint(String constraintId, UUID taskId, Constraint.ConstraintStatus status,

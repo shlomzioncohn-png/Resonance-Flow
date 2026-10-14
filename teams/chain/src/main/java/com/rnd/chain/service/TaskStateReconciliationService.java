@@ -10,7 +10,6 @@ import com.rnd.chain.repository.TaskDependencyRepository;
 import com.rnd.chain.repository.TaskRepository;
 import org.springframework.stereotype.Service;
 
-import java.time.LocalDateTime;
 import java.util.List;
 import java.util.UUID;
 import java.util.stream.Collectors;
@@ -74,7 +73,6 @@ public class TaskStateReconciliationService {
             Task.builder()
                     .id(currentTask.getId())
                     .parentTaskId(currentTask.getParentTaskId())
-                    .ownerId(currentTask.getOwnerId())
                     .status(currentTask.getStatus())
                     .isReady(actualIsReady)
                     .blockingCount(actualBlockingCount)
@@ -82,7 +80,8 @@ public class TaskStateReconciliationService {
                     .estimatedDurationMin(currentTask.getEstimatedDurationMin())
                     .score(currentTask.getScore())
                     .createdAt(currentTask.getCreatedAt())
-                    .updatedAt(LocalDateTime.now())
+                    // Keep updatedAt as received from Inbox: task.updated only accepts strictly newer events.
+                    .updatedAt(currentTask.getUpdatedAt())
                     .deletedAt(currentTask.getDeletedAt())
                     .build()
     ).orElseThrow(() -> new TaskNotFoundException(taskId));

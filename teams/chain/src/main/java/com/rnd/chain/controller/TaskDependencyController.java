@@ -82,31 +82,6 @@ public class TaskDependencyController {
                 .build();
     }
 
-    @Operation(
-            summary = "Get task dependencies",
-            description = "Returns the tasks that the specified task directly depends on"
-    )
-    @GetMapping("/{taskId}/dependencies")
-    public ResponseEntity<List<UUID>> getDependencies(
-            @PathVariable UUID taskId) {
 
-        List<UUID> dependencies =
-                taskDependencyService.getDependencies(taskId);
 
-        return ResponseEntity.ok(dependencies);
-    }
-
-    @Operation(
-            summary = "Get task dependents",
-            description = "Returns the tasks that directly depend on the specified task"
-    )
-    @GetMapping("/{taskId}/dependents")
-    public ResponseEntity<List<UUID>> getDependents(
-            @PathVariable UUID taskId) {
-
-        List<UUID> dependents =
-                taskDependencyService.getDependents(taskId);
-
-        return ResponseEntity.ok(dependents);
-    }
 }

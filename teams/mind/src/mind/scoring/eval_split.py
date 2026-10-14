@@ -2,10 +2,11 @@
 segmented-ranking baseline without tuning on what measures it.
 
 **This is a development discipline, not a change to the eval set.** The set
-stays 30 fixed scenarios and R1's reported baseline is still measured over all
-30 (`make eval`). The split exists so that the weights behind that number were
-not fitted to the very scenarios it is computed on — the first thing a mentor
-will challenge about a hand-weighted model scored on 30 labelled examples.
+was 30 fixed scenarios when this was frozen and is 36 since #535; R1's reported
+baseline is still measured over all of them (`make eval`). The split exists so
+that the weights behind that number were not fitted to the very scenarios it is
+computed on — the first thing a mentor will challenge about a hand-weighted
+model scored on a few dozen labelled examples.
 
 Rules this split is only worth something if we actually follow:
 
@@ -39,6 +40,23 @@ Known weakness, stated rather than buried: CEO and Field Engineer contribute
 one holdout scenario each, both same-tier. The holdout therefore says close to
 nothing about those two roles in cross-tier scenarios. That is the price of a
 10-scenario holdout; 12 (two per role) would have balanced it.
+
+Extended for #535 (2026-10-14)
+------------------------------
+#535 added six scenarios, one per role: CEO, Higher Manager and Manager in
+`cross_tier/`, Developer, Field Engineer and Salesperson in `same_tier/`. The
+thirty above keep their halves — moving a dev scenario into holdout would put
+one already read into the half that must not have been. The six were placed
+from their filenames only, at the set's own one-in-three ratio: one holdout
+from each folder.
+
+- `cross_tier/`: the CEO scenario, chosen by role rather than by hash. It
+  closes the weakness stated above — the holdout had no cross-tier CEO
+  scenario and only one CEO scenario at all.
+- `same_tier/`: lowest `selection_hash`, as before. That is the Field
+  Engineer scenario, which closes the other half of the same weakness.
+
+The split is now 24 / 12 and every role has two holdout scenarios.
 
 What leaked anyway: filenames are descriptive, so filename-level signal (which
 scenarios involve a blocked task, which involve an overdue deadline) was
@@ -80,6 +98,11 @@ DEV_SCENARIO_IDS: frozenset[str] = frozenset(
         "salesperson_contract_redlines_vs_cold_prospecting",
         "salesperson_expense_report_vs_departed_champion",
         "salesperson_at_risk_renewal_vs_owned_outage",
+        # Added for #535.
+        "developer_inflated_p0_vs_understated_data_leak",
+        "higher_manager_approved_vision_memo_vs_expiring_capacity_offer",
+        "manager_idle_new_hires_vs_informational_steering_deck",
+        "salesperson_dead_rfp_vs_live_signing_round",
     }
 )
 
@@ -95,6 +118,9 @@ HOLDOUT_SCENARIO_IDS: frozenset[str] = frozenset(
         "manager_overdue_preread_vs_tomorrow_review",
         "salesperson_blocked_discount_vs_warm_followup",
         "salesperson_processing_cutoff_vs_call_summary",
+        # Added for #535.
+        "ceo_own_investor_commitment_vs_unaccepted_keynote_request",
+        "field_engineer_released_controller_vs_blocked_fibre_fix",
     }
 )
 
@@ -122,16 +148,23 @@ def partition(
     """Split loaded scenarios into `(dev, holdout)`, preserving input order.
 
     Raises `ScenarioSetDriftError` if the input contains a `scenario_id` this
-    split does not know, so a changed eval set surfaces immediately instead of
-    quietly dropping scenarios out of the dev run.
+    split does not know, or lacks one it does, so a changed eval set surfaces
+    immediately instead of quietly growing or shrinking the dev run.
     """
     scenarios = list(scenarios)
-    unknown = sorted({s.scenario_id for s in scenarios} - ALL_SPLIT_SCENARIO_IDS)
+    loaded = {s.scenario_id for s in scenarios}
+    unknown = sorted(loaded - ALL_SPLIT_SCENARIO_IDS)
     if unknown:
         raise ScenarioSetDriftError(
             f"scenario_id(s) not in the frozen split: {unknown}. The persona set changed "
             f"since the split was frozen; redo the split deliberately (see this module's "
             f"docstring) rather than extending it ad hoc."
+        )
+    missing = sorted(ALL_SPLIT_SCENARIO_IDS - loaded)
+    if missing:
+        raise ScenarioSetDriftError(
+            f"scenario_id(s) in the frozen split but not in the input: {missing}. A "
+            f"scenario was removed or renamed; remove it from the split deliberately."
         )
     dev = [s for s in scenarios if s.scenario_id in DEV_SCENARIO_IDS]
     holdout = [s for s in scenarios if s.scenario_id in HOLDOUT_SCENARIO_IDS]

@@ -174,6 +174,29 @@ def test_a_good_answer_comes_back_with_its_model_and_token_counts() -> None:
     assert response.completion_tokens == 59
 
 
+def test_thinking_tokens_count_as_completion_because_they_are_billed_as_output() -> None:
+    """gemini-3.8-flash thought 237 tokens live despite thinkingBudget 0."""
+
+    handler, _ = _always(
+        _envelope(
+            VALID_ANSWER,
+            usage={"promptTokenCount": 11, "candidatesTokenCount": 1, "thoughtsTokenCount": 237},
+        )
+    )
+
+    assert _provider(handler).complete("system", "user").completion_tokens == 238
+
+
+def test_thinking_without_an_answer_count_leaves_the_completion_unknown() -> None:
+    """Pricing the thinking alone would report an under-count as a real cost."""
+
+    handler, _ = _always(
+        _envelope(VALID_ANSWER, usage={"promptTokenCount": 11, "thoughtsTokenCount": 237})
+    )
+
+    assert _provider(handler).complete("system", "user").completion_tokens is None
+
+
 def test_an_answer_split_across_parts_is_joined() -> None:
     """Taking parts[0] would truncate an object to its opening brace."""
 

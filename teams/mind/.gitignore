@@ -11,6 +11,7 @@ venv/
 
 # Generated from proto/*.proto by `make proto` — never commit
 src/mind/messaging/*_pb2.py
+src/mind/messaging/*_pb2.pyi
 
 # Local model weights — never commit
 models/*
@@ -43,6 +44,9 @@ docker-compose.override.yml
 benchmarks/**/*.json
 benchmarks/**/*.csv
 !benchmarks/README.md
+# threshold_calibration_tasks.json is input data (the task pool), not a
+# results dump -- must be tracked or the script isn't reproducible.
+!benchmarks/threshold_calibration_tasks.json
 
 # Datasets — manifests/checksums only, never the corpora
 eval/datasets/*

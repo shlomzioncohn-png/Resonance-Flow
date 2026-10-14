@@ -18,4 +18,5 @@ Why it was rejected:
 """
 
 Fix exactly what the rejection describes and change nothing else. Return the
-corrected JSON object on its own, with the same four keys and no others.
+corrected JSON object on its own, with exactly the keys the instructions
+list and no others.

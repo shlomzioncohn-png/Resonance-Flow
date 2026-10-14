@@ -1,6 +1,7 @@
 package com.rnd.chain.repository;
 
 import com.rnd.chain.dto.TaskDependency;
+import com.rnd.chain.repository.entity.TaskDependencyEntity;
 import com.rnd.chain.repository.jpa.SpringDataTaskDependencyJpaRepository;
 import org.springframework.stereotype.Repository;
 import org.springframework.transaction.annotation.Transactional;
@@ -23,7 +24,7 @@ public class PostgresTaskDependencyRepository implements TaskDependencyRepositor
     public List<TaskDependency> findByTaskId(UUID taskId) {
         Objects.requireNonNull(taskId, "taskId must not be null");
         return jpaRepository.findByIdTaskId(taskId).stream()
-                .map(entity -> new TaskDependency(entity.getId().getTaskId(), entity.getId().getDependsOnTaskId()))
+                .map(PostgresTaskDependencyRepository::toDto)
                 .toList();
     }
 
@@ -31,17 +32,29 @@ public class PostgresTaskDependencyRepository implements TaskDependencyRepositor
     public List<TaskDependency> findByDependsOnTaskId(UUID dependsOnTaskId) {
         Objects.requireNonNull(dependsOnTaskId, "dependsOnTaskId must not be null");
         return jpaRepository.findByIdDependsOnTaskId(dependsOnTaskId).stream()
-                .map(entity -> new TaskDependency(entity.getId().getTaskId(), entity.getId().getDependsOnTaskId()))
+                .map(PostgresTaskDependencyRepository::toDto)
                 .toList();
     }
 
-    /** Only the PK conflict is suppressed; FK/CHECK constraint violations still propagate. */
+    /**
+     * Issue #445: upserts {@code confidence} even when the edge already exists (Mind's republish
+     * semantics - see {@link SpringDataTaskDependencyJpaRepository#upsert}'s Javadoc), so this is
+     * no longer a pure "PK conflict suppressed" no-op. {@code Optional.empty()} still means
+     * specifically "not a new edge", not "nothing happened" - FK/CHECK/trigger violations still
+     * propagate as before.
+     */
     @Override
     @Transactional
     public Optional<TaskDependency> save(TaskDependency dependency) {
         Objects.requireNonNull(dependency, "dependency must not be null");
-        int inserted = jpaRepository.insertIgnoringConflict(dependency.taskId(), dependency.dependsOnTaskId());
-        return inserted > 0 ? Optional.of(dependency) : Optional.empty();
+        boolean wasInserted = jpaRepository.upsert(
+                dependency.taskId(), dependency.dependsOnTaskId(), dependency.confidence());
+        return wasInserted ? Optional.of(dependency) : Optional.empty();
+    }
+
+    private static TaskDependency toDto(TaskDependencyEntity entity) {
+        return new TaskDependency(
+                entity.getId().getTaskId(), entity.getId().getDependsOnTaskId(), entity.getConfidence());
     }
 
     @Override
