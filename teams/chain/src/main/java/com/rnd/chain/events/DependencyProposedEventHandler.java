@@ -78,7 +78,7 @@ public class DependencyProposedEventHandler {
             throw new ReferencedTaskNotFoundException(
                 "Source task not found for task.dependencies.proposed: " + taskId,
                 new IllegalStateException("Source task is not available yet"));
-}
+        }
 
         Set<UUID> processedDependencyIds = new HashSet<>();
 
@@ -95,6 +95,11 @@ public class DependencyProposedEventHandler {
                 continue;
             }
 
+            // Issue #445: Mind's confidence for this specific edge - feeds
+            // PriorityScoreService's B/D terms (a 0.3-confidence blocker moves priority_score
+            // less than a 0.9-confidence one).
+            double confidence = dependency.getConfidence();
+
             String sourceRef =
                     buildSourceRef(eventId, taskId, dependsOnTaskId);
 
@@ -104,6 +109,11 @@ public class DependencyProposedEventHandler {
              */
             if (taskRepository.findById(dependsOnTaskId).isEmpty()) {
 
+                // Issue #445 known gap (deliberate, not fixed here): UnresolvedDependency has no
+                // confidence field, so when UnresolvedDependencyService#resolveWaitingForTask
+                // later replays this via TaskCreatedEventHandler, the edge is added with the
+                // default confidence (1.0), not Mind's real value above. Only affects
+                // dependencies proposed before Chain has seen their target task.
                 unresolvedDependencyService.recordMissingTarget(
                         taskId,
                         dependsOnTaskId,
@@ -118,7 +128,8 @@ public class DependencyProposedEventHandler {
                         taskId,
                         dependsOnTaskId,
                         DependencyChangeSource.MIND,
-                        sourceRef);
+                        sourceRef,
+                        confidence);
 
             } catch (DuplicateDependencyException ex) {
 

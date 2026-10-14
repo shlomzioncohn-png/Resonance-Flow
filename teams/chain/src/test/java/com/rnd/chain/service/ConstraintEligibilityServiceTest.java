@@ -5,12 +5,14 @@ import com.rnd.chain.dto.Task;
 import com.rnd.chain.dto.TaskDependency;
 import com.rnd.chain.dto.TaskStatus;
 import com.rnd.chain.dto.TaskTestFixtures;
+import com.rnd.chain.events.SchedulingPublishListener;
 import com.rnd.chain.events.SchedulingUpdatePublisher;
 import com.rnd.chain.events.TaskSchedulingUpdatedEvent;
 import com.rnd.chain.repository.InMemoryConstraintRepository;
 import com.rnd.chain.repository.InMemoryGraphLock;
 import com.rnd.chain.repository.InMemoryTaskDependencyRepository;
 import com.rnd.chain.repository.InMemoryTaskRepository;
+import com.rnd.chain.testsupport.TestTransactions;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import java.time.LocalDateTime;
@@ -37,7 +39,8 @@ class ConstraintEligibilityServiceTest {
         publisher = new RecordingSchedulingUpdatePublisher();
         SchedulingUpdateService schedulingUpdateService = new SchedulingUpdateService(publisher);
         InMemoryGraphLock lock = new InMemoryGraphLock();
-        TaskCounterUpdater counterUpdater = new TaskCounterUpdater(taskRepository, schedulingUpdateService);
+        TaskCounterUpdater counterUpdater = new TaskCounterUpdater(taskRepository, dependencyRepository,
+                new PriorityScoreService(), new SchedulingPublishListener(taskRepository, schedulingUpdateService));
         constraintRepository = new InMemoryConstraintRepository();
         service = new ConstraintEligibilityService(constraintRepository, counterUpdater);
     }
@@ -72,7 +75,8 @@ class ConstraintEligibilityServiceTest {
                         0,
                         0));
 
-        service.onConstraintAdded(newConstraint(taskId, "c-add", Constraint.ConstraintStatus.PENDING));
+        TestTransactions.runCommitted(() -> service.onConstraintAdded(
+                newConstraint(taskId, "c-add", Constraint.ConstraintStatus.PENDING)));
 
         Task updated =
                 taskRepository.findById(taskId)
@@ -105,11 +109,11 @@ class ConstraintEligibilityServiceTest {
 
         constraintRepository.save(newConstraint(taskId, "c-sat", Constraint.ConstraintStatus.PENDING));
 
-        service.onConstraintStatusChanged(
+        TestTransactions.runCommitted(() -> service.onConstraintStatusChanged(
                 taskId,
                 "c-sat",
                 Constraint.ConstraintStatus.SATISFIED,
-                null);
+                null));
 
         Task updated =
                 taskRepository.findById(taskId)
@@ -281,7 +285,8 @@ class ConstraintEligibilityServiceTest {
         InMemoryTaskDependencyRepository dependencyRepo = new InMemoryTaskDependencyRepository(edges);
         InMemoryConstraintRepository constraintRepo = new InMemoryConstraintRepository();
         SchedulingUpdateService scheduling = new SchedulingUpdateService(event -> {});
-        TaskCounterUpdater counterUpdater = new TaskCounterUpdater(taskRepo, scheduling);
+        TaskCounterUpdater counterUpdater = new TaskCounterUpdater(taskRepo, dependencyRepo,
+                new PriorityScoreService(), new SchedulingPublishListener(taskRepo, scheduling));
         return new Fixture(taskRepo, dependencyRepo, constraintRepo, new ConstraintEligibilityService(constraintRepo, counterUpdater));
     }
 

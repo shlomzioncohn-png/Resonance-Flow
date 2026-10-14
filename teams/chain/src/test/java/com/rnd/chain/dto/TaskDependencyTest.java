@@ -109,4 +109,52 @@ class TaskDependencyTest {
                 .contains(taskId.toString())
                 .contains(dependsOnTaskId.toString());
     }
+
+    // Issue #445: per-edge confidence.
+
+    @Test
+    void twoArgConstructor_defaultsConfidenceToFullConfidence() {
+        TaskDependency dependency = new TaskDependency(UUID.randomUUID(), UUID.randomUUID());
+
+        assertThat(dependency.confidence()).isEqualTo(1.0);
+    }
+
+    @Test
+    void threeArgConstructor_storesTheGivenConfidence() {
+        TaskDependency dependency = new TaskDependency(UUID.randomUUID(), UUID.randomUUID(), 0.3);
+
+        assertThat(dependency.confidence()).isEqualTo(0.3);
+    }
+
+    @Test
+    void confidenceAboveOne_throws() {
+        assertThatThrownBy(() -> new TaskDependency(UUID.randomUUID(), UUID.randomUUID(), 1.1))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("confidence");
+    }
+
+    @Test
+    void confidenceBelowZero_throws() {
+        assertThatThrownBy(() -> new TaskDependency(UUID.randomUUID(), UUID.randomUUID(), -0.1))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("confidence");
+    }
+
+    @Test
+    void nullConfidence_isAllowed() {
+        TaskDependency dependency = new TaskDependency(UUID.randomUUID(), UUID.randomUUID(), null);
+
+        assertThat(dependency.confidence()).isNull();
+    }
+
+    @Test
+    void equals_dependsOnConfidenceToo() {
+        UUID taskId = UUID.randomUUID();
+        UUID dependsOnTaskId = UUID.randomUUID();
+
+        TaskDependency lowConfidence = new TaskDependency(taskId, dependsOnTaskId, 0.3);
+        TaskDependency highConfidence = new TaskDependency(taskId, dependsOnTaskId, 0.9);
+
+        assertThat(lowConfidence).isNotEqualTo(highConfidence);
+    }
 }

@@ -39,24 +39,22 @@ public class TaskEligibilityService {
 
     private final TaskRepository taskRepository;
     private final TaskDependencyRepository taskDependencyRepository;
-    private final SchedulingUpdateService schedulingUpdateService;
     private final GraphLock graphLock;
     private final TaskCounterUpdater taskCounterUpdater;
 
     public TaskEligibilityService(
             TaskRepository taskRepository,
             TaskDependencyRepository taskDependencyRepository,
-            SchedulingUpdateService schedulingUpdateService,
             GraphLock graphLock,
             TaskCounterUpdater taskCounterUpdater) {
 
         this.taskRepository = taskRepository;
         this.taskDependencyRepository = taskDependencyRepository;
-        this.schedulingUpdateService = schedulingUpdateService;
         this.graphLock = graphLock;
         this.taskCounterUpdater = taskCounterUpdater;
     }
 
+    @Transactional
     public void recalculateTaskEligibility(UUID taskId) {
 
         Objects.requireNonNull(
@@ -263,19 +261,20 @@ public void onTaskStatusChangedIfNewer(
 
         List<UUID> dependentIds = dependents.stream().map(TaskDependency::taskId).toList();
 
-        Map<UUID, Boolean> previousReadiness = new HashMap<>();
+        Map<UUID, Task> previousById = new HashMap<>();
         List<Task> updated = taskRepository.updateAll(dependentIds, task -> {
-            previousReadiness.put(task.getId(), task.isReady());
+            previousById.put(task.getId(), task);
             return TaskCounterUpdater.withCounters(
                     task,
                     Math.max(0, task.getBlockingCount() + delta),
                     task.getOpenConstraintCount());
         });
 
+        // Issue #445: each dependent's blockingCount just changed, which can move its own
+        // priority_score (see TaskCounterUpdater's confidence sums) even on top of whatever
+        // isReady did - recomputePriorityScoreAndPublish decides whether that warrants a publish.
         for (Task task : updated) {
-            if (previousReadiness.get(task.getId()) != task.isReady()) {
-                schedulingUpdateService.publishSchedulingUpdate(task);
-            }
+            taskCounterUpdater.recomputePriorityScoreAndPublish(task.getId(), previousById.get(task.getId()), task);
         }
     }
 

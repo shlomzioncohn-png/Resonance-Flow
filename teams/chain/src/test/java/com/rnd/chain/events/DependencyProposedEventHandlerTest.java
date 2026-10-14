@@ -10,7 +10,9 @@ import com.rnd.chain.repository.InMemoryTaskDependencyRepository;
 import com.rnd.chain.repository.InMemoryTaskRepository;
 import com.rnd.chain.repository.InMemoryTransactionRunner;
 import com.rnd.chain.repository.InMemoryUnresolvedDependencyRepository;
+import com.rnd.chain.events.SchedulingPublishListener;
 import com.rnd.chain.service.DependencyEdgeService;
+import com.rnd.chain.service.PriorityScoreService;
 import com.rnd.chain.service.SchedulingUpdateService;
 import com.rnd.chain.service.TaskCounterUpdater;
 import com.rnd.chain.service.TaskDependencyService;
@@ -64,11 +66,13 @@ class DependencyProposedEventHandlerTest {
                 new InMemoryTaskDependencyRepository(
                         existingDependencies);
 
+        SchedulingUpdateService schedulingUpdateService = mock(SchedulingUpdateService.class);
         DependencyEdgeService edgeService =
                 new DependencyEdgeService(
                         dependencyRepo,
                         new InMemoryGraphLock(),
-                        new TaskCounterUpdater(taskRepo, mock(SchedulingUpdateService.class)));
+                        new TaskCounterUpdater(taskRepo, dependencyRepo, new PriorityScoreService(),
+                                new SchedulingPublishListener(taskRepo, schedulingUpdateService)));
 
         InMemoryDependencyHistoryRepository historyRepo =
                 new InMemoryDependencyHistoryRepository();
