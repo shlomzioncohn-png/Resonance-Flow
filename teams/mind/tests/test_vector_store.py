@@ -334,7 +334,20 @@ async def test_search_query_can_use_the_hnsw_index(store):
     async with store._pool.connection() as conn, conn.cursor() as cur:
         await cur.execute("SET LOCAL enable_seqscan = off;")
         await cur.execute(
-            sql.SQL("EXPLAIN {}").format(store._search_query()),
+            sql.SQL("EXPLAIN {}").format(store._search_query(exclude_completed=False)),
+            ([0.0] * EMBEDDING_DIM, [0.0] * EMBEDDING_DIM, 1),
+        )
+        plan = "\n".join(row[0] for row in await cur.fetchall())
+    assert "Index Scan" in plan, f"query plan did not use the index:\n{plan}"
+
+
+async def test_search_query_can_use_the_hnsw_index_with_exclude_completed(store):
+    """WHERE NOT is_completed must not force a fall back to a full table
+    scan either -- that's the whole point of filtering in the query."""
+    async with store._pool.connection() as conn, conn.cursor() as cur:
+        await cur.execute("SET LOCAL enable_seqscan = off;")
+        await cur.execute(
+            sql.SQL("EXPLAIN {}").format(store._search_query(exclude_completed=True)),
             ([0.0] * EMBEDDING_DIM, [0.0] * EMBEDDING_DIM, 1),
         )
         plan = "\n".join(row[0] for row in await cur.fetchall())
