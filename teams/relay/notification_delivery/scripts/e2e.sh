@@ -54,15 +54,17 @@ LABEL_NAME="$(k get "deploy/${SERVICE}" -o jsonpath='{.spec.selector.matchLabels
 LABEL_INSTANCE="$(k get "deploy/${SERVICE}" -o jsonpath='{.spec.selector.matchLabels.app\.kubernetes\.io/instance}')"
 AS_LENS_BFF="app.kubernetes.io/name=${LABEL_NAME},app.kubernetes.io/instance=${LABEL_INSTANCE},app.kubernetes.io/component=lens-bff"
 
-# Same registry URL the service itself is configured with.
 REGISTRY_URL="$(k get configmap "$CONFIG_MAP" -o jsonpath='{.data.config\.yaml}' \
-  | sed -n 's/.*schema\.registry\.url:[[:space:]]*"\{0,1\}\([^"]*\)"\{0,1\}.*/\1/p')"
-[ -n "$REGISTRY_URL" ] || { echo "FAIL: no schema.registry.url in configmap ${CONFIG_MAP}"; exit 1; }
+  | sed -n 's/^[[:space:]]*schema\.registry\.url:[[:space:]]*"\{0,1\}\([^"]*\)"\{0,1\}[[:space:]]*$/\1/p')"
+REGISTRY_URL_COUNT="$(printf '%s' "$REGISTRY_URL" | grep -c . || true)"
+if [ "$REGISTRY_URL_COUNT" -ne 1 ]; then
+  echo "FAIL: expected exactly one schema.registry.url in configmap ${CONFIG_MAP}, found ${REGISTRY_URL_COUNT}:"
+  printf '%s\n' "$REGISTRY_URL"
+  exit 1
+fi
 
 echo ""
 echo "==> 1. Registering schemas through schema-sync-hook (registry: ${REGISTRY_URL})"
-# The chart's files/ are copies refreshed only after merge (relay-schema-sync.yaml) - refresh them
-# here the same way, so this run registers the checkout's schemas, not the last synced ones.
 HOOK_CHART="${TMP_DIR}/schema-sync-hook"
 cp -r "${REPO_ROOT}/teams/relay/schema-sync-hook" "$HOOK_CHART"
 mkdir -p "${HOOK_CHART}/files/schemas" "${HOOK_CHART}/files/ci"
@@ -72,7 +74,6 @@ cp "${REPO_ROOT}/teams/relay/ci/schema-subjects.tsv" "${HOOK_CHART}/files/"
 # A Windows checkout has CRLF working copies; the hook runs them under Linux bash.
 find "${HOOK_CHART}/files" -type f -exec sed -i 's/\r$//' {} +
 
-# The hook's Job is immutable - start from a clean release every run.
 helm -n "$NS" uninstall "$HOOK_RELEASE" --wait >/dev/null 2>&1 || true
 if ! helm -n "$NS" upgrade --install "$HOOK_RELEASE" "$HOOK_CHART" \
      --set schemaRegistryUrl="$REGISTRY_URL" \
