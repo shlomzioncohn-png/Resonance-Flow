@@ -51,7 +51,7 @@ The LENS Gateway is the **single entry point** for external client (Frontend) re
 
 ## 2. API Endpoints
 
-The Gateway exposes four endpoints for the Frontend's workspace functionality. All requests are forwarded to the BFF service.
+The Gateway exposes six endpoints for the Frontend's workspace functionality. All requests are forwarded to the BFF service.
 
 ### Endpoint Routing Table
 
@@ -61,6 +61,8 @@ The Gateway exposes four endpoints for the Frontend's workspace functionality. A
 | GET | `/api/workspace/tasks/{taskId}` | `http://bff-service:8080/workspace/tasks/{taskId}` | BFF (Sari) | Get full task details by ID |
 | PATCH | `/api/workspace/tasks/{taskId}/status` | `http://bff-service:8080/workspace/tasks/{taskId}/status` | BFF (Sari) | Update task status |
 | GET | `/api/workspace/employee-task` | `http://bff-service:8080/workspace/employee-task` | BFF (Sari) | Get the employee's current task (My Workspace demo); mocked at the BFF, no downstream service owns this yet |
+| GET | `/api/manager/workload` | `http://bff-service:8080/manager/workload` | BFF (Sari) | Active-task count per employee (Manager Dashboard); mocked at the BFF |
+| GET | `/api/manager/projects` | `http://bff-service:8080/manager/projects` | BFF (Sari) | Project grid with health/KPI data (Manager Dashboard); mocked at the BFF. Distinct from `/api/admin/projects` (per-project drill-down) |
 | GET | `/api/manager/users` | `http://bff-service:8080/manager/users` | BFF (Sari) | List users, **MANAGER-only** (`hasRole`). Real call through to Inbox — not mocked. |
 | GET | `/api/manager/users/{id}` | `http://bff-service:8080/manager/users/{id}` | BFF (Sari) | One user's details, MANAGER-only |
 | PATCH | `/api/manager/users/{id}` | `http://bff-service:8080/manager/users/{id}` | BFF (Sari) | Edit displayName/firstName/lastName/phone only, MANAGER-only |

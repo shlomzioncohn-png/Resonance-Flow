@@ -1,7 +1,8 @@
 """Local OCR + ASR.
 
-OCR pipeline for scanned documents/PDFs; ASR (transcription) pipeline for
-audio/meeting recordings. Feeds the same downstream extraction pipeline as
-text-native sources. Managed-API vs. local-model choice is tracked as an
-open decision (see MIND-01-System-Overview.md, "Open" table).
+OCR for scanned documents/PDFs (ocr.py: Tesseract --psm 11) and ASR for
+audio/meeting recordings (asr.py: Whisper base.en via faster-whisper), both
+returning the same envelope and failure categories (result.py, failures.py), so
+they feed the same downstream extraction pipeline as text-native sources. See
+this package's README.
 """

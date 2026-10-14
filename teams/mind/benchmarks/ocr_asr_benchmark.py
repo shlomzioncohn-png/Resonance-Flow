@@ -1,0 +1,637 @@
+"""OCR + ASR local-model benchmark.
+
+Run: python -m benchmarks.ocr_asr_benchmark (from teams/mind/)
+
+OCR: Tesseract in 3 page-segmentation-mode (PSM) configs, plus PaddleOCR
+in 2 model-size configs (mobile/server) -- all run on the FUNSD
+Foundation Gate real-data slice (the same 2 documents already committed
+via eval/datasets/.manifest.json -- see eval/datasets/README.md; no new
+data downloaded for this).
+
+PaddleOCR requires 4 model packages (mobile+server, det+rec) that
+PaddleOCR/PaddleX normally auto-download from HuggingFace/ModelScope/BOS
+on first use -- all three were blocked on this dev network by a NetFree
+content filter (confirmed: same "418 Blocked by NetFree" response from
+all three hosters). Downloaded manually on an unfiltered network instead
+and placed under the local PaddleX model cache
+(~/.paddlex/official_models/<model_name>/, extracted from the hosters'
+own `<model_name>_infer.tar`) -- see "PaddleOCR -- setup" in
+ocr-asr-benchmark.md for the exact URLs. `enable_mkldnn=False` below
+works around an unrelated NotImplementedError crash in this
+paddlepaddle build's oneDNN/CPU backend; it makes both PaddleOCR configs
+slower than PaddleOCR is capable of on hardware where mkldnn works, so
+its latency numbers are a floor for this machine, not a ceiling for the
+tool.
+
+ASR: three Whisper sizes (tiny.en / base.en / small.en) on two AMI
+meetings -- lives in benchmarks/asr_benchmark.py (its own docstring has
+the details) and runs after the OCR half here. Needs the AMI audio from
+eval/datasets/ami-audio.manifest.json and the Whisper weights under
+models/whisper/ (see "ASR -- setup" in ocr-asr-benchmark.md).
+
+Latency and resource footprint are deliberately rough (see
+ocr-asr-benchmark.md): wall-clock time and a sampled peak-RSS/CPU-time
+via psutil (Python's stdlib `resource` module doesn't exist on Windows).
+
+Accuracy is scored against FUNSD's ground truth (benchmarks/aligned_metrics.py):
+- grouped CER (primary): GT and OCR words that overlap by bounding box are
+  clustered, each cluster is scored as one string (concatenated in position
+  order), so a merged or split word with correct characters costs nothing,
+  while wrong, missing and extra characters do. Unmatched GT words are
+  deletions, unmatched OCR words insertions: CER = (S+D+I) / GT characters.
+  Works for any engine that reports boxes -- Tesseract words and
+  PaddleOCR lines -- and doesn't depend on reading order (`--psm 11` has none).
+- strict CER (conservative bound; Tesseract only): one-to-one word pairing
+  by IoU >= 0.3. A merge/split is charged as a deletion plus an insertion,
+  so it overstates the error; meaningless for PaddleOCR (lines vs. words).
+  Reported with word precision/recall at the same pairing.
+- word_recall (secondary): "did this GT word appear anywhere in the output."
+  Recall only -- it never looks at what the OCR produced beyond the GT, so
+  it is not an accuracy.
+
+An earlier `char_similarity_score` (best character match to *any* OCR
+word) was removed: it had no zero point and rewarded output volume --
+random gibberish scored 42-53% against the ground truth, rising as more
+was emitted. See ocr-asr-benchmark.md.
+"""
+
+from __future__ import annotations
+
+import functools
+import json
+import shutil
+import subprocess
+import sys
+import threading
+import time
+from collections.abc import Callable, Iterable
+from pathlib import Path
+from typing import TYPE_CHECKING, Any
+
+from pydantic import BaseModel
+
+from benchmarks.aligned_metrics import WordBox, aligned_score, grouped_score
+from benchmarks.aligned_metrics import normalize as _normalize
+from benchmarks.asr_benchmark import format_asr_conclusion, run_asr_benchmark
+from benchmarks.common import load_checksums, sample_current_process, verify_checksum
+
+if TYPE_CHECKING:
+    # PaddleOCR is the optional [benchmark] extra (see module docstring), like
+    # psutil, which the functions that use it import lazily -- so the rest of
+    # this module (word_recall, etc.) stays importable without either. This
+    # TYPE_CHECKING-only import types the `ocr` argument of run_paddle_ocr: it
+    # ships no stubs, so mypy resolves it as Any (see [tool.mypy.overrides] in
+    # pyproject.toml) -- the annotation documents the type without needing
+    # paddleocr installed to import this module.
+    from paddleocr import PaddleOCR
+
+if hasattr(sys.stdout, "reconfigure"):
+    # Windows consoles default to a codepage (e.g. cp1255) that can't
+    # encode every character PaddleOCR/Tesseract output -- avoid a crash
+    # on print() alone.
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+
+_HERE = Path(__file__).parent
+_PROJECT_ROOT = _HERE.parent
+
+# Three PSM configs (issue asked for at least 2; a third closes the
+# "does accuracy keep improving, or does it plateau/regress" question
+# instead of stopping at the first two).
+# 3  = Tesseract's own default: fully automatic page segmentation.
+# 6  = assume a single uniform block of text.
+# 11 = sparse text: find as much text as possible, in no particular
+#      order -- FUNSD pages are forms with scattered, disconnected
+#      fields, which is exactly the layout this mode targets.
+#
+# CHOSEN_PSM_ARGS is the config the team picked (see the decision in
+# ocr-asr-benchmark.md). It is the single place that says so: the OCR_CONFIGS
+# entry below is built from it and the analysis scripts import it, so changing
+# the decision here changes what every script runs (review feedback on PR #345).
+CHOSEN_PSM_ARGS = ["--psm", "11"]
+CHOSEN_CONFIG = "psm11_sparse_text"  # CHOSEN_PSM_ARGS' name in OCR_CONFIGS
+OCR_CONFIGS = {
+    "psm3_default": ["--psm", "3"],
+    "psm6_single_block": ["--psm", "6"],
+    CHOSEN_CONFIG: CHOSEN_PSM_ARGS,
+}
+
+# Two PaddleOCR model-size configs -- the "mobile vs. server model" the
+# issue asked for. Both are PP-OCRv5 (PaddleOCR's current generation);
+# "mobile"/"server" is model capacity, not an actual deploy target --
+# both run on this CPU dev machine.
+PADDLE_CONFIGS = {
+    "paddleocr_mobile": {
+        "text_detection_model_name": "PP-OCRv5_mobile_det",
+        "text_recognition_model_name": "PP-OCRv5_mobile_rec",
+    },
+    "paddleocr_server": {
+        "text_detection_model_name": "PP-OCRv5_server_det",
+        "text_recognition_model_name": "PP-OCRv5_server_rec",
+    },
+}
+
+_WINDOWS_DEFAULT_INSTALL = r"C:\Program Files\Tesseract-OCR\tesseract.exe"
+
+
+# Pydantic models instead of ad-hoc dicts for every function's return shape
+# (review feedback on PR #345) -- so the fields, types, and their meaning
+# are visible at the call site instead of only in the function body.
+
+
+class DocPaths(BaseModel):
+    """Local filesystem paths for one FUNSD record, from load_manifest()."""
+
+    image: Path
+    annotation: Path
+
+
+class OCRRunResult(BaseModel):
+    """What one OCR call produced -- shared by run_ocr() (Tesseract
+    subprocess) and run_paddle_ocr() (in-process PaddleOCR), so both can
+    feed the same word_recall() and BenchmarkRow.
+
+    `words` (text + bounding box) is what position-based scoring needs: one
+    entry per word for Tesseract (run_ocr), one per text *line* for PaddleOCR
+    (run_paddle_ocr) -- which grouped scoring handles and strict does not."""
+
+    text: str
+    words: list[WordBox] = []
+    duration_s: float
+    peak_rss_mb: float
+    cpu_time_s: float
+
+
+class BenchmarkRow(BaseModel):
+    """One (config, document) measurement -- the raw row each benchmark
+    loop iteration produces, before averaging into ConfigAverages.
+
+    grouped_* is the primary CER (any engine with boxes). strict_* is the
+    one-to-one pairing, Tesseract only (None for PaddleOCR, which emits
+    lines). The unmatched_* counts are the deletions / insertions inside
+    each CER, kept visible so the number isn't a black box."""
+
+    config: str
+    doc: str
+    duration_s: float
+    peak_rss_mb: float
+    cpu_time_s: float
+    word_recall: float
+    gt_word_count: int
+    grouped_cer: float | None = None
+    grouped_unmatched_gt: int | None = None
+    grouped_unmatched_ocr: int | None = None
+    grouped_merged_or_split_groups: int | None = None
+    strict_cer: float | None = None
+    strict_word_precision: float | None = None
+    strict_word_recall: float | None = None
+    strict_unmatched_gt: int | None = None
+    strict_unmatched_ocr: int | None = None
+
+
+class ConfigAverages(BaseModel):
+    """BenchmarkRow's numeric fields, averaged across all documents for
+    one config -- what run_ocr_benchmark()/run_paddle_benchmark() return.
+    strict_* are None when no document of the config had word boxes."""
+
+    duration_s: float
+    peak_rss_mb: float
+    cpu_time_s: float
+    word_recall: float
+    grouped_cer: float | None = None
+    strict_cer: float | None = None
+    strict_word_precision: float | None = None
+    strict_word_recall: float | None = None
+
+
+def find_tesseract() -> str:
+    found = shutil.which("tesseract")
+    if found:
+        return found
+    if Path(_WINDOWS_DEFAULT_INSTALL).exists():
+        return _WINDOWS_DEFAULT_INSTALL
+    raise RuntimeError("tesseract not found on PATH or at the default Windows install path")
+
+
+# File extension -> which DocPaths field it fills. Explicit, so an unknown
+# extension is a clear error instead of being silently taken as an annotation.
+_FILE_ROLES = {".png": "image", ".json": "annotation"}
+
+
+@functools.lru_cache(maxsize=1)
+def load_manifest() -> dict[str, DocPaths]:
+    """doc_id -> {"image": Path, "annotation": Path}.
+
+    Reads paths from eval/datasets/.manifest.json and verifies each
+    file's checksum against eval/datasets/.sha256, instead of
+    hardcoding paths/doc ids here -- keeps working if the data moves
+    (review feedback on PR #345). Cached: every benchmark loop iteration
+    calls this, but the manifest/checksums only need reading once.
+
+    Raises a RuntimeError pointing to eval/datasets/README.md (with the
+    manifest's own source_url) if the manifest exists but the actual
+    data files don't -- they're gitignored, not committed, so a fresh
+    clone genuinely won't have them. Same style as find_tesseract()'s
+    error: fail with a pointer to the fix, not a bare traceback.
+    """
+    datasets_dir = _PROJECT_ROOT / "eval" / "datasets"
+    manifest_path = datasets_dir / ".manifest.json"
+    if not manifest_path.exists():
+        raise RuntimeError(
+            f"{manifest_path} not found -- see eval/datasets/README.md for what "
+            "data this benchmark needs."
+        )
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    checksums = load_checksums(datasets_dir / ".sha256")
+
+    docs: dict[str, DocPaths] = {}
+    for record in manifest["records"]:
+        found: dict[str, Path] = {}
+        for rel_path in record["files"]:
+            path = _PROJECT_ROOT / rel_path
+            if not path.exists():
+                raise RuntimeError(
+                    f"{rel_path} not found. This benchmark needs the FUNSD real-data "
+                    "slice downloaded locally -- it's gitignored, not committed. See "
+                    f"eval/datasets/README.md, and download from "
+                    f"{manifest.get('source_url', '(no source_url in manifest)')} "
+                    "(eval/datasets/.manifest.json's own source_url)."
+                )
+            if rel_path not in checksums:
+                raise RuntimeError(
+                    f"{rel_path} is listed in {manifest_path.name} but has no entry in "
+                    f"{(datasets_dir / '.sha256').name} -- the two files are out of sync. "
+                    "Add its `sha256sum` line to eval/datasets/.sha256 (see "
+                    "eval/datasets/README.md)."
+                )
+            verify_checksum(path, checksums[rel_path])
+            role = _FILE_ROLES.get(path.suffix.lower())
+            if role is None:
+                raise RuntimeError(
+                    f"{rel_path}: unsupported file type {path.suffix!r} in "
+                    f"{manifest_path.name} -- this loader knows {sorted(_FILE_ROLES)} "
+                    "(FUNSD: .png page images + .json annotations). Another dataset "
+                    "format (e.g. RVL-CDIP .tif) needs support added here first."
+                )
+            found[role] = path
+        missing = {"image", "annotation"} - found.keys()
+        if missing:
+            raise RuntimeError(
+                f"record {record['id']!r} in {manifest_path.name} has no "
+                f"{' or '.join(sorted(missing))} file -- each record needs one .png and one .json"
+            )
+        docs[record["id"]] = DocPaths(**found)
+    return docs
+
+
+def ground_truth_boxes(doc_id: str) -> list[WordBox]:
+    """Every annotated FUNSD word with its box, in annotation order. Includes
+    entries with empty text; aligned_score() drops those."""
+    path = load_manifest()[doc_id].annotation
+    with path.open(encoding="utf-8") as f:
+        data = json.load(f)
+    boxes: list[WordBox] = []
+    for block in data["form"]:
+        for w in block["words"]:
+            x0, y0, x1, y1 = w["box"]
+            boxes.append(WordBox(text=w["text"], x0=x0, y0=y0, x1=x1, y1=y1))
+    return boxes
+
+
+def ground_truth_words(doc_id: str) -> list[str]:
+    words = (_normalize(b.text) for b in ground_truth_boxes(doc_id))
+    return [w for w in words if w]
+
+
+def parse_tesseract_tsv(tsv: str) -> list[WordBox]:
+    """Level-5 (word) rows of `tesseract ... tsv` output, as boxes.
+
+    Columns: level page block par line word left top width height conf text.
+    Rows with conf < 0 or blank text are layout scaffolding, not words."""
+    words: list[WordBox] = []
+    for line in tsv.splitlines()[1:]:  # skip header
+        fields = line.split("\t")
+        if len(fields) != 12 or fields[0] != "5":
+            continue
+        text = fields[11]
+        if float(fields[10]) < 0 or not text.strip():
+            continue
+        left, top, width, height = (float(v) for v in fields[6:10])
+        words.append(WordBox(text=text, x0=left, y0=top, x1=left + width, y1=top + height))
+    return words
+
+
+def run_ocr(tesseract_cmd: str, image_path: Path, psm_args: list[str]) -> OCRRunResult:
+    """Run tesseract as a subprocess and sample its memory/CPU while it runs.
+
+    Uses tesseract's `tsv` output so one run yields both the text and each
+    word's bounding box (needed for aligned scoring). Same recognition work
+    as plain-text output, so the latency/memory numbers are comparable.
+
+    Sampling every 10ms is rough (may miss a very brief true peak on a
+    fast run) -- adequate for this week's comparison, not a substitute
+    for a real profiler.
+    """
+    import psutil  # optional [benchmark] extra -- see module docstring
+
+    cmd = [tesseract_cmd, str(image_path), "stdout", *psm_args, "tsv"]
+    start = time.perf_counter()
+    proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    ps_proc = psutil.Process(proc.pid)
+    # Drain stdout/stderr on a worker thread while this thread samples. tsv
+    # output (~12KB) is bigger than a Windows pipe buffer (~4KB), so polling
+    # without reading deadlocks tesseract on its own write -- plain-text
+    # output happened to fit, which is why this didn't bite before.
+    output: list[tuple[bytes, bytes]] = []
+    reader = threading.Thread(target=lambda: output.append(proc.communicate()))
+    reader.start()
+    peak_rss = 0
+    cpu_time = 0.0
+    while reader.is_alive():
+        try:
+            peak_rss = max(peak_rss, ps_proc.memory_info().rss)
+            times = ps_proc.cpu_times()
+            cpu_time = times.user + times.system
+        except psutil.NoSuchProcess:
+            break
+        time.sleep(0.01)
+    reader.join()
+    stdout, stderr = output[0]
+    duration = time.perf_counter() - start
+    if proc.returncode != 0:
+        raise RuntimeError(f"tesseract failed: {stderr.decode(errors='replace')}")
+    words = parse_tesseract_tsv(stdout.decode("utf-8", errors="replace"))
+    return OCRRunResult(
+        text=" ".join(w.text for w in words),
+        words=words,
+        duration_s=duration,
+        peak_rss_mb=peak_rss / (1024 * 1024),
+        cpu_time_s=cpu_time,
+    )
+
+
+def word_recall(ocr_text: str, gt_words: list[str]) -> float:
+    """Fraction of ground-truth words that appear somewhere in the OCR
+    output (order-insensitive, case/punctuation-insensitive). A rough
+    proxy, not CER/WER."""
+    ocr_words = {_normalize(w) for w in ocr_text.split() if _normalize(w)}
+    gt_set = set(gt_words)
+    if not gt_set:
+        return 0.0
+    return len(gt_set & ocr_words) / len(gt_set)
+
+
+def _mean_or_none(values: list[float | None]) -> float | None:
+    present = [v for v in values if v is not None]
+    return sum(present) / len(present) if present else None
+
+
+def _average_rows(rows: list[BenchmarkRow]) -> ConfigAverages:
+    n = len(rows)
+    return ConfigAverages(
+        duration_s=sum(r.duration_s for r in rows) / n,
+        peak_rss_mb=sum(r.peak_rss_mb for r in rows) / n,
+        cpu_time_s=sum(r.cpu_time_s for r in rows) / n,
+        word_recall=sum(r.word_recall for r in rows) / n,
+        grouped_cer=_mean_or_none([r.grouped_cer for r in rows]),
+        strict_cer=_mean_or_none([r.strict_cer for r in rows]),
+        strict_word_precision=_mean_or_none([r.strict_word_precision for r in rows]),
+        strict_word_recall=_mean_or_none([r.strict_word_recall for r in rows]),
+    )
+
+
+def _format_averages(config_name: str, avg: ConfigAverages) -> str:
+    line = (
+        f"{config_name}: duration={avg.duration_s:.3f}s "
+        f"peak_rss={avg.peak_rss_mb:.1f}MB cpu_time={avg.cpu_time_s:.3f}s "
+        f"word_recall(unaligned)={avg.word_recall:.3f}"
+    )
+    if avg.grouped_cer is not None:
+        line += f" | grouped CER={avg.grouped_cer:.3f}"
+    if avg.strict_cer is not None:
+        line += (
+            f" | strict CER={avg.strict_cer:.3f}"
+            f" (word precision={avg.strict_word_precision:.3f}"
+            f" recall={avg.strict_word_recall:.3f})"
+        )
+    else:
+        line += " | strict: n/a (no word boxes)"
+    return line
+
+
+def _score_config(
+    config_name: str,
+    docs: dict[str, DocPaths],
+    run_one: Callable[[Path], OCRRunResult],
+    *,
+    strict: bool,
+) -> list[BenchmarkRow]:
+    """Run one OCR config over every document and score it.
+
+    Shared by the Tesseract and PaddleOCR runners (review feedback on PR #345):
+    they differ only in how one image is OCR'd -- `run_one` -- and in whether
+    strict one-to-one scoring applies (`strict`; not for PaddleOCR, whose output
+    is lines, not words). Everything else -- ground truth, scoring, the row,
+    printing it -- is the same, so a fix lands once.
+    """
+    rows: list[BenchmarkRow] = []
+    for doc_id, paths in docs.items():
+        gt_words = ground_truth_words(doc_id)
+        gt_boxes = ground_truth_boxes(doc_id)
+        result = run_one(paths.image)
+        grouped = grouped_score(gt_boxes, result.words)
+        strict_fields: dict[str, Any] = {}  # only the strict_* BenchmarkRow fields
+        if strict:
+            pairing = aligned_score(gt_boxes, result.words)
+            strict_fields = {
+                "strict_cer": round(pairing.cer, 3),
+                "strict_word_precision": round(pairing.word_precision, 3),
+                "strict_word_recall": round(pairing.word_recall, 3),
+                "strict_unmatched_gt": pairing.deletions,
+                "strict_unmatched_ocr": pairing.insertions,
+            }
+        row = BenchmarkRow(
+            config=config_name,
+            doc=doc_id,
+            duration_s=round(result.duration_s, 3),
+            peak_rss_mb=round(result.peak_rss_mb, 1),
+            cpu_time_s=round(result.cpu_time_s, 3),
+            word_recall=round(word_recall(result.text, gt_words), 3),
+            gt_word_count=len(gt_words),
+            grouped_cer=round(grouped.cer, 3),
+            grouped_unmatched_gt=grouped.unmatched_gt,
+            grouped_unmatched_ocr=grouped.unmatched_ocr,
+            grouped_merged_or_split_groups=grouped.merged_or_split_groups,
+            **strict_fields,
+        )
+        rows.append(row)
+        print(row.model_dump())
+    return rows
+
+
+def _summarize(
+    label: str, config_names: Iterable[str], rows: list[BenchmarkRow]
+) -> dict[str, ConfigAverages]:
+    """Average each config's rows across documents and print the summary."""
+    print(f"\n--- {label} per-config averages ---")
+    averages: dict[str, ConfigAverages] = {}
+    for config_name in config_names:
+        avg = _average_rows([r for r in rows if r.config == config_name])
+        averages[config_name] = avg
+        print(_format_averages(config_name, avg))
+    return averages
+
+
+def run_ocr_benchmark() -> dict[str, ConfigAverages]:
+    tesseract_cmd = find_tesseract()
+    print(f"tesseract: {tesseract_cmd}\n")
+
+    docs = load_manifest()
+    rows: list[BenchmarkRow] = []
+    for config_name, psm_args in OCR_CONFIGS.items():
+        run_one = functools.partial(run_ocr, tesseract_cmd, psm_args=psm_args)
+        rows += _score_config(config_name, docs, run_one, strict=True)
+    return _summarize("OCR", OCR_CONFIGS, rows)
+
+
+def paddle_result_lines(res: Any) -> list[WordBox]:
+    """One WordBox per text line of one PaddleOCR page result.
+
+    Reads `rec_texts` and `rec_boxes` by key and raises if either is missing,
+    instead of defaulting to empty: `res.get("rec_texts", [])` would turn a
+    renamed key into an empty OCR output and a silently wrong score (review
+    feedback on PR #345). A page with no text is fine -- PaddleOCR returns both
+    keys with empty values then. Boxes are axis-aligned [x0, y0, x1, y1] in
+    image pixel coordinates; `zip(strict=True)` also raises if the two lists
+    ever disagree in length.
+    """
+    try:
+        texts = res["rec_texts"]
+        boxes = res["rec_boxes"]
+    except KeyError as missing:
+        raise RuntimeError(
+            f"PaddleOCR result has no {missing} (keys: {sorted(res.keys())}) -- its output "
+            "format changed; run_paddle_ocr() reads rec_texts and rec_boxes"
+        ) from missing
+    box_rows = boxes.tolist() if hasattr(boxes, "tolist") else boxes
+    return [
+        WordBox(text=text, x0=x0, y0=y0, x1=x1, y1=y1)
+        for text, (x0, y0, x1, y1) in zip(texts, box_rows, strict=True)
+    ]
+
+
+def run_paddle_ocr(ocr: PaddleOCR, image_path: Path) -> OCRRunResult:
+    """Run one already-loaded PaddleOCR pipeline on one image, sampling
+    this process's own memory/CPU while it runs.
+
+    Unlike Tesseract (a separate subprocess we sample from outside),
+    PaddleOCR runs in-process -- so "peak RSS" here is the whole
+    interpreter's memory (already includes the loaded model, numpy,
+    paddle, etc.), not an isolated OCR-only number. Not apples-to-apples
+    with the Tesseract subprocess numbers for that reason; still the
+    right number for capacity planning ("what must this process's host
+    have while OCRing").
+    """
+    import psutil  # optional [benchmark] extra -- see module docstring
+
+    proc = psutil.Process()
+    stop_event = threading.Event()
+    peak = [proc.memory_info().rss]
+    sampler = threading.Thread(target=sample_current_process, args=(stop_event, proc, peak))
+    cpu_before = proc.cpu_times()
+    sampler.start()
+    start = time.perf_counter()
+    results = list(ocr.predict(str(image_path)))
+    duration = time.perf_counter() - start
+    stop_event.set()
+    sampler.join()
+    cpu_after = proc.cpu_times()
+    cpu_time = (cpu_after.user - cpu_before.user) + (cpu_after.system - cpu_before.system)
+
+    lines = [line for res in results for line in paddle_result_lines(res)]
+    return OCRRunResult(
+        text=" ".join(line.text for line in lines),
+        words=lines,
+        duration_s=duration,
+        peak_rss_mb=peak[0] / (1024 * 1024),
+        cpu_time_s=cpu_time,
+    )
+
+
+def run_paddle_benchmark() -> dict[str, ConfigAverages]:
+    """Benchmark PaddleOCR in the 2 model-size configs in PADDLE_CONFIGS.
+
+    Requires the 4 PP-OCRv5 model packages already present locally under
+    ~/.paddlex/official_models/ -- see the module docstring and
+    ocr-asr-benchmark.md "PaddleOCR -- setup" for why (network block)
+    and exactly how they were placed there.
+    """
+    from paddleocr import PaddleOCR  # heavy, optional import -- see [benchmark] extra
+
+    docs = load_manifest()
+    rows: list[BenchmarkRow] = []
+    for config_name, model_names in PADDLE_CONFIGS.items():
+        print(f"\nLoading {config_name}...")
+        load_start = time.perf_counter()
+        ocr = PaddleOCR(
+            **model_names,
+            use_doc_orientation_classify=False,
+            use_doc_unwarping=False,
+            use_textline_orientation=False,
+            enable_mkldnn=False,  # works around a oneDNN crash on this machine -- see module docstring
+        )
+        load_s = time.perf_counter() - load_start
+        print(f"{config_name}: model load took {load_s:.1f}s (one-time cost -- not counted in per-page latency below)")
+
+        run_one = functools.partial(run_paddle_ocr, ocr)
+        rows += _score_config(config_name, docs, run_one, strict=False)
+    return _summarize("PaddleOCR", PADDLE_CONFIGS, rows)
+
+
+def format_conclusion(all_averages: dict[str, ConfigAverages]) -> str:
+    """The final printout: the team's decision first, the measured leader second.
+
+    The recommendation is the *chosen* config (Tesseract psm 11, decided on
+    latency and memory), not whichever config scored best: printing the
+    lowest-CER config as "the conclusion" made the script recommend the
+    opposite of the docs (review feedback on PR #345). The lowest-CER config
+    is still shown, on its own labelled line, so the accuracy trade stays
+    visible.
+    """
+
+    cers = {c: avg.grouped_cer for c, avg in all_averages.items() if avg.grouped_cer is not None}
+
+    def describe(config: str) -> str:
+        avg = all_averages[config]
+        return (
+            f"{config} (grouped CER={cers[config]:.3f}, duration={avg.duration_s:.3f}s, "
+            f"peak_rss={avg.peak_rss_mb:.1f}MB)"
+        )
+
+    lowest_cer = min(cers, key=lambda c: cers[c])
+    lines = [f"OCR recommendation (the team's decision): {describe(CHOSEN_CONFIG)}"]
+    if lowest_cer == CHOSEN_CONFIG:
+        lines.append("  Also the lowest grouped CER measured.")
+    else:
+        lines.append(
+            f"  Lowest grouped CER measured (not the pick, see ocr-asr-benchmark.md): "
+            f"{describe(lowest_cer)}"
+        )
+    lines.append(
+        "  Chosen on latency and memory, a knowing accuracy trade -- see "
+        "ocr-asr-benchmark.md for the reasoning."
+    )
+    return "\n".join(lines)
+
+
+def main() -> None:
+    tesseract_averages = run_ocr_benchmark()
+    paddle_averages = run_paddle_benchmark()
+    asr_averages = run_asr_benchmark()
+
+    print("\n--- Conclusion ---")
+    print(format_conclusion({**tesseract_averages, **paddle_averages}))
+    print(format_asr_conclusion(asr_averages))
+
+
+if __name__ == "__main__":
+    main()

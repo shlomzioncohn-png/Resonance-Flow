@@ -27,6 +27,7 @@ bff:
     tasks: /workspace/tasks
     employee-task: /workspace/employee-task
     manager-users: /manager/users
+    task-selection: /workspace/tasks/selection
 
 server:
   port: 0

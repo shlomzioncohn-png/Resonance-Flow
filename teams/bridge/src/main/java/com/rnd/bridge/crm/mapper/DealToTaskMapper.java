@@ -3,6 +3,8 @@ package com.rnd.bridge.crm.mapper;
 import com.rnd.bridge.crm.model.Deal;
 import com.rnd.bridge.crm.model.DealStage;
 import com.rnd.bridge.task.AbstractTaskMapper;
+import com.rnd.bridge.task.enrichment.EnrichmentProperties;
+import com.rnd.bridge.task.enrichment.TaskEnricher;
 import com.rnd.bridge.task.model.RoleContext;
 import com.rnd.bridge.task.model.SourceType;
 import com.rnd.bridge.task.model.TaskStatus;
@@ -24,11 +26,12 @@ import java.time.temporal.ChronoUnit;
  */
 public final class DealToTaskMapper extends AbstractTaskMapper<Deal> {
 
-    private static final String SOURCE_REF_PREFIX = "crm:";
-
     private final String organizationId;
 
-    public DealToTaskMapper(String organizationId) {
+    public DealToTaskMapper(String organizationId,
+                            EnrichmentProperties enrichmentProperties,
+                            TaskEnricher taskEnricher) {
+        super(enrichmentProperties, taskEnricher);
         this.organizationId = organizationId;
     }
 
@@ -106,7 +109,7 @@ public final class DealToTaskMapper extends AbstractTaskMapper<Deal> {
 
     @Override
     public String toSourceRef(Deal deal) {
-        return SOURCE_REF_PREFIX + deal.dealId();
+        return deal.sourceRefPrefix() + deal.dealId();
     }
 
     @Override

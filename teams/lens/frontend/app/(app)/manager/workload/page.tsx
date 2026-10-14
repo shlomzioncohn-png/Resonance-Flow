@@ -1,34 +1,35 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
-import Button from '@mui/material/Button';
 import PageContainer from '@/components/layout/PageContainer';
 import LoadingState from '@/components/feedback/LoadingState';
 import EmptyState from '@/components/feedback/EmptyState';
 import ErrorState from '@/components/feedback/ErrorState';
+import { getErrorMessage } from '@/services/api';
 import { getManagerWorkload } from '@/services/managerApi';
 
 type Status = 'loading' | 'empty' | 'error';
 
 export default function ManagerWorkloadPage() {
   const [status, setStatus] = useState<Status>('loading');
+  const [errorMessage, setErrorMessage] = useState('');
 
-  const fetchWorkload = useCallback((simulateError: boolean) => {
-    return getManagerWorkload(simulateError)
+  const fetchWorkload = useCallback(() => {
+    return getManagerWorkload()
       .then(() => setStatus('empty'))
-      .catch(() => setStatus('error'));
+      .catch((err) => {
+        setErrorMessage(getErrorMessage(err));
+        setStatus('error');
+      });
   }, []);
 
-  const retry = useCallback(
-    (simulateError = false) => {
-      setStatus('loading');
-      fetchWorkload(simulateError);
-    },
-    [fetchWorkload],
-  );
+  const retry = useCallback(() => {
+    setStatus('loading');
+    fetchWorkload();
+  }, [fetchWorkload]);
 
   useEffect(() => {
-    fetchWorkload(false);
+    fetchWorkload();
   }, [fetchWorkload]);
 
   return (
@@ -41,21 +42,11 @@ export default function ManagerWorkloadPage() {
       {status === 'empty' && (
         <EmptyState
           title="No workload data yet"
-          description="This page demonstrates the App Shell foundation end to end: it fetches through a mock adapter and renders the Loading and Empty states. Inbox and Chain integration will replace the mock later."
-          action={
-            <Button variant="outlined" color="error" onClick={() => retry(true)}>
-              Simulate error state
-            </Button>
-          }
+          description="Workload will appear here once Inbox and Chain provide it."
         />
       )}
 
-      {status === 'error' && (
-        <ErrorState
-          description="Simulated failure — demonstrates the ErrorState. Click below to recover."
-          onRetry={() => retry(false)}
-        />
-      )}
+      {status === 'error' && <ErrorState description={errorMessage} onRetry={retry} />}
     </PageContainer>
   );
 }

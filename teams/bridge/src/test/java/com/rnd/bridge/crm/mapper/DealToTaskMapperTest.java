@@ -2,7 +2,10 @@ package com.rnd.bridge.crm.mapper;
 
 import com.rnd.bridge.crm.model.Deal;
 import com.rnd.bridge.crm.model.DealStage;
+import com.rnd.bridge.crm.repository.DealSnapshot;
 import com.rnd.bridge.crm.repository.JsonDealRepository;
+import com.rnd.bridge.task.enrichment.EnrichmentProperties;
+import com.rnd.bridge.task.enrichment.NoOpTaskEnricher;
 import com.rnd.bridge.task.model.ExtractionProvenance;
 import com.rnd.bridge.task.model.RoleContext;
 import com.rnd.bridge.task.model.SourceType;
@@ -32,14 +35,14 @@ class DealToTaskMapperTest {
 
     private static final Instant AS_OF = Instant.parse("2026-08-23T00:00:00Z");
     private static final String ORGANIZATION_ID = "org-test-0000";
-    private static final DealToTaskMapper MAPPER = new DealToTaskMapper(ORGANIZATION_ID);
+    private static final DealToTaskMapper MAPPER = new DealToTaskMapper(ORGANIZATION_ID, new EnrichmentProperties(), new NoOpTaskEnricher());
 
     private static JsonDealRepository repository() {
         return new JsonDealRepository(new DefaultResourceLoader(), "classpath:crm/synthetic-deals.json");
     }
 
     private static Deal findLatest(JsonDealRepository repo, String dealId) {
-        return repo.findLatestByDealId(dealId).orElseThrow();
+        return repo.snapshot().findLatestByDealId(dealId).orElseThrow();
     }
 
     @Test
@@ -172,9 +175,21 @@ class DealToTaskMapperTest {
     }
 
     @Test
+    void hubSpotAndJsonSourceDealsStayExactlyCrmPrefixedBareId() {
+        // Neither HubSpotDealRepository nor JsonDealRepository ever sets Deal.sourceRefPrefix -
+        // Salesforce is the only source that overrides the "crm:" default. Pinning this exact
+        // string (not just "starts with crm:") catches a regression where the default drifts or
+        // doubles up (e.g. "crm:crm:D-1").
+        Deal deal = Deal.builder().dealId("D-1").stageChangedAt(Instant.now()).build();
+
+        assertEquals("crm:", deal.sourceRefPrefix());
+        assertEquals("crm:D-1", MAPPER.toSourceRef(deal));
+    }
+
+    @Test
     void allFourD10432RecordsMapToTheSameSourceRef() {
         JsonDealRepository repo = repository();
-        List<Deal> history = repo.findHistoryByDealId("D-10432");
+        List<Deal> history = repo.snapshot().findHistoryByDealId("D-10432");
 
         assertEquals(4, history.size());
 
@@ -190,9 +205,10 @@ class DealToTaskMapperTest {
     @Test
     void toUrgencyIsInRangeForEveryRecordInTheDataset() {
         JsonDealRepository repo = repository();
+        DealSnapshot snapshot = repo.snapshot();
 
-        for (Deal deal : repo.findAll()) {
-            Integer urgency = MAPPER.toUrgency(deal, repo.asOf());
+        for (Deal deal : snapshot.allDeals()) {
+            Integer urgency = MAPPER.toUrgency(deal, snapshot.asOf());
             assertTrue(urgency >= 1 && urgency <= 5,
                     () -> "urgency out of range for " + deal.dealId() + ": " + urgency);
         }

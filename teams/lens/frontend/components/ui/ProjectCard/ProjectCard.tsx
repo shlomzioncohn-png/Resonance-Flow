@@ -108,6 +108,7 @@ export default function ProjectCard({
             <LinearProgress
               variant="determinate"
               value={progressPercent}
+              aria-label="Progress"
               sx={{
                 borderRadius: theme.custom.radius.pill,
                 bgcolor: theme.palette.status[status].bg,

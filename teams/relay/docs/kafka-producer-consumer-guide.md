@@ -10,20 +10,21 @@ running in this repo (`teams/relay`).
 ## 1. One shared config file for the connection, your own settings for the rest
 
 The Kafka/Schema Registry **connection itself** is the same for every service — same broker,
-same registry. That lives in **one shared config file**, not something you write yourself.
-Read a single environment variable that gives you its path:
+same registry. It's delivered to you by the shared Helm chart as mounted files, not something
+you write yourself — read the path from an environment variable:
 
-| Variable | Local default | Meaning |
+| Variable | Value | Meaning |
 |---|---|---|
-| `KAFKA_CONFIG_PATH` | points at the shared config file | path to the shared Kafka connection config |
+| `CONFIG_FILE_PATH` | `/etc/resonance-flow/config/config.yaml` | your component's mounted config — the Kafka connection keys are in here |
+| `SECRETS_FILE_PATH` | `/etc/resonance-flow/secret/secrets.yaml` | mounted **only** for a component that declares a `secret` block (SASL credentials); a component with none (e.g. Inbox) never gets this file |
 
-Keys you'll find inside that shared file (don't set these yourself, just read them):
+Keys you'll find inside `config.yaml` (don't set these yourself, just read them):
 
 | Key | Local default | Meaning |
 |---|---|---|
 | `bootstrap-servers` | `kafka:29092` | Kafka broker address |
 | `security.protocol` | `PLAINTEXT` | `SASL_SSL` in the cloud |
-| `sasl.jaas.config` | *(empty)* | credentials, cloud only — comes from a Secret |
+| `sasl.jaas.config` | *(empty)* | credentials, cloud only — from `secrets.yaml` |
 | `schema.registry.url` | `http://schema-registry:8080/apis/ccompat/v6` | Schema Registry endpoint — note the `/apis/ccompat/v6` suffix, it's required (Apicurio doesn't expose the Confluent-compatible API at the root path) |
 
 **Your own settings — not in the shared file, decided and set by you:**
@@ -41,7 +42,6 @@ they don't belong in the shared connection file — set them directly in your ow
 
 There is no single shared schema. This system already has several, each with its own topic:
 
-- `task-event` — Relay
 - `task.created` — Inbox
 - `bridge.raw.landed` — Bridge (unstructured intake)
 - `bridge.github.tasks` — Bridge (GitHub)
@@ -52,9 +52,13 @@ shapes through the same topic.
 
 **You don't write the `.proto` file yourself.** Bring the field names, their types, and the
 topic name — the schema gets created from that, the same way it happened for this repo's
-existing drafts (see `teams/relay/src/main/proto/task-event.proto` for what the result looks
+existing drafts (see `shared/proto/task-created-event.proto` for what the result looks
 like, including a `// kafkaTopic: ...` comment stating which topic it belongs to). Once it
 exists, you'll get it back to review before anyone builds on top of it.
+
+Enum values are prefixed — `TASK_STATUS_IN_PROGRESS`, not `IN_PROGRESS` — and every enum's
+first value is `*_UNSPECIFIED = 0`. (proto3 enum value names share the enclosing scope, so the
+prefix keeps them from colliding across enums in one file.) The schema author handles this.
 
 ## 3. The shared config file, and your own `application.yml`
 
@@ -70,26 +74,32 @@ spring:
       schema.registry.url: http://schema-registry:8080/apis/ccompat/v6
 ```
 
-**Your own `application.yml`** — imports the shared file via the one path variable, sets your
-own group-id/topic directly (not from the shared file, per section 1), plus the serializer
-setup (fixed, same for every environment):
+**Your own `application.yml`** — Spring loads the mounted `config.yaml` automatically (the chart
+sets `SPRING_CONFIG_ADDITIONAL_LOCATION`), so you don't import it yourself. You set your own
+group-id/topic (per section 1) plus the serializer setup (fixed, same for every environment).
+For local dev, put the connection keys from the block above straight into this file.
 ```yaml
 spring:
-  config:
-    import: optional:${KAFKA_CONFIG_PATH:classpath:/kafka-config.yaml}
   kafka:
     consumer:
       group-id: your-service
       auto-offset-reset: latest
-    producer:
-      key-serializer: org.apache.kafka.common.serialization.StringSerializer
-      value-serializer: io.confluent.kafka.serializers.protobuf.KafkaProtobufSerializer
-    consumer:
       key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
       value-deserializer: org.springframework.kafka.support.serializer.ErrorHandlingDeserializer
       properties:
         spring.deserializer.value.delegate.class: io.confluent.kafka.serializers.protobuf.KafkaProtobufDeserializer
         specific.protobuf.value.type: com.your.package.YourEvent
+    producer:
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: io.confluent.kafka.serializers.protobuf.KafkaProtobufSerializer
+      properties:
+        # schemas are registered centrally (schema-subjects.tsv + the schema-sync-hook),
+        # never by a producer
+        auto.register.schemas: false
+        use.latest.version: true
+        # imports (e.g. task-created-event.proto) work as-is: Relay registers each imported
+        # file under its own file name, which is where the default reference strategy looks
+        # - don't set reference.subject.name.strategy
 
 your:
   kafka:
@@ -98,8 +108,8 @@ your:
 
 This is copied directly from `teams/relay` — only the class/package names are placeholders
 for your own event. If your service isn't Java/Spring, the same split still applies: read
-`KAFKA_CONFIG_PATH` yourself, open the shared file it points to for the four connection keys,
-and set your own group-id/topic separately in your own code.
+`CONFIG_FILE_PATH` (and `SECRETS_FILE_PATH` if you have a secret) yourself for the connection
+keys, and set your own group-id/topic separately in your own code.
 
 ## 4. Producer
 
@@ -150,7 +160,7 @@ public class EventConsumer {
 publish/consume on. That's it — not a `.proto` file.
 
 **What you get back:** a reviewed `.proto` schema for that event, added to
-`teams/relay/src/main/proto/` (same place as the other teams' drafts).
+`shared/proto/` (same place as the other teams' drafts).
 
 **What whoever deploys your service needs from you:** just your group-id and topic name — the
 shared connection file and its path are already handled for every service the same way, you

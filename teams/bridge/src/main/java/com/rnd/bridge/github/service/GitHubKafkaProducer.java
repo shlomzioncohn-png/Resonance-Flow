@@ -1,10 +1,12 @@
 package com.rnd.bridge.github.service;
 
+import com.rnd.bridge.protobuf.TaskProtobufConverter;
 import com.rnd.bridge.task.model.Task;
 import com.rnd.bridge.task.TaskValidator;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.kafka.support.SendResult;
@@ -21,16 +23,17 @@ public class GitHubKafkaProducer {
     @Value("${spring.kafka.topic:bridge.github.tasks}")
     String TOPIC = "bridge.github.tasks";
 
-    private final KafkaTemplate<String, Task> kafkaTemplate;
+    private final KafkaTemplate<String, byte[]> kafkaTemplate;
     private final TaskValidator taskValidator;
 
     @Autowired
-    public GitHubKafkaProducer(KafkaTemplate<String, Task> kafkaTemplate, TaskValidator taskValidator) {
+    public GitHubKafkaProducer(
+            @Qualifier("protobufKafkaTemplate") KafkaTemplate<String, byte[]> kafkaTemplate, TaskValidator taskValidator) {
         this.kafkaTemplate = kafkaTemplate;
         this.taskValidator = taskValidator;
     }
 
-    public CompletableFuture<SendResult<String, Task>> publish(Task task) {
+    public CompletableFuture<SendResult<String, byte[]>> publish(Task task) {
         if (task == null || task.sourceRef() == null) {
             throw new IllegalArgumentException("Task and sourceRef must not be null");
         }
@@ -39,7 +42,11 @@ public class GitHubKafkaProducer {
 
         log.info("Publishing task {} to topic {}", task.sourceRef(), TOPIC);
 
-        CompletableFuture<SendResult<String, Task>> future = kafkaTemplate.send(TOPIC, task.sourceRef(), task);
+        // Convert Bridge Task to Protobuf Task and serialize to bytes
+        com.rnd.bridge.dto.Task protobufTask = TaskProtobufConverter.toProtobufTask(task);
+        byte[] taskBytes = protobufTask.toByteArray();
+
+        CompletableFuture<SendResult<String, byte[]>> future = kafkaTemplate.send(TOPIC, task.sourceRef(), taskBytes);
         future.whenComplete((result, ex) -> {
             if (ex != null) {
                 log.error("Failed to publish task {} to topic {}", task.sourceRef(), TOPIC, ex);

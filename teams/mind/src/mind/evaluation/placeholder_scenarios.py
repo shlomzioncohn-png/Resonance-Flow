@@ -44,7 +44,6 @@ _RAW_SCENARIOS: list[dict] = [
         ),
         "source": {"type": "synthetic"},
         "team_lead_approved": False,
-        "mentor_approved": False,
     },
     {
         "scenario_id": "manager_placeholder_1",
@@ -81,7 +80,6 @@ _RAW_SCENARIOS: list[dict] = [
         ),
         "source": {"type": "synthetic"},
         "team_lead_approved": False,
-        "mentor_approved": False,
     },
 ]
 

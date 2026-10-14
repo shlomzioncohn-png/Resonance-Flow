@@ -32,6 +32,5 @@
   "expected_top_task_id": "task_unblock",
   "expected_reason": "task_plan's deadline is weeks away; task_unblock has a teammate blocked on it right now.",
   "source": { "type": "synthetic", "source_detail": null },
-  "team_lead_approved": false,
-  "mentor_approved": false
+  "team_lead_approved": false
 }

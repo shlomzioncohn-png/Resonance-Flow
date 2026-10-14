@@ -1,0 +1,13 @@
+{
+  "_comment": "Answer key for developer-3-verification-insights.json. Never send this file to the LLM — compare its output against this after the fact.",
+  "results": [
+    { "id": 1, "expected": "SUPPORTED" },
+    { "id": 2, "expected": "CONTRADICTED" },
+    { "id": 3, "expected": "SUPPORTED" },
+    { "id": 4, "expected": "CONTRADICTED" },
+    { "id": 5, "expected": "INSUFFICIENT_EVIDENCE" },
+    { "id": 6, "expected": "INSUFFICIENT_EVIDENCE" },
+    { "id": 7, "expected": "SUPPORTED" },
+    { "id": 8, "expected": "INSUFFICIENT_EVIDENCE" }
+  ]
+}

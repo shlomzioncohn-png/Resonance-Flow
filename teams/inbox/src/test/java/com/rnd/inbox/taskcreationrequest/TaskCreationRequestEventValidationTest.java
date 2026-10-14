@@ -3,7 +3,7 @@ package com.rnd.inbox.taskcreationrequest;
 import com.rnd.inbox.shared.messaging.kafka.EventValidationException;
 import com.rnd.inbox.shared.messaging.kafka.EventValidator;
 import com.rnd.inbox.shared.messaging.validation.BeanValidationEventValidator;
-import com.rnd.inbox.task.SourceType;
+import com.rnd.inbox.task.model.SourceType;
 import jakarta.validation.Validation;
 import jakarta.validation.ValidatorFactory;
 import org.junit.jupiter.api.AfterAll;

@@ -4,6 +4,8 @@ import com.fasterxml.jackson.annotation.JsonInclude;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Pattern;
 import lombok.AllArgsConstructor;
+
+import java.time.Instant;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
@@ -18,6 +20,12 @@ import lombok.NoArgsConstructor;
  * Example:
  * {
  *   "status": "IN_PROGRESS"
+ * }
+ *
+ * Snoozing:
+ * {
+ *   "status": "SNOOZED",
+ *   "snoozedUntil": "2026-10-12T09:00:00Z"
  * }
  */
 @Data
@@ -37,4 +45,11 @@ public class TaskStatusUpdateDTO {
         message = "status must be one of: NEW, IN_REVIEW, APPROVED, IN_PROGRESS, SNOOZED, DONE, REJECTED, CANCELLED"
     )
     private String status;
+
+    /**
+     * Required by Inbox when status is SNOOZED: when the task wakes up again
+     * (ISO-8601, e.g. "2026-10-12T09:00:00Z"). Ignored for any other status.
+     * Inbox enforces the "required" rule and answers 400 without it.
+     */
+    private Instant snoozedUntil;
 }

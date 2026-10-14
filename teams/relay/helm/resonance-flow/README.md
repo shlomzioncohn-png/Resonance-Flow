@@ -78,8 +78,21 @@ Currently wired up:
 
 - **Kafka** - every component depends on it, so it's set globally
   (`dependencies` in `values.yaml`).
-- **Postgres** - only `inbox` uses it.
+- **Postgres** - `inbox`, `mind`, and `chain` (Chain with its own database and
+  user - see [Chain's DB credentials](#chains-db-credentials-componentschain);
+  Inbox with its own user - see [Inbox's DB credentials](#inboxs-db-credentials-componentsinbox)).
+  pgvector's `vector.so` is overlaid from the official `pgvector/pgvector` image:
+  Bitnami's own build crashes (SIGILL) building HNSW indexes on non-AVX-512 CPUs
+  (#490). The Bitnami image is pinned by digest since the overlay must match its
+  Postgres major and pgvector version.
 - **MinIO** - `bridge` and `mind` use it.
+
+A `dependencies` list set in `values-<service>.yaml` **replaces** the one in
+`values.yaml` (Helm merges maps, not lists) - repeat every entry, don't just add.
+
+CI's `setup-service-infra` port-forwards this Postgres to `localhost:5432` and
+exports `PG*` / `TEST_DATABASE_URL` (superuser, `resonance_flow`) to the test step
+of **every** service whose `values-<service>.yaml` enables `postgresql`.
 
 ```yaml
 components:
@@ -95,3 +108,155 @@ components:
 For anything the TCP-reachability check can't express, drop a raw
 container spec into `initContainers` (globally or per-component) instead
 - it's appended after the generated `dependencies` containers.
+
+## Public entry point (`ingress`)
+
+Every component's Service is `ClusterIP`. Browsers reach the cluster through one
+Ingress (`templates/ingress.yaml`): a single host, routed by path prefix to a
+component's Service, so the browser sees one origin (no CORS, one cert):
+
+```text
+https://<host>/      -> lens-frontend
+https://<host>/api   -> lens-gateway
+https://<host>/auth  -> lens-gateway
+```
+
+`ingress.enabled` is `false` by default, so teams' kind CI never renders it. The
+shared cluster turns it on in [`environments/shared.yaml`](environments/shared.yaml),
+which ArgoCD loads after `values.yaml` and CI never loads. That file sets
+`ingress.host`, `ingress.className` (`traefik`, from
+[`apps/traefik.yaml`](../../argocd/apps/traefik.yaml)) and `ingress.tlsSecretName`.
+The chart doesn't install an ingress
+controller or issue the certificate; cert-manager is wired in through
+`ingress.annotations` (e.g. `cert-manager.io/cluster-issuer`). Traefik redirects
+every plain-HTTP request to HTTPS (`ports.web.http.redirections` in `apps/traefik.yaml`),
+since `/auth/*` carries LENS passwords. With `ingress.tlsSecretName` empty, HTTPS
+still works but serves Traefik's self-signed default certificate - fine for local
+testing only.
+
+Paths are forwarded as-is (no rewrite), so lens-gateway receives `/api/...` and
+`/auth/...`. Only browser-facing components belong in `ingress.paths`. A path
+that routes to a disabled or unknown component fails the render.
+
+The ingress controller reaches pods as a separate source, from its own namespace.
+Don't add `networkPolicy` to a component listed in `ingress.paths` unless you
+also allow the controller's namespace.
+
+## Restricting callers (`networkPolicy`)
+
+By default any pod in the cluster can connect to any other. A component that
+trusts its caller declares `networkPolicy.allowFrom`, the list of components
+whose pods may connect to its `http` port. `templates/networkpolicy.yaml` then
+denies every other in-cluster source:
+
+| Component | `allowFrom` | Why |
+|---|---|---|
+| `notification-delivery` | `lens-bff` | trusts `X-Org-Id` / `X-User-Id` as-is |
+| `lens-bff` | `lens-gateway` | `/internal/auth/*` checks passwords |
+
+kubelet probes and `kubectl port-forward` aren't affected, because traffic from
+the pod's own node is always allowed. The rules only take effect if the cluster's
+CNI enforces NetworkPolicy. On a CNI that doesn't, they render but block nothing.
+The policy applies to the whole pod, not to individual paths.
+
+## Component configuration (`config` / `secret`)
+
+A `components.<name>.config` block is rendered verbatim to a `config.yaml`
+file in a ConfigMap (`templates/configmap.yaml`), mounted at
+`/etc/resonance-flow/config/config.yaml` (`CONFIG_FILE_PATH`). Spring Boot
+services also get `SPRING_CONFIG_ADDITIONAL_LOCATION` pointed at it; other
+services read the file themselves. So the `config` keys are the config-file
+keys the service reads. (`inbox`, `chain` and `notification-delivery` are the
+exception - they need a Spring-shaped file with values computed at render time
+(Kafka/Postgres hosts, SASL config), so each renders its own ConfigMap from
+`templates/services/<name>/configmap.yaml` (`notification-delivery`:
+`templates/service-notification-delivery/configmap.yaml`) instead. Shared
+pieces come from `_helpers.tpl`: `resonance-flow.configMapHeader`,
+`resonance-flow.springKafkaBase` and `resonance-flow.springKafkaConsumerDefaults`
+- use them for any new Spring component rather than copying the Kafka block.)
+
+Secrets never go in `config` (a plain ConfigMap, readable by anyone with
+access). A `components.<name>.secret` block renders a `Secret`, mounted as a
+directory at `/etc/resonance-flow/secret/` — its `secrets.yaml` key becomes
+`/etc/resonance-flow/secret/secrets.yaml` (`SECRETS_FILE_PATH`). The volume is
+`optional: true`, so the pod starts before the Secret exists (the dir is then
+empty — the loader must handle a missing file):
+
+- `secret.create: false` (default) - the Secret is created and populated
+  outside the chart (`kubectl` / sealed-secrets / external-secrets).
+- `secret.create: true` - the chart renders it, values from
+  `secret.data.*` (via `--set` for local testing, never committed).
+
+### Chain's DB credentials (`components.chain`)
+
+Chain gets its own Postgres database and user (`chain`), not Inbox's. The
+password lives only in the `resonance-flow-chain-db-credentials` Secret (key
+`password`). A pre-install/pre-upgrade hook Job
+(`templates/services/chain/db-credentials-hook.yaml`, PreSync under ArgoCD)
+creates it with a random password if it's missing, and never touches an existing
+one - so no manual step, in CI or the cluster. The Secret itself isn't a Helm
+resource: an offline render (ArgoCD) can't see the live password and would
+regenerate it every sync. To rotate, delete the Secret and restart Postgres and
+Chain after the next sync.
+
+It's mounted as a file, never an env var: into Chain's pod (read via Spring
+`configtree`) and, `optional: true`, into Postgres, whose init script
+(`templates/services/chain/configmap.yaml`) creates the user/database from it.
+Without the Secret, Postgres still starts and just skips Chain's database.
+The init script runs only on a fresh Postgres volume.
+
+### Inbox's DB credentials (`components.inbox`)
+
+Same mechanism as Chain's, with the `resonance-flow-inbox-db-credentials` Secret.
+Both hooks render from one template, `resonance-flow.dbCredentialsHook`
+(`templates/_db-credentials-hook.tpl`); each component's `db-credentials-hook.yaml`
+is a one-line include. MIND keeps its own hook, since it also creates its app
+Secret. An empty password is replaced on the next sync - restart Postgres and the
+component afterwards, since initdb only runs on a fresh volume. The difference: Inbox gets
+its own `inbox` user, not its own database - the init script
+(`templates/services/inbox/_db-init.tpl`) makes it the owner of
+`postgresql.auth.database` and creates `pgcrypto` there as superuser. The
+`postgres` superuser stays for CI's test step only.
+
+### MIND (`components.mind`)
+
+MIND's `config.yaml` is rendered by `templates/services/mind/configmap.yaml`, not by the
+generic `templates/configmap.yaml` (which skips `mind`). Host and port values are computed
+from `dependencies`, so they follow the release and namespace:
+
+| `config.yaml` key | source | value |
+|---|---|---|
+| `vector_store.url` | `dependencies` (`postgresql`) | `host:5432` |
+| `vector_store.user` / `.db` | `components.mind.config.vector_store` | `mind` / `mind` |
+| `object_storage.endpoint` | `dependencies` (`minio`) | `http://host:9000` |
+| `object_storage.bucket` | `components.mind.config.object_storage` | `bridge-raw` (same as Bridge) |
+| `kafka.bootstrap_servers` | top-level `dependencies` (`kafka`) | `host:9092` |
+| `kafka.schema_registry_url` | `dependencies` (`schema-registry`) | `http://host/apis/ccompat/v6` |
+| `kafka.producer.task_creation_requested_topic` | `components.mind.config.kafka` | `task.creation.requested` |
+
+### MIND's DB and app credentials (`components.mind`)
+
+MIND's two Secrets are created by a pre-install/pre-upgrade hook Job
+(`templates/services/mind/db-credentials-hook.yaml`), so no manual step is needed in CI or
+the cluster:
+
+- `resonance-flow-mind-db-credentials` (key `password`): a random password, mounted
+  optionally into Postgres. The init script (`templates/services/mind/_db-init.tpl`,
+  included from `templates/postgresql-initdb.yaml`) creates the `mind` role, database, and
+  `vector` extension from it. It runs only on a fresh Postgres volume.
+- `resonance-flow-mind-secret` (key `secrets.yaml`): MIND's app secret, with the same
+  password. It also includes `kafka.sasl` (user and password from `kafka.sasl.client` in
+  `values.yaml`) only when `components.mind.kafkaSasl` is `true`. That is the default, for
+  shared clusters. `values/values-mind.yaml` sets it to `false`, because CI's Kafka broker
+  runs PLAINTEXT and MIND fails the handshake if it sends SASL.
+
+The hook creates the app Secret only when the DB Secret is newly created. If the DB Secret
+already exists but the app Secret is missing, create the app Secret by hand with the same
+password.
+
+`components.mind.secret` has `create: false`, and the chart has no template for it. The app
+Secret's `kafka.sasl` uses the dev credentials in `values.yaml`. A cluster with different
+Kafka credentials must change them there, or recreate the Secret.
+
+Still open: the MinIO credentials (`object_storage.access_key` / `secret_key`, empty), the
+LLM key (`llm.api_key`, empty), and the LLM, OCR, and ASR providers (`local` for now).

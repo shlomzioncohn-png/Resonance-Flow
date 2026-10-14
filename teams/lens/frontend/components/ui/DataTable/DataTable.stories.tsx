@@ -30,7 +30,7 @@ const columns: Column<DemoRow>[] = [
 // generic instantiation.
 const meta: Meta<DataTableProps<DemoRow>> = {
   component: DataTable,
-  tags: ['ai-generated'],
+  tags: ['autodocs'],
   args: {
     columns,
     rows,

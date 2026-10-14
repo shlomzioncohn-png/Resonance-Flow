@@ -7,6 +7,7 @@ import CircularProgress from '@mui/material/CircularProgress';
 import Typography from '@mui/material/Typography';
 import Alert from '@mui/material/Alert';
 import AdminProjectDetails from '@/components/layout/AdminProjectDetails/AdminProjectDetails';
+import { getErrorMessage } from '@/services/api';
 import {
   getProjectDetails,
   type AdminProjectDetails as AdminProjectDetailsType,
@@ -28,6 +29,9 @@ export default function AdminProjectDetailsPage() {
   const [project, setProject] = useState<AdminProjectDetailsType | null>(null);
   const [error, setError] = useState<string | null>(null);
 
+  // Only sets state once the request settles - the initial 'loading' comes
+  // from useState, and handleRetry resets it, so nothing is set synchronously
+  // inside the effect.
   const fetchProject = useCallback(() => {
     getProjectDetails(projectId)
       .then((data) => {
@@ -35,8 +39,7 @@ export default function AdminProjectDetailsPage() {
         setState('loaded');
       })
       .catch((err) => {
-        const message = err instanceof Error ? err.message : 'Failed to load project';
-        setError(message);
+        setError(getErrorMessage(err));
         setState('error');
       });
   }, [projectId]);

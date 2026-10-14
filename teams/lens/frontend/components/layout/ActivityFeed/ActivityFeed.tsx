@@ -52,7 +52,7 @@ export default function ActivityFeed({
   return (
     <Card>
       <CardContent>
-        <Typography variant="h6" sx={{ mb: 2 }}>
+        <Typography variant="h6" component="h2" sx={{ mb: 2 }}>
           {title}
         </Typography>
 
@@ -82,7 +82,7 @@ export default function ActivityFeed({
 
                   <Box sx={{ flex: 1 }}>
                     <Stack direction="row" spacing={1} sx={{ mb: 0.5, alignItems: 'center' }}>
-                      <Typography variant="subtitle2">{activity.actor.name}</Typography>
+                      <Typography variant="subtitle2" component="p">{activity.actor.name}</Typography>
                       <Chip label={activity.action} size="small" variant="outlined" />
                     </Stack>
 

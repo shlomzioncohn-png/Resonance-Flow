@@ -58,6 +58,7 @@ bff:
     tasks: ${BFF_ENDPOINT_TASKS:/workspace/tasks}
     employee-task: ${BFF_ENDPOINT_EMPLOYEE_TASK:/workspace/employee-task}
     manager-users: ${BFF_ENDPOINT_MANAGER_USERS:/manager/users}
+    task-selection: ${BFF_ENDPOINT_TASK_SELECTION:/workspace/tasks/selection}
 
 server:
   port: ${SERVER_PORT:8080}

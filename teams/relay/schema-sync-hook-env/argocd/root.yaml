@@ -1,0 +1,32 @@
+# app-of-apps for the schema-sync-hook environment. Creates the three child
+# Applications under apps/ and orders them by sync-wave. Needs
+# teams/relay/argocd/argocd-cm-patch.yaml applied first (that is what lets ArgoCD
+# read child-Application health, so the waves gate).
+#
+# targetRevision is the branch this environment tracks. To run it against a
+# different branch:
+#   sed -i 's#relay-team#YOUR-BRANCH#g' \
+#     teams/relay/schema-sync-hook-env/argocd/root.yaml \
+#     teams/relay/schema-sync-hook-env/argocd/apps/*.yaml
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: env-root
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/KamaTechOrg/Resonance-Flow.git
+    targetRevision: relay-team
+    path: teams/relay/schema-sync-hook-env/argocd/apps
+    directory:
+      recurse: false
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: argocd
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true

@@ -1,0 +1,33 @@
+{{- $component := .Values.components.mind }}
+{{- if $component.enabled }}
+{{- with $component.config }}
+{{- $cfg := . }}
+---
+{{ include "resonance-flow.configMapHeader" (dict "root" $ "component" "mind") }}
+
+data:
+  config.yaml: |
+    vector_store:
+      url: {{ include "resonance-flow.dependencyAddress" (dict "root" $ "deps" $component.dependencies "name" "postgresql") | quote }}
+      user: {{ $cfg.vector_store.user | quote }}
+      db: {{ $cfg.vector_store.db | quote }}
+    llm:
+      model: {{ $cfg.llm.model | quote }}
+      cache_dir: {{ $cfg.llm.cache_dir | quote }}
+    ocr:
+      provider: {{ $cfg.ocr.provider | quote }}
+    asr:
+      provider: {{ $cfg.asr.provider | quote }}
+      whisper_model: {{ $cfg.asr.whisper_model | quote }}
+    object_storage:
+      endpoint: {{ printf "http://%s" (include "resonance-flow.dependencyAddress" (dict "root" $ "deps" $component.dependencies "name" "object-storage")) | quote }}
+      bucket: {{ $cfg.object_storage.bucket | quote }}
+    kafka:
+      bootstrap_servers: {{ include "resonance-flow.dependencyAddress" (dict "root" $ "deps" $.Values.dependencies "name" "kafka") | quote }}
+      schema_registry_url: {{ printf "http://%s/apis/ccompat/v6" (include "resonance-flow.dependencyAddress" (dict "root" $ "deps" $component.dependencies "name" "schema-registry")) | quote }}
+      producer:
+        task_creation_requested_topic: {{ $cfg.kafka.producer.task_creation_requested_topic | quote }}
+    service:
+      log_level: {{ $cfg.service.log_level | quote }}
+{{- end }}
+{{- end }}
