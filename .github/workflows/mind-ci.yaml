@@ -8,6 +8,9 @@ on:
       - "teams/mind/**"
       - "shared/proto/**"
   pull_request:
+    # ready_for_review: draft PRs skip CI (see lint's `if`), so it has to run
+    # when the PR leaves draft.
+    types: [opened, synchronize, reopened, ready_for_review]
     paths:
       - "teams/mind/**"
       - "shared/proto/**"
@@ -21,8 +24,12 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # Needs only Python (no kind/Docker/Postgres), so it runs on GitHub's
+  # runners and doesn't hold a slot on the shared self-hosted runner. Skipped
+  # on draft PRs; every other job needs lint, so they skip with it.
   lint:
-    runs-on: self-hosted
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
+    runs-on: ubuntu-latest
     timeout-minutes: 15  # a hung `make eval` must not run to the 6h default
     permissions:
       contents: read
@@ -65,8 +72,11 @@ jobs:
   # cluster + Helm infra the `ci`/`cd` jobs use), instead of a human having
   # to trust a result no CI run ever actually reproduced. Report-only, not a
   # merge gate -- continue-on-error so a flaky run doesn't block the PR.
+  # Runs only after merge to main, not on every PR push. Not on
+  # workflow_dispatch either: a manual run also runs `cd`, which publishes an image.
   foundation-gate-benchmark:
     needs: lint
+    if: github.event_name == 'push'
     runs-on: self-hosted
     timeout-minutes: 15
     continue-on-error: true
@@ -135,7 +145,9 @@ jobs:
 
   # Deploys Kafka/Schema Registry/MIND via the real Helm chart; round-trip.py
   # then runs from the runner against the deployed Kafka/registry.
+  # needs lint: don't spend ~9 runner minutes when lint already failed.
   round-trip:
+    needs: lint
     if: github.event_name == 'pull_request'
     runs-on: self-hosted
     timeout-minutes: 25
