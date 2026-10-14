@@ -204,7 +204,7 @@ def test_a_call_over_its_kinds_duration_limit_is_slow():
 
 def test_each_kind_has_its_own_default_limit():
     record_call("whisper", 60_000.0, None, kind=CallKind.ASR)  # fine for ASR (120 s)
-    record_call("deepseek", 60_000.0, None, kind=CallKind.LLM)  # slow for an LLM (30 s)
+    record_call("deepseek", 60_000.0, None, kind=CallKind.LLM)  # slow for an LLM (10 s)
     assert (row("whisper").slow_count, row("deepseek").slow_count) == (0, 1)
 
 
@@ -214,10 +214,10 @@ def test_a_failed_slow_call_still_counts_as_slow():
 
 
 def test_a_call_over_its_kinds_cost_limit_is_expensive():
-    record_call("deepseek", 10.0, 0.01, kind=CallKind.LLM)  # at the limit: not over
-    record_call("deepseek", 10.0, 0.02, kind=CallKind.LLM)
+    record_call("deepseek", 10.0, 0.02, kind=CallKind.LLM)  # at the limit: not over
+    record_call("deepseek", 10.0, 0.03, kind=CallKind.LLM)
     r = row("deepseek")
-    assert (r.cost_limit_usd, r.expensive_count) == (0.01, 1)
+    assert (r.cost_limit_usd, r.expensive_count) == (0.02, 1)
 
 
 def test_an_unpriced_call_is_never_expensive_only_unpriced():
@@ -341,4 +341,4 @@ def test_debug_model_calls_tells_unknown_from_not_applicable():
     assert (llm["prompt_tokens_total"], llm["completion_tokens_total"]) == (900, 150)
     assert (llm["cost_usd_total"], llm["unpriced_count"]) == (0.0005, 0)
     assert (llm["cpu_seconds_total"], llm["cpu_unmeasured_count"]) == (None, None)
-    assert (llm["duration_limit_ms"], llm["cost_limit_usd"]) == (30_000, 0.01)
+    assert (llm["duration_limit_ms"], llm["cost_limit_usd"]) == (10_000, 0.02)

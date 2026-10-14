@@ -6,8 +6,10 @@ working:
     pytest tests/test_cost_latency_monitoring.py -v
 
 These tests go through the real entry points -- ocr.extract_text(),
-asr.transcribe(), and BasicExtractor over the real DeepSeek client on a mocked
-transport -- and check what lands in the ledger, the summary, and the log.
+asr.transcribe(), and BasicExtractor over ScriptedProvider, R2's public test
+fake (tests/extraction/fakes.py) -- and check what lands in the ledger, the
+summary, and the log. How a provider parses token usage out of an HTTP
+response is R2's, tested in tests/extraction/test_deepseek.py / test_gemini.py.
 
 Cost has a unit per kind: OCR and ASR cost CPU seconds (MIND does not pay for
 its machine by the hour, so they have no dollar price), and only LLM calls
@@ -31,6 +33,8 @@ tests that spelled that change out ran as xfail(strict=True) until it landed.
 
 from __future__ import annotations
 
+import dataclasses
+import json
 import logging
 import subprocess
 import sys
@@ -57,7 +61,7 @@ from mind.observability.tracking import (
     get_recent_calls,
     model_call_summary,
 )
-from tests.extraction.test_deepseek import SOURCE_TEXT, VALID_ANSWER, _always, _envelope, _provider
+from tests.extraction.fakes import ScriptedProvider
 from tests.test_asr_pipeline import (
     _CLEAN_RECORDING,
     _ROOT,
@@ -143,9 +147,34 @@ def one_asr_call(monkeypatch: pytest.MonkeyPatch, model: FakeWhisper | None = No
     assert transcribe(tone(1.0)).success
 
 
-def llm_call(usage: dict[str, int] | None, model: str = "deepseek-chat") -> None:
-    handler, _ = _always(_envelope(VALID_ANSWER, model=model, usage=usage))
-    BasicExtractor(_provider(handler), sleep=lambda _: None).extract(SOURCE_TEXT, SourceType.EMAIL)
+# A valid extraction of _SOURCE: one call, no repair round.
+_ANSWER = json.dumps(
+    {
+        "title": "Send the Q3 report to finance",
+        "description": "Finance asked for the Q3 report before the close.",
+        "source_ref": "MSG-4471",
+        "has_dependencies": False,
+    }
+)
+_SOURCE = "Please send the Q3 report to finance before the close. (MSG-4471)"
+
+
+class _NoUsageProvider(ScriptedProvider):
+    """A provider that, like some real ones on some answers, reports no token usage."""
+
+    def complete(self, system: str, user: str):
+        response = super().complete(system, user)
+        return dataclasses.replace(response, prompt_tokens=None, completion_tokens=None)
+
+
+def llm_call(model: str = "deepseek-chat", *, reports_usage: bool = True) -> None:
+    """One extraction -- one LLM call -- through BasicExtractor._call.
+
+    ScriptedProvider reports the answer's model id and token counts:
+    "deepseek-chat" is priced, its default "scripted-model" is not.
+    """
+    provider = (ScriptedProvider if reports_usage else _NoUsageProvider)(_ANSWER, model=model)
+    BasicExtractor(provider, sleep=lambda _: None).extract(_SOURCE, SourceType.EMAIL)
 
 
 def row(call_name: str) -> CallNameSummary:
@@ -292,32 +321,34 @@ def test_a_real_whisper_call_is_recorded_with_its_cpu_seconds():
 
 
 def test_an_llm_call_is_recorded_with_its_latency_and_dollar_cost():
-    llm_call({"prompt_tokens": 400, "completion_tokens": 40})
+    llm_call()
     [call] = get_recent_calls()
     assert call.model_name == "deepseek-chat"
     assert call.duration_ms >= 0
-    assert call.cost == pytest.approx(estimate_cost("deepseek-chat", 400, 40))
+    assert call.prompt_tokens is not None and call.completion_tokens is not None
+    assert call.cost == pytest.approx(
+        estimate_cost("deepseek-chat", call.prompt_tokens, call.completion_tokens)
+    )
     assert call.cost is not None and call.cost > 0
 
 
 def test_an_llm_call_is_recorded_as_llm_with_its_token_counts():
-    llm_call({"prompt_tokens": 400, "completion_tokens": 40})
+    llm_call()
     [call] = get_recent_calls()
     assert call.kind == CallKind.LLM
-    assert (call.prompt_tokens, call.completion_tokens) == (400, 40)
+    assert call.completion_tokens == len(_ANSWER)  # what ScriptedProvider reports
+    assert call.prompt_tokens is not None and call.prompt_tokens > 0
 
 
 @pytest.mark.parametrize(
-    ("usage", "model"),
+    ("model", "reports_usage"),
     [
-        pytest.param({"prompt_tokens": 400, "completion_tokens": 40}, "deepseek-v9", id="no-price"),
-        pytest.param(None, "deepseek-chat", id="no-usage"),
+        pytest.param("scripted-model", True, id="no-price"),
+        pytest.param("deepseek-chat", False, id="no-usage"),
     ],
 )
-def test_an_llm_call_that_cannot_be_priced_is_unpriced_not_free(
-    usage: dict[str, int] | None, model: str
-):
-    llm_call(usage, model=model)
+def test_an_llm_call_that_cannot_be_priced_is_unpriced_not_free(model: str, reports_usage: bool):
+    llm_call(model, reports_usage=reports_usage)
     [call] = get_recent_calls()
     assert call.cost is None
 
@@ -347,10 +378,12 @@ def test_cpu_measured_as_almost_nothing_is_a_number_not_unmeasured(
 
 
 def test_an_llm_calls_cost_is_summed_in_dollars():
-    llm_call({"prompt_tokens": 400, "completion_tokens": 40})
-    llm_call({"prompt_tokens": 400, "completion_tokens": 40})
+    llm_call()
+    llm_call()
+    first, second = get_recent_calls()
+    assert first.cost is not None and second.cost is not None
     r = row("deepseek-chat")
-    assert r.cost_usd_total == pytest.approx(2 * estimate_cost("deepseek-chat", 400, 40))
+    assert r.cost_usd_total == pytest.approx(first.cost + second.cost)
     assert r.unpriced_count == 0
 
 
@@ -391,7 +424,7 @@ def test_warnings_and_summary_counters_agree_across_a_mixed_run(
             one_ocr_call()
         one_asr_call(monkeypatch)  # slow -- never expensive: no dollar cost
         one_asr_call(monkeypatch, BusyWhisper([fake_segment(" Hi.", 0.0, 1.0)]))  # slow
-        llm_call({"prompt_tokens": 400, "completion_tokens": 40})  # within both LLM limits
+        llm_call()  # within both LLM limits
 
     summary = model_call_summary()
     assert summary.total_calls == 6
@@ -421,7 +454,8 @@ def test_the_summary_is_served_over_http_after_real_calls(monkeypatch: pytest.Mo
     from mind.api.main import app
 
     one_asr_call(monkeypatch)
-    llm_call({"prompt_tokens": 400, "completion_tokens": 40})
+    llm_call()
+    llm_cost = get_recent_calls()[-1].cost
 
     body = TestClient(app).get("/debug/model-calls").json()
     by_name = {r["call_name"]: r for r in body["by_call_name"]}
@@ -430,9 +464,8 @@ def test_the_summary_is_served_over_http_after_real_calls(monkeypatch: pytest.Mo
     assert asr_row["kind"] == "asr"
     assert asr_row["cpu_seconds_total"] is not None  # CPU seconds, measured
     assert (asr_row["cost_usd_total"], asr_row["unpriced_count"]) == (None, None)  # n/a
-    assert by_name["deepseek-chat"]["cost_usd_total"] == pytest.approx(
-        estimate_cost("deepseek-chat", 400, 40)
-    )
+    assert llm_cost is not None
+    assert by_name["deepseek-chat"]["cost_usd_total"] == pytest.approx(llm_cost)
 
 
 # --- configuration -------------------------------------------------------------------
@@ -460,9 +493,9 @@ def test_the_monitoring_defaults():
     assert (s.ocr_max_duration_ms, s.asr_max_duration_ms, s.llm_max_duration_ms) == (
         30_000,
         120_000,
-        30_000,
+        10_000,
     )
-    assert s.llm_max_cost_usd == 0.01
+    assert s.llm_max_cost_usd == 0.02
     assert s.summary_every_n_calls == 100
 
 

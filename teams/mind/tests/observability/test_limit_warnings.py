@@ -71,22 +71,22 @@ def test_a_call_exactly_at_its_duration_limit_does_not_warn(warnings_logged):
 def test_a_failed_slow_call_warns_and_says_it_failed(warnings_logged):
     record_call("deepseek-chat", 60_000.0, None, kind=CallKind.LLM, status=CallStatus.ERROR)
     [line] = warned(warnings_logged, "MODEL_CALL_SLOW")
-    assert "status=error" in line and "over=2.0x" in line
+    assert "status=error" in line and "over=6.0x" in line  # the LLM limit is 10 s
 
 
 # --- expensive ----------------------------------------------------------------------
 
 
 def test_a_call_over_its_cost_limit_warns_once(warnings_logged):
-    record_call("deepseek-chat", 100.0, 0.025, kind=CallKind.LLM)
+    record_call("deepseek-chat", 100.0, 0.05, kind=CallKind.LLM)
     [line] = warned(warnings_logged, "MODEL_CALL_EXPENSIVE")
     assert "model_name=deepseek-chat kind=llm" in line
-    assert "cost_usd=0.025000 limit_usd=0.010000 over=2.5x" in line
+    assert "cost_usd=0.050000 limit_usd=0.020000 over=2.5x" in line
     assert warned(warnings_logged, "MODEL_CALL_SLOW") == []
 
 
 def test_a_call_exactly_at_its_cost_limit_does_not_warn(warnings_logged):
-    record_call("deepseek-chat", 100.0, 0.01, kind=CallKind.LLM)
+    record_call("deepseek-chat", 100.0, 0.02, kind=CallKind.LLM)
     assert warned(warnings_logged, "MODEL_CALL_EXPENSIVE") == []
 
 
@@ -114,7 +114,7 @@ def test_a_zero_cost_limit_flags_any_positive_cost_but_not_a_free_call(
 
 
 def test_a_call_over_both_limits_warns_twice(warnings_logged):
-    record_call("deepseek-chat", 31_000.0, 0.02, kind=CallKind.LLM)
+    record_call("deepseek-chat", 31_000.0, 0.03, kind=CallKind.LLM)
     assert len(warned(warnings_logged, "MODEL_CALL_SLOW")) == 1
     assert len(warned(warnings_logged, "MODEL_CALL_EXPENSIVE")) == 1
 

@@ -69,8 +69,12 @@ class MonitoringSettings(BaseSettings):
       longest document OCR reads by default.
     * ASR 120 s: base.en runs at ~10x real time, so ~60 s for the longest
       recording ASR decodes (MAX_DURATION_S = 600 s).
-    * LLM 30 s: half the provider deadline (60 s, extraction/providers).
-    * LLM $0.01: several times a DeepSeek extraction of a few thousand tokens.
+    * LLM 10 s: R2 measured ~1.4 s a call on average and 2.2 s at the slowest
+      with the paid key (the provider deadline is 60 s), so ~5x the slowest.
+    * LLM $0.02: per R2, a typical item costs ~$0.0024 and the heaviest (full
+      content, full output) ~$0.008 today. gemini-3.6-flash's price doubles
+      on 1.1.2027 (heaviest then ~$0.016), so $0.02 stays above a legitimate
+      call after that too -- while still ~8x a typical item today.
 
     Only LLM calls have a cost limit: they are the only calls priced in
     dollars. OCR/ASR cost CPU seconds, and a CPU-seconds limit waits for a
@@ -87,8 +91,8 @@ class MonitoringSettings(BaseSettings):
 
     ocr_max_duration_ms: float | None = Field(default=30_000, gt=0)
     asr_max_duration_ms: float | None = Field(default=120_000, gt=0)
-    llm_max_duration_ms: float | None = Field(default=30_000, gt=0)
-    llm_max_cost_usd: float | None = Field(default=0.01, ge=0)
+    llm_max_duration_ms: float | None = Field(default=10_000, gt=0)
+    llm_max_cost_usd: float | None = Field(default=0.02, ge=0)
     # Log the summary every this many model calls; 0 turns it off.
     summary_every_n_calls: int = Field(default=100, ge=0)
 

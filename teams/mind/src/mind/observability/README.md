@@ -99,7 +99,7 @@ recorded -- grep for `MODEL_CALL_SLOW` / `MODEL_CALL_EXPENSIVE`:
 
 ```
 MODEL_CALL_SLOW model_name=tesseract-psm11-ocr kind=ocr status=success duration_ms=45000.0 limit_ms=30000.0 over=1.5x
-MODEL_CALL_EXPENSIVE model_name=deepseek-chat kind=llm status=success cost_usd=0.025000 limit_usd=0.010000 over=2.5x
+MODEL_CALL_EXPENSIVE model_name=deepseek-chat kind=llm status=success cost_usd=0.050000 limit_usd=0.020000 over=2.5x
 ```
 
 Each warning and the summary's `slow_count` / `expensive_count` come from
@@ -118,13 +118,16 @@ and defaults: `config.MonitoringSettings`, and `.env.example`.
 |---|---|---|
 | `MIND_MONITORING__OCR_MAX_DURATION_MS` | 30000 | OCR call slower than this: `MODEL_CALL_SLOW` |
 | `MIND_MONITORING__ASR_MAX_DURATION_MS` | 120000 | same, ASR |
-| `MIND_MONITORING__LLM_MAX_DURATION_MS` | 30000 | same, LLM (needs `kind=llm`, see below) |
-| `MIND_MONITORING__LLM_MAX_COST_USD` | 0.01 | LLM call dearer than this: `MODEL_CALL_EXPENSIVE` (needs `kind=llm`) |
+| `MIND_MONITORING__LLM_MAX_DURATION_MS` | 10000 | same, LLM |
+| `MIND_MONITORING__LLM_MAX_COST_USD` | 0.02 | LLM call dearer than this: `MODEL_CALL_EXPENSIVE` |
 | `MIND_MONITORING__SUMMARY_EVERY_N_CALLS` | 100 | log the summary every N calls; 0 = never |
 
 `none` turns a limit off (an empty value is rejected). The limit defaults
 are starting points from the measurements so far, not validated targets --
-see the `MonitoringSettings` docstring for where each comes from.
+see the `MonitoringSettings` docstring for where each comes from. The LLM
+ones come from R2's measurements with the paid key (~1.4 s a call, 2.2 s at
+the slowest; ~$0.0024 a typical item, ~$0.008 the heaviest), and $0.02 leaves
+room for gemini-3.6-flash's price doubling on 1.1.2027.
 
 ### LLM calls
 
@@ -147,14 +150,16 @@ counts, and an unknown cost stays `None` instead of `0.0`:
 
 - `tests/test_cost_latency_monitoring.py` -- the issue's acceptance suite,
   through the real entry points (`extract_text`, `transcribe`, and
-  `BasicExtractor` over the real DeepSeek client on a mocked transport).
+  `BasicExtractor` over R2's `ScriptedProvider` from
+  `tests/extraction/fakes.py`, the fake her own extraction tests use).
 - `tests/observability/` -- the rules underneath: `record_call`, `CpuClock`,
   the summary, the limit warnings (including the dollar-cost boundary).
-- The acceptance suite imports helpers from other test modules rather than
-  copying them: `tests/test_ocr_result.py`, `tests/test_asr_pipeline.py`,
-  and **R2's `tests/extraction/test_deepseek.py`** (`_envelope`, `_always`,
-  `_provider`, `VALID_ANSWER`, `SOURCE_TEXT`). Renaming those breaks this
-  suite at import time.
+- The acceptance suite reuses the OCR/ASR helpers in
+  `tests/test_ocr_result.py` and `tests/test_asr_pipeline.py` rather than
+  copying them, and for LLM calls only `ScriptedProvider` -- R2's public test
+  fake -- not her private HTTP-test helpers (her call). How a provider parses
+  token usage out of an HTTP response is tested in
+  `tests/extraction/test_deepseek.py` / `test_gemini.py`.
 - **What CI actually runs:** the test job (`.github/actions/test-python`)
   only `pip install`s the package. Whisper weights are gitignored
   (`models/*`), so the real-Whisper test skips in CI. No workflow step
