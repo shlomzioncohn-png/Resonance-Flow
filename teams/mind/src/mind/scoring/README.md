@@ -266,9 +266,17 @@ written** — see [`eval_split.py`](./eval_split.py) for the derivation and the
 rules. Every weight, threshold and keyword was chosen against the 20 dev
 scenarios, and no holdout scenario was read while building this package.
 
+#535 later added six scenarios. The thirty kept their halves and the six were
+placed 4 / 2 by the same filename-only rules, so the split is now 24 / 12. The
+weights here were chosen before those six existed, and none of them was read
+for scoring. (The #352 effort-estimate work did search the text of every
+persona task, these six included, for duration phrases — a narrow look, but a
+look.) Where this README says "the 20 dev scenarios", it means the original
+twenty, which is what those claims were checked against.
+
 The split is a development discipline, not a change to the eval set and not a
 measurement. **Scoring this model against the persona set is R1's**, through the
-harness, over all 30 — so this package reports no accuracy number of its own and
+harness, over all 36 — so this package reports no accuracy number of its own and
 there is exactly one place such a number comes from.
 
 What the split lets this package claim without measuring anything is the part
