@@ -15,7 +15,7 @@ import java.time.Instant;
 import java.util.Objects;
 import java.util.UUID;
 
-/** Postgres-backed {@link TaskStateHistoryRepository} (V8 migration). */
+/** Postgres-backed {@link TaskStateHistoryRepository} (V9 migration). */
 @Repository
 public class PostgresTaskStateHistoryRepository implements TaskStateHistoryRepository {
 
