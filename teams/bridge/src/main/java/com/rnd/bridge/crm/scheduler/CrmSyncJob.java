@@ -63,7 +63,11 @@ public class CrmSyncJob implements SyncJob {
     public IntakeResult runOnce() {
         DealSnapshot snapshot = dealRepository.snapshot();
         IntakeResult result = crmLane.run(snapshot.latestPerDeal().stream(), snapshot.asOf());
-        log.info("CRM sync: {} skipped at read.", snapshot.skippedAtRead());
+        if (snapshot.skippedAtRead() > 0) {
+            log.warn("CRM sync: partial sync, {} deal(s) skipped at read.", snapshot.skippedAtRead());
+        } else {
+            log.info("CRM sync: {} skipped at read.", snapshot.skippedAtRead());
+        }
         return result;
     }
 }
