@@ -7,11 +7,13 @@ import com.rnd.chain.dto.PageResponse;
 import com.rnd.chain.dto.Task;
 import com.rnd.chain.dto.TaskDependency;
 import com.rnd.chain.dto.TaskStatus;
+import com.rnd.chain.exception.CrossTenantDependencyException;
 import com.rnd.chain.exception.DependencyNotFoundException;
 import com.rnd.chain.exception.DuplicateDependencyException;
 import com.rnd.chain.exception.InvalidDependencyException;
 import com.rnd.chain.exception.InvalidRequestException;
 import com.rnd.chain.exception.TaskNotFoundException;
+import com.rnd.chain.events.SchedulingPublishListener;
 import com.rnd.chain.repository.DependencyHistoryRepository;
 import com.rnd.chain.repository.InMemoryDependencyHistoryRepository;
 import com.rnd.chain.repository.InMemoryGraphLock;
@@ -23,6 +25,8 @@ import com.rnd.chain.repository.TaskRepository;
 import com.rnd.chain.repository.TransactionRunner;
 import com.rnd.chain.testsupport.ConcurrentTestRunner;
 import com.rnd.chain.testsupport.IncrementingClock;
+import com.rnd.chain.testsupport.TaskFixtures;
+import com.rnd.chain.testsupport.TestTransactions;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import com.rnd.chain.events.TaskSchedulingUpdatedEvent;
@@ -77,7 +81,9 @@ class TaskDependencyServiceTest {
         transactionRunner = new InMemoryTransactionRunner();
         dependencyEdgeService = new DependencyEdgeService(
                 taskDependencyRepository, new InMemoryGraphLock(),
-                new TaskCounterUpdater(taskRepository, new SchedulingUpdateService(event -> {})));
+                new TaskCounterUpdater(taskRepository, taskDependencyRepository,
+                        new PriorityScoreService(),
+                        new SchedulingPublishListener(taskRepository, new SchedulingUpdateService(event -> {}))));
 
         service = new TaskDependencyService(taskRepository, taskDependencyRepository,
                 historyRepository, transactionRunner, new IncrementingClock(), dependencyEdgeService);
@@ -88,9 +94,12 @@ class TaskDependencyServiceTest {
     @Test
     void constructor_throwsNullPointerException_whenTaskRepositoryIsNull() {
         TaskDependencyRepository taskDependencyRepository = new InMemoryTaskDependencyRepository(List.of());
+        TaskRepository dummyTaskRepository = new InMemoryTaskRepository(List.of());
         DependencyEdgeService dependencyEdgeService = new DependencyEdgeService(
                 taskDependencyRepository, new InMemoryGraphLock(),
-                new TaskCounterUpdater(new InMemoryTaskRepository(List.of()), new SchedulingUpdateService(event -> {})));
+                new TaskCounterUpdater(dummyTaskRepository, taskDependencyRepository,
+                        new PriorityScoreService(),
+                        new SchedulingPublishListener(dummyTaskRepository, new SchedulingUpdateService(event -> {}))));
 
         assertThatThrownBy(() -> new TaskDependencyService(null, taskDependencyRepository,
                 new InMemoryDependencyHistoryRepository(), new InMemoryTransactionRunner(), new IncrementingClock(),
@@ -102,9 +111,12 @@ class TaskDependencyServiceTest {
     @Test
     void constructor_throwsNullPointerException_whenTaskDependencyRepositoryIsNull() {
         TaskRepository taskRepository = new InMemoryTaskRepository(List.of());
+        TaskDependencyRepository dummyDependencyRepository = new InMemoryTaskDependencyRepository(List.of());
         DependencyEdgeService dependencyEdgeService = new DependencyEdgeService(
-                new InMemoryTaskDependencyRepository(List.of()), new InMemoryGraphLock(),
-                new TaskCounterUpdater(taskRepository, new SchedulingUpdateService(event -> {})));
+                dummyDependencyRepository, new InMemoryGraphLock(),
+                new TaskCounterUpdater(taskRepository, dummyDependencyRepository,
+                        new PriorityScoreService(),
+                        new SchedulingPublishListener(taskRepository, new SchedulingUpdateService(event -> {}))));
 
         assertThatThrownBy(() -> new TaskDependencyService(taskRepository, null,
                 new InMemoryDependencyHistoryRepository(), new InMemoryTransactionRunner(), new IncrementingClock(),
@@ -318,6 +330,24 @@ class TaskDependencyServiceTest {
     }
 
     @Test
+    void addDependency_crossTenant_recordsRejectedHistoryEntry_notDeleted() {
+        // Issue #580: unlike a duplicate/missing-task no-op, a cross-tenant rejection must stay
+        // visible in history, not just vanish along with the speculative ADDED entry.
+        taskRepository.save(Task.builder()
+                .id(taskB).tenantId(TaskFixtures.OTHER_TENANT_ID).status(TaskStatus.ACTIVE)
+                .isReady(true).blockingCount(0).openConstraintCount(0)
+                .createdAt(LocalDateTime.now()).updatedAt(LocalDateTime.now()).build());
+
+        assertThatThrownBy(() -> service.addDependency(taskA, taskB))
+                .isInstanceOf(CrossTenantDependencyException.class);
+
+        List<DependencyHistoryEntry> entries = service.getHistory(taskA, 0, 20).content();
+        assertThat(entries).hasSize(1);
+        assertThat(entries.get(0).action()).isEqualTo(DependencyChangeAction.REJECTED);
+        assertThat(taskDependencyRepository.findByTaskId(taskA)).isEmpty();
+    }
+
+    @Test
     void addDependency_failedValidation_recordsNoHistoryEntry() {
         assertThatThrownBy(() -> service.addDependency(taskA, taskA))
                 .isInstanceOf(InvalidDependencyException.class);
@@ -345,7 +375,9 @@ class TaskDependencyServiceTest {
                 List.of(newTask(taskA), newTask(taskB)));
         DependencyEdgeService dependencyEdgeService = new DependencyEdgeService(
                 taskDependencyRepository, new InMemoryGraphLock(),
-                new TaskCounterUpdater(taskRepository, new SchedulingUpdateService(event -> {})));
+                new TaskCounterUpdater(taskRepository, taskDependencyRepository,
+                        new PriorityScoreService(),
+                        new SchedulingPublishListener(taskRepository, new SchedulingUpdateService(event -> {}))));
         TaskDependencyService serviceWithFailingHistory = new TaskDependencyService(
                 taskRepository, taskDependencyRepository, failingHistoryRepository,
                 new InMemoryTransactionRunner(), new IncrementingClock(), dependencyEdgeService);
@@ -364,7 +396,9 @@ class TaskDependencyServiceTest {
                 List.of(newTask(taskA), newTask(taskB)));
         DependencyEdgeService dependencyEdgeService = new DependencyEdgeService(
                 taskDependencyRepository, new InMemoryGraphLock(),
-                new TaskCounterUpdater(taskRepository, new SchedulingUpdateService(event -> {})));
+                new TaskCounterUpdater(taskRepository, taskDependencyRepository,
+                        new PriorityScoreService(),
+                        new SchedulingPublishListener(taskRepository, new SchedulingUpdateService(event -> {}))));
         TaskDependencyService serviceWithFailingHistory = new TaskDependencyService(
                 taskRepository, taskDependencyRepository, failingHistoryRepository,
                 new InMemoryTransactionRunner(), new IncrementingClock(), dependencyEdgeService);
@@ -611,7 +645,9 @@ void addDependency_whenSameMindEventIsRetried_shouldNotApplyDependencyTwice() {
         new DependencyEdgeService(
                 taskDependencyRepository,
                 new InMemoryGraphLock(),
-                new TaskCounterUpdater(taskRepository, schedulingUpdateService));
+                new TaskCounterUpdater(taskRepository, taskDependencyRepository,
+                        new PriorityScoreService(),
+                        new SchedulingPublishListener(taskRepository, schedulingUpdateService)));
 
     TaskDependencyService mindService =
             new TaskDependencyService(
@@ -622,19 +658,21 @@ void addDependency_whenSameMindEventIsRetried_shouldNotApplyDependencyTwice() {
                     new IncrementingClock(),
                     edgeService);
 
-    // First delivery
-    mindService.addDependency(
+    // First delivery - each delivery is its own transaction in production (one Kafka message =
+    // one @Transactional listener invocation), so each gets its own simulated commit here too
+    // (issue #445 Phase 3: publishing is deferred to commit - see TestTransactions).
+    TestTransactions.runCommitted(() -> mindService.addDependency(
             taskA,
             taskB,
             DependencyChangeSource.MIND,
-            sourceRef);
+            sourceRef));
 
     // Retry of exactly the same event
-    mindService.addDependency(
+    TestTransactions.runCommitted(() -> mindService.addDependency(
             taskA,
             taskB,
             DependencyChangeSource.MIND,
-            sourceRef);
+            sourceRef));
 
     // Only one edge exists
     assertThat(

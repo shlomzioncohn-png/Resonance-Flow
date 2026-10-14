@@ -215,4 +215,36 @@ class InMemoryTaskDependencyRepositoryTest {
                 .extracting(TaskDependency::dependsOnTaskId)
                 .containsExactlyInAnyOrder(dependsOnIds);
     }
+
+    // Issue #445: save() upserts confidence on a re-saved edge.
+
+    @Test
+    void save_onAlreadyExistingEdge_updatesStoredConfidence() {
+        repository.save(new TaskDependency(a, b, 0.2));
+
+        Optional<TaskDependency> result = repository.save(new TaskDependency(a, b, 0.9));
+
+        assertThat(result).isEmpty(); // not a new edge...
+        assertThat(repository.findByTaskId(a)) // ...but the confidence was still updated.
+                .containsExactly(new TaskDependency(a, b, 0.9));
+    }
+
+    @Test
+    void save_onAlreadyExistingEdge_updatedConfidenceIsVisibleFromTheDependentsSide() {
+        repository.save(new TaskDependency(a, b, 0.2));
+
+        repository.save(new TaskDependency(a, b, 0.9));
+
+        assertThat(repository.findByDependsOnTaskId(b))
+                .containsExactly(new TaskDependency(a, b, 0.9));
+    }
+
+    @Test
+    void findByTaskId_returnsTheStoredConfidence() {
+        repository.save(new TaskDependency(a, b, 0.42));
+
+        assertThat(repository.findByTaskId(a))
+                .extracting(TaskDependency::confidence)
+                .containsExactly(0.42);
+    }
 }

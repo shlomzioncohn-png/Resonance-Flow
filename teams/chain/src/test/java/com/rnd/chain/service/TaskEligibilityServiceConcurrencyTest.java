@@ -3,6 +3,7 @@ package com.rnd.chain.service;
 import com.rnd.chain.dto.Task;
 import com.rnd.chain.dto.TaskStatus;
 import com.rnd.chain.dto.TaskTestFixtures;
+import com.rnd.chain.events.SchedulingPublishListener;
 import com.rnd.chain.repository.InMemoryGraphLock;
 import com.rnd.chain.repository.InMemoryTaskDependencyRepository;
 import com.rnd.chain.repository.InMemoryTaskRepository;
@@ -73,9 +74,10 @@ class TaskEligibilityServiceConcurrencyTest {
         InMemoryTaskDependencyRepository dependencyRepository = new InMemoryTaskDependencyRepository(List.of());
         SchedulingUpdateService scheduling = new SchedulingUpdateService(event -> {});
         InMemoryGraphLock lock = new InMemoryGraphLock();
-        TaskCounterUpdater counterUpdater = new TaskCounterUpdater(taskRepository, scheduling);
+        TaskCounterUpdater counterUpdater = new TaskCounterUpdater(taskRepository, dependencyRepository,
+                new PriorityScoreService(), new SchedulingPublishListener(taskRepository, scheduling));
         TaskEligibilityService service = new TaskEligibilityService(
-                taskRepository, dependencyRepository, scheduling, lock, counterUpdater);
+                taskRepository, dependencyRepository, lock, counterUpdater);
         DependencyEdgeService edgeService = new DependencyEdgeService(dependencyRepository, lock, counterUpdater);
 
         List<Runnable> jobs = blockerIds.stream()
@@ -104,9 +106,10 @@ class TaskEligibilityServiceConcurrencyTest {
         InMemoryTaskDependencyRepository dependencyRepository = new InMemoryTaskDependencyRepository(List.of());
         SchedulingUpdateService scheduling = new SchedulingUpdateService(event -> {});
         InMemoryGraphLock lock = new InMemoryGraphLock();
-        TaskCounterUpdater counterUpdater = new TaskCounterUpdater(taskRepository, scheduling);
+        TaskCounterUpdater counterUpdater = new TaskCounterUpdater(taskRepository, dependencyRepository,
+                new PriorityScoreService(), new SchedulingPublishListener(taskRepository, scheduling));
         TaskEligibilityService service = new TaskEligibilityService(
-                taskRepository, dependencyRepository, scheduling, lock, counterUpdater);
+                taskRepository, dependencyRepository, lock, counterUpdater);
         DependencyEdgeService edgeService = new DependencyEdgeService(dependencyRepository, lock, counterUpdater);
 
         for (UUID blockerId : blockerIds) {
@@ -155,9 +158,10 @@ class TaskEligibilityServiceConcurrencyTest {
             InMemoryTaskDependencyRepository dependencyRepository = new InMemoryTaskDependencyRepository(List.of());
             SchedulingUpdateService scheduling = new SchedulingUpdateService(event -> {});
             InMemoryGraphLock lock = new InMemoryGraphLock();
-            TaskCounterUpdater counterUpdater = new TaskCounterUpdater(taskRepository, scheduling);
+            TaskCounterUpdater counterUpdater = new TaskCounterUpdater(taskRepository, dependencyRepository,
+                    new PriorityScoreService(), new SchedulingPublishListener(taskRepository, scheduling));
             TaskEligibilityService service = new TaskEligibilityService(
-                    taskRepository, dependencyRepository, scheduling, lock, counterUpdater);
+                    taskRepository, dependencyRepository, lock, counterUpdater);
             DependencyEdgeService edgeService = new DependencyEdgeService(dependencyRepository, lock, counterUpdater);
 
             List<Runnable> jobs = List.of(

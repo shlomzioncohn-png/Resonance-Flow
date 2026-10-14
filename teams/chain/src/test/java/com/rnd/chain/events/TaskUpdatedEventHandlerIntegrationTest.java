@@ -101,9 +101,11 @@ class TaskUpdatedEventHandlerIntegrationTest {
         return Timestamp.newBuilder().setSeconds(instant.getEpochSecond()).setNanos(instant.getNano()).build();
     }
 
+    private static final UUID TENANT_ID = UUID.randomUUID();
+
     private static Task buildTask(UUID id, TaskStatus status, LocalDateTime updatedAt) {
         return Task.builder()
-                .id(id).status(status).isReady(true)
+                .id(id).tenantId(TENANT_ID).status(status).isReady(true)
                 .blockingCount(0).openConstraintCount(0)
                 .createdAt(BASE_TIME).updatedAt(updatedAt)
                 .build();
@@ -132,6 +134,7 @@ class TaskUpdatedEventHandlerIntegrationTest {
 
         producer.send(TOPIC, taskId.toString(), TaskUpdatedEvent.newBuilder()
                 .setTaskId(taskId.toString())
+                .setTenantId(TENANT_ID.toString())
                 .setStatus(com.rnd.inbox.event.TaskStatus.TASK_STATUS_IN_PROGRESS)
                 .setUpdatedAt(timestamp(newerTime))
                 .build());
@@ -149,13 +152,14 @@ class TaskUpdatedEventHandlerIntegrationTest {
         UUID dependent = UUID.randomUUID();
         ((InMemoryTaskRepository) taskRepository).save(buildTask(blocker, TaskStatus.ACTIVE, BASE_TIME));
         ((InMemoryTaskRepository) taskRepository).save(Task.builder()
-                .id(dependent).status(TaskStatus.PENDING)
+                .id(dependent).tenantId(TENANT_ID).status(TaskStatus.PENDING)
                 .isReady(false).blockingCount(1).openConstraintCount(0)
                 .createdAt(BASE_TIME).updatedAt(BASE_TIME).build());
         ((InMemoryTaskDependencyRepository) taskDependencyRepository).save(new TaskDependency(dependent, blocker));
 
         producer.send(TOPIC, blocker.toString(), TaskUpdatedEvent.newBuilder()
                 .setTaskId(blocker.toString())
+                .setTenantId(TENANT_ID.toString())
                 .setStatus(com.rnd.inbox.event.TaskStatus.TASK_STATUS_DONE)
                 .setUpdatedAt(timestamp(BASE_TIME.plusMinutes(5)))
                 .build());
@@ -173,6 +177,7 @@ class TaskUpdatedEventHandlerIntegrationTest {
 
         producer.send(TOPIC, taskId.toString(), TaskUpdatedEvent.newBuilder()
                 .setTaskId(taskId.toString())
+                .setTenantId(TENANT_ID.toString())
                 .setStatus(com.rnd.inbox.event.TaskStatus.TASK_STATUS_DONE)
                 .setUpdatedAt(timestamp(BASE_TIME.minusMinutes(1))) // older than stored
                 .build());
@@ -199,6 +204,7 @@ class TaskUpdatedEventHandlerIntegrationTest {
 
         producer.send(TOPIC, "bad-key", TaskUpdatedEvent.newBuilder()
                 .setTaskId("not-a-valid-uuid") // fails NonRetryableEventException's UUID parse
+                .setTenantId(TENANT_ID.toString())
                 .setStatus(com.rnd.inbox.event.TaskStatus.TASK_STATUS_DONE)
                 .setUpdatedAt(timestamp(BASE_TIME))
                 .build());
@@ -219,6 +225,7 @@ class TaskUpdatedEventHandlerIntegrationTest {
 
         producer.send(TOPIC, taskId.toString(), TaskUpdatedEvent.newBuilder()
                 .setTaskId(taskId.toString())
+                .setTenantId(TENANT_ID.toString())
                 .setStatus(com.rnd.inbox.event.TaskStatus.TASK_STATUS_IN_PROGRESS)
                 .setUpdatedAt(timestamp(BASE_TIME))
                 .build());
@@ -253,6 +260,7 @@ class TaskUpdatedEventHandlerIntegrationTest {
         Instant beforeSend = Instant.now();
         producer.send(TOPIC, taskId.toString(), TaskUpdatedEvent.newBuilder()
                 .setTaskId(taskId.toString())
+                .setTenantId(TENANT_ID.toString())
                 .setStatus(com.rnd.inbox.event.TaskStatus.TASK_STATUS_IN_PROGRESS)
                 .setUpdatedAt(timestamp(BASE_TIME))
                 .build());

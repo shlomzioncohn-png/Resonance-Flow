@@ -33,12 +33,12 @@ class TaskCreatedEventHandlerTest {
                 .build();
     }
 
-    private static TaskCreatedEvent.Builder eventFor( UUID id) {
+    private static TaskCreatedEvent.Builder eventFor(UUID id) {
 
         return TaskCreatedEvent.newBuilder()
                 .setId(id.toString())
-                .setStatus(
-                        com.rnd.inbox.event.TaskStatus.TASK_STATUS_NEW)
+                .setTenantId(UUID.randomUUID().toString())
+                .setStatus(com.rnd.inbox.event.TaskStatus.TASK_STATUS_NEW)
                 .setCreatedAt(timestamp(Instant.now()));
     }
 

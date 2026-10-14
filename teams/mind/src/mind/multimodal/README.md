@@ -76,8 +76,10 @@ Local OCR + ASR preprocessing.
     third, a bug of ours):
     - data failures (retrying gives the same result, drop the document):
       `EMPTY_INPUT`, `UNREADABLE_FORMAT` (not a readable image or PDF --
-      decided by PIL / `pypdfium2` *before* tesseract runs, so a corrupt or
-      truncated file is never confused with a broken install),
+      decided by PIL / `pypdfium2` *before* tesseract runs -- or is even looked
+      for -- so a corrupt or truncated file is never confused with a broken
+      install: a junk file on a host without tesseract is still
+      `UNREADABLE_FORMAT`, not `OCR_UNAVAILABLE`),
       `NO_TEXT_RECOGNIZED` (a valid image/PDF in which no text was found:
       blank or too poor);
     - environment failures, `retryable=True` (nothing is wrong with the
@@ -134,13 +136,13 @@ Local OCR + ASR preprocessing.
   `%PDF-` magic-byte check covers the real cases); a typed failure reason so a
   data failure can be told from an environment one; the per-document counts;
   `pages`; and the page cap. *Whether a document is scanned* is the caller's
-  decision, not `ocr.py`'s: `RawObjectEvent.modality` already has
+  decision, not `ocr.py`'s: `RawObjectRef.modality` (per object) already has
   `Modality.SCANNED_DOC` and `SourceType.SCANNED_DOC` exists, so no new
   `source_type` value is needed (#188 looks stale). The open question is on
   Bridge's side: Bridge sets `modality` for the media lane (a scanned-docs
   directory is always `SCANNED_DOC`) and, for unstructured attachments, derives
   it from the MIME type (`image/*` and `application/pdf` give `SCANNED_DOC`; no
-  MIME type gives `TEXT`, the contract's default), so a scanned file whose MIME
+  MIME type gives `TEXT`), so a scanned file whose MIME
   type is missing would be routed down the text path -- R2 keeps `content_type`
   plus a magic-byte check as a fallback.
 

@@ -15,7 +15,9 @@ import com.rnd.chain.repository.TaskDependencyRepository;
 import com.rnd.chain.repository.TaskRepository;
 import com.rnd.chain.repository.TransactionRunner;
 import com.rnd.chain.repository.UnresolvedDependencyRepository;
+import com.rnd.chain.events.SchedulingPublishListener;
 import com.rnd.chain.service.DependencyEdgeService;
+import com.rnd.chain.service.PriorityScoreService;
 import com.rnd.chain.service.SchedulingUpdateService;
 import com.rnd.chain.service.TaskCounterUpdater;
 import com.rnd.chain.service.TaskDependencyService;
@@ -153,7 +155,9 @@ ChainEventProcessingTemplate chainEventProcessingTemplate() {
             return new DependencyEdgeService(
                     taskDependencyRepository,
                     new InMemoryGraphLock(),
-                    new TaskCounterUpdater(taskRepository, schedulingUpdateService));
+                    new TaskCounterUpdater(taskRepository, taskDependencyRepository,
+                            new PriorityScoreService(),
+                            new SchedulingPublishListener(taskRepository, schedulingUpdateService)));
         }
 
         @Bean
@@ -224,10 +228,13 @@ ChainEventProcessingTemplate chainEventProcessingTemplate() {
                                 producerProps));
     }
 
+    private static final UUID TENANT_ID = UUID.randomUUID();
+
     private static Task buildTask(UUID id) {
 
         return Task.builder()
                 .id(id)
+                .tenantId(TENANT_ID)
                 .status(TaskStatus.PENDING)
                 .isReady(true)
                 .blockingCount(0)

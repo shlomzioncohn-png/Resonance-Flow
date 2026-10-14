@@ -17,7 +17,7 @@ data failure can be told from an environment one, per-document counts
 (``word_count``, ``low_confidence_count``, ``mean_confidence``) so the
 low-confidence list has a denominator, text per page, and a page cap (a longer PDF
 is truncated and says so, not refused). Whether a
-document is scanned is decided by the caller (``RawObjectEvent.modality``), not
+document is scanned is decided by the caller (``RawObjectRef.modality``), not
 guessed here -- ``filename`` is only a secondary hint for telling a PDF from an
 image. See this package's README.
 """
@@ -375,11 +375,12 @@ def _extract(content: bytes, filename: str, max_pages: int) -> OCRResult:
     if not content:
         return _failure(OCRFailureReason.EMPTY_INPUT, "empty input")
 
-    try:
-        tesseract_cmd = _find_tesseract()
-    except RuntimeError as exc:
-        return _failure(OCRFailureReason.OCR_UNAVAILABLE, str(exc))
-
+    # The document is checked before the binary is looked for: reading it needs
+    # only PIL / pypdfium2. Looking first made a junk file on a host without
+    # tesseract OCR_UNAVAILABLE -- an environment failure, retried forever -- when
+    # the document itself is the problem (the same fix as asr.py's, team-lead
+    # review on #478). The cost: a valid PDF's pages are rendered even when
+    # tesseract then turns out to be missing -- only on a broken host.
     try:
         if _is_pdf(content, filename):
             page_images, pages_available = _pdf_to_page_images(content, max_pages)
@@ -392,6 +393,11 @@ def _extract(content: bytes, filename: str, max_pages: int) -> OCRResult:
 
     if not page_images:
         return _failure(OCRFailureReason.UNREADABLE_FORMAT, "PDF has no pages")
+
+    try:
+        tesseract_cmd = _find_tesseract()
+    except RuntimeError as exc:
+        return _failure(OCRFailureReason.OCR_UNAVAILABLE, str(exc))
 
     parsed: list[_PageOCR] = []
     try:
