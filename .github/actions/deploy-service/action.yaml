@@ -20,6 +20,10 @@ inputs:
     description: "Optional docker build-contexts (name=path per line), e.g. shared=shared"
     required: false
     default: ""
+  target:
+    description: "Optional Dockerfile stage to build; empty builds the default (last) stage"
+    required: false
+    default: ""
 
 outputs:
   image_tag:
@@ -61,6 +65,7 @@ runs:
       with:
         context: ${{ inputs.service_dir }}
         build-contexts: ${{ inputs.extra_build_contexts }}
+        target: ${{ inputs.target }}
         load: true
         tags: ${{ inputs.service_name }}:local
         cache-from: type=gha,scope=${{ inputs.service_name }}

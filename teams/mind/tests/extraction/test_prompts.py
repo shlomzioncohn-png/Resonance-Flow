@@ -1,8 +1,11 @@
 """Tests for prompt loading and filling."""
 
+import json
+
 import pytest
 
 from mind.contracts.base_enums import SourceType
+from mind.extraction.models import response_model
 from mind.extraction.prompts import (
     MAX_CONTENT_CHARS,
     TRUNCATION_MARKER,
@@ -20,9 +23,11 @@ def test_system_prompt_names_every_field_and_forbids_extras() -> None:
     for field in ("title", "description", "source_ref", "has_dependencies"):
         assert field in prompt
     assert "null" in prompt
-    # Worded without a count on purpose: the same sentence has to hold when
-    # the classification block adds three more keys below it.
-    assert "Exactly the keys listed above" in prompt
+    # Worded without a count and without a position on purpose: the same
+    # sentence has to hold when the classification block adds its keys
+    # *below* it. "The keys listed above" read literally excluded them.
+    assert "Exactly the keys these instructions list" in prompt
+    assert "listed above" not in system_prompt(classify=True)
 
 
 def test_extraction_prompt_carries_source_type_and_content() -> None:
@@ -78,7 +83,7 @@ def test_the_switch_off_prompt_never_mentions_classification() -> None:
 
     prompt = system_prompt()
 
-    for word in ("tier", "urgency", "role_context", "STRATEGIC"):
+    for word in ("tier", "urgency", "role_context", "STRATEGIC", "effort"):
         assert word not in prompt
 
 
@@ -150,16 +155,140 @@ def test_every_role_is_described_and_not_merely_listed() -> None:
         assert marker in prompt
 
 
+def _examples() -> list[dict[str, object]]:
+    """Every example answer in the prompt, read the way the parser reads one.
+
+    An example is any line that opens with a brace. The model imitates these
+    far more closely than it follows the prose around them, so each one has
+    to be an answer the parser would accept.
+    """
+
+    lines = system_prompt(classify=True).splitlines()
+    return [json.loads(line) for line in lines if line.strip().startswith("{")]
+
+
+def test_every_example_is_an_answer_the_parser_accepts() -> None:
+    """Not only valid JSON: valid against the model, with every key it has.
+
+    The count guards the guard. If the examples drift back into a format
+    without braces, nothing is found, and a loop over nothing passes.
+    The exact key set is what forces the examples to grow with the model:
+    a field added in a later issue fails here until they show it too.
+    """
+
+    examples = _examples()
+    shape = response_model(classify=True)
+
+    assert len(examples) == 6
+    for example in examples:
+        assert set(example) == set(shape.model_fields)
+        shape.model_validate(example)
+
+
 def test_the_examples_include_one_whose_answer_is_null() -> None:
     """An example of declining to answer is the one most worth giving."""
 
-    prompt = system_prompt(classify=True)
-
-    assert 'role_context: null' in prompt
-    assert "Null there is the right answer" in prompt
+    assert any(example["role_context"] is None for example in _examples())
+    assert "Null there is the right answer" in system_prompt(classify=True)
 
 
 def test_the_prompt_warns_against_answering_with_two_labels() -> None:
     """The shape that used to end the whole run."""
 
     assert "never answer with a list of two" in system_prompt(classify=True)
+
+
+# --- the effort estimate (#352) ------------------------------------------
+
+
+def test_the_switch_on_prompt_asks_for_the_estimate_and_its_basis() -> None:
+    prompt = system_prompt(classify=True)
+
+    for word in ("effort_estimate_minutes", "effort_estimate_basis", "STATED", "INFERRED"):
+        assert word in prompt
+
+
+def test_the_classification_block_does_not_count_its_keys() -> None:
+    """"These three" became wrong the moment #352 added two more.
+
+    A count is a fact restated: the list itself already says how many there
+    are, and the count is the copy that does not get updated.
+    """
+
+    prompt = system_prompt(classify=True).lower()
+
+    for count in ("these three", "these five", "the three", "the five"):
+        assert count not in prompt
+
+
+def test_the_prompt_says_a_deadline_and_elapsed_time_are_not_effort() -> None:
+    """The two duration-shaped phrases that are not estimates.
+
+    In the persona set, every phrase that looks like a duration is one of
+    these: "down for 30 minutes", "before this afternoon".
+    """
+
+    prompt = system_prompt(classify=True)
+
+    assert "A deadline is not a duration" in prompt
+    assert "Time that has already passed is not a duration" in prompt
+
+
+def test_the_examples_show_every_kind_of_estimate() -> None:
+    """Stated, inferred and none — the model imitates the examples it sees.
+
+    With only nulls among them, null would look like the expected answer;
+    with no stated one, the model would never see an estimate taken from
+    the words rather than from the work.
+    """
+
+    bases = {example["effort_estimate_basis"] for example in _examples()}
+
+    assert bases == {"STATED", "INFERRED", None}
+
+
+def test_the_inferred_estimate_is_a_declared_exception_to_using_only_the_content() -> None:
+    """`system.md` forbids the model's own knowledge; INFERRED needs exactly that.
+
+    The exception is stated next to the field it is for, in the block that
+    only exists when the switch is on. The rule itself stays for everything
+    else, and stays the only thing a switched-off prompt says.
+    """
+
+    # Whitespace collapsed, so the check reads the wording and not where
+    # the prompt file happens to wrap its lines.
+    switched_on = " ".join(system_prompt(classify=True).split())
+
+    assert "Do not carry over knowledge of your own" in system_prompt()
+    assert "the one exception to basing every field on the content" in switched_on
+
+
+def test_the_prompt_fixes_how_long_a_day_and_a_week_are() -> None:
+    """Undefined, a week is 2400 minutes on one run and 10080 on the next.
+
+    Both would arrive as STATED, at the highest confidence there is, four
+    times apart.
+    """
+
+    prompt = " ".join(system_prompt(classify=True).split())
+
+    assert "a day is 480" in prompt
+    assert "a week is 2400" in prompt
+    assert "working time, not calendar time" in prompt
+
+
+def test_a_unit_whose_length_is_assumed_makes_the_estimate_inferred() -> None:
+    """"Two sprints" is stated in words but not in minutes.
+
+    How long a sprint is depends on the team, so the number is the model's
+    assumption, and STATED's high confidence would claim more than the text
+    did.
+    """
+
+    prompt = " ".join(system_prompt(classify=True).split())
+
+    # Inside the definition of INFERRED, and only there. As a separate rule
+    # it contradicted the definitions below it, which said that anything
+    # stating a duration is STATED.
+    assert "a unit whose length you would have to assume" in prompt
+    assert prompt.count("two sprints") == 1

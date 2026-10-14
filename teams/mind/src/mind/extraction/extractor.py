@@ -60,7 +60,8 @@ class ExtractionItem:
 
 @dataclass(frozen=True)
 class ExtractionSuccess:
-    """A validated proposal, ready for classification (#351) and effort (#352)."""
+    """A validated proposal: the basic fields, plus the classification and the
+    effort estimate (#351, #352) when the switch asked for them."""
 
     fields: ExtractedFields
     source_type: SourceType
@@ -122,8 +123,8 @@ class BasicExtractor:
         """
 
         # What we ask for and what we accept are the same decision, read
-        # from one place: a prompt asking for seven fields and a schema
-        # accepting four would fail every answer it received.
+        # from one place: a prompt asking for the classification and a
+        # schema without it would fail every answer it received.
         system = system_prompt(self._config.classify)
         schema = response_model(self._config.classify)
         user = extraction_prompt(source_type, text)

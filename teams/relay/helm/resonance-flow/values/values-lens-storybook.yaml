@@ -1,0 +1,16 @@
+# CI applies an all-components-off overlay first (setup-service-infra), so only
+# list what this service needs enabled - everything else is already off.
+# Static nginx site: no infra at all. With kafka off, the chart skips the global
+# wait-for-kafka initContainer too.
+components:
+  lens-storybook:
+    enabled: true
+kafka:
+  enabled: false
+minio:
+  enabled: false
+postgresql:
+  enabled: false
+# Kafka maintenance CronJob - nothing for it to talk to here.
+pipeConsumerGroupSweep:
+  enabled: false

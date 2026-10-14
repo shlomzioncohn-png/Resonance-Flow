@@ -17,7 +17,7 @@ data failure can be told from an environment one, per-document counts
 (``word_count``, ``low_confidence_count``, ``mean_confidence``) so the
 low-confidence list has a denominator, text per page, and a page cap (a longer PDF
 is truncated and says so, not refused). Whether a
-document is scanned is decided by the caller (``RawObjectEvent.modality``), not
+document is scanned is decided by the caller (``RawObjectRef.modality``), not
 guessed here -- ``filename`` is only a secondary hint for telling a PDF from an
 image. See this package's README.
 """
@@ -30,14 +30,18 @@ import os
 import shutil
 import subprocess
 import tempfile
+from collections.abc import Mapping
 from enum import Enum
 from pathlib import Path
+from typing import ClassVar
 
 import pypdfium2 as pdfium
 from PIL import Image
-from pydantic import BaseModel, computed_field, model_validator
+from pydantic import BaseModel, Field, computed_field
 
 from mind.api.instrumentation import instrumented_call
+from mind.multimodal.failures import FailureCategory
+from mind.multimodal.result import MediaTextResult
 
 logger = logging.getLogger(__name__)
 
@@ -138,10 +142,7 @@ class OCRFailureReason(str, Enum):
     INTERNAL_ERROR = "INTERNAL_ERROR"
 
 
-_RETRYABLE_REASONS = frozenset({OCRFailureReason.OCR_UNAVAILABLE, OCRFailureReason.OCR_FAILED})
-
-
-class OCRResult(BaseModel):
+class OCRResult(MediaTextResult[OCRFailureReason]):
     """Result of extract_text(). Always returned, never raised past this module.
 
     On success: ``text`` is all pages joined with a newline (the convenience
@@ -154,22 +155,27 @@ class OCRResult(BaseModel):
     first ``max_pages`` pages, ``pages_available`` the document's real page count
     and ``truncated`` is True -- a signal that the text is a partial document.
 
-    ``success=False`` means "could not extract" -- ``reason`` says why (a
-    classified code to branch on), ``error`` is the human-readable message for
-    logs, and ``retryable`` is True for environment failures (the document is
-    fine; try again once the environment is fixed). ``reason`` is set exactly
-    when ``success`` is False.
+    ``success`` / ``reason`` / ``error`` / ``failure_category`` / ``retryable``
+    come from MediaTextResult, the envelope OCR and ASR share (see result.py and
+    failures.py): on failure ``reason`` says why, ``error`` is the message for
+    logs, ``failure_category`` how to treat the document (drop / retry later /
+    park), and ``retryable`` is True for the environment failures.
     """
 
-    success: bool
-    text: str = ""
-    pages: list[str] = []
+    FAILURE_CATEGORIES: ClassVar[Mapping[Enum, FailureCategory]] = {
+        OCRFailureReason.EMPTY_INPUT: FailureCategory.DATA,
+        OCRFailureReason.UNREADABLE_FORMAT: FailureCategory.DATA,
+        OCRFailureReason.NO_TEXT_RECOGNIZED: FailureCategory.DATA,
+        OCRFailureReason.OCR_UNAVAILABLE: FailureCategory.ENVIRONMENT,
+        OCRFailureReason.OCR_FAILED: FailureCategory.ENVIRONMENT,
+        OCRFailureReason.INTERNAL_ERROR: FailureCategory.BUG,
+    }
+
+    pages: list[str] = Field(default_factory=list)
     pages_available: int = 0
     word_count: int = 0
     mean_confidence: float | None = None
-    low_confidence_words: list[LowConfidenceWord] = []
-    reason: OCRFailureReason | None = None
-    error: str | None = None
+    low_confidence_words: list[LowConfidenceWord] = Field(default_factory=list)
 
     @computed_field  # type: ignore[prop-decorator]
     @property
@@ -180,19 +186,6 @@ class OCRResult(BaseModel):
     @property
     def truncated(self) -> bool:
         return self.pages_available > len(self.pages)
-
-    @computed_field  # type: ignore[prop-decorator]
-    @property
-    def retryable(self) -> bool:
-        return self.reason in _RETRYABLE_REASONS
-
-    @model_validator(mode="after")
-    def _reason_iff_failure(self) -> OCRResult:
-        if self.success and (self.reason is not None or self.error is not None):
-            raise ValueError("a successful result carries no reason or error")
-        if not self.success and (self.reason is None or not self.error):
-            raise ValueError("a failed result needs both a reason and an error message")
-        return self
 
 
 def _failure(reason: OCRFailureReason, error: str) -> OCRResult:

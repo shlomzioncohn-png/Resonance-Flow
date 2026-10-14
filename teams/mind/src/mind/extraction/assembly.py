@@ -6,14 +6,16 @@ comes from our own scorer, and the rest comes from the LLM — keeping that
 boundary in one function is what stops an identity or a source type from ever
 being model-generated.
 
-The classification fields (tier, urgency, role_context) are filled in here when
-#351's switch was on and left as None when it was off. The effort fields stay
-unset either way: they belong to #352, which runs on top of this result.
+The classification fields (tier, urgency, role_context) and the effort
+estimate (#352) are filled in here when #351's switch was on and left as None
+when it was off. The estimate's confidence is derived from its basis, in
+`confidence.py`, and never touches the overall `confidence`.
 """
 
 from uuid import UUID
 
 from mind.contracts.task_creation_requested import TaskCreationRequested
+from mind.extraction.confidence import effort_confidence
 from mind.extraction.extractor import ExtractionSuccess
 from mind.extraction.models import ClassificationFields
 
@@ -51,4 +53,10 @@ def to_task_creation_requested(
         tier=classification.tier if classification else None,
         urgency=classification.urgency if classification else None,
         role_context=classification.role_context if classification else None,
+        effort_estimate_minutes=(
+            classification.effort_estimate_minutes if classification else None
+        ),
+        effort_estimate_confidence=(
+            effort_confidence(classification.effort_estimate_basis) if classification else None
+        ),
     )

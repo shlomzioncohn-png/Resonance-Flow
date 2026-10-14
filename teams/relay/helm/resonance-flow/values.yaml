@@ -115,6 +115,12 @@ components:
     resources: *defaultResources
     <<: *defaultHealthProbes
     env: {}
+    # Schema is Alembic-only (#441) -- mind's own container no longer creates
+    # task_embeddings itself, so without this the pod crash-loops on startup
+    # against a fresh database.
+    migration:
+      enabled: true
+      command: ["alembic", "upgrade", "head"]
     # A list set in values-<service>.yaml replaces this one wholesale (Helm merges
     # maps, not lists) - repeat every entry there, don't just add yours.
     dependencies:
@@ -324,6 +330,42 @@ components:
         port: http
       periodSeconds: 5
       failureThreshold: 40
+    livenessProbe:
+      httpGet:
+        path: /
+        port: http
+      periodSeconds: 10
+      failureThreshold: 3
+    readinessProbe:
+      httpGet:
+        path: /
+        port: http
+      periodSeconds: 5
+      failureThreshold: 3
+  # Static Storybook for lens-frontend (nginx) - same source dir, built from the
+  # Dockerfile's `storybook` stage.
+  lens-storybook:
+    enabled: true
+    replicaCount: 1
+    image:
+      repository: "ghcr.io/kamatechorg/resonance-flow/lens-storybook"
+      pullPolicy: IfNotPresent
+      tag: "placeholder"
+    containerPort: 8080
+    service: *defaultService
+    resources:
+      requests:
+        cpu: 25m
+        memory: 32Mi
+      limits:
+        cpu: 100m
+        memory: 64Mi
+    startupProbe:
+      httpGet:
+        path: /
+        port: http
+      periodSeconds: 5
+      failureThreshold: 12
     livenessProbe:
       httpGet:
         path: /

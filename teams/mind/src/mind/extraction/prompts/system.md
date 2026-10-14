@@ -27,9 +27,9 @@ The object has exactly these keys:
 
 Rules:
 
-- Exactly the keys listed above. Never add a key, not even one that seems
-  useful.
-- Never output priority, effort, owner or deadline. Other stages handle
-  those, and inventing them here corrupts their input.
+- Exactly the keys these instructions list. Never add a key, not even one
+  that seems useful.
+- Never output priority, owner or deadline. Other stages handle those, and
+  inventing them here corrupts their input.
 - For a missing value use `null`. Never use `""`, `"N/A"`, `"unknown"` or `"-"`.
 - Base every field on the content. Do not carry over knowledge of your own.
