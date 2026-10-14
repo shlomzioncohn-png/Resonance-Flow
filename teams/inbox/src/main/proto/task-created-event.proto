@@ -31,6 +31,8 @@ message TaskCreatedEvent {
   google.protobuf.Timestamp created_at = 19;
   optional google.protobuf.Struct metadata = 20;
   optional string owner_id = 21;
+  optional string suggested_owner_user_id = 22;
+  optional float suggested_owner_confidence = 23;
 }
 
 enum SourceType {

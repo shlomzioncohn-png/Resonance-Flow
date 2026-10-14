@@ -53,6 +53,8 @@ public class TaskCreatedProtoMapper implements ProtoEventMapper<TaskCreatedEvent
         setIfPresent(payload, "deadline", v -> builder.setDeadline(toTimestamp((String) v)));
         setIfPresent(payload, "confidence", v -> builder.setConfidence(((Number) v).floatValue()));
         setIfPresent(payload, "effortEstimateConfidence", v -> builder.setEffortEstimateConfidence(((Number) v).floatValue()));
+        setIfPresent(payload, "suggestedOwnerUserId", v -> builder.setSuggestedOwnerUserId((String) v));
+        setIfPresent(payload, "suggestedOwnerConfidence", v -> builder.setSuggestedOwnerConfidence(((Number) v).floatValue()));
         setIfPresent(payload, "createdBy", v -> builder.setCreatedBy((String) v));
         setIfPresent(payload, "metadata", v -> builder.setMetadata(toStruct(v)));
         setIfPresent(payload, "ownerId", v -> builder.setOwnerId((String) v));

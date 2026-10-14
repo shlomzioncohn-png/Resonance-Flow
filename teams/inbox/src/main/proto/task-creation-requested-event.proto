@@ -27,6 +27,9 @@ message TaskCreationRequestedEvent {
   optional bool has_dependencies = 16;
   optional string created_by_user_id = 17;
   repeated Assignee assignees = 18;
+  optional double effort_estimate_confidence = 19;
+  optional string suggested_owner_user_id = 20;
+  optional double suggested_owner_confidence = 21;
 }
 
 message Assignee {

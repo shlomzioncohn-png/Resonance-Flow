@@ -58,6 +58,8 @@ class TaskCreatedProtoMapperTest {
         assertThat(event.getExtractionProvenance()).isEqualTo(ExtractionProvenance.EXTRACTION_PROVENANCE_ML_INFERRED);
         assertThat(event.getConfidence()).isEqualTo(0.87f);
         assertThat(event.getEffortEstimateConfidence()).isEqualTo(0.62f);
+        assertThat(event.getSuggestedOwnerUserId()).isEqualTo(payload.get("suggestedOwnerUserId"));
+        assertThat(event.getSuggestedOwnerConfidence()).isEqualTo(0.73f);
         assertThat(event.getCreatedBy()).isEqualTo(createdBy.toString());
         assertThat(Timestamps.toMillis(event.getCreatedAt())).isEqualTo(createdAt.toEpochMilli());
     }
@@ -76,6 +78,8 @@ class TaskCreatedProtoMapperTest {
         assertThat(event.hasDeadline()).isFalse();
         assertThat(event.hasConfidence()).isFalse();
         assertThat(event.hasEffortEstimateConfidence()).isFalse();
+        assertThat(event.hasSuggestedOwnerUserId()).isFalse();
+        assertThat(event.hasSuggestedOwnerConfidence()).isFalse();
         assertThat(event.hasCreatedBy()).isFalse();
         assertThat(event.hasMetadata()).isFalse();
     }
@@ -160,6 +164,8 @@ class TaskCreatedProtoMapperTest {
         payload.put("extractionProvenance", "ML_INFERRED");
         payload.put("confidence", 0.87f);
         payload.put("effortEstimateConfidence", 0.62f);
+        payload.put("suggestedOwnerUserId", UUID.randomUUID().toString());
+        payload.put("suggestedOwnerConfidence", 0.73f);
         payload.put("createdBy", createdBy.toString());
         payload.put("createdAt", createdAt.toString());
         return payload;
