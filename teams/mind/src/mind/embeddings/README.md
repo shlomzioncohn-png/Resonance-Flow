@@ -118,9 +118,11 @@ candidates = await resolve_dependency_targets(
 
 ## Threshold calibration
 
-`benchmarks/threshold_calibration.py` picks both thresholds from real similarity scores, not a guess. Method: a 21-task pool (`benchmarks/threshold_calibration_tasks.json`, hand-authored -- kept separate from `eval/real_slice`/`eval/datasets` on purpose, to avoid overlapping with R2/Michal's own evaluation data), 14 test sentences per calibration (true matches + deliberately hard near-miss pairs: `prod` vs `staging`, `v2.3` vs `v2.4`, `login` vs `logout` crashes + pure negatives), scored against the real store. The threshold reported is whichever value misclassifies the fewest cases in the sample (ties broken toward the stricter/higher value). Re-run anytime: `python -m benchmarks.threshold_calibration`.
+`benchmarks/threshold_calibration.py` picks both thresholds from real similarity scores, not a guess. Method: a 21-task pool (`benchmarks/threshold_calibration_tasks.json`, hand-authored -- kept separate from `eval/real_slice`/`eval/datasets` on purpose, to avoid overlapping with R2/Michal's own evaluation data), 26 test sentences per calibration: 12 true matches (including deliberately hard near-miss pairs -- `prod` vs `staging`, `v2.3` vs `v2.4`, `login` vs `logout` crashes) and 14 true non-matches (including a couple that deliberately share vocabulary with a real task without being a duplicate of it -- `upgrading the office wifi router`, `Write a guide for new hires on our DB setup`), scored against the real store.
 
-**`duplicate_similarity_threshold` = 0.801** (`is_query=False`, full task vs. full task):
+The threshold is chosen to separate real matches from real non-matches only. A close sibling that a matched case outranks (e.g. login-bug beating logout-bug into second place) is a ranking question, not a threshold question -- the real answer is still returned, still correct, and it's still above the bar; penalizing the threshold for that isn't right. An earlier version of this script did exactly that, which pushed `dependency_match_threshold` up to 0.754 and silently broke 2 genuine matches (API docs, prod deploy) beyond the single one (security audit) this README used to document. The sweep now scores `expected_similarity` (true positives) only against the best-other score of true non-match cases (true negatives) -- not against a matched case's runner-up -- and picks the midpoint of whichever gap between adjacent observed values misclassifies the fewest cases, not a value snapped onto one example. Re-run anytime: `python -m benchmarks.threshold_calibration`.
+
+**`duplicate_similarity_threshold` = 0.761** (`is_query=False`, full task vs. full task):
 
 | text | expected | exp. sim | best other | other sim |
 |---|---|---|---|---|
@@ -130,7 +132,7 @@ candidates = await resolve_dependency_targets(
 | Review access logs across services this quarter | task-security-audit | 0.805 | task-perf-review | 0.640 |
 | Investigate the urgent support ticket from a customer | task-customer-escalation | 0.841 | task-load-test | 0.603 |
 | Document the new endpoints from this sprint | task-api-docs | 0.855 | task-release-notes | 0.638 |
-| Push the DB migration out to prod | task-deploy-prod | 0.712 | **task-db-backup (0.749, higher than expected)** | 0.749 |
+| Push the DB migration out to prod | task-deploy-prod | **0.712 (below the chosen threshold -- a false negative)** | task-db-backup | 0.749 |
 | Push the DB migration out to staging | task-deploy-staging | 0.828 | task-db-backup | 0.756 |
 | Publish the 2.3 release notes | task-release-v23 | 0.881 | task-release-v24 | 0.843 |
 | Publish the 2.4 release notes | task-release-v24 | 0.886 | task-release-v23 | 0.848 |
@@ -138,8 +140,20 @@ candidates = await resolve_dependency_targets(
 | App crashes when logging out on phones | task-logout-bug | 0.869 | task-login-bug | 0.833 |
 | Water the office plants | (none) | - | task-api-docs | 0.533 |
 | Book a conference room for Friday | (none) | - | task-catering | 0.598 |
+| Fix the coffee machine in the break room | (none) | - | task-catering | 0.582 |
+| File this quarter's tax paperwork | (none) | - | task-budget-forecast | 0.678 |
+| Replace the printer on the third floor | (none) | - | task-api-docs | 0.579 |
+| Book the dentist appointment for next week | (none) | - | task-load-test | 0.584 |
+| Plan the company holiday party | (none) | - | task-catering | 0.720 |
+| Book flights for the upcoming conference | (none) | - | task-budget-forecast | 0.613 |
+| Review expense reports from last month's travel | (none) | - | task-perf-review | 0.647 |
+| Clean out the supply closet | (none) | - | task-offboard-employee | 0.617 |
+| Update the office holiday calendar | (none) | - | task-api-docs | 0.664 |
+| Renovate the parking garage entrance | (none) | - | task-ui-redesign | 0.561 |
+| Upgrade the office wifi router firmware | (none) | - | task-api-docs | 0.649 |
+| Write a guide for new hires on our DB setup | (none) | - | task-onboard-hire | 0.696 |
 
-**`dependency_match_threshold` = 0.754** (`is_query=True`, mention vs. passage):
+**`dependency_match_threshold` = 0.666** (`is_query=True`, mention vs. passage):
 
 | text | expected | exp. sim | best other | other sim |
 |---|---|---|---|---|
@@ -157,12 +171,26 @@ candidates = await resolve_dependency_targets(
 | logout crash | task-logout-bug | 0.866 | task-login-bug | 0.744 |
 | the weather forecast | (none) | - | task-budget-forecast | 0.580 |
 | lunch plans for today | (none) | - | task-catering | 0.634 |
+| fixing the office coffee machine | (none) | - | task-offboard-employee | 0.497 |
+| quarterly tax filing | (none) | - | task-perf-review | 0.656 |
+| replacing the office printer | (none) | - | task-api-docs | 0.539 |
+| scheduling the dentist appointment | (none) | - | task-load-test | 0.536 |
+| the company holiday party | (none) | - | task-catering | 0.580 |
+| booking flights for the conference | (none) | - | task-budget-forecast | 0.575 |
+| reviewing expense reports for travel | (none) | - | task-perf-review | 0.645 |
+| organizing the supply closet | (none) | - | task-budget-forecast | 0.572 |
+| the new company holiday calendar | (none) | - | task-load-test | 0.550 |
+| the parking garage renovation | (none) | - | task-offboard-employee | 0.530 |
+| upgrading the office wifi router | (none) | - | task-api-docs | 0.596 |
+| writing the team's weekly newsletter | (none) | - | task-standup-notes | 0.658 |
 
 **Real findings, not smoothed over:**
-- Neither threshold is clean. At 0.801, "security audit"-style true matches near 0.65-0.68 would be rejected by the dependency threshold; at 0.754, the sweep already accepts that one false negative because lowering further would let in a worse false positive. There is no value that gets every case right in this sample.
-- `prod`/`staging` and `v2.3`/`v2.4` and `login`/`logout` pairs score within ~0.03-0.06 of each other. BGE similarity alone does not reliably separate these -- a consumer that truly needs that distinction should not rely on this threshold alone (e.g. exact substring/number matching as a second check).
+- Each calibration has exactly one false negative in this sample, and neither is a threshold problem:
+  - **Duplicate:** task-deploy-prod (0.712) scores below 0.761, but raising or lowering the threshold doesn't fix it -- `find_duplicate`'s own `k=1` lookup would never even retrieve it: task-db-backup outranks it (0.749 vs 0.712). This is a ranking confusion between genuinely similar siblings, independent of where the threshold sits.
+  - **Dependency:** "security audit" (0.650) is a genuinely low-similarity paraphrase, not a methodology artifact -- lowering the threshold to catch it would let in "writing the team's weekly newsletter" (0.658), a true non-match that happens to share vocabulary with task-standup-notes.
+- `prod`/`staging`, `v2.3`/`v2.4`, and `login`/`logout` pairs still score within ~0.03-0.06 of each other. This no longer affects the threshold itself (a correct answer outranking its own sibling isn't penalized -- see above), but a consumer that needs that exact distinction should still not rely on similarity alone (e.g. exact substring/number matching as a second check).
 
-**Known limitation:** chosen on 21 hand-authored synthetic tasks and 28 synthetic test sentences, not real production data. Must be re-validated once real tasks/mentions exist (week 8) -- re-run the same script against real data without changing the method.
+**Known limitation:** chosen on 21 hand-authored synthetic tasks and 52 synthetic test sentences (26 per calibration), not real production data. Must be re-validated once real tasks/mentions exist (week 8) -- re-run the same script against real data without changing the method.
 
 ## Known limitations (flag these in review)
 

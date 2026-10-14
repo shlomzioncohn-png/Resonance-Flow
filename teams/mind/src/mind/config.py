@@ -82,8 +82,8 @@ class Settings(BaseSettings):
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"] = "INFO"
     # Calibrated via benchmarks/threshold_calibration.py, not a guess -- see
     # embeddings/README.md "Threshold calibration" for the table and method.
-    duplicate_similarity_threshold: float = Field(default=0.801, ge=0.0, le=1.0)
-    dependency_match_threshold: float = Field(default=0.754, ge=0.0, le=1.0)
+    duplicate_similarity_threshold: float = Field(default=0.761, ge=0.0, le=1.0)
+    dependency_match_threshold: float = Field(default=0.666, ge=0.0, le=1.0)
     vector_store: VectorStoreSettings
     embedding_model: EmbeddingModelSettings = Field(default_factory=EmbeddingModelSettings)
 

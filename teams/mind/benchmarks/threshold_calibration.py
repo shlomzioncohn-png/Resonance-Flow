@@ -42,9 +42,28 @@ DUPLICATE_CASES: list[tuple[str, str | None]] = [
     ("Publish the 2.4 release notes", "task-release-v24"),
     ("App crashes when logging in on phones", "task-login-bug"),
     ("App crashes when logging out on phones", "task-logout-bug"),
-    # Pure negatives: unrelated to every task in the pool.
+    # Pure negatives: unrelated to every task in the pool. Needs enough of
+    # them to see where the noise floor actually sits (see README
+    # "Threshold calibration") -- 2 wasn't enough: "Write a guide for new
+    # hires on our DB setup" shares domain vocabulary with task-db-upgrade
+    # without being a duplicate of it, and scored high enough to flip an
+    # existing regression test once the threshold moved below its score.
     ("Water the office plants", None),
     ("Book a conference room for Friday", None),
+    ("Fix the coffee machine in the break room", None),
+    ("File this quarter's tax paperwork", None),
+    ("Replace the printer on the third floor", None),
+    ("Book the dentist appointment for next week", None),
+    ("Plan the company holiday party", None),
+    ("Book flights for the upcoming conference", None),
+    ("Review expense reports from last month's travel", None),
+    ("Clean out the supply closet", None),
+    ("Update the office holiday calendar", None),
+    ("Renovate the parking garage entrance", None),
+    # Hard negatives: share domain vocabulary with a real task without
+    # being a duplicate of it.
+    ("Upgrade the office wifi router firmware", None),
+    ("Write a guide for new hires on our DB setup", None),
 ]
 
 DEPENDENCY_CASES: list[tuple[str, str | None]] = [
@@ -60,8 +79,25 @@ DEPENDENCY_CASES: list[tuple[str, str | None]] = [
     ("v2.4 notes", "task-release-v24"),
     ("login crash", "task-login-bug"),
     ("logout crash", "task-logout-bug"),
+    # True negatives -- nothing in the task pool should match these. Needs
+    # enough of them to see where the noise floor actually sits, not just
+    # 1-2 examples (see README "Threshold calibration").
     ("the weather forecast", None),
     ("lunch plans for today", None),
+    ("fixing the office coffee machine", None),
+    ("quarterly tax filing", None),
+    ("replacing the office printer", None),
+    ("scheduling the dentist appointment", None),
+    ("the company holiday party", None),
+    ("booking flights for the conference", None),
+    ("reviewing expense reports for travel", None),
+    ("organizing the supply closet", None),
+    ("the new company holiday calendar", None),
+    ("the parking garage renovation", None),
+    # Hard negatives: share a word with a real task but are a different
+    # domain entirely -- the noise floor should stay low even here.
+    ("upgrading the office wifi router", None),
+    ("writing the team's weekly newsletter", None),
 ]
 
 
@@ -95,12 +131,21 @@ async def _run_cases(
 
 
 def _suggest_threshold(results: list[CaseResult]) -> float:
-    """The value in this sample that misclassifies the fewest cases --
-    ties broken high (a stricter default is the safer failure mode)."""
+    """Separates real matches from real non-matches only. A close sibling
+    that a matched case outranks (e.g. login-bug beating logout-bug into
+    second place) is a ranking question, not a threshold question -- it's
+    still returned, still correct, just also above the bar -- so it's
+    excluded here on purpose; penalizing it for that pushed the threshold
+    up past several genuine matches in an earlier version of this script
+    (see README). Picks the midpoint of whichever gap between adjacent
+    observed values misclassifies the fewest cases, not a value snapped
+    onto one example -- ties broken toward the higher (stricter) gap."""
     positives = [r.expected_similarity for r in results if r.expected_similarity is not None]
-    negatives = [r.best_other_similarity for r in results]
-    candidates = sorted(set(positives) | set(negatives), reverse=True)
-    best_threshold, best_errors = 1.0, len(positives)
+    negatives = [r.best_other_similarity for r in results if r.expected_task_id is None]
+    values = sorted(set(positives) | set(negatives))
+    gaps = [(values[i] + values[i + 1]) / 2 for i in range(len(values) - 1)]
+    candidates = [values[-1] + 0.01, *reversed(gaps), values[0] - 0.01]
+    best_threshold, best_errors = candidates[0], len(positives)
     for t in candidates:
         errors = sum(1 for p in positives if p < t) + sum(1 for n in negatives if n >= t)
         if errors < best_errors:  # strict: ties keep the higher (earlier) threshold
