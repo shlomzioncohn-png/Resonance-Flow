@@ -2,9 +2,7 @@
 Test-session setup, shared across every test module in this package.
 
 Also generates the messaging module's proto classes before tests run, in case
-pytest was invoked directly (not via `make test`), see `make proto`. The
-`migrated_db` fixture below applies the Alembic migration -- see its
-own docstring for why that's a fixture, not module-level code.
+pytest was invoked directly (not via `make test`), see `make proto`.
 """
 
 import asyncio
@@ -55,30 +53,12 @@ def _default_monitoring_limits(monkeypatch: pytest.MonkeyPatch) -> None:
 
 @pytest.fixture(scope="session")
 def migrated_db() -> None:
-    """Applies `alembic upgrade head` once per test session. PgVectorStore
-    no longer creates its own schema (issue #441) -- the real
-    `task_embeddings` table only exists once this has run.
-
-    A fixture, not module-level code: only tests that actually need a
-    migrated DB (the `store` fixtures) should pull this in. Running it
-    at import time instead would force every test file through it,
-    including DB-free ones like test_config.py -- if the DB container
-    happens to be down, those would fail too, for no reason of their own.
-
-    Runs against whatever Postgres CI/local already pointed
-    MIND_VECTOR_STORE__DSN at -- this is the real verification that the
-    migration applies cleanly, not just a fixture setup step. Uses
-    Alembic's own Python API, not a subprocess -- a real traceback on
-    failure, and no dependency on `alembic` being on PATH.
-    """
-    # The migration deliberately never runs CREATE EXTENSION (needs
-    # superuser; belongs in db/init/01-enable-pgvector.sql for a real
-    # deploy, see migrations/versions/0001's docstring). Locally that
-    # init script handles it. In CI, the shared Postgres setup-service-
-    # infra port-forwards (relay#513) never runs it either -- nothing
-    # else in that path does -- so the migration hits "type vector does
-    # not exist" otherwise. CI's TEST_DATABASE_URL connects as the
-    # `postgres` superuser specifically so tests can do this themselves.
+    """Applies `alembic upgrade head` once per session. A fixture (not
+    module-level code) so only DB tests (the `store` fixtures) pull it
+    in -- DB-free files like test_config.py shouldn't need a live DB.
+    Alembic's Python API, not a subprocess -- no dependency on `alembic`
+    being on PATH."""
+    # CREATE EXTENSION needs superuser; CI's TEST_DATABASE_URL is one.
     import psycopg
     from alembic import command as alembic_command
     from alembic.config import Config

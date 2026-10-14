@@ -406,6 +406,13 @@ def _model_path(settings: ASRSettings) -> Path:
     return target
 
 
+def _model_name(settings: ASRSettings | None = None) -> str:
+    """The name record_call() files a call under -- known without loading the model,
+    since a call can end (silence, a bad file) before the model is ever needed."""
+    size = (settings or ASRSettings()).whisper_model
+    return f"whisper-{size}-{COMPUTE_TYPE}-local"
+
+
 def _load_model() -> tuple[str, Any]:
     """The Whisper model, loaded once per process and checked against its pinned sha256.
 
@@ -428,7 +435,7 @@ def _load_model() -> tuple[str, Any]:
             except (RuntimeError, OSError, ValueError) as exc:
                 # CTranslate2 refusing the folder: missing/corrupt files, wrong format
                 raise _ASRUnavailable(f"could not load Whisper from {path}: {exc}") from exc
-            _model = (f"whisper-{settings.whisper_model}-{COMPUTE_TYPE}-local", model)
+            _model = (_model_name(settings), model)
         return _model
 
 
@@ -698,13 +705,16 @@ def _transcribe(content: bytes, filename: str, max_duration_s: float) -> ASRResu
     if not content:
         return _failure(ASRFailureReason.EMPTY_INPUT, "empty input")
 
-    try:
-        model_name, model = _load_model()
-    except _ASRUnavailable as exc:
-        return _failure(ASRFailureReason.ASR_UNAVAILABLE, str(exc))
-
+    # The input is checked before the model is touched, and the model is loaded
+    # only once a chunk with speech needs it (team-lead review on the PR): decoding
+    # and the VAD need no Whisper weights. Loading first made a junk file on a host
+    # without the weights ASR_UNAVAILABLE -- ENVIRONMENT, retried forever -- when
+    # the file itself is the problem (DATA). It also kept every input-check test
+    # from running without the weights, i.e. in CI.
+    #
     # The call's window -- wall clock and CPU -- starts here, so it includes
-    # decoding the audio as well as VAD and Whisper. Whisper runs in this
+    # decoding the audio as well as VAD and Whisper (#479), and loading the
+    # model on a call that needs it before warm_up() did. Whisper runs in this
     # process (CTranslate2's threads included), so this process's own CPU
     # covers all of it. The transcription timeout keeps its own clock below.
     call_start = time.perf_counter()
@@ -723,6 +733,7 @@ def _transcribe(content: bytes, filename: str, max_duration_s: float) -> ASRResu
 
     segments: list[TranscriptSegment] = []
     timed_out = False
+    model_name, model = _model_name(), None
     start = time.perf_counter()  # TRANSCRIBE_TIMEOUT_S counts from here
     # ERROR until the loop completes, so anything that leaves it early is
     # recorded as a failure. A timeout is not: it returns what was decoded, and
@@ -735,6 +746,8 @@ def _transcribe(content: bytes, filename: str, max_duration_s: float) -> ASRResu
                 break
             if not has_speech:
                 continue
+            if model is None:
+                model_name, model = _load_model()  # first chunk with speech
             offset_s = chunk_start / SAMPLE_RATE
             # vad_filter: Whisper's own voice-activity filter drops the silences
             # inside the chunk too. Without it Whisper tends to "hear" a stock
@@ -755,6 +768,9 @@ def _transcribe(content: bytes, filename: str, max_duration_s: float) -> ASRResu
             if timed_out:
                 break
         status = CallStatus.SUCCESS
+    except _ASRUnavailable as exc:
+        # Decodable audio with speech in it, and no model to transcribe it with.
+        return _failure(ASRFailureReason.ASR_UNAVAILABLE, str(exc))
     except (RuntimeError, MemoryError, OSError) as exc:
         # The audio was already decoded, so this is CTranslate2/onnxruntime
         # failing: the environment (out of memory, a broken install).
@@ -785,29 +801,39 @@ def _transcribe(content: bytes, filename: str, max_duration_s: float) -> ASRResu
             extent.incomplete_file,
         )
 
-    if extent.break_s is not None and not timed_out:
+    dropped_at_break = 0
+    if extent.break_s is not None:
         # The sentence at the break is cut mid-word: drop it rather than pass on
-        # whatever Whisper made of it (see BREAK_MARGIN_S).
+        # whatever Whisper made of it (see BREAK_MARGIN_S) -- whether or not the
+        # timeout also hit. It used to be skipped on a timeout, which let the half
+        # sentence through exactly when the timeout hit on the segment at the break
+        # (team-lead review on the PR); a timeout earlier in the file leaves every
+        # segment well before the break, so the filter drops nothing there anyway.
         kept = [s for s in segments if s.end < extent.break_s - BREAK_MARGIN_S]
-        if len(kept) < len(segments):
+        dropped_at_break = len(segments) - len(kept)
+        if dropped_at_break:
             logger.info(
-                "dropped %d segment(s) at the break at %.1f s",
-                len(segments) - len(kept),
-                extent.break_s,
+                "dropped %d segment(s) at the break at %.1f s", dropped_at_break, extent.break_s
             )
         segments = kept
 
     if not segments:
-        if timed_out:
+        no_complete_segment = (
+            f"the file breaks at {extent.duration_available_s:.1f} s and no complete "
+            "speech segment comes before the break"
+        )
+        # Before the timeout: if segments were decoded and the break took them all,
+        # the time did not run out empty-handed -- the broken file left nothing
+        # usable. That is DATA (drop it), not ASR_FAILED, which is ENVIRONMENT and
+        # would retry the same broken file.
+        if dropped_at_break:
+            return _failure(ASRFailureReason.NO_SPEECH_DETECTED, no_complete_segment)
+        if timed_out:  # nothing decoded at all in the time: the environment
             return _failure(
                 ASRFailureReason.ASR_FAILED, f"no segment decoded within {TRANSCRIBE_TIMEOUT_S} s"
             )
         if extent.incomplete_file:
-            return _failure(
-                ASRFailureReason.NO_SPEECH_DETECTED,
-                f"the file breaks at {extent.duration_available_s:.1f} s and no complete "
-                "speech segment comes before the break",
-            )
+            return _failure(ASRFailureReason.NO_SPEECH_DETECTED, no_complete_segment)
         return _failure(
             ASRFailureReason.NO_SPEECH_DETECTED,
             "no speech recognized (the recording may be silent or only noise)",

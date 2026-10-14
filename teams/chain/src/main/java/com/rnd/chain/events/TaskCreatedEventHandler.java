@@ -16,6 +16,7 @@ import java.util.UUID;
 
 import static com.rnd.chain.events.EventFields.parseUuid;
 import static com.rnd.chain.events.EventFields.toLocalDateTime;
+import com.rnd.chain.service.UnresolvedDependencyService;
 
 /**
  * Consumes task.created (Inbox, Protobuf) - the event that tells Chain a task exists at all.
@@ -33,7 +34,7 @@ import static com.rnd.chain.events.EventFields.toLocalDateTime;
  * task.dependencies.proposed event landing first) this handler must not reset blockingCount /
  * openConstraintCount / isReady back to their creation defaults, since those may already reflect
  * real dependency state Chain computed after the row was first created. It only overwrites the
- * Inbox-owned fields (ownerId, status) and falls back to a fresh insert when the row is genuinely
+ * Inbox-owned fields (tenantId, status) and falls back to a fresh insert when the row is genuinely
  * new.
  */
 @Component
@@ -41,11 +42,17 @@ public class TaskCreatedEventHandler {
 
     private final TaskRepository taskRepository;
     private final ChainEventProcessingTemplate template;
+    private final UnresolvedDependencyService unresolvedDependencyService;
 
-    public TaskCreatedEventHandler(TaskRepository taskRepository, ChainEventProcessingTemplate template) {
+    public TaskCreatedEventHandler(
+        TaskRepository taskRepository,
+        ChainEventProcessingTemplate template,
+        UnresolvedDependencyService unresolvedDependencyService) {
+
         this.taskRepository = taskRepository;
         this.template = template;
-    }
+        this.unresolvedDependencyService = unresolvedDependencyService;
+}
 
     @RetryableTopic(
             attempts = "3",
@@ -68,11 +75,12 @@ public class TaskCreatedEventHandler {
     }
 
     private void persist(UUID taskId, TaskCreatedEvent event, TaskStatus status, LocalDateTime createdAt) {
+        UUID tenantId = parseUuid(event.getTenantId(), "tenant_id");
         try {
             boolean existed = taskRepository.update(taskId, existing -> Task.builder()
                     .id(existing.getId())
                     .parentTaskId(existing.getParentTaskId())
-                    .ownerId(event.getOwnerId())
+                    .tenantId(tenantId)
                     .status(status)
                     .isReady(existing.isReady())
                     .blockingCount(existing.getBlockingCount())
@@ -87,15 +95,21 @@ public class TaskCreatedEventHandler {
             if (!existed) {
                 taskRepository.save(Task.builder()
                         .id(taskId)
-                        .ownerId(event.getOwnerId())
+                        .tenantId(tenantId)
                         .status(status)
                         .isReady(true)
                         .blockingCount(0)
                         .openConstraintCount(0)
+                        .estimatedDurationMin(
+                                event.hasEffortEstimateMinutes()
+                                        ? event.getEffortEstimateMinutes()
+                                        : null)
                         .createdAt(createdAt)
                         .updatedAt(createdAt)
                         .build());
             }
+
+            unresolvedDependencyService.resolveWaitingForTask(taskId);
         } catch (RuntimeException e) {
             throw new ChainTransientProcessingException(
                     "Failed to persist task " + taskId + " from task.created", e);

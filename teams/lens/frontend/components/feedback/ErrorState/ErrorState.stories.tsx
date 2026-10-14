@@ -4,7 +4,7 @@ import ErrorState from './ErrorState';
 
 const meta = {
   component: ErrorState,
-  tags: ['ai-generated'],
+  tags: ['autodocs'],
 } satisfies Meta<typeof ErrorState>;
 
 export default meta;

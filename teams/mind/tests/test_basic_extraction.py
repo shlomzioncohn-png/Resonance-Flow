@@ -134,8 +134,9 @@ def test_hallucinated_extra_field_is_rejected_and_repaired() -> None:
         {
             "title": "Send the Q3 revenue report",
             "has_dependencies": False,
-            "urgency": 5,
-            "effort_estimate_minutes": 30,
+            # A key no stage asks for. urgency and the effort estimate used to
+            # stand in here, until #351 and #352 made them legitimate answers.
+            "priority": "high",
         }
     )
 

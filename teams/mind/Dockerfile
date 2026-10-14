@@ -14,9 +14,7 @@ COPY proto ./proto
 COPY --from=shared proto ./shared/proto
 COPY scripts/gen_proto.py ./scripts/gen_proto.py
 
-# Generate the proto classes with the system Python, before the venv
-# below exists, so grpcio-tools never ends up in it. See scripts/gen_proto.py
-# -- same script used by `make proto` and tests/conftest.py.
+# System Python, before the venv exists, so grpcio-tools never ends up in it.
 RUN pip install --no-cache-dir grpcio-tools==1.71.0 \
     && python scripts/gen_proto.py
 

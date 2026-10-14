@@ -11,7 +11,7 @@ import java.util.stream.Stream;
 /**
  * Generic {@link SourceReader} entry point, for {@code AbstractIntakeLane}'s
  * {@code run(ReadCursor, Instant)} overload (used by {@code CrmLaneIntegrationTest} and any future
- * generic caller). {@code CrmBridgeController} and {@code CrmSyncScheduler} don't go through this:
+ * generic caller). {@code CrmBridgeController} and {@code CrmSyncJob} don't go through this:
  * each takes one {@code DealSnapshot} per run and calls the {@code run(Stream, Instant)} overload
  * directly, so the deals and the {@code asOf} they publish are guaranteed to come from the same
  * fetch. This reader exists so a caller using the {@code ReadCursor} overload sees the same

@@ -26,8 +26,6 @@ import java.time.temporal.ChronoUnit;
  */
 public final class DealToTaskMapper extends AbstractTaskMapper<Deal> {
 
-    private static final String SOURCE_REF_PREFIX = "crm:";
-
     private final String organizationId;
 
     public DealToTaskMapper(String organizationId,
@@ -111,7 +109,7 @@ public final class DealToTaskMapper extends AbstractTaskMapper<Deal> {
 
     @Override
     public String toSourceRef(Deal deal) {
-        return SOURCE_REF_PREFIX + deal.dealId();
+        return deal.sourceRefPrefix() + deal.dealId();
     }
 
     @Override

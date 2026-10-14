@@ -4,7 +4,7 @@ import FilterChip from './FilterChip';
 
 const meta = {
   component: FilterChip,
-  tags: ['ai-generated'],
+  tags: ['autodocs'],
 } satisfies Meta<typeof FilterChip>;
 
 export default meta;

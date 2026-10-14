@@ -141,7 +141,10 @@ class Settings(BaseSettings):
     environment: Literal["local", "ci", "staging", "production"] = "local"
     api_port: int = Field(default=8000, ge=1, le=65535)
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"] = "INFO"
-    duplicate_similarity_threshold: float = Field(default=0.90, ge=0.0, le=1.0)
+    # Calibrated via benchmarks/threshold_calibration.py, not a guess -- see
+    # embeddings/README.md "Threshold calibration" for the table and method.
+    duplicate_similarity_threshold: float = Field(default=0.761, ge=0.0, le=1.0)
+    dependency_match_threshold: float = Field(default=0.666, ge=0.0, le=1.0)
     vector_store: VectorStoreSettings
     embedding_model: EmbeddingModelSettings = Field(default_factory=EmbeddingModelSettings)
 
@@ -167,6 +170,5 @@ class Settings(BaseSettings):
 @lru_cache
 def get_settings() -> Settings:
     """Construct (once, cached) and return the Settings."""
-    # vector_store has no default (see VectorStoreSettings) -- mypy can't
-    # see that pydantic-settings fills it in from the env/chart sources above.
+    # vector_store has no default -- mypy can't see pydantic-settings fills it in.
     return Settings()  # type: ignore[call-arg]

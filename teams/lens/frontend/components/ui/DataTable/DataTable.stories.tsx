@@ -28,7 +28,7 @@ const rows: DemoRow[] = [
 // generic instantiation.
 const meta: Meta<DataTableProps<DemoRow>> = {
   component: DataTable,
-  tags: ['ai-generated'],
+  tags: ['autodocs'],
 };
 
 export default meta;

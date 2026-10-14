@@ -22,15 +22,15 @@ class SearchResult(BaseModel):
         description="Cosine similarity, comparable to Settings.duplicate_similarity_threshold",
     )
     is_completed: bool = Field(
-        default=False, description="DONE/REJECTED/CANCELLED -- any status the index treats as finished."
+        default=False,
+        description="DONE/REJECTED/CANCELLED -- any status the index treats as finished.",
     )
 
 
 class VectorStore(ABC):
     @abstractmethod
     async def open(self) -> None:
-        """Eagerly initialize (open connections, confirm the schema has
-        already been migrated). Optional -- other methods init lazily."""
+        """Eagerly initialize (confirms the schema is migrated). Optional -- other methods init lazily."""
         ...
 
     @abstractmethod
@@ -73,8 +73,14 @@ class VectorStore(ABC):
         ...
 
     @abstractmethod
-    async def search(self, query_vector: list[float], k: int) -> list[SearchResult]:
-        """Up to k results most similar to query_vector, best match first."""
+    async def search(
+        self, query_vector: list[float], k: int, *, exclude_completed: bool = False
+    ) -> list[SearchResult]:
+        """Up to k results most similar to query_vector, best match first.
+        exclude_completed=True excludes is_completed rows inside the query
+        itself, so k only ever counts open candidates -- filtering them out
+        afterward in Python can't recover a real match that a small k
+        never fetched in the first place."""
         ...
 
     @abstractmethod

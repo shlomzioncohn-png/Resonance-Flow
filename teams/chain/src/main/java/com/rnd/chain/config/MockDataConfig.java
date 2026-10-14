@@ -3,7 +3,9 @@ package com.rnd.chain.config;
 import com.rnd.chain.dto.Task;
 import com.rnd.chain.dto.TaskDependency;
 import com.rnd.chain.repository.DependencyHistoryRepository;
+import com.rnd.chain.repository.GraphLock;
 import com.rnd.chain.repository.InMemoryDependencyHistoryRepository;
+import com.rnd.chain.repository.InMemoryGraphLock;
 import com.rnd.chain.repository.InMemoryTaskDependencyRepository;
 import com.rnd.chain.repository.InMemoryTaskRepository;
 import com.rnd.chain.repository.TaskDependencyRepository;
@@ -50,5 +52,11 @@ public class MockDataConfig {
     @ConditionalOnMissingBean(DependencyHistoryRepository.class)
     public DependencyHistoryRepository dependencyHistoryRepository() {
         return new InMemoryDependencyHistoryRepository();
+    }
+
+    @Bean
+    @ConditionalOnMissingBean(GraphLock.class)
+    public GraphLock graphLock() {
+        return new InMemoryGraphLock();
     }
 }

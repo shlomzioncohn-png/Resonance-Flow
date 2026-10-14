@@ -9,7 +9,7 @@ All content is English. Answer in English, and never translate the content.
 Return a single JSON object and nothing else: no prose before or after it, no
 markdown code fence, no explanation, no trailing commentary.
 
-The object has exactly these four keys:
+The object has exactly these keys:
 
 - `title` — string. A short summary of the task, roughly 3 to 10 words,
   phrased as the action to be taken. Prefer the wording that appears in the
@@ -27,8 +27,9 @@ The object has exactly these four keys:
 
 Rules:
 
-- Exactly those four keys. Never add a key, not even one that seems useful.
-- Never output urgency, priority, effort, owner, tier or deadline. Other
-  stages handle those, and inventing them here corrupts their input.
+- Exactly the keys these instructions list. Never add a key, not even one
+  that seems useful.
+- Never output priority, owner or deadline. Other stages handle those, and
+  inventing them here corrupts their input.
 - For a missing value use `null`. Never use `""`, `"N/A"`, `"unknown"` or `"-"`.
 - Base every field on the content. Do not carry over knowledge of your own.

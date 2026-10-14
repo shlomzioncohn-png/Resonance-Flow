@@ -1,7 +1,7 @@
 """What `source_ref` is allowed to be, checked against the content it claims.
 
-There is no `source_ref` on `RawObjectEvent`, so this field can only ever come
-from inside the content. That makes the rule here a definition rather than a
+Extraction does not receive `RawObjectEvent.source_ref` yet, so this field can
+only ever come from inside the content. That makes the rule here a definition rather than a
 restriction: a pointer that does not appear in the content was not found in
 it, it was made up.
 

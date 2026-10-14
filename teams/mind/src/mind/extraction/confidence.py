@@ -18,7 +18,7 @@ import re
 from dataclasses import dataclass
 
 from mind.contracts.base_enums import SourceType
-from mind.extraction.models import ExtractedFields
+from mind.extraction.models import EffortBasis, ExtractedFields
 
 # Starting point for a first-attempt extraction with everything present.
 # Not 1.0: this stage is an ML-inferred proposal, never a certainty.
@@ -47,6 +47,18 @@ PENALTY_SHORT_TITLE = 0.10
 
 CONFIDENCE_FLOOR = 0.05
 CONFIDENCE_CEILING = 0.99
+
+# The effort estimate's own confidence (#352), one value per basis. Kept
+# apart from everything above: the contract gives effort a separate field,
+# so it never feeds the overall `confidence`. Not calibrated yet. The persona
+# set can calibrate INFERRED (every labelled estimate there is unstated or
+# loosely stated in the text) but has nothing to say about STATED. The gap between the two matters
+# more than either number: a stated estimate is the content's own claim, an
+# inferred one is the model's reading of how big the work looks.
+EFFORT_CONFIDENCE: dict[EffortBasis, float] = {
+    EffortBasis.STATED: 0.9,
+    EffortBasis.INFERRED: 0.4,
+}
 
 # A title needs at least this many content words to count as informative.
 MIN_TITLE_CONTENT_WORDS = 2
@@ -226,3 +238,13 @@ def compute_confidence(
     return score_confidence(
         fields, source_type, raw_text, attempts, invented_source_ref
     ).value
+
+
+def effort_confidence(basis: EffortBasis | None) -> float | None:
+    """How far to trust an effort estimate, from what it rests on.
+
+    None for no basis, never 0.0: a missing estimate is not an estimate
+    nobody trusts, and the contract keeps the two apart.
+    """
+
+    return None if basis is None else EFFORT_CONFIDENCE[basis]

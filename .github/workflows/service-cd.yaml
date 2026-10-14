@@ -24,6 +24,11 @@ on:
         required: false
         type: string
         default: ""
+      target:
+        description: "Optional Dockerfile stage to build; empty builds the default (last) stage"
+        required: false
+        type: string
+        default: ""
 
 jobs:
   build:
@@ -63,6 +68,7 @@ jobs:
           service_dir: ${{ inputs.service_dir }}
           container_port: ${{ inputs.container_port }}
           extra_build_contexts: ${{ inputs.extra_build_contexts }}
+          target: ${{ inputs.target }}
 
   update-manifest:
     needs: build

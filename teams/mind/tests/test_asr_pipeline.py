@@ -112,7 +112,20 @@ def test_every_call_that_reaches_the_model_is_recorded():
     assert calls[0].cost is None  # a local model costs CPU seconds, not dollars (#479)
 
 
-@_needs_weights
+def model_must_not_load(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Fail the test if transcribe() touches the Whisper model at all.
+
+    The input checks run before the model is needed (team-lead review on the PR), so
+    the tests below need no weights and run in CI. Replacing the loader -- rather than
+    relying on the weights being absent -- proves it on a machine that has them too.
+    """
+
+    def must_not_load():
+        raise AssertionError("the Whisper model was loaded for an input check")
+
+    monkeypatch.setattr(asr, "_load_model", must_not_load)
+
+
 @pytest.mark.parametrize(
     ("content", "filename"),
     [
@@ -120,7 +133,10 @@ def test_every_call_that_reaches_the_model_is_recorded():
         (png_bytes(), "scan.png"),  # a real file, just not audio
     ],
 )
-def test_an_unsupported_format_is_unreadable_format(content: bytes, filename: str):
+def test_an_unsupported_format_is_unreadable_format(
+    monkeypatch: pytest.MonkeyPatch, content: bytes, filename: str
+):
+    model_must_not_load(monkeypatch)
     result = transcribe(content, filename=filename)
     assert (result.success, result.reason) == (False, ASRFailureReason.UNREADABLE_FORMAT)
     assert result.retryable is False
@@ -145,18 +161,50 @@ def test_empty_input_is_a_data_failure():
     assert result.retryable is False
 
 
-@_needs_weights
-def test_a_silent_recording_is_no_speech_not_a_made_up_transcript():
+def test_a_silent_recording_is_no_speech_not_a_made_up_transcript(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    # the real VAD finds no speech, so the model is never needed
+    model_must_not_load(monkeypatch)
     result = transcribe(wav(seconds=5))
     assert (result.success, result.reason) == (False, ASRFailureReason.NO_SPEECH_DETECTED)
     assert result.text == ""
     assert result.retryable is False
 
 
-@_needs_weights
-def test_a_wav_with_no_samples_is_no_speech():
+def test_a_wav_with_no_samples_is_no_speech(monkeypatch: pytest.MonkeyPatch):
+    model_must_not_load(monkeypatch)
     result = transcribe(wav([]))
     assert (result.success, result.reason) == (False, ASRFailureReason.NO_SPEECH_DETECTED)
+
+
+def test_a_junk_file_without_the_model_is_unreadable_format_not_asr_unavailable(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+):
+    # The reviewer's case: a text file on a host without the weights. The file is the
+    # problem (DATA, drop it); ASR_UNAVAILABLE would make the consumer retry it forever.
+    monkeypatch.setenv("WHISPER_MODELS_DIR", str(tmp_path))  # no weights anywhere
+    monkeypatch.setenv("MODEL_CACHE_DIR", str(tmp_path))
+    monkeypatch.delitem(asr.PINNED_WHISPER_MODELS, "base.en")  # and no download either
+    result = transcribe(b"this is a text file, not audio" * 20, filename="notes.txt")
+    assert (result.success, result.reason) == (False, ASRFailureReason.UNREADABLE_FORMAT)
+    assert result.failure_category is FailureCategory.DATA
+    assert result.retryable is False
+
+
+def test_speech_without_the_model_is_still_asr_unavailable(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+):
+    # The other side: decodable audio with speech in it does need the model, and its
+    # absence is the environment -- retryable, as before.
+    monkeypatch.setenv("WHISPER_MODELS_DIR", str(tmp_path))
+    monkeypatch.setenv("MODEL_CACHE_DIR", str(tmp_path))
+    monkeypatch.delitem(asr.PINNED_WHISPER_MODELS, "base.en")  # no download either
+    monkeypatch.setattr(asr, "_speech_regions", lambda window: [(0, len(window))])
+    result = transcribe(tone(1.0))
+    assert (result.success, result.reason) == (False, ASRFailureReason.ASR_UNAVAILABLE)
+    assert result.retryable is True
+    assert get_recent_calls()  # the call got past decoding, so it is recorded
 
 
 @_needs_weights
@@ -509,6 +557,9 @@ def fake_faster_whisper(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
     )
     monkeypatch.setenv("WHISPER_MODELS_DIR", str(tmp_path / "image"))
     monkeypatch.setenv("MODEL_CACHE_DIR", str(tmp_path / "cache"))
+    # The model loads only for a chunk with speech in it; a test tone is not speech
+    # to the real VAD, so hear speech everywhere for the loading paths to run.
+    monkeypatch.setattr(asr, "_speech_regions", lambda window: [(0, len(window))])
     return seen
 
 
@@ -714,6 +765,74 @@ def test_a_broken_file_with_nothing_complete_before_the_break_is_no_speech(
     assert (result.success, result.reason) == (False, ASRFailureReason.NO_SPEECH_DETECTED)
     assert "breaks at" in (result.error or "")
     assert result.failure_category is FailureCategory.DATA
+
+
+def timeout_on_every_segment_after_the_first(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A clock that crosses TRANSCRIBE_TIMEOUT_S while the 2nd segment decodes."""
+    clock = [0.0]
+    monkeypatch.setattr(asr.time, "perf_counter", lambda: clock[0])
+    return lambda: clock.__setitem__(0, clock[0] + asr.TRANSCRIBE_TIMEOUT_S * 0.6)
+
+
+def test_the_segment_at_the_break_is_dropped_even_when_the_timeout_hits_on_it(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    # Team-lead review on the PR: the drop used to be skipped on a timeout, so a
+    # file cut off mid-way whose timeout hit on its last segment passed the half
+    # sentence at the break on to extraction. A WAV whose header says 40 s but which
+    # holds only 20 s, the timeout hitting on its last segment:
+    slow = timeout_on_every_segment_after_the_first(monkeypatch)
+    use_model(
+        monkeypatch,
+        FakeWhisper(
+            [
+                fake_segment(" First sentence.", 15.0, 17.0),
+                fake_segment(" Second sentence cut mid-wo", 18.5, 19.8),  # ends at the break
+            ],
+            on_segment=slow,
+        ),
+    )
+    result = transcribe(cut(wav(seconds=40), 0.5))
+    assert (result.incomplete_file, result.truncated) == (True, True)
+    assert result.text == "First sentence."
+    assert "mid-wo" not in result.text
+
+
+def test_a_timeout_with_every_segment_at_the_break_is_no_speech_not_an_environment_failure(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    # With the drop now running on a timeout too, nothing may be left -- that is the
+    # broken file (DATA: drop it), not a slow environment (ENVIRONMENT would retry
+    # the same broken file forever).
+    slow = timeout_on_every_segment_after_the_first(monkeypatch)
+    use_model(
+        monkeypatch,
+        FakeWhisper(
+            [fake_segment(" Cut", 18.5, 19.2), fake_segment(" mid-wo", 19.3, 19.8)],
+            on_segment=slow,
+        ),
+    )
+    result = transcribe(cut(wav(seconds=40), 0.5))
+    assert (result.success, result.reason) == (False, ASRFailureReason.NO_SPEECH_DETECTED)
+    assert result.failure_category is FailureCategory.DATA
+    assert result.retryable is False
+
+
+def test_an_incomplete_file_whose_timeout_decoded_nothing_is_still_an_environment_failure(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    # The other side of the test above: only segments actually dropped at the break
+    # make an empty result the file's fault. Here the file is incomplete (its RIFF
+    # header says 40 s, it holds 20 s) but the time ran out before any segment came
+    # out -- that is the environment, and stays retryable.
+    # Time has already run out at the first check: a budget below zero, rather
+    # than a fake clock whose first reading is assumed to be the timeout's start
+    # -- the call's own window (#479) reads the clock before that.
+    monkeypatch.setattr(asr, "TRANSCRIBE_TIMEOUT_S", -1.0)
+    use_model(monkeypatch, FakeWhisper([fake_segment(" never reached", 0.0, 1.0)]))
+    result = transcribe(cut(wav(seconds=40), 0.5), max_duration_s=5)
+    assert (result.success, result.reason) == (False, ASRFailureReason.ASR_FAILED)
+    assert result.retryable is True
 
 
 def test_incomplete_file_is_serialized_for_the_consumer(monkeypatch: pytest.MonkeyPatch):

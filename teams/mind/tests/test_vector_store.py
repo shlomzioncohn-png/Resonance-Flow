@@ -7,8 +7,8 @@ import uuid
 from contextlib import asynccontextmanager
 from unittest.mock import AsyncMock, MagicMock
 
-import psycopg
 import pytest
+from benchmarks.vector_store_test_table import create_vector_store_test_table
 from psycopg import sql
 from psycopg_pool import PoolTimeout
 
@@ -16,29 +16,6 @@ from mind.config import VectorStoreSettings
 from mind.embeddings import embed
 from mind.embeddings.embeddings import EMBEDDING_DIM
 from mind.embeddings.pgvector_store import PgVectorStore
-
-
-async def _create_test_table(settings: VectorStoreSettings) -> None:
-    # The real table is created by `alembic upgrade head`; this suite's
-    # dedicated test table isn't covered by that, so it sets itself up here
-    # -- matching migrations/versions/0003 (is_completed, content_hash).
-    table = sql.Identifier(settings.table)
-    async with await psycopg.AsyncConnection.connect(
-        str(settings.dsn.get_secret_value()), autocommit=True
-    ) as conn:
-        await conn.execute("CREATE EXTENSION IF NOT EXISTS vector;")
-        await conn.execute(
-            sql.SQL(
-                "CREATE TABLE IF NOT EXISTS {table} "
-                "(task_id TEXT PRIMARY KEY, embedding VECTOR({dim}) NOT NULL, "
-                "is_completed BOOLEAN NOT NULL DEFAULT FALSE, content_hash TEXT);"
-            ).format(table=table, dim=sql.Literal(EMBEDDING_DIM))
-        )
-        await conn.execute(
-            sql.SQL(
-                "CREATE INDEX IF NOT EXISTS {idx} ON {table} USING hnsw (embedding vector_cosine_ops);"
-            ).format(idx=sql.Identifier(f"{settings.table}_embedding_hnsw_idx"), table=table)
-        )
 
 
 @pytest.fixture(scope="module")
@@ -53,7 +30,7 @@ async def store(migrated_db):
         dsn=os.environ["MIND_VECTOR_STORE__DSN"],
         table="task_embeddings_test",
     )
-    await _create_test_table(settings)
+    await create_vector_store_test_table(settings)
     s = PgVectorStore(settings)
     await s.open()
     yield s
@@ -357,7 +334,20 @@ async def test_search_query_can_use_the_hnsw_index(store):
     async with store._pool.connection() as conn, conn.cursor() as cur:
         await cur.execute("SET LOCAL enable_seqscan = off;")
         await cur.execute(
-            sql.SQL("EXPLAIN {}").format(store._search_query()),
+            sql.SQL("EXPLAIN {}").format(store._search_query(exclude_completed=False)),
+            ([0.0] * EMBEDDING_DIM, [0.0] * EMBEDDING_DIM, 1),
+        )
+        plan = "\n".join(row[0] for row in await cur.fetchall())
+    assert "Index Scan" in plan, f"query plan did not use the index:\n{plan}"
+
+
+async def test_search_query_can_use_the_hnsw_index_with_exclude_completed(store):
+    """WHERE NOT is_completed must not force a fall back to a full table
+    scan either -- that's the whole point of filtering in the query."""
+    async with store._pool.connection() as conn, conn.cursor() as cur:
+        await cur.execute("SET LOCAL enable_seqscan = off;")
+        await cur.execute(
+            sql.SQL("EXPLAIN {}").format(store._search_query(exclude_completed=True)),
             ([0.0] * EMBEDDING_DIM, [0.0] * EMBEDDING_DIM, 1),
         )
         plan = "\n".join(row[0] for row in await cur.fetchall())

@@ -3,6 +3,7 @@ package com.rnd.chain.events;
 import com.rnd.chain.dto.Task;
 import com.rnd.chain.dto.TaskStatus;
 import com.rnd.chain.exception.TaskNotFoundException;
+import com.rnd.chain.exception.TenantReassignmentException;
 import com.rnd.chain.service.TaskEligibilityService;
 import com.rnd.inbox.event.TaskUpdatedEvent;
 import org.springframework.kafka.annotation.KafkaListener;
@@ -32,7 +33,7 @@ import static com.rnd.chain.events.EventFields.toLocalDateTime;
  *
  * Atomicity (PR #467 review): the staleness check, the status write, and the {@code updatedAt}
  * stamp all happen inside {@link TaskEligibilityService#onTaskStatusChangedIfNewer}'s single
- * {@code dependencyGraphLock} critical section - not three separate calls from here - so a
+ * graph-lock critical section - not three separate calls from here - so a
  * redelivered/out-of-order event racing a newer one for the same task can't interleave between
  * them. See that method's Javadoc for how this is meant to carry over once persistence is a real
  * transactional store.
@@ -75,16 +76,23 @@ public class TaskUpdatedEventHandler {
         UUID taskId = parseUuid(event.getTaskId(), "task_id");
         TaskStatus newStatus = InboxTaskStatusMapper.map(event.getStatus());
         LocalDateTime eventUpdatedAt = toLocalDateTime(event.getUpdatedAt());
+        UUID tenantId = parseUuid(event.getTenantId(), "tenant_id");
 
-        template.processUnclaimed(taskId.toString(), "task.updated", () -> apply(taskId, newStatus, eventUpdatedAt));
+        template.processUnclaimed(taskId.toString(), "task.updated",
+                () -> apply(taskId, newStatus, eventUpdatedAt, tenantId));
     }
 
-    private void apply(UUID taskId, TaskStatus newStatus, LocalDateTime eventUpdatedAt) {
+    private void apply(UUID taskId, TaskStatus newStatus, LocalDateTime eventUpdatedAt, UUID tenantId) {
         try {
-            taskEligibilityService.onTaskStatusChangedIfNewer(taskId, newStatus, eventUpdatedAt);
+            taskEligibilityService.onTaskStatusChangedIfNewer(taskId, newStatus, eventUpdatedAt, tenantId);
         } catch (TaskNotFoundException e) {
             throw new ReferencedTaskNotFoundException(
                     "task.updated referenced a task Chain hasn't seen yet: " + taskId, e);
+        } catch (TenantReassignmentException e) {
+            // Confirmed with Inbox: tenant_id never legitimately changes after creation, so this
+            // is always a bug upstream - retrying the same event will never resolve it.
+            throw new NonRetryableEventException(
+                    "task.updated for task " + taskId + " claims a different tenant than stored", e);
         } catch (RuntimeException e) {
             // Same reasoning as TaskCreatedEventHandler#persist: an unexpected failure here (e.g.
             // a bug in the repository) is still retried as a transient failure, not sent straight
