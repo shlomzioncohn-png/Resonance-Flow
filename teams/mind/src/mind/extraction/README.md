@@ -503,10 +503,11 @@ From run B: `tier` agrees with the labels on 36/50. The miss is one-sided —
 other 19 are `null`, consistent with text that names no role. No prompt was
 tuned against these numbers.
 
-`eval_split.partition` now refuses the persona set: six scenarios were added
-after the split was frozen. This run took `DEV_SCENARIO_IDS` as it stands, so
-the new six are in neither half and were not read. Assigning them is a
-deliberate redo of the split, not part of this.
+At the time of this run `eval_split.partition` refused the persona set: six
+scenarios had been added after the split was frozen. The run took
+`DEV_SCENARIO_IDS` as it then stood (the original 20), so the new six were in
+neither half and were not read. They have since been placed in the split
+(`yonit/mind-eval-split-535`), four to dev and two to holdout.
 
 ### Review fixes, closed in #352
 
