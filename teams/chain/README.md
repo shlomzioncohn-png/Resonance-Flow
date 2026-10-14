@@ -883,9 +883,13 @@ action in `TaskDependencyService` was **not** removed - see "Dependency graph pe
 ## Task state history (Issue #773, in progress)
 
 Append-only table `task_state_history` (V8) for status changes and blocking transitions. This
-step adds only the schema, `TaskStateHistoryEntry`/`TaskStateEventType` and
-`TaskStateHistoryRepository` (in-memory + Postgres). Nothing writes to it yet (writes: #774,
-read endpoint and full docs: #775).
+schema, `TaskStateHistoryEntry`/`TaskStateEventType` and `TaskStateHistoryRepository`
+(in-memory + Postgres) landed in #773. Rows are written (#774) in the same transaction as the
+change, via `TaskCounterUpdater.recordStatusChange`/`recordBlockingTransition`, from
+`onTaskStatusChangedIfNewer`, `onTaskStatusChanged`, `onTaskCompleted`, `updateCounters` and
+`adjustDependentsBlockingCount`. A stale/duplicate event, or one that leaves the status or the
+0/positive state of `blocking_count` unchanged, writes nothing. `TaskStateReconciliationService`
+corrections are not recorded yet. Read endpoint and full docs: #775.
 
 - `event_type`: `STATUS_CHANGED` (from/to status set), `BLOCKED` (blocking_count 0 to positive),
   `UNBLOCKED` (blocking_count back to 0). Columns that don't apply to an event are NULL, enforced
