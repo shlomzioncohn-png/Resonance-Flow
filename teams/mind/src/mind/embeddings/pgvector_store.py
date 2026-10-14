@@ -8,6 +8,7 @@ loop under FastAPI.
 """
 
 import asyncio
+import json
 
 from psycopg import sql
 from psycopg_pool import AsyncConnectionPool
@@ -106,6 +107,23 @@ class PgVectorStore(VectorStore):
             )
             return cur.rowcount > 0
 
+    async def get_vector(self, task_id: str) -> list[float] | None:
+        await self._ensure_ready()
+        async with self._pool.connection() as conn, conn.cursor() as cur:
+            await cur.execute(
+                sql.SQL("SELECT embedding FROM {table} WHERE task_id = %s;").format(
+                    table=self._table()
+                ),
+                (task_id,),
+            )
+            row = await cur.fetchone()
+            if row is None:
+                return None
+            # psycopg has no registered adapter for pgvector's `vector` type,
+            # so this comes back as its text output, e.g. "[0.1,0.2,...]" --
+            # which happens to be valid JSON.
+            return json.loads(row[0])
+
     async def get_content_hash(self, task_id: str) -> str | None:
         await self._ensure_ready()
         async with self._pool.connection() as conn, conn.cursor() as cur:
@@ -154,13 +172,23 @@ class PgVectorStore(VectorStore):
         async with self._pool.connection() as conn, conn.cursor() as cur:
             await cur.execute(sql.SQL("TRUNCATE TABLE {table};").format(table=self._table()))
 
-    def _search_query(self, *, exclude_completed: bool) -> sql.Composed:
+    def _search_query(self, *, exclude_completed: bool, exclude_task_id: bool) -> sql.Composed:
         # ORDER BY the raw <=> expression, not the similarity alias --
-        # pgvector can't match the HNSW index to an alias. WHERE NOT
-        # is_completed (not a post-hoc Python filter) so a small k counts
-        # only open candidates -- otherwise k rows of completed tasks would
-        # leave nothing, even with a real open match just outside that window.
-        where_clause = sql.SQL("WHERE NOT is_completed") if exclude_completed else sql.SQL("")
+        # pgvector can't match the HNSW index to an alias. Conditions go in
+        # the WHERE clause itself (not a post-hoc Python filter) so a small
+        # k counts only the rows that actually qualify -- otherwise k rows
+        # that all get filtered out would leave nothing, even with a real
+        # match just outside that window (is_completed; or, for #472's
+        # related-tasks query, the query task's own row, which would
+        # otherwise always match itself first).
+        conditions = []
+        if exclude_completed:
+            conditions.append(sql.SQL("NOT is_completed"))
+        if exclude_task_id:
+            conditions.append(sql.SQL("task_id != %s"))
+        where_clause = (
+            sql.SQL("WHERE ") + sql.SQL(" AND ").join(conditions) if conditions else sql.SQL("")
+        )
         return sql.SQL(
             """
             SELECT task_id, 1 - (embedding <=> %s::vector) AS similarity, is_completed
@@ -172,7 +200,12 @@ class PgVectorStore(VectorStore):
         ).format(table=self._table(), where_clause=where_clause)
 
     async def search(
-        self, query_vector: list[float], k: int, *, exclude_completed: bool = False
+        self,
+        query_vector: list[float],
+        k: int,
+        *,
+        exclude_completed: bool = False,
+        exclude_task_id: str | None = None,
     ) -> list[SearchResult]:
         await self._ensure_ready()
         async with self._pool.connection() as conn, conn.cursor() as cur:
@@ -181,17 +214,23 @@ class PgVectorStore(VectorStore):
                 "SELECT set_config('hnsw.ef_search', %s, true);",
                 (str(self._settings.search_effort),),
             )
-            if exclude_completed:
-                # Without this, the WHERE NOT is_completed above only
-                # filters within the ef_search window the HNSW scan already
-                # grabbed -- if every row in that window is completed, k
-                # comes back short even though an open match exists further
-                # into the graph. strict_order makes Postgres keep walking
-                # until it has k rows that pass the filter (pgvector >=0.8).
+            if exclude_completed or exclude_task_id is not None:
+                # Without this, a WHERE condition above only filters within
+                # the ef_search window the HNSW scan already grabbed -- if
+                # every row in that window gets filtered out, k comes back
+                # short even though a real match exists further into the
+                # graph. strict_order makes Postgres keep walking until it
+                # has k rows that pass the filter (pgvector >=0.8).
                 await cur.execute("SELECT set_config('hnsw.iterative_scan', 'strict_order', true);")
+            params: list[object] = [query_vector]
+            if exclude_task_id is not None:
+                params.append(exclude_task_id)
+            params.extend([query_vector, k])
             await cur.execute(
-                self._search_query(exclude_completed=exclude_completed),
-                (query_vector, query_vector, k),
+                self._search_query(
+                    exclude_completed=exclude_completed, exclude_task_id=exclude_task_id is not None
+                ),
+                tuple(params),
             )
             rows = await cur.fetchall()
             return [

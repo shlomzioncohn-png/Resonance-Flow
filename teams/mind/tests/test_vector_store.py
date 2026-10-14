@@ -217,6 +217,47 @@ async def test_get_content_hash_is_none_for_an_unknown_task_id(store):
     assert await store.get_content_hash(f"test-{uuid.uuid4()}") is None
 
 
+async def test_get_vector_round_trips_through_upsert(store):
+    task_id = f"test-{uuid.uuid4()}"
+    vec = embed("Ship the release notes")
+    await store.upsert(task_id, vec)
+
+    stored = await store.get_vector(task_id)
+
+    assert stored is not None
+    assert len(stored) == EMBEDDING_DIM
+    assert all(abs(a - b) < 1e-5 for a, b in zip(stored, vec))
+
+
+async def test_get_vector_is_none_for_an_unknown_task_id(store):
+    assert await store.get_vector(f"test-{uuid.uuid4()}") is None
+
+
+async def test_search_exclude_task_id_omits_the_given_task(store):
+    query_vec = embed("Ship the release notes for v2.3")
+    self_id, other_id = f"test-{uuid.uuid4()}", f"test-{uuid.uuid4()}"
+    await store.upsert(self_id, query_vec)
+    await store.upsert(other_id, embed("Write up the v2.3 release notes"))
+
+    results = await store.search(query_vec, k=5, exclude_task_id=self_id)
+
+    assert self_id not in [r.task_id for r in results]
+
+
+async def test_search_exclude_task_id_does_not_let_self_consume_the_k_budget(store):
+    """With k=1, the query task's own row (similarity 1.0, always the
+    closest possible match) must not crowd out a real second task --
+    the same k-starvation risk as exclude_completed, for a single id."""
+    query_vec = embed("Ship the release notes for v2.3")
+    self_id, other_id = f"test-{uuid.uuid4()}", f"test-{uuid.uuid4()}"
+    await store.upsert(self_id, query_vec)
+    await store.upsert(other_id, embed("Write up the v2.3 release notes"))
+
+    results = await store.search(query_vec, k=1, exclude_task_id=self_id)
+
+    assert [r.task_id for r in results] == [other_id]
+
+
 async def test_delete_removes_a_stored_vector(store):
     """delete() alone: the vector stops being findable afterward."""
     task_id = f"test-{uuid.uuid4()}"
@@ -334,7 +375,9 @@ async def test_search_query_can_use_the_hnsw_index(store):
     async with store._pool.connection() as conn, conn.cursor() as cur:
         await cur.execute("SET LOCAL enable_seqscan = off;")
         await cur.execute(
-            sql.SQL("EXPLAIN {}").format(store._search_query(exclude_completed=False)),
+            sql.SQL("EXPLAIN {}").format(
+                store._search_query(exclude_completed=False, exclude_task_id=False)
+            ),
             ([0.0] * EMBEDDING_DIM, [0.0] * EMBEDDING_DIM, 1),
         )
         plan = "\n".join(row[0] for row in await cur.fetchall())
@@ -347,8 +390,24 @@ async def test_search_query_can_use_the_hnsw_index_with_exclude_completed(store)
     async with store._pool.connection() as conn, conn.cursor() as cur:
         await cur.execute("SET LOCAL enable_seqscan = off;")
         await cur.execute(
-            sql.SQL("EXPLAIN {}").format(store._search_query(exclude_completed=True)),
+            sql.SQL("EXPLAIN {}").format(
+                store._search_query(exclude_completed=True, exclude_task_id=False)
+            ),
             ([0.0] * EMBEDDING_DIM, [0.0] * EMBEDDING_DIM, 1),
+        )
+        plan = "\n".join(row[0] for row in await cur.fetchall())
+    assert "Index Scan" in plan, f"query plan did not use the index:\n{plan}"
+
+
+async def test_search_query_can_use_the_hnsw_index_with_exclude_task_id(store):
+    """Same guarantee for #472's self-exclusion filter."""
+    async with store._pool.connection() as conn, conn.cursor() as cur:
+        await cur.execute("SET LOCAL enable_seqscan = off;")
+        await cur.execute(
+            sql.SQL("EXPLAIN {}").format(
+                store._search_query(exclude_completed=False, exclude_task_id=True)
+            ),
+            ([0.0] * EMBEDDING_DIM, "some-task-id", [0.0] * EMBEDDING_DIM, 1),
         )
         plan = "\n".join(row[0] for row in await cur.fetchall())
     assert "Index Scan" in plan, f"query plan did not use the index:\n{plan}"

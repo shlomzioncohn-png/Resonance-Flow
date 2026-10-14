@@ -105,6 +105,7 @@ class Settings(BaseSettings):
     # embeddings/README.md "Threshold calibration" for the table and method.
     duplicate_similarity_threshold: float = Field(default=0.761, ge=0.0, le=1.0)
     dependency_match_threshold: float = Field(default=0.666, ge=0.0, le=1.0)
+    related_task_threshold: float = Field(default=0.711, ge=0.0, le=1.0)
     vector_store: VectorStoreSettings
     embedding_model: EmbeddingModelSettings = Field(default_factory=EmbeddingModelSettings)
 

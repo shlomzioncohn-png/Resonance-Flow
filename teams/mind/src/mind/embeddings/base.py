@@ -74,13 +74,28 @@ class VectorStore(ABC):
 
     @abstractmethod
     async def search(
-        self, query_vector: list[float], k: int, *, exclude_completed: bool = False
+        self,
+        query_vector: list[float],
+        k: int,
+        *,
+        exclude_completed: bool = False,
+        exclude_task_id: str | None = None,
     ) -> list[SearchResult]:
         """Up to k results most similar to query_vector, best match first.
         exclude_completed=True excludes is_completed rows inside the query
         itself, so k only ever counts open candidates -- filtering them out
         afterward in Python can't recover a real match that a small k
-        never fetched in the first place."""
+        never fetched in the first place. exclude_task_id does the same for
+        a single task_id -- e.g. #472's related-tasks query, where
+        query_vector is that task's own stored vector and would otherwise
+        always match itself first."""
+        ...
+
+    @abstractmethod
+    async def get_vector(self, task_id: str) -> list[float] | None:
+        """The embedding already stored for task_id, or None if it isn't
+        indexed yet -- #472's related-tasks query reuses this instead of
+        re-embedding text that's already been embedded once."""
         ...
 
     @abstractmethod

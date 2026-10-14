@@ -1,8 +1,9 @@
-"""Empirical calibration for dependency_match_threshold (#244) and
-duplicate_similarity_threshold (#471) -- against threshold_calibration_tasks.json,
-a hand-authored pool kept separate from eval/real_slice and eval/datasets on
-purpose (see that file's _comment -- avoids overlapping with R2/Michal's own
-evaluation data).
+"""Empirical calibration for dependency_match_threshold (#244),
+duplicate_similarity_threshold (#471) and related_task_threshold (#472)
+-- against threshold_calibration_tasks.json, a hand-authored pool kept
+separate from eval/real_slice and eval/datasets on purpose (see that
+file's _comment -- avoids overlapping with R2/Michal's own evaluation
+data).
 
 Prints a score table for each calibration, suggests a threshold (the value
 that best separates true matches from everything else in this sample), and
@@ -100,6 +101,45 @@ DEPENDENCY_CASES: list[tuple[str, str | None]] = [
     ("writing the team's weekly newsletter", None),
 ]
 
+# (task_id, expected_related_task_id or None). #472 queries with a task's
+# own stored vector, not fresh text -- so unlike DUPLICATE_CASES/
+# DEPENDENCY_CASES above, both sides here are real task_ids from the pool,
+# compared task-to-task (see _run_related_cases). The "related but not
+# duplicate" pairs are literally #471's hard-pair siblings -- the issue
+# names this exact case (prod/staging, v2.3/v2.4) as related, not
+# duplicate -- plus db-upgrade/db-backup (same DB-maintenance theme,
+# clearly not the same task). Every other task in the pool has no
+# designed relation, so its best-other score is this calibration's noise
+# floor, same role as DEPENDENCY_CASES' pure negatives.
+RELATED_CASES: list[tuple[str, str | None]] = [
+    ("task-deploy-prod", "task-deploy-staging"),
+    ("task-deploy-staging", "task-deploy-prod"),
+    ("task-release-v23", "task-release-v24"),
+    ("task-release-v24", "task-release-v23"),
+    ("task-login-bug", "task-logout-bug"),
+    ("task-logout-bug", "task-login-bug"),
+    ("task-db-upgrade", "task-db-backup"),
+    ("task-db-backup", "task-db-upgrade"),
+    ("task-catering", None),
+    ("task-standup-notes", None),
+    # task-release-notes excluded here on purpose -- it scored 0.85+
+    # against both task-release-v23 and task-release-v24 (real run), i.e.
+    # it genuinely IS related to both ("release notes" generalizes "v2.3
+    # release notes"). Labeling it a negative would have been a wrong
+    # label, not a hard case -- same mistake this file's docstring already
+    # warns against for DEPENDENCY_CASES.
+    ("task-onboard-hire", None),
+    ("task-offboard-employee", None),
+    ("task-security-audit", None),
+    ("task-vendor-contract", None),
+    ("task-customer-escalation", None),
+    ("task-perf-review", None),
+    ("task-budget-forecast", None),
+    ("task-ui-redesign", None),
+    ("task-api-docs", None),
+    ("task-load-test", None),
+]
+
 
 class CaseResult(NamedTuple):
     text: str
@@ -128,6 +168,33 @@ async def _run_cases(
             CaseResult(
                 text,
                 expected_task_id,
+                expected_similarity,
+                best_other.task_id,
+                best_other.similarity,
+            )
+        )
+    return results
+
+
+async def _run_related_cases(
+    store: PgVectorStore, cases: list[tuple[str, str | None]], *, n_tasks: int
+) -> list[CaseResult]:
+    """Task-to-task, not text-to-task: find_related() queries with the
+    task's own stored vector (get_vector()), never fresh-embedded text,
+    so this mirrors that instead of reusing _run_cases()."""
+    results = []
+    for task_id, expected_related_id in cases:
+        vector = await store.get_vector(task_id)
+        assert vector is not None, f"{task_id} must already be upserted by main()"
+        candidates = await store.search(vector, k=n_tasks, exclude_task_id=task_id)
+        by_id = {c.task_id: c.similarity for c in candidates}
+        expected_similarity = by_id.get(expected_related_id) if expected_related_id else None
+        others = [c for c in candidates if c.task_id != expected_related_id]
+        best_other = max(others, key=lambda c: c.similarity)
+        results.append(
+            CaseResult(
+                task_id,
+                expected_related_id,
                 expected_similarity,
                 best_other.task_id,
                 best_other.similarity,
@@ -186,6 +253,7 @@ async def main() -> None:
 
         dup_results = await _run_cases(store, DUPLICATE_CASES, is_query=False, n_tasks=len(tasks))
         dep_results = await _run_cases(store, DEPENDENCY_CASES, is_query=True, n_tasks=len(tasks))
+        rel_results = await _run_related_cases(store, RELATED_CASES, n_tasks=len(tasks))
     finally:
         await store.clear()
         await store.close()
@@ -198,6 +266,10 @@ async def main() -> None:
     dep_threshold = _suggest_threshold(dep_results)
     print(f"\nSuggested dependency_match_threshold: {dep_threshold:.3f}")
 
+    _print_table("Related tasks (#472, task-to-task via stored vectors)", rel_results)
+    rel_threshold = _suggest_threshold(rel_results)
+    print(f"\nSuggested related_task_threshold: {rel_threshold:.3f}")
+
     _RESULTS_PATH.write_text(
         json.dumps(
             {
@@ -209,6 +281,10 @@ async def main() -> None:
                 "dependency": {
                     "suggested_threshold": dep_threshold,
                     "cases": [r._asdict() for r in dep_results],
+                },
+                "related": {
+                    "suggested_threshold": rel_threshold,
+                    "cases": [r._asdict() for r in rel_results],
                 },
             },
             indent=2,
