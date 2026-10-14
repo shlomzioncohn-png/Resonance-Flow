@@ -134,13 +134,13 @@ Local OCR + ASR preprocessing.
   `%PDF-` magic-byte check covers the real cases); a typed failure reason so a
   data failure can be told from an environment one; the per-document counts;
   `pages`; and the page cap. *Whether a document is scanned* is the caller's
-  decision, not `ocr.py`'s: `RawObjectEvent.modality` already has
+  decision, not `ocr.py`'s: `RawObjectRef.modality` (per object) already has
   `Modality.SCANNED_DOC` and `SourceType.SCANNED_DOC` exists, so no new
   `source_type` value is needed (#188 looks stale). The open question is on
   Bridge's side: Bridge sets `modality` for the media lane (a scanned-docs
   directory is always `SCANNED_DOC`) and, for unstructured attachments, derives
   it from the MIME type (`image/*` and `application/pdf` give `SCANNED_DOC`; no
-  MIME type gives `TEXT`, the contract's default), so a scanned file whose MIME
+  MIME type gives `TEXT`), so a scanned file whose MIME
   type is missing would be routed down the text path -- R2 keeps `content_type`
   plus a magic-byte check as a fallback.
 

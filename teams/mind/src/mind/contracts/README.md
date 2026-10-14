@@ -19,41 +19,75 @@
 
 ## RawObjectEvent
 
-`RawObjectEvent` is the event sent by Bridge to MIND.
+`RawObjectEvent` is the event sent by Bridge to MIND, one per logical item (an
+email, a meeting, a scanned document). Every MinIO object of the item arrives
+together in `objects`. The schema was settled in
+[Issue #31](https://github.com/KamaTechOrg/Resonance-Flow/issues/31).
 
-The event points MIND to the raw content stored in MinIO.
-
-### Required Bridge fields
-
-| Field | Description | Status |
-|---|---|---|
-| `object_key` | Exact MinIO location of the raw object. The format is guaranteed by the Bridge contract. | Confirmed — required |
-| `source_type` | Business origin/system that produced the item: `EMAIL`, `SLACK`, `WHATSAPP`, `DRIVE`, `CALENDAR`, or `MEETING`. | Confirmed — required |
-| `tenant_id` | Organization/tenant that owns the content. Guaranteed to be non-empty. | Confirmed — required |
-| `ingested_at` | Time Bridge landed the object. Always normalized to UTC. | Confirmed — required |
-| `scope_decision` | Bridge work-relevance decision: `INCLUDED` or `EXCLUDED`. | Confirmed — required |
-| `content_hash` | SHA-256 hash of the raw bytes, used as a deterministic deduplication key. | Confirmed — required |
-| `schema_version` | Version of the `RawObjectEvent` contract. | Confirmed — required |
-| `attachment_index` | Position of the object within its logical source item. `0` represents the body or standalone item; `1+` represents attachments. | Confirmed — required |
-
-### Optional Bridge fields
+### Event fields
 
 | Field | Description | Status |
 |---|---|---|
-| `participants` | Coarse list of people involved in the source interaction, copied from the source export. | Confirmed — optional |
-| `content_type` | Exact MIME/content type of the stored object. | Confirmed — optional |
-| `size_bytes` | Size of the stored object in bytes. | Confirmed — optional |
-| `transcript_object_key` | MinIO pointer to a platform-generated transcript, when one exists. It follows the same object-key format as `object_key`. | Confirmed — optional |
-| `source_timestamp` | Original creation time at the source. Always normalized to UTC. | Confirmed — optional |
-| `modality` | Technical routing hint for MIND processing. Current values: `audio`, `scanned_doc`. | Confirmed — optional |
-| `correlation_id` | UUID shared by events that belong to the same logical source item, such as an email body and its attachments. Standalone items may omit it. | Confirmed — optional |
+| `schema_version` | Version of the `RawObjectEvent` contract. | required |
+| `source_type` | Business origin/system: `EMAIL`, `SLACK`, `WHATSAPP`, `DRIVE`, `CALENDAR`, `ZOOM`, `BIGBLUEBUTTON`, `SCANNED_DOC`. Typed as `RawSourceType`, separate from the task output's `SourceType` (which follows Inbox and still has `MEETING`), so a value added for one contract never leaks into the other. | required |
+| `tenant_id` | Organization/tenant that owns the content. Non-empty. | required |
+| `correlation_id` | UUID of the logical item, stable across all its revisions. | required |
+| `ingested_at` | Time Bridge landed the item. UTC. | required |
+| `scope_decision` | `INCLUDED` or `EXCLUDED`, derived from `classification`; `INCLUDED` by default when nothing classified the item. | required |
+| `revision` | Strictly increasing per `correlation_id`. | required |
+| `change_type` | `UPSERT` or `DELETE_REVIEW`. | required |
+| `change_significance_score` | Integer 0-100. Bridge sends 100 until it computes a real score; MIND does not act on it yet. | required |
+| `objects` | The item's MinIO objects (see `RawObjectRef`). At least one for `UPSERT`, none for `DELETE_REVIEW`. | required |
+| `participants` | Coarse list of people involved, copied from the source export. | optional |
+| `source_timestamp` | Original creation time at the source. UTC. | optional |
+| `source_ref` | The source system's own identifier for the item, unique within `source_type`: Slack `channel_id:ts`, Zoom meeting `uuid`, BBB `recordID`, email Message-ID. An identifier, not a link; the UI builds links from `source_type` + `source_ref`. `null` when the source has none (WhatsApp). May change between revisions. | optional |
+| `classification` | Bridge's triage of the item (see below). | optional |
+
+### RawObjectRef: one MinIO object
+
+| Field | Description | Status |
+|---|---|---|
+| `role` | `BODY`, `ATTACHMENT`, `TRANSCRIPT`, `RECORDING`, `SOURCE_METADATA`. | required |
+| `object_key` | Exact MinIO location, `SOURCE/tenant/YYYY-MM-DD/file`. | required |
+| `content_hash` | `sha256:` + 64 hex digits of the raw bytes. | required |
+| `content_type` | MIME type of the stored object. | optional |
+| `size_bytes` | Size in bytes, non-negative. | optional |
+| `modality` | `TEXT`, `AUDIO`, `SCANNED_DOC`: which engine processes the object. Required, so a recording is never defaulted to `TEXT`. | required |
+
+### classification
+
+`decided_by` (`MODEL` or `RULE`), three labels with a value and a 0-1
+confidence (`category`, `quality`, `sensitivity`), a free-text `reason` for
+humans only, and `classifier { model, prompt_version }`.
+
+- Unknown values do not break the event: an unknown `category` becomes
+  `OTHER`, an unknown `sensitivity` becomes `HIGH` (fail safe), and an unknown
+  `quality` drops the label.
+- A classification that still fails validation (an unknown `decided_by`, a new
+  field, a confidence outside 0-1) is dropped, not the event: `classification`
+  becomes `None` and a warning names where it failed, never its content. MIND
+  doesn't read it, so it must never cost the item; Bridge "fails open" the same
+  way when its own classifier fails.
+- Outside `classification`, every enum in the event rejects an unknown value.
+- MIND does not enforce Bridge's own classification rules (which categories a
+  `source_type` may have, confidence 1.0 for `RULE`, `EXCLUDED` only with a
+  classification). A mismatch is a Bridge bug, not a reason to drop the event.
 
 ### Resolved Bridge decisions
 
-- `dedup_key` is not part of `RawObjectEvent` v1. `content_hash` is the deterministic deduplication key.
+- Deduplication key: `correlation_id + ":" + revision`. `content_hash` is per
+  object now, so no single hash represents the event.
+- An object with `role: TRANSCRIPT` replaces `transcript_object_key`; its
+  presence means ASR is not needed.
+- `DELETE_REVIEW` means the item was deleted at the source. Consumers flag
+  their outputs for review and do not delete them automatically.
+- `SOURCE_METADATA` is the platform's own report, untouched, in a format per
+  `source_type` (Zoom JSON, BBB XML). MIND does not need to read it.
 - `language` is not supplied by Bridge; MIND determines language when needed.
-- `trace_id` was removed from Bridge v1.
-- `source_type` represents the business/source system, while `modality` represents technical processing/routing.
-- The exact business rules that cause `scope_decision=EXCLUDED` are still being finalized by Bridge. In v1, Bridge currently defaults objects to `INCLUDED`.
+- `source_type` represents the business/source system, while `modality`
+  represents technical processing/routing.
+- Not pinned down in #31: the timestamp format. Bridge currently sends
+  `ingested_at` as epoch seconds (`"1791877808.974982000"`); Pydantic reads it
+  correctly, but ISO-8601 is what our tests use.
 
 Bridge contract discussion: [Issue #31](https://github.com/KamaTechOrg/Resonance-Flow/issues/31)
