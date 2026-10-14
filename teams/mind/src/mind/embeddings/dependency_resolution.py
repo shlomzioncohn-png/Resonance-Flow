@@ -31,12 +31,12 @@ async def resolve_dependency_targets(
     on empty text, same as embed()."""
     if threshold is None:
         threshold = get_settings().dependency_match_threshold
+    # exclude_completed=True at the store level, not a post-hoc Python
+    # filter here -- index_consumer.py never deletes completed tasks, only
+    # flips the flag, and a small k (find_duplicate's k=1) could fetch
+    # nothing but completed rows; filtering afterward would then discard
+    # everything even with a real open match just outside that window.
     results = await asyncio.gather(
-        *(nearest_tasks(store, text, k=k, is_query=is_query) for text in references)
+        *(nearest_tasks(store, text, k=k, is_query=is_query, exclude_completed=True) for text in references)
     )
-    # Completed tasks are never deleted from the index (index_consumer.py
-    # only flips is_completed) -- a DONE/REJECTED/CANCELLED task must not
-    # come back as a live dependency/duplicate match.
-    return [
-        [c for c in candidates if c.similarity >= threshold and not c.is_completed] for candidates in results
-    ]
+    return [[c for c in candidates if c.similarity >= threshold] for candidates in results]

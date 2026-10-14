@@ -315,7 +315,7 @@ async def test_search_query_can_use_the_hnsw_index(store):
     async with store._pool.connection() as conn, conn.cursor() as cur:
         await cur.execute("SET LOCAL enable_seqscan = off;")
         await cur.execute(
-            sql.SQL("EXPLAIN {}").format(store._search_query()),
+            sql.SQL("EXPLAIN {}").format(store._search_query(exclude_completed=False)),
             ([0.0] * EMBEDDING_DIM, [0.0] * EMBEDDING_DIM, 1),
         )
         plan = "\n".join(row[0] for row in await cur.fetchall())

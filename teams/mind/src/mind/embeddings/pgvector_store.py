@@ -154,19 +154,26 @@ class PgVectorStore(VectorStore):
         async with self._pool.connection() as conn, conn.cursor() as cur:
             await cur.execute(sql.SQL("TRUNCATE TABLE {table};").format(table=self._table()))
 
-    def _search_query(self) -> sql.Composed:
+    def _search_query(self, *, exclude_completed: bool) -> sql.Composed:
         # ORDER BY the raw <=> expression, not the similarity alias --
-        # pgvector can't match the HNSW index to an alias.
+        # pgvector can't match the HNSW index to an alias. WHERE NOT
+        # is_completed (not a post-hoc Python filter) so a small k counts
+        # only open candidates -- otherwise k rows of completed tasks would
+        # leave nothing, even with a real open match just outside that window.
+        where_clause = sql.SQL("WHERE NOT is_completed") if exclude_completed else sql.SQL("")
         return sql.SQL(
             """
             SELECT task_id, 1 - (embedding <=> %s::vector) AS similarity, is_completed
             FROM {table}
+            {where_clause}
             ORDER BY embedding <=> %s::vector
             LIMIT %s;
             """
-        ).format(table=self._table())
+        ).format(table=self._table(), where_clause=where_clause)
 
-    async def search(self, query_vector: list[float], k: int) -> list[SearchResult]:
+    async def search(
+        self, query_vector: list[float], k: int, *, exclude_completed: bool = False
+    ) -> list[SearchResult]:
         await self._ensure_ready()
         async with self._pool.connection() as conn, conn.cursor() as cur:
             # set_config(), not SET LOCAL -- that can't take a bound param.
@@ -174,7 +181,9 @@ class PgVectorStore(VectorStore):
                 "SELECT set_config('hnsw.ef_search', %s, true);",
                 (str(self._settings.search_effort),),
             )
-            await cur.execute(self._search_query(), (query_vector, query_vector, k))
+            await cur.execute(
+                self._search_query(exclude_completed=exclude_completed), (query_vector, query_vector, k)
+            )
             rows = await cur.fetchall()
             return [
                 SearchResult(task_id=row[0], similarity=row[1], is_completed=row[2])

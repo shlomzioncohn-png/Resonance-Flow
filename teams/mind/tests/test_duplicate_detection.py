@@ -99,6 +99,32 @@ async def test_a_completed_task_is_never_flagged_as_a_duplicate(store):
     assert match is None
 
 
+async def test_a_completed_top_match_does_not_starve_out_an_open_runner_up(store):
+    """find_duplicate() uses k=1 -- the exact scenario where post-hoc
+    filtering fails: if the single fetched row is completed and gets
+    discarded afterward, nothing is left, even though a genuinely open
+    duplicate exists just outside that k=1 window."""
+    await store.upsert(
+        "task-db-upgrade-done",
+        embed(task_text("Upgrade the production database", "Move to the new major version before Q2")),
+    )
+    await store.mark_completed("task-db-upgrade-done")
+    await store.upsert(
+        "task-db-upgrade-open",
+        embed(task_text("Upgrade the production database", "Move to a newer major version before Q3")),
+    )
+
+    match = await find_duplicate(
+        store,
+        "Upgrade production DB",
+        "Move to the new major version before Q2 ends",
+        threshold=0.0,
+    )
+
+    assert match is not None
+    assert match.task_id == "task-db-upgrade-open"
+
+
 async def test_uses_symmetric_embedding_not_the_mention_vs_passage_case():
     """#471 compares full task vs full task -- is_query=False. Reusing
     resolve_dependency_targets()'s default (True, for #245's short-mention
@@ -110,4 +136,4 @@ async def test_uses_symmetric_embedding_not_the_mention_vs_passage_case():
         await find_duplicate(store, "Title", "Description", threshold=0.9)
 
     mock_embed_async.assert_awaited_once_with("Title Description", is_query=False)
-    store.search.assert_awaited_once_with([0.0] * EMBEDDING_DIM, k=1)
+    store.search.assert_awaited_once_with([0.0] * EMBEDDING_DIM, k=1, exclude_completed=True)

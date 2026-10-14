@@ -244,10 +244,14 @@ async def test_a_completed_task_is_never_returned_as_a_live_match(store):
     assert candidates == []
 
 
-async def test_completed_filter_is_deterministic_regardless_of_similarity():
+async def test_requests_exclude_completed_from_the_store():
+    """The actual is_completed filtering lives in store.search() (SQL-level,
+    see PgVectorStore and test_vector_store.py) -- this only confirms
+    resolve_dependency_targets() asks for it on every call."""
     store = AsyncMock()
-    store.search.return_value = [SearchResult(task_id="task-done", similarity=0.99, is_completed=True)]
+    store.search.return_value = []
+    with patch("mind.embeddings.search.embed_async") as mock_embed_async:
+        mock_embed_async.return_value = [0.0] * EMBEDDING_DIM
+        await resolve_dependency_targets(store, ["the DB upgrade"], k=3, threshold=0.0)
 
-    [candidates] = await resolve_dependency_targets(store, ["the DB upgrade"], threshold=0.0)
-
-    assert candidates == []
+    store.search.assert_awaited_once_with([0.0] * EMBEDDING_DIM, k=3, exclude_completed=True)
