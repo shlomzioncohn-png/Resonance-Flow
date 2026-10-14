@@ -1,0 +1,45 @@
+{{/*
+Opt-in per component: components.<name>.metrics.enabled renders a ServiceMonitor
+telling the Prometheus Operator (teams/relay/argocd/apps/kube-prometheus-stack.yaml)
+to scrape that component's Service on its `http` port at metrics.path.
+
+Only rendered when the cluster has the monitoring.coreos.com/v1 CRDs. Teams' kind
+CI clusters don't, and creating a ServiceMonitor there would fail the install for
+every team - so there it's silently skipped. `helm template` without a cluster
+skips it too; pass --api-versions monitoring.coreos.com/v1/ServiceMonitor to render it.
+
+Every scraped series gets `component` (the components.<name> key) and `team`
+(metrics.team, defaulting to the component name) labels, used to filter
+dashboards and route alerts per team.
+*/}}
+{{- if .Capabilities.APIVersions.Has "monitoring.coreos.com/v1/ServiceMonitor" }}
+{{- range $componentName, $component := .Values.components }}
+{{- if and $component.enabled $component.service $component.metrics $component.metrics.enabled }}
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+
+metadata:
+  name: {{ include "resonance-flow.fullname" $ }}-{{ $componentName }}
+  labels:
+    {{- include "resonance-flow.labels" $ | nindent 4 }}
+    app.kubernetes.io/component: {{ $componentName }}
+
+spec:
+  selector:
+    matchLabels:
+      {{- include "resonance-flow.selectorLabels" $ | nindent 6 }}
+      app.kubernetes.io/component: {{ $componentName }}
+
+  endpoints:
+    - port: http
+      path: {{ $component.metrics.path | default "/actuator/prometheus" }}
+      interval: {{ $component.metrics.interval | default "30s" }}
+      relabelings:
+        - targetLabel: component
+          replacement: {{ $componentName }}
+        - targetLabel: team
+          replacement: {{ $component.metrics.team | default $componentName }}
+{{- end }}
+{{- end }}
+{{- end }}

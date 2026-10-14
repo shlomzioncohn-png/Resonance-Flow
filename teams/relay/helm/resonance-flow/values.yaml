@@ -56,6 +56,16 @@ ingress:
       component: lens-gateway
     - path: /auth
       component: lens-gateway
+# Where kube-prometheus-stack runs (teams/relay/argocd/apps/kube-prometheus-stack.yaml).
+# Components opt into scraping with their own block:
+#   metrics:
+#     enabled: true
+#     path: /actuator/prometheus   # default; /prometheus for management base-path "/"
+#     interval: 30s                # default
+#     team: lens                   # default: the component name
+# See templates/servicemonitor.yaml and README.md "Metrics scraping".
+monitoring:
+  namespace: monitoring
 pipeConsumerGroupSweep:
   enabled: true
   schedule: "0 * * * *"

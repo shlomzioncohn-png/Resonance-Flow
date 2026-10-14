@@ -6,6 +6,11 @@ upstream caller (e.g. notification-delivery trusting lens-bff) - without it,
 any pod in the cluster could forge those headers. Egress is left untouched.
 kubelet probes and `kubectl port-forward` (the CD smoke test) don't pass
 through pod networking, so they aren't affected.
+
+A component that also has metrics.enabled additionally admits Prometheus pods
+from the monitoring.namespace namespace, so templates/servicemonitor.yaml's
+scrapes aren't dropped. Both selectors sit in one `from` entry, so a pod must
+match both: other pods in that namespace (e.g. Alertmanager) stay denied.
 */}}
 {{- range $componentName, $component := .Values.components }}
 {{- if and $component.enabled $component.networkPolicy }}
@@ -37,6 +42,18 @@ spec:
               {{- include "resonance-flow.selectorLabels" $ | nindent 14 }}
               app.kubernetes.io/component: {{ . }}
         {{- end }}
+      ports:
+        - port: http
+          protocol: TCP
+    {{- end }}
+    {{- if and $component.metrics $component.metrics.enabled }}
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ $.Values.monitoring.namespace }}
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: prometheus
       ports:
         - port: http
           protocol: TCP
