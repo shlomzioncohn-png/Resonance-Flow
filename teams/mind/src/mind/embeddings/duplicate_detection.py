@@ -16,5 +16,7 @@ async def find_duplicate(
     if threshold is None:
         threshold = get_settings().duplicate_similarity_threshold
     text = task_text(title, description)
-    [candidates] = await resolve_dependency_targets(store, [text], k=1, threshold=threshold, is_query=False)
+    [candidates] = await resolve_dependency_targets(
+        store, [text], k=1, threshold=threshold, is_query=False
+    )
     return candidates[0] if candidates else None

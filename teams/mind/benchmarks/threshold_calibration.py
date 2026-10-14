@@ -125,7 +125,13 @@ async def _run_cases(
         others = [c for c in candidates if c.task_id != expected_task_id]
         best_other = max(others, key=lambda c: c.similarity)
         results.append(
-            CaseResult(text, expected_task_id, expected_similarity, best_other.task_id, best_other.similarity)
+            CaseResult(
+                text,
+                expected_task_id,
+                expected_similarity,
+                best_other.task_id,
+                best_other.similarity,
+            )
         )
     return results
 
@@ -159,7 +165,9 @@ def _print_table(name: str, results: list[CaseResult]) -> None:
     for r in results:
         exp_sim = f"{r.expected_similarity:.3f}" if r.expected_similarity is not None else "-"
         exp_id = r.expected_task_id or "(none)"
-        print(f"{r.text:<48} {exp_id:<22} {exp_sim:>8}  {r.best_other_task_id:<22} {r.best_other_similarity:>9.3f}")
+        print(
+            f"{r.text:<48} {exp_id:<22} {exp_sim:>8}  {r.best_other_task_id:<22} {r.best_other_similarity:>9.3f}"
+        )
 
 
 async def main() -> None:

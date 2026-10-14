@@ -181,6 +181,14 @@ class PgVectorStore(VectorStore):
                 "SELECT set_config('hnsw.ef_search', %s, true);",
                 (str(self._settings.search_effort),),
             )
+            if exclude_completed:
+                # Without this, the WHERE NOT is_completed above only
+                # filters within the ef_search window the HNSW scan already
+                # grabbed -- if every row in that window is completed, k
+                # comes back short even though an open match exists further
+                # into the graph. strict_order makes Postgres keep walking
+                # until it has k rows that pass the filter (pgvector >=0.8).
+                await cur.execute("SELECT set_config('hnsw.iterative_scan', 'strict_order', true);")
             await cur.execute(
                 self._search_query(exclude_completed=exclude_completed),
                 (query_vector, query_vector, k),
