@@ -1,0 +1,95 @@
+# Cluster monitoring: Prometheus Operator + Prometheus + Alertmanager +
+# node-exporter + kube-state-metrics, in their own `monitoring` namespace.
+# Grafana is off for now - enabling and exposing it is a separate issue.
+#
+# Deliberately a separate Application, not a subchart of resonance-flow: a broken
+# monitoring stack must never block sync for every team's service (see README.md
+# "Known limitation").
+#
+# sync-wave "3" puts it AFTER resonance-flow, not before. The resonance-flow chart
+# only renders ServiceMonitors once the monitoring.coreos.com/v1 CRDs exist
+# (templates/servicemonitor.yaml checks .Capabilities), so on a fresh cluster its
+# first sync just skips them, and ArgoCD's next refresh picks them up once this
+# app has installed the CRDs. An earlier wave would make resonance-flow wait on
+# monitoring being Healthy - exactly the coupling this app is kept separate to avoid.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: kube-prometheus-stack
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "3"
+spec:
+  project: default
+  source:
+    repoURL: https://prometheus-community.github.io/helm-charts
+    chart: kube-prometheus-stack
+    targetRevision: 92.4.0
+    helm:
+      # Short release name - the chart prefixes every resource with it.
+      releaseName: monitoring
+      valuesObject:
+        prometheus:
+          prometheusSpec:
+            # Without these, Prometheus only selects ServiceMonitors/PodMonitors/rules
+            # labelled `release: monitoring`, so the ones resonance-flow renders
+            # would be silently ignored. false = select all of them, in any namespace.
+            serviceMonitorSelectorNilUsesHelmValues: false
+            podMonitorSelectorNilUsesHelmValues: false
+            ruleSelectorNilUsesHelmValues: false
+            probeSelectorNilUsesHelmValues: false
+            scrapeConfigSelectorNilUsesHelmValues: false
+            retention: 15d
+            # Prometheus deletes the oldest data past this, before the volume fills up.
+            retentionSize: 9GB
+            storageSpec:
+              volumeClaimTemplate:
+                spec:
+                  # Cluster's default StorageClass.
+                  accessModes: ["ReadWriteOnce"]
+                  resources:
+                    requests:
+                      storage: 10Gi
+            resources:
+              requests:
+                cpu: 200m
+                memory: 1Gi
+              limits:
+                memory: 2Gi
+        alertmanager:
+          # No receivers yet - routing to team channels is a separate issue.
+          alertmanagerSpec:
+            retention: 120h
+        # On by default in this chart. Enabling it (admin credentials, Ingress,
+        # dashboards) is its own issue, not part of installing the stack.
+        grafana:
+          enabled: false
+        # Control-plane components that run outside pod networking on kind and on
+        # managed clusters (EKS/GKE/AKS) - they can't be scraped there, and leaving
+        # them on only produces permanent TargetDown alerts.
+        kubeEtcd:
+          enabled: false
+        kubeControllerManager:
+          enabled: false
+        kubeScheduler:
+          enabled: false
+        kubeProxy:
+          enabled: false
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: monitoring
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      # The Prometheus Operator CRDs are too large for client-side apply's
+      # last-applied-configuration annotation (256KB limit).
+      - ServerSideApply=true
+    retry:
+      limit: 5
+      backoff:
+        duration: 5s
+        factor: 2
+        maxDuration: 3m
