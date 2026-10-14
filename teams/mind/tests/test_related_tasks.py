@@ -34,8 +34,7 @@ async def clean_store(store):
 
 
 async def test_a_known_related_pair_is_found(store):
-    """prod/staging deploys of the same change -- related, not duplicate
-    (#471's own hard-pair siblings), which is exactly #472's use case."""
+    """prod/staging deploys of the same change -- related, not duplicate."""
     await store.upsert(
         "task-deploy-prod", embed(task_text("Push the DB migration out to prod", ""))
     )
@@ -60,10 +59,7 @@ async def test_an_unrelated_task_scores_below_threshold_and_is_not_returned(stor
 
 
 async def test_the_query_task_never_appears_in_its_own_results(store):
-    """The issue calls this out explicitly: the single most common bug in
-    this feature. threshold=0.0 on purpose -- this isolates the
-    exclusion itself from threshold filtering, which could otherwise
-    hide the bug by coincidence."""
+    """threshold=0.0 -- isolates exclusion from threshold filtering."""
     await store.upsert(
         "task-deploy-prod", embed(task_text("Push the DB migration out to prod", ""))
     )
@@ -74,18 +70,14 @@ async def test_the_query_task_never_appears_in_its_own_results(store):
 
 
 async def test_a_task_with_no_embedding_yet_returns_an_empty_list(store):
-    """The query task_id was never indexed -- store.get_vector() returns
-    None. Must be a clean [], never a raised error."""
+    """Unindexed task_id -- get_vector() returns None, not an error."""
     results = await find_related(store, "task-never-indexed")
 
     assert results == []
 
 
 async def test_the_only_row_in_the_index_is_itself_so_nothing_is_related(store):
-    """The query task is indexed, but it's the only row -- after excluding
-    itself there's nothing left to compare against. Different code path
-    from an unindexed task_id (get_vector succeeds; search() just finds
-    no other rows)."""
+    """Indexed, but the only row -- nothing left after excluding itself."""
     await store.upsert(
         "task-deploy-prod", embed(task_text("Push the DB migration out to prod", ""))
     )
@@ -96,9 +88,7 @@ async def test_the_only_row_in_the_index_is_itself_so_nothing_is_related(store):
 
 
 async def test_no_candidate_clears_the_threshold(store):
-    """Candidates exist, but none clear the floor -- a real similarity
-    query, not a mocked one, and threshold=1.0 forces this deterministically
-    without relying on a borderline model score."""
+    """threshold=1.0 forces this deterministically."""
     await store.upsert(
         "task-deploy-prod", embed(task_text("Push the DB migration out to prod", ""))
     )
@@ -112,9 +102,7 @@ async def test_no_candidate_clears_the_threshold(store):
 
 
 async def test_requests_exclude_task_id_from_the_store():
-    """Deterministic: confirms find_related() actually asks the store to
-    exclude the query task_id, not just that it happens not to come back
-    in a particular real-model run."""
+    """Deterministic: find_related() actually asks the store to exclude it."""
     store = AsyncMock()
     store.get_vector.return_value = [0.0] * 4
     store.search.return_value = []
@@ -126,8 +114,7 @@ async def test_requests_exclude_task_id_from_the_store():
 
 
 async def test_find_related_responds_within_a_generous_latency_bound(store):
-    """Not a real p50/p95 proof (see benchmarks/related_tasks_benchmark.py
-    for that) -- just a basic regression guard, generous on purpose."""
+    """Basic regression guard, not a p50/p95 proof (see benchmarks/)."""
     await store.upsert(
         "task-deploy-prod", embed(task_text("Push the DB migration out to prod", ""))
     )

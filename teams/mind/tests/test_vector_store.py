@@ -245,9 +245,7 @@ async def test_search_exclude_task_id_omits_the_given_task(store):
 
 
 async def test_search_exclude_task_id_does_not_let_self_consume_the_k_budget(store):
-    """With k=1, the query task's own row (similarity 1.0, always the
-    closest possible match) must not crowd out a real second task --
-    the same k-starvation risk as exclude_completed, for a single id."""
+    """Same k-starvation risk as exclude_completed, for a single id."""
     query_vec = embed("Ship the release notes for v2.3")
     self_id, other_id = f"test-{uuid.uuid4()}", f"test-{uuid.uuid4()}"
     await store.upsert(self_id, query_vec)

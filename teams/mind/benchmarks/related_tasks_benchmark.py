@@ -1,21 +1,8 @@
-"""#472: find_related() latency -- p50/p95, measured twice, honestly:
+"""#472: find_related() p50/p95 -- at the 21-task pool (current real
+order of magnitude) and at 10,000+ synthetic filler rows (not a claim
+about current volume, just a scale check). See embeddings/README.md.
 
-1. At the order of magnitude this repo actually has real data for today
-   (the 21-task pool from threshold_calibration_tasks.json -- the real
-   `task_embeddings` table has 0 rows in a fresh local dev environment;
-   see embeddings/README.md "Real data"). This is the number #472 asks
-   for: what you actually have, not what the target eventually requires.
-2. At 10,000+ synthetic filler rows (same approach as #87's
-   vector_search_benchmark.py), to show find_related() -- not just raw
-   search() -- still clears the <300ms p95 target at that scale. This is
-   NOT a claim about current production volume; it's a scale check.
-
-find_related() adds one get_vector() round-trip before search() that
-raw search() latency alone (already measured by #87) doesn't cover.
-
-Run:  python -m benchmarks.related_tasks_benchmark
-(from teams/mind/, with MIND_VECTOR_STORE__DSN pointed at a real pgvector
-instance.) Uses its own table, dropped after the run.
+Run: python -m benchmarks.related_tasks_benchmark
 """
 
 import asyncio
@@ -158,7 +145,5 @@ async def main() -> None:
 
 
 if __name__ == "__main__":
-    # loop_factory=SelectorEventLoop: psycopg's async mode rejects Windows'
-    # default ProactorEventLoop; SelectorEventLoop is already the default
-    # everywhere else, so this is a no-op off Windows.
+    # psycopg async rejects Windows' default ProactorEventLoop.
     asyncio.run(main(), loop_factory=asyncio.SelectorEventLoop)
