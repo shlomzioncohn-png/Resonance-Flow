@@ -13,11 +13,11 @@ from mind.contracts.task_enums import TaskTier
 from mind.contracts.task_score_proposed import TaskScoreProposed
 from mind.evaluation.interfaces import ScoreResult
 from mind.scoring.confidence import score_confidence
-from mind.scoring.inputs import ScorableTask
+from mind.scoring.inbox_task import InboxTask
 
 
 def build_score_event(
-    task: ScorableTask,
+    task: InboxTask,
     result: ScoreResult,
     *,
     scored_at: datetime,
@@ -33,14 +33,13 @@ def build_score_event(
 
     return TaskScoreProposed(
         event_id=event_id or uuid4(),
+        tenant_id=UUID(task.tenant_id),
         task_id=UUID(task.task_id),
         mind_score=result.factors.base_score,
         scored_at=scored_at,
         factors=dict(result.factors.contributions),
         confidence=score_confidence(task),
-        # Inbox's own values: the conversion leaves an unset field None, so the
+        # Inbox's own value: the conversion leaves an unset tier None, so the
         # tier the model assumes for an unclassified task never reaches Chain.
         tier=TaskTier(task.tier.upper()) if task.tier is not None else None,
-        effort_estimate_minutes=task.effort_estimate,
-        deadline=task.deadline,
     )

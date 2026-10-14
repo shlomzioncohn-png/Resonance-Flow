@@ -18,8 +18,12 @@ from mind.scoring.segmented_model import SegmentedRankingModel
 
 TASK_A = "3f2c1a9e-7b4d-4e8a-9c1f-0a2b3c4d5e6f"
 TASK_B = "9a8b7c6d-5e4f-4a3b-8c2d-1e0f9a8b7c6d"
+TENANT = "7d6c5b4a-3e2f-4d1c-8b0a-9f8e7d6c5b4a"
 NOW = datetime(2026, 10, 13, 9, 0, tzinfo=UTC)
 DEADLINE = datetime(2026, 10, 20, 9, 0, tzinfo=UTC)
+# When Inbox wrote each state of the task: created first, updated after.
+CREATED_AT = datetime(2026, 10, 13, 8, 0, tzinfo=UTC)
+UPDATED_AT = datetime(2026, 10, 13, 8, 5, tzinfo=UTC)
 
 
 class ListSink:
@@ -51,11 +55,13 @@ def _timestamp(dt: datetime) -> Timestamp:
 def _created(task_id: str = TASK_A) -> TaskCreatedEvent:
     return TaskCreatedEvent(
         id=task_id,
+        tenant_id=TENANT,
         title="Fix the checkout crash",
         description="Customers cannot pay since this morning's deploy.",
         tier=TaskTier.TASK_TIER_OPERATIONAL,
         effort_estimate_minutes=30,
         deadline=_timestamp(DEADLINE),
+        created_at=_timestamp(CREATED_AT),
     )
 
 
@@ -63,11 +69,13 @@ def _updated(task_id: str = TASK_A, **changes) -> TaskUpdatedEvent:
     """The same task as `_created`, as task.updated, with `changes` applied."""
     fields = {
         "task_id": task_id,
+        "tenant_id": TENANT,
         "title": "Fix the checkout crash",
         "description": "Customers cannot pay since this morning's deploy.",
         "tier": TaskTier.TASK_TIER_OPERATIONAL,
         "effort_estimate_minutes": 30,
         "deadline": _timestamp(DEADLINE),
+        "updated_at": _timestamp(UPDATED_AT),
     }
     fields.update(changes)
     return TaskUpdatedEvent(**fields)
@@ -188,3 +196,76 @@ def test_a_failed_send_is_not_recorded_so_it_is_retried():
     publisher.handle_task_created(_created())
 
     assert len(sink.sent) == 1
+
+
+# --- events that arrive out of order ----------------------------------------
+
+
+def test_an_older_event_handled_after_a_newer_one_is_dropped(publisher, sink):
+    # The two topics have no ordering between them: the update can be handled
+    # before the task.created it followed.
+    update = _updated(deadline=_timestamp(datetime(2026, 10, 15, 9, 0, tzinfo=UTC)))
+    publisher.handle_task_updated(update)
+
+    publisher.handle_task_created(_created())
+
+    expected = SegmentedRankingModel().score(
+        to_scoring_task(update), ScoreContext(current_datetime=NOW)
+    )
+    assert expected.factors is not None
+    assert len(sink.sent) == 1
+    assert sink.sent[0].mind_score == expected.factors.base_score
+
+
+def test_an_update_that_publishes_nothing_still_counts_as_seen(publisher, sink):
+    # Chain's update changes no scored field, so nothing is sent, but an event
+    # older than it is still stale.
+    publisher.handle_task_created(_created())
+    later = datetime(2026, 10, 13, 8, 10, tzinfo=UTC)
+    publisher.handle_task_updated(_updated(is_available=True, updated_at=_timestamp(later)))
+
+    publisher.handle_task_updated(_updated(effort_estimate_minutes=90))  # at UPDATED_AT
+
+    assert len(sink.sent) == 1
+
+
+def test_an_event_without_a_timestamp_is_not_dropped(publisher, sink):
+    publisher.handle_task_created(_created())
+    event = _updated(effort_estimate_minutes=90)
+    event.ClearField("updated_at")
+
+    publisher.handle_task_updated(event)
+
+    assert len(sink.sent) == 2
+
+
+# --- events that can never be scored ----------------------------------------
+
+
+def test_an_event_that_cannot_be_scored_is_skipped_not_raised(publisher, sink):
+    # Raising would leave the offset uncommitted, and the same message would
+    # fail on every redelivery and stall the partition.
+    bad = _created()
+    bad.id = "not-a-uuid"
+
+    publisher.handle_task_created(bad)
+
+    assert sink.sent == []
+
+
+def test_the_next_event_is_still_handled_after_a_skipped_one(publisher, sink):
+    bad = _created()
+    bad.tenant_id = ""
+    publisher.handle_task_created(bad)
+
+    publisher.handle_task_created(_created(TASK_B))
+
+    assert [p.task_id for p in sink.sent] == [UUID(TASK_B)]
+
+
+def test_other_errors_still_propagate():
+    # Only an unscorable event is swallowed; a broker error must be retried.
+    publisher = ScorePublisher(FailsOnceSink(), clock=lambda: NOW)
+
+    with pytest.raises(RuntimeError):
+        publisher.handle_task_created(_created())

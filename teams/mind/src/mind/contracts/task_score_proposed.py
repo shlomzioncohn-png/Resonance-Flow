@@ -1,16 +1,14 @@
 """Contract for task.score.proposed events sent from MIND to Chain (#357).
 
-Agreed with Chain (Lea): event_id, task_id, mind_score (float), scored_at,
-confidence. No tenant_id or model_version. `factors` is Yonit's addition;
-Chain does not use it today.
-
-tier, effort_estimate_minutes and deadline are sent for now: the schema
-registered in shared/proto (#551) still carries them. Chain stores the effort
-from Inbox's task.created and does not use tier or deadline today. They are
-Inbox's values passed through unchanged.
+Agreed with Chain (Lea): event_id, tenant_id, task_id, mind_score (float),
+scored_at, confidence, tier. No effort_estimate_minutes (Chain takes it from
+Inbox's task.created) and no deadline (it is already inside mind_score). No
+model_version. `factors` is Yonit's addition; Chain does not use it today.
 
 Kafka key = task_id. A re-publish for the same task replaces the previous
-score; the latest scored_at wins.
+score. The proto registered today (shared/proto/task-score-proposed-event.proto)
+has no scored_at, so Chain keeps the last message on the task's partition, not
+the latest scored_at; scored_at decides only once #542 adds it to the proto.
 """
 
 from uuid import UUID
@@ -32,13 +30,15 @@ class TaskScoreProposed(BaseModel):
 
     # Chain dedupes on it.
     event_id: UUID
+    # The same value Chain gets on Inbox's task.created.
+    tenant_id: UUID
     task_id: UUID
 
     # Importance only: the model's base_score, before any blocked adjustment.
     # Blocking is Chain's job, so sending the adjusted score would count it twice.
     mind_score: float = Field(ge=0.0, le=1.0)
 
-    # When MIND computed this score. Chain keeps the latest one per task.
+    # When MIND computed this score. Not in the registered proto yet (#542).
     scored_at: AwareDatetime
 
     # How far to trust mind_score given which of its inputs were missing:
@@ -49,8 +49,6 @@ class TaskScoreProposed(BaseModel):
     # Not used by Chain today; kept for later consumers.
     factors: dict[str, float] = Field(default_factory=dict)
 
-    # As Inbox sent them, None when unset. The tier the model assumes for an
+    # As Inbox sent it, None when unset. The tier the model assumes for an
     # unclassified task never goes here: Chain sees only a tier someone assigned.
     tier: TaskTier | None = None
-    effort_estimate_minutes: int | None = Field(default=None, gt=0)
-    deadline: AwareDatetime | None = None
