@@ -147,6 +147,21 @@ def test_a_priced_zero_cost_is_zero_not_none():
     assert (row("free").cost_usd_total, row("free").unpriced_count) == (0.0, 0)
 
 
+def test_the_dollar_total_is_rounded_not_float_noise():
+    record_call("llm", 10.0, 0.1, kind=CallKind.LLM)
+    record_call("llm", 10.0, 0.2, kind=CallKind.LLM)
+    assert row("llm").cost_usd_total == 0.3  # not 0.30000000000000004
+
+
+def test_a_failed_llm_call_counts_as_an_error_and_as_unpriced():
+    # No usage was reported, so its cost is unknown; error_count tells how many
+    # of the unpriced calls failed rather than lacked a price.
+    record_call("deepseek-chat", 10.0, 0.001, kind=CallKind.LLM)
+    record_call("deepseek-chat", 10.0, None, kind=CallKind.LLM, status=CallStatus.ERROR)
+    r = row("deepseek-chat")
+    assert (r.error_count, r.unpriced_count, r.cost_usd_total) == (1, 1, 0.001)
+
+
 def test_cost_partly_priced_is_a_lower_bound_with_the_gap_counted():
     record_call("llm", 10.0, 0.25, kind=CallKind.LLM)
     record_call("llm", 10.0, None, kind=CallKind.LLM)
@@ -278,10 +293,11 @@ def test_the_summary_is_logged_every_n_calls(
     assert "calls=3" in line
 
 
-def test_zero_turns_the_periodic_summary_off(
-    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+@pytest.mark.parametrize("every_n", [0, None])
+def test_zero_or_none_turns_the_periodic_summary_off(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture, every_n: int | None
 ):
-    use_limits(monkeypatch, summary_every_n_calls=0)
+    use_limits(monkeypatch, summary_every_n_calls=every_n)
     with caplog.at_level(logging.INFO, logger="mind.observability"):
         for _ in range(5):
             record_call("m", 1.0, None)

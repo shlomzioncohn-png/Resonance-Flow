@@ -43,7 +43,7 @@ price per token. Every field and log key carries its unit (`cpu_seconds`,
 - `model_call_summary()` -- the aggregate, per call name, since the process
   started (see "The summary" below). Served at `GET /debug/model-calls`, and
   logged as one `model_call_summary` line per call name every
-  `MIND_MONITORING__SUMMARY_EVERY_N_CALLS` calls (default 100, 0 = off);
+  `MIND_MONITORING__SUMMARY_EVERY_N_CALLS` calls (default 100, 0 or `none` = off);
   `log_summary()` logs it on demand, e.g. at the end of a batch run or a
   benchmark.
 - Storage is currently an in-memory ring buffer (last 10k calls) plus an
@@ -57,8 +57,8 @@ price per token. Every field and log key carries its unit (`cpu_seconds`,
 
 | Call | Latency | Compute cost | Dollar cost | Tokens | `kind` / limits / warnings |
 |---|---|---|---|---|---|
-| OCR (`ocr.extract_text`) | `duration_ms` | `cpu_s`: Tesseract's child-process CPU seconds; `None` on Windows | n/a | n/a | `ocr` -- duration limit |
-| ASR (`asr.transcribe`) | `duration_ms` | `cpu_s`: this process's CPU seconds (Whisper runs in it) | n/a | n/a | `asr` -- duration limit |
+| OCR (`ocr.extract_text`) | `duration_ms` | `cpu_s`: rendering the PDF pages (this process) + Tesseract's child processes; `None` on Windows | n/a | n/a | `ocr` -- duration limit |
+| ASR (`asr.transcribe`) | `duration_ms` | `cpu_s`: decoding the audio + VAD + Whisper, all in this process | n/a | n/a | `asr` -- duration limit |
 | LLM (`BasicExtractor._call`, R2's) | `duration_ms` | n/a | `cost`: tokens x provider price in US dollars; `None` when unpriced or failed | `prompt_tokens`, `completion_tokens` | `llm` -- duration and dollar limits |
 
 ### The summary
@@ -120,9 +120,12 @@ and defaults: `config.MonitoringSettings`, and `.env.example`.
 | `MIND_MONITORING__ASR_MAX_DURATION_MS` | 120000 | same, ASR |
 | `MIND_MONITORING__LLM_MAX_DURATION_MS` | 10000 | same, LLM |
 | `MIND_MONITORING__LLM_MAX_COST_USD` | 0.02 | LLM call dearer than this: `MODEL_CALL_EXPENSIVE` |
-| `MIND_MONITORING__SUMMARY_EVERY_N_CALLS` | 100 | log the summary every N calls; 0 = never |
+| `MIND_MONITORING__SUMMARY_EVERY_N_CALLS` | 100 | log the summary every N calls; 0 or `none` = never |
 
-`none` turns a limit off (an empty value is rejected). The limit defaults
+`none` turns a limit off (an empty value is rejected). **An invalid value
+never breaks a model call:** the settings fall back to all their defaults
+and log one ERROR -- the API loads them at start-up, so it shows up then.
+The limit defaults
 are starting points from the measurements so far, not validated targets --
 see the `MonitoringSettings` docstring for where each comes from. The LLM
 ones come from R2's measurements with the paid key (~1.4 s a call, 2.2 s at
@@ -173,15 +176,18 @@ counts, and an unknown cost stays `None` instead of `0.0`:
 - CPU time is process-wide: accurate while one call runs at a time, as in
   MIND's consumers; overlapping calls in one process are each charged for
   both. It is the share of the machine a call used.
-- OCR's window covers the Tesseract runs only (not PDF rasterizing), and
-  ASR's covers VAD + Whisper only (not audio decoding).
+- A call's window starts once its input is accepted: OCR's includes
+  rendering the PDF pages and ASR's decoding the audio, but not loading the
+  Whisper model (warm-up, once per process). ASR's transcription timeout
+  still counts from Whisper's start, as before.
 - Duration limits are absolute -- not per OCR page or per second of audio --
   so an unusually slow short recording is not flagged. There is no CPU-seconds
   limit yet.
 - Every call over a limit warns, with no rate limiting: a system-wide
   slowdown produces one warning per call.
 - An unpriced LLM call never warns on its own; unpriced calls show only as
-  `unpriced_count` in the summary.
+  `unpriced_count` in the summary. That count includes failed calls (no usage
+  reported); `error_count` on the same row says how many failed.
 - A failed LLM call is recorded as unpriced, but some failures are billed
   (`MAX_TOKENS`, a blocked answer). R2 tracks that on her side; until then an
   LLM `cost_usd_total` can undercount them.

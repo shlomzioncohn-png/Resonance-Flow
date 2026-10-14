@@ -703,6 +703,12 @@ def _transcribe(content: bytes, filename: str, max_duration_s: float) -> ASRResu
     except _ASRUnavailable as exc:
         return _failure(ASRFailureReason.ASR_UNAVAILABLE, str(exc))
 
+    # The call's window -- wall clock and CPU -- starts here, so it includes
+    # decoding the audio as well as VAD and Whisper. Whisper runs in this
+    # process (CTranslate2's threads included), so this process's own CPU
+    # covers all of it. The transcription timeout keeps its own clock below.
+    call_start = time.perf_counter()
+    cpu = CpuClock()
     try:
         decoded = _decode(content, max_duration_s)
     except _NotAudio as exc:
@@ -717,10 +723,7 @@ def _transcribe(content: bytes, filename: str, max_duration_s: float) -> ASRResu
 
     segments: list[TranscriptSegment] = []
     timed_out = False
-    start = time.perf_counter()
-    # Whisper runs in this process (CTranslate2's threads included), so this
-    # process's own CPU covers all of it.
-    cpu = CpuClock()
+    start = time.perf_counter()  # TRANSCRIBE_TIMEOUT_S counts from here
     # ERROR until the loop completes, so anything that leaves it early is
     # recorded as a failure. A timeout is not: it returns what was decoded, and
     # the asr_call line below says it timed out.
@@ -757,11 +760,16 @@ def _transcribe(content: bytes, filename: str, max_duration_s: float) -> ASRResu
         # failing: the environment (out of memory, a broken install).
         return _failure(ASRFailureReason.ASR_FAILED, f"Whisper failed: {exc}")
     finally:
-        duration_ms = (time.perf_counter() - start) * 1000
+        duration_ms = (time.perf_counter() - start) * 1000  # VAD + Whisper, for rtf
         cpu_s = cpu.elapsed_s()
         # A local model's cost is its CPU seconds, not dollars (#479).
         record_call(
-            model_name, duration_ms, cost=None, kind=CallKind.ASR, status=status, cpu_s=cpu_s
+            model_name,
+            (time.perf_counter() - call_start) * 1000,
+            cost=None,
+            kind=CallKind.ASR,
+            status=status,
+            cpu_s=cpu_s,
         )
         audio_s = len(audio) / SAMPLE_RATE
         logger.info(

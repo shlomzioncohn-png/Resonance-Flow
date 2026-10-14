@@ -385,6 +385,14 @@ def _extract(content: bytes, filename: str, max_pages: int) -> OCRResult:
     except RuntimeError as exc:
         return _failure(OCRFailureReason.OCR_UNAVAILABLE, str(exc))
 
+    # The call's window -- wall clock and CPU -- starts here, so it includes
+    # rendering the PDF pages (in this process, ~0.5 s a page) as well as the
+    # Tesseract runs. Input rejected below is still not recorded: only a call
+    # that reaches Tesseract is a model call. Tesseract runs as a child
+    # process, so its CPU is the children's counters -- None where the
+    # platform cannot report them (Windows).
+    start = time.perf_counter()
+    cpu = CpuClock(include_children=True)
     try:
         if _is_pdf(content, filename):
             page_images, pages_available = _pdf_to_page_images(content, max_pages)
@@ -399,10 +407,6 @@ def _extract(content: bytes, filename: str, max_pages: int) -> OCRResult:
         return _failure(OCRFailureReason.UNREADABLE_FORMAT, "PDF has no pages")
 
     parsed: list[_PageOCR] = []
-    start = time.perf_counter()
-    # Tesseract runs as a child process, so its CPU is the children's counters,
-    # not ours -- None where the platform cannot report them (Windows).
-    cpu = CpuClock(include_children=True)
     # ERROR until the loop completes, so anything that leaves it early --
     # including a bug, which is not caught below -- is recorded as a failure.
     status = CallStatus.ERROR

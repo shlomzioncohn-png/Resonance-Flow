@@ -27,6 +27,7 @@ from mind.config import get_settings
 from mind.contracts.errors import register_error_handlers
 from mind.contracts.health import HealthResponse
 from mind.embeddings.pgvector_store import PgVectorStore
+from mind.observability.tracking import monitoring_settings
 
 
 @asynccontextmanager
@@ -35,6 +36,10 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     event loop, and close it on shutdown -- regardless of how shutdown
     happens (an unhandled exception in a route must not leak the pool).
     """
+    # Read the monitoring limits now, so an invalid MIND_MONITORING__* value
+    # is logged at start-up rather than at the first model call. It never
+    # stops the app: the defaults are used instead (see monitoring_settings).
+    monitoring_settings()
     store = PgVectorStore(get_settings().vector_store)
     try:
         await store.open()

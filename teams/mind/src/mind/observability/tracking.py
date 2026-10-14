@@ -20,6 +20,7 @@ there, so one ledger holds all of them.
 
 from __future__ import annotations
 
+import dataclasses
 import logging
 import threading
 import time
@@ -29,7 +30,7 @@ from dataclasses import dataclass, field
 from enum import StrEnum
 from functools import lru_cache
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError
 
 from mind.config import MonitoringSettings
 
@@ -101,8 +102,21 @@ _records: deque[ModelCallRecord] = deque(maxlen=_MAX_IN_MEMORY_RECORDS)
 
 @lru_cache(maxsize=1)
 def monitoring_settings() -> MonitoringSettings:
-    """Limits and summary interval, read once per process (a change needs a restart)."""
-    return MonitoringSettings()
+    """Limits and summary interval, read once per process (a change needs a restart).
+
+    An invalid MIND_MONITORING__* value falls back to every default and logs
+    one ERROR -- it never raises. record_call() reads this on every model
+    call, so raising here would turn a typo in a monitoring setting into a
+    failure of every OCR, ASR and LLM call. The API loads it at start-up
+    (api/main.py) so the error shows up then, not at the first model call.
+    """
+    try:
+        return MonitoringSettings()
+    except ValidationError as exc:
+        logger.error(
+            "invalid MIND_MONITORING__* settings, using the defaults for all of them: %s", exc
+        )
+        return MonitoringSettings.model_construct()
 
 
 def _limits(kind: CallKind | None) -> tuple[float | None, float | None]:
@@ -276,6 +290,11 @@ class CallNameSummary(BaseModel):
     milliseconds. CPU seconds apply to OCR/ASR calls; tokens and dollars to
     LLM calls.
 
+    error_count counts the calls that raised. A failed LLM call reported no
+    usage, so it is in unpriced_count too: unpriced_count is every call whose
+    dollar cost is unknown -- no price on file, or no usage reported -- and
+    error_count says how many of them failed.
+
     For each measure, its *_count tells the two kinds of null apart:
 
     * count None -- the measure does not apply to this kind (an OCR call has
@@ -313,8 +332,8 @@ class ModelCallSummary(BaseModel):
     by_call_name: list[CallNameSummary]
 
 
-def _summarize(name: str, totals: _Totals) -> CallNameSummary:
-    durations = sorted(totals.durations)
+def _summarize(name: str, totals: _Totals, durations: list[float]) -> CallNameSummary:
+    durations.sort()
     duration_limit_ms, cost_limit_usd = _limits(totals.kind)
     cpu_applies = totals.cpu_applicable > 0
     tokens_apply = totals.tokens_applicable > 0
@@ -333,7 +352,9 @@ def _summarize(name: str, totals: _Totals) -> CallNameSummary:
         tokens_unreported_count=(
             totals.tokens_applicable - totals.tokens_reported if tokens_apply else None
         ),
-        cost_usd_total=totals.cost_usd if totals.priced else None,
+        # Rounded like the per-call log line's precision allows: a float sum of
+        # dollar amounts otherwise shows as 0.30000000000000004.
+        cost_usd_total=round(totals.cost_usd, 8) if totals.priced else None,
         unpriced_count=totals.usd_applicable - totals.priced if usd_applies else None,
         duration_limit_ms=duration_limit_ms,
         slow_count=totals.slow,
@@ -349,9 +370,16 @@ def model_call_summary() -> ModelCallSummary:
     processes each one only sees its own calls (see team README "Open
     decisions" -- the week-8 report is where a shared store would come in).
     """
+    # Copy under the lock and sort outside it: sorting up to 10k samples per
+    # name holds the lock (and, from the async /debug endpoint, the event
+    # loop) for milliseconds, and record_call() waits on that lock.
     with _lock:
-        rows = [_summarize(name, totals) for name, totals in sorted(_totals.items())]
+        snapshot = [
+            (name, dataclasses.replace(totals), list(totals.durations))
+            for name, totals in sorted(_totals.items())
+        ]
         total_calls = _total_calls
+    rows = [_summarize(name, totals, durations) for name, totals, durations in snapshot]
     return ModelCallSummary(total_calls=total_calls, by_call_name=rows)
 
 
@@ -462,8 +490,8 @@ def record_call(
         _records.append(record)
         _totals.setdefault(record.model_name, _Totals()).add(record, check)
         _total_calls += 1
-        every_n = monitoring_settings().summary_every_n_calls
-        summary_due = every_n > 0 and _total_calls % every_n == 0
+        every_n = monitoring_settings().summary_every_n_calls  # 0 or None: off
+        summary_due = every_n is not None and every_n > 0 and _total_calls % every_n == 0
     cpu_applies = _cpu_applies(record.kind)
     llm_applies = _llm_measures_apply(record.kind)
     logger.info(

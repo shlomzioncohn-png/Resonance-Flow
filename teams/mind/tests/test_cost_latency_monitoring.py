@@ -47,7 +47,7 @@ from pydantic import ValidationError
 
 from mind.config import MonitoringSettings
 from mind.contracts.base_enums import SourceType
-from mind.extraction.extractor import BasicExtractor
+from mind.extraction.extractor import BasicExtractor, ExtractionSuccess
 from mind.extraction.providers.pricing import estimate_cost
 from mind.multimodal import asr, ocr
 from mind.multimodal.asr import transcribe
@@ -72,6 +72,10 @@ from tests.test_asr_pipeline import (
     use_model,
 )
 from tests.test_ocr_result import png_bytes, tesseract_prints, tsv
+
+# The real settings loader. tests/conftest.py replaces tracking.monitoring_settings
+# for every test, after this module has been imported, so this is the original.
+_real_monitoring_settings = tracking.monitoring_settings
 
 _posix_only = pytest.mark.skipif(
     sys.platform == "win32", reason="Windows reports no child-process CPU"
@@ -231,6 +235,29 @@ def test_where_tesseracts_cpu_cannot_be_read_it_is_unknown_not_zero(
 
 
 @pytest.mark.usefixtures("tesseract_found")
+def test_an_ocr_calls_window_includes_rendering_the_pdf(monkeypatch: pytest.MonkeyPatch):
+    # Rendering the pages runs in this process before Tesseract does -- part
+    # of what the call costs, wall clock and CPU alike. A fake wall clock that
+    # only rendering moves makes the duration exact.
+    clock = [1000.0]
+    monkeypatch.setattr(ocr, "time", SimpleNamespace(perf_counter=lambda: clock[0]))
+
+    def render(content: bytes, max_pages: int):
+        clock[0] += 7.0  # rendering takes 7 s of wall clock...
+        burn_cpu(0.2)  # ...and 0.2 s of CPU
+        return [png_bytes()], 1
+
+    monkeypatch.setattr(ocr, "_is_pdf", lambda content, filename: True)
+    monkeypatch.setattr(ocr, "_pdf_to_page_images", render)
+    tesseract_prints(monkeypatch, tsv(("word", 90.0)))
+    assert extract_text(b"%PDF-1.4 a scan", filename="a.pdf").success
+    [call] = get_recent_calls()
+    assert call.duration_ms == pytest.approx(7000)
+    if sys.platform != "win32":  # Windows cannot read Tesseract's CPU: cpu_s is None
+        assert call.cpu_s is not None and call.cpu_s >= 0.2
+
+
+@pytest.mark.usefixtures("tesseract_found")
 @pytest.mark.parametrize(
     "fail",
     [
@@ -286,6 +313,19 @@ def test_an_asr_call_is_recorded_with_its_latency_and_cpu(monkeypatch: pytest.Mo
     assert call.duration_ms > 0
     assert call.cpu_s is not None and call.cpu_s >= 0.2  # Whisper's CPU is this process's
     assert call.cost is None  # a local model costs CPU seconds, not dollars
+
+
+def test_an_asr_calls_window_includes_decoding_the_audio(monkeypatch: pytest.MonkeyPatch):
+    real_decode = asr._decode
+
+    def decode(content: bytes, max_duration_s: float):
+        burn_cpu(0.2)  # decoding happens in this process, before VAD and Whisper
+        return real_decode(content, max_duration_s)
+
+    monkeypatch.setattr(asr, "_decode", decode)
+    one_asr_call(monkeypatch)  # a fake Whisper that uses next to no CPU itself
+    [call] = get_recent_calls()
+    assert call.cpu_s is not None and call.cpu_s >= 0.2
 
 
 def test_a_failed_asr_call_is_still_recorded_as_an_error(monkeypatch: pytest.MonkeyPatch):
@@ -518,8 +558,13 @@ def test_monitoring_limits_are_read_from_the_environment(monkeypatch: pytest.Mon
 def test_none_in_the_environment_turns_a_check_off(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setenv("MIND_MONITORING__LLM_MAX_COST_USD", "none")
     monkeypatch.setenv("MIND_MONITORING__OCR_MAX_DURATION_MS", "none")
+    monkeypatch.setenv("MIND_MONITORING__SUMMARY_EVERY_N_CALLS", "none")
     s = MonitoringSettings(_env_file=None)  # type: ignore[call-arg]
-    assert (s.llm_max_cost_usd, s.ocr_max_duration_ms) == (None, None)
+    assert (s.llm_max_cost_usd, s.ocr_max_duration_ms, s.summary_every_n_calls) == (
+        None,
+        None,
+        None,
+    )
 
 
 @pytest.mark.usefixtures("clean_monitoring_env")
@@ -538,3 +583,68 @@ def test_a_bad_monitoring_value_is_rejected(monkeypatch: pytest.MonkeyPatch, nam
     monkeypatch.setenv(f"MIND_MONITORING__{name}", value)
     with pytest.raises(ValidationError):
         MonitoringSettings(_env_file=None)  # type: ignore[call-arg]
+
+
+# --- the real settings loader, environment to record_call ---------------------------
+# Everything above runs with the loader replaced (tests/conftest.py). These go
+# through the real one: MIND_MONITORING__* in the environment -> monitoring_settings()
+# -> record_call() -- where an invalid value used to fail every model call.
+
+
+@pytest.fixture
+def real_settings_loader(monkeypatch: pytest.MonkeyPatch, clean_monitoring_env: None):
+    _real_monitoring_settings.cache_clear()
+    monkeypatch.setattr(tracking, "monitoring_settings", _real_monitoring_settings)
+    yield
+    _real_monitoring_settings.cache_clear()
+
+
+@pytest.mark.usefixtures("real_settings_loader", "tesseract_found")
+@pytest.mark.parametrize(
+    ("name", "value"),
+    [
+        pytest.param("OCR_MAX_DURATION_MS", "abc", id="not-a-number"),
+        pytest.param("LLM_MAX_COST_USD", "-1", id="out-of-range"),
+        pytest.param("SUMMARY_EVERY_N_CALLS", "often", id="a-bad-interval"),
+    ],
+)
+def test_an_invalid_monitoring_value_never_breaks_a_model_call(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture, name: str, value: str
+):
+    monkeypatch.setenv(f"MIND_MONITORING__{name}", value)
+    tesseract_prints(monkeypatch, tsv(("word", 90.0)))
+    with caplog.at_level(logging.INFO, logger="mind.observability"):
+        one_ocr_call()  # each asserts its call succeeded
+        one_asr_call(monkeypatch)
+        outcome = BasicExtractor(
+            ScriptedProvider(_ANSWER, model="deepseek-chat"), sleep=lambda _: None
+        ).extract(_SOURCE, SourceType.EMAIL)
+    assert isinstance(outcome, ExtractionSuccess)
+    assert len(get_recent_calls()) == 3  # and every one was still recorded
+    errors = [r.getMessage() for r in caplog.records if r.levelno == logging.ERROR]
+    assert len(errors) == 1  # logged once, not on every call
+    assert "MIND_MONITORING__" in errors[0] and "using the defaults" in errors[0]
+    assert row(OCR_MODEL_NAME).duration_limit_ms == 30_000  # the defaults apply
+
+
+@pytest.mark.usefixtures("real_settings_loader")
+def test_a_valid_limit_from_the_environment_reaches_record_call(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+):
+    monkeypatch.setenv("MIND_MONITORING__LLM_MAX_DURATION_MS", "5")
+    with caplog.at_level(logging.INFO, logger="mind.observability"):
+        tracking.record_call("deepseek-chat", 6.0, None, kind=CallKind.LLM)
+    [line] = warnings(caplog, "MODEL_CALL_SLOW")
+    assert "limit_ms=5.0" in line
+
+
+@pytest.mark.usefixtures("real_settings_loader")
+def test_none_turns_the_summary_line_off_through_the_real_loader(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+):
+    monkeypatch.setenv("MIND_MONITORING__SUMMARY_EVERY_N_CALLS", "none")
+    with caplog.at_level(logging.INFO, logger="mind.observability"):
+        for _ in range(3):
+            tracking.record_call("m", 1.0, None)
+    assert not [m for m in caplog.messages if m.startswith("model_call_summary")]
+    assert not [r for r in caplog.records if r.levelno >= logging.ERROR]

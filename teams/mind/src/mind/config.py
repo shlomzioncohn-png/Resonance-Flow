@@ -93,8 +93,8 @@ class MonitoringSettings(BaseSettings):
     asr_max_duration_ms: float | None = Field(default=120_000, gt=0)
     llm_max_duration_ms: float | None = Field(default=10_000, gt=0)
     llm_max_cost_usd: float | None = Field(default=0.02, ge=0)
-    # Log the summary every this many model calls; 0 turns it off.
-    summary_every_n_calls: int = Field(default=100, ge=0)
+    # Log the summary every this many model calls; 0 or none turns it off.
+    summary_every_n_calls: int | None = Field(default=100, ge=0)
 
 
 class VectorStoreSettings(BaseModel):
