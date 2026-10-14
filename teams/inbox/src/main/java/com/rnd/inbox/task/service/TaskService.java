@@ -257,7 +257,9 @@ public class TaskService {
     public Task completeTask(Task task, User completedBy, UUID correlationId) {
         Map<String, Object> before = auditSnapshot(task);
         task.setStatus(TaskStatus.DONE);
-        task.setCompletedAt(Instant.now(clock));
+        Instant now = Instant.now(clock);
+        task.setCompletedAt(now);
+        task.setUpdatedAt(now);
         Task saved = taskRepository.save(task);
 
         outboxEventRepository.save(buildOutboxEvent(EventType.TASK_COMPLETED, TaskCompletedPayload.from(saved), saved, correlationId));

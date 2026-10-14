@@ -444,7 +444,7 @@ class TaskServiceTest {
     }
 
     @Test
-    void completeTask_setsStatusDoneAndCompletedAt() {
+    void completeTask_setsStatusDoneCompletedAtAndUpdatedAt() {
         Task task = incomingTask();
         task.setId(UUID.randomUUID());
         when(taskRepository.save(task)).thenReturn(task);
@@ -453,6 +453,7 @@ class TaskServiceTest {
 
         assertThat(result.getStatus()).isEqualTo(TaskStatus.DONE);
         assertThat(result.getCompletedAt()).isEqualTo(NOW);
+        assertThat(result.getUpdatedAt()).isEqualTo(NOW);
     }
 
     @Test

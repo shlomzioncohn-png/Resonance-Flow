@@ -130,6 +130,7 @@ class TaskServiceOutboxPayloadTest {
         TaskCompletedEvent event = new TaskCompletedProtoMapper().toProto(capturedOutboxEvent().getPayload());
         assertThat(event.getTaskId()).isEqualTo(task.getId().toString());
         assertThat(event.getIsCompleted()).isTrue();
+        assertThat(Timestamps.toMillis(event.getUpdatedAt())).isEqualTo(NOW.toEpochMilli());
     }
 
     private OutboxEvent capturedOutboxEvent() {
