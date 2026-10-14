@@ -52,7 +52,7 @@ public class PostgresTaskRepository implements TaskRepository {
     @Transactional
     public Task save(Task task) {
         Objects.requireNonNull(task, "task must not be null");
-        jpaRepository.upsert(task.getId(), task.getParentTaskId(),
+        jpaRepository.upsert(task.getId(), task.getParentTaskId(), task.getTenantId(),
                 task.getStatus().name(), task.isReady(), task.getBlockingCount(),
                 task.getOpenConstraintCount(), task.getEstimatedDurationMin(), task.getScore(),
                 task.getCreatedAt(), task.getUpdatedAt(), task.getDeletedAt());
@@ -136,6 +136,7 @@ public class PostgresTaskRepository implements TaskRepository {
         return Task.builder()
                 .id(entity.getId())
                 .parentTaskId(entity.getParentTaskId())
+                .tenantId(entity.getTenantId())
                 .status(entity.getStatus())
                 .isReady(entity.isReady())
                 .blockingCount(entity.getBlockingCount())
@@ -152,6 +153,7 @@ public class PostgresTaskRepository implements TaskRepository {
      * fresh save()) so Hibernate's dirty checking emits the UPDATE at commit. */
     private static void copyOnto(TaskEntity entity, Task updated) {
         entity.setParentTaskId(updated.getParentTaskId());
+        entity.setTenantId(updated.getTenantId());
         entity.setStatus(updated.getStatus());
         entity.setReady(updated.isReady());
         entity.setBlockingCount(updated.getBlockingCount());

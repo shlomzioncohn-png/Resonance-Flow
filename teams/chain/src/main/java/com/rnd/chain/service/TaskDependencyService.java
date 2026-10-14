@@ -6,6 +6,7 @@ import com.rnd.chain.dto.DependencyChangeSource;
 import com.rnd.chain.dto.DependencyHistoryEntry;
 import com.rnd.chain.dto.PageResponse;
 import com.rnd.chain.dto.TaskDependency;
+import com.rnd.chain.exception.CrossTenantDependencyException;
 import com.rnd.chain.exception.InvalidDependencyException;
 import com.rnd.chain.exception.InvalidRequestException;
 import com.rnd.chain.exception.TaskNotFoundException;
@@ -134,6 +135,19 @@ public class TaskDependencyService {
                     DependencyChangeAction.ADDED, source, sourceRef);
             try {
                 return dependencyEdgeService.addDependency(taskId, dependsOnTaskId);
+            } catch (CrossTenantDependencyException failure) {
+                // Issue #580: unlike a duplicate/missing-task no-op (compensateHistory alone),
+                // this rejection must stay visible, not just vanish with the speculative entry -
+                // replace it with a REJECTED one instead of merely deleting it. Only attempt that
+                // if the delete itself succeeded (compensateHistory returns the same failure
+                // instance on success, a different one if the delete itself failed) - recording
+                // REJECTED on top of a still-dangling speculative ADDED entry would just mask
+                // whatever that deeper problem was.
+                RuntimeException toThrow = compensateHistory(recorded.id(), failure);
+                if (toThrow == failure) {
+                    recordHistory(taskId, dependsOnTaskId, DependencyChangeAction.REJECTED, source, sourceRef);
+                }
+                throw toThrow;
             } catch (RuntimeException failure) {
                 throw compensateHistory(recorded.id(), failure);
             }

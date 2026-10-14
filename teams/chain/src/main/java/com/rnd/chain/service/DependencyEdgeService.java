@@ -3,6 +3,7 @@ package com.rnd.chain.service;
 import com.rnd.chain.dto.Task;
 import com.rnd.chain.dto.TaskDependency;
 import com.rnd.chain.dto.TaskStatus;
+import com.rnd.chain.exception.CrossTenantDependencyException;
 import com.rnd.chain.exception.DependencyNotFoundException;
 import com.rnd.chain.exception.DuplicateDependencyException;
 import com.rnd.chain.exception.InvalidDependencyException;
@@ -79,6 +80,7 @@ public class DependencyEdgeService {
 
             Task task = taskCounterUpdater.requireTask(taskId);
             Task dependencyTask = taskCounterUpdater.requireTask(dependsOnTaskId);
+            requireSameTenant(task, dependencyTask);
 
             Optional<TaskDependency> saved =
                     taskDependencyRepository.save(
@@ -118,10 +120,28 @@ public class DependencyEdgeService {
             throw new InvalidDependencyException(
                     "Dependency would create a cycle: " + taskId + " -> " + dependsOnTaskId);
         }
-        taskCounterUpdater.requireTask(taskId);
-        boolean dependsOnAlreadyDone =
-                taskCounterUpdater.requireTask(dependsOnTaskId).getStatus() == TaskStatus.DONE;
+        Task task = taskCounterUpdater.requireTask(taskId);
+        Task dependsOnTask = taskCounterUpdater.requireTask(dependsOnTaskId);
+        requireSameTenant(task, dependsOnTask);
+        boolean dependsOnAlreadyDone = dependsOnTask.getStatus() == TaskStatus.DONE;
         return new PendingEdge(dependsOnTaskId, true, dependsOnAlreadyDone);
+    }
+
+    /**
+     * Rejects an edge between two tasks that don't share a confirmed tenant - either their
+     * {@code tenantId}s differ, or either one is still null. A null tenant is treated as
+     * "not yet known", not "any tenant" (issue #580's strict policy): existing/test data without
+     * a tenant is not meaningful enough to warrant the weaker "skip the check" alternative.
+     */
+    private static void requireSameTenant(Task task, Task dependsOnTask) {
+        UUID taskTenantId = task.getTenantId();
+        UUID dependsOnTenantId = dependsOnTask.getTenantId();
+        if (taskTenantId == null || dependsOnTenantId == null || !taskTenantId.equals(dependsOnTenantId)) {
+            throw new CrossTenantDependencyException(
+                    "Dependency rejected: task " + task.getId() + " (tenant " + taskTenantId
+                            + ") and task " + dependsOnTask.getId() + " (tenant " + dependsOnTenantId
+                            + ") do not share a confirmed tenant");
+        }
     }
 
     /** Writes one already-validated edge - no cycle/existence checks, see {@link #validateEdge}. */

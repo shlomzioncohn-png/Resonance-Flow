@@ -120,13 +120,18 @@ src/main/java/com/rnd/chain/
 ├── exception/              # GlobalExceptionHandler, NotFoundException/BadRequestException +
 │                           # TaskNotFoundException/DuplicateDependencyException (adopted from
 │                           # Riki's branch - see the 2026-09-08 fixes below), plus
-│                           # DependencyNotFoundException/InvalidDependencyException (issue #66)
+│                           # DependencyNotFoundException/InvalidDependencyException (issue #66);
+│                           # CrossTenantDependencyException/TenantReassignmentException (issue
+│                           # #580, see "Tenant isolation" below)
 └── config/                 # MockDataConfig - empty-seeded repository beans;
                             # ConstraintRepositoryConfig - the real Postgres-backed
                             # ConstraintRepository bean (issue #378)
 src/main/resources/application.yml
 src/main/resources/db/migration/  # Flyway migrations (V1 schema, V2 dependency_history,
-                                  # V3 task_constraint - issue #378)
+                                  # V3 task_constraint - issue #378, V4 unresolved_dependencies
+                                  # (Mind out-of-order target buffering), V5 removes owner_id,
+                                  # V6 task.tenant_id + same-tenant trigger, V7 dependency_history
+                                  # REJECTED action - V6/V7 issue #580)
 src/test/java/com/rnd/chain/
 ├── controller/ChainControllerTest.java
 ├── service/                # TaskTraversalServiceTest, TaskTraversalPerformanceTest,
@@ -690,7 +695,8 @@ existence checks and no shared implementation was merged yet at the time this wa
 ## Dependency change history (Issue #153)
 
 Every dependency-graph change that actually creates or removes an edge is recorded as a
-`DependencyHistoryEntry` (`dto/`): `id`, `taskId`, `dependsOnTaskId`, `action` (`ADDED`/`REMOVED`),
+`DependencyHistoryEntry` (`dto/`): `id`, `taskId`, `dependsOnTaskId`, `action`
+(`ADDED`/`REMOVED`/`REJECTED` - the third added by issue #580, see "Tenant isolation" below),
 `source` (`MIND`/`USER`/`SYSTEM`), `sourceRef` (nullable), `createdAt`. It's a plain DTO with no
 REST/Kafka/Jackson dependency, so the same model applies regardless of how it's read later.
 
@@ -718,6 +724,7 @@ the repo; the `page`/`size`/`PageResponse` shape is meant for reuse by future en
 This is also the first `@RestControllerAdvice` in the repo (`GlobalExceptionHandler`, in
 `exception/`): `TaskNotFoundException`/`DependencyNotFoundException` -> 404,
 `DuplicateDependencyException` -> 409, `InvalidDependencyException`/`InvalidRequestException` -> 400,
+`CrossTenantDependencyException` -> 400 (own error code `CROSS_TENANT_DEPENDENCY`, issue #580),
 with a `{"error": "...", "message": "..."}` body.
 
 ### Idempotency
@@ -808,6 +815,73 @@ originated the file in question):
   check of the method signature to know what `true`/`false` meant.
 
 Full test suite (47 tests, `mvn clean test`) passes.
+
+## Tenant isolation (Issue #580)
+
+`task.tenant_id` (V6 migration) is populated from Inbox's `task.created`/`task.updated` events
+(`TaskCreatedEventHandler`/`TaskUpdatedEventHandler` -> `TaskEligibilityService`) - Inbox owns
+tenancy, Chain never originates a tenant assignment. This is a deliberate decision by Chain, not
+a documented spec requirement (the Inbox/Chain ownership spec doesn't mention tenants at all) -
+recorded here for that reason. Whether/how Chain's own read APIs (`/ancestors`, `/descendants`,
+`/dependents`, etc.) should be scoped by tenant is a separate, still-open question with the team
+lead - this issue only makes the underlying data and the dependency graph itself correct.
+
+**Null-tenant policy is strict, not permissive.** A dependency edge is only allowed when both
+tasks have a non-null, *equal* `tenant_id` - a null on either side is rejected the same as a
+mismatch, not skipped. Existing/test data without a tenant isn't meaningful enough to warrant a
+weaker "skip when unknown" carve-out; `tenant_id` is nullable only because it predates this
+column and is backfilled lazily by the consumers above. A follow-up is tracked to make it
+`NOT NULL` once every row is backfilled.
+
+**Enforcement lives in one place**: `TaskEligibilityService.addDependency`/`addDependencies`
+(`requireSameTenant`), which every caller - the REST correction API (`TaskDependencyController` ->
+`TaskDependencyService`) and Mind's `task.dependencies.proposed` path
+(`DependencyProposedEventHandler` -> `TaskDependencyService`, one edge at a time; see "Kafka event
+infrastructure" above) - already converges on, via `TaskDependencyService`. A rejection throws
+`CrossTenantDependencyException` and is never silently dropped: `TaskDependencyService.addDependency`
+replaces its speculative `ADDED` history entry with a `REJECTED` one (new `DependencyChangeAction`
+value, V7 migration) instead of just deleting it, for every caller - REST and Mind alike, since
+both now go through the same method. `DependencyProposedEventHandler` builds its `sourceRef` as
+`eventId:taskId:dependsOnTaskId` (unique per edge, not just per event, since one Mind event can
+propose several edges and `dependency_history` has a unique index on `(source, source_ref)`), then
+converts the exception to `NonRetryableEventException` (straight to `.errors` - a cross-tenant edge
+is a structural data problem, not a timing issue, same as a cycle).
+- **DB-level backstop**: `fn_check_task_dependency_same_tenant`/`trg_task_dependency_check_same_tenant`
+  (V6 migration) mirrors the same strict rule as a `BEFORE INSERT/UPDATE` trigger on
+  `task_dependency`, same shape as the existing soft-delete trigger
+  (`fn_check_task_dependency_tasks_active`, V1). It deliberately defers to the FK/CHECK
+  constraints (returns early, no exception) when either referenced task doesn't exist at all -
+  BEFORE ROW triggers fire before those constraints are evaluated, so without that guard this
+  trigger's generic exception would mask the FK violation's/self-reference CHECK's more specific
+  one for a row that was never going to be valid regardless of tenant.
+
+**`task.updated` claiming a different tenant is rejected, not applied.** Confirmed directly with
+the Inbox team (Shlomzion Cohn): `tenant_id` is fixed from task creation and never legitimately
+changes afterward. `TaskEligibilityService.onTaskStatusChangedIfNewer` checks this *before* the
+staleness short-circuit (so a stale/duplicate redelivery carrying a wrong tenant is still
+flagged, not silently swallowed as "not newer") and throws `TenantReassignmentException` if the
+stored `tenant_id` is non-null and differs from the event's. `TaskUpdatedEventHandler` converts
+this to `NonRetryableEventException` - retrying never fixes an upstream bug that keeps resending
+the same wrong `tenant_id`. When the stored `tenant_id` is still null (a legacy task predating
+this column), the event's value backfills it instead - that's the normal first-population case,
+not a mismatch.
+
+**Mind is not a tenant source, by design - there is no Mind-side tenant cross-check to build.**
+An earlier draft of this issue assumed Mind's `task.dependencies.proposed` event carries its own
+`tenant_id` to cross-check against Chain's stored value. It doesn't, and shouldn't: `tenant_id`
+is only ever meant to arrive from Inbox. This is also true on the wire - Mind's real message
+(`shared/proto/task-dependencies-proposed-event.proto` -> `DependencyProposedEvent`, a
+cross-team, Relay-owned registered schema) has no `tenant_id` field, and adding one would be a
+cross-team schema change (Relay + Mind), not a Chain-only one - moot anyway, since the per-edge
+check above already covers a cross-tenant edge proposed by Mind using the tasks' own
+Inbox-sourced tenant, regardless of who proposed the edge.
+
+Tests: `TaskEligibilityServiceTest` (same/different/null-tenant `addDependency`/`addDependencies`,
+`onTaskStatusChangedIfNewer` backfill/match/reject incl. the stale-redelivery case),
+`TaskDependencyServiceTest`/`DependencyProposedEventHandlerTest` (REJECTED history on rejection,
+REST and Mind paths respectively), `TaskUpdatedEventHandlerTest` (tenant mismatch ->
+`NonRetryableEventException`, not retried), `TaskRepositoryContractTest` (`tenantId` round-trips
+through `save`/`findById` for both the in-memory and Postgres implementations).
 
 ## Transactional graph lock
 

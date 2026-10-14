@@ -24,6 +24,10 @@ public class TaskEntity {
 
     @Column(name = "parent_task_id")
     private UUID parentTaskId;
+
+    @Column(name = "tenant_id")
+    private UUID tenantId;
+
     @Enumerated(EnumType.STRING)
     @Column(nullable = false)
     private TaskStatus status;
@@ -71,6 +75,14 @@ public class TaskEntity {
 
     public void setParentTaskId(UUID parentTaskId) {
         this.parentTaskId = parentTaskId;
+    }
+
+    public UUID getTenantId() {
+        return tenantId;
+    }
+
+    public void setTenantId(UUID tenantId) {
+        this.tenantId = tenantId;
     }
 
     public TaskStatus getStatus() {

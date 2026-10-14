@@ -224,10 +224,13 @@ ChainEventProcessingTemplate chainEventProcessingTemplate() {
                                 producerProps));
     }
 
+    private static final UUID TENANT_ID = UUID.randomUUID();
+
     private static Task buildTask(UUID id) {
 
         return Task.builder()
                 .id(id)
+                .tenantId(TENANT_ID)
                 .status(TaskStatus.PENDING)
                 .isReady(true)
                 .blockingCount(0)

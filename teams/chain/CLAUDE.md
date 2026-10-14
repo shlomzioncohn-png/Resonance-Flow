@@ -100,6 +100,50 @@ already has (edgeExists() / the task's own stored previousStatus).
   `@EqualsAndHashCode` there, since it generates nothing alongside the hand-written methods.
 
 ## Open items
+- 2026-10-12, issue #580 (tenant isolation) - decisions made while implementing, each resolved
+  directly rather than left implicit:
+  - **Null-tenant policy is strict**: an edge needs both tasks' `tenant_id` non-null and equal;
+    null on either side is rejected, same as a mismatch. Confirmed with the user that existing/
+    test data without a tenant isn't meaningful enough to justify the weaker "skip when unknown"
+    alternative the issue offered. Follow-up: make `task.tenant_id` `NOT NULL` once every row is
+    backfilled through `TaskCreatedEventHandler`/`TaskUpdatedEventHandler`.
+  - **`task.updated` claiming a different tenant than stored is rejected** (`TenantReassignmentException`
+    -> `NonRetryableEventException`), not applied - confirmed directly with the Inbox team
+    (Shlomzion Cohn, Slack) that `tenant_id` never legitimately changes after task creation, so
+    this always signals a bug upstream. A still-null stored tenant is backfilled instead, not
+    treated as a mismatch.
+  - **Dropped the issue's item 3 (a Mind-side `tenant_id` cross-check) entirely, not deferred**:
+    the user confirmed Mind was never meant to be a tenant source (only Inbox is), and separately,
+    Mind's real event (`task-dependencies-proposed-event.proto`, now a cross-team, Relay-owned
+    registered schema under `shared/proto/`, not a private Chain draft) has no such field at all -
+    adding one would be a cross-team schema change, moot anyway since the per-edge same-tenant
+    check already covers an edge Mind proposes.
+  - **Mid-implementation discovery**: an earlier exploration pass for this issue was accidentally
+    done against the unmerged `shifra/chain-pending-task-buffer-tables` branch instead of `main`
+    (that branch's `PendingDependencyService`/pending-event-buffer feature does **not** exist on
+    `main`) - re-verified everything actually touched against the real `main` before implementing.
+    At that point `DependencyProposedEventHandler` called `TaskEligibilityService.addDependencies`
+    directly (no buffer/reconcile layer), so the cross-tenant check/REJECTED-history write was
+    added directly in that handler.
+  - **Superseded by a concurrent rewrite merged the next day (2026-10-13, PR #609 +
+    `chain/ruthHoltzman/582-task-completed-consumer` + the separate
+    "Riki-Mind-Dependency-Events"/`2c425890` work)**: `DependencyProposedEventHandler` no longer
+    calls `TaskEligibilityService.addDependencies` at all - it now calls
+    `TaskDependencyService.addDependency` once per edge (missing target -> buffered via the new
+    `UnresolvedDependencyService`/`unresolved_dependencies` table instead of retried; missing
+    source task is still retried). Merged this branch's tenant check/REJECTED-history code down
+    into `TaskEligibilityService`/`TaskDependencyService` to match, which actually **closes** the
+    gap noted below for Mind's path too: since Mind's edges now go through the same
+    `TaskDependencyService.addDependency` the REST path uses, a *successful* Mind-sourced add is
+    recorded in `dependency_history` as well, not just a rejected one.
+  - Also found incidentally while running the `@Tag("postgres")` suite for the first time in a
+    while (unrelated to tenant work, not fixed, flagged to the team): `TaskRepositoryContractTest`'s
+    `findByParentTaskId_returnsDirectChildren`/`findByParentTaskId_excludesSoftDeletedChildren`
+    seed a child referencing a `parentTaskId` that's never itself inserted - fails the real FK
+    constraint under `PostgresTaskRepositoryContractTest` (passes under the in-memory
+    implementation, which doesn't enforce FKs). `PostgresConstraintRepositoryTest.save_nullReason_roundTripsAsNull`
+    also fails independently (`reason` round-trips as `{}` instead of `null`) - also pre-existing,
+    also unrelated.
 - #649: TaskEligibilityService was split by domain - edges in `DependencyEdgeService`, constraints in
   `ConstraintEligibilityService`, counter helpers in `TaskCounterUpdater`. The graph lock is the
   `GraphLock` bean (see "Graph lock" below) shared by `DependencyEdgeService` and
