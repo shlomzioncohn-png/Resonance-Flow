@@ -147,18 +147,29 @@ spec:
         name: ${CONFIG_MAP}
 EOF
 
+read_phase() {
+  if ! PHASE="$(k get pod "$CLIENT_POD" -o jsonpath='{.status.phase}')"; then
+    echo "FAIL: could not read the phase of client pod ${CLIENT_POD}"; exit 1
+  fi
+}
+
 # Stream the logs once the container has started, then read the exit code.
 DEADLINE=$(( $(date +%s) + E2E_TIMEOUT ))
-until [ "$(k get pod "$CLIENT_POD" -o jsonpath='{.status.phase}')" != "Pending" ]; do
+read_phase
+while [ "$PHASE" = "Pending" ]; do
   if [ "$(date +%s)" -ge "$DEADLINE" ]; then
     echo "FAIL: client pod still Pending after ${E2E_TIMEOUT}s"; k describe pod "$CLIENT_POD" | tail -20; exit 1
   fi
   sleep 2
+  read_phase
 done
-k logs -f "$CLIENT_POD" || true
-until PHASE="$(k get pod "$CLIENT_POD" -o jsonpath='{.status.phase}')" && [ "$PHASE" = "Succeeded" ] || [ "$PHASE" = "Failed" ]; do
-  if [ "$(date +%s)" -ge "$DEADLINE" ]; then echo "FAIL: client pod did not finish within ${E2E_TIMEOUT}s"; exit 1; fi
+# A broken log stream isn't a test result - the pod phase below is what decides pass/fail.
+k logs -f "$CLIENT_POD" || echo "WARN: log stream for ${CLIENT_POD} ended with exit code $?"
+read_phase
+while [ "$PHASE" != "Succeeded" ] && [ "$PHASE" != "Failed" ]; do
+  if [ "$(date +%s)" -ge "$DEADLINE" ]; then echo "FAIL: client pod did not finish within ${E2E_TIMEOUT}s (phase: ${PHASE})"; exit 1; fi
   sleep 2
+  read_phase
 done
 
 echo ""
