@@ -74,7 +74,6 @@ public class TaskStateReconciliationService {
             Task.builder()
                     .id(currentTask.getId())
                     .parentTaskId(currentTask.getParentTaskId())
-                    .ownerId(currentTask.getOwnerId())
                     .status(currentTask.getStatus())
                     .isReady(actualIsReady)
                     .blockingCount(actualBlockingCount)

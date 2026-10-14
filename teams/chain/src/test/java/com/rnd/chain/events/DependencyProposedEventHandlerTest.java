@@ -31,7 +31,6 @@ class DependencyProposedEventHandlerTest {
     private static Task buildTask(UUID id) {
         return Task.builder()
                 .id(id)
-                .ownerId("owner")
                 .tenantId(TaskTestFixtures.DEFAULT_TENANT_ID)
                 .status(TaskStatus.PENDING)
                 .isReady(true)
@@ -205,7 +204,7 @@ class DependencyProposedEventHandlerTest {
         UUID taskId = UUID.randomUUID();
         UUID otherTenantDep = UUID.randomUUID();
         Task crossTenantTask = Task.builder()
-                .id(otherTenantDep).ownerId("owner").tenantId(TaskTestFixtures.OTHER_TENANT_ID)
+                .id(otherTenantDep).tenantId(TaskTestFixtures.OTHER_TENANT_ID)
                 .status(TaskStatus.PENDING).isReady(true).blockingCount(0).openConstraintCount(0)
                 .createdAt(LocalDateTime.now()).updatedAt(LocalDateTime.now()).build();
         Fixture fixture = newFixture(List.of(buildTask(taskId), crossTenantTask));

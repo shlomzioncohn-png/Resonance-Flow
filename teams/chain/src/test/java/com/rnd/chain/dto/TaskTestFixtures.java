@@ -34,7 +34,6 @@ public final class TaskTestFixtures {
     public static Task.Builder defaultTask(UUID id) {
         return Task.builder()
                 .id(id)
-                .ownerId("owner")
                 .tenantId(DEFAULT_TENANT_ID)
                 .status(TaskStatus.ACTIVE)
                 .isReady(false)

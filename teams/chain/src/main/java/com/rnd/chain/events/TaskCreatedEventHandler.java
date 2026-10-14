@@ -34,7 +34,7 @@ import com.rnd.chain.service.UnresolvedDependencyService;
  * task.dependencies.proposed event landing first) this handler must not reset blockingCount /
  * openConstraintCount / isReady back to their creation defaults, since those may already reflect
  * real dependency state Chain computed after the row was first created. It only overwrites the
- * Inbox-owned fields (ownerId, status) and falls back to a fresh insert when the row is genuinely
+ * Inbox-owned fields (tenantId, status) and falls back to a fresh insert when the row is genuinely
  * new.
  */
 @Component
@@ -80,7 +80,6 @@ public class TaskCreatedEventHandler {
             boolean existed = taskRepository.update(taskId, existing -> Task.builder()
                     .id(existing.getId())
                     .parentTaskId(existing.getParentTaskId())
-                    .ownerId(event.getOwnerId())
                     .tenantId(tenantId)
                     .status(status)
                     .isReady(existing.isReady())
@@ -96,7 +95,6 @@ public class TaskCreatedEventHandler {
             if (!existed) {
                 taskRepository.save(Task.builder()
                         .id(taskId)
-                        .ownerId(event.getOwnerId())
                         .tenantId(tenantId)
                         .status(status)
                         .isReady(true)

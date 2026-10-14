@@ -230,7 +230,6 @@ ChainEventProcessingTemplate chainEventProcessingTemplate() {
 
         return Task.builder()
                 .id(id)
-                .ownerId("owner")
                 .tenantId(TENANT_ID)
                 .status(TaskStatus.PENDING)
                 .isReady(true)

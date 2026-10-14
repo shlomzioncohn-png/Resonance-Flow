@@ -236,7 +236,6 @@ class ConstraintEligibilityServiceTest {
         return Task.builder()
                 .id(id)
                 .parentTaskId(null)
-                .ownerId("test-owner")
                 .status(status)
                 .isReady(ready)
                 .blockingCount(blockingCount)

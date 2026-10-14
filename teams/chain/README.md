@@ -129,9 +129,9 @@ src/main/java/com/rnd/chain/
 src/main/resources/application.yml
 src/main/resources/db/migration/  # Flyway migrations (V1 schema, V2 dependency_history,
                                   # V3 task_constraint - issue #378, V4 unresolved_dependencies
-                                  # (Mind out-of-order target buffering), V5 task.tenant_id +
-                                  # same-tenant trigger, V6 dependency_history REJECTED action -
-                                  # V5/V6 issue #580)
+                                  # (Mind out-of-order target buffering), V5 removes owner_id,
+                                  # V6 task.tenant_id + same-tenant trigger, V7 dependency_history
+                                  # REJECTED action - V6/V7 issue #580)
 src/test/java/com/rnd/chain/
 ├── controller/ChainControllerTest.java
 ├── service/                # TaskTraversalServiceTest, TaskTraversalPerformanceTest,
@@ -809,7 +809,7 @@ Full test suite (47 tests, `mvn clean test`) passes.
 
 ## Tenant isolation (Issue #580)
 
-`task.tenant_id` (V5 migration) is populated from Inbox's `task.created`/`task.updated` events
+`task.tenant_id` (V6 migration) is populated from Inbox's `task.created`/`task.updated` events
 (`TaskCreatedEventHandler`/`TaskUpdatedEventHandler` -> `TaskEligibilityService`) - Inbox owns
 tenancy, Chain never originates a tenant assignment. This is a deliberate decision by Chain, not
 a documented spec requirement (the Inbox/Chain ownership spec doesn't mention tenants at all) -
@@ -831,14 +831,14 @@ column and is backfilled lazily by the consumers above. A follow-up is tracked t
 infrastructure" above) - already converges on, via `TaskDependencyService`. A rejection throws
 `CrossTenantDependencyException` and is never silently dropped: `TaskDependencyService.addDependency`
 replaces its speculative `ADDED` history entry with a `REJECTED` one (new `DependencyChangeAction`
-value, V6 migration) instead of just deleting it, for every caller - REST and Mind alike, since
+value, V7 migration) instead of just deleting it, for every caller - REST and Mind alike, since
 both now go through the same method. `DependencyProposedEventHandler` builds its `sourceRef` as
 `eventId:taskId:dependsOnTaskId` (unique per edge, not just per event, since one Mind event can
 propose several edges and `dependency_history` has a unique index on `(source, source_ref)`), then
 converts the exception to `NonRetryableEventException` (straight to `.errors` - a cross-tenant edge
 is a structural data problem, not a timing issue, same as a cycle).
 - **DB-level backstop**: `fn_check_task_dependency_same_tenant`/`trg_task_dependency_check_same_tenant`
-  (V5 migration) mirrors the same strict rule as a `BEFORE INSERT/UPDATE` trigger on
+  (V6 migration) mirrors the same strict rule as a `BEFORE INSERT/UPDATE` trigger on
   `task_dependency`, same shape as the existing soft-delete trigger
   (`fn_check_task_dependency_tasks_active`, V1). It deliberately defers to the FK/CHECK
   constraints (returns early, no exception) when either referenced task doesn't exist at all -

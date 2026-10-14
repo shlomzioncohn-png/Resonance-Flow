@@ -324,7 +324,7 @@ class TaskDependencyServiceTest {
         // Issue #580: unlike a duplicate/missing-task no-op, a cross-tenant rejection must stay
         // visible in history, not just vanish along with the speculative ADDED entry.
         taskRepository.save(Task.builder()
-                .id(taskB).ownerId("owner").tenantId(TaskFixtures.OTHER_TENANT_ID).status(TaskStatus.ACTIVE)
+                .id(taskB).tenantId(TaskFixtures.OTHER_TENANT_ID).status(TaskStatus.ACTIVE)
                 .isReady(true).blockingCount(0).openConstraintCount(0)
                 .createdAt(LocalDateTime.now()).updatedAt(LocalDateTime.now()).build());
 
@@ -483,7 +483,6 @@ class TaskDependencyServiceTest {
         service.addDependency(taskA, taskB, DependencyChangeSource.MIND, "evt-1");
         taskRepository.save(Task.builder()
                 .id(taskA)
-                .ownerId("owner")
                 .status(TaskStatus.ACTIVE)
                 .isReady(true)
                 .blockingCount(0)

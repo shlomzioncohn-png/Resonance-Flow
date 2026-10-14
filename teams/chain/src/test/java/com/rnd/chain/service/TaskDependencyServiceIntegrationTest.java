@@ -281,7 +281,6 @@ class TaskDependencyServiceIntegrationTest {
         return Task.builder()
                 .id(id)
                 .parentTaskId(null)
-                .ownerId("test-owner")
                 .tenantId(TENANT_ID)
                 .status(status)
                 .isReady(ready)

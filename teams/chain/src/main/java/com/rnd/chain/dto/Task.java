@@ -28,7 +28,6 @@ public final class Task {
     @EqualsAndHashCode.Include
     private final UUID id;
     private final UUID parentTaskId;
-    private final String ownerId;
 
     /** Owning tenant, per issue #580. Nullable: null means "not yet populated" (a legacy task
      * predating this field, or not yet backfilled by Inbox) - never treated as "any tenant". */
@@ -58,7 +57,6 @@ public final class Task {
     @lombok.Builder(builderClassName = "Builder")
     private Task(UUID id,
                  UUID parentTaskId,
-                 String ownerId,
                  UUID tenantId,
                  TaskStatus status,
                  boolean isReady,
@@ -81,12 +79,8 @@ public final class Task {
         if (status == null) {
             throw new IllegalArgumentException("status must not be null");
         }
-        if (ownerId == null) {
-            throw new IllegalArgumentException("ownerId must not be null");
-        }
         this.id = id;
         this.parentTaskId = parentTaskId;
-        this.ownerId = ownerId;
         this.tenantId = tenantId;
         this.status = status;
         this.isReady = isReady;
@@ -108,7 +102,7 @@ public final class Task {
      */
     public static Task copyOf(Task source) {
         Objects.requireNonNull(source, "source must not be null");
-        return new Task(source.id, source.parentTaskId, source.ownerId, source.tenantId, source.status,
+        return new Task(source.id, source.parentTaskId, source.tenantId, source.status,
                 source.isReady, source.blockingCount, source.openConstraintCount,
                 source.estimatedDurationMin, source.score, source.createdAt, source.updatedAt,
                 source.deletedAt);

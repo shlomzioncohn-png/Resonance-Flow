@@ -21,7 +21,6 @@ public final class TaskFixtures {
     public static Task newTask(UUID id) {
         return Task.builder()
                 .id(id)
-                .ownerId("owner")
                 .tenantId(DEFAULT_TENANT_ID)
                 .status(TaskStatus.ACTIVE)
                 .isReady(true)

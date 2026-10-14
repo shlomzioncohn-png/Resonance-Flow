@@ -748,7 +748,6 @@ class DependencyEdgeServiceTest {
         return Task.builder()
                 .id(id)
                 .parentTaskId(null)
-                .ownerId("test-owner")
                 .tenantId(TaskTestFixtures.DEFAULT_TENANT_ID)
                 .status(status)
                 .isReady(ready)
