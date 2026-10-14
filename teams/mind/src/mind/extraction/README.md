@@ -117,14 +117,25 @@ Two of those are worth the words:
 
 #### Cost
 
-`providers/pricing.py` holds a copy of the published price list and turns the
-token counts DeepSeek reports into dollars. `estimate_run_cost` is there to
-size a large run *before* launching it, as #350 asks.
+`providers/pricing.py` holds copies of DeepSeek's and Google's published price
+lists and turns the token counts a provider reports into dollars.
+`estimate_run_cost` is there to size a large run *before* launching it, as #350
+asks.
 
-Two caveats are built in. An unknown model or a missing usage block returns
-`None`, never `0.0` — unpriced is not free. And the table ignores cache-hit
-input pricing and the off-peak discount, so every number is an upper bound.
-The list goes stale: re-check it before quoting a figure anyone will act on.
+Gemini is priced since the local key moved to the paid tier (2026-10-13); on the
+free tier its calls cost nothing and the limit was a daily quota. A model maps to
+a price *history*, not one price: Google has announced that `gemini-3.6-flash`
+doubles on 2027-01-01, and entering that now beats remembering it on the day. A
+call is priced on its UTC date — Google's page names no timezone, so a call
+within hours of a change may be priced a day off. `estimate_run_cost(..., on=)`
+prices a planned run on the day it will happen.
+
+Three caveats are built in. An unknown model or a missing usage block returns
+`None`, never `0.0` — unpriced is not free. `gemini-3.5-flash` and
+`gemini-3.7-flash` answer calls but have no price on Google's page, so they stay
+unpriced. And the table ignores cached-input pricing and every discount, so each
+number is an upper bound for the standard tier. The list goes stale: re-check it
+before quoting a figure anyone will act on.
 
 #### Testing it
 
@@ -160,16 +171,20 @@ one: against the live API the same trivial prompt took ~1.4s with thinking off
 and ~101s with it on. Extraction asks for four short fields and has nothing to
 reason about. It is `int | None` because not every model accepts the field —
 one returned 400 for a body the others took — and `None` omits it entirely.
+Not every model that accepts it obeys it either: `gemini-3.8-flash` still
+thought 237 tokens for a one-word answer. Those tokens are billed as output, so
+the client counts them into `completion_tokens`.
 
 The model is **pinned, not "latest"**. A baseline is comparable across weeks
 only if the model behind it holds still. Note also that `ListModels` is not an
 entitlement: a key issued today lists the previous generation but gets a 404
 asking for it, so verify a model by calling it.
 
-On the free tier `503 "experiencing high demand"` is an everyday event rather
-than an edge case, and the newest model is the most congested. That is handled,
-not avoided: a 503 is retryable and spends the transient-retry budget, never a
-repair round.
+On the free tier `503 "experiencing high demand"` was an everyday event rather
+than an edge case, and the newest model the most congested. On the paid tier the
+same evening, eighteen calls across six models came back 200 in under 2.5s, so
+the 503s were the quota, not the models. It is handled either way, not avoided:
+a 503 is retryable and spends the transient-retry budget, never a repair round.
 
 Blocked answers are the one case this client has that DeepSeek's does not. A
 `finishReason` of `SAFETY`/`BLOCKLIST`/`PROHIBITED_CONTENT`, or a `promptFeedback`
@@ -459,12 +474,41 @@ Caveats, all load-bearing:
 - n = 6, one model, one run per configuration. A signal, not a number to
   quote, and six examples is far too few to tune a prompt against without
   simply fitting them.
-- the noise floor — the same configuration run twice — rests on **two** items,
-  because the free tier's daily quota ran out part-way through that run.
+- the noise floor — the same configuration run twice — rested on **two** items,
+  because the free tier's daily quota ran out part-way through that run. The
+  paid-key re-run below replaces it.
 - **it does not test one call against two separate calls**, which is the
   comparison #351 actually names. That cannot be run yet: no split path
   exists. Until it is built, the combined prompt is the issue's recommended
   starting point rather than a measured winner.
+
+#### Re-measured on the paid tier, over all of DEV
+
+2026-10-13, `gemini-3.6-flash`, all 50 tasks of the 20 DEV scenarios, three
+configurations (A without classification, B with it, A' = A again). 150 calls,
+every one succeeded first time, one provider call per item, about $0.17.
+
+| | titles | `source_ref` | `has_dependencies` | mean confidence |
+|---|---|---|---|---|
+| A vs A' (noise floor) | 48/50 | 50/50 | 50/50 | 0.854 / 0.853 |
+| A vs B (off vs on) | 45/50 | 50/50 | 49/50 | 0.854 / 0.854 |
+
+Asking for the extra fields does not measurably degrade the four. Two of the
+five changed titles are tasks whose title also moves between A and A' (one of
+them came back more abstract under B). The other three are wording: a dropped
+article, a more specific noun, and one dropped time ("10:00").
+
+From run B: `tier` agrees with the labels on 36/50. The miss is one-sided —
+`STRATEGIC` comes back right on 6 of 15, otherwise `TACTICAL` (6) or
+`OPERATIONAL` (3). `role_context` is 27/50, but 27 of the 31 it answers; the
+other 19 are `null`, consistent with text that names no role. No prompt was
+tuned against these numbers.
+
+At the time of this run `eval_split.partition` refused the persona set: six
+scenarios had been added after the split was frozen. The run took
+`DEV_SCENARIO_IDS` as it then stood (the original 20), so the new six were in
+neither half and were not read. They have since been placed in the split
+(`yonit/mind-eval-split-535`), four to dev and two to holdout.
 
 ### Review fixes, closed in #352
 
@@ -551,8 +595,7 @@ issue asks for nothing beyond the estimate itself:
 - **Calibrate against the persona labels.** Since none of them fixes a
   duration, every one is effectively `INFERRED`, so they can say how often an inferred estimate lands near the
   label, and set that number from data. They say nothing about `STATED`. This
-  is R1's harness, and the free tier's daily quota will not cover 91 calls in
-  a day.
+  is R1's harness; on the paid tier 91 calls cost well under a dollar.
 - **Check a `STATED` claim against the text.** A stated estimate should have a
   duration phrase in the content to point at. Where there is none, the basis
   could be downgraded to `INFERRED` and logged, the way `grounding.py` drops a
