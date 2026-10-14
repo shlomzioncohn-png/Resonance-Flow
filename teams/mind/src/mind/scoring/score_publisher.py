@@ -29,10 +29,11 @@ from datetime import UTC, datetime
 from typing import Protocol
 
 from mind.contracts.task_score_proposed import TaskScoreProposed
-from mind.evaluation.interfaces import RankingModel, ScoreContext
+from mind.evaluation.interfaces import ScoreContext, ScoreResult
 from mind.messaging.task_created_event_pb2 import TaskCreatedEvent
 from mind.messaging.task_updated_event_pb2 import TaskUpdatedEvent
 from mind.scoring.inbox_task import to_scoring_task
+from mind.scoring.inputs import ScorableTask
 from mind.scoring.score_event import build_score_event
 from mind.scoring.segmented_model import SegmentedRankingModel
 
@@ -40,26 +41,36 @@ logger = logging.getLogger(__name__)
 
 TOPIC = "task.score.proposed"
 
+
 class ScoreSink(Protocol):
     """Where a built payload goes: Kafka in production, a list in tests."""
 
     def send(self, payload: TaskScoreProposed) -> None: ...
 
 
-def _scoring_inputs_hash(event: TaskCreatedEvent | TaskUpdatedEvent) -> bytes:
+class TaskScorer(Protocol):
+    """A model that scores a real task. `RankingModel` takes the scenario
+    `Task` and so cannot be handed one built from Inbox; the segmented model,
+    and any model layered on it, takes the wider `ScorableTask`."""
+
+    def score(self, task: ScorableTask, context: ScoreContext) -> ScoreResult: ...
+
+
+def _scoring_inputs_hash(task: ScorableTask) -> bytes:
     """A SHA-256 of every field the model reads: 32 bytes per task, whatever
     the length of its description.
 
     `urgency` is deliberately left out although #357 lists it: the model infers
     urgency from the text and never reads the field, so a change in it cannot
-    change the score.
+    change the score. `blocked` and `parent_task_id` are left out because the
+    conversion always sets them the same way.
     """
     fields = (
-        event.title,
-        event.description,
-        event.tier,
-        event.deadline.ToDatetime(tzinfo=UTC).isoformat() if event.HasField("deadline") else None,
-        event.effort_estimate_minutes if event.HasField("effort_estimate_minutes") else None,
+        task.title,
+        task.description,
+        task.tier,
+        task.deadline.isoformat() if task.deadline is not None else None,
+        task.effort_estimate,
     )
     # repr quotes each string, so no two different field sets serialize alike.
     return hashlib.sha256(repr(fields).encode()).digest()
@@ -69,7 +80,7 @@ class ScorePublisher:
     def __init__(
         self,
         sink: ScoreSink,
-        model: RankingModel | None = None,
+        model: TaskScorer | None = None,
         clock: Callable[[], datetime] = lambda: datetime.now(UTC),
     ) -> None:
         self._sink = sink
@@ -80,20 +91,21 @@ class ScorePublisher:
         self._lock = threading.Lock()
 
     def handle_task_created(self, event: TaskCreatedEvent) -> None:
-        self._publish_if_changed(event.id, event)
+        self._publish_if_changed(to_scoring_task(event))
 
     def handle_task_updated(self, event: TaskUpdatedEvent) -> None:
-        self._publish_if_changed(event.task_id, event)
+        self._publish_if_changed(to_scoring_task(event))
 
-    def _publish_if_changed(self, task_id: str, event: TaskCreatedEvent | TaskUpdatedEvent) -> None:
-        inputs = _scoring_inputs_hash(event)
+    def _publish_if_changed(self, task: ScorableTask) -> None:
+        inputs = _scoring_inputs_hash(task)
         with self._lock:
-            if self._last_published.get(task_id) == inputs:
-                logger.debug("score_publisher: task %s has no scoring change, skipping", task_id)
+            if self._last_published.get(task.task_id) == inputs:
+                logger.debug("score_publisher: task %s unchanged, skipping", task.task_id)
                 return
 
+            # Aware, in UTC, like the deadlines the conversion builds.
             now = self._clock()
-            result = self._model.score(to_scoring_task(event), ScoreContext(current_datetime=now))
-            self._sink.send(build_score_event(event, result, scored_at=now))
+            result = self._model.score(task, ScoreContext(current_datetime=now))
+            self._sink.send(build_score_event(task, result, scored_at=now))
             # Recorded only after a successful send, so a failed one is retried.
-            self._last_published[task_id] = inputs
+            self._last_published[task.task_id] = inputs

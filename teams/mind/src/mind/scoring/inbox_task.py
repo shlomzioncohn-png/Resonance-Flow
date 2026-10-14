@@ -1,34 +1,20 @@
-"""Turn an Inbox task event into the `Task` the segmented model scores (#357).
+"""Turn an Inbox task event into a `ScorableTask` the segmented model scores (#357).
 
-The model was built against the persona eval set's `Task`, which is stricter
-than what Inbox sends: on a real task the tier, the effort estimate and the
-description may all be missing, and the task_id is a UUID the eval pattern
-rejects. This module fills those gaps with fixed, documented defaults so every
-task gets a score, without loosening the eval contract itself.
+Empty stays empty: a missing tier, effort estimate or description goes to the
+model as None, and the model decides how to score it (see `inputs.py` and
+`segmented_model.rule_tier`). Nothing here fills a default.
 """
 
 from __future__ import annotations
 
-from datetime import UTC
+from dataclasses import dataclass
+from datetime import UTC, datetime
 
-from mind.evaluation.interfaces import Task, Tier
+from mind.evaluation.interfaces import Tier
 from mind.messaging.task_created_event_pb2 import TaskCreatedEvent, TaskTier
 from mind.messaging.task_updated_event_pb2 import TaskUpdatedEvent
-from mind.scoring.features import QUICK_WIN_CAP_MINUTES
 
-#: Team decision: a task Inbox has not classified yet is *scored* as tactical.
-#: Only the score uses this. The tier sent to Chain stays unset, so Chain never
-#: sees a tier nobody actually assigned.
-DEFAULT_TIER: Tier = "tactical"
-
-#: A missing effort estimate earns no quick-win bonus: at the cap,
-#: `features.quick_win` is 0, so an unknown duration is never rewarded.
-DEFAULT_EFFORT_MINUTES = QUICK_WIN_CAP_MINUTES
-
-#: The model never reads task_id, and the eval pattern (`^[a-z0-9_]+$`) rejects
-#: a UUID, so a fixed placeholder goes in and the real id stays with the caller.
-PLACEHOLDER_TASK_ID = "inbox_task"
-
+# Inbox writes the tier in upper case and the model keys its rules in lower case.
 _TIERS: dict[int, Tier] = {
     TaskTier.TASK_TIER_OPERATIONAL: "operational",
     TaskTier.TASK_TIER_TACTICAL: "tactical",
@@ -36,30 +22,39 @@ _TIERS: dict[int, Tier] = {
 }
 
 
-def to_scoring_task(event: TaskCreatedEvent | TaskUpdatedEvent) -> Task:
-    """Build the model's input from an Inbox task.created / task.updated event.
+@dataclass(frozen=True)
+class InboxTask:
+    """A real task as the model reads it. Fits `ScorableTask`."""
 
-    `blocked` is always False: blocking is Chain's call, and the score sent to
-    Chain is `base_score`, which the model computes before any blocked
-    adjustment. `parent_task_id` is None: Inbox's events do not carry it.
-    """
-    # An unset proto3 enum reads as TASK_TIER_UNSPECIFIED, which is not in _TIERS.
-    tier = _TIERS.get(event.tier, DEFAULT_TIER)
-    # An unset int reads as 0, and the eval Task needs at least 1 minute.
-    effort = event.effort_estimate_minutes
-    if effort <= 0:
-        effort = DEFAULT_EFFORT_MINUTES
-    deadline = event.deadline.ToDatetime(tzinfo=UTC) if event.HasField("deadline") else None
+    task_id: str
+    title: str
+    description: str | None
+    deadline: datetime | None
+    effort_estimate: int | None
+    tier: Tier | None
+    # Always False: blocking is Chain's call and Inbox has no such field. Only
+    # `base_score` may be sent to Chain, since `score` is adjusted by `blocked`
+    # and would come out too high for a task that is really blocked.
+    blocked: bool = False
+    # Inbox's events do not carry it.
+    parent_task_id: str | None = None
 
-    return Task(
-        task_id=PLACEHOLDER_TASK_ID,
+
+def to_scoring_task(event: TaskCreatedEvent | TaskUpdatedEvent) -> InboxTask:
+    """Build the model's input from an Inbox task.created / task.updated event."""
+    # Inbox names the id differently on the two topics.
+    task_id = event.id if isinstance(event, TaskCreatedEvent) else event.task_id
+
+    return InboxTask(
+        task_id=task_id,
         title=event.title,
-        # The model only checks whether each keyword appears, so repeating the
-        # title adds no score; it just satisfies the eval Task's non-empty rule.
-        description=event.description or event.title,
-        deadline=deadline,
-        effort_estimate=effort,
-        tier=tier,
-        blocked=False,
-        parent_task_id=None,
+        description=event.description or None,
+        # Aware, in UTC: the caller builds `now` the same way, and the model
+        # refuses to compare a naive time with an aware one.
+        deadline=event.deadline.ToDatetime(tzinfo=UTC) if event.HasField("deadline") else None,
+        effort_estimate=(
+            event.effort_estimate_minutes if event.HasField("effort_estimate_minutes") else None
+        ),
+        # An unset proto3 enum reads as TASK_TIER_UNSPECIFIED, which is not in _TIERS.
+        tier=_TIERS.get(event.tier),
     )
