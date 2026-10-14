@@ -39,9 +39,12 @@ still mocked inside the BFF.
     (no fallback; 1-480 minutes)
   - `GET /manager/workload`, `GET /manager/projects`,
     `GET /admin/projects[/{id}]` — mocked inside the BFF
-- **Frontend**: every screen calls the Gateway through `services/*Api.ts`. There is no
-  mocking in the browser anymore (MSW was removed on 2026-10-06): all mock data lives in
-  the BFF.
+- **Frontend**: every screen calls the Gateway through `services/*Api.ts`. MSW was
+  removed on 2026-10-06, when the mock data moved into the BFF, and brought back on
+  2026-10-14 for one endpoint only: `GET /api/users` (the Manager's Users screen,
+  `services/usersApi.ts`), which the Gateway doesn't expose yet. It runs only when
+  `NEXT_PUBLIC_API_MOCKING=enabled`; every other call still goes to the Gateway. Once
+  the Gateway serves `/api/users`, delete its handler in `mocks/handlers.ts`.
 
 ## Inbox Task API (branch `inbox-team`, commit `438c368`)
 

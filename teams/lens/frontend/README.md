@@ -21,7 +21,8 @@ components/
   layout/                     AppShell, Header, Sidebar, PageContainer, Logo
   feedback/                   LoadingState, EmptyState, ErrorState
   ui/                          (reserved for shared, non-layout UI components)
-mocks/                       Mock data adapters used until real APIs exist
+mocks/                       MSW handlers for endpoints the Gateway doesn't expose yet
+                              (on only when NEXT_PUBLIC_API_MOCKING=enabled)
 services/                    Gateway API client (api.ts) — not wired into any page yet;
                               see docs/api-integration-status.md for why
 docs/                        Architecture docs (see below)
