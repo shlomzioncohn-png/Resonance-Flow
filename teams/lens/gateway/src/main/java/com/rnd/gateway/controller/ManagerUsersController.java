@@ -18,8 +18,6 @@ import org.springframework.http.HttpEntity;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.ResponseEntity;
-import org.springframework.security.core.Authentication;
-import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationToken;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.client.HttpStatusCodeException;
 import org.springframework.web.client.ResourceAccessException;
@@ -37,24 +35,13 @@ import java.util.Set;
  * Routes GET/PATCH /api/manager/users/** to BFF, which calls Inbox for real
  * (see com.rnd.bff.client.InboxUserClient's javadoc).
  *
- * Authorization: SecurityConfig enforces hasRole("MANAGER") on this whole
- * path, backed by the "lens" Keycloak realm's actual manager/employee roles
- * (teams/lens/keycloak/realm-lens.json) — real, not mocked, whenever
- * app.auth.enabled=true. An employee token gets a real 403 here; this isn't
- * a TODO the way identity-forwarding below still is.
- *
- * Identity flow (current: PARTIALLY MOCK):
- *   - X-User-Role is real: derived from the JWT's mapped authorities
- *     (ROLE_MANAGER/ROLE_EMPLOYEE) when auth is enabled, "MANAGER" in
- *     dev-mode (no token).
- *   - X-User-Id is still MOCK_ACTOR_ID. The task this controller implements
- *     assumes a prior "auth" task wires a real Inbox user id per Keycloak
- *     identity (e.g. a JWT claim, or a lookup) — that task does not exist
- *     in this repo yet, so there is no such mapping to use. Every request,
- *     from any real manager, is forwarded to Inbox as the same actor id.
- *     This means Inbox's audit log and the "can't change your own status"
- *     check (ManagerUsersService) only make sense for that one seeded actor
- *     — see application.yml's app.mock-actor-id comment.
+ * Identity flow (current: MOCK, Auth stage 2 — same as WorkspaceController):
+ *   - X-User-Id is MOCK_USER_ID and X-User-Role is "MANAGER" for every
+ *     request. Roles aren't checked yet either: like every /api/** route,
+ *     this one only needs a valid token when app.auth.enabled=true.
+ *   - The Gateway never knows Inbox user ids — BFF maps the mock id to a
+ *     real Inbox user (inbox.dev-actor-id) before calling Inbox; see
+ *     com.rnd.bff.service.ManagerUsersService.
  */
 @RestController
 @RequestMapping("/api/manager/users")
@@ -62,6 +49,10 @@ import java.util.Set;
 public class ManagerUsersController {
 
     private static final Logger logger = LoggerFactory.getLogger(ManagerUsersController.class);
+
+    // TODO (Auth stage 2): the user id and role from the validated JWT
+    private static final String MOCK_USER_ID = "mgr_001";
+    private static final String MOCK_USER_ROLE = "MANAGER";
 
     /** Defense in depth: even if the Frontend sent more, only these ever leave the Gateway. */
     private static final Set<String> EDITABLE_FIELDS = Set.of("displayName", "firstName", "lastName", "phone");
@@ -78,9 +69,6 @@ public class ManagerUsersController {
     @Value("${bff.read-timeout-ms:10000}")
     private long bffReadTimeoutMs;
 
-    @Value("${app.mock-actor-id:00000000-0000-0000-0000-000000000001}")
-    private String mockActorId;
-
     public ManagerUsersController(RestTemplate restTemplate, ObjectMapper objectMapper) {
         this.restTemplate = restTemplate;
         this.objectMapper = objectMapper;
@@ -91,14 +79,13 @@ public class ManagerUsersController {
     public ResponseEntity<UserListResponseDTO> listUsers(
             @Parameter(description = "0-based page index") @RequestParam(required = false) Integer page,
             @Parameter(description = "Page size, clamped to 1-100") @RequestParam(required = false) Integer size,
-            @Parameter(description = "e.g. displayName,asc") @RequestParam(required = false) String sort,
-            Authentication authentication) {
+            @Parameter(description = "e.g. displayName,asc") @RequestParam(required = false) String sort) {
 
         if (size != null && size > 100) {
             size = 100;
         }
 
-        HttpHeaders headers = buildForwardingHeaders(authentication);
+        HttpHeaders headers = buildForwardingHeaders();
         logger.info("Manager users list request - actorId: {}, page: {}, size: {}, sort: {}",
                 headers.getFirst("X-User-Id"), page, size, sort);
 
@@ -118,8 +105,8 @@ public class ManagerUsersController {
 
     @Operation(summary = "Get user details", description = "Single user, MANAGER only.")
     @GetMapping("/{id}")
-    public ResponseEntity<UserDetailsDTO> getUser(@PathVariable String id, Authentication authentication) {
-        HttpHeaders headers = buildForwardingHeaders(authentication);
+    public ResponseEntity<UserDetailsDTO> getUser(@PathVariable String id) {
+        HttpHeaders headers = buildForwardingHeaders();
         logger.info("Manager user details request - actorId: {}, userId: {}", headers.getFirst("X-User-Id"), id);
 
         String url = UriComponentsBuilder.fromHttpUrl(bffServiceUrl)
@@ -132,8 +119,7 @@ public class ManagerUsersController {
     @PatchMapping("/{id}")
     public ResponseEntity<UserDetailsDTO> updateUser(
             @PathVariable String id,
-            @RequestBody Map<String, Object> body,
-            Authentication authentication) {
+            @RequestBody Map<String, Object> body) {
 
         Map<String, Object> allowed = new LinkedHashMap<>();
         for (String key : EDITABLE_FIELDS) {
@@ -143,7 +129,7 @@ public class ManagerUsersController {
         }
         validateEditFields(allowed);
 
-        HttpHeaders headers = buildForwardingHeaders(authentication);
+        HttpHeaders headers = buildForwardingHeaders();
         logger.info("Manager user edit request - actorId: {}, userId: {}, fields: {}",
                 headers.getFirst("X-User-Id"), id, allowed.keySet());
 
@@ -157,10 +143,9 @@ public class ManagerUsersController {
     @PatchMapping("/{id}/status")
     public ResponseEntity<UserDetailsDTO> updateStatus(
             @PathVariable String id,
-            @Valid @RequestBody UserStatusUpdateRequestDTO body,
-            Authentication authentication) {
+            @Valid @RequestBody UserStatusUpdateRequestDTO body) {
 
-        HttpHeaders headers = buildForwardingHeaders(authentication);
+        HttpHeaders headers = buildForwardingHeaders();
         logger.info("Manager user status change request - actorId: {}, userId: {}, newStatus: {}",
                 headers.getFirst("X-User-Id"), id, body.getStatus());
 
@@ -206,29 +191,12 @@ public class ManagerUsersController {
         return new ResponseStatusException(org.springframework.http.HttpStatus.BAD_REQUEST, message);
     }
 
-    /**
-     * Builds the X-User-Id/X-User-Role headers forwarded to BFF — see this
-     * class's javadoc on the identity-forwarding gap (X-User-Id is mock,
-     * X-User-Role is real).
-     */
-    private HttpHeaders buildForwardingHeaders(Authentication authentication) {
+    /** The X-User-Id/X-User-Role headers forwarded to BFF — both mock, see this class's javadoc. */
+    private HttpHeaders buildForwardingHeaders() {
         HttpHeaders headers = new HttpHeaders();
-        headers.set("X-User-Id", mockActorId); // TODO: real per-identity Inbox user id once the auth task lands
-        headers.set("X-User-Role", resolveLensRole(authentication));
+        headers.set("X-User-Id", MOCK_USER_ID);
+        headers.set("X-User-Role", MOCK_USER_ROLE);
         return headers;
-    }
-
-    /** ROLE_MANAGER -> "MANAGER". Falls back to "MANAGER" in dev-mode (no JWT at all, e.g. auth disabled). */
-    private String resolveLensRole(Authentication authentication) {
-        if (authentication instanceof JwtAuthenticationToken jwtAuth) {
-            boolean isManager = jwtAuth.getAuthorities().stream()
-                    .anyMatch(a -> "ROLE_MANAGER".equals(a.getAuthority()));
-            return isManager ? "MANAGER" : "EMPLOYEE";
-        }
-        // No JWT at all (app.auth.enabled=false) — SecurityConfig doesn't gate this path either in
-        // that mode, so there is no real role to read. Default to MANAGER so the dev-mode screen
-        // stays usable without Keycloak, exactly like WorkspaceController's dev-mode mock identity.
-        return "MANAGER";
     }
 
     private <T> ResponseEntity<T> forward(String url, HttpMethod method, HttpHeaders headers,

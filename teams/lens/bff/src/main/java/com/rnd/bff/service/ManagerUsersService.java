@@ -13,6 +13,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.HttpStatusCodeException;
@@ -34,6 +35,11 @@ import java.util.function.Supplier;
  * phone ever leaves the Gateway), and again here (so BFF doesn't depend on
  * Gateway having done it right — task spec §4: "גם אם ה-frontend לא מציג
  * את השדות האלה, ה-BFF לא מעביר ל-Inbox אף שדה מחוץ לרשימה המותרת").
+ *
+ * The Gateway still sends a mock userId ("mgr_001") and never knows Inbox
+ * user ids, so inbox.dev-actor-id (a seeded Inbox user UUID) replaces it
+ * here, same as InboxClient does. Every check below — the self-status-change
+ * rule and the currentUser flag — compares against that resolved Inbox id.
  */
 @Service
 public class ManagerUsersService {
@@ -44,20 +50,24 @@ public class ManagerUsersService {
 
     private final InboxUserClient inboxUserClient;
     private final ObjectMapper objectMapper;
+    private final String devActorId;
 
-    public ManagerUsersService(InboxUserClient inboxUserClient, ObjectMapper objectMapper) {
+    public ManagerUsersService(InboxUserClient inboxUserClient, ObjectMapper objectMapper,
+                               @Value("${inbox.dev-actor-id:}") String devActorId) {
         this.inboxUserClient = inboxUserClient;
         this.objectMapper = objectMapper;
+        this.devActorId = devActorId;
     }
 
-    public UserListResponseDTO listUsers(String actorId, Integer page, Integer size, String sort) {
+    public UserListResponseDTO listUsers(String gatewayUserId, Integer page, Integer size, String sort) {
+        String actorId = inboxActorId(gatewayUserId);
         logger.info("Fetching users from Inbox - actorId: {}, page: {}, size: {}, sort: {}",
                 actorId, page, size, sort);
 
         InboxUserPageResponse response = call(() -> inboxUserClient.listUsers(actorId, page, size, sort));
 
         return UserListResponseDTO.builder()
-                .items(response.getContent().stream().map(this::toUserRowDTO).toList())
+                .items(response.getContent().stream().map(record -> toUserRowDTO(record, actorId)).toList())
                 .page(response.getPage())
                 .size(response.getSize())
                 .totalElements(response.getTotalElements())
@@ -65,14 +75,16 @@ public class ManagerUsersService {
                 .build();
     }
 
-    public UserDetailsDTO getUser(String actorId, String userId) {
+    public UserDetailsDTO getUser(String gatewayUserId, String userId) {
+        String actorId = inboxActorId(gatewayUserId);
         logger.info("Fetching user from Inbox - actorId: {}, userId: {}", actorId, userId);
 
         InboxUserRecord record = call(() -> inboxUserClient.getUser(actorId, userId));
-        return toUserDetailsDTO(record);
+        return toUserDetailsDTO(record, actorId);
     }
 
-    public UserDetailsDTO updateUser(String actorId, String userId, Map<String, Object> fields) {
+    public UserDetailsDTO updateUser(String gatewayUserId, String userId, Map<String, Object> fields) {
+        String actorId = inboxActorId(gatewayUserId);
         Map<String, Object> allowed = new LinkedHashMap<>();
         for (String key : EDITABLE_FIELDS) {
             if (fields.containsKey(key)) {
@@ -83,10 +95,11 @@ public class ManagerUsersService {
         logger.info("Updating user via Inbox - actorId: {}, userId: {}, fields: {}", actorId, userId, allowed.keySet());
 
         InboxUserRecord record = call(() -> inboxUserClient.updateUser(actorId, userId, allowed));
-        return toUserDetailsDTO(record);
+        return toUserDetailsDTO(record, actorId);
     }
 
-    public UserDetailsDTO updateStatus(String actorId, String userId, String status) {
+    public UserDetailsDTO updateStatus(String gatewayUserId, String userId, String status) {
+        String actorId = inboxActorId(gatewayUserId);
         if (status == null || !ALLOWED_STATUSES.contains(status)) {
             throw new InboxResponseException(HttpStatus.BAD_REQUEST,
                     "status must be one of ACTIVE, SUSPENDED, DISABLED");
@@ -98,12 +111,17 @@ public class ManagerUsersService {
         logger.info("Updating user status via Inbox - actorId: {}, userId: {}, newStatus: {}", actorId, userId, status);
 
         InboxUserRecord record = call(() -> inboxUserClient.updateStatus(actorId, userId, status));
-        return toUserDetailsDTO(record);
+        return toUserDetailsDTO(record, actorId);
     }
 
     // -------------------------------------------------------------------------
     // Shared plumbing
     // -------------------------------------------------------------------------
+
+    /** The Inbox user we act as - the dev override if set, otherwise the userId from the Gateway. */
+    private String inboxActorId(String gatewayUserId) {
+        return devActorId.isBlank() ? gatewayUserId : devActorId;
+    }
 
     /**
      * Error mapping, task spec §5: 403/404/409/400 from Inbox pass through
@@ -156,7 +174,7 @@ public class ManagerUsersService {
         return "Inbox request failed: " + fallbackStatus.getReasonPhrase();
     }
 
-    private UserRowDTO toUserRowDTO(InboxUserRecord record) {
+    private UserRowDTO toUserRowDTO(InboxUserRecord record, String actorId) {
         return UserRowDTO.builder()
                 .id(record.getId())
                 .displayName(record.getDisplayName())
@@ -164,10 +182,11 @@ public class ManagerUsersService {
                 .role(LensRoleMapper.toLensRole(record.getRole()))
                 .status(record.getStatus())
                 .lastLoginAt(record.getLastLoginAt())
+                .currentUser(actorId.equals(record.getId()))
                 .build();
     }
 
-    private UserDetailsDTO toUserDetailsDTO(InboxUserRecord record) {
+    private UserDetailsDTO toUserDetailsDTO(InboxUserRecord record, String actorId) {
         return UserDetailsDTO.detailsBuilder()
                 .id(record.getId())
                 .displayName(record.getDisplayName())
@@ -175,6 +194,7 @@ public class ManagerUsersService {
                 .role(LensRoleMapper.toLensRole(record.getRole()))
                 .status(record.getStatus())
                 .lastLoginAt(record.getLastLoginAt())
+                .currentUser(actorId.equals(record.getId()))
                 .firstName(record.getFirstName())
                 .lastName(record.getLastName())
                 .phone(record.getPhone())

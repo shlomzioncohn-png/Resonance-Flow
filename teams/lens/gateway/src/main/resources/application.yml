@@ -34,16 +34,6 @@ app:
     # When true, every /api/** request needs a valid Keycloak JWT (see SecurityConfig).
     # Off until the frontend sends tokens (Auth stage 3), so existing screens keep working.
     enabled: ${APP_AUTH_ENABLED:false}
-  # ManagerUsersController's mock actor id, forwarded to BFF as X-User-Id and
-  # on to Inbox (via BFF) as X-Actor-Id. Unlike WorkspaceController's
-  # MOCK_USER_ID, this must be a real user id that already exists in Inbox's
-  # `users` table (Inbox scopes the Users list by this actor's tenant, and
-  # ManagerUsersService's "can't change your own status" check compares
-  # against it) — override with an id you've actually created there, e.g.
-  # via a direct SQL insert (Inbox has no tenant/user-creation API — see
-  # ManagerUsersController's javadoc on the missing auth-task dependency),
-  # until a real per-Keycloak-identity mapping exists.
-  mock-actor-id: ${APP_MOCK_ACTOR_ID:00000000-0000-0000-0000-000000000001}
 
 # BFF service configuration
 # Override BFF_SERVICE_URL to point at a different BFF without recompiling

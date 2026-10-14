@@ -21,6 +21,8 @@ export interface UserRow {
   /** PENDING | ACTIVE | SUSPENDED | DISABLED */
   status: string;
   lastLoginAt?: string;
+  /** True on the acting manager's own row — set by the BFF, which knows who is calling. */
+  currentUser?: boolean;
 }
 
 export interface UserDetails extends UserRow {

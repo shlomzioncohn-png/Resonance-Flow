@@ -17,8 +17,6 @@ const STATUS_TONE: Record<string, StatusTone> = {
 };
 
 export interface UserColumnsOptions {
-  /** The signed-in manager — their own row can't have its status changed. */
-  currentUserId: string;
   onEdit: (user: UserRow) => void;
   onChangeStatus: (event: MouseEvent<HTMLElement>, user: UserRow) => void;
 }
@@ -29,7 +27,6 @@ export interface UserColumnsOptions {
  * Sortable column ids double as the API's `sort` field name.
  */
 export function buildUserColumns({
-  currentUserId,
   onEdit,
   onChangeStatus,
 }: UserColumnsOptions): Column<UserRow>[] {
@@ -63,7 +60,7 @@ export function buildUserColumns({
       header: 'Actions',
       align: 'right',
       render: (user) => {
-        const isSelf = user.id === currentUserId;
+        const isSelf = user.currentUser === true;
         return (
           <Stack direction="row" spacing={0.5} sx={{ justifyContent: 'flex-end' }}>
             <Tooltip title="Edit">

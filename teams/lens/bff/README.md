@@ -111,9 +111,12 @@ Called only by Gateway's `ManagerUsersController`, which enforces
 | `/manager/users/{id}` | PATCH | Edit `displayName`/`firstName`/`lastName`/`phone` only — any other field in the body is dropped before it reaches Inbox |
 | `/manager/users/{id}/status` | PATCH | `{status}` — `ACTIVE`/`SUSPENDED`/`DISABLED`; 409 if the actor targets their own id |
 
-- Header: `X-User-Id` (required — forwarded to Inbox as `X-Actor-Id`). Still a
-  fixed mock value from Gateway, not a real per-identity id — see
-  `ManagerUsersController`'s (Gateway) javadoc for why.
+- Header: `X-User-Id` (required). Still a fixed mock value from Gateway
+  (`mgr_001`), not a real per-identity id. The Gateway never knows Inbox user ids,
+  so set `INBOX_DEV_ACTOR_ID` to a seeded Inbox user UUID: that's the id sent to
+  Inbox as `X-Actor-Id`, and the one the self-status-change rule and the
+  `currentUser` flag compare against. If it's unset, `X-User-Id` is forwarded
+  unchanged.
 - `role` in the response is the LENS role (`MANAGER`/`EMPLOYEE`), mapped from
   Inbox's own role string by `LensRoleMapper` — see that class's javadoc for
   the mapping's limits. Inbox's `tenant` is never exposed.

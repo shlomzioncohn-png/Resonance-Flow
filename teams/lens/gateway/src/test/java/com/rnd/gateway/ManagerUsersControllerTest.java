@@ -33,20 +33,17 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 /**
  * Integration tests for ManagerUsersController — task spec
  * manager-users-screen-task.md. Same pattern as GatewayRoutingTests
- * (MockWebServer standing in for BFF), plus role-gating: unlike every other
- * route today, /api/manager/users/** is actually hasRole("MANAGER")
- * enforced (see SecurityConfig), so this is the one controller test class
- * that exercises both an EMPLOYEE-role and a MANAGER-role token.
+ * (MockWebServer standing in for BFF). Roles aren't checked by the Gateway
+ * yet (Auth stage 2), so any valid token reaches BFF here.
  */
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
 @AutoConfigureMockMvc
 @ActiveProfiles("test")
 @TestMethodOrder(MethodOrderer.OrderAnnotation.class)
-@DisplayName("Gateway Manager Users routing + authorization")
+@DisplayName("Gateway Manager Users routing")
 class ManagerUsersControllerTest {
 
     private static final String MANAGER_AUTHORITY = "ROLE_MANAGER";
-    private static final String EMPLOYEE_AUTHORITY = "ROLE_EMPLOYEE";
 
     private static MockWebServer mockBff;
 
@@ -76,7 +73,7 @@ class ManagerUsersControllerTest {
     }
 
     // -------------------------------------------------------------------------
-    // Authorization — the real hasRole("MANAGER") rule
+    // Authentication
     // -------------------------------------------------------------------------
 
     @Test
@@ -88,19 +85,9 @@ class ManagerUsersControllerTest {
     }
 
     @Test
-    @Order(2)
-    @DisplayName("EMPLOYEE-role token returns 403, never reaches BFF")
-    void employeeRole_returns403() throws Exception {
-        mockMvc.perform(get("/api/manager/users")
-                        .with(jwt().authorities(new SimpleGrantedAuthority(EMPLOYEE_AUTHORITY))))
-                .andExpect(status().isForbidden())
-                .andExpect(jsonPath("$.errorCode").value("FORBIDDEN"));
-    }
-
-    @Test
     @Order(3)
-    @DisplayName("MANAGER-role token reaches BFF and returns 200")
-    void managerRole_returns200() throws Exception {
+    @DisplayName("Valid token reaches BFF with the mock identity headers")
+    void validToken_reachesBff() throws Exception {
         mockBff.enqueue(new MockResponse()
                 .setResponseCode(200)
                 .setHeader("Content-Type", "application/json")
@@ -112,7 +99,7 @@ class ManagerUsersControllerTest {
 
         RecordedRequest recorded = takeRequest();
         assertThat(recorded.getPath()).startsWith("/manager/users");
-        assertThat(recorded.getHeader("X-User-Id")).isNotNull().isNotEmpty();
+        assertThat(recorded.getHeader("X-User-Id")).isEqualTo("mgr_001");
         assertThat(recorded.getHeader("X-User-Role")).isEqualTo("MANAGER");
     }
 

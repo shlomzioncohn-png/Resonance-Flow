@@ -35,9 +35,9 @@ public class UserDetailsDTO extends UserRowDTO {
 
     @Builder(builderMethodName = "detailsBuilder")
     public UserDetailsDTO(String id, String displayName, String email, String role, String status,
-                           Instant lastLoginAt, String firstName, String lastName, String phone,
-                           String username, Instant createdAt, Instant updatedAt) {
-        super(id, displayName, email, role, status, lastLoginAt);
+                           Instant lastLoginAt, boolean currentUser, String firstName, String lastName,
+                           String phone, String username, Instant createdAt, Instant updatedAt) {
+        super(id, displayName, email, role, status, lastLoginAt, currentUser);
         this.firstName = firstName;
         this.lastName = lastName;
         this.phone = phone;

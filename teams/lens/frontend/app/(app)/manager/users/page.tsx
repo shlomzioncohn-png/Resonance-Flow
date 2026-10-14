@@ -25,7 +25,6 @@ import {
   type UserRow,
   type UserStatus,
 } from '@/services/managerUsersApi';
-import { MOCK_CURRENT_USER_ID } from './mockCurrentUser';
 import { buildUserColumns } from './userColumns';
 
 type LoadState = 'loading' | 'loaded' | 'error';
@@ -195,7 +194,6 @@ export default function ManagerUsersPage() {
   }, [statusTarget]);
 
   const columns = buildUserColumns({
-    currentUserId: MOCK_CURRENT_USER_ID,
     onEdit: openEdit,
     onChangeStatus: openStatusMenu,
   });

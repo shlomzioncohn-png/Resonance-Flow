@@ -1,17 +1,17 @@
 import type { Meta, StoryObj } from '@storybook/nextjs-vite';
 import { expect, fn, waitFor, within } from 'storybook/test';
 import type { UserListResponse, UserRow } from '@/services/managerUsersApi';
-import { MOCK_CURRENT_USER_ID } from './mockCurrentUser';
 import ManagerUsersPage from './page';
 
 const users: UserRow[] = [
   {
-    id: MOCK_CURRENT_USER_ID,
+    id: '00000000-0000-0000-0000-000000000001',
     displayName: 'Dana Levi',
     email: 'dana@example.com',
     role: 'MANAGER',
     status: 'ACTIVE',
     lastLoginAt: '2026-10-01T08:30:00Z',
+    currentUser: true,
   },
   {
     id: '00000000-0000-0000-0000-000000000002',

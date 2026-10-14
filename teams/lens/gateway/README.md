@@ -188,9 +188,9 @@ issuer — gets a JSON `401 UNAUTHORIZED` and **never reaches the BFF**.
 > `APP_AUTH_ENABLED=true` to test with real tokens (as in the curl example below).
 
 > Still mocked (Auth stage 2): the userId forwarded to BFF as `X-User-Id` is
-> still `emp_001` (`/api/workspace/**`) or a fixed `app.mock-actor-id`
-> (`/api/manager/users/**`), not the token's `sub`. Roles *are* enforced for
-> `/api/manager/users/**` — see Gateway Routes below.
+> still `emp_001` (`/api/workspace/**`) or `mgr_001` (`/api/manager/users/**`),
+> not the token's `sub`, and roles aren't checked yet — any valid token reaches
+> every `/api/**` route.
 
 ### Local Keycloak
 
@@ -243,18 +243,11 @@ The Gateway currently handles these endpoints (manual routing via explicit contr
 
 **All endpoints forward to BFF** at `http://bff-service:8080` using `RestTemplate`.
 
-**`/api/manager/users/**` is MANAGER-only for real**, not just on paper: `SecurityConfig` adds
-`.requestMatchers("/api/manager/users/**").hasRole("MANAGER")` ahead of the general `/api/**`
-rule, backed by `KeycloakRoleConverter` mapping the `lens` realm's actual `manager`/`employee`
-roles (`realm_access.roles`) to Spring authorities — see the Authentication section above for how
-to get a token for each. This only takes effect once `APP_AUTH_ENABLED=true`; while auth is off
-(today's default) this route is open like every other `/api/**` route.
-
-**Known gap:** `ManagerUsersController` still forwards `X-User-Id` as a fixed mock id
-(`app.mock-actor-id`), not one derived from the token's `sub` — there is no per-Keycloak-identity
-Inbox user mapping in this repo yet (the task this feature implements,
-`manager-users-screen-task.md`, assumes a prior "auth" task that was never built). See that
-controller's javadoc.
+**Known gap (Auth stage 2):** `/api/manager/users/**` is meant to be MANAGER-only, but the
+Gateway doesn't check roles yet — like every other `/api/**` route it only requires a valid token
+(when `APP_AUTH_ENABLED=true`). `ManagerUsersController` forwards a mock `X-User-Id` (`mgr_001`)
+and `X-User-Role: MANAGER`. The Gateway never knows Inbox user ids: the BFF maps the mock id to a
+real Inbox user (`INBOX_DEV_ACTOR_ID`) before calling Inbox — see the BFF README.
 
 **Future phases:** Once more team services are ready, BFF will expand to handle Bridge, Chain, Inbox, and Mind routing. Gateway's endpoint structure remains unchanged.
 
@@ -500,7 +493,9 @@ mvn package -DskipTests
 
 ## Running with Docker
 
-Build and run with Docker Compose:
+Build and run with Docker Compose. This compose file starts only the Gateway, so start the BFF
+first from `teams/lens/bff` (`docker-compose up --build`). The BFF's own compose file is what
+connects it to Inbox; the Gateway only ever calls the BFF, at `host.docker.internal:8082`.
 
 ```bash
 docker-compose up --build

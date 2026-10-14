@@ -50,7 +50,7 @@ class ManagerUsersServiceTest {
 
     @BeforeEach
     void setUp() {
-        managerUsersService = new ManagerUsersService(inboxUserClient, new ObjectMapper());
+        managerUsersService = new ManagerUsersService(inboxUserClient, new ObjectMapper(), "");
     }
 
     private static InboxUserRecord record(String id, String role) {
@@ -81,6 +81,18 @@ class ManagerUsersServiceTest {
         assertThat(result.getItems().get(0).getRole()).isEqualTo("MANAGER"); // SYSTEM_ADMIN -> MANAGER
         assertThat(result.getItems().get(1).getRole()).isEqualTo("EMPLOYEE"); // TEAM_LEAD -> EMPLOYEE
         assertThat(result.getTotalElements()).isEqualTo(2);
+    }
+
+    @Test
+    void listUsers_flagsOnlyTheActorsOwnRowAsCurrentUser() {
+        InboxUserPageResponse page = new InboxUserPageResponse(
+                List.of(record(ACTOR_ID, "SYSTEM_ADMIN"), record(OTHER_USER_ID, "TEAM_LEAD")), 0, 20, 2, 1);
+        when(inboxUserClient.listUsers(ACTOR_ID, 0, 20, null)).thenReturn(page);
+
+        UserListResponseDTO result = managerUsersService.listUsers(ACTOR_ID, 0, 20, null);
+
+        assertThat(result.getItems().get(0).isCurrentUser()).isTrue();
+        assertThat(result.getItems().get(1).isCurrentUser()).isFalse();
     }
 
     // -------------------------------------------------------------------------
@@ -155,6 +167,17 @@ class ManagerUsersServiceTest {
 
         assertThat(result.getId()).isEqualTo(OTHER_USER_ID);
         verify(inboxUserClient).updateStatus(ACTOR_ID, OTHER_USER_ID, "SUSPENDED");
+    }
+
+    @Test
+    void devActorId_replacesTheGatewaysMockUserId() {
+        ManagerUsersService withDevActor = new ManagerUsersService(inboxUserClient, new ObjectMapper(), ACTOR_ID);
+
+        assertThatThrownBy(() -> withDevActor.updateStatus("mgr_001", ACTOR_ID, "SUSPENDED"))
+                .isInstanceOf(SelfStatusChangeException.class);
+
+        when(inboxUserClient.getUser(ACTOR_ID, ACTOR_ID)).thenReturn(record(ACTOR_ID, "SYSTEM_ADMIN"));
+        assertThat(withDevActor.getUser("mgr_001", ACTOR_ID).isCurrentUser()).isTrue();
     }
 
     // -------------------------------------------------------------------------

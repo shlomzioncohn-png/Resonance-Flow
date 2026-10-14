@@ -29,4 +29,6 @@ public class UserRowDTO {
     /** Inbox's UserStatus: PENDING | ACTIVE | SUSPENDED | DISABLED. */
     private String status;
     private Instant lastLoginAt;
+    /** True on the one row that is the acting manager — their status can't be changed (see ManagerUsersService). */
+    private boolean currentUser;
 }
