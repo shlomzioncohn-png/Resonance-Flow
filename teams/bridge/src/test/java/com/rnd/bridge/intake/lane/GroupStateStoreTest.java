@@ -6,7 +6,10 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import com.rnd.bridge.intake.model.GroupState;
 import com.rnd.bridge.intake.model.MessageSnapshot;
+import com.rnd.bridge.raw.model.Modality;
+import com.rnd.bridge.raw.model.RawObjectRef;
 import com.rnd.bridge.raw.model.RawSourceType;
+import com.rnd.bridge.raw.model.Role;
 import com.rnd.bridge.storage.ControlPlaneStateStores;
 import com.rnd.bridge.storage.InMemoryObjectStorageClient;
 import java.time.Instant;
@@ -268,54 +271,59 @@ class GroupStateStoreTest {
         assertThat(state.published()).isFalse();
     }
 
+    private static final RawObjectRef DUMMY_REF = new RawObjectRef(
+            Role.ATTACHMENT, "SLACK/kamatech/2026-08-18/x.txt", "sha256:" + "a".repeat(64), "text/plain", 10L,
+            Modality.TEXT);
+
     @Test
-    void confirmAttachmentPublishedRecordsTheFileIdOnThatMessagesSnapshot() {
+    void recordLandedAttachmentRecordsTheFileIdOnThatMessagesSnapshot() {
         store.update(RawSourceType.SLACK, "kamatech", "g1", EMPTY, current -> new GroupState(
                 current.groupId(), current.sourceType(), current.tenantId(), current.chatId(), current.threadId(),
                 current.correlationId(),
                 List.of(new MessageSnapshot("m1", "ruth", Instant.parse("2026-08-18T09:00:00Z"), "hi", 1)),
                 false, 0, null));
 
-        store.confirmAttachmentPublished(RawSourceType.SLACK, "kamatech", "g1", "m1", "F1");
+        store.recordLandedAttachment(RawSourceType.SLACK, "kamatech", "g1", "m1", "F1", DUMMY_REF);
 
         GroupState state = store.load(RawSourceType.SLACK, "kamatech", "g1").orElseThrow();
-        assertThat(state.messages().get(0).confirmedAttachmentFileIds()).containsExactly("F1");
+        assertThat(state.messages().get(0).landedAttachments()).extracting("fileId").containsExactly("F1");
     }
 
     @Test
-    void confirmAttachmentPublishedAccumulatesMultipleFileIdsOnTheSameMessage() {
+    void recordLandedAttachmentAccumulatesMultipleFileIdsOnTheSameMessage() {
         store.update(RawSourceType.SLACK, "kamatech", "g1", EMPTY, current -> new GroupState(
                 current.groupId(), current.sourceType(), current.tenantId(), current.chatId(), current.threadId(),
                 current.correlationId(),
                 List.of(new MessageSnapshot("m1", "ruth", Instant.parse("2026-08-18T09:00:00Z"), "hi", 2)),
                 false, 0, null));
 
-        store.confirmAttachmentPublished(RawSourceType.SLACK, "kamatech", "g1", "m1", "F1");
-        store.confirmAttachmentPublished(RawSourceType.SLACK, "kamatech", "g1", "m1", "F2");
+        store.recordLandedAttachment(RawSourceType.SLACK, "kamatech", "g1", "m1", "F1", DUMMY_REF);
+        store.recordLandedAttachment(RawSourceType.SLACK, "kamatech", "g1", "m1", "F2", DUMMY_REF);
 
         GroupState state = store.load(RawSourceType.SLACK, "kamatech", "g1").orElseThrow();
-        assertThat(state.messages().get(0).confirmedAttachmentFileIds()).containsExactlyInAnyOrder("F1", "F2");
+        assertThat(state.messages().get(0).landedAttachments()).extracting("fileId")
+                .containsExactlyInAnyOrder("F1", "F2");
     }
 
     @Test
-    void confirmAttachmentPublishedIsANoOpWhenTheGroupDoesNotExist() {
-        store.confirmAttachmentPublished(RawSourceType.SLACK, "kamatech", "does-not-exist", "m1", "F1");
+    void recordLandedAttachmentIsANoOpWhenTheGroupDoesNotExist() {
+        store.recordLandedAttachment(RawSourceType.SLACK, "kamatech", "does-not-exist", "m1", "F1", DUMMY_REF);
 
         assertThat(store.load(RawSourceType.SLACK, "kamatech", "does-not-exist")).isEmpty();
     }
 
     @Test
-    void confirmAttachmentPublishedIsANoOpWhenTheMessageIsNotInTheGroup() {
+    void recordLandedAttachmentIsANoOpWhenTheMessageIsNotInTheGroup() {
         store.update(RawSourceType.SLACK, "kamatech", "g1", EMPTY, current -> new GroupState(
                 current.groupId(), current.sourceType(), current.tenantId(), current.chatId(), current.threadId(),
                 current.correlationId(),
                 List.of(new MessageSnapshot("m1", "ruth", Instant.parse("2026-08-18T09:00:00Z"), "hi", 0)),
                 false, 0, null));
 
-        store.confirmAttachmentPublished(RawSourceType.SLACK, "kamatech", "g1", "does-not-exist", "F1");
+        store.recordLandedAttachment(RawSourceType.SLACK, "kamatech", "g1", "does-not-exist", "F1", DUMMY_REF);
 
         GroupState state = store.load(RawSourceType.SLACK, "kamatech", "g1").orElseThrow();
-        assertThat(state.messages().get(0).confirmedAttachmentFileIds()).isEmpty();
+        assertThat(state.messages().get(0).landedAttachments()).isEmpty();
     }
 
     @Test

@@ -35,7 +35,9 @@ class DealToTaskMapperTest {
 
     private static final Instant AS_OF = Instant.parse("2026-08-23T00:00:00Z");
     private static final String ORGANIZATION_ID = "org-test-0000";
-    private static final DealToTaskMapper MAPPER = new DealToTaskMapper(ORGANIZATION_ID, new EnrichmentProperties(), new NoOpTaskEnricher());
+    // Pre-existing tests don't exercise the stalled-deal bump, so the mapper under test here keeps
+    // it disabled (stalledAfterDays = 0) to avoid changing any of their pinned urgency values.
+    private static final DealToTaskMapper MAPPER = new DealToTaskMapper(ORGANIZATION_ID, new EnrichmentProperties(), new NoOpTaskEnricher(), 0);
 
     private static JsonDealRepository repository() {
         return new JsonDealRepository(new DefaultResourceLoader(), "classpath:crm/synthetic-deals.json");
@@ -172,6 +174,18 @@ class DealToTaskMapperTest {
         assertEquals("crm:D-90002", task.sourceRef());
         assertEquals(TaskStatus.NEW, task.status());
         assertTrue(task.urgency() >= 1 && task.urgency() <= 5);
+    }
+
+    @Test
+    void hubSpotAndJsonSourceDealsStayExactlyCrmPrefixedBareId() {
+        // Neither HubSpotDealRepository nor JsonDealRepository ever sets Deal.sourceRefPrefix -
+        // Salesforce is the only source that overrides the "crm:" default. Pinning this exact
+        // string (not just "starts with crm:") catches a regression where the default drifts or
+        // doubles up (e.g. "crm:crm:D-1").
+        Deal deal = Deal.builder().dealId("D-1").stageChangedAt(Instant.now()).build();
+
+        assertEquals("crm:", deal.sourceRefPrefix());
+        assertEquals("crm:D-1", MAPPER.toSourceRef(deal));
     }
 
     @Test
@@ -400,5 +414,98 @@ class DealToTaskMapperTest {
                 .build();
 
         assertEquals(5, MAPPER.toUrgency(deal, asOfAfterMidnight)); // 4 + 2, clamped to 5
+    }
+
+    // --- Stalled-deal urgency bump --------------------------------------------------------
+
+    private static final int STALLED_AFTER_DAYS = 14;
+    private static final DealToTaskMapper STALL_AWARE_MAPPER =
+            new DealToTaskMapper(ORGANIZATION_ID, new EnrichmentProperties(), new NoOpTaskEnricher(), STALLED_AFTER_DAYS);
+
+    @Test
+    void oneDayShortOfTheStalledThresholdDoesNotBump() {
+        Deal deal = Deal.builder()
+                .dealId("D-91001")
+                .stage(DealStage.PROSPECT) // base 1, no close date -> no time-pressure bonus
+                .closeDate(null)
+                .stageChangedAt(AS_OF.minus(STALLED_AFTER_DAYS - 1, ChronoUnit.DAYS))
+                .build();
+
+        assertEquals(1, STALL_AWARE_MAPPER.toUrgency(deal, AS_OF));
+    }
+
+    @Test
+    void exactlyTheStalledThresholdBumps() {
+        Deal deal = Deal.builder()
+                .dealId("D-91002")
+                .stage(DealStage.PROSPECT)
+                .closeDate(null)
+                .stageChangedAt(AS_OF.minus(STALLED_AFTER_DAYS, ChronoUnit.DAYS))
+                .build();
+
+        assertEquals(2, STALL_AWARE_MAPPER.toUrgency(deal, AS_OF));
+    }
+
+    @Test
+    void wellPastTheStalledThresholdBumps() {
+        Deal deal = Deal.builder()
+                .dealId("D-91003")
+                .stage(DealStage.QUALIFIED) // base 2
+                .closeDate(null)
+                .stageChangedAt(AS_OF.minus(STALLED_AFTER_DAYS * 5L, ChronoUnit.DAYS))
+                .build();
+
+        assertEquals(3, STALL_AWARE_MAPPER.toUrgency(deal, AS_OF));
+    }
+
+    @ParameterizedTest(name = "{0} stalled long stays at urgency 1")
+    @CsvSource({"ON_HOLD", "CLOSED_WON", "CLOSED_LOST"})
+    void onHoldAndClosedStagesStayAtUrgencyOneEvenWhenStalledLong(DealStage stage) {
+        Deal deal = Deal.builder()
+                .dealId("D-91004")
+                .stage(stage)
+                .closeDate(null)
+                .stageChangedAt(AS_OF.minus(STALLED_AFTER_DAYS * 10L, ChronoUnit.DAYS))
+                .build();
+
+        assertEquals(1, STALL_AWARE_MAPPER.toUrgency(deal, AS_OF));
+    }
+
+    @Test
+    void stalledNegotiationClosingSoonStaysClampedAtFive() {
+        Deal deal = Deal.builder()
+                .dealId("D-91005")
+                .stage(DealStage.NEGOTIATION) // base 4
+                .closeDate(AS_OF.atZone(ZoneOffset.UTC).toLocalDate().plusDays(2)) // +2 bonus -> 6 before the stalled +1
+                .stageChangedAt(AS_OF.minus(STALLED_AFTER_DAYS * 2L, ChronoUnit.DAYS))
+                .build();
+
+        assertEquals(5, STALL_AWARE_MAPPER.toUrgency(deal, AS_OF));
+    }
+
+    @Test
+    void stalledAfterDaysOfZeroDisablesTheBump() {
+        DealToTaskMapper disabledMapper =
+                new DealToTaskMapper(ORGANIZATION_ID, new EnrichmentProperties(), new NoOpTaskEnricher(), 0);
+        Deal deal = Deal.builder()
+                .dealId("D-91006")
+                .stage(DealStage.PROSPECT)
+                .closeDate(null)
+                .stageChangedAt(AS_OF.minus(STALLED_AFTER_DAYS * 10L, ChronoUnit.DAYS))
+                .build();
+
+        assertEquals(1, disabledMapper.toUrgency(deal, AS_OF));
+    }
+
+    @Test
+    void stageChangedAtAfterAsOfIsNeverStalled() {
+        Deal deal = Deal.builder()
+                .dealId("D-91007")
+                .stage(DealStage.PROSPECT)
+                .closeDate(null)
+                .stageChangedAt(AS_OF.plus(5, ChronoUnit.DAYS)) // clock skew / bad data, still after AS_OF
+                .build();
+
+        assertEquals(1, STALL_AWARE_MAPPER.toUrgency(deal, AS_OF));
     }
 }

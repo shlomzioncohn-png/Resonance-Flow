@@ -8,7 +8,10 @@ from __future__ import annotations
 import pytest
 
 from mind.messaging.config import load_settings
-from mind.messaging.mind_task_dependencies_pb2 import TaskDependenciesDetected
+from mind.messaging.task_dependencies_proposed_event_pb2 import (
+    Dependency,
+    DependencyProposedEvent,
+)
 
 # --- config from the mounted files -----------------------------------------
 
@@ -54,23 +57,24 @@ def test_deserializer_reads_a_confluent_framed_message():
     protobuf = pytest.importorskip("confluent_kafka.schema_registry.protobuf")
     from confluent_kafka.serialization import MessageField, SerializationContext
 
-    event = TaskDependenciesDetected(
-        tenant_id="t-1", task_id="task-1", depends_on_task_ids=["task-0"],
-        estimated_duration_minutes=30,
+    event = DependencyProposedEvent(
+        event_id="evt-1", task_id="task-1",
+        dependencies=[Dependency(depends_on_task_id="task-0", confidence=0.75)],
     )
     frame = b"\x00" + struct.pack(">I", 1) + b"\x00" + event.SerializeToString()
 
     deserializer = protobuf.ProtobufDeserializer(
-        TaskDependenciesDetected, {"use.deprecated.format": False}
+        DependencyProposedEvent, {"use.deprecated.format": False}
     )
     back = deserializer(
-        frame, SerializationContext("task.dependencies.detected", MessageField.VALUE)
+        frame, SerializationContext("task.dependencies.proposed", MessageField.VALUE)
     )
 
+    assert back.event_id == "evt-1"
     assert back.task_id == "task-1"
-    assert back.tenant_id == "t-1"
-    assert list(back.depends_on_task_ids) == ["task-0"]
-    assert back.estimated_duration_minutes == 30
+    assert [(d.depends_on_task_id, d.confidence) for d in back.dependencies] == [
+        ("task-0", 0.75)
+    ]
 
 
 def test_module_classes_construct():

@@ -735,6 +735,59 @@ if it had cleared the bar and the eval reports a *perfect* run instead of
 failing. It also catches an embedding backend whose cosine in `[-1, 1]` was not
 rescaled to `[0, 1]`.
 
+### The extracted-item contract
+
+`evaluate_extraction` compares strings, but a real extracted item is a structured
+object. `extraction_contract.py` pins which fields of the pipeline's output the
+eval reads and what they must mean, as a Pydantic model — in code so the
+pipeline's output is *checked* against it, not just described. The pipeline's own
+outbound contract stays `TaskCreationRequested`.
+
+`ExtractedItem` carries only what the eval reads:
+
+| field | required | role |
+|---|---|---|
+| `title` | yes | head of the comparison string |
+| `description` | no | appended to `title` (`title + ". " + description`) when present — design §3.3 |
+
+**Which field carries the meeting id (issue #233, step 1): none.** `source_ref` is a
+pointer back to the original item: today it is read from *inside the content* and
+dropped when the text does not contain it (`extraction/grounding.py`), so for a
+meeting transcript it is `None`; once the Bridge consumer passes
+`RawObjectEvent.source_ref` through (#31) it becomes the source system's own id (a
+Zoom meeting uuid, a Slack `channel_id:ts`). Neither is the AMI meeting code, and
+the eval does not go through Bridge. The eval is what sends each meeting to the
+extractor, so it holds the meeting id itself: it passes it in as the extractor's
+`item_key` and reads it back from `ExtractionSuccess` / `ExtractionFailure` — both
+outcomes carry it (`extraction/README.md`, "A failed item can be found") —
+grouping items by meeting before they are scored.
+
+`ExtractedItem.to_comparison_text()` produces the string `evaluate_extraction`
+matches. Pipeline output enters the eval through
+`evaluate_extracted_items(items, annotated, *, similarity, threshold)`, which takes
+`ExtractedItem`s — so the extracted side has to pass the contract before it is
+scored — and is otherwise a thin wrapper over `evaluate_extraction` (the
+string-level version the CLI and fixture use). Field names match the pipeline's
+`ExtractedFields` (and its subclass `ExtractedFieldsWithClassification`) and
+`TaskCreationRequested` (`contracts/task_creation_requested.py`), and
+`extra="ignore"`, so the pipeline's full payload validates as-is — `source_ref`
+is simply ignored. One rule is stricter than `TaskCreationRequested`: an empty
+`description` is rejected, so "no description" is spelled `None` only (the
+pipeline already maps blank answers to `None`). Items are frozen, so one that
+passed validation cannot be edited into one that would not have. The
+classification fields (`tier`, `urgency`, `role_context`, the effort
+estimate) are deliberately absent even though the pipeline can now fill them in
+the extraction call itself (#351/#352, `ExtractionConfig.classify`): extraction
+P/R measures "did we find the right action items", not "did we classify them
+right". `role_context` joins this contract as an optional field when the
+owner-match diagnostic (design §3.7) is built.
+
+**Status: agreed with Yonit (R2), 2026-10-14** (#233 step 5): `title` +
+`description` is the comparison text, and the meeting id travels as the
+extractor's `item_key`, which reaches both outcomes unchanged (documented on the
+pipeline's side, `extraction/README.md`). This is the one place the contract's
+status is kept; the module docstring and `extraction_eval_design.md` point here.
+
 ### This eval is approximate
 
 It compares free text to free text. A "true positive" means *our rule* — a
@@ -774,3 +827,19 @@ string match); it is not this eval.
 The extracted side needs Yonit's extraction pipeline and Michal's ASR to be
 producing output; the annotated side (AMI action items) wires in via a manifest
 edit, not a code change (`extraction_eval_design.md` §"Scope").
+
+### Known limitation: one task per text
+
+The basic extraction stage returns **exactly one task per input text**
+(`BasicExtractor.extract`, `extraction/extractor.py`). An AMI meeting carries
+several action items — 4 to 8 in the current slice — so a whole meeting sent as
+one text yields one task, and recall on that meeting is capped at `1/n` (IB4003:
+at most 1/8). A score measured under this limit reflects the pipeline's shape, not
+its extraction quality, and must not be read as one.
+
+This is a product gap, not an eval one — a real meeting arriving through Bridge
+hits the same limit — and is tracked in
+[#690](https://github.com/KamaTechOrg/Resonance-Flow/issues/690). Nothing in this
+eval changes when it is fixed: whether the pipeline returns a list per text or
+meetings are segmented upstream, the eval groups results by meeting through
+`item_key` (see "The extracted-item contract").

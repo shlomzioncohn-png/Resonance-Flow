@@ -3,11 +3,15 @@ package com.rnd.chain.config;
 import com.rnd.chain.dto.Task;
 import com.rnd.chain.dto.TaskDependency;
 import com.rnd.chain.repository.DependencyHistoryRepository;
+import com.rnd.chain.repository.GraphLock;
 import com.rnd.chain.repository.InMemoryDependencyHistoryRepository;
+import com.rnd.chain.repository.InMemoryTaskStateHistoryRepository;
+import com.rnd.chain.repository.InMemoryGraphLock;
 import com.rnd.chain.repository.InMemoryTaskDependencyRepository;
 import com.rnd.chain.repository.InMemoryTaskRepository;
 import com.rnd.chain.repository.TaskDependencyRepository;
 import com.rnd.chain.repository.TaskRepository;
+import com.rnd.chain.repository.TaskStateHistoryRepository;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -50,5 +54,17 @@ public class MockDataConfig {
     @ConditionalOnMissingBean(DependencyHistoryRepository.class)
     public DependencyHistoryRepository dependencyHistoryRepository() {
         return new InMemoryDependencyHistoryRepository();
+    }
+
+    @Bean
+    @ConditionalOnMissingBean(TaskStateHistoryRepository.class)
+    public TaskStateHistoryRepository taskStateHistoryRepository() {
+        return new InMemoryTaskStateHistoryRepository();
+    }
+
+    @Bean
+    @ConditionalOnMissingBean(GraphLock.class)
+    public GraphLock graphLock() {
+        return new InMemoryGraphLock();
     }
 }

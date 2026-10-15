@@ -19,16 +19,16 @@ public class ConstraintService {
 
     private final ConstraintRepository constraintRepository;
     private final TaskRepository taskRepository;
-    private final TaskEligibilityService taskEligibilityService;
+    private final ConstraintEligibilityService constraintEligibilityService;
 
     public ConstraintService(
             ConstraintRepository constraintRepository,
             TaskRepository taskRepository,
-            TaskEligibilityService taskEligibilityService) {
+            ConstraintEligibilityService constraintEligibilityService) {
 
         this.constraintRepository = constraintRepository;
         this.taskRepository = taskRepository;
-        this.taskEligibilityService = taskEligibilityService;
+        this.constraintEligibilityService = constraintEligibilityService;
     }
 
     public Constraint createConstraint(
@@ -56,7 +56,7 @@ public class ConstraintService {
                 now
         );
 
-        taskEligibilityService.onConstraintAdded(constraint);
+        constraintEligibilityService.onConstraintAdded(constraint);
 
         return constraint;
     }
@@ -75,7 +75,7 @@ public class ConstraintService {
                 .orElseThrow(() ->
                         new ConstraintNotFoundException(constraintId));
 
-        taskEligibilityService.onConstraintStatusChanged(
+        constraintEligibilityService.onConstraintStatusChanged(
                 taskId,
                 constraintId,
                 newStatus,

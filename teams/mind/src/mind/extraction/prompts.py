@@ -55,10 +55,24 @@ def _fill(template: str, values: dict[str, str]) -> str:
     return filled
 
 
-def system_prompt() -> str:
-    """The instructions shared by the first attempt and every repair."""
+def system_prompt(classify: bool = False) -> str:
+    """The instructions shared by the first attempt and every repair.
 
-    return _load("system.md")
+    `classify` appends the #351 block asking for tier, urgency and
+    role_context. The two live in separate files and are joined here
+    rather than being one file with a switch inside it, so that turning
+    classification off leaves a prompt that never mentions it — a model
+    cannot volunteer a key it was never told about.
+
+    It is also what makes the fallback cheap: if asking for everything in
+    one call ever measures worse than two calls, this file is already the
+    second call's system prompt, unchanged.
+    """
+
+    if not classify:
+        return _load("system.md")
+
+    return _load("system.md") + "\n\n" + _load("classification.md")
 
 
 def extraction_prompt(source_type: SourceType, content: str) -> str:

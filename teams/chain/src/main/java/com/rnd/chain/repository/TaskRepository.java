@@ -77,4 +77,10 @@ public interface TaskRepository {
      * @return the updated tasks (post-mutation), for every id that existed and wasn't soft-deleted
      */
     List<Task> updateAll(List<UUID> ids, UnaryOperator<Task> mutator);
+    /**
+    * Inserts the task only if no task with the same id already exists.
+    *
+    * @return true if the task was inserted, false if it already existed
+    */
+    boolean insertIfAbsent(Task task);
 }

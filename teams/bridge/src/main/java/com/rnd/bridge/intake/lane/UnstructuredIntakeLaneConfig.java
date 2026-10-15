@@ -2,10 +2,10 @@ package com.rnd.bridge.intake.lane;
 
 import com.rnd.bridge.intake.parser.SourceRecordLoader;
 import com.rnd.bridge.intake.service.IntakeLandingService;
+import com.rnd.bridge.intake.service.SourceRecordRefMapper;
 import com.rnd.bridge.raw.RawObjectValidator;
 import com.rnd.bridge.raw.model.RawSourceType;
 import com.rnd.bridge.scoping.AllowlistScopingFilter;
-import com.rnd.bridge.storage.ObjectKeyBuilder;
 import java.util.Arrays;
 import java.util.List;
 import org.springframework.context.annotation.Bean;
@@ -23,7 +23,7 @@ class UnstructuredIntakeLaneConfig {
     List<UnstructuredIntakeLane> unstructuredIntakeLanes(
             SourceRecordLoader loader,
             AllowlistScopingFilter scopingFilter,
-            ObjectKeyBuilder objectKeyBuilder,
+            SourceRecordRefMapper refMapper,
             IntakeLandingService landingService,
             RawObjectValidator validator,
             KafkaRawObjectPublisher publisher,
@@ -34,7 +34,7 @@ class UnstructuredIntakeLaneConfig {
                 .map(sourceType -> new UnstructuredIntakeLane(
                         sourceType,
                         new SourceRecordReaderAdapter(sourceType, loader),
-                        new UnstructuredPayloadMapper(scopingFilter, objectKeyBuilder, landingService),
+                        new UnstructuredPayloadMapper(scopingFilter, refMapper),
                         validator,
                         publisher,
                         landingService,

@@ -2,6 +2,7 @@ package com.rnd.chain.service;
 
 import com.rnd.chain.dto.Task;
 import com.rnd.chain.dto.TaskStatus;
+import com.rnd.chain.exception.InvalidDependencyException;
 import com.rnd.chain.repository.PostgresTaskDependencyRepository;
 import com.rnd.chain.repository.PostgresTaskRepository;
 import com.rnd.chain.repository.jpa.SpringDataTaskJpaRepository;
@@ -18,7 +19,9 @@ import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
@@ -49,6 +52,9 @@ class TaskEligibilityServicePostgresConcurrencyTest {
     @Autowired
     private TaskEligibilityService service;
 
+    @Autowired
+    private DependencyEdgeService edgeService;
+
     // TaskRepository's port interface has no hard-delete (only soft-delete via update()) - the
     // JPA repository is used directly here, test-only, purely for cleanup.
     @Autowired
@@ -64,10 +70,12 @@ class TaskEligibilityServicePostgresConcurrencyTest {
         createdTaskIds.clear();
     }
 
+    private static final UUID TENANT_ID = UUID.randomUUID();
+
     private Task seedTask(UUID id) {
         Task task = Task.builder()
                 .id(id)
-                .ownerId("owner")
+                .tenantId(TENANT_ID)
                 .status(TaskStatus.ACTIVE)
                 .isReady(false)
                 .blockingCount(0)
@@ -117,7 +125,7 @@ class TaskEligibilityServicePostgresConcurrencyTest {
         blockerIds.forEach(this::seedTask);
 
         List<Runnable> jobs = blockerIds.stream()
-                .<Runnable>map(blockerId -> () -> service.addDependency(hubId, blockerId))
+                .<Runnable>map(blockerId -> () -> edgeService.addDependency(hubId, blockerId))
                 .collect(Collectors.toList());
 
         runConcurrently(jobs);
@@ -138,7 +146,7 @@ class TaskEligibilityServicePostgresConcurrencyTest {
         blockerIds.forEach(this::seedTask);
 
         for (UUID blockerId : blockerIds) {
-            service.addDependency(hubId, blockerId);
+            edgeService.addDependency(hubId, blockerId);
         }
         assertEquals(THREAD_COUNT, taskRepository.findById(hubId).orElseThrow().getBlockingCount());
 
@@ -167,7 +175,7 @@ class TaskEligibilityServicePostgresConcurrencyTest {
             seedTask(blockerId);
 
             runConcurrently(List.of(
-                    () -> service.addDependency(dependentId, blockerId),
+                    () -> edgeService.addDependency(dependentId, blockerId),
                     () -> service.onTaskStatusChanged(blockerId, TaskStatus.DONE)));
 
             Task dependent = taskRepository.findById(dependentId).orElseThrow();
@@ -178,6 +186,47 @@ class TaskEligibilityServicePostgresConcurrencyTest {
                         "trial " + i + ": blocker finished DONE but dependent is still counting it as blocking");
                 assertTrue(dependent.isReady(), "trial " + i + ": dependent should be ready once its only blocker is DONE");
             }
+        }
+    }
+
+    @Test
+    void concurrentAddDependency_closingCycle_onlyOneSucceeds() throws InterruptedException {
+        // With A -> B in place, B -> C and C -> A together close a cycle; the graph lock must make
+        // the second writer's DFS see the first one's committed edge.
+        int trials = 10;
+        for (int i = 0; i < trials; i++) {
+            UUID a = UUID.randomUUID();
+            UUID b = UUID.randomUUID();
+            UUID c = UUID.randomUUID();
+
+            seedTask(a);
+            seedTask(b);
+            seedTask(c);
+            edgeService.addDependency(a, b);
+
+            AtomicInteger successes = new AtomicInteger();
+            ConcurrentLinkedQueue<Throwable> failures = new ConcurrentLinkedQueue<>();
+            List<Runnable> jobs = List.of(
+                    () -> attempt(() -> edgeService.addDependency(b, c), successes, failures),
+                    () -> attempt(() -> edgeService.addDependency(c, a), successes, failures));
+            runConcurrently(jobs);
+
+            assertEquals(1, successes.get(), "trial " + i + ": exactly one of the two edges should be accepted");
+            assertEquals(1, failures.size(), "trial " + i + ": exactly one of the two edges should be rejected");
+            assertTrue(failures.peek() instanceof InvalidDependencyException,
+                    "trial " + i + ": rejection should be a cycle error, got " + failures.peek());
+            assertFalse(taskDependencyRepository.existsDependency(b, c)
+                            && taskDependencyRepository.existsDependency(c, a),
+                    "trial " + i + ": both edges were committed, closing the cycle A -> B -> C -> A");
+        }
+    }
+
+    private static void attempt(Runnable action, AtomicInteger successes, ConcurrentLinkedQueue<Throwable> failures) {
+        try {
+            action.run();
+            successes.incrementAndGet();
+        } catch (RuntimeException e) {
+            failures.add(e);
         }
     }
 }

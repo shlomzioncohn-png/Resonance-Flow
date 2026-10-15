@@ -1,5 +1,8 @@
 package com.rnd.bridge.crm.repository.hubspot;
 
+import ch.qos.logback.classic.Logger;
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.core.read.ListAppender;
 import com.rnd.bridge.crm.model.Deal;
 import com.rnd.bridge.crm.model.DealStage;
 import com.rnd.bridge.crm.repository.DealSnapshot;
@@ -9,6 +12,7 @@ import okhttp3.mockwebserver.RecordedRequest;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.slf4j.LoggerFactory;
 import org.springframework.web.client.RestClient;
 
 import java.io.IOException;
@@ -16,6 +20,7 @@ import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneId;
 import java.time.ZoneOffset;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 
@@ -26,22 +31,27 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * Exercises {@link HubSpotDealRepository} against a {@link MockWebServer}
- * with recorded-shape HubSpot response bodies. No test in this class talks
- * to the live HubSpot API.
+ * Exercises {@link HubSpotDealRepository} against a {@link MockWebServer} with recorded-shape
+ * HubSpot response bodies. No test in this class talks to the live HubSpot API.
  * <p>
  * Every test now goes through {@link HubSpotDealRepository#snapshot()} - the deprecated
  * per-instance-cache finder methods (and the cache field behind them) were removed entirely
  * (CRM-lane audit finding F1). Because {@code snapshot()} does one fully independent fetch -
  * pipeline AND deals - on every call, and the constructor still does its own one-off pipeline
- * fetch purely to fail fast on an unrecognized stage label, every test here enqueues the pipeline
- * TWICE: once for the constructor, once for the {@code snapshot()} call under test.
+ * fetch purely to fail fast at startup, every test here enqueues the pipeline TWICE: once for the
+ * constructor, once for the {@code snapshot()} call under test.
+ * <p>
+ * Stage mapping is metadata-based (F6), not label-based - see {@link HubSpotStageMappingTest} for
+ * the mapping-rule unit tests (bands, metadata leniency/validation, invalid-stage isolation). This
+ * class's pipeline fixtures carry {@code metadata} on every stage for that reason; a fixture that
+ * deliberately omits it is exercising one of the FAIL/SKIP paths that metadata absence triggers.
  */
 class HubSpotDealRepositoryTest {
 
     private static final Instant FIXED_NOW = Instant.parse("2026-08-30T12:00:00Z");
 
     private MockWebServer server;
+    private final List<ListAppender<ILoggingEvent>> attachedAppenders = new ArrayList<>();
 
     @BeforeEach
     void startServer() throws IOException {
@@ -52,6 +62,24 @@ class HubSpotDealRepositoryTest {
     @AfterEach
     void stopServer() throws IOException {
         server.shutdown();
+        Logger repoLogger = (Logger) LoggerFactory.getLogger(HubSpotDealRepository.class);
+        Logger mappingLogger = (Logger) LoggerFactory.getLogger(HubSpotStageMapping.class);
+        attachedAppenders.forEach(repoLogger::detachAppender);
+        attachedAppenders.forEach(mappingLogger::detachAppender);
+        attachedAppenders.clear();
+    }
+
+    private ListAppender<ILoggingEvent> captureLogs() {
+        ListAppender<ILoggingEvent> appender = new ListAppender<>();
+        appender.start();
+        ((Logger) LoggerFactory.getLogger(HubSpotDealRepository.class)).addAppender(appender);
+        ((Logger) LoggerFactory.getLogger(HubSpotStageMapping.class)).addAppender(appender);
+        attachedAppenders.add(appender);
+        return appender;
+    }
+
+    private static HubSpotStageMapping defaultStageMapping() {
+        return new HubSpotStageMapping(20, 50, 70, 99);
     }
 
     private HubSpotDealRepository newRepository() {
@@ -68,6 +96,15 @@ class HubSpotDealRepositoryTest {
 
     private HubSpotDealRepository newRepositoryWithClock(
             Clock clock, int maxRetries, long initialBackoffMillis, long maxBackoffMillis) {
+        return newRepositoryWithClockAndRatio(clock, maxRetries, initialBackoffMillis, maxBackoffMillis, 0.5);
+    }
+
+    private HubSpotDealRepository newRepositoryWithRatio(double maxSkippedRatio) {
+        return newRepositoryWithClockAndRatio(Clock.fixed(FIXED_NOW, ZoneOffset.UTC), 5, 0L, 0L, maxSkippedRatio);
+    }
+
+    private HubSpotDealRepository newRepositoryWithClockAndRatio(
+            Clock clock, int maxRetries, long initialBackoffMillis, long maxBackoffMillis, double maxSkippedRatio) {
         HubSpotClient client = new HubSpotClient(
                 RestClient.builder(),
                 server.url("/").toString(),
@@ -77,7 +114,7 @@ class HubSpotDealRepositoryTest {
                 initialBackoffMillis,
                 maxBackoffMillis,
                 millis -> { });
-        return new HubSpotDealRepository(client, clock);
+        return new HubSpotDealRepository(client, clock, defaultStageMapping(), maxSkippedRatio);
     }
 
     private void enqueueJson(String body) {
@@ -87,7 +124,12 @@ class HubSpotDealRepositoryTest {
                 .setBody(body));
     }
 
-    /** Pipeline with stage ids that look nothing like HubSpot's default slugs. */
+    /**
+     * Pipeline with stage ids that look nothing like HubSpot's default slugs, carrying the
+     * probabilities Step 0 confirmed against the live default pipeline - open stages 20/40/60/80/90,
+     * closed 100/0 - which map identically to today's (pre-F6) label-based mapping (PROSPECT,
+     * QUALIFIED, PROPOSAL, NEGOTIATION, NEGOTIATION, CLOSED_WON, CLOSED_LOST).
+     */
     private static final String DEFAULT_PIPELINE = """
             {
               "results": [
@@ -95,13 +137,13 @@ class HubSpotDealRepositoryTest {
                   "id": "pl-1",
                   "label": "Sales Pipeline",
                   "stages": [
-                    {"id": "st-100", "label": "Appointment Scheduled"},
-                    {"id": "st-200", "label": "Qualified To Buy"},
-                    {"id": "st-300", "label": "Presentation Scheduled"},
-                    {"id": "st-400", "label": "Decision Maker Bought-In"},
-                    {"id": "st-450", "label": "Contract Sent"},
-                    {"id": "st-500", "label": "Closed Won"},
-                    {"id": "st-600", "label": "Closed Lost"}
+                    {"id": "st-100", "label": "Appointment Scheduled", "metadata": {"isClosed": "false", "probability": "0.2"}},
+                    {"id": "st-200", "label": "Qualified To Buy", "metadata": {"isClosed": "false", "probability": "0.4"}},
+                    {"id": "st-300", "label": "Presentation Scheduled", "metadata": {"isClosed": "false", "probability": "0.6"}},
+                    {"id": "st-400", "label": "Decision Maker Bought-In", "metadata": {"isClosed": "false", "probability": "0.8"}},
+                    {"id": "st-450", "label": "Contract Sent", "metadata": {"isClosed": "false", "probability": "0.9"}},
+                    {"id": "st-500", "label": "Closed Won", "metadata": {"isClosed": "true", "probability": "1.0"}},
+                    {"id": "st-600", "label": "Closed Lost", "metadata": {"isClosed": "true", "probability": "0.0"}}
                   ]
                 }
               ]
@@ -162,6 +204,8 @@ class HubSpotDealRepositoryTest {
                 : "{\"next\": {\"after\": \"" + pagingNextAfter + "\"}}";
         return "{\"results\": [" + results + "], \"paging\": " + paging + "}";
     }
+
+    // ==== 1:1 adaptations of every HEAD scenario (metadata fixtures + new constructor) ====
 
     @Test
     void dealWithSeveralStageTransitionsProducesRecordsOrderedAscendingByStageChangedAt() {
@@ -251,8 +295,8 @@ class HubSpotDealRepositoryTest {
         enqueueConstructorPipeline();
         HubSpotDealRepository repository = newRepository();
 
-        // Same labels as HubSpot's default pipeline, but with stage ids that
-        // would not appear in any hardcoded id table.
+        // Same labels as HubSpot's default pipeline, but with stage ids that would not appear in
+        // any hardcoded id table - and metadata, not label, is what actually resolves them.
         String pipelineWithUnusualIds = """
                 {
                   "results": [
@@ -260,8 +304,8 @@ class HubSpotDealRepositoryTest {
                       "id": "pl-custom",
                       "label": "Custom Pipeline",
                       "stages": [
-                        {"id": "zzz-1", "label": "Appointment Scheduled"},
-                        {"id": "zzz-6", "label": "Closed Won"}
+                        {"id": "zzz-1", "label": "Appointment Scheduled", "metadata": {"isClosed": "false", "probability": "0.2"}},
+                        {"id": "zzz-6", "label": "Closed Won", "metadata": {"isClosed": "true", "probability": "1.0"}}
                       ]
                     }
                   ]
@@ -282,11 +326,6 @@ class HubSpotDealRepositoryTest {
 
     @Test
     void unknownStageIdReferencedByADealIsSkippedNotFailingTheWholeSync() {
-        // A deal history entry whose stage ID isn't in the fetched pipeline (but every pipeline
-        // stage LABEL is still recognized) is a per-record skip - contrast with
-        // secondSnapshotFailsEntirelyWhenTheRefetchedPipelineHasAnUnrecognizedStageLabel below,
-        // where the PIPELINE itself has a label HubSpotStageMapping doesn't know at all, which
-        // fails the whole snapshot instead.
         enqueueConstructorPipeline();
         HubSpotDealRepository repository = newRepository();
 
@@ -303,8 +342,14 @@ class HubSpotDealRepositoryTest {
         assertEquals(1, snapshot.skippedAtRead());
     }
 
+    /**
+     * Replaces HEAD's {@code pipelineStageWithAnUnrecognizedLabelFailsAtConstruction}. That test
+     * proved an unrecognized LABEL failed construction - the exact F6 weakness this task fixes.
+     * Mapping is now metadata-based, so a custom/renamed label with valid metadata must SUCCEED
+     * instead - this is that same scenario, with the opposite (now correct) expectation.
+     */
     @Test
-    void pipelineStageWithAnUnrecognizedLabelFailsAtConstruction() {
+    void renamedOrCustomStageLabelWithValidMetadataResolvesAtConstructionInsteadOfFailing() {
         String pipelineWithCustomStage = """
                 {
                   "results": [
@@ -312,7 +357,7 @@ class HubSpotDealRepositoryTest {
                       "id": "pl-1",
                       "label": "Sales Pipeline",
                       "stages": [
-                        {"id": "st-1", "label": "Some Custom Renamed Stage"}
+                        {"id": "st-1", "label": "Contract Out", "metadata": {"isClosed": "false", "probability": "0.9"}}
                       ]
                     }
                   ]
@@ -320,47 +365,53 @@ class HubSpotDealRepositoryTest {
                 """;
         enqueueJson(pipelineWithCustomStage);
 
-        UnknownHubSpotStageException exception =
-                assertThrows(UnknownHubSpotStageException.class, this::newRepository);
-        assertTrue(exception.getMessage().contains("Some Custom Renamed Stage"));
+        HubSpotDealRepository repository = assertDoesNotThrow(() -> newRepository());
+
+        enqueueJson(pipelineWithCustomStage);
+        String deal = dealJson("D-99", "On the renamed stage", "1000", null, "2026-08-01T08:00:00Z",
+                historyEntry("st-1", "2026-08-01T08:00:00.000Z"));
+        enqueueJson(dealsPage(null, deal));
+
+        DealSnapshot snapshot = repository.snapshot();
+
+        assertEquals(DealStage.NEGOTIATION, snapshot.findLatestByDealId("D-99").orElseThrow().stage());
+        assertEquals(0, snapshot.skippedAtRead());
     }
 
+    /**
+     * Replaces HEAD's {@code secondSnapshotFailsEntirelyWhenTheRefetchedPipelineHasAnUnrecognizedStageLabel}.
+     * That test proved a brand-new custom-labeled stage picked up on a refetch failed the ENTIRE
+     * snapshot (F6's core weakness). Metadata-based mapping fixes exactly this: the same scenario
+     * now succeeds, proving freshness (F1/F14) and the F6 fix together.
+     */
     @Test
-    void secondSnapshotFailsEntirelyWhenTheRefetchedPipelineHasAnUnrecognizedStageLabel() {
-        // A real behavior change from the F1 fix, not previously possible: the OLD/deprecated path
-        // resolved stage mapping once, at construction, so a stage id missing from THAT mapping was
-        // a per-deal skip (see the test above). snapshot() re-fetches and re-resolves the WHOLE
-        // pipeline on every call, so an unrecognized LABEL anywhere in the pipeline - even one no
-        // deal currently uses - now fails the entire snapshot before the deals endpoint is ever
-        // called. This is a known limitation for F6 (stage-mapping robustness, out of scope for this
-        // task) - documented in CLAUDE.md. The scheduler's existing catch(RuntimeException) + log and
-        // the controller's new @ExceptionHandler (see CrmBridgeControllerTest) are what keep this
-        // loud and clear instead of a generic failure.
+    void secondSnapshotPicksUpABrandNewCustomLabeledStageByItsMetadataNotFailingTheWholeSync() {
         enqueueConstructorPipeline();
         HubSpotDealRepository repository = newRepository();
 
-        String pipelineWithAnUnrecognizedLabel = """
+        String pipelineWithANewCustomStage = """
                 {
                   "results": [
                     {
                       "id": "pl-1",
                       "label": "Sales Pipeline",
                       "stages": [
-                        {"id": "st-100", "label": "Appointment Scheduled"},
-                        {"id": "st-999", "label": "Some Brand New Custom Stage"}
+                        {"id": "st-100", "label": "Appointment Scheduled", "metadata": {"isClosed": "false", "probability": "0.2"}},
+                        {"id": "st-999", "label": "Some Brand New Custom Stage", "metadata": {"isClosed": "false", "probability": "0.95"}}
                       ]
                     }
                   ]
                 }
                 """;
-        enqueueJson(pipelineWithAnUnrecognizedLabel);
+        enqueueJson(pipelineWithANewCustomStage);
+        String deal = dealJson("D-100", "On the new custom stage", "1000", null, "2026-08-01T08:00:00Z",
+                historyEntry("st-999", "2026-08-01T08:00:00.000Z"));
+        enqueueJson(dealsPage(null, deal));
 
-        UnknownHubSpotStageException exception =
-                assertThrows(UnknownHubSpotStageException.class, repository::snapshot);
+        DealSnapshot snapshot = assertDoesNotThrow(repository::snapshot);
 
-        assertTrue(exception.getMessage().contains("Some Brand New Custom Stage"));
-        assertEquals(2, server.getRequestCount(),
-                "constructor pipeline + the failed snapshot pipeline fetch - never reaches the deals endpoint");
+        assertEquals(DealStage.NEGOTIATION, snapshot.findLatestByDealId("D-100").orElseThrow().stage());
+        assertEquals(0, snapshot.skippedAtRead());
     }
 
     @Test
@@ -579,8 +630,8 @@ class HubSpotDealRepositoryTest {
                       "id": "pl-1",
                       "label": "Sales Pipeline",
                       "stages": [
-                        {"id": "st-100", "label": "Appointment Scheduled"},
-                        {"id": "st-700-new", "label": "Closed Won"}
+                        {"id": "st-100", "label": "Appointment Scheduled", "metadata": {"isClosed": "false", "probability": "0.2"}},
+                        {"id": "st-700-new", "label": "Closed Won", "metadata": {"isClosed": "true", "probability": "1.0"}}
                       ]
                     }
                   ]
@@ -633,6 +684,312 @@ class HubSpotDealRepositoryTest {
         assertEquals(3, snapshot.findHistoryByDealId("D-40").size());
         assertEquals(1, snapshot.latestPerDeal().size());
         assertEquals(DealStage.CLOSED_WON, snapshot.latestPerDeal().get(0).stage());
+    }
+
+    // ==== new policy rows (F6 commit) ====
+
+    // ---- pipeline/stage-level FAIL STARTUP rows (#2 empty pipelines, #3 missing stage id, #5 all invalid) ----
+
+    @Test
+    void zeroPipelinesReturnedFailsAtConstruction() {
+        enqueueJson("{\"results\": []}");
+
+        assertThrows(UnknownHubSpotStageException.class, this::newRepository);
+    }
+
+    @Test
+    void stageWithNoIdFailsAtConstruction() {
+        String pipelineWithNoStageId = """
+                {
+                  "results": [
+                    {
+                      "id": "pl-1",
+                      "label": "Sales Pipeline",
+                      "stages": [
+                        {"id": null, "label": "Mystery Stage", "metadata": {"isClosed": "false", "probability": "0.2"}}
+                      ]
+                    }
+                  ]
+                }
+                """;
+        enqueueJson(pipelineWithNoStageId);
+
+        UnknownHubSpotStageException exception = assertThrows(UnknownHubSpotStageException.class, this::newRepository);
+        assertTrue(exception.getMessage().contains("Mystery Stage"));
+    }
+
+    @Test
+    void everyStageMissingMetadataFailsAtConstructionAsALikelyApiShapeChange() {
+        String pipelineWithNoMetadataAnywhere = """
+                {
+                  "results": [
+                    {
+                      "id": "pl-1",
+                      "label": "Sales Pipeline",
+                      "stages": [
+                        {"id": "st-100", "label": "Appointment Scheduled"},
+                        {"id": "st-500", "label": "Closed Won"}
+                      ]
+                    }
+                  ]
+                }
+                """;
+        enqueueJson(pipelineWithNoMetadataAnywhere);
+
+        assertThrows(UnknownHubSpotStageException.class, this::newRepository);
+    }
+
+    @Test
+    void everyStageMissingMetadataFailsTheWholeSnapshotNotJustOneDeal() {
+        enqueueConstructorPipeline();
+        HubSpotDealRepository repository = newRepository();
+
+        String pipelineWithNoMetadataAnywhere = """
+                {
+                  "results": [
+                    {
+                      "id": "pl-1",
+                      "label": "Sales Pipeline",
+                      "stages": [
+                        {"id": "st-100", "label": "Appointment Scheduled"}
+                      ]
+                    }
+                  ]
+                }
+                """;
+        enqueueJson(pipelineWithNoMetadataAnywhere);
+
+        assertThrows(UnknownHubSpotStageException.class, repository::snapshot);
+    }
+
+    // ---- SKIP rows: one invalid stage is isolated to the deals that reference it ----
+
+    @Test
+    void constructorDoesNotThrowForOneInvalidStageOnlyLogsOneWarnListingItAndTheReason() {
+        String pipelineWithOneBadStage = """
+                {
+                  "results": [
+                    {
+                      "id": "pl-1",
+                      "label": "Sales Pipeline",
+                      "stages": [
+                        {"id": "st-100", "label": "Appointment Scheduled", "metadata": {"isClosed": "false", "probability": "0.2"}},
+                        {"id": "st-bad", "label": "Broken Stage"}
+                      ]
+                    }
+                  ]
+                }
+                """;
+        enqueueJson(pipelineWithOneBadStage);
+        ListAppender<ILoggingEvent> logs = captureLogs();
+
+        assertDoesNotThrow(() -> newRepository());
+
+        assertTrue(logs.list.stream().anyMatch(event ->
+                "WARN".equals(event.getLevel().toString())
+                        && event.getFormattedMessage().contains("st-bad")));
+    }
+
+    @Test
+    void oneInvalidStageSkipsOnlyTheDealsThatReferenceItAndLogsOneWarnAtResolutionTime() {
+        String pipelineWithOneBadStage = """
+                {
+                  "results": [
+                    {
+                      "id": "pl-1",
+                      "label": "Sales Pipeline",
+                      "stages": [
+                        {"id": "st-100", "label": "Appointment Scheduled", "metadata": {"isClosed": "false", "probability": "0.2"}},
+                        {"id": "st-bad", "label": "Broken Stage"}
+                      ]
+                    }
+                  ]
+                }
+                """;
+        enqueueJson(pipelineWithOneBadStage);
+        HubSpotDealRepository repository = newRepository();
+
+        enqueueJson(pipelineWithOneBadStage);
+        ListAppender<ILoggingEvent> logs = captureLogs();
+        String badDeal = dealJson("D-1", "On the broken stage", "1000", null, "2026-08-01T08:00:00Z",
+                historyEntry("st-bad", "2026-08-01T08:00:00.000Z"));
+        String goodDeal = dealJson("D-2", "Fine", "2000", null, "2026-08-02T08:00:00Z",
+                historyEntry("st-100", "2026-08-02T08:00:00.000Z"));
+        enqueueJson(dealsPage(null, badDeal, goodDeal));
+
+        DealSnapshot snapshot = repository.snapshot();
+
+        assertEquals(List.of("D-2"), snapshot.dealIds());
+        assertEquals(1, snapshot.skippedAtRead());
+        assertTrue(logs.list.stream().anyMatch(event ->
+                        "WARN".equals(event.getLevel().toString())
+                                && event.getFormattedMessage().contains("st-bad")),
+                "the stage-level WARN must fire, not just the counter");
+    }
+
+    @Test
+    void openStageWithMissingProbabilityDefaultsToProspectAndLogsTheWarn() {
+        String pipelineWithMissingProbability = """
+                {
+                  "results": [
+                    {
+                      "id": "pl-1",
+                      "label": "Sales Pipeline",
+                      "stages": [
+                        {"id": "st-np", "label": "No Probability Set", "metadata": {"isClosed": "false"}}
+                      ]
+                    }
+                  ]
+                }
+                """;
+        enqueueJson(pipelineWithMissingProbability);
+        HubSpotDealRepository repository = newRepository();
+
+        enqueueJson(pipelineWithMissingProbability);
+        ListAppender<ILoggingEvent> logs = captureLogs();
+        String deal = dealJson("D-1", "On the no-probability stage", "1000", null, "2026-08-01T08:00:00Z",
+                historyEntry("st-np", "2026-08-01T08:00:00.000Z"));
+        enqueueJson(dealsPage(null, deal));
+
+        DealSnapshot snapshot = repository.snapshot();
+
+        assertEquals(DealStage.PROSPECT, snapshot.findLatestByDealId("D-1").orElseThrow().stage());
+        assertEquals(0, snapshot.skippedAtRead());
+        assertTrue(logs.list.stream().anyMatch(event ->
+                "WARN".equals(event.getLevel().toString())
+                        && event.getFormattedMessage().contains("st-np")));
+    }
+
+    // ---- threshold: too many skipped deals fails the whole run ----
+
+    @Test
+    void manyDealsStuckOnOneInvalidStageAreAllSkippedAndCountedWhenBelowTheThreshold() {
+        String pipelineWithOneBadStage = """
+                {
+                  "results": [
+                    {
+                      "id": "pl-1",
+                      "label": "Sales Pipeline",
+                      "stages": [
+                        {"id": "st-100", "label": "Appointment Scheduled", "metadata": {"isClosed": "false", "probability": "0.2"}},
+                        {"id": "st-bad", "label": "Broken Stage"}
+                      ]
+                    }
+                  ]
+                }
+                """;
+        enqueueJson(pipelineWithOneBadStage);
+        HubSpotDealRepository repository = newRepositoryWithRatio(0.5);
+
+        enqueueJson(pipelineWithOneBadStage);
+        List<String> dealsJson = new ArrayList<>();
+        for (int i = 0; i < 2; i++) {
+            dealsJson.add(dealJson("BAD-" + i, "Stuck", "1000", null, "2026-08-01T08:00:00Z",
+                    historyEntry("st-bad", "2026-08-01T08:00:00.000Z")));
+        }
+        for (int i = 0; i < 3; i++) {
+            dealsJson.add(dealJson("GOOD-" + i, "Fine", "1000", null, "2026-08-01T08:00:00Z",
+                    historyEntry("st-100", "2026-08-01T08:00:00.000Z")));
+        }
+        enqueueJson(dealsPage(null, dealsJson.toArray(new String[0])));
+
+        // 2 skipped / 5 total = 0.4, not strictly greater than the 0.5 threshold - passes.
+        DealSnapshot snapshot = repository.snapshot();
+
+        assertEquals(2, snapshot.skippedAtRead());
+        assertEquals(3, snapshot.allDeals().size());
+    }
+
+    @Test
+    void exceedingTheSkipThresholdFailsTheWholeRunInsteadOfPublishingAPartialSnapshot() {
+        String pipelineWithOneBadStage = """
+                {
+                  "results": [
+                    {
+                      "id": "pl-1",
+                      "label": "Sales Pipeline",
+                      "stages": [
+                        {"id": "st-100", "label": "Appointment Scheduled", "metadata": {"isClosed": "false", "probability": "0.2"}},
+                        {"id": "st-bad", "label": "Broken Stage"}
+                      ]
+                    }
+                  ]
+                }
+                """;
+        enqueueJson(pipelineWithOneBadStage);
+        HubSpotDealRepository repository = newRepositoryWithRatio(0.5);
+
+        enqueueJson(pipelineWithOneBadStage);
+        List<String> dealsJson = new ArrayList<>();
+        for (int i = 0; i < 3; i++) {
+            dealsJson.add(dealJson("BAD-" + i, "Stuck", "1000", null, "2026-08-01T08:00:00Z",
+                    historyEntry("st-bad", "2026-08-01T08:00:00.000Z")));
+        }
+        for (int i = 0; i < 2; i++) {
+            dealsJson.add(dealJson("GOOD-" + i, "Fine", "1000", null, "2026-08-01T08:00:00Z",
+                    historyEntry("st-100", "2026-08-01T08:00:00.000Z")));
+        }
+        enqueueJson(dealsPage(null, dealsJson.toArray(new String[0])));
+
+        // 3 skipped / 5 total = 0.6, strictly greater than 0.5 - fails the whole run.
+        assertThrows(HubSpotSkipThresholdExceededException.class, repository::snapshot);
+    }
+
+    @Test
+    void exactlyAtTheThresholdRatioPasses() {
+        enqueueConstructorPipeline();
+        HubSpotDealRepository repository = newRepositoryWithRatio(0.5);
+
+        enqueuePipeline();
+        String badDeal = dealJson("D-1", "Bad", "1000", null, "2026-08-01T08:00:00Z",
+                historyEntry("st-999-does-not-exist", "2026-08-01T08:00:00.000Z"));
+        String goodDeal = dealJson("D-2", "Good", "1000", null, "2026-08-01T08:00:00Z",
+                historyEntry("st-100", "2026-08-01T08:00:00.000Z"));
+        enqueueJson(dealsPage(null, badDeal, goodDeal));
+
+        // 1 skipped / 2 total = 0.5, not STRICTLY greater than 0.5 - passes.
+        DealSnapshot snapshot = assertDoesNotThrow(repository::snapshot);
+        assertEquals(1, snapshot.skippedAtRead());
+    }
+
+    @Test
+    void zeroDealsReadNeverFailsTheThresholdCheck() {
+        enqueueConstructorPipeline();
+        HubSpotDealRepository repository = newRepositoryWithRatio(0.5);
+
+        enqueuePipeline();
+        enqueueJson(dealsPage(null));
+
+        DealSnapshot snapshot = assertDoesNotThrow(repository::snapshot);
+        assertEquals(0, snapshot.skippedAtRead());
+        assertEquals(0, snapshot.allDeals().size());
+    }
+
+    @Test
+    void oneOfOneSkippedFailsTheThresholdCheck() {
+        enqueueConstructorPipeline();
+        HubSpotDealRepository repository = newRepositoryWithRatio(0.5);
+
+        enqueuePipeline();
+        String badDeal = dealJson("D-1", "Bad", "1000", null, "2026-08-01T08:00:00Z",
+                historyEntry("st-999-does-not-exist", "2026-08-01T08:00:00.000Z"));
+        enqueueJson(dealsPage(null, badDeal));
+
+        // 1 skipped / 1 total = 1.0, strictly greater than 0.5 - fails.
+        assertThrows(HubSpotSkipThresholdExceededException.class, repository::snapshot);
+    }
+
+    @Test
+    void maxSkippedRatioMustBeGreaterThanZeroAndAtMostOne() {
+        for (double invalid : new double[] {0.0, -0.1, 1.1}) {
+            server.enqueue(new MockResponse()
+                    .setResponseCode(200)
+                    .setHeader("Content-Type", "application/json")
+                    .setBody(DEFAULT_PIPELINE));
+            IllegalStateException exception = assertThrows(IllegalStateException.class,
+                    () -> newRepositoryWithRatio(invalid));
+            assertTrue(exception.getMessage().contains("max-skipped-ratio"), "ratio " + invalid);
+        }
     }
 
     // ---- fetchDeal(String): a fresh, single-record lookup, never cached, never reusing snapshot() data ----

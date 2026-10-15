@@ -54,6 +54,13 @@ def _get_model() -> SentenceTransformer:
     return _model
 
 
+def task_text(title: str, description: str) -> str:
+    """Canonical title+description join for embedding a task -- every
+    producer (#470, #245, #471) must use this, or their vectors aren't
+    comparable to each other."""
+    return f"{title} {description}".strip()
+
+
 def embed(text: str, *, is_query: bool = False) -> list[float]:
     """Deterministic embedding vector. is_query=True for search queries."""
     if not text.strip():

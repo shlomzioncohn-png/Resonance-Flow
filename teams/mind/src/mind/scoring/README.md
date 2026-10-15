@@ -17,8 +17,16 @@ per-task priority score MIND publishes.
 `SegmentedRankingModel.score(task, context) -> ScoreResult`, matching the
 `RankingModel` protocol in [`../evaluation/interfaces.py`](../evaluation/interfaces.py).
 It is a `Protocol`, so the class inherits from nothing. The model sees one
-`Task` at a time plus `context.current_datetime`, never the other candidates and
+task at a time plus `context.current_datetime`, never the other candidates and
 never the persona. The harness builds the ranking from the per-task scores.
+
+The task it reads is a `ScorableTask` ([`inputs.py`](inputs.py)): the seven
+fields the model uses, plus `task_id`, which the score does not read but which
+names the task — `parent_task_id` points at one, and walking from a parent to
+its children (R3, week 7) needs it. R1's scenario `Task` fits it unchanged,
+so the harness runs as before; the live path can hand it a task built from
+Inbox's, where three of those fields may be empty (see below). A mypy-only
+check in `inputs.py` fails if R1's `Task` ever stops fitting.
 
 ## How a score is computed
 
@@ -142,7 +150,7 @@ In the 20 dev scenarios the expected answer is never a blocked task and no
 scenario is entirely blocked, so the band and a hard zero are indistinguishable
 there — and the band keeps information downstream needs.
 
-## The two nullable fields
+## Two fields that may be null even in the scenarios
 
 **`deadline is None`** returns that tier's stated fallback, never 0.0, and the
 fallbacks differ on purpose: `0.15` operational (undated operational work is
@@ -161,6 +169,51 @@ which is decided by `impact`, not by the timestamp.
 persona set this field is `null` in every task, so this feature **never fires and
 changes no number today**. It exists so the behaviour is defined rather than
 accidental, and so the rule is already written when week 7 fills the field in.
+
+## A task with fields missing
+
+A real task can arrive without a tier, an effort estimate or a description:
+extraction leaves them null on purpose when the content gives no basis (#351,
+#352), and Inbox's Task allows it. The scenarios fill all three, so none of
+this changes a persona score — all 91 score identically with and without it.
+
+- **No tier: scored by the tactical rule** (`ASSUMED_TIER`). Tactical is the
+  middle of both axes — 72 scale_hours between 8 and 336, weights between the
+  other two — so it assumes the least. Only the choice of rule is assumed: the
+  task's tier stays null, in the database and in what is sent to Chain, and the
+  explanation says "task of unknown tier, scored as tactical". Logged as
+  `tier_assumed` with the task's id. A task is re-scored on every update, so
+  the null-tier rate is the number of **distinct ids**, never the number of
+  lines. Counting null tiers in Inbox's tasks answers a slightly wider
+  question — every task, not only the ones that were scored — so the two can
+  differ without either being wrong.
+  Deliberately not a factor: a null tier already says it was assumed, and a
+  flag among the contributions would distort the explanation's leading factor.
+- **No effort estimate: no quick_win bonus.** The bonus rewards a shortness we
+  know about; without an estimate there is no evidence of one. That is the same
+  0.0 a task past the cap gets, so a missing estimate is never a penalty.
+- **No description: adds no words.** Without the guard, `f"{None}"` put the word
+  "none" into the text the lexicons read.
+
+### How far to trust such a score
+
+`score_confidence(task)` ([`confidence.py`](confidence.py)) fills the
+`confidence` field of `task.score.proposed`. It is 1.0 when nothing is missing
+and drops by **the worst a missing field can do**, not the typical: Chain
+orders by score, a gap of 0.05 already flips an order, and which tasks are
+badly off cannot be known in advance.
+
+| missing | penalty | where the number comes from |
+|---|---|---|
+| tier | `ASSUMED_TIER_SHIFT` (0.17) | **measured**: the 90th percentile of how far a persona task's base score moves when its tier is replaced by tactical (mean 0.063, max 0.352), over all 91 tasks — tactical ones included, since Chain cannot know whether the assumption was right. Assumes tasks with no tier spread across the tiers as the persona set does |
+| effort estimate | quick_win's weight in the rule used | **derived**: the bonus cannot move a score further than its weight — 0.10 operational, 0.05 tactical, nothing at strategic |
+
+Both missing compound by multiplication. It is a separate function rather than
+a field on `ScoreResult`, which is R1's contract and has none.
+
+One thing Chain has to know: in `task.score.proposed`, `tier` is not optional,
+so a null arrives as the protobuf default, an unspecified tier, which must read
+as "unknown".
 
 ## Why these weights
 
@@ -212,9 +265,17 @@ written** — see [`eval_split.py`](./eval_split.py) for the derivation and the
 rules. Every weight, threshold and keyword was chosen against the 20 dev
 scenarios, and no holdout scenario was read while building this package.
 
+#535 later added six scenarios. The thirty kept their halves and the six were
+placed 4 / 2 by the same filename-only rules, so the split is now 24 / 12. The
+weights here were chosen before those six existed, and none of them was read
+for scoring. (The #352 effort-estimate work did search the text of every
+persona task, these six included, for duration phrases — a narrow look, but a
+look.) Where this README says "the 20 dev scenarios", it means the original
+twenty, which is what those claims were checked against.
+
 The split is a development discipline, not a change to the eval set and not a
 measurement. **Scoring this model against the persona set is R1's**, through the
-harness, over all 30 — so this package reports no accuracy number of its own and
+harness, over all 36 — so this package reports no accuracy number of its own and
 there is exactly one place such a number comes from.
 
 What the split lets this package claim without measuring anything is the part
@@ -236,11 +297,14 @@ reading a third of the set.
   week-7 stretch, is R1's call to read off the reported numbers — not this
   package's to assert.
 - **`initiative` never fires** on the current set, as noted above.
+- **`ASSUMED_TIER_SHIFT` was measured on synthetic tasks.** The spread on real
+  extracted ones may differ; re-measure once #353 produces them.
 
 ## Running it
 
 ```
-pytest tests/test_scoring.py -v     # the acceptance tests
+pytest tests/test_scoring.py -v                  # the acceptance tests
+pytest tests/test_scoring_missing_fields.py -v   # no tier, no estimate, no description
 ```
 
 That is all this package runs. Evaluating the model against the persona set goes

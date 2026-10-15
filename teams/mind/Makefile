@@ -1,4 +1,4 @@
-.PHONY: install dev test lint fmt run eval eval-ci schema migrate docker-build docker-up proto
+.PHONY: install dev test lint fmt run run-index-consumer eval eval-ci schema migrate docker-build docker-up proto
 
 install:
 	pip install -e .
@@ -6,8 +6,10 @@ install:
 dev:
 	pip install -e ".[dev]"
 
+# See scripts/gen_proto.py -- single source of truth, also called from
+# the Dockerfile and tests/conftest.py.
 proto:
-	python -m grpc_tools.protoc --proto_path=proto --python_out=src/mind/messaging proto/*.proto
+	python scripts/gen_proto.py
 
 migrate:
 	alembic upgrade head
@@ -29,6 +31,9 @@ fmt:
 
 run: proto
 	uvicorn mind.api.main:app --reload --port 8000
+
+run-index-consumer: proto
+	python -m mind.embeddings.index_consumer_runner
 
 eval:
 	python -m mind.evaluation.run --personas eval/personas

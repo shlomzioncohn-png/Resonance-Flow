@@ -1,30 +1,35 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
+import Link from 'next/link';
 import Chip from '@mui/material/Chip';
+import MuiLink from '@mui/material/Link';
 import Stack from '@mui/material/Stack';
-import TablePagination from '@mui/material/TablePagination';
 import Typography from '@mui/material/Typography';
 import PageContainer from '@/components/layout/PageContainer';
-import LoadingState from '@/components/feedback/LoadingState';
-import EmptyState from '@/components/feedback/EmptyState';
-import ErrorState from '@/components/feedback/ErrorState';
-import DataTable, { type DataTableColumn } from '@/components/ui/DataTable';
+import DataTable, { type Column } from '@/components/ui/DataTable';
 import { getErrorMessage } from '@/services/api';
 import { listTasks, type ApiTask } from '@/services/workspaceApi';
 import { PriorityChip, softToneSx, statusTone } from '../shared';
 
 type LoadState = 'loading' | 'loaded' | 'error';
 
-const columns: DataTableColumn<ApiTask>[] = [
+const columns: Column<ApiTask>[] = [
   {
-    key: 'title',
+    id: 'title',
     header: 'Task',
     render: (task) => (
       <Stack spacing={0.25}>
-        <Typography variant="body2" sx={{ fontWeight: 600 }}>
+        <MuiLink
+          component={Link}
+          href={`/employee/tasks/${task.id}`}
+          variant="body2"
+          underline="hover"
+          color="text.primary"
+          sx={{ fontWeight: 600 }}
+        >
           {task.title}
-        </Typography>
+        </MuiLink>
         {task.project && (
           <Typography variant="caption" color="text.secondary">
             {task.project}
@@ -34,29 +39,29 @@ const columns: DataTableColumn<ApiTask>[] = [
     ),
   },
   {
-    key: 'status',
+    id: 'status',
     header: 'Status',
     render: (task) => (
       <Chip size="small" label={task.status} sx={softToneSx(statusTone(task.status))} />
     ),
   },
   {
-    key: 'priority',
+    id: 'priority',
     header: 'Priority',
     render: (task) => <PriorityChip priority={task.priority} />,
   },
   {
-    key: 'owner',
+    id: 'owner',
     header: 'Owner',
     render: (task) => task.owner ?? '—',
   },
   {
-    key: 'due',
+    id: 'due',
     header: 'Due',
     render: (task) => (task.dueDate ? new Date(task.dueDate).toLocaleString() : '—'),
   },
   {
-    key: 'effort',
+    id: 'effort',
     header: 'Effort',
     align: 'right',
     render: (task) => (task.effortEstimate != null ? `${task.effortEstimate} min` : '—'),
@@ -100,39 +105,27 @@ export default function EmployeeTasksPage() {
       title="My Tasks"
       description="Your complete task list — status, due dates, and everything you own."
     >
-      {state === 'loading' && <LoadingState message="Loading your tasks…" />}
-
-      {state === 'error' && <ErrorState description={errorMessage} onRetry={retry} />}
-
-      {state === 'loaded' && (
-        <DataTable
-          columns={columns}
-          rows={tasks}
-          getRowId={(task) => task.id}
-          getRowHref={(task) => `/employee/tasks/${task.id}`}
-          emptyState={
-            <EmptyState
-              title="No tasks assigned"
-              description="Tasks assigned to you will show up here."
-            />
-          }
-        />
-      )}
-
-      {state === 'loaded' && total > 0 && (
-        <TablePagination
-          component="div"
-          count={total}
-          page={page}
-          onPageChange={(_, newPage) => setPage(newPage)}
-          rowsPerPage={pageSize}
-          rowsPerPageOptions={[20, 50, 100]}
-          onRowsPerPageChange={(event) => {
-            setPageSize(Number(event.target.value));
+      <DataTable
+        ariaLabel="My tasks"
+        columns={columns}
+        rows={tasks}
+        getRowId={(task) => task.id}
+        loading={state === 'loading'}
+        error={state === 'error' ? errorMessage : null}
+        onRetry={retry}
+        emptyTitle="No tasks assigned"
+        emptyDescription="Tasks assigned to you will show up here."
+        pagination={{
+          page,
+          pageSize,
+          totalCount: total,
+          onPageChange: setPage,
+          onPageSizeChange: (size) => {
+            setPageSize(size);
             setPage(0);
-          }}
-        />
-      )}
+          },
+        }}
+      />
     </PageContainer>
   );
 }

@@ -49,6 +49,20 @@ services:
     networks:
       - resonance-net
 
+  schema-registry:
+    # Same image the shared Helm chart runs in-cluster (teams/relay/helm/resonance-flow/values.yaml)
+    # - deliberately NOT Redpanda's own built-in registry, whose Protobuf behavior differs from
+    # Apicurio's and could pass locally while breaking in the cluster. -mem loses its schemas on
+    # every restart - set producer.auto.register.schemas=true locally, or re-register from
+    # shared/proto, rather than relying on anything persisting across restarts.
+    image: apicurio/apicurio-registry-mem:2.5.11.Final
+    container_name: bridge-schema-registry
+    ports:
+      # 8081/8082 are already taken by Inbox/Chain's own registries - see SCHEMA_REGISTRY_URL.
+      - "8085:8080"
+    networks:
+      - resonance-net
+
 networks:
   resonance-net:
     driver: bridge

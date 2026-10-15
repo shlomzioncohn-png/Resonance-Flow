@@ -28,7 +28,6 @@ abstract class TaskRepositoryContractTest {
         LocalDateTime now = LocalDateTime.now();
         return Task.builder()
                 .id(id)
-                .ownerId("owner")
                 .status(TaskStatus.ACTIVE)
                 .blockingCount(0)
                 .openConstraintCount(0)
@@ -121,6 +120,15 @@ abstract class TaskRepositoryContractTest {
     // --- save ----------------------------------------------------------
 
     @Test
+    void save_preservesTenantId_roundTrip() {
+        UUID id = UUID.randomUUID();
+        UUID tenantId = UUID.randomUUID();
+        TaskRepository repository = createRepository(List.of(newTaskBuilder(id).tenantId(tenantId).build()));
+
+        assertThat(repository.findById(id).orElseThrow().getTenantId()).isEqualTo(tenantId);
+    }
+
+    @Test
     void save_insertsNewTask() {
         UUID id = UUID.randomUUID();
         TaskRepository repository = createRepository(List.of());
@@ -139,6 +147,56 @@ abstract class TaskRepositoryContractTest {
 
         assertThat(repository.findById(id).orElseThrow().getBlockingCount()).isEqualTo(5);
     }
+    // --- insertIfAbsent -----------------------------------------------------
+    @Test
+void insertIfAbsent_insertsTask_whenTaskDoesNotExist() {
+    UUID id = UUID.randomUUID();
+    TaskRepository repository = createRepository(List.of());
+
+    boolean inserted = repository.insertIfAbsent(
+            newTaskBuilder(id)
+                    .status(TaskStatus.PENDING)
+                    .blockingCount(0)
+                    .build()
+    );
+
+    assertThat(inserted).isTrue();
+
+    Task persisted = repository.findById(id).orElseThrow();
+    assertThat(persisted.getStatus()).isEqualTo(TaskStatus.PENDING);
+    assertThat(persisted.getBlockingCount()).isZero();
+}
+@Test
+void insertIfAbsent_doesNotOverwriteExistingTaskWithSameId() {
+    UUID id = UUID.randomUUID();
+
+    Task existing = newTaskBuilder(id)
+            .status(TaskStatus.ACTIVE)
+            .blockingCount(3)
+            .openConstraintCount(1)
+            .isReady(false)
+            .build();
+
+    TaskRepository repository = createRepository(List.of(existing));
+
+    Task attemptedReplacement = newTaskBuilder(id)
+            .status(TaskStatus.DONE)
+            .blockingCount(0)
+            .openConstraintCount(0)
+            .isReady(true)
+            .build();
+
+    boolean inserted = repository.insertIfAbsent(attemptedReplacement);
+
+    assertThat(inserted).isFalse();
+
+    Task persisted = repository.findById(id).orElseThrow();
+
+    assertThat(persisted.getStatus()).isEqualTo(TaskStatus.ACTIVE);
+    assertThat(persisted.getBlockingCount()).isEqualTo(3);
+    assertThat(persisted.getOpenConstraintCount()).isEqualTo(1);
+    assertThat(persisted.isReady()).isFalse();
+}
 
     // --- update ----------------------------------------------------------
 
@@ -150,7 +208,6 @@ abstract class TaskRepositoryContractTest {
         Optional<Task> result = repository.update(id, task ->
                 Task.builder()
                         .id(task.getId())
-                        .ownerId(task.getOwnerId())
                         .status(task.getStatus())
                         .blockingCount(task.getBlockingCount() + 1)
                         .openConstraintCount(task.getOpenConstraintCount())
