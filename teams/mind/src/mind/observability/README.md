@@ -145,15 +145,14 @@ counts, and an unknown cost stays `None` instead of `0.0`:
   failures and successes share one row and its p95 includes the slow
   failures; a success is priced by the id the answer reports, the model
   actually billed;
-
 - a failed call (no usage reported) and a model with no price on file are
   `None` -- unpriced, counted in `unpriced_count`;
-- the dollar price comes from `extraction/providers/pricing.py`. **Gemini has
-  no price on this branch:** R2 added one on her own branch
-  (`yonit/mind-gemini-pricing`, not merged yet), so until that lands, Gemini
-  calls are recorded as unpriced -- correctly, not as $0;
-- with R2's pricing branch, Gemini's `completion_tokens` include its
-  thinking tokens, which Google bills at the output price.
+- the dollar price comes from `extraction/providers/pricing.py` (R2's): the
+  DeepSeek models and the Gemini models with a published price -- others
+  (e.g. `gemini-3.5-flash`) stay unpriced on purpose. A price can change on
+  a set date (`effective_from`), which `estimate_cost` takes into account;
+- Gemini's `completion_tokens` include its thinking tokens, which Google
+  bills at the output price.
 
 ### Tests
 

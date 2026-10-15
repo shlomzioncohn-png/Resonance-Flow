@@ -115,9 +115,9 @@ measure that does not apply to a kind is `n/a` (null total, null count); one
 that applies but is unknown is never shown as 0 -- its total is `null`, with a
 count of how many calls lacked it.
 
-LLM calls are recorded in R2's `BasicExtractor._call`, with her agreement.
-Gemini has no price until her `yonit/mind-gemini-pricing` branch lands, so its
-calls are recorded as unpriced in the meantime.
+LLM calls are recorded in R2's `BasicExtractor._call`, with her agreement,
+and priced from `extraction/providers/pricing.py`; a model with no price on
+file there (some Gemini models) is recorded as unpriced, not as free.
 
 Metrics, limits, configuration, warnings and known limitations:
 [`src/mind/observability/README.md`](./src/mind/observability/README.md#status-of-479-cost-and-latency-monitoring).
@@ -153,8 +153,8 @@ licensing constraints.
   seconds**, not dollars; dollars apply only to LLM calls. No CPU-hour rate.
   A CPU-seconds limit for OCR/ASR waits for a measured baseline.
 - ~~LLM call instrumentation (#479)~~ Resolved with R2: `extractor.py` records
-  `kind`, status, token counts and an unknown cost as `None`. Gemini's price is
-  on her `yonit/mind-gemini-pricing` branch.
+  `kind`, status, token counts and an unknown cost as `None`, every call under
+  the model it was sent to. Gemini's price is in `pricing.py` (R2).
 
 ## Getting started
 
