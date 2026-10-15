@@ -89,6 +89,15 @@ class TeamMemberServiceTest {
         return user;
     }
 
+    private Team teamInAnotherTenant() {
+        Tenant otherTenant = new Tenant();
+        otherTenant.setId(UUID.randomUUID());
+        Team foreignTeam = new Team();
+        foreignTeam.setId(teamId);
+        foreignTeam.setTenant(otherTenant);
+        return foreignTeam;
+    }
+
     @Test
     void addMember_whenNotAlreadyAMember_savesNewMembership() {
         when(userRepository.findById(actorId)).thenReturn(Optional.of(actor));
@@ -158,6 +167,43 @@ class TeamMemberServiceTest {
     }
 
     @Test
+    void addMember_whenTeamIsInAnotherTenant_throwsForbiddenActionException() {
+        when(userRepository.findById(actorId)).thenReturn(Optional.of(actor));
+        when(teamRepository.findById(teamId)).thenReturn(Optional.of(teamInAnotherTenant()));
+
+        TeamMemberRequestDto request = new TeamMemberRequestDto();
+        request.setUserId(UUID.randomUUID().toString());
+
+        assertThatThrownBy(() -> teamMemberService.addMember(teamId, request, actorId))
+                .isInstanceOf(ForbiddenActionException.class);
+
+        verify(teamMemberRepository, never()).save(any());
+        verifyNoInteractions(auditService);
+    }
+
+    @Test
+    void addMember_whenSystemAdminAndTeamIsInAnotherTenant_savesNewMembership() {
+        actor.setRole(UserRole.SYSTEM_ADMIN);
+        when(userRepository.findById(actorId)).thenReturn(Optional.of(actor));
+        Team foreignTeam = teamInAnotherTenant();
+        when(teamRepository.findById(teamId)).thenReturn(Optional.of(foreignTeam));
+        User user = new User();
+        user.setId(UUID.randomUUID());
+        user.setTenant(foreignTeam.getTenant());
+        when(userRepository.findById(user.getId())).thenReturn(Optional.of(user));
+        when(teamMemberRepository.findByTeam_IdAndUser_IdAndLeftAtIsNull(teamId, user.getId()))
+                .thenReturn(Optional.empty());
+        when(teamMemberRepository.save(any(TeamMember.class))).thenAnswer(inv -> inv.getArgument(0));
+
+        TeamMemberRequestDto request = new TeamMemberRequestDto();
+        request.setUserId(user.getId().toString());
+
+        TeamMemberResponseDto result = teamMemberService.addMember(teamId, request, actorId);
+
+        assertThat(result.getUserId()).isEqualTo(user.getId());
+    }
+
+    @Test
     void removeMember_whenActiveMembershipExists_setsLeftAt() {
         when(userRepository.findById(actorId)).thenReturn(Optional.of(actor));
         when(teamRepository.findById(teamId)).thenReturn(Optional.of(team));
@@ -213,6 +259,38 @@ class TeamMemberServiceTest {
 
         assertThatThrownBy(() -> teamMemberService.removeMember(teamId, userId, actorId))
                 .isInstanceOf(TeamMembershipNotFoundException.class);
+    }
+
+    @Test
+    void removeMember_whenTeamIsInAnotherTenant_throwsForbiddenActionException() {
+        when(userRepository.findById(actorId)).thenReturn(Optional.of(actor));
+        when(teamRepository.findById(teamId)).thenReturn(Optional.of(teamInAnotherTenant()));
+        UUID userId = UUID.randomUUID();
+
+        assertThatThrownBy(() -> teamMemberService.removeMember(teamId, userId, actorId))
+                .isInstanceOf(ForbiddenActionException.class);
+
+        verify(teamMemberRepository, never()).save(any());
+        verifyNoInteractions(auditService);
+    }
+
+    @Test
+    void removeMember_whenSystemAdminAndTeamIsInAnotherTenant_setsLeftAt() {
+        actor.setRole(UserRole.SYSTEM_ADMIN);
+        when(userRepository.findById(actorId)).thenReturn(Optional.of(actor));
+        when(teamRepository.findById(teamId)).thenReturn(Optional.of(teamInAnotherTenant()));
+        UUID userId = UUID.randomUUID();
+        TeamMember membership = new TeamMember();
+        User user = new User();
+        user.setId(userId);
+        membership.setUser(user);
+        when(teamMemberRepository.findByTeam_IdAndUser_IdAndLeftAtIsNull(teamId, userId))
+                .thenReturn(Optional.of(membership));
+        when(teamMemberRepository.save(membership)).thenReturn(membership);
+
+        teamMemberService.removeMember(teamId, userId, actorId);
+
+        assertThat(membership.getLeftAt()).isEqualTo(NOW);
     }
 
     @Test

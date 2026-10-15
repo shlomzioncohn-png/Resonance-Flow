@@ -49,6 +49,7 @@ public class TeamMemberService {
     public TeamMemberResponseDto addMember(UUID teamId, TeamMemberRequestDto request, UUID actorId) {
         User actor = findActorOrThrow(actorId);
         Team team = findTeamOrThrow(teamId);
+        teamAuthorization.assertWithinScope(teamAuthorization.scopeOf(actor), team);
 
         User user = resolveUserInTenant(request.getUserId(), team.getTenant());
         if (teamMemberRepository.findByTeam_IdAndUser_IdAndLeftAtIsNull(teamId, user.getId()).isPresent()) {
@@ -67,6 +68,7 @@ public class TeamMemberService {
     public void removeMember(UUID teamId, UUID userId, UUID actorId) {
         User actor = findActorOrThrow(actorId);
         Team team = findTeamOrThrow(teamId);
+        teamAuthorization.assertWithinScope(teamAuthorization.scopeOf(actor), team);
 
         TeamMember membership = teamMemberRepository.findByTeam_IdAndUser_IdAndLeftAtIsNull(teamId, userId)
                 .orElseThrow(() -> new TeamMembershipNotFoundException(teamId, userId));
