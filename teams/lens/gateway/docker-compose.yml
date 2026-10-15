@@ -1,13 +1,4 @@
 services:
-  bff:
-    build: ../bff
-    container_name: bff-service
-    ports:
-      - "${BFF_PORT:-8082}:8082"
-    environment:
-      - SERVER_PORT=${BFF_PORT:-8082}
-      - SPRING_PROFILES_ACTIVE=${SPRING_PROFILES_ACTIVE:-local}
-
   gateway:
     build: .
     container_name: gateway-service
@@ -16,8 +7,12 @@ services:
     environment:
       - SERVER_PORT=${GATEWAY_PORT:-8080}
       - SPRING_PROFILES_ACTIVE=${SPRING_PROFILES_ACTIVE:-local}
-      - BFF_SERVICE_URL=${BFF_SERVICE_URL:-http://bff-service:8082}
+      # The Gateway only ever talks to the BFF — never to Inbox or any other team's
+      # service. Start the BFF from teams/lens/bff (its own docker-compose.yml owns the
+      # BFF → Inbox wiring); it publishes 8082 on the host.
+      - BFF_SERVICE_URL=${BFF_SERVICE_URL:-http://host.docker.internal:8082}
       - BFF_CONNECT_TIMEOUT_MS=${BFF_CONNECT_TIMEOUT_MS:-2000}
       - BFF_READ_TIMEOUT_MS=${BFF_READ_TIMEOUT_MS:-10000}
-    depends_on:
-      - bff
+    extra_hosts:
+      # host.docker.internal is built in on Docker Desktop; this makes it work on Linux too
+      - "host.docker.internal:host-gateway"

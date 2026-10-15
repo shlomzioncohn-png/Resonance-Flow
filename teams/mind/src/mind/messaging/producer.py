@@ -6,10 +6,10 @@ MIND builds the message (from its extraction pipeline) and calls publish();
 everything below is done.
 
     from mind.messaging import ProtobufProducer
-    from mind.messaging.mind_task_dependencies_pb2 import TaskDependenciesDetected
+    from mind.messaging.task_dependencies_proposed_event_pb2 import DependencyProposedEvent
 
     producer = ProtobufProducer()
-    producer.publish("task.dependencies.detected", TaskDependenciesDetected(...))
+    producer.publish("task.dependencies.proposed", DependencyProposedEvent(...), key=task_id)
 """
 
 from __future__ import annotations
