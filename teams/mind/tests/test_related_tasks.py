@@ -113,6 +113,16 @@ async def test_requests_exclude_task_id_from_the_store():
     store.search.assert_awaited_once_with([0.0] * 4, k=5, exclude_task_id="task-deploy-prod")
 
 
+@pytest.mark.parametrize("k", [0, -1])
+async def test_rejects_a_non_positive_k_before_touching_the_store(k):
+    store = AsyncMock()
+
+    with pytest.raises(ValueError, match="k must be positive"):
+        await find_related(store, "task-1", k=k)
+
+    store.get_vector.assert_not_awaited()
+
+
 async def test_find_related_responds_within_a_generous_latency_bound(store):
     """Basic regression guard, not a p50/p95 proof (see benchmarks/)."""
     await store.upsert(

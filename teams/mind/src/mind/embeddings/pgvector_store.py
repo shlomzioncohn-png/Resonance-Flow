@@ -208,8 +208,11 @@ class PgVectorStore(VectorStore):
                 (str(self._settings.search_effort),),
             )
             if exclude_completed or exclude_task_id is not None:
-                # Keeps Postgres scanning past the ef_search window for k
-                # qualifying rows, instead of stopping short (pgvector >=0.8).
+                # "Excluding 1 task_id can never starve k" only holds while
+                # search_effort stays above k -- that's the default, but
+                # it's a runtime setting, not a guarantee. Keeps Postgres
+                # scanning past the ef_search window for k qualifying rows
+                # instead of stopping short (pgvector >=0.8).
                 await cur.execute("SELECT set_config('hnsw.iterative_scan', 'strict_order', true);")
             params: list[object] = [query_vector]
             if exclude_task_id is not None:

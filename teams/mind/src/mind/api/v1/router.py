@@ -10,6 +10,8 @@ both versions can run side by side.
 
 from __future__ import annotations
 
+from typing import Annotated
+
 from fastapi import APIRouter, Depends, Request
 
 from mind.api.instrumentation import instrumented_call
@@ -27,10 +29,11 @@ def get_vector_store(request: Request) -> VectorStore:
     return request.app.state.vector_store
 
 
+VectorStoreDep = Annotated[VectorStore, Depends(get_vector_store)]
+
+
 @router.get("/tasks/{task_id}/related", response_model=RelatedTasksResponse)
-async def get_related_tasks(
-    task_id: str, store: VectorStore = Depends(get_vector_store)
-) -> RelatedTasksResponse:
+async def get_related_tasks(task_id: str, store: VectorStoreDep) -> RelatedTasksResponse:
     """#472. Always 200 -- related: [] covers an unindexed task_id, an
     empty index, or nothing above threshold (see embeddings/README.md)."""
     with instrumented_call("find_related"):

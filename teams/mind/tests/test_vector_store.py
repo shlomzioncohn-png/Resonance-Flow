@@ -256,6 +256,26 @@ async def test_search_exclude_task_id_does_not_let_self_consume_the_k_budget(sto
     assert [r.task_id for r in results] == [other_id]
 
 
+async def test_search_exclude_task_id_respects_k_starvation_at_low_search_effort(store):
+    """The earlier "excluding 1 id can never starve k" reasoning only held
+    for the default search_effort=400 -- it's a runtime setting, and can
+    go as low as k itself. With search_effort==k, excluding the self row
+    must still not come back short."""
+    settings = store._settings.model_copy(update={"search_effort": 1})
+    low_effort_store = PgVectorStore(settings)
+    try:
+        query_vec = embed("Ship the release notes for v2.3")
+        self_id, other_id = f"test-{uuid.uuid4()}", f"test-{uuid.uuid4()}"
+        await store.upsert(self_id, query_vec)
+        await store.upsert(other_id, embed("Write up the v2.3 release notes"))
+
+        results = await low_effort_store.search(query_vec, k=1, exclude_task_id=self_id)
+
+        assert [r.task_id for r in results] == [other_id]
+    finally:
+        await low_effort_store.close()
+
+
 async def test_search_combines_exclude_completed_and_exclude_task_id(store):
     """Both filters at once -- not exercised by find_related()/find_duplicate()
     today, but part of search()'s public contract."""

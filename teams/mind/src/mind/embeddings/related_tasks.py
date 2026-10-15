@@ -11,6 +11,8 @@ async def find_related(
 ) -> list[SearchResult]:
     """Up to k related tasks, task_id itself excluded. [] on no embedding,
     empty index, or nothing above threshold -- never an error."""
+    if k <= 0:
+        raise ValueError(f"k must be positive, got {k}")
     if threshold is None:
         threshold = get_settings().related_task_threshold
     vector = await store.get_vector(task_id)
