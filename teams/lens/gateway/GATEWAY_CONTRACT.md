@@ -63,8 +63,12 @@ The Gateway exposes six endpoints for the Frontend's workspace functionality. Al
 | GET | `/api/workspace/employee-task` | `http://bff-service:8080/workspace/employee-task` | BFF (Sari) | Get the employee's current task (My Workspace demo); mocked at the BFF, no downstream service owns this yet |
 | GET | `/api/manager/workload` | `http://bff-service:8080/manager/workload` | BFF (Sari) | Active-task count per employee (Manager Dashboard); mocked at the BFF |
 | GET | `/api/manager/projects` | `http://bff-service:8080/manager/projects` | BFF (Sari) | Project grid with health/KPI data (Manager Dashboard); mocked at the BFF. Distinct from `/api/admin/projects` (per-project drill-down) |
+| GET | `/api/manager/users` | `http://bff-service:8080/manager/users` | BFF (Sari) | List users (meant for managers; role check pending Auth stage 2). Real call through to Inbox — not mocked. |
+| GET | `/api/manager/users/{id}` | `http://bff-service:8080/manager/users/{id}` | BFF (Sari) | One user's details, MANAGER-only |
+| PATCH | `/api/manager/users/{id}` | `http://bff-service:8080/manager/users/{id}` | BFF (Sari) | Edit displayName/firstName/lastName/phone only, MANAGER-only |
+| PATCH | `/api/manager/users/{id}/status` | `http://bff-service:8080/manager/users/{id}/status` | BFF (Sari) | Change status (ACTIVE/SUSPENDED/DISABLED), MANAGER-only, 409 on self-change |
 
-**Current Implementation:** Manual routing via `WorkspaceController.java` — each endpoint explicitly forwards to BFF using `RestTemplate`.
+**Current Implementation:** Manual routing via `WorkspaceController.java` and `ManagerUsersController.java` — each endpoint explicitly forwards to BFF using `RestTemplate`.
 
 **Future Phases:** Once more team services are ready, BFF will expand to route to Bridge, Chain, Inbox, and Mind services. Gateway's routing layer remains unchanged.
 

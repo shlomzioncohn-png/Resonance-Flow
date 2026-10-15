@@ -5,7 +5,7 @@ import EmptyState from './EmptyState';
 
 const meta = {
   component: EmptyState,
-  tags: ['ai-generated'],
+  tags: ['autodocs'],
 } satisfies Meta<typeof EmptyState>;
 
 export default meta;

@@ -164,6 +164,71 @@ TCP-reachable. Dependencies whose target is disabled get no initContainer.
 {{- end }}
 {{- end }}
 {{/*
+env entries for a component's mounted config/secret -- shared between the
+main container (deployment.yaml) and resonance-flow.migrationInitContainer
+so the two can't drift apart.
+*/}}
+{{- define "resonance-flow.configSecretEnv" -}}
+{{- $component := .component }}
+{{- if $component.config }}
+{{- include "resonance-flow.configFilePathEnv" . }}
+{{- end }}
+{{- if $component.secret }}
+- name: SECRETS_FILE_PATH
+  value: "/etc/resonance-flow/secret/secrets.yaml"
+{{- end }}
+{{- end }}
+{{/*
+volumeMounts for a component's mounted config/secret. See
+resonance-flow.configSecretEnv.
+*/}}
+{{- define "resonance-flow.configSecretVolumeMounts" -}}
+{{- $component := .component }}
+{{- if $component.config }}
+- name: resonance-flow-config
+  mountPath: /etc/resonance-flow/config/config.yaml
+  subPath: config.yaml
+  readOnly: true
+{{- end }}
+{{- if $component.secret }}
+# whole Secret as a dir (no subPath): an optional missing Secret then
+# leaves an empty dir, not a phantom file, and updates propagate.
+- name: resonance-flow-secret
+  mountPath: /etc/resonance-flow/secret
+  readOnly: true
+{{- end }}
+{{- end }}
+{{/*
+Opt-in migration initContainer (components.<name>.migration: {enabled, command}),
+e.g. `alembic upgrade head` -- runs components.<name>.image at the exact tag/config/
+secret/resources the main container gets, so the migration always matches the
+code being deployed instead of drifting from a hand-run or CI-only step.
+*/}}
+{{- define "resonance-flow.migrationInitContainer" -}}
+{{- $componentName := .componentName }}
+{{- $component := .component }}
+{{- if not $component.migration.command }}
+{{- fail (printf "components.%s.migration.enabled is true but migration.command is unset/empty -- a nil command falls back to the image's default entrypoint, which never exits, and the initContainer hangs forever" $componentName) }}
+{{- end }}
+- name: {{ $componentName }}-migrate
+  image: "{{ $component.image.repository }}:{{ $component.image.tag }}"
+  imagePullPolicy: {{ $component.image.pullPolicy }}
+  command:
+    {{- toYaml $component.migration.command | nindent 4 }}
+  {{- if or $component.config $component.secret }}
+  env:
+    {{- include "resonance-flow.configSecretEnv" . | nindent 4 }}
+  {{- end }}
+  {{- if or $component.config $component.secret }}
+  volumeMounts:
+    {{- include "resonance-flow.configSecretVolumeMounts" . | nindent 4 }}
+  {{- end }}
+  {{- with $component.resources }}
+  resources:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+{{- end }}
+{{/*
 Kafka SASL client JAAS config string, derived from kafka.sasl.client.users
 and kafka.sasl.client.passwords - the same values that seed the Kafka subchart's own
 auto-generated Secret (see charts/kafka/templates/secrets.yaml). Every component that

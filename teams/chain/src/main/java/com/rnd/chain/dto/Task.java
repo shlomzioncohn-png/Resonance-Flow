@@ -29,6 +29,10 @@ public final class Task {
     private final UUID id;
     private final UUID parentTaskId;
 
+    /** Owning tenant, per issue #580. Nullable: null means "not yet populated" (a legacy task
+     * predating this field, or not yet backfilled by Inbox) - never treated as "any tenant". */
+    private final UUID tenantId;
+
     private final TaskStatus status;
 
     /** Whether all of this task's dependencies and constraints are satisfied, so it can be worked on.
@@ -46,6 +50,16 @@ public final class Task {
     private final Integer estimatedDurationMin;
     private final Double score;
 
+    /** Mind's confidence (0..1) in its own {@link #score} for this task. Null until Mind sends
+     * one alongside the score (task.score.proposed). Issue #445: the m term of priority_score
+     * is {@code score * confidence}, not {@code score} alone. */
+    private final Double confidence;
+
+    /** Chain's feasibility-adjusted priority, 1..10, or null until {@link #score} is set. Issue
+     * #445: computed by {@code PriorityScoreService}, never set directly by a caller other than
+     * {@code TaskEligibilityService}. */
+    private final Double priorityScore;
+
     private final LocalDateTime createdAt;
     private final LocalDateTime updatedAt;
     private final LocalDateTime deletedAt;
@@ -53,12 +67,15 @@ public final class Task {
     @lombok.Builder(builderClassName = "Builder")
     private Task(UUID id,
                  UUID parentTaskId,
+                 UUID tenantId,
                  TaskStatus status,
                  boolean isReady,
                  int blockingCount,
                  int openConstraintCount,
                  Integer estimatedDurationMin,
                  Double score,
+                 Double confidence,
+                 Double priorityScore,
                  LocalDateTime createdAt,
                  LocalDateTime updatedAt,
                  LocalDateTime deletedAt) {
@@ -76,12 +93,15 @@ public final class Task {
         }
         this.id = id;
         this.parentTaskId = parentTaskId;
+        this.tenantId = tenantId;
         this.status = status;
         this.isReady = isReady;
         this.blockingCount = blockingCount;
         this.openConstraintCount = openConstraintCount;
         this.estimatedDurationMin = estimatedDurationMin;
         this.score = score;
+        this.confidence = confidence;
+        this.priorityScore = priorityScore;
         this.createdAt = createdAt;
         this.updatedAt = updatedAt;
         this.deletedAt = deletedAt;
@@ -96,10 +116,10 @@ public final class Task {
      */
     public static Task copyOf(Task source) {
         Objects.requireNonNull(source, "source must not be null");
-        return new Task(source.id, source.parentTaskId, source.status,
+        return new Task(source.id, source.parentTaskId, source.tenantId, source.status,
                 source.isReady, source.blockingCount, source.openConstraintCount,
-                source.estimatedDurationMin, source.score, source.createdAt, source.updatedAt,
-                source.deletedAt);
+                source.estimatedDurationMin, source.score, source.confidence, source.priorityScore,
+                source.createdAt, source.updatedAt, source.deletedAt);
     }
 
     @Override
@@ -109,6 +129,7 @@ public final class Task {
                 + ", isReady=" + isReady
                 + ", blockingCount=" + blockingCount
                 + ", openConstraintCount=" + openConstraintCount
+                + ", priorityScore=" + priorityScore
                 + ", deletedAt=" + deletedAt
                 + "}";
     }
