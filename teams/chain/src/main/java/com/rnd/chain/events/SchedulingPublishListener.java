@@ -6,6 +6,7 @@ import com.rnd.chain.service.SchedulingUpdateService;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
 import java.util.UUID;
@@ -52,6 +53,7 @@ public class SchedulingPublishListener {
     private final SchedulingUpdateService schedulingUpdateService;
     private final Sleeper sleeper;
 
+    @Autowired
     public SchedulingPublishListener(TaskRepository taskRepository, SchedulingUpdateService schedulingUpdateService) {
         this(taskRepository, schedulingUpdateService, REAL_SLEEPER);
     }
