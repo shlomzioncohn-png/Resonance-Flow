@@ -9,7 +9,7 @@ import java.util.UUID;
  * has already changed more than once in this project's history. Centralizing the sensible
  * defaults here means a future shape change only needs updating in one place.
  *
- * <p>{@code TaskEligibilityServiceConcurrencyTest} and {@code TaskTest} call this directly.
+ * <p>{@code TaskTest} call this directly.
  * {@code TaskEligibilityServiceTest} keeps its own private {@code buildTask(id, blockingCount,
  * openConstraintCount, isReady[, status])} - a positional-args convenience wrapper used at 30+
  * call sites in that file - but its body now delegates to {@link #defaultTask(UUID)} rather than

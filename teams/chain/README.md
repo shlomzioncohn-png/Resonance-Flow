@@ -423,9 +423,9 @@ docker compose down
 mvn test
 ```
 
-The default run covers unit tests only. Since the in-memory repositories were removed, most
-service/handler tests that used them were deleted rather than ported; coverage of that logic now
-comes from the `@Tag("postgres")` tests below.
+The default run covers only tests that need no database. The service, event-handler and repository
+tests were ported to run against a real Postgres (`@Tag("postgres")`, see below); `PgRepos` exposes the
+real repositories to them and `PgCleanup` removes rows that non-transactional (Kafka-driven) tests commit.
 
 `@Tag("postgres")` tests (the `Postgres*RepositoryTest`/`*ConcurrencyTest` classes) are excluded by
 default - run them with a real Postgres reachable (`chain`/`chain`/`chain`, matching
