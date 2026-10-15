@@ -7,8 +7,10 @@ per-task priority score MIND publishes.
   feasibility, free-time matching, deciding what actually gets done — belongs to
   Chain and Inbox. The contract enforces this by not handing the model
   `free_time_minutes` or `constraints`, and nothing here reintroduces them.
-- **Stretch goal (week 7, R3):** propagate importance down `parent_task_id`.
-  This baseline reads that field as a weak signal but never walks the chain.
+- **Hierarchy is not here at all.** The week-7 stretch (R3) propagates
+  importance down the parent chain; this baseline does not read
+  `parent_task_id`, does not declare it on its input, and knows nothing about
+  hierarchy. That is deliberate — see *Why hierarchy is absent* below.
 - **Explanations (#358, week 6)** are built on top of the raw factors this model
   returns; only a fixed template lives here.
 
@@ -20,10 +22,10 @@ It is a `Protocol`, so the class inherits from nothing. The model sees one
 task at a time plus `context.current_datetime`, never the other candidates and
 never the persona. The harness builds the ranking from the per-task scores.
 
-The task it reads is a `ScorableTask` ([`inputs.py`](inputs.py)): the seven
+The task it reads is a `ScorableTask` ([`inputs.py`](inputs.py)): the six
 fields the model uses, plus `task_id`, which the score does not read but which
-names the task — `parent_task_id` points at one, and walking from a parent to
-its children (R3, week 7) needs it. R1's scenario `Task` fits it unchanged,
+names the task — R3's week-7 propagation asks Chain's dependency API for a
+task's ancestors by that id (SPEC-R3 §5). R1's scenario `Task` fits it unchanged,
 so the harness runs as before; the live path can hand it a task built from
 Inbox's, where three of those fields may be empty (see below). A mypy-only
 check in `inputs.py` fails if R1's `Task` ever stops fitting.
@@ -77,11 +79,11 @@ developer can hold a strategic one. Here it acts as a switch selecting which
 yardstick measures the task. All three yardsticks report onto the same 0-1
 scale, so tasks of different tiers remain comparable inside one scenario.
 
-| tier | `time_pressure` | `impact` | `quick_win` | `initiative` | half-pressing at | no deadline reads as |
-|---|---|---|---|---|---|---|
-| `operational` | 0.65 | 0.25 | 0.10 | — | 8 hours | 0.15 |
-| `tactical` | 0.40 | 0.55 | 0.05 | — | 72 hours | 0.30 |
-| `strategic` | 0.20 | 0.75 | — | 0.05 | 336 hours | 0.50 |
+| tier | `time_pressure` | `impact` | `quick_win` | half-pressing at | no deadline reads as |
+|---|---|---|---|---|---|
+| `operational` | 0.65 | 0.25 | 0.10 | 8 hours | 0.15 |
+| `tactical` | 0.40 | 0.55 | 0.05 | 72 hours | 0.30 |
+| `strategic` | 0.21 | 0.79 | — | 336 hours | 0.50 |
 
 ## The features
 
@@ -97,7 +99,6 @@ three rules genuinely distinct rather than three names for one formula.
 | `time_pressure` | the two above | Their **max**: either source can establish urgency, neither is paid twice |
 | `impact` | `title` + `description` | **Sum** of matched phrase weights onto a neutral base of 0.5, clamped. Impact genuinely accumulates; a customer-facing outage with an SLA attached is worse than either signal alone |
 | `quick_win` | `effort_estimate` | `1 - min(effort, 120) / 120` |
-| `belongs_to_initiative` | `parent_task_id` | 1.0 if a parent exists, 0.0 otherwise. No traversal |
 
 ### Why urgency can be stated in words
 
@@ -125,6 +126,41 @@ that one kind of task always beats another, which is precisely what the
 `cross_tier/` scenarios exist to test rather than assume.
 
 The final clamp in `score()` is a contract guard, not part of the method.
+
+**The requirement is on the reachable range, not on the sum.** A weight parked on
+a feature that can never leave 0 passes the sum check and still shortens that
+rule's scale. That had actually happened: the strategic rule's `initiative`
+weight was 0.05 of a sum of 1.0, but the feature returned 0 for every task in
+the set, so the rule could only reach 0.95 while the other two reached 1.0 —
+quietly penalising strategic tasks in exactly the `cross_tier/` scenarios where
+tiers compete directly. `test_every_rule_can_reach_a_full_base_score` holds this
+now, and would have failed on the old weights.
+
+## Why hierarchy is absent
+
+The baseline does not read `parent_task_id`, and `ScorableTask` does not declare
+it. Three reasons, in the order they matter:
+
+1. **The comparison depends on it.** Week 7's stretch propagates importance down
+   the parent chain and is measured against this baseline. "Did hierarchy help?"
+   is only answerable if the baseline never saw hierarchy at all.
+2. **The signal is close to information-free in production.** In a real company
+   almost every task sits under something — a developer task under a manager
+   task under a feature goal — so "has a parent" is very nearly the constant 1.
+3. **It was never measured.** `parent_task_id` is `null` in every scenario, so
+   the feature always returned exactly 0 and its 0.05 was reasoned, not
+   calibrated — while silently costing the strategic rule 5% of its scale (see
+   *Normalisation*).
+
+Removed at the team lead's request. Its 0.05 was redistributed between the two
+remaining strategic weights **in proportion** — 0.20/0.95 and 0.75/0.95, giving
+0.21 and 0.79 — so neither weight was re-chosen; only the share that had been
+parked on a constant-0 feature moved. A test pins both the values and the
+preserved ratio, and another asserts that a task scores identically with and
+without a parent at every tier, so re-introducing the feature fails the suite.
+
+R3 does not need the field on this input either: per SPEC-R3 §5 she obtains a
+task's ancestors from Chain's dependency query API, keyed by `task_id`.
 
 ## `blocked` is a band, not a zero
 
@@ -165,10 +201,10 @@ both directions — one where the moment has passed and the task is now near
 worthless, one where it is still the most urgent thing on the list. Which is
 which is decided by `impact`, not by the timestamp.
 
-**`parent_task_id is None`** contributes nothing and cannot crash. In the current
-persona set this field is `null` in every task, so this feature **never fires and
-changes no number today**. It exists so the behaviour is defined rather than
-accidental, and so the rule is already written when week 7 fills the field in.
+**`parent_task_id`** is not read at all, and is not even declared on
+`ScorableTask`, so there is no null case to define. A test asserts that the same
+task scores identically with and without a parent, at every tier — see *Why
+hierarchy is absent*.
 
 ## A task with fields missing
 
@@ -233,8 +269,7 @@ segmentation. At operational, .65 > .35 satisfies the strong reading of
 `effort_estimate` is Chain's input and `eval/personas/README.md` forbids a
 scenario's correct answer from hinging on it; at these weights it can only break
 a near-tie, never decide an ordering. It is dropped entirely at strategic, where
-a 40-minute item is not a "quick win" in any useful sense. `initiative` takes the
-smallest non-zero weight in the model, matching the issue's "weak signal".
+a 40-minute item is not a "quick win" in any useful sense.
 
 The blocked ceiling is bounded the same way: a startable but utterly bland task
 scores around 0.30, so the ceiling has to sit below that or the guarantee fails.
@@ -297,7 +332,6 @@ reading a third of the set.
   rebuild fixed. Whether that is the case here, and what it means for R3's
   week-7 stretch, is R1's call to read off the reported numbers — not this
   package's to assert.
-- **`initiative` never fires** on the current set, as noted above.
 - **`ASSUMED_TIER_SHIFT` was measured on synthetic tasks.** The spread on real
   extracted ones may differ; re-measure once #353 produces them.
 
