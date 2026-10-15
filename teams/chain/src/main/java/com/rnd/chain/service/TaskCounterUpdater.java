@@ -80,6 +80,7 @@ public class TaskCounterUpdater {
      * Issue #774: appends a STATUS_CHANGED history row. Call only after the status write actually
      * happened, inside the same transaction; a no-op when the status did not change.
      */
+    @Transactional
     public void recordStatusChange(UUID taskId, TaskStatus from, TaskStatus to) {
         if (from == to) {
             return;
@@ -92,6 +93,7 @@ public class TaskCounterUpdater {
      * Issue #774: appends BLOCKED (0 to positive) or UNBLOCKED (positive to 0) for a blockingCount
      * change that was just written; any other change (e.g. 1 to 2) records nothing.
      */
+    @Transactional
     public void recordBlockingTransition(UUID taskId, int before, int after) {
         if (before == 0 && after > 0) {
             taskStateHistoryRepository.record(TaskStateHistoryEntry.blocked(
