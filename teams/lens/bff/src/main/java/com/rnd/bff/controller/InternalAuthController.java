@@ -11,13 +11,11 @@ import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.responses.ApiResponses;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
-import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
-import org.springframework.web.util.UriComponentsBuilder;
 
 /**
  * Internal auth endpoints used by Gateway only.
@@ -34,31 +32,6 @@ public class InternalAuthController {
 
     public InternalAuthController(InternalAuthService internalAuthService) {
         this.internalAuthService = internalAuthService;
-    }
-
-    /**
-     * POST /internal/auth/register
-     * Register a new user.
-     * Called by Gateway during user registration.
-     */
-    @Operation(summary = "Register a new user (internal endpoint)")
-    @ApiResponses({
-            @ApiResponse(responseCode = "201", description = "User registered",
-                    content = @Content(schema = @Schema(implementation = AuthUserResponseDto.class))),
-            @ApiResponse(responseCode = "400", description = "Invalid request (bad password, invalid email)"),
-            @ApiResponse(responseCode = "409", description = "Email already registered"),
-            @ApiResponse(responseCode = "503", description = "Inbox service unavailable")
-    })
-    @PostMapping("/register")
-    public ResponseEntity<AuthUserResponseDto> register(
-            @Valid @RequestBody AuthRegisterRequestDto request,
-            UriComponentsBuilder uriBuilder) {
-        
-        AuthUserResponseDto response = internalAuthService.register(request);
-        
-        return ResponseEntity
-                .created(uriBuilder.path("/users/{id}").build(response.getId()))
-                .body(response);
     }
 
     /**

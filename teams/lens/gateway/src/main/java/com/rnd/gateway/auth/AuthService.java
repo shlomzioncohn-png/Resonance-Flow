@@ -26,25 +26,6 @@ public class AuthService {
     }
 
     /**
-     * Register a new user.
-     * Forwards request to BFF, which forwards to Inbox.
-     * 
-     * @param request containing email, password, displayName
-     * @return user ID (no token returned on registration)
-     */
-    public UUID register(AuthRegisterRequestDto request) {
-        log.info("Registering user: {}", request.getEmail());
-        
-        BffAuthUserResponse userResponse = bffAuthClient.register(
-                request.getEmail(),
-                request.getPassword(),
-                request.getDisplayName()
-        );
-        
-        return userResponse.getId();
-    }
-
-    /**
      * Login user and generate JWT token.
      * Verifies credentials via BFF, then issues JWT.
      * 

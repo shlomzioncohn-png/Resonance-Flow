@@ -2,7 +2,6 @@ package com.rnd.bff.service;
 
 import com.rnd.bff.client.InboxAuthUserResponse;
 import com.rnd.bff.client.InboxUsersClient;
-import com.rnd.bff.dto.AuthRegisterRequestDto;
 import com.rnd.bff.dto.AuthUserResponseDto;
 import com.rnd.bff.dto.AuthVerifyRequestDto;
 import org.slf4j.Logger;
@@ -24,34 +23,6 @@ public class InternalAuthService {
     public InternalAuthService(InboxUsersClient inboxUsersClient, RoleMapper roleMapper) {
         this.inboxUsersClient = inboxUsersClient;
         this.roleMapper = roleMapper;
-    }
-
-    /**
-     * Register a new user by forwarding to Inbox and mapping the role.
-     * 
-     * @param request containing email, password, and displayName
-     * @return user info with role mapped to LENS role
-     */
-    public AuthUserResponseDto register(AuthRegisterRequestDto request) {
-        log.debug("Registering user: {}", request.getEmail());
-
-        InboxAuthUserResponse inboxResponse = inboxUsersClient.register(
-                request.getEmail(),
-                request.getPassword(),
-                request.getDisplayName()
-        );
-
-        // Map Inbox role to LENS role
-        String lensRole = roleMapper.mapToLensRole(inboxResponse.getRole());
-
-        AuthUserResponseDto response = new AuthUserResponseDto(
-                inboxResponse.getId(),
-                inboxResponse.getDisplayName(),
-                lensRole
-        );
-
-        log.info("User registered: {} with role {}", inboxResponse.getId(), lensRole);
-        return response;
     }
 
     /**

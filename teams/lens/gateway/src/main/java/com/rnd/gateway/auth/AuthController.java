@@ -21,69 +21,19 @@ import org.springframework.web.util.UriComponentsBuilder;
 
 import java.util.UUID;
 
-/**
- * Public authentication endpoints.
- * 
- * POST /auth/register - Create new user (limited to 10 registrations per hour per IP)
- * POST /auth/login - Login and get JWT token (limited to 5 failed attempts per minute per IP)
- * GET /auth/me - Get current user info (requires valid JWT)
- */
 @Tag(name = "Auth", description = "Public authentication endpoints")
 @RestController
 @RequestMapping("/auth")
 public class AuthController {
 
     private final AuthService authService;
-    private final RateLimitingConfig.RateLimiter registerRateLimiter;
     private final RateLimitingConfig.RateLimiter loginRateLimiter;
 
     public AuthController(
             AuthService authService,
-            RateLimitingConfig.RateLimiter registerRateLimiter,
             RateLimitingConfig.RateLimiter loginRateLimiter) {
         this.authService = authService;
-        this.registerRateLimiter = registerRateLimiter;
         this.loginRateLimiter = loginRateLimiter;
-    }
-
-    /**
-     * POST /auth/register
-     * Register a new user with email, password, and display name.
-     * Limited to 10 registrations per hour per IP.
-     * Returns the user ID (no token yet - user must login to get one).
-     */
-    @Operation(summary = "Register a new user")
-    @ApiResponses({
-            @ApiResponse(responseCode = "201", description = "User registered",
-                    content = @Content(schema = @Schema(implementation = AuthRegisterResponseDto.class))),
-            @ApiResponse(responseCode = "400", description = "Invalid request (bad password, invalid email)"),
-            @ApiResponse(responseCode = "409", description = "Email already registered"),
-            @ApiResponse(responseCode = "429", description = "Too many registration attempts from this IP"),
-            @ApiResponse(responseCode = "503", description = "Service unavailable")
-    })
-    @PostMapping("/register")
-    public ResponseEntity<AuthRegisterResponseDto> register(
-            @Valid @RequestBody AuthRegisterRequestDto request,
-            HttpServletRequest httpRequest,
-            UriComponentsBuilder uriBuilder) {
-        
-        String clientIp = getClientIp(httpRequest);
-        
-        // Check rate limit: 10 registrations per hour per IP
-        if (!registerRateLimiter.allowRequest(clientIp)) {
-            return ResponseEntity
-                    .status(HttpStatus.TOO_MANY_REQUESTS)
-                    .header("Retry-After", "3600")  // Retry after 1 hour
-                    .build();
-        }
-        
-        UUID userId = authService.register(request);
-        
-        AuthRegisterResponseDto response = new AuthRegisterResponseDto(userId);
-        
-        return ResponseEntity
-                .created(uriBuilder.path("/users/{id}").build(userId))
-                .body(response);
     }
 
     /**
