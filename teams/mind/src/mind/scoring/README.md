@@ -211,10 +211,9 @@ badly off cannot be known in advance.
 Both missing compound by multiplication. It is a separate function rather than
 a field on `ScoreResult`, which is R1's contract and has none.
 
-Two things Chain has to know: in `task.score.proposed` neither `tier` nor
-`effort_estimate_minutes` is optional, so a null arrives as the protobuf
-default — an unspecified tier and **0 minutes**, which must read as "unknown",
-not as a zero-minute task.
+One thing Chain has to know: in `task.score.proposed`, `tier` is not optional,
+so a null arrives as the protobuf default, an unspecified tier, which must read
+as "unknown".
 
 ## Why these weights
 

@@ -101,8 +101,9 @@ def task_score_round_trip() -> bool:
         tier=TASK_TIER_TACTICAL,
         mind_score=0.5,
         confidence=0.75,
-        effort_estimate_minutes=30,
-        deadline=datetime.now(UTC),
+        tenant_id="11111111-1111-1111-1111-111111111111",
+        scored_at=datetime.now(UTC),
+        factors={"deadline": 0.3, "urgency": 0.2},
     )
     with ProtobufProducer() as producer:
         producer.publish("task.score.proposed", score, key=score.task_id)
@@ -113,6 +114,9 @@ def task_score_round_trip() -> bool:
     def handle(event, msg):
         received["task_id"] = event.task_id
         received["mind_score"] = event.mind_score
+        received["tenant_id"] = event.tenant_id
+        received["scored_at"] = event.scored_at.ToDatetime(UTC)
+        received["factors"] = dict(event.factors)
         print(f"consumed: task.score.proposed[{msg.partition()}]@{msg.offset()} "
               f"task_id={event.task_id!r} mind_score={event.mind_score}")
 
@@ -123,6 +127,9 @@ def task_score_round_trip() -> bool:
         n == 1
         and received.get("task_id") == score.task_id
         and received.get("mind_score") == score.mind_score
+        and received.get("tenant_id") == score.tenant_id
+        and received.get("scored_at") == score.scored_at.ToDatetime(UTC)
+        and received.get("factors") == dict(score.factors)
     )
     print("PASS" if ok else "FAIL - did not receive the same event back")
     return ok
