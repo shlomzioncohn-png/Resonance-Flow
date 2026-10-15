@@ -49,11 +49,6 @@ def main() -> None:
     _MESSAGING.mkdir(parents=True, exist_ok=True)
     (_ROOT / "src" / "mind" / "__init__.py").touch()
 
-    _protoc(
-        _ROOT / "proto",
-        _ROOT / "proto" / "mind-task-created.proto",
-        _ROOT / "proto" / "mind-task-dependencies.proto",
-    )
     # Relay's single registered copy -- never vendored locally.
     _protoc(
         _SHARED_PROTO,
@@ -61,6 +56,9 @@ def main() -> None:
         _SHARED_PROTO / "task-updated-event.proto",
         _SHARED_PROTO / "task-completed-event.proto",
         _SHARED_PROTO / "task-creation-requested-event.proto",
+        _SHARED_PROTO / "task-dependencies-proposed-event.proto",
+        _SHARED_PROTO / "task-score-proposed-event.proto",
+        _SHARED_PROTO / "raw-object-event.proto",
     )
 
 
