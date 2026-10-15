@@ -1,14 +1,13 @@
 """Contract for task.score.proposed events sent from MIND to Chain (#357).
 
-Agreed with Chain (Lea): event_id, tenant_id, task_id, mind_score (float),
+Agreed with Chain (Shifi): event_id, tenant_id, task_id, mind_score (float),
 scored_at, confidence, tier. No effort_estimate_minutes (Chain takes it from
 Inbox's task.created) and no deadline (it is already inside mind_score). No
 model_version. `factors` is Yonit's addition; Chain does not use it today.
 
+Sent as shared/proto/task-score-proposed-event.proto (scoring/kafka_sink.py).
 Kafka key = task_id. A re-publish for the same task replaces the previous
-score. The proto registered today (shared/proto/task-score-proposed-event.proto)
-has no scored_at, so Chain keeps the last message on the task's partition, not
-the latest scored_at; scored_at decides only once #542 adds it to the proto.
+score; the latest scored_at wins.
 """
 
 from uuid import UUID
@@ -38,7 +37,7 @@ class TaskScoreProposed(BaseModel):
     # Blocking is Chain's job, so sending the adjusted score would count it twice.
     mind_score: float = Field(ge=0.0, le=1.0)
 
-    # When MIND computed this score. Not in the registered proto yet (#542).
+    # When MIND computed this score. Chain keeps the latest one per task.
     scored_at: AwareDatetime
 
     # How far to trust mind_score given which of its inputs were missing:

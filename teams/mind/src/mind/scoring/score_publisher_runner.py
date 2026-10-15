@@ -5,10 +5,8 @@ ProtobufConsumer.run() blocks, so one thread per topic.
 Both threads share one ScorePublisher, so the "last published" state covers
 task.created and task.updated together.
 
-Not runnable yet: `_kafka_sink` waits for the task.score.proposed proto
-(#542, and Chain's answer on the final fields).
-
 Usage:
+    make run-score-publisher
     python -m mind.scoring.score_publisher_runner
 """
 
@@ -21,20 +19,15 @@ from typing import Any
 from google.protobuf.message import Message
 
 from mind.config import get_settings
-from mind.messaging import ProtobufConsumer
+from mind.messaging import ProtobufConsumer, ProtobufProducer
 from mind.messaging.task_created_event_pb2 import TaskCreatedEvent
 from mind.messaging.task_updated_event_pb2 import TaskUpdatedEvent
-from mind.scoring.score_publisher import ScorePublisher, ScoreSink
+from mind.scoring.kafka_sink import KafkaScoreSink
+from mind.scoring.score_publisher import ScorePublisher
 
 logger = logging.getLogger(__name__)
 
 _GROUP_ID = "mind-score-publisher"
-
-
-def _kafka_sink() -> ScoreSink:
-    """Converts the payload to the task.score.proposed proto message and
-    publishes it with key = task_id. Written once that proto exists."""
-    raise NotImplementedError("needs the task.score.proposed proto (#542)")
 
 
 # Any: each handler takes its own topic's event type, which run() has
@@ -63,7 +56,7 @@ def _die_on_thread_crash(args: threading.ExceptHookArgs) -> None:
 def main() -> None:
     logging.basicConfig(level=get_settings().log_level)
     threading.excepthook = _die_on_thread_crash
-    publisher = ScorePublisher(_kafka_sink())
+    publisher = ScorePublisher(KafkaScoreSink(ProtobufProducer()))
 
     topics: list[tuple[str, type[Message], _Handler]] = [
         ("task.created", TaskCreatedEvent, publisher.handle_task_created),

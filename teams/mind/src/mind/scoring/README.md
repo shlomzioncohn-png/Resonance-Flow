@@ -300,11 +300,50 @@ reading a third of the set.
 - **`ASSUMED_TIER_SHIFT` was measured on synthetic tasks.** The spread on real
   extracted ones may differ; re-measure once #353 produces them.
 
+## Publishing the score to Chain (#357)
+
+A separate process, like the index consumer: it reads Inbox's `task.created`
+and `task.updated`, scores each task with this model, and publishes
+`task.score.proposed` to Chain.
+
+| File | Role |
+|---|---|
+| `inbox_task.py` | Inbox event → `InboxTask` (fits `ScorableTask`). Empty fields stay empty. A task or tenant id that is not a UUID raises `InvalidInboxEvent`. |
+| `score_event.py` | `ScoreResult` → `TaskScoreProposed` (`contracts/`). |
+| `kafka_sink.py` | `TaskScoreProposed` → shared/proto's `TaskScoreProposedEvent`, published keyed by `task_id`. |
+| `score_publisher.py` | The handlers, and when to publish. |
+| `score_publisher_runner.py` | The process: one consumer thread per topic. |
+
+The payload, as agreed with Chain on #133: `event_id`, `tenant_id`, `task_id`,
+`mind_score` (the **`base_score`**, never the blocked-adjusted `score`: blocking
+is Chain's call), `scored_at`, `confidence` (`score_confidence`), `factors`, and
+`tier` as Inbox sent it. An unclassified task is scored by the tactical rule, but
+its tier goes out unset.
+
+When a score is published:
+
+- **On `task.created`, and on `task.updated` only when a field the model reads
+  changes** (title, description, tier, deadline, effort). Every score makes Chain
+  publish `task.scheduling.updated`, which makes Inbox emit `task.updated`;
+  publishing on every update would loop forever. `urgency` is not a trigger: the
+  model never reads that field.
+- **Older events are dropped.** The two topics have no ordering between them, so
+  each task keeps the newest Inbox `created_at` / `updated_at` seen. At an equal
+  time, `task.created` counts as older.
+- **Unscorable events are skipped, not retried.** An `InvalidInboxEvent` would
+  fail on every redelivery and stall the partition, so it is logged and skipped.
+  Every other error propagates and is retried.
+
+What was last published lives in memory, so a restart re-publishes each task
+once on its next event. A score is not re-sent just because time passes.
+
 ## Running it
 
 ```
 pytest tests/test_scoring.py -v                  # the acceptance tests
 pytest tests/test_scoring_missing_fields.py -v   # no tier, no estimate, no description
+pytest tests/test_score_publish.py tests/test_score_event.py \
+       tests/test_inbox_task.py tests/test_kafka_sink.py -v   # publishing to Chain
 ```
 
 That is all this package runs. Evaluating the model against the persona set goes

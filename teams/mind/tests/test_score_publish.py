@@ -229,6 +229,18 @@ def test_an_update_that_publishes_nothing_still_counts_as_seen(publisher, sink):
     assert len(sink.sent) == 1
 
 
+def test_at_an_equal_time_task_created_counts_as_older(publisher, sink):
+    # Inbox's clock has millisecond precision, so a create and an update can share
+    # a timestamp. The update is the newer state and must not be overwritten.
+    publisher.handle_task_updated(
+        _updated(effort_estimate_minutes=90, updated_at=_timestamp(CREATED_AT))
+    )
+
+    publisher.handle_task_created(_created())  # created_at == CREATED_AT
+
+    assert len(sink.sent) == 1
+
+
 def test_an_event_without_a_timestamp_is_not_dropped(publisher, sink):
     publisher.handle_task_created(_created())
     event = _updated(effort_estimate_minutes=90)

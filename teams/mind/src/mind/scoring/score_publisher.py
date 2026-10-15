@@ -14,10 +14,14 @@ topics are consumed on separate threads with no ordering between them, so a
 task.created can be handled after a task.updated that came later; scoring it
 would replace the right score with a stale one. "Older" is judged by Inbox's
 own clock, created_at / updated_at, the same last-write-wins rule Chain applies.
+Inbox's clock has millisecond precision, so at an equal time a task.created
+counts as older than a task.updated.
 
-A hash of what was last published, and the time of the newest event seen, live
-in memory per task. After a restart, each task's next event re-publishes once,
-which is safe: a newer score replaces the old one.
+A hash of what was last published, and the newest event seen, live in memory
+per task. After a restart, each task's next event re-publishes once. That is
+safe when the event is the task's newest state. It is not when a task.created
+was still uncommitted at the crash while a newer task.updated had already been
+sent: the older score goes out again until the next update.
 
 Known limitation: a score is not re-sent just because time passes, although
 time pressure rises as a deadline nears. Chain keeps the last score sent.
@@ -50,7 +54,10 @@ from mind.scoring.segmented_model import SegmentedRankingModel
 
 logger = logging.getLogger(__name__)
 
-TOPIC = "task.score.proposed"
+# Breaks a tie between equal Inbox times: a task.created is never newer than a
+# task.updated of the same moment.
+_CREATED = 0
+_UPDATED = 1
 
 
 class ScoreSink(Protocol):
@@ -103,21 +110,25 @@ class ScorePublisher:
         clock: Callable[[], datetime] = lambda: datetime.now(UTC),
     ) -> None:
         self._sink = sink
-        self._model = model or SegmentedRankingModel()
+        self._model = model if model is not None else SegmentedRankingModel()
         self._clock = clock
         self._last_published: dict[str, bytes] = {}
-        self._seen_at: dict[str, datetime] = {}
+        # (Inbox time, _CREATED / _UPDATED) of the newest event seen.
+        self._seen_at: dict[str, tuple[datetime, int]] = {}
         # One consumer thread per topic shares the state above.
         self._lock = threading.Lock()
 
     def handle_task_created(self, event: TaskCreatedEvent) -> None:
-        self._handle(event, _event_time(event, "created_at"))
+        self._handle(event, _event_time(event, "created_at"), _CREATED)
 
     def handle_task_updated(self, event: TaskUpdatedEvent) -> None:
-        self._handle(event, _event_time(event, "updated_at"))
+        self._handle(event, _event_time(event, "updated_at"), _UPDATED)
 
     def _handle(
-        self, event: TaskCreatedEvent | TaskUpdatedEvent, event_time: datetime | None
+        self,
+        event: TaskCreatedEvent | TaskUpdatedEvent,
+        event_time: datetime | None,
+        kind: int,
     ) -> None:
         try:
             task = to_scoring_task(event)
@@ -127,28 +138,28 @@ class ScorePublisher:
             # else, a bug or a broker error, still propagates and is retried.
             logger.exception("score_publisher: skipping an event that cannot be scored")
             return
-        self._publish_if_changed(task, event_time)
+        self._publish_if_changed(task, None if event_time is None else (event_time, kind))
 
-    def _publish_if_changed(self, task: InboxTask, event_time: datetime | None) -> None:
+    def _publish_if_changed(self, task: InboxTask, seen: tuple[datetime, int] | None) -> None:
         inputs = _scoring_inputs_hash(task)
         with self._lock:
-            seen_at = self._seen_at.get(task.task_id)
-            if event_time is None:
+            newest = self._seen_at.get(task.task_id)
+            if seen is None:
                 # Cannot tell whether it is stale. Scoring it at worst sends one
                 # extra score; dropping it could lose a real update.
                 logger.warning("score_publisher: task %s event has no timestamp", task.task_id)
-            elif seen_at is not None and event_time < seen_at:
+            elif newest is not None and seen < newest:
                 logger.info(
                     "score_publisher: task %s event from %s is older than %s, skipping",
                     task.task_id,
-                    event_time,
-                    seen_at,
+                    seen[0],
+                    newest[0],
                 )
                 return
             else:
                 # Moved even when nothing is published below: Chain's own update
                 # changes no scored field, yet an older event after it is stale.
-                self._seen_at[task.task_id] = event_time
+                self._seen_at[task.task_id] = seen
 
             if self._last_published.get(task.task_id) == inputs:
                 logger.debug("score_publisher: task %s unchanged, skipping", task.task_id)

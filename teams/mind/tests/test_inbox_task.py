@@ -60,9 +60,7 @@ def test_blocked_and_parent_are_never_set():
 
 
 def test_task_updated_reads_its_id_from_task_id():
-    event = TaskUpdatedEvent(
-        task_id=TASK_UUID, tenant_id=TENANT_UUID, title="Plan the sprint"
-    )
+    event = TaskUpdatedEvent(task_id=TASK_UUID, tenant_id=TENANT_UUID, title="Plan the sprint")
 
     assert to_scoring_task(event).task_id == TASK_UUID
 
@@ -70,9 +68,9 @@ def test_task_updated_reads_its_id_from_task_id():
 def test_empty_fields_stay_empty():
     # Only a title: no tier, effort, deadline or description. No defaults here,
     # the model decides how to score what is missing.
-    task = to_scoring_task(TaskCreatedEvent(
-        id=TASK_UUID, tenant_id=TENANT_UUID, title="Look into the flaky test"
-    ))
+    task = to_scoring_task(
+        TaskCreatedEvent(id=TASK_UUID, tenant_id=TENANT_UUID, title="Look into the flaky test")
+    )
 
     assert task.tier is None
     assert task.effort_estimate is None
@@ -88,9 +86,7 @@ def test_the_result_fits_the_models_input():
 
 
 def test_a_bare_task_can_be_scored():
-    event = TaskCreatedEvent(
-        id=TASK_UUID, tenant_id=TENANT_UUID, title="Look into the flaky test"
-    )
+    event = TaskCreatedEvent(id=TASK_UUID, tenant_id=TENANT_UUID, title="Look into the flaky test")
     context = ScoreContext(current_datetime=datetime(2026, 10, 13, 9, 0, tzinfo=UTC))
 
     result = SegmentedRankingModel().score(to_scoring_task(event), context)
