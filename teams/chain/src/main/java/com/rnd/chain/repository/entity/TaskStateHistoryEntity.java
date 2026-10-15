@@ -8,6 +8,9 @@ import jakarta.persistence.EnumType;
 import jakarta.persistence.Enumerated;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
+import lombok.AccessLevel;
+import lombok.Getter;
+import lombok.NoArgsConstructor;
 
 import java.time.Instant;
 import java.util.UUID;
@@ -17,6 +20,8 @@ import java.util.UUID;
  * on {@link com.rnd.chain.dto.TaskStateHistoryEntry}. */
 @Entity
 @Table(name = "task_state_history")
+@Getter
+@NoArgsConstructor(access = AccessLevel.PROTECTED)
 public class TaskStateHistoryEntity {
 
     @Id
@@ -46,41 +51,7 @@ public class TaskStateHistoryEntity {
     @Column(name = "created_at", nullable = false)
     private Instant createdAt;
 
+    @Getter(AccessLevel.NONE)
     @Column(insertable = false, updatable = false)
     private Long sequence;
-
-    protected TaskStateHistoryEntity() {
-    }
-
-    public UUID getId() {
-        return id;
-    }
-
-    public UUID getTaskId() {
-        return taskId;
-    }
-
-    public TaskStateEventType getEventType() {
-        return eventType;
-    }
-
-    public TaskStatus getFromStatus() {
-        return fromStatus;
-    }
-
-    public TaskStatus getToStatus() {
-        return toStatus;
-    }
-
-    public Integer getBlockingCountBefore() {
-        return blockingCountBefore;
-    }
-
-    public Integer getBlockingCountAfter() {
-        return blockingCountAfter;
-    }
-
-    public Instant getCreatedAt() {
-        return createdAt;
-    }
 }

@@ -131,8 +131,8 @@ src/main/resources/db/migration/  # Flyway migrations (V1 schema, V2 dependency_
                                   # V3 task_constraint - issue #378, V4 unresolved_dependencies
                                   # (Mind out-of-order target buffering), V5 removes owner_id,
                                   # V6 task.tenant_id + same-tenant trigger, V7 dependency_history
-                                  # REJECTED action - V6/V7 issue #580, V8 task_state_history
-                                  # - issue #773)
+                                  # REJECTED action - V6/V7 issue #580, V8 task.confidence/priority_score (#445),
+                                  # V9 task_state_history - issue #773)
 src/test/java/com/rnd/chain/
 ├── controller/ChainControllerTest.java
 ├── service/                # TaskTraversalServiceTest, TaskTraversalPerformanceTest,
@@ -316,7 +316,7 @@ their respective Kafka handlers - i.e. routed straight to `.errors`), never sile
 
 ### Storage (Phase 2)
 
-`V4__add_task_priority_score.sql` adds `task.confidence`/`task.priority_score` (both nullable,
+`V8__add_task_priority_score.sql` adds `task.confidence`/`task.priority_score` (both nullable,
 CHECK'd to `[0,1]`/`[1,10]`) and `task_dependency.confidence` (nullable, CHECK'd to `[0,1]`,
 backfilled to `1.0` for every edge that predates this migration). `TaskEntity`/`TaskDependencyEntity`
 and their Postgres repositories carry the two new `Task` fields and the edge's `confidence` the
@@ -388,8 +388,6 @@ around the call) and by the new tests that specifically prove the commit/rollbac
   `KafkaSchedulingUpdatePublisher` publishes real Protobuf against the registered
   `shared/proto/scheduling-updated-event.proto`, with a per-event `event_id`. Covered end-to-end by
   `SchedulingUpdatedEventContractTest` and `SchedulingUpdatePublishIntegrationTest` (a real broker).
-=======
->>>>>>> origin/main
 
 ## Running locally with Maven
 
@@ -891,7 +889,7 @@ below (#775).
 
 ### Schema
 
-Table `task_state_history` (Flyway V8):
+Table `task_state_history` (Flyway V9):
 
 | Column | Type | Meaning |
 |--------|------|---------|

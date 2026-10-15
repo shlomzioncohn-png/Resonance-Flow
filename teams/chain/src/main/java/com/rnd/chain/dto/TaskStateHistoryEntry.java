@@ -7,7 +7,7 @@ import java.util.UUID;
 /**
  * Immutable, protocol-agnostic record of one task status change or blocking transition.
  * Only the fields meaningful for {@code eventType} are set - the rest are null, mirroring the
- * {@code chk_task_state_history_shape} CHECK (V8 migration):
+ * {@code chk_task_state_history_shape} CHECK (V9 migration):
  * STATUS_CHANGED carries from/to status; BLOCKED (0 to positive) and UNBLOCKED (positive to 0)
  * carry blocking_count before/after.
  * Identity (equals/hashCode) is by {@code id} alone, same as {@link DependencyHistoryEntry}.
