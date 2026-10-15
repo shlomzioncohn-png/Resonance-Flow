@@ -4,9 +4,7 @@ import com.rnd.chain.dto.DependencyChangeSource;
 import com.rnd.chain.exception.DuplicateDependencyException;
 import com.rnd.chain.exception.InvalidDependencyException;
 import com.rnd.chain.exception.InvalidRequestException;
-import com.rnd.chain.repository.TaskRepository;
 import com.rnd.chain.service.TaskDependencyService;
-import com.rnd.chain.service.UnresolvedDependencyService;
 import com.rnd.mind.event.DependencyProposedEvent;
 import org.springframework.kafka.annotation.KafkaListener;
 import org.springframework.kafka.annotation.RetryableTopic;
@@ -21,29 +19,28 @@ import java.util.UUID;
 
 import static com.rnd.chain.events.EventFields.parseUuid;
 
+/**
+ * Consumes task.dependencies.proposed. A task referenced by the event that Chain doesn't know yet
+ * is created as a PENDING placeholder in the event's tenant, so the edge is recorded right away.
+ * Cycles, invalid dependencies and cross-tenant edges go straight to .errors without retry.
+ */
 @Component
 public class DependencyProposedEventHandler {
 
     private final TaskDependencyService taskDependencyService;
-    private final TaskRepository taskRepository;
-    private final UnresolvedDependencyService unresolvedDependencyService;
     private final ChainEventProcessingTemplate template;
 
     public DependencyProposedEventHandler(
             TaskDependencyService taskDependencyService,
-            TaskRepository taskRepository,
-            UnresolvedDependencyService unresolvedDependencyService,
             ChainEventProcessingTemplate template) {
 
         this.taskDependencyService = taskDependencyService;
-        this.taskRepository = taskRepository;
-        this.unresolvedDependencyService = unresolvedDependencyService;
         this.template = template;
     }
 
     @RetryableTopic(
-            attempts = "5",
-            backoff = @Backoff(delay = 5000),
+            attempts = "3",
+            backoff = @Backoff(delay = 2000),
             dltStrategy = DltStrategy.FAIL_ON_ERROR,
             dltTopicSuffix = ".errors",
             exclude = NonRetryableEventException.class,
@@ -57,28 +54,19 @@ public class DependencyProposedEventHandler {
 
         UUID eventId = parseUuid(event.getEventId(), "event_id");
         UUID taskId = parseUuid(event.getTaskId(), "task_id");
+        UUID tenantId = parseUuid(event.getTenantId(), "tenant_id");
 
         template.processClaimed(
                 eventId,
                 "task.dependencies.proposed",
-                () -> processDependencies(eventId, taskId, event));
+                () -> processDependencies(eventId, taskId, tenantId, event));
     }
 
     private void processDependencies(
             UUID eventId,
             UUID taskId,
+            UUID tenantId,
             DependencyProposedEvent event) {
-
-        /*
-         * Missing source task is not stored as unresolved.
-         * It means Chain has not received the canonical task yet,
-         * so allow Kafka retry handling to retry the event.
-         */
-        if (taskRepository.findById(taskId).isEmpty()) {
-            throw new ReferencedTaskNotFoundException(
-                "Source task not found for task.dependencies.proposed: " + taskId,
-                new IllegalStateException("Source task is not available yet"));
-        }
 
         Set<UUID> processedDependencyIds = new HashSet<>();
 
@@ -103,33 +91,14 @@ public class DependencyProposedEventHandler {
             String sourceRef =
                     buildSourceRef(eventId, taskId, dependsOnTaskId);
 
-            /*
-             * Missing target is a recoverable out-of-order case.
-             * Store it until task.created arrives.
-             */
-            if (taskRepository.findById(dependsOnTaskId).isEmpty()) {
-
-                // Issue #445 known gap (deliberate, not fixed here): UnresolvedDependency has no
-                // confidence field, so when UnresolvedDependencyService#resolveWaitingForTask
-                // later replays this via TaskCreatedEventHandler, the edge is added with the
-                // default confidence (1.0), not Mind's real value above. Only affects
-                // dependencies proposed before Chain has seen their target task.
-                unresolvedDependencyService.recordMissingTarget(
-                        taskId,
-                        dependsOnTaskId,
-                        DependencyChangeSource.MIND,
-                        sourceRef);
-
-                continue;
-            }
-
             try {
                 taskDependencyService.addDependency(
                         taskId,
                         dependsOnTaskId,
                         DependencyChangeSource.MIND,
                         sourceRef,
-                        confidence);
+                        confidence,
+                        tenantId);
 
             } catch (DuplicateDependencyException ex) {
 
