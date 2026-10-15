@@ -333,6 +333,13 @@ When a score is published:
 - **Unscorable events are skipped, not retried.** An `InvalidInboxEvent` would
   fail on every redelivery and stall the partition, so it is logged and skipped.
   Every other error propagates and is retried.
+- **When propagation changes a score without an Inbox event** (#474: a parent
+  changed, so its children's scores did), the propagation code calls
+  `ScorePublisher.rescore(child_id)` for each affected child. The child is scored
+  again with the publisher's own model (so that model must be the propagation
+  model) on its newest state, under the same lock as the event handlers. The
+  state is in memory, so a child no Inbox event has reached since start-up is
+  not re-scored (`rescore` returns `False`) until its next event.
 
 What was last published lives in memory, so a restart re-publishes each task
 once on its next event. A score is not re-sent just because time passes.

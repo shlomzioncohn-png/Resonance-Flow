@@ -8,8 +8,9 @@ from uuid import UUID
 import pytest
 from google.protobuf.timestamp_pb2 import Timestamp
 
+from mind.contracts.task_enums import TaskTier as ContractTier
 from mind.contracts.task_score_proposed import TaskScoreProposed
-from mind.evaluation.interfaces import ScoreContext
+from mind.evaluation.interfaces import ScoreContext, ScoreFactors, ScoreResult
 from mind.messaging.task_created_event_pb2 import TaskCreatedEvent, TaskTier
 from mind.messaging.task_updated_event_pb2 import TaskUpdatedEvent
 from mind.scoring.inbox_task import to_scoring_task
@@ -281,3 +282,93 @@ def test_other_errors_still_propagate():
 
     with pytest.raises(RuntimeError):
         publisher.handle_task_created(_created())
+
+
+# --- re-score after hierarchical propagation (#474) ------------------------
+
+
+class StubModel:
+    """Returns `base` as the score and remembers every task it was given."""
+
+    def __init__(self) -> None:
+        self.base = 0.5
+        self.tasks: list = []
+
+    def score(self, task, context) -> ScoreResult:
+        self.tasks.append(task)
+        return ScoreResult(
+            score=self.base,
+            factors=ScoreFactors(contributions={"impact": self.base}, base_score=self.base),
+        )
+
+
+@pytest.fixture
+def model() -> StubModel:
+    return StubModel()
+
+
+@pytest.fixture
+def propagating(sink: ListSink, model: StubModel) -> ScorePublisher:
+    return ScorePublisher(sink, model=model, clock=lambda: NOW)
+
+
+def test_a_rescored_task_is_published_with_the_models_new_score(propagating, sink, model):
+    propagating.handle_task_created(_created())
+    model.base = 0.9  # the parent changed, so propagation now gives more
+
+    assert propagating.rescore(TASK_A) is True
+
+    assert [p.mind_score for p in sink.sent] == [0.5, 0.9]
+    payload = sink.sent[1]
+    assert payload.tenant_id == UUID(TENANT)
+    assert payload.tier == ContractTier.OPERATIONAL
+    assert payload.scored_at == NOW
+
+
+def test_rescore_uses_the_newest_state(propagating, model):
+    propagating.handle_task_created(_created())
+    moved = datetime(2026, 10, 15, 9, 0, tzinfo=UTC)
+    propagating.handle_task_updated(_updated(deadline=_timestamp(moved)))
+
+    propagating.rescore(TASK_A)
+
+    assert model.tasks[-1].deadline == moved
+
+
+def test_rescore_scores_with_the_full_task(propagating, model):
+    # The model reads the text, so the state kept for rescore must keep it.
+    propagating.handle_task_created(_created())
+
+    propagating.rescore(TASK_A)
+
+    assert model.tasks[-1].title == "Fix the checkout crash"
+    assert model.tasks[-1].description == "Customers cannot pay since this morning's deploy."
+
+
+def test_an_unknown_task_is_not_rescored(propagating, sink):
+    # e.g. a child no Inbox event has reached since a restart.
+    assert propagating.rescore(TASK_B) is False
+    assert sink.sent == []
+
+
+def test_a_rescored_task_id_is_matched_in_any_spelling(propagating):
+    propagating.handle_task_created(_created())
+
+    assert propagating.rescore(TASK_A.upper()) is True
+
+
+def test_a_task_id_that_is_not_a_uuid_is_refused(propagating):
+    with pytest.raises(ValueError):
+        propagating.rescore("not-a-uuid")
+
+
+def test_chains_echo_of_a_rescore_is_not_re_published(propagating, sink):
+    # The rescore makes Chain update, and Inbox emits task.updated with no
+    # scored field changed: that must not start a loop.
+    propagating.handle_task_created(_created())
+    propagating.rescore(TASK_A)
+
+    later = datetime(2026, 10, 13, 8, 10, tzinfo=UTC)
+    propagating.handle_task_updated(_updated(is_available=True, updated_at=_timestamp(later)))
+
+    assert len(sink.sent) == 2

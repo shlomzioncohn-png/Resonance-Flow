@@ -17,11 +17,19 @@ own clock, created_at / updated_at, the same last-write-wins rule Chain applies.
 Inbox's clock has millisecond precision, so at an equal time a task.created
 counts as older than a task.updated.
 
-A hash of what was last published, and the newest event seen, live in memory
-per task. After a restart, each task's next event re-publishes once. That is
-safe when the event is the task's newest state. It is not when a task.created
-was still uncommitted at the crash while a newer task.updated had already been
-sent: the older score goes out again until the next update.
+Per task, in memory: the newest accepted state, the newest event seen, and a
+hash of what was last published. After a restart, each task's next event
+re-publishes once. That is safe when the event is the task's newest state. It is
+not when a task.created was still uncommitted at the crash while a newer
+task.updated had already been sent: the older score goes out again until the
+next update.
+
+A score can also change without any Inbox event: R3's hierarchical propagation
+(#474) changes a parent, and so its children's scores. Her code calls
+`rescore(child_id)` for each child, and the child is scored again with this
+publisher's model on its newest state. Since the state lives in memory, a child
+no Inbox event has reached since start-up cannot be re-scored: it is skipped
+until its next event.
 
 Known limitation: a score is not re-sent just because time passes, although
 time pressure rises as a deadline nears. Chain keeps the last score sent.
@@ -38,8 +46,10 @@ import hashlib
 import logging
 import threading
 from collections.abc import Callable
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Protocol
+from uuid import UUID
 
 from google.protobuf.timestamp_pb2 import Timestamp
 
@@ -58,6 +68,13 @@ logger = logging.getLogger(__name__)
 # task.updated of the same moment.
 _CREATED = 0
 _UPDATED = 1
+
+
+@dataclass(slots=True)
+class _TaskState:
+    task: InboxTask  # the newest accepted state, for rescore
+    seen: tuple[datetime, int] | None  # (Inbox time, _CREATED / _UPDATED)
+    published: bytes | None  # hash of the inputs last published
 
 
 class ScoreSink(Protocol):
@@ -112,10 +129,8 @@ class ScorePublisher:
         self._sink = sink
         self._model = model if model is not None else SegmentedRankingModel()
         self._clock = clock
-        self._last_published: dict[str, bytes] = {}
-        # (Inbox time, _CREATED / _UPDATED) of the newest event seen.
-        self._seen_at: dict[str, tuple[datetime, int]] = {}
-        # One consumer thread per topic shares the state above.
+        self._state: dict[str, _TaskState] = {}
+        # One consumer thread per topic, and the caller of rescore, share it.
         self._lock = threading.Lock()
 
     def handle_task_created(self, event: TaskCreatedEvent) -> None:
@@ -143,31 +158,61 @@ class ScorePublisher:
     def _publish_if_changed(self, task: InboxTask, seen: tuple[datetime, int] | None) -> None:
         inputs = _scoring_inputs_hash(task)
         with self._lock:
-            newest = self._seen_at.get(task.task_id)
+            state = self._state.get(task.task_id)
             if seen is None:
                 # Cannot tell whether it is stale. Scoring it at worst sends one
                 # extra score; dropping it could lose a real update.
                 logger.warning("score_publisher: task %s event has no timestamp", task.task_id)
-            elif newest is not None and seen < newest:
+            elif state is not None and state.seen is not None and seen < state.seen:
                 logger.info(
                     "score_publisher: task %s event from %s is older than %s, skipping",
                     task.task_id,
                     seen[0],
-                    newest[0],
+                    state.seen[0],
                 )
                 return
+
+            if state is None:
+                state = _TaskState(task=task, seen=seen, published=None)
+                self._state[task.task_id] = state
             else:
+                state.task = task
                 # Moved even when nothing is published below: Chain's own update
                 # changes no scored field, yet an older event after it is stale.
-                self._seen_at[task.task_id] = seen
+                if seen is not None:
+                    state.seen = seen
 
-            if self._last_published.get(task.task_id) == inputs:
+            if state.published == inputs:
                 logger.debug("score_publisher: task %s unchanged, skipping", task.task_id)
                 return
+            self._score_and_send(state, inputs)
 
-            # Aware, in UTC, like the deadlines the conversion builds.
-            now = self._clock()
-            result = self._model.score(task, ScoreContext(current_datetime=now))
-            self._sink.send(build_score_event(task, result, scored_at=now))
-            # Recorded only after a successful send, so a failed one is retried.
-            self._last_published[task.task_id] = inputs
+    def rescore(self, task_id: str) -> bool:
+        """Score a task again with no Inbox event, and publish the result.
+
+        For #474's propagation: a parent changed, so this child's score did. The
+        child is scored with this publisher's model on its newest state, under
+        the same lock as the event handlers, so the score is never computed from
+        a state older than one already published.
+
+        Returns False, and sends nothing, for a task no Inbox event has reached
+        since this process started (the state is in memory). Raises ValueError
+        for a task_id that is not a UUID.
+        """
+        task_id = str(UUID(task_id))
+        with self._lock:
+            state = self._state.get(task_id)
+            if state is None:
+                logger.warning("score_publisher: task %s is unknown, not re-scored", task_id)
+                return False
+            self._score_and_send(state, _scoring_inputs_hash(state.task))
+            return True
+
+    def _score_and_send(self, state: _TaskState, inputs: bytes) -> None:
+        """Score `state.task`, publish it, and record it. Caller holds the lock."""
+        # Aware, in UTC, like the deadlines the conversion builds.
+        now = self._clock()
+        result = self._model.score(state.task, ScoreContext(current_datetime=now))
+        self._sink.send(build_score_event(state.task, result, scored_at=now))
+        # Recorded only after a successful send, so a failed one is retried.
+        state.published = inputs
