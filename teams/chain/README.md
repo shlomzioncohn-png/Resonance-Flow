@@ -883,9 +883,14 @@ action in `TaskDependencyService` was **not** removed - see "Dependency graph pe
 ## Task state history (Issues #773, #774, #775)
 
 Append-only log of a task's status changes and blocking transitions, for dependency-flow health
-analytics. Rows are written by Chain itself (#774), in the same transaction as the change they
-describe, so the history can never disagree with the task state. Read access is the endpoint
-below (#775).
+analytics. The `task_state_history` table (V9), `TaskStateHistoryEntry`/`TaskStateEventType` and
+`TaskStateHistoryRepository` (in-memory + Postgres) landed in #773. Rows are written (#774) in the
+same transaction as the change, via `TaskCounterUpdater.recordStatusChange`/
+`recordBlockingTransition`, from `onTaskStatusChangedIfNewer`, `onTaskStatusChanged`,
+`onTaskCompleted`, `updateCounters` and `adjustDependentsBlockingCount`, so the history can never
+disagree with the task state. A stale/duplicate event, or one that leaves the status or the
+0/positive state of `blocking_count` unchanged, writes nothing. `TaskStateReconciliationService`
+corrections are not recorded yet. Read access is the endpoint below (#775).
 
 ### Schema
 

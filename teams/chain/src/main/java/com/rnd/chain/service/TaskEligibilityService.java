@@ -102,6 +102,8 @@ public class TaskEligibilityService {
             TaskStatus previousStatus =
                     previous.get().getStatus();
 
+            taskCounterUpdater.recordStatusChange(taskId, previousStatus, newStatus);
+
             if (previousStatus != TaskStatus.DONE
                     && newStatus == TaskStatus.DONE) {
 
@@ -161,6 +163,7 @@ public class TaskEligibilityService {
             TaskCounterUpdater.requireUpdated(taskRepository.update(taskId, task ->
                     TaskCounterUpdater.copyOf(task).status(newStatus).updatedAt(eventUpdatedAt)
                             .tenantId(tenantId).build()), taskId);
+            taskCounterUpdater.recordStatusChange(taskId, previousStatus, newStatus);
 
             if (previousStatus != TaskStatus.DONE && newStatus == TaskStatus.DONE) {
                 adjustDependentsBlockingCount(taskId, -1);
@@ -195,6 +198,7 @@ public class TaskEligibilityService {
             log.info("Task {} completed", taskId);
             TaskCounterUpdater.requireUpdated(taskRepository.update(taskId, task ->
                     TaskCounterUpdater.copyOf(task).status(TaskStatus.DONE).build()), taskId);
+            taskCounterUpdater.recordStatusChange(taskId, current.getStatus(), TaskStatus.DONE);
             adjustDependentsBlockingCount(taskId, -1);
         });
     }
@@ -222,6 +226,9 @@ public class TaskEligibilityService {
         // priority_score (see TaskCounterUpdater's confidence sums) even on top of whatever
         // isReady did - recomputePriorityScoreAndPublish decides whether that warrants a publish.
         for (Task task : updated) {
+            Task before = previousById.get(task.getId());
+            taskCounterUpdater.recordBlockingTransition(
+                    task.getId(), before.getBlockingCount(), task.getBlockingCount());
             taskCounterUpdater.recomputePriorityScoreAndPublish(task.getId(), previousById.get(task.getId()), task);
         }
     }
