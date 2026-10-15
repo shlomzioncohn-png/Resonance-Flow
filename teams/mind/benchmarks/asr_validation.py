@@ -1,7 +1,29 @@
 """ASR validation against AMI reference transcripts, with a real WER (#480).
 
-This module holds the two halves every WER number depends on, so they are
-tested directly rather than trusted from a printed table:
+Run from teams/mind/: python -m benchmarks.asr_validation [--sizes ...]
+(default: the chosen size only; --sizes tiny.en base.en small.en to compare).
+
+What it measures is the ASR pipeline itself, not Whisper on its own: every
+window goes through mind.multimodal.asr.transcribe() -- its chunking, VAD,
+caps and timeout -- and must leave a record_call() record, which is where
+the latency and CPU time in the table come from. (The #135 size benchmark,
+asr_benchmark.py, calls faster-whisper directly; it is left as it is, so its
+recorded numbers still reproduce.)
+
+The fixed set: three VALIDATION_WINDOW_S windows per meeting in
+eval/datasets/ami-audio.manifest.json, at VALIDATION_WINDOW_POSITIONS of its
+length (validation_windows()). Not whole meetings: transcribe() decodes at
+most MAX_DURATION_S of a recording and gives up after TRANSCRIBE_TIMEOUT_S,
+and a 30-minute meeting would hit both. A window the pipeline still cut short
+is flagged in the table, never scored as if it were complete.
+
+WER is jiwer's (word-level Levenshtein), on normalized words. Overall and
+per-meeting WER are pooled -- every window's errors summed, over every
+window's reference words -- not an average of per-window rates, which would
+let a short window weigh as much as a long one.
+
+Two halves every WER number depends on are tested directly rather than
+trusted from a printed table:
 
 - **The reference:** AMI's human transcript (the manual annotations' words/
   layer), parsed with each word's start time and speaker, so a fixed window
@@ -59,12 +81,39 @@ Known residual mismatches, deliberately not normalized:
 
 from __future__ import annotations
 
+import argparse
+import concurrent.futures
+import importlib.metadata
+import io
+import multiprocessing
+import os
 import re
 import unicodedata
+import wave
 import xml.etree.ElementTree as ET
+from collections.abc import Callable, Iterable
 from pathlib import Path
 
+import jiwer
 from pydantic import BaseModel
+
+from benchmarks.asr_benchmark import CHOSEN_WHISPER_SIZE, WHISPER_SIZES, Meeting, load_meetings
+from mind.multimodal.asr import ASRResult
+from mind.observability.tracking import CallKind, get_recent_calls
+
+_PROJECT_ROOT = Path(__file__).parent.parent
+# Every window's full ASRResult (segments, timestamps, confidences), for
+# reading the worst segments by eye -- gitignored, like the audio.
+_OUTPUT_DIR = _PROJECT_ROOT / "local-data" / "ami" / "asr-validation"
+
+# Under TRANSCRIBE_TIMEOUT_S (240 s of processing) at every real-time factor
+# #135 measured for base.en (worst 0.31) and at small.en's quiet-host RTF
+# (0.67); small.en on a busy host (RTF up to 1.4) can still time out -- which
+# the table then shows, since that is the pipeline's real behavior.
+VALIDATION_WINDOW_S = 240.0
+# A quarter, half and three quarters into the meeting: past the opening
+# small talk, and spread over the whole discussion.
+VALIDATION_WINDOW_POSITIONS = (0.25, 0.5, 0.75)
 
 # Rule 8. Single words only: rule 6 has already split "mm-hmm" into "mm hmm".
 FILLER_WORDS = frozenset(
@@ -236,3 +285,262 @@ def reference_window(
 def reference_text(words: list[ReferenceWord]) -> str:
     """The words joined in time order, ready for normalize()."""
     return " ".join(w.text for w in words)
+
+
+# --- scoring ------------------------------------------------------------------
+
+
+class WordErrors(BaseModel):
+    """Word-level edit counts of a hypothesis against its reference (normalized words).
+
+    Only the WER is unique: among alignments of equal cost, how the errors split
+    into S / D / I is the implementation's choice (jiwer's)."""
+
+    hits: int
+    substitutions: int
+    deletions: int
+    insertions: int
+
+    @property
+    def ref_words(self) -> int:
+        return self.hits + self.substitutions + self.deletions
+
+    @property
+    def hyp_words(self) -> int:
+        return self.hits + self.substitutions + self.insertions
+
+    @property
+    def wer(self) -> float:
+        return (self.substitutions + self.deletions + self.insertions) / self.ref_words
+
+
+def score(reference: list[str], hypothesis: list[str]) -> WordErrors:
+    """jiwer's alignment of two normalized word lists.
+
+    An empty reference has no WER (nothing to divide by) and means the window
+    was badly chosen, so it is refused rather than scored."""
+    if not reference:
+        raise ValueError("empty reference: no WER for a window with no reference words")
+    out = jiwer.process_words(" ".join(reference), " ".join(hypothesis))
+    return WordErrors(
+        hits=out.hits,
+        substitutions=out.substitutions,
+        deletions=out.deletions,
+        insertions=out.insertions,
+    )
+
+
+def pooled(errors: Iterable[WordErrors]) -> WordErrors:
+    """Counts summed, so .wer is total errors over total reference words."""
+    errors = list(errors)
+    return WordErrors(
+        hits=sum(e.hits for e in errors),
+        substitutions=sum(e.substitutions for e in errors),
+        deletions=sum(e.deletions for e in errors),
+        insertions=sum(e.insertions for e in errors),
+    )
+
+
+# --- the fixed set --------------------------------------------------------------
+
+
+class Window(BaseModel):
+    """A fixed stretch of one meeting: the unit that is transcribed and scored."""
+
+    meeting: str
+    start_s: float
+    end_s: float
+
+    @property
+    def label(self) -> str:
+        return f"{self.meeting}@{self.start_s:.0f}-{self.end_s:.0f}s"
+
+
+def validation_windows(meeting: str, duration_s: float) -> list[Window]:
+    """The fixed windows of one meeting: VALIDATION_WINDOW_S long, starting at
+    each of VALIDATION_WINDOW_POSITIONS of its length (whole seconds)."""
+    windows = []
+    for position in VALIDATION_WINDOW_POSITIONS:
+        start = float(round(position * duration_s))
+        end = start + VALIDATION_WINDOW_S
+        if end > duration_s:
+            raise ValueError(f"{meeting} ({duration_s} s) is too short for a window at {start} s")
+        windows.append(Window(meeting=meeting, start_s=start, end_s=end))
+    return windows
+
+
+def window_wav(audio: Path, window: Window) -> bytes:
+    """The window's stretch of a WAV file, as the bytes of a WAV file of its own --
+    what transcribe() takes, like a recording landed by Bridge."""
+    with wave.open(str(audio), "rb") as src:
+        rate = src.getframerate()
+        src.setpos(round(window.start_s * rate))
+        frames = src.readframes(round((window.end_s - window.start_s) * rate))
+        buf = io.BytesIO()
+        with wave.open(buf, "wb") as dst:
+            dst.setnchannels(src.getnchannels())
+            dst.setsampwidth(src.getsampwidth())
+            dst.setframerate(rate)
+            dst.writeframes(frames)
+    return buf.getvalue()
+
+
+# --- running ------------------------------------------------------------------
+
+
+class WindowResult(BaseModel):
+    """One (size, window) measurement."""
+
+    size: str
+    window: Window
+    errors: WordErrors
+    audio_s: float  # how much of the window transcribe() covered
+    # From the record_call() record of the call, not timed here: the pipeline's
+    # own measurement, so a broken record would show up as a broken table.
+    latency_s: float
+    cpu_s: float | None
+    # transcribe() stopped before the end of the window (its timeout): the
+    # hypothesis covers less audio than the reference, so its WER is inflated.
+    truncated: bool
+
+    @property
+    def real_time_factor(self) -> float:
+        return self.latency_s / (self.window.end_s - self.window.start_s)
+
+
+Transcribe = Callable[..., ASRResult]
+
+
+def validate_window(
+    transcribe: Transcribe,
+    size: str,
+    audio: Path,
+    reference: list[ReferenceWord],
+    window: Window,
+) -> tuple[WindowResult, ASRResult]:
+    """Transcribe one window through the pipeline and score it against the reference.
+
+    Fails loudly rather than scoring if the transcription failed (a WER of 1.0
+    would hide an environment problem behind an accuracy number), or if the
+    call left no ASR record_call() record under this size (#480: week 8's
+    monitoring depends on every ASR call going through it)."""
+    before = get_recent_calls(1)
+    result = transcribe(window_wav(audio, window), filename=f"{window.label}.wav")
+    after = get_recent_calls(1)
+    if not result.success:
+        raise RuntimeError(f"{window.label} with {size}: {result.reason}: {result.error}")
+    if not after or (before and after[-1] is before[-1]) or after[-1].kind != CallKind.ASR:
+        raise RuntimeError(f"{window.label} with {size}: transcribe() left no record_call() record")
+    record = after[-1]
+    if size not in record.model_name:
+        raise RuntimeError(f"{window.label}: recorded under {record.model_name!r}, not {size}")
+
+    in_window = reference_window(reference, window.start_s, window.end_s)
+    row = WindowResult(
+        size=size,
+        window=window,
+        errors=score(normalize(reference_text(in_window)), normalize(result.text)),
+        audio_s=result.duration_s,
+        latency_s=record.duration_ms / 1000,
+        cpu_s=record.cpu_s,
+        truncated=result.truncated,
+    )
+    return row, result
+
+
+def validate_size(size: str, meetings: list[Meeting]) -> list[WindowResult]:
+    """Every window of every meeting with one Whisper size.
+
+    Runs in its own fresh process (see run_validation): transcribe() loads its
+    model once per process, from WHISPER_MODEL, so the size is set before the
+    first call."""
+    os.environ["WHISPER_MODEL"] = size
+    from mind.multimodal import asr
+
+    # Loads the model and the VAD session up front, so neither lands in the
+    # first window's latency.
+    if not asr.warm_up():
+        raise RuntimeError(f"Whisper {size} could not be loaded -- see the log above")
+    out_dir = _OUTPUT_DIR / size
+    out_dir.mkdir(parents=True, exist_ok=True)
+    rows = []
+    for meeting in meetings:
+        reference = load_reference(meeting.words_files)
+        for window in validation_windows(meeting.id, meeting.duration_s):
+            row, result = validate_window(asr.transcribe, size, meeting.audio, reference, window)
+            (out_dir / f"{window.label}.json").write_text(
+                result.model_dump_json(indent=2), encoding="utf-8"
+            )
+            rows.append(row)
+    return rows
+
+
+def _format_counts(name: str, errors: WordErrors) -> str:
+    return (
+        f"| {name} | {errors.wer:.3f} | {errors.ref_words:,} | {errors.hyp_words:,} | "
+        f"{errors.substitutions} / {errors.deletions} / {errors.insertions} |"
+    )
+
+
+def format_size_report(size: str, rows: list[WindowResult]) -> str:
+    """Per-window, per-meeting and overall WER for one size, as markdown tables."""
+    lines = [
+        f"### {size}",
+        "",
+        "| Window | WER | Ref words | Hyp words | S / D / I | RTF | CPU s | Truncated |",
+        "|---|---|---|---|---|---|---|---|",
+    ]
+    for r in rows:
+        cpu = f"{r.cpu_s:.0f}" if r.cpu_s is not None else "n/a"
+        lines.append(
+            _format_counts(r.window.label, r.errors)
+            + f" {r.real_time_factor:.3f} | {cpu} | {'YES' if r.truncated else 'no'} |"
+        )
+    lines += [
+        "",
+        "| Meeting (pooled) | WER | Ref words | Hyp words | S / D / I |",
+        "|---|---|---|---|---|",
+    ]
+    for meeting in dict.fromkeys(r.window.meeting for r in rows):
+        in_meeting = (r.errors for r in rows if r.window.meeting == meeting)
+        lines.append(_format_counts(meeting, pooled(in_meeting)))
+    lines.append(_format_counts("**overall**", pooled(r.errors for r in rows)))
+    truncated = sum(r.truncated for r in rows)
+    if truncated:
+        lines.append(
+            f"\nWARNING: {truncated} window(s) truncated by transcribe()'s timeout -- "
+            "their WER counts audio that was never transcribed."
+        )
+    return "\n".join(lines)
+
+
+def run_validation(sizes: list[str]) -> dict[str, list[WindowResult]]:
+    """Validate every size, each in its own fresh process."""
+    meetings = load_meetings()
+    print(
+        f"jiwer {importlib.metadata.version('jiwer')}; normalization: benchmarks/asr_validation.py"
+    )
+    print("Fixed set:")
+    for meeting in meetings:
+        labels = [w.label for w in validation_windows(meeting.id, meeting.duration_s)]
+        print(f"  {', '.join(labels)}")
+    results: dict[str, list[WindowResult]] = {}
+    spawn = multiprocessing.get_context("spawn")
+    for size in sizes:
+        print(f"\nTranscribing with {size}...", flush=True)
+        with concurrent.futures.ProcessPoolExecutor(max_workers=1, mp_context=spawn) as pool:
+            results[size] = pool.submit(validate_size, size, meetings).result()
+        print(format_size_report(size, results[size]), flush=True)
+    return results
+
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="ASR validation against AMI, with a real WER")
+    parser.add_argument(
+        "--sizes",
+        nargs="+",
+        choices=WHISPER_SIZES,
+        default=[CHOSEN_WHISPER_SIZE],
+        help=f"Whisper sizes to validate (default: {CHOSEN_WHISPER_SIZE}, the chosen one)",
+    )
+    run_validation(parser.parse_args().sizes)
