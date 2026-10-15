@@ -1002,13 +1002,11 @@ the same wrong `tenant_id`. When the stored `tenant_id` is still null (a legacy 
 this column), the event's value backfills it instead - that's the normal first-population case,
 not a mismatch.
 
-**Placeholders on `task.dependencies.proposed`.** The event's `tenant_id` is optional for now. A missing source
-or target task is created as a `PENDING` placeholder (`updatedAt` = epoch, counters 0) inside the
-graph lock, and the edge is recorded right away. The placeholder's tenant is the event's, else copied
-from an existing task of the edge, else null when both tasks are new. An existing task is never
-overwritten, and one in a different tenant than a given `tenant_id` rejects the whole event (no retry,
-nothing created). A later
-`task.updated` replaces the placeholder's state.
+**Placeholders on `task.dependencies.proposed`.** The event always carries `tenant_id`; one without it is
+malformed and goes straight to `.errors`. A missing source or target task is created as a `PENDING`
+placeholder in that tenant (`updatedAt` = epoch, counters 0) inside the graph lock, and the edge is
+recorded right away. An existing task is never overwritten, and one in a different tenant rejects the
+whole event (no retry, nothing created). A later `task.updated` replaces the placeholder's state.
 
 Tests: `TaskEligibilityServiceTest` (same/different/null-tenant `addDependency`/`addDependencies`,
 `onTaskStatusChangedIfNewer` backfill/match/reject incl. the stale-redelivery case),

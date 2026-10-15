@@ -77,8 +77,7 @@ public class DependencyEdgeService {
 
     /**
      * Same as {@link #addDependency(UUID, UUID, Double)}, but a missing task is first created as a
-     * PENDING placeholder. A non-null {@code tenantId} must match any existing task; a null one is
-     * copied from an existing task of the edge, or left null when both tasks are new.
+     * PENDING placeholder in {@code tenantId}; an existing task in another tenant is rejected.
      */
     @Transactional
     public TaskDependency addDependencyCreatingMissing(
@@ -87,6 +86,7 @@ public class DependencyEdgeService {
             Double confidence,
             UUID tenantId) {
 
+        Objects.requireNonNull(tenantId, "tenantId must not be null");
         return doAddDependency(taskId, dependsOnTaskId, confidence, true, tenantId);
     }
 
@@ -137,12 +137,8 @@ public class DependencyEdgeService {
 
             Task task = taskCounterUpdater.requireTask(taskId);
             Task dependencyTask = taskCounterUpdater.requireTask(dependsOnTaskId);
-            if (createMissing && tenantId == null) {
-                requireEqualTenants(task, dependencyTask);
-            } else {
-                requireSameTenant(task, dependencyTask);
-            }
-            if (tenantId != null) {
+            requireSameTenant(task, dependencyTask);
+            if (createMissing) {
                 requireTenant(task, tenantId);
                 requireTenant(dependencyTask, tenantId);
             }
@@ -205,16 +201,6 @@ public class DependencyEdgeService {
         requireSameTenant(task, dependsOnTask);
         boolean dependsOnAlreadyDone = dependsOnTask.getStatus() == TaskStatus.DONE;
         return new PendingEdge(dependsOnTaskId, confidence, true, dependsOnAlreadyDone);
-    }
-
-    /** Like {@link #requireSameTenant} but two null tenants match (placeholders awaiting a real tenant). */
-    private static void requireEqualTenants(Task task, Task dependsOnTask) {
-        if (!Objects.equals(task.getTenantId(), dependsOnTask.getTenantId())) {
-            throw new CrossTenantDependencyException(
-                    "Dependency rejected: task " + task.getId() + " (tenant " + task.getTenantId()
-                            + ") and task " + dependsOnTask.getId() + " (tenant " + dependsOnTask.getTenantId()
-                            + ") are in different tenants");
-        }
     }
 
     private static void requireTenant(Task task, UUID tenantId) {

@@ -55,16 +55,10 @@ public class TaskCounterUpdater {
     }
 
     /**
-     * Creates a PENDING placeholder (epoch updatedAt, zero counters) for each absent task; never touches
-     * an existing one. Tenant: the event's if given, else copied from an existing task of the pair, else null.
+     * Creates a PENDING placeholder (epoch updatedAt, zero counters) in {@code tenantId} for each
+     * absent task; never touches an existing one.
      */
-    public void insertPlaceholdersIfAbsent(UUID taskId, UUID dependsOnTaskId, UUID eventTenantId) {
-        UUID tenantId = eventTenantId;
-        if (tenantId == null) {
-            tenantId = taskRepository.findById(taskId).map(Task::getTenantId)
-                    .or(() -> taskRepository.findById(dependsOnTaskId).map(Task::getTenantId))
-                    .orElse(null);
-        }
+    public void insertPlaceholdersIfAbsent(UUID taskId, UUID dependsOnTaskId, UUID tenantId) {
         insertPlaceholderIfAbsent(taskId, tenantId);
         insertPlaceholderIfAbsent(dependsOnTaskId, tenantId);
     }
