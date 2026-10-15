@@ -7,9 +7,12 @@ import com.rnd.inbox.user.exception.DuplicateEmailException;
 import com.rnd.inbox.user.exception.DuplicateUsernameException;
 import com.rnd.inbox.user.exception.UserNotFoundException;
 import com.rnd.inbox.user.mapper.UserMapper;
+import com.rnd.inbox.user.model.AuthType;
 import com.rnd.inbox.user.model.User;
+import com.rnd.inbox.user.model.UserAuthIdentity;
 import com.rnd.inbox.user.model.UserRole;
 import com.rnd.inbox.user.model.UserStatus;
+import com.rnd.inbox.user.repository.UserAuthIdentityRepository;
 import com.rnd.inbox.user.repository.UserRepository;
 import com.rnd.inbox.user.security.UserAuthorization;
 import com.rnd.inbox.audit.AuditService;
@@ -28,6 +31,7 @@ import org.openapitools.jackson.nullable.JsonNullable;
 import org.hibernate.exception.ConstraintViolationException;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.PageRequest;
@@ -65,6 +69,12 @@ class UserServiceTest {
     @Mock
     private AuditService auditService;
 
+    @Mock
+    private UserAuthIdentityRepository userAuthIdentityRepository;
+
+    @Mock
+    private PasswordEncoder passwordEncoder;
+
     private UserService userService;
 
     private UUID tenantId;
@@ -77,7 +87,8 @@ class UserServiceTest {
     @BeforeEach
     void setUp() {
         userService = new UserService(
-                userRepository, tenantRepository, userMapper, auditService, new UserAuthorization(userRepository));
+                userRepository, tenantRepository, userMapper, auditService, new UserAuthorization(userRepository),
+                userAuthIdentityRepository, passwordEncoder);
 
         tenantId = UUID.randomUUID();
         tenant = new Tenant();
@@ -105,6 +116,7 @@ class UserServiceTest {
         request.setEmail(email);
         request.setUsername(username);
         request.setRole("EMPLOYEE");
+        request.setPassword("MyPass123");
         return request;
     }
 
@@ -353,9 +365,66 @@ class UserServiceTest {
     }
 
     @Test
+    void createUser_withPassword_savesOneNormalizedUsernameIdentity() {
+        stubActorFound();
+        UserCreateRequestDto request = createRequest("Yehudit@Acme.com", "Yehudit");
+        user.setEmail("Yehudit@Acme.com");
+        user.setUsername("Yehudit");
+
+        when(tenantRepository.findById(tenantId)).thenReturn(Optional.of(tenant));
+        when(userMapper.toEntity(request, tenant)).thenReturn(user);
+        when(userRepository.save(user)).thenReturn(user);
+        when(passwordEncoder.encode("MyPass123")).thenReturn("hashed");
+
+        userService.createUser(request, actorId);
+
+        ArgumentCaptor<UserAuthIdentity> captor = ArgumentCaptor.forClass(UserAuthIdentity.class);
+        verify(userAuthIdentityRepository).save(captor.capture());
+        UserAuthIdentity identity = captor.getValue();
+        assertThat(identity.getUser()).isSameAs(user);
+        assertThat(identity.getAuthType()).isEqualTo(AuthType.PASSWORD);
+        assertThat(identity.getIdentifier()).isEqualTo("yehudit");
+        assertThat(identity.getPasswordHash()).isEqualTo("hashed");
+    }
+
+    @Test
+    void createUser_withoutPassword_savesNoPasswordIdentity() {
+        stubActorFound();
+        UserCreateRequestDto request = createRequest("yehudit@acme.com", "yehudit");
+        request.setPassword(null);
+        user.setEmail("yehudit@acme.com");
+        user.setUsername("yehudit");
+
+        when(tenantRepository.findById(tenantId)).thenReturn(Optional.of(tenant));
+        when(userMapper.toEntity(request, tenant)).thenReturn(user);
+        when(userRepository.save(user)).thenReturn(user);
+
+        userService.createUser(request, actorId);
+
+        verify(userRepository).save(user);
+        verifyNoInteractions(userAuthIdentityRepository, passwordEncoder);
+    }
+
+    @Test
+    void createUser_whenUsernameIsAlreadyALoginInAnotherCase_throwsDuplicateUsernameException() {
+        stubActorFound();
+        UserCreateRequestDto request = createRequest(null, "Yehudit");
+
+        when(tenantRepository.findById(tenantId)).thenReturn(Optional.of(tenant));
+        when(userRepository.findByUsername("Yehudit")).thenReturn(Optional.empty());
+        when(userAuthIdentityRepository.existsByAuthTypeAndIdentifier(AuthType.PASSWORD, "yehudit"))
+                .thenReturn(true);
+
+        assertThatThrownBy(() -> userService.createUser(request, actorId))
+                .isInstanceOf(DuplicateUsernameException.class);
+        verify(userRepository, never()).save(any());
+    }
+
+    @Test
     void createUser_whenEmailAndUsernameAreNull_skipsUniquenessChecksAndSaves() {
         stubActorFound();
         UserCreateRequestDto request = createRequest(null, null);
+        request.setPassword(null);
 
         when(tenantRepository.findById(tenantId)).thenReturn(Optional.of(tenant));
         when(userMapper.toEntity(request, tenant)).thenReturn(user);

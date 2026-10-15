@@ -7,9 +7,12 @@ import com.rnd.inbox.user.exception.DuplicateEmailException;
 import com.rnd.inbox.user.exception.DuplicateUsernameException;
 import com.rnd.inbox.user.exception.UserNotFoundException;
 import com.rnd.inbox.user.mapper.UserMapper;
+import com.rnd.inbox.user.model.AuthType;
 import com.rnd.inbox.user.model.User;
+import com.rnd.inbox.user.model.UserAuthIdentity;
 import com.rnd.inbox.user.model.UserRole;
 import com.rnd.inbox.user.model.UserStatus;
+import com.rnd.inbox.user.repository.UserAuthIdentityRepository;
 import com.rnd.inbox.user.repository.UserRepository;
 import com.rnd.inbox.user.security.UserAuthorization;
 import com.rnd.inbox.audit.AuditService;
@@ -24,6 +27,7 @@ import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.Pageable;
+import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -40,14 +44,19 @@ public class UserService {
     private final UserMapper userMapper;
     private final AuditService auditService;
     private final UserAuthorization userAuthorization;
+    private final UserAuthIdentityRepository userAuthIdentityRepository;
+    private final PasswordEncoder passwordEncoder;
 
     public UserService(UserRepository userRepository, TenantRepository tenantRepository,
-                        UserMapper userMapper, AuditService auditService, UserAuthorization userAuthorization) {
+                        UserMapper userMapper, AuditService auditService, UserAuthorization userAuthorization,
+                        UserAuthIdentityRepository userAuthIdentityRepository, PasswordEncoder passwordEncoder) {
         this.userRepository = userRepository;
         this.tenantRepository = tenantRepository;
         this.userMapper = userMapper;
         this.auditService = auditService;
         this.userAuthorization = userAuthorization;
+        this.userAuthIdentityRepository = userAuthIdentityRepository;
+        this.passwordEncoder = passwordEncoder;
     }
 
     @Transactional
@@ -58,12 +67,36 @@ public class UserService {
         userAuthorization.assertCanAssignRole(actor, UserRole.valueOf(request.getRole()));
         assertEmailAvailable(request.getEmail(), null);
         assertUsernameAvailable(request.getUsername(), null);
+        if (request.getPassword() != null) {
+            assertLoginAvailable(request.getUsername());
+        }
 
         User user = userMapper.toEntity(request, tenant);
         User saved = saveUser(user);
+        if (request.getPassword() != null) {
+            savePasswordIdentity(saved, request.getUsername(), request.getPassword());
+        }
         auditService.createAuditLog("USER_CREATED", "User", saved.getId(), tenant,
                 actor, auditSnapshot(saved), null);
         return userMapper.toResponseDto(saved);
+    }
+
+    private void savePasswordIdentity(User user, String username, String rawPassword) {
+        UserAuthIdentity identity = new UserAuthIdentity();
+        identity.setUser(user);
+        identity.setAuthType(AuthType.PASSWORD);
+        identity.setIdentifier(UserAuthIdentity.normalizeIdentifier(username));
+        identity.setPasswordHash(passwordEncoder.encode(rawPassword));
+        identity.setCreatedAt(user.getCreatedAt());
+        identity.setUpdatedAt(user.getCreatedAt());
+        userAuthIdentityRepository.save(identity);
+    }
+
+    private void assertLoginAvailable(String username) {
+        if (userAuthIdentityRepository.existsByAuthTypeAndIdentifier(
+                AuthType.PASSWORD, UserAuthIdentity.normalizeIdentifier(username))) {
+            throw new DuplicateUsernameException(username);
+        }
     }
 
     @Transactional(readOnly = true)
