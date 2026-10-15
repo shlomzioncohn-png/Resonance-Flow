@@ -44,6 +44,8 @@ export default function AdminProjectDetailsPage() {
       });
   }, [projectId]);
 
+  // The effect body never calls setState synchronously — the loading
+  // transition for a retry happens in handleRetry instead.
   useEffect(() => {
     fetchProject();
   }, [fetchProject]);
