@@ -15,27 +15,28 @@ import java.util.List;
  * when a message with attachments was merged in a previous intake run and never reappears in a
  * later batch — without this, a later run building SourceRecords from only its own batch's
  * messages would have no way to know about attachments a prior run already accounted for.
- * confirmedAttachmentFileIds is the set of this message's Slack attachment file ids (see
- * ChatMessage.Attachment) that have actually been published to Kafka - populated by
- * GroupStateStore.confirmAttachmentPublished, called from UnstructuredIntakeLane.afterPublish
- * once a specific attachment's publish actually succeeds. ChatGroupStateReconciler.mergeSnapshots
- * carries this forward (filtered to whatever attachments the message still has) on every
- * re-merge of the same messageId, so a Slack retry or an unrelated text edit of an already-
- * confirmed attachment never re-publishes it - only an attachment whose file id isn't in this
- * set yet is still eligible. Deliberately keyed on Slack's own stable file id, not
- * attachmentIndex (a position, which can shift if an edit reorders or removes a file) - see
- * SourceRecord.attachmentFileId's javadoc.
+ * landedAttachments is this message's Slack attachments (see ChatMessage.Attachment) that have
+ * already been landed to MinIO during the session's real-time arrival - populated by
+ * GroupStateStore.recordLandedAttachment, called directly from SlackEventsController once a
+ * specific attachment's MinIO put actually succeeds (not a Kafka publish - publication for a
+ * non-thread session happens exactly once, for the whole group, at session close; see
+ * SlackSessionPublisher). ChatGroupStateReconciler.mergeSnapshots carries this forward (filtered
+ * to whatever attachments the message still has) on every re-merge of the same messageId, so a
+ * Slack retry or an unrelated text edit of an already-landed attachment never re-lands it - only
+ * an attachment whose file id isn't in this set yet is still eligible. Deliberately keyed on
+ * Slack's own stable file id, not attachmentIndex (a position, which can shift if an edit
+ * reorders or removes a file) - see SourceRecord.attachmentFileId's javadoc.
  */
 public record MessageSnapshot(
         String messageId, String sender, Instant timestamp, String text, int attachmentCount,
-        List<String> confirmedAttachmentFileIds) {
+        List<LandedAttachment> landedAttachments) {
 
     public MessageSnapshot {
-        confirmedAttachmentFileIds = confirmedAttachmentFileIds == null ? List.of() : List.copyOf(confirmedAttachmentFileIds);
+        landedAttachments = landedAttachments == null ? List.of() : List.copyOf(landedAttachments);
     }
 
-    /** Convenience constructor for a message with no confirmed attachment publications yet -
-     * every message starts here, including ones with no attachments at all. */
+    /** Convenience constructor for a message with no landed attachments yet - every message
+     * starts here, including ones with no attachments at all. */
     public MessageSnapshot(String messageId, String sender, Instant timestamp, String text, int attachmentCount) {
         this(messageId, sender, timestamp, text, attachmentCount, List.of());
     }

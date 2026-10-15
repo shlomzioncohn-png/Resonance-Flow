@@ -9,8 +9,10 @@ import com.rnd.bridge.core.error.LaneException;
 import com.rnd.bridge.intake.model.SourceRecord;
 import com.rnd.bridge.intake.service.IntakeLandingService;
 import com.rnd.bridge.raw.model.RawObjectEvent;
+import com.rnd.bridge.raw.model.RawObjectRef;
 import com.rnd.bridge.raw.model.RawSourceType;
 import java.time.Instant;
+import java.util.List;
 
 /**
  * One instance per {@link RawSourceType} this lane serves (EMAIL/SLACK/WHATSAPP/DRIVE/CALENDAR
@@ -19,12 +21,17 @@ import java.time.Instant;
  * parameterized by constructor, not one subclass per source, so it avoids the near-duplicate
  * Lane-subclass boilerplate that was previously the reason to stay with a single hand-rolled
  * orchestrator (see plan.md).
+ * <p>
+ * The unit of work is one correlationId-group (a logical item's body/transcript plus every
+ * attachment - see SourceRecordGrouper), not one SourceRecord: every object in the group lands
+ * to MinIO (afterMap) before the single RawObjectEvent for the whole group is validated and
+ * published, and confirmation (afterPublish) is likewise once per group, never per attachment.
  */
-public final class UnstructuredIntakeLane extends AbstractIntakeLane<SourceRecord, RawObjectEvent> {
+public final class UnstructuredIntakeLane extends AbstractIntakeLane<List<SourceRecord>, RawObjectEvent> {
 
     private final RawSourceType sourceType;
-    private final SourceReader<SourceRecord> sourceReader;
-    private final PayloadMapper<SourceRecord, RawObjectEvent> payloadMapper;
+    private final SourceReader<List<SourceRecord>> sourceReader;
+    private final PayloadMapper<List<SourceRecord>, RawObjectEvent> payloadMapper;
     private final PayloadValidator<RawObjectEvent> payloadValidator;
     private final PayloadPublisher<RawObjectEvent> payloadPublisher;
     private final IntakeLandingService landingService;
@@ -33,8 +40,8 @@ public final class UnstructuredIntakeLane extends AbstractIntakeLane<SourceRecor
 
     UnstructuredIntakeLane(
             RawSourceType sourceType,
-            SourceReader<SourceRecord> sourceReader,
-            PayloadMapper<SourceRecord, RawObjectEvent> payloadMapper,
+            SourceReader<List<SourceRecord>> sourceReader,
+            PayloadMapper<List<SourceRecord>, RawObjectEvent> payloadMapper,
             PayloadValidator<RawObjectEvent> payloadValidator,
             PayloadPublisher<RawObjectEvent> payloadPublisher,
             IntakeLandingService landingService,
@@ -55,12 +62,12 @@ public final class UnstructuredIntakeLane extends AbstractIntakeLane<SourceRecor
     }
 
     @Override
-    protected SourceReader<SourceRecord> sourceReader() {
+    protected SourceReader<List<SourceRecord>> sourceReader() {
         return sourceReader;
     }
 
     @Override
-    protected PayloadMapper<SourceRecord, RawObjectEvent> payloadMapper() {
+    protected PayloadMapper<List<SourceRecord>, RawObjectEvent> payloadMapper() {
         return payloadMapper;
     }
 
@@ -74,100 +81,71 @@ public final class UnstructuredIntakeLane extends AbstractIntakeLane<SourceRecor
         return payloadPublisher;
     }
 
-    /** Lands the record's raw bytes in MinIO - the one side effect this lane needs beyond publishing. */
+    /**
+     * Lands every record in the group - positionally aligned with payload.objects(), since both
+     * are built from the same group in the same order by UnstructuredPayloadMapper. Landing one
+     * record's bytes failing (LaneException thrown, caught by AbstractIntakeLane.run()) means
+     * none of this group's records reach validate/publish - a RawObjectEvent is only ever
+     * published once every object it refers to has actually landed.
+     * A record with a non-null precomputedRef (see SourceRecord's javadoc) was already landed
+     * under a different group before this group was built - e.g. a migrated thread root's
+     * attachment (see ChatSourceRecordMapper.toSourceRecords(GroupState, List)) - so it is skipped
+     * here entirely rather than re-landed with its unused filler rawContent.
+     */
     @Override
-    protected void afterMap(SourceRecord source, RawObjectEvent payload, Instant asOf) {
+    protected void afterMap(List<SourceRecord> group, RawObjectEvent payload, Instant asOf) {
         try {
-            landingService.land(payload.objectKey(), source, payload.scopeDecision(), asOf);
+            List<RawObjectRef> objects = payload.objects();
+            for (int i = 0; i < group.size(); i++) {
+                if (group.get(i).precomputedRef() != null) {
+                    continue;
+                }
+                landingService.land(objects.get(i).objectKey(), group.get(i), payload.scopeDecision(), asOf);
+            }
         } catch (RuntimeException e) {
-            throw new LaneException(
-                    "Failed to land sourceType=" + source.sourceType() + " naturalId=" + source.naturalId(), e);
+            throw new LaneException("Failed to land correlationId=" + payload.correlationId(), e);
         }
     }
 
     /**
-     * Confirms a chat group's publish state once its transcript record has actually been
-     * published - see ChatGroupStateReconciler.mergeAndMaybePublish for why a group is only
-     * ever persisted as pending until this fires. Gated on attachmentIndex()==0 (the
-     * transcript/body record, never an attachment) and a non-null source.groupId() (only chat
-     * records built from a persisted group carry one - see SourceRecord's javadoc), so this is a
-     * no-op for every other source and for attachment records.
-     * source.groupId() is ChatGroupStateReconciler's own internal GroupState.groupId, carried
-     * straight through from the GroupState that produced this record (see SourceRecord's
-     * javadoc) - not reverse-resolved through GroupStateStore's messageId index. That index is
-     * for recognizing an edit/re-read of an already-landed message (see GroupStateStore's class
-     * javadoc), not for answering "which group produced this SourceRecord": resolving via the
-     * index used to break for a thread's root message specifically, since
-     * GroupStateStore.writeMessageIndex deliberately never indexes it (see that method's
-     * javadoc) - a thread transcript's sourceMessageIds is always root-first (sorted by
-     * timestamp), so looking the confirmation target up via sourceMessageIds().get(0) silently
-     * never resolved for any thread with a reply, leaving the group's published flag stuck at
-     * false and every later edit permanently collapsing onto revision 0 instead of advancing.
-     * Passes source.revision() through so GroupStateStore.confirmPublished only flips the
-     * group published if that's still its current revision - this ack belongs to the specific
-     * revision this SourceRecord was built from, which may no longer be current by the time
-     * the ack comes back (see GroupStateStore.confirmPublished's javadoc).
+     * Confirms the group's/event's publish state exactly once per group, using the group's
+     * primary (body/transcript) record for identity - never per attachment, since the whole
+     * group published as one Kafka event (see class javadoc).
+     * Gated on primary.groupId() != null (only chat records built from a persisted GroupState
+     * carry one - see SourceRecord's javadoc), so this is a no-op for every other source.
      * GroupStateStore's own failures surface as plain RuntimeExceptions (UncheckedIOException,
-     * IllegalStateException - see its and ControlPlaneStateStore's javadoc), not LaneException,
-     * so they're wrapped here the same way afterMap wraps landingService failures: run() only
-     * catches LaneException, and only counts this source as published once afterPublish returns
-     * successfully (see AbstractIntakeLane.run()/afterPublish's javadoc) - without this wrapping,
-     * a transient MinIO failure here would escape run() uncaught and abort the whole batch
-     * instead of being recorded as a single rejected record and retried next run (Slack's cursor
-     * freeze-on-reject already makes that retry both safe and necessary - see
-     * UnstructuredIntakeController).
+     * IllegalStateException), not LaneException, so they're wrapped here the same way afterMap
+     * wraps landingService failures: run() only catches LaneException, and only counts this
+     * group as published once afterPublish returns successfully.
      */
     @Override
-    protected void afterPublish(SourceRecord source, RawObjectEvent payload, Instant asOf) {
+    protected void afterPublish(List<SourceRecord> group, RawObjectEvent payload, Instant asOf) {
+        SourceRecord primary = UnstructuredPayloadMapper.primaryOf(group);
         try {
-            if (source.attachmentIndex() == 0 && source.groupId() != null) {
+            if (primary.groupId() != null) {
                 groupStateStore.confirmPublished(
-                        source.sourceType(), source.tenantId(), source.groupId(), source.revision());
-            } else if (source.attachmentIndex() > 0
-                    && source.attachmentFileId() != null
-                    && source.groupId() != null
-                    && !source.sourceMessageIds().isEmpty()) {
-                // Mirrors the transcript confirmation above, at per-attachment granularity - see
-                // GroupStateStore.confirmAttachmentPublished's javadoc for why this is keyed on
-                // Slack's own stable file id rather than this record's attachmentIndex. The
-                // owning message id itself still comes from sourceMessageIds (an attachment
-                // record's single element, always that specific message's own id, never the
-                // group's root) - only the GROUP identity now comes from source.groupId()
-                // instead of a reverse messageId-index lookup.
-                String messageId = source.sourceMessageIds().get(0);
-                groupStateStore.confirmAttachmentPublished(
-                        source.sourceType(), source.tenantId(), source.groupId(), messageId, source.attachmentFileId());
+                        primary.sourceType(), primary.tenantId(), primary.groupId(), primary.revision());
             }
         } catch (RuntimeException e) {
             throw new LaneException(
-                    "Failed to confirm chat group publish for sourceType=" + source.sourceType()
-                            + " naturalId=" + source.naturalId(), e);
+                    "Failed to confirm chat group publish for correlationId=" + payload.correlationId(), e);
         }
-        confirmCalendarEventPublish(source);
+        confirmCalendarEventPublish(primary);
     }
 
     /**
-     * Confirms a Calendar event's persisted state once its SourceRecord has actually been
-     * published - the Calendar analog of the chat-group confirmation above (see
-     * CalendarEventStateReconciler/CalendarEventStateStore for the identity/revision side of
-     * this). source.naturalId() is event.getId() for every Calendar record (see
-     * RealCalendarSourceReader.toSourceRecord/FixtureCalendarSourceReader - Calendar attachments
-     * aren't implemented yet, so attachmentIndex is always 0 and naturalId is never suffixed).
-     * source.revision() is passed through as the expected revision so a stale ack for a
-     * since-superseded revision can never mark a newer, not-yet-published one as confirmed - same
-     * expected-revision guard as GroupStateStore.confirmPublished, for the same reason.
-     * Gated on sourceType() rather than a Calendar-specific SourceReader/record type, matching
-     * how the chat-group branch above is gated on sourceMessageIds() - so this stays a no-op for
-     * every other source without needing a source-specific SourceRecord subtype.
+     * Confirms a Calendar event's persisted state once its group has actually been published -
+     * the Calendar analog of the chat-group confirmation above. Calendar never splits a logical
+     * item into attachments today, so its group is always a single record (see
+     * RealCalendarSourceReader) and primary is simply that record.
      */
-    private void confirmCalendarEventPublish(SourceRecord source) {
+    private void confirmCalendarEventPublish(SourceRecord primary) {
         try {
-            if (source.sourceType() == RawSourceType.CALENDAR) {
-                calendarEventStateStore.confirmPublished(source.tenantId(), source.naturalId(), source.revision());
+            if (primary.sourceType() == RawSourceType.CALENDAR) {
+                calendarEventStateStore.confirmPublished(primary.tenantId(), primary.naturalId(), primary.revision());
             }
         } catch (RuntimeException e) {
-            throw new LaneException(
-                    "Failed to confirm Calendar event publish for naturalId=" + source.naturalId(), e);
+            throw new LaneException("Failed to confirm Calendar event publish for naturalId=" + primary.naturalId(), e);
         }
     }
 }
