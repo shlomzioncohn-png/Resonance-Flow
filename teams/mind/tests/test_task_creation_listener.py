@@ -189,7 +189,7 @@ def test_a_failed_check_is_logged_and_the_timer_goes_on(caplog: pytest.LogCaptur
     assert "store unavailable" in caplog.text
 
 
-# --- recovering from a failure, up to a limit --------------------------------
+# --- recovering from a failure, for as long as the outage allows ------------
 
 
 class ScriptedConsumer:
@@ -206,14 +206,37 @@ class ScriptedConsumer:
         return self._handled_before
 
 
-def _listen(consumers: list[ScriptedConsumer], waits: list[float], loop: asyncio.AbstractEventLoop) -> None:
+class FakeTime:
+    """A clock that only moves when the listener waits: minutes pass in no time."""
+
+    def __init__(self) -> None:
+        self.now = 0.0
+        self.waits: list[float] = []
+
+    def sleep(self, seconds: float) -> None:
+        self.waits.append(seconds)
+        self.now += seconds
+
+
+def _listen(
+    consumers: list[ScriptedConsumer],
+    time_: FakeTime,
+    loop: asyncio.AbstractEventLoop,
+    **limits: float,
+) -> None:
     connections = iter(consumers)
     run_task_created_listener(
         _flow(FakeVectorStore()),
         loop,
         consumer_factory=lambda: next(connections),
-        sleep=waits.append,
+        sleep=time_.sleep,
+        clock=lambda: time_.now,
+        **limits,  # type: ignore[arg-type]
     )
+
+
+def _outage(failures: int) -> list[ScriptedConsumer]:
+    return [ScriptedConsumer(0, ConnectionError(f"failure {n}")) for n in range(failures)]
 
 
 def test_after_a_failure_the_listener_reconnects_and_goes_on(
@@ -222,32 +245,55 @@ def test_after_a_failure_the_listener_reconnects_and_goes_on(
     """Kafka redelivers the message that failed to the new connection; the
     in-memory store, unlike after a restart, is still there to match it."""
 
-    waits: list[float] = []
+    time_ = FakeTime()
     with caplog.at_level(logging.ERROR, logger="mind.task_creation"):
-        _listen([ScriptedConsumer(0, ConnectionError("db blip")), ScriptedConsumer(1, None)], waits, loop)
+        _listen([*_outage(1), ScriptedConsumer(1, None)], time_, loop)
 
-    assert waits == [1.0]
-    assert "db blip" in caplog.text
-
-
-def test_five_failures_in_a_row_are_given_up_on(loop: asyncio.AbstractEventLoop) -> None:
-    """Then the error leaves the thread, for the process to exit and restart."""
-
-    waits: list[float] = []
-    failing = [ScriptedConsumer(0, ConnectionError(f"failure {n}")) for n in range(5)]
-
-    with pytest.raises(ConnectionError, match="failure 4"):
-        _listen(failing, waits, loop)
-
-    assert waits == [1.0, 2.0, 4.0, 8.0]
+    assert time_.waits == [1.0]
+    assert "failure 0" in caplog.text
 
 
-def test_a_handled_message_starts_the_count_again(loop: asyncio.AbstractEventLoop) -> None:
-    """Six failures, each after a success: six separate blips, not one outage."""
+def test_a_database_outage_of_minutes_is_ridden_out(loop: asyncio.AbstractEventLoop) -> None:
+    """The case the reconnect exists for. No message succeeds during an outage,
+    so counting failures gave up after about 15 seconds and the restart wiped
+    every pending request. Ten minutes of failing must be survived."""
 
-    waits: list[float] = []
+    time_ = FakeTime()
+    # 1+2+4+8+16+32 = 63 s, then 60 s each: 15 failures is about ten minutes.
+    _listen([*_outage(15), ScriptedConsumer(1, None)], time_, loop)
+
+    assert sum(time_.waits) >= 9 * 60
+
+
+def test_the_wait_doubles_up_to_its_ceiling_and_stays_there(
+    loop: asyncio.AbstractEventLoop,
+) -> None:
+    time_ = FakeTime()
+    _listen([*_outage(9), ScriptedConsumer(1, None)], time_, loop)
+
+    assert time_.waits == [1.0, 2.0, 4.0, 8.0, 16.0, 32.0, 60.0, 60.0, 60.0]
+
+
+def test_an_outage_longer_than_allowed_is_given_up_on(loop: asyncio.AbstractEventLoop) -> None:
+    """Then the error leaves the thread, for the process to exit and restart —
+    a crash loop anyone can see, rather than a listener failing for ever."""
+
+    time_ = FakeTime()
+
+    with pytest.raises(ConnectionError):
+        _listen(_outage(50), time_, loop, max_outage=100.0)
+
+    # Gave up at the first failure past 100 s: after waits 1..32 and one 60.
+    assert time_.waits == [1.0, 2.0, 4.0, 8.0, 16.0, 32.0, 60.0]
+
+
+def test_a_handled_message_ends_the_outage(loop: asyncio.AbstractEventLoop) -> None:
+    """Blips hours apart are separate, not one long outage: each starts the
+    wait and the outage clock from the beginning."""
+
+    time_ = FakeTime()
     blips = [ScriptedConsumer(1, ConnectionError("blip")) for _ in range(6)]
 
-    _listen([*blips, ScriptedConsumer(1, None)], waits, loop)
+    _listen([*blips, ScriptedConsumer(1, None)], time_, loop, max_outage=0.5)
 
-    assert waits == [1.0] * 6
+    assert time_.waits == [1.0] * 6

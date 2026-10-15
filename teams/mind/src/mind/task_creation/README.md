@@ -168,10 +168,13 @@ await flow.send(proposal, bridge_correlation_id=event.correlation_id, revision=e
 - **A failure in the listener is retried, then fatal.** `ProtobufConsumer.run`
   closes the consumer on an error, so the listener reconnects itself — waits
   doubling from 1 s to 60 s — and Kafka hands the uncommitted message to the
-  new connection, while the in-memory store survives to match it. After 5
-  failures in a row (a handled message resets the count) it lets the error
-  out, and the excepthook above exits the process to be restarted. A message
-  that fails every time therefore ends in a visible crash loop, not silence.
+  new connection, while the in-memory store survives to match it. The limit
+  is **time, not a count**: no message succeeds during an outage, so a count
+  ran out in seconds and the restart wiped the store. Only after failing for
+  15 minutes (`MAX_OUTAGE`; a handled message ends the outage) does it let the
+  error out, for the excepthook above to exit the process and have it
+  restarted. A message that fails every time therefore ends in a visible crash
+  loop, not silence.
 - **The timer is the opposite:** it logs a failed check and carries on, so it
   never stops reporting in silence.
 - **Only the timer has a stop signal.** The listener blocks in Kafka's poll and

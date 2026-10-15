@@ -58,11 +58,14 @@ def task_created_handler(
     return _handle
 
 
-#: Consecutive failures the listener recovers from before giving up. A handled
-#: message resets the count: blips hours apart are separate, not one outage.
-MAX_FAILURES_IN_A_ROW = 5
+#: How long the listener keeps failing before it gives up. Measured in time,
+#: not in failures: no message succeeds during an outage, so a count runs out
+#: in seconds — and giving up restarts the process, which wipes the in-memory
+#: pending store the reconnect exists to keep. A handled message ends the outage.
+MAX_OUTAGE = 15 * 60.0
 
-#: The longest wait between reconnects; waits double from one second up to it.
+#: The longest wait between reconnects. Waits double from one second and stay
+#: here once they reach it, so a long outage is retried once a minute.
 _MAX_RECONNECT_WAIT = 60.0
 
 
@@ -82,9 +85,10 @@ def run_task_created_listener(
     flow: TaskCreationFlow,
     loop: AbstractEventLoop,
     *,
-    max_failures_in_a_row: int = MAX_FAILURES_IN_A_ROW,
+    max_outage: float = MAX_OUTAGE,
     consumer_factory: Callable[[], _Consumer] | None = None,
     sleep: Callable[[float], None] = time.sleep,
+    clock: Callable[[], float] = time.monotonic,
 ) -> None:
     """Consume task.created until the process stops. Blocks.
 
@@ -94,9 +98,10 @@ def run_task_created_listener(
     so Kafka hands it to the new connection, and the in-memory pending store,
     which a restart would wipe, is still here to match it.
 
-    After `max_failures_in_a_row` it gives up and lets the error out. Then the
-    process should exit and be restarted, as R3's runner arranges with a
-    `threading.excepthook` — with a persistent store that loses nothing.
+    Once failures have gone on for longer than `max_outage` seconds it gives up
+    and lets the error out. Then the process should exit and be restarted, as
+    R3's runner arranges with a `threading.excepthook` — with a persistent store
+    that loses nothing. A message that always fails ends there, visibly.
 
     The flow's vector store must already be open on `loop`: an async pool
     belongs to the loop that opened it, and this one is the listener's.
@@ -104,26 +109,32 @@ def run_task_created_listener(
 
     make_consumer = consumer_factory or (lambda: ProtobufConsumer(group_id=GROUP_ID, topics=[TOPIC]))
     handle = task_created_handler(flow, loop)
+    # When the current run of failures began, and how many it has had; both
+    # reset by any handled message.
+    outage_began: float | None = None
     failures = 0
 
-    def _handle_and_count(event: object, message: object) -> None:
-        nonlocal failures
+    def _handle_and_reset(event: object, message: object) -> None:
+        nonlocal outage_began, failures
         handle(event, message)
-        failures = 0
+        outage_began, failures = None, 0
 
     while True:
         try:
-            make_consumer().run(TaskCreatedEvent, _handle_and_count, idle_timeout=None)
+            make_consumer().run(TaskCreatedEvent, _handle_and_reset, idle_timeout=None)
             return
         except Exception:
-            failures += 1
-            if failures >= max_failures_in_a_row:
+            now = clock()
+            if outage_began is None:
+                outage_began = now
+            if now - outage_began >= max_outage:
                 logger.critical(
-                    "task_creation: task.created listener failed %d times in a row; giving up",
-                    failures,
+                    "task_creation: task.created listener failing for %.0fs; giving up",
+                    now - outage_began,
                 )
                 raise
-            wait = min(2.0 ** (failures - 1), _MAX_RECONNECT_WAIT)
+            wait = min(2.0**failures, _MAX_RECONNECT_WAIT)
+            failures += 1
             logger.exception(
                 "task_creation: task.created listener failed (%d in a row); reconnecting in %ss",
                 failures,
