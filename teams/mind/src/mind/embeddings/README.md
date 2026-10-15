@@ -139,7 +139,7 @@ candidates = await resolve_dependency_targets(
 
 `store.get_vector(task_id)` returns the embedding already stored for a task_id (or `None` if it isn't indexed), for callers that already have a task in the system and don't want to re-embed its text. `store.search(..., exclude_task_id=...)` excludes a single task_id from the results, the same SQL-level way `exclude_completed` does -- needed whenever the query vector IS a stored row's own vector, or that row matches itself first.
 
-`find_related(store, task_id, *, k=5, threshold=None)` (`related_tasks.py`, #472) is Mind's one capability called from outside the service, through R4's HTTP layer (#450) -- see "Serving this over HTTP" below for the endpoint shape to agree with her. Up to k tasks related to `task_id`, ranked, `task_id` itself always excluded from its own results. `threshold=None` reads `Settings.related_task_threshold` -- a **lower, separate** bar from `duplicate_similarity_threshold`: the same pair can be related without being a duplicate (e.g. a prod and a staging deploy of the same change), so reusing the duplicate threshold here would miss exactly that case. Unlike `resolve_dependency_targets()`/`find_duplicate()`, a completed task is **not** excluded -- relatedness is topical context for display (what Lens/Inbox show alongside a task), not a live blocking check, so a finished related task is still useful context. A `task_id` with no embedding yet, an index with nothing else in it, and no candidate clearing the threshold all return `[]`, never an error:
+`find_related(store, task_id, *, k=5, threshold=None)` (`related_tasks.py`, #472) is Mind's one capability called from outside the service, through R4's HTTP layer (#450) -- see "Serving this over HTTP" below for the endpoint. Up to k tasks related to `task_id`, ranked, `task_id` itself always excluded from its own results. `threshold=None` reads `Settings.related_task_threshold` -- a **lower, separate** bar from `duplicate_similarity_threshold`: the same pair can be related without being a duplicate (e.g. a prod and a staging deploy of the same change), so reusing the duplicate threshold here would miss exactly that case. Unlike `resolve_dependency_targets()`/`find_duplicate()`, a completed task is **not** excluded -- relatedness is topical context for display (what Lens/Inbox show alongside a task), not a live blocking check, so a finished related task is still useful context. A `task_id` with no embedding yet, an index with nothing else in it, and no candidate clearing the threshold all return `[]`, never an error:
 
 ```python
 from mind.embeddings import find_related
@@ -264,14 +264,14 @@ Re-run: `python -m benchmarks.related_tasks_benchmark`.
 
 ## Serving this over HTTP (#450, R4)
 
-Building the HTTP layer is R4's boundary (#450) -- this is a proposed shape to agree with her, not wired into `api/v1/router.py`:
+Agreed with R4 and wired into `api/v1/router.py` (`src/mind/contracts/related_tasks.py` for the response model) -- see `docs/API.md` for the full contract:
 
 ```
 GET /v1/tasks/{task_id}/related
 -> 200 {"related": [{"task_id": str, "similarity": float}, ...]}
 ```
 
-`related: []` covers every "nothing to return" case alike -- an unindexed `task_id`, an index with nothing else in it, or no candidate clearing the threshold -- matching `find_related()`'s own contract (see above). Not a 404: Mind doesn't own the canonical task registry, so "unknown to Mind's index" isn't the same claim as "doesn't exist" -- a clean empty result, not an error, for all of them.
+`related: []` covers every "nothing to return" case alike -- an unindexed `task_id`, an index with nothing else in it, or no candidate clearing the threshold -- matching `find_related()`'s own contract (see above). Not a 404: Mind doesn't own the canonical task registry, so "unknown to Mind's index" isn't the same claim as "doesn't exist" -- a clean empty result, not an error, for all of them. `threshold` isn't exposed as a request param (R4's call); `k` could be added later as an optional query param without breaking anything.
 
 ## Known limitations (flag these in review)
 
