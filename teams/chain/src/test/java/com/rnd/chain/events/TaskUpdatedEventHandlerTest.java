@@ -10,6 +10,8 @@ import com.rnd.chain.service.SchedulingUpdateService;
 import static org.mockito.Mockito.mock;
 import com.rnd.chain.repository.InMemoryTaskDependencyRepository;
 import com.rnd.chain.repository.InMemoryTaskRepository;
+import com.rnd.chain.events.SchedulingPublishListener;
+import com.rnd.chain.service.PriorityScoreService;
 import com.rnd.chain.service.TaskCounterUpdater;
 import com.rnd.chain.service.TaskEligibilityService;
 import com.rnd.inbox.event.TaskUpdatedEvent;
@@ -54,7 +56,8 @@ class TaskUpdatedEventHandlerTest {
         InMemoryTaskDependencyRepository dependencyRepo = new InMemoryTaskDependencyRepository(edges);
         SchedulingUpdateService scheduling = mock(SchedulingUpdateService.class);
         TaskEligibilityService eligibilityService = new TaskEligibilityService(taskRepo, dependencyRepo,
-                scheduling, new InMemoryGraphLock(), new TaskCounterUpdater(taskRepo, scheduling));
+                new InMemoryGraphLock(), new TaskCounterUpdater(taskRepo, dependencyRepo,
+                        new PriorityScoreService(), new SchedulingPublishListener(taskRepo, scheduling)));
         ChainEventProcessingTemplate template = new ChainEventProcessingTemplate(new InMemoryProcessedEventStore());
         return new Fixture(taskRepo, new TaskUpdatedEventHandler(eligibilityService, template));
     }
