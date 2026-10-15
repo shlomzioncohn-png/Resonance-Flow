@@ -262,9 +262,11 @@ first character would otherwise read as an empty completion, which is retryable.
 
 `record_call` sat after the `try`, so a provider that raised was never
 recorded — and the failures are the slowest calls we make, since a timeout
-waits out the whole deadline. They are recorded now, under the provider's name
-(no answer to read a model id from), with `status=error` and a cost of `None`:
-no usage was reported, so the cost is unknown, not zero.
+waits out the whole deadline. They are recorded now, under the model id the
+provider sends -- the same key as a success, so a model's failures and successes
+share one row of the summary (#479) -- with `status=error` and a cost of `None`:
+no usage was reported, so the cost is unknown, not zero. A success is recorded
+under that same id but priced by the id the answer reports, the model billed.
 
 `except LLMError` rather than `finally`, so that a bug in a client or a
 `KeyboardInterrupt` propagates without being counted as a model call.

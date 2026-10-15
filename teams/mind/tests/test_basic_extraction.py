@@ -285,8 +285,8 @@ def test_a_failed_call_is_recorded_too() -> None:
     assert len(get_recent_calls()) == outcome.provider_calls
 
 
-def test_a_failed_call_is_recorded_under_the_provider_name() -> None:
-    """There is no answer to read a model id off, so the provider names it."""
+def test_a_failed_call_is_recorded_under_the_model_it_was_sent_to() -> None:
+    """The same key as a success, so a model's failures land on its own row (#479)."""
 
     _reset_for_tests()
     provider = ScriptedProvider(LLMTimeout("too slow"), LLMTimeout("again"), LLMTimeout("again"))
@@ -294,7 +294,7 @@ def test_a_failed_call_is_recorded_under_the_provider_name() -> None:
     BasicExtractor(provider, sleep=lambda _: None).extract(EMAIL_TEXT, SourceType.EMAIL)
 
     record = get_recent_calls()[0]
-    assert record.model_name == provider.name
+    assert record.model_name == provider.model
     assert record.duration_ms >= 0.0
     assert (record.kind, record.status) == (CallKind.LLM, CallStatus.ERROR)
     assert record.cost is None  # no usage reported: unknown, not free

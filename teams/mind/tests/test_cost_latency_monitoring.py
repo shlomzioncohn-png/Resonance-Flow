@@ -48,6 +48,7 @@ from pydantic import ValidationError
 from mind.config import MonitoringSettings
 from mind.contracts.base_enums import SourceType
 from mind.extraction.extractor import BasicExtractor, ExtractionSuccess
+from mind.extraction.providers.base import LLMTimeout
 from mind.extraction.providers.pricing import estimate_cost
 from mind.multimodal import asr, ocr
 from mind.multimodal.asr import transcribe
@@ -391,6 +392,33 @@ def test_an_llm_call_that_cannot_be_priced_is_unpriced_not_free(model: str, repo
     llm_call(model, reports_usage=reports_usage)
     [call] = get_recent_calls()
     assert call.cost is None
+
+
+def test_a_models_failures_and_successes_share_one_row():
+    # The first call times out, the retry succeeds: one model, so one row --
+    # its error_count and p95 include the failure.
+    provider = ScriptedProvider(LLMTimeout("too slow"), _ANSWER, model="deepseek-chat")
+    BasicExtractor(provider, sleep=lambda _: None).extract(_SOURCE, SourceType.EMAIL)
+    [r] = model_call_summary().by_call_name
+    assert (r.call_name, r.call_count, r.error_count) == ("deepseek-chat", 2, 1)
+
+
+class _AliasProvider(ScriptedProvider):
+    """Sends an alias; the API answers with the model it resolved it to."""
+
+    def complete(self, system: str, user: str):
+        return dataclasses.replace(super().complete(system, user), model="deepseek-chat")
+
+
+def test_an_llm_call_is_keyed_by_the_model_sent_and_priced_by_the_model_billed():
+    provider = _AliasProvider(_ANSWER, model="deepseek-latest")
+    BasicExtractor(provider, sleep=lambda _: None).extract(_SOURCE, SourceType.EMAIL)
+    [call] = get_recent_calls()
+    assert call.model_name == "deepseek-latest"  # a stable key, whatever the API answers
+    assert call.prompt_tokens is not None and call.completion_tokens is not None
+    assert call.cost == pytest.approx(  # the price of the model that actually ran
+        estimate_cost("deepseek-chat", call.prompt_tokens, call.completion_tokens)
+    )
 
 
 # --- units: CPU seconds for local models, dollars for LLM ---------------------------

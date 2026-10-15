@@ -72,6 +72,17 @@ class LLMProvider(Protocol):
 
     name: str
 
+    @property
+    def model(self) -> str:
+        """The model id this provider is configured to send.
+
+        The key every call is recorded under (observability.record_call), the
+        failures included: a model's successes and failures have to land on one
+        row of the cost and latency summary (#479). Part of the Protocol rather
+        than read with a getattr fallback, so mypy holds every provider to it.
+        """
+        ...
+
     def complete(self, system: str, user: str) -> LLMResponse:
         """Send one prompt pair and return the raw text of the answer.
 

@@ -227,11 +227,12 @@ class BasicExtractor:
             # before raising. Recording only the successes would leave the
             # latency figures describing a better service than this one.
             #
-            # There is no answer to read a model id off, so the provider
-            # names itself, and the cost is None: no usage was reported, so
-            # it is unknown -- not known to be free.
+            # Recorded under the model id the provider sends, like a success
+            # below, so a model's failures and successes are one row of the
+            # summary -- and its p95 includes the slow failures. The cost is
+            # None: no usage was reported, so it is unknown, not free.
             record_call(
-                model_name=self._provider.name,
+                model_name=self._provider.model,
                 duration_ms=(time.perf_counter() - started) * 1000,
                 cost=None,
                 kind=CallKind.LLM,
@@ -240,11 +241,13 @@ class BasicExtractor:
             raise
 
         duration_ms = (time.perf_counter() - started) * 1000
-        # The model id comes off the response rather than off the provider:
-        # a benchmark comparing two DeepSeek models needs to tell them apart,
-        # and only the answer knows which one produced it.
+        # Recorded under the model id the provider sends -- the key stays
+        # stable even if the API answers an alias with a versioned id -- but
+        # priced by the id the answer reports, the model actually billed.
+        # Two configured models (a benchmark comparing two DeepSeek models)
+        # are still two rows: each provider sends its own id.
         record_call(
-            model_name=response.model or self._provider.name,
+            model_name=self._provider.model,
             duration_ms=duration_ms,
             # None for an unpriced model or a provider that reported no
             # usage: unknown, which the cost report keeps apart from free.

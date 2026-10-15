@@ -140,6 +140,12 @@ included (confirmed by R2). The change there was agreed with her on the PR:
 every call is recorded with `kind=CallKind.LLM`, its status and token
 counts, and an unknown cost stays `None` instead of `0.0`:
 
+- every call -- failures included -- is recorded under the model id the
+  provider sends (`LLMProvider.model`, part of the Protocol), so a model's
+  failures and successes share one row and its p95 includes the slow
+  failures; a success is priced by the id the answer reports, the model
+  actually billed;
+
 - a failed call (no usage reported) and a model with no price on file are
   `None` -- unpriced, counted in `unpriced_count`;
 - the dollar price comes from `extraction/providers/pricing.py`. **Gemini has
