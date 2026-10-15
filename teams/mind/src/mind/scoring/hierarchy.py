@@ -9,14 +9,13 @@ Chain's traversal API in production.
 Agreed between R1 (evaluation) and R3 (propagation). It lives in `scoring/`, not
 `evaluation/`, so production scoring never imports from the evaluation package.
 
-Two layers of rules, as in `mind.evaluation.interfaces`:
-
-- **Per node** — field types and bounds, on `HierarchyNode`.
-- **Across the node list** — unique ids, every non-null parent present, no
-  cycles — on `HierarchyFixture`, so a violating file fails to load.
-
-What this module cannot see — whether the tasks pointing *into* the fixture
-name real nodes — is checked where both are loaded (`mind.evaluation.hierarchy`).
+Only the *shape* is enforced here: field types and bounds on `HierarchyNode`,
+and unique ids on `HierarchyFixture` (without them `by_id` would silently drop a
+node). Whether a graph may contain a cycle, or a parent that is not in it, is
+deliberately **not** decided here: that is the propagation's behaviour to define
+(#473), and its test graphs need to be able to contain both. The eval's own
+fixture must have neither; that is checked by `mind.evaluation.hierarchy`, next
+to the rule that scenario tasks point at real nodes.
 """
 
 from __future__ import annotations
@@ -74,39 +73,14 @@ class HierarchyFixture(BaseModel):
             raise ValueError(f"node task_id must be unique; duplicated: {duplicates}")
         return self
 
-    @model_validator(mode="after")
-    def _parents_exist(self) -> HierarchyFixture:
-        task_ids = {node.task_id for node in self.nodes}
-        dangling = sorted(
-            f"{node.task_id} -> {node.parent_task_id}"
-            for node in self.nodes
-            if node.parent_task_id is not None and node.parent_task_id not in task_ids
-        )
-        if dangling:
-            raise ValueError(
-                "parent_task_id must name a node in the fixture (an orphan is null, "
-                f"not a missing id); dangling: {dangling}"
-            )
-        return self
-
-    @model_validator(mode="after")
-    def _acyclic(self) -> HierarchyFixture:
-        parent_of = {node.task_id: node.parent_task_id for node in self.nodes}
-        for start, first_parent in parent_of.items():
-            seen = {start}
-            current = first_parent
-            while current is not None and current in parent_of:
-                if current in seen:
-                    raise ValueError(f"cycle in the node hierarchy, reached from {start!r}")
-                seen.add(current)
-                current = parent_of[current]
-        return self
-
     def by_id(self) -> dict[str, HierarchyNode]:
         """Nodes keyed by task_id, for walking a chain upward."""
         return {node.task_id: node for node in self.nodes}
 
 
 def load_hierarchy(path: str | Path) -> HierarchyFixture:
-    """Load and validate a node file. Raises FileNotFoundError or a ValidationError."""
+    """Load a node file and check its shape. Raises OSError or a ValidationError.
+
+    A graph with a cycle or a dangling parent loads; whether that is acceptable
+    is the caller's rule (see the module docstring)."""
     return HierarchyFixture.model_validate_json(Path(path).read_text(encoding="utf-8"))

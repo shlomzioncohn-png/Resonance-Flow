@@ -79,24 +79,34 @@ def test_duplicate_task_id_is_rejected():
         HierarchyFixture.model_validate({"nodes": [_node("root"), _node("root")]})
 
 
-def test_parent_missing_from_the_fixture_is_rejected():
-    with pytest.raises(ValidationError, match="dangling"):
-        HierarchyFixture.model_validate({"nodes": [_node("child", parent_task_id="nowhere")]})
+# Cycles and dangling parents are the propagation's behaviour to define (#473), and
+# its test graphs must be able to contain them, so the shared model loads them.
+# The eval forbids both in its own fixture: tests/test_hierarchy_links.py.
 
 
-def test_self_parent_is_a_cycle():
-    with pytest.raises(ValidationError, match="cycle"):
-        HierarchyFixture.model_validate({"nodes": [_node("loop", parent_task_id="loop")]})
+def test_shared_model_loads_a_parent_missing_from_the_graph():
+    fixture = HierarchyFixture.model_validate(
+        {"nodes": [_node("child", parent_task_id="nowhere")]}
+    )
+
+    assert fixture.by_id()["child"].parent_task_id == "nowhere"
 
 
-def test_longer_cycle_is_rejected():
-    nodes = [
-        _node("a", parent_task_id="b"),
-        _node("b", parent_task_id="c"),
-        _node("c", parent_task_id="a"),
-    ]
-    with pytest.raises(ValidationError, match="cycle"):
-        HierarchyFixture.model_validate({"nodes": nodes})
+@pytest.mark.parametrize(
+    "nodes",
+    [
+        [_node("loop", parent_task_id="loop")],
+        [
+            _node("a", parent_task_id="b"),
+            _node("b", parent_task_id="c"),
+            _node("c", parent_task_id="a"),
+        ],
+    ],
+)
+def test_shared_model_loads_a_cycle(nodes):
+    fixture = HierarchyFixture.model_validate({"nodes": nodes})
+
+    assert len(fixture.nodes) == len(nodes)
 
 
 def test_load_hierarchy_reads_a_file(tmp_path):

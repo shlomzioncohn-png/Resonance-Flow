@@ -256,7 +256,8 @@ silent edit to a node's importance fails `personas_checksum --check`, and makes
 | Rule | Where |
 |---|---|
 | Node fields, types and bounds | `HierarchyNode` |
-| Unique node ids, every non-null parent present, no cycles | `HierarchyFixture` (a bad file fails to load) |
+| Unique node ids | `HierarchyFixture` (a bad file fails to load) |
+| Every non-null node parent is in the fixture; no cycles | `mind.evaluation.hierarchy.validate_hierarchy_fixture` — run by `run.py` before scoring and by the tests. Deliberately **not** in the shared `HierarchyFixture`: what a cycle or a missing parent means is the propagation's behaviour to define (#473), and its test graphs must be able to contain them |
 | Every scenario `parent_task_id` names a node; no node id is also a scenario `task_id` | `mind.evaluation.hierarchy.validate_hierarchy_links` — run by `run.py` before scoring (a failure exits 1, like a broken scenario) and by the tests |
 | Every task's chain matches the table below; scenarios not in it are fully orphan; every importance is one of the three levels; every node belongs to exactly one scenario (no shared, no unused nodes) | `tests/test_hierarchy_links.py` |
 | A changed node is a changed set | `personas.sha256`, and the checksum a recorded baseline stores (both via `personas_checksum`) |

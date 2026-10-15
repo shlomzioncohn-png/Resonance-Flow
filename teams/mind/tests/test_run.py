@@ -117,11 +117,17 @@ def _broken_hierarchy(tmp_path: Path, nodes: dict) -> Path:
 @pytest.mark.parametrize(
     ("nodes", "message"),
     [
-        # A node file that does not load at all (a parent that is not in the file).
+        # A node file that does not load at all (importance out of range).
         (
-            {"nodes": [{"task_id": "x", "parent_task_id": "nowhere",
-                        "importance": 0.5, "label": "X"}]},
+            {"nodes": [{"task_id": "x", "parent_task_id": None,
+                        "importance": 2.0, "label": "X"}]},
             "Could not load the hierarchy",
+        ),
+        # A node file that loads (the shared model allows cycles) but the eval does not.
+        (
+            {"nodes": [{"task_id": "loop", "parent_task_id": "loop",
+                        "importance": 0.5, "label": "Loop"}]},
+            "Hierarchy validation FAILED",
         ),
         # A node file that loads, but the scenarios' parents are not in it.
         (

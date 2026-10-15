@@ -8,7 +8,11 @@ chain. If one of these fails, either the data drifted or the README is now wrong
 
 import pytest
 
-from mind.evaluation.hierarchy import HIERARCHY_PATH, validate_hierarchy_links
+from mind.evaluation.hierarchy import (
+    HIERARCHY_PATH,
+    validate_hierarchy_fixture,
+    validate_hierarchy_links,
+)
 from mind.evaluation.personas import PERSONAS_DIR, load_personas
 from mind.evaluation.placeholder_scenarios import PLACEHOLDER_SCENARIOS
 from mind.scoring.hierarchy import HierarchyFixture, load_hierarchy
@@ -20,6 +24,43 @@ _FIXTURE = HierarchyFixture.model_validate(
         ]
     }
 )
+
+
+def _graph(*edges):
+    """A fixture from (task_id, parent_task_id) pairs."""
+    return HierarchyFixture.model_validate(
+        {
+            "nodes": [
+                {"task_id": t, "parent_task_id": p, "importance": 0.5, "label": t}
+                for t, p in edges
+            ]
+        }
+    )
+
+
+def test_a_forest_with_a_two_level_chain_is_a_valid_fixture():
+    assert validate_hierarchy_fixture(_graph(("goal", None), ("initiative", "goal"))) == []
+
+
+def test_fixture_with_a_parent_missing_from_it_is_an_error():
+    errors = validate_hierarchy_fixture(_graph(("child", "nowhere")))
+
+    assert len(errors) == 1
+    assert "'nowhere' is not a node" in errors[0]
+
+
+@pytest.mark.parametrize(
+    "edges",
+    [
+        [("loop", "loop")],
+        [("a", "b"), ("b", "c"), ("c", "a")],
+    ],
+)
+def test_fixture_with_a_cycle_is_an_error(edges):
+    errors = validate_hierarchy_fixture(_graph(*edges))
+
+    assert errors
+    assert all("cycle" in e for e in errors)
 
 
 def _scenario_with_parent(parent_task_id):
@@ -84,6 +125,7 @@ def _parent(scenario, task_id):
 def test_real_set_links_cleanly_to_the_real_fixture(scenarios):
     fixture = load_hierarchy(HIERARCHY_PATH)
 
+    assert validate_hierarchy_fixture(fixture) == []
     assert validate_hierarchy_links(list(scenarios.values()), fixture) == []
 
 
@@ -201,13 +243,19 @@ SHARED_PARENT = {
 }
 
 
-def _chain(nodes, parent_task_id):
-    importances = []
+def _ancestors(nodes, parent_task_id):
+    """Node ids from `parent_task_id` up to its root, failing on a cycle."""
+    chain = []
     current = parent_task_id
     while current is not None:
-        importances.append(nodes[current].importance)
+        assert len(chain) <= len(nodes), f"cycle reached from {parent_task_id!r}"
+        chain.append(current)
         current = nodes[current].parent_task_id
-    return tuple(importances)
+    return chain
+
+
+def _chain(nodes, parent_task_id):
+    return tuple(nodes[node_id].importance for node_id in _ancestors(nodes, parent_task_id))
 
 
 def test_every_task_has_exactly_the_hierarchy_the_readme_table_states(scenarios, nodes):
@@ -243,10 +291,8 @@ def test_every_node_belongs_to_exactly_one_scenario(scenarios, nodes):
     owners: dict[str, set[str]] = {node_id: set() for node_id in nodes}
     for scenario_id, scenario in scenarios.items():
         for task in scenario.tasks:
-            current = task.parent_task_id
-            while current is not None:
-                owners[current].add(scenario_id)
-                current = nodes[current].parent_task_id
+            for node_id in _ancestors(nodes, task.parent_task_id):
+                owners[node_id].add(scenario_id)
 
     shared = {n: sorted(s) for n, s in owners.items() if len(s) > 1}
     unused = sorted(n for n, s in owners.items() if not s)

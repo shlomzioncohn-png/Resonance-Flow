@@ -1,15 +1,18 @@
-"""Cross-file rules between the persona set and its hierarchy fixture.
+"""The eval's rules for its hierarchy fixture, and between it and the persona set.
 
-`HierarchyFixture` (mind.scoring.hierarchy) checks the node file on its own:
-unique ids, parents present, no cycles. What it cannot see is the other side —
-the scenario tasks pointing *into* it. Those rules need both files loaded, so
-they live here, next to `validate_personas`, and return messages instead of
-raising, the same way:
+`HierarchyFixture` (mind.scoring.hierarchy) only checks the node shape and unique
+ids. It is shared with the propagation code, whose test graphs (#473) must be
+able to contain a cycle or a dangling parent, so it does not forbid either. The
+eval's own fixture must have neither, and that rule lives here, with the ones
+that need the scenarios too. All of them return messages instead of raising,
+like `validate_personas`:
 
-- every non-null `Task.parent_task_id` names a node in the fixture (an orphan is
-  null, never an id that does not exist);
-- no node id is also a scenario task_id, so a parent can never be mistaken for a
-  candidate the baseline scores.
+- `validate_hierarchy_fixture`: every non-null node `parent_task_id` names a node
+  in the fixture, and no chain loops back on itself;
+- `validate_hierarchy_links`: every non-null `Task.parent_task_id` names a node in
+  the fixture (an orphan is null, never an id that does not exist), and no node id
+  is also a scenario task_id, so a parent can never be mistaken for a candidate
+  the baseline scores.
 """
 
 from __future__ import annotations
@@ -23,6 +26,29 @@ from mind.scoring.hierarchy import HierarchyFixture
 # real set's file.
 NODES_FILENAME = "nodes.json"
 HIERARCHY_PATH = HIERARCHY_DIR / NODES_FILENAME
+
+
+def validate_hierarchy_fixture(fixture: HierarchyFixture) -> list[str]:
+    """Errors in the eval fixture's own graph; an empty list means it is a forest."""
+    parent_of = {node.task_id: node.parent_task_id for node in fixture.nodes}
+    errors = [
+        f"{node_id}: parent_task_id {parent!r} is not a node in the fixture "
+        "(an orphan is null, not a missing id)"
+        for node_id, parent in sorted(parent_of.items())
+        if parent is not None and parent not in parent_of
+    ]
+
+    for start, first_parent in sorted(parent_of.items()):
+        seen = {start}
+        current = first_parent
+        while current is not None and current in parent_of:
+            if current in seen:
+                errors.append(f"{start}: its parent chain loops back to {current!r} (a cycle)")
+                break
+            seen.add(current)
+            current = parent_of[current]
+
+    return errors
 
 
 def validate_hierarchy_links(

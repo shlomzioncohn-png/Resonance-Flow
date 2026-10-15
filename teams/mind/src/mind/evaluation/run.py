@@ -20,7 +20,11 @@ from mind.evaluation.baseline_record import (
 )
 from mind.evaluation.dummy_model import DummyModel
 from mind.evaluation.harness import EvaluationOutput, Report, run, split_by_role
-from mind.evaluation.hierarchy import NODES_FILENAME, validate_hierarchy_links
+from mind.evaluation.hierarchy import (
+    NODES_FILENAME,
+    validate_hierarchy_fixture,
+    validate_hierarchy_links,
+)
 from mind.evaluation.interfaces import RankingModel
 from mind.evaluation.personas import (
     HIERARCHY_DIR,
@@ -163,10 +167,12 @@ def main() -> None:
     except (OSError, UnicodeDecodeError, ValidationError) as e:
         print(f"Could not load the hierarchy from {str(hierarchy_dir)!r}: {e}", file=sys.stderr)
         sys.exit(1)
-    link_errors = validate_hierarchy_links(all_scenarios, fixture)
-    if link_errors:
+    hierarchy_errors = validate_hierarchy_fixture(fixture) + validate_hierarchy_links(
+        all_scenarios, fixture
+    )
+    if hierarchy_errors:
         print("\n--- Hierarchy validation FAILED ---")
-        for error in link_errors:
+        for error in hierarchy_errors:
             print(f"  - {error}")
         print("-----------------------------------\n")
         sys.exit(1)
