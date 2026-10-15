@@ -19,6 +19,12 @@ const preview: Preview = {
       return worker;
     }),
   ],
+  // Every story starts signed out. RoleProvider keeps the role in localStorage, and all
+  // stories share one browser, so a story that signs in (Pages/Login) would otherwise
+  // leave its role behind for the next one.
+  beforeEach() {
+    window.localStorage.removeItem('lens.role');
+  },
   parameters: {
     controls: {
       matchers: {
