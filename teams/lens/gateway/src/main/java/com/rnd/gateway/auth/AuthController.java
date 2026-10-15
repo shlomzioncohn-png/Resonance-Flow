@@ -7,6 +7,7 @@ import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.responses.ApiResponses;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletResponse;
 import jakarta.validation.Valid;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -103,7 +104,8 @@ public class AuthController {
     @PostMapping("/login")
     public ResponseEntity<AuthLoginResponseDto> login(
             @Valid @RequestBody AuthLoginRequestDto request,
-            HttpServletRequest httpRequest) {
+            HttpServletRequest httpRequest,
+            HttpServletResponse httpResponse) {
         
         String clientIp = getClientIp(httpRequest);
         
@@ -112,6 +114,15 @@ public class AuthController {
         
         try {
             AuthLoginResponseDto response = authService.login(request);
+            
+            // Set HttpOnly cookie with JWT token
+            String cookieValue = String.format(
+                    "accessToken=%s; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=%d",
+                    response.getAccessToken(),
+                    response.getExpiresIn()
+            );
+            httpResponse.setHeader("Set-Cookie", cookieValue);
+            
             return ResponseEntity.ok(response);
         } catch (BffAuthClient.InvalidCredentialsException e) {
             // Track failed login attempt
@@ -168,5 +179,30 @@ public class AuthController {
         
         AuthMeResponseDto response = new AuthMeResponseDto(userId, displayName, role);
         return ResponseEntity.ok(response);
+    }
+
+    /**
+     * POST /auth/logout
+     * Logout current user by clearing the accessToken cookie.
+     */
+    @Operation(summary = "Logout (clear accessToken cookie)")
+    @ApiResponses({
+            @ApiResponse(responseCode = "204", description = "Logout successful"),
+            @ApiResponse(responseCode = "401", description = "Not authenticated")
+    })
+    @PostMapping("/logout")
+    public ResponseEntity<Void> logout(
+            Authentication authentication,
+            HttpServletResponse httpResponse) {
+        
+        if (authentication == null || !authentication.isAuthenticated()) {
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).build();
+        }
+        
+        // Clear the accessToken cookie by setting Max-Age to 0
+        String clearCookie = "accessToken=; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=0";
+        httpResponse.setHeader("Set-Cookie", clearCookie);
+        
+        return ResponseEntity.noContent().build();
     }
 }

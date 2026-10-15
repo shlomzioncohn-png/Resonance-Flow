@@ -55,7 +55,7 @@ lens:
     public-key-location: ${JWT_PUBLIC_KEY_LOCATION:./jwt-public.pem}
 
 server:
-  port: ${SERVER_PORT:8090}
+  port: ${SERVER_PORT:8081}
 
 logging:
   level:
