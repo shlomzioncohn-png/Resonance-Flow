@@ -58,6 +58,7 @@ public class TaskCounterUpdater {
      * Creates a PENDING placeholder (epoch updatedAt, zero counters) in {@code tenantId} for each
      * absent task; never touches an existing one.
      */
+    @Transactional
     public void insertPlaceholdersIfAbsent(UUID taskId, UUID dependsOnTaskId, UUID tenantId) {
         insertPlaceholderIfAbsent(taskId, tenantId);
         insertPlaceholderIfAbsent(dependsOnTaskId, tenantId);
