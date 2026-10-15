@@ -14,8 +14,7 @@ import java.util.UUID;
  * openConstraintCount, isReady[, status])} - a positional-args convenience wrapper used at 30+
  * call sites in that file - but its body now delegates to {@link #defaultTask(UUID)} rather than
  * duplicating the {@code Task.builder()} construction, so this class is still the single place
- * the actual defaults live. {@code InMemoryTaskRepositoryTest} doesn't use either form - it
- * extends {@code TaskRepositoryContractTest}, which has its own fixture.
+ * the actual defaults live.
  *
  * <p>{@link #DEFAULT_TENANT_ID} (issue #580): every {@link #defaultTask(UUID)} shares this same
  * constant, so two tasks built from this fixture always share a tenant and pass the strict
