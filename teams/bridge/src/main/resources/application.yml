@@ -67,6 +67,12 @@ bridge:
   # KafkaPayloadPublisher (see esti/inbox-kafka-ingestion-contract) - one
   # topic for every source, never a per-lane one.
   structured-tasks-topic: ${BRIDGE_STRUCTURED_TASKS_TOPIC:bridge.structured.tasks}
+  kafka:
+    # Confluent Schema Registry for bridgeTaskEventKafkaTemplate's KafkaProtobufSerializer (see
+    # BridgeTaskKafkaConfig). The localhost default is for local/dev only - any real environment
+    # must override SCHEMA_REGISTRY_URL to the shared registry Relay owns.
+    schema-registry:
+      url: ${SCHEMA_REGISTRY_URL:http://localhost:8081}
   manual-sync:
     enabled: false
   crm:
@@ -113,10 +119,24 @@ bridge:
       tokens-directory: ${BRIDGE_GOOGLE_TOKENS_DIR:}
     email:
       mode: fixture
+      sync:
+        # Set to true to enable scheduled email sync via IntakeSyncJobs/SyncJobScheduler - off
+        # by default, same convention as bridge.crm.sync.cron/github.sync.cron.
+        cron:
+          enabled: ${BRIDGE_INTAKE_EMAIL_SYNC_CRON_ENABLED:false}
+          expression: ${BRIDGE_INTAKE_EMAIL_SYNC_CRON_EXPRESSION:0 */15 * * * ?}
     drive:
       mode: fixture
+      sync:
+        cron:
+          enabled: ${BRIDGE_INTAKE_DRIVE_SYNC_CRON_ENABLED:false}
+          expression: ${BRIDGE_INTAKE_DRIVE_SYNC_CRON_EXPRESSION:0 */15 * * * ?}
     calendar:
       mode: fixture
+      sync:
+        cron:
+          enabled: ${BRIDGE_INTAKE_CALENDAR_SYNC_CRON_ENABLED:false}
+          expression: ${BRIDGE_INTAKE_CALENDAR_SYNC_CRON_EXPRESSION:0 */15 * * * ?}
       # Only read when mode: real. "primary" means the calendar of whichever Google account
       # completes the OAuth consent.
       calendar-id: ${BRIDGE_CALENDAR_ID:primary}

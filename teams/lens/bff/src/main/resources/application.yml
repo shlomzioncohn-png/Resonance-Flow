@@ -8,7 +8,7 @@ spring:
 # Inbox (task data) - see InboxClient and lens/frontend/docs/api-integration-status.md
 inbox:
   # true = in-memory mock tasks, no Inbox needed. Set false to call the real Inbox.
-  mock-enabled: ${INBOX_MOCK_ENABLED:true}
+  mock-enabled: ${INBOX_MOCK_ENABLED:false}
   # Inbox runs on 8080
   service:
     url: ${INBOX_SERVICE_URL:http://inbox-service:8080}

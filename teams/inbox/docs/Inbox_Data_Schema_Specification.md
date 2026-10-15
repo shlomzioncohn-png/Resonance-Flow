@@ -168,7 +168,7 @@ Fields are listed with their type, whether they are required, their foreign-key 
 | `project_id` | UUID | No | FK → `projects.id` | Project associated with the task. |
 | `title` | TEXT | Yes | — | Short task title. |
 | `description` | TEXT | No | — | Detailed task description. |
-| `source_type` | VARCHAR / ENUM | Yes | `github_issue / github_pr / crm_deal / email / slack / whatsapp / meeting / doc / scanned_doc / calendar / manual / jira_issue` | Original source of the task. |
+| `source_type` | VARCHAR / ENUM | Yes | `github_issue / github_pr / crm_deal / email / slack / whatsapp / meeting / doc / scanned_doc / calendar / manual / jira_issue / zoom / bigbluebutton` | Original source of the task. |
 | `source_ref` | TEXT | No | — | Reference to the original source, such as URL, message ID, or issue ID. |
 | `correlation_id` | UUID | No | — | Request/response correlation value used by Mind on the unstructured creation path (`task.creation.requested` → `task.created`). NULL for tasks created via the structured path (Bridge) or manually. Technical field, not a business attribute. |
 | `tier` | VARCHAR / ENUM | No | `operational / tactical / strategic` | Task level used by Mind for tier-specific classification/ranking. May be NULL before classification. |
@@ -275,6 +275,21 @@ If feedback also mutates a `TASKS` field directly, for example `status → in_re
 
 > **Note:** This JSONB-based, per-action design (one row per change, covering all field diffs together) differs from an alternative per-field design (one row per individual field changed) also discussed for this schema — see Open Questions for the trade-off.
 
+**What is written (`AuditService`):** every service builds an explicit *snapshot* of its entity - a fixed list of fields, never the whole object - and the row is written from it.
+
+| | `old_values` | `new_values` |
+|---|---|---|
+| Creation / addition (`*_CREATED`, `TEAM_MEMBER_ADDED`) | NULL | Full snapshot of the new record. |
+| Update (`*_UPDATED`, `*_STATUS_UPDATED`, `TASK_COMPLETED`, `TASK_SCHEDULING_UPDATED`, `TEAM_MEMBER_REMOVED`) | Only the fields whose value changed, each with the value it had **before** the change. | Full snapshot **after** the change. |
+
+- An update that changes nothing in the snapshot writes **no row** - the trail records changes, not requests. This is why a snapshot must list every field an update can change: a field left out of it would make an update of only that field go unaudited.
+- A field that appears in `old_values` is, by definition, a field that changed in that action; its new value is the same key in `new_values`.
+- Enum values are stored by name (`"IN_PROGRESS"`, `"EMPLOYEE"`), related records by id only (`ownerId`, `projectId`, `teamLeadId`).
+- `TASKS` snapshot: `title`, `description`, `sourceType`, `sourceRef`, `status`, `tier`, `roleContext`, `urgency`, `effortEstimateMinutes`, `effortEstimateConfidence`, `deadline`, `snoozedUntil`, `completedAt`, `projectId`, `ownerId`, `suggestedOwnerUserId`, `suggestedOwnerConfidence`. `TASK_SCHEDULING_UPDATED` rows carry `isAvailable` and `priorityScore` instead.
+- `TASK_CREATED` additionally carries `assignments` in `new_values`: one `{userId, teamId, assignmentRole, assignedById}` object per `ASSIGNMENTS` row saved with the task, an empty list when there are none. Assignments are only written at task creation, so they have no audit row of their own.
+- Appointing a team lead writes up to three rows: the `TEAM_CREATED` / `TEAM_UPDATED` row itself, a `TEAM_MEMBER_ADDED` row if the lead was not already a member, and a `USER_UPDATED` row if the lead was promoted from `EMPLOYEE` to `TEAM_LEAD`.
+- Rows written before this behaviour was introduced have `old_values` NULL on updates too, and a narrower `TASKS` snapshot (`title`, `sourceType`, `sourceRef`, `status`).
+
 ---
 
 ## 4. Schema Relationships
@@ -310,6 +325,8 @@ This schema stores `old_values` / `new_values` as JSONB per action — one row p
 An alternative, per-field design — one row per individual field changed, with plain `changed_field / old_value / new_value` columns — has also been discussed and is simpler to query for single-field history but does not generalize as cleanly across entity types.
 
 **Decision needed:** confirm JSONB is the adopted approach. If per-field query performance for a specific UI (e.g. status-change timeline) is required, consider a GIN index on `old_values` / `new_values`, or a supplementary per-field table for TASKS specifically.
+
+*Current state, not a decision:* the code writes to the JSONB columns, and `old_values` is filled on every update (see section 3.11, "What is written"). That implements the existing design; it does not settle the choice above.
 
 ### OPEN IN SCHEMA — Parent/child task hierarchy ownership
 

@@ -1,23 +1,10 @@
 """
-The contract every vector-database backend must satisfy.
+The contract every vector-database backend must satisfy. Dependency-free
+of any backend-specific package, so it's importable without psycopg etc.
 
-Deliberately dependency-free of any *backend-specific* package (only
-`abc` and `pydantic`, the latter already a core project dependency, not
-something specific to whichever database ends up behind this interface)
-so this interface can be imported -- for type-checking, mocking in
-tests, or sketching a new backend -- without requiring psycopg or any
-other backend-specific package to be installed.
-
-Methods are `async def`: the current backend (pgvector via psycopg) talks
-to Postgres over an async connection so it doesn't block the event loop,
-and any future backend implementing this interface needs to honor the
-same contract.
-
-pgvector is the team's chosen backend -- see
-`../../../benchmarks/vector-store-comparison.md` for the comparison and
-decision. Anything else the app wants to use later implements this class
-too; callers construct whichever implementation they need directly (see
-`pgvector_store.PgVectorStore`).
+pgvector is the chosen backend (see
+benchmarks/vector-store-comparison.md); callers construct
+pgvector_store.PgVectorStore directly.
 """
 
 from abc import ABC, abstractmethod
@@ -26,7 +13,7 @@ from pydantic import BaseModel, Field
 
 
 class SearchResult(BaseModel):
-    """One search() hit: which task_id, and how similar it was."""
+    """One search() hit: task_id and similarity."""
 
     task_id: str
     similarity: float = Field(
@@ -34,45 +21,67 @@ class SearchResult(BaseModel):
         le=1.0,
         description="Cosine similarity, comparable to Settings.duplicate_similarity_threshold",
     )
+    is_completed: bool = Field(
+        default=False, description="DONE/REJECTED/CANCELLED -- any status the index treats as finished."
+    )
 
 
 class VectorStore(ABC):
     @abstractmethod
     async def open(self) -> None:
-        """Eagerly initialize the store (open connections, ensure schema).
-
-        Optional -- upsert/search/delete/clear initialize lazily on first
-        use otherwise. Call explicitly to tie resources to a known,
-        long-lived event loop (e.g. a FastAPI lifespan handler).
-        """
+        """Eagerly initialize (confirms the schema is migrated). Optional -- other methods init lazily."""
         ...
 
     @abstractmethod
     async def close(self) -> None:
-        """Release resources acquired by open() or by lazy initialization
-        (e.g. close a connection pool). Call this on graceful shutdown."""
+        """Release resources. Call on graceful shutdown."""
         ...
 
     @abstractmethod
-    async def upsert(self, task_id: str, vector: list[float]) -> None:
-        """Save or update the vector for a given task_id."""
+    async def upsert(
+        self, task_id: str, vector: list[float], *, content_hash: str | None = None
+    ) -> None:
+        """Save or update the vector for a given task_id. content_hash (a
+        hash of whatever text embed() was given) lets a caller skip
+        re-embedding unchanged text later via get_content_hash()."""
+        ...
+
+    @abstractmethod
+    async def upsert_if_absent(
+        self, task_id: str, vector: list[float], *, content_hash: str | None = None
+    ) -> bool:
+        """Insert only if absent (unlike upsert's insert-or-update).
+        True if inserted, False if a row already existed."""
+        ...
+
+    @abstractmethod
+    async def get_content_hash(self, task_id: str) -> str | None:
+        """The content_hash last passed to upsert()/upsert_if_absent(), or
+        None if the task isn't indexed or was indexed without one."""
+        ...
+
+    @abstractmethod
+    async def mark_completed(self, task_id: str) -> bool:
+        """True if a row existed and was updated, False if unknown."""
+        ...
+
+    @abstractmethod
+    async def mark_incomplete(self, task_id: str) -> bool:
+        """Reset is_completed to False (e.g. a DONE task got reopened).
+        True if a row existed and was updated, False if unknown."""
         ...
 
     @abstractmethod
     async def search(self, query_vector: list[float], k: int) -> list[SearchResult]:
-        """Return up to k results most similar to query_vector, best match first."""
+        """Up to k results most similar to query_vector, best match first."""
         ...
 
     @abstractmethod
     async def delete(self, task_id: str) -> None:
-        """Remove the vector for a given task_id, if it exists.
-
-        Deleting a task_id that isn't stored is not an error -- same
-        no-op-if-absent semantics as SQL's DELETE.
-        """
+        """Remove a task_id's vector. No-op if it isn't stored."""
         ...
 
     @abstractmethod
     async def clear(self) -> None:
-        """Remove every stored vector. Intended for test teardown, not production use."""
+        """Remove every stored vector. Test teardown only."""
         ...

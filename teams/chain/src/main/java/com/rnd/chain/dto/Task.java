@@ -28,13 +28,12 @@ public final class Task {
     @EqualsAndHashCode.Include
     private final UUID id;
     private final UUID parentTaskId;
-    private final String ownerId;
 
     private final TaskStatus status;
 
     /** Whether all of this task's dependencies and constraints are satisfied, so it can be worked on.
      * Invariant: must equal {@code blockingCount == 0 && openConstraintCount == 0}. Not enforced by
-     * this class (a stored field, not derived) - {@code TaskEligibilityService.withCounters} is the
+     * this class (a stored field, not derived) - {@code TaskCounterUpdater.withCounters} is the
      * single place responsible for keeping it in sync whenever either counter changes. */
     private final boolean isReady;
 
@@ -54,7 +53,6 @@ public final class Task {
     @lombok.Builder(builderClassName = "Builder")
     private Task(UUID id,
                  UUID parentTaskId,
-                 String ownerId,
                  TaskStatus status,
                  boolean isReady,
                  int blockingCount,
@@ -67,9 +65,6 @@ public final class Task {
         if (id == null) {
             throw new IllegalArgumentException("id must not be null");
         }
-        if (ownerId == null) {
-            throw new IllegalArgumentException("ownerId must not be null");
-        }
         if (blockingCount < 0) {
             throw new IllegalArgumentException("blockingCount must not be negative");
         }
@@ -81,7 +76,6 @@ public final class Task {
         }
         this.id = id;
         this.parentTaskId = parentTaskId;
-        this.ownerId = ownerId;
         this.status = status;
         this.isReady = isReady;
         this.blockingCount = blockingCount;
@@ -102,7 +96,7 @@ public final class Task {
      */
     public static Task copyOf(Task source) {
         Objects.requireNonNull(source, "source must not be null");
-        return new Task(source.id, source.parentTaskId, source.ownerId, source.status,
+        return new Task(source.id, source.parentTaskId, source.status,
                 source.isReady, source.blockingCount, source.openConstraintCount,
                 source.estimatedDurationMin, source.score, source.createdAt, source.updatedAt,
                 source.deletedAt);

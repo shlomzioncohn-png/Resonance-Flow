@@ -1,43 +1,94 @@
 """
-embed(): turns a piece of text into a fixed-length vector.
+Real embedding generation (BAAI/bge-small-en-v1.5, 384-dim, CPU-only).
 
-Deterministic, fully offline placeholder (scikit-learn's HashingVectorizer)
--- not a real semantic model, so it has no notion of meaning: "car" and
-"automobile" hash to unrelated vectors. See
-`benchmarks/vector-store-comparison.md` for the measured impact. It lets
-the rest of the interface be built and tested without a real model;
-swapping one in later only means replacing `embed()`'s body, since every
-caller only ever sees `list[float]` of length EMBEDDING_DIM.
+Asymmetric model: queries need `is_query=True` (keyword-only) or
+similarity scores get silently inflated. Prefer
+`PgVectorStore.search_text()` over `search(embed(...))` for queries.
+
+Long text truncates at 512 tokens, no chunking. Empty/whitespace text
+raises ValueError -- nothing meaningful to embed.
+
+`embed()`/`embed_batch()` block (CPU inference) -- use the `_async`
+wrappers from async code.
 """
 
-from sklearn.feature_extraction.text import HashingVectorizer
+import asyncio
+import threading
+from pathlib import Path
 
-# A plain constant, not read from mind.config.Settings: this dimension is
-# inherent to this hashing vectorizer, needed to build it at import time,
-# and importing mind.config.Settings requires a DSN. Must match
-# VectorStoreSettings.embedding_dim's default -- both describe the same
-# fixed fact about this placeholder implementation.
-EMBEDDING_DIM = 256
+from sentence_transformers import SentenceTransformer
 
-_vectorizer = HashingVectorizer(
-    n_features=EMBEDDING_DIM,
-    alternate_sign=False,
-    norm="l2",
+from mind.config import EmbeddingModelSettings
+
+EMBEDDING_DIM = 384
+MAX_SEQ_LENGTH = 512
+
+BGE_QUERY_INSTRUCTION = "Represent this sentence for searching relevant passages: "
+
+_embedding_model_settings = EmbeddingModelSettings()
+EMBEDDING_MODEL_NAME = _embedding_model_settings.name
+# None = download from HF Hub (no local MODEL_CACHE_DIR set).
+EMBEDDING_MODEL_LOCAL_DIR: Path | None = (
+    Path(_embedding_model_settings.model_cache_dir) / EMBEDDING_MODEL_NAME.rsplit("/", 1)[-1]
+    if _embedding_model_settings.model_cache_dir
+    else None
 )
 
+_model: SentenceTransformer | None = None
+_model_lock = threading.Lock()
 
-def embed(text: str) -> list[float]:
-    """Turn `text` into a deterministic unit-length vector of EMBEDDING_DIM floats.
 
-    Raises ValueError if `text` has no extractable tokens (e.g. empty, or
-    only punctuation/whitespace). HashingVectorizer's `norm="l2"` can't
-    normalize an all-zero row and silently returns it as-is; pgvector's
-    cosine-distance operator then divides by that vector's zero norm and
-    returns NaN, which sorts unpredictably and corrupts search results.
-    Failing fast here surfaces the problem at the caller instead.
-    """
-    sparse_vec = _vectorizer.transform([text])
-    vector = sparse_vec.toarray()[0]
-    if not vector.any():
-        raise ValueError(f"embed() got text with no extractable tokens: {text!r}")
+def _get_model() -> SentenceTransformer:
+    # threading.Lock, not asyncio.Lock -- runs on worker threads.
+    global _model
+    if _model is None:
+        with _model_lock:
+            if _model is None:
+                model_source = (
+                    str(EMBEDDING_MODEL_LOCAL_DIR)
+                    if EMBEDDING_MODEL_LOCAL_DIR is not None and EMBEDDING_MODEL_LOCAL_DIR.is_dir()
+                    else EMBEDDING_MODEL_NAME
+                )
+                _model = SentenceTransformer(model_source)
+                _model.max_seq_length = MAX_SEQ_LENGTH
+    return _model
+
+
+def task_text(title: str, description: str) -> str:
+    """Canonical title+description join for embedding a task -- every
+    producer (#470, #245, #471) must use this, or their vectors aren't
+    comparable to each other."""
+    return f"{title} {description}".strip()
+
+
+def embed(text: str, *, is_query: bool = False) -> list[float]:
+    """Deterministic embedding vector. is_query=True for search queries."""
+    if not text.strip():
+        raise ValueError(f"embed() got text with no extractable content: {text!r}")
+    if is_query:
+        text = BGE_QUERY_INSTRUCTION + text
+    vector = _get_model().encode(text, normalize_embeddings=True)
     return vector.tolist()
+
+
+def embed_batch(texts: list[str], *, is_query: bool = False) -> list[list[float]]:
+    """Batch version of embed()."""
+    if not texts:
+        return []
+    for text in texts:
+        if not text.strip():
+            raise ValueError(f"embed_batch() got text with no extractable content: {text!r}")
+    if is_query:
+        texts = [BGE_QUERY_INSTRUCTION + t for t in texts]
+    vectors = _get_model().encode(texts, normalize_embeddings=True)
+    return vectors.tolist()
+
+
+async def embed_async(text: str, *, is_query: bool = False) -> list[float]:
+    """Non-blocking embed() for async callers."""
+    return await asyncio.to_thread(embed, text, is_query=is_query)
+
+
+async def embed_batch_async(texts: list[str], *, is_query: bool = False) -> list[list[float]]:
+    """Non-blocking embed_batch() for async callers."""
+    return await asyncio.to_thread(embed_batch, texts, is_query=is_query)

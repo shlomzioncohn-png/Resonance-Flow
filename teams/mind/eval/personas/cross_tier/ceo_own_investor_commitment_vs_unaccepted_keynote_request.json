@@ -1,0 +1,52 @@
+{
+  "scenario_id": "ceo_own_investor_commitment_vs_unaccepted_keynote_request",
+  "persona": {
+    "role": "CEO",
+    "department": null
+  },
+  "context": {
+    "free_time_minutes": 50,
+    "current_datetime": "2026-10-22T13:10:00",
+    "time_horizon": "this_week",
+    "constraints": []
+  },
+  "tasks": [
+    {
+      "task_id": "task_keynote",
+      "title": "Send your bio and headshot for the industry conference keynote",
+      "description": "The organizer emailed this morning inviting you to give a keynote and asking for a bio and headshot by 17:00 today to finalize the printed program. Last year's keynote speaker was the CEO of a public company, the organizer writes that slots are filled in the order replies arrive, and two other CEOs have already confirmed. The conference is in six weeks. You have not replied to the invitation or accepted the slot.",
+      "deadline": "2026-10-22T17:00:00",
+      "effort_estimate": 15,
+      "tier": "operational",
+      "blocked": false,
+      "parent_task_id": null
+    },
+    {
+      "task_id": "task_acquisitions",
+      "title": "Outline the 2027 acquisition-targets shortlist",
+      "description": "Exploratory thinking for next year's strategy. The leadership offsite where acquisition targets are first discussed takes place in March, and the chief of staff has pencilled in a half-day session for it. A first list of fifteen names was drafted last spring by the corporate-development intern and has not been revisited since.",
+      "deadline": null,
+      "effort_estimate": 30,
+      "tier": "strategic",
+      "blocked": false,
+      "parent_task_id": null
+    },
+    {
+      "task_id": "task_investor",
+      "title": "Finish and send the lead investor the revised runway and hiring plan",
+      "description": "On Monday you wrote to the lead investor, 'I will send you the revised runway and hiring plan by Friday noon'. She told her partners to expect it before the investment committee decides whether she leads the extension round. It needs your final numbers and a covering note.",
+      "deadline": "2026-10-23T12:00:00",
+      "effort_estimate": 45,
+      "tier": "strategic",
+      "blocked": false,
+      "parent_task_id": null
+    }
+  ],
+  "expected_top_task_id": "task_investor",
+  "expected_reason": "task_investor is a firm commitment the CEO made in writing, with a Friday-noon date that feeds the investor's decision on leading the extension round; task_keynote is an invitation the CEO has not accepted, so its 17:00 request date does not bind, and task_acquisitions has no deadline and is thinking for an offsite in March.",
+  "source": {
+    "type": "synthetic",
+    "source_detail": null
+  },
+  "team_lead_approved": false
+}

@@ -5,10 +5,12 @@ import com.rnd.chain.dto.Task;
 import com.rnd.chain.dto.TaskDependency;
 import com.rnd.chain.dto.TaskStatus;
 import com.rnd.chain.repository.InMemoryConstraintRepository;
+import com.rnd.chain.repository.InMemoryGraphLock;
 import com.rnd.chain.service.SchedulingUpdateService;
 import static org.mockito.Mockito.mock;
 import com.rnd.chain.repository.InMemoryTaskDependencyRepository;
 import com.rnd.chain.repository.InMemoryTaskRepository;
+import com.rnd.chain.service.TaskCounterUpdater;
 import com.rnd.chain.service.TaskEligibilityService;
 import com.rnd.inbox.event.TaskUpdatedEvent;
 import org.junit.jupiter.api.Test;
@@ -33,7 +35,6 @@ class TaskUpdatedEventHandlerTest {
     private static Task buildTask(UUID id, TaskStatus status, LocalDateTime updatedAt) {
         return Task.builder()
                 .id(id)
-                .ownerId("owner")
                 .status(status)
                 .isReady(true)
                 .blockingCount(0)
@@ -49,8 +50,9 @@ class TaskUpdatedEventHandlerTest {
     private static Fixture newFixture(List<Task> tasks, List<TaskDependency> edges) {
         InMemoryTaskRepository taskRepo = new InMemoryTaskRepository(tasks);
         InMemoryTaskDependencyRepository dependencyRepo = new InMemoryTaskDependencyRepository(edges);
+        SchedulingUpdateService scheduling = mock(SchedulingUpdateService.class);
         TaskEligibilityService eligibilityService = new TaskEligibilityService(taskRepo, dependencyRepo,
-                mock(SchedulingUpdateService.class), new InMemoryConstraintRepository());
+                scheduling, new InMemoryGraphLock(), new TaskCounterUpdater(taskRepo, scheduling));
         ChainEventProcessingTemplate template = new ChainEventProcessingTemplate(new InMemoryProcessedEventStore());
         return new Fixture(taskRepo, new TaskUpdatedEventHandler(eligibilityService, template));
     }
@@ -78,7 +80,7 @@ class TaskUpdatedEventHandlerTest {
         UUID dependent = UUID.randomUUID();
         Fixture fixture = newFixture(
                 List.of(buildTask(blocker, TaskStatus.ACTIVE, BASE_TIME),
-                        Task.builder().id(dependent).ownerId("owner").status(TaskStatus.PENDING)
+                        Task.builder().id(dependent).status(TaskStatus.PENDING)
                                 .isReady(false).blockingCount(1).openConstraintCount(0)
                                 .createdAt(BASE_TIME).updatedAt(BASE_TIME).build()),
                 List.of(new TaskDependency(dependent, blocker)));
@@ -100,7 +102,7 @@ class TaskUpdatedEventHandlerTest {
         UUID dependent = UUID.randomUUID();
         Fixture fixture = newFixture(
                 List.of(buildTask(blocker, TaskStatus.ACTIVE, BASE_TIME),
-                        Task.builder().id(dependent).ownerId("owner").status(TaskStatus.PENDING)
+                        Task.builder().id(dependent).status(TaskStatus.PENDING)
                                 .isReady(false).blockingCount(1).openConstraintCount(0)
                                 .createdAt(BASE_TIME).updatedAt(BASE_TIME).build()),
                 List.of(new TaskDependency(dependent, blocker)));
@@ -123,7 +125,7 @@ class TaskUpdatedEventHandlerTest {
         UUID dependent = UUID.randomUUID();
         Fixture fixture = newFixture(
                 List.of(buildTask(blocker, TaskStatus.ACTIVE, BASE_TIME),
-                        Task.builder().id(dependent).ownerId("owner").status(TaskStatus.PENDING)
+                        Task.builder().id(dependent).status(TaskStatus.PENDING)
                                 .isReady(false).blockingCount(1).openConstraintCount(0)
                                 .createdAt(BASE_TIME).updatedAt(BASE_TIME).build()),
                 List.of(new TaskDependency(dependent, blocker)));

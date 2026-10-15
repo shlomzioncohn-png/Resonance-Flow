@@ -5,12 +5,14 @@ package com.rnd.inbox.event;
 option java_package = "com.rnd.inbox.event";
 option java_multiple_files = true;
 
+import "google/protobuf/timestamp.proto";
+
 // kafkaTopic: task.completed
-// Mirrors teams/inbox/src/main/java/com/rnd/inbox/task/TaskCompletedPayload.java
-// (built via TaskCompletedPayload.from(Task), published by TaskService on EventType.TASK_COMPLETED).
-// Both fields are non-nullable in the source class, so neither is `optional` here.
+// Published by Inbox - built from teams/inbox/src/main/java/com/rnd/inbox/task/event/TaskCompletedPayload.java
+// by TaskCompletedProtoMapper.
 
 message TaskCompletedEvent {
   string task_id = 1;      // UUID as string.
-  bool is_completed = 2;   // Always true in practice - from(Task) only sets this from status == DONE.
+  bool is_completed = 2;   // true when status == DONE.
+  google.protobuf.Timestamp updated_at = 3;
 }

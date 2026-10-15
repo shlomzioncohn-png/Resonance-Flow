@@ -9,6 +9,7 @@ import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
 
 import java.time.Instant;
+import java.time.temporal.ChronoUnit;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -18,6 +19,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
+import java.util.ArrayList;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -29,13 +31,24 @@ class OutboxEventRepositoryIntegrationTest extends AbstractIntegrationTest {
     @Autowired
     private PlatformTransactionManager transactionManager;
 
+    private final List<UUID> createdEventIds = new ArrayList<>();
+
+    // Deletes only the events this test created, never the whole outbox table.
     @AfterEach
     void cleanUp() {
-        outboxEventRepository.deleteAll();
+        outboxEventRepository.deleteAllById(createdEventIds);
+        createdEventIds.clear();
+    }
+
+    // The id is generated on save, so it is only known from the saved instance.
+    private OutboxEvent saveTracked(OutboxEvent event) {
+        OutboxEvent saved = outboxEventRepository.save(event);
+        createdEventIds.add(saved.getEventId());
+        return saved;
     }
 
     private OutboxEvent newPendingEvent() {
-        return outboxEventRepository.save(newUnsavedEvent(Instant.now()));
+        return saveTracked(newUnsavedEvent(Instant.now()));
     }
 
     private OutboxEvent newUnsavedEvent(Instant createdAt) {
@@ -56,21 +69,24 @@ class OutboxEventRepositoryIntegrationTest extends AbstractIntegrationTest {
 
     @Test
     void claimPendingBatch_returnsOnlyPendingRowsDueForRetry() {
-        OutboxEvent duePending = newPendingEvent();
+        OutboxEvent duePending = saveTracked(newUnsavedEvent(Instant.now().minus(1, ChronoUnit.DAYS)));
 
         OutboxEvent notYetDue = newPendingEvent();
         notYetDue.setNextRetryAt(Instant.now().plusSeconds(3600));
-        outboxEventRepository.save(notYetDue);
+        saveTracked(notYetDue);
 
         OutboxEvent alreadyPublished = newPendingEvent();
         alreadyPublished.setStatus(OutboxStatus.PUBLISHED);
         alreadyPublished.setPublishedAt(Instant.now());
-        outboxEventRepository.save(alreadyPublished);
+        saveTracked(alreadyPublished);
 
         List<OutboxEvent> claimed = new TransactionTemplate(transactionManager)
                 .execute(status -> outboxEventRepository.claimPendingBatch(Instant.now(), 10));
 
-        assertThat(claimed).extracting(OutboxEvent::getEventId).containsExactly(duePending.getEventId());
+        // The outbox table may hold other pending rows, so assert on this test's rows only.
+        assertThat(claimed).extracting(OutboxEvent::getEventId)
+                .contains(duePending.getEventId())
+                .doesNotContain(notYetDue.getEventId(), alreadyPublished.getEventId());
     }
 
     @Test
@@ -114,8 +130,8 @@ class OutboxEventRepositoryIntegrationTest extends AbstractIntegrationTest {
 
         executor.shutdown();
 
-        assertThat(first).extracting(OutboxEvent::getEventId).containsExactly(event.getEventId());
-        assertThat(second).isEmpty(); 
+        assertThat(first).extracting(OutboxEvent::getEventId).contains(event.getEventId());
+        assertThat(second).extracting(OutboxEvent::getEventId).doesNotContain(event.getEventId());
     }
 
     private static void awaitQuietly(CountDownLatch latch) {
@@ -131,15 +147,15 @@ class OutboxEventRepositoryIntegrationTest extends AbstractIntegrationTest {
         OutboxEvent oldPublished = newUnsavedEvent(Instant.now().minusSeconds(20 * 24 * 3600));
         oldPublished.setStatus(OutboxStatus.PUBLISHED);
         oldPublished.setPublishedAt(Instant.now());
-        oldPublished = outboxEventRepository.save(oldPublished);
+        oldPublished = saveTracked(oldPublished);
 
         OutboxEvent recentPublished = newUnsavedEvent(Instant.now());
         recentPublished.setStatus(OutboxStatus.PUBLISHED);
         recentPublished.setPublishedAt(Instant.now());
-        recentPublished = outboxEventRepository.save(recentPublished);
+        recentPublished = saveTracked(recentPublished);
 
         OutboxEvent oldButPending = newUnsavedEvent(Instant.now().minusSeconds(20 * 24 * 3600));
-        oldButPending = outboxEventRepository.save(oldButPending);
+        oldButPending = saveTracked(oldButPending);
 
         int deleted = new TransactionTemplate(transactionManager)
                 .execute(status -> outboxEventRepository.deletePublishedOlderThan(Instant.now().minusSeconds(7 * 24 * 3600)));
@@ -154,7 +170,7 @@ class OutboxEventRepositoryIntegrationTest extends AbstractIntegrationTest {
     void deleteFailedOlderThan_removesOnlyOldFailedRows() {
         OutboxEvent oldFailed = newUnsavedEvent(Instant.now().minusSeconds(40 * 24 * 3600));
         oldFailed.setStatus(OutboxStatus.FAILED);
-        oldFailed = outboxEventRepository.save(oldFailed);
+        oldFailed = saveTracked(oldFailed);
 
         int deleted = new TransactionTemplate(transactionManager)
                 .execute(status -> outboxEventRepository.deleteFailedOlderThan(Instant.now().minusSeconds(30L * 24 * 3600)));

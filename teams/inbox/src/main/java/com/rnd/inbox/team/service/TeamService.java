@@ -21,7 +21,7 @@ import com.rnd.inbox.tenant.repository.TenantRepository;
 import com.rnd.inbox.user.model.User;
 import com.rnd.inbox.user.exception.UserNotFoundException;
 import com.rnd.inbox.user.repository.UserRepository;
-import com.rnd.inbox.user.model.UserRole;
+import com.rnd.inbox.user.service.UserService;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
@@ -38,17 +38,19 @@ public class TeamService {
     private final TenantRepository tenantRepository;
     private final UserRepository userRepository;
     private final TeamMemberService teamMemberService;
+    private final UserService userService;
     private final TeamMapper teamMapper;
     private final AuditService auditService;
     private final TeamAuthorization teamAuthorization;
 
     public TeamService(TeamRepository teamRepository, TenantRepository tenantRepository,
                         UserRepository userRepository, TeamMemberService teamMemberService,
-                        TeamMapper teamMapper, AuditService auditService, TeamAuthorization teamAuthorization) {
+                        UserService userService, TeamMapper teamMapper, AuditService auditService, TeamAuthorization teamAuthorization) {
         this.teamRepository = teamRepository;
         this.tenantRepository = tenantRepository;
         this.userRepository = userRepository;
         this.teamMemberService = teamMemberService;
+        this.userService = userService;
         this.teamMapper = teamMapper;
         this.auditService = auditService;
         this.teamAuthorization = teamAuthorization;
@@ -61,11 +63,11 @@ public class TeamService {
         teamAuthorization.assertCanCreateIn(teamAuthorization.scopeOf(actor), tenant);
 
         User teamLead = resolveUserInTenant(request.getTeamLeadId(), tenant);
-        promoteToTeamLeadIfEmployee(teamLead);
+        userService.promoteToTeamLeadIfEmployee(teamLead, actor);
 
         Team team = teamMapper.toEntity(request, tenant, teamLead);
         Team saved = teamRepository.save(team);
-        teamMemberService.ensureMembership(saved, teamLead);
+        teamMemberService.ensureMembership(saved, teamLead, actor);
 
         auditService.createAuditLog("TEAM_CREATED", "Team", saved.getId(), tenant, actor,
                 auditSnapshot(saved), null);
@@ -103,17 +105,18 @@ public class TeamService {
         User resolvedTeamLead = null;
         if (request.getTeamLeadId() != null) {
             resolvedTeamLead = resolveUserInTenant(request.getTeamLeadId(), team.getTenant());
-            promoteToTeamLeadIfEmployee(resolvedTeamLead);
+            userService.promoteToTeamLeadIfEmployee(resolvedTeamLead, actor);
         }
 
+        Map<String, Object> before = auditSnapshot(team);
         teamMapper.applyUpdate(team, request, resolvedTeamLead);
         Team saved = teamRepository.save(team);
         if (resolvedTeamLead != null) {
-            teamMemberService.ensureMembership(saved, resolvedTeamLead);
+            teamMemberService.ensureMembership(saved, resolvedTeamLead, actor);
         }
 
-        auditService.createAuditLog("TEAM_UPDATED", "Team", saved.getId(), saved.getTenant(), actor,
-                auditSnapshot(saved), null);
+        auditService.createUpdateAuditLog("TEAM_UPDATED", "Team", saved.getId(), saved.getTenant(), actor,
+                before, auditSnapshot(saved), null);
         return teamMapper.toResponseDto(saved);
     }
 
@@ -122,22 +125,13 @@ public class TeamService {
         User actor = findActorOrThrow(actorId);
         Team team = findTeamOrThrow(id);
 
+        Map<String, Object> before = auditSnapshot(team);
         teamMapper.applyStatusChange(team, TeamStatus.valueOf(request.getStatus()));
         Team saved = teamRepository.save(team);
 
-        auditService.createAuditLog("TEAM_STATUS_UPDATED", "Team", saved.getId(), saved.getTenant(), actor,
-                auditSnapshot(saved), null);
+        auditService.createUpdateAuditLog("TEAM_STATUS_UPDATED", "Team", saved.getId(), saved.getTenant(), actor,
+                before, auditSnapshot(saved), null);
         return teamMapper.toResponseDto(saved);
-    }
-
-    // Appointing someone as team lead promotes a plain EMPLOYEE to TEAM_LEAD, but never demotes
-    // a TENANT_ADMIN/SYSTEM_ADMIN who happens to also lead a team - leading a team never reduces
-    // an actor's standing authority.
-    private void promoteToTeamLeadIfEmployee(User user) {
-        if (user.getRole() == UserRole.EMPLOYEE) {
-            user.setRole(UserRole.TEAM_LEAD);
-            userRepository.save(user);
-        }
     }
 
     private Team findTeamOrThrow(UUID id) {

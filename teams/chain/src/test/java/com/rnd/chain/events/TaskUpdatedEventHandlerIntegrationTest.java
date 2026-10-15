@@ -103,7 +103,7 @@ class TaskUpdatedEventHandlerIntegrationTest {
 
     private static Task buildTask(UUID id, TaskStatus status, LocalDateTime updatedAt) {
         return Task.builder()
-                .id(id).ownerId("owner").status(status).isReady(true)
+                .id(id).status(status).isReady(true)
                 .blockingCount(0).openConstraintCount(0)
                 .createdAt(BASE_TIME).updatedAt(updatedAt)
                 .build();
@@ -149,7 +149,7 @@ class TaskUpdatedEventHandlerIntegrationTest {
         UUID dependent = UUID.randomUUID();
         ((InMemoryTaskRepository) taskRepository).save(buildTask(blocker, TaskStatus.ACTIVE, BASE_TIME));
         ((InMemoryTaskRepository) taskRepository).save(Task.builder()
-                .id(dependent).ownerId("owner").status(TaskStatus.PENDING)
+                .id(dependent).status(TaskStatus.PENDING)
                 .isReady(false).blockingCount(1).openConstraintCount(0)
                 .createdAt(BASE_TIME).updatedAt(BASE_TIME).build());
         ((InMemoryTaskDependencyRepository) taskDependencyRepository).save(new TaskDependency(dependent, blocker));

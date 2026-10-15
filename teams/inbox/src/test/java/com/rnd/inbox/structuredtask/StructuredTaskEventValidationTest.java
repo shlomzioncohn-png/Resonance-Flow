@@ -84,7 +84,7 @@ class StructuredTaskEventValidationTest {
     }
 
     @ParameterizedTest
-    @EnumSource(value = SourceType.class, names = {"GITHUB_ISSUE", "GITHUB_PR", "CRM_DEAL"})
+    @EnumSource(value = SourceType.class, names = {"GITHUB_ISSUE", "GITHUB_PR", "CRM_DEAL", "JIRA_ISSUE"})
     void acceptsEveryStructuredPlatform(SourceType sourceType) {
         StructuredTaskEventDto dto = validEvent();
         dto.setSourceType(sourceType.name());
@@ -93,7 +93,7 @@ class StructuredTaskEventValidationTest {
     }
 
     @ParameterizedTest
-    @EnumSource(value = SourceType.class, names = {"GITHUB_ISSUE", "GITHUB_PR", "CRM_DEAL"},
+    @EnumSource(value = SourceType.class, names = {"GITHUB_ISSUE", "GITHUB_PR", "CRM_DEAL", "JIRA_ISSUE"},
             mode = EnumSource.Mode.EXCLUDE)
     void rejectsASourceTypeThatBelongsOnTheUnstructuredPath(SourceType sourceType) {
         StructuredTaskEventDto dto = validEvent();

@@ -25,6 +25,8 @@ podSecurityContext: {}
 securityContext: {}
 volumes: []
 volumeMounts: []
+objectStorage:
+  provider: minio
 dependencies:
   - name: kafka
     port: 9092
@@ -32,6 +34,28 @@ initContainers: []
 nodeSelector: {}
 tolerations: []
 affinity: {}
+# Public entry point (templates/ingress.yaml): one host, routed by path to components'
+# Services. Off by default so teams' kind CI never renders it; the shared environment
+# turns it on with its own host/TLS. Needs an ingress controller - not installed here.
+ingress:
+  enabled: false
+  className: ""
+  # Controller/cert-manager specifics, e.g. cert-manager.io/cluster-issuer.
+  annotations: {}
+  host: ""
+  # TLS cert for host - created by cert-manager or by hand. Empty = plain HTTP, which
+  # sends LENS passwords (/auth/*) unencrypted.
+  # Flat, not ingress.tls.secretName: minio has its own ingress.tls (false), and
+  # Helm warns on every render when the two shapes differ.
+  tlsSecretName: ""
+  # Prefix match; the longest matching path wins. The path is forwarded as-is (no rewrite).
+  paths:
+    - path: /
+      component: lens-frontend
+    - path: /api
+      component: lens-gateway
+    - path: /auth
+      component: lens-gateway
 pipeConsumerGroupSweep:
   enabled: true
   schedule: "0 * * * *"
@@ -91,15 +115,41 @@ components:
     resources: *defaultResources
     <<: *defaultHealthProbes
     env: {}
+    # Schema is Alembic-only (#441) -- mind's own container no longer creates
+    # task_embeddings itself, so without this the pod crash-loops on startup
+    # against a fresh database.
+    migration:
+      enabled: true
+      command: ["alembic", "upgrade", "head"]
     # A list set in values-<service>.yaml replaces this one wholesale (Helm merges
     # maps, not lists) - repeat every entry there, don't just add yours.
     dependencies:
-      - name: minio
+      - name: object-storage
         port: 9000
       - name: postgresql
         port: 5432
       - name: schema-registry
         port: 8080
+    volumeMounts:
+      - name: object-storage-credentials
+        mountPath: /etc/resonance-flow/secrets/object-storage
+        readOnly: true
+      - name: mind-llm-credentials
+        mountPath: /etc/resonance-flow/secrets/llm
+        readOnly: true
+    dependencySecretVolumes:
+      - name: object-storage-credentials
+        dependencyName: object-storage
+        items:
+          - key: root-user
+            path: object-storage.access-key
+          - key: root-password
+            path: object-storage.secret-key
+    volumes:
+      - name: mind-llm-credentials
+        secret:
+          secretName: resonance-flow-mind-llm
+          optional: true
     # Mounted as config.yaml at /etc/resonance-flow/config/ - keys are what MIND reads.
     config:
       vector_store:
@@ -113,7 +163,8 @@ components:
         provider: local
       asr:
         provider: local
-        whisper_model: base
+        # English-only Whisper, decided in #135 / #652 (teams/mind/benchmarks/ocr-asr-benchmark.md).
+        whisper_model: base.en
       object_storage:
         bucket: bridge-raw
       kafka:
@@ -149,6 +200,11 @@ components:
       notificationDelivery:
         service:
           url: http://resonance-flow-notification-delivery:80
+    # /internal/auth/* checks passwords for lens-gateway, so only lens-gateway may reach
+    # it - see templates/networkpolicy.yaml. Covers the whole pod, not just that path.
+    networkPolicy:
+      allowFrom:
+        - lens-gateway
   bridge:
     enabled: true
     replicaCount: 1
@@ -160,8 +216,97 @@ components:
     service: *defaultService
     resources: *defaultResources
     <<: *defaultHealthProbes
+    env: {}
+    objectStorage:
+      bucket: "bridge-raw"
+    config:
+      spring:
+        config:
+          import:
+            - "configtree:/etc/resonance-flow/secrets/object-storage/"
+            - "configtree:/etc/resonance-flow/secrets/kafka/"
+        kafka:
+          # GitHub currently publishes to bridge.github.tasks.
+          # Issue #275 will decide whether to use the shared topic instead.
+          topic: "bridge.github.tasks"
+          properties:
+            security.protocol: "SASL_PLAINTEXT"
+            sasl.mechanism: "PLAIN"
+      github:
+        api:
+          base-url: "https://api.github.com"
+          token: "${GITHUB_TOKEN:}"
+        target:
+          owner: "KamaTechOrg"
+          repo: "Resonance-Flow"
+      jira:
+        api:
+          base-url: "${JIRA_API_BASE_URL:https://example.atlassian.net}"
+          token: "${JIRA_TOKEN:}"
+        target:
+          project: "${JIRA_TARGET_PROJECT:}"
+      bridge:
+        structured-tasks-topic: "bridge.structured.tasks"
+        crm:
+          organization-id: "${CRM_ORGANIZATION_ID:}"
+          hubspot:
+            base-url: "https://api.hubspot.com"
+            token: "${HUBSPOT_TOKEN:}"
+            page-size: 50
+            max-retries: 5
+            initial-backoff-millis: 500
+            max-backoff-millis: 8000
+            connect-timeout-millis: 5000
+            read-timeout-millis: 15000
+        intake:
+          raw-landed-topic: "bridge.raw.landed"
+          google:
+            client-secrets-path: "${BRIDGE_GOOGLE_CLIENT_SECRETS_PATH:}"
+            tokens-directory: "${BRIDGE_GOOGLE_TOKENS_DIR:}"
+          email:
+            mode: fixture
+          drive:
+            # The real Drive reader is still a placeholder in Malki's branch.
+            mode: fixture
+          calendar:
+            mode: fixture
+            calendar-id: "${BRIDGE_CALENDAR_ID:primary}"
+          slack:
+            mode: fixture
+            bot-token: "${BRIDGE_SLACK_BOT_TOKEN:}"
+            channels: "${BRIDGE_SLACK_CHANNELS:}"
+          whatsapp:
+            mode: fixture
+            import-dir: "${BRIDGE_WHATSAPP_IMPORT_DIR:}"
+            zone-id: "${BRIDGE_WHATSAPP_ZONE_ID:Asia/Jerusalem}"
+        media:
+          zoom-recordings-dir: "${BRIDGE_MEDIA_ZOOM_RECORDINGS_DIR:}"
+          bbb-recordings-dir: "${BRIDGE_MEDIA_BBB_RECORDINGS_DIR:}"
+          scanned-docs-dir: "${BRIDGE_MEDIA_SCANNED_DOCS_DIR:}"
+          tenant-id: "${BRIDGE_MEDIA_TENANT_ID:kamatech}"
+          min-file-size-bytes: "${BRIDGE_MEDIA_MIN_FILE_SIZE_BYTES:1}"
+    volumeMounts:
+      - name: object-storage-credentials
+        mountPath: /etc/resonance-flow/secrets/object-storage
+        readOnly: true
+      - name: kafka-credentials
+        mountPath: /etc/resonance-flow/secrets/kafka
+        readOnly: true
+    dependencySecretVolumes:
+      - name: object-storage-credentials
+        dependencyName: object-storage
+        items:
+          - key: root-user
+            path: minio.access-key
+          - key: root-password
+            path: minio.secret-key
+      - name: kafka-credentials
+        dependencyName: kafka-user-passwords
+        items:
+          - key: client-passwords
+            path: kafka.password
     dependencies:
-      - name: minio
+      - name: object-storage
         port: 9000
   lens-frontend:
     enabled: true
@@ -275,6 +420,7 @@ components:
             # Consumed, Protobuf (#467): task.created/updated from Inbox, proposals from Mind.
             taskCreated: task.created
             taskUpdated: task.updated
+            taskCompleted: task.completed
             dependenciesProposed: task.dependencies.proposed
             # taskDependenciesRemoved intentionally omitted: Chain confirmed (#385 follow-up)
             # removeDependency is REST-only (Lens BFF -> Chain), no Kafka topic behind it today -
@@ -310,6 +456,16 @@ components:
         port: http
       periodSeconds: 5
       failureThreshold: 3
+    # Password from the inbox-db-credentials Secret, mounted as a file - created by
+    # the inbox db-credentials hook Job, not a chart resource (same as Chain's).
+    volumeMounts:
+      - name: inbox-db-credentials
+        mountPath: /etc/resonance-flow/secrets/inbox-db
+        readOnly: true
+    volumes:
+      - name: inbox-db-credentials
+        secret:
+          secretName: resonance-flow-inbox-db-credentials
     dependencies:
       - name: postgresql
         port: 5432
@@ -317,7 +473,9 @@ components:
         port: 8080
     config:
       data:
-        # datasource credentials come from postgresql.auth below - no copy here.
+        datasource:
+          # Own user, owning postgresql.auth.database - not the subchart's superuser.
+          username: inbox
         kafka:
           consumerGroupId: inbox-service
           topics:
@@ -333,6 +491,10 @@ components:
       pullPolicy: IfNotPresent
       tag: "2.5.11.Final"
     containerPort: 8080
+    env:
+      # ccompat lookups otherwise exact-match schema text, so Confluent serializers with
+      # auto.register=false (Chain) fail with 40403 on an identical proto.
+      REGISTRY_CCOMPAT_USE_CANONICAL_HASH: "true"
     service:
       type: ClusterIP
       port: 8080
@@ -421,6 +583,11 @@ components:
     dependencies:
       - name: schema-registry
         port: 8080
+    # Trusts X-Org-Id/X-User-Id as-is (lens-gateway validates the token, lens-bff forwards
+    # the identity), so only lens-bff may reach it - see templates/networkpolicy.yaml.
+    networkPolicy:
+      allowFrom:
+        - lens-bff
     config:
       managed: true
     # Interim CPU-based HPA (templates/pipe-hpa.yaml). §10 open question: the real scaling
@@ -478,6 +645,9 @@ kafka:
 minio:
   enabled: true
   mode: standalone
+  defaultBuckets: bridge-raw
+ # Bitnami moved the MinIO images to bitnamilegacy/*.
+# This chart uses the new image location.
   image:
     registry: docker.io
     repository: bitnamilegacy/minio
@@ -497,9 +667,8 @@ minio:
 postgresql:
   enabled: true
   architecture: standalone
-  # Also inbox's datasource credentials (services/inbox/configmap.yaml reads them from
-  # here). Pinned: the subchart otherwise generates a random password and only creates
-  # the default "postgres" database.
+  # Pinned: the subchart otherwise generates a random password and only creates the
+  # default "postgres" database. Inbox's user owns auth.database (inbox/_db-init.tpl).
   auth:
     postgresPassword: postgres
     database: resonance_flow
@@ -541,6 +710,10 @@ postgresql:
         secret:
           secretName: resonance-flow-mind-db-credentials
           optional: true
+      - name: inbox-db-credentials
+        secret:
+          secretName: resonance-flow-inbox-db-credentials
+          optional: true
     extraVolumeMounts:
       - name: pgvector
         mountPath: /opt/bitnami/postgresql/lib/vector.so
@@ -551,6 +724,9 @@ postgresql:
         readOnly: true
       - name: mind-db-credentials
         mountPath: /etc/resonance-flow/secrets/mind-db
+        readOnly: true
+      - name: inbox-db-credentials
+        mountPath: /etc/resonance-flow/secrets/inbox-db
         readOnly: true
     # HNSW index builds use maintenance_work_mem (64MB default) on top of
     # shared_buffers (128MB) - 192Mi left no headroom and OOMKills instead of erroring.

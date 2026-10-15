@@ -81,7 +81,6 @@ class InMemoryTaskRepositoryTest extends TaskRepositoryContractTest {
         return Task.builder()
                 .id(task.getId())
                 .parentTaskId(task.getParentTaskId())
-                .ownerId(task.getOwnerId())
                 .status(task.getStatus())
                 .blockingCount(task.getBlockingCount() + 1)
                 .openConstraintCount(task.getOpenConstraintCount())

@@ -12,6 +12,7 @@ import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;
 import jakarta.persistence.Enumerated;
+import jakarta.persistence.FetchType;
 import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.Id;
 import jakarta.persistence.JoinColumn;
@@ -32,7 +33,7 @@ public class Project {
     @Column(updatable = false, nullable = false)
     private UUID id;
 
-    @ManyToOne
+    @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "tenant_id", nullable = false)
     private Tenant tenant;
 
@@ -42,11 +43,11 @@ public class Project {
     @Column
     private String description;
 
-    @ManyToOne
+    @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "owner_id", nullable = true)
     private User owner;
 
-    @ManyToOne
+    @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "team_id", nullable = true)
     private Team team;
 
@@ -163,7 +164,8 @@ public class Project {
         if (this == o) return true;
         if (!(o instanceof Project)) return false;
         Project that = (Project) o;
-        return id != null && id.equals(that.id);
+        // getId(), not the field: "that" may be a lazy-loading proxy, whose own fields are empty.
+        return id != null && id.equals(that.getId());
     }
 
     @Override

@@ -2,6 +2,7 @@ package com.rnd.chain.events;
 
 import com.google.protobuf.Message;
 import com.rnd.inbox.event.SchedulingUpdatedEvent;
+import com.rnd.inbox.event.TaskCompletedEvent;
 import com.rnd.inbox.event.TaskCreatedEvent;
 import com.rnd.inbox.event.TaskUpdatedEvent;
 import com.rnd.mind.event.DependencyProposedEvent;
@@ -45,7 +46,7 @@ import java.util.Map;
  * {@code @RetryableTopic}'s own retry/DLT publishing (see each handler's
  * {@code @RetryableTopic(kafkaTemplate = "...")}). Without an explicit template,
  * {@code @RetryableTopic} falls back to the application's single default KafkaTemplate&lt;String,
- * String&gt; (configured for KafkaEventPublisher's flat-JSON publishing) - trying to serialize a
+ * String&gt; - trying to serialize a
  * typed Protobuf message (e.g. TaskCreatedEvent) through a StringSerializer throws a
  * SerializationException, which itself then fails to publish to the DLT, which retries
  * indefinitely: a message that should go straight to `.errors` instead never arrives there at
@@ -181,6 +182,22 @@ public class ChainProtobufKafkaConfig {
     }
 
     @Bean
+    public ConsumerFactory<String, TaskCompletedEvent> taskCompletedEventConsumerFactory() {
+        return new DefaultKafkaConsumerFactory<>(consumerProps(TaskCompletedEvent.class));
+    }
+
+    @Bean
+    public ConcurrentKafkaListenerContainerFactory<String, TaskCompletedEvent> taskCompletedEventKafkaListenerContainerFactory(
+            ConsumerFactory<String, TaskCompletedEvent> taskCompletedEventConsumerFactory) {
+        return listenerContainerFactory(taskCompletedEventConsumerFactory);
+    }
+
+    @Bean
+    public KafkaTemplate<String, TaskCompletedEvent> taskCompletedEventKafkaTemplate() {
+        return protobufTemplate();
+    }
+
+    @Bean
     public ConsumerFactory<String, DependencyProposedEvent> dependencyProposedEventConsumerFactory() {
         return new DefaultKafkaConsumerFactory<>(consumerProps(DependencyProposedEvent.class));
     }
@@ -197,23 +214,11 @@ public class ChainProtobufKafkaConfig {
     }
 
     /**
-     * Plain String/String KafkaTemplate for KafkaEventPublisher's flat-JSON publishing
-     * (task.scheduling.updated). Spring Boot's KafkaAutoConfiguration would normally supply this
-     * automatically from spring.kafka.producer.* - but its {@code @ConditionalOnMissingBean
-     * (KafkaTemplate.class)} guard checks the raw type only (generics are erased at runtime), so
-     * once this class defines any other KafkaTemplate bean (the Protobuf-typed ones above),
-     * autoconfiguration backs off from creating this one too. Defined explicitly here so
-     * KafkaEventPublisher keeps getting exactly what it did before - same serializers as
-     * spring.kafka.producer.* in application.yml.
+     * Producer template for the live task.scheduling.updated publisher
+     * ({@code events.KafkaSchedulingUpdatePublisher}, see #543). Registry-governed
+     * ({@code protobufTemplate(true)}): Inbox owns {@code scheduling-updated-event.proto}, so
+     * this producer never registers a schema, only resolves the latest already-registered one.
      */
-    @Bean
-    public KafkaTemplate<String, String> kafkaTemplate() {
-        Map<String, Object> props = new HashMap<>(kafkaProperties.buildProducerProperties());
-        props.put(ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG, StringSerializer.class);
-        props.put(ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG, StringSerializer.class);
-        return new KafkaTemplate<>(new DefaultKafkaProducerFactory<>(props));
-    }
-
     @Bean
     public KafkaTemplate<String, SchedulingUpdatedEvent> schedulingUpdatedEventKafkaTemplate() {
         return protobufTemplate(true);

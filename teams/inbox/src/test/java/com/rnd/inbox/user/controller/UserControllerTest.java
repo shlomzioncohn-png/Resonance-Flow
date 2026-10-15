@@ -94,6 +94,8 @@ class UserControllerTest {
         request.setTenantId(tenantId.toString());
         request.setDisplayName("Yehudit Cohen");
         request.setRole("EMPLOYEE");
+        request.setUsername("yehudit");
+        request.setPassword("MyPass123");
         return request;
     }
 
@@ -128,6 +130,61 @@ class UserControllerTest {
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.error").value("VALIDATION_ERROR"))
                 .andExpect(jsonPath("$.field_errors").isArray());
+    }
+
+    @Test
+    void createUser_withoutPassword_returns201() throws Exception {
+        UserCreateRequestDto request = validCreateRequest();
+        request.setPassword(null);
+        when(userService.createUser(any(), eq(actorId))).thenReturn(sampleUser());
+
+        mockMvc.perform(post("/api/v1/users")
+                        .header(ACTOR_HEADER, actorId.toString())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(request)))
+                .andExpect(status().isCreated());
+    }
+
+    @Test
+    void createUser_withoutPasswordOrUsername_returns201() throws Exception {
+        UserCreateRequestDto request = validCreateRequest();
+        request.setPassword(null);
+        request.setUsername(null);
+        when(userService.createUser(any(), eq(actorId))).thenReturn(sampleUser());
+
+        mockMvc.perform(post("/api/v1/users")
+                        .header(ACTOR_HEADER, actorId.toString())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(request)))
+                .andExpect(status().isCreated());
+    }
+
+    @Test
+    void createUser_withPasswordShorterThan8_returns400() throws Exception {
+        UserCreateRequestDto request = validCreateRequest();
+        request.setPassword("short");
+
+        mockMvc.perform(post("/api/v1/users")
+                        .header(ACTOR_HEADER, actorId.toString())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(request)))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.field_errors[0].field").value("password"));
+    }
+
+    @Test
+    void createUser_withPasswordButNoUsername_returns400() throws Exception {
+        UserCreateRequestDto request = validCreateRequest();
+        request.setUsername(null);
+        request.setEmail("yehudit@acme.com");
+
+        mockMvc.perform(post("/api/v1/users")
+                        .header(ACTOR_HEADER, actorId.toString())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(request)))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.field_errors[0].field").value("username_present_for_password"));
+        verify(userService, never()).createUser(any(), any());
     }
 
     @Test

@@ -42,7 +42,6 @@ they don't belong in the shared connection file — set them directly in your ow
 
 There is no single shared schema. This system already has several, each with its own topic:
 
-- `task-event` — Relay
 - `task.created` — Inbox
 - `bridge.raw.landed` — Bridge (unstructured intake)
 - `bridge.github.tasks` — Bridge (GitHub)
@@ -53,7 +52,7 @@ shapes through the same topic.
 
 **You don't write the `.proto` file yourself.** Bring the field names, their types, and the
 topic name — the schema gets created from that, the same way it happened for this repo's
-existing drafts (see `shared/proto/task-event.proto` for what the result looks
+existing drafts (see `shared/proto/task-created-event.proto` for what the result looks
 like, including a `// kafkaTopic: ...` comment stating which topic it belongs to). Once it
 exists, you'll get it back to review before anyone builds on top of it.
 
@@ -98,6 +97,9 @@ spring:
         # never by a producer
         auto.register.schemas: false
         use.latest.version: true
+        # imports (e.g. task-created-event.proto) work as-is: Relay registers each imported
+        # file under its own file name, which is where the default reference strategy looks
+        # - don't set reference.subject.name.strategy
 
 your:
   kafka:

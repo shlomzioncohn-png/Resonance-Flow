@@ -34,6 +34,7 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.kafka.core.DefaultKafkaConsumerFactory;
 import org.springframework.kafka.core.DefaultKafkaProducerFactory;
 import org.springframework.kafka.core.KafkaTemplate;
@@ -45,6 +46,7 @@ import org.springframework.test.context.TestPropertySource;
 
 import java.time.Duration;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -69,6 +71,9 @@ class TaskCreationRequestConsumerIntegrationTest extends PostgresIntegrationTest
     private EmbeddedKafkaBroker embeddedKafkaBroker;
 
     @Autowired
+    private JdbcTemplate jdbcTemplate;
+
+    @Autowired
     private TaskRepository taskRepository;
 
     @Autowired
@@ -89,6 +94,7 @@ class TaskCreationRequestConsumerIntegrationTest extends PostgresIntegrationTest
     private KafkaTemplate<String, TaskCreationRequestedEvent> producer;
     private KafkaTemplate<String, byte[]> rawBytesProducer;
     private Consumer<String, String> errorConsumer;
+    private final List<UUID> createdTenantIds = new ArrayList<>();
 
     @BeforeEach
     void setUp() {
@@ -112,6 +118,13 @@ class TaskCreationRequestConsumerIntegrationTest extends PostgresIntegrationTest
     @AfterEach
     void tearDown() {
         errorConsumer.close();
+        for (UUID tenantId : createdTenantIds) {
+            jdbcTemplate.update(
+                    "DELETE FROM audit_log WHERE entity_id IN (SELECT id FROM tasks WHERE tenant_id = ?)", tenantId);
+            jdbcTemplate.update(
+                    "DELETE FROM outbox WHERE aggregate_id IN (SELECT id FROM tasks WHERE tenant_id = ?)", tenantId);
+            jdbcTemplate.update("DELETE FROM tenants WHERE id = ?", tenantId);
+        }
     }
 
     private Tenant persistTenant() {
@@ -121,7 +134,9 @@ class TaskCreationRequestConsumerIntegrationTest extends PostgresIntegrationTest
         tenant.setStatus(TenantStatus.ACTIVE);
         tenant.setCreatedAt(Instant.now());
         tenant.setUpdatedAt(Instant.now());
-        return tenantRepository.saveAndFlush(tenant);
+        Tenant saved = tenantRepository.saveAndFlush(tenant);
+        createdTenantIds.add(saved.getId());
+        return saved;
     }
 
     private User persistUser(Tenant tenant) {
@@ -366,6 +381,39 @@ class TaskCreationRequestConsumerIntegrationTest extends PostgresIntegrationTest
         Task task = awaitTask(tenant.getId(), SourceType.GITHUB_ISSUE, sourceRef);
 
         assertThat(task.getExtractionProvenance()).isEqualTo(TaskExtractionProvenance.ML_INFERRED);
+    }
+
+    @Test
+    void aZoomMeetingTaskIsPersistedWithTheZoomSourceType() {
+        assertMeetingPlatformIsPersisted(com.rnd.inbox.event.SourceType.SOURCE_TYPE_ZOOM, SourceType.ZOOM);
+    }
+
+    @Test
+    void aBigBlueButtonMeetingTaskIsPersistedWithTheBigBlueButtonSourceType() {
+        assertMeetingPlatformIsPersisted(com.rnd.inbox.event.SourceType.SOURCE_TYPE_BIGBLUEBUTTON,
+                SourceType.BIGBLUEBUTTON);
+    }
+
+    private void assertMeetingPlatformIsPersisted(com.rnd.inbox.event.SourceType protoSourceType,
+                                                  SourceType expectedSourceType) {
+        Tenant tenant = persistTenant();
+        String sourceRef = "meeting:" + UUID.randomUUID();
+        TaskCreationRequestedEvent event = TaskCreationRequestedEvent.newBuilder()
+                .setEventId(UUID.randomUUID().toString())
+                .setCorrelationId(UUID.randomUUID().toString())
+                .setTenantId(tenant.getId().toString())
+                .setTitle("Follow up on the action item from the weekly sync")
+                .setSourceType(protoSourceType)
+                .setSourceRef(sourceRef)
+                .setConfidence(0.5)
+                .setHasDependencies(false)
+                .build();
+
+        producer.send(TOPIC, event);
+
+        Task task = awaitTask(tenant.getId(), expectedSourceType, sourceRef);
+
+        assertThat(task.getSourceType()).isEqualTo(expectedSourceType);
     }
 
     /**

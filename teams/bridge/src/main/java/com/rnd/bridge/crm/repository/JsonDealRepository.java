@@ -15,6 +15,7 @@ import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 
 /**
  * Loads the synthetic CRM deal feed from a JSON resource.
@@ -79,5 +80,18 @@ public class JsonDealRepository implements DealRepository {
     @Override
     public DealSnapshot snapshot() {
         return snapshot;
+    }
+
+    /**
+     * The fixture is loaded once at construction (see the class Javadoc) and never changes at
+     * runtime, so "fresh" here means the same thing it does for {@link #snapshot()}: there is no
+     * live source to re-read, just the one dataset read at startup.
+     */
+    @Override
+    public Optional<Deal> fetchDeal(String dealId) {
+        if (dealId == null || dealId.isBlank()) {
+            throw new IllegalArgumentException("dealId must not be blank");
+        }
+        return snapshot.findLatestByDealId(dealId);
     }
 }

@@ -58,6 +58,24 @@ list in the same PR has no effect on how that PR is judged. (The workflow file
 still runs from the PR — it is kept thin, with the enforced rules in the scripts
 and the tsv.)
 
+### Library rows — for files other files import
+
+A file that another `.proto` imports gets a row whose subject is its own file
+name (`task-created-event.proto	task-created-event.proto`), listed before its
+importers. Importers are registered with references to that subject, because
+Confluent serializers look an import up under its file name (#618). A library
+row the base branch doesn't have yet is still picked up from the PR: it only adds
+a check, and without it the base's importers can't even be seeded.
+
+### `# reset: <subject>` — pre-production escape hatch
+
+For a change the registry rejects that we accept because nothing is in production
+yet (e.g. making a proto3 field `optional`). With the line on the base branch,
+`seed-registry.sh` doesn't seed that subject, so the PR's version is checked as a
+new subject, and the hook's `run-all.sh` hard-deletes the subject before
+registering. Land it in its own PR before the breaking one, and remove it once
+the cluster has synced — otherwise every sync re-creates the subject with a new id.
+
 ## What schema changes are allowed
 
 Two layers decide this:
