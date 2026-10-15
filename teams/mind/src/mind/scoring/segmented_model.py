@@ -64,7 +64,7 @@ class TierRule:
 #: Weight rationale, in three strengths of justification (see README):
 #:
 #: *Derived from the issue's tier table* — the ordering. Deadline weight falls
-#: across the tiers (.65 > .40 > .20) because deadline proximity is "the
+#: across the tiers (.65 > .40 > .21) because deadline proximity is "the
 #: dominant signal" operationally, "matters but less sharply" tactically and
 #: "matters least" strategically; impact rises (.25 < .55 < .79) as its mirror.
 #: The two cross exactly once, between operational and tactical — that crossing

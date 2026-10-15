@@ -258,9 +258,9 @@ Three strengths of justification, and it is worth keeping them apart — a numbe
 with none of them has no defence.
 
 **Derived from the issue's tier table.** The *ordering*. Deadline weight falls
-across the tiers (.65 > .40 > .20) because deadline proximity is "the dominant
+across the tiers (.65 > .40 > .21) because deadline proximity is "the dominant
 signal" operationally, "matters but less sharply" tactically and "matters least"
-strategically. Impact rises as its mirror (.25 < .55 < .75). The two series cross
+strategically. Impact rises as its mirror (.25 < .55 < .79). The two series cross
 exactly once, between operational and tactical — that crossing *is* the
 segmentation. At operational, .65 > .35 satisfies the strong reading of
 "dominant": the deadline outweighs everything else combined.
@@ -322,11 +322,12 @@ reading a third of the set.
 ## Known limitations
 
 - **The lexicon will not transfer to real extracted tasks.** It was written from
-  30 hand-authored scenarios; tasks extracted from meetings and email will be
-  worded differently. What survives is the *interface* — `impact(task) -> float`
-  — so its body can be replaced (embeddings, a learned classifier) without
-  touching the rules, the weights or the tests. A frozen lexicon is, however, the
-  honest way to meet the reproducibility requirement for a baseline.
+  the wording of 20 hand-authored scenarios — the dev split, never the holdout;
+  tasks extracted from meetings and email will be worded differently. What
+  survives is the *interface* — `impact(task) -> float` — so its body can be
+  replaced (embeddings, a learned classifier) without touching the rules, the
+  weights or the tests. A frozen lexicon is, however, the honest way to meet
+  the reproducibility requirement for a baseline.
 - **The set may have little headroom left for the stretch.** A set a baseline
   nearly saturates cannot show improvement, which is the problem the September
   rebuild fixed. Whether that is the case here, and what it means for R3's
