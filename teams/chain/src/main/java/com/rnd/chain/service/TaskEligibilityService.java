@@ -158,7 +158,7 @@ public void onTaskStatusChangedIfNewer(
                     .openConstraintCount(0)
                     .estimatedDurationMin(null)
                     .score(null)
-                    .createdAt(null)
+                    .createdAt(LocalDateTime.now())
                     .updatedAt(eventUpdatedAt)
                     .deletedAt(null)
                     .build();

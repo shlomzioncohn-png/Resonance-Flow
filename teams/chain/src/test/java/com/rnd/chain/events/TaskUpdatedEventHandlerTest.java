@@ -12,6 +12,7 @@ import com.rnd.chain.service.PriorityScoreService;
 import com.rnd.chain.service.TaskCounterUpdater;
 import com.rnd.chain.service.TaskEligibilityService;
 import com.rnd.inbox.event.TaskUpdatedEvent;
+import com.rnd.chain.service.SchedulingUpdateService;
 import org.junit.jupiter.api.Test;
 
 import java.time.Instant;
