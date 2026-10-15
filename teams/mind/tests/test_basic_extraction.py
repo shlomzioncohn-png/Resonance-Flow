@@ -29,6 +29,7 @@ from mind.observability.tracking import _reset_for_tests, get_recent_calls
 from tests.extraction.fakes import ScriptedProvider
 
 TENANT_ID = UUID("11111111-1111-1111-1111-111111111111")
+BRIDGE_ITEM = UUID("6f1c2e9a-3b4d-4c8e-9a1f-2d7e5b0c4a83")
 
 EMAIL_TEXT = (
     "Hi team, please send the Q3 revenue report to the board before Friday. "
@@ -83,7 +84,9 @@ def test_extraction_output_validates_against_the_contract() -> None:
     result = extractor(GOOD_ANSWER).extract(EMAIL_TEXT, SourceType.EMAIL)
     assert isinstance(result, ExtractionSuccess)
 
-    request = to_task_creation_requested(result, tenant_id=TENANT_ID)
+    request = to_task_creation_requested(
+        result, tenant_id=TENANT_ID, bridge_source_ref=None, bridge_correlation_id=BRIDGE_ITEM
+    )
 
     assert isinstance(request, TaskCreationRequested)
     assert request.tenant_id == TENANT_ID
@@ -239,8 +242,12 @@ def test_missing_source_ref_is_a_normal_outcome() -> None:
     # A scanned document has no pointer to carry, so nothing is deducted.
     assert "missing_source_ref" not in {p.reason for p in result.confidence.penalties}
 
-    request = to_task_creation_requested(result, tenant_id=TENANT_ID)
-    assert request.source_ref is None
+    # Inbox requires a source_ref, so the task carries Bridge's id for the
+    # item instead (#353); nothing from the content is passed off as one.
+    request = to_task_creation_requested(
+        result, tenant_id=TENANT_ID, bridge_source_ref=None, bridge_correlation_id=BRIDGE_ITEM
+    )
+    assert request.source_ref == f"bridge:{BRIDGE_ITEM}"
 
 
 def test_placeholder_source_ref_is_normalised_to_none() -> None:

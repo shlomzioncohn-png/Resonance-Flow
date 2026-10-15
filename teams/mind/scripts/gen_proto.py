@@ -60,6 +60,7 @@ def main() -> None:
         _SHARED_PROTO / "task-created-event.proto",
         _SHARED_PROTO / "task-updated-event.proto",
         _SHARED_PROTO / "task-completed-event.proto",
+        _SHARED_PROTO / "task-creation-requested-event.proto",
     )
 
 
