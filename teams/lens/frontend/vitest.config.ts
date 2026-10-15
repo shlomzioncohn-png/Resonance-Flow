@@ -42,6 +42,7 @@ export default defineConfig({
             'app/**/*.{ts,tsx}',
             'components/**/*.{ts,tsx}',
             'design-system/**/*.{ts,tsx}',
+            'mocks/**/*.{ts,tsx}',
             'services/**/*.{ts,tsx}',
             'theme/**/*.{ts,tsx}',
           ],
