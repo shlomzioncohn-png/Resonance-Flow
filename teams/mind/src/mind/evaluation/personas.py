@@ -53,10 +53,16 @@ ALL_ROLES = {
     "CEO",
 }
 
+# The group of scenarios where the parent hierarchy, not deadline or impact,
+# decides the answer (#507). The original set is every other group.
+HIERARCHY_DECIDES_GROUP = "hierarchy_decides"
+
 MIN_SCENARIOS_PER_ROLE = 4
-MAX_SCENARIOS_PER_ROLE = 6
+# 6 per role / 36 total for the original set, plus one hierarchy_decides scenario
+# per role (#507, raised with the mentor's agreement).
+MAX_SCENARIOS_PER_ROLE = 7
 MIN_TOTAL_SCENARIOS = 24
-MAX_TOTAL_SCENARIOS = 36
+MAX_TOTAL_SCENARIOS = 42
 
 
 class PersonaSchemaError(ValueError):

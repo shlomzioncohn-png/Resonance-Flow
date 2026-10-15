@@ -10,8 +10,11 @@ from mind.evaluation.harness import run
 from mind.evaluation.interfaces import PersonaEvaluationScenario
 from mind.evaluation.personas import (
     ALL_ROLES,
+    HIERARCHY_DECIDES_GROUP,
     MAX_SCENARIOS_PER_ROLE,
+    MAX_TOTAL_SCENARIOS,
     MIN_SCENARIOS_PER_ROLE,
+    MIN_TOTAL_SCENARIOS,
     PersonaSchemaError,
     correct_answer_deadline_violates_time_horizon,
     load_personas,
@@ -24,7 +27,7 @@ REAL_SCHEMA_PATH = REAL_PERSONAS_DIR / "scenario.schema.json"
 # The committed benchmark is fixed (see eval/personas/README.md). If this number
 # changes, it must change deliberately, with the mentor's sign-off — bump it here
 # in the same commit so the change is visible in review.
-EXPECTED_REAL_SCENARIO_COUNT = 36
+EXPECTED_REAL_SCENARIO_COUNT = 42  # 36 original + 6 in hierarchy_decides/ (#507)
 
 # `make eval-ci` gate for the length-bias probe (see the Makefile comment).
 LONGEST_DESCRIPTION_CEILING = 0.65
@@ -37,6 +40,17 @@ HARD_SCENARIO_IDS = {
     "field_engineer_released_controller_vs_blocked_fibre_fix",
     "salesperson_dead_rfp_vs_live_signing_round",
     "ceo_own_investor_commitment_vs_unaccepted_keynote_request",
+}
+
+# eval/personas/hierarchy_decides/ (#507): the parent hierarchy decides four of them,
+# two are controls where a hard signal must beat it.
+HIERARCHY_DECIDES_IDS = {
+    "manager_restructuring_team_signoff_vs_maintenance_team_signoff",
+    "salesperson_core_target_proposal_vs_paused_vertical_proposal",
+    "higher_manager_migration_budget_vs_reporting_requests",
+    "ceo_expansion_partnership_vs_wound_down_line_partnership",
+    "developer_payment_incident_vs_migration_steps",
+    "field_engineer_site_outage_vs_rollout_survey",
 }
 
 
@@ -247,7 +261,10 @@ def test_validate_personas_role_count_out_of_range_is_warning_not_error():
 def test_validate_personas_total_count_out_of_range_is_warning_not_error():
     report = validate_personas([make_scenario_model()])  # 1 total, below MIN (24)
     assert report.ok
-    assert any("total" in w and "24-36" in w for w in report.warnings)
+    assert any(
+        "total" in w and f"{MIN_TOTAL_SCENARIOS}-{MAX_TOTAL_SCENARIOS}" in w
+        for w in report.warnings
+    )
 
 
 # -- the real eval/personas/ directory --------------------------------------
@@ -362,7 +379,7 @@ def test_real_persona_set_correct_answer_position_distribution():
             three_task_scenarios_with_answer_first.append(s.scenario_id)
 
     assert three_task_scenarios_with_answer_first == []
-    assert dict(position_counts) == {0: 10, 1: 17, 2: 9}
+    assert dict(position_counts) == {0: 10, 1: 20, 2: 12}
 
 
 def test_real_persona_set_no_duplicate_task_text_with_different_tier():
@@ -428,3 +445,80 @@ def test_in_the_hard_scenarios_the_correct_answer_is_not_systematically_the_shor
         if min(s.tasks, key=lambda t: len(t.description)).task_id == s.expected_top_task_id
     ]
     assert len(shortest_is_correct) <= len(hard) // 2
+
+
+# -- eval/personas/hierarchy_decides/ (#507) -------------------------------------
+
+
+@pytest.fixture(scope="module")
+def hierarchy_decides():
+    return load_personas(REAL_PERSONAS_DIR / HIERARCHY_DECIDES_GROUP)
+
+
+def _nearest_dated(s):
+    return min((t for t in s.tasks if t.deadline is not None), key=lambda t: t.deadline)
+
+
+def _correct(s):
+    return next(t for t in s.tasks if t.task_id == s.expected_top_task_id)
+
+
+def test_hierarchy_decides_holds_exactly_the_planned_scenarios_one_per_role(hierarchy_decides):
+    assert {s.scenario_id for s in hierarchy_decides} == HIERARCHY_DECIDES_IDS
+    assert Counter(s.persona.role for s in hierarchy_decides) == {role: 1 for role in ALL_ROLES}
+
+
+def test_hierarchy_decides_has_at_least_three_decided_and_one_or_two_controls(
+    hierarchy_decides,
+):
+    # Decided: the correct answer is NOT the nearest deadline (a feature-only reading
+    # picks a sibling). Control: a hard signal holds the nearest deadline and wins.
+    controls = [s for s in hierarchy_decides if _nearest_dated(s) is _correct(s)]
+    decided = [s for s in hierarchy_decides if s not in controls]
+
+    assert len(decided) >= 3
+    assert 1 <= len(controls) <= 2
+
+
+def test_in_decided_scenarios_the_rivals_are_near_equal_on_features(hierarchy_decides):
+    # The nearest-deadline rival shares the correct answer's tier and effort and is due
+    # within two hours of it: only the hierarchy separates them, and not as a full tie.
+    for s in hierarchy_decides:
+        correct, rival = _correct(s), _nearest_dated(s)
+        if rival is correct:
+            continue
+        assert correct.deadline is not None, s.scenario_id
+        assert (correct.tier, correct.effort_estimate) == (rival.tier, rival.effort_estimate), (
+            s.scenario_id
+        )
+        assert 0 < (correct.deadline - rival.deadline).total_seconds() <= 2 * 3600, s.scenario_id
+
+
+def test_in_hierarchy_decides_no_two_candidates_fit_the_free_time_together(hierarchy_decides):
+    # The mentor's #535 finding: if two tasks fit together, doing both loses nothing and
+    # the "correct" first pick is ambiguous.
+    for s in hierarchy_decides:
+        efforts = sorted((t.effort_estimate for t in s.tasks), reverse=True)
+        assert efforts[0] + efforts[1] > s.context.free_time_minutes, s.scenario_id
+
+
+def test_in_hierarchy_decides_the_correct_answer_is_never_the_longest_description(
+    hierarchy_decides,
+):
+    longest_is_correct = [
+        s.scenario_id
+        for s in hierarchy_decides
+        if max(s.tasks, key=lambda t: len(t.description)).task_id == s.expected_top_task_id
+    ]
+    assert longest_is_correct == []
+
+
+def test_in_hierarchy_decides_the_correct_answer_is_not_systematically_the_shortest(
+    hierarchy_decides,
+):
+    shortest_is_correct = [
+        s.scenario_id
+        for s in hierarchy_decides
+        if min(s.tasks, key=lambda t: len(t.description)).task_id == s.expected_top_task_id
+    ]
+    assert len(shortest_is_correct) <= len(hierarchy_decides) // 2

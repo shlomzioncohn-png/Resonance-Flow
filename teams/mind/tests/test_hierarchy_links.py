@@ -146,11 +146,13 @@ def test_fixture_has_a_two_level_chain(nodes):
 
 
 def test_changed_case_correct_answer_sits_under_the_more_important_parent(scenarios, nodes):
-    scenario = scenarios["manager_status_digest_vs_reorg_proposal"]
-    correct = nodes[_parent(scenario, "task_reorg")]
-    distractor = nodes[_parent(scenario, "task_status")]
+    # The week-7 "designed to change" scenario (README). It replaced
+    # manager_status_digest_vs_reorg_proposal, which the baseline already gets right.
+    scenario = scenarios["manager_restructuring_team_signoff_vs_maintenance_team_signoff"]
+    correct = nodes[_parent(scenario, "task_atlas_signoff")]
+    distractor = nodes[_parent(scenario, "task_birchwood_signoff")]
 
-    assert scenario.expected_top_task_id == "task_reorg"
+    assert scenario.expected_top_task_id == "task_atlas_signoff"
     assert correct.importance > distractor.importance
     assert correct.parent_task_id is not None  # the two-level chain
 
@@ -234,12 +236,43 @@ EXPECTED_CHAINS: dict[str, dict[str, tuple[float, ...]]] = {
         "task_vision": (HIGH,),
         "task_capacity": (HIGH,),
     },
+    # hierarchy_decides/: the hierarchy decides the first four, the last two are controls.
+    "manager_restructuring_team_signoff_vs_maintenance_team_signoff": {
+        "task_atlas_signoff": (HIGH, HIGH),
+        "task_birchwood_signoff": (LOW,),
+    },
+    "salesperson_core_target_proposal_vs_paused_vertical_proposal": {
+        "task_northgate": (HIGH,),
+        "task_pinecrest": (LOW,),
+    },
+    "higher_manager_migration_budget_vs_reporting_requests": {
+        "task_orion_budget": (HIGH,),
+        "task_ledger_budget": (LOW,),
+        "task_ledger_staffing": (LOW,),
+    },
+    "ceo_expansion_partnership_vs_wound_down_line_partnership": {
+        "task_halvorsen": (MEDIUM, HIGH),
+        "task_quayle": (MEDIUM, LOW),
+    },
+    "developer_payment_incident_vs_migration_steps": {
+        "task_port_config": (HIGH, HIGH),
+        "task_port_tests": (HIGH, HIGH),
+    },
+    "field_engineer_site_outage_vs_rollout_survey": {
+        "task_site_restore": (LOW,),
+        "task_rollout_survey": (HIGH,),
+    },
 }
 
 # Pairs the README says sit under the very same node (the "shared parent" controls).
 SHARED_PARENT = {
     "higher_manager_blocked_budget_vs_headcount_plan": ("task_budget", "task_headcount"),
     "salesperson_processing_cutoff_vs_call_summary": ("task_orderform", "task_summary"),
+    "higher_manager_migration_budget_vs_reporting_requests": (
+        "task_ledger_budget",
+        "task_ledger_staffing",
+    ),
+    "developer_payment_incident_vs_migration_steps": ("task_port_config", "task_port_tests"),
 }
 
 

@@ -209,6 +209,96 @@
       "parent_task_id": null,
       "importance": 0.8,
       "label": "Training capacity for the ML team's Q1 release"
+    },
+    {
+      "task_id": "hd_mgr_annual_goal",
+      "parent_task_id": null,
+      "importance": 0.8,
+      "label": "This year's organizational goal"
+    },
+    {
+      "task_id": "hd_mgr_q4_restructuring",
+      "parent_task_id": "hd_mgr_annual_goal",
+      "importance": 0.8,
+      "label": "Q4 restructuring initiative the Atlas team is part of"
+    },
+    {
+      "task_id": "hd_mgr_routine_maintenance",
+      "parent_task_id": null,
+      "importance": 0.2,
+      "label": "Routine maintenance work the Birchwood team carries"
+    },
+    {
+      "task_id": "hd_sales_core_bookings",
+      "parent_task_id": null,
+      "importance": 0.8,
+      "label": "This quarter's core bookings target"
+    },
+    {
+      "task_id": "hd_sales_paused_retail_push",
+      "parent_task_id": null,
+      "importance": 0.2,
+      "label": "Retail vertical push, paused by leadership this quarter"
+    },
+    {
+      "task_id": "hd_hm_platform_migration",
+      "parent_task_id": null,
+      "importance": 0.8,
+      "label": "Platform migration, the company's top strategic initiative this year"
+    },
+    {
+      "task_id": "hd_hm_reporting_refresh",
+      "parent_task_id": null,
+      "importance": 0.2,
+      "label": "Routine refresh of the internal reporting tools"
+    },
+    {
+      "task_id": "hd_ceo_enterprise_expansion",
+      "parent_task_id": null,
+      "importance": 0.8,
+      "label": "Enterprise expansion, this year's company goal"
+    },
+    {
+      "task_id": "hd_ceo_enterprise_partnerships",
+      "parent_task_id": "hd_ceo_enterprise_expansion",
+      "importance": 0.5,
+      "label": "Partnerships program for the enterprise expansion"
+    },
+    {
+      "task_id": "hd_ceo_consumer_line",
+      "parent_task_id": null,
+      "importance": 0.2,
+      "label": "Consumer app line, which the board decided to wind down this year"
+    },
+    {
+      "task_id": "hd_ceo_consumer_partnerships",
+      "parent_task_id": "hd_ceo_consumer_line",
+      "importance": 0.5,
+      "label": "Partnerships program for the consumer app line"
+    },
+    {
+      "task_id": "hd_dev_platform_goal",
+      "parent_task_id": null,
+      "importance": 0.8,
+      "label": "Platform migration, this year's engineering goal"
+    },
+    {
+      "task_id": "hd_dev_migration_wave",
+      "parent_task_id": "hd_dev_platform_goal",
+      "importance": 0.8,
+      "label": "Q4 migration wave for the billing service"
+    },
+    {
+      "task_id": "hd_fe_maintenance_contracts",
+      "parent_task_id": null,
+      "importance": 0.2,
+      "label": "Routine maintenance contracts with existing customers"
+    },
+    {
+      "task_id": "hd_fe_edge_rollout",
+      "parent_task_id": null,
+      "importance": 0.8,
+      "label": "Edge-device rollout, the field team's priority program this year"
     }
   ]
 }

@@ -1,7 +1,8 @@
 # personas
 
 The fixed evaluation scenario set: 4-6 scenarios per role (Developer,
-Manager, Higher Manager, Field Engineer, Salesperson, CEO), ~24-36 total.
+Manager, Higher Manager, Field Engineer, Salesperson, CEO), ~24-36 total, plus one
+`hierarchy_decides/` scenario per role (#507) — so up to 7 per role and 42 in all.
 Each scenario states a free-time window and an agreed "correct" top
 task. This set must be complete and team-lead-approved (see `team_lead_approved`
 below) by the Foundation Gate (end of week 3) and must not change once
@@ -13,21 +14,25 @@ Despite its name and location it covers **two** directories: the scenario files
 here *and* `../hierarchy/`, the parent nodes the scenarios' `parent_task_id`
 values point at — a changed node changes the set as much as a changed scenario.
 
-## Two groups: `same_tier/` and `cross_tier/`
+## Three groups: `same_tier/`, `cross_tier/` and `hierarchy_decides/`
 
-Per the mentor's review, the set is split into two subdirectories that test
+Per the mentor's review, the set is split into subdirectories that test
 different things and are scored separately (`make eval` prints a number for each,
-plus a combined one):
+one for the original set, and a combined one):
 
 | Directory | Every candidate task is… | What it checks |
 |---|---|---|
 | `same_tier/` | the **same** `tier` (e.g. three `operational` tasks) | the ranking model **in isolation** — given tasks of one kind, does it order them right? |
 | `cross_tier/` | a **mix** of tiers (e.g. `strategic` vs `operational`) | the **end-to-end** outcome — did the system land on the right task for the user? (the raw calibrated score matters less here) |
+| `hierarchy_decides/` | near-equal on their own features; what separates them is the initiative each one serves (#507) | whether the **hierarchy** changes the answer — the week-7 stretch. See **Hierarchy** in `src/mind/evaluation/README.md` |
 
-The rule is mechanical: all task `tier` values equal → `same_tier/`, otherwise
-`cross_tier/`. The 4-6-per-role and 24-36-total counts apply to the **combined**
-set, not per group. `load_personas("eval/personas")` recurses into both; pass a
-single group dir to load just that group.
+For the first two the rule is mechanical: all task `tier` values equal →
+`same_tier/`, otherwise `cross_tier/`. Those two together are the **original
+set** (36): `make eval` prints its number as `[original set: all but
+hierarchy_decides]`, next to `[hierarchy_decides]` and `[combined]` (42). The
+per-role and total counts (4-7 per role, 24-42 total) apply to the combined set.
+`load_personas("eval/personas")` recurses into every group; pass a single group
+dir to load just that group.
 
 **Binding source of truth:** the Pydantic model `PersonaEvaluationScenario` in
 [`src/mind/evaluation/interfaces.py`](../../src/mind/evaluation/interfaces.py).
@@ -154,18 +159,19 @@ is built up incrementally by multiple people before the Foundation Gate, so a
 mid-week PR shouldn't go red just because the set isn't complete yet). Pydantic
 can only raise, not warn, which is why these stay in Python rather than in the model:
 - A role has no scenario at all.
-- A role has scenarios, but not 4-6 of them.
-- The full set doesn't total 24-36 scenarios.
+- A role has scenarios, but not 4-7 of them.
+- The full set doesn't total 24-42 scenarios.
 
 ## Status
 
-The full set is drafted: **36 scenarios** across all six roles (**6 per role** —
+The full set is drafted: **42 scenarios** across all six roles (**7 per role** —
 the per-role and total maximum, see `MAX_SCENARIOS_PER_ROLE` / `MAX_TOTAL_SCENARIOS`),
-split into `same_tier/` (20) and `cross_tier/` (16). The first 30 are the
-2026-09-06 rebuild; the last 6 are the "hard scenarios" round described below
-(one per role, all still `team_lead_approved: false`). All load cleanly through
-`load_personas`; `validate_personas` reports no errors and no role-coverage /
-count warnings.
+split into `same_tier/` (20), `cross_tier/` (16) and `hierarchy_decides/` (6). The
+first 30 are the 2026-09-06 rebuild; the next 6 are the "hard scenarios" round
+described below; the last 6, one per role, are the hierarchy group (#507, raised
+from 36 / 6 per role with the mentor's agreement). The 12 newest are still
+`team_lead_approved: false`. All load cleanly through `load_personas`;
+`validate_personas` reports no errors and no role-coverage / count warnings.
 
 Each role's first five scenarios (the 2026-09 rebuild) test five *different* tradeoffs,
 no dimension repeated within a role; the sixth is one of the hard scenarios
@@ -185,14 +191,20 @@ no dimension repeated within a role; the sixth is one of the hard scenarios
 
 The set is the measuring stick for baseline-vs-stretch. If a two-line heuristic
 already near-ceilings, there is no room to show a real model's improvement. Run
-against all 36 (the 30-scenario figures were 33.3% / 46.7% / 66.7%):
+against the original 36 and the full 42 (the 30-scenario figures were 33.3% /
+46.7% / 66.7%):
 
-| Strategy | Score |
-|---|---|
-| pick the first task (`DummyModel`) | 27.8% (10/36) — measured 2026-10 |
-| pick the nearest deadline, ignore `blocked` | 41.7% (15/36) — measured 2026-10 |
-| **skip `blocked`, then nearest deadline** | **58.3% (21/36)** — measured 2026-10 |
-| pick the longest description (`LongestDescriptionModel`) | 61.1% (22/36) — measured 2026-10 |
+| Strategy | Original set (36) | `hierarchy_decides/` (6) | All (42) |
+|---|---|---|---|
+| pick the first task (`DummyModel`) | 27.8% (10/36) | 0/6 | 23.8% (10/42) |
+| pick the nearest deadline, ignore `blocked` | 41.7% (15/36) | 2/6 | 40.5% (17/42) |
+| **skip `blocked`, then nearest deadline** | **58.3% (21/36)** | 2/6 | 54.8% (23/42) |
+| pick the longest description (`LongestDescriptionModel`) | 61.1% (22/36) | 0/6 | 52.4% (22/42) |
+
+All measured 2026-10. The original-set column did not move when the hierarchy
+group was added. On `hierarchy_decides/` the deadline rules get exactly the two
+controls (the hard signal holds the nearest deadline there) and miss the four
+cases the hierarchy decides, which is how that group is built.
 
 (Measured by `mind.evaluation.baseline_models`, not hand-derived — see below.
 The 30-scenario set was designed for ~30%/~43%/~63%; after the 2026-09-16 review
@@ -285,7 +297,7 @@ improvement. The set was rebuilt to **30 scenarios (5 per role)** so that:
 
 **Hard-scenarios round (2026-10).** The mentor ran a real model on the set and
 it scored too high, so six deliberately misleading scenarios were added (one per
-role; set is now 36, the maximum). Each one makes the surface signals — nearest
+role; set was then 36, the maximum at the time). Each one makes the surface signals — nearest
 deadline, tier, urgent-sounding words, the `blocked` flag — point at the wrong
 task, while the right one is still decidable from per-task text alone. Same
 rules as above: nothing hinges on `free_time_minutes`, `seniority` or
@@ -304,9 +316,11 @@ with a deadline holds the nearest deadline; both approvals start `false`.
 Measured effect: `SkipBlockedNearestDeadlineModel` gets **1 of the 6** (the
 `manager_idle_...` one, whose answer is the nearest deadline; 66.7% → 58.3% combined);
 `DummyModel` gets 0 of 6 (none has the answer in position 0), dropping to 27.8%,
-still inside its 20-50% band. Position distribution is index 0 in 10/36, 1 in 17,
-2 in 9 (no 3-task scenario has the answer first). `tests/test_personas.py` pins it
-(`EXPECTED_REAL_SCENARIO_COUNT = 36`, the position dict `{0: 10, 1: 17, 2: 9}`). The
+still inside its 20-50% band. Position distribution was then index 0 in 10/36, 1 in
+17, 2 in 9 (no 3-task scenario has the answer first). With `hierarchy_decides/` (#507,
+answer at index 1 in three and index 2 in three) it is 10 / 20 / 12 of 42, which is
+what `tests/test_personas.py` pins (`EXPECTED_REAL_SCENARIO_COUNT = 42`, the position
+dict `{0: 10, 1: 20, 2: 12}`). The
 `make eval-ci` headroom gate (`--max-accuracy 0.68`) is unchanged and now has
 ~10 points of slack instead of ~1. Known overlap, deliberate because stacking
 traps is what lowers the score: the Developer and Field Engineer scenarios each

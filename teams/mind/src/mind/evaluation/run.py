@@ -27,6 +27,7 @@ from mind.evaluation.hierarchy import (
 )
 from mind.evaluation.interfaces import RankingModel
 from mind.evaluation.personas import (
+    HIERARCHY_DECIDES_GROUP,
     HIERARCHY_DIR,
     PersonaSchemaError,
     load_personas,
@@ -179,10 +180,21 @@ def main() -> None:
 
     # One report per scenario group (a subdirectory of the personas dir), plus a combined one.
     group_dirs = sorted(p for p in personas_path.iterdir() if p.is_dir())
+    group_scenarios = {group_dir.name: load_personas(group_dir) for group_dir in group_dirs}
     group_reports: dict[str, Report] = {
-        group_dir.name: run(model, load_personas(group_dir)) for group_dir in group_dirs
+        name: run(model, scenarios) for name, scenarios in group_scenarios.items()
     }
     combined_report = run(model, all_scenarios)
+    # The set as it was before the hierarchy group (#507): every other group together.
+    original_report: Report | None = None
+    if HIERARCHY_DECIDES_GROUP in group_scenarios:
+        original_scenarios = [
+            s
+            for name, scenarios in group_scenarios.items()
+            if name != HIERARCHY_DECIDES_GROUP
+            for s in scenarios
+        ]
+        original_report = run(model, original_scenarios)
     # Per role, so a model that is bad for one role can't hide inside the aggregate.
     role_reports = split_by_role(all_scenarios, combined_report)
 
@@ -194,6 +206,9 @@ def main() -> None:
     for role, report in role_reports.items():
         print(_summary_lines(f"[role: {role}]", report))
         print()
+    if original_report is not None:
+        print(_summary_lines(f"[original set: all but {HIERARCHY_DECIDES_GROUP}]", original_report))
+        print()
     print(_summary_lines("[combined]", combined_report))
     print("===========================\n")
 
@@ -202,6 +217,7 @@ def main() -> None:
         combined=combined_report,
         groups=group_reports,
         roles=role_reports,
+        original_set=original_report,
     )
 
     report_text = _report_json(output)

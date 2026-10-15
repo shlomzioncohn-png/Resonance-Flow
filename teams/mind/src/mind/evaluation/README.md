@@ -89,11 +89,13 @@ python -m mind.evaluation.run --model dummy
 Replace `dummy` with the name of the model you want to evaluate.
 
 `--personas` (default `eval/personas`) points to the personas directory. The
-scenario files live in two subdirectories — `same_tier/` and `cross_tier/` (see
-`eval/personas/README.md`) — and `load_personas` recurses into both;
-`scenario.schema.json` at the root is skipped. `make eval` scores each group
-separately, breaks the result down per `persona.role`, and prints a combined
-number too; `report.json` carries all of them (`combined`, `groups`, `roles`).
+scenario files live in three subdirectories — `same_tier/`, `cross_tier/` and
+`hierarchy_decides/` (see `eval/personas/README.md`) — and `load_personas` recurses
+into all of them; `scenario.schema.json` at the root is skipped. `make eval` scores
+each group separately, breaks the result down per `persona.role`, prints the
+original set (every group but `hierarchy_decides/`) as one line, and prints a
+combined number too; `report.json` carries all of them (`combined`, `groups`,
+`roles`, `original_set`).
 The per-role numbers are split out of the combined run, not re-scored, so
 they always add up to it. Pass a single group dir
 (`--personas eval/personas/same_tier`) to score just that group. Loading goes through
@@ -170,8 +172,9 @@ answer means something.
 
 - A scenario task's `parent_task_id` names a **node** in
   [`eval/hierarchy/nodes.json`](../../../eval/hierarchy/nodes.json). The node is
-  never one of the scenario's candidate tasks, so the candidate lists — and so
-  every baseline score — are unchanged.
+  never one of the scenario's candidate tasks, so the candidate lists are
+  unchanged, and a model that does not read `parent_task_id` scores exactly as
+  before (see **What did not change** below).
 - `null` means an **orphan**, on purpose. Orphans are part of the coverage, not
   gaps.
 - A node has its own `parent_task_id` (`null` = a root), so chains can be more
@@ -269,32 +272,95 @@ the recommendation, one where it did not. Both were chosen before any
 hierarchy-aware model exists. They are **designed** to behave this way; whether
 they do depends on the propagation, and either outcome is a result.
 
-- **Designed to change — `manager_status_digest_vs_reorg_proposal`.**
-  `task_status` is operational with a deadline today; `task_reorg` (the correct
-  answer) is strategic with a deadline six days out, and a quarter-defining
-  leadership decision depends on it. `task_reorg` sits under a high Q4
-  restructuring initiative, itself under a high annual goal (the two-level
-  chain); `task_status` sits under low routine reporting; the survey filler is an
-  orphan. The hierarchy points where the `expected_reason` points; the deadline
-  points the other way.
+- **Designed to change —
+  `hierarchy_decides/manager_restructuring_team_signoff_vs_maintenance_team_signoff`.**
+  Two sign-offs of the same tactical resourcing plan, with the same text and effort,
+  for two teams; the Birchwood one is due an hour earlier. The correct answer, the
+  Atlas sign-off, sits under a high Q4 restructuring initiative, itself under a high
+  annual goal (the two-level chain); Birchwood's sits under low routine maintenance.
+  The baseline misses it (it follows the earlier deadline); only the hierarchy points
+  at the answer.
 - **Designed not to change — `developer_prod_crash_vs_backlog_feature`.**
   `task_backlog_widget` sits under a high self-service roadmap node; the correct
   answer `task_crash` is an **orphan** — a production checkout crash with a
   three-hour support SLA. An orphan with a hard, near deadline must still beat a
-  task under an important initiative.
+  task under an important initiative. The baseline gets it right.
+
+The first "designed to change" pick was `manager_status_digest_vs_reorg_proposal`.
+It was replaced because `SegmentedRankingModel` already gets it right without any
+hierarchy (the task text says what matters), so the stretch could not show a
+change there.
+
+### `hierarchy_decides/`: where the hierarchy decides
+
+The 36 original scenarios were written before there was a hierarchy, and every one
+of them is decided by deadline, `blocked` or the text of the task. So the hierarchy
+can confirm or contradict an answer there, but almost never decide one: the stretch
+would have nearly nothing to change. `eval/personas/hierarchy_decides/` adds six
+scenarios, one per role, built so that it can:
+
+- **Four where the hierarchy decides.** The candidates are near-equal on their own
+  features: the same tier and effort, wording identical but for a name, deadlines
+  an hour or two apart. The correct answer is slightly *weaker* on them (its
+  deadline is the later one), never a full tie. What separates them is the
+  initiative each one serves, and the `expected_reason` names it. Together they
+  cover what the mentor asked for: an initiative that was **deprioritized**
+  (`salesperson_...`, a paused vertical push), a **two-level chain**
+  (`manager_...`), a **branch** (`higher_manager_...`: one important parent with one
+  child against an unimportant parent with two), and a case where the direct
+  parents are **equal and only the grandparents differ** (`ceo_...`), which a
+  propagation that looks one level up cannot get right.
+- **Two controls.** The hierarchy pulls hard toward a distractor, but a hard signal
+  must win: a production payment failure with a 13:00 SLA against two migration
+  steps under the year's top goal (`developer_...`, the answer is an orphan), and a
+  customer site that is down inside a four-hour contractual window, whose own
+  parent is *low*, against a survey for the year's priority program
+  (`field_engineer_...`).
+
+They are **new scenarios, not copies** of existing ones. The originals decide their
+answer through the task text ("the biggest structural decision of the quarter",
+"nobody has ever acted on it"); a copy with that text removed is no longer the same
+scenario, and one with it kept would not test the hierarchy at all.
+
+The correct answers were written before anything was run. Then the check: run
+`SegmentedRankingModel` with no hierarchy input; it should miss the four decided
+ones and get the two controls, and if it got a decided one right, that scenario's
+features would be evened out, not its answer. Run on the baseline from #797 (which
+removes its `parent_task_id` signal), it does exactly that, with no change needed:
+
+| Scenario | Kind | Baseline picks | Scores (picked vs correct) |
+|---|---|---|---|
+| `manager_restructuring_…` | decided | Birchwood — **miss** | 0.7172 vs 0.7160 |
+| `salesperson_core_target_…` | decided | Pinecrest — **miss** | 0.7280 vs 0.7259 |
+| `higher_manager_migration_…` | decided | Ledger staffing — **miss** | 0.7459 vs 0.7453 |
+| `ceo_expansion_partnership_…` | decided | Quayle — **miss** | 0.7035 vs 0.7031 |
+| `developer_payment_incident_…` | control | the payment fix — **right** | 0.8526 vs 0.7101 next |
+| `field_engineer_site_outage_…` | control | the site restore — **right** | 0.7884 vs 0.7422 next |
+
+The margins in the decided four are tiny on purpose: the features are near-equal
+and only an earlier deadline tips the baseline the wrong way, so any real push from
+the hierarchy is enough to change the answer. The cheap baselines behave the same
+way (2/6, exactly the controls; see `eval/personas/README.md`). `tests/test_personas.py` pins the shape: one per role,
+at least three decided and one or two controls, near-equal rivals (same tier and
+effort, the answer due 0-2 hours later), no two candidates fitting the free time
+together, and the answer never the longest description.
+
+`make eval` prints three lines for this: `[original set: all but
+hierarchy_decides]` (36), `[hierarchy_decides]` (6) and `[combined]` (42); `report.json`
+carries the first as `original_set`.
 
 ### Every scenario with a hierarchy, and what it checks
 
-21 of the 36 scenarios have at least one parent; the other 15 are fully orphan —
-mostly live incidents and deadline-decided pairs, where the `expected_reason`
-gives no initiative for the tasks to serve. Every node was checked against its
-scenario's task descriptions and `expected_reason`, and nothing else.
-`tests/test_hierarchy_links.py` holds this table as data and fails if the
-fixture drifts from it.
+27 of the 42 scenarios have at least one parent (21 of the original 36, and all six
+in `hierarchy_decides/`); the other 15 are fully orphan — mostly live incidents and
+deadline-decided pairs, where the `expected_reason` gives no initiative for the
+tasks to serve. Every node was checked against its scenario's task descriptions and
+`expected_reason`, and nothing else. `tests/test_hierarchy_links.py` holds this
+table as data and fails if the fixture drifts from it.
 
 | Scenario | Hierarchy (✱ = correct answer) | Importance from | What it checks |
 |---|---|---|---|
-| `manager_status_digest_vs_reorg_proposal` | reorg✱ high → high (2 levels); status low; survey orphan | text | Designed to change (above) |
+| `manager_status_digest_vs_reorg_proposal` | reorg✱ high → high (2 levels); status low; survey orphan | text | Hierarchy agrees with the answer (the first "designed to change" pick, replaced — see above) |
 | `developer_prod_crash_vs_backlog_feature` | widget high; crash✱ and wiki orphans | constructed | Designed not to change (above) |
 | `developer_owns_arch_decision_vs_dep_bump` | arch✱ high; bump orphan | text | Hierarchy agrees with the answer — no-harm check |
 | `developer_blocked_oauth_vs_pr_review` | oauth (blocked) high; pr✱ orphan | constructed | Blocked beats an important parent |
@@ -315,6 +381,12 @@ fixture drifts from it.
 | `salesperson_dead_rfp_vs_live_signing_round` | rfp low (deal already lost); signing✱ high; QBR orphan (a routine review) | text | A dead initiative — even though the text calls it the second-largest opportunity |
 | `ceo_own_investor_commitment_vs_unaccepted_keynote_request` | investor✱ high; acquisitions low (exploratory); keynote orphan (never accepted) | text | Three levels in one scenario |
 | `higher_manager_approved_vision_memo_vs_expiring_capacity_offer` | vision high; capacity✱ high; travel exceptions orphan | text | An important parent over a now-trivial task (only formatting left) |
+| `hierarchy_decides/manager_restructuring_team_signoff_vs_maintenance_team_signoff` | atlas✱ high → high (2 levels); birchwood low; filler orphan | constructed, named in the reason | **Decides:** two-level chain — the week-7 "designed to change" scenario |
+| `hierarchy_decides/salesperson_core_target_proposal_vs_paused_vertical_proposal` | northgate✱ high; pinecrest low (paused); filler orphan | constructed, named in the reason | **Decides:** deprioritized initiative |
+| `hierarchy_decides/higher_manager_migration_budget_vs_reporting_requests` | orion✱ high; both ledger requests under one low node | constructed, named in the reason | **Decides:** branch — one child of an important parent vs two of an unimportant one |
+| `hierarchy_decides/ceo_expansion_partnership_vs_wound_down_line_partnership` | halvorsen✱ medium → high; quayle medium → low; filler orphan | constructed, named in the reason | **Decides:** equal parents, only the grandparents differ |
+| `hierarchy_decides/developer_payment_incident_vs_migration_steps` | both migration steps high → high; payment✱ orphan | constructed, named in the reason | **Control:** a live payment failure with an SLA beats a deep, important chain |
+| `hierarchy_decides/field_engineer_site_outage_vs_rollout_survey` | survey high; site restore✱ low; filler orphan | constructed, named in the reason | **Control:** a hard signal wins although its own parent is low |
 
 Comparisons *within* one scenario (the controls, the shared-parent pairs) are the
 clean ones: same time, same persona, only the hierarchy differs. Comparisons
@@ -323,12 +395,23 @@ differ in deadlines and wording, so they are suggestive, not controlled.
 
 ### What did not change
 
-No candidate list, `expected_top_task_id` or `expected_reason` changed — only
-`parent_task_id` values, plus the new `eval/hierarchy/` and the regenerated
-`personas.sha256` and `scenario.schema.json`. A model that ignores
-`parent_task_id` scores exactly as before: `skip-blocked-nearest-deadline` is
-**58.3% (21/36)** before and after (the number `eval/personas/README.md`
-records for the set this change was made on).
+In the original 36, no candidate list, `expected_top_task_id` or `expected_reason`
+changed — only `parent_task_id` values, plus the new `eval/hierarchy/` and the
+regenerated `personas.sha256` and `scenario.schema.json`. A model that ignores
+`parent_task_id` scores exactly as before on them: `skip-blocked-nearest-deadline`
+is **58.3% (21/36)** on the original set before and after (the number
+`eval/personas/README.md` records for the set this change was made on). The six
+`hierarchy_decides/` scenarios are new, so the combined number (42) is new too.
+
+That holds only for a model that does not read `parent_task_id`. R2's
+`SegmentedRankingModel` currently still does (its `belongs_to_initiative`
+feature), so on this set its result moves. The mentor has decided that the
+baseline must not read `parent_task_id` at all: the hierarchy is the stretch's
+input, and a baseline that already uses it leaves nothing for the stretch to be
+measured against. That feature is being removed from the baseline in a separate
+PR; once it is merged, a test runs `SegmentedRankingModel` on the set with the
+parents and with every `parent_task_id` set to null and asserts the results are
+identical, so the baseline stays free of hierarchy from then on.
 
 `team_lead_approved` was left as it was on every touched scenario. The change is
 additive — a new field value pointing outside the scenario — and leaves

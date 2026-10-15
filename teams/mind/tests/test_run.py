@@ -92,6 +92,26 @@ def test_a_run_that_passes_its_gates_writes_a_record_that_loads_back(
     assert report.model_name == "SkipBlockedNearestDeadlineModel"
 
 
+def test_the_report_has_the_original_set_the_hierarchy_group_and_everything(
+    monkeypatch, tmp_path, capsys
+):
+    # The three numbers #507 asks for, each as one line: the set before the
+    # hierarchy group, the hierarchy group alone, and all of it together.
+    _run_cli(monkeypatch, tmp_path, "--record-baseline", str(tmp_path / "baseline.json"))
+
+    out = capsys.readouterr().out
+    assert "[original set: all but hierarchy_decides]" in out
+    report = EvaluationOutput.model_validate_json((tmp_path / "report.json").read_text())
+    assert report.original_set is not None
+    hierarchy = report.groups["hierarchy_decides"]
+    assert report.original_set.total_scenarios + hierarchy.total_scenarios == (
+        report.combined.total_scenarios
+    )
+    assert report.original_set.correct_top1 + hierarchy.correct_top1 == (
+        report.combined.correct_top1
+    )
+
+
 def test_the_record_stores_team_relative_paths_not_the_recorders_machine_layout(
     monkeypatch, tmp_path
 ):
