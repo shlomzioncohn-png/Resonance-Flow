@@ -6,10 +6,13 @@ import static org.mockito.Mockito.verifyNoInteractions;
 
 import com.rnd.bridge.intake.model.SourceRecord;
 import com.rnd.bridge.intake.service.IntakeLandingService;
+import com.rnd.bridge.intake.service.SourceRecordRefMapper;
 import com.rnd.bridge.raw.model.ChangeType;
 import com.rnd.bridge.raw.model.Modality;
 import com.rnd.bridge.raw.model.RawObjectEvent;
+import com.rnd.bridge.raw.model.RawObjectRef;
 import com.rnd.bridge.raw.model.RawSourceType;
+import com.rnd.bridge.raw.model.Role;
 import com.rnd.bridge.scoping.AllowlistScopingFilter;
 import com.rnd.bridge.storage.ObjectKeyBuilder;
 import com.rnd.bridge.storage.ObjectStorageClient;
@@ -25,8 +28,10 @@ class UnstructuredPayloadMapperSanityTest {
 
     // Never stubbed/verified for I/O: map() is pure and must not touch storage - see afterMap().
     private final ObjectStorageClient storageClient = mock(ObjectStorageClient.class);
-    private final UnstructuredPayloadMapper mapper = new UnstructuredPayloadMapper(
-            new AllowlistScopingFilter(), new ObjectKeyBuilder(), new IntakeLandingService(storageClient));
+    private final SourceRecordRefMapper refMapper = new SourceRecordRefMapper(
+            new ObjectKeyBuilder(), new IntakeLandingService(storageClient));
+    private final UnstructuredPayloadMapper mapper =
+            new UnstructuredPayloadMapper(new AllowlistScopingFilter(), refMapper);
 
     @Test
     void mapIsPureAndNeverTouchesStorage() {
@@ -35,12 +40,13 @@ class UnstructuredPayloadMapperSanityTest {
                 Instant.parse("2026-08-16T20:00:00Z"), "malki@kamatech.org", List.of("malki@kamatech.org"),
                 "IMG_2043.jpg", null, "{}".getBytes(StandardCharsets.UTF_8), "image/jpeg", null, 0, 0, List.of(), 0);
 
-        RawObjectEvent event = mapper.map(record, Instant.now());
+        RawObjectEvent event = mapper.map(List.of(record), Instant.now());
+        RawObjectRef ref = event.objects().get(0);
 
-        assertThat(event.modality()).isEqualTo(Modality.SCANNED_DOC);
-        assertThat(event.contentType()).isEqualTo("image/jpeg");
-        assertThat(event.sizeBytes()).isEqualTo(2L);
-        assertThat(CONTENT_HASH_PATTERN.matcher(event.contentHash()).matches()).isTrue();
+        assertThat(ref.modality()).isEqualTo(Modality.SCANNED_DOC);
+        assertThat(ref.contentType()).isEqualTo("image/jpeg");
+        assertThat(ref.sizeBytes()).isEqualTo(2L);
+        assertThat(CONTENT_HASH_PATTERN.matcher(ref.contentHash()).matches()).isTrue();
         assertThat(event.schemaVersion()).isEqualTo("1.0");
         verifyNoInteractions(storageClient);
     }
@@ -52,33 +58,47 @@ class UnstructuredPayloadMapperSanityTest {
                 Instant.parse("2026-08-18T09:15:00Z"), "hadas@kamatech.org", List.of("hadas@kamatech.org"),
                 "PR review needed", "body", "{}".getBytes(StandardCharsets.UTF_8), null, null, 0, 0, List.of(), 0);
 
-        RawObjectEvent event = mapper.map(record, Instant.now());
+        RawObjectEvent event = mapper.map(List.of(record), Instant.now());
+        RawObjectRef ref = event.objects().get(0);
 
-        assertThat(event.modality()).isEqualTo(Modality.TEXT);
-        assertThat(event.contentType()).isEqualTo("application/json");
+        assertThat(ref.modality()).isEqualTo(Modality.TEXT);
+        assertThat(ref.contentType()).isEqualTo("application/json");
+        assertThat(ref.role()).isEqualTo(Role.BODY);
     }
 
     @Test
-    void attachmentRecordWithAudioMimeTypeGetsAudioModality() {
-        SourceRecord record = new SourceRecord(
+    void anEmailBodyPlusItsAttachmentMapToOneEventWithTwoObjects() {
+        SourceRecord body = new SourceRecord(
+                RawSourceType.EMAIL, "kamatech", "EMAIL|ruth@kamatech.org|2026-08-18T11:00:00Z", "corr-3",
+                Instant.parse("2026-08-18T11:00:00Z"), "ruth@kamatech.org", List.of("ruth@kamatech.org"),
+                "invoice", "body text", "body text".getBytes(StandardCharsets.UTF_8), null, null, 0, 1, List.of(), 0);
+        SourceRecord attachment = new SourceRecord(
                 RawSourceType.EMAIL, "kamatech", "EMAIL|ruth@kamatech.org|2026-08-18T11:00:00Z|attachment", "corr-3",
                 Instant.parse("2026-08-18T11:00:00Z"), "ruth@kamatech.org", List.of("ruth@kamatech.org"),
                 null, null, "fake-audio-bytes".getBytes(StandardCharsets.UTF_8), "audio/opus", "voice-note.opus", 1,
                 1, List.of(), 0);
 
-        RawObjectEvent event = mapper.map(record, Instant.now());
+        RawObjectEvent event = mapper.map(List.of(body, attachment), Instant.now());
 
-        assertThat(event.modality()).isEqualTo(Modality.AUDIO);
+        assertThat(event.objects()).hasSize(2);
+        assertThat(event.objects().get(0).role()).isEqualTo(Role.BODY);
+        assertThat(event.objects().get(1).role()).isEqualTo(Role.ATTACHMENT);
+        assertThat(event.objects().get(1).modality()).isEqualTo(Modality.AUDIO);
+        assertThat(event.correlationId()).isEqualTo("corr-3");
     }
 
     @Test
-    void participantsArePassedThroughFromTheSourceRecord() {
-        SourceRecord record = new SourceRecord(
-                RawSourceType.EMAIL, "kamatech", "id-1", "corr-4", Instant.now(),
+    void outerEventFieldsComeFromTheGroupsPrimaryBodyRecordNotAnAttachment() {
+        SourceRecord body = new SourceRecord(
+                RawSourceType.EMAIL, "kamatech", "id-1", "corr-4", Instant.parse("2026-08-18T09:00:00Z"),
                 "hadas@kamatech.org", List.of("hadas@kamatech.org"), "subject", "body",
-                "{}".getBytes(StandardCharsets.UTF_8), null, null, 0, 0, List.of(), 0);
+                "{}".getBytes(StandardCharsets.UTF_8), null, null, 0, 1, List.of(), 0);
+        SourceRecord attachment = new SourceRecord(
+                RawSourceType.EMAIL, "kamatech", "id-1|attachment-1", "corr-4", Instant.parse("2026-08-18T09:00:00Z"),
+                "other-sender", List.of("other-sender"), null, null,
+                "bytes".getBytes(StandardCharsets.UTF_8), "application/pdf", "invoice.pdf", 1, 1, List.of(), 0);
 
-        RawObjectEvent event = mapper.map(record, Instant.now());
+        RawObjectEvent event = mapper.map(List.of(attachment, body), Instant.now()); // attachment listed first
 
         assertThat(event.participants()).containsExactly("hadas@kamatech.org");
     }
@@ -90,10 +110,10 @@ class UnstructuredPayloadMapperSanityTest {
                 Instant.parse("2026-08-18T09:15:00Z"), "hadas@kamatech.org", List.of("hadas@kamatech.org"),
                 "PR review needed", "body", "{}".getBytes(StandardCharsets.UTF_8), null, null, 0, 0, List.of(), 0);
 
-        RawObjectEvent first = mapper.map(record, Instant.now());
-        RawObjectEvent second = mapper.map(record, Instant.now());
+        RawObjectEvent first = mapper.map(List.of(record), Instant.now());
+        RawObjectEvent second = mapper.map(List.of(record), Instant.now());
 
-        assertThat(first.contentHash()).isEqualTo(second.contentHash());
+        assertThat(first.objects().get(0).contentHash()).isEqualTo(second.objects().get(0).contentHash());
     }
 
     @Test
@@ -103,22 +123,22 @@ class UnstructuredPayloadMapperSanityTest {
                 Instant.parse("2026-08-18T09:00:00Z"), "ruth", List.of("ruth"), null, "ruth: hi (edited)",
                 "ruth: hi (edited)".getBytes(StandardCharsets.UTF_8), null, null, 0, 0, List.of("m1"), 3);
 
-        RawObjectEvent event = mapper.map(record, Instant.now());
+        RawObjectEvent event = mapper.map(List.of(record), Instant.now());
 
         assertThat(event.revision()).isEqualTo(3);
     }
 
     @Test
-    void sourceRecordAttachmentCountIsCarriedThroughToTheRawObjectEventVerbatim() {
+    void anAttachmentRecordIsMappedToAnAttachmentRoleRef() {
         SourceRecord record = new SourceRecord(
                 RawSourceType.EMAIL, "kamatech", "id-1|attachment-1", "corr-8",
                 Instant.parse("2026-08-18T11:00:00Z"), "ruth@kamatech.org", List.of("ruth@kamatech.org"),
                 null, null, "fake-pdf".getBytes(StandardCharsets.UTF_8), "application/pdf", "invoice.pdf", 1,
                 2, List.of(), 0);
 
-        RawObjectEvent event = mapper.map(record, Instant.now());
+        RawObjectEvent event = mapper.map(List.of(record), Instant.now());
 
-        assertThat(event.attachmentCount()).isEqualTo(2);
+        assertThat(event.objects().get(0).role()).isEqualTo(Role.ATTACHMENT);
     }
 
     @Test
@@ -128,7 +148,7 @@ class UnstructuredPayloadMapperSanityTest {
                 "hadas@kamatech.org", List.of("hadas@kamatech.org"), "subject", "body",
                 "{}".getBytes(StandardCharsets.UTF_8), null, null, 0, 0, List.of(), 0);
 
-        RawObjectEvent event = mapper.map(record, Instant.now());
+        RawObjectEvent event = mapper.map(List.of(record), Instant.now());
 
         assertThat(event.changeType()).isEqualTo(ChangeType.UPSERT);
     }

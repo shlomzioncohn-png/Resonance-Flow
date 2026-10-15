@@ -25,7 +25,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 
 class JsonDealRepositoryTest {
 
-    private static final DealToTaskMapper MAPPER = new DealToTaskMapper("org-test-0000", new EnrichmentProperties(), new NoOpTaskEnricher());
+    private static final DealToTaskMapper MAPPER = new DealToTaskMapper("org-test-0000", new EnrichmentProperties(), new NoOpTaskEnricher(), 0);
 
     private DealRepository repository;
     private DealSnapshot snapshot;

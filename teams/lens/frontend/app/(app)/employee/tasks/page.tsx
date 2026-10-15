@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
+import Link from 'next/link';
 import Chip from '@mui/material/Chip';
 import InputAdornment from '@mui/material/InputAdornment';
 import MenuItem from '@mui/material/MenuItem';
@@ -10,25 +11,29 @@ import TextField from '@mui/material/TextField';
 import Typography from '@mui/material/Typography';
 import SearchIcon from '@mui/icons-material/Search';
 import PageContainer from '@/components/layout/PageContainer';
-import LoadingState from '@/components/feedback/LoadingState';
-import EmptyState from '@/components/feedback/EmptyState';
-import ErrorState from '@/components/feedback/ErrorState';
-import DataTable, { type DataTableColumn } from '@/components/ui/DataTable';
+import DataTable, { type Column } from '@/components/ui/DataTable';
 import { getErrorMessage } from '@/services/api';
 import { listTasks, type ApiTask, type TaskListFilter } from '@/services/workspaceApi';
 import { PriorityChip, softToneSx, statusTone } from '../shared';
 
 type LoadState = 'loading' | 'loaded' | 'error';
 
-const columns: DataTableColumn<ApiTask>[] = [
+const columns: Column<ApiTask>[] = [
   {
-    key: 'title',
+    id: 'title',
     header: 'Task',
     render: (task) => (
       <Stack spacing={0.25}>
-        <Typography variant="body2" sx={{ fontWeight: 600 }}>
+        <MuiLink
+          component={Link}
+          href={`/employee/tasks/${task.id}`}
+          variant="body2"
+          underline="hover"
+          color="text.primary"
+          sx={{ fontWeight: 600 }}
+        >
           {task.title}
-        </Typography>
+        </MuiLink>
         {task.project && (
           <Typography variant="caption" color="text.secondary">
             {task.project}
@@ -38,30 +43,30 @@ const columns: DataTableColumn<ApiTask>[] = [
     ),
   },
   {
-    key: 'status',
+    id: 'status',
     header: 'Status',
     render: (task) => (
       <Chip size="small" label={task.status} sx={softToneSx(statusTone(task.status))} />
     ),
   },
   {
-    key: 'priority',
+    id: 'priority',
     header: 'Priority',
     render: (task) => <PriorityChip priority={task.priority} />,
   },
   {
-    key: 'owner',
+    id: 'owner',
     header: 'Owner',
     render: (task) => task.owner ?? '—',
   },
   {
-    key: 'due',
+    id: 'due',
     header: 'Due',
     // Already formatted by Inbox (e.g. "12/10/2026") - shown as-is
     render: (task) => task.dueDate ?? '—',
   },
   {
-    key: 'effort',
+    id: 'effort',
     header: 'Effort',
     align: 'right',
     render: (task) => (task.effortEstimate != null ? `${task.effortEstimate} min` : '—'),
@@ -214,9 +219,9 @@ export default function EmployeeTasksPage() {
           onRowsPerPageChange={(event) => {
             setPageSize(Number(event.target.value));
             setPage(0);
-          }}
-        />
-      )}
+          },
+        }}
+      />
     </PageContainer>
   );
 }

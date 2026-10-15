@@ -2,6 +2,7 @@ package com.rnd.bridge.media;
 
 import com.rnd.bridge.raw.model.Modality;
 import com.rnd.bridge.raw.model.RawObjectEvent;
+import com.rnd.bridge.raw.model.RawObjectRef;
 import com.rnd.bridge.raw.model.RawSourceType;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -169,17 +170,17 @@ public class MediaIntakeOrchestrator {
 
             try {
                 Instant ingestedAt = Instant.now();
-                String transcriptObjectKey = null;
+                RawObjectRef transcriptRef = null;
                 if (transcript != null) {
                     byte[] transcriptContent = Files.readAllBytes(transcript);
-                    transcriptObjectKey = intakeService.landTranscript(
+                    transcriptRef = intakeService.landTranscript(
                             transcriptContent, transcript.getFileName().toString(), tenantId,
                             source.sourceType(), ingestedAt);
                 }
 
                 RawObjectEvent event = intakeService.land(
                         content, contentHash, file.getFileName().toString(), tenantId,
-                        source.sourceType(), source.modality(), ingestedAt, transcriptObjectKey);
+                        source.sourceType(), source.modality(), ingestedAt, transcriptRef);
                 eventPublisher.publish(event);
 
                 moveTo(file, uploadedDir);
@@ -187,8 +188,9 @@ public class MediaIntakeOrchestrator {
                     moveTo(transcript, uploadedDir);
                 }
 
-                log.info("Uploaded {} as {}", file.getFileName(), event.objectKey());
-                uploaded.add(event.objectKey());
+                String primaryObjectKey = event.objects().get(0).objectKey();
+                log.info("Uploaded {} as {}", file.getFileName(), primaryObjectKey);
+                uploaded.add(primaryObjectKey);
             } catch (Exception e) {
                 // checkAndRecord() already claimed contentHash above so a concurrent run
                 // couldn't land the same content twice - but this attempt failed before

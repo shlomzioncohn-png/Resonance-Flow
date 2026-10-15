@@ -7,3 +7,9 @@ services:
     environment:
       - SERVER_PORT=${SERVER_PORT:-8082}
       - SPRING_PROFILES_ACTIVE=${SPRING_PROFILES_ACTIVE:-local}
+      # Inbox isn't part of this compose file (teams/inbox has its own) — reach it on the
+      # host, where its own docker-compose.yml publishes it. See InboxUserClient's javadoc.
+      - INBOX_SERVICE_URL=${INBOX_SERVICE_URL:-http://host.docker.internal:8080}
+      # The Gateway only sends a mock user id ("mgr_001"); this seeded Inbox user UUID is who
+      # the BFF actually acts as toward Inbox (see ManagerUsersService / InboxClient).
+      - INBOX_DEV_ACTOR_ID=${INBOX_DEV_ACTOR_ID:-}

@@ -2,14 +2,18 @@ package com.rnd.bridge.intake.controller;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.rnd.bridge.core.IntakeResult;
 import com.rnd.bridge.intake.config.SlackApiProperties;
+import com.rnd.bridge.intake.lane.GroupStateStore;
 import com.rnd.bridge.intake.lane.UnstructuredIntakeLane;
 import com.rnd.bridge.intake.model.ChatMessage;
 import com.rnd.bridge.intake.model.GroupState;
@@ -17,8 +21,15 @@ import com.rnd.bridge.intake.model.MessageSnapshot;
 import com.rnd.bridge.intake.model.SourceRecord;
 import com.rnd.bridge.intake.parser.slack.SlackUserNameResolver;
 import com.rnd.bridge.intake.service.ChatGroupStateReconciler;
+import com.rnd.bridge.intake.service.IntakeLandingService;
 import com.rnd.bridge.intake.service.SlackSessionScheduler;
+import com.rnd.bridge.intake.service.SourceRecordRefMapper;
+import com.rnd.bridge.raw.model.Modality;
+import com.rnd.bridge.raw.model.RawObjectRef;
 import com.rnd.bridge.raw.model.RawSourceType;
+import com.rnd.bridge.raw.model.Role;
+import com.rnd.bridge.raw.model.ScopeDecision;
+import com.rnd.bridge.scoping.AllowlistScopingFilter;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.List;
@@ -38,9 +49,10 @@ import org.springframework.mock.web.MockHttpServletRequest;
  * JSON-to-ChatMessage parsing is covered by SlackEventMessageParserTest, reconcile-only
  * merge/persist semantics by ChatGroupStateReconcilerTest, and scheduler internals by
  * SlackSessionSchedulerTest; this class only verifies the controller wires them together
- * correctly (threaded vs. non-thread routing, transcript withheld, scheduling based on whether
- * the resulting group still needs publication - not on whether the event was a genuinely-new
- * message or an edit, unsupported events acked without touching the reconciler).
+ * correctly: threaded messages go through the lane as one group-per-event, non-thread messages
+ * only land attachments (never publish to Kafka here - see SlackSessionPublisher for that),
+ * scheduling is based on whether the resulting group still needs publication, and unsupported
+ * events are acked without touching the reconciler.
  */
 class SlackEventsControllerTest {
 
@@ -52,8 +64,13 @@ class SlackEventsControllerTest {
     private final ChatGroupStateReconciler reconciler = mock(ChatGroupStateReconciler.class);
     private final SlackSessionScheduler sessionScheduler = mock(SlackSessionScheduler.class);
     private final UnstructuredIntakeLane slackLane = mockSlackLane();
+    private final AllowlistScopingFilter scopingFilter = mock(AllowlistScopingFilter.class);
+    private final SourceRecordRefMapper refMapper = mock(SourceRecordRefMapper.class);
+    private final IntakeLandingService landingService = mock(IntakeLandingService.class);
+    private final GroupStateStore groupStateStore = mock(GroupStateStore.class);
     private final SlackEventsController controller = new SlackEventsController(
-            verifier, new ObjectMapper(), eventMessageParser, reconciler, sessionScheduler, List.of(slackLane));
+            verifier, new ObjectMapper(), eventMessageParser, reconciler, sessionScheduler, List.of(slackLane),
+            scopingFilter, refMapper, landingService, groupStateStore);
 
     // Real (unmocked) parser, used only by the message_changed end-to-end tests below - these
     // exist specifically to prove realistic Slack JSON produces a ChatMessage the reconciler can
@@ -72,7 +89,8 @@ class SlackEventsControllerTest {
         return resolver;
     }
     private final SlackEventsController controllerWithRealParser = new SlackEventsController(
-            verifier, new ObjectMapper(), realEventMessageParser, reconciler, sessionScheduler, List.of(slackLane));
+            verifier, new ObjectMapper(), realEventMessageParser, reconciler, sessionScheduler, List.of(slackLane),
+            scopingFilter, refMapper, landingService, groupStateStore);
 
     private static UnstructuredIntakeLane mockSlackLane() {
         UnstructuredIntakeLane lane = mock(UnstructuredIntakeLane.class);
@@ -107,7 +125,8 @@ class SlackEventsControllerTest {
         return new SourceRecord(
                 RawSourceType.SLACK, "kamatech", "chat-a|1000.1|attachment-1", "corr-1",
                 Instant.parse("2026-08-18T09:00:00Z"), "U1", List.of("U1"), null, null,
-                "bytes".getBytes(StandardCharsets.UTF_8), "text/plain", "note.txt", 1, 1, List.of("1000.1"), 0);
+                "bytes".getBytes(StandardCharsets.UTF_8), "text/plain", "note.txt", "F1", 1, 1, List.of("1000.1"), 0,
+                "g1");
     }
 
     @Test
@@ -188,7 +207,7 @@ class SlackEventsControllerTest {
     }
 
     @Test
-    void nonThreadMessageWithoutAttachmentIsReconciledAndSchedulesTheTimerButPublishesNothing() throws Exception {
+    void nonThreadMessageWithoutAttachmentIsReconciledAndSchedulesTheTimerButLandsNothing() throws Exception {
         String body = "{\"type\":\"event_callback\",\"event\":{\"type\":\"message\"}}";
         when(verifier.isValid("1000", "v0=valid", body)).thenReturn(true);
         ChatMessage message = nonThreadMessage();
@@ -203,32 +222,40 @@ class SlackEventsControllerTest {
         verify(reconciler).reconcileNonThreadedMessage(message);
         verify(reconciler, never()).group(any());
         verify(slackLane, never()).run(any(Stream.class), any());
+        verifyNoInteractions(landingService, groupStateStore);
         verify(sessionScheduler).scheduleOrReschedule(groupState);
     }
 
     @Test
-    void nonThreadMessageWithAttachmentPublishesOnlyTheAttachmentRecordAndSchedulesTheTimer() throws Exception {
+    void nonThreadMessageWithAttachmentLandsItAndRecordsItOnGroupStateWithoutPublishingToKafka() throws Exception {
         String body = "{\"type\":\"event_callback\",\"event\":{\"type\":\"message\"}}";
         when(verifier.isValid("1000", "v0=valid", body)).thenReturn(true);
         ChatMessage message = nonThreadMessage();
         SourceRecord attachment = attachmentRecord();
         GroupState groupState = groupState();
+        RawObjectRef ref = new RawObjectRef(
+                Role.ATTACHMENT, "SLACK/kamatech/2026-08-18/x.txt", "sha256:" + "a".repeat(64), "text/plain", 5L,
+                Modality.TEXT);
         when(eventMessageParser.parse(any())).thenReturn(Optional.of(message));
         when(reconciler.reconcileNonThreadedMessage(message))
                 .thenReturn(new ChatGroupStateReconciler.RealtimeReconcileResult(groupState, List.of(attachment), true));
-        when(slackLane.run(any(Stream.class), any())).thenReturn(new IntakeResult(1, 1, 0, List.of()));
+        when(scopingFilter.decide(attachment)).thenReturn(ScopeDecision.INCLUDED);
+        when(refMapper.toRef(eq(attachment), any())).thenReturn(ref);
 
         ResponseEntity<?> response = controller.handle("1000", "v0=valid", requestWithBody(body));
 
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
         verify(reconciler).reconcileNonThreadedMessage(message);
         verify(reconciler, never()).group(any());
-        verify(slackLane).run(any(Stream.class), any());
+        verify(slackLane, never()).run(any(Stream.class), any());
+        verify(landingService).land(eq(ref.objectKey()), eq(attachment), eq(ScopeDecision.INCLUDED), any());
+        verify(groupStateStore).recordLandedAttachment(
+                RawSourceType.SLACK, "kamatech", "g1", "1000.1", "F1", ref);
         verify(sessionScheduler).scheduleOrReschedule(groupState);
     }
 
     @Test
-    void nonThreadMessageWhoseAttachmentPublishIsRejectedReturnsANon2xxSoSlackRetries() throws Exception {
+    void nonThreadMessageWhoseAttachmentLandingFailsReturnsANon2xxSoSlackRetries() throws Exception {
         String body = "{\"type\":\"event_callback\",\"event\":{\"type\":\"message\"}}";
         when(verifier.isValid("1000", "v0=valid", body)).thenReturn(true);
         ChatMessage message = nonThreadMessage();
@@ -237,16 +264,13 @@ class SlackEventsControllerTest {
         when(eventMessageParser.parse(any())).thenReturn(Optional.of(message));
         when(reconciler.reconcileNonThreadedMessage(message))
                 .thenReturn(new ChatGroupStateReconciler.RealtimeReconcileResult(groupState, List.of(attachment), true));
-        // A rejected record (e.g. a MinIO landing/Kafka publish failure) must not be silently
-        // acknowledged - see IntakeResult's rejected count and errors.
-        when(slackLane.run(any(Stream.class), any()))
-                .thenReturn(new IntakeResult(1, 0, 1, List.of(new com.rnd.bridge.core.error.LaneException("boom"))));
+        when(scopingFilter.decide(attachment)).thenReturn(ScopeDecision.INCLUDED);
+        doThrow(new RuntimeException("MinIO unreachable")).when(landingService).land(any(), any(), any(), any());
 
         ResponseEntity<?> response = controller.handle("1000", "v0=valid", requestWithBody(body));
 
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.INTERNAL_SERVER_ERROR);
-        verify(slackLane).run(any(Stream.class), any());
-        // The GroupState merge/persist already happened and stands regardless of the publish
+        // The GroupState merge/persist already happened and stands regardless of the landing
         // outcome - only the ACK reflects the failure, nothing about reconciliation is undone.
         verify(sessionScheduler).scheduleOrReschedule(groupState);
     }
