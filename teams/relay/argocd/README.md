@@ -92,21 +92,9 @@ team's sync.
   `monitoring.coreos.com/v1` CRDs exist, so on a fresh cluster
   `resonance-flow`'s first sync skips ServiceMonitors, and ArgoCD's next
   refresh adds them once this app has installed the CRDs.
-- **What gets scraped.** Prometheus selects every ServiceMonitor, PodMonitor
-  and PrometheusRule in the cluster, not only ones labelled for its own
-  release. A team opts its component in with `components.<team>.metrics`
-  - see the chart's [README](../helm/resonance-flow/README.md#metrics-scraping-metrics).
-- **Storage.** 15 days, capped at 9GB, on a 10Gi PVC from the cluster's
-  default StorageClass.
-- **Not scraped.** etcd, kube-scheduler, kube-controller-manager and
-  kube-proxy are disabled - they aren't reachable from pod networking on
-  kind or on managed clusters, and would only produce permanent
-  `TargetDown` alerts.
-- **Alerting.** Alertmanager runs with the chart's default rules but no
-  receivers yet - alerts are visible in its UI only.
-
-- **Grafana.** Disabled for now (the chart turns it on by default) - enabling
-  and exposing it is a separate issue.
+- **Scraping a service.** A team opts its component in with
+  `components.<team>.metrics` - see the chart's
+  [README](../helm/resonance-flow/README.md#metrics-scraping-metrics).
 
 Nothing here has an Ingress. Reach Prometheus and Alertmanager with:
 
