@@ -195,14 +195,14 @@ own `@KafkaListener` handler, and the handlers share the claim/logging skeleton 
 | `task.created` | Inbox | `TaskCreatedEventHandler` | state-based (no event id) | 3 attempts, 2s apart |
 | `task.updated` | Inbox | `TaskUpdatedEventHandler` | state-based, last-write-wins on `updated_at` | 3 attempts, 2s apart |
 | `task.completed` | Inbox | `TaskCompletedEventHandler` | state-based; Kafka record timestamp compared to stored `updated_at`, never written | 3 attempts, 2s apart |
-| `task.dependencies.proposed` | Mind | `DependencyProposedEventHandler` | `event_id` claim in `ProcessedEventStore` | 5 attempts, 5s apart |
+| `task.dependencies.proposed` | Mind | `DependencyProposedEventHandler` | `event_id` claim in `ProcessedEventStore` | 3 attempts, 2s apart |
 
 **Retry and dead-lettering**: retries are non-blocking, via `@RetryableTopic`, so a message waiting
 to retry never stalls the rest of its partition. Every exception is retried except
 `NonRetryableEventException` (malformed messages, cycles), which goes straight to `<topic>.errors`.
 Retries are bounded (see the table), so an unexpected bug costs a few delayed attempts before it
 lands on `<topic>.errors`. A typical retried case is `ReferencedTaskNotFoundException`, raised when
-a referenced task has not arrived yet.
+a referenced task has not arrived yet (not on `task.dependencies.proposed`, which creates placeholders).
 
 **Offsets**: auto-commit is disabled and each listener uses `AckMode.RECORD`. An offset is committed
 only after its record is handled or handed to its retry/DLT topic, so a crash mid-processing
@@ -1002,15 +1002,11 @@ the same wrong `tenant_id`. When the stored `tenant_id` is still null (a legacy 
 this column), the event's value backfills it instead - that's the normal first-population case,
 not a mismatch.
 
-**Mind is not a tenant source, by design - there is no Mind-side tenant cross-check to build.**
-An earlier draft of this issue assumed Mind's `task.dependencies.proposed` event carries its own
-`tenant_id` to cross-check against Chain's stored value. It doesn't, and shouldn't: `tenant_id`
-is only ever meant to arrive from Inbox. This is also true on the wire - Mind's real message
-(`shared/proto/task-dependencies-proposed-event.proto` -> `DependencyProposedEvent`, a
-cross-team, Relay-owned registered schema) has no `tenant_id` field, and adding one would be a
-cross-team schema change (Relay + Mind), not a Chain-only one - moot anyway, since the per-edge
-check above already covers a cross-tenant edge proposed by Mind using the tasks' own
-Inbox-sourced tenant, regardless of who proposed the edge.
+**Placeholders on `task.dependencies.proposed`.** The event now carries `tenant_id`. A missing source
+or target task is created as a `PENDING` placeholder in that tenant (`updatedAt` = epoch, counters 0)
+inside the graph lock, and the edge is recorded right away; an existing task is never overwritten,
+and one in a different tenant rejects the whole event (no retry, nothing created). A later
+`task.updated` replaces the placeholder's state.
 
 Tests: `TaskEligibilityServiceTest` (same/different/null-tenant `addDependency`/`addDependencies`,
 `onTaskStatusChangedIfNewer` backfill/match/reject incl. the stale-redelivery case),

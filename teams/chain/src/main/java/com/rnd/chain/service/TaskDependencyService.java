@@ -106,10 +106,7 @@ public class TaskDependencyService {
     /**
      * Same as {@link #addDependency(UUID, UUID, DependencyChangeSource, String)}, with an
      * explicit Mind confidence (issue #445) for this specific edge instead of defaulting to full
-     * confidence. {@code DependencyProposedEventHandler} uses this overload for a dependency
-     * whose target task is already known; see that handler's class for the known gap on the
-     * "target not seen yet" path (confidence isn't preserved through
-     * {@code UnresolvedDependencyService} today).
+     * confidence.
      */
     public TaskDependency addDependency(UUID taskId, UUID dependsOnTaskId,
                                          DependencyChangeSource source, String sourceRef, Double confidence) {
