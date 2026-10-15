@@ -168,6 +168,7 @@ Ancestors has no `/transitive` variant - the ancestor chain already is the trans
 | GET | `/tasks/{taskId}/dependencies` | Direct dependencies |
 | GET | `/tasks/{taskId}/dependencies/transitive` | All (transitive) dependencies |
 | GET | `/tasks/{taskId}/dependencies/history` | Dependency change history |
+| GET | `/tasks/{taskId}/state-history` | Status / blocking history, filterable by time range |
 | GET | `/tasks/{taskId}/dependents` | Direct dependents |
 | GET | `/tasks/{taskId}/dependents/transitive` | All (transitive) dependents |
 | GET | `/tasks/{taskId}/ancestors` | Full ancestor chain (hierarchy) |
@@ -182,6 +183,7 @@ Traversal routes return `TaskResponse` lists, except:
 - `/trace` returns `TaskTraceResponse`
 - `/blockers` returns `TaskAvailability`
 - `/dependencies/history` returns `PageResponse<DependencyHistoryResponse>`
+- `/state-history` returns `PageResponse<TaskStateHistoryResponse>`
 
 An unknown task id returns `404` with an `ApiError` body; an invalid (non-UUID) `taskId` returns `400`.
 
@@ -880,19 +882,86 @@ Same status as the dependency graph: Postgres-backed in production (`PostgresDep
 + `JpaTransactionRunner`), in-memory only as `MockDataConfig`'s fallback. The manual compensating
 action in `TaskDependencyService` was **not** removed - see "Dependency graph persistence" above.
 
-## Task state history (Issue #773, in progress)
+## Task state history (Issues #773, #774, #775)
 
-Append-only table `task_state_history` (V8) for status changes and blocking transitions. This
-step adds only the schema, `TaskStateHistoryEntry`/`TaskStateEventType` and
-`TaskStateHistoryRepository` (in-memory + Postgres). Nothing writes to it yet (writes: #774,
-read endpoint and full docs: #775).
+Append-only log of a task's status changes and blocking transitions, for dependency-flow health
+analytics. Rows are written by Chain itself (#774), in the same transaction as the change they
+describe, so the history can never disagree with the task state. Read access is the endpoint
+below (#775).
 
-- `event_type`: `STATUS_CHANGED` (from/to status set), `BLOCKED` (blocking_count 0 to positive),
-  `UNBLOCKED` (blocking_count back to 0). Columns that don't apply to an event are NULL, enforced
-  by a CHECK.
-- No FK to `task`, so history survives task deletion. No backfill: history starts at deployment.
-- `findByTaskId(taskId, from, to, page, size)`: `[from, to)`, newest first (`created_at`, then
-  `sequence`); a null bound is open.
+### Schema
+
+Table `task_state_history` (Flyway V8):
+
+| Column | Type | Meaning |
+|--------|------|---------|
+| `id` | UUID, PK | Entry id |
+| `task_id` | UUID | The task the event is about (no FK, see below) |
+| `event_type` | VARCHAR(20) | `STATUS_CHANGED`, `BLOCKED` or `UNBLOCKED` |
+| `from_status`, `to_status` | VARCHAR(20), nullable | `PENDING` / `ACTIVE` / `DONE`; set only for `STATUS_CHANGED` |
+| `blocking_count_before`, `blocking_count_after` | INTEGER, nullable | Set only for `BLOCKED` / `UNBLOCKED` |
+| `created_at` | TIMESTAMPTZ | When the change was recorded |
+| `sequence` | BIGSERIAL | Insertion order; tie-breaker for equal `created_at` |
+
+A column that does not apply to an event is always NULL (never "unknown"); a CHECK constraint
+enforces this per event type. Index: `(task_id, created_at DESC, sequence DESC)`.
+
+### Event types
+
+| `event_type` | Recorded when | Fields set |
+|--------------|---------------|------------|
+| `STATUS_CHANGED` | The task's status actually changed | `from_status`, `to_status` |
+| `BLOCKED` | `blockingCount` went from 0 to a positive value | `blocking_count_before` = 0, `blocking_count_after` > 0 |
+| `UNBLOCKED` | `blockingCount` went from a positive value back to 0 | `blocking_count_before` > 0, `blocking_count_after` = 0 |
+
+Only these transitions are recorded: a `blockingCount` change that stays positive (e.g. 1 to 2) or
+a status write that sets the same status writes nothing. The task's tenant is not stored here -
+it never changes for a task, so it can be read from the task itself.
+
+### Limitations
+
+- **No backfill.** History starts at the deployment that introduced it. A task that existed
+  earlier, and has not changed since, has an empty history even though it has a status.
+- **No FK to the task**, so entries survive the task being deleted - but the endpoint returns
+  `404` for a task id that no longer exists, so those entries are not readable through the API.
+
+### Read endpoint
+
+```
+GET /tasks/{taskId}/state-history?from=2026-10-01T00:00:00Z&to=2026-11-01T00:00:00Z&page=0&size=20
+```
+
+| Parameter | Default | Meaning |
+|-----------|---------|---------|
+| `from` | open | ISO-8601 instant with offset, **inclusive** |
+| `to` | open | ISO-8601 instant with offset, **exclusive** |
+| `page` | 0 | Zero-based, must be >= 0 |
+| `size` | 20 | 1 to 100 |
+
+Returns a `PageResponse<TaskStateHistoryResponse>` (`content`, `page`, `size`, `totalElements`,
+`totalPages`), newest first. Fields that do not apply to an entry's `eventType` are omitted from
+the JSON:
+
+```json
+{
+  "content": [
+    {"id": "...", "taskId": "...", "eventType": "UNBLOCKED",
+     "blockingCountBefore": 2, "blockingCountAfter": 0, "createdAt": "2026-10-02T09:15:00Z"},
+    {"id": "...", "taskId": "...", "eventType": "STATUS_CHANGED",
+     "fromStatus": "PENDING", "toStatus": "ACTIVE", "createdAt": "2026-10-01T10:00:00Z"}
+  ],
+  "page": 0, "size": 20, "totalElements": 2, "totalPages": 1
+}
+```
+
+- A task that exists but has no history (see "No backfill") returns `200` with empty `content`;
+  `404` is only for a `taskId` that does not exist.
+- `400` for: `from` after `to` (`from == to` is valid and returns an empty page), a negative
+  `page`, `size` outside 1..100, a date that is not an ISO-8601 instant with an offset, or a
+  non-UUID `taskId`.
+- Code: `TaskStateHistoryController` -> `TaskStateHistoryService` -> `TaskStateHistoryRepository`
+  (in-memory + `PostgresTaskStateHistoryRepository`); `TaskStateHistoryResponse` is the API-layer
+  DTO, kept separate from the domain `TaskStateHistoryEntry`.
 
 ## Constraint persistence (Issue #378)
 
