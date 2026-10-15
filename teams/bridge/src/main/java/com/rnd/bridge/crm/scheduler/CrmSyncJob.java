@@ -23,7 +23,12 @@ import org.springframework.stereotype.Component;
  * Enabled/disabled checking, start/complete logging, and catching a failed run so it never
  * propagates are now {@link SyncJobScheduler}'s job, shared by every {@link SyncJob} - this class
  * (formerly {@code CrmSyncScheduler}) only still logs {@code skippedAtRead}, which has no
- * equivalent on {@link IntakeResult} or any other job.
+ * equivalent on {@link IntakeResult} or any other job. Logged at WARN, not INFO, whenever it's
+ * greater than zero - {@link SyncJobScheduler}'s shared "complete: N read, N published, N
+ * rejected" summary has no room for it, so without this line a partial sync (some deals silently
+ * skipped at read - see {@code HubSpotDealRepository}) would otherwise report success on the
+ * scheduled path exactly like a clean one. The HTTP path doesn't need this: {@code
+ * CrmSyncResponse} already surfaces {@code skippedAtRead} in its JSON body.
  */
 @Component
 public class CrmSyncJob implements SyncJob {
@@ -63,7 +68,11 @@ public class CrmSyncJob implements SyncJob {
     public IntakeResult runOnce() {
         DealSnapshot snapshot = dealRepository.snapshot();
         IntakeResult result = crmLane.run(snapshot.latestPerDeal().stream(), snapshot.asOf());
-        log.info("CRM sync: {} skipped at read.", snapshot.skippedAtRead());
+        if (snapshot.skippedAtRead() > 0) {
+            log.warn("CRM sync: partial sync, {} deal(s) skipped at read.", snapshot.skippedAtRead());
+        } else {
+            log.info("CRM sync: {} skipped at read.", snapshot.skippedAtRead());
+        }
         return result;
     }
 }

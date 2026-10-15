@@ -34,7 +34,9 @@ class CrmLaneConfig {
             String organizationId,
             Environment environment,
             EnrichmentProperties enrichmentProperties,
-            TaskEnricher taskEnricher) {
+            TaskEnricher taskEnricher,
+            @Value("${bridge.crm.stalled-after-days:14}")
+            int stalledAfterDays) {
         // CrmTaskValidator.LOCAL_PLACEHOLDER_TENANT_ID only makes sense without the kafka profile
         // (fixture data, LoggingPayloadPublisher - nothing leaves the process). Once kafka is
         // active, a missing/malformed/still-the-placeholder tenant id means every published
@@ -45,7 +47,7 @@ class CrmLaneConfig {
         if (environment.matchesProfiles("kafka")) {
             requireValidTenantIdForKafka(organizationId);
         }
-        return new DealToTaskMapper(organizationId, enrichmentProperties, taskEnricher);
+        return new DealToTaskMapper(organizationId, enrichmentProperties, taskEnricher, stalledAfterDays);
     }
 
     // HubSpotDealRepository (@Profile("hubspot")) and SalesforceDealRepository
