@@ -32,9 +32,13 @@ CHECKSUM_PATH = PERSONAS_DIR / "personas.sha256"
 
 
 def compute_personas_checksum(
-    personas_dir: str | Path, hierarchy_dir: str | Path | None = None
+    personas_dir: str | Path, *, hierarchy_dir: str | Path | None
 ) -> str:
     """SHA-256 over every scenario file under `personas_dir`, plus `hierarchy_dir`.
+
+    `hierarchy_dir` is required, with no default: forgetting it would silently
+    give a checksum that never matches `personas.sha256`. Pass `None` to mean
+    "this set has no hierarchy".
 
     Recurses (same_tier/, cross_tier/, any future group), skips the generated
     `scenario.schema.json`, and hashes each file's path (relative to
@@ -80,7 +84,7 @@ def _entry(relative: str, path: Path) -> bytes:
 
 def render_checksum() -> str:
     """The exact text that belongs in personas.sha256 (trailing newline included)."""
-    return compute_personas_checksum(PERSONAS_DIR, HIERARCHY_DIR) + "\n"
+    return compute_personas_checksum(PERSONAS_DIR, hierarchy_dir=HIERARCHY_DIR) + "\n"
 
 
 def main() -> None:

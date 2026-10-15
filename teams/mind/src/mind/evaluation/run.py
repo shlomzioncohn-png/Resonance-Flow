@@ -20,7 +20,7 @@ from mind.evaluation.baseline_record import (
 )
 from mind.evaluation.dummy_model import DummyModel
 from mind.evaluation.harness import EvaluationOutput, Report, run, split_by_role
-from mind.evaluation.hierarchy import validate_hierarchy_links
+from mind.evaluation.hierarchy import NODES_FILENAME, validate_hierarchy_links
 from mind.evaluation.interfaces import RankingModel
 from mind.evaluation.personas import (
     HIERARCHY_DIR,
@@ -159,8 +159,8 @@ def main() -> None:
     # that names no node fails the run, the same way a broken scenario does.
     hierarchy_dir: Path = args.hierarchy
     try:
-        fixture = load_hierarchy(hierarchy_dir / "nodes.json")
-    except (OSError, ValidationError) as e:
+        fixture = load_hierarchy(hierarchy_dir / NODES_FILENAME)
+    except (OSError, UnicodeDecodeError, ValidationError) as e:
         print(f"Could not load the hierarchy from {str(hierarchy_dir)!r}: {e}", file=sys.stderr)
         sys.exit(1)
     link_errors = validate_hierarchy_links(all_scenarios, fixture)

@@ -23,6 +23,7 @@ from mind.evaluation.baseline_record import (
 )
 from mind.evaluation.dummy_model import DummyModel
 from mind.evaluation.harness import run, split_by_role
+from mind.evaluation.hierarchy import NODES_FILENAME
 from mind.evaluation.personas import load_personas
 from mind.evaluation.personas_checksum import compute_personas_checksum
 from mind.evaluation.placeholder_scenarios import PLACEHOLDER_SCENARIOS
@@ -110,11 +111,44 @@ def test_record_is_labelled_with_date_model_commits_metric_and_persona_set(place
     assert record.format_version == 1
     assert record.persona_set == PersonaSetInfo(
         path=placeholder_dir.as_posix(),
-        checksum=compute_personas_checksum(placeholder_dir),
+        checksum=compute_personas_checksum(placeholder_dir, hierarchy_dir=None),
         commit="b" * 40,
         scenarios=2,
         team_lead_approved=0,
     )
+
+
+def _real_record(personas_path: Path, hierarchy_dir: Path) -> BaselineRecord:
+    scenarios = load_personas(personas_path)
+    combined = run(DummyModel(), scenarios)
+    return build_baseline_record(
+        recorded_on=date(2026, 10, 4),
+        provenance=FAKE_PROVENANCE,
+        personas_path=personas_path,
+        hierarchy_dir=hierarchy_dir,
+        scenarios=scenarios,
+        combined=combined,
+        groups={},
+        roles={},
+    )
+
+
+def test_record_stores_paths_relative_to_the_team_dir_whether_given_absolute_or_relative(
+    monkeypatch,
+):
+    absolute = _real_record(REAL_PERSONAS_DIR, REAL_HIERARCHY_DIR).persona_set
+
+    monkeypatch.chdir(REAL_PERSONAS_DIR.parent.parent)  # teams/mind, as `make eval` runs
+    relative = _real_record(Path("eval/personas"), Path("eval/hierarchy")).persona_set
+
+    # A committed record must not carry the recorder's machine layout.
+    assert (absolute.path, absolute.hierarchy_path) == ("eval/personas", "eval/hierarchy")
+    assert (relative.path, relative.hierarchy_path) == ("eval/personas", "eval/hierarchy")
+
+
+def test_record_keeps_a_path_outside_the_team_dir_as_given(placeholder_dir):
+    # A temporary copy has no team-relative form; it is stored as it was passed.
+    assert _record(placeholder_dir).persona_set.path == placeholder_dir.as_posix()
 
 
 def test_record_carries_overall_per_role_and_per_scenario_results(placeholder_dir):
@@ -326,7 +360,9 @@ def test_the_checksum_is_computed_from_the_files_not_given_by_the_caller(placeho
     record = _record(placeholder_dir)
 
     # build_baseline_record has no checksum parameter; the value can only come from the set.
-    assert record.persona_set.checksum == compute_personas_checksum(placeholder_dir)
+    assert record.persona_set.checksum == compute_personas_checksum(
+        placeholder_dir, hierarchy_dir=None
+    )
     assert len(record.persona_set.checksum) == 64
 
 
@@ -350,7 +386,9 @@ def test_load_refuses_when_a_scenario_was_edited_after_the_baseline_was_recorded
     data = json.loads(victim.read_text(encoding="utf-8"))
     data["expected_reason"] += " (edited after the baseline was recorded)"
     victim.write_text(json.dumps(data), encoding="utf-8")
-    assert compute_personas_checksum(changed) != compute_personas_checksum(REAL_PERSONAS_DIR)
+    assert compute_personas_checksum(
+        changed, hierarchy_dir=changed.parent / "hierarchy"
+    ) != compute_personas_checksum(REAL_PERSONAS_DIR, hierarchy_dir=REAL_HIERARCHY_DIR)
 
     with pytest.raises(BaselineRecordError, match="same fixed set"):
         load_baseline_record(
@@ -377,7 +415,7 @@ def test_load_refuses_when_a_hierarchy_node_was_edited_after_the_baseline_was_re
     path = tmp_path / "baseline_score.json"
     _write_real_record(path)
     changed = _copy_real_set(tmp_path, "node_changed")
-    nodes_file = changed.parent / "hierarchy" / "nodes.json"
+    nodes_file = changed.parent / "hierarchy" / NODES_FILENAME
     data = json.loads(nodes_file.read_text(encoding="utf-8"))
     original_importance = data["nodes"][0]["importance"]
     data["nodes"][0]["importance"] = 0.35  # not one of the levels the set uses

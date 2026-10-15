@@ -18,7 +18,11 @@ from mind.evaluation.interfaces import PersonaEvaluationScenario
 from mind.evaluation.personas import HIERARCHY_DIR
 from mind.scoring.hierarchy import HierarchyFixture
 
-HIERARCHY_PATH = HIERARCHY_DIR / "nodes.json"
+# The node file's name inside a hierarchy directory. The one place it is spelled
+# out: run.py reads `<--hierarchy dir> / NODES_FILENAME`, and HIERARCHY_PATH is the
+# real set's file.
+NODES_FILENAME = "nodes.json"
+HIERARCHY_PATH = HIERARCHY_DIR / NODES_FILENAME
 
 
 def validate_hierarchy_links(

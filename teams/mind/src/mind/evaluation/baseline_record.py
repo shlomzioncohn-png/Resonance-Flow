@@ -26,7 +26,11 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_valida
 
 from mind.evaluation.harness import Report, ScenarioResult
 from mind.evaluation.interfaces import PersonaEvaluationScenario
+from mind.evaluation.personas import PERSONAS_DIR
 from mind.evaluation.personas_checksum import compute_personas_checksum
+
+# teams/mind: the directory every path stored in a record is made relative to.
+_TEAM_DIR = PERSONAS_DIR.parent.parent
 
 METRIC = "top-1 accuracy"
 
@@ -212,6 +216,22 @@ class BaselineRecord(BaseModel):
         )
 
 
+def _team_relative(path: Path) -> str:
+    """`path` as stored in a record: relative to teams/mind when it is inside it.
+
+    A record is committed to the repo, so it must not carry the recorder's own
+    directory layout (`/Users/<name>/...`, `C:/Users/...`): the same set recorded
+    on two machines has to read the same. Paths are resolved first, so an
+    absolute `--hierarchy` default and a relative `--personas eval/personas`
+    both come out as `eval/...`. A path outside teams/mind (a temporary copy in a
+    test) has no team-relative form and is stored as given.
+    """
+    try:
+        return path.resolve().relative_to(_TEAM_DIR.resolve()).as_posix()
+    except ValueError:
+        return path.as_posix()
+
+
 def build_baseline_record(
     *,
     recorded_on: date,
@@ -228,9 +248,10 @@ def build_baseline_record(
 
     The persona set's checksum is computed here from `personas_path` and
     `hierarchy_dir`, not passed in. `hierarchy_dir` has no default: the caller
-    says which hierarchy was scored, or `None` for none."""
+    says which hierarchy was scored, or `None` for none. Both paths are stored
+    relative to teams/mind (`_team_relative`)."""
     try:
-        checksum = compute_personas_checksum(personas_path, hierarchy_dir)
+        checksum = compute_personas_checksum(personas_path, hierarchy_dir=hierarchy_dir)
     except FileNotFoundError as e:
         raise BaselineRecordError(f"cannot checksum the persona set: {e}") from e
     return BaselineRecord(
@@ -239,8 +260,8 @@ def build_baseline_record(
         model_commit=provenance.model_commit,
         metric=METRIC,
         persona_set=PersonaSetInfo(
-            path=personas_path.as_posix(),
-            hierarchy_path=hierarchy_dir.as_posix() if hierarchy_dir is not None else None,
+            path=_team_relative(personas_path),
+            hierarchy_path=_team_relative(hierarchy_dir) if hierarchy_dir is not None else None,
             checksum=checksum,
             commit=provenance.persona_set_commit,
             scenarios=len(scenarios),
@@ -311,7 +332,7 @@ def load_baseline_record(
             ) from e
         raise BaselineRecordError(f"{path} is not a valid baseline record:\n{e}") from e
     try:
-        current = compute_personas_checksum(personas_path, hierarchy_dir)
+        current = compute_personas_checksum(personas_path, hierarchy_dir=hierarchy_dir)
     except FileNotFoundError as e:
         raise BaselineRecordError(f"cannot checksum the persona set: {e}") from e
     recorded = record.persona_set.checksum

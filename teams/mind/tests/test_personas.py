@@ -190,6 +190,21 @@ def test_load_personas_reports_every_offending_file(tmp_path):
         load_personas(personas_dir)
 
 
+@pytest.mark.parametrize(
+    "content",
+    [
+        b'{"scenario_id": "\xff\xfe broken"}',  # not valid UTF-8
+        b'{"scenario_id": "developer_cut_off", ',  # valid UTF-8, not valid JSON
+    ],
+)
+def test_load_personas_reports_an_unreadable_file_instead_of_crashing(tmp_path, content):
+    personas_dir = write_personas_dir(tmp_path, [make_scenario(scenario_id="developer_good")])
+    (personas_dir / "developer_unreadable.json").write_bytes(content)
+
+    with pytest.raises(PersonaSchemaError, match="developer_unreadable.json: not valid UTF-8 JSON"):
+        load_personas(personas_dir)
+
+
 # -- validate_personas ------------------------------------------------------
 
 

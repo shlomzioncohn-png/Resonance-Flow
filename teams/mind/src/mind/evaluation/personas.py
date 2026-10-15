@@ -88,7 +88,8 @@ def load_personas(personas_dir: str | Path) -> list[PersonaEvaluationScenario]:
     Returns an empty list if the directory has no scenario files yet (the set is
     built up incrementally before the Foundation Gate). Raises FileNotFoundError
     if the directory is missing, and PersonaSchemaError listing every schema
-    violation found, across every offending file, if any scenario fails to parse.
+    violation found, across every offending file, if any scenario fails to parse
+    (including a file that is not valid UTF-8 or not valid JSON at all).
     """
     personas_path = Path(personas_dir)
     if not personas_path.is_dir():
@@ -100,8 +101,14 @@ def load_personas(personas_dir: str | Path) -> list[PersonaEvaluationScenario]:
         if scenario_path.name == SCHEMA_FILENAME:
             continue
 
-        with scenario_path.open(encoding="utf-8") as f:
-            raw = json.load(f)
+        # A file that is not UTF-8 or not JSON is as broken as one that fails the
+        # model: report it with the others instead of escaping as a raw traceback.
+        try:
+            with scenario_path.open(encoding="utf-8") as f:
+                raw = json.load(f)
+        except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+            schema_errors.append(f"{scenario_path.name}: not valid UTF-8 JSON: {exc}")
+            continue
 
         try:
             scenarios.append(PersonaEvaluationScenario.model_validate(raw))

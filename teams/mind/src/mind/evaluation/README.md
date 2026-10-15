@@ -369,7 +369,10 @@ manual spot-check and the week-7 comparison).
   record stores `personas_checksum.compute_personas_checksum` of the persona
   directory that was scored **and of the hierarchy given with `--hierarchy`**
   (default `eval/hierarchy`; its path is stored as `persona_set.hierarchy_path`).
-  For the real set that is the same checksum `make lint` checks against
+  Both `persona_set.path` and `persona_set.hierarchy_path` are stored relative to
+  `teams/mind` (`eval/personas`, `eval/hierarchy`), however they were passed, so a
+  committed record never carries the recorder's own directory layout and reads
+  the same on every machine. For the real set that is the same checksum `make lint` checks against
   `eval/personas/personas.sha256`. It is computed from the files themselves, so
   it cannot be typed wrong, and it describes exactly what was scored, including
   uncommitted edits to the scenarios or to a node's importance. `load_baseline_record` refuses to load a
