@@ -142,12 +142,12 @@ class TaskCompletedEventHandlerTest {
     }
 
     @Test
-    void onMessage_referencingATaskThatDoesNotExist_throwsReferencedTaskNotFoundException() {
+    void onMessage_referencingATaskThatDoesNotExist_throwsTransientProcessingException() {
         Fixture fixture = newFixture(List.of(), List.of());
         ConsumerRecord<String, TaskCompletedEvent> unknown =
                 record(UUID.randomUUID().toString(), true, BASE_TIME);
 
-        assertThrows(ReferencedTaskNotFoundException.class, () -> fixture.handler().onMessage(unknown));
+        assertThrows(ChainTransientProcessingException.class, () -> fixture.handler().onMessage(unknown));
     }
 
     @Test

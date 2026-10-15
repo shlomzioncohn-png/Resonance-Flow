@@ -34,10 +34,7 @@ import static com.rnd.chain.events.EventFields.toLocalDateTime;
  * {@link TaskEligibilityService#onTaskStatusChangedIfNewer}'s graph-lock critical section,
  * preventing concurrent task.updated events for the same task from interleaving incorrectly.
  *
- * OPEN DISCREPANCY: task-created-event.proto's header documentation suggests that events may
- * carry an event_id as a Kafka header, while the current task.updated contract is handled as
- * having no event id. This handler therefore uses state-based idempotency. If task.updated is
- * later confirmed to carry an event id, this handler should use
+ * task.updated carries no event id, hence state-based idempotency; if it gains one, use
  * {@link ChainEventProcessingTemplate#processClaimed} instead.
  */
 @Component

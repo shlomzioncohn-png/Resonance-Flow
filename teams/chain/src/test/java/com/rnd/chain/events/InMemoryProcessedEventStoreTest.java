@@ -29,7 +29,7 @@ class InMemoryProcessedEventStoreTest {
     @Test
     void tryClaim_returnsTrue_forANewEventId() {
         InMemoryProcessedEventStore store = new InMemoryProcessedEventStore();
-        ProcessedEvent event = new ProcessedEvent(UUID.randomUUID(), "task.created", Instant.now());
+        ProcessedEvent event = new ProcessedEvent(UUID.randomUUID(), "task.updated", Instant.now());
 
         assertTrue(store.tryClaim(event));
     }
@@ -38,8 +38,8 @@ class InMemoryProcessedEventStoreTest {
     void tryClaim_returnsFalse_whenTheSameEventIdIsClaimedAgain() {
         InMemoryProcessedEventStore store = new InMemoryProcessedEventStore();
         UUID eventId = UUID.randomUUID();
-        ProcessedEvent first = new ProcessedEvent(eventId, "task.created", Instant.now());
-        ProcessedEvent secondDelivery = new ProcessedEvent(eventId, "task.created", Instant.now());
+        ProcessedEvent first = new ProcessedEvent(eventId, "task.updated", Instant.now());
+        ProcessedEvent secondDelivery = new ProcessedEvent(eventId, "task.updated", Instant.now());
 
         assertTrue(store.tryClaim(first));
         assertFalse(store.tryClaim(secondDelivery));
@@ -48,8 +48,8 @@ class InMemoryProcessedEventStoreTest {
     @Test
     void tryClaim_treatsDifferentEventIdsIndependently() {
         InMemoryProcessedEventStore store = new InMemoryProcessedEventStore();
-        ProcessedEvent first = new ProcessedEvent(UUID.randomUUID(), "task.created", Instant.now());
-        ProcessedEvent second = new ProcessedEvent(UUID.randomUUID(), "task.created", Instant.now());
+        ProcessedEvent first = new ProcessedEvent(UUID.randomUUID(), "task.updated", Instant.now());
+        ProcessedEvent second = new ProcessedEvent(UUID.randomUUID(), "task.updated", Instant.now());
 
         assertTrue(store.tryClaim(first));
         assertTrue(store.tryClaim(second));
@@ -59,11 +59,11 @@ class InMemoryProcessedEventStoreTest {
     void release_allowsTheSameEventIdToBeClaimedAgain() {
         InMemoryProcessedEventStore store = new InMemoryProcessedEventStore();
         UUID eventId = UUID.randomUUID();
-        store.tryClaim(new ProcessedEvent(eventId, "task.created", Instant.now()));
+        store.tryClaim(new ProcessedEvent(eventId, "task.updated", Instant.now()));
 
         store.release(eventId);
 
-        assertTrue(store.tryClaim(new ProcessedEvent(eventId, "task.created", Instant.now())),
+        assertTrue(store.tryClaim(new ProcessedEvent(eventId, "task.updated", Instant.now())),
                 "after release, the same eventId must be claimable again (e.g. a retry after a handler failure)");
     }
 
@@ -90,7 +90,7 @@ class InMemoryProcessedEventStoreTest {
                 ready.countDown();
                 try {
                     start.await();
-                    ProcessedEvent event = new ProcessedEvent(eventId, "task.created", Instant.now());
+                    ProcessedEvent event = new ProcessedEvent(eventId, "task.updated", Instant.now());
                     if (store.tryClaim(event)) {
                         winners.incrementAndGet();
                     }

@@ -105,15 +105,14 @@ src/main/java/com/rnd/chain/
 │                           # TaskResponse, TaskTraceResponse, ProcessedEvent (idempotency
 │                           # claim record)
 ├── events/                 # Kafka consume/publish infrastructure - see below
-│   ├── TaskCreatedEventHandler.java / TaskUpdatedEventHandler.java /
-│   │   TaskCompletedEventHandler.java /
+│   ├── TaskUpdatedEventHandler.java / TaskCompletedEventHandler.java /
 │   │   DependencyProposedEventHandler.java   # one @KafkaListener per inbound topic
 │   ├── ChainEventProcessingTemplate.java     # shared claim/logging skeleton
 │   ├── EventFields.java                      # UUID / Timestamp parsing shared by the handlers
 │   ├── ChainProtobufKafkaConfig.java         # Protobuf consumer/producer factories
 │   ├── EventPublisher.java / KafkaEventPublisher.java
 │   ├── ChainEventTopicsProperties.java
-│   ├── ChainTransientProcessingException.java / ReferencedTaskNotFoundException.java
+│   ├── ChainTransientProcessingException.java
 │   ├── NonRetryableEventException.java / InboxTaskStatusMapper.java
 │   ├── ProcessedEventStore.java / InMemoryProcessedEventStore.java
 │   └── payloads/
@@ -187,13 +186,12 @@ An unknown task id returns `404` with an `ApiError` body; an invalid (non-UUID) 
 
 ## Kafka event infrastructure
 
-Chain consumes four Protobuf topics and publishes one Protobuf topic. Each inbound topic has its
+Chain consumes three Protobuf topics and publishes one Protobuf topic. Each inbound topic has its
 own `@KafkaListener` handler, and the handlers share the claim/logging skeleton in
 `ChainEventProcessingTemplate`.
 
 | Topic | Producer | Handler | Idempotency | Retries before `.errors` |
 | --- | --- | --- | --- | --- |
-| `task.created` | Inbox | `TaskCreatedEventHandler` | state-based (no event id) | 3 attempts, 2s apart |
 | `task.updated` | Inbox | `TaskUpdatedEventHandler` | state-based, last-write-wins on `updated_at` | 3 attempts, 2s apart |
 | `task.completed` | Inbox | `TaskCompletedEventHandler` | state-based; Kafka record timestamp compared to stored `updated_at`, never written | 3 attempts, 2s apart |
 | `task.dependencies.proposed` | Mind | `DependencyProposedEventHandler` | `event_id` claim in `ProcessedEventStore` | 3 attempts, 2s apart |
@@ -202,15 +200,14 @@ own `@KafkaListener` handler, and the handlers share the claim/logging skeleton 
 to retry never stalls the rest of its partition. Every exception is retried except
 `NonRetryableEventException` (malformed messages, cycles), which goes straight to `<topic>.errors`.
 Retries are bounded (see the table), so an unexpected bug costs a few delayed attempts before it
-lands on `<topic>.errors`. A typical retried case is `ReferencedTaskNotFoundException`, raised when
-a referenced task has not arrived yet (not on `task.dependencies.proposed`, which creates placeholders).
+lands on `<topic>.errors`. A typical retried case is a `task.completed` for a task Chain has not seen yet.
 
 **Offsets**: auto-commit is disabled and each listener uses `AckMode.RECORD`. An offset is committed
 only after its record is handled or handed to its retry/DLT topic, so a crash mid-processing
 redelivers the record instead of losing it.
 
 **Idempotency**: `task.dependencies.proposed` is deduplicated by `event_id`. The claim is released if
-the handler fails, so a retry can process the event again. `task.created`, `task.updated` and `task.completed` carry no
+the handler fails, so a retry can process the event again. `task.updated` and `task.completed` carry no
 event id, so they rely on their state changes being safe to repeat. `task.completed` has no
 timestamp either, so its Kafka record timestamp is compared against the stored `updated_at` (to
 ignore a completion that arrives after a reopen) but never written to it; this is interim until
@@ -235,7 +232,8 @@ maps to `ACTIVE`, and every other status maps to `PENDING`.
 reads as "leave the stored value unchanged". `KafkaEventPublisher` (flat JSON, no envelope) was removed under #543 - it had no production caller.
 
 **Schemas**: the `.proto` sources come from the repo's [`shared/proto/`](../../shared/proto)
-(`task-created-event`, `task-updated-event`, `task-dependencies-proposed-event`,
+(`chain-task-updated-event` - a self-contained copy of `task-updated-event` - and
+`task-dependencies-proposed-event`,
 `scheduling-updated-event`). Messages are
 validated against the Schema Registry at `SCHEMA_REGISTRY_URL`. Tests use a mock registry
 (`mock://...`), so no registry process is needed.
@@ -244,7 +242,6 @@ validated against the Schema Registry at `SCHEMA_REGISTRY_URL`. Tests use a mock
 
 | Property | Purpose | Default |
 | --- | --- | --- |
-| `chain.kafka.topics.task-created` (env `TASK_CREATED_TOPIC`) | Topic consumed for `task.created` | `task.created` |
 | `chain.kafka.topics.task-updated` (env `TASK_UPDATED_TOPIC`) | Topic consumed for `task.updated` | `task.updated` |
 | `chain.kafka.topics.task-completed` (env `TASK_COMPLETED_TOPIC`) | Topic consumed for `task.completed` | `task.completed` |
 | `chain.kafka.topics.dependencies-proposed` (env `DEPENDENCIES_PROPOSED_TOPIC`) | Topic consumed for `task.dependencies.proposed` | `task.dependencies.proposed` |
@@ -969,8 +966,8 @@ Full test suite (47 tests, `mvn clean test`) passes.
 
 ## Tenant isolation (Issue #580)
 
-`task.tenant_id` (V6 migration) is populated from Inbox's `task.created`/`task.updated` events
-(`TaskCreatedEventHandler`/`TaskUpdatedEventHandler` -> `TaskEligibilityService`) - Inbox owns
+`task.tenant_id` (V6 migration) is populated from Inbox's `task.updated` events
+(`TaskUpdatedEventHandler` -> `TaskEligibilityService`) - Inbox owns
 tenancy, Chain never originates a tenant assignment. This is a deliberate decision by Chain, not
 a documented spec requirement (the Inbox/Chain ownership spec doesn't mention tenants at all) -
 recorded here for that reason. Whether/how Chain's own read APIs (`/ancestors`, `/descendants`,
