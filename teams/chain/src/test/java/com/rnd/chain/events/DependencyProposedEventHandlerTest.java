@@ -324,6 +324,40 @@ class DependencyProposedEventHandlerTest {
     }
 
     @Test
+    void onMessage_noTenantInEvent_bothTasksMissing_createsPlaceholdersWithNullTenant() {
+        UUID missingSource = UUID.randomUUID();
+        UUID missingDep = UUID.randomUUID();
+        Fixture fixture = newFixture(List.of());
+
+        fixture.handler().onMessage(DependencyProposedEvent.newBuilder()
+                .setEventId(UUID.randomUUID().toString())
+                .setTaskId(missingSource.toString())
+                .addDependencies(dependencyOn(missingDep))
+                .build());
+
+        assertNull(fixture.taskRepo().findById(missingSource).orElseThrow().getTenantId());
+        assertNull(fixture.taskRepo().findById(missingDep).orElseThrow().getTenantId());
+        assertEquals(1, fixture.dependencyRepo().findByTaskId(missingSource).size());
+    }
+
+    @Test
+    void onMessage_noTenantInEvent_missingTarget_copiesTheTenantOfTheExistingSource() {
+        UUID taskId = UUID.randomUUID();
+        UUID missingDep = UUID.randomUUID();
+        Fixture fixture = newFixture(List.of(buildTask(taskId)));
+
+        fixture.handler().onMessage(DependencyProposedEvent.newBuilder()
+                .setEventId(UUID.randomUUID().toString())
+                .setTaskId(taskId.toString())
+                .addDependencies(dependencyOn(missingDep))
+                .build());
+
+        assertEquals(TaskTestFixtures.DEFAULT_TENANT_ID,
+                fixture.taskRepo().findById(missingDep).orElseThrow().getTenantId());
+        assertEquals(1, fixture.dependencyRepo().findByTaskId(taskId).size());
+    }
+
+    @Test
     void onMessage_thatWouldCreateACycle_throwsNonRetryableEventException() {
 
         UUID taskA = UUID.randomUUID();

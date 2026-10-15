@@ -72,19 +72,29 @@ public class DependencyEdgeService {
             UUID dependsOnTaskId,
             Double confidence) {
 
-        return addDependency(taskId, dependsOnTaskId, confidence, null);
+        return doAddDependency(taskId, dependsOnTaskId, confidence, false, null);
     }
 
     /**
      * Same as {@link #addDependency(UUID, UUID, Double)}, but a missing task is first created as a
-     * PENDING placeholder in {@code tenantId}; an existing task in another tenant is rejected.
-     * A null {@code tenantId} keeps the strict behavior: both tasks must already exist.
+     * PENDING placeholder. A non-null {@code tenantId} must match any existing task; a null one is
+     * copied from an existing task of the edge, or left null when both tasks are new.
      */
     @Transactional
-    public TaskDependency addDependency(
+    public TaskDependency addDependencyCreatingMissing(
             UUID taskId,
             UUID dependsOnTaskId,
             Double confidence,
+            UUID tenantId) {
+
+        return doAddDependency(taskId, dependsOnTaskId, confidence, true, tenantId);
+    }
+
+    private TaskDependency doAddDependency(
+            UUID taskId,
+            UUID dependsOnTaskId,
+            Double confidence,
+            boolean createMissing,
             UUID tenantId) {
 
         Objects.requireNonNull(
@@ -103,9 +113,8 @@ public class DependencyEdgeService {
 
         return graphLock.runExclusive(() -> {
 
-            if (tenantId != null) {
-                taskCounterUpdater.insertPlaceholderIfAbsent(taskId, tenantId);
-                taskCounterUpdater.insertPlaceholderIfAbsent(dependsOnTaskId, tenantId);
+            if (createMissing) {
+                taskCounterUpdater.insertPlaceholdersIfAbsent(taskId, dependsOnTaskId, tenantId);
             }
 
             // Checked before the cycle check and the task lookups: a duplicate must not require
@@ -128,7 +137,11 @@ public class DependencyEdgeService {
 
             Task task = taskCounterUpdater.requireTask(taskId);
             Task dependencyTask = taskCounterUpdater.requireTask(dependsOnTaskId);
-            requireSameTenant(task, dependencyTask);
+            if (createMissing && tenantId == null) {
+                requireEqualTenants(task, dependencyTask);
+            } else {
+                requireSameTenant(task, dependencyTask);
+            }
             if (tenantId != null) {
                 requireTenant(task, tenantId);
                 requireTenant(dependencyTask, tenantId);
@@ -192,6 +205,16 @@ public class DependencyEdgeService {
         requireSameTenant(task, dependsOnTask);
         boolean dependsOnAlreadyDone = dependsOnTask.getStatus() == TaskStatus.DONE;
         return new PendingEdge(dependsOnTaskId, confidence, true, dependsOnAlreadyDone);
+    }
+
+    /** Like {@link #requireSameTenant} but two null tenants match (placeholders awaiting a real tenant). */
+    private static void requireEqualTenants(Task task, Task dependsOnTask) {
+        if (!Objects.equals(task.getTenantId(), dependsOnTask.getTenantId())) {
+            throw new CrossTenantDependencyException(
+                    "Dependency rejected: task " + task.getId() + " (tenant " + task.getTenantId()
+                            + ") and task " + dependsOnTask.getId() + " (tenant " + dependsOnTask.getTenantId()
+                            + ") are in different tenants");
+        }
     }
 
     private static void requireTenant(Task task, UUID tenantId) {

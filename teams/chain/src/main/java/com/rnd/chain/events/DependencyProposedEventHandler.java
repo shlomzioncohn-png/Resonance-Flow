@@ -21,7 +21,8 @@ import static com.rnd.chain.events.EventFields.parseUuid;
 
 /**
  * Consumes task.dependencies.proposed. A task referenced by the event that Chain doesn't know yet
- * is created as a PENDING placeholder in the event's tenant, so the edge is recorded right away.
+ * is created as a PENDING placeholder, so the edge is recorded right away. The event's tenant_id is
+ * optional: when absent the tenant is copied from an existing task of the edge, or left null.
  * Cycles, invalid dependencies and cross-tenant edges go straight to .errors without retry.
  */
 @Component
@@ -54,7 +55,7 @@ public class DependencyProposedEventHandler {
 
         UUID eventId = parseUuid(event.getEventId(), "event_id");
         UUID taskId = parseUuid(event.getTaskId(), "task_id");
-        UUID tenantId = parseUuid(event.getTenantId(), "tenant_id");
+        UUID tenantId = event.getTenantId().isEmpty() ? null : parseUuid(event.getTenantId(), "tenant_id");
 
         template.processClaimed(
                 eventId,
@@ -92,7 +93,7 @@ public class DependencyProposedEventHandler {
                     buildSourceRef(eventId, taskId, dependsOnTaskId);
 
             try {
-                taskDependencyService.addDependency(
+                taskDependencyService.addDependencyCreatingMissing(
                         taskId,
                         dependsOnTaskId,
                         DependencyChangeSource.MIND,

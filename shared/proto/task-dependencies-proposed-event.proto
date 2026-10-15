@@ -13,7 +13,7 @@ message DependencyProposedEvent {
   string event_id = 1;                    // UUID as string. Chain dedupes on it.
   string task_id = 2;                     // UUID as string.
   repeated Dependency dependencies = 3;
-  string tenant_id = 4;                   // UUID as string. Same value as Inbox's task.created.
+  string tenant_id = 4;                   // UUID as string. Optional for now; same value as Inbox's task.created.
 }
 
 message Dependency {

@@ -54,8 +54,22 @@ public class TaskCounterUpdater {
         this.schedulingPublishListener = schedulingPublishListener;
     }
 
-    /** Creates a PENDING placeholder (epoch updatedAt, zero counters) if absent; never touches an existing task. */
-    public void insertPlaceholderIfAbsent(UUID taskId, UUID tenantId) {
+    /**
+     * Creates a PENDING placeholder (epoch updatedAt, zero counters) for each absent task; never touches
+     * an existing one. Tenant: the event's if given, else copied from an existing task of the pair, else null.
+     */
+    public void insertPlaceholdersIfAbsent(UUID taskId, UUID dependsOnTaskId, UUID eventTenantId) {
+        UUID tenantId = eventTenantId;
+        if (tenantId == null) {
+            tenantId = taskRepository.findById(taskId).map(Task::getTenantId)
+                    .or(() -> taskRepository.findById(dependsOnTaskId).map(Task::getTenantId))
+                    .orElse(null);
+        }
+        insertPlaceholderIfAbsent(taskId, tenantId);
+        insertPlaceholderIfAbsent(dependsOnTaskId, tenantId);
+    }
+
+    private void insertPlaceholderIfAbsent(UUID taskId, UUID tenantId) {
         taskRepository.insertIfAbsent(Task.builder()
                 .id(taskId)
                 .tenantId(tenantId)
