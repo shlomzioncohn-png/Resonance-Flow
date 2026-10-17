@@ -4,9 +4,9 @@ import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import Chip from '@mui/material/Chip';
 import InputAdornment from '@mui/material/InputAdornment';
+import MuiLink from '@mui/material/Link';
 import MenuItem from '@mui/material/MenuItem';
 import Stack from '@mui/material/Stack';
-import TablePagination from '@mui/material/TablePagination';
 import TextField from '@mui/material/TextField';
 import Typography from '@mui/material/Typography';
 import SearchIcon from '@mui/icons-material/Search';
@@ -182,42 +182,27 @@ export default function EmployeeTasksPage() {
         </TextField>
       </Stack>
 
-      {state === 'loading' && <LoadingState message="Loading your tasks…" />}
-
-      {state === 'error' && <ErrorState description={errorMessage} onRetry={retry} />}
-
-      {state === 'loaded' && (
-        <DataTable
-          columns={columns}
-          rows={tasks}
-          getRowId={(task) => task.id}
-          getRowHref={(task) => `/employee/tasks/${task.id}`}
-          emptyState={
-            isFiltered ? (
-              <EmptyState
-                title="No matching tasks"
-                description="Try a different search or status."
-              />
-            ) : (
-              <EmptyState
-                title="No tasks assigned"
-                description="Tasks assigned to you will show up here."
-              />
-            )
-          }
-        />
-      )}
-
-      {state === 'loaded' && total > 0 && (
-        <TablePagination
-          component="div"
-          count={total}
-          page={page}
-          onPageChange={(_, newPage) => setPage(newPage)}
-          rowsPerPage={pageSize}
-          rowsPerPageOptions={[20, 50, 100]}
-          onRowsPerPageChange={(event) => {
-            setPageSize(Number(event.target.value));
+      <DataTable
+        ariaLabel="My tasks"
+        columns={columns}
+        rows={tasks}
+        getRowId={(task) => task.id}
+        loading={state === 'loading'}
+        error={state === 'error' ? errorMessage : null}
+        onRetry={retry}
+        emptyTitle={isFiltered ? 'No matching tasks' : 'No tasks assigned'}
+        emptyDescription={
+          isFiltered
+            ? 'Try a different search or status.'
+            : 'Tasks assigned to you will show up here.'
+        }
+        pagination={{
+          page,
+          pageSize,
+          totalCount: total,
+          onPageChange: setPage,
+          onPageSizeChange: (size) => {
+            setPageSize(size);
             setPage(0);
           },
         }}
