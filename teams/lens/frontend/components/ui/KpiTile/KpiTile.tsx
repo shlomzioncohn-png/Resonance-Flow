@@ -15,9 +15,11 @@ export interface KpiTileProps {
    * pale gray `status.neutral` swatch, which would look disabled here.
    */
   tone: StatusTone;
+  /** Secondary text shown under the label, e.g. "Last 7 days". */
+  subtitle?: string;
 }
 
-export default function KpiTile({ value, label, tone }: KpiTileProps) {
+export default function KpiTile({ value, label, tone, subtitle }: KpiTileProps) {
   const theme = useTheme();
   const color = tone === 'neutral' ? theme.palette.text.primary : theme.palette.status[tone].main;
 
@@ -30,6 +32,11 @@ export default function KpiTile({ value, label, tone }: KpiTileProps) {
         <Typography variant="body2" color="text.secondary">
           {label}
         </Typography>
+        {subtitle && (
+          <Typography variant="caption" color="text.secondary">
+            {subtitle}
+          </Typography>
+        )}
       </Stack>
     </Card>
   );
