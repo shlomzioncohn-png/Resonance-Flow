@@ -900,6 +900,14 @@ corrections are not recorded yet. Read endpoint and full docs: #775.
 - `findByTaskId(taskId, from, to, page, size)`: `[from, to)`, newest first (`created_at`, then
   `sequence`); a null bound is open.
 
+## Dependency-flow health analytics (`analytics/health/`)
+
+A separate Python project next to the Java service (not part of the Maven build or the Docker image)
+that will flag unhealthy dependency patterns from `dependency_history` and `task_state_history`.
+Stage 1 only: a synthetic history generator that writes rows shaped like those two tables plus a
+ground-truth key of planted diseases. No model, no endpoint, nothing written to Postgres yet. See
+`analytics/health/README.md`.
+
 ## Constraint persistence (Issue #378)
 
 `ConstraintRepository` / `PostgresConstraintRepository` (in `repository/`) give `Constraint` a
