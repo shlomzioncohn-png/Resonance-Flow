@@ -12,4 +12,5 @@ data:
   {{- include "resonance-flow.inbox.dbInitScript" $ | nindent 2 }}
   {{- include "resonance-flow.chain.dbInitScript" $ | nindent 2 }}
   {{- include "resonance-flow.mind.dbInitScript" $ | nindent 2 }}
+  {{- include "resonance-flow.bridge.dbInitScript" $ | nindent 2 }}
 {{- end }}

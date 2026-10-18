@@ -78,7 +78,7 @@ Currently wired up:
 
 - **Kafka** - every component depends on it, so it's set globally
   (`dependencies` in `values.yaml`).
-- **Postgres** - `inbox`, `mind`, and `chain` (Chain with its own database and
+- **Postgres** - `bridge`, `inbox`, `mind`, and `chain` (Bridge and Chain with their own databases and
   user - see [Chain's DB credentials](#chains-db-credentials-componentschain);
   Inbox with its own user - see [Inbox's DB credentials](#inboxs-db-credentials-componentsinbox)).
   pgvector's `vector.so` is overlaid from the official `pgvector/pgvector` image:
@@ -186,6 +186,32 @@ empty — the loader must handle a missing file):
   outside the chart (`kubectl` / sealed-secrets / external-secrets).
 - `secret.create: true` - the chart renders it, values from
   `secret.data.*` (via `--set` for local testing, never committed).
+
+### Bridge's DB credentials (`components.bridge`)
+
+Bridge gets its own PostgreSQL database and user (`bridge`) for control-plane
+state. Its ConfigMap resolves `bridge.postgres.url` from the PostgreSQL dependency
+and `bridge.postgres.database`; `bridge.postgres.user` is the database role.
+These are the properties read by Bridge's `ControlPlanePostgresConfig` (the
+application's `BRIDGE_DB_*` variables are another way to supply the same properties).
+
+The shared `resonance-flow.dbCredentialsHook` creates the
+`resonance-flow-bridge-db-credentials` Secret (key `password`) before PostgreSQL
+starts and reuses an existing non-empty password on upgrades. Bridge mounts it
+at `/etc/resonance-flow/secrets/bridge-db/` and reads it with Spring `configtree`;
+the password is never put in its ConfigMap or environment variables.
+
+PostgreSQL mounts the same Secret optionally. The `create-bridge-database.sh`
+init script creates the role and database; Bridge's own `schema.sql` creates
+`control_plane_state`. Init scripts run only on a fresh PostgreSQL data directory.
+An existing PostgreSQL instance needs the role/database provisioned separately;
+do not delete a database volume to apply this change.
+
+`values/values-bridge.yaml` enables PostgreSQL for Bridge's CI. Bridge's dependency
+list also contains `postgresql:5432`, so its pod waits for PostgreSQL before the
+application starts. Use a Bridge image containing the PostgreSQL code from
+PR #656 to verify application-level writes; rendering this chart alone does not
+verify the application image.
 
 ### Chain's DB credentials (`components.chain`)
 

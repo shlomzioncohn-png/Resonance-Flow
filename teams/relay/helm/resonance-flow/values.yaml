@@ -226,6 +226,7 @@ components:
           import:
             - "configtree:/etc/resonance-flow/secrets/object-storage/"
             - "configtree:/etc/resonance-flow/secrets/kafka/"
+            - "configtree:/etc/resonance-flow/secrets/bridge-db/"
         kafka:
           # GitHub currently publishes to bridge.github.tasks.
           # Issue #275 will decide whether to use the shared topic instead.
@@ -247,6 +248,12 @@ components:
         target:
           project: "${JIRA_TARGET_PROJECT:}"
       bridge:
+        postgres:
+          # Separate control-plane state from Inbox's tasks database.
+          # The URL is resolved in Bridge's ConfigMap from its PostgreSQL dependency.
+          database: bridge
+          user: bridge
+          password: "${password}"
         structured-tasks-topic: "bridge.structured.tasks"
         crm:
           organization-id: "${CRM_ORGANIZATION_ID:}"
@@ -293,6 +300,13 @@ components:
       - name: kafka-credentials
         mountPath: /etc/resonance-flow/secrets/kafka
         readOnly: true
+      - name: bridge-db-credentials
+        mountPath: /etc/resonance-flow/secrets/bridge-db
+        readOnly: true
+    volumes:
+      - name: bridge-db-credentials
+        secret:
+          secretName: resonance-flow-bridge-db-credentials
     dependencySecretVolumes:
       - name: object-storage-credentials
         dependencyName: object-storage
@@ -309,6 +323,8 @@ components:
     dependencies:
       - name: object-storage
         port: 9000
+      - name: postgresql
+        port: 5432
   lens-frontend:
     enabled: true
     replicaCount: 1
@@ -699,6 +715,10 @@ postgresql:
         secret:
           secretName: resonance-flow-inbox-db-credentials
           optional: true
+      - name: bridge-db-credentials
+        secret:
+          secretName: resonance-flow-bridge-db-credentials
+          optional: true
     extraVolumeMounts:
       - name: pgvector
         mountPath: /opt/bitnami/postgresql/lib/vector.so
@@ -712,6 +732,9 @@ postgresql:
         readOnly: true
       - name: inbox-db-credentials
         mountPath: /etc/resonance-flow/secrets/inbox-db
+        readOnly: true
+      - name: bridge-db-credentials
+        mountPath: /etc/resonance-flow/secrets/bridge-db
         readOnly: true
     # HNSW index builds use maintenance_work_mem (64MB default) on top of
     # shared_buffers (128MB) - 192Mi left no headroom and OOMKills instead of erroring.
