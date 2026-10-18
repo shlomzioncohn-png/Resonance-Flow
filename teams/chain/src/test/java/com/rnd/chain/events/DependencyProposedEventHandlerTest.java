@@ -300,7 +300,8 @@ class DependencyProposedEventHandlerTest {
         Task existingDep = Task.builder()
                 .id(depId).tenantId(TaskTestFixtures.DEFAULT_TENANT_ID)
                 .status(TaskStatus.ACTIVE).isReady(true).blockingCount(0).openConstraintCount(0)
-                .createdAt(LocalDateTime.now()).updatedAt(LocalDateTime.now()).build();
+                .createdAt(LocalDateTime.now().truncatedTo(java.time.temporal.ChronoUnit.MICROS))
+                .updatedAt(LocalDateTime.now().truncatedTo(java.time.temporal.ChronoUnit.MICROS)).build();
         Fixture fixture = newFixture(List.of(buildTask(taskId), existingDep));
 
         fixture.handler().onMessage(eventBuilder()
