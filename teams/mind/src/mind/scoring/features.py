@@ -130,17 +130,3 @@ def quick_win(task: ScorableTask) -> float:
         return 0.0
     capped = min(task.effort_estimate, QUICK_WIN_CAP_MINUTES)
     return 1.0 - capped / QUICK_WIN_CAP_MINUTES
-
-
-def belongs_to_initiative(task: ScorableTask) -> float:
-    """1.0 when the task hangs under a parent task, 0.0 when it stands alone.
-
-    `parent_task_id` points *outside* the scenario, so the parent cannot be
-    looked up: the only readable signal is whether a parent exists at all —
-    weak evidence that this sits inside a larger initiative. Walking the chain
-    is R3's week-7 stretch and is deliberately not done here.
-
-    In the current persona set this field is `null` everywhere, so this feature
-    never fires. It exists so the behaviour is defined rather than accidental.
-    """
-    return 0.0 if task.parent_task_id is None else 1.0
