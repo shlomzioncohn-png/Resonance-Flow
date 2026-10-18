@@ -1,0 +1,48 @@
+{{/*
+Renders the mounted config.yaml for notification-delivery (the Pipe service) - delivered
+through the same generic mechanism every other component uses: this ConfigMap is mounted
+and wired up via CONFIG_FILE_PATH / SPRING_CONFIG_ADDITIONAL_LOCATION, injected generically
+by deployment.yaml whenever $component.config is truthy (see resonance-flow.configFilePathEnv
+in _helpers.tpl). It's a separate file (like services/inbox/configmap.yaml) only because its
+content needs the dependencyAddress/kafkaSaslJaasConfig helpers computed at render time -
+templates/configmap.yaml's generic loop just re-serializes values.yaml's static
+$component.config as-is and can't do that, so both components are excluded from it.
+
+Overrides the same spring.kafka.* property paths relay's classpath kafka-config.yaml sets
+(bootstrap-servers, properties.security.protocol, properties.sasl.jaas.config,
+properties.schema.registry.url) - an additional-location file takes precedence over the
+classpath default it's layered on top of, so this swaps the docker-compose-only hostnames
+and plaintext auth for the real in-cluster Kafka host and the cluster's required
+SASL_PLAINTEXT credentials (see the kafka.sasl comment in values.yaml) without the app's own
+config needing to know whether it's running locally or in-cluster.
+
+Uses `index` (not dot-notation) because the component key has a hyphen - same reason as
+pipe-hpa.yaml.
+*/}}
+{{- with index .Values.components "notification-delivery" }}
+{{- if .enabled }}
+---
+apiVersion: v1
+kind: ConfigMap
+
+metadata:
+  name: {{ include "resonance-flow.fullname" $ }}-notification-delivery-config
+  labels:
+    {{- include "resonance-flow.labels" $ | nindent 4 }}
+    app.kubernetes.io/component: notification-delivery
+
+data:
+  config.yaml: |
+    spring:
+      kafka:
+        # kafka is a top-level dependency (shared by every component), schema-registry is
+        # declared on this component specifically - same split components.inbox.dependencies
+        # and the services/inbox configmap use.
+        bootstrap-servers: {{ include "resonance-flow.dependencyAddress" (dict "root" $ "deps" $.Values.dependencies "name" "kafka") | quote }}
+        properties:
+          security.protocol: SASL_PLAINTEXT
+          sasl.mechanism: PLAIN
+          sasl.jaas.config: {{ include "resonance-flow.kafkaSaslJaasConfig" (dict "root" $) | quote }}
+          schema.registry.url: {{ printf "http://%s/apis/ccompat/v6" (include "resonance-flow.dependencyAddress" (dict "root" $ "deps" .dependencies "name" "schema-registry")) | quote }}
+{{- end }}
+{{- end }}

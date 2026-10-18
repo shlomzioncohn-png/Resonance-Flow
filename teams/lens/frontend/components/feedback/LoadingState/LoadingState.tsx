@@ -1,9 +1,9 @@
-import Box from '@mui/material/Box'
-import CircularProgress from '@mui/material/CircularProgress'
-import Typography from '@mui/material/Typography'
+import Box from '@mui/material/Box';
+import CircularProgress from '@mui/material/CircularProgress';
+import Typography from '@mui/material/Typography';
 
 export interface LoadingStateProps {
-  message?: string
+  message?: string;
 }
 
 export default function LoadingState({ message = 'Loading…' }: LoadingStateProps) {
@@ -20,10 +20,11 @@ export default function LoadingState({ message = 'Loading…' }: LoadingStatePro
         py: 8,
       }}
     >
-      <CircularProgress size={32} />
+      {/* Decorative: the message below is what the live region announces. */}
+      <CircularProgress size={32} aria-hidden />
       <Typography variant="body2" color="text.secondary">
         {message}
       </Typography>
     </Box>
-  )
+  );
 }

@@ -9,99 +9,37 @@ import "google/protobuf/timestamp.proto";
 import "google/protobuf/struct.proto";
 
 // kafkaTopic: task.created
-// DRAFT for review - closes out issue #225 (Relay<->Inbox task.created contract, part of
-// RELAY<->INBOX integration issue #100). Reviewed by Inbox directly against their real code
-// (inbox-team branch: Task entity, TaskCreatedPayload, shared/database/migrations) - this
-// version reflects that review, not just their earlier prose answer.
+// Published by Inbox - built from teams/inbox/src/main/java/com/rnd/inbox/task/event/TaskCreatedPayload.java
+// by TaskCreatedProtoMapper. Enums mirror Inbox's Postgres enum types; other task.* schemas import them.
 //
-// id/title/description keep the exact field numbers, names and (for description) the
-// non-optional declaration already registered for task.created-value - the schema-registry FULL
-// compatibility check (teams/relay/ci/check-all-schemas.sh) compares against that registered
-// version, and protobuf compatibility is governed by field number/type, not by field name or
-// text order, so anything already registered must stay put. Every other field is new (never
-// registered), so free to name/type/renumber as needed.
+// Registered under FULL compatibility: never renumber, retype or remove a field or enum value -
+// only add. That's also why id/title/description keep their original names and nullability.
 //
-// tenant_id (was organization_id in the first draft): CONFIRMED FINAL by Inbox - the rename is
-// merged on their side (PR #255, commit 9684b8e, V7__rename_organization_to_tenant.sql -
-// organizations -> tenants, organization_id -> tenant_id on every table). Note this migration
-// lives on inbox-team, not main (main doesn't have shared/ at all yet) - don't be surprised if
-// it's not visible there.
-//
-// project_id: optional - confirmed nullable in migration (tasks.project_id has no NOT NULL) and
-// in Task.java (`@JoinColumn(name = "project_id", nullable = true)`).
-//
-// created_by: optional - confirmed nullable in Task.java (`@JoinColumn(name = "created_by",
-// nullable = true)`) and TaskCreatedPayload.from() explicitly null-checks it.
-//
-// effort_estimate_minutes: int32, not double - Task.java has this as `Integer`, DB column is
-// INTEGER.
-//
-// confidence / effort_estimate_confidence: float, not double - Task.java has both as `Float`,
-// DB columns are REAL.
-//
-// role_context: now a proper enum (TaskRoleContext), not a free string - V1 migration defines
-// task_role_context as a Postgres enum type, and Task.java uses the TaskRoleContext Java enum.
-// The original draft's `optional string role_context` was wrong.
-//
-// metadata (field 20): added because TaskCreatedPayload now has 20 fields, not 19 -
-// shared/database/migrations/V6__add_tasks_metadata.sql added tasks.metadata (JSONB, nullable),
-// already merged. Uses google.protobuf.Struct (arbitrary JSON-shaped data), not
-// map<string,string>, since the column is free-form JSONB, not flat key/value strings.
-//
-// Enum value lists (SourceType, TaskTier, TaskStatus, ExtractionProvenance, TaskRoleContext) are
-// now filled in for real, not left at UNSPECIFIED-only as in the previous revision (per Ayala's
-// review comment on that revision: add values only once confirmed, since removing a wrong guess
-// after registration breaks FULL compatibility, but adding is always safe). Inbox confirmed these
-// are frozen Postgres enum types from the already-applied V1 migration
-// (shared/database/migrations/V1__init_schema.sql), matched 1:1 against Inbox's own Java enum
-// classes under teams/inbox/src/main/java/com/rnd/inbox/model/enums/ - not guesses.
-//
-// SourceType.DRIVE: reversed from the previous revision's resolution. That revision treated it as
-// an unused leftover from an unrelated ML-fields PR (#219) and said Inbox would remove it. Since
-// then, MIND confirmed directly that they do send sourceType=DRIVE for real (source: Google
-// Drive), so there's now an actual producer for it, not just a stray enum value. Added as
-// SOURCE_TYPE_DRIVE = 12 - a pure addition, safe under FULL compatibility (nothing already
-// registered changes). Inbox owns the matching Postgres enum migration on their side
-// (shared/database/migrations) - not part of this schema change.
-//
-// Of TaskCreatedPayload's fields, suggested_owner_user_id and suggested_owner_confidence are
-// intentionally NOT included here - Inbox confirmed those are filled in later by MIND via
-// task.updated, not present at creation time (and stay permanently empty for tasks from
-// structured sources like GitHub that already have a definite assignee).
-//
-// correlation_id is intentionally NOT a field here - CONFIRMED FINAL by Inbox: stays a Kafka
-// header (alongside event_id/event_type/timestamp/source_service), same as today. Their outbox
-// table already keeps correlation_id as its own column, separate from the JSONB payload
-// (shared/database/migrations/V3__add_outbox_table.sql), consistent with this. Also a standing
-// rule on Inbox's side: correlation_id is a technical tracing field, not a business attribute,
-// and is never exposed as a product field - headers are Kafka-level, not schema-level, so this is
-// unaffected by the move to Protobuf.
+// Not fields here: correlation_id (a Kafka header, like event_id), and suggested_owner_* (set
+// later by MIND, so they only appear on task.updated).
 
 message TaskCreatedEvent {
-  string id = 1;                                   // UUID as string. Kept as "id" (not renamed to task_id) - already registered under this name/number.
+  string id = 1;                                   // UUID as string.
   string title = 2;
-  string description = 3;                          // Kept non-optional, matching what's already registered.
-  string tenant_id = 4;                             // UUID as string. Confirmed final name - see note above.
-  optional string project_id = 5;                   // UUID as string. Nullable - confirmed (migration + entity).
+  string description = 3;
+  string tenant_id = 4;                            // UUID as string.
+  optional string project_id = 5;                  // UUID as string.
   SourceType source_type = 6;
   string source_ref = 7;
-  bool is_available = 8;                            // Chain-computed, materialized here per root CLAUDE.md - not computed by Inbox.
-  optional TaskTier tier = 9;                        // Nullable until MIND classification (confirmed).
-  optional TaskRoleContext role_context = 10;        // Nullable until MIND classification (confirmed). Enum, not string - see note above.
-  optional int32 urgency = 11;                       // 1..5 per DB check constraint (confirmed by Inbox).
-  optional int32 effort_estimate_minutes = 12;       // int32, not double - see note above.
+  bool is_available = 8;                           // Computed by Chain; Inbox only stores it.
+  optional TaskTier tier = 9;                      // Unset until MIND classifies the task.
+  optional TaskRoleContext role_context = 10;      // Unset until MIND classifies the task.
+  optional int32 urgency = 11;                     // 1..5 (DB check constraint).
+  optional int32 effort_estimate_minutes = 12;
   optional google.protobuf.Timestamp deadline = 13;
   TaskStatus status = 14;
   ExtractionProvenance extraction_provenance = 15;
-  // Nullable in general, but required (non-null) when extraction_provenance =
-  // EXTRACTION_PROVENANCE_ML_INFERRED - a real DB constraint per Inbox, enforced in application
-  // code by Inbox and any consumer that cares, not at the schema level (confirmed, no conditional
-  // constraint in the .proto itself).
-  optional float confidence = 16;                    // float, not double - see note above.
-  optional float effort_estimate_confidence = 17;    // float, not double - see note above.
-  optional string created_by = 18;                   // UUID as string. Nullable - see note above.
+  optional float confidence = 16;                  // 0..1. Required by the DB when ML_INFERRED - enforced in code, not here.
+  optional float effort_estimate_confidence = 17;  // 0..1.
+  optional string created_by = 18;                 // UUID as string.
   google.protobuf.Timestamp created_at = 19;
-  optional google.protobuf.Struct metadata = 20;     // Free-form JSONB - see note above.
+  optional google.protobuf.Struct metadata = 20;   // Free-form JSONB.
+  optional string owner_id = 21;                   // UUID as string.
 }
 
 enum SourceType {
@@ -118,6 +56,7 @@ enum SourceType {
   SOURCE_TYPE_CALENDAR = 10;
   SOURCE_TYPE_MANUAL = 11;
   SOURCE_TYPE_DRIVE = 12;
+  SOURCE_TYPE_JIRA_ISSUE = 13;
 }
 
 enum TaskTier {

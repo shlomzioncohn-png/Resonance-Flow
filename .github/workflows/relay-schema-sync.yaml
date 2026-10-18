@@ -1,40 +1,53 @@
-name: Relay / sync schema files into schema-sync-hook
+name: Relay / sync schema file copies
 
-# Keeps teams/relay/schema-sync-hook/files/ in sync with the real source files,
-# automatically — nobody should ever hand-edit the copies in files/.
+# Keeps the schema-sync-hook chart's copy of shared/proto and relay's CI scripts
+# in sync, automatically — nobody should ever hand-edit it. The copy exists only
+# because a Helm chart can't read outside its dir; services read shared/proto
+# directly (named Docker build context).
+# Opens a PR rather than pushing: the main ruleset rejects direct pushes (GH013).
 on:
   push:
     branches: ["main"]
     paths:
-      - "teams/relay/src/main/proto/**"
+      - "shared/proto/**"
       - "teams/relay/ci/**"
       - ".github/workflows/relay-schema-sync.yaml"
 
 jobs:
   sync:
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     permissions:
       contents: write
+      pull-requests: write
+    concurrency:
+      group: relay-schema-sync
+      cancel-in-progress: false
     steps:
       - uses: actions/checkout@v7
 
-      - name: Copy real schema + CI files into the hook chart
+      - name: Copy real schema + CI files into their copies
         run: |
           mkdir -p teams/relay/schema-sync-hook/files/schemas teams/relay/schema-sync-hook/files/ci
-          cp teams/relay/src/main/proto/*.proto teams/relay/schema-sync-hook/files/schemas/
-          # only the two scripts the chart actually mounts — not seed-registry.sh /
+          # rm first so a schema deleted from shared/proto disappears from the copy too
+          rm -f teams/relay/schema-sync-hook/files/schemas/*.proto
+          cp shared/proto/*.proto teams/relay/schema-sync-hook/files/schemas/
+          # only the scripts the chart actually mounts — not seed-registry.sh /
           # check-all-schemas.sh, which are CI-only
-          cp teams/relay/ci/check-schema-compatibility.sh teams/relay/ci/register-schema.sh teams/relay/schema-sync-hook/files/ci/
+          cp teams/relay/ci/check-schema-compatibility.sh teams/relay/ci/register-schema.sh teams/relay/ci/_schema-references.sh teams/relay/schema-sync-hook/files/ci/
           cp teams/relay/ci/schema-subjects.tsv teams/relay/schema-sync-hook/files/
 
-      - name: Commit and push if anything changed
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add teams/relay/schema-sync-hook/files
-          if git diff --cached --quiet; then
-            echo "No changes to sync"
-          else
-            git commit -m "chore(schema-sync-hook): sync schema/script files [skip ci]"
-            git push origin HEAD:main
-          fi
+      # PAT, not GITHUB_TOKEN - see service-update-manifest.yaml. No-op when nothing changed.
+      - name: Open a PR with the synced copies
+        uses: peter-evans/create-pull-request@v7
+        # Self-hosted runners may lack $HOME; the action needs it for `git config --global`.
+        env:
+          HOME: ${{ runner.temp }}
+        with:
+          token: ${{ secrets.RELAY_CI_PUSH_TOKEN }}
+          base: main
+          branch: ci/relay-schema-sync
+          add-paths: |
+            teams/relay/schema-sync-hook/files
+          commit-message: "chore(relay): sync schema file copies"
+          title: "chore(relay): sync schema file copies"
+          body: "Automated sync of `shared/proto` and `teams/relay/ci` into their copies, triggered by `${{ github.sha }}`. Needs review/approval per the `main` branch ruleset."

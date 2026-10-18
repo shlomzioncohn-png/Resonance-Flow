@@ -1,7 +1,8 @@
 package com.rnd.inbox.audit;
 
-import com.rnd.inbox.tenant.Tenant;
-import com.rnd.inbox.user.User;
+import com.rnd.inbox.task.model.Task;
+import com.rnd.inbox.tenant.model.Tenant;
+import com.rnd.inbox.user.model.User;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;

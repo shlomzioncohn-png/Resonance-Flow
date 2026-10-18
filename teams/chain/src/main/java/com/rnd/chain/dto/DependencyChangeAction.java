@@ -1,0 +1,9 @@
+package com.rnd.chain.dto;
+
+/** What happened to a dependency edge in a {@link DependencyHistoryEntry}. */
+public enum DependencyChangeAction {
+    ADDED,
+    REMOVED,
+    /** The edge was never created - rejected (e.g. cross-tenant, issue #580), not applied. */
+    REJECTED
+}

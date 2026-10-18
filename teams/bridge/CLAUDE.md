@@ -39,11 +39,24 @@ predates this abstraction and does not use it (see §6).
 ## 4. Task vs. BridgeTaskEventDto — two shapes, on purpose
 
 - `task.model.Task` is the **database-shaped** record: `@JsonNaming(SnakeCaseStrategy)`, enums
-  serialize lowercase via `@JsonValue`. This is what Inbox's `tasks` table looks like.
+  serialize lowercase via `@JsonValue`. This is what Inbox's `tasks` table looks like — except
+  `organization_id`/`organizationId`, which Inbox renamed to `tenant_id` on 2026-09-06 and `Task`
+  deliberately does not mirror (see §6).
 - `task.BridgeTaskEventDto` is the **Kafka wire shape** (Inbox's ingestion contract, topic
   `bridge.structured.tasks`): camelCase keys, enums as raw `UPPER_SNAKE_CASE` `Enum.name()`, plus
   a fresh `eventId` per publish, and it deliberately omits fields `Task` carries that Inbox
-  forbids on the wire (`extractionProvenance`, `completedAt`, `snoozedUntil`).
+  forbids on the wire (`extractionProvenance`, `completedAt`, `snoozedUntil`). Inbox confirmed
+  camelCase directly on 2026-09-15 — they have no `@JsonNaming` and no global Jackson naming
+  strategy, so a snake_case key from us simply doesn't match their field names. The cross-team
+  snake_case convention still stands as the eventual target, not rejected — Inbox just hasn't
+  adopted it on their side yet, and both producer and consumer have to switch in the same moment
+  for it to work. Don't change this DTO's casing unilaterally again until they have. Separately,
+  this DTO's tenant field is named `tenantId`, not `organizationId` like `Task` — Inbox renamed
+  `organization_id` to `tenant_id` across their schema on 2026-09-06 (#255, `9684b8e8`), including
+  the `bridge.structured.tasks` idempotency index, so the dedup key is `(tenant_id, source_type,
+  source_ref)`, not `(organization_id, source_type, source_ref)`. Every message Bridge published
+  between that rename and this fix was silently rejected by Inbox's `@NotBlank` validation on
+  `tenantId` (see §6) — `Task.organizationId` is deliberately NOT renamed to match, see above.
 
 **Do not conflate these or serialize `Task` directly onto Kafka** — that was `GitHubKafkaProducer`'s
 approach and it does not conform to the contract (§6). Build `BridgeTaskEventDto.from(task)` for
@@ -55,6 +68,13 @@ an actual value, never a made-up one. `DealToTaskMapper` is the only override to
 `${bridge.crm.organization-id}` / `CRM_ORGANIZATION_ID` — one static value standing in for one
 account until Inbox supports resolving it per deal from `Deal.crmAccountSlug()`.
 
+`DealToTaskMapper.toUrgency` also adds +1 (before the 1..5 clamp) for a deal in an open stage
+(`PROSPECT`/`QUALIFIED`/`PROPOSAL`/`NEGOTIATION`) that's sat in that stage at least
+`${bridge.crm.stalled-after-days}` / `CRM_STALLED_AFTER_DAYS` days (default 14, `<= 0` disables
+it) as of the run's `asOf` — `ON_HOLD`/`CLOSED_*` are never bumped. Computed only from `asOf` and
+`Deal.stageChangedAt`, so a deal that becomes stalled after its Task already exists in Inbox won't
+get the bump there until Inbox's F2 (insert-only ingestion) is fixed to also update existing tasks.
+
 ## 5. Profile-switched beans
 
 Convention used throughout: a default, always-registered bean, overridden by a `@Profile("x")
@@ -63,11 +83,15 @@ candidate); profile active → both beans exist, `@Primary` breaks the tie.
 
 | Concern | Default | Profile override |
 |---|---|---|
-| CRM deal source | `JsonDealRepository` (synthetic fixture) | `hubspot` → `HubSpotDealRepository` (live HubSpot API) |
+| CRM deal source | `JsonDealRepository` (synthetic fixture) | `hubspot` → `HubSpotDealRepository` (live HubSpot API); `salesforce` → `SalesforceDealRepository` (live Salesforce REST API) |
 | CRM task publisher | `LoggingPayloadPublisher<Task>` (logs, publishes nowhere) | `kafka` → `KafkaPayloadPublisher` (real Kafka via `BridgeTaskEventDto`) |
 
 Don't add a new switch without this pattern — a bespoke `if/else` in a `@Bean` method or a second
-mechanism will fight `@Primary` resolution.
+mechanism will fight `@Primary` resolution. `hubspot` and `salesforce` are mutually exclusive, not
+stackable the way `kafka` is: both repository beans are independently `@Primary` within their own
+profile, so Spring has no tiebreaker if both are active at once. `CrmLaneConfig.dealToTaskMapper`
+fails startup with a clear `IllegalStateException` naming both profiles if that happens (same
+shape as the kafka/tenant-id check, §7) — see §10 for the Salesforce source specifically.
 
 ## 6. Known gaps — don't silently "fix" these without asking
 
@@ -95,23 +119,57 @@ mechanism will fight `@Primary` resolution.
   `messaging/kafka/EventProcessingTemplate.java`) don't exist either. Re-check before trusting
   that claim; don't assume it's been built since.
 - **`organizationId` is one static config value**, not per-tenant (§4).
+- **`bridge.structured.tasks` was silently rejected by Inbox for over a week (2026-09-06 to
+  2026-09-15).** Inbox renamed `organization_id` to `tenant_id` across their schema on 2026-09-06
+  (#255, `9684b8e8`) — `StructuredTaskEventDto.tenantId` is `@NotBlank`, has no `@JsonNaming`, and
+  Inbox has no global Jackson naming strategy, so it matches nothing but a literal `tenantId` key.
+  `BridgeTaskEventDto` kept sending `organizationId` until this was found and fixed, so every CRM
+  and JIRA message in that window failed that validation and was routed to
+  `bridge.structured.tasks.errors` — a real Kafka topic, logged at WARN, but nothing in this repo
+  consumes `.errors` topics, so in practice it was invisible. Fixed by renaming the DTO's field to
+  `tenantId` (§4); `Task.organizationId` was deliberately left alone (§4) since `Task` never goes
+  on the wire directly. Two internal Bridge naming inconsistencies are a deliberate result of that
+  scoping decision, not oversights, and are tracked here together: (1) `Task.organizationId` /
+  `AbstractTaskMapper.organizationId()` still say "organization", not "tenant" (§4); (2)
+  `CRM_ORGANIZATION_ID` / `bridge.crm.organization-id` (`application.yml`, `.env.example`) also
+  still say "organization" - renaming an env var/config key is an operational risk across Helm and
+  every deployed environment for zero correctness gain, since it's a label Bridge picks for its
+  own config, never a wire field. Neither is broken today; both are candidates for a future
+  cleanup pass, not this fix. **`TaskSerializationTest` pins a stale claim about Inbox's schema** — its
+  `INBOX_COLUMN_NAMES` set still asserts `organization_id` as Inbox's real column name, which has
+  been false since the same 2026-09-06 rename. The test still passes because it only checks that
+  `Task.java`'s own (deliberately unrenamed) `organizationId` field serializes to
+  `organization_id` — that's internally consistent and always will be, regardless of what Inbox's
+  actual column is called. A passing `TaskSerializationTest` is not evidence this was ever checked
+  against Inbox's real schema; don't read it as verification of that. No test anywhere in either
+  `teams/bridge` or `teams/inbox` exercises the real seam between Bridge's producer and Inbox's
+  consumer — `StructuredTaskConsumerIntegrationTest` (Inbox) hand-builds its own JSON payload using
+  Inbox's own expected field names, so it's true by construction and would never have caught this.
 
 ## 7. Testing conventions
 
 - Wire-shape/schema tests pin literal JSON key strings and assert the full key set with
   `assertEquals(expectedKeys, actualKeys)`, not just presence — see `TaskSerializationTest` (DB
   shape) and `BridgeTaskEventDtoTest` (Kafka shape) as the two canonical examples.
+- `HubSpotDealRecordObjectMapperNamingStrategyTest` (`@JsonTest`) pins that Bridge's shared,
+  Spring-auto-configured `ObjectMapper` stays on Jackson's default camelCase naming strategy —
+  that bean also deserializes inbound HubSpot API responses (camelCase), so any future per-DTO
+  `@JsonNaming` decision for a Kafka contract must never become a global strategy on this bean.
 - Kafka-touching code is tested with a **mocked `KafkaTemplate`** — no test talks to a real
   broker. `@SpringBootTest`-based tests that boot a real context already pay ~40s in
   `KafkaAdmin` retrying against an absent broker; don't add to that.
 - `AbstractIntakeLane`'s per-record error handling is exercised generically once
   (`AbstractIntakeLaneTest`) — a new publisher/mapper/validator only needs to prove it throws the
   right `LaneException` subtype, not re-test the lane's catch/continue behavior.
-- `application.yml` has **no default** for secrets/tenant config that must never silently take a
-  placeholder value in production (`HUBSPOT_TOKEN`, `CRM_ORGANIZATION_ID`) — missing → startup
-  fails loudly. A full-context test (`@SpringBootTest`) touching a profile that needs one of
-  these must supply a test-only value via `@TestPropertySource`/`properties = {...}`, not add a
-  production default.
+- `application.yml` has **no default** for `HUBSPOT_TOKEN` — missing → startup fails loudly
+  (`HubSpotClient`'s constructor). **`CRM_ORGANIZATION_ID` is different and this bullet used to
+  claim otherwise:** it defaults to the placeholder `local-crm-org`
+  (`bridge.crm.organization-id:local-crm-org` in `application.yml`), usable for a local run
+  without the `kafka` profile. `CrmLaneConfig.dealToTaskMapper` fails startup on a missing or
+  non-UUID value only once the `kafka` profile is active (added 2026-10-06, CRM-lane audit
+  finding F5) — a `@SpringBootTest` combining `kafka` with that placeholder needs a real UUID via
+  `@TestPropertySource`/`properties = {...}`, not a production default change. `HUBSPOT_TOKEN`
+  itself still has no profile-conditional default; it fails loudly regardless of profile.
 - Full suite as of the last run (2026-09-06): **126 tests, 0 failures** (was 121 before the
   `enrichment` package landed - 5 tests added in `NoOpEnrichmentServiceTest`; was 115 before that,
   before `HubSpotClient`'s retry logic was extended to 502/503/504 and transport failures - 3
@@ -129,6 +187,17 @@ mechanism will fight `@Primary` resolution.
   too new for this Spring Boot/Mockito version — `@Spy` fields fail to initialize. Use JDK 23 at
   `C:\Program Files\Java\jdk-23` instead (`$env:JAVA_HOME` + prepend `bin` to `$env:PATH`); it
   compiles the pom's `java.version=21` target fine and Mockito works normally under it.
+- **`protobuf-maven-plugin`'s `protoc.exe` fails on a non-ASCII checkout path.** If the repo sits
+  under a path containing non-ASCII characters (this machine's checkout is under a Hebrew-named
+  folder), `mvn compile`/`test` fails with `PROTOC FAILED: ...: warning: directory does not
+  exist` even though the directory is right there — the native `protoc.exe` binary can't resolve
+  the path under this machine's active codepage. Reproduces identically for `teams/inbox`'s own
+  pre-existing `.proto` build, so it's an environment issue, not anything specific to Bridge's
+  schema. `-Dfile.encoding=UTF-8 -Dsun.jnu.encoding=UTF-8` via `MAVEN_OPTS` does not fix it.
+  Workaround: `subst` an ASCII drive letter to the parent folder and build from there, e.g.
+  `subst R: "C:\Users\1\Desktop\<non-ascii-folder>"`, then build from
+  `R:\Resonance-Flow\teams\bridge`. Not an issue in CI — `.github/actions/test-java` runs `mvn`
+  inside a Linux Maven Docker container, where this never comes up.
 
 ## 9. Project status & roadmap (as of 2026-09-06)
 
@@ -181,8 +250,52 @@ suite (126 tests, 0 failures — see §7):
 - **`Deal` model + `DealToTaskMapper`** (`crm.model`, `crm.mapper`) — maps a CRM `Deal` to the
   canonical `Task`: stage→status, close-date→deadline (end-of-day UTC convention, provisional),
   urgency, `organizationId()` override backed by `${bridge.crm.organization-id}` /
-  `CRM_ORGANIZATION_ID` (no default — fails startup loudly if unset), `toCompletedAt()` override
-  (only set when status is DONE and the deal actually recorded a close date).
+  `CRM_ORGANIZATION_ID`, `toCompletedAt()` override (only set when status is DONE and the deal
+  actually recorded a close date). **Corrected 2026-10-06 (this bullet previously said "no
+  default — fails startup loudly if unset"; false — see §7):** the config key defaults to
+  `local-crm-org`, and only fails startup when the `kafka` profile is active
+  (`CrmLaneConfig.dealToTaskMapper`, CRM-lane audit finding F5).
+- **Snapshot-per-sync, latest-state-per-deal (added 2026-10-06, audit findings F1/F2/F14/F9).**
+  `DealRepository.snapshot()` performs one fresh fetch and returns an immutable `DealSnapshot`
+  (`asOf`, full history, `latestPerDeal()`, `skippedAtRead`). `CrmBridgeController` and
+  `CrmSyncJob` each take exactly one snapshot per run and call
+  `crmLane.run(snapshot.latestPerDeal().stream(), snapshot.asOf())` — never the old
+  `ReadCursor`/`ReadCursor.full()` overload, which would let the deals and `asOf` come from two
+  separate fetches. `CrmSourceReader.read()` also returns `latestPerDeal()`, so the generic
+  `AbstractIntakeLane.run(ReadCursor, Instant)` path (used by `CrmLaneIntegrationTest`) agrees.
+  **`DealRepository` has only `snapshot()` now** — the five old per-instance-cached finder methods
+  (`asOf()`, `findAll()`, …) were deprecated, then removed outright (2026-10-06, same day): nothing
+  called them except their own test suite, and leaving a cache field on `HubSpotDealRepository`
+  that nothing production-facing used was a trap for the next person who reached for the
+  "obvious" method. `HubSpotDealRepositoryTest`'s 14 pre-existing tests were migrated to
+  `snapshot()` rather than deleted. `HubSpotDealRepository.snapshot()` also re-fetches and
+  re-resolves the pipeline/stage mapping on every call (not just at construction), so a stage
+  added to the portal after startup is picked up. **Tradeoff worth knowing:** the constructor
+  still eagerly resolves the pipeline once too (result discarded), purely to fail fast at startup
+  on a pipeline/stage-level problem (see §11) — so the very first `snapshot()` call after startup
+  does one redundant pipeline fetch.
+  **Corrected 2026-10-14 (F6 is fixed, not "still open" as the paragraph here originally said) —
+  see §11 for the full mapping-rule rewrite:** this used to describe a label added under a name
+  `HubSpotStageMapping` doesn't recognize failing the **entire** sync from the moment it appears.
+  Stage resolution is metadata-based now (`isClosed`/`probability`, never the label), the same
+  approach §10's Salesforce fix already used, so that failure mode is gone — a renamed/custom
+  label with valid metadata just resolves correctly.
+  `SyncJobScheduler`'s shared `catch (RuntimeException e) { log.error(...) }` (every `SyncJob`'s
+  failure handling, not just CRM's — see §9.4) and
+  `CrmBridgeController.handleSnapshotFailure` (a 503 with the exception's message, not the
+  framework's default message-less 500) still apply to what genuinely can't be isolated to one
+  stage (§11's FAIL STARTUP / FAIL RUN rows).
+  Only a CRM-only `CrmTaskValidator` (wraps the shared `TaskValidator`, adds tenant-UUID/
+  `sourceRef` checks) is new for F5 — the shared `TaskValidator` itself is unchanged, since
+  GitHub/JIRA/`TaskEnrichmentConsumer` share it directly and never set a tenant id.
+  **`CRM_ORGANIZATION_ID`'s default changed from `local-crm-org` to
+  `CrmTaskValidator.LOCAL_PLACEHOLDER_TENANT_ID` (`00000000-0000-0000-0000-000000000000`),
+  2026-10-06, fixing a real regression caught before merge:** `CrmTaskValidator` validates
+  tenant-id shape unconditionally, not just under `kafka`, so the old non-UUID placeholder would
+  have made every task fail validation on a plain no-profile local run. The new placeholder is
+  UUID-shaped (passes `CrmTaskValidator`) but is rejected **by name**, not just by shape, in
+  `CrmLaneConfig`'s `kafka`-profile startup check — explicitly setting it to this exact value under
+  `kafka` still fails startup, same as leaving it unset.
 - **`JsonDealRepository`** (default bean) — reads the synthetic fixture
   `classpath:crm/synthetic-deals.json` via `SyntheticDealsLoader`/`SyntheticDealsFeed`. This is
   the *existing* CRM fixture data, not the new Stage-4 "dirty" synthetic corpus (§9.4.4) — don't
@@ -256,14 +369,25 @@ that brief, not a linked spec.
    - PR #161 merged (§9.1).
    - Verified (not changed, per instruction) that "the daily scheduled job pulling HubSpot +
      GitHub" **does not actually exist as described**:
-     - **CRM**: no scheduler at all. `POST /bridge/crm/sync` is the only trigger — something
-       external has to call it; nothing in Bridge does so on a cadence.
+     - **CRM**: **stale as of 2026-10-12 — a scheduler exists, now via a shared mechanism.**
+       `CrmSyncJob` (`bridge.crm.sync.cron.enabled`/`...expression`, same keys and `0 0 3 * * ?`
+       default as before, off by default) runs the same `crmLane` as `POST /bridge/crm/sync`.
+       It's one of several `SyncJob` beans `SyncJobScheduler` (`core/sync`) now registers — a
+       single generic scheduler added 2026-10-12 to replace CRM/GitHub/Jira each having their own
+       copy-pasted `@Scheduled` method; `IntakeSyncJobs` added three more (EMAIL/CALENDAR/DRIVE,
+       `bridge.intake.<source>.sync.cron.*`, off by default, each a direct bean call to
+       `UnstructuredIntakeController.run(RawSourceType)`). This bullet originally said "no
+       scheduler at all" — true on 2026-09-06, false since. See §9.2 for what the CRM job itself
+       does today.
      - **GitHub**: `GitHubSyncScheduler` (`@Scheduled`, default cron `0 0 2 * * ?`, gated by
        `@EnableScheduling` in `GitHubSchedulerConfig`) exists, but is **disabled by default**
        (`github.sync.cron.enabled: ${GITHUB_SYNC_CRON_ENABLED:false}`, not set true anywhere in
        `.env.example` or any profile yml). Even if enabled, it publishes through
        `GitHubKafkaProducer`, which is the known-stale gap from §6 (wrong topic, wrong wire
-       shape) — so enabling it today would not correctly reach Inbox anyway.
+       shape) — so enabling it today would not correctly reach Inbox anyway. **Not migrated to
+       `SyncJob`** (2026-10-12) — GitHub/Jira are Hadas's own schedulers, and `GitHubSyncScheduler`
+       is reactive (`Mono`-based) rather than returning `IntakeResult`, unlike every `SyncJob`;
+       left exactly as-is, the owner's call.
    - This was reported, not fixed — left exactly as-is per instruction not to touch this logic.
 2. **Real-time ingestion infra prep (optional / time-permitting).** ❌ **Not started.** No
    `CrmWebhookReceiver`, `GitHubEventEndpoint`, or any webhook-shaped controller exists anywhere
@@ -308,3 +432,108 @@ that brief, not a linked spec.
   "Bridge outbox integration", `yehudit/bridge-outbox-integration → inbox/bridge-assignment-outbox`).
   Neither blocks the CRM lane directly, but both touch shared `core`/`task` territory the same way
   `ruth/bridge-core` does — worth a glance before assuming `core`/`task` are stable.
+
+## 10. Salesforce CRM source
+
+`SalesforceDealRepository` (`@Repository @Profile("salesforce") @Primary`) is the third
+`DealRepository` implementation, alongside `JsonDealRepository` (default) and
+`HubSpotDealRepository` (`hubspot`). Full design rationale lives in
+`teams/bridge/docs/crm-salesforce-design.md` — this section is the short version plus the things
+most likely to trip someone up.
+
+- **Auth: OAuth 2.0 Client Credentials Flow, not a static token.** `SalesforceClient` acquires and
+  caches an access token (together with the `instance_url` it came with — every subsequent call
+  targets that host, not the login host). Salesforce's Client Credentials Flow issues no refresh
+  token and no `expires_in`, so there is nothing to proactively refresh against; the token is
+  refreshed *reactively* on a `401` (refreshed once, triggering call retried once — a second `401`
+  after a genuinely fresh token is fatal, not looped).
+- **`dealId` is always the bare `Opportunity.Id` — never prefixed.** Per-source `sourceRef` needs
+  go through `Deal.sourceRefPrefix` instead (defaults to `"crm:"` in the builder and for
+  HubSpot/JSON, both of which never set it; `SalesforceDealRepository` sets it to
+  `"crm:salesforce:"`). `DealToTaskMapper.toSourceRef` is `deal.sourceRefPrefix() + deal.dealId()`
+  — no per-source branch in the mapper, and `dealId()` is the same bare value everywhere, so
+  `fetchDeal(deal.dealId())` always round-trips. Don't reintroduce a prefixed `dealId` to solve a
+  future per-source `sourceRef` need — extend `sourceRefPrefix` (or add a sibling field) instead.
+- **`fetchDeal(dealId)` takes the bare `Opportunity.Id`** — the same value `Deal#dealId()` returns.
+  One query for the Opportunity; the stage-metadata query only fires if that lookup found a record
+  (a miss costs one request, not two, mirroring `HubSpotDealRepository`'s 404 handling adapted to
+  Salesforce's "not found is zero records"). No cache field anywhere on this class — `snapshot()`
+  and `fetchDeal()` are both a fresh set of SOQL queries every call (CRM-lane audit finding F1).
+- **Stage resolution is metadata-based, never label matching** (`SalesforceStageMapping`) — the
+  same fix as HubSpot's own (§11) for CRM audit finding F6 (a renamed/custom stage label breaking
+  the whole sync), landed here first. `IsClosed`/`IsWon` on the `OpportunityStage` row map directly to `CLOSED_WON`/
+  `CLOSED_LOST`; an open stage is bucketed by `DefaultProbability` into one of four configurable
+  bands read from `bridge.crm.salesforce.stage-bands.*` in `application-salesforce.yml` (defaults
+  0–20/21–50/51–80/81–99 → `PROSPECT`/`QUALIFIED`/`PROPOSAL`/`NEGOTIATION`), validated at actual
+  Spring startup (the mapping is a plain field of the eagerly-created `SalesforceDealRepository`
+  singleton) to be strictly increasing and partition `0..99` exactly — a misconfigured band fails
+  loudly with a clear `IllegalStateException` instead of silently misclassifying every open deal. A
+  `null` `DefaultProbability` on an open stage falls back to `PROSPECT`, the most conservative
+  bucket. **An unresolvable `StageName` is a per-record skip in `snapshot()`** (counted in
+  `DealSnapshot.skippedAtRead()`, never aborts the sync) **but throws `IllegalStateException` in
+  `fetchDeal()`** — there's no "sync" to protect for a single-record fetch, so failing loudly there
+  is correct, not a missed case of the same rule.
+- **REST API version is config, not hardcoded** (`bridge.crm.salesforce.api-version` /
+  `SALESFORCE_API_VERSION`, default `68.0`) — Salesforce ships three releases a year and retires
+  old API versions, so this is expected to need bumping periodically; it was hardcoded in
+  `SalesforceClient` until this was fixed.
+- **`load-history: true` is not implemented.** Unlike HubSpot (per-property history),
+  Salesforce's default read is current-state-only — one `Deal` per Opportunity, one history entry
+  long. Enabling `load-history` fails fast at `SalesforceDealRepository`'s construction with a
+  clear message rather than silently behaving like current-state-only mode.
+- **`REQUEST_LIMIT_EXCEEDED` (`403`) is fatal, never retried** — it's a rolling 24-hour budget, not
+  a short per-second bucket like HubSpot's `429`, so backing off cannot make it succeed sooner.
+  `500`/`502`/`503`/`504` and transport failures (connect/read timeout, DNS/IO errors) **are**
+  retried with exponential backoff, same as `HubSpotClient`.
+- **`hubspot` and `salesforce` are mutually exclusive profiles** — see §5's table note. Both active
+  at once fails startup with an `IllegalStateException` naming both, from
+  `CrmLaneConfig.dealToTaskMapper` (`CrmLaneConfigTest.failsToStartWhenBothHubspotAndSalesforceProfilesAreActive`).
+- **No Salesforce org exists for this work yet** (design doc §9) — everything above is verified
+  against `SalesforceClient`/`SalesforceDealRepository`'s own test suites
+  (`MockWebServer`-backed, no live calls), not against a real org. `stage-changed-at-field`
+  defaulting to `LastStageChangeDate` is specifically flagged in the design doc as
+  moderate-confidence/unverified — if it turns out not to exist on the target org, switch
+  `SALESFORCE_STAGE_CHANGED_AT_FIELD` to `LastModifiedDate` (config change only, no code change),
+  noting the real imprecision that comes with it (bumps on any field edit, not just a stage
+  change).
+
+## 11. HubSpot stage mapping by metadata — F6 fix
+
+`HubSpotStageMapping` resolves `isClosed`/`probability` metadata on each pipeline stage now,
+never the stage `label` — the same approach §10's `SalesforceStageMapping` already used. A
+renamed or custom stage label with valid metadata just resolves correctly; `label` is purely
+informational (log/error messages only). `StageProbabilityBands` (`crm/repository`, shared with
+Salesforce) holds the four band maxima + their validation + `forOpenStage(percent)`; each CRM
+constructs its own instance from its own `bridge.crm.<crm>.stage-bands.*` config. HubSpot's
+defaults are **20/50/70/99**, not Salesforce's 20/50/80/99 — HubSpot's live default pipeline has
+"Decision Maker Bought-In" at probability 0.8, which must land in `NEGOTIATION` (matching the old
+label mapping), not `PROPOSAL`; at Salesforce's 80-max boundary it wouldn't.
+
+Metadata arrives as JSON strings on the live API (`"false"`, `"0.2"`), but `HubSpotStageMetadata`'s
+fields are plain `String` so a portal sending real JSON booleans/numbers binds identically (Jackson's
+default `String` deserializer accepts either). `probability` is parsed via `BigDecimal` (never
+`Double` — `Double.parseDouble("NaN")` succeeds; `BigDecimal`'s string constructor has no NaN
+representation at all) and compared to `0`/`1` with `compareTo`, never `equals` (`"1.0".equals(ONE)`
+is `false`; `compareTo` is `0`).
+
+**Policy table** (every row implemented in `HubSpotStageMapping`/`HubSpotDealRepository`, tested in
+`HubSpotStageMappingTest`/`HubSpotDealRepositoryTest`):
+
+| Case | Where | Outcome |
+|---|---|---|
+| Pipeline fetch fails; empty pipeline list; a stage with no id; every fetched stage invalid (any reason); bad `stage-bands` config; bad `max-skipped-ratio` | Before the per-deal loop, or at Spring startup | **FAIL STARTUP** (constructor) / **FAIL THE WHOLE SYNC RUN** (`snapshot()`/`fetchDeal()`) |
+| Metadata missing on one stage; `isClosed` missing/not boolean-like; `probability` non-numeric/out-of-range/NaN; `probability` missing on a **closed** stage; closed stage with `0 < p < 1` (can't tell won from lost — HubSpot has no `IsWon`-equivalent flag); a deal's `dealstage` id not in the pipeline at all | Stage classified invalid during resolution (before the loop); effect realized per-deal inside `snapshot()`'s existing per-record `try/catch` | **SKIP** the affected deal(s), **+WARN** (once per invalid stage per run, not per deal), counted in `skippedAtRead` |
+| Open stage, `probability` missing | Same resolution step | **MAP WITH DEFAULT** → `PROSPECT`, +WARN (once per stage per run) |
+| `skippedAtRead / totalRecordsRead` **strictly greater than** `bridge.crm.hubspot.max-skipped-ratio` (default `0.5`; `0` records read never fails) | After the per-deal loop, before returning the `DealSnapshot` | **FAIL THE WHOLE SYNC RUN** (`HubSpotSkipThresholdExceededException`) instead of publishing a mostly-skipped snapshot |
+
+**A skipped deal means a stale Task in Inbox, not a deleted one.** Neither Bridge (`CrmLane`,
+`LoggingPayloadPublisher`/`KafkaPayloadPublisher`) nor Inbox (`StructuredTaskConsumer` →
+`TaskIngestionService`) has any delete-by-absence path — a deal missing from one sync's published
+set (skipped, or just not re-sent) leaves its Inbox `Task` exactly as it was after the last
+successful publish. `CrmSyncJob` logs a WARN ("partial sync") when `skippedAtRead > 0` so a
+scheduled run with skips doesn't look identical to a clean one in the logs; the HTTP path already
+surfaces `skippedAtRead` in `CrmSyncResponse`'s JSON body.
+
+`bridge.crm.hubspot.max-skipped-ratio` is **HubSpot-only for now** — Salesforce's per-record skip
+(§10) has no equivalent aggregate threshold yet. Out of scope for this task; flagged as a
+candidate for the same guard later.

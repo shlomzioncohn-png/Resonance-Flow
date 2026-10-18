@@ -9,92 +9,101 @@ import java.util.List;
 
 /**
  * Published to Kafka topic bridge.raw.landed by both unstructured lanes (Malki and
- * Esther). One event = one logical source item (an email, a meeting), never one event per
- * physical file - every related MinIO object it owns (a message body plus its attachments,
- * or a recording plus its transcript/platform-metadata sidecar) is one entry in
- * {@link #objects()} instead of its own separately-published event. Field names are
- * camelCase in Java but serialize as snake_case on the wire via @JsonNaming.
- * <p>
- * This replaces the earlier shape where object_key/content_hash/content_type/size_bytes/
- * modality sat directly on the event (describing only its one primary file) plus bespoke
- * pointer fields for anything else (transcript_object_key, the former
- * additional_metadata_object_key) and attachment_index/attachment_count for splitting one
- * logical item across several events. Approved on Mind's side 2026-10 (issue #31) - see that
- * thread for the full before/after discussion.
- * <p>
- * correlationId is now required, not optional: with content_hash moved into each
- * {@link RawObjectRef}, there's no single event-level hash left to key/dedup on, and a
- * content hash was never a good fit for revisions anyway (an edited body gets a different
- * hash, scattering revisions of the same logical item). correlationId stays fixed across
- * revisions by construction, so {@link #dedupKey()} is correlationId, not a hash - see
- * {@code media.MediaIntakeOrchestrator}/{@code intake.service.PointerEventPublisher} for how
- * each lane generates it (fresh per logical item, reused across its revisions).
- * <p>
- * sourceRef is a pointer back to the original item in the *source system* itself (a Zoom
- * share_url, a Slack permalink, an email Message-ID) - distinct from every object_key in
- * {@link #objects()}, which only ever points into Bridge's own MinIO copy. Lets a UI jump to
- * "the real thing" without reading a MinIO object just to find that one string.
- * <p>
- * revision/changeType/changeSignificanceScore support content that gets edited after first
- * landing (Malki's lane) - both lanes send revision 0 / UPSERT / 100 for a brand-new item;
- * neither Zoom/BBB recordings nor scanned docs are ever revised once landed, so Esther's
- * lane always sends exactly that, never anything else.
- * <p>
+ * Esther) - the contract agreed with Mind in issue #31, wire schema
+ * shared/proto/raw-object-event.proto. One RawObjectEvent represents one logical item (an
+ * email, a chat session, a meeting recording, a scanned document), carrying every MinIO object
+ * that belongs to it - body/transcript and every attachment alike - as a list of
+ * {@link RawObjectRef} entries, instead of one logical item fanning out into several separate
+ * Kafka events keyed by attachment_index. object_key/content_hash/content_type/size_bytes/
+ * modality live on each RawObjectRef (they are per-object, not per-logical-item); a role says
+ * what each object is (see Role's javadoc).
+ *
+ * correlationId is the stable identity of the logical item - minted once and carried
+ * forward unchanged across every subsequent edit (see ChatGroupStateReconciler for the
+ * chat case), so Mind can recognize that a later revision of the same correlationId is
+ * an edit of an already-seen object, not a new one. Required (never null in practice).
+ *
+ * revision/changeType carry chat edit/reconciliation state (see ChatGroupStateReconciler)
+ * to Mind: revision is 0 for every non-chat source, which never republishes an existing
+ * correlationId; a chat edit republishes the same correlationId at a higher revision.
+ * changeType is UPSERT for a new object or an edit; DELETE_REVIEW is defined but not
+ * emitted by any producer yet.
+ *
+ * changeSignificanceScore (0-100) has no real calculation yet - every producer hardcodes
+ * CURRENT_CHANGE_SIGNIFICANCE_SCORE until that logic exists.
+ *
+ * sourceRef is the source system's own identifier for the item (a Zoom meeting uuid, a
+ * BigBlueButton recordID, an email Message-ID, a Slack channel_id:ts) - an identifier, not a
+ * link, unique within its sourceType, and null when the source has none. Distinct from every
+ * object_key, which only ever points into Bridge's own MinIO copy. Set via
+ * {@link #withSourceRef}.
+ *
  * classification is Bridge's optional whole-item triage that scopeDecision was derived from -
- * see {@link Classification}. Omitted from the JSON entirely (not sent as null) when no
- * classifier ran; attach one with {@link #withClassification}.
- * <p>
- * implements BridgePayload (see core.BridgePayload): tenantId() is satisfied by the record's
- * own tenantId component.
+ * see {@link Classification}. Omitted from the JSON entirely (not sent as null) when nothing
+ * classified the item; set via {@link #withClassification}.
+ *
+ * objects must never be empty - a RawObjectEvent is only ever published once every
+ * MinIO object it refers to has actually landed successfully; a partial object list is
+ * never published (see UnstructuredIntakeLane/MediaIntakeOrchestrator, the two producers).
+ *
+ * implements BridgePayload (see core.BridgePayload): tenantId() is satisfied by the
+ * record's own tenantId component; dedupKey() is correlationId + ":" + revision - the
+ * consumer dedup key Mind defined in #31 - since no single object's hash can stand in for
+ * "this whole published revision of this logical item" once there can be more than one object.
  */
 @JsonNaming(PropertyNamingStrategies.SnakeCaseStrategy.class)
 public record RawObjectEvent(
         String schemaVersion,
         RawSourceType sourceType,
         String tenantId,
-        String correlationId,
         Instant ingestedAt,
         ScopeDecision scopeDecision,
-        int revision,
-        ChangeType changeType,
-        Integer changeSignificanceScore,
         List<String> participants,
         Instant sourceTimestamp,
-        String sourceRef,
+        String correlationId,
+        int revision,
+        ChangeType changeType,
+        int changeSignificanceScore,
         List<RawObjectRef> objects,
+        String sourceRef,
         @JsonInclude(JsonInclude.Include.NON_NULL) Classification classification) implements BridgePayload {
 
     private static final String CURRENT_SCHEMA_VERSION = "1.0";
+    private static final int CURRENT_CHANGE_SIGNIFICANCE_SCORE = 100;
 
     public static RawObjectEvent create(
             RawSourceType sourceType,
             String tenantId,
-            String correlationId,
             Instant ingestedAt,
             ScopeDecision scopeDecision,
-            int revision,
-            ChangeType changeType,
-            Integer changeSignificanceScore,
             List<String> participants,
             Instant sourceTimestamp,
-            String sourceRef,
+            String correlationId,
+            int revision,
+            ChangeType changeType,
             List<RawObjectRef> objects) {
         return new RawObjectEvent(
-                CURRENT_SCHEMA_VERSION, sourceType, tenantId, correlationId, ingestedAt,
-                scopeDecision, revision, changeType, changeSignificanceScore, participants,
-                sourceTimestamp, sourceRef, objects, null);
+                CURRENT_SCHEMA_VERSION, sourceType, tenantId, ingestedAt, scopeDecision, participants,
+                sourceTimestamp, correlationId, revision, changeType, CURRENT_CHANGE_SIGNIFICANCE_SCORE, objects,
+                null, null);
+    }
+
+    /** A copy of this event carrying {@code sourceRef}. */
+    public RawObjectEvent withSourceRef(String sourceRef) {
+        return new RawObjectEvent(
+                schemaVersion, sourceType, tenantId, ingestedAt, scopeDecision, participants, sourceTimestamp,
+                correlationId, revision, changeType, changeSignificanceScore, objects, sourceRef, classification);
     }
 
     /** A copy of this event carrying {@code classification}. */
     public RawObjectEvent withClassification(Classification classification) {
         return new RawObjectEvent(
-                schemaVersion, sourceType, tenantId, correlationId, ingestedAt, scopeDecision,
-                revision, changeType, changeSignificanceScore, participants, sourceTimestamp,
-                sourceRef, objects, classification);
+                schemaVersion, sourceType, tenantId, ingestedAt, scopeDecision, participants, sourceTimestamp,
+                correlationId, revision, changeType, changeSignificanceScore, objects, sourceRef, classification);
     }
 
     @Override
     public String dedupKey() {
-        return correlationId;
+        return correlationId + ":" + revision;
     }
 }

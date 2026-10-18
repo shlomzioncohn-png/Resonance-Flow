@@ -248,15 +248,15 @@ class MediaIntakeOrchestratorTest {
     private RawObjectEvent fakeMeetingEvent(String objectKey) {
         RawObjectRef recording = new RawObjectRef(
                 Role.RECORDING, objectKey, "sha256:" + "0".repeat(64), "audio/mpeg", 2000L, Modality.AUDIO);
-        return RawObjectEvent.create(RawSourceType.ZOOM, "demo-tenant", "corr-fake", Instant.now(),
-                ScopeDecision.INCLUDED, 0, ChangeType.UPSERT, 100, null, null, null, List.of(recording));
+        return RawObjectEvent.create(RawSourceType.ZOOM, "demo-tenant", Instant.now(),
+                ScopeDecision.INCLUDED, null, null, "corr-fake", 0, ChangeType.UPSERT, List.of(recording));
     }
 
     private RawObjectEvent fakeScannedDocEvent(String objectKey) {
         RawObjectRef body = new RawObjectRef(
                 Role.BODY, objectKey, "sha256:" + "1".repeat(64), "application/pdf", 2000L, Modality.SCANNED_DOC);
-        return RawObjectEvent.create(RawSourceType.SCANNED_DOC, "demo-tenant", "corr-fake-doc", Instant.now(),
-                ScopeDecision.INCLUDED, 0, ChangeType.UPSERT, 100, null, null, null, List.of(body));
+        return RawObjectEvent.create(RawSourceType.SCANNED_DOC, "demo-tenant", Instant.now(),
+                ScopeDecision.INCLUDED, null, null, "corr-fake-doc", 0, ChangeType.UPSERT, List.of(body));
     }
 
     private String sha256(byte[] content) throws Exception {

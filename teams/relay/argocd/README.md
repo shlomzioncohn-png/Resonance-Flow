@@ -9,12 +9,12 @@ and discovered per-service manifests at `teams/<team>/<service>/k8s`.
 That model no longer matches how services are actually deployed: every
 team's service is now a `components.<team>` entry in the single shared
 [`resonance-flow`](../helm/resonance-flow) Helm chart's `values.yaml`,
-kept up to date by each team's own CI (e.g.
+kept up to date by each team's own CD (e.g.
 [`mind-ci.yaml`](../../../.github/workflows/mind-ci.yaml),
 [`bridge-ci.yaml`](../../../.github/workflows/bridge-ci.yaml), both built
 on the reusable
-[`service-ci.yaml`](../../../.github/workflows/service-ci.yaml)), which
-bumps the image tag and commits straight to `main`. ArgoCD's job is just
+[`service-update-manifest.yaml`](../../../.github/workflows/service-update-manifest.yaml)), which
+bumps the image tag and opens a PR to `main`. ArgoCD's job is just
 to watch that chart and keep the cluster in sync with it - a classic
 push-based GitOps flow, no image updater needed.
 
@@ -31,7 +31,8 @@ dedicated project is needed for this repo's scope.
 |--------------------------|--------------------------------------------------------------------------|
 | `root-app.yaml`          | App-of-apps bootstrap `Application` - manages everything under `apps/` |
 | `argocd-cm-patch.yaml`   | Restores the `argoproj.io/Application` health check ArgoCD dropped in 1.8 (with a fix for a "Missing" status edge case) - kept in case a future child `Application` needs sync-wave gating on another `Application`'s health; nothing under `apps/` currently uses more than one wave |
-| `apps/resonance-flow.yaml` | `Application` syncing the [`resonance-flow`](../helm/resonance-flow) chart (all teams' services, including the Kafka/Postgres/MinIO subcharts) |
+| `apps/resonance-flow.yaml` | `Application` syncing the [`resonance-flow`](../helm/resonance-flow) chart (all teams' services, including the Kafka/Postgres/MinIO subcharts), with [`environments/shared.yaml`](../helm/resonance-flow/environments/shared.yaml) layered on top for shared-cluster-only settings |
+| `apps/traefik.yaml`      | `Application` installing the Traefik ingress controller (namespace `traefik`, ingress class `traefik`) that serves the chart's Ingress |
 
 ## Onboarding your team's service
 

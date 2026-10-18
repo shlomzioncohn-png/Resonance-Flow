@@ -1,17 +1,17 @@
-import type { ReactNode } from 'react'
-import DashboardOutlinedIcon from '@mui/icons-material/DashboardOutlined'
-import SupervisorAccountOutlinedIcon from '@mui/icons-material/SupervisorAccountOutlined'
-import PersonOutlineIcon from '@mui/icons-material/PersonOutlined'
+import type { ReactNode } from 'react';
+import DashboardOutlinedIcon from '@mui/icons-material/DashboardOutlined';
+import SupervisorAccountOutlinedIcon from '@mui/icons-material/SupervisorAccountOutlined';
+import PersonOutlineIcon from '@mui/icons-material/PersonOutlined';
 
 export interface NavItem {
-  label: string
-  href: string
-  icon?: ReactNode
+  label: string;
+  href: string;
+  icon?: ReactNode;
 }
 
 export interface NavSection {
-  label: string
-  items: NavItem[]
+  label: string;
+  items: NavItem[];
 }
 
 export const navSections: NavSection[] = [
@@ -31,6 +31,7 @@ export const navSections: NavSection[] = [
       { label: 'Work in progress', href: '/manager/wip' },
       { label: 'Blocked & delayed', href: '/manager/blocked' },
       { label: 'Bottlenecks', href: '/manager/bottlenecks' },
+      { label: 'Users', href: '/manager/users' },
     ],
   },
   {
@@ -40,4 +41,4 @@ export const navSections: NavSection[] = [
       { label: 'My Tasks', href: '/employee/tasks' },
     ],
   },
-]
+];

@@ -1,43 +1,55 @@
-{{- if .Values.ingress.enabled -}}
+{{/*
+Public entry point: one host, each path routed to a component's Service (its
+`http` port), so the browser sees a single origin - no CORS, one cert. Only
+components that browsers should reach belong here; internal services
+(lens-bff, inbox, notification-delivery, ...) stay ClusterIP-only.
+Off by default (ingress.enabled) so teams' kind CI never renders it.
+*/}}
+{{- with .Values.ingress }}
+{{- if .enabled }}
+---
 apiVersion: networking.k8s.io/v1
 kind: Ingress
+
 metadata:
-  name: {{ include "resonance-flow.fullname" . }}
+  name: {{ include "resonance-flow.fullname" $ }}
   labels:
-    {{- include "resonance-flow.labels" . | nindent 4 }}
-  {{- with .Values.ingress.annotations }}
+    {{- include "resonance-flow.labels" $ | nindent 4 }}
+  {{- with .annotations }}
   annotations:
     {{- toYaml . | nindent 4 }}
   {{- end }}
+
 spec:
-  {{- with .Values.ingress.className }}
+  {{- with .className }}
   ingressClassName: {{ . }}
   {{- end }}
-  {{- if .Values.ingress.tls }}
+
+  {{- with .tlsSecretName }}
   tls:
-    {{- range .Values.ingress.tls }}
     - hosts:
-        {{- range .hosts }}
-        - {{ . | quote }}
-        {{- end }}
-      secretName: {{ .secretName }}
-    {{- end }}
+        - {{ $.Values.ingress.host | quote }}
+      secretName: {{ . }}
   {{- end }}
+
   rules:
-    {{- range .Values.ingress.hosts }}
-    - host: {{ .host | quote }}
+    - host: {{ required "ingress.host is required when ingress.enabled is true" .host | quote }}
       http:
         paths:
           {{- range .paths }}
+          {{- /* A disabled/unknown component has no Service - fail the render instead
+                 of syncing an Ingress that only returns 503. */}}
+          {{- $component := index $.Values.components .component | default dict }}
+          {{- if not $component.enabled }}
+          {{- fail (printf "ingress path %q routes to component %q, which is not enabled" .path .component) }}
+          {{- end }}
           - path: {{ .path }}
-            {{- with .pathType }}
-            pathType: {{ . }}
-            {{- end }}
+            pathType: Prefix
             backend:
               service:
-                name: {{ include "resonance-flow.fullname" $ }}
+                name: {{ include "resonance-flow.fullname" $ }}-{{ .component }}
                 port:
-                  number: {{ $.Values.service.port }}
+                  name: http
           {{- end }}
-    {{- end }}
+{{- end }}
 {{- end }}

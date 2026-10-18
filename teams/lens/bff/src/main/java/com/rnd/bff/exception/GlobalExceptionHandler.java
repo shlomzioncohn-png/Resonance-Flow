@@ -67,6 +67,20 @@ public class GlobalExceptionHandler {
                 HttpStatus.BAD_REQUEST);
     }
 
+    /**
+     * Triggered by an invalid argument the service checks itself, e.g.
+     * availableMinutes outside 1-480. Same mapping as the Gateway's handler.
+     */
+    @ExceptionHandler(IllegalArgumentException.class)
+    public ResponseEntity<ErrorResponse> handleIllegalArgumentException(
+            IllegalArgumentException ex, WebRequest request) {
+        String path = getRequestPath(request);
+        logger.warn("Invalid argument - Path: {}, Details: {}", path, ex.getMessage());
+        return new ResponseEntity<>(
+                new ErrorResponse("BAD_REQUEST", ex.getMessage(), path, null),
+                HttpStatus.BAD_REQUEST);
+    }
+
     /** Triggered by calling an endpoint with the wrong HTTP method. */
     @ExceptionHandler(HttpRequestMethodNotSupportedException.class)
     public ResponseEntity<ErrorResponse> handleMethodNotSupportedException(
@@ -100,6 +114,40 @@ public class GlobalExceptionHandler {
                 HttpStatus.SERVICE_UNAVAILABLE);
     }
 
+    /**
+     * Inbox is up but refused the request (401/403/400). Passed on with the
+     * same status, so the screen can tell "not allowed" from "Inbox is down".
+     */
+    @ExceptionHandler(InboxRejectedException.class)
+    public ResponseEntity<ErrorResponse> handleInboxRejectedException(
+            InboxRejectedException ex, WebRequest request) {
+        String path = getRequestPath(request);
+        logger.warn("Inbox rejected request ({}) - Path: {}, Details: {}", ex.getStatus(), path, ex.getMessage());
+        HttpStatus status = HttpStatus.valueOf(ex.getStatus());
+        String message = switch (ex.getStatus()) {
+            case 401 -> "User is not recognized by Inbox";
+            case 403 -> "Not allowed to access this task";
+            default -> "Inbox rejected the request";
+        };
+        return new ResponseEntity<>(
+                new ErrorResponse(status.name(), message, path, ex.getMessage()), status);
+    }
+
+    /**
+     * Triggered when a project id has no details (ProjectDetailsService).
+     * Needs its own handler: the catch-all below would otherwise win over the
+     * exception's @ResponseStatus(NOT_FOUND) and turn it into a 500.
+     */
+    @ExceptionHandler(ProjectNotFoundException.class)
+    public ResponseEntity<ErrorResponse> handleProjectNotFoundException(
+            ProjectNotFoundException ex, WebRequest request) {
+        String path = getRequestPath(request);
+        logger.warn("Project not found - Path: {}, projectId: {}", path, ex.getProjectId());
+        return new ResponseEntity<>(
+                new ErrorResponse("NOT_FOUND", "Project not found", path, ex.getMessage()),
+                HttpStatus.NOT_FOUND);
+    }
+
     /** Triggered when a task id doesn't exist in Inbox's task set. */
     @ExceptionHandler(TaskNotFoundException.class)
     public ResponseEntity<ErrorResponse> handleTaskNotFoundException(
@@ -110,6 +158,32 @@ public class GlobalExceptionHandler {
         return new ResponseEntity<>(
                 new ErrorResponse("NOT_FOUND", "Task not found", path, ex.getMessage()),
                 HttpStatus.NOT_FOUND);
+    }
+
+    /**
+     * A real 4xx response Inbox itself returned (404/409/400/403) for the
+     * admin Users screen — see InboxResponseException's javadoc. Status and
+     * message are passed through as-is rather than flattened to 503.
+     */
+    @ExceptionHandler(InboxResponseException.class)
+    public ResponseEntity<ErrorResponse> handleInboxResponseException(
+            InboxResponseException ex, WebRequest request) {
+        String path = getRequestPath(request);
+        logger.warn("Inbox rejected the request: {} - Path: {}", ex.getStatus(), path);
+
+        return new ResponseEntity<>(
+                new ErrorResponse(ex.getStatus().name(), ex.getMessage(), path, null), ex.getStatus());
+    }
+
+    /** A manager tried to change their own status (409) — see SelfStatusChangeException's javadoc. */
+    @ExceptionHandler(SelfStatusChangeException.class)
+    public ResponseEntity<ErrorResponse> handleSelfStatusChangeException(
+            SelfStatusChangeException ex, WebRequest request) {
+        String path = getRequestPath(request);
+        logger.warn("Self status change blocked - Path: {}", path);
+
+        return new ResponseEntity<>(
+                new ErrorResponse("CONFLICT", ex.getMessage(), path, null), HttpStatus.CONFLICT);
     }
 
     /** Catch-all for unexpected errors. */

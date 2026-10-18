@@ -11,6 +11,7 @@ import com.rnd.bridge.media.meeting.MeetingMetadataReader;
 import com.rnd.bridge.media.meeting.ParticipantActivity;
 import com.rnd.bridge.raw.model.Modality;
 import com.rnd.bridge.raw.model.RawObjectEvent;
+import com.rnd.bridge.raw.model.RawObjectRef;
 import com.rnd.bridge.raw.model.RawSourceType;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;

@@ -17,11 +17,11 @@ import org.springframework.stereotype.Component;
  * convention of partitioning a raw-landing bucket by when content arrived, so retention/
  * lifecycle rules can operate on "what came in this month" regardless of how old the
  * source content itself is. The caller passes ingestedAt rather than this class calling
- * Instant.now() itself, so the same instant is shared with the MinIO tag and the
- * published event (see UnstructuredIntakeService) instead of three independent clocks.
+ * Instant.now() itself, so the same instant (AbstractIntakeLane.run()'s asOf) is shared
+ * with the MinIO tag and the published event instead of three independent clocks.
  * Filename gets a fresh random id per record. Linking a body record to its attachment
  * record(s) is no longer this class's job — that's now carried explicitly by
- * RawObjectEvent.correlationId/attachmentIndex (see PointerEventPublisher), so the
+ * RawObjectEvent.correlationId/attachmentIndex (see UnstructuredPayloadMapper), so the
  * object_key itself doesn't need to encode it. A side benefit: two attachments on the same
  * message with an identical original filename (e.g. two files both named "invoice.pdf")
  * can't collide, since each gets its own random id regardless of filename.

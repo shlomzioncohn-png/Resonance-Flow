@@ -1,11 +1,16 @@
 package com.rnd.bridge.crm.controller;
 
-import com.rnd.bridge.core.ReadCursor;
 import com.rnd.bridge.crm.CrmLane;
 import com.rnd.bridge.crm.repository.DealRepository;
+import com.rnd.bridge.crm.repository.DealSnapshot;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
+
+import java.util.Map;
 
 /**
  * Thin HTTP trigger for the CRM lane. No mapping, filtering, or decisions
@@ -20,6 +25,19 @@ import org.springframework.web.bind.annotation.RestController;
  * the current {@code LoggingPayloadPublisher}; not harmless once Kafka is
  * wired (interleaved or duplicate publishes). Not solved here - needs a
  * single-flight guard or lock before that lands.
+ * <p>
+ * Takes exactly one {@link DealSnapshot} per request and runs the lane against its {@code
+ * latestPerDeal()}/{@code asOf()} together, via {@code CrmLane.run(Stream, Instant)} - never the
+ * {@code ReadCursor} overload, which would fetch the deals and the {@code asOf} from two separate,
+ * potentially different snapshots.
+ * <p>
+ * A fetch failure (HubSpot/Salesforce unreachable, retries exhausted, a pipeline/stage-level
+ * metadata problem {@code HubSpotStageMapping} can't isolate to one stage - zero stages, a stage
+ * with no id, every stage invalid - or {@code bridge.crm.hubspot.max-skipped-ratio} exceeded, see
+ * {@code HubSpotDealRepository}'s Javadoc) happens inside {@code dealRepository.snapshot()},
+ * before {@link CrmLane} ever runs, so there is no {@link com.rnd.bridge.core.IntakeResult} to
+ * shape into a normal 200 response. {@link #handleSnapshotFailure} turns that into an explicit
+ * 503 with the failure's message, instead of the framework's default, message-less 500.
  */
 @RestController
 @RequestMapping("/bridge/crm")
@@ -35,9 +53,15 @@ public class CrmBridgeController {
 
     @PostMapping("/sync")
     public CrmSyncResponse sync() {
-        // asOf comes from the repository's own time basis, never the clock -
-        // the whole lane is built so urgency and deadlines are reproducible
-        // from arguments alone; Instant.now() here would undo that.
-        return CrmSyncResponse.from(crmLane.run(ReadCursor.full(), dealRepository.asOf()));
+        DealSnapshot snapshot = dealRepository.snapshot();
+        return CrmSyncResponse.from(
+                crmLane.run(snapshot.latestPerDeal().stream(), snapshot.asOf()),
+                snapshot.skippedAtRead());
+    }
+
+    @ExceptionHandler(RuntimeException.class)
+    public ResponseEntity<Map<String, String>> handleSnapshotFailure(RuntimeException e) {
+        return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE)
+                .body(Map.of("error", "CRM sync failed: " + e.getMessage()));
     }
 }

@@ -1,0 +1,42 @@
+{
+  "scenario_id": "ceo_blocked_ma_review_vs_vp_offer",
+  "persona": {
+    "role": "CEO",
+    "department": null
+  },
+  "context": {
+    "free_time_minutes": 50,
+    "current_datetime": "2026-09-21T10:00:00",
+    "time_horizon": "this_week",
+    "constraints": []
+  },
+  "tasks": [
+    {
+      "task_id": "task_ma",
+      "title": "Review the renewed vendor contract terms",
+      "description": "The updated terms need your sign-off before the current vendor agreement lapses Friday, but your review is on hold until legal finishes redlining the liability clause, which is still in progress.",
+      "deadline": "2026-09-25T17:00:00",
+      "effort_estimate": 40,
+      "tier": "strategic",
+      "blocked": true,
+      "parent_task_id": null
+    },
+    {
+      "task_id": "task_vp",
+      "title": "Make the final call on the VP Sales offer",
+      "description": "The preferred candidate needs a yes or no; their employer has made a counter and they will decide by the end of the week.",
+      "deadline": "2026-09-25T20:00:00",
+      "effort_estimate": 30,
+      "tier": "strategic",
+      "blocked": false,
+      "parent_task_id": null
+    }
+  ],
+  "expected_top_task_id": "task_vp",
+  "expected_reason": "task_ma is blocked pending legal's redline of the liability clause and cannot move now, even though it technically expires first that same day; task_vp is unblocked and needs a decision by the end of the week.",
+  "source": {
+    "type": "synthetic",
+    "source_detail": null
+  },
+  "team_lead_approved": true
+}

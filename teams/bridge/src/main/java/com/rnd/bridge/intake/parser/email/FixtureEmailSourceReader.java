@@ -6,6 +6,7 @@ import static com.rnd.bridge.intake.parser.FixtureIoSupport.textOrNull;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.rnd.bridge.core.ReadCursor;
 import com.rnd.bridge.intake.model.SourceRecord;
 import com.rnd.bridge.raw.model.RawSourceType;
 import java.nio.charset.StandardCharsets;
@@ -32,7 +33,7 @@ public class FixtureEmailSourceReader implements EmailSourceReader {
     }
 
     @Override
-    public List<SourceRecord> read() {
+    public EmailReadResult read(ReadCursor cursor) {
         List<SourceRecord> records = new ArrayList<>();
         for (JsonNode node : readJson(objectMapper, FIXTURE_ROOT + "gmail-sample.json")) {
             String from = node.get("from").asText();
@@ -42,12 +43,14 @@ public class FixtureEmailSourceReader implements EmailSourceReader {
             String naturalId = "EMAIL|" + from + "|" + date;
             String correlationId = UUID.randomUUID().toString();
 
+            JsonNode attachments = node.get("attachments");
+            int attachmentCount = attachments == null ? 0 : attachments.size();
+
             records.add(new SourceRecord(
                     RawSourceType.EMAIL, tenantId, naturalId, correlationId, occurredAt, from, List.of(from),
                     textOrNull(node.get("subject")), textOrNull(node.get("body")),
-                    node.toString().getBytes(StandardCharsets.UTF_8), null, null, 0));
+                    node.toString().getBytes(StandardCharsets.UTF_8), null, null, 0, attachmentCount, List.of(), 0));
 
-            JsonNode attachments = node.get("attachments");
             if (attachments != null) {
                 int index = 0;
                 for (JsonNode attachment : attachments) {
@@ -56,10 +59,11 @@ public class FixtureEmailSourceReader implements EmailSourceReader {
                     records.add(new SourceRecord(
                             RawSourceType.EMAIL, tenantId, naturalId + "|attachment-" + index, correlationId,
                             occurredAt, from, List.of(from), null, null, content,
-                            textOrNull(attachment.get("mimeType")), textOrNull(attachment.get("filename")), index));
+                            textOrNull(attachment.get("mimeType")), textOrNull(attachment.get("filename")), index,
+                            attachmentCount, List.of(), 0));
                 }
             }
         }
-        return records;
+        return new EmailReadResult(records, null);
     }
 }

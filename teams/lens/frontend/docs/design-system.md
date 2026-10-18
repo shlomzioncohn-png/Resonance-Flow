@@ -37,11 +37,11 @@ file.
 
 ### Colors
 
-| Token | Value | Used for |
-|---|---|---|
-| `colorTokens.brand[600]` | `#4f46e5` | `palette.primary.main` — buttons, links, active nav, focus ring |
-| `colorTokens.slate[50..950]` | `#f8fafc` → `#0b1120` | `palette.grey`, text, dividers, the dark sidebar surface |
-| `colorTokens.green` / `amber` / `red` | — | `palette.success` / `warning` / `error` (form & feedback semantics) |
+| Token                                 | Value                 | Used for                                                            |
+| ------------------------------------- | --------------------- | ------------------------------------------------------------------- |
+| `colorTokens.brand[600]`              | `#4f46e5`             | `palette.primary.main` — buttons, links, active nav, focus ring     |
+| `colorTokens.slate[50..950]`          | `#f8fafc` → `#0b1120` | `palette.grey`, text, dividers, the dark sidebar surface            |
+| `colorTokens.green` / `amber` / `red` | —                     | `palette.success` / `warning` / `error` (form & feedback semantics) |
 
 ### Status palette (`theme.palette.status`)
 
@@ -52,12 +52,12 @@ meaning — task/project/blocker state — as opposed to MUI's `success` /
 "this task is blocked" would make snackbar styling and workflow-health
 styling impossible to change independently.
 
-| Tone | `main` (dot / border) | `bg` (fill) | `text` (label) | Meaning |
-|---|---|---|---|---|
-| `healthy` | green 600 | green 50 | green 700 | Healthy / Good / Completed |
-| `warning` | amber 600 | amber 50 | amber 700 | At risk / In progress / Delayed |
-| `critical` | red 600 | red 50 | red 700 | Critical / Blocked |
-| `neutral` | slate 500 | slate 100 | slate 700 | Unknown / N/A |
+| Tone       | `main` (dot / border) | `bg` (fill) | `text` (label) | Meaning                         |
+| ---------- | --------------------- | ----------- | -------------- | ------------------------------- |
+| `healthy`  | green 600             | green 50    | green 700      | Healthy / Good / Completed      |
+| `warning`  | amber 600             | amber 50    | amber 700      | At risk / In progress / Delayed |
+| `critical` | red 600               | red 50      | red 700        | Critical / Blocked              |
+| `neutral`  | slate 500             | slate 100   | slate 700      | Unknown / N/A                   |
 
 Usage: `theme.palette.status.healthy.main`, or via `StatusBadge` (see below).
 `text` is always a dark, accessible shade — never white-on-tint — so labels
@@ -85,12 +85,12 @@ for spacing.
 most components) is `10px`. For places that need a different step, use
 `theme.custom.radius`:
 
-| Token | Value | Used for |
-|---|---|---|
-| `radius.sm` | 6px | Buttons, list items, small controls |
-| `radius.md` | 10px | Cards, panels (`theme.shape.borderRadius`) |
-| `radius.lg` | 16px | Larger surfaces, modals |
-| `radius.pill` | 999px | Chips, status badges |
+| Token         | Value | Used for                                   |
+| ------------- | ----- | ------------------------------------------ |
+| `radius.sm`   | 6px   | Buttons, list items, small controls        |
+| `radius.md`   | 10px  | Cards, panels (`theme.shape.borderRadius`) |
+| `radius.lg`   | 16px  | Larger surfaces, modals                    |
+| `radius.pill` | 999px | Chips, status badges                       |
 
 ### Elevation
 
@@ -100,11 +100,11 @@ use a hairline border and a very soft shadow, not heavy elevation). Instead of
 redefining all 25 steps, `theme.custom.elevation` gives three named,
 purpose-built shadows:
 
-| Token | Used for |
-|---|---|
-| `elevation.card` | Default card/panel shadow (very subtle) |
-| `elevation.raised` | Hover/dragging state |
-| `elevation.overlay` | Menus, popovers, dialogs |
+| Token               | Used for                                |
+| ------------------- | --------------------------------------- |
+| `elevation.card`    | Default card/panel shadow (very subtle) |
+| `elevation.raised`  | Hover/dragging state                    |
+| `elevation.overlay` | Menus, popovers, dialogs                |
 
 ### Breakpoints
 
@@ -131,8 +131,8 @@ color/theme-related belongs in `theme/components.ts`, not there.
 ## MUI usage conventions
 
 1. **Read colors, spacing, and radii from the theme, not literals.** `sx={{
-   bgcolor: 'primary.main' }}` or `bgcolor: 'grey.100'`, not `bgcolor:
-   '#4f46e5'`. If a value doesn't exist on the theme yet, add it to
+bgcolor: 'primary.main' }}` or `bgcolor: 'grey.100'`, not `bgcolor:
+'#4f46e5'`. If a value doesn't exist on the theme yet, add it to
    `theme/tokens.ts` rather than inlining it — see `Sidebar.tsx` and
    `Header.tsx` for the pattern (no component in `components/layout` hardcodes
    a color).
@@ -162,9 +162,9 @@ color/theme-related belongs in `theme/components.ts`, not there.
 ## When to create a LENS-specific component
 
 Only when there's a real **product abstraction or behavior** MUI doesn't
-express — not to rename or reskin an existing MUI component. Ask: *does this
+express — not to rename or reskin an existing MUI component. Ask: _does this
 encode domain knowledge (a mapping, a business rule, a composed
-interaction), or is it just MUI with different default styling?* The latter
+interaction), or is it just MUI with different default styling?_ The latter
 belongs in `theme/components.ts`.
 
 **Example that qualifies:** `components/ui/StatusBadge`. Workflow-health
@@ -176,9 +176,9 @@ text label (never color alone — see Accessibility), which is exactly the
 kind of small, justified abstraction this rule allows:
 
 ```tsx
-import StatusBadge from '@/components/ui/StatusBadge'
+import StatusBadge from '@/components/ui/StatusBadge';
 
-<StatusBadge status="critical" label="Blocked" />
+<StatusBadge status="critical" label="Blocked" />;
 ```
 
 See it in use in `app/(app)/manager/workload/page.tsx`.
@@ -188,6 +188,68 @@ default `elevation={0}` — that's a per-instance default, and belongs in
 `theme/components.ts → MuiCard.styleOverrides` so every `<Card>` gets it
 automatically, including ones written before the wrapper existed.
 
+## Tables: `DataTable`
+
+Every table in LENS is a `components/ui/DataTable` — don't hand-roll MUI
+`Table` markup on a page. The split is: **the table knows how to display, the
+page decides what to display.**
+
+- `DataTable` owns structure, loading / empty / error states (the existing
+  `components/feedback/*State` components), sort and pagination controls, and
+  table accessibility (`aria-label`, `scope="col"`, `aria-sort`).
+- The page owns the data and the columns. It loads rows itself (through
+  `services/`) and passes `rows`, `loading` and `error`; the table never
+  fetches.
+- Sorting and pagination are **controlled**. The table only reports what the
+  user asked for (`onSortChange`, `pagination.onPageChange`) — it never sorts
+  or slices `rows`. The page reacts, typically by calling the API again.
+- The shared look (header, padding, hover) lives in `theme/components.ts`
+  (`MuiTableCell` / `MuiTableRow`), not in the component.
+
+Column definitions live in a file next to the page. From
+`app/(app)/manager/users/userColumns.tsx`:
+
+```tsx
+import type { Column } from '@/components/ui/DataTable';
+
+const columns: Column<UserRow>[] = [
+  {
+    id: 'displayName', // also the sort key sent to the API
+    header: 'Name',
+    sortable: true,
+    render: (user) => <Typography variant="body2">{user.displayName}</Typography>,
+  },
+  {
+    id: 'status',
+    header: 'Status',
+    render: (user) => <Chip size="small" label={user.status} color={STATUS_COLOR[user.status]} />,
+  },
+];
+```
+
+```tsx
+<DataTable
+  ariaLabel="Users"
+  columns={columns}
+  rows={users}
+  getRowId={(user) => user.id}
+  loading={loading}
+  error={error}
+  onRetry={retry}
+  sort={sort}
+  onSortChange={changeSort}
+  pagination={{ page, pageSize, totalCount, onPageChange, onPageSizeChange }}
+/>
+```
+
+**The rule: content goes in `render`, not in new `DataTable` props.** A status
+chip, a date format, a link to a details page, row actions — all of it is a
+column's `render`. If you're about to add a prop like `showStatusChip`, or a
+branch on what kind of rows the table holds, it belongs in the column
+definition instead. Rows have no `onClick`: row actions are real buttons
+(or links) inside a cell, each with an `aria-label` that names the row
+(`"Edit Dana Levi"`), so the table works with a keyboard alone.
+
 ## Working example: Theme usage in the App Shell
 
 The App Shell (`components/layout/{AppShell,Header,Sidebar,Logo,PageContainer}`)
@@ -196,7 +258,7 @@ is the theme's first real consumer and demonstrates the conventions above:
 - `Sidebar.tsx` is a permanently dark surface (a deliberate product choice,
   independent of light/dark mode) built entirely from theme values —
   `theme.palette.grey[900]` for the background, `alpha(theme.palette.common.white,
-  …)` for text/hover/divider opacity steps, `theme.typography.*.fontWeight`
+…)` for text/hover/divider opacity steps, `theme.typography.*.fontWeight`
   for active vs. inactive nav item weight. No hex literal appears in the file.
 - `Header.tsx` uses `theme.custom.radius.sm` for the search field and
   `grey.100` for its background.
@@ -220,7 +282,7 @@ is the theme's first real consumer and demonstrates the conventions above:
   `IconButton` itself (not just a `Tooltip` title) — see the notifications
   button in `Header.tsx`.
 - **Live regions for async state**: `LoadingState` uses `role="status"
-  aria-live="polite"`; `ErrorState` uses `role="alert"`. Reuse these
+aria-live="polite"`; `ErrorState` uses `role="alert"`. Reuse these
   components for new async views instead of building ad hoc loading/error UI.
 - **Contrast**: `text.primary` on `background.default`/`paper` and all four
   `status` tones' `text` color on their `bg` fill meet WCAG AA (≥4.5:1) at

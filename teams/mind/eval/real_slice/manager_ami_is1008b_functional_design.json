@@ -1,0 +1,56 @@
+{
+  "scenario_id": "manager_ami_is1008b_functional_design",
+  "persona": { "role": "Manager", "department": "Engineering" },
+  "context": {
+    "free_time_minutes": 60,
+    "current_datetime": "2004-12-10T09:00:00",
+    "time_horizon": "this_week",
+    "constraints": []
+  },
+  "tasks": [
+    {
+      "task_id": "task_components_concept",
+      "title": "Prepare the components-concept presentation (Industrial Designer)",
+      "description": "Verbatim action item (AMI IS1008b): 'The Industrial Designer will make a presentation on the components concept for the product.' AMI does not state this explicitly, but the components concept centers on integrating voice recognition, which a separate action item (task_research_vr_help) has the Project Manager still researching outside help for; treated here as blocked on that research pending resolution.",
+      "deadline": null,
+      "effort_estimate": 90,
+      "tier": "operational",
+      "blocked": true,
+      "parent_task_id": null
+    },
+    {
+      "task_id": "task_ui_concept",
+      "title": "Prepare the user-interface-concept presentation (UI Designer)",
+      "description": "Verbatim action item (AMI IS1008b): 'The User Interface Designer will make a presentation on the user interface concept.' Standard preparation for the next design meeting; independent of the other assignments.",
+      "deadline": null,
+      "effort_estimate": 90,
+      "tier": "operational",
+      "blocked": false,
+      "parent_task_id": null
+    },
+    {
+      "task_id": "task_marketing_concept",
+      "title": "Prepare the marketing-concept presentation (Marketing Expert)",
+      "description": "Verbatim action item (AMI IS1008b): 'The Marketing Expert will present the marketing concept.' Standard preparation for the next design meeting; independent of the other assignments.",
+      "deadline": null,
+      "effort_estimate": 90,
+      "tier": "operational",
+      "blocked": false,
+      "parent_task_id": null
+    },
+    {
+      "task_id": "task_research_vr_help",
+      "title": "Find companies that can help integrate voice recognition",
+      "description": "Verbatim action item (AMI IS1008b): 'The Project Manager will research companies that can provide the Industrial Designer with help on integrating voice recognition into her design.' AMI does not state this explicitly, but the Industrial Designer's components-concept presentation is treated as blocked on this same research resolving — inferred for this scenario, not an AMI-stated fact.",
+      "deadline": null,
+      "effort_estimate": 45,
+      "tier": "operational",
+      "blocked": false,
+      "parent_task_id": null
+    }
+  ],
+  "expected_top_task_id": "task_research_vr_help",
+  "expected_reason": "task_components_concept is blocked, pending the outside integration help task_research_vr_help is tasked with finding. This dependency is inferred for the scenario, not stated by AMI itself — the annotation only has the Project Manager 'offer to help' find that outside help, not a statement that the presentation cannot proceed without it. task_ui_concept and task_marketing_concept are unaffected by that dependency and remain independent preparation items. task_research_vr_help is the correct answer because completing it resolves the blocker on task_components_concept; enabling blocked work outranks parallel preparation.",
+  "source": { "type": "AMI", "source_detail": "AMI Meeting Corpus meeting IS1008b, abssumm <actions> (ami_public_manual_1.6.2)" },
+  "team_lead_approved": false
+}

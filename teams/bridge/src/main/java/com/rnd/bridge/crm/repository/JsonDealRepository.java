@@ -9,7 +9,6 @@ import org.springframework.stereotype.Repository;
 
 import java.io.IOException;
 import java.io.InputStream;
-import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
@@ -21,17 +20,17 @@ import java.util.Optional;
 /**
  * Loads the synthetic CRM deal feed from a JSON resource.
  * <p>
- * The dataset is the adapter's actual runtime data source - there is no live
- * CRM in scope for this program - so it is read eagerly at construction time
- * and failures are fatal at startup rather than surfacing lazily per call.
+ * The dataset is the adapter's actual runtime data source - there is no live CRM in scope for
+ * this program - so it is read eagerly at construction time and failures are fatal at startup
+ * rather than surfacing lazily per call. The fixture never changes at runtime, so one {@link
+ * DealSnapshot} built once at construction correctly serves every {@link #snapshot()} call - there
+ * is no cross-call staleness to guard against here the way there is in {@code
+ * HubSpotDealRepository}.
  */
 @Repository
 public class JsonDealRepository implements DealRepository {
 
-    private final Instant asOf;
-    private final List<Deal> allDeals;
-    private final Map<String, List<Deal>> historyByDealId;
-    private final List<String> dealIds;
+    private final DealSnapshot snapshot;
 
     public JsonDealRepository(
             ResourceLoader resourceLoader,
@@ -60,50 +59,39 @@ public class JsonDealRepository implements DealRepository {
                     "CRM synthetic dataset at " + datasetLocation + " has no deals");
         }
 
-        this.asOf = feed.asOf();
-
         List<Deal> sorted = new ArrayList<>(feed.deals());
         sorted.sort(Comparator.comparing(Deal::stageChangedAt).thenComparing(Deal::dealId));
-        this.allDeals = Collections.unmodifiableList(sorted);
+        List<Deal> allDeals = Collections.unmodifiableList(sorted);
 
         Map<String, List<Deal>> history = new LinkedHashMap<>();
-        for (Deal deal : sorted) {
+        for (Deal deal : allDeals) {
             history.computeIfAbsent(deal.dealId(), id -> new ArrayList<>()).add(deal);
         }
         Map<String, List<Deal>> unmodifiableHistory = new LinkedHashMap<>();
         for (Map.Entry<String, List<Deal>> entry : history.entrySet()) {
             unmodifiableHistory.put(entry.getKey(), Collections.unmodifiableList(entry.getValue()));
         }
-        this.historyByDealId = Collections.unmodifiableMap(unmodifiableHistory);
-        this.dealIds = Collections.unmodifiableList(new ArrayList<>(unmodifiableHistory.keySet()));
+        List<String> dealIds = Collections.unmodifiableList(new ArrayList<>(unmodifiableHistory.keySet()));
+
+        this.snapshot = new DealSnapshot(
+                feed.asOf(), allDeals, Collections.unmodifiableMap(unmodifiableHistory), dealIds, 0);
     }
 
     @Override
-    public Instant asOf() {
-        return asOf;
+    public DealSnapshot snapshot() {
+        return snapshot;
     }
 
+    /**
+     * The fixture is loaded once at construction (see the class Javadoc) and never changes at
+     * runtime, so "fresh" here means the same thing it does for {@link #snapshot()}: there is no
+     * live source to re-read, just the one dataset read at startup.
+     */
     @Override
-    public List<Deal> findAll() {
-        return allDeals;
-    }
-
-    @Override
-    public List<Deal> findHistoryByDealId(String dealId) {
-        return historyByDealId.getOrDefault(dealId, List.of());
-    }
-
-    @Override
-    public Optional<Deal> findLatestByDealId(String dealId) {
-        List<Deal> history = findHistoryByDealId(dealId);
-        if (history.isEmpty()) {
-            return Optional.empty();
+    public Optional<Deal> fetchDeal(String dealId) {
+        if (dealId == null || dealId.isBlank()) {
+            throw new IllegalArgumentException("dealId must not be blank");
         }
-        return Optional.of(history.get(history.size() - 1));
-    }
-
-    @Override
-    public List<String> findAllDealIds() {
-        return dealIds;
+        return snapshot.findLatestByDealId(dealId);
     }
 }

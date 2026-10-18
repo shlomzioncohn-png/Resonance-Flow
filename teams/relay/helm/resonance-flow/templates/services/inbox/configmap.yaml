@@ -1,0 +1,45 @@
+{{- $component := .Values.components.inbox }}
+{{- if $component.enabled }}
+{{- with $component.config }}
+{{- $cfg := .data }}
+{{- $pg := $.Values.postgresql.auth }}
+---
+{{ include "resonance-flow.configMapHeader" (dict "root" $ "component" "inbox") }}
+
+# Only deploy-specific overrides - everything else keeps application.yml's defaults
+# (this file is layered on top of it via SPRING_CONFIG_ADDITIONAL_LOCATION).
+data:
+  config.yaml: |
+    server:
+      port: {{ $component.containerPort }}
+    spring:
+      config:
+        # Binds the inbox-db-credentials Secret's "password" file to ${password} below.
+        import: "optional:configtree:/etc/resonance-flow/secrets/inbox-db/"
+      datasource:
+        # Same host/port helper as the wait-for-postgresql initContainer; the database is
+        # the subchart's own, which Inbox's user owns (see inbox/_db-init.tpl).
+        url: "jdbc:postgresql://{{ include "resonance-flow.dependencyAddress" (dict "root" $ "deps" $component.dependencies "name" "postgresql") }}/{{ $pg.database }}?stringtype=unspecified"
+        username: {{ $cfg.datasource.username | quote }}
+        password: "${password}"
+      kafka:
+        {{- include "resonance-flow.springKafkaBase" (dict "root" $) | nindent 8 }}
+        consumer:
+          group-id: {{ $cfg.kafka.consumerGroupId | quote }}
+    kafka:
+      # The key KafkaConfig's @Value reads for every Protobuf serde, not spring.kafka.properties.
+      schema-registry:
+        url: {{ printf "http://%s/apis/ccompat/v6" (include "resonance-flow.dependencyAddress" (dict "root" $ "deps" $component.dependencies "name" "schema-registry")) | quote }}
+    inbox:
+      kafka:
+        topics:
+          bridge-structured-tasks: {{ $cfg.kafka.topics.bridgeStructuredTasks | quote }}
+          chain-scheduling-updated: {{ $cfg.kafka.topics.chainSchedulingUpdated | quote }}
+          mind-task-creation-requested: {{ $cfg.kafka.topics.mindTaskCreationRequested | quote }}
+{{- end }}
+{{- end }}
+
+
+# inbox-db-credentials isn't rendered here - an offline render can't tell a live
+# password from none, so it would overwrite the real value. Created by
+# db-credentials-hook.yaml; referenced by name only, here and in values.yaml.

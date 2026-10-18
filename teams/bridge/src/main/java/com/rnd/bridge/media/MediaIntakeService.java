@@ -19,6 +19,7 @@ import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.HexFormat;
 import java.util.List;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Service;
 
 /**
@@ -44,11 +45,10 @@ public class MediaIntakeService {
     private static final DateTimeFormatter DATE_FORMAT =
             DateTimeFormatter.ofPattern("yyyy-MM-dd").withZone(ZoneOffset.UTC);
     private static final int NEW_ITEM_REVISION = 0;
-    private static final int NEW_ITEM_SIGNIFICANCE_SCORE = 100;
 
     private final ObjectStorageClient storageClient;
 
-    public MediaIntakeService(ObjectStorageClient storageClient) {
+    public MediaIntakeService(@Qualifier("minioObjectStorageClient") ObjectStorageClient storageClient) {
         this.storageClient = storageClient;
     }
 
@@ -102,9 +102,9 @@ public class MediaIntakeService {
                                        Instant ingestedAt, List<String> participants, Instant sourceTimestamp,
                                        String sourceRef, List<RawObjectRef> objects, Triage triage) {
         return RawObjectEvent.create(
-                sourceType, tenantId, correlationId, ingestedAt, triage.scopeDecision(),
-                NEW_ITEM_REVISION, ChangeType.UPSERT, NEW_ITEM_SIGNIFICANCE_SCORE,
-                participants, sourceTimestamp, sourceRef, objects)
+                        sourceType, tenantId, ingestedAt, triage.scopeDecision(), participants, sourceTimestamp,
+                        correlationId, NEW_ITEM_REVISION, ChangeType.UPSERT, objects)
+                .withSourceRef(sourceRef)
                 .withClassification(triage.classification());
     }
 

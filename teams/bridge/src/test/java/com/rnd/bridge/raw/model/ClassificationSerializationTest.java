@@ -85,8 +85,7 @@ class ClassificationSerializationTest {
         RawObjectRef body = new RawObjectRef(
                 Role.BODY, "SCANNED_DOC/kamatech/2026-10-11/x.png", "sha256:" + "a".repeat(64),
                 "image/png", 10L, Modality.SCANNED_DOC);
-        return RawObjectEvent.create(
-                RawSourceType.SCANNED_DOC, "kamatech", "corr-1", Instant.parse("2026-10-11T09:00:00Z"),
-                ScopeDecision.INCLUDED, 0, ChangeType.UPSERT, 100, null, null, null, List.of(body));
+        return RawObjectEvent.create(RawSourceType.SCANNED_DOC, "kamatech", Instant.parse("2026-10-11T09:00:00Z"),
+                ScopeDecision.INCLUDED, null, null, "corr-1", 0, ChangeType.UPSERT, List.of(body));
     }
 }

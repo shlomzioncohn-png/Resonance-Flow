@@ -6,6 +6,7 @@ import com.rnd.bridge.storage.ObjectStorageClient;
 import com.rnd.bridge.storage.ObjectStorageClient.PutResult;
 import com.rnd.bridge.storage.ObjectTags;
 import java.time.Instant;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Service;
 
 /**
@@ -20,7 +21,7 @@ public class IntakeLandingService {
 
     private final ObjectStorageClient storageClient;
 
-    public IntakeLandingService(ObjectStorageClient storageClient) {
+    public IntakeLandingService(@Qualifier("minioObjectStorageClient") ObjectStorageClient storageClient) {
         this.storageClient = storageClient;
     }
 
@@ -33,7 +34,11 @@ public class IntakeLandingService {
                 ObjectTags.of(record.sourceType(), record.tenantId(), ingestedAt, scopeDecision));
     }
 
-    private String resolveContentType(SourceRecord record, String objectKey) {
+    /**
+     * Pure - callers that already need the content type before landing (e.g. to build the
+     * event that references it) don't have to wait on the actual I/O in {@link #land} to get it.
+     */
+    public String resolveContentType(SourceRecord record, String objectKey) {
         if (record.mimeType() != null) {
             return record.mimeType();
         }

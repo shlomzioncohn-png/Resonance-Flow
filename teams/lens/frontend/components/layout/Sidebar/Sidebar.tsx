@@ -1,47 +1,48 @@
-'use client'
+'use client';
 
-import { alpha, useTheme } from '@mui/material/styles'
+import { alpha, useTheme } from '@mui/material/styles';
 import {
   Box,
   Drawer,
   List,
+  ListItem,
   ListItemButton,
   ListItemIcon,
   ListItemText,
   Toolbar,
   Typography,
-} from '@/design-system/components'
-import Link from 'next/link'
-import { usePathname } from 'next/navigation'
-import Logo from '../Logo'
-import { useRole } from '../RoleProvider'
-import { navSections } from './navConfig'
+} from '@/design-system/components';
+import Link from 'next/link';
+import { usePathname } from 'next/navigation';
+import Logo from '../Logo';
+import { useRole } from '../RoleProvider';
+import { navSections } from './navConfig';
 
-export const SIDEBAR_WIDTH = 260
+export const SIDEBAR_WIDTH = 260;
 
 export interface SidebarProps {
-  open: boolean
-  onClose: () => void
-  variant: 'permanent' | 'temporary'
+  open: boolean;
+  onClose: () => void;
+  variant: 'permanent' | 'temporary';
 }
 
 export default function Sidebar({ open, onClose, variant }: SidebarProps) {
-  const pathname = usePathname()
-  const { role } = useRole()
-  const theme = useTheme()
+  const pathname = usePathname();
+  const { role } = useRole();
+  const theme = useTheme();
 
-  const sidebarBg = theme.palette.sidebar.background
-  const sidebarText = theme.palette.sidebar.text
-  const sidebarTextActive = theme.palette.sidebar.textActive
-  const sidebarDivider = theme.palette.sidebar.divider
-  const sidebarHover = theme.palette.sidebar.hover
+  const sidebarBg = theme.palette.sidebar.background;
+  const sidebarText = theme.palette.sidebar.text;
+  const sidebarTextActive = theme.palette.sidebar.textActive;
+  const sidebarDivider = theme.palette.sidebar.divider;
+  const sidebarHover = theme.palette.sidebar.hover;
 
   const visibleSections =
     role === 'manager'
       ? navSections.filter((section) => section.label !== 'Employee')
       : role === 'employee'
         ? navSections.filter((section) => section.label === 'Employee')
-        : navSections
+        : navSections;
 
   const content = (
     <Box
@@ -68,7 +69,7 @@ export default function Sidebar({ open, onClose, variant }: SidebarProps) {
                 display: 'block',
                 px: 1.5,
                 mb: 0.5,
-                color: alpha(theme.palette.common.white, 0.35),
+                color: alpha(theme.palette.common.white, 0.55),
                 fontWeight: 700,
                 letterSpacing: '0.08em',
                 textTransform: 'uppercase',
@@ -78,49 +79,50 @@ export default function Sidebar({ open, onClose, variant }: SidebarProps) {
             </Typography>
             <List disablePadding>
               {section.items.map((item) => {
-                const selected = pathname === item.href
+                const selected = pathname === item.href;
                 return (
-                  <ListItemButton
-                    key={item.href}
-                    component={Link}
-                    href={item.href}
-                    selected={selected}
-                    onClick={variant === 'temporary' ? onClose : undefined}
-                    sx={{
-                      borderRadius: 1.5,
-                      mb: 0.25,
-                      pl: item.icon ? 1.5 : 4.5,
-                      color: selected ? sidebarTextActive : sidebarText,
-                      '&:hover': { bgcolor: sidebarHover },
-                      '&.Mui-selected': {
-                        bgcolor: 'primary.main',
-                        color: sidebarTextActive,
-                        '&:hover': { bgcolor: 'primary.main' },
-                      },
-                    }}
-                  >
-                    {item.icon && (
-                      <ListItemIcon sx={{ minWidth: 32, color: 'inherit' }}>
-                        {item.icon}
-                      </ListItemIcon>
-                    )}
-                    <ListItemText
-                      primary={item.label}
-                      slotProps={{
-                        primary: {
-                          sx: { fontSize: 14, fontWeight: selected ? 600 : 500 },
+                  <ListItem key={item.href} disablePadding>
+                    <ListItemButton
+                      component={Link}
+                      href={item.href}
+                      selected={selected}
+                      onClick={variant === 'temporary' ? onClose : undefined}
+                      sx={{
+                        borderRadius: 1.5,
+                        mb: 0.25,
+                        pl: item.icon ? 1.5 : 4.5,
+                        color: selected ? sidebarTextActive : sidebarText,
+                        '&:hover': { bgcolor: sidebarHover },
+                        '&.Mui-selected': {
+                          bgcolor: 'primary.main',
+                          color: sidebarTextActive,
+                          '&:hover': { bgcolor: 'primary.main' },
                         },
                       }}
-                    />
-                  </ListItemButton>
-                )
+                    >
+                      {item.icon && (
+                        <ListItemIcon sx={{ minWidth: 32, color: 'inherit' }}>
+                          {item.icon}
+                        </ListItemIcon>
+                      )}
+                      <ListItemText
+                        primary={item.label}
+                        slotProps={{
+                          primary: {
+                            sx: { fontSize: 14, fontWeight: selected ? 600 : 500 },
+                          },
+                        }}
+                      />
+                    </ListItemButton>
+                  </ListItem>
+                );
               })}
             </List>
           </Box>
         ))}
       </Box>
     </Box>
-  )
+  );
 
   if (variant === 'permanent') {
     return (
@@ -135,7 +137,7 @@ export default function Sidebar({ open, onClose, variant }: SidebarProps) {
       >
         {content}
       </Box>
-    )
+    );
   }
 
   return (
@@ -144,6 +146,7 @@ export default function Sidebar({ open, onClose, variant }: SidebarProps) {
       open={open}
       onClose={onClose}
       ModalProps={{ keepMounted: true }}
+      slotProps={{ paper: { 'aria-label': 'Navigation menu' } }}
       sx={{
         display: { xs: 'block', md: 'none' },
         [`& .MuiDrawer-paper`]: { width: SIDEBAR_WIDTH, boxSizing: 'border-box', border: 'none' },
@@ -151,5 +154,5 @@ export default function Sidebar({ open, onClose, variant }: SidebarProps) {
     >
       {content}
     </Drawer>
-  )
+  );
 }

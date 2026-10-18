@@ -4,6 +4,7 @@ import com.rnd.bridge.raw.RawObjectValidator;
 import com.rnd.bridge.raw.model.RawObjectEvent;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.stereotype.Service;
@@ -25,7 +26,7 @@ public class MediaEventPublisher {
     private final RawObjectValidator validator;
     private final String topic;
 
-    public MediaEventPublisher(KafkaTemplate<String, Object> kafkaTemplate,
+    public MediaEventPublisher(@Qualifier("kafkaTemplate") KafkaTemplate<String, Object> kafkaTemplate,
                                 RawObjectValidator validator,
                                 @Value("${bridge.intake.raw-landed-topic}") String topic) {
         this.kafkaTemplate = kafkaTemplate;

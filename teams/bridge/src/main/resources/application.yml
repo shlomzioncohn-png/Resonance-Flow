@@ -11,12 +11,30 @@ management:
 spring:
   application:
     name: bridge
+  sql:
+    init:
+      # Creates control_plane_state on startup if it doesn't exist yet (schema.sql, IF NOT
+      # EXISTS) - a single static table, so a one-line script is enough; no Flyway needed.
+      mode: always
+      # Tolerates individual statement errors (e.g. table already exists via a races-with-self
+      # redeploy) without failing startup; does NOT cover "Postgres unreachable at all" - a
+      # genuinely absent/misconfigured DB still fails startup loudly, same as a missing
+      # bridge.postgres.* value would. BridgeApplicationTests overrides this to "never" so its
+      # full-context load doesn't require a live Postgres at all - see that test's own comment.
+      continue-on-error: true
   kafka:
     # Team shared / remote environment (do not use unless agreed):
     #   bootstrap-servers: 3.216.80.66:9092
     #   topic: bridge.github.tasks
     bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
     topic: ${KAFKA_TOPIC:bridge.test}
+    # Read directly by RawObjectEventKafkaConfig (raw/config/) for its dedicated Protobuf
+    # producer - this block's producer.* below stays JSON and keeps serving GitHub/CRM/JIRA/
+    # Media via the shared kafkaTemplate bean, per teams/relay/docs/kafka-producer-consumer-guide.md.
+    properties:
+      # Port 8085, not 8081/8082 - those are already taken by Inbox's and Chain's own local
+      # registries. Apicurio, not Redpanda's built-in one - see .env.example for why.
+      schema.registry.url: ${SCHEMA_REGISTRY_URL:http://localhost:8085/apis/ccompat/v6}
     producer:
       key-serializer: org.apache.kafka.common.serialization.StringSerializer
       value-serializer: org.springframework.kafka.support.serializer.JsonSerializer
@@ -24,6 +42,12 @@ spring:
       retries: 3
       properties:
         spring.json.add.type.headers: false
+    consumer:
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: org.springframework.kafka.support.serializer.JsonDeserializer
+      properties:
+        spring.json.trusted.packages: com.rnd.bridge
+        spring.json.value.default.type: com.rnd.bridge.task.BridgeTaskEventDto
 
 minio:
   endpoint: ${MINIO_ENDPOINT:http://localhost:9000}
@@ -57,19 +81,44 @@ jira:
       expression: ${JIRA_SYNC_CRON_EXPRESSION:0 0 2 * * ?}
 
 bridge:
+  # Backs the control-plane lane (GroupStateStore/CursorStore/CalendarEventStateStore), not
+  # the rest of Bridge - no default on any of these three, same convention as HUBSPOT_TOKEN: a
+  # missing value must fail startup loudly, not silently fall back to a placeholder.
+  postgres:
+    url: ${BRIDGE_DB_URL}
+    user: ${BRIDGE_DB_USER}
+    password: ${BRIDGE_DB_PASSWORD}
   # Shared by every structured lane that publishes a Task via
   # KafkaPayloadPublisher (see esti/inbox-kafka-ingestion-contract) - one
   # topic for every source, never a per-lane one.
   structured-tasks-topic: ${BRIDGE_STRUCTURED_TASKS_TOPIC:bridge.structured.tasks}
+  kafka:
+    # Confluent Schema Registry for bridgeTaskEventKafkaTemplate's KafkaProtobufSerializer (see
+    # BridgeTaskKafkaConfig). The localhost default is for local/dev only - any real environment
+    # must override SCHEMA_REGISTRY_URL to the shared registry Relay owns.
+    schema-registry:
+      url: ${SCHEMA_REGISTRY_URL:http://localhost:8081}
   manual-sync:
     enabled: false
   crm:
     dataset: classpath:crm/synthetic-deals.json
-    # Inbox's tasks.organization_id is NOT NULL, but HubSpot (and this
+    # Inbox's tasks.tenant_id is NOT NULL, but HubSpot (and this
     # lane's Deal model) has no concept of it - see DealToTaskMapper's class
     # Javadoc. Set CRM_ORGANIZATION_ID for a real org; falls back to a
     # local placeholder for development so the app can start without it.
-    organization-id: ${CRM_ORGANIZATION_ID:local-crm-org}
+    # This key deliberately still says "organization-id", not "tenant-id" -
+    # see teams/bridge/CLAUDE.md §6 (tracked alongside the Task.organizationId
+    # decision, same reasoning: renaming a config key is an operational risk
+    # across every deployed environment, not a wire-format concern).
+    # Must stay in sync with CrmTaskValidator.LOCAL_PLACEHOLDER_TENANT_ID: a canonically-shaped
+    # but obviously-fake UUID, not a free-text placeholder - CrmTaskValidator requires every
+    # Task.organizationId to be UUID-shaped unconditionally (CRM-lane audit finding F5), including
+    # for a no-profile local/demo run through LoggingPayloadPublisher, so the default itself has to
+    # pass that check. CrmLaneConfig's kafka-profile startup check still rejects this exact value
+    # by name (not just by shape), so forgetting to override it for a real deployment is caught.
+    organization-id: ${CRM_ORGANIZATION_ID:00000000-0000-0000-0000-000000000000}
+    # Days an open deal (PROSPECT/QUALIFIED/PROPOSAL/NEGOTIATION) may sit in the same stage before +1 urgency; <= 0 disables it.
+    stalled-after-days: ${CRM_STALLED_AFTER_DAYS:14}
     sync:
       # Set to true to enable the automatic daily HubSpot to Kafka sync.
       # Off by default, same convention as github.sync.cron - an operator
@@ -87,14 +136,49 @@ bridge:
       session-gap-minutes: 45
     # Per-source fixture/real switch - see plan.md. Each source can go "real" independently;
     # "real" beans throw UnsupportedOperationException until their connector is implemented.
+    # Shared by every real Google reader (Calendar/Gmail/Drive) - see intake.google.
+    # GoogleCredentialsProvider. Personal Gmail account -> OAuth2 user-consent flow, not a
+    # service account: client-secrets-path is the OAuth Client ID JSON from Google Cloud
+    # Console (Desktop app type), tokens-directory caches the refresh token after the one-time
+    # browser consent so later runs don't need a browser.
+    google:
+      client-secrets-path: ${BRIDGE_GOOGLE_CLIENT_SECRETS_PATH:}
+      tokens-directory: ${BRIDGE_GOOGLE_TOKENS_DIR:}
     email:
       mode: fixture
+      sync:
+        # Set to true to enable scheduled email sync via IntakeSyncJobs/SyncJobScheduler - off
+        # by default, same convention as bridge.crm.sync.cron/github.sync.cron.
+        cron:
+          enabled: ${BRIDGE_INTAKE_EMAIL_SYNC_CRON_ENABLED:false}
+          expression: ${BRIDGE_INTAKE_EMAIL_SYNC_CRON_EXPRESSION:0 */15 * * * ?}
     drive:
       mode: fixture
+      sync:
+        cron:
+          enabled: ${BRIDGE_INTAKE_DRIVE_SYNC_CRON_ENABLED:false}
+          expression: ${BRIDGE_INTAKE_DRIVE_SYNC_CRON_EXPRESSION:0 */15 * * * ?}
     calendar:
       mode: fixture
+      sync:
+        cron:
+          enabled: ${BRIDGE_INTAKE_CALENDAR_SYNC_CRON_ENABLED:false}
+          expression: ${BRIDGE_INTAKE_CALENDAR_SYNC_CRON_EXPRESSION:0 */15 * * * ?}
+      # Only read when mode: real. "primary" means the calendar of whichever Google account
+      # completes the OAuth consent.
+      calendar-id: ${BRIDGE_CALENDAR_ID:primary}
     slack:
       mode: fixture
+      # Only read when mode: real. Bot User OAuth Token (xoxb-...) from a Slack app installed
+      # with channels:history/groups:history/files:read scopes - see plan.md.
+      bot-token: ${BRIDGE_SLACK_BOT_TOKEN:}
+      tenant-id: kamatech
+      # Channel IDs (Cxxxxxxxx) the bot has been invited to - no config here means "read every
+      # channel", Slack has no such mode without a much broader scope.
+      channels: ${BRIDGE_SLACK_CHANNELS:}
+      # Slack app's Signing Secret (Basic Information page) - verifies X-Slack-Signature on
+      # inbound Events API requests. Only used by SlackEventsController, not by polling.
+      signing-secret: ${BRIDGE_SLACK_SIGNING_SECRET:}
     whatsapp:
       mode: fixture
       # Only read when mode: real. See plan.md - there's no export API, so this directory is
@@ -107,9 +191,9 @@ bridge:
     # Meeting/doc/audio hand-off (Esther) - local folders to read test files from, one per
     # source, not committed; set your own in .env. Shares minio.* and
     # bridge.intake.raw-landed-topic above with the Unstructured-intake lane.
-    zoom-recordings-dir: ${BRIDGE_MEDIA_ZOOM_RECORDINGS_DIR:}
-    bbb-recordings-dir: ${BRIDGE_MEDIA_BBB_RECORDINGS_DIR:}
-    scanned-docs-dir: ${BRIDGE_MEDIA_SCANNED_DOCS_DIR:}
+    zoom-recordings-dir: ${BRIDGE_MEDIA_ZOOM_RECORDINGS_DIR:./temp/zoom}
+    bbb-recordings-dir: ${BRIDGE_MEDIA_BBB_RECORDINGS_DIR:./temp/bbb}
+    scanned-docs-dir: ${BRIDGE_MEDIA_SCANNED_DOCS_DIR:./temp/docs}
     tenant-id: ${BRIDGE_MEDIA_TENANT_ID:demo-tenant}
     # Files at or below this size never land - a conservative proxy for "empty/corrupt
     # recording", not real audio-duration filtering (that needs a codec-aware library this
@@ -156,3 +240,31 @@ bridge:
       # see RealZoomCloudRecordingClient's javadoc for what implementing it actually needs
       # (Server-to-Server OAuth app credentials, added here once that work starts).
       mode: fixture
+
+llm:
+  enrichment:
+    # Master switch for the rule-based task enrichment engine.
+    enabled: ${LLM_ENRICHMENT_ENABLED:false}
+    # Only these source types are enriched; all others are skipped entirely.
+    supported-sources: ${LLM_ENRICHMENT_SUPPORTED_SOURCES:GITHUB_ISSUE,JIRA_ISSUE}
+    # Keyword -> urgency level (1..5). Overrides the built-in defaults when set.
+    urgency-keywords:
+      blocker: 5
+      critical: 5
+      asap: 5
+      urgent: 5
+      "production down": 5
+      "high priority": 4
+      important: 4
+      "needed soon": 4
+      medium: 3
+      todo: 3
+      needed: 3
+      low: 1
+      whenever: 1
+      "nice to have": 1
+  consumer:
+    # Separate switch for the automatic Kafka enrichment channel.
+    enabled: ${LLM_CONSUMER_ENABLED:false}
+    input-topic: ${LLM_CONSUMER_INPUT_TOPIC:bridge.tasks.to-enrich}
+    group-id: ${LLM_CONSUMER_GROUP_ID:bridge-llm-enricher}

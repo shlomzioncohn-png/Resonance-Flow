@@ -6,20 +6,35 @@ on:
     tags: [ "chain-v*.*.*" ]
     paths:
       - "teams/chain/**"
+      - "shared/proto/**"
   pull_request:
     branches: [ "main" ]
     paths:
       - "teams/chain/**"
+      - "shared/proto/**"
   workflow_dispatch: {}
 
 jobs:
   ci:
+    if: github.event_name == 'pull_request'
+    permissions:
+      contents: read
+    uses: ./.github/workflows/service-ci-java.yaml
+    with:
+      service_name: chain
+      service_dir: teams/chain
+
+  cd:
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
     permissions:
       contents: write
       packages: write
-    uses: ./.github/workflows/service-ci.yaml
+      pull-requests: write
+    uses: ./.github/workflows/service-cd.yaml
+    secrets: inherit
     with:
       service_name: chain
       service_dir: teams/chain
       language: java
       container_port: 8081
+      extra_build_contexts: shared=shared

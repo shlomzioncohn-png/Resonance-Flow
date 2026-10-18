@@ -14,4 +14,7 @@ public sealed interface ItemCategory permits MeetingCategory, DocumentCategory {
 
     /** The source types this category's values are valid for - checked by RawObjectValidator. */
     Set<RawSourceType> sourceTypes();
+
+    /** The wire value - the enum constant's name (every implementation is an enum). */
+    String name();
 }

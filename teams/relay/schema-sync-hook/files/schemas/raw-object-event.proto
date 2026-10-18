@@ -8,24 +8,45 @@ option java_multiple_files = true;
 import "google/protobuf/timestamp.proto";
 
 // kafkaTopic: bridge.raw.landed
-// DRAFT for review - mirrors Bridge's unstructured-intake lanes (Malki, Esther), branch
-// BRIDGE/malki/unstructured-intake-scoping. That team already validates against an official
-// JSON Schema today (additionalProperties: false) - NOT Protobuf. First-pass formalization
+// Reconciled against the agreed Bridge/MIND RawObjectEvent contract
+// (teams/bridge/src/main/java/com/rnd/bridge/raw/model/RawObjectEvent.java): one RawObjectEvent
+// is one logical item carrying every MinIO object it owns (body/transcript and every attachment
+// alike) as a repeated RawObjectRef, instead of fanning out into several Kafka events keyed by
+// attachment_index. The schema_version field's runtime value stays "0.1" - this hasn't shipped
+// to any real consumer yet, so there's no released "1.0" to version past; bump it once this is
+// actually in production use.
 
 message RawObjectEvent {
   string schema_version = 1;
-  string object_key = 2;               
-  SourceType source_type = 3;
-  string tenant_id = 4;
-  google.protobuf.Timestamp ingested_at = 5;
-  ScopeDecision scope_decision = 6;
-  string content_hash = 7;              
-  optional Modality modality = 8;       
-  repeated string participants = 9;
-  string content_type = 10;
-  optional int64 size_bytes = 11;
-  optional string transcript_object_key = 12; // Populated later, once transcription completes.
-  google.protobuf.Timestamp source_timestamp = 13;
+  SourceType source_type = 2;
+  string tenant_id = 3;
+  google.protobuf.Timestamp ingested_at = 4;
+  ScopeDecision scope_decision = 5;
+  repeated string participants = 6;
+  google.protobuf.Timestamp source_timestamp = 7;
+  string correlation_id = 8;
+  int32 revision = 9;
+  ChangeType change_type = 10;
+  int32 change_significance_score = 11;
+  repeated RawObjectRef objects = 12;
+}
+
+message RawObjectRef {
+  Role role = 1;
+  string object_key = 2;
+  string content_hash = 3;
+  string content_type = 4;
+  optional int64 size_bytes = 5;
+  Modality modality = 6;
+}
+
+enum Role {
+  ROLE_UNSPECIFIED = 0;
+  BODY = 1;
+  ATTACHMENT = 2;
+  TRANSCRIPT = 3;
+  RECORDING = 4;
+  SOURCE_METADATA = 5;
 }
 
 enum SourceType {
@@ -36,6 +57,9 @@ enum SourceType {
   DRIVE = 4;
   CALENDAR = 5;
   MEETING = 6;
+  SOURCE_TYPE_SCANNED_DOC = 7; // prefixed - plain SCANNED_DOC collides with Modality.SCANNED_DOC
+                               // (proto3 enum values are siblings of the package, not their enum)
+  DOC = 8;
 }
 
 enum ScopeDecision {
@@ -48,4 +72,11 @@ enum Modality {
   MODALITY_UNSPECIFIED = 0;
   AUDIO = 1;
   SCANNED_DOC = 2;
+  TEXT = 3;
+}
+
+enum ChangeType {
+  CHANGE_TYPE_UNSPECIFIED = 0;
+  UPSERT = 1;
+  DELETE_REVIEW = 2;
 }

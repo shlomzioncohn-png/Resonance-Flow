@@ -3,6 +3,8 @@ package com.rnd.bridge.crm.mapper;
 import com.rnd.bridge.crm.model.Deal;
 import com.rnd.bridge.crm.model.DealStage;
 import com.rnd.bridge.task.AbstractTaskMapper;
+import com.rnd.bridge.task.enrichment.EnrichmentProperties;
+import com.rnd.bridge.task.enrichment.TaskEnricher;
 import com.rnd.bridge.task.model.RoleContext;
 import com.rnd.bridge.task.model.SourceType;
 import com.rnd.bridge.task.model.TaskStatus;
@@ -24,12 +26,16 @@ import java.time.temporal.ChronoUnit;
  */
 public final class DealToTaskMapper extends AbstractTaskMapper<Deal> {
 
-    private static final String SOURCE_REF_PREFIX = "crm:";
-
     private final String organizationId;
+    private final int stalledAfterDays;
 
-    public DealToTaskMapper(String organizationId) {
+    public DealToTaskMapper(String organizationId,
+                            EnrichmentProperties enrichmentProperties,
+                            TaskEnricher taskEnricher,
+                            int stalledAfterDays) {
+        super(enrichmentProperties, taskEnricher);
         this.organizationId = organizationId;
+        this.stalledAfterDays = stalledAfterDays;
     }
 
     // Deal.closeDate -> Task.deadline convention (end-of-day UTC). Provisional
@@ -106,7 +112,7 @@ public final class DealToTaskMapper extends AbstractTaskMapper<Deal> {
 
     @Override
     public String toSourceRef(Deal deal) {
-        return SOURCE_REF_PREFIX + deal.dealId();
+        return deal.sourceRefPrefix() + deal.dealId();
     }
 
     @Override
@@ -140,9 +146,21 @@ public final class DealToTaskMapper extends AbstractTaskMapper<Deal> {
      * </ul>
      * {@code ON_HOLD}, {@code CLOSED_WON} and {@code CLOSED_LOST} get no
      * bonus: a paused or finished deal should not be pushed up the queue by
-     * a date. The result is clamped to 1..5 (AbstractTaskMapper clamps it
-     * again defensively; this local clamp is kept so calling this method
-     * directly still returns an in-range value).
+     * a date.
+     * <p>
+     * Stalled bonus, added after the above and before the final clamp: +1 for
+     * a deal in one of the four open stages whose days between {@code
+     * stageChangedAt} and {@code asOf} (UTC dates, same convention as the
+     * time-pressure bonus) is at least {@code stalledAfterDays} (config:
+     * {@code bridge.crm.stalled-after-days} / {@code CRM_STALLED_AFTER_DAYS},
+     * default 14; {@code <= 0} disables this bonus entirely).
+     * {@code stageChangedAt} after {@code asOf} (clock skew or bad data)
+     * never counts as stalled. {@code ON_HOLD}, {@code CLOSED_WON} and
+     * {@code CLOSED_LOST} are never bumped by this rule either.
+     * <p>
+     * The result is clamped to 1..5 (AbstractTaskMapper clamps it again
+     * defensively; this local clamp is kept so calling this method directly
+     * still returns an in-range value).
      */
     @Override
     protected Integer toUrgency(Deal deal, Instant asOf) {
@@ -155,6 +173,9 @@ public final class DealToTaskMapper extends AbstractTaskMapper<Deal> {
             case CLOSED_WON -> 1;
             case CLOSED_LOST -> 1;
         };
+        if (isStalled(deal, asOf)) {
+            urgency += 1;
+        }
         return clamp(urgency, 1, 5);
     }
 
@@ -170,6 +191,23 @@ public final class DealToTaskMapper extends AbstractTaskMapper<Deal> {
             return 1;
         }
         return 0;
+    }
+
+    private boolean isStalled(Deal deal, Instant asOf) {
+        if (stalledAfterDays <= 0 || !isOpenStage(deal.stage())) {
+            return false;
+        }
+        long daysSinceStageChange = ChronoUnit.DAYS.between(
+                LocalDate.ofInstant(deal.stageChangedAt(), ZoneOffset.UTC),
+                LocalDate.ofInstant(asOf, ZoneOffset.UTC));
+        return daysSinceStageChange >= stalledAfterDays;
+    }
+
+    private static boolean isOpenStage(DealStage stage) {
+        return switch (stage) {
+            case PROSPECT, QUALIFIED, PROPOSAL, NEGOTIATION -> true;
+            case ON_HOLD, CLOSED_WON, CLOSED_LOST -> false;
+        };
     }
 
     private static int clamp(int value, int min, int max) {

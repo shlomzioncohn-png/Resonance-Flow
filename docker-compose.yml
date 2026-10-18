@@ -3,54 +3,17 @@
 # ========================================
 # 
 # Current Services:
-# 1. Gateway (LENS Team) - Routes Frontend ↔ BFF
-# 2. BFF (Sari) - [PENDING - Add when ready]
-# 3. Shared PostgreSQL + pgAdmin - used by chain, bridge, inbox
-# 4. Chain, Bridge, Inbox - backend team services (see teams/inbox/CLAUDE.md §3
+# 1. LENS Team - Gateway, BFF, Frontend and Storybook
+#    (Frontend -> Gateway -> BFF -> Inbox)
+# 2. Shared PostgreSQL + pgAdmin - used by chain, bridge, inbox
+# 3. Chain, Bridge, Inbox - backend team services (see teams/inbox/CLAUDE.md §3
 #    for the two-compose-file split and known cross-team gaps around Kafka/ports)
 #
-# TODO: When BFF is ready, add this section:
-# 
-#   bff:
-#     build:
-#       context: ./teams/bff  # or wherever Sari creates it
-#       dockerfile: Dockerfile
-#     container_name: bff-service
-#     ports:
-#       - "${BFF_PORT:-8081}:8080"
-#     environment:
-#       - SERVER_PORT=8080
-#     depends_on:
-#       - gateway
-#     networks:
-#       - resonance-network
-#     healthcheck:
-#       test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
-#       interval: 10s
-#       timeout: 5s
-#       retries: 3
-#       start_period: 20s
-# 
-# Then Gateway will route /api/** requests to BFF
 # ========================================
 
 services:
   # ========================================
-  # LENS TEAM RESPONSIBILITY
-  # ========================================
-  
-  # API Gateway - Port 8080
-  # ONLY routes between:
-  # - Frontend/External clients
-  # - BFF (Backend for Frontend) by Sari
-  #
-  # Gateway responsibilities:
-  # - Route /api/** to BFF
-  # - Error handling (404 for unknown routes, etc)
-  # - Gateway health endpoint (/health, /health/ready)
-  #
-  # NOTE: BFF is responsible for communicating with
-  #       Bridge, Chain, Inbox, and Mind teams
+  # LENS TEAM - API Gateway (host port 8086; 8080 is Bridge's)
   # ========================================
   gateway:
     build:
@@ -58,18 +21,77 @@ services:
       dockerfile: Dockerfile
     container_name: gateway-service
     ports:
-      - "${GATEWAY_PORT:-8080}:8080"
+      - "${GATEWAY_PORT:-8086}:8080"
     environment:
       - SERVER_PORT=8080
       - SPRING_PROFILES_ACTIVE=${SPRING_PROFILES_ACTIVE:-local}
-    networks:
-      - resonance-network
+      - BFF_SERVICE_URL=http://bff-service:8082
+    depends_on:
+      bff:
+        condition: service_healthy
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
       interval: 10s
       timeout: 5s
       retries: 3
       start_period: 20s
+
+  # ========================================
+  # LENS TEAM - BFF (host port 8087)
+  # ========================================
+  bff:
+    build: ./teams/lens/bff
+    container_name: bff-service
+    ports:
+      - "${BFF_PORT:-8087}:8082"
+    environment:
+      - SERVER_PORT=8082
+      - SPRING_PROFILES_ACTIVE=${SPRING_PROFILES_ACTIVE:-local}
+      - INBOX_MOCK_ENABLED=${INBOX_MOCK_ENABLED:-false}
+      - INBOX_SERVICE_URL=http://inbox-service:8080
+      - INBOX_DEV_ACTOR_ID=${INBOX_DEV_ACTOR_ID:-ef071a8a-1040-3a27-904a-f6352bad4fea}
+    depends_on:
+      - inbox
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8082/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+
+  # ========================================
+  # LENS TEAM - Frontend, Next.js (host port 3000)
+  # ========================================
+  frontend:
+    build:
+      context: ./teams/lens/frontend
+      target: development
+    container_name: lens-frontend
+    ports:
+      - "${FRONTEND_PORT:-3000}:3000"
+    environment:
+      - NODE_ENV=development
+      # Called from the browser, so the Gateway's host port - not its container name.
+      - NEXT_PUBLIC_API_BASE_URL=http://localhost:${GATEWAY_PORT:-8086}
+    volumes:
+      - ./teams/lens/frontend:/app
+      - /app/node_modules
+      - /app/.next
+    depends_on:
+      gateway:
+        condition: service_healthy
+    command: npm run dev
+
+  # ========================================
+  # LENS TEAM - Storybook, static build on nginx (host port 6006)
+  # ========================================
+  storybook:
+    build:
+      context: ./teams/lens/frontend
+      target: storybook
+    container_name: lens-storybook
+    ports:
+      - "${STORYBOOK_PORT:-6006}:8080"
 
   # ========================================
   # BACKEND TEAMS - shared Postgres + pgAdmin, and the Chain/Bridge/Inbox
@@ -82,10 +104,13 @@ services:
       - POSTGRES_DB=${DB_NAME:-resonance_flow}
       - POSTGRES_USER=${DB_USER:-postgres}
       - POSTGRES_PASSWORD=${DB_PASSWORD:-postgres}
+      - CHAIN_DB_PASSWORD=${CHAIN_DB_PASSWORD:-chain}
     ports:
       - "${DB_PORT:-5432}:5432"
     volumes:
       - resonance-postgres-data:/var/lib/postgresql/data
+      # Own database + own DB user for chain, on first init only - see PR #417.
+      - ./shared/database/init/create-chain-database.sh:/docker-entrypoint-initdb.d/create-chain-database.sh:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-postgres} -d ${DB_NAME:-resonance_flow}"]
       interval: 5s
@@ -116,6 +141,14 @@ services:
     environment:
       - SERVER_PORT=8081
       - SPRING_PROFILES_ACTIVE=${SPRING_PROFILES_ACTIVE:-local}
+      - DB_HOST=postgres
+      - DB_PORT=5432
+      - DB_NAME=chain
+      - DB_USER=chain
+      - DB_PASSWORD=${CHAIN_DB_PASSWORD:-chain}
+    depends_on:
+      postgres:
+        condition: service_healthy
 
   bridge:
     build: ./teams/bridge
@@ -125,6 +158,17 @@ services:
     environment:
       - SERVER_PORT=8080
       - SPRING_PROFILES_ACTIVE=${SPRING_PROFILES_ACTIVE:-local}
+      # bridge.postgres.* (application.yml) has no default - control-plane state
+      # (GroupStateStore/CursorStore/CalendarEventStateStore) now lives here instead of MinIO,
+      # on the same shared Postgres as chain/inbox. "postgres" is the in-network service name,
+      # not localhost - matches DB_USER/DB_PASSWORD already used by the postgres/inbox blocks
+      # above so one .env controls all three.
+      - BRIDGE_DB_URL=jdbc:postgresql://postgres:5432/${DB_NAME:-resonance_flow}
+      - BRIDGE_DB_USER=${DB_USER:-postgres}
+      - BRIDGE_DB_PASSWORD=${DB_PASSWORD:-postgres}
+    depends_on:
+      postgres:
+        condition: service_healthy
 
   inbox:
     build: ./teams/inbox
@@ -150,11 +194,11 @@ services:
   # The following are built and maintained by their respective teams
   # independently, and are not wired in here yet:
   # - Mind Team: teams/mind/
-  # - Lens BFF: pending (see the TODO block above)
-
-networks:
-  resonance-network:
-    driver: bridge
+  # - Lens Keycloak (login): teams/lens/docker-compose.yml
+  #
+  # These teams will provide their service images
+  # for docker-compose when their implementations
+  # are ready. For now, they are developed separately.
 
 volumes:
   resonance-postgres-data:
