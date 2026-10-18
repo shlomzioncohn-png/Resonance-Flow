@@ -1,10 +1,5 @@
-"""One object for both sides of #353, so they share one pending store.
-
-The sender (the #349 pipeline) and the task.created listener have to see the
-same requests: a listener with a store of its own finds none of them and drops
-every reply as unknown. Whoever holds this object holds that store — and a
-Postgres `PendingStore` later is passed in here too — see pending.py for what
-it has to handle that memory does not.
+"""`TaskCreationFlow`: one object for the sender, the listener and the timer,
+so all three use one pending store. How to compose it: README.md, "Running it".
 """
 
 from datetime import datetime, timedelta
@@ -31,8 +26,8 @@ class TaskCreationFlow:
         max_wait: timedelta = DEFAULT_MAX_WAIT,
         on_matched: OnMatched | None = None,
     ) -> None:
-        """`on_matched` hears of each request Inbox turned into a task — the
-        hook for #355 and a later update flow — at least once, maybe twice."""
+        """`on_matched` is told of each request Inbox turned into a task (#355's
+        hook) — at least once, maybe twice."""
 
         self._producer = producer
         self._index = index

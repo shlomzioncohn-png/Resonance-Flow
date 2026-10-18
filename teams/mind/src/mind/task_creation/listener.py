@@ -1,15 +1,6 @@
-"""The two loops that run beside the #349 pipeline: task.created, and the overdue timer.
+"""The two loops beside the #349 pipeline: the task.created listener and the overdue timer.
 
-The listener: `ProtobufConsumer.run` calls a plain function for every message,
-and the flow is async, so the handler drives the listener's own event loop — as
-R3's index runner does. Nothing is caught: an exception propagates, the consumer
-does not commit the offset, and Kafka redelivers the message.
-
-The timer: requests go overdue when Inbox is down, which is exactly when no
-task.created arrives — so the check cannot ride on the listener. It runs on its
-own thread and event loop (two threads cannot drive one loop), and here it is
-the other way round: a failed check is logged and the timer goes on, because a
-timer that died on one error would stop reporting in silence.
+Why each one fails the way it does, and how to start them: README.md, "Running it".
 """
 
 import asyncio
@@ -31,8 +22,7 @@ TOPIC = "task.created"
 
 logger = logging.getLogger("mind.task_creation")
 
-#: Our own group. R3's index consumer reads task.created too, and within one
-#: group each message reaches a single member: both need every message.
+#: Not R3's: within one group each message reaches one member, and both need every message.
 GROUP_ID = "mind-task-creation"
 
 
@@ -48,9 +38,7 @@ def task_created_handler(
     """The function `ProtobufConsumer.run` calls with (event, message)."""
 
     def _handle(event: object, message: object) -> None:
-        # run() has already deserialised `event` into a TaskCreatedEvent. The
-        # correlation_id is on the envelope, so the message goes in for its
-        # headers alone.
+        # The correlation_id is on the envelope: the message goes in for its headers.
         loop.run_until_complete(
             flow.on_task_created(cast(TaskCreatedEvent, event), cast(_KafkaMessage, message).headers())
         )
@@ -58,14 +46,10 @@ def task_created_handler(
     return _handle
 
 
-#: How long the listener keeps failing before it gives up. Measured in time,
-#: not in failures: no message succeeds during an outage, so a count runs out
-#: in seconds — and giving up restarts the process, which wipes the in-memory
-#: pending store the reconnect exists to keep. A handled message ends the outage.
+#: How long the listener keeps failing before it gives up — time, not a count.
 MAX_OUTAGE = 15 * 60.0
 
-#: The longest wait between reconnects. Waits double from one second and stay
-#: here once they reach it, so a long outage is retried once a minute.
+#: Waits double from one second up to this, and stay here.
 _MAX_RECONNECT_WAIT = 60.0
 
 
@@ -92,39 +76,36 @@ def run_task_created_listener(
 ) -> None:
     """Consume task.created until the process stops. Blocks.
 
-    A failure closes the consumer — `ProtobufConsumer.run` lets the error out —
-    so on its own one database blip would end this thread in silence. Instead it
-    logs, waits, and reconnects: the message that failed was never committed,
-    so Kafka hands it to the new connection, and the in-memory pending store,
-    which a restart would wipe, is still here to match it.
-
-    Once failures have gone on for longer than `max_outage` seconds it gives up
-    and lets the error out. Then the process should exit and be restarted, as
-    R3's runner arranges with a `threading.excepthook` — with a persistent store
-    that loses nothing. A message that always fails ends there, visibly.
-
-    The flow's vector store must already be open on `loop`: an async pool
-    belongs to the loop that opened it, and this one is the listener's.
+    Reconnects after a failure; after `max_outage` seconds of failing, lets the
+    error out for the process to exit and restart. The flow's vector store must
+    already be open on `loop`.
     """
 
     make_consumer = consumer_factory or (lambda: ProtobufConsumer(group_id=GROUP_ID, topics=[TOPIC]))
     handle = task_created_handler(flow, loop)
-    # When the current run of failures began, and how many it has had; both
-    # reset by any handled message.
     outage_began: float | None = None
     failures = 0
+    handling_since: float | None = None  # when the message being handled arrived
 
     def _handle_and_reset(event: object, message: object) -> None:
-        nonlocal outage_began, failures
+        nonlocal outage_began, failures, handling_since
+        handling_since = clock()
         handle(event, message)
-        outage_began, failures = None, 0
+        outage_began, failures, handling_since = None, 0, None
 
     while True:
+        connected_at = clock()
+        handling_since = None
         try:
             make_consumer().run(TaskCreatedEvent, _handle_and_reset, idle_timeout=None)
             return
         except Exception:
             now = clock()
+            # Quiet for longer than the longest wait was a recovery, so a new
+            # outage. Time spent handling the failing message is not quiet.
+            quiet = (handling_since if handling_since is not None else now) - connected_at
+            if quiet > _MAX_RECONNECT_WAIT:
+                outage_began, failures = None, 0
             if outage_began is None:
                 outage_began = now
             if now - outage_began >= max_outage:
@@ -158,8 +139,8 @@ def run_overdue_timer(
 ) -> None:
     """Check for overdue requests every `interval` seconds until `stop` is set. Blocks.
 
-    Waits on `stop` rather than sleeping, so a shutdown is immediate instead of
-    waiting out the interval.
+    A failed check is logged and the timer goes on. Waits on `stop`, so a
+    shutdown does not wait out the interval.
     """
 
     loop = asyncio.new_event_loop()

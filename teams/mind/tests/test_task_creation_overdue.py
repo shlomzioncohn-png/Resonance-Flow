@@ -6,7 +6,9 @@ reply still matches. Every matched reply logs how long it took, so the limit
 can later be set from real latencies (twice the usual) instead of a guess.
 """
 
+import asyncio
 import logging
+import threading
 from datetime import UTC, datetime, timedelta
 from uuid import UUID
 
@@ -126,3 +128,51 @@ async def test_no_warning_for_a_request_answered_while_the_timer_ran(
 
     assert overdue == []
     assert caplog.text == ""
+
+
+# --- three threads share the store ---------------------------------------------
+
+
+class PausingDict(dict):  # type: ignore[type-arg]
+    """Stops one chosen thread right after a membership check, so another
+    thread can be made to act in exactly the gap between check and write."""
+
+    def __init__(self, items: dict, paused: threading.Event, resume: threading.Event) -> None:  # type: ignore[type-arg]
+        super().__init__(items)
+        self.checker: threading.Thread | None = None
+        self._paused, self._resume = paused, resume
+
+    def __contains__(self, key: object) -> bool:
+        found = super().__contains__(key)
+        if threading.current_thread() is self.checker:
+            self._paused.set()
+            self._resume.wait(timeout=2)
+        return found
+
+
+async def test_a_discard_cannot_slip_between_mark_reporteds_check_and_write() -> None:
+    """Without a lock, the listener's discard lands in the gap: the timer then
+    marks a request that is gone, and the mark outlives it — so the same request,
+    registered again, can never be reported. "No await between them" holds
+    within one event loop, not across the three threads that use the store."""
+
+    pending = await _pending()
+    paused, resume = threading.Event(), threading.Event()
+    pending._by_id = PausingDict(pending._by_id, paused, resume)  # type: ignore[assignment]
+
+    timer = threading.Thread(target=lambda: asyncio.run(pending.mark_reported(REQUEST_ID)))
+    pending._by_id.checker = timer  # type: ignore[attr-defined]
+    listener = threading.Thread(target=lambda: asyncio.run(pending.discard(REQUEST_ID)))
+
+    timer.start()
+    assert paused.wait(timeout=2)
+    listener.start()  # the reply is matched, mid-check
+    listener.join(timeout=0.2)
+    resume.set()
+    timer.join()
+    listener.join()
+
+    await pending.add(
+        REQUEST_ID, PendingRequest(bridge_correlation_id=ITEM, revision=1, task_index=0, sent_at=SENT)
+    )
+    assert await pending.mark_reported(REQUEST_ID) is True

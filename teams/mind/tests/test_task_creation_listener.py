@@ -193,14 +193,19 @@ def test_a_failed_check_is_logged_and_the_timer_goes_on(caplog: pytest.LogCaptur
 
 
 class ScriptedConsumer:
-    """One connection's life: handle some messages, then fail or stop."""
+    """One connection's life: handle some messages, stay up a while, then fail or stop."""
 
-    def __init__(self, handled_before: int, then: Exception | None) -> None:
-        self._handled_before, self._then = handled_before, then
+    def __init__(
+        self, handled_before: int, then: Exception | None, *, up_for: float = 0.0
+    ) -> None:
+        self._handled_before, self._then, self._up_for = handled_before, then, up_for
+        self.time: FakeTime | None = None
 
     def run(self, message_type: type, handler: Callable[[object, object], None], **_: object) -> int:
         for _n in range(self._handled_before):
             handler(_event(), FakeMessage(None))
+        if self.time is not None:
+            self.time.now += self._up_for  # connected and idle, no messages
         if self._then is not None:
             raise self._then
         return self._handled_before
@@ -224,6 +229,8 @@ def _listen(
     loop: asyncio.AbstractEventLoop,
     **limits: float,
 ) -> None:
+    for consumer in consumers:
+        consumer.time = time_
     connections = iter(consumers)
     run_task_created_listener(
         _flow(FakeVectorStore()),
@@ -297,3 +304,76 @@ def test_a_handled_message_ends_the_outage(loop: asyncio.AbstractEventLoop) -> N
     _listen([*blips, ScriptedConsumer(1, None)], time_, loop, max_outage=0.5)
 
     assert time_.waits == [1.0] * 6
+
+
+def test_a_failure_after_a_long_quiet_connection_is_a_new_outage(
+    loop: asyncio.AbstractEventLoop,
+) -> None:
+    """The review's case: an outage at 09:00, a reconnect that then stays up
+    for 20 quiet minutes — no message, so nothing reset the clock — and a new
+    failure at 09:20. It is a new outage, not a 20-minute one."""
+
+    time_ = FakeTime()
+    _listen(
+        [
+            ScriptedConsumer(0, ConnectionError("09:00")),
+            ScriptedConsumer(0, ConnectionError("09:20"), up_for=20 * 60),
+            ScriptedConsumer(1, None),
+        ],
+        time_,
+        loop,
+        max_outage=15 * 60,
+    )
+
+    assert time_.waits == [1.0, 1.0]  # the second wait starts over too
+
+
+def test_connections_that_fail_at_once_are_still_one_outage(
+    loop: asyncio.AbstractEventLoop,
+) -> None:
+    """The other side: a database that is down lets Kafka connect and fails
+    the first message straight away. Those reconnects are not recoveries."""
+
+    time_ = FakeTime()
+
+    with pytest.raises(ConnectionError):
+        _listen(_outage(50), time_, loop, max_outage=100.0)
+
+    assert time_.waits == [1.0, 2.0, 4.0, 8.0, 16.0, 32.0, 60.0]
+
+
+class SlowFailingMessage:
+    """An envelope whose handling takes a while and then fails — as a slow
+    on_matched or a hanging index write would."""
+
+    def __init__(self, time_: FakeTime, takes: float) -> None:
+        self._time, self._takes = time_, takes
+
+    def headers(self) -> list[tuple[str, bytes]] | None:
+        self._time.now += self._takes
+        raise ConnectionError("slow failure")
+
+
+class SlowFailingConsumer(ScriptedConsumer):
+    def __init__(self, takes: float) -> None:
+        super().__init__(0, None)
+        self._takes = takes
+
+    def run(self, message_type: type, handler: Callable[[object, object], None], **_: object) -> int:
+        assert self.time is not None
+        handler(_event(), SlowFailingMessage(self.time, self._takes))
+        return 0
+
+
+def test_time_spent_handling_a_message_is_not_quiet_uptime(
+    loop: asyncio.AbstractEventLoop,
+) -> None:
+    """A message that takes 90 s to fail each time arrives the moment the
+    connection opens: zero quiet time, so the same outage, and the listener
+    gives up when the outage runs out instead of retrying it for ever."""
+
+    time_ = FakeTime()
+    slow = [SlowFailingConsumer(takes=90.0) for _ in range(50)]
+
+    with pytest.raises(ConnectionError, match="slow failure"):
+        _listen(slow, time_, loop, max_outage=10 * 60)

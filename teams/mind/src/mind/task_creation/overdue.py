@@ -1,13 +1,6 @@
-"""Creation requests Inbox has not answered in time (#353).
+"""Reporting creation requests Inbox has not answered in time — once each, and kept.
 
-Inbox down or the message lost, a request would otherwise wait in silence for
-ever. Past the limit it is reported once, as a warning — and kept, because a
-late reply should still be matched.
-
-The limit starts as a fixed guess. Inbox answers in seconds, so ten minutes
-already means something is wrong rather than slow. Every matched reply logs
-how long it took (`reply.py`), so it can later be set from real latencies —
-twice the usual — instead.
+Why ten minutes, and when a request is marked: README.md, "A reply that never comes".
 """
 
 import logging
@@ -31,8 +24,7 @@ async def report_overdue(
         waited = now - request.sent_at
         if waited <= max_wait:
             continue
-        # Only now: marking a request reported is a change, not a check, and
-        # done for a young one it would silence the warning it is owed later.
+        # Only past the wait: marking is a change, not a check.
         if await pending.mark_reported(correlation_id):
             logger.warning(
                 "task_creation: no task.created for request %s (Bridge item %s, task %d) "

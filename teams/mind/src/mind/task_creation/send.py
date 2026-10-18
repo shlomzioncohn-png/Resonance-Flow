@@ -1,14 +1,7 @@
-"""Sending one creation request to Inbox (#353).
+"""Sending one creation request to Inbox: id, message, register, publish — in that order.
 
-In this order, and the order is the point:
-
-1. the correlation_id, derived from Bridge's item so a retry repeats it;
-2. the message — built before anything is registered, so a request Inbox would
-   reject (a blank source_ref) fails here and leaves nothing behind;
-3. the registration — before publishing, so a fast reply always finds it;
-4. the publish. If it fails, a registration this call made is taken back. One
-   it found already is kept: that earlier attempt may have arrived. If it
-   succeeds, a registration it found is renewed, to describe this attempt.
+Why the order, and what a failed or repeated publish does: README.md,
+"Order: register, then publish; index, then forget".
 """
 
 import asyncio
@@ -57,10 +50,8 @@ async def send_creation_request(
     )
     registered_now = await pending.add(correlation_id, entry)
     try:
-        # Keyed by the correlation_id, so a retry lands on the same partition.
-        # On a thread: publish() blocks until Kafka acks, and inline it would
-        # freeze the caller's event loop for the whole round trip. Still
-        # awaited, so the order above holds and a failure still lands below.
+        # Off the loop: publish() blocks until Kafka acks. Keyed so a retry
+        # lands on the same partition.
         await asyncio.to_thread(producer.publish, TOPIC, event, key=str(correlation_id))
     except Exception:
         if registered_now:
@@ -68,9 +59,7 @@ async def send_creation_request(
         raise
 
     if not registered_now:
-        # A retry that went out: the entry now describes this request, so its
-        # overdue clock restarts and it may be reported again. Only here, after
-        # a successful publish — a failed retry changed nothing at Inbox.
+        # A retry that went out (only now: a failed one changed nothing).
         await pending.renew(correlation_id, entry)
 
     return correlation_id

@@ -47,9 +47,9 @@ format is the registered `shared/proto`, and `event.py` only translates.
   validates on the difference (`urgency` 0 is rejected, absent is not).
 - **Enums gain their prefix** (`OPERATIONAL` → `TASK_TIER_OPERATIONAL`). A value
   missing from `shared/proto` fails here, never as `UNSPECIFIED`.
-- **A blank `source_ref` fails here.** Inbox would reject it into its error
-  topic, the task would never exist, and Mind would wait for a reply that never
-  comes.
+- **A blank `title` or `source_ref` fails here.** Inbox would reject it
+  (`@NotBlank`) into its error topic, the task would never exist, and Mind
+  would wait for a reply that never comes.
 - Left unset on purpose: `event_id`, `project_id`, `created_by_user_id`
   (no source for them), `status` (Inbox starts tasks as `NEW`), `assignees`
   (a candidate owner is a suggestion; there it would become an assignment —
@@ -79,10 +79,20 @@ repeats itself after a crash with nothing remembered.
   leaves nothing behind.
 - **A failed publish takes back only a registration it made.** One it found
   is kept: an earlier attempt may have arrived.
-- **A reply is indexed before it is forgotten.** If the write fails, the error
-  propagates, Kafka redelivers, and the redelivery must still find its request.
-- **A reply that matches nothing is ignored**, at INFO: tasks anyone else
-  creates arrive on the same topic.
+- **A retry that went out renews its entry**: the overdue clock restarts, the
+  revision is the one Inbox now holds, and it may be reported again. A failed
+  retry changes nothing — nothing reached Inbox.
+- **Publishing runs on a worker thread**, so `publish()` waiting for Kafka's
+  ack does not block the caller's event loop; it is still awaited, so the
+  order above holds.
+- **A reply is indexed, and `on_matched` told, before it is forgotten.** If
+  either fails, the error propagates, Kafka redelivers, and the redelivery must
+  still find its request — so `on_matched` runs at least once, maybe twice,
+  and must not mind hearing of a task again.
+- **Replies Mind did not ask for are ignored**, at three levels: no
+  `correlation_id` header (anyone else's task) at DEBUG; a header that is not a
+  UUID (a format changed somewhere) at WARNING, with what arrived; a valid id
+  matching nothing pending (a restart, or a redelivery already matched) at INFO.
 
 Indexing uses R3's `handle_task_created` unchanged — the same embedding and
 `upsert_if_absent`, so whichever consumer writes first, the other does not
@@ -98,7 +108,10 @@ what Mind knew when it asked, revision included. It is the hook for #355
 
 `report_overdue` warns once about each request older than `max_wait`
 (default **10 minutes** — Inbox answers in seconds, so this means broken, not
-slow) and keeps it, so a late reply still matches. Every matched reply logs how
+slow) and keeps it, so a late reply still matches. A request is marked only
+past the wait (marking a young one would use up the report it is owed later)
+and only while still pending (a reply matched during the check earns no
+warning). Every matched reply logs how
 long it took; once real latencies exist, the limit can be set from them (about
 twice the usual) instead of this guess.
 
@@ -125,6 +138,23 @@ database one:
 
 A table would also be what a later update flow needs: a lasting record of
 which item became which task, at which revision.
+
+### Three threads, one store
+
+The pipeline, the listener and the timer each touch the store from their own
+thread, so every method of `PendingRequests` holds one `threading.Lock` — an
+asyncio lock would not do, each thread runs its own loop. Two writes depend on
+a check and must not let another thread act in between:
+
+- **`renew` acts only on an entry still pending.** The retry's reply can be
+  matched, and the entry forgotten, before the sender renews it; bringing it
+  back would leave it waiting for ever and reported overdue for a task that
+  exists.
+- **`mark_reported` acts only on an entry still pending**, for the same reason
+  from the timer's side.
+
+A Postgres store gets the same guarantees from single statements
+(`UPDATE ... WHERE ... AND reported_at IS NULL`).
 
 ## Running it
 
@@ -174,7 +204,12 @@ await flow.send(proposal, bridge_correlation_id=event.correlation_id, revision=e
   15 minutes (`MAX_OUTAGE`; a handled message ends the outage) does it let the
   error out, for the excepthook above to exit the process and have it
   restarted. A message that fails every time therefore ends in a visible crash
-  loop, not silence.
+  loop, not silence. A connection that was **quiet** — up, with no message —
+  for longer than the longest wait (60 s) was a recovery even with no message
+  to say so, so its failure starts a new outage. Time spent handling the message
+  that failed does not count as quiet: a message that takes 90 s to fail every
+  time arrives at once and stays one outage, rather than looking like a
+  recovery on each attempt and never being given up on.
 - **The timer is the opposite:** it logs a failed check and carries on, so it
   never stops reporting in silence.
 - **Only the timer has a stop signal.** The listener blocks in Kafka's poll and
@@ -182,14 +217,11 @@ await flow.send(proposal, bridge_correlation_id=event.correlation_id, revision=e
   redelivered.
 - `index` is the vector store the listener writes through, opened on the
   listener's loop (a pool belongs to the loop that opened it).
-- **`on_matched` runs at least once per task, and may run twice**: the
-  request is forgotten only after it returns, so a failure is retried on
-  redelivery rather than lost. It must not mind hearing of a task again.
-- **One producer, several threads.** `send` publishes on a worker thread so the
-  pipeline's loop is not blocked, so concurrent sends share the
-  `ProtobufProducer`. confluent-kafka's producer is thread-safe and each
-  publish keeps its delivery result in its own call; the serializer cache can
-  at worst build one twice.
+- **One producer, several threads.** Publishing runs off the loop (see
+  "Order" above), so concurrent sends share the `ProtobufProducer`.
+  confluent-kafka's producer is thread-safe and each publish keeps its
+  delivery result in its own call; the serializer cache can at worst build
+  one twice.
 
 ## Not yet in
 
@@ -201,11 +233,25 @@ await flow.send(proposal, bridge_correlation_id=event.correlation_id, revision=e
 - **ZOOM and BIGBLUEBUTTON** as task source types (Inbox #749) — same reason.
   Until then intake maps both to `MEETING`. A test fails if a value is added to
   Mind's `SourceType` before it reaches `shared/proto`.
-
 - **The extracted `source_ref` still counts toward confidence.** Inbox now gets
   Bridge's, but `confidence.py` still deducts for a missing or invented
   extracted one. Changing that moves #350's scores and calibration, so it is
   left for the same follow-up as whether to ask the model for it at all.
+
+## Open with Inbox
+
+Raised in review, and theirs to settle:
+
+- **One source_ref, several tasks.** Inbox de-duplicates on (tenant,
+  `source_type`, `source_ref`), so a second task from the same Bridge item is
+  dropped. Today an item yields one task; asked to key on `correlation_id`
+  instead, or to add the task index.
+- **A duplicate request gets no reply.** Inbox returns the existing task
+  without publishing `task.created`, so a re-sent request waits for ever (and
+  is reported overdue once). Asked to re-emit `task.created` for the existing
+  task, or to publish a distinct "already exists" event (the reviewer's
+  preference). Until then such an entry also stays in the in-memory store
+  until a restart; a re-emitted reply would clear it, so no expiry is built.
 
 ## Running the tests
 
