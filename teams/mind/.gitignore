@@ -62,3 +62,8 @@ extraction_report.json
 
 # Local raw datasets — never commit
 local-data/
+
+# Claude Code session tooling, including any worktree it creates --
+# never project content, must never be committed.
+.claude/
+skills-lock.json
