@@ -2,26 +2,22 @@ package com.rnd.chain.service;
 
 import com.rnd.chain.dto.Task;
 import com.rnd.chain.dto.TaskDependency;
-import com.rnd.chain.dto.TaskStateHistoryEntry;
 import com.rnd.chain.dto.TaskStatus;
 import com.rnd.chain.events.SchedulingPublishListener;
 import com.rnd.chain.exception.InvalidRequestException;
 import com.rnd.chain.exception.TaskNotFoundException;
 import com.rnd.chain.repository.TaskDependencyRepository;
-import com.rnd.chain.repository.InMemoryTaskStateHistoryRepository;
 import com.rnd.chain.repository.TaskRepository;
-import com.rnd.chain.repository.TaskStateHistoryRepository;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionSynchronization;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 
-import java.time.Clock;
-import java.time.Instant;
+import java.time.LocalDateTime;
+import java.time.ZoneOffset;
 import java.util.LinkedHashSet;
 import java.util.Objects;
 import java.util.Optional;
@@ -45,63 +41,38 @@ public class TaskCounterUpdater {
     private final TaskDependencyRepository taskDependencyRepository;
     private final PriorityScoreService priorityScoreService;
     private final SchedulingPublishListener schedulingPublishListener;
-    private final TaskStateHistoryRepository taskStateHistoryRepository;
-    private final Clock clock;
 
-    @Autowired
-    public TaskCounterUpdater(
-            TaskRepository taskRepository,
-            TaskDependencyRepository taskDependencyRepository,
-            PriorityScoreService priorityScoreService,
-            SchedulingPublishListener schedulingPublishListener,
-            TaskStateHistoryRepository taskStateHistoryRepository,
-            Clock clock) {
-
-        this.taskRepository = taskRepository;
-        this.taskDependencyRepository = taskDependencyRepository;
-        this.priorityScoreService = priorityScoreService;
-        this.schedulingPublishListener = schedulingPublishListener;
-        this.taskStateHistoryRepository = taskStateHistoryRepository;
-        this.clock = clock;
-    }
-
-    /** For tests that don't care about history: records into a throwaway in-memory repository. */
     public TaskCounterUpdater(
             TaskRepository taskRepository,
             TaskDependencyRepository taskDependencyRepository,
             PriorityScoreService priorityScoreService,
             SchedulingPublishListener schedulingPublishListener) {
 
-        this(taskRepository, taskDependencyRepository, priorityScoreService, schedulingPublishListener,
-                new InMemoryTaskStateHistoryRepository(), Clock.systemUTC());
+        this.taskRepository = taskRepository;
+        this.taskDependencyRepository = taskDependencyRepository;
+        this.priorityScoreService = priorityScoreService;
+        this.schedulingPublishListener = schedulingPublishListener;
     }
 
     /**
-     * Issue #774: appends a STATUS_CHANGED history row. Call only after the status write actually
-     * happened, inside the same transaction; a no-op when the status did not change.
+     * Creates a PENDING placeholder (epoch updatedAt, zero counters) in {@code tenantId} for each
+     * absent task; never touches an existing one.
      */
     @Transactional
-    public void recordStatusChange(UUID taskId, TaskStatus from, TaskStatus to) {
-        if (from == to) {
-            return;
-        }
-        taskStateHistoryRepository.record(TaskStateHistoryEntry.statusChanged(
-                UUID.randomUUID(), taskId, from, to, Instant.now(clock)));
+    public void insertPlaceholdersIfAbsent(UUID taskId, UUID dependsOnTaskId, UUID tenantId) {
+        insertPlaceholderIfAbsent(taskId, tenantId);
+        insertPlaceholderIfAbsent(dependsOnTaskId, tenantId);
     }
 
-    /**
-     * Issue #774: appends BLOCKED (0 to positive) or UNBLOCKED (positive to 0) for a blockingCount
-     * change that was just written; any other change (e.g. 1 to 2) records nothing.
-     */
-    @Transactional
-    public void recordBlockingTransition(UUID taskId, int before, int after) {
-        if (before == 0 && after > 0) {
-            taskStateHistoryRepository.record(TaskStateHistoryEntry.blocked(
-                    UUID.randomUUID(), taskId, after, Instant.now(clock)));
-        } else if (before > 0 && after == 0) {
-            taskStateHistoryRepository.record(TaskStateHistoryEntry.unblocked(
-                    UUID.randomUUID(), taskId, before, Instant.now(clock)));
-        }
+    private void insertPlaceholderIfAbsent(UUID taskId, UUID tenantId) {
+        taskRepository.insertIfAbsent(Task.builder()
+                .id(taskId)
+                .tenantId(tenantId)
+                .status(TaskStatus.PENDING)
+                .isReady(true)
+                .createdAt(LocalDateTime.now())
+                .updatedAt(LocalDateTime.ofEpochSecond(0, 0, ZoneOffset.UTC))
+                .build());
     }
 
     public Task requireTask(UUID taskId) {
@@ -174,7 +145,6 @@ public class TaskCounterUpdater {
                 taskId);
 
         Task oldTask = previous.get();
-        recordBlockingTransition(taskId, oldTask.getBlockingCount(), updated.getBlockingCount());
 
         if (updated != oldTask) {
             log.info(

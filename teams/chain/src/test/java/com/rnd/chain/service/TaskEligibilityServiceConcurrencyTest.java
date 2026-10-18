@@ -1,5 +1,6 @@
 package com.rnd.chain.service;
 
+import com.rnd.chain.testsupport.TaskStateHistoryFixtures;
 import com.rnd.chain.dto.Task;
 import com.rnd.chain.dto.TaskStatus;
 import com.rnd.chain.dto.TaskTestFixtures;
@@ -77,8 +78,8 @@ class TaskEligibilityServiceConcurrencyTest {
         TaskCounterUpdater counterUpdater = new TaskCounterUpdater(taskRepository, dependencyRepository,
                 new PriorityScoreService(), new SchedulingPublishListener(taskRepository, scheduling));
         TaskEligibilityService service = new TaskEligibilityService(
-                taskRepository, dependencyRepository, lock, counterUpdater);
-        DependencyEdgeService edgeService = new DependencyEdgeService(dependencyRepository, lock, counterUpdater);
+                taskRepository, dependencyRepository, lock, counterUpdater, TaskStateHistoryFixtures.newRecorder());
+        DependencyEdgeService edgeService = new DependencyEdgeService(dependencyRepository, lock, counterUpdater, TaskStateHistoryFixtures.newRecorder());
 
         List<Runnable> jobs = blockerIds.stream()
                 .<Runnable>map(blockerId -> () -> edgeService.addDependency(hubId, blockerId))
@@ -109,8 +110,8 @@ class TaskEligibilityServiceConcurrencyTest {
         TaskCounterUpdater counterUpdater = new TaskCounterUpdater(taskRepository, dependencyRepository,
                 new PriorityScoreService(), new SchedulingPublishListener(taskRepository, scheduling));
         TaskEligibilityService service = new TaskEligibilityService(
-                taskRepository, dependencyRepository, lock, counterUpdater);
-        DependencyEdgeService edgeService = new DependencyEdgeService(dependencyRepository, lock, counterUpdater);
+                taskRepository, dependencyRepository, lock, counterUpdater, TaskStateHistoryFixtures.newRecorder());
+        DependencyEdgeService edgeService = new DependencyEdgeService(dependencyRepository, lock, counterUpdater, TaskStateHistoryFixtures.newRecorder());
 
         for (UUID blockerId : blockerIds) {
             edgeService.addDependency(hubId, blockerId);
@@ -161,8 +162,8 @@ class TaskEligibilityServiceConcurrencyTest {
             TaskCounterUpdater counterUpdater = new TaskCounterUpdater(taskRepository, dependencyRepository,
                     new PriorityScoreService(), new SchedulingPublishListener(taskRepository, scheduling));
             TaskEligibilityService service = new TaskEligibilityService(
-                    taskRepository, dependencyRepository, lock, counterUpdater);
-            DependencyEdgeService edgeService = new DependencyEdgeService(dependencyRepository, lock, counterUpdater);
+                    taskRepository, dependencyRepository, lock, counterUpdater, TaskStateHistoryFixtures.newRecorder());
+            DependencyEdgeService edgeService = new DependencyEdgeService(dependencyRepository, lock, counterUpdater, TaskStateHistoryFixtures.newRecorder());
 
             List<Runnable> jobs = List.of(
                     () -> edgeService.addDependency(dependentId, targetId),

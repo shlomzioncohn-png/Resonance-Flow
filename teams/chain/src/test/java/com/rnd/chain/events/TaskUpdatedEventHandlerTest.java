@@ -1,5 +1,6 @@
 package com.rnd.chain.events;
 
+import com.rnd.chain.testsupport.TaskStateHistoryFixtures;
 import com.google.protobuf.Timestamp;
 import com.rnd.chain.dto.Task;
 import com.rnd.chain.dto.TaskDependency;
@@ -57,7 +58,7 @@ class TaskUpdatedEventHandlerTest {
         SchedulingUpdateService scheduling = mock(SchedulingUpdateService.class);
         TaskEligibilityService eligibilityService = new TaskEligibilityService(taskRepo, dependencyRepo,
                 new InMemoryGraphLock(), new TaskCounterUpdater(taskRepo, dependencyRepo,
-                        new PriorityScoreService(), new SchedulingPublishListener(taskRepo, scheduling)));
+                        new PriorityScoreService(), new SchedulingPublishListener(taskRepo, scheduling)), TaskStateHistoryFixtures.newRecorder());
         ChainEventProcessingTemplate template = new ChainEventProcessingTemplate(new InMemoryProcessedEventStore());
         return new Fixture(taskRepo, new TaskUpdatedEventHandler(eligibilityService, template));
     }

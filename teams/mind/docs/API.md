@@ -1,9 +1,9 @@
 # MIND API
 
 MIND's outward-facing HTTP API — the only door other teams use to talk to
-MIND (health check today; search and scoring once Phase 2 lands). This
-document is the contract: Relay, Chain, Inbox and Lens should be able to
-integrate against it without reading MIND's source.
+MIND (health check and related-task search today; scoring once Phase 2
+lands). This document is the contract: Relay, Chain, Inbox and Lens
+should be able to integrate against it without reading MIND's source.
 
 Implementation: `src/mind/api/main.py` (routes) and
 `src/mind/contracts/errors.py` (error format). Keep this document and
@@ -48,6 +48,39 @@ requests", nothing more.
 | `200` | The process is up. This is the only code `/health` returns today. |
 | `5xx` | Would only happen if the process is failing to serve HTTP at all — Relay's own connection/timeout handling detects that case, not a status code from us. |
 
+### `GET /v1/tasks/{task_id}/related`
+
+Up to 5 tasks related to `task_id` (#472), ranked by similarity, `task_id`
+itself never included. Always `200` — an unindexed `task_id`, an empty
+index, and "nothing clears the relatedness floor" all come back as
+`related: []`, never a `404` or `500`. See
+`src/mind/embeddings/README.md` for the relatedness threshold and how
+it's calibrated.
+
+**Response — `200 OK`**
+
+```json
+{
+  "related": [
+    { "task_id": "task-456", "similarity": 0.83 }
+  ]
+}
+```
+
+| Field | Type | Meaning |
+|---|---|---|
+| `related` | array | Ranked, best match first. Empty array for "nothing related" — see above. |
+| `related[].task_id` | string | A related task's id. |
+| `related[].similarity` | number | Cosine similarity, `-1.0`–`1.0`. |
+
+**Status codes**
+
+| Code | When |
+|---|---|
+| `200` | Always, for any `task_id` — see above. |
+| `422` | `task_id` fails request validation (e.g. wrong type in the path). |
+| `500` | Unhandled exception — the standard error format below applies. |
+
 ## Error format
 
 Every non-2xx response from any MIND endpoint — today and in the future —
@@ -91,14 +124,12 @@ the table in `errors.py` and to this table in the same change.
 
 ## API versioning plan
 
-Today's only route (`/health`) is unversioned because there is nothing to
-break yet. An empty `/v1` router already lives at
-`src/mind/api/v1/router.py` and is mounted into `app` in `main.py`, so
-the first business endpoint just needs to be added to it — no wiring
-left to do.
+`/health` is unversioned because there is nothing to break there. Every
+business endpoint (`/v1/tasks/{task_id}/related` today, search/scoring
+once Phase 2 lands) lives under `src/mind/api/v1/router.py`, mounted
+into `app` in `main.py`.
 
-Plan, to apply starting with the first business endpoint (search/scoring
-in Phase 2):
+Plan for future business endpoints:
 
 1. **All new business endpoints go under a `/v1/` prefix** — e.g.
    `/v1/search`, `/v1/score`. `/health` stays unversioned and

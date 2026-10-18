@@ -43,7 +43,7 @@ class SalesforceDealRepositoryTest {
 
     private static final Instant FIXED_NOW = Instant.parse("2026-08-30T12:00:00Z");
     private static final DealToTaskMapper TASK_MAPPER =
-            new DealToTaskMapper("org-test-0000", new EnrichmentProperties(), new NoOpTaskEnricher());
+            new DealToTaskMapper("org-test-0000", new EnrichmentProperties(), new NoOpTaskEnricher(), 0);
 
     private MockWebServer server;
 

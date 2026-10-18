@@ -614,7 +614,7 @@ The same rule as the classification fields, because both keys are optional:
   working time: the product works in short free windows, so a longer estimate is a
   model error or a project, not a task. Above it the value becomes null and is
   logged. (Pydantic alone sets no bound, but the wire does: the field is `int32`
-  in both `mind-task-created.proto` and Inbox's `task-created-event.proto`.)
+  in Inbox's `task-created-event.proto` and `task-creation-requested-event.proto`.)
 - what counts as a whole number is decided once, in `_whole_number`, shared
   with urgency so the two cannot drift apart.
 - the two keys travel together, checked after each has been read on its own.

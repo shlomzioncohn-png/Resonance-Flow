@@ -43,6 +43,13 @@ import java.util.List;
  * claimedRevision != expectedRevision and win the claim. Cleared back to null once that
  * revision is either confirmed published or superseded by a new merge - see
  * GroupStateStore.claimForPublication and confirmPublished's javadoc.
+ * superseded means this group's own content was migrated into a different group's identity
+ * (today: the live Slack root -> first-reply case, see ChatGroupStateReconciler.
+ * newThreadGroupState/GroupStateStore.markSuperseded) and must never be independently published
+ * again - regardless of what its own pending inactivity timer later observes (see
+ * SlackSessionScheduler.onDeadline). Deliberately a separate flag from published: this group's
+ * content was never actually acknowledged by Kafka under its own correlationId, so reusing
+ * published to mean "retired" here would falsely claim something was delivered that never was.
  */
 public record GroupState(
         String groupId,
@@ -54,5 +61,19 @@ public record GroupState(
         List<MessageSnapshot> messages,
         boolean published,
         int revision,
-        Integer claimedRevision) {
+        Integer claimedRevision,
+        boolean superseded) {
+
+    /** Convenience constructor for every existing call site built before the thread-root
+     * migration fix - defaults superseded to false, the only value any of them ever needs
+     * (a freshly-minted or merged group is never, itself, the migrated-from side of a
+     * migration - see GroupStateStore.markSuperseded, the only place superseded=true is ever
+     * constructed). */
+    public GroupState(
+            String groupId, RawSourceType sourceType, String tenantId, String chatId, String threadId,
+            String correlationId, List<MessageSnapshot> messages, boolean published, int revision,
+            Integer claimedRevision) {
+        this(groupId, sourceType, tenantId, chatId, threadId, correlationId, messages, published, revision,
+                claimedRevision, false);
+    }
 }

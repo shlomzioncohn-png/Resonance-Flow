@@ -10,7 +10,10 @@ import com.rnd.bridge.intake.model.ChatMessage;
 import com.rnd.bridge.intake.model.GroupState;
 import com.rnd.bridge.intake.model.MessageSnapshot;
 import com.rnd.bridge.intake.model.SourceRecord;
+import com.rnd.bridge.raw.model.Modality;
+import com.rnd.bridge.raw.model.RawObjectRef;
 import com.rnd.bridge.raw.model.RawSourceType;
+import com.rnd.bridge.raw.model.Role;
 import com.rnd.bridge.storage.ControlPlaneStateStores;
 import com.rnd.bridge.storage.InMemoryObjectStorageClient;
 import java.time.Instant;
@@ -40,6 +43,10 @@ import org.junit.jupiter.api.Test;
  * simulate a prior run's publish having actually succeeded.
  */
 class ChatGroupStateReconcilerTest {
+
+    private static final RawObjectRef DUMMY_REF = new RawObjectRef(
+            Role.ATTACHMENT, "SLACK/kamatech/2026-08-18/x.txt", "sha256:" + "a".repeat(64), "text/plain", 10L,
+            Modality.TEXT);
 
     // Shared so ObjectStorageClient (reads/index) and ControlPlaneStateStore (the group
     // record's atomic write) see the same data - in production both hit the same MinIO bucket.
@@ -202,7 +209,7 @@ class ChatGroupStateReconcilerTest {
     }
 
     @Test
-    void migratedRootDoesNotCarryForwardItsOriginalGroupsConfirmedAttachments() {
+    void migratedRootCarriesForwardItsOriginalGroupsLandedAttachmentsAndSupersedesTheOriginalGroup() {
         ChatMessage.Attachment attachment = new ChatMessage.Attachment("F1", "a.txt", "text/plain", "a".getBytes());
         ChatMessage rootWithAttachment = new ChatMessage(
                 RawSourceType.SLACK, "kamatech", "chat-a", "malki", Instant.parse("2026-08-18T09:00:00Z"),
@@ -211,19 +218,35 @@ class ChatGroupStateReconcilerTest {
         ChatGroupStateReconciler.RealtimeReconcileResult rootResult =
                 reconciler.reconcileNonThreadedMessage(rootWithAttachment);
         String originalGroupId = rootResult.groupState().groupId();
-        groupStateStore.confirmAttachmentPublished(RawSourceType.SLACK, "kamatech", originalGroupId, "r1", "F1");
+        groupStateStore.recordLandedAttachment(RawSourceType.SLACK, "kamatech", originalGroupId, "r1", "F1", DUMMY_REF);
 
-        reconciler.group(List.of(threadMessage("chat-a", "ruth", "2026-08-18T09:05:00Z", "reply", "reply1", "r1")));
+        List<SourceRecord> records =
+                reconciler.group(List.of(threadMessage("chat-a", "ruth", "2026-08-18T09:05:00Z", "reply", "reply1", "r1")));
 
+        // The migrated root's attachment is carried into the thread's own copy, not stripped -
+        // it must not be lost just because the root itself was never "incoming" for this group.
         GroupState threadGroup = groupStateStore.load(RawSourceType.SLACK, "kamatech", "r1").orElseThrow();
         MessageSnapshot migratedRoot = threadGroup.messages().stream()
                 .filter(m -> m.messageId().equals("r1")).findFirst().orElseThrow();
-        assertThat(migratedRoot.confirmedAttachmentFileIds()).isEmpty();
+        assertThat(migratedRoot.landedAttachments()).extracting("fileId").containsExactly("F1");
         assertThat(migratedRoot.attachmentCount()).isEqualTo(1);
 
-        // The original group's own confirmation state is unaffected by the copy.
+        // It actually reaches the thread's own published SourceRecord list as a real attachment
+        // record (precomputedRef carried from the original landing), not just as state.
+        assertThat(records).hasSizeGreaterThanOrEqualTo(2);
+        SourceRecord migratedAttachmentRecord = records.stream()
+                .filter(r -> "F1".equals(r.attachmentFileId()))
+                .findFirst().orElseThrow();
+        assertThat(migratedAttachmentRecord.precomputedRef()).isEqualTo(DUMMY_REF);
+        assertThat(migratedAttachmentRecord.attachmentIndex()).isGreaterThan(0);
+
+        // The original group is marked superseded - its content was migrated, so it must never
+        // be independently published again - but it is NOT falsely marked published (nothing was
+        // ever actually sent to Kafka under its own correlationId).
         GroupState originalGroup = groupStateStore.load(RawSourceType.SLACK, "kamatech", originalGroupId).orElseThrow();
-        assertThat(originalGroup.messages().get(0).confirmedAttachmentFileIds()).containsExactly("F1");
+        assertThat(originalGroup.superseded()).isTrue();
+        assertThat(originalGroup.published()).isFalse();
+        assertThat(originalGroup.messages().get(0).landedAttachments()).extracting("fileId").containsExactly("F1");
     }
 
     @Test
@@ -446,7 +469,7 @@ class ChatGroupStateReconcilerTest {
     }
 
     @Test
-    void unchangedReReadOfAConfirmedGroupStillRegeneratesAttachmentsOnly() {
+    void unchangedReReadOfAConfirmedGroupPublishesNothingAtAll() {
         ChatMessage.Attachment attachment =
                 new ChatMessage.Attachment("note.txt", "text/plain", "fake-bytes".getBytes());
         ChatMessage withAttachment = new ChatMessage(
@@ -464,13 +487,11 @@ class ChatGroupStateReconcilerTest {
 
         List<SourceRecord> run2 = reconciler.group(List.of(withAttachment)); // identical re-read
 
-        // The transcript is a confirmed no-op, but the attachment has no confirmation state of
-        // its own, so it must still be regenerated (see mergeAndMaybePublish).
-        assertThat(run2).hasSize(1);
-        assertThat(run2.get(0).attachmentIndex()).isGreaterThan(0);
-        assertThat(run2.get(0).attachmentCount()).isEqualTo(1);
-        // The regenerated attachment retry still carries the group's stable correlationId.
-        assertThat(run2.get(0).correlationId()).isEqualTo(correlationId);
+        // The whole group (transcript + attachment) already published together as one event -
+        // a confirmed, unchanged re-read has nothing left to publish at all (see
+        // mergeAndMaybePublish: confirmation is per logical object/revision now, not
+        // per-attachment, so there is no independent attachment-only republish anymore).
+        assertThat(run2).isEmpty();
         GroupState state = groupStateStore.load(RawSourceType.SLACK, "kamatech", groupId).orElseThrow();
         assertThat(state.revision()).isZero();
     }
@@ -614,9 +635,9 @@ class ChatGroupStateReconcilerTest {
     }
 
     /** Attachment publish idempotency (keyed on Slack's own stable fileId, not attachmentIndex -
-     * see MessageSnapshot.confirmedAttachmentFileIds/SourceRecord.attachmentFileId). Exercised
+     * see MessageSnapshot.landedAttachments/SourceRecord.attachmentFileId). Exercised
      * through reconcileNonThreadedMessage since that's the real-time path a Slack retry actually
-     * hits (see SlackEventsController); GroupStateStoreTest covers confirmAttachmentPublished
+     * hits (see SlackEventsController); GroupStateStoreTest covers recordLandedAttachment
      * itself in isolation. */
 
     @Test
@@ -631,7 +652,7 @@ class ChatGroupStateReconcilerTest {
         String groupId = groupStateStore.findGroupIdForMessage(RawSourceType.SLACK, "kamatech", "m1").orElseThrow();
         // Simulates UnstructuredIntakeLane.afterPublish, called once this attachment's own Kafka
         // publish actually succeeded.
-        groupStateStore.confirmAttachmentPublished(RawSourceType.SLACK, "kamatech", groupId, "m1", "F1");
+        groupStateStore.recordLandedAttachment(RawSourceType.SLACK, "kamatech", groupId, "m1", "F1", DUMMY_REF);
 
         // Slack retries the identical webhook delivery (e.g. because a different record in the
         // same event failed and SlackEventsController returned non-2xx).
@@ -654,7 +675,7 @@ class ChatGroupStateReconcilerTest {
         // F1's own publish (and afterPublish confirmation) succeeded; F2's failed - only F1 gets
         // confirmed, matching what UnstructuredIntakeLane.afterPublish would actually do since
         // each SourceRecord is its own map/land/validate/publish/afterPublish unit.
-        groupStateStore.confirmAttachmentPublished(RawSourceType.SLACK, "kamatech", groupId, "m1", "F1");
+        groupStateStore.recordLandedAttachment(RawSourceType.SLACK, "kamatech", groupId, "m1", "F1", DUMMY_REF);
 
         ChatGroupStateReconciler.RealtimeReconcileResult retry = reconciler.reconcileNonThreadedMessage(message);
 
@@ -672,7 +693,7 @@ class ChatGroupStateReconcilerTest {
 
         reconciler.reconcileNonThreadedMessage(original);
         String groupId = groupStateStore.findGroupIdForMessage(RawSourceType.SLACK, "kamatech", "m1").orElseThrow();
-        groupStateStore.confirmAttachmentPublished(RawSourceType.SLACK, "kamatech", groupId, "m1", "F1");
+        groupStateStore.recordLandedAttachment(RawSourceType.SLACK, "kamatech", groupId, "m1", "F1", DUMMY_REF);
 
         // Edit swaps the files array order - F2 is now first (attachmentIndex 1), F1 second
         // (index 2). Positional identity would misattribute F1's confirmation to F2 here; fileId
@@ -696,7 +717,7 @@ class ChatGroupStateReconcilerTest {
 
         reconciler.reconcileNonThreadedMessage(original);
         String groupId = groupStateStore.findGroupIdForMessage(RawSourceType.SLACK, "kamatech", "m1").orElseThrow();
-        groupStateStore.confirmAttachmentPublished(RawSourceType.SLACK, "kamatech", groupId, "m1", "F1");
+        groupStateStore.recordLandedAttachment(RawSourceType.SLACK, "kamatech", groupId, "m1", "F1", DUMMY_REF);
 
         ChatMessage edited = new ChatMessage(
                 RawSourceType.SLACK, "kamatech", "chat-a", "ruth", Instant.parse("2026-08-18T09:00:00Z"),
@@ -704,7 +725,7 @@ class ChatGroupStateReconcilerTest {
         reconciler.reconcileNonThreadedMessage(edited);
 
         GroupState state = groupStateStore.load(RawSourceType.SLACK, "kamatech", groupId).orElseThrow();
-        assertThat(state.messages().get(0).confirmedAttachmentFileIds()).isEmpty();
+        assertThat(state.messages().get(0).landedAttachments()).isEmpty();
     }
 
     @Test
@@ -716,7 +737,7 @@ class ChatGroupStateReconcilerTest {
 
         reconciler.reconcileNonThreadedMessage(original);
         String groupId = groupStateStore.findGroupIdForMessage(RawSourceType.SLACK, "kamatech", "m1").orElseThrow();
-        groupStateStore.confirmAttachmentPublished(RawSourceType.SLACK, "kamatech", groupId, "m1", "F1");
+        groupStateStore.recordLandedAttachment(RawSourceType.SLACK, "kamatech", groupId, "m1", "F1", DUMMY_REF);
 
         // Same attachment, just the text edited - the confirmed attachment must not be re-sent.
         ChatMessage edited = new ChatMessage(

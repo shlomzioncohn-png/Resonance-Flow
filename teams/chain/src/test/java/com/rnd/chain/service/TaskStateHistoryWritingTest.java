@@ -42,10 +42,10 @@ class TaskStateHistoryWritingTest {
         InMemoryGraphLock lock = new InMemoryGraphLock();
         TaskCounterUpdater counterUpdater = new TaskCounterUpdater(taskRepository, dependencyRepository,
                 new PriorityScoreService(),
-                new SchedulingPublishListener(taskRepository, new SchedulingUpdateService(event -> { })),
-                history, Clock.systemUTC());
-        service = new TaskEligibilityService(taskRepository, dependencyRepository, lock, counterUpdater);
-        edgeService = new DependencyEdgeService(dependencyRepository, lock, counterUpdater);
+                new SchedulingPublishListener(taskRepository, new SchedulingUpdateService(event -> { })));
+        TaskStateHistoryRecorder recorder = new TaskStateHistoryRecorder(history, Clock.systemUTC());
+        service = new TaskEligibilityService(taskRepository, dependencyRepository, lock, counterUpdater, recorder);
+        edgeService = new DependencyEdgeService(dependencyRepository, lock, counterUpdater, recorder);
     }
 
     private UUID savedTask(TaskStatus status, LocalDateTime updatedAt) {

@@ -1,6 +1,6 @@
 # Extraction-Quality Eval — Design Note
 
-> **Status: design locked except two external confirmations; core implemented
+> **Status: design locked except one external confirmation (Ayala); core implemented
 > (#177).** Design for the *second* harness: "did the pipeline extract the right
 > action items from a meeting at all?" — precision / recall against AMI's
 > human-tagged action items. The matching core is `extraction_eval.py`
@@ -10,12 +10,15 @@
 > Lives next to the code in `src/mind/evaluation/`; the README's "Extraction-quality
 > eval" section is the short version of this note.
 >
-> **The only open items** (everything else is decided):
+> **The only open item** (everything else is decided):
 > - **`TODO(Ayala)`** — does she expose a reusable `similarity(a,b)->float` over
 >   her embeddings? If not within a few days, the lexical baseline (§4.2, fully
 >   specified) ships instead. Either way the harness is unblocked.
-> - **`TODO(Yonit)`** — confirm the corpus-loader sets `source_ref` = manifest
->   `records[].id` verbatim (§"Meeting IDs").
+>
+> Settled with Yonit (2026-10-14, #233): `title` + `description` is the
+> comparison text, and the meeting id travels as the extractor's `item_key`, not
+> `source_ref` (§"Meeting IDs", revised 2026-10-12). The contract's status is
+> kept in the README, "The extracted-item contract".
 >
 > This matching is **inherently approximate** — see §7. Not an exact comparison.
 >
@@ -121,14 +124,15 @@ whatever `str.split()` treats as such — that includes the non-breaking space
 internal punctuation stays, stopword removal / stemming (if any) belong to the
 `similarity` implementation, not here.
 
-### 3.3 Which text is compared — LOCKED (revisit when R2's output firms up)
+### 3.3 Which text is compared — LOCKED (confirmed with R2, 2026-10-14)
 
 - **Gold side:** the `<sentence>` text verbatim (then §3.2 normalization).
 - **Predicted side:** `title + ". " + description` when `description` is set,
   else `title`. Rationale: an AMI gold sentence carries roughly a
   title-plus-detail worth of content; matching title-only would under-credit an
   extractor that puts specifics in `description`. `TaskCreationRequested` has
-  `title` (required) and `description` (optional).
+  `title` (required) and `description` (optional). Pinned in code as
+  `ExtractedItem.to_comparison_text()` (`extraction_contract.py`, #233).
 
 ### 3.4 Matching procedure, per meeting — LOCKED
 
@@ -407,10 +411,16 @@ The eval is a **join between two lists** for each meeting:
 
 | left — ground truth (this eval owns) | right — predictions (pipeline produces) |
 |---|---|
-| action items loaded straight from `abstractive/IS1008b.abssumm.xml` | `TaskCreationRequested` objects extracted from that meeting's transcript |
-| key: `IS1008b` — the `.abssumm.xml` filename stem | key: `source_ref` on each task |
+| action items loaded straight from `abstractive/IS1008b.abssumm.xml` | the items extracted from that meeting's transcript |
+| key: `IS1008b` — the `.abssumm.xml` filename stem | key: the `item_key` the eval passed in with that transcript |
 
 The join only works if the same string appears on both sides.
+
+> **Revised 2026-10-12** (#233 / PR #338, agreed with the mentor). An earlier
+> version of this section planned the right-hand key as `source_ref`, set by the
+> corpus loader and "only copied through" by extraction. That does not hold for
+> the pipeline as built, see below. **Answer to #233 step 1 ("which field carries
+> the meeting id"): none of the pipeline's output fields — the eval holds it.**
 
 ### The gold key (left side)
 
@@ -419,52 +429,60 @@ case, not uppercased: `IB4003`, `ES2002a`, `IS1008b`, `TS3003d`. (The trailing
 letter on scenario meetings is lowercase — `IS1008b`, never `IS1008B`.) This
 eval controls this side; no coordination needed for it.
 
-### The prediction key (right side) — where Yonit comes in
+### Why not `source_ref`
 
-The field is **`source_ref: str | None`** on `TaskCreationRequested` (and
-`Task`) — `contracts/task_creation_requested.py`, branch
-`yonit/task-contracts`. Docstring: *"Original source from which MIND extracted
-the task."* It is free text today — no pattern, no rule.
+`source_ref` (on `ExtractedFields` and `TaskCreationRequested`) is a pointer back
+to the original item, and neither value it can hold is the AMI meeting code:
 
-`source_ref` is set upstream, in **`src/mind/ingestion/`** (Yonit's area) when a
-meeting is loaded. Extraction (`src/mind/extraction/`, R2) only copies it
-through. So the value that lands on every predicted task is decided by the
-ingestion layer.
+- **Today** extraction reads it from *inside the content* — the LLM is asked for
+  a message id, URL or ticket key that appears in the text — and
+  `extraction/grounding.py` drops it when the text does not contain it. A
+  meeting transcript carries no such pointer, so for a meeting it is `None`.
+- **Once the Bridge consumer passes `RawObjectEvent.source_ref` through** (#31),
+  it becomes the source system's own identifier: a Zoom meeting uuid, a Slack
+  `channel_id:ts`, an email Message-ID. Still not an AMI code — and the eval does
+  not go through Bridge at all.
 
-### Two ingestion paths — the eval uses only one
+Asking extraction to overwrite it with the AMI code on the corpus path was
+rejected: it would give the field a second meaning only the eval needs, against
+the grounding check and against what Inbox uses it for (a link back to the
+original).
 
-`src/mind/ingestion/` has two entry paths, and they carry meeting identity very
-differently:
+### The prediction key (right side) — `item_key`, held by the eval
 
-| path | identifier available | has the AMI code? |
-|---|---|---|
-| **1. Bridge intake** (production) — consumes `RawObjectEvent` | `object_key`, e.g. `MEETING/tenant-123/2026-09-08/is1008b.xml` (`[A-Z_]+/tenant/date/file`); plus `correlation_id` (UUID) | no — only as a substring of a MinIO path, mixed with tenant/date |
-| **2. Corpus loader** (eval / training) — reads `local-data/` via a manifest | `ami.manifest.json` → `records[].id` = `IS1008b` | yes — clean |
+The eval is what sends each meeting's transcript to the extractor, so it already
+knows which meeting a result belongs to. It passes the meeting code as the
+extractor's `item_key` (`ExtractionItem(text, source_type, item_key="IS1008b")`)
+and reads it back from the outcome:
 
-`RawObjectEvent` (branch `yonit/mind-data-models`) has **no `meeting_id` /
-`document_id` field** — the only handle is `object_key`. So the production path
-structurally loses meeting identity.
+- `ExtractionSuccess.item_key` and `ExtractionFailure.item_key` both carry it
+  unchanged — documented on the pipeline's side (`extraction/README.md`, "A
+  failed item can be found").
+- **A failure counts as a meeting with zero extracted items** (all its gold items
+  are missed), never as a skipped meeting — skipping would inflate the score
+  silently. The run report shows failures on a separate line, with their
+  `reason` (`provider_error` vs `invalid_output`), so a provider outage is not
+  read as a quality drop (mentor's requirement; to be built with the per-meeting
+  layer, §9 / #178).
+- `item_key` is not on `TaskCreationRequested` (`assembly.py` does not copy it),
+  so the eval reads the extractor's outcomes, before assembly. That is the right
+  layer anyway: this eval measures extraction, not what is sent to Inbox.
 
-**The extraction eval runs through path 2 only** — no MinIO, no Bridge event,
-just `local-data/ami/...` fed to extraction. Do **not** route the eval through
-the `RawObjectEvent` path; if a full-pipeline eval is ever wanted, it needs a
-separately-maintained `object_key → meeting code` mapping (out of scope here).
+The eval-side contract for one extracted item is `ExtractedItem`
+(`extraction_contract.py`): `title` + optional `description`, nothing else.
 
-### The convention to lock (issue step 7)
+### Known limitation: one task per text
 
-> **Corpus loader:** for a document loaded from a dataset manifest, `source_ref`
-> = that record's `records[].id`, verbatim. For AMI that makes
-> `source_ref == "IS1008b"`, matching the gold key with zero glue.
+`BasicExtractor.extract` returns exactly one task per text, and a meeting has
+4–8 action items, so recall per meeting is structurally capped at `1/n` until
+that changes (#690). This does not change the join: whether the pipeline returns
+a list per text or meetings are segmented upstream, each result keeps the
+`item_key` of the text it came from, and the eval groups by it.
 
-- **Recorded in:** `src/mind/ingestion/README.md` or the `source_ref` docstring
-  — Yonit's call.
-- **Implemented in:** a corpus-loader file under `src/mind/ingestion/` that does
-  not exist yet (`ingestion/corpus_loader.py` / `ingestion/ami.py`). No loader
-  code exists on any branch today — only the manifest. So this is a convention
-  to agree now, code later (week 4).
-- **`TODO(Yonit)`:** confirm the convention above for the corpus loader; confirm
-  the field name is `source_ref` (not a new `meeting_id`); say who writes the
-  AMI corpus loader (Yonit did FUNSD, not AMI). *(question sent)*
+### Still open
+
+- **Who loads AMI transcripts:** `src/mind/ingestion/` has no AMI loader; #348
+  covers FUNSD only. Needed before #178 can run.
 
 ---
 
@@ -525,9 +543,15 @@ owner-match diagnostic are still to build on top of it.
 **Blocking (external):**
 - [ ] `TODO(Ayala)` — reusable `similarity(a,b)->float`? model? range? pinned?
       If no within a few days → build the §4.2 lexical baseline.
-- [ ] `TODO(Yonit)` — confirm corpus-loader `source_ref = records[].id`
-      verbatim, case-exact; field name stays `source_ref`; who writes the AMI
-      corpus loader.
+- [x] ~~`TODO(Yonit)` — confirm corpus-loader `source_ref = records[].id`~~ —
+      superseded: the meeting id travels as the extractor's `item_key`, held by
+      the eval (§"Meeting IDs", revised 2026-10-12, #233 / PR #338).
+- [x] `TODO(Yonit)` — confirm `title` + `description` (§3.3) is the right
+      comparison text. Confirmed 2026-10-14 (#233 step 4).
+- [ ] An AMI transcript loader — `src/mind/ingestion/` has none, and #348 is
+      FUNSD only. Owner to be decided; blocks #178.
+- [ ] #690 — extraction returns one task per text; per-meeting recall is capped
+      at `1/n` until it is fixed.
 
 **Build-time (not blocking the design):**
 - [ ] Redo the §5 Jaccard numbers with code once `similarity.py` exists — they
@@ -535,7 +559,11 @@ owner-match diagnostic are still to build on top of it.
 - [x] Implement `extraction_eval.py` per §3/§9 (core: #177) and add the docstring
       note to `metrics.extraction_precision_recall`. Still open: per-meeting
       grouping, micro/macro F1, the owner-match diagnostic.
-- [ ] Wire the CI regression check to micro-F1.
+- [x] The eval-side contract for an extracted item (`ExtractedItem`) and the
+      entry point that enforces it (`evaluate_extracted_items`) — #233 / PR #338.
+- [ ] Per-meeting grouping by `item_key`, micro-F1, and a separate failures line
+      (count + `reason`) in the run report — #178.
+- [ ] Wire the CI regression check to micro-F1 — #175.
 
 **Housekeeping:**
 - [x] Fold this note into `src/mind/evaluation/README.md` or keep standalone —

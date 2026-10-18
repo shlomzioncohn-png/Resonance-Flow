@@ -1,5 +1,6 @@
 package com.rnd.chain.service;
 
+import com.rnd.chain.testsupport.TaskStateHistoryFixtures;
 import com.rnd.chain.dto.Task;
 import com.rnd.chain.dto.TaskDependency;
 import com.rnd.chain.dto.TaskStatus;
@@ -78,7 +79,7 @@ class TaskDependencyServiceIntegrationTest {
                                 taskRepository,
                                 dependencyRepository,
                                 new PriorityScoreService(),
-                                new SchedulingPublishListener(taskRepository, schedulingUpdateService)));
+                                new SchedulingPublishListener(taskRepository, schedulingUpdateService)), TaskStateHistoryFixtures.newRecorder());
 
         taskDependencyService =
                 new TaskDependencyService(
