@@ -62,6 +62,8 @@ services:
       additional_contexts:
         shared: ../../shared
     command: ["python", "-m", "mind.scoring.score_publisher_runner"]
+    # A Kafka error kills the process on purpose, so the message is retried.
+    restart: on-failure
     # No HTTP server here -- the Dockerfile's :8000/health check doesn't apply.
     healthcheck:
       disable: true

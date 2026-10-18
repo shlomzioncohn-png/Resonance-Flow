@@ -2,12 +2,14 @@
 field the score depends on changes, and not re-published otherwise.
 No broker: the sink is an in-memory list."""
 
+import threading
 from datetime import UTC, datetime
 from uuid import UUID
 
 import pytest
 from google.protobuf.timestamp_pb2 import Timestamp
 
+import mind.scoring.score_publisher as score_publisher_module
 from mind.contracts.task_enums import TaskTier as ContractTier
 from mind.contracts.task_score_proposed import TaskScoreProposed
 from mind.evaluation.interfaces import ScoreContext, ScoreFactors, ScoreResult
@@ -316,7 +318,8 @@ def test_a_rescored_task_is_published_with_the_models_new_score(propagating, sin
     propagating.handle_task_created(_created())
     model.base = 0.9  # the parent changed, so propagation now gives more
 
-    assert propagating.rescore(TASK_A) is True
+    propagating.rescore(TASK_A)
+    assert propagating.drain_rescores() == 1
 
     assert [p.mind_score for p in sink.sent] == [0.5, 0.9]
     payload = sink.sent[1]
@@ -325,12 +328,21 @@ def test_a_rescored_task_is_published_with_the_models_new_score(propagating, sin
     assert payload.scored_at == NOW
 
 
+def test_rescore_only_queues(propagating, sink):
+    propagating.handle_task_created(_created())
+
+    propagating.rescore(TASK_A)
+
+    assert len(sink.sent) == 1  # nothing until the worker runs
+
+
 def test_rescore_uses_the_newest_state(propagating, model):
     propagating.handle_task_created(_created())
     moved = datetime(2026, 10, 15, 9, 0, tzinfo=UTC)
     propagating.handle_task_updated(_updated(deadline=_timestamp(moved)))
 
     propagating.rescore(TASK_A)
+    propagating.drain_rescores()
 
     assert model.tasks[-1].deadline == moved
 
@@ -340,6 +352,7 @@ def test_rescore_scores_with_the_full_task(propagating, model):
     propagating.handle_task_created(_created())
 
     propagating.rescore(TASK_A)
+    propagating.drain_rescores()
 
     assert model.tasks[-1].title == "Fix the checkout crash"
     assert model.tasks[-1].description == "Customers cannot pay since this morning's deploy."
@@ -347,28 +360,207 @@ def test_rescore_scores_with_the_full_task(propagating, model):
 
 def test_an_unknown_task_is_not_rescored(propagating, sink):
     # e.g. a child no Inbox event has reached since a restart.
-    assert propagating.rescore(TASK_B) is False
+    propagating.rescore(TASK_B)
+
+    assert propagating.drain_rescores() == 0
     assert sink.sent == []
 
 
-def test_a_rescored_task_id_is_matched_in_any_spelling(propagating):
+def test_a_rescored_task_id_is_matched_in_any_spelling(propagating, model):
     propagating.handle_task_created(_created())
+    model.base = 0.9
 
-    assert propagating.rescore(TASK_A.upper()) is True
+    propagating.rescore(TASK_A.upper())
 
-
-def test_a_task_id_that_is_not_a_uuid_is_refused(propagating):
-    with pytest.raises(ValueError):
-        propagating.rescore("not-a-uuid")
+    assert propagating.drain_rescores() == 1
 
 
-def test_chains_echo_of_a_rescore_is_not_re_published(propagating, sink):
+def test_a_task_id_that_is_not_a_uuid_is_ignored_not_raised(propagating, sink):
+    # Raising here would fail the scoring of the task the caller was working on.
+    propagating.rescore("not-a-uuid")
+
+    assert propagating.drain_rescores() == 0
+
+
+def test_chains_echo_of_a_rescore_is_not_re_published(propagating, sink, model):
     # The rescore makes Chain update, and Inbox emits task.updated with no
     # scored field changed: that must not start a loop.
     propagating.handle_task_created(_created())
+    model.base = 0.9
     propagating.rescore(TASK_A)
+    propagating.drain_rescores()
 
     later = datetime(2026, 10, 13, 8, 10, tzinfo=UTC)
     propagating.handle_task_updated(_updated(is_available=True, updated_at=_timestamp(later)))
 
     assert len(sink.sent) == 2
+
+
+def test_rescore_from_inside_score_does_not_deadlock(sink):
+    # Propagation's natural place to notice a parent changed is inside
+    # score(parent), while the publisher holds its lock.
+    class ParentModel(StubModel):
+        def score(self, task, context):
+            if task.task_id == TASK_A:
+                self.base = 0.9  # A's arrival changes what its child B is worth
+                publisher.rescore(TASK_B)
+            return super().score(task, context)
+
+    publisher = ScorePublisher(sink, model=ParentModel(), clock=lambda: NOW)
+    publisher.handle_task_created(_created(TASK_B))
+
+    worker = threading.Thread(target=publisher.handle_task_created, args=(_created(TASK_A),))
+    worker.start()
+    worker.join(timeout=5)
+
+    assert not worker.is_alive(), "rescore from inside score() deadlocked"
+    assert publisher.drain_rescores() == 1
+    assert [p.task_id for p in sink.sent] == [UUID(TASK_B), UUID(TASK_A), UUID(TASK_B)]
+
+
+# --- errors that would repeat on every redelivery ---------------------------
+
+
+class FailingModel(StubModel):
+    """Raises for the ids in `fail_for`, as a model bug one task triggers would."""
+
+    def __init__(self, fail_for: set[str]) -> None:
+        super().__init__()
+        self.fail_for = fail_for
+
+    def score(self, task, context):
+        if task.task_id in self.fail_for:
+            raise RuntimeError("model bug for this task")
+        return super().score(task, context)
+
+
+def test_a_model_error_skips_the_task_and_the_next_one_is_handled(sink):
+    publisher = ScorePublisher(sink, model=FailingModel({TASK_A}), clock=lambda: NOW)
+
+    publisher.handle_task_created(_created(TASK_A))  # must not raise
+    publisher.handle_task_created(_created(TASK_B))
+
+    assert [p.task_id for p in sink.sent] == [UUID(TASK_B)]
+
+
+def test_a_result_without_base_score_is_skipped(sink):
+    class NoBaseScore(StubModel):
+        def score(self, task, context):
+            return ScoreResult(score=0.5)
+
+    publisher = ScorePublisher(sink, model=NoBaseScore(), clock=lambda: NOW)
+
+    publisher.handle_task_created(_created())
+
+    assert sink.sent == []
+
+
+def test_a_base_score_outside_0_1_is_skipped(sink):
+    # ScoreResult accepts it (its own `score` is valid), but TaskScoreProposed
+    # refuses mind_score > 1 with a pydantic ValidationError.
+    class BaseScoreAboveOne(StubModel):
+        def score(self, task, context):
+            return ScoreResult(
+                score=0.9,
+                factors=ScoreFactors(contributions={"impact": 1.5}, base_score=1.5),
+            )
+
+    publisher = ScorePublisher(sink, model=BaseScoreAboveOne(), clock=lambda: NOW)
+
+    publisher.handle_task_created(_created())
+
+    assert sink.sent == []
+
+
+def test_a_model_error_inside_score_is_skipped(sink):
+    # The model's own ScoreResult refuses score > 1, so it raises inside score().
+    model = StubModel()
+    model.base = 1.5
+    publisher = ScorePublisher(sink, model=model, clock=lambda: NOW)
+
+    publisher.handle_task_created(_created())
+
+    assert sink.sent == []
+
+
+def test_a_rescore_error_skips_that_task_and_the_queue_goes_on(sink):
+    model = FailingModel(set())
+    publisher = ScorePublisher(sink, model=model, clock=lambda: NOW)
+    publisher.handle_task_created(_created(TASK_A))
+    publisher.handle_task_created(_created(TASK_B))
+    model.fail_for.add(TASK_A)  # after the parent changed, TASK_A hits the bug
+    model.base = 0.9
+
+    publisher.rescore(TASK_A)
+    publisher.rescore(TASK_B)
+
+    assert publisher.drain_rescores() == 1
+    assert [p.task_id for p in sink.sent] == [UUID(TASK_A), UUID(TASK_B), UUID(TASK_B)]
+
+
+def test_a_conversion_error_other_than_a_bad_id_is_skipped(publisher, sink, monkeypatch):
+    # Any conversion failure repeats on every redelivery, not only InvalidInboxEvent.
+    def broken(event):
+        raise RuntimeError("conversion bug")
+
+    monkeypatch.setattr(score_publisher_module, "to_scoring_task", broken)
+
+    publisher.handle_task_created(_created())  # must not raise
+
+    assert sink.sent == []
+
+
+def test_a_kafka_error_in_the_rescore_worker_propagates(model):
+    # Only scoring errors are skipped; a send failure must reach the worker
+    # thread so the process restarts and nothing is silently lost.
+    class FailsOnSecond(ListSink):
+        def send(self, payload):
+            if self.sent:
+                raise RuntimeError("broker down")
+            super().send(payload)
+
+    publisher = ScorePublisher(FailsOnSecond(), model=model, clock=lambda: NOW)
+    publisher.handle_task_created(_created())
+    model.base = 0.9
+    publisher.rescore(TASK_A)
+
+    with pytest.raises(RuntimeError, match="broker down"):
+        publisher.drain_rescores()
+
+
+# --- bounding re-scores -----------------------------------------------------
+
+
+def test_a_rescore_with_an_unchanged_score_is_not_sent(propagating, sink):
+    # Nothing new for Chain, and what ends a cycle of re-scores in the hierarchy.
+    propagating.handle_task_created(_created())
+
+    propagating.rescore(TASK_A)
+
+    assert propagating.drain_rescores() == 0
+    assert len(sink.sent) == 1
+
+
+def test_a_task_requested_twice_is_rescored_once(propagating, model):
+    propagating.handle_task_created(_created())
+    model.base = 0.9
+    scored_before = len(model.tasks)
+
+    propagating.rescore(TASK_A)
+    propagating.rescore(TASK_A)
+
+    assert propagating.drain_rescores() == 1
+    assert len(model.tasks) == scored_before + 1
+
+
+def test_a_request_after_the_task_was_taken_is_queued_again(propagating, model):
+    # Once the worker has taken a task, a new request must not be dropped.
+    propagating.handle_task_created(_created())
+    model.base = 0.9
+    propagating.rescore(TASK_A)
+    propagating.drain_rescores()
+
+    model.base = 0.95
+    propagating.rescore(TASK_A)
+
+    assert propagating.drain_rescores() == 1

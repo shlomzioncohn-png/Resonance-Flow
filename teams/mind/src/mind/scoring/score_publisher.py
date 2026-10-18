@@ -26,24 +26,43 @@ next update.
 
 A score can also change without any Inbox event: R3's hierarchical propagation
 (#474) changes a parent, and so its children's scores. Her code calls
-`rescore(child_id)` for each child, and the child is scored again with this
-publisher's model on its newest state. Since the state lives in memory, a child
-no Inbox event has reached since start-up cannot be re-scored: it is skipped
-until its next event.
+`rescore(child_id)` for each child. That only queues the id, so it is safe from
+anywhere, including from inside the model's own `score()` while the lock is
+held. A separate worker (`run_rescores`) takes ids off the queue and scores each
+child again with this publisher's model on its newest state. A request for a
+task already waiting in the queue is dropped, and a re-score whose mind_score
+equals the last one published is not sent, so a cycle in the hierarchy, or
+repeated requests, cannot flood Chain. Propagation should still ask for a child
+only when its parent's score actually changed. Since the state lives in memory,
+a child no Inbox event has reached since start-up cannot be re-scored: it is
+logged and skipped until its next event.
 
 Known limitation: a score is not re-sent just because time passes, although
 time pressure rises as a deadline nears. Chain keeps the last score sent.
 
-The handler lets unexpected exceptions propagate (ProtobufConsumer only commits
-after it returns), so a failed publish is retried and is not recorded as sent.
-The one exception is an event that can never be scored (InvalidInboxEvent): it
-is logged and skipped, since it would fail on every redelivery.
+Two kinds of error, handled differently:
+
+- Sending to Kafka (`sink.send`) can fail for a while and then work. That error
+  propagates: ProtobufConsumer commits only after the handler returns, so the
+  message is retried, and it is not recorded as sent.
+- Converting the event, scoring the task or building the payload fails the same
+  way on every redelivery: a malformed event, a result without base_score, a
+  score outside 0..1, a bug in the model for one task. Propagating it would kill
+  the process on the same message forever, so it is logged with the task id and
+  skipped, and the next event is handled as usual. Anything the model raises
+  counts as this kind, so a model must not raise on a transient failure: #474
+  already requires propagation to fall back to the baseline score when Chain's
+  traversal API is unavailable.
+
+Known limitation: the lock is held while the model scores, so a model that calls
+the network (#474's traversal of Chain) holds up the other topic meanwhile.
 """
 
 from __future__ import annotations
 
 import hashlib
 import logging
+import queue
 import threading
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -57,7 +76,7 @@ from mind.contracts.task_score_proposed import TaskScoreProposed
 from mind.evaluation.interfaces import ScoreContext, ScoreResult
 from mind.messaging.task_created_event_pb2 import TaskCreatedEvent
 from mind.messaging.task_updated_event_pb2 import TaskUpdatedEvent
-from mind.scoring.inbox_task import InboxTask, InvalidInboxEvent, to_scoring_task
+from mind.scoring.inbox_task import InboxTask, to_scoring_task
 from mind.scoring.inputs import ScorableTask
 from mind.scoring.score_event import build_score_event
 from mind.scoring.segmented_model import SegmentedRankingModel
@@ -75,6 +94,7 @@ class _TaskState:
     task: InboxTask  # the newest accepted state, for rescore
     seen: tuple[datetime, int] | None  # (Inbox time, _CREATED / _UPDATED)
     published: bytes | None  # hash of the inputs last published
+    last_score: float | None = None  # mind_score last published, for rescore
 
 
 class ScoreSink(Protocol):
@@ -130,8 +150,14 @@ class ScorePublisher:
         self._model = model if model is not None else SegmentedRankingModel()
         self._clock = clock
         self._state: dict[str, _TaskState] = {}
-        # One consumer thread per topic, and the caller of rescore, share it.
+        # One consumer thread per topic, and the rescore worker, share it.
         self._lock = threading.Lock()
+        # Task ids waiting to be re-scored; see rescore. `_pending` holds the
+        # same ids so a repeated request is dropped. It has its own lock, never
+        # the one above: rescore may be called while that one is held.
+        self._rescores: queue.SimpleQueue[str] = queue.SimpleQueue()
+        self._pending: set[str] = set()
+        self._pending_lock = threading.Lock()
 
     def handle_task_created(self, event: TaskCreatedEvent) -> None:
         self._handle(event, _event_time(event, "created_at"), _CREATED)
@@ -147,11 +173,11 @@ class ScorePublisher:
     ) -> None:
         try:
             task = to_scoring_task(event)
-        except InvalidInboxEvent:
-            # Only this is caught: the message fails the same way on every
-            # redelivery, so propagating it would stall the partition. Anything
-            # else, a bug or a broker error, still propagates and is retried.
-            logger.exception("score_publisher: skipping an event that cannot be scored")
+        except Exception:
+            # Fails the same way on every redelivery (InvalidInboxEvent, or a
+            # conversion bug): skipped, so it cannot stall the partition.
+            raw_id = event.id if isinstance(event, TaskCreatedEvent) else event.task_id
+            logger.exception("score_publisher: task %r cannot be converted, skipping", raw_id)
             return
         self._publish_if_changed(task, None if event_time is None else (event_time, kind))
 
@@ -187,32 +213,93 @@ class ScorePublisher:
                 return
             self._score_and_send(state, inputs)
 
-    def rescore(self, task_id: str) -> bool:
-        """Score a task again with no Inbox event, and publish the result.
+    def rescore(self, task_id: str) -> None:
+        """Ask for a task to be scored again, with no Inbox event (#474).
 
-        For #474's propagation: a parent changed, so this child's score did. The
-        child is scored with this publisher's model on its newest state, under
-        the same lock as the event handlers, so the score is never computed from
-        a state older than one already published.
+        Only queues the id and returns at once, so it is safe to call from
+        anywhere, including from inside the model's `score()` while this
+        publisher holds its lock. The worker (`run_rescores`) scores the task
+        with this publisher's model on its newest state and publishes it.
 
-        Returns False, and sends nothing, for a task no Inbox event has reached
-        since this process started (the state is in memory). Raises ValueError
-        for a task_id that is not a UUID.
+        Returns nothing: whether the task is known is decided by the worker, which
+        logs and skips one no Inbox event has reached since start-up. A request
+        for a task already waiting in the queue is dropped.
+
+        Never raises: an id that is not a UUID is logged and dropped, so a bad id
+        cannot fail the scoring of the task the caller was working on.
         """
-        task_id = str(UUID(task_id))
+        try:
+            task_id = str(UUID(task_id))
+        except ValueError:
+            logger.error("score_publisher: rescore of %r ignored: not a UUID", task_id)
+            return
+        with self._pending_lock:
+            if task_id in self._pending:
+                return
+            self._pending.add(task_id)
+        self._rescores.put(task_id)
+
+    def run_rescores(self) -> None:
+        """The worker: re-score queued tasks, one at a time, forever."""
+        while True:
+            self._rescore_now(self._take(self._rescores.get()))
+
+    def drain_rescores(self) -> int:
+        """Re-score every task queued so far, and return how many were sent."""
+        sent = 0
+        while True:
+            try:
+                task_id = self._rescores.get_nowait()
+            except queue.Empty:
+                return sent
+            sent += self._rescore_now(self._take(task_id))
+
+    def _take(self, task_id: str) -> str:
+        # Off the pending set before scoring, so a request made while the task
+        # is being scored (its parent changed again) is queued, not lost.
+        with self._pending_lock:
+            self._pending.discard(task_id)
+        return task_id
+
+    def _rescore_now(self, task_id: str) -> bool:
         with self._lock:
             state = self._state.get(task_id)
             if state is None:
+                # The state is in memory: unknown since start-up until its next event.
                 logger.warning("score_publisher: task %s is unknown, not re-scored", task_id)
                 return False
-            self._score_and_send(state, _scoring_inputs_hash(state.task))
-            return True
+            return self._score_and_send(
+                state, _scoring_inputs_hash(state.task), only_if_changed=True
+            )
 
-    def _score_and_send(self, state: _TaskState, inputs: bytes) -> None:
-        """Score `state.task`, publish it, and record it. Caller holds the lock."""
+    def _score_and_send(
+        self, state: _TaskState, inputs: bytes, *, only_if_changed: bool = False
+    ) -> bool:
+        """Score `state.task`, publish it, and record it. Caller holds the lock.
+
+        Returns False, having sent nothing, when the task cannot be scored, or,
+        with `only_if_changed`, when its mind_score equals the last one sent.
+        """
+        task_id = state.task.task_id
         # Aware, in UTC, like the deadlines the conversion builds.
         now = self._clock()
-        result = self._model.score(state.task, ScoreContext(current_datetime=now))
-        self._sink.send(build_score_event(state.task, result, scored_at=now))
+        try:
+            result = self._model.score(state.task, ScoreContext(current_datetime=now))
+            payload = build_score_event(state.task, result, scored_at=now)
+        except Exception:
+            # Scoring this task fails the same way every time (a result without
+            # base_score, a score outside 0..1, a model bug for this task):
+            # skipped, so one broken task does not stop all scoring.
+            logger.exception("score_publisher: task %s cannot be scored, skipping", task_id)
+            return False
+        if only_if_changed and payload.mind_score == state.last_score:
+            # Nothing for Chain to learn; also what ends a cycle of re-scores.
+            logger.debug("score_publisher: task %s re-scored unchanged, not sent", task_id)
+            return False
+        # Outside the try: a Kafka error is transient, so it propagates and the
+        # message is retried.
+        self._sink.send(payload)
         # Recorded only after a successful send, so a failed one is retried.
         state.published = inputs
+        state.last_score = payload.mind_score
+        return True

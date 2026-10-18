@@ -330,16 +330,28 @@ When a score is published:
 - **Older events are dropped.** The two topics have no ordering between them, so
   each task keeps the newest Inbox `created_at` / `updated_at` seen. At an equal
   time, `task.created` counts as older.
-- **Unscorable events are skipped, not retried.** An `InvalidInboxEvent` would
-  fail on every redelivery and stall the partition, so it is logged and skipped.
-  Every other error propagates and is retried.
+- **Errors that would repeat are skipped, not retried.** Converting the event,
+  scoring the task or building the payload fails the same way on every
+  redelivery (a malformed id, a result without `base_score`, a score outside
+  0..1, a model bug for one task). Propagating it would kill the process on the
+  same message forever, so it is logged with the task id and skipped. Only a
+  failure to send to Kafka propagates, so that message is retried. Anything the
+  model raises counts as permanent, so a model must not raise on a transient
+  failure (#474 already requires falling back to the baseline score).
 - **When propagation changes a score without an Inbox event** (#474: a parent
   changed, so its children's scores did), the propagation code calls
-  `ScorePublisher.rescore(child_id)` for each affected child. The child is scored
-  again with the publisher's own model (so that model must be the propagation
-  model) on its newest state, under the same lock as the event handlers. The
-  state is in memory, so a child no Inbox event has reached since start-up is
-  not re-scored (`rescore` returns `False`) until its next event.
+  `ScorePublisher.rescore(child_id)` for each affected child. That only queues
+  the id, so it is safe from anywhere, including from inside the model's own
+  `score()`. A worker thread scores each queued child again with the publisher's
+  own model (so that model must be the propagation model) on its newest state,
+  under the same lock as the event handlers. A request for a task already
+  queued is dropped, and a re-score whose score is unchanged is not sent, so a
+  cycle in the hierarchy cannot flood Chain; propagation should still ask only
+  when a parent's score actually changed. `rescore` returns nothing. The state is
+  in memory, so a child no Inbox event has reached since start-up is logged and
+  skipped until its next event.
+- **The lock is held while the model scores**, so a model that calls the network
+  (propagation reads Chain's traversal API) holds up the other topic meanwhile.
 
 What was last published lives in memory, so a restart re-publishes each task
 once on its next event. A score is not re-sent just because time passes.

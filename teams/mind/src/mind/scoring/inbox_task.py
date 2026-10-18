@@ -5,8 +5,8 @@ model as None, and the model decides how to score it (see `inputs.py` and
 `segmented_model.rule_tier`). Nothing here fills a default.
 
 An event that can never be scored, because its task or tenant id is not a UUID,
-raises `InvalidInboxEvent`. It is the one error a handler may swallow: the same
-message would fail on every redelivery, so retrying it would stall the partition.
+raises `InvalidInboxEvent`. The publisher logs and skips it: the same message
+would fail on every redelivery, so retrying it would stall the partition.
 """
 
 from __future__ import annotations

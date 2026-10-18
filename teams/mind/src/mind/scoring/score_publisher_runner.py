@@ -3,7 +3,8 @@ task.score.proposed to Chain. Own process, like index_consumer_runner:
 ProtobufConsumer.run() blocks, so one thread per topic.
 
 Both threads share one ScorePublisher, so the "last published" state covers
-task.created and task.updated together.
+task.created and task.updated together. A third thread runs the publisher's
+rescore worker, which re-scores the tasks #474's propagation asks for.
 
 Usage:
     make run-score-publisher
@@ -65,6 +66,7 @@ def main() -> None:
     threads = [
         threading.Thread(target=_run_topic, args=t, name=f"score-publisher-{t[0]}") for t in topics
     ]
+    threads.append(threading.Thread(target=publisher.run_rescores, name="score-publisher-rescore"))
     for t in threads:
         t.start()
     for t in threads:
