@@ -1,5 +1,6 @@
 package com.rnd.chain.events;
 
+import com.rnd.chain.testsupport.TaskStateHistoryFixtures;
 import com.rnd.chain.dto.Task;
 import com.rnd.chain.dto.TaskDependency;
 import com.rnd.chain.dto.TaskStatus;
@@ -79,7 +80,7 @@ class DependencyProposedEventHandlerTest {
                         dependencyRepo,
                         new InMemoryGraphLock(),
                         new TaskCounterUpdater(taskRepo, dependencyRepo, new PriorityScoreService(),
-                                new SchedulingPublishListener(taskRepo, schedulingUpdateService)));
+                                new SchedulingPublishListener(taskRepo, schedulingUpdateService)), TaskStateHistoryFixtures.newRecorder());
 
         InMemoryDependencyHistoryRepository historyRepo =
                 new InMemoryDependencyHistoryRepository();

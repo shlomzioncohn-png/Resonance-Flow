@@ -1,5 +1,6 @@
 package com.rnd.chain.events;
 
+import com.rnd.chain.testsupport.TaskStateHistoryFixtures;
 import com.rnd.chain.dto.Task;
 import com.rnd.chain.dto.TaskStatus;
 import com.rnd.chain.repository.ConstraintRepository;
@@ -148,7 +149,7 @@ ChainEventProcessingTemplate chainEventProcessingTemplate() {
                     new InMemoryGraphLock(),
                     new TaskCounterUpdater(taskRepository, taskDependencyRepository,
                             new PriorityScoreService(),
-                            new SchedulingPublishListener(taskRepository, schedulingUpdateService)));
+                            new SchedulingPublishListener(taskRepository, schedulingUpdateService)), TaskStateHistoryFixtures.newRecorder());
         }
 
         @Bean

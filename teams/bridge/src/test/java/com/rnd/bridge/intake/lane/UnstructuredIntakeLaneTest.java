@@ -19,8 +19,11 @@ import com.rnd.bridge.core.error.LaneException;
 import com.rnd.bridge.intake.model.SourceRecord;
 import com.rnd.bridge.intake.service.IntakeLandingService;
 import com.rnd.bridge.raw.model.ChangeType;
+import com.rnd.bridge.raw.model.Modality;
 import com.rnd.bridge.raw.model.RawObjectEvent;
+import com.rnd.bridge.raw.model.RawObjectRef;
 import com.rnd.bridge.raw.model.RawSourceType;
+import com.rnd.bridge.raw.model.Role;
 import com.rnd.bridge.raw.model.ScopeDecision;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
@@ -28,8 +31,9 @@ import java.util.List;
 import java.util.stream.Stream;
 import org.junit.jupiter.api.Test;
 
-/** Covers UnstructuredIntakeLane's own logic: the afterMap override that lands the record, and
- * the afterPublish override that confirms a chat group's publish state. */
+/** Covers UnstructuredIntakeLane's own logic: the afterMap override that lands every record in
+ * the group, and the afterPublish override that confirms a chat group's/calendar event's publish
+ * state once per group. */
 class UnstructuredIntakeLaneTest {
 
     private static final SourceRecord RECORD = new SourceRecord(
@@ -38,9 +42,10 @@ class UnstructuredIntakeLaneTest {
             "{}".getBytes(StandardCharsets.UTF_8), null, null, 0, 0, List.of(), 0);
 
     private static final RawObjectEvent EVENT = RawObjectEvent.create(
-            "EMAIL/kamatech/2026-08-18/x.json", RawSourceType.EMAIL, "kamatech", Instant.parse("2026-08-18T09:15:00Z"),
-            ScopeDecision.INCLUDED, "sha256:" + "0".repeat(64), null, List.of("hadas@kamatech.org"),
-            "application/json", 2L, Instant.parse("2026-08-18T09:15:00Z"), "corr-1", 0, 0, 0, ChangeType.UPSERT);
+            RawSourceType.EMAIL, "kamatech", Instant.parse("2026-08-18T09:15:00Z"), ScopeDecision.INCLUDED,
+            List.of("hadas@kamatech.org"), Instant.parse("2026-08-18T09:15:00Z"), "corr-1", 0, ChangeType.UPSERT,
+            List.of(new RawObjectRef(Role.BODY, "EMAIL/kamatech/2026-08-18/x.json", "sha256:" + "0".repeat(64),
+                    "application/json", 2L, Modality.TEXT)));
 
     // A chat transcript record (attachmentIndex 0, non-null groupId) - the shape that actually
     // reaches the GroupStateStore confirmation branch inside afterPublish, unlike RECORD above.
@@ -50,9 +55,10 @@ class UnstructuredIntakeLaneTest {
             "ruth: hi".getBytes(StandardCharsets.UTF_8), null, null, 0, 0, List.of("m1"), 0, "g1");
 
     private static final RawObjectEvent SLACK_EVENT = RawObjectEvent.create(
-            "SLACK/kamatech/2026-08-18/x.json", RawSourceType.SLACK, "kamatech", Instant.parse("2026-08-18T09:00:00Z"),
-            ScopeDecision.INCLUDED, "sha256:" + "1".repeat(64), null, List.of("ruth"), "text/plain", 8L,
-            Instant.parse("2026-08-18T09:00:00Z"), "corr-2", 0, 0, 0, ChangeType.UPSERT);
+            RawSourceType.SLACK, "kamatech", Instant.parse("2026-08-18T09:00:00Z"), ScopeDecision.INCLUDED,
+            List.of("ruth"), Instant.parse("2026-08-18T09:00:00Z"), "corr-2", 0, ChangeType.UPSERT,
+            List.of(new RawObjectRef(Role.TRANSCRIPT, "SLACK/kamatech/2026-08-18/x.json", "sha256:" + "1".repeat(64),
+                    "text/plain", 8L, Modality.TEXT)));
 
     // A Calendar record at revision 1 (naturalId is event.getId() - see
     // RealCalendarSourceReader.toSourceRecord) - the shape that reaches
@@ -63,15 +69,15 @@ class UnstructuredIntakeLaneTest {
             "{}".getBytes(StandardCharsets.UTF_8), null, null, 0, 0, List.of(), 1);
 
     private static final RawObjectEvent CALENDAR_EVENT = RawObjectEvent.create(
-            "CALENDAR/kamatech/2026-08-19/x.json", RawSourceType.CALENDAR, "kamatech",
-            Instant.parse("2026-08-19T13:00:00Z"), ScopeDecision.INCLUDED, "sha256:" + "2".repeat(64), null,
-            List.of("hadas@kamatech.org"), "application/json", 2L, Instant.parse("2026-08-19T13:00:00Z"), "corr-3",
-            0, 0, 1, ChangeType.UPSERT);
+            RawSourceType.CALENDAR, "kamatech", Instant.parse("2026-08-19T13:00:00Z"), ScopeDecision.INCLUDED,
+            List.of("hadas@kamatech.org"), Instant.parse("2026-08-19T13:00:00Z"), "corr-3", 1, ChangeType.UPSERT,
+            List.of(new RawObjectRef(Role.BODY, "CALENDAR/kamatech/2026-08-19/x.json", "sha256:" + "2".repeat(64),
+                    "application/json", 2L, Modality.TEXT)));
 
     @SuppressWarnings("unchecked")
-    private final SourceReader<SourceRecord> sourceReader = mock(SourceReader.class);
+    private final SourceReader<List<SourceRecord>> sourceReader = mock(SourceReader.class);
     @SuppressWarnings("unchecked")
-    private final PayloadMapper<SourceRecord, RawObjectEvent> payloadMapper = mock(PayloadMapper.class);
+    private final PayloadMapper<List<SourceRecord>, RawObjectEvent> payloadMapper = mock(PayloadMapper.class);
     @SuppressWarnings("unchecked")
     private final PayloadValidator<RawObjectEvent> payloadValidator = mock(PayloadValidator.class);
     @SuppressWarnings("unchecked")
@@ -84,8 +90,9 @@ class UnstructuredIntakeLaneTest {
             RawSourceType.EMAIL, sourceReader, payloadMapper, payloadValidator, payloadPublisher, landingService,
             groupStateStore, calendarEventStateStore);
 
-    // afterPublish keys strictly off source.sourceType()/tenantId(), not the lane's own
-    // declared sourceType - but a dedicated SLACK-typed lane keeps these tests' intent explicit.
+    // afterPublish keys strictly off the group's primary record's sourceType()/tenantId(), not
+    // the lane's own declared sourceType - but a dedicated SLACK-typed lane keeps these tests'
+    // intent explicit.
     private final UnstructuredIntakeLane slackLane = new UnstructuredIntakeLane(
             RawSourceType.SLACK, sourceReader, payloadMapper, payloadValidator, payloadPublisher, landingService,
             groupStateStore, calendarEventStateStore);
@@ -95,14 +102,14 @@ class UnstructuredIntakeLaneTest {
             groupStateStore, calendarEventStateStore);
 
     @Test
-    void afterMapLandsUsingTheMappedPayloadsObjectKeyAndScopeDecision() {
-        when(sourceReader.read(any())).thenReturn(Stream.of(RECORD));
+    void afterMapLandsEveryRecordInTheGroupUsingTheMatchingRefsObjectKeyAndScopeDecision() {
+        when(sourceReader.read(any())).thenReturn(Stream.of(List.of(RECORD)));
         when(payloadMapper.map(any(), any())).thenReturn(EVENT);
         Instant asOf = Instant.parse("2026-08-31T10:00:00Z");
 
         IntakeResult result = lane.run(ReadCursor.full(), asOf);
 
-        verify(landingService).land(EVENT.objectKey(), RECORD, EVENT.scopeDecision(), asOf);
+        verify(landingService).land(EVENT.objects().get(0).objectKey(), RECORD, EVENT.scopeDecision(), asOf);
         verify(payloadValidator).validate(EVENT);
         verify(payloadPublisher).publish(EVENT);
         assertThat(result).isEqualTo(new IntakeResult(1, 1, 0, List.of()));
@@ -113,7 +120,7 @@ class UnstructuredIntakeLaneTest {
 
     @Test
     void landingFailureIsRecordedAsRejectedAndSkipsValidateAndPublish() {
-        when(sourceReader.read(any())).thenReturn(Stream.of(RECORD));
+        when(sourceReader.read(any())).thenReturn(Stream.of(List.of(RECORD)));
         when(payloadMapper.map(any(), any())).thenReturn(EVENT);
         doThrow(new IllegalStateException("MinIO unreachable")).when(landingService)
                 .land(any(), any(), any(), any());
@@ -129,8 +136,8 @@ class UnstructuredIntakeLaneTest {
     }
 
     @Test
-    void chatGroupConfirmationSucceedingCountsTheRecordAsPublishedNotRejected() {
-        when(sourceReader.read(any())).thenReturn(Stream.of(SLACK_RECORD));
+    void chatGroupConfirmationSucceedingCountsTheGroupAsPublishedNotRejected() {
+        when(sourceReader.read(any())).thenReturn(Stream.of(List.of(SLACK_RECORD)));
         when(payloadMapper.map(any(), any())).thenReturn(SLACK_EVENT);
 
         IntakeResult result = slackLane.run(ReadCursor.full(), Instant.now());
@@ -143,7 +150,7 @@ class UnstructuredIntakeLaneTest {
 
     /**
      * The regression this guards: afterPublish used to run AFTER published++ already counted
-     * the record, so a failure here got the record counted as both published (already
+     * the group, so a failure here got the group counted as both published (already
      * incremented) and rejected (the catch block below) at once. run() now only increments
      * published once afterPublish returns successfully, and UnstructuredIntakeLane.afterPublish
      * wraps GroupStateStore's own RuntimeExceptions (IllegalStateException/UncheckedIOException -
@@ -152,7 +159,7 @@ class UnstructuredIntakeLaneTest {
      */
     @Test
     void chatGroupConfirmationFailureAfterKafkaPublishIsRejectedNotPublished() {
-        when(sourceReader.read(any())).thenReturn(Stream.of(SLACK_RECORD));
+        when(sourceReader.read(any())).thenReturn(Stream.of(List.of(SLACK_RECORD)));
         when(payloadMapper.map(any(), any())).thenReturn(SLACK_EVENT);
         doThrow(new IllegalStateException("MinIO unreachable"))
                 .when(groupStateStore).confirmPublished(RawSourceType.SLACK, "kamatech", "g1", 0);
@@ -170,8 +177,8 @@ class UnstructuredIntakeLaneTest {
     }
 
     @Test
-    void calendarEventConfirmationSucceedingCountsTheRecordAsPublishedNotRejected() {
-        when(sourceReader.read(any())).thenReturn(Stream.of(CALENDAR_RECORD));
+    void calendarEventConfirmationSucceedingCountsTheGroupAsPublishedNotRejected() {
+        when(sourceReader.read(any())).thenReturn(Stream.of(List.of(CALENDAR_RECORD)));
         when(payloadMapper.map(any(), any())).thenReturn(CALENDAR_EVENT);
 
         IntakeResult result = calendarLane.run(ReadCursor.full(), Instant.now());
@@ -184,7 +191,7 @@ class UnstructuredIntakeLaneTest {
      * own confirmation path instead of the chat-group one. */
     @Test
     void calendarEventConfirmationFailureAfterKafkaPublishIsRejectedNotPublished() {
-        when(sourceReader.read(any())).thenReturn(Stream.of(CALENDAR_RECORD));
+        when(sourceReader.read(any())).thenReturn(Stream.of(List.of(CALENDAR_RECORD)));
         when(payloadMapper.map(any(), any())).thenReturn(CALENDAR_EVENT);
         doThrow(new IllegalStateException("MinIO unreachable"))
                 .when(calendarEventStateStore).confirmPublished("kamatech", "evt-1", 1);

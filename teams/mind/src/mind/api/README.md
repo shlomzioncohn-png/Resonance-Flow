@@ -19,14 +19,16 @@ lands) — see `v1/README.md`. `/health` deliberately stays here in
 
 ## Instrumentation
 
-`instrumentation.py` has `instrumented_call(name, cost=0.0)` — wrap any
-future model call (OCR, ASR, LLM extraction, embeddings, ranking) in it
-instead of writing your own timing/logging:
+`instrumentation.py` has `instrumented_call(name, cost=0.0)` — wrap
+HTTP-level work in it instead of writing your own timing/logging:
 
 ```python
-with instrumented_call("whisper-base-local", cost=0.0):
-    result = call_whisper_model(audio)
+with instrumented_call("health_check"):
+    ...
 ```
+
+Model calls (OCR, ASR, LLM) are **not** wrapped in it — they are recorded
+with `observability/tracking.py`'s `record_call()` instead (see below).
 
 It measures wall-clock duration, logs one structured JSON line
 (`call_name`, `duration_ms`, `cost`, `timestamp`, `status`), and folds
@@ -51,10 +53,18 @@ call exists (extraction starts week 4):
   `error_count`, `p95_duration_ms`, `cumulative_cost`. A minimal
   stand-in for the real monitoring dashboard Relay builds in week 8 —
   not a persistent metrics store, resets on process restart.
+- `GET /debug/model-calls` — the model-call summary (#479): every OCR / ASR /
+  LLM call recorded through `record_call()`, per call name — count, errors,
+  p50/p95 latency, CPU seconds (OCR/ASR), tokens and US dollars (LLM), and
+  slow / expensive limit crossings. A measure that doesn't apply to a kind
+  has a `null` total and a `null` count; an unknown one a `null` total and a
+  count of the calls that lacked it — never 0. See `observability/README.md`.
 
 `/health` is wrapped too, purely to prove the mechanism end-to-end — a
 health check isn't a model call.
 
-Not the same thing as `observability/tracking.py`'s `record_call()`
-(a manual ledger for benchmarking, fed pre-computed numbers). New call
-sites should prefer `instrumented_call`.
+Not the same thing as `observability/tracking.py`'s `record_call()`,
+the one ledger every model call goes through (#479): it records what a
+model call has and an HTTP handler does not — kind (OCR/ASR/LLM), CPU
+seconds for local models, token usage and a dollar cost for LLM calls —
+one that can be *unpriced* rather than a misleading 0.0.

@@ -24,10 +24,15 @@ import com.rnd.bridge.intake.controller.UnstructuredIntakeController;
 import com.rnd.bridge.intake.model.SourceRecord;
 import com.rnd.bridge.intake.parser.calendar.CalendarReadResult;
 import com.rnd.bridge.intake.parser.calendar.CalendarSourceReader;
+import com.rnd.bridge.intake.parser.email.EmailReadResult;
+import com.rnd.bridge.intake.parser.email.EmailSourceReader;
 import com.rnd.bridge.intake.service.IntakeLandingService;
 import com.rnd.bridge.raw.model.ChangeType;
+import com.rnd.bridge.raw.model.Modality;
 import com.rnd.bridge.raw.model.RawObjectEvent;
+import com.rnd.bridge.raw.model.RawObjectRef;
 import com.rnd.bridge.raw.model.RawSourceType;
+import com.rnd.bridge.raw.model.Role;
 import com.rnd.bridge.raw.model.ScopeDecision;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
@@ -61,9 +66,10 @@ class UnstructuredIntakeControllerTest {
             "{}".getBytes(StandardCharsets.UTF_8), null, null, 0, 0, List.of(), 0);
 
     private static final RawObjectEvent EVENT = RawObjectEvent.create(
-            "EMAIL/kamatech/2026-08-18/x.json", RawSourceType.EMAIL, "kamatech", Instant.parse("2026-08-18T09:15:00Z"),
-            ScopeDecision.INCLUDED, "sha256:" + "0".repeat(64), null, List.of("hadas@kamatech.org"),
-            "application/json", 2L, Instant.parse("2026-08-18T09:15:00Z"), "corr-1", 0, 0, 0, ChangeType.UPSERT);
+            RawSourceType.EMAIL, "kamatech", Instant.parse("2026-08-18T09:15:00Z"), ScopeDecision.INCLUDED,
+            List.of("hadas@kamatech.org"), Instant.parse("2026-08-18T09:15:00Z"), "corr-1", 0, ChangeType.UPSERT,
+            List.of(new RawObjectRef(Role.BODY, "EMAIL/kamatech/2026-08-18/x.json", "sha256:" + "0".repeat(64),
+                    "application/json", 2L, Modality.TEXT)));
 
     // A chat transcript record (attachmentIndex 0, non-null groupId) - the shape that actually
     // reaches UnstructuredIntakeLane.afterPublish's GroupStateStore confirmation branch.
@@ -73,9 +79,10 @@ class UnstructuredIntakeControllerTest {
             "ruth: hi".getBytes(StandardCharsets.UTF_8), null, null, 0, 0, List.of("m1"), 0, "g1");
 
     private static final RawObjectEvent SLACK_EVENT = RawObjectEvent.create(
-            "SLACK/kamatech/2026-08-18/x.json", RawSourceType.SLACK, "kamatech", Instant.parse("2026-08-18T09:00:00Z"),
-            ScopeDecision.INCLUDED, "sha256:" + "1".repeat(64), null, List.of("ruth"), "text/plain", 8L,
-            Instant.parse("2026-08-18T09:00:00Z"), "corr-2", 0, 0, 0, ChangeType.UPSERT);
+            RawSourceType.SLACK, "kamatech", Instant.parse("2026-08-18T09:00:00Z"), ScopeDecision.INCLUDED,
+            List.of("ruth"), Instant.parse("2026-08-18T09:00:00Z"), "corr-2", 0, ChangeType.UPSERT,
+            List.of(new RawObjectRef(Role.TRANSCRIPT, "SLACK/kamatech/2026-08-18/x.json", "sha256:" + "1".repeat(64),
+                    "text/plain", 8L, Modality.TEXT)));
 
     private static final SourceRecord CALENDAR_RECORD = new SourceRecord(
             RawSourceType.CALENDAR, "kamatech", "event-1", "corr-3", Instant.parse("2026-08-18T09:15:00Z"),
@@ -83,15 +90,15 @@ class UnstructuredIntakeControllerTest {
             "{}".getBytes(StandardCharsets.UTF_8), null, null, 0, 0, List.of(), 0);
 
     private static final RawObjectEvent CALENDAR_EVENT = RawObjectEvent.create(
-            "CALENDAR/kamatech/2026-08-18/x.json", RawSourceType.CALENDAR, "kamatech",
-            Instant.parse("2026-08-18T09:15:00Z"), ScopeDecision.INCLUDED, "sha256:" + "2".repeat(64), null,
-            List.of("malki@kamatech.org"), "application/json", 2L, Instant.parse("2026-08-18T09:15:00Z"), "corr-3",
-            0, 0, 0, ChangeType.UPSERT);
+            RawSourceType.CALENDAR, "kamatech", Instant.parse("2026-08-18T09:15:00Z"), ScopeDecision.INCLUDED,
+            List.of("malki@kamatech.org"), Instant.parse("2026-08-18T09:15:00Z"), "corr-3", 0, ChangeType.UPSERT,
+            List.of(new RawObjectRef(Role.BODY, "CALENDAR/kamatech/2026-08-18/x.json", "sha256:" + "2".repeat(64),
+                    "application/json", 2L, Modality.TEXT)));
 
     @SuppressWarnings("unchecked")
-    private final SourceReader<SourceRecord> sourceReader = mock(SourceReader.class);
+    private final SourceReader<List<SourceRecord>> sourceReader = mock(SourceReader.class);
     @SuppressWarnings("unchecked")
-    private final PayloadMapper<SourceRecord, RawObjectEvent> payloadMapper = mock(PayloadMapper.class);
+    private final PayloadMapper<List<SourceRecord>, RawObjectEvent> payloadMapper = mock(PayloadMapper.class);
     @SuppressWarnings("unchecked")
     private final PayloadValidator<RawObjectEvent> payloadValidator = mock(PayloadValidator.class);
     @SuppressWarnings("unchecked")
@@ -100,6 +107,7 @@ class UnstructuredIntakeControllerTest {
     private final GroupStateStore groupStateStore = mock(GroupStateStore.class);
     private final CursorStore cursorStore = mock(CursorStore.class);
     private final CalendarSourceReader calendarSourceReader = mock(CalendarSourceReader.class);
+    private final EmailSourceReader emailSourceReader = mock(EmailSourceReader.class);
     private final CalendarEventStateStore calendarEventStateStore = mock(CalendarEventStateStore.class);
     private final KeyedLock calendarCursorLock = new KeyedLock();
 
@@ -111,14 +119,15 @@ class UnstructuredIntakeControllerTest {
 
     private UnstructuredIntakeController controllerFor(RawSourceType sourceType) {
         return new UnstructuredIntakeController(
-                List.of(laneFor(sourceType)), cursorStore, calendarSourceReader, calendarCursorLock);
+                List.of(laneFor(sourceType)), cursorStore, calendarSourceReader, emailSourceReader,
+                calendarCursorLock);
     }
 
     @Test
     void slackCursorIsNotAdvancedWhenTheRunHasRejectedRecords() {
         UnstructuredIntakeController controller = controllerFor(RawSourceType.SLACK);
         when(cursorStore.load(RawSourceType.SLACK, "kamatech")).thenReturn(ReadCursor.full());
-        when(sourceReader.read(any())).thenReturn(Stream.of(RECORD));
+        when(sourceReader.read(any())).thenReturn(Stream.of(List.of(RECORD)));
         when(payloadMapper.map(any(), any())).thenReturn(EVENT);
         doThrow(new LaneException("kafka down")).when(payloadPublisher).publish(any());
 
@@ -132,7 +141,7 @@ class UnstructuredIntakeControllerTest {
     void slackCursorAdvancesWhenTheRunFullySucceeds() {
         UnstructuredIntakeController controller = controllerFor(RawSourceType.SLACK);
         when(cursorStore.load(RawSourceType.SLACK, "kamatech")).thenReturn(ReadCursor.full());
-        when(sourceReader.read(any())).thenReturn(Stream.of(RECORD));
+        when(sourceReader.read(any())).thenReturn(Stream.of(List.of(RECORD)));
         when(payloadMapper.map(any(), any())).thenReturn(EVENT);
 
         IntakeResult result = controller.run(RawSourceType.SLACK);
@@ -152,7 +161,7 @@ class UnstructuredIntakeControllerTest {
     void slackCursorIsNotAdvancedWhenChatGroupConfirmationFailsAfterKafkaPublishSucceeds() {
         UnstructuredIntakeController controller = controllerFor(RawSourceType.SLACK);
         when(cursorStore.load(RawSourceType.SLACK, "kamatech")).thenReturn(ReadCursor.full());
-        when(sourceReader.read(any())).thenReturn(Stream.of(SLACK_RECORD));
+        when(sourceReader.read(any())).thenReturn(Stream.of(List.of(SLACK_RECORD)));
         when(payloadMapper.map(any(), any())).thenReturn(SLACK_EVENT);
         doThrow(new IllegalStateException("MinIO unreachable"))
                 .when(groupStateStore).confirmPublished(RawSourceType.SLACK, "kamatech", "g1", 0);
@@ -164,18 +173,77 @@ class UnstructuredIntakeControllerTest {
         verify(cursorStore, never()).save(any(), any(), any());
     }
 
+    // DRIVE stands in for "any source with no dedicated controller path" - EMAIL now has its own
+    // historyId-cursor path (see the emailCursor... tests below), same as CALENDAR already did.
     @Test
     void nonSlackCursorAdvancesEvenWhenTheRunHasRejectedRecords() {
+        UnstructuredIntakeController controller = controllerFor(RawSourceType.DRIVE);
+        when(cursorStore.load(RawSourceType.DRIVE, "kamatech")).thenReturn(ReadCursor.full());
+        when(sourceReader.read(any())).thenReturn(Stream.of(List.of(RECORD)));
+        when(payloadMapper.map(any(), any())).thenReturn(EVENT);
+        doThrow(new LaneException("kafka down")).when(payloadPublisher).publish(any());
+
+        IntakeResult result = controller.run(RawSourceType.DRIVE);
+
+        assertThat(result.rejected()).isEqualTo(1);
+        verify(cursorStore).save(eq(RawSourceType.DRIVE), eq("kamatech"), any());
+    }
+
+    /**
+     * Full/initial sync: no stored historyId, the read completes fully, and the reader reports
+     * the nextHistoryId it obtained - the controller must persist exactly that as the new cursor
+     * once the whole run has succeeded. Mirrors calendarCursorPersistsTheNewSyncTokenWhenTheRunFullySucceeds.
+     */
+    @Test
+    void emailCursorPersistsTheNewHistoryIdWhenTheRunFullySucceeds() {
         UnstructuredIntakeController controller = controllerFor(RawSourceType.EMAIL);
         when(cursorStore.load(RawSourceType.EMAIL, "kamatech")).thenReturn(ReadCursor.full());
-        when(sourceReader.read(any())).thenReturn(Stream.of(RECORD));
+        when(emailSourceReader.read(any())).thenReturn(new EmailReadResult(List.of(RECORD), "history-2"));
+        when(payloadMapper.map(any(), any())).thenReturn(EVENT);
+
+        IntakeResult result = controller.run(RawSourceType.EMAIL);
+
+        assertThat(result.rejected()).isEqualTo(0);
+        ArgumentCaptor<ReadCursor> captor = ArgumentCaptor.forClass(ReadCursor.class);
+        verify(cursorStore).save(eq(RawSourceType.EMAIL), eq("kamatech"), captor.capture());
+        assertThat(captor.getValue().historyId()).isEqualTo("history-2");
+    }
+
+    /**
+     * Safe cursor advancement: if any record from the batch Gmail returned under the current
+     * historyId failed to publish, the controller must NOT persist the new historyId the reader
+     * obtained - doing so would permanently lose that record, since Gmail's history API would
+     * never resend it under a later incremental sync. Mirrors calendarCursorIsNotAdvancedWhenTheRunHasRejectedRecords.
+     */
+    @Test
+    void emailCursorIsNotAdvancedWhenTheRunHasRejectedRecords() {
+        UnstructuredIntakeController controller = controllerFor(RawSourceType.EMAIL);
+        when(cursorStore.load(RawSourceType.EMAIL, "kamatech")).thenReturn(new ReadCursor(null, null, "history-1"));
+        when(emailSourceReader.read(any())).thenReturn(new EmailReadResult(List.of(RECORD), "history-2"));
         when(payloadMapper.map(any(), any())).thenReturn(EVENT);
         doThrow(new LaneException("kafka down")).when(payloadPublisher).publish(any());
 
         IntakeResult result = controller.run(RawSourceType.EMAIL);
 
         assertThat(result.rejected()).isEqualTo(1);
-        verify(cursorStore).save(eq(RawSourceType.EMAIL), eq("kamatech"), any());
+        verify(cursorStore, never()).save(any(), any(), any());
+    }
+
+    /**
+     * A read that produced no new cursor to advance to (e.g. the reader never obtained one) must
+     * not overwrite whatever cursor is already stored.
+     */
+    @Test
+    void emailCursorIsUntouchedWhenTheReaderReportsNoNewHistoryId() {
+        UnstructuredIntakeController controller = controllerFor(RawSourceType.EMAIL);
+        when(cursorStore.load(RawSourceType.EMAIL, "kamatech")).thenReturn(ReadCursor.full());
+        when(emailSourceReader.read(any())).thenReturn(new EmailReadResult(List.of(RECORD), null));
+        when(payloadMapper.map(any(), any())).thenReturn(EVENT);
+
+        IntakeResult result = controller.run(RawSourceType.EMAIL);
+
+        assertThat(result.rejected()).isEqualTo(0);
+        verify(cursorStore, never()).save(any(), any(), any());
     }
 
     /**

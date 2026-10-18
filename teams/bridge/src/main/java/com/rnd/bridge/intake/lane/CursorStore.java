@@ -7,6 +7,7 @@ import com.rnd.bridge.storage.ObjectStorageClient;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.util.Map;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Component;
 
 /**
@@ -21,7 +22,8 @@ public class CursorStore {
     private final ObjectStorageClient storageClient;
     private final ObjectMapper objectMapper;
 
-    public CursorStore(ObjectStorageClient storageClient, ObjectMapper objectMapper) {
+    public CursorStore(
+            @Qualifier("postgresObjectStorageClient") ObjectStorageClient storageClient, ObjectMapper objectMapper) {
         this.storageClient = storageClient;
         this.objectMapper = objectMapper;
     }

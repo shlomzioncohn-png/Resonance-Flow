@@ -1,5 +1,6 @@
 package com.rnd.chain.service;
 
+import com.rnd.chain.testsupport.TaskStateHistoryFixtures;
 import com.rnd.chain.dto.Task;
 import com.rnd.chain.dto.TaskDependency;
 import com.rnd.chain.dto.TaskStatus;
@@ -43,7 +44,7 @@ class DependencyEdgeServiceTest {
         InMemoryGraphLock lock = new InMemoryGraphLock();
         TaskCounterUpdater counterUpdater = new TaskCounterUpdater(taskRepository, dependencyRepository,
                 new PriorityScoreService(), new SchedulingPublishListener(taskRepository, schedulingUpdateService));
-        service = new DependencyEdgeService(dependencyRepository, lock, counterUpdater);
+        service = new DependencyEdgeService(dependencyRepository, lock, counterUpdater, TaskStateHistoryFixtures.newRecorder());
     }
 
     @Test
@@ -799,7 +800,7 @@ class DependencyEdgeServiceTest {
         SchedulingUpdateService scheduling = new SchedulingUpdateService(event -> {});
         TaskCounterUpdater counterUpdater = new TaskCounterUpdater(taskRepo, dependencyRepo,
                 new PriorityScoreService(), new SchedulingPublishListener(taskRepo, scheduling));
-        return new Fixture(taskRepo, dependencyRepo, constraintRepo, new DependencyEdgeService(dependencyRepo, new InMemoryGraphLock(), counterUpdater));
+        return new Fixture(taskRepo, dependencyRepo, constraintRepo, new DependencyEdgeService(dependencyRepo, new InMemoryGraphLock(), counterUpdater, TaskStateHistoryFixtures.newRecorder()));
     }
 
     private static Task buildTask(UUID id, int blockingCount, int openConstraintCount, boolean isReady) {

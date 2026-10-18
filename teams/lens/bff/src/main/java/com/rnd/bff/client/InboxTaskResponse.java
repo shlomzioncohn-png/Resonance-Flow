@@ -8,7 +8,6 @@ import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
-import java.time.Instant;
 import java.util.Map;
 
 /**
@@ -16,6 +15,10 @@ import java.util.Map;
  * Inbox's TaskResponseDto (teams/inbox, branch inbox-team). Only used inside
  * InboxClient, which translates it to TaskDTO (the BFF's frontend-facing
  * contract) — same split as InboxTaskRecord for the mock.
+ *
+ * Dates arrive already formatted for display, in Israel time ("12/10/2026"
+ * for deadline, "12/10/2026 09:00" for the rest - inbox-team PR #591), so
+ * they're plain strings here and passed on as-is.
  *
  * Inbox sends snake_case field names (project_id, owner_id, ...), enums as
  * UPPERCASE names and ids as UUID strings; enums and ids are kept as plain
@@ -33,6 +36,8 @@ public class InboxTaskResponse {
     private String id;
     private TenantSummary tenant;
     private String projectId;
+    /** inbox-team PR #591 */
+    private String projectName;
     private String title;
     private String description;
     private String sourceType;
@@ -41,21 +46,23 @@ public class InboxTaskResponse {
     private String roleContext;
     private Integer urgency;
     private Integer effortEstimateMinutes;
-    private Instant deadline;
+    private String deadline;
     private String status;
     private Boolean available;
     private Double priorityScore;
-    private Instant snoozedUntil;
+    private String snoozedUntil;
     private String extractionProvenance;
     private Double confidence;
     private String ownerId;
+    /** inbox-team PR #591 */
+    private String ownerDisplayName;
     private Double effortEstimateConfidence;
     private String suggestedOwnerUserId;
     private Double suggestedOwnerConfidence;
     private String createdById;
-    private Instant createdAt;
-    private Instant updatedAt;
-    private Instant completedAt;
+    private String createdAt;
+    private String updatedAt;
+    private String completedAt;
     private Map<String, Object> metadata;
 
     /** Inbox nests the tenant as { id, name, slug } instead of a bare tenantId. */
