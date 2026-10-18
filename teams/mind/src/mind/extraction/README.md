@@ -17,6 +17,7 @@ a task record and issues a real `task_id`.
 |---|---|
 | `title`, `description`, `source_ref`, `has_dependencies` | the LLM, validated against `ExtractedFields` |
 | `source_type` | carried forward from the intake event — never asked of the LLM |
+| `source_ref` **sent to Inbox** | Bridge's, never the LLM's — see below and `task_creation/README.md` (#353) |
 | `confidence` | computed locally by `confidence.py` — never asked of the LLM |
 
 English only: the pipeline assumes English content (confirmed by Kayvan), and
@@ -318,10 +319,13 @@ written by whoever sent it, so a sender can put a link in their own message and
 tell the model to use it; the value genuinely is in the content and passes
 every check here. `test_a_link_the_content_itself_carries_is_still_kept` pins
 that limit so nobody mistakes the check for more than it is. The real answer is
-for `source_ref` to arrive from Bridge as event metadata. #31 added it as
-`RawObjectEvent.source_ref`, but extraction does not receive the event yet.
-Until the consumer passes it through, this field says what the content
-claimed, not what is true.
+for `source_ref` to arrive from Bridge as event metadata — #31 added it as
+`RawObjectEvent.source_ref`. Since #353 the `source_ref` Inbox receives is
+Bridge's (or `bridge:<item id>`), passed to assembly by whoever holds the
+event — the #349 consumer, once it exists — never this extracted value: a
+pointer the content mentions is not the item's own id, and Inbox's UI builds a
+link from it. The extracted field still feeds the confidence penalties above;
+whether to stop asking the model for it at all is open.
 
 ## Classification at extraction time (#351)
 
