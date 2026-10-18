@@ -160,6 +160,32 @@ public class GlobalExceptionHandler {
                 HttpStatus.NOT_FOUND);
     }
 
+    /**
+     * A real 4xx response Inbox itself returned (404/409/400/403) for the
+     * admin Users screen — see InboxResponseException's javadoc. Status and
+     * message are passed through as-is rather than flattened to 503.
+     */
+    @ExceptionHandler(InboxResponseException.class)
+    public ResponseEntity<ErrorResponse> handleInboxResponseException(
+            InboxResponseException ex, WebRequest request) {
+        String path = getRequestPath(request);
+        logger.warn("Inbox rejected the request: {} - Path: {}", ex.getStatus(), path);
+
+        return new ResponseEntity<>(
+                new ErrorResponse(ex.getStatus().name(), ex.getMessage(), path, null), ex.getStatus());
+    }
+
+    /** A manager tried to change their own status (409) — see SelfStatusChangeException's javadoc. */
+    @ExceptionHandler(SelfStatusChangeException.class)
+    public ResponseEntity<ErrorResponse> handleSelfStatusChangeException(
+            SelfStatusChangeException ex, WebRequest request) {
+        String path = getRequestPath(request);
+        logger.warn("Self status change blocked - Path: {}", path);
+
+        return new ResponseEntity<>(
+                new ErrorResponse("CONFLICT", ex.getMessage(), path, null), HttpStatus.CONFLICT);
+    }
+
     /** Catch-all for unexpected errors. */
     @ExceptionHandler(Exception.class)
     public ResponseEntity<ErrorResponse> handleGeneralException(Exception ex, WebRequest request) {

@@ -1,101 +1,124 @@
-import type { ReactNode } from 'react';
-import Link from 'next/link';
+'use client';
+
 import Card from '@mui/material/Card';
 import Table from '@mui/material/Table';
 import TableBody from '@mui/material/TableBody';
 import TableCell from '@mui/material/TableCell';
 import TableContainer from '@mui/material/TableContainer';
 import TableHead from '@mui/material/TableHead';
+import TablePagination from '@mui/material/TablePagination';
 import TableRow from '@mui/material/TableRow';
+import TableSortLabel from '@mui/material/TableSortLabel';
+import EmptyState from '@/components/feedback/EmptyState';
+import ErrorState from '@/components/feedback/ErrorState';
+import LoadingState from '@/components/feedback/LoadingState';
+import type { Column, DataTableProps } from './types';
 
-export interface DataTableColumn<Row> {
-  /** Unique key for this column — used as the React key for header/body cells. */
-  key: string;
-  header: string;
-  render: (row: Row) => ReactNode;
-  align?: 'left' | 'center' | 'right';
-  width?: string | number;
-}
-
-export interface DataTableProps<Row> {
-  columns: DataTableColumn<Row>[];
-  rows: Row[];
-  getRowId: (row: Row) => string;
-  /**
-   * When provided, each row navigates to this URL on click/Enter. Implemented
-   * as a real anchor stretched over the row (not a `<tr onClick>`), so rows
-   * stay keyboard- and screen-reader-accessible.
-   */
-  getRowHref?: (row: Row) => string;
-  /** Rendered instead of the table when `rows` is empty. */
-  emptyState?: ReactNode;
-}
+const PAGE_SIZE_OPTIONS = [10, 20, 50, 100];
 
 /**
- * Generic, column-driven data table — the one place row/column rendering
- * lives, so any screen with a list-of-records-in-a-table shape (My Tasks,
- * blocked work, workload, ...) configures columns instead of hand-rolling
- * MUI Table markup. Domain formatting (status chips, date formats, etc.)
- * belongs in each caller's `render` functions, not here.
+ * Generic, column-driven data table — the one place table structure, sort and
+ * pagination controls, loading/empty/error states and table accessibility
+ * live. It knows how to display rows, never what they are: domain content
+ * (status chips, date formats, row actions) belongs in each caller's column
+ * `render` functions, not in new props here.
+ *
+ * Sorting and pagination are controlled — the table only renders the controls
+ * and reports what the user asked for; it never sorts, slices or fetches.
  */
-export default function DataTable<Row>({
+export default function DataTable<T>({
   columns,
   rows,
   getRowId,
-  getRowHref,
-  emptyState,
-}: DataTableProps<Row>) {
-  if (rows.length === 0 && emptyState) {
-    return <>{emptyState}</>;
-  }
+  ariaLabel,
+  loading = false,
+  error,
+  onRetry,
+  emptyTitle,
+  emptyDescription,
+  sort,
+  onSortChange,
+  pagination,
+}: DataTableProps<T>) {
+  if (loading) return <LoadingState />;
+  if (error) return <ErrorState description={error} onRetry={onRetry} />;
+  if (rows.length === 0) return <EmptyState title={emptyTitle} description={emptyDescription} />;
+
+  const sortDirectionOf = (column: Column<T>) =>
+    column.sortable && sort?.columnId === column.id ? sort.direction : false;
+
+  const requestSort = (column: Column<T>) => {
+    const isActive = sort?.columnId === column.id;
+    onSortChange?.({
+      columnId: column.id,
+      direction: isActive && sort.direction === 'asc' ? 'desc' : 'asc',
+    });
+  };
+
+  // The current size is always offered, even when a page uses a non-standard one.
+  const pageSizeOptions =
+    pagination && !PAGE_SIZE_OPTIONS.includes(pagination.pageSize)
+      ? [...PAGE_SIZE_OPTIONS, pagination.pageSize].sort((a, b) => a - b)
+      : PAGE_SIZE_OPTIONS;
 
   return (
     <Card>
       <TableContainer sx={{ overflowX: 'auto' }}>
-        <Table>
+        <Table aria-label={ariaLabel}>
           <TableHead>
             <TableRow>
-              {columns.map((column) => (
-                <TableCell key={column.key} align={column.align} sx={{ width: column.width }}>
-                  {column.header}
-                </TableCell>
-              ))}
+              {columns.map((column) => {
+                const direction = sortDirectionOf(column);
+                return (
+                  <TableCell
+                    key={column.id}
+                    scope="col"
+                    align={column.align}
+                    sortDirection={direction}
+                    sx={{ width: column.width }}
+                  >
+                    {column.sortable ? (
+                      <TableSortLabel
+                        active={direction !== false}
+                        direction={direction || 'asc'}
+                        onClick={() => requestSort(column)}
+                      >
+                        {column.header}
+                      </TableSortLabel>
+                    ) : (
+                      column.header
+                    )}
+                  </TableCell>
+                );
+              })}
             </TableRow>
           </TableHead>
           <TableBody>
-            {rows.map((row) => {
-              const rowId = getRowId(row);
-              const href = getRowHref?.(row);
-              const titleCellId = `${rowId}-primary-cell`;
-
-              return (
-                <TableRow
-                  key={rowId}
-                  hover={!!href}
-                  sx={href ? { position: 'relative' } : undefined}
-                >
-                  {columns.map((column, index) => (
-                    <TableCell
-                      key={column.key}
-                      align={column.align}
-                      id={index === 0 ? titleCellId : undefined}
-                    >
-                      {href && index === 0 && (
-                        <Link
-                          href={href}
-                          aria-labelledby={titleCellId}
-                          style={{ position: 'absolute', inset: 0 }}
-                        />
-                      )}
-                      {column.render(row)}
-                    </TableCell>
-                  ))}
-                </TableRow>
-              );
-            })}
+            {rows.map((row) => (
+              <TableRow key={getRowId(row)} hover>
+                {columns.map((column) => (
+                  <TableCell key={column.id} align={column.align}>
+                    {column.render(row)}
+                  </TableCell>
+                ))}
+              </TableRow>
+            ))}
           </TableBody>
         </Table>
       </TableContainer>
+      {pagination && (
+        <TablePagination
+          component="div"
+          count={pagination.totalCount}
+          page={pagination.page}
+          rowsPerPage={pagination.pageSize}
+          onPageChange={(_, page) => pagination.onPageChange(page)}
+          onRowsPerPageChange={(event) =>
+            pagination.onPageSizeChange?.(parseInt(event.target.value, 10))
+          }
+          rowsPerPageOptions={pagination.onPageSizeChange ? pageSizeOptions : []}
+        />
+      )}
     </Card>
   );
 }

@@ -15,5 +15,8 @@ public enum RawSourceType {
     DRIVE,
     CALENDAR,
     MEETING,
-    SCANNED_DOC
+    SCANNED_DOC,
+    // Contract value only - no reader/mapper produces this yet; see Mind's agreed
+    // RawObjectEvent contract. Do not wire a mapping to it without a real source.
+    DOC
 }

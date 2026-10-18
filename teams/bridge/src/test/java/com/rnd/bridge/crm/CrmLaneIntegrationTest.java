@@ -44,7 +44,7 @@ class CrmLaneIntegrationTest {
     private static CrmLane newLane(DealRepository repository) {
         return new CrmLane(
                 new CrmSourceReader(repository),
-                new DealToTaskMapper(VALID_TENANT_ID, new EnrichmentProperties(), new NoOpTaskEnricher()),
+                new DealToTaskMapper(VALID_TENANT_ID, new EnrichmentProperties(), new NoOpTaskEnricher(), 0),
                 new CrmTaskValidator(new TaskValidator()),
                 new LoggingPayloadPublisher<Task>());
     }
@@ -80,7 +80,7 @@ class CrmLaneIntegrationTest {
         CrmLane lane = new CrmLane(
                 new CrmSourceReader(repository),
                 new DealToTaskMapper(
-                        CrmTaskValidator.LOCAL_PLACEHOLDER_TENANT_ID, new EnrichmentProperties(), new NoOpTaskEnricher()),
+                        CrmTaskValidator.LOCAL_PLACEHOLDER_TENANT_ID, new EnrichmentProperties(), new NoOpTaskEnricher(), 0),
                 new CrmTaskValidator(new TaskValidator()),
                 new LoggingPayloadPublisher<Task>());
 
@@ -108,7 +108,7 @@ class CrmLaneIntegrationTest {
         // D-11009: a full five-event PROSPECT -> ... -> CLOSED_WON progression (see the dataset's
         // own "notes"). Only its latest state should ever be mapped/published.
         DealToTaskMapper mapper =
-                new DealToTaskMapper(VALID_TENANT_ID, new EnrichmentProperties(), new NoOpTaskEnricher());
+                new DealToTaskMapper(VALID_TENANT_ID, new EnrichmentProperties(), new NoOpTaskEnricher(), 0);
         DealRepository repository = repository();
         Instant asOf = repository.snapshot().asOf();
 
@@ -127,7 +127,7 @@ class CrmLaneIntegrationTest {
         // checking what Inbox's insert-or-return-existing ingestion actually keeps: a record with
         // the wrong urgency, computed from the wrong stage and the wrong close date.
         DealToTaskMapper mapper =
-                new DealToTaskMapper(VALID_TENANT_ID, new EnrichmentProperties(), new NoOpTaskEnricher());
+                new DealToTaskMapper(VALID_TENANT_ID, new EnrichmentProperties(), new NoOpTaskEnricher(), 0);
         DealRepository repository = repository();
         Instant asOf = repository.snapshot().asOf(); // 2026-08-24T09:00:00Z
 

@@ -2,6 +2,7 @@ package com.rnd.bridge.intake.service;
 
 import com.rnd.bridge.intake.model.ChatMessage;
 import com.rnd.bridge.intake.model.GroupState;
+import com.rnd.bridge.intake.model.LandedAttachment;
 import com.rnd.bridge.intake.model.MessageSnapshot;
 import com.rnd.bridge.intake.model.SourceRecord;
 import com.rnd.bridge.raw.model.ChangeType;
@@ -30,6 +31,11 @@ import org.springframework.stereotype.Service;
  */
 @Service
 public class ChatSourceRecordMapper {
+
+    /** Filler for a carried-forward attachment record's rawContent (see SourceRecord.
+     * precomputedRef's javadoc) - the object already exists in MinIO under precomputedRef's own
+     * objectKey, so this value is never read by anything that lands or hashes content. */
+    private static final byte[] EMPTY_CONTENT = new byte[0];
 
     public List<SourceRecord> toSourceRecords(List<ChatMessage> sessionMessages) {
         return toSourceRecords(sessionMessages, UUID.randomUUID().toString());
@@ -98,6 +104,7 @@ public class ChatSourceRecordMapper {
                         ownerMessageId,
                         0,
                         ChangeType.UPSERT,
+                        null,
                         null));
             }
         }
@@ -116,6 +123,11 @@ public class ChatSourceRecordMapper {
      * still carried onto each built SourceRecord's own groupId field, though - Bridge-internal
      * bookkeeping only (see SourceRecord's javadoc), letting UnstructuredIntakeLane.afterPublish
      * confirm the exact group these records came from without a reverse messageId-index lookup.
+     * A message snapshot NOT in newMessagesThisBatch can still carry its own landedAttachments
+     * (today: only a migrated thread root - see ChatGroupStateReconciler.newThreadGroupState) -
+     * those are emitted here too, as precomputedRef attachment records (see SourceRecord's
+     * javadoc), so a root's already-landed attachment is never silently dropped from the thread's
+     * own logical object just because the root itself was never "incoming" for this group.
      */
     public List<SourceRecord> toSourceRecords(GroupState mergedGroup, List<ChatMessage> newMessagesThisBatch) {
         List<MessageSnapshot> allMessages = mergedGroup.messages();
@@ -158,6 +170,36 @@ public class ChatSourceRecordMapper {
                 mergedGroup.groupId()));
 
         int attachmentIndex = 0;
+        List<String> incomingMessageIds = newMessagesThisBatch.stream()
+                .map(ChatMessage::id)
+                .filter(id -> id != null)
+                .toList();
+        for (MessageSnapshot snapshot : allMessages) {
+            if (incomingMessageIds.contains(snapshot.messageId())) {
+                continue;
+            }
+            for (LandedAttachment landed : snapshot.landedAttachments()) {
+                attachmentIndex++;
+                records.add(new SourceRecord(
+                        mergedGroup.sourceType(),
+                        mergedGroup.tenantId(),
+                        naturalId + "|attachment-" + attachmentIndex,
+                        mergedGroup.correlationId(),
+                        snapshot.timestamp(),
+                        snapshot.sender(),
+                        List.of(snapshot.sender()),
+                        null,
+                        null,
+                        EMPTY_CONTENT,
+                        landed.fileId(),
+                        attachmentIndex,
+                        attachmentCount,
+                        List.of(snapshot.messageId()),
+                        mergedGroup.revision(),
+                        mergedGroup.groupId(),
+                        landed.ref()));
+            }
+        }
         for (ChatMessage message : newMessagesThisBatch) {
             for (ChatMessage.Attachment attachment : message.attachments()) {
                 attachmentIndex++;

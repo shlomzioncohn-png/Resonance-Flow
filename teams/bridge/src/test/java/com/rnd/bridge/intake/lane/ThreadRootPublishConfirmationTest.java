@@ -20,6 +20,7 @@ import com.rnd.bridge.intake.service.ChatGroupStateReconciler;
 import com.rnd.bridge.intake.service.ChatSessionGrouper;
 import com.rnd.bridge.intake.service.ChatSourceRecordMapper;
 import com.rnd.bridge.intake.service.IntakeLandingService;
+import com.rnd.bridge.intake.service.SourceRecordRefMapper;
 import com.rnd.bridge.raw.model.RawObjectEvent;
 import com.rnd.bridge.raw.model.RawSourceType;
 import com.rnd.bridge.scoping.AllowlistScopingFilter;
@@ -65,11 +66,11 @@ class ThreadRootPublishConfirmationTest {
     private final ChatGroupStateReconciler reconciler = new ChatGroupStateReconciler(
             properties, new ChatSessionGrouper(properties), new ChatSourceRecordMapper(), groupStateStore);
     private final UnstructuredPayloadMapper mapper = new UnstructuredPayloadMapper(
-            new AllowlistScopingFilter(), new ObjectKeyBuilder(),
-            new IntakeLandingService(mock(ObjectStorageClient.class)));
+            new AllowlistScopingFilter(),
+            new SourceRecordRefMapper(new ObjectKeyBuilder(), new IntakeLandingService(mock(ObjectStorageClient.class))));
 
     @SuppressWarnings("unchecked")
-    private final SourceReader<SourceRecord> sourceReader = mock(SourceReader.class);
+    private final SourceReader<List<SourceRecord>> sourceReader = mock(SourceReader.class);
     @SuppressWarnings("unchecked")
     private final PayloadValidator<RawObjectEvent> payloadValidator = mock(PayloadValidator.class);
     @SuppressWarnings("unchecked")
@@ -88,7 +89,7 @@ class ThreadRootPublishConfirmationTest {
     }
 
     private IntakeResult publish(List<SourceRecord> records) {
-        when(sourceReader.read(any())).thenReturn(records.stream());
+        when(sourceReader.read(any())).thenReturn(Stream.of(records));
         return lane.run(ReadCursor.full(), Instant.now());
     }
 

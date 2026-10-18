@@ -21,6 +21,7 @@ import com.rnd.bridge.intake.service.ChatGroupStateReconciler;
 import com.rnd.bridge.intake.service.ChatSessionGrouper;
 import com.rnd.bridge.intake.service.ChatSourceRecordMapper;
 import com.rnd.bridge.intake.service.IntakeLandingService;
+import com.rnd.bridge.intake.service.SourceRecordRefMapper;
 import com.rnd.bridge.raw.model.ChangeType;
 import com.rnd.bridge.raw.model.RawObjectEvent;
 import com.rnd.bridge.raw.model.RawSourceType;
@@ -61,11 +62,11 @@ class ChatEditWireContractTest {
     private final ChatGroupStateReconciler reconciler = new ChatGroupStateReconciler(
             properties, new ChatSessionGrouper(properties), new ChatSourceRecordMapper(), groupStateStore);
     private final UnstructuredPayloadMapper mapper = new UnstructuredPayloadMapper(
-            new AllowlistScopingFilter(), new ObjectKeyBuilder(),
-            new IntakeLandingService(mock(ObjectStorageClient.class)));
+            new AllowlistScopingFilter(),
+            new SourceRecordRefMapper(new ObjectKeyBuilder(), new IntakeLandingService(mock(ObjectStorageClient.class))));
 
     @SuppressWarnings("unchecked")
-    private final SourceReader<SourceRecord> sourceReader = mock(SourceReader.class);
+    private final SourceReader<List<SourceRecord>> sourceReader = mock(SourceReader.class);
     @SuppressWarnings("unchecked")
     private final PayloadValidator<RawObjectEvent> payloadValidator = mock(PayloadValidator.class);
     @SuppressWarnings("unchecked")
@@ -90,7 +91,7 @@ class ChatEditWireContractTest {
         List<SourceRecord> run1Records =
                 reconciler.group(List.of(message("2026-08-18T09:00:00Z", "original message", "m1")));
         assertThat(run1Records).hasSize(1);
-        when(sourceReader.read(any())).thenReturn(Stream.of(run1Records.get(0)));
+        when(sourceReader.read(any())).thenReturn(Stream.of(run1Records));
 
         IntakeResult run1 = lane.run(ReadCursor.full(), Instant.parse("2026-08-18T10:00:00Z"));
 
@@ -124,7 +125,7 @@ class ChatEditWireContractTest {
         assertThat(edited.body()).contains("updated message");
         assertThat(edited.body()).doesNotContain("original message");
 
-        RawObjectEvent editedEvent = mapper.map(edited, Instant.parse("2026-08-18T10:05:00Z"));
+        RawObjectEvent editedEvent = mapper.map(List.of(edited), Instant.parse("2026-08-18T10:05:00Z"));
         assertThat(editedEvent.correlationId()).isEqualTo(firstEvent.correlationId());
         assertThat(editedEvent.revision()).isEqualTo(1);
         assertThat(editedEvent.changeType()).isEqualTo(ChangeType.UPSERT);
