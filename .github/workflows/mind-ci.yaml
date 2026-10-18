@@ -185,11 +185,19 @@ jobs:
       - name: Fetch chart dependencies
         run: helm dependency build "$CHART_DIR"
 
+      - uses: ./.github/actions/install-yq
+
+      - name: Build all-components-off overlay
+        run: |
+          echo "CHART_ALL_OFF=$RUNNER_TEMP/components-all-off.yaml" >> "$GITHUB_ENV"
+          yq '{"components": (.components | map_values({"enabled": false}))}' "$CHART_DIR/values.yaml" > "$RUNNER_TEMP/components-all-off.yaml"
+
       # Phase 1: infra only, MIND's image isn't built yet (two-phase, like service-ci.yaml).
       - name: Deploy chart with MIND disabled (infra only)
         run: |
           helm upgrade --install "$RELEASE" "$CHART_DIR" \
             -f "$CHART_DIR/values.yaml" \
+            -f "$CHART_ALL_OFF" \
             -f "$CHART_DIR/values/values-mind.yaml" \
             --set components.mind.enabled=false \
             --namespace "$NAMESPACE" --create-namespace \
@@ -209,6 +217,7 @@ jobs:
         run: |
           helm upgrade --install "$RELEASE" "$CHART_DIR" \
             -f "$CHART_DIR/values.yaml" \
+            -f "$CHART_ALL_OFF" \
             -f "$CHART_DIR/values/values-mind.yaml" \
             --set components.mind.image.tag="$KIND_IMAGE_TAG" \
             --namespace "$NAMESPACE"

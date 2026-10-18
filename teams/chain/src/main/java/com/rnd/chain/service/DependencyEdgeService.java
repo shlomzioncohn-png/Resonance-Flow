@@ -72,6 +72,31 @@ public class DependencyEdgeService {
             UUID dependsOnTaskId,
             Double confidence) {
 
+        return doAddDependency(taskId, dependsOnTaskId, confidence, false, null);
+    }
+
+    /**
+     * Same as {@link #addDependency(UUID, UUID, Double)}, but a missing task is first created as a
+     * PENDING placeholder in {@code tenantId}; an existing task in another tenant is rejected.
+     */
+    @Transactional
+    public TaskDependency addDependencyCreatingMissing(
+            UUID taskId,
+            UUID dependsOnTaskId,
+            Double confidence,
+            UUID tenantId) {
+
+        Objects.requireNonNull(tenantId, "tenantId must not be null");
+        return doAddDependency(taskId, dependsOnTaskId, confidence, true, tenantId);
+    }
+
+    private TaskDependency doAddDependency(
+            UUID taskId,
+            UUID dependsOnTaskId,
+            Double confidence,
+            boolean createMissing,
+            UUID tenantId) {
+
         Objects.requireNonNull(
                 taskId,
                 "taskId must not be null");
@@ -87,6 +112,10 @@ public class DependencyEdgeService {
         }
 
         return graphLock.runExclusive(() -> {
+
+            if (createMissing) {
+                taskCounterUpdater.insertPlaceholdersIfAbsent(taskId, dependsOnTaskId, tenantId);
+            }
 
             // Checked before the cycle check and the task lookups: a duplicate must not require
             // either task to still exist, and an existing edge cannot be introducing a new cycle.
@@ -109,6 +138,10 @@ public class DependencyEdgeService {
             Task task = taskCounterUpdater.requireTask(taskId);
             Task dependencyTask = taskCounterUpdater.requireTask(dependsOnTaskId);
             requireSameTenant(task, dependencyTask);
+            if (createMissing) {
+                requireTenant(task, tenantId);
+                requireTenant(dependencyTask, tenantId);
+            }
 
             Optional<TaskDependency> saved =
                     taskDependencyRepository.save(
@@ -168,6 +201,14 @@ public class DependencyEdgeService {
         requireSameTenant(task, dependsOnTask);
         boolean dependsOnAlreadyDone = dependsOnTask.getStatus() == TaskStatus.DONE;
         return new PendingEdge(dependsOnTaskId, confidence, true, dependsOnAlreadyDone);
+    }
+
+    private static void requireTenant(Task task, UUID tenantId) {
+        if (!tenantId.equals(task.getTenantId())) {
+            throw new CrossTenantDependencyException(
+                    "Dependency rejected: task " + task.getId() + " (tenant " + task.getTenantId()
+                            + ") is not in the event's tenant " + tenantId);
+        }
     }
 
     /**

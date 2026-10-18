@@ -131,7 +131,8 @@ src/main/resources/db/migration/  # Flyway migrations (V1 schema, V2 dependency_
                                   # V3 task_constraint - issue #378, V4 unresolved_dependencies
                                   # (Mind out-of-order target buffering), V5 removes owner_id,
                                   # V6 task.tenant_id + same-tenant trigger, V7 dependency_history
-                                  # REJECTED action - V6/V7 issue #580)
+                                  # REJECTED action - V6/V7 issue #580, V8 task.confidence/priority_score (#445),
+                                  # V9 task_state_history - issue #773)
 src/test/java/com/rnd/chain/
 ├── controller/ChainControllerTest.java
 ├── service/                # TaskTraversalServiceTest, TaskTraversalPerformanceTest,
@@ -195,14 +196,14 @@ own `@KafkaListener` handler, and the handlers share the claim/logging skeleton 
 | `task.created` | Inbox | `TaskCreatedEventHandler` | state-based (no event id) | 3 attempts, 2s apart |
 | `task.updated` | Inbox | `TaskUpdatedEventHandler` | state-based, last-write-wins on `updated_at` | 3 attempts, 2s apart |
 | `task.completed` | Inbox | `TaskCompletedEventHandler` | state-based; Kafka record timestamp compared to stored `updated_at`, never written | 3 attempts, 2s apart |
-| `task.dependencies.proposed` | Mind | `DependencyProposedEventHandler` | `event_id` claim in `ProcessedEventStore` | 5 attempts, 5s apart |
+| `task.dependencies.proposed` | Mind | `DependencyProposedEventHandler` | `event_id` claim in `ProcessedEventStore` | 3 attempts, 2s apart |
 
 **Retry and dead-lettering**: retries are non-blocking, via `@RetryableTopic`, so a message waiting
 to retry never stalls the rest of its partition. Every exception is retried except
 `NonRetryableEventException` (malformed messages, cycles), which goes straight to `<topic>.errors`.
 Retries are bounded (see the table), so an unexpected bug costs a few delayed attempts before it
 lands on `<topic>.errors`. A typical retried case is `ReferencedTaskNotFoundException`, raised when
-a referenced task has not arrived yet.
+a referenced task has not arrived yet (not on `task.dependencies.proposed`, which creates placeholders).
 
 **Offsets**: auto-commit is disabled and each listener uses `AckMode.RECORD`. An offset is committed
 only after its record is handled or handed to its retry/DLT topic, so a crash mid-processing
@@ -313,7 +314,7 @@ their respective Kafka handlers - i.e. routed straight to `.errors`), never sile
 
 ### Storage (Phase 2)
 
-`V4__add_task_priority_score.sql` adds `task.confidence`/`task.priority_score` (both nullable,
+`V8__add_task_priority_score.sql` adds `task.confidence`/`task.priority_score` (both nullable,
 CHECK'd to `[0,1]`/`[1,10]`) and `task_dependency.confidence` (nullable, CHECK'd to `[0,1]`,
 backfilled to `1.0` for every edge that predates this migration). `TaskEntity`/`TaskDependencyEntity`
 and their Postgres repositories carry the two new `Task` fields and the edge's `confidence` the
@@ -879,6 +880,20 @@ Same status as the dependency graph: Postgres-backed in production (`PostgresDep
 + `JpaTransactionRunner`), in-memory only as `MockDataConfig`'s fallback. The manual compensating
 action in `TaskDependencyService` was **not** removed - see "Dependency graph persistence" above.
 
+## Task state history (Issue #773, in progress)
+
+Append-only table `task_state_history` (V9) for status changes and blocking transitions. This
+step adds only the schema, `TaskStateHistoryEntry`/`TaskStateEventType` and
+`TaskStateHistoryRepository` (in-memory + Postgres). Nothing writes to it yet (writes: #774,
+read endpoint and full docs: #775).
+
+- `event_type`: `STATUS_CHANGED` (from/to status set), `BLOCKED` (blocking_count 0 to positive),
+  `UNBLOCKED` (blocking_count back to 0). Columns that don't apply to an event are NULL, enforced
+  by a CHECK.
+- No FK to `task`, so history survives task deletion. No backfill: history starts at deployment.
+- `findByTaskId(taskId, from, to, page, size)`: `[from, to)`, newest first (`created_at`, then
+  `sequence`); a null bound is open.
+
 ## Constraint persistence (Issue #378)
 
 `ConstraintRepository` / `PostgresConstraintRepository` (in `repository/`) give `Constraint` a
@@ -1002,15 +1017,11 @@ the same wrong `tenant_id`. When the stored `tenant_id` is still null (a legacy 
 this column), the event's value backfills it instead - that's the normal first-population case,
 not a mismatch.
 
-**Mind is not a tenant source, by design - there is no Mind-side tenant cross-check to build.**
-An earlier draft of this issue assumed Mind's `task.dependencies.proposed` event carries its own
-`tenant_id` to cross-check against Chain's stored value. It doesn't, and shouldn't: `tenant_id`
-is only ever meant to arrive from Inbox. This is also true on the wire - Mind's real message
-(`shared/proto/task-dependencies-proposed-event.proto` -> `DependencyProposedEvent`, a
-cross-team, Relay-owned registered schema) has no `tenant_id` field, and adding one would be a
-cross-team schema change (Relay + Mind), not a Chain-only one - moot anyway, since the per-edge
-check above already covers a cross-tenant edge proposed by Mind using the tasks' own
-Inbox-sourced tenant, regardless of who proposed the edge.
+**Placeholders on `task.dependencies.proposed`.** The event always carries `tenant_id`; one without it is
+malformed and goes straight to `.errors`. A missing source or target task is created as a `PENDING`
+placeholder in that tenant (`updatedAt` = epoch, counters 0) inside the graph lock, and the edge is
+recorded right away. An existing task is never overwritten, and one in a different tenant rejects the
+whole event (no retry, nothing created). A later `task.updated` replaces the placeholder's state.
 
 Tests: `TaskEligibilityServiceTest` (same/different/null-tenant `addDependency`/`addDependencies`,
 `onTaskStatusChangedIfNewer` backfill/match/reject incl. the stale-redelivery case),
