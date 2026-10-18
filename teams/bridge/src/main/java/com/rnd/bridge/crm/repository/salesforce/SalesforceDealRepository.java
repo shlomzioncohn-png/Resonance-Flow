@@ -8,7 +8,6 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.context.annotation.Primary;
 import org.springframework.context.annotation.Profile;
 import org.springframework.stereotype.Repository;
 import org.springframework.web.client.RestClient;
@@ -86,7 +85,6 @@ import java.util.Optional;
  */
 @Repository
 @Profile("salesforce")
-@Primary
 public class SalesforceDealRepository implements DealRepository {
 
     private static final Logger log = LoggerFactory.getLogger(SalesforceDealRepository.class);
@@ -157,6 +155,11 @@ public class SalesforceDealRepository implements DealRepository {
         this.stageChangedAtField = (stageChangedAtField == null || stageChangedAtField.isBlank())
                 ? "LastStageChangeDate" : stageChangedAtField;
         this.stageMapping = stageMapping;
+    }
+
+    @Override
+    public String source() {
+        return "salesforce";
     }
 
     /**

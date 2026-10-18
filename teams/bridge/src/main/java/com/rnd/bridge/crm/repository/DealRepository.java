@@ -24,6 +24,16 @@ import java.util.Optional;
  */
 public interface DealRepository {
 
+    /**
+     * A short, stable label for this source - {@code "hubspot"}, {@code "salesforce"}, {@code
+     * "json"} - used for per-source sync reporting (logs, {@code CrmSyncResponse.sources}), never
+     * for {@code sourceRef} construction. That is {@link Deal#sourceRefPrefix()}'s job instead
+     * ({@code DealToTaskMapper.toSourceRef} builds {@code sourceRefPrefix() + dealId()}) - the two
+     * are deliberately independent so one source's reporting label can change without touching the
+     * dedup key Inbox already has on file for it, and vice versa.
+     */
+    String source();
+
     DealSnapshot snapshot();
 
     /**

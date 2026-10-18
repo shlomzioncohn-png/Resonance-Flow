@@ -3,6 +3,7 @@ package com.rnd.bridge.crm.repository;
 import com.fasterxml.jackson.databind.json.JsonMapper;
 import com.rnd.bridge.crm.model.Deal;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.context.annotation.Profile;
 import org.springframework.core.io.Resource;
 import org.springframework.core.io.ResourceLoader;
 import org.springframework.stereotype.Repository;
@@ -26,8 +27,13 @@ import java.util.Optional;
  * DealSnapshot} built once at construction correctly serves every {@link #snapshot()} call - there
  * is no cross-call staleness to guard against here the way there is in {@code
  * HubSpotDealRepository}.
+ * <p>
+ * The synthetic fixture feed, active only when neither a real CRM source profile is - once
+ * {@code hubspot} and/or {@code salesforce} is active, the live source(s) are what should run,
+ * never the fixture alongside them.
  */
 @Repository
+@Profile("!hubspot & !salesforce")
 public class JsonDealRepository implements DealRepository {
 
     private final DealSnapshot snapshot;
@@ -75,6 +81,11 @@ public class JsonDealRepository implements DealRepository {
 
         this.snapshot = new DealSnapshot(
                 feed.asOf(), allDeals, Collections.unmodifiableMap(unmodifiableHistory), dealIds, 0);
+    }
+
+    @Override
+    public String source() {
+        return "json";
     }
 
     @Override

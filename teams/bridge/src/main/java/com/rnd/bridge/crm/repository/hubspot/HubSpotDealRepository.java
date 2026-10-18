@@ -8,7 +8,6 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.context.annotation.Primary;
 import org.springframework.context.annotation.Profile;
 import org.springframework.stereotype.Repository;
 import org.springframework.web.client.RestClient;
@@ -89,13 +88,22 @@ import java.util.Optional;
  * HUBSPOT_TOKEN} environment variable, purely to build the {@code
  * Authorization} header - it is never hardcoded, logged, or included in an
  * error message (see {@link HubSpotClientException}).
+ * <p>
+ * <b>{@code sourceRef}.</b> Every {@link Deal} this class builds carries an explicit {@link
+ * #SOURCE_REF_PREFIX} ({@code "crm:hubspot:"}), so a HubSpot-sourced task is distinguishable by
+ * {@code sourceRef} alone from one sourced from {@code JsonDealRepository} (bare {@code "crm:"})
+ * or {@code SalesforceDealRepository} ({@code "crm:salesforce:"}) once more than one source can be
+ * active in the same deployment (hubspot + salesforce together). Not set before this: a
+ * HubSpot-sourced task's {@code sourceRef} was indistinguishable in shape from a JSON-fixture
+ * one's.
  */
 @Repository
 @Profile("hubspot")
-@Primary
 public class HubSpotDealRepository implements DealRepository {
 
     private static final Logger log = LoggerFactory.getLogger(HubSpotDealRepository.class);
+
+    private static final String SOURCE_REF_PREFIX = "crm:hubspot:";
 
     private final HubSpotClient client;
     private final Clock clock;
@@ -149,6 +157,11 @@ public class HubSpotDealRepository implements DealRepository {
                             + "per deal at read time: {}",
                     resolution.invalidStageReasons().size(), resolution.invalidStageReasons());
         }
+    }
+
+    @Override
+    public String source() {
+        return "hubspot";
     }
 
     /**
@@ -279,6 +292,7 @@ public class HubSpotDealRepository implements DealRepository {
             }
             deals.add(Deal.builder()
                     .dealId(record.id())
+                    .sourceRefPrefix(SOURCE_REF_PREFIX)
                     .title(title)
                     .stage(stage)
                     .closeDate(closeDate)

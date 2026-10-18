@@ -11,6 +11,7 @@ import okhttp3.mockwebserver.MockWebServer;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.Timeout;
 import org.springframework.web.client.RestClient;
 
 import java.io.IOException;
@@ -21,6 +22,7 @@ import java.time.ZoneId;
 import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Optional;
+import java.util.concurrent.TimeUnit;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -39,6 +41,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * the single-Opportunity query first and only queries stage metadata if that lookup found a
  * record - mirroring {@code HubSpotDealRepositoryTest}'s "a miss costs one request, not two" rule.
  */
+@Timeout(value = 30, unit = TimeUnit.SECONDS)
 class SalesforceDealRepositoryTest {
 
     private static final Instant FIXED_NOW = Instant.parse("2026-08-30T12:00:00Z");
@@ -187,6 +190,11 @@ class SalesforceDealRepositoryTest {
         Deal deal = newRepository().snapshot().findLatestByDealId("006B").orElseThrow();
 
         assertEquals("crm:salesforce:006B", TASK_MAPPER.toSourceRef(deal));
+    }
+
+    @Test
+    void sourceIsSalesforce() {
+        assertEquals("salesforce", newRepository().source());
     }
 
     @Test
