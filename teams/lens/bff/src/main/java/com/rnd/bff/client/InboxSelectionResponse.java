@@ -7,7 +7,6 @@ import lombok.AllArgsConstructor;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
-import java.time.Instant;
 import java.util.List;
 
 /**
@@ -41,7 +40,8 @@ public class InboxSelectionResponse {
         private String title;
         private String description;
         private int effortEstimateMinutes;
-        private Instant deadline;
+        /** Already formatted by Inbox, e.g. "12/10/2026". */
+        private String deadline;
         /** 0-1, higher is better. */
         private double selectionScore;
     }

@@ -83,7 +83,9 @@ class InboxClientTest {
         assertThat(inboxClient.getTaskById("any-user", "task_006").getSnoozedUntil()).isNotNull();
         assertThat(task.getExtractionProvenance()).isEqualTo("etl");
         assertThat(task.getSuggestedOwnerUserId()).isEqualTo("66666666-6666-6666-6666-666666666666");
-        assertThat(task.getCreatedAt()).isNotNull();
+        // Same display format as real Inbox: dd/MM/yyyy for dueDate, dd/MM/yyyy HH:mm for the rest
+        assertThat(task.getDueDate()).matches("[0-9]{2}/[0-9]{2}/[0-9]{4}");
+        assertThat(task.getCreatedAt()).matches("[0-9]{2}/[0-9]{2}/[0-9]{4} [0-9]{2}:[0-9]{2}");
         assertThat(task.getUpdatedAt()).isNotNull();
     }
 
@@ -149,10 +151,10 @@ class InboxClientTest {
              "tenant":{"id":"1a2befb7-9bb3-39dd-89cd-6f1c47cd2db6","name":"Medium Org 18","slug":"medium-org-18"},
              "project_id":null,"title":"Meeting task 1","description":null,
              "source_type":"MEETING","tier":"OPERATIONAL","role_context":"DEVELOPER",
-             "effort_estimate_minutes":30,"deadline":"2026-10-20T15:00:00Z",
+             "effort_estimate_minutes":30,"deadline":"20/10/2026",
              "status":"IN_PROGRESS","available":false,"priority_score":8.0,
              "extraction_provenance":"ML_INFERRED","created_by_id":null,
-             "created_at":"2026-10-04T11:01:12.696564Z","some_future_field":"ignored"}
+             "created_at":"04/10/2026 14:01","owner_display_name":"User 8","project_name":"Billing","some_future_field":"ignored"}
             """;
 
     private HttpServer inbox;
@@ -175,7 +177,7 @@ class InboxClientTest {
             if (path.equals("/api/v1/tasks/selection")) {
                 body = "{\"selected_tasks\":[{\"id\":\"bd77b903-c5eb-3648-95cc-6e78adb0e126\","
                         + "\"title\":\"Github issue task 175\",\"effort_estimate_minutes\":21,"
-                        + "\"deadline\":\"2026-10-11T10:00:08Z\",\"selection_score\":0.28}],"
+                        + "\"deadline\":\"11/10/2026\",\"selection_score\":0.28}],"
                         + "\"total_effort_minutes\":21,\"remaining_minutes\":0,\"used_fallback\":true,"
                         + "\"reason\":\"window was automatically expanded to 21 minutes\"}";
             } else if (path.equals("/api/v1/tasks")) {
@@ -228,8 +230,12 @@ class InboxClientTest {
         assertThat(task.getInboxStatus()).isEqualTo("IN_PROGRESS");
         assertThat(task.getPriority()).isEqualTo("HIGH");
         assertThat(task.getEffortEstimate()).isEqualTo(30);
-        // Sent with its zone (UTC), so the browser shows the right local time
-        assertThat(task.getDueDate()).isEqualTo(Instant.parse("2026-10-20T15:00:00Z"));
+        // Dates come already formatted by Inbox (Israel time) and are passed on as-is
+        assertThat(task.getDueDate()).isEqualTo("20/10/2026");
+        assertThat(task.getCreatedAt()).isEqualTo("04/10/2026 14:01");
+        // Names from Inbox (PR #591) fill owner/project
+        assertThat(task.getOwner()).isEqualTo("User 8");
+        assertThat(task.getProject()).isEqualTo("Billing");
         assertThat(task.getTenantId()).isEqualTo("1a2befb7-9bb3-39dd-89cd-6f1c47cd2db6");
         assertThat(task.getSourceType()).isEqualTo("meeting");
         assertThat(task.getIsAvailable()).isFalse();
@@ -291,6 +297,7 @@ class InboxClientTest {
         assertThat(selection.getSelectedTasks()).hasSize(1);
         assertThat(selection.getSelectedTasks().get(0).getEffortEstimateMinutes()).isEqualTo(21);
         assertThat(selection.getSelectedTasks().get(0).getSelectionScore()).isEqualTo(0.28);
+        assertThat(selection.getSelectedTasks().get(0).getDeadline()).isEqualTo("11/10/2026");
     }
 
     // -------------------------------------------------------------------------
