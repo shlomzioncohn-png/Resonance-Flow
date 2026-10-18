@@ -282,9 +282,12 @@ class SegmentedRankingModel:
         lifting = [f for f in order if is_reason(f) and shifts[f] > 0]
         holding = [f for f in order if is_reason(f) and shifts[f] < 0]
 
-        # The verdict is on the base score. A blocked task's final score is
-        # squeezed below every startable one, so for it the verdict is conditional.
-        verb = "would rank" if task.blocked else "ranks"
+        # The verdict is on the base score, so it says "scores", never "ranks":
+        # it is this task's own score, not its place in a list — a list's top
+        # task can score in the middle when its rivals score lower. A blocked
+        # task's final score is squeezed below every startable one, so for it
+        # the verdict is conditional.
+        verb = "would score" if task.blocked else "scores"
         decisive = not LOW_BASE_SCORE <= evaluation.base < HIGH_BASE_SCORE
         if evaluation.base >= HIGH_BASE_SCORE:
             lifting = lifting or leaning(+1.0)
@@ -409,9 +412,15 @@ def _impact_phrase(task: ScorableTask, value: float, quoted: str | None) -> str:
         if (weight > 0) == raised and (match := pattern.search(text))
     ]
     if not raised:
-        return f"its wording plays it down ({', '.join(words)})"
+        return f"its wording plays it down ({_quoted(words)})"
     words = [word for word in words if word != quoted]
-    return f"it mentions {', '.join(words)}" if words else "that wording also raises its impact"
+    return f"it mentions {_quoted(words)}" if words else "that wording also raises its impact"
+
+
+def _quoted(words: list[str]) -> str:
+    """Lexicon phrases are quoted, as the urgency phrase is: many are not nouns
+    ("needs your", "must reach"), and bare they would not read as a sentence."""
+    return ", ".join(f'"{word}"' for word in words)
 
 
 def _as_written(text: str, phrase: str, match: re.Match[str]) -> str:

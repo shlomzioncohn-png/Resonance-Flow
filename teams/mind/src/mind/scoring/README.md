@@ -291,9 +291,9 @@ and then measured on 10 that were never read.
 the same values the score was computed from:
 
 ```
-operational task, ranks high: the deadline is 3 hours away; it mentions sla, customer.
-tactical task, ranks low: its wording plays it down (housekeeping, routine); the deadline is 6 days away.
-strategic task, ranks in the middle: no factor stands out; no deadline given.
+operational task, scores high: the deadline is 3 hours away; it mentions "sla", "customer".
+tactical task, scores low: its wording plays it down ("housekeeping", "routine"); the deadline is 6 days away.
+strategic task, scores in the middle: no factor stands out; no deadline given.
 ```
 
 ### What counts as a reason
@@ -334,16 +334,22 @@ Consequences worth knowing:
 
 - **Verdict** on the base score, symmetric around 0.5: *high* at or above
   `HIGH_BASE_SCORE` (0.6), *low* below `LOW_BASE_SCORE` (0.4), otherwise *in
-  the middle*. It describes this task's score, not its rank: a task can top its
-  list from the middle because its rivals are lower, and the sentence says so
-  rather than inventing a reason. A blocked task says *would rank*, since its
-  final score sits below every startable one.
+  the middle*. It says *scores*, never *ranks*, because it describes this
+  task's own score, not its place in a list: on the 36 persona scenarios the
+  model's top task scores in the middle in 8 and low in 2, because its rivals
+  score lower still. "Ranks low" for the top task would read as a
+  contradiction; "scores low" is simply true, and why it still comes first is
+  Chain's ordering to explain, not MIND's. A blocked task says *would score*,
+  since its final score sits below every startable one.
 - **A high or low verdict always names something.** Several factors can each
   stay under the threshold and still add up to a high or low base; then the
   ones that leaned the verdict's way are named, never the tie-breaker.
 - **Reasons** are this tier's factors only, largest shift first, each with its
   real value: the hours or days to the deadline, the words that moved impact
   (a stem such as `escalat*` is printed as the word written, "escalated").
+  Impact words are quoted, as the urgency phrase is: many lexicon entries are
+  not nouns ("needs your", "must reach"), and bare after "it mentions" they
+  would not read as a sentence.
   Half hours round up, so 2.5 hours reads "3 hours" — not Python's `round`,
   which would send 2.5 to 2 but 3.5 to 4.
 - **Time pressure names its source.** It is the max of the deadline and the

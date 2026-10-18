@@ -152,7 +152,7 @@ def test_a_neutral_task_names_no_reason() -> None:
     explanation = MODEL.explain(replace(LiveTask(), tier="strategic", deadline=None), CONTEXT)
 
     assert explanation.text == (
-        "strategic task, ranks in the middle: no factor stands out; no deadline given."
+        "strategic task, scores in the middle: no factor stands out; no deadline given."
     )
 
 
@@ -173,7 +173,7 @@ def test_a_high_score_built_from_small_shifts_still_names_them() -> None:
 
     assert all(abs(shift) <= REASON_SHIFT for shift in explanation.shifts.values())
     assert explanation.text == (
-        "operational task, ranks high: it mentions customer; the deadline is 7 hours away."
+        'operational task, scores high: it mentions "customer"; the deadline is 7 hours away.'
     )
 
 
@@ -229,7 +229,7 @@ def test_urgency_from_the_wording_is_not_credited_to_the_deadline() -> None:
 def test_impact_names_the_words_that_raised_it() -> None:
     task = replace(LiveTask(), tier="strategic", description="The board and investors are asking.")
 
-    assert "it mentions board, investors" in reasoning_of(task)
+    assert 'it mentions "board", "investors"' in reasoning_of(task)
 
 
 def test_a_stem_match_is_printed_as_the_whole_word() -> None:
@@ -237,7 +237,7 @@ def test_a_stem_match_is_printed_as_the_whole_word() -> None:
         LiveTask(), tier="strategic", description="Support escalated it; customers are upset."
     )
 
-    assert "it mentions customers, escalated" in reasoning_of(task)
+    assert 'it mentions "customers", "escalated"' in reasoning_of(task)
 
 
 def test_a_phrase_quoted_for_urgency_is_not_repeated_for_impact() -> None:
@@ -251,7 +251,7 @@ def test_a_phrase_quoted_for_urgency_is_not_repeated_for_impact() -> None:
     reasoning = reasoning_of(task)
 
     assert reasoning.count("data is at risk") == 1
-    assert "it mentions customer" in reasoning
+    assert 'it mentions "customer"' in reasoning
 
 
 # --- low scores are explained too --------------------------------------------
@@ -266,17 +266,17 @@ def test_a_low_score_says_what_holds_it_down() -> None:
     )
 
     assert reasoning_of(task) == (
-        "tactical task, ranks low: its wording plays it down "
-        "(nobody is waiting, housekeeping, routine); the deadline is 6 days away."
+        "tactical task, scores low: its wording plays it down "
+        '("nobody is waiting", "housekeeping", "routine"); the deadline is 6 days away.'
     )
 
 
-def test_a_blocked_task_is_not_said_to_rank_high() -> None:
+def test_a_blocked_task_is_not_said_to_score_high() -> None:
     """Its final score is below every startable task, whatever its base."""
     task = replace(LiveTask(), deadline=NOW + timedelta(hours=2), blocked=True)
     reasoning = reasoning_of(task)
 
-    assert reasoning.startswith("tactical task, would rank high: ")
+    assert reasoning.startswith("tactical task, would score high: ")
     assert reasoning.endswith("; blocked, so it cannot outrank anything startable.")
 
 
@@ -333,10 +333,10 @@ def test_the_same_task_is_explained_differently_by_each_tier() -> None:
     bodies = {tier: without_subject(reasoning_of(replace(task, tier=tier))) for tier in TIERS}
 
     assert bodies == {
-        "operational": "ranks low: no deadline given.",
-        "tactical": "ranks in the middle; in its favour: it mentions customer; "
+        "operational": "scores low: no deadline given.",
+        "tactical": 'scores in the middle; in its favour: it mentions "customer"; '
         "against it: no deadline given.",
-        "strategic": "ranks high: it mentions customer; no deadline given.",
+        "strategic": 'scores high: it mentions "customer"; no deadline given.',
     }
 
 
