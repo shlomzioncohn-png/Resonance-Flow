@@ -7,8 +7,8 @@ Dependency-flow health analysis for Chain: finds unhealthy patterns in how depen
 time (chronic blocking, recurring blockers, slow chains, growing bottlenecks, stuck subgraphs) and
 reports them as a ranked, explained list. Advisory only: it never changes Chain's data.
 
-**Status: stage 1 of 6 (synthetic input).** Only the data generator exists. There is no model yet,
-no Chain endpoint, and nothing is written to Postgres; those come in later stages.
+**Status: stage 1 of 6 (synthetic input).** The data generator and a Postgres loader exist. There is no model yet,
+no Chain endpoint, and nothing touches the shared Chain database; those come in later stages.
 
 ## Run
 
@@ -40,6 +40,21 @@ Rows shaped exactly like Chain's two history tables (migrations `V2` and `V9`), 
 
 `ground_truth.*` and `tasks_meta.csv` are for evaluation only. The model's input is the two
 history tables.
+
+## Loading into Postgres (optional, `[db]` extra)
+
+Loads a dataset into a throwaway Postgres that has Chain's real history-table schema. Chain's own
+Flyway files (V2, V7, V9) are applied as they are, so Postgres itself enforces the CHECK constraints and
+the unique index on the synthetic rows. It is never the shared Chain database.
+
+```bash
+pip install -e ".[dev,db]"
+docker compose up -d --wait            # postgres on localhost:55432, data discarded on `down`
+python -m health.loader                # out/dev -> chain_health; override with --data / --dsn / HEALTH_DB_DSN
+docker compose down                    # reset before loading again
+```
+
+The loader refuses to load into tables that already hold rows (it never truncates or drops anything).
 
 ## How it works
 
