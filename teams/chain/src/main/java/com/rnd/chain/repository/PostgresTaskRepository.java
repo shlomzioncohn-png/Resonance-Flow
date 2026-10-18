@@ -71,6 +71,7 @@ public class PostgresTaskRepository implements TaskRepository {
         int insertedRows = jpaRepository.insertIfAbsent(
                 task.getId(),
                 task.getParentTaskId(),
+                task.getTenantId(),
                 task.getStatus().name(),
                 task.isReady(),
                 task.getBlockingCount(),

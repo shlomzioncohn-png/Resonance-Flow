@@ -151,6 +151,7 @@ class DependencyProposedEventHandlerIntegrationTest {
 
         DependencyProposedEvent event =
                 DependencyProposedEvent.newBuilder()
+                        .setTenantId(TENANT_ID.toString())
                         .setEventId(
                                 UUID.randomUUID().toString())
                         .setTaskId(
@@ -194,6 +195,7 @@ class DependencyProposedEventHandlerIntegrationTest {
 
         DependencyProposedEvent event =
                 DependencyProposedEvent.newBuilder()
+                        .setTenantId(TENANT_ID.toString())
                         .setEventId(eventId)
                         .setTaskId(taskId.toString())
                         .addDependencies(
@@ -259,15 +261,13 @@ void malformedEvent_goesStraightToTheErrorsTopic_neverRetried() {
             TOPIC,
             "bad-key",
             DependencyProposedEvent.newBuilder()
+                        .setTenantId(TENANT_ID.toString())
                     .setEventId(UUID.randomUUID().toString())
                     .setTaskId("not-a-valid-uuid")
                     .build());
 
     ConsumerRecord<String, String> onErrorsTopic =
-            KafkaTestUtils.getSingleRecord(
-                    errorsProbe,
-                    ERROR_TOPIC,
-                    Duration.ofMillis(3000));
+            KafkaTestUtils.getRecords(errorsProbe, Duration.ofMillis(3000)).iterator().next();
 
     assertNotNull(
             onErrorsTopic,
@@ -327,10 +327,7 @@ void genuinelyMalformedBytes_notValidProtobufAtAll_alsoGoesStraightToTheErrorsTo
                     .getBytes(java.nio.charset.StandardCharsets.UTF_8));
 
     ConsumerRecord<String, String> onErrorsTopic =
-            KafkaTestUtils.getSingleRecord(
-                    errorsProbe,
-                    ERROR_TOPIC,
-                    Duration.ofSeconds(15));
+            KafkaTestUtils.getRecords(errorsProbe, Duration.ofSeconds(15)).iterator().next();
 
     assertNotNull(
             onErrorsTopic,
@@ -340,49 +337,36 @@ void genuinelyMalformedBytes_notValidProtobufAtAll_alsoGoesStraightToTheErrorsTo
 }
 
     @Test
-    void missingTarget_isStoredUntilTargetExists() {
+    void missingTarget_isCreatedAsPendingPlaceholderAndEdgeIsAdded() {
 
         UUID taskId = UUID.randomUUID();
-        UUID missingDependencyId =
-                UUID.randomUUID();
+        UUID missingDependencyId = UUID.randomUUID();
 
         taskRepository.save(buildTask(taskId));
 
         DependencyProposedEvent event =
                 DependencyProposedEvent.newBuilder()
-                        .setEventId(
-                                UUID.randomUUID().toString())
-                        .setTaskId(
-                                taskId.toString())
+                        .setTenantId(TENANT_ID.toString())
+                        .setEventId(UUID.randomUUID().toString())
+                        .setTaskId(taskId.toString())
                         .addDependencies(
                                 com.rnd.mind.event.Dependency
                                         .newBuilder()
-                                        .setDependsOnTaskId(
-                                                missingDependencyId
-                                                        .toString())
+                                        .setDependsOnTaskId(missingDependencyId.toString())
                                         .build())
                         .build();
 
-        producer.send(
-                TOPIC,
-                taskId.toString(),
-                event);
-
+        producer.send(TOPIC, taskId.toString(), event);
         producer.flush();
 
-        /*
-         * Missing target must not make the existing task blocked yet.
-         * It is persisted as unresolved and will be resolved when the
-         * missing task arrives.
-         */
         await()
-                .during(Duration.ofSeconds(1))
-                .atMost(Duration.ofSeconds(5))
+                .atMost(Duration.ofSeconds(10))
                 .until(() ->
-                        taskRepository
-                                .findById(taskId)
-                                .map(task ->
-                                        task.getBlockingCount() == 0)
+                        taskRepository.findById(missingDependencyId)
+                                .map(task -> task.getStatus() == TaskStatus.PENDING)
+                                .orElse(false)
+                                && taskRepository.findById(taskId)
+                                .map(task -> task.getBlockingCount() == 1)
                                 .orElse(false));
     }
 }

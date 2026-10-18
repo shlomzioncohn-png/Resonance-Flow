@@ -98,4 +98,18 @@ class PostgresTaskRepositoryTest {
         assertThat(persisted.getConfidence()).isNull();
         assertThat(persisted.getPriorityScore()).isNull();
     }
+
+    @Test
+    void insertIfAbsent_persistsTheTenantId() {
+        UUID id = UUID.randomUUID();
+        UUID tenantId = UUID.randomUUID();
+        LocalDateTime now = LocalDateTime.now();
+
+        boolean inserted = postgresTaskRepository.insertIfAbsent(Task.builder()
+                .id(id).tenantId(tenantId).status(TaskStatus.PENDING).isReady(true)
+                .createdAt(now).updatedAt(now).build());
+
+        assertThat(inserted).isTrue();
+        assertThat(postgresTaskRepository.findById(id).orElseThrow().getTenantId()).isEqualTo(tenantId);
+    }
 }

@@ -16,6 +16,8 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionSynchronization;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 
+import java.time.LocalDateTime;
+import java.time.ZoneOffset;
 import java.util.LinkedHashSet;
 import java.util.Objects;
 import java.util.Optional;
@@ -50,6 +52,27 @@ public class TaskCounterUpdater {
         this.taskDependencyRepository = taskDependencyRepository;
         this.priorityScoreService = priorityScoreService;
         this.schedulingPublishListener = schedulingPublishListener;
+    }
+
+    /**
+     * Creates a PENDING placeholder (epoch updatedAt, zero counters) in {@code tenantId} for each
+     * absent task; never touches an existing one.
+     */
+    @Transactional
+    public void insertPlaceholdersIfAbsent(UUID taskId, UUID dependsOnTaskId, UUID tenantId) {
+        insertPlaceholderIfAbsent(taskId, tenantId);
+        insertPlaceholderIfAbsent(dependsOnTaskId, tenantId);
+    }
+
+    private void insertPlaceholderIfAbsent(UUID taskId, UUID tenantId) {
+        taskRepository.insertIfAbsent(Task.builder()
+                .id(taskId)
+                .tenantId(tenantId)
+                .status(TaskStatus.PENDING)
+                .isReady(true)
+                .createdAt(LocalDateTime.now())
+                .updatedAt(LocalDateTime.ofEpochSecond(0, 0, ZoneOffset.UTC))
+                .build());
     }
 
     public Task requireTask(UUID taskId) {
