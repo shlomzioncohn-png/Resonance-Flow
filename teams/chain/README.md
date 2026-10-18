@@ -371,8 +371,6 @@ around the call) and by the new tests that specifically prove the commit/rollbac
   `KafkaSchedulingUpdatePublisher` publishes real Protobuf against the registered
   `shared/proto/scheduling-updated-event.proto`, with a per-event `event_id`. Covered end-to-end by
   `SchedulingUpdatedEventContractTest` and `SchedulingUpdatePublishIntegrationTest` (a real broker).
-=======
->>>>>>> origin/main
 
 ## Running locally with Maven
 
