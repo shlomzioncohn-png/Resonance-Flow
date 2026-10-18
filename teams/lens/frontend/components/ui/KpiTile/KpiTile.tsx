@@ -7,7 +7,8 @@ import { useTheme } from '@mui/material/styles';
 import type { StatusTone } from '../StatusBadge';
 
 export interface KpiTileProps {
-  value: number;
+  /** Raw count or pre-formatted text, e.g. 12, "1,284" or "3.2d". */
+  value: number | string;
   label: string;
   /**
    * Workflow-health tone the number is colored by. 'neutral' is a plain
