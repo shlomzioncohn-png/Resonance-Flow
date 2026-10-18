@@ -94,29 +94,14 @@ team's sync.
   `resonance-flow`'s first sync skips ServiceMonitors, and ArgoCD's next
   refresh adds them once this app has installed the CRDs. `traefik` and
   `kafka-exporter` are on wave `4`, after it: their charts render a
-  ServiceMonitor without that check (Traefik's fails its render outright), and
-  `argocd-cm-patch.yaml` gates each wave on the previous one's health.
-- **What gets scraped.** Prometheus selects every ServiceMonitor, PodMonitor
-  and PrometheusRule in the cluster, not only ones labelled for its own
-  release. A team opts its component in with `components.<team>.metrics`
-  - see the chart's [README](../helm/resonance-flow/README.md#metrics-scraping-metrics).
-- **Infra targets.** Kafka (JMX), PostgreSQL (postgres-exporter) and MinIO
-  are scraped through the chart's `templates/infra-servicemonitors.yaml`,
-  their exporters turned on in `environments/shared.yaml` (so not in CI).
-  Traefik exposes its own, per router and service. Kafka consumer-group lag
-  (`kafka_consumergroup_lag`) comes from `apps/kafka-exporter.yaml`, which
-  logs in with the `kafka.sasl.client` user - keep its password in sync.
-- **Storage.** 15 days, capped at 9GB, on a 10Gi PVC from the cluster's
-  default StorageClass.
-- **Not scraped.** etcd, kube-scheduler, kube-controller-manager and
-  kube-proxy are disabled - they aren't reachable from pod networking on
-  kind or on managed clusters, and would only produce permanent
-  `TargetDown` alerts.
-- **Alerting.** Alertmanager runs with the chart's default rules but no
-  receivers yet - alerts are visible in its UI only.
-
-- **Grafana.** Disabled for now (the chart turns it on by default) - enabling
-  and exposing it is a separate issue.
+  ServiceMonitor without that check.
+- **Scraping a service.** A team opts its component in with
+  `components.<team>.metrics` - see the chart's
+  [README](../helm/resonance-flow/README.md#metrics-scraping-metrics).
+- **Infra targets.** Kafka, PostgreSQL and MinIO - see the chart's README.
+  Traefik exposes its own metrics, per router. Kafka consumer-group lag comes
+  from `apps/kafka-exporter.yaml`, which logs in as the `kafka.sasl.client`
+  user - keep its password in sync.
 
 Nothing here has an Ingress. Reach Prometheus and Alertmanager with:
 

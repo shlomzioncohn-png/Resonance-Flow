@@ -1,17 +1,4 @@
-{{/*
-Opt-in per component: components.<name>.metrics.enabled renders a ServiceMonitor
-telling the Prometheus Operator (teams/relay/argocd/apps/kube-prometheus-stack.yaml)
-to scrape that component's Service on its `http` port at metrics.path.
-
-Only rendered when the cluster has the monitoring.coreos.com/v1 CRDs. Teams' kind
-CI clusters don't, and creating a ServiceMonitor there would fail the install for
-every team - so there it's silently skipped. `helm template` without a cluster
-skips it too; pass --api-versions monitoring.coreos.com/v1/ServiceMonitor to render it.
-
-Every scraped series gets `component` (the components.<name> key) and `team`
-(metrics.team, defaulting to the component name) labels, used to filter
-dashboards and route alerts per team.
-*/}}
+{{/* Teams' kind CI clusters have no ServiceMonitor CRD - see README.md "Metrics scraping". */}}
 {{- if .Capabilities.APIVersions.Has "monitoring.coreos.com/v1/ServiceMonitor" }}
 {{- range $componentName, $component := .Values.components }}
 {{- if and $component.enabled $component.service $component.metrics $component.metrics.enabled }}

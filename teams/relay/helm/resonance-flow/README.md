@@ -159,9 +159,6 @@ the pod's own node is always allowed. The rules only take effect if the cluster'
 CNI enforces NetworkPolicy. On a CNI that doesn't, they render but block nothing.
 The policy applies to the whole pod, not to individual paths.
 
-A component with both `networkPolicy` and `metrics.enabled` also admits Prometheus
-pods from the `monitoring.namespace` namespace on its `http` port - see below.
-
 ## Metrics scraping (`metrics`)
 
 Prometheus (installed by `teams/relay/argocd/apps/kube-prometheus-stack.yaml`)
@@ -191,16 +188,13 @@ alert routing.
   `monitoring.coreos.com/v1` CRDs. Teams' kind CI clusters don't, so CI is
   unaffected. `helm template` skips it too, unless you pass
   `--api-versions monitoring.coreos.com/v1/ServiceMonitor`.
-- **NetworkPolicy.** If the component also has `networkPolicy`, the chart adds a
-  rule admitting only pods labelled `app.kubernetes.io/name: prometheus` in the
-  `monitoring.namespace` namespace (default `monitoring`). Nothing else in that
-  namespace gets in.
-- **Kafka, PostgreSQL, MinIO.** `templates/infra-servicemonitors.yaml` renders
-  one ServiceMonitor each when that subchart's metrics are on
-  (`kafka.metrics.jmx.enabled`, `postgresql.metrics.enabled`,
-  `minio.metrics.enabled` - all set only in `environments/shared.yaml`), with
-  the same CRD check, labelled `team: relay`. Don't turn on the subcharts' own
-  `metrics.serviceMonitor.enabled`: theirs skip the CRD check.
+- **NetworkPolicy.** If the component also has `networkPolicy`, Prometheus pods
+  in `monitoring.namespace` (default `monitoring`) are allowed in on its `http` port.
+- **Kafka, PostgreSQL, MinIO.** Their exporters are on only in
+  `environments/shared.yaml`, so not in CI. `templates/infra-servicemonitors.yaml`
+  scrapes them, with the same CRD check, labelled `team: relay`. Don't turn on the
+  subcharts' own `metrics.serviceMonitor.enabled`: theirs skip the CRD check, and
+  on a fresh cluster the failed apply would block every team's sync.
 
 ## Component configuration (`config` / `secret`)
 
