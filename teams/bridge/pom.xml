@@ -110,6 +110,14 @@
             <version>${minio.version}</version>
         </dependency>
 
+        <!-- Renders scanned-doc PDF pages to images for media classification (pure Java,
+             no external tools). -->
+        <dependency>
+            <groupId>org.apache.pdfbox</groupId>
+            <artifactId>pdfbox</artifactId>
+            <version>3.0.5</version>
+        </dependency>
+
         <!-- control-plane state (GroupStateStore/CursorStore/CalendarEventStateStore) -
              small, frequently read/written key->blob records, moved off MinIO onto Postgres. -->
         <dependency>

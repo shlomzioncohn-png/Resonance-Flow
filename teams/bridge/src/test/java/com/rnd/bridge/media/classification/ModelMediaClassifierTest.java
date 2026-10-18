@@ -1,0 +1,180 @@
+package com.rnd.bridge.media.classification;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.rnd.bridge.media.classification.document.DocumentScan;
+import com.rnd.bridge.media.meeting.MeetingMetadata;
+import com.rnd.bridge.media.meeting.ParticipantActivity;
+import com.rnd.bridge.raw.model.Classification;
+import com.rnd.bridge.raw.model.DecidedBy;
+import com.rnd.bridge.raw.model.DocumentCategory;
+import com.rnd.bridge.raw.model.MeetingCategory;
+import com.rnd.bridge.raw.model.Quality;
+import com.rnd.bridge.raw.model.Sensitivity;
+import java.time.Instant;
+import java.util.List;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.EnumSource;
+
+class ModelMediaClassifierTest {
+
+    private static final String TRANSCRIPT =
+            "WEBVTT\n\n1\n00:00:01.000 --> 00:00:04.000\nDana: let's plan the next sprint and split the work.\n";
+
+    private final RecordingChatClient chatClient = new RecordingChatClient();
+    private final ModelMediaClassifier classifier = new ModelMediaClassifier(
+            chatClient, new ObjectMapper(), ClassificationTestSupport.properties(true, "key"));
+
+    @Test
+    void parsesMeetingVerdictIntoClassification() {
+        chatClient.reply = """
+                {"category": "PLANNING", "category_confidence": 0.93,
+                 "quality": "GOOD", "quality_confidence": 0.9,
+                 "sensitivity": "NONE", "sensitivity_confidence": 0.8,
+                 "reason": "sprint planning discussion"}""";
+
+        Classification result = classifier.classifyMeeting(new MeetingClassificationInput(metadata(), TRANSCRIPT)).orElseThrow();
+
+        assertThat(result.decidedBy()).isEqualTo(DecidedBy.MODEL);
+        assertThat(result.category().value()).isEqualTo(MeetingCategory.PLANNING);
+        assertThat(result.category().confidence()).isEqualTo(0.93);
+        assertThat(result.quality().value()).isEqualTo(Quality.GOOD);
+        assertThat(result.sensitivity().value()).isEqualTo(Sensitivity.NONE);
+        assertThat(result.reason()).isEqualTo("sprint planning discussion");
+        assertThat(result.classifier().model()).isEqualTo("test-model");
+        assertThat(result.classifier().promptVersion()).isEqualTo("v1");
+    }
+
+    @Test
+    void sendsSpokenTextAndHeadcountButNoParticipantNamesOrTimestamps() {
+        chatClient.reply = verdict("PLANNING");
+
+        classifier.classifyMeeting(new MeetingClassificationInput(metadata(), TRANSCRIPT));
+
+        assertThat(chatClient.userText).contains("Topic: Sprint planning", "Participants: 2",
+                "let's plan the next sprint");
+        assertThat(chatClient.userText).doesNotContain("Dana Levi", "Yossi Cohen", "-->", "WEBVTT");
+        assertThat(chatClient.images).isEmpty();
+    }
+
+    @Test
+    void toleratesCodeFencesAroundTheJson() {
+        chatClient.reply = "```json\n" + verdict("STANDUP") + "\n```";
+
+        assertThat(classifier.classifyMeeting(new MeetingClassificationInput(null, TRANSCRIPT))
+                .orElseThrow().category().value()).isEqualTo(MeetingCategory.STANDUP);
+    }
+
+    @Test
+    void unknownCategoryBecomesOther() {
+        chatClient.reply = verdict("BRAINSTORM");
+
+        assertThat(classifier.classifyMeeting(new MeetingClassificationInput(null, TRANSCRIPT))
+                .orElseThrow().category().value()).isEqualTo(MeetingCategory.OTHER);
+    }
+
+    @Test
+    void invalidQualityIsRejected() {
+        chatClient.reply = verdict("PLANNING").replace("\"GOOD\"", "\"EXCELLENT\"");
+
+        assertThatThrownBy(() -> classifier.classifyMeeting(new MeetingClassificationInput(null, TRANSCRIPT)))
+                .isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
+    void missingConfidenceIsRejectedNotDefaultedToZero() {
+        chatClient.reply = verdict("PLANNING").replace("\"category_confidence\": 0.9,", "");
+
+        assertThatThrownBy(() -> classifier.classifyMeeting(new MeetingClassificationInput(null, TRANSCRIPT)))
+                .isInstanceOf(NullPointerException.class);
+    }
+
+    @Test
+    void replyWithoutJsonIsRejected() {
+        chatClient.reply = "Sorry, I can't help with that.";
+
+        assertThatThrownBy(() -> classifier.classifyMeeting(new MeetingClassificationInput(null, TRANSCRIPT)))
+                .isInstanceOf(IllegalStateException.class);
+    }
+
+    @Test
+    void meetingWithoutSpokenTranscriptIsNotSentToTheModelEvenWithATopic() {
+        assertThat(classifier.classifyMeeting(new MeetingClassificationInput(metadata(), null))).isEmpty();
+        assertThat(classifier.classifyMeeting(new MeetingClassificationInput(metadata(), "WEBVTT\n"))).isEmpty();
+        assertThat(chatClient.calls).isZero();
+    }
+
+    @Test
+    void documentContentPagesAreSentAsPngImagesWithTheirPageNumbers() {
+        chatClient.reply = verdict("INVOICE");
+
+        Classification result = classifier.classifyDocument(ClassificationTestSupport.contentScan(12, 2, 3)).orElseThrow();
+
+        assertThat(result.category().value()).isEqualTo(DocumentCategory.INVOICE);
+        assertThat(chatClient.images).hasSize(2);
+        assertThat(chatClient.images).allSatisfy(image -> assertThat(image).startsWith(0x89, 'P', 'N', 'G'));
+        assertThat(chatClient.userText).contains("12 page(s) in total", "page(s) [2, 3]");
+    }
+
+    @Test
+    void documentPromptOffersEveryCategoryExceptBlank() {
+        chatClient.reply = verdict("MEMO");
+
+        classifier.classifyDocument(ClassificationTestSupport.contentScan(1, 1));
+
+        assertThat(chatClient.systemPrompt).contains("INVOICE", "SCIENTIFIC_PUBLICATION", "MEMO", "OTHER");
+        assertThat(chatClient.systemPrompt).doesNotContain("BLANK");
+    }
+
+    @Test
+    void blankVerdictOnAPageWithContentIsRecordedAsOther() {
+        chatClient.reply = verdict("BLANK");
+
+        Classification result = classifier.classifyDocument(ClassificationTestSupport.contentScan(1, 1)).orElseThrow();
+
+        assertThat(result.category().value()).isEqualTo(DocumentCategory.OTHER);
+        assertThat(result.category().confidence()).isEqualTo(0.9);
+    }
+
+    @ParameterizedTest
+    @EnumSource(value = DocumentScan.Outcome.class, names = "CONTENT_FOUND", mode = EnumSource.Mode.EXCLUDE)
+    void documentWithoutContentPagesIsNotSentToTheModel(DocumentScan.Outcome outcome) {
+        assertThat(classifier.classifyDocument(new DocumentScan(outcome, 3, 3, List.of()))).isEmpty();
+        assertThat(chatClient.calls).isZero();
+    }
+
+    private static String verdict(String category) {
+        return """
+                {"category": "%s", "category_confidence": 0.9,
+                 "quality": "GOOD", "quality_confidence": 0.9,
+                 "sensitivity": "LOW", "sensitivity_confidence": 0.9,
+                 "reason": "generic reason"}""".formatted(category);
+    }
+
+    private static MeetingMetadata metadata() {
+        return new MeetingMetadata("1", "Sprint planning", "dana@example.com",
+                Instant.parse("2026-10-11T09:00:00Z"), Instant.parse("2026-10-11T09:30:00Z"),
+                List.of(new ParticipantActivity("a", "Dana Levi", null, null),
+                        new ParticipantActivity("b", "Yossi Cohen", null, null)));
+    }
+
+    private static final class RecordingChatClient implements ChatCompletionClient {
+        String reply;
+        String systemPrompt;
+        String userText;
+        List<byte[]> images;
+        int calls;
+
+        @Override
+        public String complete(String systemPrompt, String userText, List<byte[]> pngImages) {
+            this.systemPrompt = systemPrompt;
+            this.userText = userText;
+            this.images = pngImages;
+            calls++;
+            return reply;
+        }
+    }
+}
