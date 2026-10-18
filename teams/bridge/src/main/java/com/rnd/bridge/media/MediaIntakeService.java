@@ -3,16 +3,23 @@ package com.rnd.bridge.media;
 import com.rnd.bridge.raw.model.ChangeType;
 import com.rnd.bridge.raw.model.Modality;
 import com.rnd.bridge.raw.model.RawObjectEvent;
+import com.rnd.bridge.raw.model.RawObjectRef;
 import com.rnd.bridge.raw.model.RawSourceType;
+import com.rnd.bridge.raw.model.Role;
 import com.rnd.bridge.raw.model.ScopeDecision;
 import com.rnd.bridge.storage.ObjectStorageClient;
 import com.rnd.bridge.storage.ObjectStorageClient.PutResult;
 import com.rnd.bridge.storage.ObjectTags;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Service;
 
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
+import java.util.HexFormat;
+import java.util.List;
 import java.util.UUID;
 
 /**
@@ -30,25 +37,27 @@ public class MediaIntakeService {
     private static final DateTimeFormatter DATE_FORMAT =
             DateTimeFormatter.ofPattern("yyyy-MM-dd").withZone(ZoneOffset.UTC);
 
-    // Mind's confirmed RawObjectEvent contract requires attachment_index; 0 marks a
-    // standalone item (this lane never splits one source item into a body + attachments).
-    private static final int ATTACHMENT_INDEX_STANDALONE = 0;
-
-    // This lane never splits a logical item into body + attachments and never republishes
-    // an existing correlationId, so attachmentCount/revision are always 0 and changeType is
-    // always UPSERT - see RawObjectEvent's javadoc.
-    private static final int ATTACHMENT_COUNT_STANDALONE = 0;
+    // This lane never republishes an existing correlationId (no edit/resync path), so
+    // revision is always 0 and changeType is always UPSERT - see RawObjectEvent's javadoc.
     private static final int REVISION_INITIAL = 0;
 
     private final ObjectStorageClient storageClient;
 
-    public MediaIntakeService(ObjectStorageClient storageClient) {
+    public MediaIntakeService(@Qualifier("minioObjectStorageClient") ObjectStorageClient storageClient) {
         this.storageClient = storageClient;
     }
 
+    /**
+     * Lands the primary recording/scanned-doc file and builds the one RawObjectEvent for this
+     * logical item - its object list is [primary ref] or [primary ref, transcriptRef] when a
+     * sidecar transcript was landed first (see {@link #landTranscript}). Never publishes a
+     * partial object list: this method only runs after any transcript sidecar has already
+     * landed successfully (see MediaIntakeOrchestrator.upload's call order), so transcriptRef
+     * is either a fully-landed ref or null, never a half-landed one.
+     */
     public RawObjectEvent land(byte[] content, String contentHash, String filename, String tenantId,
                                 RawSourceType sourceType, Modality modality, Instant ingestedAt,
-                                String transcriptObjectKey) {
+                                RawObjectRef transcriptRef) {
         String contentType = guessContentType(extractExtension(filename));
         String objectKey = buildObjectKey(sourceType, tenantId, ingestedAt, extractExtension(filename));
 
@@ -56,22 +65,27 @@ public class MediaIntakeService {
                 objectKey, content, contentType,
                 ObjectTags.of(sourceType, tenantId, ingestedAt, ScopeDecision.INCLUDED));
 
+        RawObjectRef primaryRef = new RawObjectRef(
+                sourceType == RawSourceType.MEETING ? Role.RECORDING : Role.BODY,
+                objectKey, contentHash, putResult.contentType(), putResult.sizeBytes(), modality);
+        List<RawObjectRef> objects = transcriptRef == null
+                ? List.of(primaryRef)
+                : List.of(primaryRef, transcriptRef);
+
         return RawObjectEvent.create(
-                objectKey, sourceType, tenantId, ingestedAt, ScopeDecision.INCLUDED, contentHash,
-                modality, null, putResult.contentType(), putResult.sizeBytes(), transcriptObjectKey,
-                null, null, ATTACHMENT_INDEX_STANDALONE, ATTACHMENT_COUNT_STANDALONE, REVISION_INITIAL,
-                ChangeType.UPSERT);
+                sourceType, tenantId, ingestedAt, ScopeDecision.INCLUDED, null, null,
+                UUID.randomUUID().toString(), REVISION_INITIAL, ChangeType.UPSERT, objects);
     }
 
     /**
      * Lands a platform-generated transcript sidecar file (see
      * MediaIntakeOrchestrator.findTranscript) under the same source_type/tenant/date
-     * partition as its recording, tagged the same way. No RawObjectEvent/publish of its
-     * own - it's referenced from the recording's event via transcriptObjectKey, per Mind's
-     * confirmed contract ("MinIO pointer to a platform-generated transcript").
+     * partition as its recording, tagged the same way, and returns the RawObjectRef
+     * (role=TRANSCRIPT) for it - the caller passes this into {@link #land} so the recording's
+     * event object list includes it, instead of a separate transcript_object_key field.
      */
-    public String landTranscript(byte[] content, String filename, String tenantId,
-                                  RawSourceType sourceType, Instant ingestedAt) {
+    public RawObjectRef landTranscript(byte[] content, String filename, String tenantId,
+                                        RawSourceType sourceType, Instant ingestedAt) {
         String extension = extractExtension(filename);
         String contentType = switch (extension.toLowerCase()) {
             case ".vtt" -> "text/vtt";
@@ -80,11 +94,22 @@ public class MediaIntakeService {
         };
         String objectKey = buildObjectKey(sourceType, tenantId, ingestedAt, extension);
 
-        storageClient.putObject(
+        PutResult putResult = storageClient.putObject(
                 objectKey, content, contentType,
                 ObjectTags.of(sourceType, tenantId, ingestedAt, ScopeDecision.INCLUDED));
 
-        return objectKey;
+        return new RawObjectRef(
+                Role.TRANSCRIPT, objectKey, sha256Hex(content), putResult.contentType(),
+                putResult.sizeBytes(), Modality.TEXT);
+    }
+
+    private String sha256Hex(byte[] content) {
+        try {
+            MessageDigest sha256 = MessageDigest.getInstance("SHA-256");
+            return "sha256:" + HexFormat.of().formatHex(sha256.digest(content));
+        } catch (NoSuchAlgorithmException e) {
+            throw new IllegalStateException("SHA-256 not available", e);
+        }
     }
 
     private String buildObjectKey(RawSourceType sourceType, String tenantId, Instant ingestedAt, String extension) {

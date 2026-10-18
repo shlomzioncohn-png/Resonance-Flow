@@ -3,104 +3,65 @@ package com.rnd.bridge.intake.lane;
 import com.rnd.bridge.core.PayloadMapper;
 import com.rnd.bridge.core.error.LaneException;
 import com.rnd.bridge.intake.model.SourceRecord;
-import com.rnd.bridge.intake.service.IntakeLandingService;
-import com.rnd.bridge.raw.model.Modality;
+import com.rnd.bridge.intake.service.SourceRecordRefMapper;
 import com.rnd.bridge.raw.model.RawObjectEvent;
+import com.rnd.bridge.raw.model.RawObjectRef;
 import com.rnd.bridge.raw.model.ScopeDecision;
 import com.rnd.bridge.scoping.AllowlistScopingFilter;
-import com.rnd.bridge.storage.ObjectKeyBuilder;
-import java.security.MessageDigest;
-import java.security.NoSuchAlgorithmException;
 import java.time.Instant;
+import java.util.List;
 
 /**
- * Maps a SourceRecord to the RawObjectEvent that gets published, carrying over
- * contentHash/modality derivation verbatim from the old PointerEventPublisher (no behavior
- * change). A pure transform - no I/O: contentType/sizeBytes are computed from the record
- * itself ({@link IntakeLandingService#resolveContentType} is a pure function, and sizeBytes
- * is just the raw content's length), so they don't need to wait on the actual MinIO put.
- * Landing the bytes is a separate side effect - see {@link UnstructuredIntakeLane#afterMap}.
- * revision is carried straight through from record.revision() (see RawObjectEvent's javadoc);
- * changeType is carried straight through from record.changeType() too - every source except
- * Calendar's cancelled-event path only ever produces UPSERT (SourceRecord's convenience
- * constructor defaults to it), so this mapper stays a pure pass-through rather than deciding
- * changeType itself. See RealCalendarSourceReader.toCancelledSourceRecord for the one case that
- * sets DELETE_REVIEW.
+ * Maps one correlationId-group of SourceRecords (a logical item's body/transcript plus every
+ * attachment - see SourceRecordGrouper) to the single RawObjectEvent published for it, one
+ * RawObjectRef per record via SourceRecordRefMapper. A pure transform - no I/O: landing the
+ * actual bytes is a separate side effect per record, done afterward in lockstep with this
+ * event's objects list (see UnstructuredIntakeLane#afterMap).
+ * The group's outer fields (sourceType/tenantId/correlationId/revision/changeType/participants/
+ * sourceTimestamp) all come from the group's primary record - the body/transcript
+ * (attachmentIndex() == 0) - since every record in a correlationId-group shares them by
+ * construction (see SourceRecord's javadoc) except scopeDecision, which has no per-record
+ * equivalent on the wire anymore: the whole logical item's scope is decided from its primary
+ * record's content, not voted on attachment-by-attachment.
  * Failures are wrapped in LaneException: AbstractIntakeLane's template method only catches
  * LaneException per record, so an unwrapped RuntimeException here would abort the whole run
  * instead of being recorded and skipped.
  */
-final class UnstructuredPayloadMapper implements PayloadMapper<SourceRecord, RawObjectEvent> {
+final class UnstructuredPayloadMapper implements PayloadMapper<List<SourceRecord>, RawObjectEvent> {
 
     private final AllowlistScopingFilter scopingFilter;
-    private final ObjectKeyBuilder objectKeyBuilder;
-    private final IntakeLandingService landingService;
+    private final SourceRecordRefMapper refMapper;
 
-    UnstructuredPayloadMapper(
-            AllowlistScopingFilter scopingFilter,
-            ObjectKeyBuilder objectKeyBuilder,
-            IntakeLandingService landingService) {
+    UnstructuredPayloadMapper(AllowlistScopingFilter scopingFilter, SourceRecordRefMapper refMapper) {
         this.scopingFilter = scopingFilter;
-        this.objectKeyBuilder = objectKeyBuilder;
-        this.landingService = landingService;
+        this.refMapper = refMapper;
     }
 
     @Override
-    public RawObjectEvent map(SourceRecord record, Instant ingestedAt) {
+    public RawObjectEvent map(List<SourceRecord> group, Instant ingestedAt) {
+        SourceRecord primary = primaryOf(group);
         try {
-            ScopeDecision scopeDecision = scopingFilter.decide(record);
-            String objectKey = objectKeyBuilder.build(record, ingestedAt);
-            String contentType = landingService.resolveContentType(record, objectKey);
+            ScopeDecision scopeDecision = scopingFilter.decide(primary);
+            List<RawObjectRef> objects = group.stream().map(record -> refMapper.toRef(record, ingestedAt)).toList();
 
             return RawObjectEvent.create(
-                    objectKey,
-                    record.sourceType(),
-                    record.tenantId(),
+                    primary.sourceType(),
+                    primary.tenantId(),
                     ingestedAt,
                     scopeDecision,
-                    computeContentHash(record),
-                    deriveModality(record),
-                    record.participants(),
-                    contentType,
-                    (long) record.rawContent().length,
-                    record.occurredAt(),
-                    record.correlationId(),
-                    record.attachmentIndex(),
-                    record.attachmentCount(),
-                    record.revision(),
-                    record.changeType());
+                    primary.participants(),
+                    primary.occurredAt(),
+                    primary.correlationId(),
+                    primary.revision(),
+                    primary.changeType(),
+                    objects);
         } catch (RuntimeException e) {
             throw new LaneException(
-                    "Failed to map sourceType=" + record.sourceType() + " naturalId=" + record.naturalId(), e);
+                    "Failed to map sourceType=" + primary.sourceType() + " correlationId=" + primary.correlationId(), e);
         }
     }
 
-    private String computeContentHash(SourceRecord record) {
-        byte[] content = record.rawContent();
-        try {
-            MessageDigest digest = MessageDigest.getInstance("SHA-256");
-            byte[] hash = digest.digest(content);
-            StringBuilder hex = new StringBuilder("sha256:");
-            for (byte b : hash) {
-                hex.append(String.format("%02x", b));
-            }
-            return hex.toString();
-        } catch (NoSuchAlgorithmException e) {
-            throw new IllegalStateException("SHA-256 not available", e);
-        }
-    }
-
-    private Modality deriveModality(SourceRecord record) {
-        String mimeType = record.mimeType();
-        if (mimeType == null) {
-            return Modality.TEXT;
-        }
-        if (mimeType.startsWith("audio/")) {
-            return Modality.AUDIO;
-        }
-        if (mimeType.startsWith("image/") || mimeType.equals("application/pdf")) {
-            return Modality.SCANNED_DOC;
-        }
-        return Modality.TEXT;
+    static SourceRecord primaryOf(List<SourceRecord> group) {
+        return group.stream().filter(record -> record.attachmentIndex() == 0).findFirst().orElse(group.get(0));
     }
 }

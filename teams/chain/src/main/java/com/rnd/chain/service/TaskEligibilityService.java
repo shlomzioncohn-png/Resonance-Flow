@@ -41,17 +41,20 @@ public class TaskEligibilityService {
     private final TaskDependencyRepository taskDependencyRepository;
     private final GraphLock graphLock;
     private final TaskCounterUpdater taskCounterUpdater;
+    private final TaskStateHistoryRecorder historyRecorder;
 
     public TaskEligibilityService(
             TaskRepository taskRepository,
             TaskDependencyRepository taskDependencyRepository,
             GraphLock graphLock,
-            TaskCounterUpdater taskCounterUpdater) {
+            TaskCounterUpdater taskCounterUpdater,
+            TaskStateHistoryRecorder historyRecorder) {
 
         this.taskRepository = taskRepository;
         this.taskDependencyRepository = taskDependencyRepository;
         this.graphLock = graphLock;
         this.taskCounterUpdater = taskCounterUpdater;
+        this.historyRecorder = historyRecorder;
     }
 
     @Transactional
@@ -102,7 +105,7 @@ public class TaskEligibilityService {
             TaskStatus previousStatus =
                     previous.get().getStatus();
 
-            taskCounterUpdater.recordStatusChange(taskId, previousStatus, newStatus);
+            historyRecorder.recordStatusChange(taskId, previousStatus, newStatus);
 
             if (previousStatus != TaskStatus.DONE
                     && newStatus == TaskStatus.DONE) {
@@ -163,7 +166,7 @@ public class TaskEligibilityService {
             TaskCounterUpdater.requireUpdated(taskRepository.update(taskId, task ->
                     TaskCounterUpdater.copyOf(task).status(newStatus).updatedAt(eventUpdatedAt)
                             .tenantId(tenantId).build()), taskId);
-            taskCounterUpdater.recordStatusChange(taskId, previousStatus, newStatus);
+            historyRecorder.recordStatusChange(taskId, previousStatus, newStatus);
 
             if (previousStatus != TaskStatus.DONE && newStatus == TaskStatus.DONE) {
                 adjustDependentsBlockingCount(taskId, -1);
@@ -198,7 +201,7 @@ public class TaskEligibilityService {
             log.info("Task {} completed", taskId);
             TaskCounterUpdater.requireUpdated(taskRepository.update(taskId, task ->
                     TaskCounterUpdater.copyOf(task).status(TaskStatus.DONE).build()), taskId);
-            taskCounterUpdater.recordStatusChange(taskId, current.getStatus(), TaskStatus.DONE);
+            historyRecorder.recordStatusChange(taskId, current.getStatus(), TaskStatus.DONE);
             adjustDependentsBlockingCount(taskId, -1);
         });
     }
@@ -227,7 +230,7 @@ public class TaskEligibilityService {
         // isReady did - recomputePriorityScoreAndPublish decides whether that warrants a publish.
         for (Task task : updated) {
             Task before = previousById.get(task.getId());
-            taskCounterUpdater.recordBlockingTransition(
+            historyRecorder.recordBlockingTransition(
                     task.getId(), before.getBlockingCount(), task.getBlockingCount());
             taskCounterUpdater.recomputePriorityScoreAndPublish(task.getId(), previousById.get(task.getId()), task);
         }

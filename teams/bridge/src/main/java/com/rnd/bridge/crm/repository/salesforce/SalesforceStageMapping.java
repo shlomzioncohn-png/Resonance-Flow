@@ -1,6 +1,7 @@
 package com.rnd.bridge.crm.repository.salesforce;
 
 import com.rnd.bridge.crm.model.DealStage;
+import com.rnd.bridge.crm.repository.StageProbabilityBands;
 
 import java.util.HashMap;
 import java.util.List;
@@ -38,41 +39,12 @@ import java.util.Map;
  */
 final class SalesforceStageMapping {
 
-    private final int prospectMax;
-    private final int qualifiedMax;
-    private final int proposalMax;
-    private final int negotiationMax;
+    private static final String CONFIG_PREFIX = "bridge.crm.salesforce.stage-bands";
+
+    private final StageProbabilityBands bands;
 
     SalesforceStageMapping(int prospectMax, int qualifiedMax, int proposalMax, int negotiationMax) {
-        if (prospectMax < 0) {
-            throw new IllegalStateException(
-                    "bridge.crm.salesforce.stage-bands.prospect-max must be >= 0, was " + prospectMax);
-        }
-        if (qualifiedMax <= prospectMax) {
-            throw new IllegalStateException(
-                    "bridge.crm.salesforce.stage-bands.qualified-max (" + qualifiedMax
-                            + ") must be greater than prospect-max (" + prospectMax + ")");
-        }
-        if (proposalMax <= qualifiedMax) {
-            throw new IllegalStateException(
-                    "bridge.crm.salesforce.stage-bands.proposal-max (" + proposalMax
-                            + ") must be greater than qualified-max (" + qualifiedMax + ")");
-        }
-        if (negotiationMax <= proposalMax) {
-            throw new IllegalStateException(
-                    "bridge.crm.salesforce.stage-bands.negotiation-max (" + negotiationMax
-                            + ") must be greater than proposal-max (" + proposalMax + ")");
-        }
-        if (negotiationMax != 99) {
-            throw new IllegalStateException(
-                    "bridge.crm.salesforce.stage-bands.negotiation-max must be exactly 99, so the bands "
-                            + "cover the full 0-99 probability range with no gap at the top - was "
-                            + negotiationMax);
-        }
-        this.prospectMax = prospectMax;
-        this.qualifiedMax = qualifiedMax;
-        this.proposalMax = proposalMax;
-        this.negotiationMax = negotiationMax;
+        this.bands = new StageProbabilityBands(CONFIG_PREFIX, prospectMax, qualifiedMax, proposalMax, negotiationMax);
     }
 
     /**
@@ -103,16 +75,7 @@ final class SalesforceStageMapping {
         if (probability == null) {
             return DealStage.PROSPECT;
         }
-        if (probability <= prospectMax) {
-            return DealStage.PROSPECT;
-        }
-        if (probability <= qualifiedMax) {
-            return DealStage.QUALIFIED;
-        }
-        if (probability <= proposalMax) {
-            return DealStage.PROPOSAL;
-        }
-        return DealStage.NEGOTIATION;
+        return bands.forOpenStage(probability);
     }
 
     private static boolean truthy(Object raw) {
