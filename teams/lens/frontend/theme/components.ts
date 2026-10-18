@@ -81,6 +81,30 @@ export const components: Components<Theme> = {
       }),
     },
   },
+  // Shared look of every table (DataTable and raw MUI tables alike).
+  MuiTableCell: {
+    styleOverrides: {
+      root: ({ theme }) => ({
+        padding: theme.spacing(1.5, 2),
+        borderBottomColor: theme.palette.divider,
+      }),
+      head: ({ theme }) => ({
+        ...theme.typography.subtitle2,
+        color: theme.palette.text.secondary,
+        backgroundColor: theme.palette.grey[50],
+        whiteSpace: 'nowrap',
+      }),
+    },
+  },
+  MuiTableRow: {
+    styleOverrides: {
+      root: ({ theme }) => ({
+        '&.MuiTableRow-hover:hover': {
+          backgroundColor: theme.palette.action.hover,
+        },
+      }),
+    },
+  },
   MuiTooltip: {
     styleOverrides: {
       tooltip: ({ theme }) => ({

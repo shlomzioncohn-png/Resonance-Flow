@@ -2,10 +2,8 @@ package com.rnd.bridge.intake.service;
 
 import com.rnd.bridge.intake.config.ChatSessionProperties;
 import com.rnd.bridge.intake.lane.GroupStateStore;
-import com.rnd.bridge.intake.lane.UnstructuredIntakeLane;
 import com.rnd.bridge.intake.model.GroupState;
 import com.rnd.bridge.intake.model.MessageSnapshot;
-import com.rnd.bridge.intake.model.SourceRecord;
 import com.rnd.bridge.raw.model.RawSourceType;
 import java.time.Clock;
 import java.time.Duration;
@@ -47,22 +45,17 @@ public class SlackSessionScheduler {
     private final TaskScheduler taskScheduler;
     private final GroupStateStore groupStateStore;
     private final ChatSessionProperties properties;
-    private final ChatSourceRecordMapper chatSourceRecordMapper;
-    private final UnstructuredIntakeLane slackLane;
+    private final SlackSessionPublisher sessionPublisher;
     private final Clock clock;
     private final ConcurrentHashMap<GroupKey, ScheduledFuture<?>> registry = new ConcurrentHashMap<>();
 
     public SlackSessionScheduler(
             TaskScheduler taskScheduler, GroupStateStore groupStateStore, ChatSessionProperties properties,
-            ChatSourceRecordMapper chatSourceRecordMapper, List<UnstructuredIntakeLane> lanes, Clock clock) {
+            SlackSessionPublisher sessionPublisher, Clock clock) {
         this.taskScheduler = taskScheduler;
         this.groupStateStore = groupStateStore;
         this.properties = properties;
-        this.chatSourceRecordMapper = chatSourceRecordMapper;
-        this.slackLane = lanes.stream()
-                .filter(lane -> lane.sourceType() == RawSourceType.SLACK)
-                .findFirst()
-                .orElseThrow(() -> new IllegalStateException("No SLACK UnstructuredIntakeLane configured"));
+        this.sessionPublisher = sessionPublisher;
         this.clock = clock;
     }
 
@@ -112,7 +105,7 @@ public class SlackSessionScheduler {
             return;
         }
         GroupState state = maybeState.get();
-        if (state.published() || state.messages().isEmpty()) {
+        if (state.published() || state.superseded() || state.messages().isEmpty()) {
             registry.remove(key, myFuture);
             return;
         }
@@ -139,7 +132,20 @@ public class SlackSessionScheduler {
         }
 
         try {
-            publishTranscript(state);
+            // Reload fresh rather than publishing the snapshot loaded at the top of this method:
+            // GroupStateStore.recordLandedAttachment is deliberately not revision-guarded (see
+            // its javadoc), so an attachment can finish landing and be recorded on this exact
+            // group between that initial load and the claim succeeding above. Publishing the
+            // stale pre-claim state would silently omit any such attachment from the event, with
+            // no way to retry it once this group is confirmed published. Guarded on revision
+            // staying exactly what was claimed: if a concurrent edit already advanced past it (or
+            // the group vanished) between the claim and this reload, that edit's own
+            // scheduleOrReschedule call owns republishing the new revision - nothing to publish
+            // for this now-stale claim.
+            Optional<GroupState> freshState = groupStateStore.load(key.sourceType(), key.tenantId(), key.groupId());
+            if (freshState.isPresent() && freshState.get().revision() == state.revision()) {
+                sessionPublisher.publishSession(freshState.get(), clock.instant());
+            }
         } catch (RuntimeException e) {
             // A scheduled TaskScheduler Runnable's exception would otherwise only surface via
             // its (unread) Future, silently vanishing - caught here instead so the failure is at
@@ -150,26 +156,6 @@ public class SlackSessionScheduler {
             log.warn("Failed to publish Slack session transcript for group {}", key, e);
         } finally {
             registry.remove(key, myFuture);
-        }
-    }
-
-    /**
-     * Publishes ONLY the final transcript record through the existing Slack lane - map -> MinIO
-     * landing -> validate -> Kafka publish -> afterPublish -> confirmPublished, identical to
-     * every other caller of AbstractIntakeLane.run(Stream, Instant) (see
-     * SlackEventsController). newMessagesThisBatch is List.of() because this session's
-     * attachments were already published immediately when their owning message first arrived
-     * (see ChatGroupStateReconciler.reconcileNonThreadedMessage) - re-passing them here would
-     * duplicate them. With an empty newMessagesThisBatch, ChatSourceRecordMapper.toSourceRecords
-     * only ever emits the transcript record itself (attachmentIndex() == 0); the filter below is
-     * an explicit belt-and-suspenders check against that existing convention, not a new one.
-     */
-    private void publishTranscript(GroupState state) {
-        List<SourceRecord> transcriptOnly = chatSourceRecordMapper.toSourceRecords(state, List.of()).stream()
-                .filter(record -> record.attachmentIndex() == 0)
-                .toList();
-        if (!transcriptOnly.isEmpty()) {
-            slackLane.run(transcriptOnly.stream(), clock.instant());
         }
     }
 

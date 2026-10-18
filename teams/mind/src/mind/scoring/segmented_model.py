@@ -47,6 +47,13 @@ class TierRule:
     with no clamping: **the tier changes the weights, not the range.** Bands per
     tier were rejected deliberately — they would decide in advance that one kind
     of task always beats another, which is the very thing being tested.
+
+    The real requirement is on the **reachable** range, not on the sum. A weight
+    parked on a feature that can never leave 0 passes the sum check and still
+    shortens the scale: that is exactly what the removed `initiative` weight did
+    to this rule, which could only ever reach 0.95 while the other two reached
+    1.0 — quietly penalising strategic tasks wherever tiers compete directly.
+    `test_every_rule_can_reach_a_full_base_score` is what holds this now.
     """
 
     scale_hours: float
@@ -57,9 +64,9 @@ class TierRule:
 #: Weight rationale, in three strengths of justification (see README):
 #:
 #: *Derived from the issue's tier table* — the ordering. Deadline weight falls
-#: across the tiers (.65 > .40 > .20) because deadline proximity is "the
+#: across the tiers (.65 > .40 > .21) because deadline proximity is "the
 #: dominant signal" operationally, "matters but less sharply" tactically and
-#: "matters least" strategically; impact rises (.25 < .55 < .75) as its mirror.
+#: "matters least" strategically; impact rises (.25 < .55 < .79) as its mirror.
 #: The two cross exactly once, between operational and tactical — that crossing
 #: *is* the segmentation. At operational, .65 > .35 makes deadline dominant in
 #: the strong sense: it outweighs everything else combined.
@@ -68,12 +75,28 @@ class TierRule:
 #: `effort_estimate` is Chain's input and a correct answer may never hinge on
 #: it; at these weights it can only break a near-tie. It is dropped entirely at
 #: strategic, where a 40-minute item is not a "quick win" in any useful sense.
-#: `initiative` takes the smallest non-zero weight the model has, matching the
-#: issue's "weak signal".
 #:
-#: *Calibrated on the 20 dev scenarios only* — the exact decimals and the
-#: scale_hours/missing_deadline values. The 10 holdout scenarios were not used
-#: to choose any number here.
+#: *Not here at all* — hierarchy. The strategic rule briefly carried a .05
+#: `initiative` weight on "does this task have a parent". It was removed at the
+#: team lead's request: in a real company almost every task sits under one, so
+#: the signal is close to information-free, and it was never measured anyway —
+#: `parent_task_id` was null in every scenario, so the feature always returned
+#: 0 and the .05 was reasoned, not calibrated. Keeping the baseline ignorant of
+#: hierarchy is also what makes week 7's propagation stretch measurable: the
+#: comparison answers "did hierarchy help" only if the baseline never saw it.
+#: Its .05 was redistributed between the two remaining weights in proportion
+#: (.20/.95 and .75/.95), so neither was re-chosen.
+#:
+#: *Calibrated on the dev split only* — the operational and tactical decimals,
+#: and every scale_hours/missing_deadline value. Chosen against the 20 dev
+#: scenarios of the original 20/10 split; the set is 36 and the split 24/12
+#: since #535, and no number here was revisited against the larger one. No
+#: holdout scenario was used to choose any of them.
+#:
+#: *Derived, not calibrated* — the strategic pair, .21 and .79. They are
+#: .20/.95 and .75/.95, the renormalisation described above, and they were
+#: never fitted to anything: the dev result is identical before and after the
+#: change that produced them (20/24 either way).
 TIER_RULES: dict[Tier, TierRule] = {
     # Hours are the unit of the working day: a deadline 8 hours out is half-pressing.
     # No deadline reads as low pressure — operational work that nobody dated is
@@ -95,7 +118,7 @@ TIER_RULES: dict[Tier, TierRule] = {
     "strategic": TierRule(
         scale_hours=336.0,
         missing_deadline=0.50,
-        weights={Factor.TIME_PRESSURE: 0.20, Factor.IMPACT: 0.75, Factor.INITIATIVE: 0.05},
+        weights={Factor.TIME_PRESSURE: 0.21, Factor.IMPACT: 0.79},
     ),
 }
 
@@ -123,7 +146,6 @@ _FACTOR_PHRASING: dict[Factor, str] = {
     Factor.TIME_PRESSURE: "how soon this has to happen",
     Factor.IMPACT: "who is affected and how badly",
     Factor.QUICK_WIN: "how quickly it can be cleared",
-    Factor.INITIATIVE: "sitting inside a larger initiative",
 }
 
 
@@ -148,7 +170,6 @@ class SegmentedRankingModel:
             ),
             Factor.IMPACT: features.impact(task),
             Factor.QUICK_WIN: features.quick_win(task),
-            Factor.INITIATIVE: features.belongs_to_initiative(task),
         }
 
         # Only this tier's features contribute; the others are not part of its

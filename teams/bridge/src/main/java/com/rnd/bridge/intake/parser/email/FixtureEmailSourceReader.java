@@ -6,6 +6,7 @@ import static com.rnd.bridge.intake.parser.FixtureIoSupport.textOrNull;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.rnd.bridge.core.ReadCursor;
 import com.rnd.bridge.intake.model.SourceRecord;
 import com.rnd.bridge.raw.model.RawSourceType;
 import java.nio.charset.StandardCharsets;
@@ -32,7 +33,7 @@ public class FixtureEmailSourceReader implements EmailSourceReader {
     }
 
     @Override
-    public List<SourceRecord> read() {
+    public EmailReadResult read(ReadCursor cursor) {
         List<SourceRecord> records = new ArrayList<>();
         for (JsonNode node : readJson(objectMapper, FIXTURE_ROOT + "gmail-sample.json")) {
             String from = node.get("from").asText();
@@ -63,6 +64,6 @@ public class FixtureEmailSourceReader implements EmailSourceReader {
                 }
             }
         }
-        return records;
+        return new EmailReadResult(records, null);
     }
 }

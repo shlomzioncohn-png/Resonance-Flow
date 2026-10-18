@@ -1,6 +1,7 @@
 package com.rnd.bridge.intake.model;
 
 import com.rnd.bridge.raw.model.ChangeType;
+import com.rnd.bridge.raw.model.RawObjectRef;
 import com.rnd.bridge.raw.model.RawSourceType;
 import java.time.Instant;
 import java.util.List;
@@ -32,13 +33,13 @@ import java.util.List;
  * attachmentFileId is Slack's own stable per-file id (see ChatMessage.Attachment.fileId) -
  * null for a body/transcript record, for any non-Slack attachment, and for a Slack attachment
  * from a source with no such id. It is Bridge-internal bookkeeping only (like sourceMessageIds
- * below), never mapped onto RawObjectEvent/the wire: UnstructuredIntakeLane.afterPublish reads
- * it (together with sourceMessageIds) to tell GroupStateStore.confirmAttachmentPublished exactly
- * which attachment a given Kafka publish was for, so a later retry/edit of the same message can
- * recognize this specific attachment was already published and skip republishing it - see
- * MessageSnapshot.confirmedAttachmentFileIds. Deliberately NOT attachmentIndex (below), whose
- * job is purely to keep this record's object key unique among sibling attachments - a position
- * can shift if an edit reorders or drops a file, but a fileId never does.
+ * below), never mapped onto RawObjectEvent/the wire: SlackEventsController's real-time path
+ * reads it (together with sourceMessageIds) to tell GroupStateStore.recordLandedAttachment
+ * exactly which attachment was just landed to MinIO, so a later retry/edit of the same message
+ * can recognize this specific attachment was already landed and skip re-landing it - see
+ * MessageSnapshot.landedAttachments. Deliberately NOT attachmentIndex (below), whose job is
+ * purely to keep this record's object key unique among sibling attachments - a position can
+ * shift if an edit reorders or drops a file, but a fileId never does.
  * attachmentIndex is 0 for body/transcript records, 1-based for attachment records (the
  * position of this attachment among its siblings sharing the same correlationId).
  * ObjectKeyBuilder includes it in the object key so two attachments on the same message
@@ -47,8 +48,9 @@ import java.util.List;
  * attachmentCount is the total number of attachment records sharing this record's
  * correlationId (never counting the body/transcript itself) — 0 for a logical item with no
  * attachments. Every record split off the same logical item (the body and every attachment)
- * carries the same value, verbatim onto RawObjectEvent.attachmentCount() by
- * UnstructuredPayloadMapper — see RawObjectEvent's javadoc for the wire-facing side of this.
+ * carries the same value - Bridge-internal bookkeeping only now (e.g. ChatGroupStateReconciler's
+ * cross-run accumulation); the wire no longer carries a separate attachment_count field, since
+ * RawObjectEvent.objects()'s own size is the attachment count Mind sees.
  * sourceMessageIds is the stable per-message id(s) (ChatMessage.id — Slack's ts) of the raw
  * chat messages this record was built from: every message in the session for a transcript
  * record, or the single owning message for an attachment record. Empty (never null) for
@@ -57,11 +59,12 @@ import java.util.List;
  * edit/delete handling (see Bridge issue #264), not a schema or contract change.
  * revision is the persisted GroupState's revision this record's content represents (see
  * ChatGroupStateReconciler) — 0 for every non-chat source. UnstructuredIntakeLane.afterPublish
- * reads it off this record (not off RawObjectEvent) to tell GroupStateStore.confirmPublished
- * exactly which revision a given Kafka ack belongs to; without it, a stale ack for a
- * since-superseded revision could incorrectly mark the group's newer, not-yet-actually-published
- * content as confirmed. Also mapped verbatim onto RawObjectEvent.revision() by
- * UnstructuredPayloadMapper — see RawObjectEvent's javadoc for the wire-facing side of this.
+ * reads it off the group's primary record (not off RawObjectEvent) to tell
+ * GroupStateStore.confirmPublished exactly which revision a given Kafka ack belongs to; without
+ * it, a stale ack for a since-superseded revision could incorrectly mark the group's newer,
+ * not-yet-actually-published content as confirmed. Also mapped verbatim onto
+ * RawObjectEvent.revision() by UnstructuredPayloadMapper — see RawObjectEvent's javadoc for the
+ * wire-facing side of this.
  * changeType is mapped verbatim onto RawObjectEvent.changeType() by UnstructuredPayloadMapper —
  * UPSERT for every source/case except one: a cancelled Google Calendar event (event.status ==
  * "cancelled"), which RealCalendarSourceReader.toCancelledSourceRecord builds with
@@ -83,6 +86,14 @@ import java.util.List;
  * silently break for a thread's root message, which GroupStateStore.writeMessageIndex deliberately
  * never indexes (see its javadoc) - see ChatGroupStateReconcilerTest/ChatEditWireContractTest for
  * the regression this was fixed for.
+ * precomputedRef is non-null only for a carried-forward attachment record whose bytes were
+ * already landed to MinIO under a DIFFERENT group before this record was built (today: a thread-
+ * root migration's own already-landed attachments - see ChatSourceRecordMapper.toSourceRecords
+ * (GroupState, List) and ChatGroupStateReconciler.newThreadGroupState). For such a record,
+ * rawContent is unused filler (there is nothing left to land - the object already exists under
+ * precomputedRef.objectKey()): SourceRecordRefMapper.toRef returns precomputedRef verbatim instead
+ * of recomputing a ref from rawContent, and UnstructuredIntakeLane.afterMap skips landing it
+ * entirely. Null for every ordinary record, which is landed/ref'd fresh as always.
  */
 public record SourceRecord(
         RawSourceType sourceType,
@@ -103,7 +114,8 @@ public record SourceRecord(
         List<String> sourceMessageIds,
         int revision,
         ChangeType changeType,
-        String groupId) {
+        String groupId,
+        RawObjectRef precomputedRef) {
 
     /** Convenience constructor for every case except a Slack attachment record (which needs
      * attachmentFileId - see below) and Calendar's cancellation path - defaults attachmentFileId
@@ -128,7 +140,7 @@ public record SourceRecord(
             int revision) {
         this(sourceType, tenantId, naturalId, correlationId, occurredAt, sender, participants, subject, body,
                 rawContent, mimeType, attachmentFilename, null, attachmentIndex, attachmentCount, sourceMessageIds,
-                revision, ChangeType.UPSERT, null);
+                revision, ChangeType.UPSERT, null, null);
     }
 
     /** Convenience constructor for Calendar's cancellation path - same attachmentFileId/groupId
@@ -154,7 +166,7 @@ public record SourceRecord(
             ChangeType changeType) {
         this(sourceType, tenantId, naturalId, correlationId, occurredAt, sender, participants, subject, body,
                 rawContent, mimeType, attachmentFilename, null, attachmentIndex, attachmentCount, sourceMessageIds,
-                revision, changeType, null);
+                revision, changeType, null, null);
     }
 
     /** Convenience constructor for a chat transcript record built from a persisted GroupState -
@@ -180,7 +192,7 @@ public record SourceRecord(
             String groupId) {
         this(sourceType, tenantId, naturalId, correlationId, occurredAt, sender, participants, subject, body,
                 rawContent, mimeType, attachmentFilename, null, attachmentIndex, attachmentCount, sourceMessageIds,
-                revision, ChangeType.UPSERT, groupId);
+                revision, ChangeType.UPSERT, groupId, null);
     }
 
     /** Convenience constructor for a Slack attachment record built from a persisted GroupState -
@@ -208,6 +220,32 @@ public record SourceRecord(
             String groupId) {
         this(sourceType, tenantId, naturalId, correlationId, occurredAt, sender, participants, subject, body,
                 rawContent, mimeType, attachmentFilename, attachmentFileId, attachmentIndex, attachmentCount,
-                sourceMessageIds, revision, ChangeType.UPSERT, groupId);
+                sourceMessageIds, revision, ChangeType.UPSERT, groupId, null);
+    }
+
+    /** Convenience constructor for a carried-forward, already-landed attachment record (see
+     * precomputedRef's javadoc) - the one case that needs a non-null precomputedRef, always
+     * UPSERT (a migrated root's attachment is never itself a Calendar cancellation). */
+    public SourceRecord(
+            RawSourceType sourceType,
+            String tenantId,
+            String naturalId,
+            String correlationId,
+            Instant occurredAt,
+            String sender,
+            List<String> participants,
+            String subject,
+            String body,
+            byte[] rawContent,
+            String attachmentFileId,
+            int attachmentIndex,
+            int attachmentCount,
+            List<String> sourceMessageIds,
+            int revision,
+            String groupId,
+            RawObjectRef precomputedRef) {
+        this(sourceType, tenantId, naturalId, correlationId, occurredAt, sender, participants, subject, body,
+                rawContent, null, null, attachmentFileId, attachmentIndex, attachmentCount, sourceMessageIds,
+                revision, ChangeType.UPSERT, groupId, precomputedRef);
     }
 }

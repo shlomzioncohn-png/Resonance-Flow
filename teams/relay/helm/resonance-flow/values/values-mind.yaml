@@ -8,23 +8,6 @@ components:
       pullPolicy: Never
   schema-registry:
     enabled: true
-  lens-bff:
-    enabled: false
-  bridge:
-    enabled: false
-  lens-frontend:
-    enabled: false
-  lens-storybook:
-    enabled: false
-  chain:
-    enabled: false
-  inbox:
-    enabled: false
-  lens-gateway:
-    enabled: false
-  notification-delivery:
-    enabled: false
-
 kafka:
   enabled: true
   image:
