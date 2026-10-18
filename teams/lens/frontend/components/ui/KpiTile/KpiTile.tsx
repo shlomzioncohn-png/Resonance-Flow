@@ -1,10 +1,65 @@
 'use client';
 
+import ArrowDownwardIcon from '@mui/icons-material/ArrowDownward';
+import ArrowUpwardIcon from '@mui/icons-material/ArrowUpward';
+import RemoveIcon from '@mui/icons-material/Remove';
+import Box from '@mui/material/Box';
 import Card from '@mui/material/Card';
 import Stack from '@mui/material/Stack';
 import Typography from '@mui/material/Typography';
 import { useTheme } from '@mui/material/styles';
 import type { StatusTone } from '../StatusBadge';
+
+export interface KpiTrend {
+  /** Change vs the previous period, in percent: 8 means +8%, -3 means -3%. */
+  delta: number;
+  /**
+   * Which direction is an improvement. Defaults to 'up'. Use 'down' for
+   * counts where less is better, e.g. blocked tasks.
+   */
+  goodDirection?: 'up' | 'down';
+}
+
+/** Hides text visually but keeps it for screen readers. */
+const srOnly = {
+  position: 'absolute',
+  width: 1,
+  height: 1,
+  overflow: 'hidden',
+  clip: 'rect(0 0 0 0)',
+  whiteSpace: 'nowrap',
+} as const;
+
+function TrendIndicator({ delta, goodDirection = 'up' }: KpiTrend) {
+  const theme = useTheme();
+  const direction = delta > 0 ? 'up' : delta < 0 ? 'down' : 'flat';
+  const color =
+    direction === 'flat'
+      ? theme.palette.text.secondary
+      : direction === goodDirection
+        ? theme.palette.status.healthy.text
+        : theme.palette.status.critical.text;
+  const Icon =
+    direction === 'up' ? ArrowUpwardIcon : direction === 'down' ? ArrowDownwardIcon : RemoveIcon;
+  const percent = Math.abs(delta);
+  const spokenText =
+    direction === 'flat'
+      ? 'No change from previous period'
+      : `${direction === 'up' ? 'Up' : 'Down'} ${percent}% from previous period`;
+
+  return (
+    <Stack direction="row" spacing={0.5} sx={{ alignItems: 'center', color }}>
+      <Icon fontSize="small" aria-hidden />
+      <Typography variant="body2" component="span" sx={{ fontWeight: 600 }} aria-hidden>
+        {direction === 'up' ? '+' : direction === 'down' ? '−' : ''}
+        {percent}%
+      </Typography>
+      <Box component="span" sx={srOnly}>
+        {spokenText}
+      </Box>
+    </Stack>
+  );
+}
 
 export interface KpiTileProps {
   /** Raw count or pre-formatted text, e.g. 12, "1,284" or "3.2d". */
@@ -18,18 +73,23 @@ export interface KpiTileProps {
   tone: StatusTone;
   /** Secondary text shown under the label, e.g. "Last 7 days". */
   subtitle?: string;
+  /** Change vs the previous period, shown next to the value. */
+  trend?: KpiTrend;
 }
 
-export default function KpiTile({ value, label, tone, subtitle }: KpiTileProps) {
+export default function KpiTile({ value, label, tone, subtitle, trend }: KpiTileProps) {
   const theme = useTheme();
   const color = tone === 'neutral' ? theme.palette.text.primary : theme.palette.status[tone].main;
 
   return (
     <Card sx={{ px: 3, py: 2.5, flex: 1 }}>
       <Stack spacing={0.5}>
-        <Typography variant="h3" component="p" sx={{ fontWeight: 700, color }}>
-          {value}
-        </Typography>
+        <Stack direction="row" spacing={1.5} sx={{ alignItems: 'baseline' }}>
+          <Typography variant="h3" component="p" sx={{ fontWeight: 700, color }}>
+            {value}
+          </Typography>
+          {trend && <TrendIndicator {...trend} />}
+        </Stack>
         <Typography variant="body2" color="text.secondary">
           {label}
         </Typography>
