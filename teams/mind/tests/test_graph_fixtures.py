@@ -133,6 +133,7 @@ def test_the_cycle_fixture_is_genuinely_cyclic(fixtures):
     cyclic -- catches an author mistake that left it acyclic by accident,
     which would make the whole fixture pointless."""
     cycle = next(f for f in fixtures if f.name == "cycle")
+    assert cycle.leaf_ids(), "cycle fixture needs at least one leaf, or a leaf-starting walk never enters the loop"
     errors = validate_hierarchy_fixture(cycle.graph)
     assert errors
     assert any("cycle" in e for e in errors)
