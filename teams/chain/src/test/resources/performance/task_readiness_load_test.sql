@@ -100,25 +100,11 @@ ANALYZE task_constraint;
 -- Find all ready tasks directly from the source tables.
 EXPLAIN ANALYZE
 SELECT
-    t.id
-FROM task t
-WHERE t.deleted_at IS NULL
-  AND t.status <> 'DONE'
-  AND NOT EXISTS (
-      SELECT 1
-      FROM task_dependency td
-      JOIN task blocker
-        ON blocker.id = td.depends_on_task_id
-      WHERE td.task_id = t.id
-        AND blocker.deleted_at IS NULL
-        AND blocker.status <> 'DONE'
-  )
-  AND NOT EXISTS (
-      SELECT 1
-      FROM task_constraint tc
-      WHERE tc.task_id = t.id
-        AND tc.status = 'PENDING'
-  );
+    r.id
+FROM task_readiness r
+JOIN task t ON t.id = r.id
+WHERE r.is_ready = true
+  AND t.status <> 'DONE';
 
 
 -- Test 2:

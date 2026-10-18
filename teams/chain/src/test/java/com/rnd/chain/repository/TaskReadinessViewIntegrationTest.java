@@ -16,6 +16,7 @@ class TaskReadinessViewIntegrationTest {
 
     @Autowired
     private JdbcTemplate jdbcTemplate;
+    
 
     @Test
     void taskReadinessView_matchesStoredReadinessColumns() {
@@ -27,6 +28,9 @@ class TaskReadinessViewIntegrationTest {
         UUID doneBlockerId = UUID.randomUUID();
 
         UUID readyTaskId = UUID.randomUUID();
+        UUID doneTaskId = UUID.randomUUID();
+
+        insertTask(doneTaskId, tenantId, "DONE", true, 0, 0);
 
         // Task שאמורה להיות חסומה:
         // blocker פעיל אחד + constraint פתוח אחד.
@@ -111,6 +115,7 @@ class TaskReadinessViewIntegrationTest {
 
         assertViewMatchesStoredColumns(blockedTaskId);
         assertViewMatchesStoredColumns(readyTaskId);
+        assertViewMatchesStoredColumns(doneTaskId);
     }
 
     private void insertTask(

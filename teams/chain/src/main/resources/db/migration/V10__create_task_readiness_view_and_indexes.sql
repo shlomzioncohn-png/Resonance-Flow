@@ -39,8 +39,8 @@ SELECT
     ) AS is_ready
 
 FROM task t
-WHERE t.deleted_at IS NULL
-  AND t.status <> 'DONE';
+WHERE t.deleted_at IS NULL;
+
 
 
 CREATE INDEX idx_task_constraint_pending
