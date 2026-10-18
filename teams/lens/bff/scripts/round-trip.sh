@@ -32,8 +32,9 @@ kubectl run curl-seed -n "$NAMESPACE" --rm -i --restart=Never --image=curlimages
 "
 
 echo "==> Fetching it back through lens-bff (real InboxClient, not mock)"
+INSTANCE=$(kubectl get pod -n "$NAMESPACE" -l app.kubernetes.io/component=lens-bff -o jsonpath='{.items[0].metadata.labels.app\.kubernetes\.io/instance}')
 kubectl run curl-verify -n "$NAMESPACE" --restart=Never --image=curlimages/curl:latest \
-  --labels="app.kubernetes.io/component=lens-gateway,app.kubernetes.io/instance=resonance-flow,app.kubernetes.io/name=resonance-flow" \
+  --labels="app.kubernetes.io/component=lens-gateway,app.kubernetes.io/instance=${INSTANCE},app.kubernetes.io/name=resonance-flow" \
   --command -- sh -c "
   curl -sS --max-time 30 -w '\nHTTP_CODE:%{http_code}\n' 'http://resonance-flow-lens-bff:80/workspace/tasks?page=0&size=5' -H 'X-User-Id: ${USER_ID}'
 " >/dev/null
