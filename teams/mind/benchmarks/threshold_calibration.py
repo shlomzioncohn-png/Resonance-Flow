@@ -1,13 +1,7 @@
-"""Empirical calibration for dependency_match_threshold (#244) and
-duplicate_similarity_threshold (#471) -- against threshold_calibration_tasks.json,
-a hand-authored pool kept separate from eval/real_slice and eval/datasets on
-purpose (see that file's _comment -- avoids overlapping with R2/Michal's own
-evaluation data).
-
-Prints a score table for each calibration, suggests a threshold (the value
-that best separates true matches from everything else in this sample), and
-writes benchmarks/threshold_calibration_results.json so the numbers can be
-re-checked against real data later (week 8) without re-deriving the method.
+"""Empirical calibration for dependency_match_threshold (#244),
+duplicate_similarity_threshold (#471) and related_task_threshold (#472),
+against threshold_calibration_tasks.json (kept separate from
+eval/real_slice to avoid overlapping R2/Michal's own eval data).
 
 Run: python -m benchmarks.threshold_calibration
 """
@@ -42,12 +36,7 @@ DUPLICATE_CASES: list[tuple[str, str | None]] = [
     ("Publish the 2.4 release notes", "task-release-v24"),
     ("App crashes when logging in on phones", "task-login-bug"),
     ("App crashes when logging out on phones", "task-logout-bug"),
-    # Pure negatives: unrelated to every task in the pool. Needs enough of
-    # them to see where the noise floor actually sits (see README
-    # "Threshold calibration") -- 2 wasn't enough: "Write a guide for new
-    # hires on our DB setup" shares domain vocabulary with task-db-upgrade
-    # without being a duplicate of it, and scored high enough to flip an
-    # existing regression test once the threshold moved below its score.
+    # Pure negatives -- need enough to find the real noise floor.
     ("Water the office plants", None),
     ("Book a conference room for Friday", None),
     ("Fix the coffee machine in the break room", None),
@@ -79,9 +68,7 @@ DEPENDENCY_CASES: list[tuple[str, str | None]] = [
     ("v2.4 notes", "task-release-v24"),
     ("login crash", "task-login-bug"),
     ("logout crash", "task-logout-bug"),
-    # True negatives -- nothing in the task pool should match these. Needs
-    # enough of them to see where the noise floor actually sits, not just
-    # 1-2 examples (see README "Threshold calibration").
+    # True negatives -- need enough to find the real noise floor.
     ("the weather forecast", None),
     ("lunch plans for today", None),
     ("fixing the office coffee machine", None),
@@ -98,6 +85,35 @@ DEPENDENCY_CASES: list[tuple[str, str | None]] = [
     # domain entirely -- the noise floor should stay low even here.
     ("upgrading the office wifi router", None),
     ("writing the team's weekly newsletter", None),
+]
+
+# (task_id, expected_related_task_id or None) -- task-to-task, not text
+# (see _run_related_cases). Related-not-duplicate pairs: #471's own hard
+# siblings, plus db-upgrade/db-backup. Everything else has no designed
+# relation -- its best-other score is the noise floor.
+RELATED_CASES: list[tuple[str, str | None]] = [
+    ("task-deploy-prod", "task-deploy-staging"),
+    ("task-deploy-staging", "task-deploy-prod"),
+    ("task-release-v23", "task-release-v24"),
+    ("task-release-v24", "task-release-v23"),
+    ("task-login-bug", "task-logout-bug"),
+    ("task-logout-bug", "task-login-bug"),
+    ("task-db-upgrade", "task-db-backup"),
+    ("task-db-backup", "task-db-upgrade"),
+    ("task-catering", None),
+    ("task-standup-notes", None),
+    # task-release-notes excluded: it scored 0.85+ against v23/v24 -- it's
+    # genuinely related to both, not a negative.
+    ("task-onboard-hire", None),
+    ("task-offboard-employee", None),
+    ("task-security-audit", None),
+    ("task-vendor-contract", None),
+    ("task-customer-escalation", None),
+    ("task-perf-review", None),
+    ("task-budget-forecast", None),
+    ("task-ui-redesign", None),
+    ("task-api-docs", None),
+    ("task-load-test", None),
 ]
 
 
@@ -136,16 +152,35 @@ async def _run_cases(
     return results
 
 
+async def _run_related_cases(
+    store: PgVectorStore, cases: list[tuple[str, str | None]], *, n_tasks: int
+) -> list[CaseResult]:
+    """Task-to-task, not text-to-task -- matches how find_related() queries."""
+    results = []
+    for task_id, expected_related_id in cases:
+        vector = await store.get_vector(task_id)
+        assert vector is not None, f"{task_id} must already be upserted by main()"
+        candidates = await store.search(vector, k=n_tasks, exclude_task_id=task_id)
+        by_id = {c.task_id: c.similarity for c in candidates}
+        expected_similarity = by_id.get(expected_related_id) if expected_related_id else None
+        others = [c for c in candidates if c.task_id != expected_related_id]
+        best_other = max(others, key=lambda c: c.similarity)
+        results.append(
+            CaseResult(
+                task_id,
+                expected_related_id,
+                expected_similarity,
+                best_other.task_id,
+                best_other.similarity,
+            )
+        )
+    return results
+
+
 def _suggest_threshold(results: list[CaseResult]) -> float:
-    """Separates real matches from real non-matches only. A close sibling
-    that a matched case outranks (e.g. login-bug beating logout-bug into
-    second place) is a ranking question, not a threshold question -- it's
-    still returned, still correct, just also above the bar -- so it's
-    excluded here on purpose; penalizing it for that pushed the threshold
-    up past several genuine matches in an earlier version of this script
-    (see README). Picks the midpoint of whichever gap between adjacent
-    observed values misclassifies the fewest cases, not a value snapped
-    onto one example -- ties broken toward the higher (stricter) gap."""
+    """Separates real matches from real non-matches only -- a matched
+    case's own runner-up isn't a negative (see README). Picks the midpoint
+    of the best-separating gap, ties toward the stricter (higher) one."""
     positives = [r.expected_similarity for r in results if r.expected_similarity is not None]
     negatives = [r.best_other_similarity for r in results if r.expected_task_id is None]
     values = sorted(set(positives) | set(negatives))
@@ -186,6 +221,7 @@ async def main() -> None:
 
         dup_results = await _run_cases(store, DUPLICATE_CASES, is_query=False, n_tasks=len(tasks))
         dep_results = await _run_cases(store, DEPENDENCY_CASES, is_query=True, n_tasks=len(tasks))
+        rel_results = await _run_related_cases(store, RELATED_CASES, n_tasks=len(tasks))
     finally:
         await store.clear()
         await store.close()
@@ -197,6 +233,10 @@ async def main() -> None:
     _print_table("Dependency resolution (#244, is_query=True)", dep_results)
     dep_threshold = _suggest_threshold(dep_results)
     print(f"\nSuggested dependency_match_threshold: {dep_threshold:.3f}")
+
+    _print_table("Related tasks (#472, task-to-task via stored vectors)", rel_results)
+    rel_threshold = _suggest_threshold(rel_results)
+    print(f"\nSuggested related_task_threshold: {rel_threshold:.3f}")
 
     _RESULTS_PATH.write_text(
         json.dumps(
@@ -210,6 +250,10 @@ async def main() -> None:
                     "suggested_threshold": dep_threshold,
                     "cases": [r._asdict() for r in dep_results],
                 },
+                "related": {
+                    "suggested_threshold": rel_threshold,
+                    "cases": [r._asdict() for r in rel_results],
+                },
             },
             indent=2,
         )
@@ -218,7 +262,5 @@ async def main() -> None:
 
 
 if __name__ == "__main__":
-    # loop_factory=SelectorEventLoop: psycopg's async mode rejects Windows'
-    # default ProactorEventLoop; SelectorEventLoop is already the default
-    # everywhere else, so this is a no-op off Windows.
+    # psycopg async rejects Windows' default ProactorEventLoop.
     asyncio.run(main(), loop_factory=asyncio.SelectorEventLoop)
