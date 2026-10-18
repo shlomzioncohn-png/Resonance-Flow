@@ -18,12 +18,8 @@ import org.springframework.core.env.Environment;
 import org.springframework.kafka.core.KafkaTemplate;
 
 /**
- * Bean wiring for {@link CrmLane}'s collaborators that intentionally carry
- * no Spring annotations of their own - {@link DealToTaskMapper} and
- * {@link CrmTaskValidator} are plain, framework-free classes shared or shareable
- * across lanes - plus the publisher, which is the logging stand-in unless
- * the {@code kafka} profile is active, mirroring how the {@code hubspot}
- * profile overrides {@code JsonDealRepository} elsewhere in this package.
+ * Bean wiring for {@link CrmLane}'s collaborators (the mapper, validator, and publisher).
+ * The {@code kafka} profile requires a real tenant UUID for {@code bridge.crm.organization-id}, not the placeholder.
  */
 @Configuration
 class CrmLaneConfig {
@@ -37,12 +33,7 @@ class CrmLaneConfig {
             TaskEnricher taskEnricher,
             @Value("${bridge.crm.stalled-after-days:14}")
             int stalledAfterDays) {
-        // CrmTaskValidator.LOCAL_PLACEHOLDER_TENANT_ID only makes sense without the kafka profile
-        // (fixture data, LoggingPayloadPublisher - nothing leaves the process). Once kafka is
-        // active, a missing/malformed/still-the-placeholder tenant id means every published
-        // message is silently rejected by Inbox's own tenant validation and routed to an error
-        // topic nobody consumes (finding F5 in the CRM-lane audit) - fail here, at startup,
-        // instead of discovering that later.
+        // Under kafka, a missing/placeholder tenant id means every message is silently rejected by Inbox (F5).
         if (environment.matchesProfiles("kafka")) {
             requireValidTenantIdForKafka(organizationId);
         }

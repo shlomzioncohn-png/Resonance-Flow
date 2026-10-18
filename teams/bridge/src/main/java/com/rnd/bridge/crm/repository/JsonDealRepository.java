@@ -19,18 +19,8 @@ import java.util.Map;
 import java.util.Optional;
 
 /**
- * Loads the synthetic CRM deal feed from a JSON resource.
- * <p>
- * The dataset is the adapter's actual runtime data source - there is no live CRM in scope for
- * this program - so it is read eagerly at construction time and failures are fatal at startup
- * rather than surfacing lazily per call. The fixture never changes at runtime, so one {@link
- * DealSnapshot} built once at construction correctly serves every {@link #snapshot()} call - there
- * is no cross-call staleness to guard against here the way there is in {@code
- * HubSpotDealRepository}.
- * <p>
- * The synthetic fixture feed, active only when neither a real CRM source profile is - once
- * {@code hubspot} and/or {@code salesforce} is active, the live source(s) are what should run,
- * never the fixture alongside them.
+ * Loads the synthetic CRM deal feed from a JSON resource, read once at construction time.
+ * Active only when neither {@code hubspot} nor {@code salesforce} profile is.
  */
 @Repository
 @Profile("!hubspot & !salesforce")
@@ -93,11 +83,6 @@ public class JsonDealRepository implements DealRepository {
         return snapshot;
     }
 
-    /**
-     * The fixture is loaded once at construction (see the class Javadoc) and never changes at
-     * runtime, so "fresh" here means the same thing it does for {@link #snapshot()}: there is no
-     * live source to re-read, just the one dataset read at startup.
-     */
     @Override
     public Optional<Deal> fetchDeal(String dealId) {
         if (dealId == null || dealId.isBlank()) {

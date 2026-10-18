@@ -12,23 +12,8 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
 /**
- * Daily CRM sync as a {@link SyncJob} - the team lead's call (2026-09-07) is to stay on a
- * once-a-day pull for now, not move to real-time, until told otherwise. {@link #runOnce()} takes
- * exactly one {@link DealSnapshot} per run and calls {@code crmLane.run(Stream, Instant)} against
- * its {@code latestPerDeal()}/{@code asOf()} together - the same single-snapshot-per-run shape
- * {@code CrmBridgeController} uses, so a scheduled run and a manual trigger agree on what "one
- * sync" means, and neither can see a mix of two different fetches the way calling
- * {@code dealRepository.snapshot()} and a separate read could.
- * <p>
- * Enabled/disabled checking, start/complete logging, and catching a failed run so it never
- * propagates are now {@link SyncJobScheduler}'s job, shared by every {@link SyncJob} - this class
- * (formerly {@code CrmSyncScheduler}) only still logs {@code skippedAtRead}, which has no
- * equivalent on {@link IntakeResult} or any other job. Logged at WARN, not INFO, whenever it's
- * greater than zero - {@link SyncJobScheduler}'s shared "complete: N read, N published, N
- * rejected" summary has no room for it, so without this line a partial sync (some deals silently
- * skipped at read - see {@code HubSpotDealRepository}) would otherwise report success on the
- * scheduled path exactly like a clean one. The HTTP path doesn't need this: {@code
- * CrmSyncResponse} already surfaces {@code skippedAtRead} in its JSON body.
+ * Daily CRM sync as a {@link SyncJob} - once-a-day pull, not real-time (team lead's call, 2026-09-07).
+ * {@link #runOnce()} takes one {@link DealSnapshot} per run, the same single-snapshot-per-run shape {@code CrmBridgeController} uses.
  */
 @Component
 public class CrmSyncJob implements SyncJob {

@@ -5,12 +5,8 @@ import com.rnd.bridge.core.IntakeResult;
 import java.util.List;
 
 /**
- * HTTP-safe view of an {@link IntakeResult}, plus {@code skippedAtRead} - deals that never reached
- * the lane at all because they failed to parse while reading from HubSpot (see
- * {@code HubSpotDealRepository}), so they can't appear in {@code IntakeResult}'s own counts (see
- * finding F9 in the CRM-lane audit). {@code IntakeResult} carries {@code List<LaneException>},
- * which Jackson would otherwise try to serialize whole - stack traces included. This maps each
- * exception to its message only.
+ * HTTP-safe view of an {@link IntakeResult}, plus {@code skippedAtRead} (deals that never reached
+ * the lane - F9). Maps each {@code LaneException} to its message only, not the whole stack trace.
  */
 public record CrmSyncResponse(int read, int published, int rejected, List<String> errors, int skippedAtRead) {
 
