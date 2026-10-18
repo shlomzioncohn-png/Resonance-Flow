@@ -2,7 +2,7 @@
 segmented-ranking baseline without tuning on what measures it.
 
 **This is a development discipline, not a change to the eval set.** The set
-was 30 fixed scenarios when this was frozen and is 36 since #535; R1's reported
+was 30 fixed scenarios when this was frozen, 36 since #535 and 42 since #507; R1's reported
 baseline is still measured over all of them (`make eval`). The split exists so
 that the weights behind that number were not fitted to the very scenarios it is
 computed on — the first thing a mentor will challenge about a hand-weighted
@@ -58,6 +58,22 @@ from each folder.
 
 The split is now 24 / 12 and every role has two holdout scenarios.
 
+Extended for #507
+-----------------
+#507 added six scenarios, one per role, in `hierarchy_decides/`. All six go to
+DEV, for two reasons:
+
+- They cannot be a valid holdout: the baseline's pick and scores on each of them
+  are already published in `src/mind/evaluation/README.md`, and a holdout is only
+  worth something while nobody has looked at how the model does on it.
+- They are not a calibration target either. Each is built so that the parent
+  hierarchy is the only thing that decides it, and the baseline does not read the
+  hierarchy (#797), so there is nothing in them to tune the baseline on. Its
+  expected result there is fixed by design: it misses the four decided ones and
+  gets the two controls.
+
+The split is now 30 / 12.
+
 What leaked anyway: filenames are descriptive, so filename-level signal (which
 scenarios involve a blocked task, which involve an overdue deadline) was
 visible while building this. `eval/personas/README.md` also documents set-wide
@@ -103,6 +119,13 @@ DEV_SCENARIO_IDS: frozenset[str] = frozenset(
         "higher_manager_approved_vision_memo_vs_expiring_capacity_offer",
         "manager_idle_new_hires_vs_informational_steering_deck",
         "salesperson_dead_rfp_vs_live_signing_round",
+        # Added for #507.
+        "ceo_expansion_partnership_vs_wound_down_line_partnership",
+        "developer_payment_incident_vs_migration_steps",
+        "field_engineer_site_outage_vs_rollout_survey",
+        "higher_manager_migration_budget_vs_reporting_requests",
+        "manager_restructuring_team_signoff_vs_maintenance_team_signoff",
+        "salesperson_core_target_proposal_vs_paused_vertical_proposal",
     }
 )
 

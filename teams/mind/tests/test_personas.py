@@ -367,19 +367,22 @@ def test_real_persona_set_every_task_fits_free_time():
 def test_real_persona_set_correct_answer_position_distribution():
     # Locked distribution documented in eval/personas/README.md's Status
     # section, guarding against the position bias the pre-2026-09-06 set had.
-    # No 3-task scenario may put the correct answer first (index 0).
+    # No 3-task scenario in the original set may put the correct answer first
+    # (index 0). hierarchy_decides/ puts it first in two of its six on purpose, so
+    # "pick the first task" is not scored 0/6 there by construction (#507 review).
     scenarios = load_personas(REAL_PERSONAS_DIR)
+    hierarchy_ids = {s.scenario_id for s in load_personas(REAL_PERSONAS_DIR / HIERARCHY_DECIDES_GROUP)}
     position_counts: Counter[int] = Counter()
     three_task_scenarios_with_answer_first = []
     for s in scenarios:
         task_ids = [t.task_id for t in s.tasks]
         idx = task_ids.index(s.expected_top_task_id)
         position_counts[idx] += 1
-        if len(task_ids) == 3 and idx == 0:
+        if len(task_ids) == 3 and idx == 0 and s.scenario_id not in hierarchy_ids:
             three_task_scenarios_with_answer_first.append(s.scenario_id)
 
     assert three_task_scenarios_with_answer_first == []
-    assert dict(position_counts) == {0: 10, 1: 20, 2: 12}
+    assert dict(position_counts) == {0: 12, 1: 18, 2: 12}
 
 
 def test_real_persona_set_no_duplicate_task_text_with_different_tier():
