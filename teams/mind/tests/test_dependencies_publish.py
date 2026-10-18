@@ -4,6 +4,7 @@ edge, and never at all with nothing to say. No broker: the sink is an
 in-memory list, and resolve_dependency_targets (#245) is mocked -- its own
 behavior is tests/test_dependency_resolution.py's job, not this file's."""
 
+import asyncio
 from unittest.mock import AsyncMock, patch
 from uuid import UUID, uuid4
 
@@ -27,6 +28,18 @@ class ListSink:
 
     def send(self, payload: DependencyProposed) -> None:
         self.sent.append(payload)
+
+
+class FailsOnceSink(ListSink):
+    def __init__(self) -> None:
+        super().__init__()
+        self._failed = False
+
+    def send(self, payload: DependencyProposed) -> None:
+        if not self._failed:
+            self._failed = True
+            raise RuntimeError("broker down")
+        super().send(payload)
 
 
 @pytest.fixture
@@ -80,6 +93,39 @@ async def test_a_duplicate_task_created_reply_does_not_republish_the_same_edge(p
         )
         await publisher.publish_dependencies(
             task_id=TASK_A, tenant_id=TENANT, dependency_mentions=["the DB upgrade"]
+        )
+
+    assert len(sink.sent) == 1
+
+
+async def test_a_failed_send_does_not_mark_the_edge_as_already_sent():
+    sink = FailsOnceSink()
+    publisher = DependencyPublisher(store=object(), sink=sink)  # type: ignore[arg-type]
+
+    with _resolved([SearchResult(task_id=TASK_B, similarity=0.9)]):
+        with pytest.raises(RuntimeError, match="broker down"):
+            await publisher.publish_dependencies(
+                task_id=TASK_A, tenant_id=TENANT, dependency_mentions=["the DB upgrade"]
+            )
+        assert sink.sent == []
+
+        await publisher.publish_dependencies(
+            task_id=TASK_A, tenant_id=TENANT, dependency_mentions=["the DB upgrade"]
+        )
+
+    [event] = sink.sent
+    assert event.dependencies[0].depends_on_task_id == UUID(TASK_B)
+
+
+async def test_two_concurrent_calls_for_the_same_task_publish_the_edge_once(publisher, sink):
+    with _resolved([SearchResult(task_id=TASK_B, similarity=0.9)]):
+        await asyncio.gather(
+            publisher.publish_dependencies(
+                task_id=TASK_A, tenant_id=TENANT, dependency_mentions=["the DB upgrade"]
+            ),
+            publisher.publish_dependencies(
+                task_id=TASK_A, tenant_id=TENANT, dependency_mentions=["the DB upgrade"]
+            ),
         )
 
     assert len(sink.sent) == 1

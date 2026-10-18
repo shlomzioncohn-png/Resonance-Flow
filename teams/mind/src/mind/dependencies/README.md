@@ -55,8 +55,12 @@ If a mention's target has no task_id yet (the issue's step 4),
 neither dropped nor force-published. Calling it again later with the same
 `dependency_mentions` (once the adapter above exists and fires again for *any*
 `task.created`) picks up what's now resolved; the per-task published-edge
-tracking means an edge already sent is never sent twice. When, or whether, to
-call again is the caller's decision -- not built here.
+tracking means an edge already sent this process is never sent twice. That
+tracking is in-memory only -- it doesn't survive a restart, so the same
+mentions publish the same edges again afterwards, relying on Chain treating a
+re-proposed edge (same `depends_on_task_id`, same `task_id`) as a no-op
+rather than a hard duplicate. When, or whether, to call again is the
+caller's decision -- not built here.
 
 ## Running the tests
 
