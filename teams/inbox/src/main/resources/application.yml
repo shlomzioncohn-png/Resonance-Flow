@@ -47,7 +47,7 @@ inbox:
       max-backoff-ms: ${INBOX_KAFKA_RETRY_MAX_BACKOFF_MS:10000}
   sql-logging:
     enabled: ${SQL_LOG_ENABLED:true}
-    include-parameters: ${SQL_LOG_INCLUDE_PARAMETERS:true}
+    include-parameters: ${SQL_LOG_INCLUDE_PARAMETERS:false}
     slow-query-threshold-ms: ${SQL_LOG_SLOW_QUERY_THRESHOLD_MS:200}
   work-insights:
     window-days: ${WORK_INSIGHTS_WINDOW_DAYS:30}
