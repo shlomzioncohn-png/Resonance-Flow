@@ -24,6 +24,10 @@ class RawObjectEventSerializationTest {
 
     @Test
     void serializesFieldNamesAsSnakeCase() throws Exception {
+        RawObjectRef recording = new RawObjectRef(
+                Role.RECORDING, "EMAIL/kamatech/2026-08-18/x.json", "sha256:" + "a".repeat(64),
+                "application/json", 123L, Modality.AUDIO);
+
         RawObjectEvent event = RawObjectEvent.create(
                 RawSourceType.EMAIL,
                 "kamatech",
@@ -41,6 +45,7 @@ class RawObjectEventSerializationTest {
         assertThat(json).contains("\"schema_version\"");
         assertThat(json).contains("\"source_type\"");
         assertThat(json).contains("\"tenant_id\"");
+        assertThat(json).contains("\"correlation_id\"");
         assertThat(json).contains("\"ingested_at\"");
         assertThat(json).contains("\"scope_decision\"");
         assertThat(json).contains("\"source_timestamp\"");
