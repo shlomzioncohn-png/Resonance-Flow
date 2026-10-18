@@ -8,7 +8,6 @@ components:
       pullPolicy: Never
   schema-registry:
     enabled: true
-
 kafka:
   enabled: true
   image:
