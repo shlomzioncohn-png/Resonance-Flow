@@ -1,0 +1,53 @@
+{{/*
+ServiceMonitors for the Bitnami subcharts' metrics endpoints, rendered here
+instead of by the subcharts (their metrics.serviceMonitor.enabled) because theirs
+don't check for the CRD - see templates/servicemonitor.yaml for why that matters.
+Each one renders when its subchart and its metrics are enabled
+(environments/shared.yaml), and the cluster has the monitoring.coreos.com/v1 CRDs.
+
+Every series gets `component` (kafka/postgresql/minio) and `team: relay` labels,
+matching the per-component ServiceMonitors.
+*/}}
+{{- if .Capabilities.APIVersions.Has "monitoring.coreos.com/v1/ServiceMonitor" }}
+{{- $monitors := list }}
+{{- if and .Values.kafka.enabled .Values.kafka.metrics.jmx.enabled }}
+{{- $monitors = append $monitors (dict "name" "kafka" "component" "metrics" "port" "http-metrics" "paths" (list "/metrics")) }}
+{{- end }}
+{{- if and .Values.postgresql.enabled .Values.postgresql.metrics.enabled }}
+{{- $monitors = append $monitors (dict "name" "postgresql" "component" "metrics" "port" "http-metrics" "paths" (list "/metrics")) }}
+{{- end }}
+{{- if and .Values.minio.enabled .Values.minio.metrics.enabled }}
+{{- /* No separate metrics Service - MinIO's own API Service. bucket = per-bucket usage. */}}
+{{- $monitors = append $monitors (dict "name" "minio" "component" "minio" "port" "tcp-api" "paths" (list "/minio/v2/metrics/cluster" "/minio/v2/metrics/node" "/minio/v2/metrics/bucket")) }}
+{{- end }}
+{{- range $m := $monitors }}
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+
+metadata:
+  name: {{ include "resonance-flow.fullname" $ }}-{{ $m.name }}-metrics
+  labels:
+    {{- include "resonance-flow.labels" $ | nindent 4 }}
+    app.kubernetes.io/component: {{ $m.name }}
+
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/instance: {{ $.Release.Name }}
+      app.kubernetes.io/name: {{ $m.name }}
+      app.kubernetes.io/component: {{ $m.component }}
+
+  endpoints:
+    {{- range $path := $m.paths }}
+    - port: {{ $m.port }}
+      path: {{ $path }}
+      interval: 30s
+      relabelings:
+        - targetLabel: component
+          replacement: {{ $m.name }}
+        - targetLabel: team
+          replacement: relay
+    {{- end }}
+{{- end }}
+{{- end }}

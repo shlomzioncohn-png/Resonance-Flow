@@ -34,6 +34,7 @@ dedicated project is needed for this repo's scope.
 | `apps/resonance-flow.yaml` | `Application` syncing the [`resonance-flow`](../helm/resonance-flow) chart (all teams' services, including the Kafka/Postgres/MinIO subcharts), with [`environments/shared.yaml`](../helm/resonance-flow/environments/shared.yaml) layered on top for shared-cluster-only settings |
 | `apps/traefik.yaml`      | `Application` installing the Traefik ingress controller (namespace `traefik`, ingress class `traefik`) that serves the chart's Ingress |
 | `apps/kube-prometheus-stack.yaml` | `Application` installing cluster monitoring (Prometheus Operator, Prometheus, Alertmanager, node-exporter, kube-state-metrics) into namespace `monitoring` - see [Monitoring](#monitoring) |
+| `apps/kafka-exporter.yaml` | `Application` installing `kafka-exporter` into namespace `monitoring`, for Kafka consumer-group lag - see [Monitoring](#monitoring) |
 
 ## Onboarding your team's service
 
@@ -91,11 +92,20 @@ team's sync.
   `templates/servicemonitor.yaml` only renders once the
   `monitoring.coreos.com/v1` CRDs exist, so on a fresh cluster
   `resonance-flow`'s first sync skips ServiceMonitors, and ArgoCD's next
-  refresh adds them once this app has installed the CRDs.
+  refresh adds them once this app has installed the CRDs. `traefik` and
+  `kafka-exporter` are on wave `4`, after it: their charts render a
+  ServiceMonitor without that check (Traefik's fails its render outright), and
+  `argocd-cm-patch.yaml` gates each wave on the previous one's health.
 - **What gets scraped.** Prometheus selects every ServiceMonitor, PodMonitor
   and PrometheusRule in the cluster, not only ones labelled for its own
   release. A team opts its component in with `components.<team>.metrics`
   - see the chart's [README](../helm/resonance-flow/README.md#metrics-scraping-metrics).
+- **Infra targets.** Kafka (JMX), PostgreSQL (postgres-exporter) and MinIO
+  are scraped through the chart's `templates/infra-servicemonitors.yaml`,
+  their exporters turned on in `environments/shared.yaml` (so not in CI).
+  Traefik exposes its own, per router and service. Kafka consumer-group lag
+  (`kafka_consumergroup_lag`) comes from `apps/kafka-exporter.yaml`, which
+  logs in with the `kafka.sasl.client` user - keep its password in sync.
 - **Storage.** 15 days, capped at 9GB, on a 10Gi PVC from the cluster's
   default StorageClass.
 - **Not scraped.** etcd, kube-scheduler, kube-controller-manager and

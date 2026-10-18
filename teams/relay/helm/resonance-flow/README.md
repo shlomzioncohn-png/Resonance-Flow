@@ -195,6 +195,12 @@ alert routing.
   rule admitting only pods labelled `app.kubernetes.io/name: prometheus` in the
   `monitoring.namespace` namespace (default `monitoring`). Nothing else in that
   namespace gets in.
+- **Kafka, PostgreSQL, MinIO.** `templates/infra-servicemonitors.yaml` renders
+  one ServiceMonitor each when that subchart's metrics are on
+  (`kafka.metrics.jmx.enabled`, `postgresql.metrics.enabled`,
+  `minio.metrics.enabled` - all set only in `environments/shared.yaml`), with
+  the same CRD check, labelled `team: relay`. Don't turn on the subcharts' own
+  `metrics.serviceMonitor.enabled`: theirs skip the CRD check.
 
 ## Component configuration (`config` / `secret`)
 
