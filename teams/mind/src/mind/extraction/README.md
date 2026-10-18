@@ -262,15 +262,21 @@ first character would otherwise read as an empty completion, which is retryable.
 
 `record_call` sat after the `try`, so a provider that raised was never
 recorded — and the failures are the slowest calls we make, since a timeout
-waits out the whole deadline. They are recorded now, under the provider's name
-(no answer to read a model id from) and at cost 0.0 (no usage reported).
+waits out the whole deadline. They are recorded now, under the model id the
+provider sends -- the same key as a success, so a model's failures and successes
+share one row of the summary (#479) -- with `status=error` and a cost of `None`:
+no usage was reported, so the cost is unknown, not zero. A success is recorded
+under that same id but priced by the id the answer reports, the model billed.
 
 `except LLMError` rather than `finally`, so that a bug in a client or a
 `KeyboardInterrupt` propagates without being counted as a model call.
 
-Known gap, unchanged: `estimate_cost` returns None for an unpriced model, but
-`record_call` only takes a float, so unpriced and free both land as 0.0. Fixing
-that means widening `ModelCallRecord`, which is shared surface.
+The gap this section used to list is closed (#479): `record_call` now takes
+`cost=None`, so an unpriced model, a provider that reported no usage and a failed
+call are all recorded as unpriced rather than as 0.0. Every call is also
+recorded with `kind=llm` and its token counts, so the model-call summary
+(`GET /debug/model-calls`, see `observability/README.md`) totals tokens and US
+dollars per model and holds LLM calls to their duration and cost limits.
 
 ### A failed item can be found
 
