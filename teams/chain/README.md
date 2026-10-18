@@ -423,7 +423,7 @@ docker compose down
 mvn test
 ```
 
-The default run covers only tests that need no database. The service, event-handler and repository
+The default run covers only tests that need no database. The four inbound event handlers have Mockito-based `*EventHandlerUnitTest` classes (collaborators mocked, so they do not depend on the schema); they run in the default build and in CI. The service, event-handler and repository
 tests were ported to run against a real Postgres (`@Tag("postgres")`, see below); `PgRepos` exposes the
 real repositories to them and `PgCleanup` removes rows that non-transactional (Kafka-driven) tests commit.
 
