@@ -242,7 +242,7 @@ already has (edgeExists() / the task's own stored previousStatus).
   are mapped to/from them entirely inside the adapters. The H2 placeholder
   is gone, and so are all `InMemory*` repositories, `MockDataConfig` and `InMemoryProcessedEventStore`
   (2026-10-15): Postgres is the only persistence, including `PostgresProcessedEventStore` (V10) for
-  event dedup. Tests that depended on the in-memory fakes were deleted, not ported.
+  event dedup. The tests that used the in-memory fakes now run against Postgres (`PgRepos`).
 - `TaskRepository#update()`'s atomicity is now real: `PostgresTaskRepository`
   uses a pessimistic row lock (`SELECT ... FOR UPDATE`) as the sole
   correctness mechanism for `blockingCount`/`openConstraintCount` under
