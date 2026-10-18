@@ -5,7 +5,6 @@ import com.rnd.chain.dto.Task;
 import com.rnd.chain.dto.TaskStatus;
 import com.rnd.chain.repository.InMemoryTaskRepository;
 import com.rnd.chain.repository.TaskRepository;
-import com.rnd.chain.service.UnresolvedDependencyService;
 import com.rnd.inbox.event.TaskCreatedEvent;
 import org.junit.jupiter.api.Test;
 
@@ -17,7 +16,6 @@ import java.util.UUID;
 import java.util.function.UnaryOperator;
 
 import static org.junit.jupiter.api.Assertions.*;
-import static org.mockito.Mockito.*;
 
 class TaskCreatedEventHandlerTest {
 
@@ -48,14 +46,10 @@ class TaskCreatedEventHandlerTest {
         InMemoryTaskRepository repository =
                 new InMemoryTaskRepository(List.of());
 
-        UnresolvedDependencyService unresolvedService =
-                mock(UnresolvedDependencyService.class);
-
         TaskCreatedEventHandler handler =
                 new TaskCreatedEventHandler(
                         repository,
-                        newTemplate(),
-                        unresolvedService);
+                        newTemplate());
 
         UUID taskId = UUID.randomUUID();
 
@@ -79,9 +73,6 @@ class TaskCreatedEventHandlerTest {
                 saved.getOpenConstraintCount());
 
         assertTrue(saved.isReady());
-
-        verify(unresolvedService)
-                .resolveWaitingForTask(taskId);
     }
 
     @Test
@@ -103,14 +94,10 @@ class TaskCreatedEventHandlerTest {
                 new InMemoryTaskRepository(
                         List.of(existing));
 
-        UnresolvedDependencyService unresolvedService =
-                mock(UnresolvedDependencyService.class);
-
         TaskCreatedEventHandler handler =
                 new TaskCreatedEventHandler(
                         repository,
-                        newTemplate(),
-                        unresolvedService);
+                        newTemplate());
 
         handler.onMessage(
                 eventFor(taskId).build());
@@ -128,22 +115,15 @@ class TaskCreatedEventHandlerTest {
                 merged.getOpenConstraintCount());
 
         assertFalse(merged.isReady());
-
-        verify(unresolvedService)
-                .resolveWaitingForTask(taskId);
     }
 
     @Test
     void onMessage_withAnInvalidTaskId_throwsNonRetryableEventException() {
 
-        UnresolvedDependencyService unresolvedService =
-                mock(UnresolvedDependencyService.class);
-
         TaskCreatedEventHandler handler =
                 new TaskCreatedEventHandler(
                         new InMemoryTaskRepository(List.of()),
-                        newTemplate(),
-                        unresolvedService);
+                        newTemplate());
 
         TaskCreatedEvent event =
                 eventFor(
@@ -154,8 +134,6 @@ class TaskCreatedEventHandlerTest {
         assertThrows(
                 NonRetryableEventException.class,
                 () -> handler.onMessage(event));
-
-        verifyNoInteractions(unresolvedService);
     }
 
     @Test
@@ -210,14 +188,10 @@ class TaskCreatedEventHandlerTest {
                     }
                 };
 
-        UnresolvedDependencyService unresolvedService =
-                mock(UnresolvedDependencyService.class);
-
         TaskCreatedEventHandler handler =
                 new TaskCreatedEventHandler(
                         failingRepository,
-                        newTemplate(),
-                        unresolvedService);
+                        newTemplate());
 
         TaskCreatedEvent event =
                 eventFor(
@@ -228,7 +202,5 @@ class TaskCreatedEventHandlerTest {
         assertThrows(
                 ChainTransientProcessingException.class,
                 () -> handler.onMessage(event));
-
-        verifyNoInteractions(unresolvedService);
     }
 }

@@ -10,18 +10,15 @@ import com.rnd.chain.repository.InMemoryGraphLock;
 import com.rnd.chain.repository.InMemoryTaskDependencyRepository;
 import com.rnd.chain.repository.InMemoryTaskRepository;
 import com.rnd.chain.repository.InMemoryTransactionRunner;
-import com.rnd.chain.repository.InMemoryUnresolvedDependencyRepository;
 import com.rnd.chain.repository.TaskDependencyRepository;
 import com.rnd.chain.repository.TaskRepository;
 import com.rnd.chain.repository.TransactionRunner;
-import com.rnd.chain.repository.UnresolvedDependencyRepository;
 import com.rnd.chain.events.SchedulingPublishListener;
 import com.rnd.chain.service.DependencyEdgeService;
 import com.rnd.chain.service.PriorityScoreService;
 import com.rnd.chain.service.SchedulingUpdateService;
 import com.rnd.chain.service.TaskCounterUpdater;
 import com.rnd.chain.service.TaskDependencyService;
-import com.rnd.chain.service.UnresolvedDependencyService;
 import com.rnd.mind.event.DependencyProposedEvent;
 import io.confluent.kafka.serializers.protobuf.KafkaProtobufSerializer;
 import io.confluent.kafka.serializers.protobuf.KafkaProtobufSerializerConfig;
@@ -135,12 +132,6 @@ ChainEventProcessingTemplate chainEventProcessingTemplate() {
 
         @Bean
         @Primary
-        UnresolvedDependencyRepository testUnresolvedDependencyRepository() {
-            return new InMemoryUnresolvedDependencyRepository();
-        }
-
-        @Bean
-        @Primary
         SchedulingUpdateService testSchedulingUpdateService() {
             return mock(SchedulingUpdateService.class);
         }
@@ -176,18 +167,6 @@ ChainEventProcessingTemplate chainEventProcessingTemplate() {
                     transactionRunner,
                     Clock.systemUTC(),
                     dependencyEdgeService);
-        }
-
-        @Bean
-        @Primary
-        UnresolvedDependencyService testUnresolvedDependencyService(
-                UnresolvedDependencyRepository unresolvedDependencyRepository,
-                TaskDependencyService taskDependencyService) {
-
-            return new UnresolvedDependencyService(
-                    unresolvedDependencyRepository,
-                    taskDependencyService,
-                    Clock.systemUTC());
         }
     }
 
