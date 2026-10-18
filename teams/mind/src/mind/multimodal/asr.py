@@ -688,7 +688,8 @@ def transcribe(
     audio, the VAD and Whisper, and ``status=ERROR`` if Whisper raised -- the CPU seconds are
     the call's compute cost; a local model has no dollar price (#479) -- whether
     it succeeded or not, and even when the VAD found no speech for Whisper to run
-    on.
+    on. Not when the model is not installed (ASR_UNAVAILABLE): that is the host,
+    not a failed call, and it is logged as a WARNING instead.
     """
     if max_duration_s <= 0:
         raise ValueError(f"max_duration_s must be more than 0, got {max_duration_s}")
@@ -739,6 +740,7 @@ def _transcribe(content: bytes, filename: str, max_duration_s: float) -> ASRResu
     # recorded as a failure. A timeout is not: it returns what was decoded, and
     # the asr_call line below says it timed out.
     status = CallStatus.ERROR
+    model_unavailable = False
     try:
         for chunk_start, chunk_end, has_speech in _chunks(audio):
             if time.perf_counter() - start > TRANSCRIBE_TIMEOUT_S:
@@ -770,36 +772,45 @@ def _transcribe(content: bytes, filename: str, max_duration_s: float) -> ASRResu
         status = CallStatus.SUCCESS
     except _ASRUnavailable as exc:
         # Decodable audio with speech in it, and no model to transcribe it with.
+        # That is the host, not a failed call: logged here, not recorded below.
+        model_unavailable = True
+        logger.warning("ASR_UNAVAILABLE: %s", exc)
         return _failure(ASRFailureReason.ASR_UNAVAILABLE, str(exc))
     except (RuntimeError, MemoryError, OSError) as exc:
         # The audio was already decoded, so this is CTranslate2/onnxruntime
         # failing: the environment (out of memory, a broken install).
         return _failure(ASRFailureReason.ASR_FAILED, f"Whisper failed: {exc}")
     finally:
-        duration_ms = (time.perf_counter() - start) * 1000  # VAD + Whisper, for rtf
-        cpu_s = cpu.elapsed_s()
-        # A local model's cost is its CPU seconds, not dollars (#479).
-        record_call(
-            model_name,
-            (time.perf_counter() - call_start) * 1000,
-            cost=None,
-            kind=CallKind.ASR,
-            status=status,
-            cpu_s=cpu_s,
-        )
-        audio_s = len(audio) / SAMPLE_RATE
-        logger.info(
-            "asr_call model=%s audio_s=%.1f rtf=%.3f cpu_s=%.1f segments=%d timed_out=%s "
-            "capped=%s incomplete_file=%s",
-            model_name,
-            audio_s,
-            duration_ms / 1000 / audio_s,
-            cpu_s,
-            len(segments),
-            timed_out,
-            not decoded.reached_end,
-            extent.incomplete_file,
-        )
+        # A model that is not installed is not a call that failed (#479): it
+        # would end in a millisecond, pull p50 down and inflate error_count, and
+        # read as "Whisper failed" when Whisper is not there -- the same rule as
+        # OCR without tesseract. The caller still gets ASR_UNAVAILABLE, and the
+        # WARNING above names it.
+        if not model_unavailable:
+            duration_ms = (time.perf_counter() - start) * 1000  # VAD + Whisper, for rtf
+            cpu_s = cpu.elapsed_s()
+            # A local model's cost is its CPU seconds, not dollars (#479).
+            record_call(
+                model_name,
+                (time.perf_counter() - call_start) * 1000,
+                cost=None,
+                kind=CallKind.ASR,
+                status=status,
+                cpu_s=cpu_s,
+            )
+            audio_s = len(audio) / SAMPLE_RATE
+            logger.info(
+                "asr_call model=%s audio_s=%.1f rtf=%.3f cpu_s=%.1f segments=%d timed_out=%s "
+                "capped=%s incomplete_file=%s",
+                model_name,
+                audio_s,
+                duration_ms / 1000 / audio_s,
+                cpu_s,
+                len(segments),
+                timed_out,
+                not decoded.reached_end,
+                extent.incomplete_file,
+            )
 
     dropped_at_break = 0
     if extent.break_s is not None:

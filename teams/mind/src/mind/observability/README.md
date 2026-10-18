@@ -29,6 +29,12 @@ price per token. Every field and log key carries its unit (`cpu_seconds`,
   working unchanged.
 - Model calls are recorded here, not with `api/instrumentation.py`'s
   `instrumented_call` -- that one times HTTP-level work.
+- A call is recorded once its input is accepted and its model can run. A
+  model that is not installed -- OCR without Tesseract, ASR without the
+  Whisper weights -- is the host's problem, not a failed call: it would end
+  in a millisecond, pull p50 down and inflate `error_count`. It is not
+  recorded; the caller gets `OCR_UNAVAILABLE` / `ASR_UNAVAILABLE`, and a
+  WARNING line with that marker is logged.
 - `compute.py` -- `CpuClock()` measures the CPU seconds of a local model
   call: this process's own (Whisper) or, with `include_children=True`, also
   the child processes it waited for (Tesseract). Windows reports no

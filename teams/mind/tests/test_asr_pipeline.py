@@ -204,7 +204,9 @@ def test_speech_without_the_model_is_still_asr_unavailable(
     result = transcribe(tone(1.0))
     assert (result.success, result.reason) == (False, ASRFailureReason.ASR_UNAVAILABLE)
     assert result.retryable is True
-    assert get_recent_calls()  # the call got past decoding, so it is recorded
+    # Not a model call: Whisper never ran (#479) -- the host lacks it, which the
+    # reason says. Recording it would add a 1 ms "error" to Whisper's figures.
+    assert get_recent_calls() == []
 
 
 @_needs_weights

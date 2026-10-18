@@ -287,6 +287,20 @@ def test_a_failed_ocr_call_is_still_recorded_as_an_error(
     assert (call.kind, call.status) == (CallKind.OCR, CallStatus.ERROR)
 
 
+def test_ocr_without_tesseract_is_not_a_model_call(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+):
+    def not_installed() -> str:
+        raise RuntimeError("tesseract binary not found")
+
+    monkeypatch.setattr(ocr, "_find_tesseract", not_installed)
+    with caplog.at_level(logging.WARNING, logger=ocr.logger.name):
+        result = extract_text(png_bytes(), filename="a.png")
+    assert result.reason == ocr.OCRFailureReason.OCR_UNAVAILABLE
+    assert get_recent_calls() == []  # the host's problem, not a failed call
+    assert any(m.startswith("OCR_UNAVAILABLE") for m in caplog.messages)  # still visible
+
+
 @pytest.mark.usefixtures("tesseract_found")
 def test_input_rejected_before_tesseract_runs_is_not_a_model_call():
     assert not extract_text(b"not an image at all", filename="a.png").success
@@ -327,6 +341,25 @@ def test_an_asr_calls_window_includes_decoding_the_audio(monkeypatch: pytest.Mon
     one_asr_call(monkeypatch)  # a fake Whisper that uses next to no CPU itself
     [call] = get_recent_calls()
     assert call.cpu_s is not None and call.cpu_s >= 0.2
+
+
+def test_asr_without_the_model_is_not_a_model_call(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+):
+    # Decodable audio with speech, and no Whisper to transcribe it: the same
+    # rule as OCR without tesseract -- not recorded, so it neither pulls
+    # Whisper's p50 down nor shows up in its error_count.
+    def not_installed():
+        raise asr._ASRUnavailable("Whisper base.en weights not found")
+
+    monkeypatch.setattr(asr, "_load_model", not_installed)
+    monkeypatch.setattr(asr, "_speech_regions", lambda window: [(0, len(window))])
+    with caplog.at_level(logging.WARNING, logger=asr.logger.name):
+        result = transcribe(tone(1.0))
+    assert result.reason == asr.ASRFailureReason.ASR_UNAVAILABLE
+    assert get_recent_calls() == []
+    assert model_call_summary().by_call_name == []
+    assert any(m.startswith("ASR_UNAVAILABLE") for m in caplog.messages)  # still visible
 
 
 def test_a_failed_asr_call_is_still_recorded_as_an_error(monkeypatch: pytest.MonkeyPatch):

@@ -295,7 +295,10 @@ Local OCR + ASR preprocessing.
   Every call whose audio decodes is recorded through
   `observability.record_call()` (`whisper-base.en-int8-local`, `kind=asr`,
   with its CPU seconds -- decoding the audio, VAD and Whisper -- as its
-  compute cost; a local model has no dollar price, #479), as #478 asks. OCR is recorded the same way -- `record_call()` is
+  compute cost; a local model has no dollar price, #479), as #478 asks --
+  except when the weights are missing: `ASR_UNAVAILABLE` is the host, not a
+  failed call, so it is logged as a WARNING and not recorded, like OCR
+  without tesseract. OCR is recorded the same way -- `record_call()` is
   the one mechanism for model calls.
 
   **Resource budget -- measured in a Linux container, one process holding the

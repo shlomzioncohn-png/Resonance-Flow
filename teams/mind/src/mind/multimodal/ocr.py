@@ -411,6 +411,8 @@ def _extract(content: bytes, filename: str, max_pages: int) -> OCRResult:
     try:
         tesseract_cmd = _find_tesseract()
     except RuntimeError as exc:
+        # The host, not a failed call: logged, and not recorded as a model call.
+        logger.warning("OCR_UNAVAILABLE: %s", exc)
         return _failure(OCRFailureReason.OCR_UNAVAILABLE, str(exc))
 
     parsed: list[_PageOCR] = []
