@@ -1,13 +1,4 @@
-{{/*
-ServiceMonitors for the Bitnami subcharts' metrics endpoints, rendered here
-instead of by the subcharts (their metrics.serviceMonitor.enabled) because theirs
-don't check for the CRD - see templates/servicemonitor.yaml for why that matters.
-Each one renders when its subchart and its metrics are enabled
-(environments/shared.yaml), and the cluster has the monitoring.coreos.com/v1 CRDs.
-
-Every series gets `component` (kafka/postgresql/minio) and `team: relay` labels,
-matching the per-component ServiceMonitors.
-*/}}
+{{/* Kafka/PostgreSQL/MinIO - see README.md "Metrics scraping". */}}
 {{- if .Capabilities.APIVersions.Has "monitoring.coreos.com/v1/ServiceMonitor" }}
 {{- $monitors := list }}
 {{- if and .Values.kafka.enabled .Values.kafka.metrics.jmx.enabled }}
@@ -17,7 +8,6 @@ matching the per-component ServiceMonitors.
 {{- $monitors = append $monitors (dict "name" "postgresql" "component" "metrics" "port" "http-metrics" "paths" (list "/metrics")) }}
 {{- end }}
 {{- if and .Values.minio.enabled .Values.minio.metrics.enabled }}
-{{- /* No separate metrics Service - MinIO's own API Service. bucket = per-bucket usage. */}}
 {{- $monitors = append $monitors (dict "name" "minio" "component" "minio" "port" "tcp-api" "paths" (list "/minio/v2/metrics/cluster" "/minio/v2/metrics/node" "/minio/v2/metrics/bucket")) }}
 {{- end }}
 {{- range $m := $monitors }}

@@ -4,6 +4,7 @@ metadata:
   name: kafka-exporter
   namespace: argocd
   annotations:
+    # See README.md "Monitoring".
     argocd.argoproj.io/sync-wave: "4"
 spec:
   project: default

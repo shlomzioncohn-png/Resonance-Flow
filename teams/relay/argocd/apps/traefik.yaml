@@ -4,10 +4,7 @@ metadata:
   name: traefik
   namespace: argocd
   annotations:
-    # After kube-prometheus-stack (wave 3): the chart fails its render when
-    # metrics.prometheus.serviceMonitor is on and the ServiceMonitor CRD is
-    # missing, and argocd-cm-patch.yaml gates each wave on the previous one's
-    # health - on wave 2 a fresh cluster would never get past Traefik.
+    # See README.md "Monitoring".
     argocd.argoproj.io/sync-wave: "4"
 spec:
   project: default
@@ -44,12 +41,8 @@ spec:
                 readTimeout: 0s
         service:
           type: LoadBalancer
-        # Prometheus metrics on the chart's internal `metrics` entryPoint (:9100),
-        # scraped through a ServiceMonitor by kube-prometheus-stack.
         metrics:
           prometheus:
-            # Off by default - without it there's no per-router breakdown, only
-            # per-entryPoint (traefik_router_requests_total, ..._duration_seconds).
             addRoutersLabels: true
             addServicesLabels: true
             service:
