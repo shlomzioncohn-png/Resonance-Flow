@@ -37,10 +37,12 @@ public class TaskStateHistoryService {
 
     /**
      * Entries for {@code taskId} with {@code from <= createdAt < to}, newest first. A null bound
-     * is open. A task that exists but has no history yields an empty page.
+     * is open. A task that exists but has no history yields an empty page. History outlives its
+     * task (no FK, and tasks are soft-deleted), so a task that no longer exists is still readable
+     * as long as it left any history behind.
      *
      * @throws InvalidRequestException if page is negative, size is not in 1..100, or from is after to
-     * @throws TaskNotFoundException   if the task does not exist
+     * @throws TaskNotFoundException   if there is neither a task nor any history for {@code taskId}
      */
     public PageResponse<TaskStateHistoryEntry> getHistory(UUID taskId, Instant from, Instant to,
                                                           int page, int size) {
@@ -51,10 +53,20 @@ public class TaskStateHistoryService {
         if (from != null && to != null && from.isAfter(to)) {
             throw new InvalidRequestException("from must not be after to");
         }
-        taskRepository.findById(taskId)
-                .orElseThrow(() -> new TaskNotFoundException("Task not found: " + taskId));
 
-        return transactionRunner.runInReadOnlyTransaction(
-                () -> historyRepository.findByTaskId(taskId, from, to, page, size));
+        return transactionRunner.runInReadOnlyTransaction(() -> {
+            requireTaskOrHistory(taskId);
+            return historyRepository.findByTaskId(taskId, from, to, page, size);
+        });
+    }
+
+    /** 404 only when the id is unknown to both the task store and the history (a mistyped id). */
+    private void requireTaskOrHistory(UUID taskId) {
+        if (taskRepository.findById(taskId).isPresent()) {
+            return;
+        }
+        if (historyRepository.findByTaskId(taskId, null, null, 0, 1).totalElements() == 0) {
+            throw new TaskNotFoundException("Task not found: " + taskId);
+        }
     }
 }

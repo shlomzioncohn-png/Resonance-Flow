@@ -926,8 +926,8 @@ it never changes for a task, so it can be read from the task itself.
 
 - **No backfill.** History starts at the deployment that introduced it. A task that existed
   earlier, and has not changed since, has an empty history even though it has a status.
-- **No FK to the task**, so entries survive the task being deleted - but the endpoint returns
-  `404` for a task id that no longer exists, so those entries are not readable through the API.
+- **No FK to the task**, so entries survive the task being deleted (tasks are soft-deleted), and
+  the endpoint still serves them: see the `404` rule below.
 
 ### Read endpoint
 
@@ -958,8 +958,10 @@ the JSON:
 }
 ```
 
-- A task that exists but has no history (see "No backfill") returns `200` with empty `content`;
-  `404` is only for a `taskId` that does not exist.
+- A task that exists but has no history (see "No backfill") returns `200` with empty `content`.
+  A task that no longer exists but left history behind also returns `200` with that history.
+  `404` is only for a `taskId` that is unknown to both the tasks and the history (e.g. a mistyped
+  id). Costs one extra single-row history lookup when the task itself is not found.
 - `400` for: `from` after `to` (`from == to` is valid and returns an empty page), a negative
   `page`, `size` outside 1..100, a date that is not an ISO-8601 instant with an offset, or a
   non-UUID `taskId`.

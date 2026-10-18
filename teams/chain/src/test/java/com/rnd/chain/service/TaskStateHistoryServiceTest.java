@@ -50,6 +50,27 @@ class TaskStateHistoryServiceTest {
     }
 
     @Test
+    void getHistory_taskGoneButHistoryRemains_returnsTheHistory() {
+        UUID deletedTaskId = UUID.randomUUID();
+        history.record(TaskStateHistoryEntry.statusChanged(
+                UUID.randomUUID(), deletedTaskId, TaskStatus.PENDING, TaskStatus.DONE, T1));
+
+        PageResponse<TaskStateHistoryEntry> page = service.getHistory(deletedTaskId, null, null, 0, 20);
+
+        assertThat(page.content()).hasSize(1);
+        assertThat(page.content().get(0).taskId()).isEqualTo(deletedTaskId);
+    }
+
+    @Test
+    void getHistory_taskGoneAndRangeMatchesNothing_stillReturnsEmptyPageNotNotFound() {
+        UUID deletedTaskId = UUID.randomUUID();
+        history.record(TaskStateHistoryEntry.statusChanged(
+                UUID.randomUUID(), deletedTaskId, TaskStatus.PENDING, TaskStatus.DONE, T1));
+
+        assertThat(service.getHistory(deletedTaskId, T2, T3, 0, 20).content()).isEmpty();
+    }
+
+    @Test
     void getHistory_existingTaskWithoutHistory_returnsEmptyPage() {
         PageResponse<TaskStateHistoryEntry> page = service.getHistory(taskId, null, null, 0, 20);
 
