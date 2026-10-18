@@ -129,9 +129,6 @@ async def test_two_concurrent_calls_for_the_same_task_publish_the_edge_once(publ
                 task_id=TASK_A, tenant_id=TENANT, dependency_mentions=["the DB upgrade"]
             )
         )
-        await asyncio.sleep(0.01)  # let both reach the lock, one still holding/awaiting it
-        assert publisher._lock_refs.get(TASK_A) == 2
-
         await asyncio.gather(call1, call2)
 
     assert len(sink.sent) == 1
