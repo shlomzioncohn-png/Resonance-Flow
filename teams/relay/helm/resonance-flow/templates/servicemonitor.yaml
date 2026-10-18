@@ -1,0 +1,32 @@
+{{/* Teams' kind CI clusters have no ServiceMonitor CRD - see README.md "Metrics scraping". */}}
+{{- if .Capabilities.APIVersions.Has "monitoring.coreos.com/v1/ServiceMonitor" }}
+{{- range $componentName, $component := .Values.components }}
+{{- if and $component.enabled $component.service $component.metrics $component.metrics.enabled }}
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+
+metadata:
+  name: {{ include "resonance-flow.fullname" $ }}-{{ $componentName }}
+  labels:
+    {{- include "resonance-flow.labels" $ | nindent 4 }}
+    app.kubernetes.io/component: {{ $componentName }}
+
+spec:
+  selector:
+    matchLabels:
+      {{- include "resonance-flow.selectorLabels" $ | nindent 6 }}
+      app.kubernetes.io/component: {{ $componentName }}
+
+  endpoints:
+    - port: http
+      path: {{ $component.metrics.path | default "/actuator/prometheus" }}
+      interval: {{ $component.metrics.interval | default "30s" }}
+      relabelings:
+        - targetLabel: component
+          replacement: {{ $componentName }}
+        - targetLabel: team
+          replacement: {{ $component.metrics.team | default $componentName }}
+{{- end }}
+{{- end }}
+{{- end }}

@@ -159,6 +159,38 @@ the pod's own node is always allowed. The rules only take effect if the cluster'
 CNI enforces NetworkPolicy. On a CNI that doesn't, they render but block nothing.
 The policy applies to the whole pod, not to individual paths.
 
+## Metrics scraping (`metrics`)
+
+Prometheus (installed by `teams/relay/argocd/apps/kube-prometheus-stack.yaml`)
+scrapes a component once it opts in:
+
+```yaml
+components:
+  bridge:
+    metrics:
+      enabled: true
+      path: /prometheus        # default /actuator/prometheus
+      interval: 30s            # default
+      team: bridge             # default: the component name
+```
+
+`templates/servicemonitor.yaml` then renders a ServiceMonitor for the component's
+Service, on its `http` port. Every series gets two labels: `component` (the
+`components.<name>` key) and `team` (`metrics.team`), for per-team dashboards and
+alert routing.
+
+- **The app must expose the endpoint first.** For Spring Boot that's
+  `io.micrometer:micrometer-registry-prometheus` plus `prometheus` in
+  `management.endpoints.web.exposure.include`. A component that sets
+  `management.endpoints.web.base-path: /` (bridge, chain) serves it at
+  `/prometheus`, not `/actuator/prometheus`.
+- **Skipped without the CRD.** The template only renders when the cluster has the
+  `monitoring.coreos.com/v1` CRDs. Teams' kind CI clusters don't, so CI is
+  unaffected. `helm template` skips it too, unless you pass
+  `--api-versions monitoring.coreos.com/v1/ServiceMonitor`.
+- **NetworkPolicy.** If the component also has `networkPolicy`, Prometheus pods
+  in `monitoring.namespace` (default `monitoring`) are allowed in on its `http` port.
+
 ## Component configuration (`config` / `secret`)
 
 A `components.<name>.config` block is rendered verbatim to a `config.yaml`

@@ -33,6 +33,7 @@ dedicated project is needed for this repo's scope.
 | `argocd-cm-patch.yaml`   | Restores the `argoproj.io/Application` health check ArgoCD dropped in 1.8 (with a fix for a "Missing" status edge case) - kept in case a future child `Application` needs sync-wave gating on another `Application`'s health; nothing under `apps/` currently uses more than one wave |
 | `apps/resonance-flow.yaml` | `Application` syncing the [`resonance-flow`](../helm/resonance-flow) chart (all teams' services, including the Kafka/Postgres/MinIO subcharts), with [`environments/shared.yaml`](../helm/resonance-flow/environments/shared.yaml) layered on top for shared-cluster-only settings |
 | `apps/traefik.yaml`      | `Application` installing the Traefik ingress controller (namespace `traefik`, ingress class `traefik`) that serves the chart's Ingress |
+| `apps/kube-prometheus-stack.yaml` | `Application` installing cluster monitoring (Prometheus Operator, Prometheus, Alertmanager, node-exporter, kube-state-metrics) into namespace `monitoring` - see [Monitoring](#monitoring) |
 
 ## Onboarding your team's service
 
@@ -77,6 +78,30 @@ If `teams-mind-api`/`teams-relay-*`-style Applications from the old
 directory-generator setup were ever applied to a live cluster, delete
 them explicitly (`argocd app delete <name>`) - they're orphaned now that
 `teams/relay/k8s/argocd/` is gone from `main`.
+
+## Monitoring
+
+`apps/kube-prometheus-stack.yaml` installs the
+[kube-prometheus-stack](https://github.com/prometheus-community/helm-charts/tree/main/charts/kube-prometheus-stack)
+chart as its own `Application` in its own `monitoring` namespace - not as a
+subchart of `resonance-flow`, so a broken monitoring stack never blocks any
+team's sync.
+
+- **Ordering.** It's on sync-wave `3`, after `resonance-flow`. The chart's
+  `templates/servicemonitor.yaml` only renders once the
+  `monitoring.coreos.com/v1` CRDs exist, so on a fresh cluster
+  `resonance-flow`'s first sync skips ServiceMonitors, and ArgoCD's next
+  refresh adds them once this app has installed the CRDs.
+- **Scraping a service.** A team opts its component in with
+  `components.<team>.metrics` - see the chart's
+  [README](../helm/resonance-flow/README.md#metrics-scraping-metrics).
+
+Nothing here has an Ingress. Reach Prometheus and Alertmanager with:
+
+```bash
+kubectl -n monitoring port-forward svc/monitoring-kube-prometheus-prometheus 9090:9090
+kubectl -n monitoring port-forward svc/monitoring-kube-prometheus-alertmanager 9093:9093
+```
 
 ## Scope
 

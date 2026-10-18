@@ -56,6 +56,9 @@ ingress:
       component: lens-gateway
     - path: /auth
       component: lens-gateway
+# Components opt in with components.<name>.metrics - see README.md "Metrics scraping".
+monitoring:
+  namespace: monitoring
 pipeConsumerGroupSweep:
   enabled: true
   schedule: "0 * * * *"
