@@ -18,6 +18,8 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from uuid import UUID
 
 from mind.dependencies.event import build_dependency_event
@@ -31,18 +33,32 @@ logger = logging.getLogger(__name__)
 class DependencyPublisher:
     """One lock per task_id, held only around that task's own
     check-reserve-send section: unrelated tasks' Kafka round trips never
-    wait on each other, while two calls for the same task still serialize."""
+    wait on each other, while two calls for the same task still serialize.
+    Each lock is removed once nothing is using it, so this never grows
+    unboundedly."""
 
     def __init__(self, store: VectorStore, sink: DependencySink) -> None:
         self._store = store
         self._sink = sink
         self._published: dict[str, set[UUID]] = {}
         self._locks: dict[str, asyncio.Lock] = {}
+        self._lock_refs: dict[str, int] = {}
         self._locks_guard = asyncio.Lock()
 
-    async def _lock_for(self, task_id: str) -> asyncio.Lock:
+    @asynccontextmanager
+    async def _task_lock(self, task_id: str) -> AsyncIterator[None]:
         async with self._locks_guard:
-            return self._locks.setdefault(task_id, asyncio.Lock())
+            lock = self._locks.setdefault(task_id, asyncio.Lock())
+            self._lock_refs[task_id] = self._lock_refs.get(task_id, 0) + 1
+        try:
+            async with lock:
+                yield
+        finally:
+            async with self._locks_guard:
+                self._lock_refs[task_id] -= 1
+                if self._lock_refs[task_id] == 0:
+                    del self._locks[task_id]
+                    del self._lock_refs[task_id]
 
     async def publish_dependencies(
         self,
@@ -83,8 +99,7 @@ class DependencyPublisher:
                     candidates[target_uuid] = result.similarity
                 break
 
-        task_lock = await self._lock_for(task_id)
-        async with task_lock:
+        async with self._task_lock(task_id):
             already_sent = self._published.get(task_id, set())
             new_edges = {
                 target: confidence

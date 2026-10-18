@@ -119,16 +119,25 @@ async def test_a_failed_send_does_not_mark_the_edge_as_already_sent():
 
 async def test_two_concurrent_calls_for_the_same_task_publish_the_edge_once(publisher, sink):
     with _resolved([SearchResult(task_id=TASK_B, similarity=0.9)]):
-        await asyncio.gather(
+        call1 = asyncio.ensure_future(
             publisher.publish_dependencies(
                 task_id=TASK_A, tenant_id=TENANT, dependency_mentions=["the DB upgrade"]
-            ),
-            publisher.publish_dependencies(
-                task_id=TASK_A, tenant_id=TENANT, dependency_mentions=["the DB upgrade"]
-            ),
+            )
         )
+        call2 = asyncio.ensure_future(
+            publisher.publish_dependencies(
+                task_id=TASK_A, tenant_id=TENANT, dependency_mentions=["the DB upgrade"]
+            )
+        )
+        await asyncio.sleep(0.01)  # let both reach the lock, one still holding/awaiting it
+        assert publisher._lock_refs.get(TASK_A) == 2
+
+        await asyncio.gather(call1, call2)
 
     assert len(sink.sent) == 1
+    # cleanup only happens once nothing is using the lock anymore
+    assert TASK_A not in publisher._locks
+    assert TASK_A not in publisher._lock_refs
 
 
 async def test_an_unresolved_target_is_not_dropped_and_resolves_on_a_later_call(publisher, sink):
@@ -289,6 +298,27 @@ async def test_a_task_that_publishes_nothing_gets_no_published_entry(publisher, 
 
     assert sink.sent == []
     assert TASK_A not in publisher._published
+
+
+async def test_a_task_that_publishes_nothing_leaves_no_lock_behind(publisher, sink):
+    with _resolved([]):  # the mention never resolves
+        await publisher.publish_dependencies(
+            task_id=TASK_A, tenant_id=TENANT, dependency_mentions=["a task that doesn't exist yet"]
+        )
+
+    assert TASK_A not in publisher._locks
+    assert TASK_A not in publisher._lock_refs
+
+
+async def test_a_task_that_publishes_something_leaves_no_lock_behind(publisher, sink):
+    with _resolved([SearchResult(task_id=TASK_B, similarity=0.9)]):
+        await publisher.publish_dependencies(
+            task_id=TASK_A, tenant_id=TENANT, dependency_mentions=["the DB upgrade"]
+        )
+
+    assert sink.sent  # sanity check: this call did publish
+    assert TASK_A not in publisher._locks
+    assert TASK_A not in publisher._lock_refs
 
 
 async def test_the_same_target_in_different_case_is_deduped_across_mentions(publisher, sink):
