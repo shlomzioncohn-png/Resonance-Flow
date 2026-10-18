@@ -168,6 +168,22 @@ async def test_a_later_call_publishes_only_the_newly_resolved_edge(publisher, si
     assert second.depends_on_task_id == UUID(TASK_C)
 
 
+async def test_resolve_is_called_with_exclude_task_id(publisher, sink):
+    """The task's own row should be excluded at the search level, not just
+    filtered out afterward by the self-id check below."""
+    with patch(
+        "mind.dependencies.publisher.resolve_dependency_targets",
+        AsyncMock(return_value=[[SearchResult(task_id=TASK_B, similarity=0.9)]]),
+    ) as mock_resolve:
+        await publisher.publish_dependencies(
+            task_id=TASK_A, tenant_id=TENANT, dependency_mentions=["the DB upgrade"]
+        )
+
+    mock_resolve.assert_awaited_once_with(
+        publisher._store, ["the DB upgrade"], exclude_task_id=TASK_A
+    )
+
+
 async def test_a_mention_resolving_to_the_tasks_own_id_is_not_a_self_dependency(publisher, sink):
     with _resolved([SearchResult(task_id=TASK_A, similarity=0.95)]):
         await publisher.publish_dependencies(
@@ -210,5 +226,84 @@ def test_dependency_proposed_rejects_an_empty_dependencies_list():
 
 
 def test_build_dependency_event_raises_on_no_resolved_edges():
-    with pytest.raises(ValueError, match="at least one resolved edge"):
+    with pytest.raises(ValidationError):
         build_dependency_event(UUID(TASK_A), TENANT, {})
+
+
+async def test_a_mention_with_two_candidates_above_threshold_publishes_only_the_best(publisher, sink):
+    """#355 finding 1: 'login bug' vs 'logout bug' can both clear the
+    threshold for one mention -- only the best (first) candidate is an edge."""
+    with _resolved(
+        [
+            SearchResult(task_id=TASK_B, similarity=0.82),
+            SearchResult(task_id=TASK_C, similarity=0.71),
+        ]
+    ):
+        await publisher.publish_dependencies(
+            task_id=TASK_A, tenant_id=TENANT, dependency_mentions=["fix the login bug"]
+        )
+
+    [event] = sink.sent
+    assert len(event.dependencies) == 1
+    assert event.dependencies[0].depends_on_task_id == UUID(TASK_B)
+
+
+async def test_a_cancelled_call_does_not_lose_track_of_a_completed_send():
+    import time
+
+    class SlowSink(ListSink):
+        def send(self, payload):
+            time.sleep(0.05)
+            super().send(payload)
+
+    slow_sink = SlowSink()
+    slow_publisher = DependencyPublisher(store=object(), sink=slow_sink)  # type: ignore[arg-type]
+
+    with _resolved([SearchResult(task_id=TASK_B, similarity=0.9)]):
+        task = asyncio.ensure_future(
+            slow_publisher.publish_dependencies(
+                task_id=TASK_A, tenant_id=TENANT, dependency_mentions=["the DB upgrade"]
+            )
+        )
+        await asyncio.sleep(0.01)  # let it reach the send, still in flight
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+        await asyncio.sleep(0.1)  # let the background send actually finish
+
+    assert len(slow_sink.sent) == 1
+
+    # a second call for the same edge must not duplicate it
+    with _resolved([SearchResult(task_id=TASK_B, similarity=0.9)]):
+        await slow_publisher.publish_dependencies(
+            task_id=TASK_A, tenant_id=TENANT, dependency_mentions=["the DB upgrade"]
+        )
+    assert len(slow_sink.sent) == 1
+
+
+async def test_a_task_that_publishes_nothing_gets_no_published_entry(publisher, sink):
+    with _resolved([]):  # the mention never resolves
+        await publisher.publish_dependencies(
+            task_id=TASK_A, tenant_id=TENANT, dependency_mentions=["a task that doesn't exist yet"]
+        )
+
+    assert sink.sent == []
+    assert TASK_A not in publisher._published
+
+
+async def test_the_same_target_in_different_case_is_deduped_across_mentions(publisher, sink):
+    """#355 finding 8: dedupe is by UUID value, not raw string -- differently
+    cased representations of the same id are the same edge."""
+    with _resolved(
+        [SearchResult(task_id=TASK_B, similarity=0.7)],
+        [SearchResult(task_id=TASK_B.upper(), similarity=0.95)],
+    ):
+        await publisher.publish_dependencies(
+            task_id=TASK_A,
+            tenant_id=TENANT,
+            dependency_mentions=["vague reference", "the DB upgrade specifically"],
+        )
+
+    [event] = sink.sent
+    assert len(event.dependencies) == 1
+    assert event.dependencies[0].confidence == 0.95

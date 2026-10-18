@@ -272,4 +272,38 @@ async def test_requests_exclude_completed_from_the_store():
         mock_embed_async.return_value = [0.0] * EMBEDDING_DIM
         await resolve_dependency_targets(store, ["the DB upgrade"], k=3, threshold=0.0)
 
-    store.search.assert_awaited_once_with([0.0] * EMBEDDING_DIM, k=3, exclude_completed=True)
+    store.search.assert_awaited_once_with(
+        [0.0] * EMBEDDING_DIM, k=3, exclude_completed=True, exclude_task_id=None
+    )
+
+
+async def test_requests_exclude_task_id_from_the_store():
+    """A task's own row should never spend one of its k search slots --
+    exclude_task_id is threaded through to the store.search() call."""
+    store = AsyncMock()
+    store.search.return_value = []
+    with patch("mind.embeddings.search.embed_async") as mock_embed_async:
+        mock_embed_async.return_value = [0.0] * EMBEDDING_DIM
+        await resolve_dependency_targets(
+            store, ["the DB upgrade"], k=3, threshold=0.0, exclude_task_id="task-a"
+        )
+
+    store.search.assert_awaited_once_with(
+        [0.0] * EMBEDDING_DIM, k=3, exclude_completed=True, exclude_task_id="task-a"
+    )
+
+
+async def test_a_tasks_own_row_is_excluded_even_as_the_only_match(store):
+    """If a task's own embedding is the single best (or only) match for
+    its own dependency mention text, exclude_task_id must still keep it
+    out of the results -- not just rank it lower."""
+    await store.upsert(
+        "task-db-upgrade",
+        embed(task_text("Upgrade the production database", "Move to the new major version")),
+    )
+
+    [candidates] = await resolve_dependency_targets(
+        store, ["Upgrade the production database"], threshold=0.0, exclude_task_id="task-db-upgrade"
+    )
+
+    assert candidates == []

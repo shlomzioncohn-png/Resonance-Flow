@@ -7,9 +7,8 @@ from __future__ import annotations
 
 from typing import Protocol
 
-from google.protobuf.message import Message
-
 from mind.contracts.task_dependencies_proposed import DependencyProposed
+from mind.messaging.producer import Publisher
 from mind.messaging.task_dependencies_proposed_event_pb2 import (
     Dependency as ProtoDependency,
 )
@@ -18,12 +17,6 @@ from mind.messaging.task_dependencies_proposed_event_pb2 import (
 )
 
 TOPIC = "task.dependencies.proposed"
-
-
-class Producer(Protocol):
-    """What `ProtobufProducer` offers; a fake in tests."""
-
-    def publish(self, topic: str, message: Message, key: str | None = None) -> None: ...
 
 
 def to_proto(payload: DependencyProposed) -> DependencyProposedEvent:
@@ -51,7 +44,7 @@ class KafkaDependencySink:
     """A `DependencySink` that publishes to task.dependencies.proposed, keyed by
     task_id so every edge for one task lands on one partition, in order."""
 
-    def __init__(self, producer: Producer) -> None:
+    def __init__(self, producer: Publisher) -> None:
         self._producer = producer
 
     def send(self, payload: DependencyProposed) -> None:

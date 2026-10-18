@@ -14,7 +14,7 @@ everything below is done.
 
 from __future__ import annotations
 
-from typing import Self
+from typing import Protocol, Self
 
 from confluent_kafka import KafkaException, Producer
 from confluent_kafka.schema_registry import SchemaRegistryClient
@@ -24,6 +24,7 @@ from confluent_kafka.serialization import (
     SerializationContext,
     StringSerializer,
 )
+from google.protobuf.message import Message
 
 from mind.messaging.config import MessagingSettings, load_settings
 
@@ -34,6 +35,12 @@ _SERIALIZER_CONF = {
     "auto.register.schemas": True,
     "use.deprecated.format": False,
 }
+
+
+class Publisher(Protocol):
+    """What `ProtobufProducer` offers: publish one message and wait for the ack."""
+
+    def publish(self, topic: str, message: Message, key: str | None = None) -> None: ...
 
 
 class ProtobufProducer:

@@ -7,11 +7,12 @@ from uuid import UUID
 
 from mind.contracts.task_creation_requested import TaskCreationRequested
 from mind.embeddings.base import VectorStore
+from mind.messaging.producer import Publisher
 from mind.messaging.task_created_event_pb2 import TaskCreatedEvent
 from mind.task_creation.overdue import DEFAULT_MAX_WAIT, report_overdue
 from mind.task_creation.pending import PendingStore
 from mind.task_creation.reply import Headers, MatchedReply, OnMatched, handle_task_created_reply
-from mind.task_creation.send import Publisher, send_creation_request
+from mind.task_creation.send import send_creation_request
 
 
 class TaskCreationFlow:

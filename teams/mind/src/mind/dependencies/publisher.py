@@ -1,25 +1,17 @@
 """#355: resolve a task's dependency mentions into targets and publish
 task.dependencies.proposed (#133) to Chain.
 
-`publish_dependencies` takes `task_id`, `tenant_id` and `dependency_mentions`
-(free text, #245's input shape) explicitly. Where those three come from --
-extraction's LLM call, and matching Inbox's task.created reply to a real
-task_id (#353's `on_matched` hook, `MatchedReply`) -- is not this module's
-concern: that hand-off is #349's pipeline to build, which does not exist yet,
-the same position #353 itself is in (see its README, "Running it"). Whoever
-wires it calls this with those three values, however it gets them.
+Hand-off: `publish_dependencies` takes `task_id`, `tenant_id` and
+`dependency_mentions` explicitly -- not read off #353's `MatchedReply`,
+which doesn't carry them yet (see README.md).
 
-A mention that resolves to nothing yet (its target has no task_id -- the
-issue's step 4) is neither dropped nor force-published: calling
-`publish_dependencies` again later with the same mentions picks it up once it
-resolves, and the per-task published-edge tracking below makes a repeat call
-safe within this process -- an edge already sent this process is never sent
-again, matching #133's contract ("re-publishing adds edges, never replaces
-them"). That tracking is in-memory only and does not survive a restart; after
-one, the same mentions publish the same edges again, relying on Chain
-treating a re-proposed edge (same `depends_on_task_id`, same `task_id`) as a
-no-op rather than a hard duplicate. When, or whether, to call again is the
-caller's decision, not built here.
+Per mention, only the best resolved candidate becomes an edge: the
+embeddings README notes that a close paraphrase pair (e.g. "login bug" vs
+"logout bug") can both clear the threshold, so taking every candidate above
+it would treat a near-miss as a real dependency. An unresolved mention is
+neither dropped nor force-published -- a later call with the same mentions
+picks it up once it resolves. The sent-edges record is per-process,
+in-memory, and relies on Chain no-op'ing a re-proposed edge after a restart.
 """
 
 from __future__ import annotations
@@ -37,15 +29,20 @@ logger = logging.getLogger(__name__)
 
 
 class DependencyPublisher:
-    """Stateful: tracks which depends_on_task_id have already been sent for
-    each task_id, so a duplicate call (#353's `on_matched` can fire twice for
-    the same reply) never re-publishes an edge."""
+    """One lock per task_id, held only around that task's own
+    check-reserve-send section: unrelated tasks' Kafka round trips never
+    wait on each other, while two calls for the same task still serialize."""
 
     def __init__(self, store: VectorStore, sink: DependencySink) -> None:
         self._store = store
         self._sink = sink
-        self._published: dict[str, set[str]] = {}
-        self._lock = asyncio.Lock()
+        self._published: dict[str, set[UUID]] = {}
+        self._locks: dict[str, asyncio.Lock] = {}
+        self._locks_guard = asyncio.Lock()
+
+    async def _lock_for(self, task_id: str) -> asyncio.Lock:
+        async with self._locks_guard:
+            return self._locks.setdefault(task_id, asyncio.Lock())
 
     async def publish_dependencies(
         self,
@@ -56,18 +53,17 @@ class DependencyPublisher:
     ) -> None:
         """Resolve `dependency_mentions` (#245) and publish whatever is new.
 
-        A task with no mentions at all publishes nothing: `has_dependencies`
-        false means no event, never called with anything to resolve.
+        A task with no mentions at all publishes nothing.
         """
         if not dependency_mentions:
             return
 
-        # Parsed up front, every call: a malformed task_id from the caller
-        # should fail now, not after the (expensive) resolution below.
         task_uuid = UUID(task_id)
 
-        resolved_lists = await resolve_dependency_targets(self._store, dependency_mentions)
-        candidates: dict[str, float] = {}
+        resolved_lists = await resolve_dependency_targets(
+            self._store, dependency_mentions, exclude_task_id=task_id
+        )
+        candidates: dict[UUID, float] = {}
         for results in resolved_lists:
             for result in results:
                 try:
@@ -83,11 +79,13 @@ class DependencyPublisher:
                     # A mention resolving to the task's own id is not a real
                     # dependency -- a task cannot depend on itself.
                     continue
-                if result.task_id not in candidates or result.similarity > candidates[result.task_id]:
-                    candidates[result.task_id] = result.similarity
+                if target_uuid not in candidates or result.similarity > candidates[target_uuid]:
+                    candidates[target_uuid] = result.similarity
+                break
 
-        async with self._lock:
-            already_sent = self._published.setdefault(task_id, set())
+        task_lock = await self._lock_for(task_id)
+        async with task_lock:
+            already_sent = self._published.get(task_id, set())
             new_edges = {
                 target: confidence
                 for target, confidence in candidates.items()
@@ -102,8 +100,21 @@ class DependencyPublisher:
                     len(dependency_mentions),
                 )
                 return
+
             event = build_dependency_event(task_uuid, tenant_id, new_edges)
-            # Off the loop: send() blocks until Kafka acks (see
-            # task_creation/send.py for the same pattern).
-            await asyncio.to_thread(self._sink.send, event)
-            already_sent.update(new_edges)
+            # Off the loop: send() blocks until Kafka acks.
+            send_task = asyncio.ensure_future(asyncio.to_thread(self._sink.send, event))
+            try:
+                await asyncio.shield(send_task)
+            except asyncio.CancelledError:
+                if send_task.cancelled():
+                    raise
+                # This call was cancelled, but the thread running send() can't
+                # be interrupted -- it may still reach Kafka. Wait for the
+                # real outcome so already_sent only updates if it did, then
+                # honor the cancellation.
+                await send_task
+                self._published[task_id] = already_sent | set(new_edges)
+                raise
+            else:
+                self._published[task_id] = already_sent | set(new_edges)

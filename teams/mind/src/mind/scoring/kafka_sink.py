@@ -7,12 +7,9 @@ only for FULL compatibility: Chain does not need them, so they stay unset.
 
 from __future__ import annotations
 
-from typing import Protocol
-
-from google.protobuf.message import Message
-
 from mind.contracts.task_enums import TaskTier
 from mind.contracts.task_score_proposed import TaskScoreProposed
+from mind.messaging.producer import Publisher
 from mind.messaging.task_created_event_pb2 import TaskTier as ProtoTaskTier
 from mind.messaging.task_score_proposed_event_pb2 import TaskScoreProposedEvent
 
@@ -23,12 +20,6 @@ _TIERS = {
     TaskTier.TACTICAL: ProtoTaskTier.TASK_TIER_TACTICAL,
     TaskTier.STRATEGIC: ProtoTaskTier.TASK_TIER_STRATEGIC,
 }
-
-
-class Producer(Protocol):
-    """What `ProtobufProducer` offers; a fake in tests."""
-
-    def publish(self, topic: str, message: Message, key: str | None = None) -> None: ...
 
 
 def to_proto(payload: TaskScoreProposed) -> TaskScoreProposedEvent:
@@ -51,7 +42,7 @@ class KafkaScoreSink:
     """A `ScoreSink` that publishes to task.score.proposed, keyed by task_id
     so every score for one task lands on one partition, in order."""
 
-    def __init__(self, producer: Producer) -> None:
+    def __init__(self, producer: Publisher) -> None:
         self._producer = producer
 
     def send(self, payload: TaskScoreProposed) -> None:

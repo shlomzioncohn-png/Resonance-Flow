@@ -5,10 +5,11 @@ Why the order, and what a failed or repeated publish does: README.md,
 """
 
 import asyncio
-from typing import TYPE_CHECKING, Protocol
+from typing import TYPE_CHECKING
 from uuid import UUID
 
 from mind.contracts.task_creation_requested import TaskCreationRequested
+from mind.messaging.producer import Publisher
 from mind.task_creation.correlation import correlation_id_for
 from mind.task_creation.event import to_creation_requested_event
 from mind.task_creation.pending import PendingRequest, PendingStore
@@ -17,12 +18,6 @@ if TYPE_CHECKING:
     from mind.messaging.producer import ProtobufProducer
 
 TOPIC = "task.creation.requested"
-
-
-class Publisher(Protocol):
-    """What `ProtobufProducer` offers: publish one message and wait for the ack."""
-
-    def publish(self, topic: str, message: object, key: str | None = None) -> None: ...
 
 
 def _the_real_producer_fits(producer: "ProtobufProducer") -> Publisher:
