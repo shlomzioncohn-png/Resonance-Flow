@@ -2,7 +2,7 @@
   "dataset": "AMI Meeting Corpus",
   "dataset_version": "ami_public_manual_1.6.2",
   "purpose": "Foundation Gate real-data slice for the persona harness; also the ground-truth source for #176",
-  "split": "manual annotations - abstractive summary (abssumm), <actions> layer",
+  "split": "manual annotations - abstractive summary (abssumm), <actions> layer; words/ layer (AMI's human word-level transcript, every speaker) for the transcript loader in src/mind/ingestion/ami_transcripts.py (#784)",
   "source_url": "https://groups.inf.ed.ac.uk/ami/AMICorpusAnnotations/ami_public_manual_1.6.2.zip",
   "source_page": "https://groups.inf.ed.ac.uk/ami/download/",
   "license": {
@@ -22,21 +22,33 @@
       "id": "IB4003",
       "files": [
         "local-data/ami/ami_public_manual_1.6.2/abstractive/IB4003.abssumm.xml",
-        "local-data/ami/ami_public_manual_1.6.2/corpusResources/meetings.xml"
+        "local-data/ami/ami_public_manual_1.6.2/corpusResources/meetings.xml",
+        "local-data/ami/ami_public_manual_1.6.2/words/IB4003.A.words.xml",
+        "local-data/ami/ami_public_manual_1.6.2/words/IB4003.B.words.xml",
+        "local-data/ami/ami_public_manual_1.6.2/words/IB4003.C.words.xml",
+        "local-data/ami/ami_public_manual_1.6.2/words/IB4003.D.words.xml"
       ]
     },
     {
       "id": "IS1008b",
       "files": [
         "local-data/ami/ami_public_manual_1.6.2/abstractive/IS1008b.abssumm.xml",
-        "local-data/ami/ami_public_manual_1.6.2/corpusResources/meetings.xml"
+        "local-data/ami/ami_public_manual_1.6.2/corpusResources/meetings.xml",
+        "local-data/ami/ami_public_manual_1.6.2/words/IS1008b.A.words.xml",
+        "local-data/ami/ami_public_manual_1.6.2/words/IS1008b.B.words.xml",
+        "local-data/ami/ami_public_manual_1.6.2/words/IS1008b.C.words.xml",
+        "local-data/ami/ami_public_manual_1.6.2/words/IS1008b.D.words.xml"
       ]
     },
     {
       "id": "IS1008d",
       "files": [
         "local-data/ami/ami_public_manual_1.6.2/abstractive/IS1008d.abssumm.xml",
-        "local-data/ami/ami_public_manual_1.6.2/corpusResources/meetings.xml"
+        "local-data/ami/ami_public_manual_1.6.2/corpusResources/meetings.xml",
+        "local-data/ami/ami_public_manual_1.6.2/words/IS1008d.A.words.xml",
+        "local-data/ami/ami_public_manual_1.6.2/words/IS1008d.B.words.xml",
+        "local-data/ami/ami_public_manual_1.6.2/words/IS1008d.C.words.xml",
+        "local-data/ami/ami_public_manual_1.6.2/words/IS1008d.D.words.xml"
       ]
     }
   ],
