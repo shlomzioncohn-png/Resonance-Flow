@@ -238,20 +238,21 @@ UNIQUE(task_id, team_id) WHERE team_id IS NOT NULL;
 
 ### 3.10 TASK_FEEDBACK
 
-*Phase 2 — the employee feedback loop: structured responses to a task that feed back into stored task data and future extraction/scoring, not just the current session.*
+*Phase 2 — the employee feedback loop: free-text responses to a task that feed back into stored task data and future extraction/scoring, not just the current session.*
 
 | Field | Type | Required | FK / Constraints | Description |
 |---|---|---|---|---|
 | `id` | UUID | Yes | PK | Unique feedback record identifier. |
 | `task_id` | UUID | Yes | FK → `tasks.id` | Task the feedback relates to. |
 | `user_id` | UUID | Yes | FK → `users.id` | User who gave the feedback. |
-| `feedback_type` | VARCHAR(30) | Yes | e.g. `needs_approval / too_tired / needs_clarification / other` | Structured category of the feedback, used to drive downstream logic. |
-| `feedback_text` | TEXT | No | — | Free-text detail accompanying the feedback. |
+| `feedback_text` | TEXT | Yes | NOT NULL | The feedback itself, as free text. A row is written only when non-blank text was sent. |
 | `created_at` | TIMESTAMPTZ | Yes | DEFAULT `now()` | Feedback timestamp. |
 
 **Resolved:** a new `TASK_FEEDBACK` row is written by Inbox and propagates to Mind through the existing `task.updated` topic rather than a new dedicated topic. Mind consumes it there to refine future extraction/scoring.
 
 If feedback also mutates a `TASKS` field directly, for example `status → in_review`, that change rides the same `task.updated` event — no separate signal is needed.
+
+**Current scope:** feedback is accepted only together with a status change to `rejected` (`PATCH /api/v1/tasks/{id}/status`), and is optional there; blank text counts as no feedback. The `task.updated` event of that change carries it in two optional fields - `feedback_text`, `feedback_user_id` - which are absent from every `task.updated` event that has no feedback. The text is also written to the `audit_log.new_values` of that status change.
 
 ### 3.11 AUDIT_LOG
 

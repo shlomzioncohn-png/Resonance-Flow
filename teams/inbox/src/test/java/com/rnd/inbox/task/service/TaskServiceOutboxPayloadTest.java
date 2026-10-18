@@ -18,6 +18,7 @@ import com.rnd.inbox.task.model.SourceType;
 import com.rnd.inbox.task.model.Task;
 import com.rnd.inbox.task.model.TaskExtractionProvenance;
 import com.rnd.inbox.task.model.TaskStatus;
+import com.rnd.inbox.task.repository.TaskFeedbackRepository;
 import com.rnd.inbox.task.repository.TaskRepository;
 import com.rnd.inbox.task.security.TaskAuthorization;
 import com.rnd.inbox.tenant.model.Tenant;
@@ -64,6 +65,7 @@ class TaskServiceOutboxPayloadTest {
         outboxEventRepository = mock(OutboxEventRepository.class);
         taskService = new TaskService(
                 taskRepository,
+                mock(TaskFeedbackRepository.class),
                 mock(AuditService.class),
                 outboxEventRepository,
                 mock(AssignmentRepository.class),

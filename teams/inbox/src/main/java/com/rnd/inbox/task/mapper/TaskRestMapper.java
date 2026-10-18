@@ -6,6 +6,7 @@ import com.rnd.inbox.task.dto.TaskUpdateRequestDto;
 import com.rnd.inbox.task.model.SourceType;
 import com.rnd.inbox.task.model.Task;
 import com.rnd.inbox.task.model.TaskExtractionProvenance;
+import com.rnd.inbox.task.model.TaskFeedback;
 import com.rnd.inbox.task.model.TaskStatus;
 import com.rnd.inbox.project.Project;
 import com.rnd.inbox.tenant.model.Tenant;
@@ -87,6 +88,15 @@ public class TaskRestMapper {
             task.setCompletedAt(Instant.now(clock));
         }
         task.setUpdatedAt(Instant.now(clock));
+    }
+
+    public TaskFeedback toFeedbackEntity(Task task, User user, String feedbackText) {
+        TaskFeedback feedback = new TaskFeedback();
+        feedback.setTask(task);
+        feedback.setUser(user);
+        feedback.setFeedbackText(feedbackText);
+        feedback.setCreatedAt(Instant.now(clock));
+        return feedback;
     }
 
     public TaskResponseDto toResponseDto(Task task) {

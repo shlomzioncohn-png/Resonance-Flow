@@ -16,7 +16,9 @@ import com.rnd.inbox.task.mapper.TaskRestMapper;
 import com.rnd.inbox.task.model.SourceType;
 import com.rnd.inbox.task.model.Task;
 import com.rnd.inbox.task.model.TaskExtractionProvenance;
+import com.rnd.inbox.task.model.TaskFeedback;
 import com.rnd.inbox.task.model.TaskStatus;
+import com.rnd.inbox.task.repository.TaskFeedbackRepository;
 import com.rnd.inbox.task.repository.TaskRepository;
 import com.rnd.inbox.task.security.TaskAuthorization;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -63,6 +65,7 @@ import java.util.UUID;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
@@ -81,6 +84,9 @@ class TaskServiceTest {
 
     @Mock
     private TaskRepository taskRepository;
+
+    @Mock
+    private TaskFeedbackRepository taskFeedbackRepository;
 
     @Mock
     private AuditService auditService;
@@ -117,6 +123,7 @@ class TaskServiceTest {
     void setUp() {
         taskService = new TaskService(
                 taskRepository,
+                taskFeedbackRepository,
                 auditService,
                 outboxEventRepository,
                 assignmentRepository,
@@ -1072,5 +1079,118 @@ class TaskServiceTest {
 
         assertThatThrownBy(() -> taskService.updateTaskStatus(taskId, request, actor.getId()))
                 .isInstanceOf(TaskNotFoundException.class);
+    }
+
+    @Test
+    void updateTaskStatus_toDone_writesTaskCompletedOutboxEventAndAuditLog() {
+        User actor = actorWithRole(UserRole.SYSTEM_ADMIN);
+        when(userRepository.findById(actor.getId())).thenReturn(Optional.of(actor));
+        Task task = existingTask();
+        when(taskRepository.save(task)).thenReturn(task);
+
+        TaskStatusUpdateRequestDto request = new TaskStatusUpdateRequestDto();
+        request.setStatus("DONE");
+
+        taskService.updateTaskStatus(task.getId(), request, actor.getId());
+
+        OutboxEvent event = capturedOutboxEvent();
+        assertThat(event.getEventType()).isEqualTo(EventType.TASK_COMPLETED);
+        assertThat(event.getPayload())
+                .containsEntry("taskId", task.getId().toString())
+                .containsEntry("completed", true);
+        verify(auditService).createUpdateAuditLog(eq("TASK_COMPLETED"), eq("Task"), eq(task.getId()), eq(tenant),
+                eq(actor), any(), any(), any());
+        verifyNoInteractions(taskFeedbackRepository);
+    }
+
+    @Test
+    void updateTaskStatus_toRejectedWithFeedback_savesFeedbackAndPublishesItOnTaskUpdated() {
+        User actor = actorWithRole(UserRole.SYSTEM_ADMIN);
+        when(userRepository.findById(actor.getId())).thenReturn(Optional.of(actor));
+        Task task = existingTask();
+        when(taskRepository.save(task)).thenReturn(task);
+        TaskFeedback feedback = new TaskFeedback();
+        feedback.setTask(task);
+        feedback.setUser(actor);
+        feedback.setFeedbackText("Not clear what is expected");
+        when(taskRestMapper.toFeedbackEntity(task, actor, "Not clear what is expected")).thenReturn(feedback);
+
+        TaskStatusUpdateRequestDto request = new TaskStatusUpdateRequestDto();
+        request.setStatus("REJECTED");
+        request.setFeedbackText("Not clear what is expected");
+
+        taskService.updateTaskStatus(task.getId(), request, actor.getId());
+
+        verify(taskFeedbackRepository).save(feedback);
+        OutboxEvent event = capturedOutboxEvent();
+        assertThat(event.getEventType()).isEqualTo(EventType.TASK_UPDATED);
+        assertThat(event.getPayload())
+                .containsEntry("feedbackText", "Not clear what is expected")
+                .containsEntry("feedbackUserId", actor.getId().toString());
+
+        verify(auditService).createUpdateAuditLog(eq("TASK_STATUS_UPDATED"), eq("Task"), eq(task.getId()), eq(tenant),
+                eq(actor), any(),
+                argThat(after -> "Not clear what is expected".equals(after.get("feedbackText"))),
+                any());
+    }
+
+    @Test
+    void updateTaskStatus_toRejectedWithoutFeedback_publishesTaskUpdatedAndSavesNoFeedback() {
+        User actor = actorWithRole(UserRole.SYSTEM_ADMIN);
+        when(userRepository.findById(actor.getId())).thenReturn(Optional.of(actor));
+        Task task = existingTask();
+        when(taskRepository.save(task)).thenReturn(task);
+
+        TaskStatusUpdateRequestDto request = new TaskStatusUpdateRequestDto();
+        request.setStatus("REJECTED");
+
+        taskService.updateTaskStatus(task.getId(), request, actor.getId());
+
+        verifyNoInteractions(taskFeedbackRepository);
+        OutboxEvent event = capturedOutboxEvent();
+        assertThat(event.getEventType()).isEqualTo(EventType.TASK_UPDATED);
+        assertThat(event.getPayload().get("feedbackText")).isNull();
+        assertThat(event.getPayload().get("feedbackUserId")).isNull();
+    }
+
+    @Test
+    void updateTaskStatus_withFeedbackOnStatusOtherThanRejected_throwsInvalidTaskStatusTransitionException() {
+        User actor = actorWithRole(UserRole.SYSTEM_ADMIN);
+        when(userRepository.findById(actor.getId())).thenReturn(Optional.of(actor));
+        Task task = existingTask();
+
+        TaskStatusUpdateRequestDto request = new TaskStatusUpdateRequestDto();
+        request.setStatus("IN_PROGRESS");
+        request.setFeedbackText("Not clear what is expected");
+
+        assertThatThrownBy(() -> taskService.updateTaskStatus(task.getId(), request, actor.getId()))
+                .isInstanceOf(InvalidTaskStatusTransitionException.class);
+
+        verify(taskRepository, never()).save(any());
+        verifyNoInteractions(taskFeedbackRepository, outboxEventRepository);
+    }
+
+    @Test
+    void updateTaskStatus_toRejectedWithBlankFeedbackText_savesNoFeedback() {
+        User actor = actorWithRole(UserRole.SYSTEM_ADMIN);
+        when(userRepository.findById(actor.getId())).thenReturn(Optional.of(actor));
+        Task task = existingTask();
+        when(taskRepository.save(task)).thenReturn(task);
+
+        TaskStatusUpdateRequestDto request = new TaskStatusUpdateRequestDto();
+        request.setStatus("REJECTED");
+        request.setFeedbackText("   ");
+
+        taskService.updateTaskStatus(task.getId(), request, actor.getId());
+
+        verifyNoInteractions(taskFeedbackRepository);
+        assertThat(capturedOutboxEvent().getPayload().get("feedbackText")).isNull();
+    }
+
+    private Task existingTask() {
+        Task task = incomingTask();
+        task.setId(UUID.randomUUID());
+        when(taskRepository.findById(task.getId())).thenReturn(Optional.of(task));
+        return task;
     }
 }

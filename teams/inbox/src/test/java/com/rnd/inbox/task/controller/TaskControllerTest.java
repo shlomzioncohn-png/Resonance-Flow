@@ -32,11 +32,13 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.http.MediaType;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.web.servlet.MockMvc;
 
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -69,6 +71,9 @@ class TaskControllerTest extends PostgresIntegrationTest {
 
     @Autowired
     private TaskRepository taskRepository;
+
+    @Autowired
+    private JdbcTemplate jdbcTemplate;
 
     @Autowired
     private UserRepository userRepository;
@@ -660,6 +665,46 @@ class TaskControllerTest extends PostgresIntegrationTest {
                         .content(objectMapper.writeValueAsString(request)))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.error").value("VALIDATION_ERROR"));
+    }
+
+    @Test
+    void updateStatus_whenRejectedWithFeedback_returns200AndStoresFeedback() throws Exception {
+        Task task = persistTask(tenant, "Task");
+        TaskStatusUpdateRequestDto request = new TaskStatusUpdateRequestDto();
+        request.setStatus("REJECTED");
+        request.setFeedbackText("Not clear what is expected");
+
+        mockMvc.perform(patch("/api/v1/tasks/{id}/status", task.getId())
+                        .header(ACTOR_HEADER, actor.getId().toString())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(request)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("REJECTED"));
+
+        String storedStatus = jdbcTemplate.queryForObject(
+                "SELECT status::text FROM tasks WHERE id = ?", String.class, task.getId());
+        assertThat(storedStatus).isEqualTo("rejected");
+
+        Map<String, Object> stored = jdbcTemplate.queryForMap(
+                "SELECT feedback_text, user_id FROM task_feedback WHERE task_id = ?", task.getId());
+        assertThat(stored)
+                .containsEntry("feedback_text", "Not clear what is expected")
+                .containsEntry("user_id", actor.getId());
+    }
+
+    @Test
+    void updateStatus_withFeedbackOnStatusOtherThanRejected_returns400() throws Exception {
+        Task task = persistTask(tenant, "Task");
+        TaskStatusUpdateRequestDto request = new TaskStatusUpdateRequestDto();
+        request.setStatus("IN_PROGRESS");
+        request.setFeedbackText("Not clear what is expected");
+
+        mockMvc.perform(patch("/api/v1/tasks/{id}/status", task.getId())
+                        .header(ACTOR_HEADER, actor.getId().toString())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(request)))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error").value("INVALID_TASK_STATUS_TRANSITION"));
     }
 
     @Test
