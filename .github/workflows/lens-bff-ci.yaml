@@ -35,3 +35,74 @@ jobs:
       service_dir: teams/lens/bff
       language: java
       container_port: 8082
+
+  round-trip:
+    if: github.event_name == 'pull_request'
+    runs-on: self-hosted
+    timeout-minutes: 25
+    permissions:
+      contents: read
+
+    env:
+      CHART_DIR: teams/relay/helm/resonance-flow
+      RELEASE: lens-bff-rt
+      NAMESPACE: lens-bff-rt
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: ./.github/actions/free-runner-disk
+
+      - uses: azure/setup-helm@v5
+
+      - name: Create kind cluster
+        uses: helm/kind-action@v1
+        with:
+          cluster_name: lens-bff-rt-cluster
+
+      - name: Fetch chart dependencies
+        run: helm dependency build "$CHART_DIR"
+
+      - uses: ./.github/actions/install-yq
+
+      - name: Build all-components-off overlay
+        run: |
+          echo "CHART_ALL_OFF=$RUNNER_TEMP/components-all-off.yaml" >> "$GITHUB_ENV"
+          yq '{"components": (.components | map_values({"enabled": false}))}' "$CHART_DIR/values.yaml" > "$RUNNER_TEMP/components-all-off.yaml"
+
+      - name: Build and load the lens-bff and inbox images
+        run: |
+          docker build -t lens-bff:local teams/lens/bff
+          docker build -t inbox:local teams/inbox --build-context shared=shared
+          kind load docker-image lens-bff:local --name lens-bff-rt-cluster
+          kind load docker-image inbox:local --name lens-bff-rt-cluster
+
+      - name: Deploy chart with lens-bff + inbox enabled
+        run: |
+          helm upgrade --install "$RELEASE" "$CHART_DIR" \
+            -f "$CHART_DIR/values.yaml" \
+            -f "$CHART_ALL_OFF" \
+            --set components.lens-bff.enabled=true \
+            --set components.lens-bff.image.repository=lens-bff \
+            --set components.lens-bff.image.tag=local \
+            --set components.lens-bff.image.pullPolicy=Never \
+            --set components.lens-bff.env.INBOX_MOCK_ENABLED=false \
+            --set components.inbox.enabled=true \
+            --set components.inbox.image.repository=inbox \
+            --set components.inbox.image.tag=local \
+            --set components.inbox.image.pullPolicy=Never \
+            --set components.schema-registry.enabled=true \
+            --set postgresql.enabled=true \
+            --namespace "$NAMESPACE" --create-namespace \
+            --wait --timeout 600s
+
+      - name: Diagnose deploy failure
+        if: failure()
+        run: |
+          kubectl -n "$NAMESPACE" get pods -o wide
+          kubectl -n "$NAMESPACE" describe pods
+          kubectl -n "$NAMESPACE" logs -l app.kubernetes.io/component=lens-bff --all-containers --tail=200 || true
+          kubectl -n "$NAMESPACE" logs -l app.kubernetes.io/component=inbox --all-containers --tail=200 || true
+
+      - name: Round trip
+        run: ./teams/lens/bff/scripts/round-trip.sh

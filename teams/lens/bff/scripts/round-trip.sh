@@ -1,96 +1,14 @@
 #!/usr/bin/env bash
-# Proves the LENS<->Inbox round trip live (#411): deploys lens-bff + Inbox
-# (+ their dependencies) through the real Helm chart with real images and
-# mocking off, creates one real task through Inbox's own API, then confirms
+# Seeds one real tenant/user/task through Inbox's own API, then confirms
 # lens-bff fetches it back through its real InboxClient - not the mock.
+# Assumes lens-bff + Inbox are already deployed and reachable in $NAMESPACE.
 #
-# Usage: ./round-trip.sh [--clean]
-#   --clean   delete the kind cluster at the end (default: leave it running)
-#
-# Requires: docker, kind, helm, kubectl, yq - all already on this machine.
+# Usage: NAMESPACE=<namespace> ./round-trip.sh
 
 set -euo pipefail
 
-REPO_ROOT="$(git rev-parse --show-toplevel)"
-cd "$REPO_ROOT"
+NAMESPACE="${NAMESPACE:?NAMESPACE env var is required}"
 
-CLUSTER_NAME="lens-round-trip-cluster"
-NAMESPACE="lens-round-trip"
-CHART_DIR="teams/relay/helm/resonance-flow"
-CHART_VALUES="${CHART_DIR}/values.yaml"
-CHART_ALL_OFF="${CHART_DIR}/.round-trip-all-off.yaml"
-CLEAN=0
-
-for arg in "$@"; do
-  [ "$arg" = "--clean" ] && CLEAN=1
-done
-
-for bin in docker kind helm kubectl yq; do
-  command -v "$bin" >/dev/null 2>&1 || { echo "FAIL: '$bin' is required but not installed"; exit 1; }
-done
-
-cleanup() {
-  rm -f "$CHART_ALL_OFF"
-  if [ "$CLEAN" -eq 1 ]; then
-    echo "==> --clean: deleting kind cluster $CLUSTER_NAME"
-    kind delete cluster --name "$CLUSTER_NAME" || true
-  else
-    echo "==> Leaving kind cluster $CLUSTER_NAME running (pass --clean to tear it down)"
-  fi
-}
-trap cleanup EXIT
-
-echo "==> Building local images (lens-bff, inbox)"
-docker build -t lens-bff:local teams/lens/bff
-docker build -t inbox:local teams/inbox --build-context shared=shared
-
-if kind get clusters 2>/dev/null | grep -qx "$CLUSTER_NAME"; then
-  echo "==> kind cluster $CLUSTER_NAME already exists, reusing it"
-else
-  echo "==> Creating kind cluster $CLUSTER_NAME"
-  kind create cluster --name "$CLUSTER_NAME"
-fi
-
-NODE="${CLUSTER_NAME}-control-plane"
-NETFREE_CA="/c/ProgramData/NetFree/CA/netfree-ca-bundle-curl.crt"
-if [ -f "$NETFREE_CA" ]; then
-  echo "==> Trusting NetFree's proxy CA inside the kind node (needed to pull kafka/postgres/schema-registry images)"
-  docker cp "$NETFREE_CA" "${NODE}:/usr/local/share/ca-certificates/netfree.crt"
-  docker exec "$NODE" update-ca-certificates
-  docker exec "$NODE" systemctl restart containerd
-  sleep 3
-fi
-
-for img in lens-bff inbox; do
-  echo "==> Loading $img into kind"
-  kind load docker-image "${img}:local" --name "$CLUSTER_NAME"
-done
-
-echo "==> Fetching chart dependencies"
-helm dependency build "$CHART_DIR"
-
-echo "==> Building all-components-off overlay"
-yq '{"components": (.components | map_values({"enabled": false}))}' "$CHART_VALUES" > "$CHART_ALL_OFF"
-
-echo "==> Deploying only lens-bff + inbox (+ postgres/schema-registry/kafka) with local images, Inbox mock disabled"
-helm upgrade --install resonance-flow "$CHART_DIR" \
-  -f "$CHART_VALUES" \
-  -f "$CHART_ALL_OFF" \
-  --set components.lens-bff.enabled=true \
-  --set components.lens-bff.image.repository=lens-bff \
-  --set components.lens-bff.image.tag=local \
-  --set components.lens-bff.image.pullPolicy=Never \
-  --set components.lens-bff.env.INBOX_MOCK_ENABLED=false \
-  --set components.inbox.enabled=true \
-  --set components.inbox.image.repository=inbox \
-  --set components.inbox.image.tag=local \
-  --set components.inbox.image.pullPolicy=Never \
-  --set components.schema-registry.enabled=true \
-  --set postgresql.enabled=true \
-  --namespace "$NAMESPACE" --create-namespace \
-  --wait --timeout 600s
-
-echo "==> Seeding one real tenant + user directly in Postgres (no API for this exists yet)"
 PG_POD=$(kubectl get pod -n "$NAMESPACE" -l app.kubernetes.io/name=postgresql -o jsonpath='{.items[0].metadata.name}')
 UUID_RE='[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}'
 TENANT_ID=$(kubectl exec -n "$NAMESPACE" "$PG_POD" -- env PGPASSWORD=postgres psql -U postgres -d resonance_flow -tAc "
