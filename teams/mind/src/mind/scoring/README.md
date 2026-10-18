@@ -335,11 +335,69 @@ reading a third of the set.
 - **`ASSUMED_TIER_SHIFT` was measured on synthetic tasks.** The spread on real
   extracted ones may differ; re-measure once #353 produces them.
 
+## Publishing the score to Chain (#357)
+
+A separate process, like the index consumer: it reads Inbox's `task.created`
+and `task.updated`, scores each task with this model, and publishes
+`task.score.proposed` to Chain.
+
+| File | Role |
+|---|---|
+| `inbox_task.py` | Inbox event → `InboxTask` (fits `ScorableTask`). Empty fields stay empty. A task or tenant id that is not a UUID raises `InvalidInboxEvent`. |
+| `score_event.py` | `ScoreResult` → `TaskScoreProposed` (`contracts/`). |
+| `kafka_sink.py` | `TaskScoreProposed` → shared/proto's `TaskScoreProposedEvent`, published keyed by `task_id`. |
+| `score_publisher.py` | The handlers, and when to publish. |
+| `score_publisher_runner.py` | The process: one consumer thread per topic. |
+
+The payload, as agreed with Chain on #133: `event_id`, `tenant_id`, `task_id`,
+`mind_score` (the **`base_score`**, never the blocked-adjusted `score`: blocking
+is Chain's call), `scored_at`, `confidence` (`score_confidence`), `factors`, and
+`tier` as Inbox sent it. An unclassified task is scored by the tactical rule, but
+its tier goes out unset.
+
+When a score is published:
+
+- **On `task.created`, and on `task.updated` only when a field the model reads
+  changes** (title, description, tier, deadline, effort). Every score makes Chain
+  publish `task.scheduling.updated`, which makes Inbox emit `task.updated`;
+  publishing on every update would loop forever. `urgency` is not a trigger: the
+  model never reads that field.
+- **Older events are dropped.** The two topics have no ordering between them, so
+  each task keeps the newest Inbox `created_at` / `updated_at` seen. At an equal
+  time, `task.created` counts as older.
+- **Errors that would repeat are skipped, not retried.** Converting the event,
+  scoring the task or building the payload fails the same way on every
+  redelivery (a malformed id, a result without `base_score`, a score outside
+  0..1, a model bug for one task). Propagating it would kill the process on the
+  same message forever, so it is logged with the task id and skipped. Only a
+  failure to send to Kafka propagates, so that message is retried. Anything the
+  model raises counts as permanent, so a model must not raise on a transient
+  failure (#474 already requires falling back to the baseline score).
+- **When propagation changes a score without an Inbox event** (#474: a parent
+  changed, so its children's scores did), the propagation code calls
+  `ScorePublisher.rescore(child_id)` for each affected child. That only queues
+  the id, so it is safe from anywhere, including from inside the model's own
+  `score()`. A worker thread scores each queued child again with the publisher's
+  own model (so that model must be the propagation model) on its newest state,
+  under the same lock as the event handlers. A request for a task already
+  queued is dropped, and a re-score whose score is unchanged is not sent, so a
+  cycle in the hierarchy cannot flood Chain; propagation should still ask only
+  when a parent's score actually changed. `rescore` returns nothing. The state is
+  in memory, so a child no Inbox event has reached since start-up is logged and
+  skipped until its next event.
+- **The lock is held while the model scores**, so a model that calls the network
+  (propagation reads Chain's traversal API) holds up the other topic meanwhile.
+
+What was last published lives in memory, so a restart re-publishes each task
+once on its next event. A score is not re-sent just because time passes.
+
 ## Running it
 
 ```
 pytest tests/test_scoring.py -v                  # the acceptance tests
 pytest tests/test_scoring_missing_fields.py -v   # no tier, no estimate, no description
+pytest tests/test_score_publish.py tests/test_score_event.py \
+       tests/test_inbox_task.py tests/test_kafka_sink.py -v   # publishing to Chain
 ```
 
 That is all this package runs. Evaluating the model against the persona set goes
