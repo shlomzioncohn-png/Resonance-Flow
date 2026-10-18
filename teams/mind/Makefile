@@ -1,4 +1,4 @@
-.PHONY: install dev test lint fmt run run-index-consumer eval eval-ci schema migrate docker-build docker-up proto
+.PHONY: install dev test lint fmt run run-index-consumer run-score-publisher eval eval-ci schema migrate docker-build docker-up proto
 
 install:
 	pip install -e .
@@ -34,6 +34,9 @@ run: proto
 
 run-index-consumer: proto
 	python -m mind.embeddings.index_consumer_runner
+
+run-score-publisher: proto
+	python -m mind.scoring.score_publisher_runner
 
 eval:
 	python -m mind.evaluation.run --personas eval/personas

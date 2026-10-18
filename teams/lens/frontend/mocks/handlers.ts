@@ -7,10 +7,12 @@
  * the /api/workspace/* and /api/manager/* calls are untouched by MSW.
  *
  * Only endpoints the Gateway doesn't expose yet belong here. Once the Gateway
- * serves one, delete its handler - the calling code (services/usersApi.ts)
- * already has its final shape and keeps working unchanged.
+ * serves one, delete its handler - the calling code (services/usersApi.ts,
+ * services/authApi.ts) already has its final shape and keeps working unchanged.
  */
 import { delay, http, HttpResponse } from 'msw';
+import type { GatewayErrorBody } from '@/services/api';
+import type { LoginRequest, LoginResponse } from '@/services/authApi';
 import type { User, UsersPage } from '@/services/usersApi';
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? 'http://localhost:8080';
@@ -117,6 +119,24 @@ const MOCK_USERS: User[] = [
   },
 ];
 
+// Same users and passwords as the Keycloak realm (teams/lens/keycloak/realm-lens.json).
+const MOCK_ACCOUNTS: (LoginRequest & LoginResponse)[] = [
+  {
+    username: 'manager1',
+    password: 'manager1',
+    id: 'a3c5e0b2-4f1d-4c8e-9b7a-1d2e3f4a5b01',
+    displayName: 'Maya Manager',
+    role: 'manager',
+  },
+  {
+    username: 'employee1',
+    password: 'employee1',
+    id: 'a3c5e0b2-4f1d-4c8e-9b7a-1d2e3f4a5b02',
+    displayName: 'Eli Employee',
+    role: 'employee',
+  },
+];
+
 /** A non-negative integer query param, or `fallback` when it's missing or invalid. */
 function intParam(value: string | null, fallback: number, min: number): number {
   const parsed = Number(value);
@@ -137,4 +157,37 @@ export const handlers = [
       total: MOCK_USERS.length,
     });
   }),
+
+  // POST /api/auth/login - a wrong username or password gets the Gateway's 401 error body.
+  // The generics type the request body and allow either response body (success or error).
+  http.post<never, LoginRequest, LoginResponse | GatewayErrorBody>(
+    `${API_BASE_URL}/api/auth/login`,
+    async ({ request }) => {
+      await delay(400);
+
+      const { username, password } = await request.json();
+      const account = MOCK_ACCOUNTS.find(
+        (candidate) => candidate.username === username && candidate.password === password,
+      );
+
+      if (!account) {
+        return HttpResponse.json<GatewayErrorBody>(
+          {
+            status: 'ERROR',
+            errorCode: 'UNAUTHORIZED',
+            message: 'Invalid username or password',
+            path: '/api/auth/login',
+            timestamp: new Date().toISOString(),
+          },
+          { status: 401 },
+        );
+      }
+
+      return HttpResponse.json<LoginResponse>({
+        id: account.id,
+        displayName: account.displayName,
+        role: account.role,
+      });
+    },
+  ),
 ];
