@@ -337,10 +337,27 @@ def load_baseline_record(
         raise BaselineRecordError(f"cannot checksum the persona set: {e}") from e
     recorded = record.persona_set.checksum
     if current != recorded:
+        current_personas_path = _team_relative(personas_path)
+        current_hierarchy_path = (
+            _team_relative(hierarchy_dir) if hierarchy_dir is not None else None
+        )
+        mismatches = []
+        if current_personas_path != record.persona_set.path:
+            mismatches.append(
+                f"personas path: recorded {record.persona_set.path!r}, now "
+                f"{current_personas_path!r}"
+            )
+        if current_hierarchy_path != record.persona_set.hierarchy_path:
+            mismatches.append(
+                f"hierarchy path: recorded {record.persona_set.hierarchy_path!r}, now "
+                f"{current_hierarchy_path!r}"
+            )
+        location_note = f" ({'; '.join(mismatches)})" if mismatches else ""
         raise BaselineRecordError(
             f"{path} was scored on a persona set with checksum {recorded[:12]}..., but "
-            f"{personas_path} now has checksum {current[:12]}.... A baseline can only be "
-            "compared against the same fixed set. If the set was changed on purpose, "
-            "record a new baseline; if not, restore the scenario and hierarchy files."
+            f"{current_personas_path} now has checksum {current[:12]}....{location_note} A "
+            "baseline can only be compared against the same fixed set. If the set was changed "
+            "on purpose, record a new baseline; if not, restore the scenario and hierarchy "
+            "files."
         )
     return record.to_report()

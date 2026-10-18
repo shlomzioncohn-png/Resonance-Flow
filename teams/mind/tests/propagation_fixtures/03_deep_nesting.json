@@ -1,0 +1,17 @@
+{
+  "name": "deep_nesting",
+  "description": "A leaf four levels under an important goal vs. a leaf one level under an unimportant goal, same own importance. Forces the depth-decay decision: with no decay, the deep leaf's boost should not have eroded enough to lose.",
+  "graph": {
+    "nodes": [
+      {"task_id": "goal_deep_important", "parent_task_id": null, "importance": 0.9, "label": "Important goal, reached through a long chain"},
+      {"task_id": "program_l2", "parent_task_id": "goal_deep_important", "importance": 0.1, "label": "Program under the goal"},
+      {"task_id": "initiative_l3", "parent_task_id": "program_l2", "importance": 0.1, "label": "Initiative under the program"},
+      {"task_id": "epic_l4", "parent_task_id": "initiative_l3", "importance": 0.1, "label": "Epic under the initiative"},
+      {"task_id": "task_deep", "parent_task_id": "epic_l4", "importance": 0.1, "label": "Leaf task, 4 levels under the important goal"},
+      {"task_id": "goal_shallow_unimportant", "parent_task_id": null, "importance": 0.2, "label": "Unimportant goal, reached directly"},
+      {"task_id": "task_shallow", "parent_task_id": "goal_shallow_unimportant", "importance": 0.1, "label": "Leaf task, 1 level under the unimportant goal, same own importance as task_deep"}
+    ]
+  },
+  "expected_order": ["task_deep", "task_shallow"],
+  "notes": "Decision: importance propagates undiminished with depth, it does not decay. No decay rate is specified anywhere in the roadmap, and starting simple is defensible -- revisit only if real data shows it's wrong. This fixture is the proof: if decay were applied, 4 hops of decay could plausibly erode task_deep's boost below task_shallow's single hop, flipping this order. Keeping both at full importance is what keeps the order as written. The three middle nodes (program_l2, initiative_l3, epic_l4) are deliberately kept low (0.1), below goal_shallow_unimportant's 0.2: an implementation that only looks one level up would see task_deep's immediate parent (epic_l4, 0.1) losing to task_shallow's immediate parent (goal_shallow_unimportant, 0.2), so only a correct walk all the way up to goal_deep_important (0.9) produces the boost needed for the stated order. Separately, the stated order also assumes ancestors can only add a boost on top of a task's own importance, never multiply it down -- under a multiplicative model the four hops below goal_deep_important (0.1*0.1*0.1*0.1*0.9=0.00009) would land far below task_shallow's single-hop 0.1*0.2=0.02, reversing the order regardless of decay. That's a deliberate assumption for this fixture, not a decision; the real combination formula is #474's to settle."
+}

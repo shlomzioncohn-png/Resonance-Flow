@@ -1,0 +1,14 @@
+{
+  "name": "deprioritized_initiative",
+  "description": "A parent whose importance was lowered after the fact, alongside a parent that stayed important -- children of the deprioritized one must drop accordingly. The scenario the roadmap names explicitly.",
+  "graph": {
+    "nodes": [
+      {"task_id": "goal_was_important", "parent_task_id": null, "importance": 0.1, "label": "Initiative deprioritized after a reorg"},
+      {"task_id": "goal_still_important", "parent_task_id": null, "importance": 0.8, "label": "Initiative that stayed important"},
+      {"task_id": "task_under_deprioritized", "parent_task_id": "goal_was_important", "importance": 0.5, "label": "Leaf under the deprioritized initiative"},
+      {"task_id": "task_under_important", "parent_task_id": "goal_still_important", "importance": 0.5, "label": "Leaf under the still-important initiative, same own importance"}
+    ]
+  },
+  "expected_order": ["task_under_important", "task_under_deprioritized"],
+  "notes": "Same own importance (0.5) for both leaves -- only the parent's importance differs, and that alone must decide the order. A propagation model that ignores a lowered parent importance would get this wrong."
+}

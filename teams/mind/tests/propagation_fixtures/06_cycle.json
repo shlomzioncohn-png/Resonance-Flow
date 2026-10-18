@@ -1,0 +1,14 @@
+{
+  "name": "cycle",
+  "description": "A depends on B depends on A, via parent_task_id. Should not happen, and it will. HierarchyFixture permits this on purpose -- it does not enforce acyclicity -- so this graph loads; what the propagation code does with it is the decision this fixture records.",
+  "graph": {
+    "nodes": [
+      {"task_id": "node_a", "parent_task_id": "node_b", "importance": 0.5, "label": "Points at node_b"},
+      {"task_id": "node_b", "parent_task_id": "node_a", "importance": 0.5, "label": "Points at node_a -- the cycle"},
+      {"task_id": "task_in_cycle", "parent_task_id": "node_a", "importance": 0.5, "label": "Leaf under the cycle -- without this, leaf_ids() is empty and no leaf-starting walk ever enters the loop"}
+    ]
+  },
+  "expected_order": [],
+  "expected_error": "cyclic parent_task_id chain",
+  "notes": "Decision: detect the cycle and refuse (raise), rather than silently breaking at a depth limit. Matches Chain's own traversal code, which treats a cycle as a defensive guard against corrupt data, not a case to paper over. A naive walk-the-parent-chain implementation loops forever here -- that's the whole point of this fixture. task_in_cycle exists only so leaf_ids() is non-empty and a leaf-starting walk actually reaches the cycle."
+}

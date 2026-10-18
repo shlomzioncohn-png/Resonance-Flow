@@ -1,0 +1,14 @@
+{
+  "name": "chain",
+  "description": "A simple parent -> child -> grandchild chain. Importance flows down and the expected order is obvious -- the smoke test.",
+  "graph": {
+    "nodes": [
+      {"task_id": "goal_strategic", "parent_task_id": null, "importance": 0.9, "label": "Strategic 2026 goal"},
+      {"task_id": "initiative_q4", "parent_task_id": "goal_strategic", "importance": 0.1, "label": "Q4 initiative under the goal"},
+      {"task_id": "task_under_chain", "parent_task_id": "initiative_q4", "importance": 0.3, "label": "Task under the Q4 initiative"},
+      {"task_id": "task_standalone", "parent_task_id": null, "importance": 0.3, "label": "Unrelated standalone task, same own importance as task_under_chain"}
+    ]
+  },
+  "expected_order": ["task_under_chain", "task_standalone"],
+  "notes": "Both leaves start at the identical own importance (0.3). task_under_chain must outrank task_standalone purely because of the chain beneath a strategic goal -- if this fails, nothing else will pass either. initiative_q4's own importance (0.1) is deliberately kept low, below task_standalone's baseline (0.3): an implementation that only looks at the immediate parent would see a weak boost and risk the wrong order, so only a correct walk that continues up to goal_strategic (0.9) reaches a boost strong enough to produce the stated order. This order assumes a combination model where an ancestor's importance can only add a boost on top of a task's own baseline, never multiply it down below that baseline -- under a multiplicative model (0.3*0.1*0.9=0.027) task_under_chain would lose to task_standalone's bare 0.3, flipping the order regardless. That's a stated assumption for this fixture, not a claim about the real formula; #474 still has to decide the actual combination."
+}
