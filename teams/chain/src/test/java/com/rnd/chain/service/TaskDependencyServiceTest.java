@@ -1,5 +1,7 @@
 package com.rnd.chain.service;
 
+import com.rnd.chain.testsupport.TaskStateHistoryFixtures;
+
 import com.rnd.chain.testsupport.PgRepos;
 import org.junit.jupiter.api.Tag;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -92,7 +94,7 @@ class TaskDependencyServiceTest {
                 taskDependencyRepository, PgRepos.graphLock(),
                 new TaskCounterUpdater(taskRepository, taskDependencyRepository,
                         new PriorityScoreService(),
-                        new SchedulingPublishListener(taskRepository, new SchedulingUpdateService(event -> {}))));
+                        new SchedulingPublishListener(taskRepository, new SchedulingUpdateService(event -> {}))), TaskStateHistoryFixtures.newRecorder());
 
         service = new TaskDependencyService(taskRepository, taskDependencyRepository,
                 historyRepository, transactionRunner, new IncrementingClock(), dependencyEdgeService);
@@ -108,7 +110,7 @@ class TaskDependencyServiceTest {
                 taskDependencyRepository, PgRepos.graphLock(),
                 new TaskCounterUpdater(dummyTaskRepository, taskDependencyRepository,
                         new PriorityScoreService(),
-                        new SchedulingPublishListener(dummyTaskRepository, new SchedulingUpdateService(event -> {}))));
+                        new SchedulingPublishListener(dummyTaskRepository, new SchedulingUpdateService(event -> {}))), TaskStateHistoryFixtures.newRecorder());
 
         assertThatThrownBy(() -> new TaskDependencyService(null, taskDependencyRepository,
                 PgRepos.history(), PgRepos.transactionRunner(), new IncrementingClock(),
@@ -125,7 +127,7 @@ class TaskDependencyServiceTest {
                 dummyDependencyRepository, PgRepos.graphLock(),
                 new TaskCounterUpdater(taskRepository, dummyDependencyRepository,
                         new PriorityScoreService(),
-                        new SchedulingPublishListener(taskRepository, new SchedulingUpdateService(event -> {}))));
+                        new SchedulingPublishListener(taskRepository, new SchedulingUpdateService(event -> {}))), TaskStateHistoryFixtures.newRecorder());
 
         assertThatThrownBy(() -> new TaskDependencyService(taskRepository, null,
                 PgRepos.history(), PgRepos.transactionRunner(), new IncrementingClock(),
@@ -339,7 +341,7 @@ class TaskDependencyServiceTest {
                 taskDependencyRepository, PgRepos.graphLock(),
                 new TaskCounterUpdater(taskRepository, taskDependencyRepository,
                         new PriorityScoreService(),
-                        new SchedulingPublishListener(taskRepository, new SchedulingUpdateService(event -> {}))));
+                        new SchedulingPublishListener(taskRepository, new SchedulingUpdateService(event -> {}))), TaskStateHistoryFixtures.newRecorder());
         TaskDependencyService serviceWithFailingHistory = new TaskDependencyService(
                 taskRepository, taskDependencyRepository, failingHistoryRepository,
                 PgRepos.transactionRunner(), new IncrementingClock(), dependencyEdgeService);
@@ -360,7 +362,7 @@ class TaskDependencyServiceTest {
                 taskDependencyRepository, PgRepos.graphLock(),
                 new TaskCounterUpdater(taskRepository, taskDependencyRepository,
                         new PriorityScoreService(),
-                        new SchedulingPublishListener(taskRepository, new SchedulingUpdateService(event -> {}))));
+                        new SchedulingPublishListener(taskRepository, new SchedulingUpdateService(event -> {}))), TaskStateHistoryFixtures.newRecorder());
         TaskDependencyService serviceWithFailingHistory = new TaskDependencyService(
                 taskRepository, taskDependencyRepository, failingHistoryRepository,
                 PgRepos.transactionRunner(), new IncrementingClock(), dependencyEdgeService);
@@ -579,7 +581,7 @@ void addDependency_whenSameMindEventIsRetried_shouldNotApplyDependencyTwice() {
                 PgRepos.graphLock(),
                 new TaskCounterUpdater(taskRepository, taskDependencyRepository,
                         new PriorityScoreService(),
-                        new SchedulingPublishListener(taskRepository, schedulingUpdateService)));
+                        new SchedulingPublishListener(taskRepository, schedulingUpdateService)), TaskStateHistoryFixtures.newRecorder());
 
     TaskDependencyService mindService =
             new TaskDependencyService(

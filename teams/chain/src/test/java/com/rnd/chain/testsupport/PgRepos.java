@@ -3,6 +3,7 @@ package com.rnd.chain.testsupport;
 import com.rnd.chain.dto.Task;
 import com.rnd.chain.dto.TaskDependency;
 import com.rnd.chain.events.ProcessedEventStore;
+import com.rnd.chain.repository.TaskStateHistoryRepository;
 import com.rnd.chain.repository.ConstraintRepository;
 import com.rnd.chain.repository.DependencyHistoryRepository;
 import com.rnd.chain.repository.GraphLock;
@@ -32,12 +33,13 @@ public class PgRepos {
     private static GraphLock graphLock;
     private static TransactionRunner transactionRunner;
     private static ProcessedEventStore processedEventStore;
+    private static TaskStateHistoryRepository stateHistoryRepository;
     private static EntityManager entityManager;
 
     public PgRepos(TaskRepository tasks, TaskDependencyRepository dependencies, ConstraintRepository constraints,
                    DependencyHistoryRepository history, UnresolvedDependencyRepository unresolved,
                    GraphLock lock, TransactionRunner runner, ProcessedEventStore processedEvents,
-                   EntityManager em) {
+                   TaskStateHistoryRepository stateHistory, EntityManager em) {
         taskRepository = tasks;
         dependencyRepository = dependencies;
         constraintRepository = constraints;
@@ -46,6 +48,7 @@ public class PgRepos {
         graphLock = lock;
         transactionRunner = runner;
         processedEventStore = processedEvents;
+        stateHistoryRepository = stateHistory;
         entityManager = em;
     }
 
@@ -83,6 +86,10 @@ public class PgRepos {
 
     public static TransactionRunner transactionRunner() {
         return transactionRunner;
+    }
+
+    public static TaskStateHistoryRepository stateHistory() {
+        return stateHistoryRepository;
     }
 
     public static ProcessedEventStore processedEvents() {

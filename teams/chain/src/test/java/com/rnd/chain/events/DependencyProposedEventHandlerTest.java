@@ -1,5 +1,7 @@
 package com.rnd.chain.events;
 
+import com.rnd.chain.testsupport.TaskStateHistoryFixtures;
+
 import com.rnd.chain.testsupport.PgRepos;
 import org.junit.jupiter.api.Tag;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -88,7 +90,7 @@ class DependencyProposedEventHandlerTest {
                         dependencyRepo,
                         PgRepos.graphLock(),
                         new TaskCounterUpdater(taskRepo, dependencyRepo, new PriorityScoreService(),
-                                new SchedulingPublishListener(taskRepo, schedulingUpdateService)));
+                                new SchedulingPublishListener(taskRepo, schedulingUpdateService)), TaskStateHistoryFixtures.newRecorder());
 
         DependencyHistoryRepository historyRepo =
                 PgRepos.history();

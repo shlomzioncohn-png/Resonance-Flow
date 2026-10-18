@@ -1,5 +1,7 @@
 package com.rnd.chain.service;
 
+import com.rnd.chain.testsupport.TaskStateHistoryFixtures;
+
 import com.rnd.chain.testsupport.PgRepos;
 import org.junit.jupiter.api.Tag;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -87,7 +89,7 @@ class TaskDependencyServiceIntegrationTest {
                                 taskRepository,
                                 dependencyRepository,
                                 new PriorityScoreService(),
-                                new SchedulingPublishListener(taskRepository, schedulingUpdateService)));
+                                new SchedulingPublishListener(taskRepository, schedulingUpdateService)), TaskStateHistoryFixtures.newRecorder());
 
         taskDependencyService =
                 new TaskDependencyService(

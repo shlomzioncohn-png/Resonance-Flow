@@ -1,5 +1,7 @@
 package com.rnd.chain.service;
 
+import com.rnd.chain.testsupport.TaskStateHistoryFixtures;
+
 import com.rnd.chain.testsupport.PgRepos;
 import org.junit.jupiter.api.Tag;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -57,8 +59,8 @@ class TaskEligibilityServiceTest {
                 taskRepository, dependencyRepository, new PriorityScoreService(),
                 new SchedulingPublishListener(taskRepository, schedulingUpdateService));
         service = new TaskEligibilityService(
-                taskRepository, dependencyRepository, lock, counterUpdater);
-        edgeService = new DependencyEdgeService(dependencyRepository, lock, counterUpdater);
+                taskRepository, dependencyRepository, lock, counterUpdater, TaskStateHistoryFixtures.newRecorder());
+        edgeService = new DependencyEdgeService(dependencyRepository, lock, counterUpdater, TaskStateHistoryFixtures.newRecorder());
     }
 
     @Test
@@ -498,8 +500,8 @@ class TaskEligibilityServiceTest {
                 taskRepo, dependencyRepo, new PriorityScoreService(),
                 new SchedulingPublishListener(taskRepo, scheduling));
         TaskEligibilityService eligibilityService =
-                new TaskEligibilityService(taskRepo, dependencyRepo, lock, counterUpdater);
-        DependencyEdgeService edgeService = new DependencyEdgeService(dependencyRepo, lock, counterUpdater);
+                new TaskEligibilityService(taskRepo, dependencyRepo, lock, counterUpdater, TaskStateHistoryFixtures.newRecorder());
+        DependencyEdgeService edgeService = new DependencyEdgeService(dependencyRepo, lock, counterUpdater, TaskStateHistoryFixtures.newRecorder());
         return new Fixture(taskRepo, dependencyRepo, constraintRepo, fixturePublisher, eligibilityService,
                 edgeService, counterUpdater);
     }
