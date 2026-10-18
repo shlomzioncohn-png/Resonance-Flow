@@ -1,7 +1,9 @@
 package com.rnd.chain.config;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.rnd.chain.repository.ConstraintHistoryRepository;
 import com.rnd.chain.repository.ConstraintRepository;
+import com.rnd.chain.repository.PostgresConstraintHistoryRepository;
 import com.rnd.chain.repository.PostgresConstraintRepository;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
 import org.springframework.context.annotation.Bean;
@@ -26,5 +28,11 @@ public class ConstraintRepositoryConfig {
     @ConditionalOnMissingBean(ConstraintRepository.class)
     public ConstraintRepository constraintRepository(JdbcTemplate jdbcTemplate, ObjectMapper objectMapper) {
         return new PostgresConstraintRepository(jdbcTemplate, objectMapper);
+    }
+
+    @Bean
+    @ConditionalOnMissingBean(ConstraintHistoryRepository.class)
+    public ConstraintHistoryRepository constraintHistoryRepository(JdbcTemplate jdbcTemplate) {
+        return new PostgresConstraintHistoryRepository(jdbcTemplate);
     }
 }

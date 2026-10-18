@@ -100,8 +100,10 @@ src/main/java/com/rnd/chain/
 │                           # / TransactionRunner + in-memory impls, Postgres*Repository /
 │                           # JpaTransactionRunner (real impls), entity/ (JPA entities), jpa/
 │                           # (Spring Data interfaces); ConstraintRepository +
-│                           # PostgresConstraintRepository (JDBC, issue #378)
-├── dto/                    # Task, TaskDependency, TaskStatus, Constraint, ApiError,
+│                           # PostgresConstraintRepository (JDBC, issue #378);
+│                           # ConstraintHistoryRepository + PostgresConstraintHistoryRepository
+│                           # (JDBC, issue #815; no in-memory impl)
+├── dto/                    # Task, TaskDependency, TaskStatus, Constraint, ConstraintHistoryEntry, ApiError,
 │                           # TaskResponse, TaskTraceResponse, ProcessedEvent (idempotency
 │                           # claim record)
 ├── events/                 # Kafka consume/publish infrastructure - see below
@@ -125,14 +127,16 @@ src/main/java/com/rnd/chain/
 │                           # #580, see "Tenant isolation" below)
 └── config/                 # MockDataConfig - empty-seeded repository beans;
                             # ConstraintRepositoryConfig - the real Postgres-backed
-                            # ConstraintRepository bean (issue #378)
+                            # ConstraintRepository (issue #378) and ConstraintHistoryRepository
+                            # (issue #815) beans
 src/main/resources/application.yml
 src/main/resources/db/migration/  # Flyway migrations (V1 schema, V2 dependency_history,
                                   # V3 task_constraint - issue #378, V4 unresolved_dependencies
                                   # (Mind out-of-order target buffering), V5 removes owner_id,
                                   # V6 task.tenant_id + same-tenant trigger, V7 dependency_history
                                   # REJECTED action - V6/V7 issue #580, V8 task.confidence/priority_score (#445),
-                                  # V9 task_state_history - issue #773)
+                                  # V9 task_state_history - issue #773, V10 constraint_history -
+                                  # issue #815)
 src/test/java/com/rnd/chain/
 ├── controller/ChainControllerTest.java
 ├── service/                # TaskTraversalServiceTest, TaskTraversalPerformanceTest,
@@ -146,7 +150,8 @@ src/test/java/com/rnd/chain/
 │                           # (PostgresTaskRepositoryContractTest/Test, PostgresTaskDependencyRepositoryTest,
 │                           # PostgresDependencyHistoryRepositoryTest - need a real Postgres reachable, see
 │                           # "Tests" below); PostgresConstraintRepositoryTest and
-│                           # PostgresConstraintRepositoryConcurrencyTest (issue #378, @Tag("postgres"))
+│                           # PostgresConstraintRepositoryConcurrencyTest (issue #378, @Tag("postgres"));
+│                           # PostgresConstraintHistoryRepositoryTest (issue #815, @Tag("postgres"))
 ├── dto/ConstraintTest.java, TaskTest.java, TaskDependencyTest.java,
 │                           # TaskTestFixtures.java (shared Task.Builder defaults)
 ├── events/                 # *HandlerTest and *HandlerIntegrationTest (@EmbeddedKafka) per inbound
