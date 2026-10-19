@@ -15,6 +15,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.HashMap;
 import java.util.List;
@@ -36,6 +37,9 @@ public class TaskEligibilityService {
 
     private static final Logger log =
             LoggerFactory.getLogger(TaskEligibilityService.class);
+
+    /** How far before a DONE task.updated's own updated_at a task created from it is stamped. */
+    static final Duration DONE_EVENT_UPDATED_AT_SKEW = Duration.ofSeconds(1);
 
     private final TaskRepository taskRepository;
     private final TaskDependencyRepository taskDependencyRepository;
@@ -153,22 +157,7 @@ public void onTaskStatusChangedIfNewer(
         Task current = taskRepository.findById(taskId).orElse(null);
 
         if (current == null) {
-            Task newTask = Task.builder()
-                    .id(taskId)
-                    .parentTaskId(null)
-                    .tenantId(tenantId)
-                    .status(newStatus)
-                    .isReady(true)
-                    .blockingCount(0)
-                    .openConstraintCount(0)
-                    .estimatedDurationMin(null)
-                    .score(null)
-                    .createdAt(LocalDateTime.now())
-                    .updatedAt(eventUpdatedAt)
-                    .deletedAt(null)
-                    .build();
-
-            taskRepository.insertIfAbsent(newTask);
+            taskRepository.insertIfAbsent(newTaskFromEvent(taskId, tenantId, newStatus, eventUpdatedAt));
             return;
         }
 
@@ -226,6 +215,59 @@ public void onTaskStatusChangedIfNewer(
         }
     });
 }
+
+    /**
+     * Handles a task.updated carrying Inbox's DONE status. Completion is applied only by
+     * task.completed ({@link #onTaskCompleted}), so this never changes an existing task's status,
+     * updatedAt or dependents. It only keeps task.updated's other duties: the tenant check, and
+     * creating the task if Chain has not seen it yet.
+     *
+     * A task created here is PENDING (not DONE) and its updatedAt is set
+     * {@link #DONE_EVENT_UPDATED_AT_SKEW} before the event's, so the task.completed that follows
+     * (compared against updatedAt by its Kafka record timestamp) is not dropped as stale, while
+     * an older task.updated is still rejected.
+     *
+     * @throws TenantReassignmentException if {@code tenantId} differs from the task's stored tenant
+     */
+    @Transactional
+    public void onTaskUpdatedAsDone(UUID taskId, LocalDateTime eventUpdatedAt, UUID tenantId) {
+        Objects.requireNonNull(taskId, "taskId must not be null");
+        Objects.requireNonNull(eventUpdatedAt, "eventUpdatedAt must not be null");
+
+        graphLock.runExclusive(() -> {
+            Task current = taskRepository.findById(taskId).orElse(null);
+
+            if (current == null) {
+                taskRepository.insertIfAbsent(newTaskFromEvent(taskId, tenantId, TaskStatus.PENDING,
+                        eventUpdatedAt.minus(DONE_EVENT_UPDATED_AT_SKEW)));
+                return;
+            }
+
+            if (current.getTenantId() != null && !current.getTenantId().equals(tenantId)) {
+                throw new TenantReassignmentException("Task " + taskId + " already has tenant "
+                        + current.getTenantId() + ", event claims " + tenantId);
+            }
+            log.debug("Task {} task.updated DONE ignored: completion is applied by task.completed", taskId);
+        });
+    }
+
+    private static Task newTaskFromEvent(UUID taskId, UUID tenantId, TaskStatus status,
+                                         LocalDateTime updatedAt) {
+        return Task.builder()
+                .id(taskId)
+                .parentTaskId(null)
+                .tenantId(tenantId)
+                .status(status)
+                .isReady(true)
+                .blockingCount(0)
+                .openConstraintCount(0)
+                .estimatedDurationMin(null)
+                .score(null)
+                .createdAt(LocalDateTime.now())
+                .updatedAt(updatedAt)
+                .deletedAt(null)
+                .build();
+    }
 
     /**
      * Applies task.completed. The Kafka record timestamp is only compared against the stored
