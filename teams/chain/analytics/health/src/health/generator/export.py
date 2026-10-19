@@ -123,12 +123,13 @@ def write_dataset(out_dir: Path, cfg: GeneratorConfig, world: World, history: Hi
     for d in world.diseases:
         o = observed[d.id]
         common = {"disease_id": d.id, "type": d.type, "severity": d.severity, "tier": d.tier,
+                  "in_stage_a": str(d.in_stage_a).lower(),
                   "window_start": o["window_start"], "window_end": o["window_end"],
                   "ongoing_at_end": str(o["ongoing_at_end"]).lower()}
         rows += [{**common, "element_type": "task", "task_id": t,
                   "role": "root" if t == d.root_task_id else "member"} for t in d.task_ids]
         rows += [{**common, "element_type": "edge", **e} for e in o["edges"]]
     _write_csv(out_dir / "ground_truth.csv",
-               ["disease_id", "type", "severity", "tier", "element_type", "task_id", "depends_on_task_id", "role",
+               ["disease_id", "type", "severity", "tier", "in_stage_a", "element_type", "task_id", "depends_on_task_id", "role",
                 "window_start", "window_end", "ongoing_at_end"], rows)
     return manifest

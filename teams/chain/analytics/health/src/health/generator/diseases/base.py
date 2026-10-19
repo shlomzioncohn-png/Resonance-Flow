@@ -30,6 +30,7 @@ class Disease:
     # Set when the pattern can still be unfolding at the end of the history: its nominal length in days.
     nominal_days: Callable[["Planter", str], float] | None = None
     tiers: tuple[str, ...] = TIERS  # tiers its root task may have
+    in_stage_a: bool = True  # False: planted, but the stage-A detectors and evaluation must ignore it
 
 
 class Planter:

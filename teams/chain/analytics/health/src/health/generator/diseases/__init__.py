@@ -40,7 +40,7 @@ def plant_diseases(cfg: GeneratorConfig, projects: list[Project], normal: list[T
                 root, params = disease.plant(planter, severity)
                 params = {**params, "peer_typical_days": round(planter.typical_days(), 1)}
                 out.append(DiseaseInstance(
-                    id=planter.disease_id, type=name, severity=severity, tier=planter.tier,
+                    id=planter.disease_id, type=name, severity=severity, tier=planter.tier, in_stage_a=disease.in_stage_a,
                     root_task_id=root.id, task_ids=[m.id for m in planter.members], start=planter.t0,
                     params=params))
     return out

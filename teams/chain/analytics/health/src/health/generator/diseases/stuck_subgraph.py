@@ -25,4 +25,5 @@ def _plant(p: Planter, severity: str):
     return root, {"size": size, "hold_days": round(hold_days, 1)}
 
 
-DISEASE = Disease("stuck_subgraph", _plant, _nominal_days)
+# Out of scope for stage A (kept for later): planted, labelled in_stage_a=false, ignored by the detectors.
+DISEASE = Disease("stuck_subgraph", _plant, _nominal_days, in_stage_a=False)

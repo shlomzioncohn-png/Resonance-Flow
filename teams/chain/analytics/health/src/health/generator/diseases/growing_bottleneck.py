@@ -26,4 +26,5 @@ def _plant(p: Planter, severity: str):
     return bottleneck, {"dependents": len(p.members) - 1, "planned_dependents": n, "window_days": window_days}
 
 
-DISEASE = Disease("growing_bottleneck", _plant, _nominal_days)
+# Out of scope for stage A (kept for later): planted, labelled in_stage_a=false, ignored by the detectors.
+DISEASE = Disease("growing_bottleneck", _plant, _nominal_days, in_stage_a=False)

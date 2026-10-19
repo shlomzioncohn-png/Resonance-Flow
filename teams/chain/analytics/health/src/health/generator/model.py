@@ -91,6 +91,7 @@ class DiseaseInstance:
     type: str
     severity: str
     tier: str  # tier of the root task; "similar tasks" means the same tier
+    in_stage_a: bool  # False for diseases outside stage A: present in the data, ignored by the detectors
     root_task_id: UUID
     task_ids: list[UUID]  # every task that belongs to the pattern, root included
     start: datetime

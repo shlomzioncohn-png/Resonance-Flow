@@ -55,6 +55,16 @@ def test_every_severity_and_type_is_planted(full):
     assert {"chronic_blocking", "recurring_blocker", "slow_chain"} <= set(DISEASE_TYPES)  # the three required
 
 
+def test_diseases_outside_stage_a_are_labelled_so_the_detectors_can_skip_them(full, tmp_path):
+    out_of_scope = {d.type for d in full.world.diseases if not d.in_stage_a}
+    assert out_of_scope == {"growing_bottleneck", "stuck_subgraph"}
+    write_dataset(tmp_path, full.config, full.world, full.history)
+    with (tmp_path / "ground_truth.csv").open(encoding="utf-8") as f:
+        rows = list(csv.DictReader(f))
+    in_scope = {r["type"] for r in rows if r["in_stage_a"] == "true"}
+    assert in_scope == {"chronic_blocking", "recurring_blocker", "slow_chain"}
+
+
 def test_sick_share_is_a_small_minority(full):
     sick = {t for d in full.world.diseases for t in d.task_ids}
     assert 0.03 < len(sick) / len(full.world.tasks) < 0.20
