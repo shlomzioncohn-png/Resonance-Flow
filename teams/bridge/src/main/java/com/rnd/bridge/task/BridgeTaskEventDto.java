@@ -25,7 +25,7 @@ import java.util.UUID;
  * of which exist on {@code Task} - are deliberately absent: {@code id},
  * {@code correlationId}, {@code isAvailable}, {@code priorityScore}, {@code
  * ownerId}, {@code createdBy}, {@code extractionProvenance}, {@code
- * createdAt}, {@code updatedAt}, {@code completedAt}, {@code snoozedUntil}.
+ * createdAt}, {@code updatedAt}, {@code completedAt}.
  * <p>
  * {@code eventId} is audit correlation only, not the idempotency key
  * (that's {@code tenantId + sourceType + sourceRef}), so a fresh UUID
