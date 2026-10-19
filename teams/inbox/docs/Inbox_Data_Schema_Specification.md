@@ -214,6 +214,7 @@ Distinct from `tasks.owner_id`, which is the accountable owner/manager of the ta
 | `task_id` | UUID | Yes | FK → `tasks.id` | Task being assigned. |
 | `user_id` | UUID | Cond. | FK → `users.id`; NULL unless user assignment | User assigned to the task. Mutually exclusive with `team_id`. |
 | `team_id` | UUID | Cond. | FK → `teams.id`; NULL unless team assignment | Team assigned to the task. Mutually exclusive with `user_id`. |
+| `assignment_role` | ENUM | Yes | `owner / assignee / responsible / collaborator` | The assignee's role on the task. |
 | `assigned_at` | TIMESTAMPTZ | Yes | DEFAULT `now()` | Assignment timestamp. |
 | `assigned_by` | UUID | No | FK → `users.id` | User who made the assignment; NULL for automatic assignment. |
 
@@ -235,6 +236,14 @@ Use two partial unique indexes:
 UNIQUE(task_id, user_id) WHERE user_id IS NOT NULL;
 UNIQUE(task_id, team_id) WHERE team_id IS NOT NULL;
 ```
+
+**How assignments are written:**
+
+- **Create** - `POST /api/v1/tasks` takes an optional `assignees` list; one row is saved per entry, together with the task. The Kafka ingestion paths (`bridge.structured.tasks`, `task.creation.requested`) do the same from their own `assignees` list.
+- **Read** - every task response carries its `assignees`.
+- **Update** - `PATCH /api/v1/tasks/{id}` with `assignees` replaces the task's full set; without `assignees` the set is left untouched. An assignee already on the task keeps its row (`assigned_at`, `assigned_by` unchanged); if only its role changed, the role is updated in place. Rows not in the new list are deleted; new entries are inserted. The ingestion paths still write assignments at creation only.
+- **Delete** - there is no task delete yet. `task_id` is `ON DELETE CASCADE`, so any future task delete removes its assignments with it.
+- **Validation** - an assigned user or team must exist (`404`) and belong to the task's tenant (`403`); the same user or team listed twice is rejected (`400`). On the REST path, `assigned_by` is the acting user.
 
 ### 3.10 TASK_FEEDBACK
 
@@ -287,7 +296,7 @@ If feedback also mutates a `TASKS` field directly, for example `status → in_re
 - A field that appears in `old_values` is, by definition, a field that changed in that action; its new value is the same key in `new_values`.
 - Enum values are stored by name (`"IN_PROGRESS"`, `"EMPLOYEE"`), related records by id only (`ownerId`, `projectId`, `teamLeadId`).
 - `TASKS` snapshot: `title`, `description`, `sourceType`, `sourceRef`, `status`, `tier`, `roleContext`, `urgency`, `effortEstimateMinutes`, `effortEstimateConfidence`, `deadline`, `snoozedUntil`, `completedAt`, `projectId`, `ownerId`, `suggestedOwnerUserId`, `suggestedOwnerConfidence`. `TASK_SCHEDULING_UPDATED` rows carry `isAvailable` and `priorityScore` instead.
-- `TASK_CREATED` additionally carries `assignments` in `new_values`: one `{userId, teamId, assignmentRole, assignedById}` object per `ASSIGNMENTS` row saved with the task, an empty list when there are none. Assignments are only written at task creation, so they have no audit row of their own.
+- `TASK_CREATED` additionally carries `assignments` in `new_values`: one `{userId, teamId, assignmentRole, assignedById}` object per `ASSIGNMENTS` row saved with the task, an empty list when there are none. `TASK_UPDATED` carries the same `assignments` list in its snapshot, so a change of assignees alone is audited like any other field change. Assignments have no audit row of their own.
 - Appointing a team lead writes up to three rows: the `TEAM_CREATED` / `TEAM_UPDATED` row itself, a `TEAM_MEMBER_ADDED` row if the lead was not already a member, and a `USER_UPDATED` row if the lead was promoted from `EMPLOYEE` to `TEAM_LEAD`.
 - Rows written before this behaviour was introduced have `old_values` NULL on updates too, and a narrower `TASKS` snapshot (`title`, `sourceType`, `sourceRef`, `status`).
 

@@ -5,6 +5,7 @@ import com.rnd.inbox.support.PostgresIntegrationTest;
 import com.rnd.inbox.task.assignment.Assignment;
 import com.rnd.inbox.task.assignment.AssignmentRepository;
 import com.rnd.inbox.task.assignment.AssignmentRole;
+import com.rnd.inbox.task.dto.TaskAssigneeRequestDto;
 import com.rnd.inbox.task.dto.TaskCreateRequestDto;
 import com.rnd.inbox.task.dto.TaskStatusUpdateRequestDto;
 import com.rnd.inbox.task.dto.TaskUpdateRequestDto;
@@ -29,6 +30,7 @@ import com.rnd.inbox.user.repository.UserRepository;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.openapitools.jackson.nullable.JsonNullable;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.http.MediaType;
@@ -575,6 +577,174 @@ class TaskControllerTest extends PostgresIntegrationTest {
         assertThat(seen).hasSize(5).doesNotHaveDuplicates();
         assertThat(titles.subList(0, 2)).containsExactlyInAnyOrder("Task 3", "Task 4");
         assertThat(titles.subList(2, 5)).containsExactly("Task 2", "Task 1", "Task 0");
+    }
+
+    private static TaskAssigneeRequestDto assignee(String type, UUID id, String role) {
+        TaskAssigneeRequestDto dto = new TaskAssigneeRequestDto();
+        dto.setAssigneeType(type);
+        dto.setId(id.toString());
+        dto.setAssignmentRole(role);
+        return dto;
+    }
+
+    @Test
+    void createTask_withAssignees_savesThemAndReturnsThem() throws Exception {
+        User assignedUser = persistUser(tenant, UserRole.EMPLOYEE);
+        Team assignedTeam = persistTeam(tenant, actor);
+        TaskCreateRequestDto request = validCreateRequest();
+        request.setAssignees(List.of(
+                assignee("USER", assignedUser.getId(), "ASSIGNEE"),
+                assignee("TEAM", assignedTeam.getId(), "RESPONSIBLE")));
+
+        String body = mockMvc.perform(post("/api/v1/tasks")
+                        .header(ACTOR_HEADER, actor.getId().toString())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(request)))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.assignees", hasSize(2)))
+                .andExpect(jsonPath("$.assignees[*].assignee_id", containsInAnyOrder(
+                        assignedUser.getId().toString(), assignedTeam.getId().toString())))
+                .andReturn().getResponse().getContentAsString();
+
+        UUID taskId = UUID.fromString(objectMapper.readTree(body).get("id").asText());
+        List<Assignment> saved = assignmentRepository.findByTask_Id(taskId);
+        assertThat(saved).hasSize(2);
+        assertThat(saved).allSatisfy(a -> assertThat(a.getAssignedBy().getId()).isEqualTo(actor.getId()));
+    }
+
+    @Test
+    void createTask_withSameAssigneeTwice_returns400AndDoesNotPersist() throws Exception {
+        User assignedUser = persistUser(tenant, UserRole.EMPLOYEE);
+        TaskCreateRequestDto request = validCreateRequest();
+        request.setAssignees(List.of(
+                assignee("USER", assignedUser.getId(), "ASSIGNEE"),
+                assignee("USER", assignedUser.getId(), "OWNER")));
+
+        mockMvc.perform(post("/api/v1/tasks")
+                        .header(ACTOR_HEADER, actor.getId().toString())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(request)))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error").value("DUPLICATE_ASSIGNEE"));
+
+        assertThat(countTasksInTenant(tenant.getId())).isZero();
+    }
+
+    @Test
+    void createTask_withInvalidAssigneeType_returns400() throws Exception {
+        TaskCreateRequestDto request = validCreateRequest();
+        request.setAssignees(List.of(assignee("ROBOT", UUID.randomUUID(), "ASSIGNEE")));
+
+        mockMvc.perform(post("/api/v1/tasks")
+                        .header(ACTOR_HEADER, actor.getId().toString())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(request)))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error").value("VALIDATION_ERROR"));
+    }
+
+    @Test
+    void createTask_withAssigneeFromAnotherTenant_returns403AndDoesNotPersist() throws Exception {
+        User outsider = persistUser(persistTenant(), UserRole.EMPLOYEE);
+        TaskCreateRequestDto request = validCreateRequest();
+        request.setAssignees(List.of(assignee("USER", outsider.getId(), "ASSIGNEE")));
+
+        mockMvc.perform(post("/api/v1/tasks")
+                        .header(ACTOR_HEADER, actor.getId().toString())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(request)))
+                .andExpect(status().isForbidden());
+
+        assertThat(countTasksInTenant(tenant.getId())).isZero();
+    }
+
+    @Test
+    void createTask_withUnknownAssignee_returns404() throws Exception {
+        TaskCreateRequestDto request = validCreateRequest();
+        request.setAssignees(List.of(assignee("USER", UUID.randomUUID(), "ASSIGNEE")));
+
+        mockMvc.perform(post("/api/v1/tasks")
+                        .header(ACTOR_HEADER, actor.getId().toString())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(request)))
+                .andExpect(status().isNotFound());
+
+        assertThat(countTasksInTenant(tenant.getId())).isZero();
+    }
+
+    @Test
+    void getTaskById_returnsTheTasksAssignees() throws Exception {
+        Task task = persistTask(tenant, "Assigned task");
+        User assignedUser = persistUser(tenant, UserRole.EMPLOYEE);
+        persistAssignment(task, assignedUser, null);
+
+        mockMvc.perform(get("/api/v1/tasks/{id}", task.getId())
+                        .header(ACTOR_HEADER, actor.getId().toString()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.assignees", hasSize(1)))
+                .andExpect(jsonPath("$.assignees[0].assignee_type").value("USER"))
+                .andExpect(jsonPath("$.assignees[0].assignee_id").value(assignedUser.getId().toString()));
+    }
+
+    @Test
+    void updateTask_withAssignees_replacesTheWholeSet() throws Exception {
+        Task task = persistTask(tenant, "Assigned task");
+        User removed = persistUser(tenant, UserRole.EMPLOYEE);
+        User kept = persistUser(tenant, UserRole.EMPLOYEE);
+        User added = persistUser(tenant, UserRole.EMPLOYEE);
+        persistAssignment(task, removed, null);
+        persistAssignment(task, kept, null);
+        TaskUpdateRequestDto request = new TaskUpdateRequestDto();
+        request.setAssignees(JsonNullable.of(List.of(
+                assignee("USER", kept.getId(), "OWNER"),
+                assignee("USER", added.getId(), "ASSIGNEE"))));
+
+        mockMvc.perform(patch("/api/v1/tasks/{id}", task.getId())
+                        .header(ACTOR_HEADER, actor.getId().toString())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(request)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.assignees", hasSize(2)));
+
+        List<Assignment> saved = assignmentRepository.findByTask_Id(task.getId());
+        assertThat(saved).extracting(a -> a.getUser().getId())
+                .containsExactlyInAnyOrder(kept.getId(), added.getId());
+        assertThat(saved).filteredOn(a -> a.getUser().getId().equals(kept.getId()))
+                .singleElement().extracting(Assignment::getAssignmentRole).isEqualTo(AssignmentRole.OWNER);
+    }
+
+    @Test
+    void updateTask_withoutAssignees_leavesThemUntouched() throws Exception {
+        Task task = persistTask(tenant, "Old title");
+        persistAssignment(task, persistUser(tenant, UserRole.EMPLOYEE), null);
+        TaskUpdateRequestDto request = new TaskUpdateRequestDto();
+        request.setTitle("New title");
+
+        mockMvc.perform(patch("/api/v1/tasks/{id}", task.getId())
+                        .header(ACTOR_HEADER, actor.getId().toString())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(request)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.assignees", hasSize(1)));
+
+        assertThat(assignmentRepository.findByTask_Id(task.getId())).hasSize(1);
+    }
+
+    @Test
+    void updateTask_withEmptyAssignees_removesThemAll() throws Exception {
+        Task task = persistTask(tenant, "Assigned task");
+        persistAssignment(task, persistUser(tenant, UserRole.EMPLOYEE), null);
+        TaskUpdateRequestDto request = new TaskUpdateRequestDto();
+        request.setAssignees(JsonNullable.of(List.of()));
+
+        mockMvc.perform(patch("/api/v1/tasks/{id}", task.getId())
+                        .header(ACTOR_HEADER, actor.getId().toString())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(request)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.assignees", hasSize(0)));
+
+        assertThat(assignmentRepository.findByTask_Id(task.getId())).isEmpty();
     }
 
     @Test

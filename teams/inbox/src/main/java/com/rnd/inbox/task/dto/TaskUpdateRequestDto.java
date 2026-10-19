@@ -1,11 +1,14 @@
 package com.rnd.inbox.task.dto;
 import com.rnd.inbox.shared.messaging.validation.ValidUuid;
 import com.rnd.inbox.validation.OptionalNotBlank;
+import jakarta.validation.Valid;
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
+import jakarta.validation.constraints.NotNull;
 import org.openapitools.jackson.nullable.JsonNullable;
 
 import java.time.Instant;
+import java.util.List;
 
 public class TaskUpdateRequestDto {
 
@@ -28,6 +31,8 @@ public class TaskUpdateRequestDto {
     private JsonNullable<Integer> effortEstimateMinutes = JsonNullable.undefined();
 
     private JsonNullable<Instant> deadline = JsonNullable.undefined();
+
+    private JsonNullable<List<@NotNull @Valid TaskAssigneeRequestDto>> assignees = JsonNullable.undefined();
 
     public String getTitle() {
         return title;
@@ -83,5 +88,13 @@ public class TaskUpdateRequestDto {
 
     public void setDeadline(JsonNullable<Instant> deadline) {
         this.deadline = deadline;
+    }
+
+    public JsonNullable<List<TaskAssigneeRequestDto>> getAssignees() {
+        return assignees;
+    }
+
+    public void setAssignees(JsonNullable<List<TaskAssigneeRequestDto>> assignees) {
+        this.assignees = assignees;
     }
 }

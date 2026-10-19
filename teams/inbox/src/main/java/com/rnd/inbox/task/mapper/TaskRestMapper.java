@@ -1,4 +1,6 @@
 package com.rnd.inbox.task.mapper;
+import com.rnd.inbox.task.assignment.Assignment;
+import com.rnd.inbox.task.assignment.AssignmentMapper;
 import com.rnd.inbox.task.controller.TaskController;
 import com.rnd.inbox.task.dto.TaskCreateRequestDto;
 import com.rnd.inbox.task.dto.TaskResponseDto;
@@ -16,6 +18,7 @@ import org.springframework.stereotype.Component;
 
 import java.time.Clock;
 import java.time.Instant;
+import java.util.List;
 
 /**
  * Maps between the REST-facing DTOs and {@link Task}, for the endpoints in {@link TaskController}.
@@ -27,9 +30,11 @@ import java.time.Instant;
 public class TaskRestMapper {
 
     private final Clock clock;
+    private final AssignmentMapper assignmentMapper;
 
-    public TaskRestMapper(Clock clock) {
+    public TaskRestMapper(Clock clock, AssignmentMapper assignmentMapper) {
         this.clock = clock;
+        this.assignmentMapper = assignmentMapper;
     }
 
     public Task toEntity(TaskCreateRequestDto dto, Tenant tenant, Project project, User owner, User createdBy) {
@@ -99,7 +104,7 @@ public class TaskRestMapper {
         return feedback;
     }
 
-    public TaskResponseDto toResponseDto(Task task) {
+    public TaskResponseDto toResponseDto(Task task, List<Assignment> assignments) {
         Tenant tenant = task.getTenant();
         TenantSummaryDto tenantSummary = tenant != null
                 ? new TenantSummaryDto(tenant.getId(), tenant.getName(), tenant.getSlug())
@@ -134,6 +139,7 @@ public class TaskRestMapper {
                 task.getCreatedAt(),
                 task.getUpdatedAt(),
                 task.getCompletedAt(),
-                task.getMetadata());
+                task.getMetadata(),
+                assignments.stream().map(assignmentMapper::toResponseDto).toList());
     }
 }
