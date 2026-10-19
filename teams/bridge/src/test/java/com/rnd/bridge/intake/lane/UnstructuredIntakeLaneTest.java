@@ -203,4 +203,34 @@ class UnstructuredIntakeLaneTest {
         assertThat(result.rejected()).isEqualTo(1);
         assertThat(result.errors().get(0)).isInstanceOf(LaneException.class);
     }
+
+    /**
+     * The ROADMAP.md §3.3/Drive-plan contract fix: a DELETE_REVIEW event (empty objects list,
+     * per UnstructuredPayloadMapper/RawObjectEvent's contract) must never go through the
+     * landing loop at all - there is nothing to land for a logical item that no longer exists,
+     * and the group's own (sparse, tombstone-only) rawContent must never be mistaken for real
+     * content worth landing.
+     */
+    @Test
+    void afterMapNeverLandsAnythingForADeleteReviewEvent() {
+        SourceRecord trashedRecord = new SourceRecord(
+                RawSourceType.DRIVE, "kamatech", "file-1", "corr-4", Instant.parse("2026-08-19T13:00:00Z"),
+                null, List.of(), null, null, "{}".getBytes(StandardCharsets.UTF_8), null, null, 0, 0, List.of(),
+                1, ChangeType.DELETE_REVIEW);
+        RawObjectEvent deleteEvent = RawObjectEvent.create(
+                RawSourceType.DRIVE, "kamatech", Instant.parse("2026-08-19T13:00:00Z"), ScopeDecision.INCLUDED,
+                List.of(), Instant.parse("2026-08-19T13:00:00Z"), "corr-4", 1, ChangeType.DELETE_REVIEW, List.of());
+        when(sourceReader.read(any())).thenReturn(Stream.of(List.of(trashedRecord)));
+        when(payloadMapper.map(any(), any())).thenReturn(deleteEvent);
+        UnstructuredIntakeLane driveLane = new UnstructuredIntakeLane(
+                RawSourceType.DRIVE, sourceReader, payloadMapper, payloadValidator, payloadPublisher, landingService,
+                groupStateStore, calendarEventStateStore);
+
+        IntakeResult result = driveLane.run(ReadCursor.full(), Instant.now());
+
+        verifyNoInteractions(landingService);
+        verify(payloadValidator).validate(deleteEvent);
+        verify(payloadPublisher).publish(deleteEvent);
+        assertThat(result).isEqualTo(new IntakeResult(1, 1, 0, List.of()));
+    }
 }

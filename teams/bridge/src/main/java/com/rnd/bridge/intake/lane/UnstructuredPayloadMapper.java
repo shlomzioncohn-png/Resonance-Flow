@@ -4,6 +4,7 @@ import com.rnd.bridge.core.PayloadMapper;
 import com.rnd.bridge.core.error.LaneException;
 import com.rnd.bridge.intake.model.SourceRecord;
 import com.rnd.bridge.intake.service.SourceRecordRefMapper;
+import com.rnd.bridge.raw.model.ChangeType;
 import com.rnd.bridge.raw.model.RawObjectEvent;
 import com.rnd.bridge.raw.model.RawObjectRef;
 import com.rnd.bridge.raw.model.ScopeDecision;
@@ -42,7 +43,13 @@ final class UnstructuredPayloadMapper implements PayloadMapper<List<SourceRecord
         SourceRecord primary = primaryOf(group);
         try {
             ScopeDecision scopeDecision = scopingFilter.decide(primary);
-            List<RawObjectRef> objects = group.stream().map(record -> refMapper.toRef(record, ingestedAt)).toList();
+            // DELETE_REVIEW means "this logical item no longer exists" - per RawObjectEvent's
+            // own contract (and already-agreed with Mind, see raw-object-event-source-ref-
+            // schema-response.md), it must carry an empty objects list, never a landed ref to
+            // whatever sparse tombstone content the reader built the record from.
+            List<RawObjectRef> objects = primary.changeType() == ChangeType.DELETE_REVIEW
+                    ? List.of()
+                    : group.stream().map(record -> refMapper.toRef(record, ingestedAt)).toList();
 
             return RawObjectEvent.create(
                     primary.sourceType(),

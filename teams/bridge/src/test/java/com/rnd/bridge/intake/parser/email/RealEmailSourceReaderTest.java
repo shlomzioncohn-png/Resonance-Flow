@@ -96,7 +96,7 @@ class RealEmailSourceReaderTest {
         when(messages.get("me", "m2")).thenReturn(getRequest);
         when(getRequest.execute()).thenReturn(message("m2", "200"));
 
-        EmailReadResult result = reader().read(new ReadCursor(null, null, "100"));
+        EmailReadResult result = reader().read(new ReadCursor(null, "100"));
 
         assertThat(result.records()).hasSize(1);
         assertThat(result.nextHistoryId()).isEqualTo("200");
@@ -120,7 +120,7 @@ class RealEmailSourceReaderTest {
         when(messages.get("me", "m3")).thenReturn(getRequest);
         when(getRequest.execute()).thenReturn(message("m3", "300"));
 
-        EmailReadResult result = reader().read(new ReadCursor(null, null, "999"));
+        EmailReadResult result = reader().read(new ReadCursor(null, "999"));
 
         assertThat(result.records()).hasSize(1);
         assertThat(result.nextHistoryId()).isEqualTo("300");

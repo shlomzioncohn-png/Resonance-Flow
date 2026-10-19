@@ -80,7 +80,7 @@ public class RealEmailSourceReader implements EmailSourceReader {
 
     @Override
     public EmailReadResult read(ReadCursor cursor) {
-        String historyId = cursor == null ? null : cursor.historyId();
+        String historyId = cursor == null ? null : cursor.token();
         if (historyId == null) {
             return readFull();
         }

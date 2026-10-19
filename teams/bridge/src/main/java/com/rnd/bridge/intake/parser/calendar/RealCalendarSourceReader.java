@@ -85,7 +85,7 @@ public class RealCalendarSourceReader implements CalendarSourceReader {
 
     @Override
     public CalendarReadResult read(ReadCursor cursor) {
-        String syncToken = cursor == null ? null : cursor.syncToken();
+        String syncToken = cursor == null ? null : cursor.token();
         try {
             return readPages(syncToken);
         } catch (GoogleJsonResponseException e) {

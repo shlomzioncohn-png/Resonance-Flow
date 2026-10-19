@@ -1,22 +1,232 @@
 package com.rnd.bridge.intake.parser.drive;
 
+import com.google.api.client.googleapis.json.GoogleJsonResponseException;
+import com.google.api.client.http.HttpTransport;
+import com.google.api.client.http.javanet.NetHttpTransport;
+import com.google.api.client.json.gson.GsonFactory;
+import com.google.api.services.drive.Drive;
+import com.google.api.services.drive.DriveScopes;
+import com.google.api.services.drive.model.Change;
+import com.google.api.services.drive.model.ChangeList;
+import com.google.api.services.drive.model.File;
+import com.google.api.services.drive.model.FileList;
+import com.rnd.bridge.core.ReadCursor;
+import com.rnd.bridge.intake.config.DriveImportProperties;
+import com.rnd.bridge.intake.google.GoogleCredentialsProvider;
+import com.rnd.bridge.intake.model.DriveFileState;
 import com.rnd.bridge.intake.model.SourceRecord;
+import com.rnd.bridge.intake.service.DriveFileStateReconciler;
+import com.rnd.bridge.raw.model.ChangeType;
+import com.rnd.bridge.raw.model.RawSourceType;
+import java.io.ByteArrayOutputStream;
+import java.io.IOException;
+import java.io.UncheckedIOException;
+import java.nio.charset.StandardCharsets;
+import java.time.Instant;
+import java.util.ArrayList;
 import java.util.List;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
 
 /**
- * Placeholder for the real Google Drive API reader (files.list/changes.list, page tokens for
- * incremental sync — see plan.md). Not implemented yet; enabling bridge.intake.drive.mode=real
- * activates this bean but every call fails until it's filled in.
+ * Reads real Google Drive files. Two modes, chosen by whether a startPageToken is already
+ * known (cursor.token()):
+ * - First run (cursor.token() == null): a full files.list() baseline scan, same as before this
+ *   class supported incremental sync at all - every file goes through fileStateReconciler as a
+ *   first-seen file (revision 0). A changes.list startPageToken freshly minted via
+ *   changes().getStartPageToken() marks "from now on" only - confirmed against Google's own
+ *   docs that it never retroactively returns pre-existing files - so it is minted alongside
+ *   this baseline scan, not instead of it, and returned as this read's nextToken.
+ * - Every run after (cursor.token() != null): changes.list(startPageToken) only - a true
+ *   delta-only read, no files.list() call at all.
+ * A native Google file (Doc/Sheet/Slide - mimeType starting "application/vnd.google-apps.")
+ * has no bytes of its own and must be exported to a concrete format via files.export; every
+ * other file is downloaded as-is via files.get(...).executeMediaAsInputStream() - except a
+ * trashed file (see toTrashedSourceRecord), which is never fetched at all.
+ * correlationId/revision come from DriveFileStateReconciler.resolve, keyed on fileId/
+ * headRevisionId - the direct Drive analog of RealCalendarSourceReader's eventId/etag
+ * reconciliation (see that class's javadoc for the shared reasoning).
  */
 @Component
 @ConditionalOnProperty(prefix = "bridge.intake.drive", name = "mode", havingValue = "real")
 public class RealDriveSourceReader implements DriveSourceReader {
 
+    /** Default export target for native Google files - cheapest, most directly usable by
+     * downstream text processing (Mind); trades away preserved formatting. */
+    private static final String EXPORT_MIME_TYPE = "text/plain";
+    private static final String GOOGLE_APPS_MIME_PREFIX = "application/vnd.google-apps.";
+    private static final String LIST_FIELDS =
+            "nextPageToken, files(id, name, description, mimeType, modifiedTime, owners, size)";
+    private static final String CHANGES_FIELDS = "nextPageToken, newStartPageToken, "
+            + "changes(fileId, removed, "
+            + "file(id, name, description, mimeType, modifiedTime, owners, size, headRevisionId, trashed))";
+
+    private final GoogleCredentialsProvider credentialsProvider;
+    private final DriveImportProperties properties;
+    private final DriveFileStateReconciler fileStateReconciler;
+    private Drive client;
+
+    @Autowired
+    public RealDriveSourceReader(
+            GoogleCredentialsProvider credentialsProvider, DriveImportProperties properties,
+            DriveFileStateReconciler fileStateReconciler) {
+        this.credentialsProvider = credentialsProvider;
+        this.properties = properties;
+        this.fileStateReconciler = fileStateReconciler;
+    }
+
+    /** Test-only seam: lets tests inject a mocked Drive client instead of the real one client()
+     * would otherwise lazily build from live Google credentials. */
+    RealDriveSourceReader(
+            GoogleCredentialsProvider credentialsProvider, DriveImportProperties properties,
+            DriveFileStateReconciler fileStateReconciler, Drive client) {
+        this(credentialsProvider, properties, fileStateReconciler);
+        this.client = client;
+    }
+
     @Override
-    public List<SourceRecord> read() {
-        throw new UnsupportedOperationException(
-                "Real Drive reading is not implemented yet - see plan.md's rollout order");
+    public DriveReadResult read(ReadCursor cursor) {
+        String token = cursor == null ? null : cursor.token();
+        try {
+            if (token == null) {
+                return readBaseline();
+            }
+            return readChanges(token);
+        } catch (GoogleJsonResponseException e) {
+            if (e.getStatusCode() == 410 && token != null) {
+                // Expired startPageToken - the only way back is a full baseline resync.
+                try {
+                    return readBaseline();
+                } catch (IOException retryFailure) {
+                    throw new UncheckedIOException("Failed to list Drive files", retryFailure);
+                }
+            }
+            throw new UncheckedIOException("Failed to list Drive files", e);
+        } catch (IOException e) {
+            throw new UncheckedIOException("Failed to list Drive files", e);
+        }
+    }
+
+    private DriveReadResult readBaseline() throws IOException {
+        Drive drive = client();
+        List<SourceRecord> records = new ArrayList<>();
+        String pageToken = null;
+        do {
+            FileList page = listPage(drive, pageToken);
+            if (page.getFiles() != null) {
+                for (File file : page.getFiles()) {
+                    records.add(toSourceRecord(drive, file));
+                }
+            }
+            pageToken = page.getNextPageToken();
+        } while (pageToken != null);
+        String nextToken = drive.changes().getStartPageToken().execute().getStartPageToken();
+        return new DriveReadResult(records, nextToken);
+    }
+
+    private FileList listPage(Drive drive, String pageToken) throws IOException {
+        Drive.Files.List request = drive.files().list()
+                .setFields(LIST_FIELDS)
+                .setPageToken(pageToken);
+        String rootFolderId = properties.rootFolderId();
+        if (rootFolderId != null && !rootFolderId.isBlank()) {
+            request.setQ("'" + rootFolderId + "' in parents");
+        }
+        return request.execute();
+    }
+
+    private DriveReadResult readChanges(String startPageToken) throws IOException {
+        Drive drive = client();
+        List<SourceRecord> records = new ArrayList<>();
+        String pageToken = startPageToken;
+        // newStartPageToken only ever appears on the last page of a sync (same contract as
+        // Calendar's nextSyncToken) - so it's only ever read once, right before the loop ends.
+        String nextToken = null;
+        do {
+            ChangeList page = drive.changes().list(pageToken).setFields(CHANGES_FIELDS).execute();
+            if (page.getChanges() != null) {
+                for (Change change : page.getChanges()) {
+                    if (Boolean.TRUE.equals(change.getRemoved()) || change.getFile() == null) {
+                        // removed=true (deletion vs. lost access, ambiguous) is explicitly out
+                        // of scope for this pass - see ROADMAP.md §3.3.
+                        continue;
+                    }
+                    records.add(toSourceRecord(drive, change.getFile()));
+                }
+            }
+            pageToken = page.getNextPageToken();
+            if (pageToken == null) {
+                nextToken = page.getNewStartPageToken();
+            }
+        } while (pageToken != null);
+        return new DriveReadResult(records, nextToken);
+    }
+
+    private SourceRecord toSourceRecord(Drive drive, File file) {
+        if (Boolean.TRUE.equals(file.getTrashed())) {
+            return toTrashedSourceRecord(file);
+        }
+        byte[] content = fetchContent(drive, file);
+        String owner = file.getOwners() == null || file.getOwners().isEmpty()
+                ? null
+                : file.getOwners().get(0).getEmailAddress();
+        Instant occurredAt = Instant.ofEpochMilli(file.getModifiedTime().getValue());
+        DriveFileState state = fileStateReconciler.resolve(properties.tenantId(), file.getId(), file.getHeadRevisionId());
+        return new SourceRecord(
+                RawSourceType.DRIVE, properties.tenantId(), file.getId(), state.correlationId(),
+                occurredAt, owner, owner == null ? List.of() : List.of(owner), file.getName(),
+                file.getDescription(), content, file.getMimeType(), null, 0, 0, List.of(), state.revision());
+    }
+
+    /**
+     * A trashed file's SourceRecord uses only fields Google guarantees on a change record with
+     * removed=false (file.trashed=true) - name/description/owners/size are not assumed present,
+     * and content is never fetched (may 403/404, and there is no reason to re-download content
+     * being deleted) - mirrors RealCalendarSourceReader.toCancelledSourceRecord. correlationId/
+     * revision still come from DriveFileStateReconciler.resolve, exactly like a normal edit -
+     * only changeType marks this as a deletion.
+     */
+    private SourceRecord toTrashedSourceRecord(File file) {
+        DriveFileState state = fileStateReconciler.resolve(properties.tenantId(), file.getId(), file.getHeadRevisionId());
+        Instant occurredAt = file.getModifiedTime() != null
+                ? Instant.ofEpochMilli(file.getModifiedTime().getValue())
+                : Instant.now();
+        return new SourceRecord(
+                RawSourceType.DRIVE, properties.tenantId(), file.getId(), state.correlationId(),
+                occurredAt, null, List.of(), null, null,
+                file.toString().getBytes(StandardCharsets.UTF_8), null, null, 0, 0, List.of(), state.revision(),
+                ChangeType.DELETE_REVIEW);
+    }
+
+    private byte[] fetchContent(Drive drive, File file) {
+        try {
+            if (file.getMimeType() != null && file.getMimeType().startsWith(GOOGLE_APPS_MIME_PREFIX)) {
+                return drainToBytes(drive.files().export(file.getId(), EXPORT_MIME_TYPE).executeMediaAsInputStream());
+            }
+            return drainToBytes(drive.files().get(file.getId()).executeMediaAsInputStream());
+        } catch (IOException e) {
+            throw new UncheckedIOException("Failed to fetch Drive file content for " + file.getId(), e);
+        }
+    }
+
+    private static byte[] drainToBytes(java.io.InputStream in) throws IOException {
+        try (java.io.InputStream input = in; ByteArrayOutputStream out = new ByteArrayOutputStream()) {
+            input.transferTo(out);
+            return out.toByteArray();
+        }
+    }
+
+    private synchronized Drive client() {
+        if (client == null) {
+            // Plain NetHttpTransport, not GoogleNetHttpTransport.newTrustedTransport() - see
+            // GoogleCredentialsProvider for why.
+            HttpTransport transport = new NetHttpTransport();
+            var credential = credentialsProvider.credentials(List.of(DriveScopes.DRIVE_READONLY));
+            client = new Drive.Builder(transport, GsonFactory.getDefaultInstance(), credential)
+                    .setApplicationName("bridge-intake")
+                    .build();
+        }
+        return client;
     }
 }

@@ -8,6 +8,7 @@ import com.rnd.bridge.core.SourceReader;
 import com.rnd.bridge.core.error.LaneException;
 import com.rnd.bridge.intake.model.SourceRecord;
 import com.rnd.bridge.intake.service.IntakeLandingService;
+import com.rnd.bridge.raw.model.ChangeType;
 import com.rnd.bridge.raw.model.RawObjectEvent;
 import com.rnd.bridge.raw.model.RawObjectRef;
 import com.rnd.bridge.raw.model.RawSourceType;
@@ -95,6 +96,11 @@ public final class UnstructuredIntakeLane extends AbstractIntakeLane<List<Source
     @Override
     protected void afterMap(List<SourceRecord> group, RawObjectEvent payload, Instant asOf) {
         try {
+            // DELETE_REVIEW always has an empty objects list now (see UnstructuredPayloadMapper)
+            // - nothing to land for a logical item that no longer exists.
+            if (payload.changeType() == ChangeType.DELETE_REVIEW) {
+                return;
+            }
             List<RawObjectRef> objects = payload.objects();
             for (int i = 0; i < group.size(); i++) {
                 if (group.get(i).precomputedRef() != null) {

@@ -24,6 +24,8 @@ import com.rnd.bridge.intake.controller.UnstructuredIntakeController;
 import com.rnd.bridge.intake.model.SourceRecord;
 import com.rnd.bridge.intake.parser.calendar.CalendarReadResult;
 import com.rnd.bridge.intake.parser.calendar.CalendarSourceReader;
+import com.rnd.bridge.intake.parser.drive.DriveReadResult;
+import com.rnd.bridge.intake.parser.drive.DriveSourceReader;
 import com.rnd.bridge.intake.parser.email.EmailReadResult;
 import com.rnd.bridge.intake.parser.email.EmailSourceReader;
 import com.rnd.bridge.intake.service.IntakeLandingService;
@@ -95,6 +97,17 @@ class UnstructuredIntakeControllerTest {
             List.of(new RawObjectRef(Role.BODY, "CALENDAR/kamatech/2026-08-18/x.json", "sha256:" + "2".repeat(64),
                     "application/json", 2L, Modality.TEXT)));
 
+    private static final SourceRecord DRIVE_RECORD = new SourceRecord(
+            RawSourceType.DRIVE, "kamatech", "file-1", "corr-4", Instant.parse("2026-08-18T09:15:00Z"),
+            "malki@kamatech.org", List.of("malki@kamatech.org"), "Q3-Roadmap.docx", "desc",
+            "{}".getBytes(StandardCharsets.UTF_8), null, null, 0, 0, List.of(), 0);
+
+    private static final RawObjectEvent DRIVE_EVENT = RawObjectEvent.create(
+            RawSourceType.DRIVE, "kamatech", Instant.parse("2026-08-18T09:15:00Z"), ScopeDecision.INCLUDED,
+            List.of("malki@kamatech.org"), Instant.parse("2026-08-18T09:15:00Z"), "corr-4", 0, ChangeType.UPSERT,
+            List.of(new RawObjectRef(Role.BODY, "DRIVE/kamatech/2026-08-18/x.json", "sha256:" + "3".repeat(64),
+                    "application/octet-stream", 2L, Modality.TEXT)));
+
     @SuppressWarnings("unchecked")
     private final SourceReader<List<SourceRecord>> sourceReader = mock(SourceReader.class);
     @SuppressWarnings("unchecked")
@@ -108,6 +121,7 @@ class UnstructuredIntakeControllerTest {
     private final CursorStore cursorStore = mock(CursorStore.class);
     private final CalendarSourceReader calendarSourceReader = mock(CalendarSourceReader.class);
     private final EmailSourceReader emailSourceReader = mock(EmailSourceReader.class);
+    private final DriveSourceReader driveSourceReader = mock(DriveSourceReader.class);
     private final CalendarEventStateStore calendarEventStateStore = mock(CalendarEventStateStore.class);
     private final KeyedLock calendarCursorLock = new KeyedLock();
 
@@ -120,7 +134,7 @@ class UnstructuredIntakeControllerTest {
     private UnstructuredIntakeController controllerFor(RawSourceType sourceType) {
         return new UnstructuredIntakeController(
                 List.of(laneFor(sourceType)), cursorStore, calendarSourceReader, emailSourceReader,
-                calendarCursorLock);
+                driveSourceReader, calendarCursorLock);
     }
 
     @Test
@@ -173,20 +187,21 @@ class UnstructuredIntakeControllerTest {
         verify(cursorStore, never()).save(any(), any(), any());
     }
 
-    // DRIVE stands in for "any source with no dedicated controller path" - EMAIL now has its own
-    // historyId-cursor path (see the emailCursor... tests below), same as CALENDAR already did.
+    // WHATSAPP stands in for "any source with no dedicated controller path" - EMAIL/CALENDAR/
+    // DRIVE all now have their own token-cursor paths (see the respective ...Cursor... tests
+    // below).
     @Test
     void nonSlackCursorAdvancesEvenWhenTheRunHasRejectedRecords() {
-        UnstructuredIntakeController controller = controllerFor(RawSourceType.DRIVE);
-        when(cursorStore.load(RawSourceType.DRIVE, "kamatech")).thenReturn(ReadCursor.full());
+        UnstructuredIntakeController controller = controllerFor(RawSourceType.WHATSAPP);
+        when(cursorStore.load(RawSourceType.WHATSAPP, "kamatech")).thenReturn(ReadCursor.full());
         when(sourceReader.read(any())).thenReturn(Stream.of(List.of(RECORD)));
         when(payloadMapper.map(any(), any())).thenReturn(EVENT);
         doThrow(new LaneException("kafka down")).when(payloadPublisher).publish(any());
 
-        IntakeResult result = controller.run(RawSourceType.DRIVE);
+        IntakeResult result = controller.run(RawSourceType.WHATSAPP);
 
         assertThat(result.rejected()).isEqualTo(1);
-        verify(cursorStore).save(eq(RawSourceType.DRIVE), eq("kamatech"), any());
+        verify(cursorStore).save(eq(RawSourceType.WHATSAPP), eq("kamatech"), any());
     }
 
     /**
@@ -206,7 +221,7 @@ class UnstructuredIntakeControllerTest {
         assertThat(result.rejected()).isEqualTo(0);
         ArgumentCaptor<ReadCursor> captor = ArgumentCaptor.forClass(ReadCursor.class);
         verify(cursorStore).save(eq(RawSourceType.EMAIL), eq("kamatech"), captor.capture());
-        assertThat(captor.getValue().historyId()).isEqualTo("history-2");
+        assertThat(captor.getValue().token()).isEqualTo("history-2");
     }
 
     /**
@@ -218,7 +233,7 @@ class UnstructuredIntakeControllerTest {
     @Test
     void emailCursorIsNotAdvancedWhenTheRunHasRejectedRecords() {
         UnstructuredIntakeController controller = controllerFor(RawSourceType.EMAIL);
-        when(cursorStore.load(RawSourceType.EMAIL, "kamatech")).thenReturn(new ReadCursor(null, null, "history-1"));
+        when(cursorStore.load(RawSourceType.EMAIL, "kamatech")).thenReturn(new ReadCursor(null, "history-1"));
         when(emailSourceReader.read(any())).thenReturn(new EmailReadResult(List.of(RECORD), "history-2"));
         when(payloadMapper.map(any(), any())).thenReturn(EVENT);
         doThrow(new LaneException("kafka down")).when(payloadPublisher).publish(any());
@@ -264,7 +279,7 @@ class UnstructuredIntakeControllerTest {
         assertThat(result.rejected()).isEqualTo(0);
         ArgumentCaptor<ReadCursor> captor = ArgumentCaptor.forClass(ReadCursor.class);
         verify(cursorStore).save(eq(RawSourceType.CALENDAR), eq("kamatech"), captor.capture());
-        assertThat(captor.getValue().syncToken()).isEqualTo("sync-token-2");
+        assertThat(captor.getValue().token()).isEqualTo("sync-token-2");
     }
 
     /**
@@ -322,7 +337,7 @@ class UnstructuredIntakeControllerTest {
         when(cursorStore.load(RawSourceType.CALENDAR, "kamatech"))
                 .thenAnswer(inv -> new ReadCursor(null, storedToken.get()));
         doAnswer(inv -> {
-            storedToken.set(((ReadCursor) inv.getArgument(2)).syncToken());
+            storedToken.set(((ReadCursor) inv.getArgument(2)).token());
             return null;
         }).when(cursorStore).save(eq(RawSourceType.CALENDAR), eq("kamatech"), any());
 
@@ -331,7 +346,7 @@ class UnstructuredIntakeControllerTest {
         List<String> tokensSeenByRead = new CopyOnWriteArrayList<>();
         when(calendarSourceReader.read(any())).thenAnswer(inv -> {
             ReadCursor cursor = inv.getArgument(0);
-            tokensSeenByRead.add(cursor.syncToken());
+            tokensSeenByRead.add(cursor.token());
             if (tokensSeenByRead.size() == 1) {
                 runAEnteredRead.countDown();
                 assertThat(releaseRunA.await(5, TimeUnit.SECONDS)).isTrue();
@@ -405,5 +420,54 @@ class UnstructuredIntakeControllerTest {
 
         assertThat(secondResult.rejected()).isEqualTo(0);
         verify(cursorStore).save(eq(RawSourceType.CALENDAR), eq("kamatech"), any());
+    }
+
+    /**
+     * Drive's dedicated runDrive path (added for ROADMAP.md §3.3) through the same generic
+     * runTokenBasedSource skeleton Calendar/Email already use - mirrors
+     * calendarCursorPersistsTheNewSyncTokenWhenTheRunFullySucceeds.
+     */
+    @Test
+    void driveCursorPersistsTheNewTokenWhenTheRunFullySucceeds() {
+        UnstructuredIntakeController controller = controllerFor(RawSourceType.DRIVE);
+        when(cursorStore.load(RawSourceType.DRIVE, "kamatech")).thenReturn(ReadCursor.full());
+        when(driveSourceReader.read(any())).thenReturn(new DriveReadResult(List.of(DRIVE_RECORD), "page-token-2"));
+        when(payloadMapper.map(any(), any())).thenReturn(DRIVE_EVENT);
+
+        IntakeResult result = controller.run(RawSourceType.DRIVE);
+
+        assertThat(result.rejected()).isEqualTo(0);
+        ArgumentCaptor<ReadCursor> captor = ArgumentCaptor.forClass(ReadCursor.class);
+        verify(cursorStore).save(eq(RawSourceType.DRIVE), eq("kamatech"), captor.capture());
+        assertThat(captor.getValue().token()).isEqualTo("page-token-2");
+    }
+
+    /** Mirrors calendarCursorIsNotAdvancedWhenTheRunHasRejectedRecords. */
+    @Test
+    void driveCursorIsNotAdvancedWhenTheRunHasRejectedRecords() {
+        UnstructuredIntakeController controller = controllerFor(RawSourceType.DRIVE);
+        when(cursorStore.load(RawSourceType.DRIVE, "kamatech")).thenReturn(new ReadCursor(null, "page-token-1"));
+        when(driveSourceReader.read(any())).thenReturn(new DriveReadResult(List.of(DRIVE_RECORD), "page-token-2"));
+        when(payloadMapper.map(any(), any())).thenReturn(DRIVE_EVENT);
+        doThrow(new LaneException("kafka down")).when(payloadPublisher).publish(any());
+
+        IntakeResult result = controller.run(RawSourceType.DRIVE);
+
+        assertThat(result.rejected()).isEqualTo(1);
+        verify(cursorStore, never()).save(any(), any(), any());
+    }
+
+    /** Mirrors calendarCursorIsUntouchedWhenTheReaderReportsNoNewSyncToken. */
+    @Test
+    void driveCursorIsUntouchedWhenTheReaderReportsNoNewToken() {
+        UnstructuredIntakeController controller = controllerFor(RawSourceType.DRIVE);
+        when(cursorStore.load(RawSourceType.DRIVE, "kamatech")).thenReturn(ReadCursor.full());
+        when(driveSourceReader.read(any())).thenReturn(new DriveReadResult(List.of(DRIVE_RECORD), null));
+        when(payloadMapper.map(any(), any())).thenReturn(DRIVE_EVENT);
+
+        IntakeResult result = controller.run(RawSourceType.DRIVE);
+
+        assertThat(result.rejected()).isEqualTo(0);
+        verify(cursorStore, never()).save(any(), any(), any());
     }
 }

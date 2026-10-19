@@ -9,6 +9,8 @@ import com.rnd.bridge.intake.model.SourceRecord;
 import com.rnd.bridge.intake.parser.SourceRecordGrouper;
 import com.rnd.bridge.intake.parser.calendar.CalendarReadResult;
 import com.rnd.bridge.intake.parser.calendar.CalendarSourceReader;
+import com.rnd.bridge.intake.parser.drive.DriveReadResult;
+import com.rnd.bridge.intake.parser.drive.DriveSourceReader;
 import com.rnd.bridge.intake.parser.email.EmailReadResult;
 import com.rnd.bridge.intake.parser.email.EmailSourceReader;
 import com.rnd.bridge.raw.model.RawSourceType;
@@ -37,16 +39,18 @@ public class UnstructuredIntakeController {
     private final CursorStore cursorStore;
     private final CalendarSourceReader calendarSourceReader;
     private final EmailSourceReader emailSourceReader;
+    private final DriveSourceReader driveSourceReader;
     private final KeyedLock tokenCursorLock;
 
     public UnstructuredIntakeController(
             List<UnstructuredIntakeLane> lanes, CursorStore cursorStore, CalendarSourceReader calendarSourceReader,
-            EmailSourceReader emailSourceReader, KeyedLock tokenCursorLock) {
+            EmailSourceReader emailSourceReader, DriveSourceReader driveSourceReader, KeyedLock tokenCursorLock) {
         this.lanesBySource = lanes.stream()
                 .collect(Collectors.toMap(UnstructuredIntakeLane::sourceType, Function.identity()));
         this.cursorStore = cursorStore;
         this.calendarSourceReader = calendarSourceReader;
         this.emailSourceReader = emailSourceReader;
+        this.driveSourceReader = driveSourceReader;
         // One shared KeyedLock instance for every token-cursor source (Calendar, Email, and any
         // future one) - it's a per-key lock, and the key already includes the sourceType (see
         // cursorLockKey), so this one bean safely serializes each source's independent
@@ -65,6 +69,9 @@ public class UnstructuredIntakeController {
         }
         if (sourceType == RawSourceType.EMAIL) {
             return runEmail(lane);
+        }
+        if (sourceType == RawSourceType.DRIVE) {
+            return runDrive(lane);
         }
 
         ReadCursor cursor = cursorStore.load(sourceType, TENANT_ID);
@@ -106,6 +113,22 @@ public class UnstructuredIntakeController {
     }
 
     /**
+     * Drive's cursor is a changes.list startPageToken, not a timestamp - same reasoning as
+     * Calendar's syncToken (see {@link #runCalendar}'s javadoc), tied to the single
+     * driveSourceReader.read(cursor) call that returned it (see DriveReadResult/
+     * RealDriveSourceReader's javadoc). Shares tokenCursorLock with Calendar/Email - safe for
+     * the same reason given in the constructor's comment.
+     */
+    private IntakeResult runDrive(UnstructuredIntakeLane lane) {
+        return runTokenBasedSource(RawSourceType.DRIVE, cursorLockKey(RawSourceType.DRIVE, TENANT_ID), lane,
+                cursor -> {
+                    DriveReadResult read = driveSourceReader.read(cursor);
+                    return new TokenRead(read.records(), read.nextToken());
+                },
+                ReadCursor::new);
+    }
+
+    /**
      * Gmail's cursor is a historyId, not a timestamp - same reasoning as Calendar's syncToken
      * (see {@link #runCalendar}'s javadoc), tied to the single emailSourceReader.read(cursor)
      * call that returned it (see EmailReadResult/RealEmailSourceReader's javadoc). Shares
@@ -119,7 +142,7 @@ public class UnstructuredIntakeController {
                     EmailReadResult read = emailSourceReader.read(cursor);
                     return new TokenRead(read.records(), read.nextHistoryId());
                 },
-                (asOf, historyId) -> new ReadCursor(asOf, null, historyId));
+                ReadCursor::new);
     }
 
     /**
