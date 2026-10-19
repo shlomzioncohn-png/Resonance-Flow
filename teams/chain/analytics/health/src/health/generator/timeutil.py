@@ -4,10 +4,18 @@ import random
 from datetime import datetime, timedelta
 
 WORK_START, WORK_END = 8, 19  # UTC hours; keeps the synthetic week looking like a real one
+# Automation (Mind, system updates) and late work do not respect office hours. Without this share every
+# duration lands near a whole number of days, with empty gaps in between: an obvious synthetic fingerprint.
+OFF_HOURS_SHARE = 0.15
 
 
 def snap_to_work_time(t: datetime, rng: random.Random) -> datetime:
-    """Move t to the next working moment (Mon-Fri, 08:00-19:00); in-hours times are untouched."""
+    """Move t to the next working moment (Mon-Fri, 08:00-19:00); in-hours times are untouched.
+
+    A small share of events is left exactly where it is, at any hour or day of the week.
+    """
+    if rng.random() < OFF_HOURS_SHARE:
+        return t
     moved = False
     while True:
         if t.weekday() >= 5:
@@ -19,8 +27,9 @@ def snap_to_work_time(t: datetime, rng: random.Random) -> datetime:
         else:
             break
         moved = True
-    # jitter so everything that got pushed doesn't pile up at exactly 08:00
-    return t + timedelta(seconds=rng.uniform(0, 3600)) if moved else t
+    # spread over the whole working day: a short jitter piles every pushed event up around 08:00,
+    # which turns durations into near-whole days (visible as bands in the plots)
+    return t + timedelta(seconds=rng.uniform(0, (WORK_END - WORK_START) * 3600 - 1)) if moved else t
 
 
 def lognormal_hours(rng: random.Random, median_hours: float, sigma: float) -> float:

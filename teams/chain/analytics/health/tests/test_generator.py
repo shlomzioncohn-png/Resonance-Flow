@@ -153,10 +153,10 @@ def test_graph_has_fan_in_and_fan_out_not_just_chains(full):
     assert max(deps.values()) >= 5 and max(dependents.values()) >= 6
 
 
-def test_working_hours_and_weekends_are_respected(full):
+def test_activity_is_mostly_in_working_hours_but_not_only(full):
     created = [r.created_at for r in full.history.state_rows if r.event_type == "STATUS_CHANGED"]
-    off_hours = sum(1 for t in created if t.weekday() >= 5 or not 8 <= t.hour < 20)
-    assert off_hours / len(created) < 0.02
+    off_hours = sum(1 for t in created if t.weekday() >= 5 or not 8 <= t.hour < 19)
+    assert 0.05 < off_hours / len(created) < 0.30  # mostly office hours, but not exclusively
 
 
 # ---- ground truth ----

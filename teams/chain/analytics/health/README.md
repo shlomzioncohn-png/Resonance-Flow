@@ -68,7 +68,7 @@ Code layout (`src/health/generator/`): `config.py` (all knobs), `model.py` (tier
 - **Tiers:** `operational` (70%), `tactical` (22%), `strategic` (8%). Higher tiers take longer
   (work x1 / x2.5 / x6) and wait on lower ones (strategic on tactical, tactical on operational).
 - **Teams:** 20 projects of different pace (fast / medium / slow), lognormal durations, working
-  hours and weekdays only.
+  hours and weekdays, except about 15% of events (automation, late work) at any hour or day.
 - **Load bursts:** about 15% of tasks are created in 12 bursts, where one to three teams open many tasks within a day or two.
 - **Graph shapes:** chains, fan-out (hub tasks that several later tasks of a project depend on),
   fan-in (integration tasks that wait on 4-7 earlier ones), diamonds. Edges also appear mid-period and are sometimes removed. No cycles.
