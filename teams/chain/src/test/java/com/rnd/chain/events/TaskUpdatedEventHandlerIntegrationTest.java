@@ -1,11 +1,14 @@
 package com.rnd.chain.events;
 
+import com.rnd.chain.testsupport.PgCleanup;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.Tag;
+import org.springframework.jdbc.core.JdbcTemplate;
+
 import com.google.protobuf.Timestamp;
 import com.rnd.chain.dto.Task;
 import com.rnd.chain.dto.TaskDependency;
 import com.rnd.chain.dto.TaskStatus;
-import com.rnd.chain.repository.InMemoryTaskDependencyRepository;
-import com.rnd.chain.repository.InMemoryTaskRepository;
 import com.rnd.chain.repository.TaskDependencyRepository;
 import com.rnd.chain.repository.TaskRepository;
 import com.rnd.inbox.event.TaskUpdatedEvent;
@@ -47,6 +50,7 @@ import static org.junit.jupiter.api.Assertions.*;
  * pattern as {@link DependencyProposedEventHandlerIntegrationTest}, see its Javadoc for why
  * {@code mock://} schema registry URLs are used instead of a real registry process.
  */
+@Tag("postgres")
 @SpringBootTest
 @EmbeddedKafka(partitions = 1, bootstrapServersProperty = "spring.kafka.bootstrap-servers")
 @TestPropertySource(properties = {
@@ -57,22 +61,6 @@ class TaskUpdatedEventHandlerIntegrationTest {
     private static final String TOPIC = "task.updated";
     private static final String ERROR_TOPIC = TOPIC + ".errors";
     private static final LocalDateTime BASE_TIME = LocalDateTime.of(2026, 1, 1, 12, 0, 0);
-
-    @TestConfiguration
-    static class Fixtures {
-
-        @Bean
-        @Primary
-        TaskRepository testTaskRepository() {
-            return new InMemoryTaskRepository(java.util.List.of());
-        }
-
-        @Bean
-        @Primary
-        TaskDependencyRepository testTaskDependencyRepository() {
-            return new InMemoryTaskDependencyRepository(java.util.List.of());
-        }
-    }
 
     @org.springframework.beans.factory.annotation.Autowired
     private TaskRepository taskRepository;
@@ -85,8 +73,19 @@ class TaskUpdatedEventHandlerIntegrationTest {
 
     private KafkaTemplate<String, TaskUpdatedEvent> producer;
 
+    @org.springframework.beans.factory.annotation.Autowired
+    private JdbcTemplate jdbcTemplate;
+
+    private PgCleanup cleanup;
+
+    @AfterEach
+    void cleanUpRows() {
+        cleanup.restore();
+    }
+
     @BeforeEach
     void setUp() {
+        cleanup = new PgCleanup(jdbcTemplate);
         Map<String, Object> producerProps = new HashMap<>();
         producerProps.put(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, bootstrapServers);
         producerProps.put(ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG, StringSerializer.class);
@@ -129,7 +128,7 @@ class TaskUpdatedEventHandlerIntegrationTest {
     @Test
     void validNewerEvent_appliesTheStatusChangeAndStampsUpdatedAt() throws InterruptedException {
         UUID taskId = UUID.randomUUID();
-        ((InMemoryTaskRepository) taskRepository).save(buildTask(taskId, TaskStatus.PENDING, BASE_TIME));
+        taskRepository.save(buildTask(taskId, TaskStatus.PENDING, BASE_TIME));
         LocalDateTime newerTime = BASE_TIME.plusMinutes(10);
 
         producer.send(TOPIC, taskId.toString(), TaskUpdatedEvent.newBuilder()
@@ -150,12 +149,12 @@ class TaskUpdatedEventHandlerIntegrationTest {
     void transitioningToDone_releasesDependents() throws InterruptedException {
         UUID blocker = UUID.randomUUID();
         UUID dependent = UUID.randomUUID();
-        ((InMemoryTaskRepository) taskRepository).save(buildTask(blocker, TaskStatus.ACTIVE, BASE_TIME));
-        ((InMemoryTaskRepository) taskRepository).save(Task.builder()
+        taskRepository.save(buildTask(blocker, TaskStatus.ACTIVE, BASE_TIME));
+        taskRepository.save(Task.builder()
                 .id(dependent).tenantId(TENANT_ID).status(TaskStatus.PENDING)
                 .isReady(false).blockingCount(1).openConstraintCount(0)
                 .createdAt(BASE_TIME).updatedAt(BASE_TIME).build());
-        ((InMemoryTaskDependencyRepository) taskDependencyRepository).save(new TaskDependency(dependent, blocker));
+        taskDependencyRepository.save(new TaskDependency(dependent, blocker));
 
         producer.send(TOPIC, blocker.toString(), TaskUpdatedEvent.newBuilder()
                 .setTaskId(blocker.toString())
@@ -173,7 +172,7 @@ class TaskUpdatedEventHandlerIntegrationTest {
     @Test
     void staleEvent_withAnOlderTimestamp_isANoOp() throws InterruptedException {
         UUID taskId = UUID.randomUUID();
-        ((InMemoryTaskRepository) taskRepository).save(buildTask(taskId, TaskStatus.ACTIVE, BASE_TIME));
+        taskRepository.save(buildTask(taskId, TaskStatus.ACTIVE, BASE_TIME));
 
         producer.send(TOPIC, taskId.toString(), TaskUpdatedEvent.newBuilder()
                 .setTaskId(taskId.toString())

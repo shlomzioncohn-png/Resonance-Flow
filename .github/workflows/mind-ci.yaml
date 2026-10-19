@@ -8,6 +8,9 @@ on:
       - "teams/mind/**"
       - "shared/proto/**"
   pull_request:
+    # ready_for_review: draft PRs skip CI (see lint's `if`), so it has to run
+    # when the PR leaves draft.
+    types: [opened, synchronize, reopened, ready_for_review]
     paths:
       - "teams/mind/**"
       - "shared/proto/**"
@@ -21,8 +24,12 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # Needs only Python (no kind/Docker/Postgres), so it runs on GitHub's
+  # runners and doesn't hold a slot on the shared self-hosted runner. Skipped
+  # on draft PRs; every other job needs lint, so they skip with it.
   lint:
-    runs-on: self-hosted
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
+    runs-on: ubuntu-latest
     timeout-minutes: 15  # a hung `make eval` must not run to the 6h default
     permissions:
       contents: read
@@ -65,8 +72,11 @@ jobs:
   # cluster + Helm infra the `ci`/`cd` jobs use), instead of a human having
   # to trust a result no CI run ever actually reproduced. Report-only, not a
   # merge gate -- continue-on-error so a flaky run doesn't block the PR.
+  # Runs only after merge to main, not on every PR push. Not on
+  # workflow_dispatch either: a manual run also runs `cd`, which publishes an image.
   foundation-gate-benchmark:
     needs: lint
+    if: github.event_name == 'push'
     runs-on: self-hosted
     timeout-minutes: 15
     continue-on-error: true
@@ -135,7 +145,9 @@ jobs:
 
   # Deploys Kafka/Schema Registry/MIND via the real Helm chart; round-trip.py
   # then runs from the runner against the deployed Kafka/registry.
+  # needs lint: don't spend ~9 runner minutes when lint already failed.
   round-trip:
+    needs: lint
     if: github.event_name == 'pull_request'
     runs-on: self-hosted
     timeout-minutes: 25
@@ -146,6 +158,11 @@ jobs:
       CHART_DIR: teams/relay/helm/resonance-flow
       RELEASE: mind-rt
       NAMESPACE: mind-rt
+      # Per-run names: runners on one host share a Docker daemon, so fixed
+      # names collide when two runs overlap. Only this job uses the "mind-rt-"
+      # prefix, so run_id+run_attempt are enough here.
+      KIND_CLUSTER: mind-rt-${{ github.run_id }}-${{ github.run_attempt }}
+      KIND_IMAGE_TAG: local-${{ github.run_id }}-${{ github.run_attempt }}
 
     steps:
       - uses: actions/checkout@v4
@@ -154,21 +171,33 @@ jobs:
 
       - uses: azure/setup-helm@v5
 
-      # No working-directory override on this or the helm/kubectl steps below -
-      # kind's kubeconfig write-up is tied to where it runs, keep it at the repo root.
+      # Own kubeconfig per job, not the shared ~/.kube/config -- otherwise a
+      # parallel job switching context makes helm here install into its cluster.
+      # (runner.temp isn't available in job-level env, hence a step.)
+      - name: Use a per-job kubeconfig
+        run: echo "KUBECONFIG=$RUNNER_TEMP/kubeconfig" >> "$GITHUB_ENV"
+
       - name: Create kind cluster
         uses: helm/kind-action@v1
         with:
-          cluster_name: mind-rt-cluster
+          cluster_name: ${{ env.KIND_CLUSTER }}
 
       - name: Fetch chart dependencies
         run: helm dependency build "$CHART_DIR"
+
+      - uses: ./.github/actions/install-yq
+
+      - name: Build all-components-off overlay
+        run: |
+          echo "CHART_ALL_OFF=$RUNNER_TEMP/components-all-off.yaml" >> "$GITHUB_ENV"
+          yq '{"components": (.components | map_values({"enabled": false}))}' "$CHART_DIR/values.yaml" > "$RUNNER_TEMP/components-all-off.yaml"
 
       # Phase 1: infra only, MIND's image isn't built yet (two-phase, like service-ci.yaml).
       - name: Deploy chart with MIND disabled (infra only)
         run: |
           helm upgrade --install "$RELEASE" "$CHART_DIR" \
             -f "$CHART_DIR/values.yaml" \
+            -f "$CHART_ALL_OFF" \
             -f "$CHART_DIR/values/values-mind.yaml" \
             --set components.mind.enabled=false \
             --namespace "$NAMESPACE" --create-namespace \
@@ -177,8 +206,8 @@ jobs:
       - name: Build and load the MIND image
         working-directory: teams/mind
         run: |
-          docker build --build-context shared=../../shared -t mind:local .
-          kind load docker-image mind:local --name mind-rt-cluster
+          docker build --build-context shared=../../shared -t "mind:$KIND_IMAGE_TAG" .
+          kind load docker-image "mind:$KIND_IMAGE_TAG" --name "$KIND_CLUSTER"
 
       # Migration now runs as mind's own initContainer (see
       # teams/relay/helm/resonance-flow/values.yaml's components.mind.migration
@@ -188,7 +217,9 @@ jobs:
         run: |
           helm upgrade --install "$RELEASE" "$CHART_DIR" \
             -f "$CHART_DIR/values.yaml" \
+            -f "$CHART_ALL_OFF" \
             -f "$CHART_DIR/values/values-mind.yaml" \
+            --set components.mind.image.tag="$KIND_IMAGE_TAG" \
             --namespace "$NAMESPACE"
 
       - name: Wait for MIND deployment to be ready

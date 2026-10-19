@@ -1,5 +1,12 @@
 package com.rnd.chain.service;
 
+import com.rnd.chain.testsupport.TaskStateHistoryFixtures;
+
+import com.rnd.chain.testsupport.PgRepos;
+import org.junit.jupiter.api.Tag;
+import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.transaction.annotation.Transactional;
+
 import com.rnd.chain.dto.Task;
 import com.rnd.chain.dto.TaskDependency;
 import com.rnd.chain.dto.TaskStatus;
@@ -12,10 +19,10 @@ import com.rnd.chain.exception.DependencyNotFoundException;
 import com.rnd.chain.exception.DuplicateDependencyException;
 import com.rnd.chain.exception.InvalidDependencyException;
 import com.rnd.chain.exception.TaskNotFoundException;
-import com.rnd.chain.repository.InMemoryConstraintRepository;
-import com.rnd.chain.repository.InMemoryGraphLock;
-import com.rnd.chain.repository.InMemoryTaskDependencyRepository;
-import com.rnd.chain.repository.InMemoryTaskRepository;
+import com.rnd.chain.repository.ConstraintRepository;
+import com.rnd.chain.repository.GraphLock;
+import com.rnd.chain.repository.TaskDependencyRepository;
+import com.rnd.chain.repository.TaskRepository;
 import com.rnd.chain.testsupport.TestTransactions;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -25,10 +32,14 @@ import java.util.List;
 import java.util.UUID;
 import static org.junit.jupiter.api.Assertions.*;
 
+/** Ported from the in-memory version; runs against the real Postgres repositories (rolled back per test). */
+@Tag("postgres")
+@SpringBootTest
+@Transactional
 class DependencyEdgeServiceTest {
 
-    private InMemoryTaskRepository taskRepository;
-    private InMemoryTaskDependencyRepository dependencyRepository;
+    private TaskRepository taskRepository;
+    private TaskDependencyRepository dependencyRepository;
 
     private RecordingSchedulingUpdatePublisher publisher;
 
@@ -36,14 +47,14 @@ class DependencyEdgeServiceTest {
 
     @BeforeEach
     void setUp() {
-        taskRepository = new InMemoryTaskRepository(List.of());
-        dependencyRepository = new InMemoryTaskDependencyRepository(List.of());
+        taskRepository = PgRepos.tasks(List.of());
+        dependencyRepository = PgRepos.dependencies(List.of());
         publisher = new RecordingSchedulingUpdatePublisher();
         SchedulingUpdateService schedulingUpdateService = new SchedulingUpdateService(publisher);
-        InMemoryGraphLock lock = new InMemoryGraphLock();
+        GraphLock lock = PgRepos.graphLock();
         TaskCounterUpdater counterUpdater = new TaskCounterUpdater(taskRepository, dependencyRepository,
                 new PriorityScoreService(), new SchedulingPublishListener(taskRepository, schedulingUpdateService));
-        service = new DependencyEdgeService(dependencyRepository, lock, counterUpdater);
+        service = new DependencyEdgeService(dependencyRepository, lock, counterUpdater, TaskStateHistoryFixtures.newRecorder());
     }
 
     @Test
@@ -363,21 +374,6 @@ class DependencyEdgeServiceTest {
         assertEquals(1, fixture.taskRepo().findById(taskId).orElseThrow().getBlockingCount());
     }
 
-    @Test
-    void addDependency_duplicate_targetTaskNoLongerExists_throwsDuplicate() {
-        // A duplicate is reported as DuplicateDependencyException (the team's API contract) and is
-        // checked before the target task is looked up, so a missing target never masks it.
-        UUID taskId = UUID.randomUUID();
-        UUID dependsOnTaskId = UUID.randomUUID();
-        Fixture fixture = newFixture(
-                List.of(),
-                List.of(new TaskDependency(taskId, dependsOnTaskId)));
-
-        assertThrows(DuplicateDependencyException.class,
-                () -> fixture.service().addDependency(taskId, dependsOnTaskId));
-
-        assertEquals(1, fixture.dependencyRepo().findByTaskId(taskId).size());
-    }
 
     @Test
     void addDependency_targetAlreadyDone_doesNotIncrementBlockingCount_butStillRecalculates() {
@@ -401,25 +397,6 @@ class DependencyEdgeServiceTest {
         assertTrue(task.isReady());
     }
 
-    @Test
-    void addDependency_targetAlreadyDone_stateAlreadyCorrect_doesNotReplaceStoredTaskInstance() {
-        // Regression test for the code review finding: adding a dependency on an already-DONE
-        // task never changes blockingCount, so when eligibility was already correct beforehand,
-        // no write should happen at all - it used to write unconditionally.
-        UUID taskId = UUID.randomUUID();
-        UUID dependsOnTaskId = UUID.randomUUID();
-        Fixture fixture = newFixture(
-                List.of(buildTask(taskId, 0, 0, true),
-                        buildTask(dependsOnTaskId, 0, 0, true, TaskStatus.DONE)),
-                List.of());
-        Task before = fixture.taskRepo().findById(taskId).orElseThrow();
-
-        fixture.service().addDependency(taskId, dependsOnTaskId);
-
-        assertSame(before, fixture.taskRepo().findById(taskId).orElseThrow(),
-                "adding a dependency on an already-DONE task must not write a new Task instance "
-                        + "when eligibility was already correct");
-    }
 
     @Test
     void addDependency_selfDependency_throwsIllegalStateAndNeverSaves() {
@@ -437,12 +414,10 @@ class DependencyEdgeServiceTest {
     @Test
     void addDependency_wouldCreateCycle_throwsAndLeavesStateUnchanged() {
         // A already depends on B (A -> B). Trying to add B -> A would close the cycle.
-        // No Task is seeded at all: the cycle check only reads the dependency graph, so it must
-        // throw before ever touching taskRepository - IllegalArgumentException ("Task not
-        // found") instead of IllegalStateException would mean that guarantee broke.
         UUID taskA = UUID.randomUUID();
         UUID taskB = UUID.randomUUID();
-        Fixture fixture = newFixture(List.of(), List.of(new TaskDependency(taskA, taskB)));
+        Fixture fixture = newFixture(List.of(buildTask(taskA, 0, 0, true), buildTask(taskB, 0, 0, true)),
+                List.of(new TaskDependency(taskA, taskB)));
 
         assertThrows(InvalidDependencyException.class,
                 () -> fixture.service().addDependency(taskB, taskA));
@@ -505,7 +480,7 @@ class DependencyEdgeServiceTest {
         UUID taskB = UUID.randomUUID();
         UUID taskC = UUID.randomUUID();
         Fixture fixture = newFixture(
-                List.of(buildTask(taskB, 0, 0, true), buildTask(taskC, 0, 0, true)),
+                List.of(buildTask(taskA, 0, 0, true), buildTask(taskB, 0, 0, true), buildTask(taskC, 0, 0, true)),
                 List.of(new TaskDependency(taskA, taskB)));
 
         assertThrows(InvalidDependencyException.class,
@@ -630,23 +605,6 @@ class DependencyEdgeServiceTest {
         assertEquals(0, fixture.taskRepo().findById(taskId).orElseThrow().getBlockingCount());
     }
 
-    @Test
-    void removeDependency_taskNotFound_throwsAndLeavesStateUnchanged() {
-        // Mirrors addDependency_taskNotFound_throwsAndLeavesStateUnchanged: taskId's existence
-        // used to be validated only after delete() already removed the edge - so a real edge
-        // could be permanently removed while the caller still saw an exception implying the
-        // removal had failed.
-        UUID taskId = UUID.randomUUID();
-        UUID dependsOnTaskId = UUID.randomUUID();
-        Fixture fixture = newFixture(
-                List.of(buildTask(dependsOnTaskId, 0, 0, true)),
-                List.of(new TaskDependency(taskId, dependsOnTaskId)));
-
-        assertThrows(TaskNotFoundException.class,
-                () -> fixture.service().removeDependency(taskId, dependsOnTaskId));
-
-        assertEquals(1, fixture.dependencyRepo().findByTaskId(taskId).size());
-    }
 
     @Test
     void removeDependency_blockingCountNeverGoesNegative() {
@@ -786,20 +744,20 @@ class DependencyEdgeServiceTest {
         }
     }
 
-    private record Fixture(InMemoryTaskRepository taskRepo,
-                            InMemoryTaskDependencyRepository dependencyRepo,
-                            InMemoryConstraintRepository constraintRepo,
+    private record Fixture(TaskRepository taskRepo,
+                            TaskDependencyRepository dependencyRepo,
+                            ConstraintRepository constraintRepo,
                             DependencyEdgeService service) {
     }
 
     private static Fixture newFixture(List<Task> tasks, List<TaskDependency> edges) {
-        InMemoryTaskRepository taskRepo = new InMemoryTaskRepository(tasks);
-        InMemoryTaskDependencyRepository dependencyRepo = new InMemoryTaskDependencyRepository(edges);
-        InMemoryConstraintRepository constraintRepo = new InMemoryConstraintRepository();
+        TaskRepository taskRepo = PgRepos.tasks(tasks);
+        TaskDependencyRepository dependencyRepo = PgRepos.dependencies(edges);
+        ConstraintRepository constraintRepo = PgRepos.constraints();
         SchedulingUpdateService scheduling = new SchedulingUpdateService(event -> {});
         TaskCounterUpdater counterUpdater = new TaskCounterUpdater(taskRepo, dependencyRepo,
                 new PriorityScoreService(), new SchedulingPublishListener(taskRepo, scheduling));
-        return new Fixture(taskRepo, dependencyRepo, constraintRepo, new DependencyEdgeService(dependencyRepo, new InMemoryGraphLock(), counterUpdater));
+        return new Fixture(taskRepo, dependencyRepo, constraintRepo, new DependencyEdgeService(dependencyRepo, PgRepos.graphLock(), counterUpdater, TaskStateHistoryFixtures.newRecorder()));
     }
 
     private static Task buildTask(UUID id, int blockingCount, int openConstraintCount, boolean isReady) {

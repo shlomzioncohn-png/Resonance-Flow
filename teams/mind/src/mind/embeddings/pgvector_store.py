@@ -8,6 +8,7 @@ loop under FastAPI.
 """
 
 import asyncio
+import json
 
 from psycopg import sql
 from psycopg_pool import AsyncConnectionPool
@@ -106,6 +107,21 @@ class PgVectorStore(VectorStore):
             )
             return cur.rowcount > 0
 
+    async def get_vector(self, task_id: str) -> list[float] | None:
+        await self._ensure_ready()
+        async with self._pool.connection() as conn, conn.cursor() as cur:
+            await cur.execute(
+                sql.SQL("SELECT embedding FROM {table} WHERE task_id = %s;").format(
+                    table=self._table()
+                ),
+                (task_id,),
+            )
+            row = await cur.fetchone()
+            if row is None:
+                return None
+            # No registered adapter for `vector` -- comes back as text, e.g. "[0.1,0.2]" (valid JSON).
+            return json.loads(row[0])
+
     async def get_content_hash(self, task_id: str) -> str | None:
         await self._ensure_ready()
         async with self._pool.connection() as conn, conn.cursor() as cur:
@@ -154,19 +170,36 @@ class PgVectorStore(VectorStore):
         async with self._pool.connection() as conn, conn.cursor() as cur:
             await cur.execute(sql.SQL("TRUNCATE TABLE {table};").format(table=self._table()))
 
-    def _search_query(self) -> sql.Composed:
-        # ORDER BY the raw <=> expression, not the similarity alias --
-        # pgvector can't match the HNSW index to an alias.
+    def _search_query(self, *, exclude_completed: bool, exclude_task_id: bool) -> sql.Composed:
+        # ORDER BY the raw <=> expression -- pgvector can't match the HNSW
+        # index to an alias. Conditions go in WHERE, not a post-hoc filter,
+        # so a small k only ever counts qualifying rows.
+        conditions = []
+        if exclude_completed:
+            conditions.append(sql.SQL("NOT is_completed"))
+        if exclude_task_id:
+            conditions.append(sql.SQL("task_id != %s"))
+        where_clause = (
+            sql.SQL("WHERE ") + sql.SQL(" AND ").join(conditions) if conditions else sql.SQL("")
+        )
         return sql.SQL(
             """
             SELECT task_id, 1 - (embedding <=> %s::vector) AS similarity, is_completed
             FROM {table}
+            {where_clause}
             ORDER BY embedding <=> %s::vector
             LIMIT %s;
             """
-        ).format(table=self._table())
+        ).format(table=self._table(), where_clause=where_clause)
 
-    async def search(self, query_vector: list[float], k: int) -> list[SearchResult]:
+    async def search(
+        self,
+        query_vector: list[float],
+        k: int,
+        *,
+        exclude_completed: bool = False,
+        exclude_task_id: str | None = None,
+    ) -> list[SearchResult]:
         await self._ensure_ready()
         async with self._pool.connection() as conn, conn.cursor() as cur:
             # set_config(), not SET LOCAL -- that can't take a bound param.
@@ -174,11 +207,26 @@ class PgVectorStore(VectorStore):
                 "SELECT set_config('hnsw.ef_search', %s, true);",
                 (str(self._settings.search_effort),),
             )
-            await cur.execute(self._search_query(), (query_vector, query_vector, k))
+            if exclude_completed or exclude_task_id is not None:
+                # "Excluding 1 task_id can never starve k" only holds while
+                # search_effort stays above k -- that's the default, but
+                # it's a runtime setting, not a guarantee. Keeps Postgres
+                # scanning past the ef_search window for k qualifying rows
+                # instead of stopping short (pgvector >=0.8).
+                await cur.execute("SELECT set_config('hnsw.iterative_scan', 'strict_order', true);")
+            params: list[object] = [query_vector]
+            if exclude_task_id is not None:
+                params.append(exclude_task_id)
+            params.extend([query_vector, k])
+            await cur.execute(
+                self._search_query(
+                    exclude_completed=exclude_completed, exclude_task_id=exclude_task_id is not None
+                ),
+                tuple(params),
+            )
             rows = await cur.fetchall()
             return [
-                SearchResult(task_id=row[0], similarity=row[1], is_completed=row[2])
-                for row in rows
+                SearchResult(task_id=row[0], similarity=row[1], is_completed=row[2]) for row in rows
             ]
 
     async def search_text(self, query: str, k: int) -> list[SearchResult]:

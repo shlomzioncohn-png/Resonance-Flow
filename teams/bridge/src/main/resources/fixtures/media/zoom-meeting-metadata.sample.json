@@ -1,0 +1,74 @@
+{
+  "_comment": "Field NAMES and STRUCTURE are copied verbatim from Zoom's OFFICIAL OpenAPI spec for the Reports endpoints GET /report/meetings/{meetingId} (meeting-level fields, including custom_keys and tracking_fields) and GET /report/meetings/{meetingId}/participants (participants array, including bo_mtg_id), combined into one payload the way this lane lands them. Verified directly against the real spec document - not from memory. VALUES are fabricated placeholders (we don't have a live Zoom Report API connection - see plan.md).",
+  "id": 3927350525,
+  "uuid": "iOTQZPmhTUq5a232ETb9eg==",
+  "topic": "Weekly Sync - Resonance Flow",
+  "user_email": "dana.levi@example.com",
+  "user_name": "Dana Levi",
+  "dept": "R&D",
+  "start_time": "2026-09-08T09:00:03Z",
+  "end_time": "2026-09-08T09:41:17Z",
+  "duration": 41,
+  "total_minutes": 124,
+  "participants_count": 3,
+  "type": 2,
+  "custom_keys": [
+    {
+      "key": "Host Nation",
+      "value": "IL"
+    }
+  ],
+  "tracking_fields": [
+    {
+      "field": "project",
+      "value": "Resonance Flow"
+    }
+  ],
+  "participants": [
+    {
+      "id": "30R7kT7bTIKSNUFEuH_Qlg",
+      "user_id": "16778245",
+      "participant_user_id": "30R7kT7bTIKSNUFEuH_Qlg",
+      "name": "Dana Levi",
+      "user_email": "dana.levi@example.com",
+      "join_time": "2026-09-08T09:00:03Z",
+      "leave_time": "2026-09-08T09:41:17Z",
+      "duration": 2474,
+      "status": "in_meeting",
+      "failover": false,
+      "customer_key": "",
+      "registrant_id": "",
+      "bo_mtg_id": ""
+    },
+    {
+      "id": "a1B2c3D4e5F6g7H8i9J0k",
+      "user_id": "16778391",
+      "participant_user_id": "a1B2c3D4e5F6g7H8i9J0k",
+      "name": "Esther Ora",
+      "user_email": "esther.ora@example.com",
+      "join_time": "2026-09-08T09:01:12Z",
+      "leave_time": "2026-09-08T09:41:17Z",
+      "duration": 2405,
+      "status": "in_meeting",
+      "failover": false,
+      "customer_key": "",
+      "registrant_id": "",
+      "bo_mtg_id": ""
+    },
+    {
+      "id": "k1L2m3N4o5P6q7R8s9T0u",
+      "user_id": "16778456",
+      "participant_user_id": "k1L2m3N4o5P6q7R8s9T0u",
+      "name": "Malki Cohen",
+      "user_email": "malki.cohen@example.com",
+      "join_time": "2026-09-08T09:02:47Z",
+      "leave_time": "2026-09-08T09:38:02Z",
+      "duration": 2115,
+      "status": "in_meeting",
+      "failover": false,
+      "customer_key": "",
+      "registrant_id": "",
+      "bo_mtg_id": ""
+    }
+  ]
+}

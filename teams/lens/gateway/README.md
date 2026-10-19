@@ -188,7 +188,9 @@ issuer — gets a JSON `401 UNAUTHORIZED` and **never reaches the BFF**.
 > `APP_AUTH_ENABLED=true` to test with real tokens (as in the curl example below).
 
 > Still mocked (Auth stage 2): the userId forwarded to BFF as `X-User-Id` is
-> still `emp_001`, not the token's `sub`, and roles aren't enforced yet.
+> still `emp_001` (`/api/workspace/**`) or `mgr_001` (`/api/manager/users/**`),
+> not the token's `sub`, and roles aren't checked yet — any valid token reaches
+> every `/api/**` route.
 
 ### Local Keycloak
 
@@ -227,15 +229,26 @@ the off switch is covered by `AuthDisabledTests`.
 
 ## Gateway Routes
 
-The Gateway currently handles three workspace endpoints (manual routing via `WorkspaceController`):
+The Gateway currently handles these endpoints (manual routing via explicit controllers):
 
 | Endpoint | Method | Purpose |
 |----------|--------|---------|
 | `/api/workspace/recommend` | POST | Get task recommendation for available time |
 | `/api/workspace/tasks/{taskId}` | GET | Get full task details by ID |
 | `/api/workspace/tasks/{taskId}/status` | PATCH | Update task status |
+| `/api/manager/users` | GET | List users, MANAGER only — see below |
+| `/api/manager/users` | POST | Create a user (displayName + role MANAGER/EMPLOYEE), MANAGER only |
+| `/api/manager/users/{id}` | GET | Get one user's details, MANAGER only |
+| `/api/manager/users/{id}` | PATCH | Edit displayName/firstName/lastName/phone, MANAGER only |
+| `/api/manager/users/{id}/status` | PATCH | Change status (ACTIVE/SUSPENDED/DISABLED), MANAGER only |
 
 **All endpoints forward to BFF** at `http://bff-service:8080` using `RestTemplate`.
+
+**Known gap (Auth stage 2):** `/api/manager/users/**` is meant to be MANAGER-only, but the
+Gateway doesn't check roles yet — like every other `/api/**` route it only requires a valid token
+(when `APP_AUTH_ENABLED=true`). `ManagerUsersController` forwards a mock `X-User-Id` (`mgr_001`)
+and `X-User-Role: MANAGER`. The Gateway never knows Inbox user ids: the BFF maps the mock id to a
+real Inbox user (`INBOX_DEV_ACTOR_ID`) before calling Inbox — see the BFF README.
 
 **Future phases:** Once more team services are ready, BFF will expand to handle Bridge, Chain, Inbox, and Mind routing. Gateway's endpoint structure remains unchanged.
 
@@ -481,7 +494,9 @@ mvn package -DskipTests
 
 ## Running with Docker
 
-Build and run with Docker Compose:
+Build and run with Docker Compose. This compose file starts only the Gateway, so start the BFF
+first from `teams/lens/bff` (`docker-compose up --build`). The BFF's own compose file is what
+connects it to Inbox; the Gateway only ever calls the BFF, at `host.docker.internal:8082`.
 
 ```bash
 docker-compose up --build

@@ -22,3 +22,22 @@ bridge:
       # (a v3 objects/deals page can be slow on a large portal) but finite.
       connect-timeout-millis: 5000
       read-timeout-millis: 15000
+      # Open-stage probability (0-1) -> DealStage bands - Bridge's own policy, not a HubSpot
+      # convention. Deliberately NOT Salesforce's 20/50/80/99 (application-salesforce.yml):
+      # HubSpot's own default pipeline's "Decision Maker Bought-In" stage sits at probability 0.8,
+      # which needs to land in NEGOTIATION (matching today's label-based mapping) rather than
+      # PROPOSAL, so proposal-max is 70 here, not 80. Each -max is the inclusive top of its band
+      # (after converting probability to a 0-99 percent); validated at startup to be strictly
+      # increasing and to partition 0-99 with no gap, no overlap (HubSpotStageMapping's
+      # constructor, via the shared StageProbabilityBands) - a misconfiguration fails loudly
+      # instead of silently misclassifying every open deal.
+      stage-bands:
+        prospect-max: 20
+        qualified-max: 50
+        proposal-max: 70
+        negotiation-max: 99
+      # If the fraction of deals skipped while reading (skippedAtRead / deals actually read) in one
+      # snapshot() call exceeds this ratio, the whole sync fails instead of publishing a partial
+      # snapshot - see HubSpotDealRepository's class Javadoc. Must be > 0 and <= 1; validated at
+      # startup. HubSpot-only for now (Salesforce could get the same guard later).
+      max-skipped-ratio: 0.5

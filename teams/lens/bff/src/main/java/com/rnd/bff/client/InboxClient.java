@@ -604,7 +604,7 @@ public class InboxClient {
                 task.getTitle(),
                 task.getDescription(),
                 task.getEffortEstimateMinutes(),
-                task.getDeadline() == null ? null : task.getDeadline().toInstant(ZoneOffset.UTC),
+                DisplayDates.date(task.getDeadline()),
                 task.getPriorityScore() == null ? 0 : task.getPriorityScore() / 10);
     }
 
@@ -638,7 +638,7 @@ public class InboxClient {
                 .status(toUpperCase(record.getStatus()))
                 .priority(toFrontendPriority(record.getPriorityScore()))
                 .effortEstimate(record.getEffortEstimateMinutes())
-                .dueDate(toInstant(record.getDeadline()))
+                .dueDate(DisplayDates.date(record.getDeadline()))
                 .owner(record.getOwner())
                 .project(record.getProject())
                 .dependencies(record.getDependencies())
@@ -656,24 +656,24 @@ public class InboxClient {
                 .inboxStatus(toUpperCase(record.getStatus()))
                 .isAvailable(record.getIsAvailable())
                 .priorityScore(record.getPriorityScore())
-                .snoozedUntil(toInstant(record.getSnoozedUntil()))
+                .snoozedUntil(DisplayDates.dateTime(record.getSnoozedUntil()))
                 .extractionProvenance(record.getExtractionProvenance())
                 .confidence(record.getConfidence())
                 .suggestedOwnerUserId(record.getSuggestedOwnerUserId())
                 .suggestedOwnerConfidence(record.getSuggestedOwnerConfidence())
                 .metadata(record.getMetadata())
                 .createdBy(record.getCreatedBy())
-                .createdAt(toInstant(record.getCreatedAt()))
-                .updatedAt(toInstant(record.getUpdatedAt()))
-                .completedAt(toInstant(record.getCompletedAt()))
+                .createdAt(DisplayDates.dateTime(record.getCreatedAt()))
+                .updatedAt(DisplayDates.dateTime(record.getUpdatedAt()))
+                .completedAt(DisplayDates.dateTime(record.getCompletedAt()))
                 .build();
     }
 
     /**
      * Inbox's JSON -> TaskDTO. Enum values are lowercased to match the DB
      * vocabulary the mock (and so the frontend) already uses - except status,
-     * which TaskDTO keeps UPPERCASE. owner/project stay null: Inbox only
-     * returns their ids, and resolving names is a separate call not done yet.
+     * which TaskDTO keeps UPPERCASE. owner/project come from
+     * Inbox's display names (PR #591). Dates are already formatted by Inbox.
      */
     private static TaskDTO toTaskDTO(InboxTaskResponse task) {
         return TaskDTO.builder()
@@ -684,6 +684,8 @@ public class InboxClient {
                 .priority(toFrontendPriority(task.getPriorityScore()))
                 .effortEstimate(task.getEffortEstimateMinutes())
                 .dueDate(task.getDeadline())
+                .owner(task.getOwnerDisplayName())
+                .project(task.getProjectName())
                 .tenantId(task.getTenant() == null ? null : task.getTenant().getId())
                 .projectId(task.getProjectId())
                 .sourceType(toLowerCase(task.getSourceType()))
@@ -706,15 +708,6 @@ public class InboxClient {
                 .updatedAt(task.getUpdatedAt())
                 .completedAt(task.getCompletedAt())
                 .build();
-    }
-
-    /**
-     * TaskDTO dates are Instants, sent as ISO-8601 UTC ("...Z"), so the browser
-     * converts them to local time correctly. The mock's records are zone-less
-     * LocalDateTime and are read as UTC.
-     */
-    private static Instant toInstant(LocalDateTime dateTime) {
-        return dateTime == null ? null : dateTime.toInstant(ZoneOffset.UTC);
     }
 
     /** For storing an Instant on a mock record (zone-less, UTC). */

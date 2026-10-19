@@ -200,6 +200,14 @@ process — with fields `ApiName`/`MasterLabel` (the label), `IsActive`, `IsClos
 `DefaultProbability` (0–100), and `SortOrder` **(secondary-sourced** — corroborated by the object
 reference page's own indexed field list; direct fetch returned a loading shell**)**.
 
+**Update 2026-10-14: `HubSpotStageMapping` got the same fix.** This section originally described
+Salesforce's metadata-based mapping as the fix for F6, contrasted against HubSpot's then-current
+exact-label matching. HubSpot's own stage resolution is metadata-based now too (`isClosed`/
+`probability`, no `IsWon`-equivalent flag so a closed stage's won/lost call comes from
+`probability` being exactly `0`/`1` instead) — see `teams/bridge/CLAUDE.md` §11 for the full
+policy table. The rest of this section's F6 rationale is unchanged and still describes Salesforce
+accurately; it just isn't the *only* CRM with the fix anymore.
+
 Proposed mapping, resolved fresh every `snapshot()`/`fetchDeal()` call (mirrors
 `HubSpotStageMapping.resolveIdsToStages` being re-fetched every call, not cached):
 
