@@ -128,7 +128,8 @@ src/main/resources/db/migration/  # Flyway migrations (V1 schema, V2 dependency_
                                   # REJECTED action - V6/V7 issue #580, V8 task.confidence/priority_score (#445),
                                   # V9 task_state_history - issue #773,
                                   # V10 processed_events - Kafka event dedup claims,
-                                  # V11 constraint_history - issue #815)
+                                  # V11 task readiness view + indexes,
+                                  # V12 constraint_history - issue #815)
 src/test/java/com/rnd/chain/
 ├── controller/ChainControllerTest.java
 ├── service/                # TaskDependencyServicePostgresIntegrationTest,
