@@ -20,8 +20,11 @@ cannot tell the two apart:
 - email: the fixture email lane (FixtureEmailSourceReader) -- the record as
   compact JSON for BODY, plus one ATTACHMENT object per attachment.
 
-Every run mints fresh correlation ids and object keys, so it never collides
-with an earlier one (the dedup key is `correlation_id:revision`).
+Every run mints fresh correlation ids and object keys, so its events never
+collide with an earlier run's (the event dedup key is `correlation_id:revision`).
+That holds for Kafka and MinIO only: the pipeline's duplicate detection matches
+a rerun's tasks against the first run's stored tasks, so a full-pipeline rerun
+needs a clean store (README.md, "Repeatability").
 """
 
 from __future__ import annotations

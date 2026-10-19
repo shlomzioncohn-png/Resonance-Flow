@@ -61,8 +61,9 @@ make demo-feed                      # natural order: meeting, then Slack 90 s la
 make demo-feed-slack-first          # Slack, then the meeting 5 s later, then email
 ```
 
-Each `make` target is one command and can be run again as often as you like (see
-[Repeatability](#repeatability)).
+Each `make` target is one command. Running the feed again is safe for Kafka and MinIO, but
+the full pipeline only gives the expected answer on a clean store. See
+[Repeatability](#repeatability) before a second run.
 
 - **`make demo-artifacts`:** the form is drawn with Pillow and builds on any OS, giving the
   same image every time. The audio is read by the Windows speech synthesizer, so it builds
@@ -123,11 +124,23 @@ deadlines are already past: pass `--anchor` with the next Monday if that matters
 
 ### Repeatability
 
-Every run mints new correlation ids and new object keys, the same way Bridge does. Meeting
-objects are named after the meeting's correlation id; Slack and email objects get a random
-UUID each. Each run is also a new Zoom meeting, with its own `uuid` and so its own
-`source_ref`. The dedup key is `correlation_id:revision`, so a second run is new data, never
-a replay that gets skipped.
+**Transport level: safe to rerun.** Every run mints new correlation ids and new object keys,
+the same way Bridge does. Meeting objects are named after the meeting's correlation id;
+Slack and email objects get a random UUID each. Each run is also a new Zoom meeting, with
+its own `uuid` and so its own `source_ref`. The event dedup key is `correlation_id:revision`,
+so a second run's events are new events and are not skipped as replays.
+
+**Pipeline level: not repeatable yet.** Mind's duplicate detection
+(`embeddings/duplicate_detection.py`) compares each new task with every task already in
+the vector store. A second run carries exactly the same content as the first, so its three
+tasks match the first run's stored tasks and are treated as duplicates. The second run
+produces **0 tasks** instead of the 3 in `expected.json`, which looks like a failure but is
+duplicate detection working as designed.
+
+Until the demo can clear its own data, run the full pipeline once per clean store. That
+means a fresh vector store (and Inbox state) before every rehearsal and before Demo Day.
+Clearing only the demo's data needs a demo-scoped reset. That is waiting on the tenant fix
+in duplicate detection, and is not part of this feed yet.
 
 Each real run also writes `runs/<run-id>.json`, which is gitignored. It maps every item to
 its correlation id, Kafka key, object keys and the full event, so you can tell which run's
@@ -255,6 +268,10 @@ the feed.
    A consumer that parses BODY has to handle two shapes. This feed sends the fixture shape.
 8. **Bridge's README gives the wrong MinIO console port.** It says
    `http://localhost:9001`, but `teams/bridge/docker-compose.yml` maps it to **9091**.
+9. **The demo can't be rerun through the full pipeline yet (Mind).** Duplicate detection
+   matches a rerun's tasks against the previous run's stored tasks, so the second run yields
+   0 tasks (see [Repeatability](#repeatability)). The planned fix is a reset that deletes the
+   demo's data before a run, after the tenant fix in duplicate detection.
 
 ### Resolved by #823
 
