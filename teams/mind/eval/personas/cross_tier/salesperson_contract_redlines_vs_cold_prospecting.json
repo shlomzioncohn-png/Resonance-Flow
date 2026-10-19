@@ -19,7 +19,7 @@
       "effort_estimate": 40,
       "tier": "operational",
       "blocked": false,
-      "parent_task_id": null
+      "parent_task_id": "sales_acme_new_logo_target"
     },
     {
       "task_id": "task_redlines",
@@ -29,7 +29,7 @@
       "effort_estimate": 40,
       "tier": "tactical",
       "blocked": false,
-      "parent_task_id": null
+      "parent_task_id": "sales_acme_deal"
     },
     {
       "task_id": "task_crm",
