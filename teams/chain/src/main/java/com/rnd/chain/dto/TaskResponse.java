@@ -1,17 +1,15 @@
 package com.rnd.chain.dto;
+
 import com.fasterxml.jackson.annotation.JsonProperty;
 
+import java.util.Objects;
 import java.util.UUID;
 
 /**
- * Read-facing view of {@link Task} returned by every graph-traversal endpoint. Mirrors the
- * TaskResponse shape already established (unused so far) on the Riki-Kaplan branch - same field
- * list, same purpose (don't leak the domain object directly into API responses) - adapted only
- * where that branch's own field list disagrees with the real {@link Task}, now sourced verbatim
- * from chain/ruthHoltzman/dependency-repository-66 (immutable, no setters): here score is a
- * {@code Double}, not an {@code Integer},
- * matching the Riki-Kaplan branch precedent's field list rather than adding a field it didn't
- * have.
+ * Read-facing representation of a Task returned by graph-traversal endpoints.
+ *
+ * Readiness-related fields are sourced from task_readiness rather than
+ * the legacy counters stored on Task.
  */
 public class TaskResponse {
 
@@ -24,14 +22,16 @@ public class TaskResponse {
     private final Integer estimatedDurationMin;
     private final Double score;
 
-    public TaskResponse(UUID id,
-                        UUID parentTaskId,
-                        TaskStatus status,
-                        boolean isReady,
-                        int blockingCount,
-                        int openConstraintCount,
-                        Integer estimatedDurationMin,
-                        Double score) {
+    public TaskResponse(
+            UUID id,
+            UUID parentTaskId,
+            TaskStatus status,
+            boolean isReady,
+            int blockingCount,
+            int openConstraintCount,
+            Integer estimatedDurationMin,
+            Double score) {
+
         this.id = id;
         this.parentTaskId = parentTaskId;
         this.status = status;
@@ -42,14 +42,37 @@ public class TaskResponse {
         this.score = score;
     }
 
-    public static TaskResponse from(Task task) {
+    /**
+     * Builds an API response from the task domain data plus the authoritative
+     * readiness state from task_readiness.
+     */
+    public static TaskResponse from(
+            Task task,
+            TaskReadinessSnapshot readiness) {
+
+        Objects.requireNonNull(
+                task,
+                "task must not be null");
+
+        Objects.requireNonNull(
+                readiness,
+                "readiness must not be null");
+
+        if (!task.getId().equals(readiness.taskId())) {
+            throw new IllegalArgumentException(
+                    "Task/readiness id mismatch: task="
+                            + task.getId()
+                            + ", readiness="
+                            + readiness.taskId());
+        }
+
         return new TaskResponse(
                 task.getId(),
                 task.getParentTaskId(),
                 task.getStatus(),
-                task.isReady(),
-                task.getBlockingCount(),
-                task.getOpenConstraintCount(),
+                readiness.isReady(),
+                readiness.blockingCount(),
+                readiness.openConstraintCount(),
                 task.getEstimatedDurationMin(),
                 task.getScore());
     }

@@ -15,6 +15,7 @@ import com.rnd.chain.repository.DependencyHistoryRepository;
 import com.rnd.chain.repository.GraphLock;
 import com.rnd.chain.repository.TaskDependencyRepository;
 import com.rnd.chain.repository.TaskRepository;
+import com.rnd.chain.repository.TaskReadinessRepository;
 import com.rnd.chain.repository.TransactionRunner;
 import com.rnd.chain.events.SchedulingPublishListener;
 import com.rnd.chain.service.DependencyEdgeService;
@@ -24,6 +25,7 @@ import com.rnd.chain.service.TaskCounterUpdater;
 import com.rnd.chain.service.TaskDependencyService;
 import com.rnd.mind.event.DependencyProposedEvent;
 import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.annotation.Autowired;
 
 import java.time.Clock;
 import java.time.LocalDateTime;
@@ -39,6 +41,9 @@ import static org.mockito.Mockito.mock;
 @SpringBootTest
 @Transactional
 class DependencyProposedEventHandlerTest {
+
+    @Autowired
+    private TaskReadinessRepository taskReadinessRepository;
 
     private static Task buildTask(UUID id) {
         return Task.builder()
@@ -69,11 +74,11 @@ class DependencyProposedEventHandlerTest {
             DependencyProposedEventHandler handler) {
     }
 
-    private static Fixture newFixture(List<Task> tasks) {
+    private Fixture newFixture(List<Task> tasks) {
         return newFixture(tasks, List.of());
     }
 
-    private static Fixture newFixture(
+    private Fixture newFixture(
             List<Task> tasks,
             List<TaskDependency> existingDependencies) {
 
@@ -90,7 +95,8 @@ class DependencyProposedEventHandlerTest {
                         dependencyRepo,
                         PgRepos.graphLock(),
                         new TaskCounterUpdater(taskRepo, dependencyRepo, new PriorityScoreService(),
-                                new SchedulingPublishListener(taskRepo, schedulingUpdateService)), TaskStateHistoryFixtures.newRecorder());
+                                new SchedulingPublishListener(taskRepo, schedulingUpdateService), taskReadinessRepository),
+                        TaskStateHistoryFixtures.newRecorder(), taskReadinessRepository);
 
         DependencyHistoryRepository historyRepo =
                 PgRepos.history();

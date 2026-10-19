@@ -8,7 +8,9 @@ import com.rnd.chain.exception.InvalidRequestException;
 import com.rnd.chain.exception.TaskNotFoundException;
 import com.rnd.chain.repository.TaskDependencyRepository;
 import com.rnd.chain.repository.TaskRepository;
-
+import com.rnd.chain.dto.TaskReadinessSnapshot;
+import com.rnd.chain.repository.TaskReadinessRepository;
+import com.rnd.chain.dto.TaskReadinessSnapshot;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
@@ -41,17 +43,20 @@ public class TaskCounterUpdater {
     private final TaskDependencyRepository taskDependencyRepository;
     private final PriorityScoreService priorityScoreService;
     private final SchedulingPublishListener schedulingPublishListener;
+    private final TaskReadinessRepository taskReadinessRepository;
 
     public TaskCounterUpdater(
             TaskRepository taskRepository,
             TaskDependencyRepository taskDependencyRepository,
             PriorityScoreService priorityScoreService,
-            SchedulingPublishListener schedulingPublishListener) {
+            SchedulingPublishListener schedulingPublishListener,
+            TaskReadinessRepository taskReadinessRepository) {
 
         this.taskRepository = taskRepository;
         this.taskDependencyRepository = taskDependencyRepository;
         this.priorityScoreService = priorityScoreService;
         this.schedulingPublishListener = schedulingPublishListener;
+        this.taskReadinessRepository = taskReadinessRepository;
     }
 
     /**
@@ -196,6 +201,60 @@ public class TaskCounterUpdater {
      * - whose own blocking/openConstraintCount are untouched by that edge change, so it has
      * nothing to pass {@link #updateCounters} as a counters mutator.
      */
+
+    @Transactional
+public Task recomputePriorityScoreAndPublish(
+        UUID taskId,
+        Task oldTask,
+        Task current,
+        TaskReadinessSnapshot beforeReadiness,
+        TaskReadinessSnapshot afterReadiness) {
+
+    Objects.requireNonNull(beforeReadiness, "beforeReadiness must not be null");
+    Objects.requireNonNull(afterReadiness, "afterReadiness must not be null");
+
+    if (current.getDeletedAt() != null) {
+        return current;
+    }
+
+    Double recomputed = priorityScoreService.compute(
+            current.getScore(),
+            current.getConfidence(),
+            blockingConfidenceSum(taskId),
+            afterReadiness.openConstraintCount(),
+            dependentConfidenceSum(taskId));
+
+    Task finalTask = current;
+
+    if (!Objects.equals(recomputed, current.getPriorityScore())) {
+
+        finalTask = requireUpdated(
+                taskRepository.update(
+                        taskId,
+                        task -> copyOf(task)
+                                .priorityScore(recomputed)
+                                .build()),
+                taskId);
+    }
+
+    if (oldTask != null) {
+
+        boolean availabilityChanged =
+                beforeReadiness.isReady()
+                        != afterReadiness.isReady();
+
+        boolean priorityChanged =
+                !Objects.equals(
+                        oldTask.getPriorityScore(),
+                        finalTask.getPriorityScore());
+
+        if (availabilityChanged || priorityChanged) {
+            requestPublishAfterCommit(taskId);
+        }
+    }
+
+    return finalTask;
+}
     @Transactional
     public Task recomputePriorityScoreAndPublish(UUID taskId, Task oldTask, Task current) {
         if (current.getDeletedAt() != null) {
@@ -359,5 +418,62 @@ public class TaskCounterUpdater {
         if (value != null && (value < 0.0 || value > 1.0)) {
             throw new InvalidRequestException(name + " must be between 0 and 1, got " + value);
         }
+    }
+    @Transactional
+    public Task updateCounters(
+        UUID taskId,
+        UnaryOperator<Task> countersMutator,
+        TaskReadinessSnapshot beforeReadiness,
+        TaskReadinessSnapshot afterReadiness) {
+
+        AtomicReference<Task> previous = new AtomicReference<>();
+
+        Task updated = requireUpdated(
+            taskRepository.update(
+                    taskId,
+                    task -> {
+                        previous.set(task);
+                        return countersMutator.apply(task);
+                    }),
+            taskId);
+
+        Task oldTask = previous.get();
+
+        if (updated != oldTask) {
+            log.info(
+                "Task {} eligibility updated: blockingCount={}, openConstraintCount={}, isReady={}",
+                taskId,
+                updated.getBlockingCount(),
+                updated.getOpenConstraintCount(),
+                updated.isReady());
+    }
+
+        return recomputePriorityScoreAndPublish(
+            taskId,
+            oldTask,
+            updated,
+            beforeReadiness,
+            afterReadiness);
+    }
+    @Transactional
+    public void adjustBlockingCount(
+            UUID taskId,
+            boolean dependsOnIsDone,
+            int delta,
+            TaskReadinessSnapshot beforeReadiness,
+            TaskReadinessSnapshot afterReadiness) {
+
+        int effectiveDelta = dependsOnIsDone ? 0 : delta;
+
+        updateCounters(
+                taskId,
+                task -> withCounters(
+                        task,
+                        Math.max(
+                                0,
+                                task.getBlockingCount() + effectiveDelta),
+                        task.getOpenConstraintCount()),
+                beforeReadiness,
+                afterReadiness);
     }
 }
