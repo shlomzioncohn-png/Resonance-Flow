@@ -1,9 +1,13 @@
 package com.rnd.chain.events;
 
+import com.rnd.chain.testsupport.PgCleanup;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.Tag;
+import org.springframework.jdbc.core.JdbcTemplate;
+
 import com.google.protobuf.Timestamp;
 import com.rnd.chain.dto.Task;
 import com.rnd.chain.dto.TaskStatus;
-import com.rnd.chain.repository.InMemoryTaskRepository;
 import com.rnd.chain.repository.TaskRepository;
 import com.rnd.inbox.event.TaskCreatedEvent;
 import io.confluent.kafka.serializers.protobuf.KafkaProtobufSerializer;
@@ -37,6 +41,7 @@ import java.util.UUID;
 import static org.awaitility.Awaitility.await;
 import static org.junit.jupiter.api.Assertions.*;
 
+@Tag("postgres")
 @SpringBootTest
 @EmbeddedKafka(
         partitions = 1,
@@ -51,16 +56,6 @@ class TaskCreatedEventHandlerIntegrationTest {
     private static final String ERROR_TOPIC = TOPIC + ".errors";
     private static final UUID TENANT_ID = UUID.randomUUID();
 
-    @TestConfiguration
-    static class Fixtures {
-
-        @Bean
-        @Primary
-        TaskRepository testTaskRepository() {
-            return new InMemoryTaskRepository(java.util.List.of());
-        }
-    }
-
     @org.springframework.beans.factory.annotation.Autowired
     private TaskRepository taskRepository;
 
@@ -71,8 +66,19 @@ class TaskCreatedEventHandlerIntegrationTest {
 
     private KafkaTemplate<String, TaskCreatedEvent> producer;
 
+    @org.springframework.beans.factory.annotation.Autowired
+    private JdbcTemplate jdbcTemplate;
+
+    private PgCleanup cleanup;
+
+    @AfterEach
+    void cleanUpRows() {
+        cleanup.restore();
+    }
+
     @BeforeEach
     void setUp() {
+        cleanup = new PgCleanup(jdbcTemplate);
         Map<String, Object> producerProps = new HashMap<>();
 
         producerProps.put(
@@ -160,7 +166,7 @@ class TaskCreatedEventHandlerIntegrationTest {
 
         UUID taskId = UUID.randomUUID();
 
-        ((InMemoryTaskRepository) taskRepository).save(
+        taskRepository.save(
                 Task.builder()
                         .id(taskId)
                         .tenantId(TENANT_ID)

@@ -1,16 +1,22 @@
 package com.rnd.chain.events;
 
 import com.rnd.chain.testsupport.TaskStateHistoryFixtures;
+
+import com.rnd.chain.testsupport.PgRepos;
+import org.junit.jupiter.api.Tag;
+import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.transaction.annotation.Transactional;
+
 import com.google.protobuf.Timestamp;
 import com.rnd.chain.dto.Task;
 import com.rnd.chain.dto.TaskDependency;
 import com.rnd.chain.dto.TaskStatus;
-import com.rnd.chain.repository.InMemoryConstraintRepository;
-import com.rnd.chain.repository.InMemoryGraphLock;
+import com.rnd.chain.repository.ConstraintRepository;
+import com.rnd.chain.repository.GraphLock;
 import com.rnd.chain.service.SchedulingUpdateService;
 import static org.mockito.Mockito.mock;
-import com.rnd.chain.repository.InMemoryTaskDependencyRepository;
-import com.rnd.chain.repository.InMemoryTaskRepository;
+import com.rnd.chain.repository.TaskDependencyRepository;
+import com.rnd.chain.repository.TaskRepository;
 import com.rnd.chain.events.SchedulingPublishListener;
 import com.rnd.chain.service.PriorityScoreService;
 import com.rnd.chain.service.TaskCounterUpdater;
@@ -26,6 +32,10 @@ import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.*;
 
+/** Ported from the in-memory version; runs against the real Postgres repositories (rolled back per test). */
+@Tag("postgres")
+@SpringBootTest
+@Transactional
 class TaskUpdatedEventHandlerTest {
 
     private static final LocalDateTime BASE_TIME = LocalDateTime.of(2026, 1, 1, 12, 0, 0);
@@ -49,17 +59,17 @@ class TaskUpdatedEventHandlerTest {
                 .build();
     }
 
-    private record Fixture(InMemoryTaskRepository taskRepo, TaskUpdatedEventHandler handler) {
+    private record Fixture(TaskRepository taskRepo, TaskUpdatedEventHandler handler) {
     }
 
     private static Fixture newFixture(List<Task> tasks, List<TaskDependency> edges) {
-        InMemoryTaskRepository taskRepo = new InMemoryTaskRepository(tasks);
-        InMemoryTaskDependencyRepository dependencyRepo = new InMemoryTaskDependencyRepository(edges);
+        TaskRepository taskRepo = PgRepos.tasks(tasks);
+        TaskDependencyRepository dependencyRepo = PgRepos.dependencies(edges);
         SchedulingUpdateService scheduling = mock(SchedulingUpdateService.class);
         TaskEligibilityService eligibilityService = new TaskEligibilityService(taskRepo, dependencyRepo,
-                new InMemoryGraphLock(), new TaskCounterUpdater(taskRepo, dependencyRepo,
+                PgRepos.graphLock(), new TaskCounterUpdater(taskRepo, dependencyRepo,
                         new PriorityScoreService(), new SchedulingPublishListener(taskRepo, scheduling)), TaskStateHistoryFixtures.newRecorder());
-        ChainEventProcessingTemplate template = new ChainEventProcessingTemplate(new InMemoryProcessedEventStore());
+        ChainEventProcessingTemplate template = new ChainEventProcessingTemplate(PgRepos.processedEvents());
         return new Fixture(taskRepo, new TaskUpdatedEventHandler(eligibilityService, template));
     }
 
