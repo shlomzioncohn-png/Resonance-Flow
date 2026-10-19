@@ -86,7 +86,7 @@ docker compose down
 
 ## Creating the first admin
 
-On an empty database there is no user who can log in yet. Migration `V14` seeds a built-in
+On an empty database there is no user who can log in yet. Migration `V15` seeds a built-in
 `SYSTEM_ADMIN` (`00000000-0000-0000-0000-000000000002`) with no password, so it can never log
 in. Use it once, as the `X-Actor-Id` of a direct API call, to create a real admin with a password:
 
