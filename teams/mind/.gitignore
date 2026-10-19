@@ -44,6 +44,9 @@ docker-compose.override.yml
 benchmarks/**/*.json
 benchmarks/**/*.csv
 !benchmarks/README.md
+# threshold_calibration_tasks.json is input data (the task pool), not a
+# results dump -- must be tracked or the script isn't reproducible.
+!benchmarks/threshold_calibration_tasks.json
 
 # Datasets — manifests/checksums only, never the corpora
 eval/datasets/*
@@ -59,3 +62,8 @@ extraction_report.json
 
 # Local raw datasets — never commit
 local-data/
+
+# Claude Code session tooling, including any worktree it creates --
+# never project content, must never be committed.
+.claude/
+skills-lock.json

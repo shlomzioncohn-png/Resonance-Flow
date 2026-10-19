@@ -24,6 +24,10 @@ public class TaskEntity {
 
     @Column(name = "parent_task_id")
     private UUID parentTaskId;
+
+    @Column(name = "tenant_id")
+    private UUID tenantId;
+
     @Enumerated(EnumType.STRING)
     @Column(nullable = false)
     private TaskStatus status;
@@ -41,6 +45,14 @@ public class TaskEntity {
     private Integer estimatedDurationMin;
 
     private Double score;
+
+    /** Issue #445: Mind's confidence (0..1) in {@link #score}. */
+    private Double confidence;
+
+    /** Issue #445: Chain's feasibility-adjusted priority, 1..10, or null until {@link #score}
+     * is set - see {@code PriorityScoreService}. */
+    @Column(name = "priority_score")
+    private Double priorityScore;
 
     @Version
     private long version;
@@ -71,6 +83,14 @@ public class TaskEntity {
 
     public void setParentTaskId(UUID parentTaskId) {
         this.parentTaskId = parentTaskId;
+    }
+
+    public UUID getTenantId() {
+        return tenantId;
+    }
+
+    public void setTenantId(UUID tenantId) {
+        this.tenantId = tenantId;
     }
 
     public TaskStatus getStatus() {
@@ -119,6 +139,22 @@ public class TaskEntity {
 
     public void setScore(Double score) {
         this.score = score;
+    }
+
+    public Double getConfidence() {
+        return confidence;
+    }
+
+    public void setConfidence(Double confidence) {
+        this.confidence = confidence;
+    }
+
+    public Double getPriorityScore() {
+        return priorityScore;
+    }
+
+    public void setPriorityScore(Double priorityScore) {
+        this.priorityScore = priorityScore;
     }
 
     public long getVersion() {

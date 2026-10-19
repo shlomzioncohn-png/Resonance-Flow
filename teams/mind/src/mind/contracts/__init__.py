@@ -29,6 +29,7 @@ from mind.contracts.task_enums import (
     TaskStatus,
     TaskTier,
 )
+from mind.contracts.task_score_proposed import TaskScoreProposed
 
 __all__ = [
     "Assignee",
@@ -53,6 +54,7 @@ __all__ = [
     "TaskCompleted",
     "TaskCreated",
     "TaskCreationRequested",
+    "TaskScoreProposed",
     "TaskStatus",
     "TaskTier",
 ]

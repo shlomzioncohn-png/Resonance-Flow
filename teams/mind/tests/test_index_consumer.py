@@ -57,10 +57,25 @@ class FakeVectorStore(VectorStore):
     async def get_content_hash(self, task_id: str) -> str | None:
         return self.rows[task_id][2] if task_id in self.rows else None
 
-    async def search(self, query_vector: list[float], k: int) -> list[SearchResult]:
+    async def get_vector(self, task_id: str) -> list[float] | None:
+        return self.rows[task_id][0] if task_id in self.rows else None
+
+    async def search(
+        self,
+        query_vector: list[float],
+        k: int,
+        *,
+        exclude_completed: bool = False,
+        exclude_task_id: str | None = None,
+    ) -> list[SearchResult]:
+        rows = [
+            (tid, completed)
+            for tid, (_vec, completed, _hash) in self.rows.items()
+            if (not exclude_completed or not completed) and tid != exclude_task_id
+        ]
         return [
             SearchResult(task_id=tid, similarity=1.0, is_completed=completed)
-            for tid, (_vec, completed, _hash) in list(self.rows.items())[:k]
+            for tid, completed in rows[:k]
         ]
 
     async def delete(self, task_id: str) -> None:

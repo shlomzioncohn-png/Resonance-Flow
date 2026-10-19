@@ -153,9 +153,7 @@ export default function TaskDetailsPage({ params }: { params: Promise<{ taskId: 
                     )
                   }
                 />
-                {task.dueDate && (
-                  <DetailRow label="Due" value={new Date(task.dueDate).toLocaleString()} />
-                )}
+                {task.dueDate && <DetailRow label="Due" value={task.dueDate} />}
                 <DetailRow label="Priority" value={<PriorityChip priority={task.priority} />} />
                 <DetailRow
                   label="Estimated effort"

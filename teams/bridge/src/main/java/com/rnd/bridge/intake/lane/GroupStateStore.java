@@ -2,7 +2,9 @@ package com.rnd.bridge.intake.lane;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.rnd.bridge.intake.model.GroupState;
+import com.rnd.bridge.intake.model.LandedAttachment;
 import com.rnd.bridge.intake.model.MessageSnapshot;
+import com.rnd.bridge.raw.model.RawObjectRef;
 import com.rnd.bridge.raw.model.RawSourceType;
 import com.rnd.bridge.storage.ControlPlaneStateStore;
 import com.rnd.bridge.storage.ObjectStorageClient;
@@ -15,6 +17,7 @@ import java.util.Optional;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Function;
 import java.util.function.UnaryOperator;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Component;
 
 /**
@@ -61,7 +64,8 @@ public class GroupStateStore {
     private final ObjectMapper objectMapper;
 
     public GroupStateStore(
-            ObjectStorageClient storageClient, ControlPlaneStateStore controlPlaneStateStore, ObjectMapper objectMapper) {
+            @Qualifier("postgresObjectStorageClient") ObjectStorageClient storageClient,
+            ControlPlaneStateStore controlPlaneStateStore, ObjectMapper objectMapper) {
         this.storageClient = storageClient;
         this.controlPlaneStateStore = controlPlaneStateStore;
         this.objectMapper = objectMapper;
@@ -130,33 +134,37 @@ public class GroupStateStore {
             return;
         }
         update(sourceType, tenantId, groupId, MISSING_GROUP_SENTINEL, current -> {
-            if (current == MISSING_GROUP_SENTINEL || current.revision() != expectedRevision || current.published()) {
+            if (current == MISSING_GROUP_SENTINEL || current.revision() != expectedRevision || current.published()
+                    || current.superseded()) {
                 return current;
             }
             return new GroupState(
                     current.groupId(), current.sourceType(), current.tenantId(), current.chatId(),
-                    current.threadId(), current.correlationId(), current.messages(), true, current.revision(), null);
+                    current.threadId(), current.correlationId(), current.messages(), true, current.revision(), null,
+                    current.superseded());
         });
     }
 
     /**
-     * Marks one specific attachment (identified by its owning message's id plus Slack's own
+     * Records one specific attachment (identified by its owning message's id plus Slack's own
      * stable file id - see ChatMessage.Attachment.fileId/SourceRecord.attachmentFileId) as
-     * confirmed published, so a later Slack retry or an unrelated edit of the same message can
-     * recognize it was already published and skip republishing it (see
-     * ChatGroupStateReconciler.alreadyConfirmed/MessageSnapshot.confirmedAttachmentFileIds).
-     * Deliberately not revision-guarded like confirmPublished: unlike the transcript (one value
-     * per group, which a stale ack could otherwise misattribute to a newer revision), a specific
-     * attachment's own confirmation state is independent of the group's current revision - it
-     * marks "this file, on this message, was published", which stays true regardless of what the
-     * group's transcript later becomes. If the message no longer exists in the group (already
-     * scoped out, e.g. by whatever future delete handling lands), or already lists this fileId,
-     * this is a no-op - update()'s mutator returns the same messages list unchanged so no write
+     * already landed to MinIO, so a later Slack retry or an unrelated edit of the same message
+     * can recognize it was already landed and skip re-landing it (see
+     * ChatGroupStateReconciler.alreadyLanded/MessageSnapshot.landedAttachments). This is MinIO-
+     * landing state, not Kafka-publication state: a non-thread session's attachments and
+     * transcript all publish together, exactly once, at session close (see SlackSessionPublisher)
+     * - there is no longer an independent per-attachment Kafka confirmation to track.
+     * Deliberately not revision-guarded like confirmPublished: a specific attachment's own landed
+     * state is independent of the group's current revision - it marks "this file, on this
+     * message, was landed", which stays true regardless of what the group's transcript later
+     * becomes. If the message no longer exists in the group, or already lists this fileId, this
+     * is a no-op - update()'s mutator returns the same messages list unchanged so no write
      * happens.
      * Same not-found tolerance as confirmPublished for a group that genuinely isn't there.
      */
-    public void confirmAttachmentPublished(
-            RawSourceType sourceType, String tenantId, String groupId, String messageId, String fileId) {
+    public void recordLandedAttachment(
+            RawSourceType sourceType, String tenantId, String groupId, String messageId, String fileId,
+            RawObjectRef ref) {
         if (load(sourceType, tenantId, groupId).isEmpty()) {
             return;
         }
@@ -166,8 +174,8 @@ public class GroupStateStore {
             }
             List<MessageSnapshot> updatedMessages = current.messages().stream()
                     .map(snapshot -> snapshot.messageId().equals(messageId)
-                            && !snapshot.confirmedAttachmentFileIds().contains(fileId)
-                                    ? withConfirmedAttachment(snapshot, fileId)
+                            && snapshot.landedAttachments().stream().noneMatch(la -> la.fileId().equals(fileId))
+                                    ? withLandedAttachment(snapshot, fileId, ref)
                                     : snapshot)
                     .toList();
             if (updatedMessages.equals(current.messages())) {
@@ -176,16 +184,16 @@ public class GroupStateStore {
             return new GroupState(
                     current.groupId(), current.sourceType(), current.tenantId(), current.chatId(),
                     current.threadId(), current.correlationId(), updatedMessages, current.published(),
-                    current.revision(), current.claimedRevision());
+                    current.revision(), current.claimedRevision(), current.superseded());
         });
     }
 
-    private static MessageSnapshot withConfirmedAttachment(MessageSnapshot snapshot, String fileId) {
-        List<String> confirmed = new ArrayList<>(snapshot.confirmedAttachmentFileIds());
-        confirmed.add(fileId);
+    private static MessageSnapshot withLandedAttachment(MessageSnapshot snapshot, String fileId, RawObjectRef ref) {
+        List<LandedAttachment> landed = new ArrayList<>(snapshot.landedAttachments());
+        landed.add(new LandedAttachment(fileId, ref));
         return new MessageSnapshot(
                 snapshot.messageId(), snapshot.sender(), snapshot.timestamp(), snapshot.text(),
-                snapshot.attachmentCount(), confirmed);
+                snapshot.attachmentCount(), landed);
     }
 
     /**
@@ -214,6 +222,7 @@ public class GroupStateStore {
             if (current == MISSING_GROUP_SENTINEL
                     || current.revision() != expectedRevision
                     || current.published()
+                    || current.superseded()
                     || (current.claimedRevision() != null && current.claimedRevision() == expectedRevision)) {
                 return current;
             }
@@ -221,9 +230,37 @@ public class GroupStateStore {
             return new GroupState(
                     current.groupId(), current.sourceType(), current.tenantId(), current.chatId(),
                     current.threadId(), current.correlationId(), current.messages(), current.published(),
-                    current.revision(), expectedRevision);
+                    current.revision(), expectedRevision, current.superseded());
         });
         return claimed[0];
+    }
+
+    /**
+     * Marks a group as superseded - its content has been migrated into a different group's
+     * identity (today: a non-thread group whose root was adopted by a newly-created thread
+     * group, see ChatGroupStateReconciler.newThreadGroupState) and must never be independently
+     * published again, including by a pending inactivity timer that was already scheduled before
+     * the migration happened (see SlackSessionScheduler.onDeadline's superseded check).
+     * Deliberately not the same as marking it published: this group's content was never actually
+     * acknowledged by Kafka under its own correlationId, so published=true here would be a false
+     * claim of delivery that never happened - superseded says "retired, nothing further to do",
+     * independent of whether anything was ever actually sent.
+     * Same not-found tolerance as confirmPublished/recordLandedAttachment for a group that
+     * genuinely isn't there, and idempotent - a no-op if already superseded.
+     */
+    public void markSuperseded(RawSourceType sourceType, String tenantId, String groupId) {
+        if (load(sourceType, tenantId, groupId).isEmpty()) {
+            return;
+        }
+        update(sourceType, tenantId, groupId, MISSING_GROUP_SENTINEL, current -> {
+            if (current == MISSING_GROUP_SENTINEL || current.superseded()) {
+                return current;
+            }
+            return new GroupState(
+                    current.groupId(), current.sourceType(), current.tenantId(), current.chatId(),
+                    current.threadId(), current.correlationId(), current.messages(), current.published(),
+                    current.revision(), current.claimedRevision(), true);
+        });
     }
 
     /**

@@ -25,9 +25,9 @@ class ScorableTask(Protocol):
     """
 
     # Not read by the score. Here so the score can be traced to its task, and
-    # because `parent_task_id` points at an id: walking from a parent to its
-    # children (R3, week 7) needs the task's own. A string: R1's scenario ids
-    # and Inbox's UUIDs (converted) both fit.
+    # because R3's week-7 propagation asks Chain's dependency API for a task's
+    # ancestors by this id (SPEC-R3 §5). A string: R1's scenario ids and
+    # Inbox's UUIDs (converted) both fit.
     @property
     def task_id(self) -> str: ...
 
@@ -57,9 +57,6 @@ class ScorableTask(Protocol):
 
     @property
     def blocked(self) -> bool: ...
-
-    @property
-    def parent_task_id(self) -> str | None: ...
 
 
 def _a_scenario_task_is_scorable(task: Task) -> ScorableTask:

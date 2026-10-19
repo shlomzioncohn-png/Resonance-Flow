@@ -42,11 +42,13 @@ class PostgresTaskDependencyRepositoryTest {
     @Autowired
     private SpringDataTaskDependencyJpaRepository jpaRepository;
 
+    private static final UUID TENANT_ID = UUID.randomUUID();
+
     private Task seedTask() {
         UUID id = UUID.randomUUID();
         LocalDateTime now = LocalDateTime.now();
         Task task = Task.builder()
-                .id(id).status(TaskStatus.ACTIVE)
+                .id(id).tenantId(TENANT_ID).status(TaskStatus.ACTIVE)
                 .blockingCount(0).openConstraintCount(0)
                 .createdAt(now).updatedAt(now).build();
         return postgresTaskRepository.save(task);
@@ -82,6 +84,33 @@ class PostgresTaskDependencyRepositoryTest {
     }
 
     @Test
+    void save_onAlreadyExistingEdge_upsertsConfidenceInsteadOfNoOp() {
+        // Issue #445: confirmed with Mind - a republish of the same edge upserts confidence, it
+        // is not a pure no-op the way the pre-#445 "ON CONFLICT DO NOTHING" behaved.
+        Task task = seedTask();
+        Task dependsOn = seedTask();
+        postgresTaskDependencyRepository.save(new TaskDependency(task.getId(), dependsOn.getId(), 0.2));
+
+        Optional<TaskDependency> result = postgresTaskDependencyRepository.save(
+                new TaskDependency(task.getId(), dependsOn.getId(), 0.9));
+
+        assertThat(result).isEmpty(); // not a new edge...
+        assertThat(postgresTaskDependencyRepository.findByTaskId(task.getId())) // ...but upserted.
+                .containsExactly(new TaskDependency(task.getId(), dependsOn.getId(), 0.9));
+    }
+
+    @Test
+    void findByTaskId_returnsTheStoredConfidence() {
+        Task task = seedTask();
+        Task dependsOn = seedTask();
+        postgresTaskDependencyRepository.save(new TaskDependency(task.getId(), dependsOn.getId(), 0.42));
+
+        assertThat(postgresTaskDependencyRepository.findByTaskId(task.getId()))
+                .extracting(TaskDependency::confidence)
+                .containsExactly(0.42);
+    }
+
+    @Test
     void save_throwsDataIntegrityViolation_whenReferencedTaskDoesNotExist() {
         TaskDependencyId id = new TaskDependencyId(UUID.randomUUID(), UUID.randomUUID());
 
@@ -105,7 +134,7 @@ class PostgresTaskDependencyRepositoryTest {
         Task blocker = seedTask();
         postgresTaskRepository.update(blocker.getId(), t ->
                 Task.builder()
-                        .id(t.getId()).status(t.getStatus())
+                        .id(t.getId()).tenantId(t.getTenantId()).status(t.getStatus())
                         .blockingCount(t.getBlockingCount()).openConstraintCount(t.getOpenConstraintCount())
                         .createdAt(t.getCreatedAt()).updatedAt(t.getUpdatedAt())
                         .deletedAt(LocalDateTime.now())

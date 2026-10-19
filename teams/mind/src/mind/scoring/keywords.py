@@ -24,8 +24,8 @@ Beyond the word boundary there is still no stemming, no embeddings and no LLM:
 the same task must score identically on every run, or the week-5 baseline cannot
 be compared to the week-7 stretch.
 
-**Provenance:** every phrase here was taken from the wording of the 20 *dev*
-scenarios (see `eval_split`). No holdout scenario was read while building this,
+**Provenance:** every phrase here was taken from the wording of the original
+20 *dev* scenarios (see `eval_split`). No holdout scenario was read while building this,
 and no phrase was ever added to fix a single failing scenario — they are grouped
 into coarse strength bands precisely so that per-word tuning is not possible.
 """
