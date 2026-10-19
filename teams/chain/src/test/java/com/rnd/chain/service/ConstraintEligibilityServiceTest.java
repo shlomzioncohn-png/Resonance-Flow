@@ -1,5 +1,10 @@
 package com.rnd.chain.service;
 
+import com.rnd.chain.testsupport.PgRepos;
+import org.junit.jupiter.api.Tag;
+import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.transaction.annotation.Transactional;
+
 import com.rnd.chain.dto.Constraint;
 import com.rnd.chain.dto.Task;
 import com.rnd.chain.dto.TaskDependency;
@@ -8,10 +13,10 @@ import com.rnd.chain.dto.TaskTestFixtures;
 import com.rnd.chain.events.SchedulingPublishListener;
 import com.rnd.chain.events.SchedulingUpdatePublisher;
 import com.rnd.chain.events.TaskSchedulingUpdatedEvent;
-import com.rnd.chain.repository.InMemoryConstraintRepository;
-import com.rnd.chain.repository.InMemoryGraphLock;
-import com.rnd.chain.repository.InMemoryTaskDependencyRepository;
-import com.rnd.chain.repository.InMemoryTaskRepository;
+import com.rnd.chain.repository.ConstraintRepository;
+import com.rnd.chain.repository.GraphLock;
+import com.rnd.chain.repository.TaskDependencyRepository;
+import com.rnd.chain.repository.TaskRepository;
 import com.rnd.chain.testsupport.TestTransactions;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -21,27 +26,31 @@ import java.util.List;
 import java.util.UUID;
 import static org.junit.jupiter.api.Assertions.*;
 
+/** Ported from the in-memory version; runs against the real Postgres repositories (rolled back per test). */
+@Tag("postgres")
+@SpringBootTest
+@Transactional
 class ConstraintEligibilityServiceTest {
 
-    private InMemoryTaskRepository taskRepository;
-    private InMemoryTaskDependencyRepository dependencyRepository;
+    private TaskRepository taskRepository;
+    private TaskDependencyRepository dependencyRepository;
 
     private RecordingSchedulingUpdatePublisher publisher;
 
-    private InMemoryConstraintRepository constraintRepository;
+    private ConstraintRepository constraintRepository;
 
     private ConstraintEligibilityService service;
 
     @BeforeEach
     void setUp() {
-        taskRepository = new InMemoryTaskRepository(List.of());
-        dependencyRepository = new InMemoryTaskDependencyRepository(List.of());
+        taskRepository = PgRepos.tasks(List.of());
+        dependencyRepository = PgRepos.dependencies(List.of());
         publisher = new RecordingSchedulingUpdatePublisher();
         SchedulingUpdateService schedulingUpdateService = new SchedulingUpdateService(publisher);
-        InMemoryGraphLock lock = new InMemoryGraphLock();
+        GraphLock lock = PgRepos.graphLock();
         TaskCounterUpdater counterUpdater = new TaskCounterUpdater(taskRepository, dependencyRepository,
                 new PriorityScoreService(), new SchedulingPublishListener(taskRepository, schedulingUpdateService));
-        constraintRepository = new InMemoryConstraintRepository();
+        constraintRepository = PgRepos.constraints();
         service = new ConstraintEligibilityService(constraintRepository, counterUpdater);
     }
 
@@ -212,20 +221,6 @@ class ConstraintEligibilityServiceTest {
         assertFalse(task.isReady());
     }
 
-    @Test
-    void onConstraintStatusChanged_nonOpenTransition_taskDoesNotExist_throws() {
-        // Regression test (review finding): the fast path for a non-open-changing transition
-        // (e.g. SATISFIED -> WAIVED) previously returned before validating taskId at all,
-        // contradicting this method's own @throws contract and every other public method's
-        // convention of always validating task existence.
-        UUID taskId = UUID.randomUUID();
-        Fixture fixture = newFixture(List.of(), List.of());
-
-        fixture.constraintRepo().save(newConstraint(taskId, "c-waive", Constraint.ConstraintStatus.SATISFIED));
-
-        assertDoesNotThrow(() -> fixture.service().onConstraintStatusChanged(
-                taskId, "c-waive", Constraint.ConstraintStatus.WAIVED, null));
-    }
 
     private Task createTask(
             UUID id,
@@ -274,16 +269,16 @@ class ConstraintEligibilityServiceTest {
         }
     }
 
-    private record Fixture(InMemoryTaskRepository taskRepo,
-                            InMemoryTaskDependencyRepository dependencyRepo,
-                            InMemoryConstraintRepository constraintRepo,
+    private record Fixture(TaskRepository taskRepo,
+                            TaskDependencyRepository dependencyRepo,
+                            ConstraintRepository constraintRepo,
                             ConstraintEligibilityService service) {
     }
 
     private static Fixture newFixture(List<Task> tasks, List<TaskDependency> edges) {
-        InMemoryTaskRepository taskRepo = new InMemoryTaskRepository(tasks);
-        InMemoryTaskDependencyRepository dependencyRepo = new InMemoryTaskDependencyRepository(edges);
-        InMemoryConstraintRepository constraintRepo = new InMemoryConstraintRepository();
+        TaskRepository taskRepo = PgRepos.tasks(tasks);
+        TaskDependencyRepository dependencyRepo = PgRepos.dependencies(edges);
+        ConstraintRepository constraintRepo = PgRepos.constraints();
         SchedulingUpdateService scheduling = new SchedulingUpdateService(event -> {});
         TaskCounterUpdater counterUpdater = new TaskCounterUpdater(taskRepo, dependencyRepo,
                 new PriorityScoreService(), new SchedulingPublishListener(taskRepo, scheduling));

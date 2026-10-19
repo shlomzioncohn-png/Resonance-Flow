@@ -64,6 +64,7 @@ The Gateway exposes six endpoints for the Frontend's workspace functionality. Al
 | GET | `/api/manager/workload` | `http://bff-service:8080/manager/workload` | BFF (Sari) | Active-task count per employee (Manager Dashboard); mocked at the BFF |
 | GET | `/api/manager/projects` | `http://bff-service:8080/manager/projects` | BFF (Sari) | Project grid with health/KPI data (Manager Dashboard); mocked at the BFF. Distinct from `/api/admin/projects` (per-project drill-down) |
 | GET | `/api/manager/users` | `http://bff-service:8080/manager/users` | BFF (Sari) | List users (meant for managers; role check pending Auth stage 2). Real call through to Inbox — not mocked. |
+| POST | `/api/manager/users` | `http://bff-service:8080/manager/users` | BFF (Sari) | Create a user in the manager's own tenant (displayName + role MANAGER/EMPLOYEE required), 201; 409 if email/username exists |
 | GET | `/api/manager/users/{id}` | `http://bff-service:8080/manager/users/{id}` | BFF (Sari) | One user's details, MANAGER-only |
 | PATCH | `/api/manager/users/{id}` | `http://bff-service:8080/manager/users/{id}` | BFF (Sari) | Edit displayName/firstName/lastName/phone only, MANAGER-only |
 | PATCH | `/api/manager/users/{id}/status` | `http://bff-service:8080/manager/users/{id}/status` | BFF (Sari) | Change status (ACTIVE/SUSPENDED/DISABLED), MANAGER-only, 409 on self-change |

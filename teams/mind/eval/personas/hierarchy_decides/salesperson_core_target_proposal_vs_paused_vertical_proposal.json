@@ -1,0 +1,52 @@
+{
+  "scenario_id": "salesperson_core_target_proposal_vs_paused_vertical_proposal",
+  "persona": {
+    "role": "Salesperson",
+    "department": null
+  },
+  "context": {
+    "free_time_minutes": 45,
+    "current_datetime": "2026-10-14T10:00:00",
+    "time_horizon": "this_week",
+    "constraints": []
+  },
+  "tasks": [
+    {
+      "task_id": "task_pinecrest",
+      "title": "Send Pinecrest Retail Group the revised pricing proposal",
+      "description": "Send Pinecrest Retail Group the revised pricing proposal their procurement lead asked for. The numbers are approved and the document needs a final read-through.",
+      "deadline": "2026-10-15T11:00:00",
+      "effort_estimate": 25,
+      "tier": "tactical",
+      "blocked": false,
+      "parent_task_id": "hd_sales_paused_retail_push"
+    },
+    {
+      "task_id": "task_filler_crm",
+      "title": "Update the CRM contact notes",
+      "description": "Update the contact notes in the CRM after last week's calls; no date set.",
+      "deadline": null,
+      "effort_estimate": 20,
+      "tier": "operational",
+      "blocked": false,
+      "parent_task_id": null
+    },
+    {
+      "task_id": "task_northgate",
+      "title": "Send Northgate Health the revised pricing proposal",
+      "description": "Send Northgate Health the revised pricing proposal their procurement lead asked for. The numbers are approved and the document needs a final read-through.",
+      "deadline": "2026-10-15T12:00:00",
+      "effort_estimate": 25,
+      "tier": "tactical",
+      "blocked": false,
+      "parent_task_id": "hd_sales_core_bookings"
+    }
+  ],
+  "expected_top_task_id": "task_northgate",
+  "expected_reason": "Both are the same revised pricing proposal with the same effort, due an hour apart on Thursday; task_northgate serves this quarter's core bookings target, while task_pinecrest serves the retail vertical push that leadership paused this quarter.",
+  "source": {
+    "type": "synthetic",
+    "source_detail": null
+  },
+  "team_lead_approved": false
+}

@@ -1,0 +1,52 @@
+{
+  "scenario_id": "higher_manager_migration_budget_vs_reporting_requests",
+  "persona": {
+    "role": "Higher Manager",
+    "department": null
+  },
+  "context": {
+    "free_time_minutes": 45,
+    "current_datetime": "2026-10-19T09:00:00",
+    "time_horizon": "this_week",
+    "constraints": []
+  },
+  "tasks": [
+    {
+      "task_id": "task_ledger_staffing",
+      "title": "Approve the Ledger program's FY27 staffing request",
+      "description": "Approve the FY27 staffing request submitted by the Ledger program lead; finance needs your decision to include it in the annual plan.",
+      "deadline": "2026-10-23T10:00:00",
+      "effort_estimate": 30,
+      "tier": "strategic",
+      "blocked": false,
+      "parent_task_id": "hd_hm_reporting_refresh"
+    },
+    {
+      "task_id": "task_ledger_budget",
+      "title": "Approve the Ledger program's FY27 budget request",
+      "description": "Approve the FY27 budget request submitted by the Ledger program lead; finance needs your decision to include it in the annual plan.",
+      "deadline": "2026-10-23T11:00:00",
+      "effort_estimate": 30,
+      "tier": "strategic",
+      "blocked": false,
+      "parent_task_id": "hd_hm_reporting_refresh"
+    },
+    {
+      "task_id": "task_orion_budget",
+      "title": "Approve the Orion program's FY27 budget request",
+      "description": "Approve the FY27 budget request submitted by the Orion program lead; finance needs your decision to include it in the annual plan.",
+      "deadline": "2026-10-23T12:00:00",
+      "effort_estimate": 30,
+      "tier": "strategic",
+      "blocked": false,
+      "parent_task_id": "hd_hm_platform_migration"
+    }
+  ],
+  "expected_top_task_id": "task_orion_budget",
+  "expected_reason": "All three are the same kind of FY27 approval with the same effort, due within two hours of each other on Friday; task_orion_budget serves the platform migration, the company's top strategic initiative this year, while both Ledger requests serve a routine refresh of the internal reporting tools.",
+  "source": {
+    "type": "synthetic",
+    "source_detail": null
+  },
+  "team_lead_approved": false
+}

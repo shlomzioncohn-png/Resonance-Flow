@@ -1,9 +1,14 @@
 package com.rnd.chain.events;
 
+import com.rnd.chain.testsupport.PgRepos;
+import org.junit.jupiter.api.Tag;
+import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.transaction.annotation.Transactional;
+
 import com.google.protobuf.Timestamp;
 import com.rnd.chain.dto.Task;
 import com.rnd.chain.dto.TaskStatus;
-import com.rnd.chain.repository.InMemoryTaskRepository;
+import com.rnd.chain.repository.TaskRepository;
 import com.rnd.chain.repository.TaskRepository;
 import com.rnd.inbox.event.TaskCreatedEvent;
 import org.junit.jupiter.api.Test;
@@ -17,11 +22,15 @@ import java.util.function.UnaryOperator;
 
 import static org.junit.jupiter.api.Assertions.*;
 
+/** Ported from the in-memory version; runs against the real Postgres repositories (rolled back per test). */
+@Tag("postgres")
+@SpringBootTest
+@Transactional
 class TaskCreatedEventHandlerTest {
 
     private static ChainEventProcessingTemplate newTemplate() {
         return new ChainEventProcessingTemplate(
-                new InMemoryProcessedEventStore());
+                PgRepos.processedEvents());
     }
 
     private static Timestamp timestamp(Instant instant) {
@@ -43,8 +52,8 @@ class TaskCreatedEventHandlerTest {
     @Test
     void onMessage_forANewTask_insertsItReadyWithZeroedCounters() {
 
-        InMemoryTaskRepository repository =
-                new InMemoryTaskRepository(List.of());
+        TaskRepository repository =
+                PgRepos.tasks(List.of());
 
         TaskCreatedEventHandler handler =
                 new TaskCreatedEventHandler(
@@ -90,8 +99,8 @@ class TaskCreatedEventHandlerTest {
                 .updatedAt(LocalDateTime.now())
                 .build();
 
-        InMemoryTaskRepository repository =
-                new InMemoryTaskRepository(
+        TaskRepository repository =
+                PgRepos.tasks(
                         List.of(existing));
 
         TaskCreatedEventHandler handler =
@@ -122,7 +131,7 @@ class TaskCreatedEventHandlerTest {
 
         TaskCreatedEventHandler handler =
                 new TaskCreatedEventHandler(
-                        new InMemoryTaskRepository(List.of()),
+                        PgRepos.tasks(List.of()),
                         newTemplate());
 
         TaskCreatedEvent event =

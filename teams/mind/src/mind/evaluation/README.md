@@ -29,8 +29,8 @@ class RankingModel(Protocol):
 
 - `Task` (`interfaces.py`): `task_id`, `title`, `description`, `deadline`,
   `effort_estimate` (minutes; the eval set's form of the canonical
-  `Task.effort_estimate`), `tier`, `blocked`, `parent_task_id` (nullable,
-  reserved for the week-7 hierarchical-propagation eval).
+  `Task.effort_estimate`), `tier`, `blocked`, `parent_task_id` (nullable; points
+  at a node in `eval/hierarchy/nodes.json` — see **Hierarchy** below).
 - `ScoreContext`: just `current_datetime` — the model may judge how near a
   `deadline` is, and nothing else about the persona's situation (per the mentor's
   review). The harness fixes it to the scenario's `current_datetime`; it is never
@@ -89,11 +89,13 @@ python -m mind.evaluation.run --model dummy
 Replace `dummy` with the name of the model you want to evaluate.
 
 `--personas` (default `eval/personas`) points to the personas directory. The
-scenario files live in two subdirectories — `same_tier/` and `cross_tier/` (see
-`eval/personas/README.md`) — and `load_personas` recurses into both;
-`scenario.schema.json` at the root is skipped. `make eval` scores each group
-separately, breaks the result down per `persona.role`, and prints a combined
-number too; `report.json` carries all of them (`combined`, `groups`, `roles`).
+scenario files live in three subdirectories — `same_tier/`, `cross_tier/` and
+`hierarchy_decides/` (see `eval/personas/README.md`) — and `load_personas` recurses
+into all of them; `scenario.schema.json` at the root is skipped. `make eval` scores
+each group separately, breaks the result down per `persona.role`, prints the
+original set (every group but `hierarchy_decides/`) as one line, and prints a
+combined number too; `report.json` carries all of them (`combined`, `groups`,
+`roles`, `original_set`).
 The per-role numbers are split out of the combined run, not re-scored, so
 they always add up to it. Pass a single group dir
 (`--personas eval/personas/same_tier`) to score just that group. Loading goes through
@@ -157,6 +159,270 @@ To keep the door open for a future switch to a different metric without re-runni
 model, the harness report keeps every candidate's score and reasoning per scenario
 (`ScenarioResult.candidates`), not just the winner.
 
+## Hierarchy (`parent_task_id`)
+
+The week-7 stretch goal propagates importance down the `parent_task_id` chain.
+Until #507 every task in the set had `parent_task_id: null`, so a
+hierarchy-aware model had nothing to read and would score exactly like the
+baseline — and `diff_reports` would say "0 scenarios changed" whether the stretch
+failed or simply never got any input. The set now carries a hierarchy, so that
+answer means something.
+
+### How it is represented
+
+- A scenario task's `parent_task_id` names a **node** in
+  [`eval/hierarchy/nodes.json`](../../../eval/hierarchy/nodes.json). The node is
+  never one of the scenario's candidate tasks, so the candidate lists are
+  unchanged, and a model that does not read `parent_task_id` scores exactly as
+  before (see **What did not change** below).
+- `null` means an **orphan**, on purpose. Orphans are part of the coverage, not
+  gaps.
+- A node has its own `parent_task_id` (`null` = a root), so chains can be more
+  than one level deep.
+- Each scenario has **its own small tree** (node ids carry a per-scenario prefix,
+  e.g. `mgr_reorg_…`). The scenarios were written as independent worlds —
+  different companies, different dates — and one shared organization tree would
+  have forced them into one organization after the fact. It also keeps the
+  week-7 question answerable: a scenario's result depends only on its own nodes.
+
+The node shape is `HierarchyNode` / `HierarchyFixture` in
+[`mind.scoring.hierarchy`](../scoring/hierarchy.py), agreed with R3 (the
+propagation author) so the fixture and the propagation code use one shape. It
+lives in `scoring/`, not here, so production scoring never imports from the
+evaluation package.
+
+| Field | Meaning |
+|---|---|
+| `task_id` | Unique across the file; same character rule as `Task.task_id` |
+| `parent_task_id` | The node's own parent, or `null` for a root. Required — a root is stated, never implied |
+| `importance` | 0-1, finite, **set by hand** (see below) |
+| `label` | Short description for readers; no model reads it |
+
+### Where parent importance comes from during an eval run
+
+From the fixture, and nowhere else. `importance` is a fixed input, like a
+`deadline`: it is not computed from depth, from the tasks under a node, or from
+any model. Three levels are used throughout, so each value says something a
+reviewer can check against the scenario text:
+
+| Level | Value | Used for |
+|---|---|---|
+| low | 0.2 | Routine work, an initiative that already ended or was lost, or one still only being explored |
+| medium | 0.5 | Regular planned work |
+| high | 0.8 | A central initiative or goal |
+
+0 and 1 are not used: 0 would mean "worthless" and 1 "the single most important
+thing there is", and no node in the set is either. In the one two-level chain on
+a correct answer, both levels are high, so the only difference between them is
+depth. `tests/test_hierarchy_links.py` fails if any node uses another value.
+
+**The nodes are constructed, not found.** No scenario names its parent
+initiative; every node, its label and its chain were written for this fixture.
+What differs is where each *importance* comes from, and the table below says
+which for every scenario:
+
+- **text** — the importance restates something the scenario itself says: the
+  launch "happened without it", the deal is "already lost to a competitor", the
+  memo is "still exploratory", the renewal protects revenue that is "actively
+  slipping".
+- **constructed** — the scenario does not say how important the parent is; the
+  value was chosen to build a test case (a control, a stress test, a blocked task
+  under an important initiative). These are R1's judgment and are open to review
+  as such; changing one changes what the case tests, not whether the scenario's
+  answer is right.
+
+How a model gets the nodes: `score(task, context)` already receives
+`task.parent_task_id`, and nothing new goes through `ScoreContext`. The ancestors
+themselves are handed to the model when it is built — the hierarchy-aware model
+lives in `scoring/` and never imports from `evaluation/`, so it cannot read
+`HIERARCHY_PATH` itself. For the eval, `run.py` already loads and checks the
+fixture (`load_hierarchy`, from `--hierarchy`, default `eval/hierarchy`); when
+the hierarchy-aware model is added to its model list, that loaded fixture is
+what it is constructed with. In production an adapter over Chain's traversal API
+supplies the same `HierarchyNode` shape. The exact constructor is R3's to define
+in #474.
+
+### Why a fixture and not Chain
+
+In production the ancestors come from Chain's traversal API. The eval does not
+call it, deliberately: an eval that depends on another team's service being up,
+with data that may have changed since the last run, is not reproducible — and a
+reproducible comparison against the **same** fixed set is the entire point of
+the baseline-vs-stretch measurement. The fixture is part of the fixed set:
+`personas.sha256` covers `eval/hierarchy/` as well as `eval/personas/`, and so
+does the checksum a recorded baseline stores (see **Baseline score**), so a
+silent edit to a node's importance fails `personas_checksum --check`, and makes
+`load_baseline_record` refuse an older baseline, just like an edit to a scenario.
+
+### What is enforced, and where
+
+| Rule | Where |
+|---|---|
+| Node fields, types and bounds | `HierarchyNode` |
+| Unique node ids | `HierarchyFixture` (a bad file fails to load) |
+| Every non-null node parent is in the fixture; no cycles | `mind.evaluation.hierarchy.validate_hierarchy_fixture` — run by `run.py` before scoring and by the tests. Deliberately **not** in the shared `HierarchyFixture`: what a cycle or a missing parent means is the propagation's behaviour to define (#473), and its test graphs must be able to contain them |
+| Every scenario `parent_task_id` names a node; no node id is also a scenario `task_id` | `mind.evaluation.hierarchy.validate_hierarchy_links` — run by `run.py` before scoring (a failure exits 1, like a broken scenario) and by the tests |
+| Every task's chain matches the table below; scenarios not in it are fully orphan; every importance is one of the three levels; every node belongs to exactly one scenario (no shared, no unused nodes) | `tests/test_hierarchy_links.py` |
+| A changed node is a changed set | `personas.sha256`, and the checksum a recorded baseline stores (both via `personas_checksum`) |
+
+### The two scenarios for the week-7 question
+
+The mentor question is known in advance: one scenario where the stretch changed
+the recommendation, one where it did not. Both were chosen before any
+hierarchy-aware model exists. They are **designed** to behave this way; whether
+they do depends on the propagation, and either outcome is a result.
+
+- **Designed to change —
+  `hierarchy_decides/manager_restructuring_team_signoff_vs_maintenance_team_signoff`.**
+  Two sign-offs of the same tactical resourcing plan, with the same text and effort,
+  for two teams; the Birchwood one is due an hour earlier. The correct answer, the
+  Atlas sign-off, sits under a high Q4 restructuring initiative, itself under a high
+  annual goal (the two-level chain); Birchwood's sits under low routine maintenance.
+  The baseline misses it (it follows the earlier deadline); only the hierarchy points
+  at the answer.
+- **Designed not to change — `developer_prod_crash_vs_backlog_feature`.**
+  `task_backlog_widget` sits under a high self-service roadmap node; the correct
+  answer `task_crash` is an **orphan** — a production checkout crash with a
+  three-hour support SLA. An orphan with a hard, near deadline must still beat a
+  task under an important initiative. The baseline gets it right.
+
+The first "designed to change" pick was `manager_status_digest_vs_reorg_proposal`.
+It was replaced because `SegmentedRankingModel` already gets it right without any
+hierarchy (the task text says what matters), so the stretch could not show a
+change there.
+
+### `hierarchy_decides/`: where the hierarchy decides
+
+The 36 original scenarios were written before there was a hierarchy, and every one
+of them is decided by deadline, `blocked` or the text of the task. So the hierarchy
+can confirm or contradict an answer there, but almost never decide one: the stretch
+would have nearly nothing to change. `eval/personas/hierarchy_decides/` adds six
+scenarios, one per role, built so that it can:
+
+- **Four where the hierarchy decides.** The candidates are near-equal on their own
+  features: the same tier and effort, wording identical but for a name, deadlines
+  an hour or two apart. The correct answer is slightly *weaker* on them (its
+  deadline is the later one), never a full tie. What separates them is the
+  initiative each one serves, and the `expected_reason` names it. Together they
+  cover what the mentor asked for: an initiative that was **deprioritized**
+  (`salesperson_...`, a paused vertical push), a **two-level chain**
+  (`manager_...`), a **branch** (`higher_manager_...`: one important parent with one
+  child against an unimportant parent with two), and a case where the direct
+  parents are **equal and only the grandparents differ** (`ceo_...`), which a
+  propagation that looks one level up cannot get right.
+- **Two controls.** The hierarchy pulls hard toward a distractor, but a hard signal
+  must win: a production payment failure with a 13:00 SLA against two migration
+  steps under the year's top goal (`developer_...`, the answer is an orphan), and a
+  customer site that is down inside a four-hour contractual window, whose own
+  parent is *low*, against a survey for the year's priority program
+  (`field_engineer_...`).
+
+They are **new scenarios, not copies** of existing ones. The originals decide their
+answer through the task text ("the biggest structural decision of the quarter",
+"nobody has ever acted on it"); a copy with that text removed is no longer the same
+scenario, and one with it kept would not test the hierarchy at all.
+
+The correct answers were written before anything was run. Then the check: run
+`SegmentedRankingModel` with no hierarchy input; it should miss the four decided
+ones and get the two controls, and if it got a decided one right, that scenario's
+features would be evened out, not its answer. Run on the baseline from #797 (which
+removes its `parent_task_id` signal), it does exactly that, with no change needed:
+
+| Scenario | Kind | Baseline picks | Scores (picked vs correct) |
+|---|---|---|---|
+| `manager_restructuring_…` | decided | Birchwood — **miss** | 0.7172 vs 0.7160 |
+| `salesperson_core_target_…` | decided | Pinecrest — **miss** | 0.7280 vs 0.7259 |
+| `higher_manager_migration_…` | decided | Ledger staffing — **miss** | 0.7459 vs 0.7453 |
+| `ceo_expansion_partnership_…` | decided | Quayle — **miss** | 0.7035 vs 0.7031 |
+| `developer_payment_incident_…` | control | the payment fix — **right** | 0.8526 vs 0.7101 next |
+| `field_engineer_site_outage_…` | control | the site restore — **right** | 0.7884 vs 0.7422 next |
+
+The margins in the decided four are tiny on purpose: the features are near-equal
+and only an earlier deadline tips the baseline the wrong way, so any real push from
+the hierarchy is enough to change the answer. The two cheap deadline baselines
+behave the same way (2/6, exactly the controls); `DummyModel` gets the two whose
+answer is listed first and `LongestDescriptionModel` gets none (see
+`eval/personas/README.md`). `tests/test_baseline_ignores_hierarchy.py` pins both
+halves of this: the baseline's results are identical with and without parents, and
+it misses the "designed to change" scenario. `tests/test_personas.py` pins the shape: one per role,
+at least three decided and one or two controls, near-equal rivals (same tier and
+effort, the answer due 0-2 hours later), no two candidates fitting the free time
+together, and the answer never the longest description.
+
+`make eval` prints three lines for this: `[original set: all but
+hierarchy_decides]` (36), `[hierarchy_decides]` (6) and `[combined]` (42); `report.json`
+carries the first as `original_set`.
+
+### Every scenario with a hierarchy, and what it checks
+
+27 of the 42 scenarios have at least one parent (21 of the original 36, and all six
+in `hierarchy_decides/`); the other 15 are fully orphan — mostly live incidents and
+deadline-decided pairs, where the `expected_reason` gives no initiative for the
+tasks to serve. Every node was checked against its scenario's task descriptions and
+`expected_reason`, and nothing else. `tests/test_hierarchy_links.py` holds this
+table as data and fails if the fixture drifts from it.
+
+| Scenario | Hierarchy (✱ = correct answer) | Importance from | What it checks |
+|---|---|---|---|
+| `manager_status_digest_vs_reorg_proposal` | reorg✱ high → high (2 levels); status low; survey orphan | text | Hierarchy agrees with the answer (the first "designed to change" pick, replaced — see above) |
+| `developer_prod_crash_vs_backlog_feature` | widget high; crash✱ and wiki orphans | constructed | Designed not to change (above) |
+| `developer_owns_arch_decision_vs_dep_bump` | arch✱ high; bump orphan | text | Hierarchy agrees with the answer — no-harm check |
+| `developer_blocked_oauth_vs_pr_review` | oauth (blocked) high; pr✱ orphan | constructed | Blocked beats an important parent |
+| `manager_sprint_plan_vs_1on1_notes` | sprint✱ medium; notes and expenses orphans | text | No-harm check, medium level |
+| `higher_manager_stalled_renewal_vs_market_expansion` | renewal✱ high; expansion medium; filler orphan | text | The distractor is an initiative too, just a less important one |
+| `salesperson_expense_report_vs_departed_champion` | champion✱ high; expense and CRM orphans | text | Undated task under an important deal vs. dated routine admin |
+| `salesperson_contract_redlines_vs_cold_prospecting` | redlines✱ medium; prospecting high; CRM orphan | constructed | A hard deadline the signature depends on beats a task under a *more* important parent |
+| `higher_manager_regulatory_filing_vs_strategy_section` | strategy high; filing✱ orphan | text | Same tier: a statutory deadline today beats an important parent |
+| `ceo_regulator_call_vs_board_prep` | board high → high (2 levels); regulator✱ orphan | constructed | A deep, important chain on the *losing* task |
+| `manager_blocked_hire_vs_budget_review` | hire (blocked) high; budget✱ medium | constructed | Blocked beats a *more* important parent |
+| `higher_manager_blocked_budget_vs_headcount_plan` | both under one shared high node; budget blocked | text | Identical hierarchy — only `blocked` separates them |
+| `ceo_overdue_launch_statement_vs_earnings_prep` | statement low (launch already happened); earnings✱ high | text | A low-importance initiative, from the reason itself |
+| `higher_manager_board_deck_vs_reorg_memo` | deck✱ high; memo low (still exploratory) | text | A low-importance initiative of a different kind |
+| `ceo_investor_update_vs_allhands_prep` | two different parents, both high | constructed | Control: equal hierarchy, the deadline decides |
+| `manager_escalation_call_vs_design_review` | escalation✱ medium (1 level); review medium → medium (2 levels) | constructed | Control: equal importance, different depth only |
+| `salesperson_processing_cutoff_vs_call_summary` | both under one shared high node | constructed | Control: the same parent — hierarchy cannot separate them |
+| `field_engineer_customer_degradation_vs_internal_tooling` | script medium; degradation✱ and inventory orphans | text | An orphan with no deadline wins on customer impact alone |
+| `salesperson_dead_rfp_vs_live_signing_round` | rfp low (deal already lost); signing✱ high; QBR orphan (a routine review) | text | A dead initiative — even though the text calls it the second-largest opportunity |
+| `ceo_own_investor_commitment_vs_unaccepted_keynote_request` | investor✱ high; acquisitions low (exploratory); keynote orphan (never accepted) | text | Three levels in one scenario |
+| `higher_manager_approved_vision_memo_vs_expiring_capacity_offer` | vision high; capacity✱ high; travel exceptions orphan | text | An important parent over a now-trivial task (only formatting left) |
+| `hierarchy_decides/manager_restructuring_team_signoff_vs_maintenance_team_signoff` | atlas✱ high → high (2 levels); birchwood low; filler orphan | constructed, named in the reason | **Decides:** two-level chain — the week-7 "designed to change" scenario |
+| `hierarchy_decides/salesperson_core_target_proposal_vs_paused_vertical_proposal` | northgate✱ high; pinecrest low (paused); filler orphan | constructed, named in the reason | **Decides:** deprioritized initiative |
+| `hierarchy_decides/higher_manager_migration_budget_vs_reporting_requests` | orion✱ high; both ledger requests under one low node | constructed, named in the reason | **Decides:** branch — one child of an important parent vs two of an unimportant one |
+| `hierarchy_decides/ceo_expansion_partnership_vs_wound_down_line_partnership` | halvorsen✱ medium → high; quayle medium → low; filler orphan | constructed, named in the reason | **Decides:** equal parents, only the grandparents differ |
+| `hierarchy_decides/developer_payment_incident_vs_migration_steps` | both migration steps high → high; payment✱ orphan | constructed, named in the reason | **Control:** a live payment failure with an SLA beats a deep, important chain |
+| `hierarchy_decides/field_engineer_site_outage_vs_rollout_survey` | survey high; site restore✱ low; filler orphan | constructed, named in the reason | **Control:** a hard signal wins although its own parent is low |
+
+Comparisons *within* one scenario (the controls, the shared-parent pairs) are the
+clean ones: same time, same persona, only the hierarchy differs. Comparisons
+*across* scenarios (e.g. `oauth` vs. `arch`, both high parents, one blocked) also
+differ in deadlines and wording, so they are suggestive, not controlled.
+
+### What did not change
+
+In the original 36, no candidate list, `expected_top_task_id` or `expected_reason`
+changed — only `parent_task_id` values, plus the new `eval/hierarchy/` and the
+regenerated `personas.sha256` and `scenario.schema.json`. A model that ignores
+`parent_task_id` scores exactly as before on them: `skip-blocked-nearest-deadline`
+is **58.3% (21/36)** on the original set before and after (the number
+`eval/personas/README.md` records for the set this change was made on). The six
+`hierarchy_decides/` scenarios are new, so the combined number (42) is new too.
+
+That holds for any model that does not read `parent_task_id`, and R2's
+`SegmentedRankingModel` is now one of them. The mentor decided that the baseline
+must not read `parent_task_id` at all: the hierarchy is the stretch's input, and a
+baseline that already uses it leaves nothing for the stretch to be measured
+against. #797 removed the baseline's `belongs_to_initiative` feature, and
+`tests/test_baseline_ignores_hierarchy.py` runs `SegmentedRankingModel` on the set
+with the parents and with every `parent_task_id` set to null and asserts the same
+pick and the same scores in every scenario, so the baseline stays free of hierarchy
+from now on.
+
+`team_lead_approved` was left as it was on every touched scenario. The change is
+additive — a new field value pointing outside the scenario — and leaves
+everything the approval was about (the candidates, the correct answer, the
+reason) exactly as approved. The delta itself goes to review as one PR, so the
+approval covers it explicitly rather than by silence.
+
 ## Baseline score
 
 The number the week-7 stretch is measured against (#486). Once recorded, an
@@ -169,7 +435,7 @@ The baseline is written to its own committed file:
 
 ```bash
 git rev-parse HEAD                                 # -> <model-sha>
-git log -1 --format=%H -- eval/personas            # -> <persona-set-sha>
+git log -1 --format=%H -- eval/personas eval/hierarchy  # -> <persona-set-sha>
 python -m mind.evaluation.run --model <model> \
     --record-baseline eval/baselines/baseline_score_<YYYY-MM-DD>.json \
     --model-commit <model-sha> --persona-set-commit <persona-set-sha>
@@ -189,10 +455,15 @@ manual spot-check and the week-7 comparison).
   real run that follows).
 - **The persona set is identified by a checksum, computed automatically.** The
   record stores `personas_checksum.compute_personas_checksum` of the persona
-  directory that was scored (the same checksum `make lint` checks against
-  `eval/personas/personas.sha256`). It is computed from the files themselves, so
+  directory that was scored **and of the hierarchy given with `--hierarchy`**
+  (default `eval/hierarchy`; its path is stored as `persona_set.hierarchy_path`).
+  Both `persona_set.path` and `persona_set.hierarchy_path` are stored relative to
+  `teams/mind` (`eval/personas`, `eval/hierarchy`), however they were passed, so a
+  committed record never carries the recorder's own directory layout and reads
+  the same on every machine. For the real set that is the same checksum `make lint` checks against
+  `eval/personas/personas.sha256`. It is computed from the files themselves, so
   it cannot be typed wrong, and it describes exactly what was scored, including
-  uncommitted edits to the scenarios. `load_baseline_record` refuses to load a
+  uncommitted edits to the scenarios or to a node's importance. `load_baseline_record` refuses to load a
   baseline when the current set's checksum differs from the recorded one: that is
   the "same fixed set" guarantee for the baseline-vs-stretch comparison.
 - **Both commits are required and must look like a git sha** (7-40 lowercase
@@ -214,7 +485,7 @@ fails any of them is refused, with an error naming the field. The per-group and
 per-role slices must also add up to `combined`.
 `format_version` (currently `1`) lets a reader say "this record is an older/newer
 format" if a field is ever renamed or removed, instead of a validation error.
-`baseline_record.load_baseline_record(path, personas_path=...)` reads a record back into the
+`baseline_record.load_baseline_record(path, personas_path=..., hierarchy_dir=...)` reads a record back into the
 `Report` it was written from, so the week-7 comparison (#487) diffs the stretch
 run against the recorded baseline instead of a re-run.
 

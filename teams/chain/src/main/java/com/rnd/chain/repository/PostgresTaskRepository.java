@@ -101,7 +101,7 @@ public class PostgresTaskRepository implements TaskRepository {
         TaskEntity entity = locked.get();
         if (entity.getDeletedAt() != null) {
             // Mutator must not be invoked at all against a soft-deleted task - matches
-            // InMemoryTaskRepository/TaskRepositoryContractTest#update_leavesSoftDeletedTaskUntouched.
+            // TaskRepositoryContractTest#update_leavesSoftDeletedTaskUntouched.
             return Optional.empty();
         }
 

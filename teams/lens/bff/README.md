@@ -99,14 +99,14 @@ Basic liveness check (`StatusController`).
 
 ### Admin "Users" screen — `/manager/users/**`
 
-Called only by Gateway's `ManagerUsersController`, which enforces
-`hasRole("MANAGER")` before any of these are reached (task spec:
+Called only by Gateway's `ManagerUsersController` (task spec:
 `manager-users-screen-task.md`). Unlike every endpoint above, this is a
 **real** call to Inbox — see `InboxUserClient`'s javadoc.
 
 | Endpoint | Method | Purpose |
 |----------|--------|---------|
 | `/manager/users` | GET | Paginated users list (`?page&size&sort`) |
+| `/manager/users` | POST | Create a user (`displayName` + LENS `role` required) in the acting manager's own tenant — 201; 409 if the email/username exists |
 | `/manager/users/{id}` | GET | One user's details — 404 if the id doesn't exist |
 | `/manager/users/{id}` | PATCH | Edit `displayName`/`firstName`/`lastName`/`phone` only — any other field in the body is dropped before it reaches Inbox |
 | `/manager/users/{id}/status` | PATCH | `{status}` — `ACTIVE`/`SUSPENDED`/`DISABLED`; 409 if the actor targets their own id |
@@ -120,6 +120,14 @@ Called only by Gateway's `ManagerUsersController`, which enforces
 - `role` in the response is the LENS role (`MANAGER`/`EMPLOYEE`), mapped from
   Inbox's own role string by `LensRoleMapper` — see that class's javadoc for
   the mapping's limits. Inbox's `tenant` is never exposed.
+- Creating a user: `role` is the LENS role — `MANAGER` becomes Inbox's
+  `TENANT_ADMIN`, `EMPLOYEE` stays `EMPLOYEE`. The tenant is never taken from
+  the request — BFF reads it from the acting manager's own Inbox record. Inbox
+  only lets `SYSTEM_ADMIN`/`TENANT_ADMIN` create users, so `INBOX_DEV_ACTOR_ID`
+  must be one of those for this to work locally.
+- Inbox's JSON is snake_case (`display_name`, `total_elements`):
+  `InboxUserClient` converts request keys and the `InboxUser*` records map the
+  responses (`@JsonNaming`).
 - Errors: Inbox's own 404/409/400/403 pass through as-is
   (`InboxResponseException`); unreachable/timeout/5xx becomes 503
   (`ServiceUnavailableException`).

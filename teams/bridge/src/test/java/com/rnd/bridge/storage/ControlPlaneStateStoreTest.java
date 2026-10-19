@@ -25,11 +25,11 @@ class ControlPlaneStateStoreTest {
 
     @Test
     void updateStartsFromEmptyValueWhenKeyDoesNotExistYet() {
-        String[] result = store.update("_dedup/MEETING/demo-tenant.json", String[].class, new String[0],
+        String[] result = store.update("_dedup/ZOOM/demo-tenant.json", String[].class, new String[0],
                 current -> new String[] {"sha256:aaa"});
 
         assertThat(result).containsExactly("sha256:aaa");
-        assertThat(fakeObjects).containsKey("_dedup/MEETING/demo-tenant.json");
+        assertThat(fakeObjects).containsKey("_dedup/ZOOM/demo-tenant.json");
     }
 
     @Test
@@ -56,7 +56,7 @@ class ControlPlaneStateStoreTest {
                 try {
                     for (int j = 0; j < updatesPerCaller; j++) {
                         String hash = "sha256:" + callerId + "-" + j;
-                        store.update("_dedup/MEETING/demo-tenant.json", String[].class, new String[0],
+                        store.update("_dedup/ZOOM/demo-tenant.json", String[].class, new String[0],
                                 current -> appendIfAbsent(current, hash));
                     }
                 } finally {
@@ -68,7 +68,7 @@ class ControlPlaneStateStoreTest {
         assertThat(done.await(20, TimeUnit.SECONDS)).isTrue();
         pool.shutdown();
 
-        String[] finalState = store.update("_dedup/MEETING/demo-tenant.json", String[].class, new String[0],
+        String[] finalState = store.update("_dedup/ZOOM/demo-tenant.json", String[].class, new String[0],
                 current -> current);
         assertThat(finalState).hasSize(callers * updatesPerCaller);
     }

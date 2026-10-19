@@ -2,6 +2,7 @@ package com.rnd.gateway.controller;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.rnd.gateway.dto.UserCreateRequestDTO;
 import com.rnd.gateway.dto.UserDetailsDTO;
 import com.rnd.gateway.dto.UserListResponseDTO;
 import com.rnd.gateway.dto.UserStatusUpdateRequestDTO;
@@ -101,6 +102,17 @@ public class ManagerUsersController {
         }
 
         return forward(urlBuilder.toUriString(), HttpMethod.GET, headers, null, UserListResponseDTO.class);
+    }
+
+    @Operation(summary = "Create a user", description = "Created in the acting manager's own tenant; role is MANAGER | EMPLOYEE. 409 if the email/username already exists.")
+    @PostMapping
+    public ResponseEntity<UserDetailsDTO> createUser(@Valid @RequestBody UserCreateRequestDTO body) {
+        HttpHeaders headers = buildForwardingHeaders();
+        logger.info("Manager user create request - actorId: {}, role: {}", headers.getFirst("X-User-Id"), body.getRole());
+
+        String url = UriComponentsBuilder.fromHttpUrl(bffServiceUrl).path(bffUsersPath).toUriString();
+
+        return forward(url, HttpMethod.POST, headers, body, UserDetailsDTO.class);
     }
 
     @Operation(summary = "Get user details", description = "Single user, MANAGER only.")

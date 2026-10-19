@@ -72,6 +72,6 @@ class RawObjectEventSerializationRoundTripTest {
         assertThat(deserialized.getChangeSignificanceScore()).isEqualTo(100);
         assertThat(deserialized.getObjectsList()).hasSize(1);
         assertThat(deserialized.getObjects(0).getRole())
-                .isEqualTo(com.rnd.bridge.shared.unstructured.dto.Role.TRANSCRIPT);
+                .isEqualTo(com.rnd.bridge.shared.unstructured.dto.Role.ROLE_TRANSCRIPT);
     }
 }

@@ -21,16 +21,15 @@ import java.util.UUID;
 
 /**
  * Postgres-backed {@link ConstraintRepository}, plain JDBC (no JPA/Hibernate) - matching the
- * hand-written-repository convention {@link TaskDependencyRepository}'s in-memory implementation
- * already follows in this module, per the team-lead decision on issue #378/#271 (2026-09-17):
+ * hand-written-repository convention the other repositories in this module follow,
+ * per the team-lead decision on issue #378/#271 (2026-09-17):
  * Chain's repositories are hand-written interfaces, not Spring Data, and the operations needed
  * here (upsert, row locking) are raw SQL anyway.
  *
  * <p>Registered as a bean via {@code ConstraintRepositoryConfig}, not component-scanned directly
  * (a {@code @Bean} factory method with {@code @ConditionalOnMissingBean}, not the annotation on
  * this class itself - the latter doesn't reliably self-register outside true auto-configuration
- * classes). Same reasoning as why {@code InMemoryTaskRepository} isn't a {@code @Component}
- * either; {@code MockDataConfig} wires it the same way.
+ * classes).
  *
  * <p>{@code reason} is stored as {@code jsonb} - read back as plain text and parsed with Jackson,
  * written via a {@link PGobject} typed {@code "jsonb"} (required for the Postgres JDBC driver to
@@ -38,7 +37,7 @@ import java.util.UUID;
  *
  * <p>{@link #save} uses {@code xmax = 0} (Postgres's own way of reporting "this row was just
  * inserted, not updated by the ON CONFLICT branch") instead of a {@code SELECT COUNT(*)} or an
- * in-memory idempotency ledger - see teams/chain/CLAUDE.md "Key decisions" (2026-09-22) for why.
+ * separate idempotency ledger - see teams/chain/CLAUDE.md "Key decisions" (2026-09-22) for why.
  * {@link #updateStatus} reads the row's previous status inside the same atomic statement (a CTE
  * under {@code FOR UPDATE}) rather than as a separate read, so no other writer can change the row
  * between the read and the write.

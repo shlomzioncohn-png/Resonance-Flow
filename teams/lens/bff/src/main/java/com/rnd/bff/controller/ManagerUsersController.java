@@ -1,5 +1,6 @@
 package com.rnd.bff.controller;
 
+import com.rnd.bff.dto.UserCreateRequestDTO;
 import com.rnd.bff.dto.UserDetailsDTO;
 import com.rnd.bff.dto.UserListResponseDTO;
 import com.rnd.bff.dto.UserStatusUpdateRequestDTO;
@@ -9,6 +10,7 @@ import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
@@ -47,6 +49,16 @@ public class ManagerUsersController {
 
         logger.info("Users list request - actorId: {}, page: {}, size: {}, sort: {}", userId, page, size, sort);
         return ResponseEntity.ok(managerUsersService.listUsers(userId, page, size, sort));
+    }
+
+    @Operation(summary = "Create a user", description = "Created in the acting manager's own tenant. role is MANAGER | EMPLOYEE. 409 if the email/username already exists.")
+    @PostMapping
+    public ResponseEntity<UserDetailsDTO> createUser(
+            @RequestBody UserCreateRequestDTO body,
+            @RequestHeader("X-User-Id") String userId) {
+
+        logger.info("User create request - actorId: {}, role: {}", userId, body.getRole());
+        return ResponseEntity.status(HttpStatus.CREATED).body(managerUsersService.createUser(userId, body));
     }
 
     @Operation(summary = "Get user details", description = "404 if the user id doesn't exist.")
