@@ -129,7 +129,8 @@ src/main/resources/db/migration/  # Flyway migrations (V1 schema, V2 dependency_
                                   # V9 task_state_history - issue #773,
                                   # V10 processed_events - Kafka event dedup claims,
                                   # V11 task readiness view + indexes,
-                                  # V12 constraint_history - issue #815)
+                                  # V12 constraint_history - issue #815,
+                                  # V13 drops unresolved_dependencies - replaced by placeholder tasks)
 src/test/java/com/rnd/chain/
 ├── controller/ChainControllerTest.java
 ├── service/                # TaskDependencyServicePostgresIntegrationTest,
