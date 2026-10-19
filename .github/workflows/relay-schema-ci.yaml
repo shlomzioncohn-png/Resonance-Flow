@@ -11,7 +11,8 @@ name: Relay / schema compatibility (PR)
 #
 # schema-compat resolves that base at run time, not from the event's frozen
 # base.sha: a rerun or a quick reopen otherwise checks against a stale base and
-# misses a directive (e.g. "# reset:") that just landed there (#620).
+# misses a directive (e.g. "# reset:") that just landed there (#620). If the
+# live base can't be used (ref gone, or a conflict), it falls back to base.sha.
 #
 # The schema list and the compatibility level come from that base ref too (via
 # `git show`), not from the PR, so a PR can't weaken its own gate. The workflow
@@ -68,18 +69,29 @@ jobs:
     steps:
       - uses: actions/checkout@v7
         with:
-          # the PR head, merged onto the live base below - the event's merge commit may predate it
-          ref: ${{ github.event.pull_request.head.sha }}
           # the scripts read the base branch's schema files / list / level via `git show`
           fetch-depth: 0
 
-      # Files and policy from one snapshot: re-merging keeps the checkout in step with the base it's checked against.
-      - name: Merge the PR onto the live base tip
+      # Files and policy from one snapshot: the live base is merged into the checkout, not just passed to the scripts.
+      # Base ref gone (renamed/deleted) or a conflict -> fall back to the event's base: that is not a schema verdict,
+      # and a conflicting PR can't merge until a new push, which re-runs this against the fresh base.
+      - name: Merge the live base tip into the checkout
         id: base
+        env:
+          EVENT_BASE_SHA: ${{ github.event.pull_request.base.sha }}
         run: |
-          BASE_SHA="$(git rev-parse "origin/${GITHUB_BASE_REF}")"
-          echo "Base ${GITHUB_BASE_REF} is at ${BASE_SHA}"
-          git -c user.name=schema-ci -c user.email=schema-ci@localhost merge --no-edit "$BASE_SHA"
+          BASE_SHA="$EVENT_BASE_SHA"
+          if ! LIVE_SHA="$(git rev-parse --verify --quiet "refs/remotes/origin/${GITHUB_BASE_REF}^{commit}")"; then
+            echo "::warning::Base branch '${GITHUB_BASE_REF}' no longer exists - checking against the event's base ${EVENT_BASE_SHA}."
+          elif [ "$LIVE_SHA" = "$EVENT_BASE_SHA" ]; then
+            echo "Base ${GITHUB_BASE_REF} has not moved since the event (${LIVE_SHA})."
+          elif git -c user.name=schema-ci -c user.email=schema-ci@localhost merge --no-edit "$LIVE_SHA"; then
+            echo "Merged live base ${GITHUB_BASE_REF} at ${LIVE_SHA}."
+            BASE_SHA="$LIVE_SHA"
+          else
+            git merge --abort
+            echo "::warning::PR conflicts with the live tip of '${GITHUB_BASE_REF}' (${LIVE_SHA}) - checking against the event's base ${EVENT_BASE_SHA}. Resolve the conflict to re-check."
+          fi
           echo "sha=${BASE_SHA}" >> "$GITHUB_OUTPUT"
 
       - name: Point at this job's Schema Registry port
