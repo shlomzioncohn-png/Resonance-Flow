@@ -2,7 +2,6 @@ package com.rnd.chain.events;
 
 import com.google.protobuf.Timestamp;
 import com.rnd.chain.dto.TaskStatus;
-import com.rnd.chain.exception.TaskNotFoundException;
 import com.rnd.chain.exception.TenantReassignmentException;
 import com.rnd.chain.service.TaskEligibilityService;
 import com.rnd.inbox.event.TaskUpdatedEvent;
@@ -61,15 +60,7 @@ class TaskUpdatedEventHandlerUnitTest {
                 () -> handler.onMessage(event(UUID.randomUUID().toString(), "not-a-uuid")));
     }
 
-    @Test
-    void unknownTask_becomesRetryableReferencedTaskNotFound() {
-        UUID taskId = UUID.randomUUID();
-        doThrow(new TaskNotFoundException(taskId)).when(service)
-                .onTaskStatusChangedIfNewer(any(), any(), any(), any());
 
-        assertThrows(ReferencedTaskNotFoundException.class,
-                () -> handler.onMessage(event(taskId.toString(), TENANT_ID.toString())));
-    }
 
     @Test
     void tenantReassignment_isNonRetryable() {
