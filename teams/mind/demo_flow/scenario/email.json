@@ -1,0 +1,14 @@
+{
+  "tenantId": "demo-tenant",
+  "from": "lisa.grant@northwind.example",
+  "to": ["dana@brightline.example"],
+  "subject": "Supplier registration form - please return by Friday",
+  "date": "2026-10-05T11:15:00Z",
+  "body": "Hi Dana,\n\nThanks for the call earlier today. To set Brightline Sensors up in our vendor system, please complete, sign and return the attached supplier registration form by Friday. A scanned copy of the form is attached.\n\nBest regards,\nLisa Grant\nProcurement, Northwind Traders",
+  "attachments": [
+    {
+      "filename": "supplier_form.jpg",
+      "mimeType": "image/jpeg"
+    }
+  ]
+}
