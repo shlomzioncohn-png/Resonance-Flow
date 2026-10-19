@@ -1,5 +1,6 @@
 import logging
 from collections.abc import Callable
+from enum import Enum
 from typing import Any
 from uuid import UUID
 
@@ -7,7 +8,7 @@ import pytest
 
 from mind.contracts.raw_object_event_enums import Modality, ObjectRole, RawSourceType
 from mind.ingestion.normalized_record import NormalizedRecord
-from mind.ingestion.to_text import MediaUnavailable, to_texts
+from mind.ingestion.to_text import RETRY_REASONS, SKIP_REASONS, MediaUnavailable, to_texts
 from mind.multimodal.asr import ASRFailureReason, ASRResult
 from mind.multimodal.ocr import OCRFailureReason, OCRResult
 
@@ -41,6 +42,15 @@ def _returns(result: Any) -> Callable[..., Any]:
     def pipeline(content: bytes, *, filename: str = "") -> Any:
         pipeline.calls.append((content, filename))  # type: ignore[attr-defined]
         return result
+
+    pipeline.calls = []  # type: ignore[attr-defined]
+    return pipeline
+
+
+def _returns_in_turn(*results: Any) -> Callable[..., Any]:
+    def pipeline(content: bytes, *, filename: str = "") -> Any:
+        pipeline.calls.append((content, filename))  # type: ignore[attr-defined]
+        return results[len(pipeline.calls) - 1]  # type: ignore[attr-defined]
 
     pipeline.calls = []  # type: ignore[attr-defined]
     return pipeline
@@ -95,6 +105,9 @@ def test_the_pipelines_get_the_bytes_and_the_file_name() -> None:
         OCRResult(success=False, reason=OCRFailureReason.NO_TEXT_RECOGNIZED, error="blank"),
         # BUG: retrying fails the same way and would block every item behind it.
         OCRResult(success=False, reason=OCRFailureReason.INTERNAL_ERROR, error="boom"),
+        # The tool ran and failed (a page past its timeout): ENVIRONMENT in R4's
+        # categories, but it can be this one file, so a retry may never pass.
+        OCRResult(success=False, reason=OCRFailureReason.OCR_FAILED, error="timeout"),
     ],
 )
 def test_a_failure_that_retrying_cannot_fix_skips_only_that_record(
@@ -102,6 +115,13 @@ def test_a_failure_that_retrying_cannot_fix_skips_only_that_record(
 ) -> None:
     assert _texts([SCAN, TRANSCRIPT], ocr=_returns(failure)) == ["WEBVTT ready"]
     assert "quote.pdf" in caplog.text
+
+
+def test_a_recording_the_asr_failed_on_is_skipped(caplog: pytest.LogCaptureFixture) -> None:
+    failed = ASRResult(success=False, reason=ASRFailureReason.ASR_FAILED, error="decoder crashed")
+
+    assert _texts([RECORDING, SCAN], asr=_returns(failed)) == ["price quote"]
+    assert "meeting.wav" in caplog.text
 
 
 def test_text_that_is_not_utf8_is_skipped() -> None:
@@ -134,3 +154,50 @@ def test_a_missing_model_or_binary_stops_the_item_so_it_is_retried(
 ) -> None:
     with pytest.raises(MediaUnavailable):
         _texts(records, **{name: _returns(result) for name, result in pipeline.items()})
+
+
+def test_every_ocr_and_asr_failure_reason_has_exactly_one_decision() -> None:
+    # The reasons are R4's (multimodal/). A new one must be placed here on
+    # purpose, retry or skip, rather than fall into skip unnoticed. Counted by
+    # identity: they are str enums, so OCR's EMPTY_INPUT == ASR's EMPTY_INPUT.
+    decided = [*RETRY_REASONS, *SKIP_REASONS]
+
+    for reason in [*OCRFailureReason, *ASRFailureReason]:
+        assert sum(reason is d for d in decided) == 1, reason
+
+
+def test_a_tool_failure_is_tried_once_more_and_may_pass() -> None:
+    # OCR_FAILED can be a timeout on a busy host, not the file.
+    ocr = _returns_in_turn(
+        OCRResult(success=False, reason=OCRFailureReason.OCR_FAILED, error="timeout"),
+        OCRResult(success=True, text="price quote"),
+    )
+
+    assert _texts([SCAN], ocr=ocr) == ["price quote"]
+    assert len(ocr.calls) == 2  # type: ignore[attr-defined]
+
+
+def test_a_failure_of_the_file_itself_is_not_tried_again() -> None:
+    ocr = _returns(OCRResult(success=False, reason=OCRFailureReason.NO_TEXT_RECOGNIZED, error="x"))
+
+    assert _texts([SCAN], ocr=ocr) == []
+    assert len(ocr.calls) == 1  # type: ignore[attr-defined]
+
+
+class _NewReason(str, Enum):
+    GPU_MELTED = "GPU_MELTED"  # one R4 might add before Mind decides on it
+
+
+class _UndecidedFailure:
+    success = False
+    text = ""
+    reason = _NewReason.GPU_MELTED
+    error = "no decision for this one"
+    failure_category = None
+
+
+def test_a_reason_without_a_decision_is_skipped_and_named(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    assert _texts([SCAN, TRANSCRIPT], ocr=_returns(_UndecidedFailure())) == ["WEBVTT ready"]
+    assert "undecided" in caplog.text

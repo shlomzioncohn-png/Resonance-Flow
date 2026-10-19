@@ -72,6 +72,8 @@ class ObjectStorageSettings(BaseSettings):
     bucket: str = "bridge-raw"
     access_key: str
     secret_key: str
+    # Larger objects are skipped, not read: the process's memory is the limit.
+    max_object_bytes: int = Field(default=100 * 1024 * 1024, gt=0)
 
 
 class MonitoringSettings(BaseSettings):

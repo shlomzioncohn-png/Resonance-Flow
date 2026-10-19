@@ -15,7 +15,10 @@ from collections.abc import Callable
 from datetime import UTC, datetime
 from typing import Any
 
+from pydantic import ValidationError
+
 from mind.contracts import RawObjectEvent
+from mind.ingestion.raw_object_event_handler import InvalidEvent
 from mind.messaging.raw_object_event_pb2 import (
     ChangeType,
     Classification,
@@ -34,40 +37,53 @@ from mind.messaging.raw_object_event_pb2 import RawObjectEvent as RawObjectEvent
 def _mind_name(name_of: Callable[[int], str], prefix: str, value: int) -> str:
     """ROLE_BODY -> "BODY"."""
 
-    return name_of(value).removeprefix(f"{prefix}_")
+    try:
+        name = name_of(value)
+    except ValueError:
+        # A number our pb2 has no name for: Bridge added a value Mind has not
+        # regenerated yet. Bridge's input, not our bug.
+        raise InvalidEvent(f"{prefix} {value} is not in Mind's shared/proto") from None
+    return name.removeprefix(f"{prefix}_")
 
 
 def _time(message: Any, field: str) -> datetime | None:
-    return getattr(message, field).ToDatetime(tzinfo=UTC) if message.HasField(field) else None
+    if not message.HasField(field):
+        return None
+    try:
+        return getattr(message, field).ToDatetime(tzinfo=UTC)
+    except (ValueError, OverflowError) as e:
+        # Out of range (e.g. milliseconds sent as seconds): Bridge's input.
+        raise InvalidEvent(f"{field} is not a valid time: {e}") from None
 
 
 def to_raw_object_event(message: RawObjectEventMessage) -> RawObjectEvent:
-    """Raises ValueError (pydantic's ValidationError) for a message the contract rejects."""
+    """Raises InvalidEvent for a message the contract rejects."""
 
-    return RawObjectEvent.model_validate(
-        {
-            "schema_version": message.schema_version,
-            "source_type": _mind_name(SourceType.Name, "SOURCE_TYPE", message.source_type),
-            "tenant_id": message.tenant_id,
-            "ingested_at": _time(message, "ingested_at"),
-            "scope_decision": _mind_name(
-                ScopeDecision.Name, "SCOPE_DECISION", message.scope_decision
-            ),
-            "participants": list(message.participants) or None,
-            "source_timestamp": _time(message, "source_timestamp"),
-            "correlation_id": message.correlation_id,
-            "revision": message.revision,
-            "change_type": _mind_name(ChangeType.Name, "CHANGE_TYPE", message.change_type),
-            "change_significance_score": message.change_significance_score,
-            "objects": [_object(ref) for ref in message.objects],
-            "source_ref": message.source_ref if message.HasField("source_ref") else None,
-            "classification": (
-                _classification(message.classification)
-                if message.HasField("classification")
-                else None
-            ),
-        }
-    )
+    try:
+        return RawObjectEvent.model_validate(_event(message))
+    except ValidationError as e:
+        raise InvalidEvent(f"the contract rejects the message: {e}") from e
+
+
+def _event(message: RawObjectEventMessage) -> dict[str, Any]:
+    return {
+        "schema_version": message.schema_version,
+        "source_type": _mind_name(SourceType.Name, "SOURCE_TYPE", message.source_type),
+        "tenant_id": message.tenant_id,
+        "ingested_at": _time(message, "ingested_at"),
+        "scope_decision": _mind_name(ScopeDecision.Name, "SCOPE_DECISION", message.scope_decision),
+        "participants": list(message.participants) or None,
+        "source_timestamp": _time(message, "source_timestamp"),
+        "correlation_id": message.correlation_id,
+        "revision": message.revision,
+        "change_type": _mind_name(ChangeType.Name, "CHANGE_TYPE", message.change_type),
+        "change_significance_score": message.change_significance_score,
+        "objects": [_object(ref) for ref in message.objects],
+        "source_ref": message.source_ref if message.HasField("source_ref") else None,
+        "classification": (
+            _classification(message.classification) if message.HasField("classification") else None
+        ),
+    }
 
 
 def _object(ref: RawObjectRef) -> dict[str, Any]:

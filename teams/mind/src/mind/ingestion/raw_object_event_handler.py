@@ -12,14 +12,26 @@ from mind.ingestion.normalized_record import NormalizedRecord
 logger = logging.getLogger(__name__)
 
 
+class InvalidEvent(Exception):
+    """What Bridge sent cannot be processed, and never will be: the consumer
+    skips it. Raised on purpose, only where Bridge's input is checked, so a
+    ValueError from a bug of ours is not mistaken for it."""
+
+
 class ObjectNotFound(Exception):
     """The store has no object under this key. Readers raise it for that case
     only: any other failure (the store is down) must propagate, or a whole
     outage would be skipped object by object and lost."""
 
 
-# object_key -> bytes, raising ObjectNotFound when the key is absent. MinIO in
-# production; a dict in the tests.
+class ObjectTooLarge(Exception):
+    """The object is over the reader's size limit, so it was not read whole.
+    Reading it would risk the process's memory, and a crash there would come
+    back on the same message after every restart."""
+
+
+# object_key -> bytes, raising ObjectNotFound when the key is absent and
+# ObjectTooLarge when it is over the limit. MinIO in production; a dict in the tests.
 ObjectReader = Callable[[str], bytes]
 
 
@@ -33,8 +45,8 @@ def handle_raw_object_event(
     they are often private. SOURCE_METADATA describes the item rather than
     being its content, so it is skipped too.
 
-    A missing object, or one that does not match its content_hash, is logged
-    and skipped; the rest of the event still comes through.
+    A missing object, one too large to read, or one that does not match its
+    content_hash is logged and skipped; the rest of the event still comes through.
     """
 
     if event.change_type is ChangeType.DELETE_REVIEW:
@@ -47,7 +59,7 @@ def handle_raw_object_event(
     try:
         tenant_id = UUID(event.tenant_id)
     except ValueError:
-        raise ValueError(f"RawObjectEvent.tenant_id is not a UUID: {event.tenant_id!r}") from None
+        raise InvalidEvent(f"RawObjectEvent.tenant_id is not a UUID: {event.tenant_id!r}") from None
 
     records = []
     for obj in event.objects:
@@ -58,6 +70,13 @@ def handle_raw_object_event(
         except ObjectNotFound:
             logger.warning(
                 "raw_object_event: skipping missing object %s of %s",
+                obj.object_key,
+                event.correlation_id,
+            )
+            continue
+        except ObjectTooLarge:
+            logger.error(
+                "raw_object_event: skipping %s of %s, over the size limit",
                 obj.object_key,
                 event.correlation_id,
             )

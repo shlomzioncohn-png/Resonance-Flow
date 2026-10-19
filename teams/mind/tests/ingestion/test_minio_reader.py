@@ -4,10 +4,11 @@ import pytest
 from minio.error import S3Error
 
 from mind.ingestion.minio_reader import MinioObjectReader, minio_endpoint
-from mind.ingestion.raw_object_event_handler import ObjectNotFound
+from mind.ingestion.raw_object_event_handler import ObjectNotFound, ObjectTooLarge
 
 BUCKET = "bridge-raw"
 KEY = "ZOOM/550e8400-e29b-41d4-a716-446655440000/2026-10-18/meeting.vtt"
+LIMIT = 10  # bytes, small enough to test both sides of it
 
 
 def _s3_error(code: str) -> S3Error:
@@ -32,41 +33,67 @@ class _Response:
 
 
 class _Client:
-    """Stands in for minio.Minio: only get_object is used."""
+    """Stands in for minio.Minio: only get_object is used, with S3's range rules."""
 
     def __init__(self, objects: dict[str, bytes | Exception], error: S3Error | None = None) -> None:
         self.objects, self.error = objects, error
-        self.asked: list[tuple[str, str]] = []
+        self.asked: list[tuple[str, str, int]] = []
         self.responses: list[_Response] = []
 
-    def get_object(self, bucket_name: str, object_name: str) -> _Response:
-        self.asked.append((bucket_name, object_name))
+    def get_object(self, bucket_name: str, object_name: str, length: int = 0) -> _Response:
+        self.asked.append((bucket_name, object_name, length))
         if self.error is not None:
             raise self.error
         if object_name not in self.objects:
             raise _s3_error("NoSuchKey")
-        self.responses.append(_Response(self.objects[object_name]))
+        data = self.objects[object_name]
+        if isinstance(data, bytes) and length:
+            if not data:
+                raise _s3_error("InvalidRange")  # S3 refuses any range of an empty object
+            data = data[:length]
+        self.responses.append(_Response(data))
         return self.responses[-1]
+
+
+def _read(client: _Client) -> bytes:
+    return MinioObjectReader(client, BUCKET, max_bytes=LIMIT)(KEY)
 
 
 def test_an_object_is_read_from_the_bucket_and_its_connection_released() -> None:
     client = _Client({KEY: b"WEBVTT"})
 
-    assert MinioObjectReader(client, BUCKET)(KEY) == b"WEBVTT"
-    assert client.asked == [(BUCKET, KEY)]
+    assert _read(client) == b"WEBVTT"
+    assert client.asked == [(BUCKET, KEY, LIMIT + 1)]
     assert client.responses[0].released
+
+
+def test_an_object_over_the_limit_is_never_read_whole() -> None:
+    client = _Client({KEY: b"x" * (LIMIT + 5)})
+
+    with pytest.raises(ObjectTooLarge):
+        _read(client)
+    assert client.asked == [(BUCKET, KEY, LIMIT + 1)]  # at most one byte past the limit
+    assert client.responses[0].released
+
+
+def test_an_object_exactly_at_the_limit_is_read() -> None:
+    assert _read(_Client({KEY: b"x" * LIMIT})) == b"x" * LIMIT
+
+
+def test_an_empty_object_is_read_as_empty() -> None:
+    assert _read(_Client({KEY: b""})) == b""
 
 
 def test_a_missing_key_is_object_not_found() -> None:
     with pytest.raises(ObjectNotFound):
-        MinioObjectReader(_Client({}), BUCKET)(KEY)
+        _read(_Client({}))
 
 
 def test_a_read_cut_off_midway_still_releases_the_connection() -> None:
     client = _Client({KEY: ConnectionResetError("connection dropped")})
 
     with pytest.raises(ConnectionResetError):
-        MinioObjectReader(client, BUCKET)(KEY)
+        _read(client)
     assert client.responses[0].released
 
 
@@ -77,7 +104,7 @@ def test_any_other_storage_error_propagates(code: str) -> None:
     client = _Client({KEY: b"WEBVTT"}, error=_s3_error(code))
 
     with pytest.raises(S3Error):
-        MinioObjectReader(client, BUCKET)(KEY)
+        _read(client)
 
 
 @pytest.mark.parametrize(

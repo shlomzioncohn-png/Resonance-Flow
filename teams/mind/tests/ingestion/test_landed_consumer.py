@@ -102,6 +102,12 @@ def _no_model(records: list[NormalizedRecord]) -> list[tuple[NormalizedRecord, s
     raise MediaUnavailable("ASR_UNAVAILABLE")
 
 
+def _our_bug(records: list[NormalizedRecord]) -> list[tuple[NormalizedRecord, str]]:
+    # A ValueError of our own, not Bridge's: it must stop the consumer loudly,
+    # not be skipped as if the message were invalid.
+    raise ValueError("a bug in Mind")
+
+
 def _hand_off_fails(event: RawObjectEvent, texts: list[tuple[NormalizedRecord, str]]) -> None:
     raise RuntimeError("extraction down")
 
@@ -112,6 +118,7 @@ def _hand_off_fails(event: RawObjectEvent, texts: list[tuple[NormalizedRecord, s
         ({"read_object": _storage_down}, ConnectionError),
         ({"to_texts": _no_model}, MediaUnavailable),
         ({"on_texts": _hand_off_fails}, RuntimeError),
+        ({"to_texts": _our_bug}, ValueError),
     ],
 )
 def test_a_failure_that_may_pass_later_propagates_and_nothing_is_marked(

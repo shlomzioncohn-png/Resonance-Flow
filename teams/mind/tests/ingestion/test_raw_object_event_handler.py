@@ -1,4 +1,5 @@
 import hashlib
+import logging
 from typing import Any
 from uuid import UUID
 
@@ -7,8 +8,10 @@ import pytest
 from mind.contracts import RawObjectEvent
 from mind.contracts.raw_object_event_enums import ObjectRole
 from mind.ingestion.raw_object_event_handler import (
+    InvalidEvent,
     ObjectNotFound,
     ObjectReader,
+    ObjectTooLarge,
     handle_raw_object_event,
 )
 
@@ -105,6 +108,20 @@ def test_a_missing_object_is_skipped_and_the_rest_kept(caplog: pytest.LogCapture
     assert ATTACHMENT_KEY in caplog.text
 
 
+def test_an_object_too_large_to_read_is_skipped_loudly(caplog: pytest.LogCaptureFixture) -> None:
+    def attachment_too_large(key: str) -> bytes:
+        if key == ATTACHMENT_KEY:
+            raise ObjectTooLarge(key)
+        return STORE[key]
+
+    (record,) = handle_raw_object_event(_with_attachment(), attachment_too_large)
+
+    assert record.role is ObjectRole.BODY
+    assert any(
+        r.levelno == logging.ERROR and ATTACHMENT_KEY in r.getMessage() for r in caplog.records
+    )
+
+
 def test_a_storage_outage_is_not_mistaken_for_a_missing_object() -> None:
     def storage_down(key: str) -> bytes:
         raise ConnectionError("MinIO unreachable")
@@ -114,5 +131,5 @@ def test_a_storage_outage_is_not_mistaken_for_a_missing_object() -> None:
 
 
 def test_a_tenant_id_that_is_not_a_uuid_is_rejected() -> None:
-    with pytest.raises(ValueError):
+    with pytest.raises(InvalidEvent):
         handle_raw_object_event(_event(tenant_id="tenant-123"), _reader(STORE))

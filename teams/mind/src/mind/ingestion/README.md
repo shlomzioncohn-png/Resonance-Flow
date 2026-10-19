@@ -59,19 +59,32 @@ so each failure is one of two kinds:
 
 | what happened | what happens |
 |---|---|
-| the contract rejects the message | skipped, logged at ERROR |
-| `tenant_id` is not a UUID | skipped, logged at ERROR |
+| the contract rejects the message, an enum number Mind's pb2 lacks, or a time out of range | `InvalidEvent`: skipped, logged at ERROR |
+| `tenant_id` is not a UUID | `InvalidEvent`: skipped, logged at ERROR |
 | duplicate, late, or updated revision | skipped, logged at INFO |
 | a file is missing, or does not match its hash | that file skipped (WARNING), the rest goes on |
-| OCR/ASR: the file is the problem (DATA), or our bug (BUG) | that file skipped (WARNING), the rest goes on |
-| MinIO unreachable, or any MinIO error but a missing key | raised: the process stops, the message comes again |
-| OCR/ASR could not run here (ENVIRONMENT) | `MediaUnavailable` raised, same |
+| a file is over `max_object_bytes` | that file skipped (ERROR), the rest goes on |
+| OCR/ASR: the file is the problem (DATA) | that file skipped (WARNING), the rest goes on |
+| OCR/ASR: the tool ran and failed (`*_FAILED`) | tried once more; if it fails again, that file skipped (ERROR) |
+| OCR/ASR: our bug (BUG), or a reason with no decision yet | that file skipped (ERROR), the rest goes on |
+| OCR/ASR: the tool is missing here (`*_UNAVAILABLE`) | `MediaUnavailable` raised: the process stops, the message comes again |
+| MinIO unreachable, or any MinIO error but a missing key | raised, same |
 | the hand-off fails | raised, same |
+| any other error (a bug of ours) | raised, same: loud rather than lost |
 
 A skip is for what a retry cannot fix: the same message would fail the same
-way on every redelivery and block everything behind it. ERROR, not WARNING,
-because a contract change on Bridge's side sends every message there, and the
-log is the only place it shows.
+way on every redelivery and block everything behind it. A retry here has no
+bound (it is a restart on the same message), so only a failure the
+environment, not the item, can cause is retried. ERROR, not WARNING, where a
+skip may hide a problem of ours or the host's: a contract change on Bridge's
+side sends every message there, and the log is the only place it shows.
+
+Only `InvalidEvent` is skipped, never a bare `ValueError`: it is raised on
+purpose where Bridge's input is checked, so a bug of ours is not taken for
+Bridge's fault. Which OCR/ASR reason is retried is listed in `to_text.py`
+(`RETRY_REASONS` / `SKIP_REASONS`); the reasons are R4's, and a test fails
+until a new one is placed in exactly one of them. One that ships before the
+test has run is skipped with an "undecided failure reason" ERROR.
 
 Only `NoSuchKey` counts as a missing file, the same line Bridge's own
 `MinioObjectStorageClient` draws. A wrong bucket or an outage would otherwise
@@ -86,10 +99,14 @@ MIND_OBJECT_STORAGE__ACCESS_KEY=... MIND_OBJECT_STORAGE__SECRET_KEY=... make run
 `MIND_OBJECT_STORAGE__ENDPOINT` (default `http://localhost:9000`) and
 `MIND_OBJECT_STORAGE__BUCKET` (default `bridge-raw`) match Bridge's local
 defaults. The credentials have no default, so a missing one fails at start-up.
-Kafka and the Schema Registry come from `messaging/config.py`.
+`MIND_OBJECT_STORAGE__MAX_OBJECT_BYTES` (default 100 MB) caps what is read: at
+most one byte past it is fetched, whatever the event's `size_bytes` says.
+Kafka and the Schema Registry come from `messaging/config.py`; this consumer
+alone raises `max.poll.interval.ms` to 30 minutes (`conf_overrides`).
 
-Until extraction is wired in, `on_texts` logs each text (its item, file,
-length and first characters), which also shows the stage in a demo run.
+Until extraction is wired in, `on_texts` logs each text by its item, file and
+length, never its content (Bridge may have classified it HIGH sensitivity),
+which also shows the stage in a demo run.
 
 ## Not yet in
 
@@ -111,11 +128,31 @@ length and first characters), which also shows the stage in a demo run.
 - **Credentials in the cluster.** Helm mounts them as files under
   `/etc/resonance-flow/secrets/object-storage/`; this reads environment
   variables only.
-- **Long items and Kafka's poll interval.** One transcription is capped at
-  240 s (`TRANSCRIBE_TIMEOUT_S`), under Kafka's default 5 minutes between
-  polls. An event with two audio files to transcribe can exceed it, and Kafka
-  would then hand the message on as if the consumer had died. The interval is
-  not configurable per consumer in `messaging/config.py` today.
+- **An event that takes over 30 minutes.** OCR is capped at 200 s per file
+  and ASR at 240 s, and the poll interval is raised to 30 minutes, but an
+  event with many long media files (about five 10-page scans that each fail
+  and are tried twice, or ten that do not) can still exceed
+  it; Kafka then hands the message on as if the consumer had died, again and
+  again. If it happens: cap the media files processed per event.
+- **Large video.** A file over `max_object_bytes` (100 MB) is skipped, so a
+  long Zoom video recording yields no text in production. Audio-only
+  recordings of an hour fit. Raising the cap runs into the pod's memory
+  (Helm: 512Mi), which Whisper's ~2 GB peak already exceeds; to raise with R4
+  and Relay.
+- **`size_bytes` is not used to skip early.** An object the event already
+  reports as over `max_object_bytes` is still fetched up to the cap before it
+  is skipped: up to 100 MB of download, once per such item. Skipping on
+  `size_bytes` first needs the handler to know the reader's limit.
+- **A message that cannot be deserialized** (not Bridge's schema, a broken
+  frame) fails inside the shared `ProtobufConsumer.run`, before this handler,
+  and stops every consumer of Mind on it the same way. To fix there, for all
+  consumers: log and commit past it.
+- **An S3 error on one key only.** `AccessDenied` on a single object cannot be
+  told from wrong credentials for the whole bucket, so it is retried, and that
+  one object stops the topic until it is readable or removed.
+- **ASR missing stops everything.** `ASR_UNAVAILABLE` is retried so recordings
+  are not lost, which means a pod without Whisper also stops the text and OCR
+  items behind the first recording. An environment to fix, not a skip.
 
 ## Open with Bridge and Inbox
 

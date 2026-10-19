@@ -14,6 +14,7 @@ from mind.contracts.raw_object_event_enums import (
     ScopeDecision,
     Sensitivity,
 )
+from mind.ingestion.raw_object_event_handler import InvalidEvent
 from mind.ingestion.raw_object_event_proto import to_raw_object_event
 from mind.messaging import raw_object_event_pb2 as pb
 
@@ -113,6 +114,25 @@ def test_a_classification_with_no_quality_keeps_the_rest() -> None:
     assert event.classification.quality is None
 
 
-def test_a_message_without_a_source_type_is_rejected() -> None:
-    with pytest.raises(ValueError):
-        to_raw_object_event(_message(source_type=pb.SOURCE_TYPE_UNSPECIFIED))
+@pytest.mark.parametrize(
+    "source_type",
+    [
+        pb.SOURCE_TYPE_UNSPECIFIED,
+        # A value Bridge added before Mind regenerated its pb2: protobuf keeps
+        # the number, and has no name for it.
+        11,
+    ],
+)
+def test_a_source_type_mind_cannot_read_is_rejected(source_type: int) -> None:
+    with pytest.raises(InvalidEvent):
+        to_raw_object_event(_message(source_type=source_type))
+
+
+@pytest.mark.parametrize("field", ["ingested_at", "source_timestamp"])
+def test_a_time_out_of_range_is_rejected(field: str) -> None:
+    # Milliseconds written into the seconds field: past year 9999 for Python.
+    message = _message()
+    getattr(message, field).seconds = 1_760_000_000_000
+
+    with pytest.raises(InvalidEvent):
+        to_raw_object_event(message)
