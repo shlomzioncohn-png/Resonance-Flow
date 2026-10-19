@@ -66,12 +66,19 @@ public class TaskEligibilityService {
                 taskId,
                 "taskId must not be null");
 
+        TaskReadinessSnapshot readiness =
+                requireReadinessSnapshot(
+                        taskReadinessRepository.findByIds(List.of(taskId)),
+                        taskId);
+
         taskCounterUpdater.updateCounters(
                 taskId,
                 task -> TaskCounterUpdater.withCounters(
                         task,
                         task.getBlockingCount(),
-                        task.getOpenConstraintCount()));
+                        task.getOpenConstraintCount()),
+                readiness,
+                readiness);
     }
 
     @Transactional
@@ -191,7 +198,27 @@ public class TaskEligibilityService {
         graphLock.runExclusive(() -> {
 
             Task current =
-                    taskCounterUpdater.requireTask(taskId);
+                    taskRepository.findById(taskId).orElse(null);
+
+            if (current == null) {
+                Task newTask = Task.builder()
+                        .id(taskId)
+                        .parentTaskId(null)
+                        .tenantId(tenantId)
+                        .status(newStatus)
+                        .isReady(true)
+                        .blockingCount(0)
+                        .openConstraintCount(0)
+                        .estimatedDurationMin(null)
+                        .score(null)
+                        .createdAt(LocalDateTime.now())
+                        .updatedAt(eventUpdatedAt)
+                        .deletedAt(null)
+                        .build();
+
+                taskRepository.insertIfAbsent(newTask);
+                return;
+            }
 
             if (current.getTenantId() != null
                     && !current.getTenantId().equals(tenantId)) {

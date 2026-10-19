@@ -2,7 +2,10 @@ package com.rnd.chain.service;
 
 import com.rnd.chain.dto.Constraint;
 import com.rnd.chain.dto.TaskReadinessSnapshot;
+import com.rnd.chain.dto.ConstraintHistoryAction;
+import com.rnd.chain.dto.ConstraintHistoryEntry;
 import com.rnd.chain.exception.TaskNotFoundException;
+import com.rnd.chain.repository.ConstraintHistoryRepository;
 import com.rnd.chain.repository.ConstraintRepository;
 import com.rnd.chain.repository.TaskReadinessRepository;
 
@@ -11,6 +14,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.Instant;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
@@ -24,17 +28,20 @@ public class ConstraintEligibilityService {
             LoggerFactory.getLogger(ConstraintEligibilityService.class);
 
     private final ConstraintRepository constraintRepository;
+    private final ConstraintHistoryRepository constraintHistoryRepository;
     private final TaskCounterUpdater taskCounterUpdater;
     private final TaskReadinessRepository taskReadinessRepository;
     private final TaskStateHistoryRecorder historyRecorder;
 
     public ConstraintEligibilityService(
             ConstraintRepository constraintRepository,
+            ConstraintHistoryRepository constraintHistoryRepository,
             TaskCounterUpdater taskCounterUpdater,
             TaskReadinessRepository taskReadinessRepository,
             TaskStateHistoryRecorder historyRecorder) {
 
         this.constraintRepository = constraintRepository;
+        this.constraintHistoryRepository = constraintHistoryRepository;
         this.taskCounterUpdater = taskCounterUpdater;
         this.taskReadinessRepository = taskReadinessRepository;
         this.historyRecorder = historyRecorder;
@@ -91,6 +98,8 @@ public class ConstraintEligibilityService {
 
             return;
         }
+        recordHistory(ConstraintHistoryAction.CREATED, constraint.getConstraintId(), taskId,
+                null, constraint.getStatus(), constraint.getSourceRef());
 
         /*
          * Constraint now exists, so the View contains
@@ -157,6 +166,10 @@ public class ConstraintEligibilityService {
         TaskReadinessSnapshot beforeReadiness =
                 requireReadinessSnapshot(taskId);
 
+        // source_ref is immutable after creation, so reading it before the update is safe.
+        String sourceRef = constraintRepository.findById(constraintId)
+                .map(Constraint::getSourceRef)
+                .orElse(null);
         Constraint.ConstraintStatus previousStatus =
                 constraintRepository.updateStatus(
                         taskId,
@@ -164,6 +177,11 @@ public class ConstraintEligibilityService {
                         newStatus,
                         reason,
                         LocalDateTime.now());
+
+        if (previousStatus != newStatus) {
+            recordHistory(ConstraintHistoryAction.STATUS_CHANGED, constraintId, taskId,
+                    previousStatus, newStatus, sourceRef);
+        }
 
         boolean wasOpen =
                 previousStatus == Constraint.ConstraintStatus.PENDING;
@@ -255,4 +273,25 @@ public class ConstraintEligibilityService {
 
         return snapshot;
     }
+
+    private void recordHistory(
+            ConstraintHistoryAction action,
+            String constraintId,
+            UUID taskId,
+            Constraint.ConstraintStatus previousStatus,
+            Constraint.ConstraintStatus newStatus,
+            String sourceRef) {
+
+        constraintHistoryRepository.record(
+                new ConstraintHistoryEntry(
+                        null,
+                        constraintId,
+                        taskId,
+                        action,
+                        previousStatus,
+                        newStatus,
+                        sourceRef,
+                        Instant.now()));
+    }
 }
+

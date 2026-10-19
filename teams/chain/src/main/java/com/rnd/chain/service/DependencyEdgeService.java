@@ -107,12 +107,9 @@ public class DependencyEdgeService {
             UUID dependsOnTaskId,
             Double confidence) {
 
-        return doAddDependency(
-                taskId,
-                dependsOnTaskId,
-                confidence,
-                false,
-                null);
+
+        return doAddDependency(taskId, dependsOnTaskId, confidence, null);
+
     }
 
     /**
@@ -126,23 +123,17 @@ public class DependencyEdgeService {
             Double confidence,
             UUID tenantId) {
 
-        Objects.requireNonNull(
-                tenantId,
-                "tenantId must not be null");
 
-        return doAddDependency(
-                taskId,
-                dependsOnTaskId,
-                confidence,
-                true,
-                tenantId);
+        Objects.requireNonNull(tenantId, "tenantId must not be null");
+        return doAddDependency(taskId, dependsOnTaskId, confidence, tenantId);
+
     }
 
+    /** A non-null {@code tenantId} means missing tasks are created as placeholders in that tenant. */
     private TaskDependency doAddDependency(
             UUID taskId,
             UUID dependsOnTaskId,
             Double confidence,
-            boolean createMissing,
             UUID tenantId) {
 
         Objects.requireNonNull(
@@ -167,11 +158,10 @@ public class DependencyEdgeService {
 
         return graphLock.runExclusive(() -> {
 
-            if (createMissing) {
-                taskCounterUpdater.insertPlaceholdersIfAbsent(
-                        taskId,
-                        dependsOnTaskId,
-                        tenantId);
+
+            if (tenantId != null) {
+                taskCounterUpdater.insertPlaceholdersIfAbsent(taskId, dependsOnTaskId, tenantId);
+
             }
 
             /*
@@ -200,24 +190,15 @@ public class DependencyEdgeService {
                                 + dependsOnTaskId);
             }
 
-            Task task =
-                    taskCounterUpdater.requireTask(taskId);
 
-            Task dependencyTask =
-                    taskCounterUpdater.requireTask(dependsOnTaskId);
+            Task task = taskCounterUpdater.requireTask(taskId);
+            Task dependencyTask = taskCounterUpdater.requireTask(dependsOnTaskId);
+            if (tenantId != null) {
+                requireTenant(task, tenantId);
+                requireTenant(dependencyTask, tenantId);
+            } else {
+                requireSameTenant(task, dependencyTask);
 
-            requireSameTenant(
-                    task,
-                    dependencyTask);
-
-            if (createMissing) {
-                requireTenant(
-                        task,
-                        tenantId);
-
-                requireTenant(
-                        dependencyTask,
-                        tenantId);
             }
 
             /*

@@ -9,6 +9,8 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.transaction.annotation.Transactional;
 
 import com.rnd.chain.dto.Constraint;
+import com.rnd.chain.dto.ConstraintHistoryAction;
+import com.rnd.chain.dto.ConstraintHistoryEntry;
 import com.rnd.chain.dto.Task;
 import com.rnd.chain.dto.TaskDependency;
 import com.rnd.chain.dto.TaskStatus;
@@ -16,6 +18,7 @@ import com.rnd.chain.dto.TaskTestFixtures;
 import com.rnd.chain.events.SchedulingPublishListener;
 import com.rnd.chain.events.SchedulingUpdatePublisher;
 import com.rnd.chain.events.TaskSchedulingUpdatedEvent;
+import com.rnd.chain.repository.ConstraintHistoryRepository;
 import com.rnd.chain.repository.ConstraintRepository;
 import com.rnd.chain.repository.TaskDependencyRepository;
 import com.rnd.chain.repository.TaskReadinessRepository;
@@ -24,13 +27,19 @@ import com.rnd.chain.testsupport.TestTransactions;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-
+import org.mockito.ArgumentCaptor;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
 
 @Tag("postgres")
 @SpringBootTest
@@ -44,6 +53,8 @@ class ConstraintEligibilityServiceTest {
 
     private ConstraintRepository constraintRepository;
 
+    private ConstraintHistoryRepository historyRepository;
+
     private ConstraintEligibilityService service;
 
     @Autowired
@@ -51,15 +62,9 @@ class ConstraintEligibilityServiceTest {
 
     @BeforeEach
     void setUp() {
-
-        taskRepository =
-                PgRepos.tasks(List.of());
-
-        dependencyRepository =
-                PgRepos.dependencies(List.of());
-
-        publisher =
-                new RecordingSchedulingUpdatePublisher();
+        taskRepository = PgRepos.tasks(List.of());
+        dependencyRepository = PgRepos.dependencies(List.of());
+        publisher = new RecordingSchedulingUpdatePublisher();
 
         SchedulingUpdateService schedulingUpdateService =
                 new SchedulingUpdateService(publisher);
@@ -74,15 +79,111 @@ class ConstraintEligibilityServiceTest {
                                 schedulingUpdateService),
                         taskReadinessRepository);
 
-        constraintRepository =
-                PgRepos.constraints();
+        constraintRepository = PgRepos.constraints();
+        historyRepository = mock(ConstraintHistoryRepository.class);
 
         service =
                 new ConstraintEligibilityService(
                         constraintRepository,
+                        historyRepository,
                         counterUpdater,
                         taskReadinessRepository,
                         TaskStateHistoryFixtures.newRecorder());
+    }
+
+    private ConstraintHistoryEntry singleRecordedEntry() {
+        ArgumentCaptor<ConstraintHistoryEntry> captor = ArgumentCaptor.forClass(ConstraintHistoryEntry.class);
+        verify(historyRepository).record(captor.capture());
+        return captor.getValue();
+    }
+
+    @Test
+    void onConstraintAdded_recordsExactlyOneCreatedEntry() {
+        UUID taskId = UUID.randomUUID();
+        taskRepository.save(createTask(taskId, TaskStatus.ACTIVE, true, 0, 0));
+
+        service.onConstraintAdded(newConstraint(taskId, "c-hist-add", Constraint.ConstraintStatus.PENDING));
+
+        ConstraintHistoryEntry entry = singleRecordedEntry();
+        assertEquals(ConstraintHistoryAction.CREATED, entry.action());
+        assertEquals("c-hist-add", entry.constraintId());
+        assertEquals(taskId, entry.taskId());
+        assertNull(entry.previousStatus());
+        assertEquals(Constraint.ConstraintStatus.PENDING, entry.newStatus());
+        assertEquals("source-ref", entry.sourceRef());
+    }
+
+    @Test
+    void onConstraintAdded_duplicateAdd_recordsNoSecondEntry() {
+        UUID taskId = UUID.randomUUID();
+        taskRepository.save(createTask(taskId, TaskStatus.ACTIVE, true, 0, 0));
+        Constraint constraint = newConstraint(taskId, "c-hist-dup", Constraint.ConstraintStatus.PENDING);
+
+        service.onConstraintAdded(constraint);
+        service.onConstraintAdded(constraint);
+
+        verify(historyRepository, times(1)).record(any());
+    }
+
+    @Test
+    void onConstraintStatusChanged_recordsExactlyOneStatusChangedEntry() {
+        UUID taskId = UUID.randomUUID();
+        taskRepository.save(createTask(taskId, TaskStatus.ACTIVE, false, 0, 1));
+        constraintRepository.save(newConstraint(taskId, "c-hist-chg", Constraint.ConstraintStatus.PENDING));
+
+        service.onConstraintStatusChanged(taskId, "c-hist-chg", Constraint.ConstraintStatus.SATISFIED, null);
+
+        ConstraintHistoryEntry entry = singleRecordedEntry();
+        assertEquals(ConstraintHistoryAction.STATUS_CHANGED, entry.action());
+        assertEquals(Constraint.ConstraintStatus.PENDING, entry.previousStatus());
+        assertEquals(Constraint.ConstraintStatus.SATISFIED, entry.newStatus());
+        assertEquals("source-ref", entry.sourceRef());
+    }
+
+    @Test
+    void onConstraintStatusChanged_sameStatus_recordsNothing() {
+        UUID taskId = UUID.randomUUID();
+        taskRepository.save(createTask(taskId, TaskStatus.ACTIVE, false, 0, 1));
+        constraintRepository.save(newConstraint(taskId, "c-hist-same", Constraint.ConstraintStatus.PENDING));
+
+        service.onConstraintStatusChanged(taskId, "c-hist-same", Constraint.ConstraintStatus.PENDING, null);
+
+        verify(historyRepository, never()).record(any());
+    }
+
+    @Test
+    void onConstraintStatusChanged_betweenTwoClosedStatuses_recordsEntryButLeavesCounter() {
+        UUID taskId = UUID.randomUUID();
+        taskRepository.save(createTask(taskId, TaskStatus.ACTIVE, true, 0, 0));
+        constraintRepository.save(newConstraint(taskId, "c-hist-closed", Constraint.ConstraintStatus.SATISFIED));
+
+        service.onConstraintStatusChanged(taskId, "c-hist-closed", Constraint.ConstraintStatus.WAIVED, null);
+
+        ConstraintHistoryEntry entry = singleRecordedEntry();
+        assertEquals(Constraint.ConstraintStatus.SATISFIED, entry.previousStatus());
+        assertEquals(Constraint.ConstraintStatus.WAIVED, entry.newStatus());
+        assertEquals(0, taskRepository.findById(taskId).orElseThrow().getOpenConstraintCount());
+    }
+
+    @Test
+    void onConstraintAdded_historyWriteFails_exceptionPropagates() {
+        UUID taskId = UUID.randomUUID();
+        taskRepository.save(createTask(taskId, TaskStatus.ACTIVE, true, 0, 0));
+        doThrow(new IllegalStateException("history down")).when(historyRepository).record(any());
+
+        assertThrows(IllegalStateException.class, () -> service.onConstraintAdded(
+                newConstraint(taskId, "c-hist-fail", Constraint.ConstraintStatus.PENDING)));
+    }
+
+    @Test
+    void onConstraintStatusChanged_historyWriteFails_exceptionPropagates() {
+        UUID taskId = UUID.randomUUID();
+        taskRepository.save(createTask(taskId, TaskStatus.ACTIVE, false, 0, 1));
+        constraintRepository.save(newConstraint(taskId, "c-hist-fail2", Constraint.ConstraintStatus.PENDING));
+        doThrow(new IllegalStateException("history down")).when(historyRepository).record(any());
+
+        assertThrows(IllegalStateException.class, () -> service.onConstraintStatusChanged(
+                taskId, "c-hist-fail2", Constraint.ConstraintStatus.SATISFIED, null));
     }
 
     private static Constraint newConstraint(
@@ -430,6 +531,7 @@ class ConstraintEligibilityServiceTest {
         ConstraintEligibilityService constraintService =
                 new ConstraintEligibilityService(
                         constraintRepo,
+                        mock(ConstraintHistoryRepository.class),
                         counterUpdater,
                         taskReadinessRepository,
                         TaskStateHistoryFixtures.newRecorder());
