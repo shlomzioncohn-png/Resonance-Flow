@@ -1,0 +1,19 @@
+{
+  "case_id": "non_english_text",
+  "provider": "gemini",
+  "model": "gemini-3.6-flash",
+  "recorded_at": "2026-10-19T12:59:01+00:00",
+  "answers": [
+    "{\n  \"title\": \"Send the budget report to finance\",\n  \"description\": null,\n  \"source_ref\": null,\n  \"has_dependencies\": false,\n  \"tier\": \"OPERATIONAL\",\n  \"urgency\": 3,\n  \"role_context\": null,\n  \"effort_estimate_minutes\": null,\n  \"effort_estimate_basis\": null\n}"
+  ],
+  "observed_live": {
+    "kind": "success",
+    "title": "Send the budget report to finance",
+    "confidence": 0.6412,
+    "penalties": [
+      "title_not_grounded",
+      "missing_description"
+    ],
+    "schema_attempts": 1
+  }
+}

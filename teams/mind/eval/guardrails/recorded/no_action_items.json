@@ -1,0 +1,18 @@
+{
+  "case_id": "no_action_items",
+  "provider": "gemini",
+  "model": "gemini-3.6-flash",
+  "recorded_at": "2026-10-19T12:58:57+00:00",
+  "answers": [
+    "{\n  \"title\": \"Catch up next week\",\n  \"description\": null,\n  \"source_ref\": null,\n  \"has_dependencies\": false,\n  \"tier\": \"OPERATIONAL\",\n  \"urgency\": 1,\n  \"role_context\": null,\n  \"effort_estimate_minutes\": null,\n  \"effort_estimate_basis\": null\n}"
+  ],
+  "observed_live": {
+    "kind": "success",
+    "title": "Catch up next week",
+    "confidence": 0.855,
+    "penalties": [
+      "missing_description"
+    ],
+    "schema_attempts": 1
+  }
+}
