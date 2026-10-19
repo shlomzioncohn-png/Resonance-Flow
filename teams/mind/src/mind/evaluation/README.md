@@ -339,8 +339,12 @@ removes its `parent_task_id` signal), it does exactly that, with no change neede
 
 The margins in the decided four are tiny on purpose: the features are near-equal
 and only an earlier deadline tips the baseline the wrong way, so any real push from
-the hierarchy is enough to change the answer. The cheap baselines behave the same
-way (2/6, exactly the controls; see `eval/personas/README.md`). `tests/test_personas.py` pins the shape: one per role,
+the hierarchy is enough to change the answer. The two cheap deadline baselines
+behave the same way (2/6, exactly the controls); `DummyModel` gets the two whose
+answer is listed first and `LongestDescriptionModel` gets none (see
+`eval/personas/README.md`). `tests/test_baseline_ignores_hierarchy.py` pins both
+halves of this: the baseline's results are identical with and without parents, and
+it misses the "designed to change" scenario. `tests/test_personas.py` pins the shape: one per role,
 at least three decided and one or two controls, near-equal rivals (same tier and
 effort, the answer due 0-2 hours later), no two candidates fitting the free time
 together, and the answer never the longest description.
@@ -403,15 +407,15 @@ is **58.3% (21/36)** on the original set before and after (the number
 `eval/personas/README.md` records for the set this change was made on). The six
 `hierarchy_decides/` scenarios are new, so the combined number (42) is new too.
 
-That holds only for a model that does not read `parent_task_id`. R2's
-`SegmentedRankingModel` currently still does (its `belongs_to_initiative`
-feature), so on this set its result moves. The mentor has decided that the
-baseline must not read `parent_task_id` at all: the hierarchy is the stretch's
-input, and a baseline that already uses it leaves nothing for the stretch to be
-measured against. That feature is being removed from the baseline in a separate
-PR; once it is merged, a test runs `SegmentedRankingModel` on the set with the
-parents and with every `parent_task_id` set to null and asserts the results are
-identical, so the baseline stays free of hierarchy from then on.
+That holds for any model that does not read `parent_task_id`, and R2's
+`SegmentedRankingModel` is now one of them. The mentor decided that the baseline
+must not read `parent_task_id` at all: the hierarchy is the stretch's input, and a
+baseline that already uses it leaves nothing for the stretch to be measured
+against. #797 removed the baseline's `belongs_to_initiative` feature, and
+`tests/test_baseline_ignores_hierarchy.py` runs `SegmentedRankingModel` on the set
+with the parents and with every `parent_task_id` set to null and asserts the same
+pick and the same scores in every scenario, so the baseline stays free of hierarchy
+from now on.
 
 `team_lead_approved` was left as it was on every touched scenario. The change is
 additive — a new field value pointing outside the scenario — and leaves

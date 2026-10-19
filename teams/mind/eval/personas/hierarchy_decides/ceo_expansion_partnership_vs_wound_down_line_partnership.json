@@ -12,16 +12,6 @@
   },
   "tasks": [
     {
-      "task_id": "task_quayle",
-      "title": "Sign the Quayle Data Systems partnership term sheet",
-      "description": "Review and sign the partnership term sheet with Quayle Data Systems; legal has cleared it and the partner's team is waiting for your signature.",
-      "deadline": "2026-10-22T14:00:00",
-      "effort_estimate": 30,
-      "tier": "strategic",
-      "blocked": false,
-      "parent_task_id": "hd_ceo_consumer_partnerships"
-    },
-    {
       "task_id": "task_halvorsen",
       "title": "Sign the Halvorsen Group partnership term sheet",
       "description": "Review and sign the partnership term sheet with Halvorsen Group; legal has cleared it and the partner's team is waiting for your signature.",
@@ -30,6 +20,16 @@
       "tier": "strategic",
       "blocked": false,
       "parent_task_id": "hd_ceo_enterprise_partnerships"
+    },
+    {
+      "task_id": "task_quayle",
+      "title": "Sign the Quayle Data Systems partnership term sheet",
+      "description": "Review and sign the partnership term sheet with Quayle Data Systems; legal has cleared it and the partner's team is waiting for your signature.",
+      "deadline": "2026-10-22T14:00:00",
+      "effort_estimate": 30,
+      "tier": "strategic",
+      "blocked": false,
+      "parent_task_id": "hd_ceo_consumer_partnerships"
     },
     {
       "task_id": "task_filler_interview",

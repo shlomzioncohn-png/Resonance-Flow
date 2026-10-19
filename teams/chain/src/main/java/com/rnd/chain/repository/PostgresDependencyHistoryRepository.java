@@ -64,7 +64,7 @@ public class PostgresDependencyHistoryRepository implements DependencyHistoryRep
     @Override
     public PageResponse<DependencyHistoryEntry> findByTaskId(UUID taskId, int page, int size) {
         // Newest first: createdAt descending, sequence descending as the same-millisecond
-        // tiebreaker (mirrors InMemoryDependencyHistoryRepository's sequenceById/AtomicLong).
+        // tiebreaker (sequence breaks ties between same-timestamp entries).
         Sort sort = Sort.by(Sort.Order.desc("createdAt"), Sort.Order.desc("sequence"));
         Page<DependencyHistoryEntity> result = jpaRepository.findByTaskId(taskId, PageRequest.of(page, size, sort));
         return new PageResponse<>(result.getContent().stream().map(PostgresDependencyHistoryRepository::toDto).toList(),

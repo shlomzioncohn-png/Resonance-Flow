@@ -196,15 +196,17 @@ against the original 36 and the full 42 (the 30-scenario figures were 33.3% /
 
 | Strategy | Original set (36) | `hierarchy_decides/` (6) | All (42) |
 |---|---|---|---|
-| pick the first task (`DummyModel`) | 27.8% (10/36) | 0/6 | 23.8% (10/42) |
+| pick the first task (`DummyModel`) | 27.8% (10/36) | 2/6 | 28.6% (12/42) |
 | pick the nearest deadline, ignore `blocked` | 41.7% (15/36) | 2/6 | 40.5% (17/42) |
 | **skip `blocked`, then nearest deadline** | **58.3% (21/36)** | 2/6 | 54.8% (23/42) |
 | pick the longest description (`LongestDescriptionModel`) | 61.1% (22/36) | 0/6 | 52.4% (22/42) |
 
 All measured 2026-10. The original-set column did not move when the hierarchy
-group was added. On `hierarchy_decides/` the deadline rules get exactly the two
+group was added. On `hierarchy_decides/` the two deadline rules get exactly the two
 controls (the hard signal holds the nearest deadline there) and miss the four
-cases the hierarchy decides, which is how that group is built.
+cases the hierarchy decides, which is how that group is built. `DummyModel` gets the
+two whose answer is listed first (one decided, one control) and
+`LongestDescriptionModel` none.
 
 (Measured by `mind.evaluation.baseline_models`, not hand-derived — see below.
 The 30-scenario set was designed for ~30%/~43%/~63%; after the 2026-09-16 review
@@ -318,9 +320,11 @@ Measured effect: `SkipBlockedNearestDeadlineModel` gets **1 of the 6** (the
 `DummyModel` gets 0 of 6 (none has the answer in position 0), dropping to 27.8%,
 still inside its 20-50% band. Position distribution was then index 0 in 10/36, 1 in
 17, 2 in 9 (no 3-task scenario has the answer first). With `hierarchy_decides/` (#507,
-answer at index 1 in three and index 2 in three) it is 10 / 20 / 12 of 42, which is
+answer at index 0 in two, 1 in one and 2 in three, so that "pick the first task" is
+not scored 0/6 there by construction) it is 12 / 18 / 12 of 42, which is
 what `tests/test_personas.py` pins (`EXPECTED_REAL_SCENARIO_COUNT = 42`, the position
-dict `{0: 10, 1: 20, 2: 12}`). The
+dict `{0: 12, 1: 18, 2: 12}`; the "answer never first in a 3-task scenario" rule now
+applies to the original set only). The
 `make eval-ci` headroom gate (`--max-accuracy 0.68`) is unchanged and now has
 ~10 points of slack instead of ~1. Known overlap, deliberate because stacking
 traps is what lowers the score: the Developer and Field Engineer scenarios each

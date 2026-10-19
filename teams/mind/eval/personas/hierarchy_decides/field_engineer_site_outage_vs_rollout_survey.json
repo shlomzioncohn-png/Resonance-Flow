@@ -12,16 +12,6 @@
   },
   "tasks": [
     {
-      "task_id": "task_rollout_survey",
-      "title": "Survey Customer L's site for the edge-device rollout",
-      "description": "Survey Customer L's site for the next phase of the edge-device rollout; the rollout team needs your report to schedule the installs. Customer L has set aside Thursday afternoon for the visit.",
-      "deadline": "2026-10-29T17:00:00",
-      "effort_estimate": 50,
-      "tier": "tactical",
-      "blocked": false,
-      "parent_task_id": "hd_fe_edge_rollout"
-    },
-    {
       "task_id": "task_site_restore",
       "title": "Restore Customer K's offline warehouse scanners",
       "description": "Customer K's warehouse scanners have been offline since 08:30; their support contract requires service to be restored within four hours, by 12:30.",
@@ -30,6 +20,16 @@
       "tier": "operational",
       "blocked": false,
       "parent_task_id": "hd_fe_maintenance_contracts"
+    },
+    {
+      "task_id": "task_rollout_survey",
+      "title": "Survey Customer L's site for the edge-device rollout",
+      "description": "Survey Customer L's site for the next phase of the edge-device rollout; the rollout team needs your report to schedule the installs. Customer L has set aside Thursday afternoon for the visit.",
+      "deadline": "2026-10-29T17:00:00",
+      "effort_estimate": 50,
+      "tier": "tactical",
+      "blocked": false,
+      "parent_task_id": "hd_fe_edge_rollout"
     },
     {
       "task_id": "task_filler_mileage",

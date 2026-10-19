@@ -13,5 +13,19 @@ runs:
     - name: Install yq ${{ inputs.version }}
       shell: bash
       run: |
-        sudo curl -fsSL -o /usr/local/bin/yq "https://github.com/mikefarah/yq/releases/download/${{ inputs.version }}/yq_linux_amd64"
-        sudo chmod +x /usr/local/bin/yq
+        VERSION="${{ inputs.version }}"
+        # /usr/local/bin/yq is shared by every runner on the host -- skip if the
+        # pinned version is already there.
+        if yq --version 2>/dev/null | grep -qE " ${VERSION}\$"; then
+          echo "yq ${VERSION} already installed"
+          exit 0
+        fi
+        # Download next to the target, then rename: mv within one directory is
+        # atomic, so a parallel job running yq sees the old binary or the new
+        # one, never a half-written file.
+        TMP=$(sudo mktemp /usr/local/bin/.yq.XXXXXX)
+        trap 'sudo rm -f "$TMP"' EXIT
+        sudo curl -fsSL -o "$TMP" "https://github.com/mikefarah/yq/releases/download/${VERSION}/yq_linux_amd64"
+        # mktemp creates 0600; other users on the host run this binary too.
+        sudo chmod 0755 "$TMP"
+        sudo mv -f "$TMP" /usr/local/bin/yq
