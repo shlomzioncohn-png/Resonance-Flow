@@ -5,16 +5,18 @@ The proto is Relay's copy in shared/proto/task-dependencies-proposed-event.proto
 
 from __future__ import annotations
 
-from typing import Protocol
+from typing import TYPE_CHECKING, Protocol
 
 from mind.contracts.task_dependencies_proposed import DependencyProposed
-from mind.messaging.producer import Publisher
 from mind.messaging.task_dependencies_proposed_event_pb2 import (
     Dependency as ProtoDependency,
 )
 from mind.messaging.task_dependencies_proposed_event_pb2 import (
     DependencyProposedEvent,
 )
+
+if TYPE_CHECKING:
+    from mind.messaging.producer import Publisher
 
 TOPIC = "task.dependencies.proposed"
 

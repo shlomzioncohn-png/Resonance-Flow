@@ -91,11 +91,21 @@ async def handle_task_created_reply(
         )
         return None
 
+    try:
+        tenant_id = UUID(event.tenant_id)
+    except ValueError:
+        logger.warning(
+            "task_creation: task.created %s has an unreadable tenant_id %r; ignored",
+            event.id,
+            event.tenant_id,
+        )
+        return None
+
     await handle_task_created(store, event)
     matched = MatchedReply(
         correlation_id=correlation_id,
         task_id=event.id,
-        tenant_id=UUID(event.tenant_id),
+        tenant_id=tenant_id,
         request=request,
     )
     if on_matched is not None:

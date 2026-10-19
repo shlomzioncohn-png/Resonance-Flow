@@ -181,6 +181,8 @@ flow = TaskCreationFlow(
     index=index,
     pending=pending,
     on_matched=adapter.on_task_created,  # #355: hears of each real task id, maybe twice
+    on_tick=adapter.retry_pending,       # #355: also retry on the overdue timer, for
+                                          # targets created directly in Inbox
 )
 
 # A listener that has given up must take the process with it, so it is

@@ -7,11 +7,15 @@ only for FULL compatibility: Chain does not need them, so they stay unset.
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from mind.contracts.task_enums import TaskTier
 from mind.contracts.task_score_proposed import TaskScoreProposed
-from mind.messaging.producer import Publisher
 from mind.messaging.task_created_event_pb2 import TaskTier as ProtoTaskTier
 from mind.messaging.task_score_proposed_event_pb2 import TaskScoreProposedEvent
+
+if TYPE_CHECKING:
+    from mind.messaging.producer import Publisher
 
 TOPIC = "task.score.proposed"
 

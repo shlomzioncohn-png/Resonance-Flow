@@ -277,6 +277,25 @@ async def test_a_failed_on_matched_keeps_the_request_so_redelivery_tries_again()
     assert await pending.get(correlation_id) is None
 
 
+async def test_on_tick_runs_on_every_overdue_check() -> None:
+    ticks = 0
+
+    async def on_tick() -> None:
+        nonlocal ticks
+        ticks += 1
+
+    flow = TaskCreationFlow(
+        producer=FakeProducer(), index=FakeVectorStore(), pending=PendingRequests(),
+        on_tick=on_tick,
+    )
+    correlation_id = await flow.send(_proposal(), bridge_correlation_id=ITEM, revision=0)
+
+    overdue = await flow.check_overdue(now=datetime.now(UTC) + timedelta(minutes=11))
+
+    assert ticks == 1
+    assert overdue == [correlation_id]
+
+
 async def test_an_unreadable_correlation_header_is_a_warning_not_silence(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
@@ -293,6 +312,27 @@ async def test_an_unreadable_correlation_header_is_a_warning_not_silence(
 
     assert matched is None
     assert "not-a-uuid" in caplog.text
+
+
+async def test_an_unreadable_tenant_id_is_a_warning_not_silence(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Inbox's own event malformed this time, not the header. Must still be
+    ignored rather than raising -- an uncaught error here leaves the offset
+    uncommitted, and Kafka redelivers the same malformed event forever."""
+
+    pending, store = PendingRequests(), FakeVectorStore()
+    correlation_id = await _send(pending)
+    event, headers = _reply(correlation_id)
+    event.tenant_id = "not-a-uuid"
+
+    with caplog.at_level(logging.WARNING, logger="mind.task_creation"):
+        matched = await handle_task_created_reply(store, pending, event, headers)
+
+    assert matched is None
+    assert "not-a-uuid" in caplog.text
+    assert store.rows == {}  # not indexed
+    assert await pending.get(correlation_id) is not None  # not discarded
 
 
 # --- wired to DependencyAdapter, end to end (#355) ---------------------------

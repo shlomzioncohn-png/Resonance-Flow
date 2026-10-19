@@ -4,24 +4,25 @@ Why the order, and what a failed or repeated publish does: README.md,
 "Order: register, then publish; index, then forget".
 """
 
+from __future__ import annotations
+
 import asyncio
 from collections.abc import Sequence
 from typing import TYPE_CHECKING
 from uuid import UUID
 
 from mind.contracts.task_creation_requested import TaskCreationRequested
-from mind.messaging.producer import Publisher
 from mind.task_creation.correlation import correlation_id_for
 from mind.task_creation.event import to_creation_requested_event
 from mind.task_creation.pending import PendingRequest, PendingStore
 
 if TYPE_CHECKING:
-    from mind.messaging.producer import ProtobufProducer
+    from mind.messaging.producer import ProtobufProducer, Publisher
 
 TOPIC = "task.creation.requested"
 
 
-def _the_real_producer_fits(producer: "ProtobufProducer") -> Publisher:
+def _the_real_producer_fits(producer: ProtobufProducer) -> Publisher:
     """Checked by mypy, never called: tests use a fake, production the real one."""
 
     return producer

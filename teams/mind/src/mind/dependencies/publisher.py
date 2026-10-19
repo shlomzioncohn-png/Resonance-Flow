@@ -46,7 +46,7 @@ class DependencyPublisher:
     def __init__(self, store: VectorStore, sink: DependencySink) -> None:
         self._store = store
         self._sink = sink
-        self._published: dict[str, set[UUID]] = {}
+        self._published: dict[str, dict[str, UUID]] = {}  # task_id -> {mention: target already sent}
         self._locks: dict[str, asyncio.Lock] = {}
         self._lock_refs: dict[str, int] = {}
         self._locks_guard = asyncio.Lock()
@@ -96,14 +96,22 @@ class DependencyPublisher:
         task_uuid = UUID(task_id)
         task_id_normalized = str(task_uuid)
 
-        resolved_lists = await resolve_dependency_targets(
-            self._store, mentions, k=1, exclude_task_id=task_id_normalized
+        already_sent = self._published.get(task_id_normalized, {})
+        pending_mentions = [m for m in mentions if m not in already_sent]
+
+        resolved_lists = (
+            await resolve_dependency_targets(
+                self._store, pending_mentions, k=1, exclude_task_id=task_id_normalized
+            )
+            if pending_mentions
+            else []
         )
         candidates: dict[UUID, float] = {}
-        all_resolved = True
-        for results in resolved_lists:
+        newly_resolved: dict[str, UUID] = {}
+        unresolved = False
+        for mention, results in zip(pending_mentions, resolved_lists):
             if not results:
-                all_resolved = False
+                unresolved = True
                 continue
             result = results[0]
             try:
@@ -114,24 +122,28 @@ class DependencyPublisher:
                     task_id,
                     result.task_id,
                 )
-                all_resolved = False
+                unresolved = True
                 continue
+            newly_resolved[mention] = target_uuid
             if target_uuid not in candidates or result.similarity > candidates[target_uuid]:
                 candidates[target_uuid] = result.similarity
 
+        all_resolved = not unresolved
+
         async with self._task_lock(task_id_normalized):
-            already_sent = self._published.get(task_id_normalized, set())
+            already_sent = self._published.get(task_id_normalized, {})
+            sent_targets = set(already_sent.values())
             new_edges = {
                 target: confidence
                 for target, confidence in candidates.items()
-                if target not in already_sent
+                if target not in sent_targets
             }
             if not new_edges:
                 logger.debug(
                     "dependencies: task %s has no new edges to publish "
                     "(%d already sent, %d mentions resolved)",
                     task_id,
-                    len(already_sent),
+                    len(sent_targets),
                     len(mentions),
                 )
                 return all_resolved
@@ -148,12 +160,19 @@ class DependencyPublisher:
                 if send_task.cancelled():
                     raise
                 # This call was cancelled, but the thread running send() can't
-                # be interrupted -- it may still reach Kafka. Wait for the
-                # real outcome so already_sent only updates if it did, then
-                # honor the cancellation.
-                await send_task
-                self._published[task_id_normalized] = already_sent | set(new_edges)
+                # be interrupted -- it may still reach Kafka. Wait for the real
+                # outcome, shielded so a second cancellation here can't cut this
+                # wait short, so already_sent only updates if it actually
+                # succeeded -- then honor the original cancellation regardless.
+                try:
+                    await asyncio.shield(send_task)
+                except Exception:
+                    logger.exception(
+                        "dependencies: task %s's cancelled send failed", task_id
+                    )
+                else:
+                    self._published[task_id_normalized] = {**already_sent, **newly_resolved}
                 raise
             else:
-                self._published[task_id_normalized] = already_sent | set(new_edges)
+                self._published[task_id_normalized] = {**already_sent, **newly_resolved}
                 return all_resolved

@@ -3,13 +3,14 @@ DependencyPublisher, and its retry tracking for a target that isn't a task
 yet. No broker: the sink is an in-memory list, and resolve_dependency_targets
 (#245) is mocked, as in tests/test_dependencies_publish.py."""
 
+from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, patch
 from uuid import UUID, uuid4
 
 import pytest
 
 from mind.contracts.task_dependencies_proposed import DependencyProposed
-from mind.dependencies.adapter import DependencyAdapter
+from mind.dependencies.adapter import _MAX_PENDING_AGE, DependencyAdapter
 from mind.dependencies.publisher import DependencyPublisher
 from mind.embeddings.base import SearchResult
 from mind.task_creation.pending import PendingRequest
@@ -111,3 +112,98 @@ async def test_a_still_unresolved_retry_stays_pending(adapter, sink):
 
     assert sink.sent == []
     assert TASK_A in adapter._pending
+
+
+# --- finding 1: an unrelated pending task's failure must not block the current reply ---
+
+
+async def test_an_unrelated_pending_tasks_failure_does_not_block_the_current_reply(adapter, sink):
+    with _resolved([]):
+        await adapter.on_task_created(_matched(TASK_A, mentions=("waiting on A's target",)))
+    with _resolved([]):
+        await adapter.on_task_created(_matched(TASK_B, mentions=("waiting on B's target",)))
+
+    attempted: list[str] = []
+
+    async def flaky(_store, _mentions, *, k, exclude_task_id):
+        attempted.append(exclude_task_id)
+        if exclude_task_id == TASK_A:
+            raise ConnectionError("transient DB error")
+        return [[]]
+
+    with patch("mind.dependencies.publisher.resolve_dependency_targets", flaky):
+        # TASK_C has no mentions of its own; this call exists only to trigger
+        # the retry sweep over TASK_A and TASK_B.
+        await adapter.on_task_created(_matched(TASK_C))
+
+    assert TASK_B in attempted  # retried despite TASK_A's failure
+    assert TASK_A in adapter._pending  # the failing retry changed nothing for it
+
+
+# --- finding 2: _pending is capped and expires -------------------------------
+
+
+async def test_pending_is_capped_and_a_new_entry_is_dropped_once_full(adapter, sink, monkeypatch):
+    monkeypatch.setattr("mind.dependencies.adapter._MAX_PENDING", 2)
+
+    with _resolved([]):
+        await adapter.on_task_created(_matched(TASK_A, mentions=("a",)))
+    with _resolved([]):
+        await adapter.on_task_created(_matched(TASK_B, mentions=("b",)))
+    assert len(adapter._pending) == 2
+
+    with _resolved([]):
+        await adapter.on_task_created(_matched(TASK_C, mentions=("c",)))
+
+    assert TASK_C not in adapter._pending
+    assert len(adapter._pending) == 2
+
+
+async def test_a_pending_entry_expires_after_max_pending_age_and_is_never_retried(publisher, sink):
+    now = datetime(2026, 1, 1, tzinfo=UTC)
+    adapter = DependencyAdapter(publisher, clock=lambda: now)
+
+    with _resolved([]):
+        await adapter.on_task_created(_matched(TASK_A, mentions=("a task that doesn't exist yet",)))
+    assert TASK_A in adapter._pending
+
+    now = now + _MAX_PENDING_AGE + timedelta(seconds=1)
+    adapter._clock = lambda: now
+
+    mock_resolve = AsyncMock(return_value=[[]])
+    with patch("mind.dependencies.publisher.resolve_dependency_targets", mock_resolve):
+        await adapter.retry_pending()
+
+    assert TASK_A not in adapter._pending
+    mock_resolve.assert_not_awaited()
+
+
+# --- finding 3: retries fire from the overdue timer too, not just on_matched ---
+
+
+async def test_retry_pending_resolves_a_pending_task_without_any_matched_reply(adapter, sink):
+    with _resolved([]):
+        await adapter.on_task_created(_matched(TASK_A, mentions=("a task that doesn't exist yet",)))
+    assert TASK_A in adapter._pending
+
+    # Called directly, as the overdue timer would -- not via on_task_created/on_matched.
+    with _resolved([SearchResult(task_id=TASK_B, similarity=0.9)]):
+        await adapter.retry_pending()
+
+    [event] = sink.sent
+    assert event.task_id == UUID(TASK_A)
+    assert TASK_A not in adapter._pending
+
+
+# --- finding 4: _pending is keyed by the normalized task id ------------------
+
+
+async def test_publish_normalizes_the_task_id_so_case_does_not_create_two_entries(adapter, sink):
+    canonical = str(uuid4())
+
+    with _resolved([]):
+        await adapter._publish(canonical.upper(), TENANT, ("a",))
+    with _resolved([]):
+        await adapter._publish(canonical, TENANT, ("a",))
+
+    assert list(adapter._pending.keys()) == [canonical]

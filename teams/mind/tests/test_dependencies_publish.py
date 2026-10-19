@@ -202,15 +202,37 @@ async def test_a_later_call_publishes_only_the_newly_resolved_edge(publisher, si
     [first] = sink.sent
     assert [e.depends_on_task_id for e in first.dependencies] == [UUID(TASK_B)]
 
-    with _resolved(
-        [SearchResult(task_id=TASK_B, similarity=0.9)],
-        [SearchResult(task_id=TASK_C, similarity=0.8)],
-    ):
+    with _resolved([SearchResult(task_id=TASK_C, similarity=0.8)]):
         await publisher.publish_dependencies(task_id=TASK_A, tenant_id=TENANT, dependency_mentions=mentions)
 
     assert len(sink.sent) == 2
     [second] = [e for e in sink.sent[1].dependencies]
     assert second.depends_on_task_id == UUID(TASK_C)
+
+
+async def test_a_mention_already_sent_is_never_re_resolved_even_if_its_best_match_changes(publisher, sink):
+    """#355 finding: once a mention has produced a sent edge, a retry with
+    the same mention text must not re-resolve it, even if the underlying
+    best match changed (e.g. a better task appeared, or the first one got
+    completed) -- otherwise that retry would add a second edge for what is
+    conceptually one dependency."""
+    mentions = ["the DB upgrade"]
+
+    with patch(
+        "mind.dependencies.publisher.resolve_dependency_targets",
+        AsyncMock(
+            side_effect=[
+                [[SearchResult(task_id=TASK_B, similarity=0.9)]],
+                [[SearchResult(task_id=TASK_C, similarity=0.95)]],
+            ]
+        ),
+    ) as mock_resolve:
+        await publisher.publish_dependencies(task_id=TASK_A, tenant_id=TENANT, dependency_mentions=mentions)
+        await publisher.publish_dependencies(task_id=TASK_A, tenant_id=TENANT, dependency_mentions=mentions)
+
+    mock_resolve.assert_awaited_once()
+    [event] = sink.sent
+    assert event.dependencies[0].depends_on_task_id == UUID(TASK_B)
 
 
 async def test_resolve_is_called_with_k_one_and_exclude_task_id(publisher, sink):
