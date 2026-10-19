@@ -300,6 +300,25 @@ class TeamServiceTest {
     }
 
     @Test
+    void updateTeamStatus_whenTeamIsInAnotherTenant_throwsForbiddenActionException() {
+        when(userRepository.findById(actorId)).thenReturn(Optional.of(actor));
+        UUID teamId = UUID.randomUUID();
+        Team team = new Team();
+        team.setTenant(new Tenant());
+        team.getTenant().setId(UUID.randomUUID());
+        team.setStatus(TeamStatus.ACTIVE);
+        when(teamRepository.findById(teamId)).thenReturn(Optional.of(team));
+
+        TeamStatusUpdateRequestDto request = new TeamStatusUpdateRequestDto();
+        request.setStatus("ARCHIVED");
+
+        assertThatThrownBy(() -> teamService.updateTeamStatus(teamId, request, actorId))
+                .isInstanceOf(ForbiddenActionException.class);
+
+        verify(teamRepository, never()).save(any());
+    }
+
+    @Test
     void updateTeam_auditsTheValuesFromBeforeAndAfterTheChange() {
         when(userRepository.findById(actorId)).thenReturn(Optional.of(actor));
         UUID teamId = UUID.randomUUID();

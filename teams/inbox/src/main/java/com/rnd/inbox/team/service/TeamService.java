@@ -124,6 +124,7 @@ public class TeamService {
     public TeamResponseDto updateTeamStatus(UUID id, TeamStatusUpdateRequestDto request, UUID actorId) {
         User actor = findActorOrThrow(actorId);
         Team team = findTeamOrThrow(id);
+        teamAuthorization.assertWithinScope(teamAuthorization.scopeOf(actor), team);
 
         Map<String, Object> before = auditSnapshot(team);
         teamMapper.applyStatusChange(team, TeamStatus.valueOf(request.getStatus()));
