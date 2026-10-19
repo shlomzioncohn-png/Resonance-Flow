@@ -1,13 +1,18 @@
 package com.rnd.chain.service;
 
+import com.rnd.chain.testsupport.PgRepos;
+import org.junit.jupiter.api.Tag;
+import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.transaction.annotation.Transactional;
+
 import com.rnd.chain.dto.Task;
 import com.rnd.chain.dto.TaskDependency;
 import com.rnd.chain.dto.TaskResponse;
 import com.rnd.chain.dto.TaskStatus;
 import com.rnd.chain.dto.TaskTraceResponse;
 import com.rnd.chain.exception.TaskNotFoundException;
-import com.rnd.chain.repository.InMemoryTaskDependencyRepository;
-import com.rnd.chain.repository.InMemoryTaskRepository;
+import com.rnd.chain.repository.TaskDependencyRepository;
+import com.rnd.chain.repository.TaskRepository;
 import com.rnd.chain.repository.TaskDependencyRepository;
 import com.rnd.chain.repository.TaskRepository;
 import org.junit.jupiter.api.Test;
@@ -23,6 +28,10 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+/** Ported from the in-memory version; runs against the real Postgres repositories (rolled back per test). */
+@Tag("postgres")
+@SpringBootTest
+@Transactional
 class TaskTraversalServiceTest {
 
     // ---- Dependency axis --------------------------------------------------
@@ -376,8 +385,8 @@ class TaskTraversalServiceTest {
     // ---- fixtures -----------------------------------------------------------
 
     private static TaskTraversalService serviceOf(List<Task> tasks, List<TaskDependency> edges) {
-        TaskRepository taskRepository = new InMemoryTaskRepository(tasks);
-        TaskDependencyRepository taskDependencyRepository = new InMemoryTaskDependencyRepository(edges);
+        TaskRepository taskRepository = PgRepos.tasks(tasks);
+        TaskDependencyRepository taskDependencyRepository = PgRepos.dependencies(edges);
         return new TaskTraversalService(taskRepository, taskDependencyRepository);
     }
 
@@ -388,6 +397,7 @@ class TaskTraversalServiceTest {
     private static Task task(UUID id) {
         return Task.builder()
                 .id(id)
+                .tenantId(com.rnd.chain.testsupport.TaskFixtures.DEFAULT_TENANT_ID)
                 .status(TaskStatus.PENDING)
                 .build();
     }
@@ -398,6 +408,7 @@ class TaskTraversalServiceTest {
         for (Map.Entry<UUID, UUID> e : idToParentId) {
             result.add(Task.builder()
                     .id(e.getKey())
+                    .tenantId(com.rnd.chain.testsupport.TaskFixtures.DEFAULT_TENANT_ID)
                     .parentTaskId(e.getValue())
                     .status(TaskStatus.PENDING)
                     .build());

@@ -39,7 +39,7 @@
       "effort_estimate": 30,
       "tier": "tactical",
       "blocked": false,
-      "parent_task_id": null
+      "parent_task_id": "sales_vertex_deal"
     }
   ],
   "expected_top_task_id": "task_champion",

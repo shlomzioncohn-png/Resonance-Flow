@@ -9,10 +9,11 @@ from pathlib import Path
 
 import pytest
 
-from mind.evaluation.personas import ALL_ROLES, load_personas
+from mind.evaluation.personas import ALL_ROLES, HIERARCHY_DECIDES_GROUP, load_personas
 from mind.scoring.eval_split import (
     ALL_SPLIT_SCENARIO_IDS,
     DEV_SCENARIO_IDS,
+    HIERARCHY_DECIDES_SCENARIO_IDS,
     HOLDOUT_SCENARIO_IDS,
     ScenarioSetDriftError,
     partition,
@@ -30,7 +31,7 @@ def test_every_scenario_in_the_set_has_a_half() -> None:
     vanished = sorted(ALL_SPLIT_SCENARIO_IDS - loaded)
 
     assert not unplaced, (
-        f"not in the dev/holdout split: {unplaced}. Place them in "
+        f"not in the dev/holdout/hierarchy_decides split: {unplaced}. Place them in "
         "mind/scoring/eval_split.py by its filename-only rules (see its docstring)."
     )
     assert not vanished, f"in the split but no longer in eval/personas: {vanished}"
@@ -38,6 +39,23 @@ def test_every_scenario_in_the_set_has_a_half() -> None:
 
 def test_no_scenario_is_in_both_halves() -> None:
     assert not DEV_SCENARIO_IDS & HOLDOUT_SCENARIO_IDS
+    assert not HIERARCHY_DECIDES_SCENARIO_IDS & (DEV_SCENARIO_IDS | HOLDOUT_SCENARIO_IDS)
+
+
+def test_the_hierarchy_decides_list_is_exactly_that_folder() -> None:
+    in_folder = {s.scenario_id for s in load_personas(PERSONAS_DIR / HIERARCHY_DECIDES_GROUP)}
+
+    assert in_folder == HIERARCHY_DECIDES_SCENARIO_IDS
+
+
+def test_hierarchy_decides_scenarios_are_returned_in_neither_half() -> None:
+    """Not a calibration target and not a valid holdout (see eval_split's docstring)."""
+
+    dev, holdout = partition(load_personas(PERSONAS_DIR))
+    returned = {s.scenario_id for s in dev} | {s.scenario_id for s in holdout}
+
+    assert not returned & HIERARCHY_DECIDES_SCENARIO_IDS
+    assert returned == DEV_SCENARIO_IDS | HOLDOUT_SCENARIO_IDS
 
 
 def test_every_role_has_at_least_two_holdout_scenarios() -> None:

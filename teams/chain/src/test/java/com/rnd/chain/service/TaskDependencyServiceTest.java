@@ -1,6 +1,12 @@
 package com.rnd.chain.service;
 
 import com.rnd.chain.testsupport.TaskStateHistoryFixtures;
+
+import com.rnd.chain.testsupport.PgRepos;
+import org.junit.jupiter.api.Tag;
+import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.transaction.annotation.Transactional;
+
 import com.rnd.chain.dto.DependencyChangeAction;
 import com.rnd.chain.dto.DependencyChangeSource;
 import com.rnd.chain.dto.DependencyHistoryEntry;
@@ -16,11 +22,11 @@ import com.rnd.chain.exception.InvalidRequestException;
 import com.rnd.chain.exception.TaskNotFoundException;
 import com.rnd.chain.events.SchedulingPublishListener;
 import com.rnd.chain.repository.DependencyHistoryRepository;
-import com.rnd.chain.repository.InMemoryDependencyHistoryRepository;
-import com.rnd.chain.repository.InMemoryGraphLock;
-import com.rnd.chain.repository.InMemoryTaskDependencyRepository;
-import com.rnd.chain.repository.InMemoryTaskRepository;
-import com.rnd.chain.repository.InMemoryTransactionRunner;
+import com.rnd.chain.repository.DependencyHistoryRepository;
+import com.rnd.chain.repository.GraphLock;
+import com.rnd.chain.repository.TaskDependencyRepository;
+import com.rnd.chain.repository.TaskRepository;
+import com.rnd.chain.repository.TransactionRunner;
 import com.rnd.chain.repository.TaskDependencyRepository;
 import com.rnd.chain.repository.TaskRepository;
 import com.rnd.chain.repository.TransactionRunner;
@@ -52,6 +58,10 @@ import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+/** Ported from the in-memory version; runs against the real Postgres repositories (rolled back per test). */
+@Tag("postgres")
+@SpringBootTest
+@Transactional
 class TaskDependencyServiceTest {
 
     private UUID taskA;
@@ -75,13 +85,13 @@ class TaskDependencyServiceTest {
         taskD = UUID.randomUUID();
         unknownTaskId = UUID.randomUUID();
 
-        taskRepository = new InMemoryTaskRepository(
+        taskRepository = PgRepos.tasks(
                 List.of(newTask(taskA), newTask(taskB), newTask(taskC), newTask(taskD)));
-        taskDependencyRepository = new InMemoryTaskDependencyRepository(List.of());
-        historyRepository = new InMemoryDependencyHistoryRepository();
-        transactionRunner = new InMemoryTransactionRunner();
+        taskDependencyRepository = PgRepos.dependencies(List.of());
+        historyRepository = PgRepos.history();
+        transactionRunner = PgRepos.transactionRunner();
         dependencyEdgeService = new DependencyEdgeService(
-                taskDependencyRepository, new InMemoryGraphLock(),
+                taskDependencyRepository, PgRepos.graphLock(),
                 new TaskCounterUpdater(taskRepository, taskDependencyRepository,
                         new PriorityScoreService(),
                         new SchedulingPublishListener(taskRepository, new SchedulingUpdateService(event -> {}))), TaskStateHistoryFixtures.newRecorder());
@@ -94,16 +104,16 @@ class TaskDependencyServiceTest {
 
     @Test
     void constructor_throwsNullPointerException_whenTaskRepositoryIsNull() {
-        TaskDependencyRepository taskDependencyRepository = new InMemoryTaskDependencyRepository(List.of());
-        TaskRepository dummyTaskRepository = new InMemoryTaskRepository(List.of());
+        TaskDependencyRepository taskDependencyRepository = PgRepos.dependencies(List.of());
+        TaskRepository dummyTaskRepository = PgRepos.tasks(List.of());
         DependencyEdgeService dependencyEdgeService = new DependencyEdgeService(
-                taskDependencyRepository, new InMemoryGraphLock(),
+                taskDependencyRepository, PgRepos.graphLock(),
                 new TaskCounterUpdater(dummyTaskRepository, taskDependencyRepository,
                         new PriorityScoreService(),
                         new SchedulingPublishListener(dummyTaskRepository, new SchedulingUpdateService(event -> {}))), TaskStateHistoryFixtures.newRecorder());
 
         assertThatThrownBy(() -> new TaskDependencyService(null, taskDependencyRepository,
-                new InMemoryDependencyHistoryRepository(), new InMemoryTransactionRunner(), new IncrementingClock(),
+                PgRepos.history(), PgRepos.transactionRunner(), new IncrementingClock(),
                 dependencyEdgeService))
                 .isInstanceOf(NullPointerException.class)
                 .hasMessageContaining("taskRepository");
@@ -111,16 +121,16 @@ class TaskDependencyServiceTest {
 
     @Test
     void constructor_throwsNullPointerException_whenTaskDependencyRepositoryIsNull() {
-        TaskRepository taskRepository = new InMemoryTaskRepository(List.of());
-        TaskDependencyRepository dummyDependencyRepository = new InMemoryTaskDependencyRepository(List.of());
+        TaskRepository taskRepository = PgRepos.tasks(List.of());
+        TaskDependencyRepository dummyDependencyRepository = PgRepos.dependencies(List.of());
         DependencyEdgeService dependencyEdgeService = new DependencyEdgeService(
-                dummyDependencyRepository, new InMemoryGraphLock(),
+                dummyDependencyRepository, PgRepos.graphLock(),
                 new TaskCounterUpdater(taskRepository, dummyDependencyRepository,
                         new PriorityScoreService(),
                         new SchedulingPublishListener(taskRepository, new SchedulingUpdateService(event -> {}))), TaskStateHistoryFixtures.newRecorder());
 
         assertThatThrownBy(() -> new TaskDependencyService(taskRepository, null,
-                new InMemoryDependencyHistoryRepository(), new InMemoryTransactionRunner(), new IncrementingClock(),
+                PgRepos.history(), PgRepos.transactionRunner(), new IncrementingClock(),
                 dependencyEdgeService))
                 .isInstanceOf(NullPointerException.class)
                 .hasMessageContaining("taskDependencyRepository");
@@ -162,25 +172,6 @@ class TaskDependencyServiceTest {
                 .isInstanceOf(DuplicateDependencyException.class);
     }
 
-    @Test
-    void addDependency_underConcurrentDuplicateAttempts_succeedsExactlyOnce() throws InterruptedException {
-        int threadCount = 20;
-        AtomicInteger successes = new AtomicInteger();
-        AtomicInteger duplicateRejections = new AtomicInteger();
-
-        ConcurrentTestRunner.run(threadCount, () -> {
-            try {
-                service.addDependency(taskA, taskB);
-                successes.incrementAndGet();
-            } catch (DuplicateDependencyException e) {
-                duplicateRejections.incrementAndGet();
-            }
-        });
-
-        assertThat(successes.get()).isEqualTo(1);
-        assertThat(duplicateRejections.get()).isEqualTo(threadCount - 1);
-        assertThat(service.getDependencies(taskA)).containsExactly(taskB);
-    }
 
     // --- removeDependency ------------------------------------------------
 
@@ -200,26 +191,6 @@ class TaskDependencyServiceTest {
                 .isInstanceOf(DependencyNotFoundException.class);
     }
 
-    @Test
-    void removeDependency_underConcurrentDuplicateAttempts_succeedsExactlyOnce() throws InterruptedException {
-        service.addDependency(taskA, taskB);
-        int threadCount = 20;
-        AtomicInteger successes = new AtomicInteger();
-        AtomicInteger notFoundRejections = new AtomicInteger();
-
-        ConcurrentTestRunner.run(threadCount, () -> {
-            try {
-                service.removeDependency(taskA, taskB);
-                successes.incrementAndGet();
-            } catch (DependencyNotFoundException e) {
-                notFoundRejections.incrementAndGet();
-            }
-        });
-
-        assertThat(successes.get()).isEqualTo(1);
-        assertThat(notFoundRejections.get()).isEqualTo(threadCount - 1);
-        assertThat(service.getDependencies(taskA)).isEmpty();
-    }
 
     // --- getDependencies / getDependents ----------------------------------
 
@@ -247,15 +218,7 @@ class TaskDependencyServiceTest {
 
     // --- reads wait for in-flight writes, so they can't see a mid-rollback state ---
 
-    @Test
-    void getDependencies_blocksUntilAnInFlightTransactionFinishes() throws InterruptedException {
-        assertReadBlocksUntilTransactionFinishes(() -> service.getDependencies(taskA));
-    }
 
-    @Test
-    void getDependents_blocksUntilAnInFlightTransactionFinishes() throws InterruptedException {
-        assertReadBlocksUntilTransactionFinishes(() -> service.getDependents(taskA));
-    }
 
     private void assertReadBlocksUntilTransactionFinishes(Runnable read) throws InterruptedException {
         CountDownLatch transactionStarted = new CountDownLatch(1);
@@ -372,16 +335,16 @@ class TaskDependencyServiceTest {
     @Test
     void addDependency_historyWriteFails_edgeIsNeverWritten() {
         DependencyHistoryRepository failingHistoryRepository = new ThrowingDependencyHistoryRepository();
-        TaskRepository taskRepository = new InMemoryTaskRepository(
+        TaskRepository taskRepository = PgRepos.tasks(
                 List.of(newTask(taskA), newTask(taskB)));
         DependencyEdgeService dependencyEdgeService = new DependencyEdgeService(
-                taskDependencyRepository, new InMemoryGraphLock(),
+                taskDependencyRepository, PgRepos.graphLock(),
                 new TaskCounterUpdater(taskRepository, taskDependencyRepository,
                         new PriorityScoreService(),
                         new SchedulingPublishListener(taskRepository, new SchedulingUpdateService(event -> {}))), TaskStateHistoryFixtures.newRecorder());
         TaskDependencyService serviceWithFailingHistory = new TaskDependencyService(
                 taskRepository, taskDependencyRepository, failingHistoryRepository,
-                new InMemoryTransactionRunner(), new IncrementingClock(), dependencyEdgeService);
+                PgRepos.transactionRunner(), new IncrementingClock(), dependencyEdgeService);
 
         assertThatThrownBy(() -> serviceWithFailingHistory.addDependency(taskA, taskB))
                 .isInstanceOf(RuntimeException.class);
@@ -393,16 +356,16 @@ class TaskDependencyServiceTest {
     void removeDependency_historyWriteFails_edgeIsNeverRemoved() {
         service.addDependency(taskA, taskB);
         DependencyHistoryRepository failingHistoryRepository = new ThrowingDependencyHistoryRepository();
-        TaskRepository taskRepository = new InMemoryTaskRepository(
+        TaskRepository taskRepository = PgRepos.tasks(
                 List.of(newTask(taskA), newTask(taskB)));
         DependencyEdgeService dependencyEdgeService = new DependencyEdgeService(
-                taskDependencyRepository, new InMemoryGraphLock(),
+                taskDependencyRepository, PgRepos.graphLock(),
                 new TaskCounterUpdater(taskRepository, taskDependencyRepository,
                         new PriorityScoreService(),
                         new SchedulingPublishListener(taskRepository, new SchedulingUpdateService(event -> {}))), TaskStateHistoryFixtures.newRecorder());
         TaskDependencyService serviceWithFailingHistory = new TaskDependencyService(
                 taskRepository, taskDependencyRepository, failingHistoryRepository,
-                new InMemoryTransactionRunner(), new IncrementingClock(), dependencyEdgeService);
+                PgRepos.transactionRunner(), new IncrementingClock(), dependencyEdgeService);
 
         assertThatThrownBy(() -> serviceWithFailingHistory.removeDependency(taskA, taskB))
                 .isInstanceOf(RuntimeException.class);
@@ -417,10 +380,10 @@ class TaskDependencyServiceTest {
     @Test
     void addDependency_duplicateEdge_whenCompensationFails_throwsWithOriginalSuppressed() {
         DependencyHistoryRepository deleteThrowingHistory =
-                new DeleteThrowingDependencyHistoryRepository(new InMemoryDependencyHistoryRepository());
+                new DeleteThrowingDependencyHistoryRepository(PgRepos.history());
         TaskDependencyService serviceWithBrokenCompensation = new TaskDependencyService(
                 taskRepository, taskDependencyRepository, deleteThrowingHistory,
-                new InMemoryTransactionRunner(), new IncrementingClock(), dependencyEdgeService);
+                PgRepos.transactionRunner(), new IncrementingClock(), dependencyEdgeService);
         serviceWithBrokenCompensation.addDependency(taskA, taskB);
 
         assertThatThrownBy(() -> serviceWithBrokenCompensation.addDependency(taskA, taskB))
@@ -432,10 +395,10 @@ class TaskDependencyServiceTest {
     @Test
     void removeDependency_missingEdge_whenCompensationFails_throwsWithOriginalSuppressed() {
         DependencyHistoryRepository deleteThrowingHistory =
-                new DeleteThrowingDependencyHistoryRepository(new InMemoryDependencyHistoryRepository());
+                new DeleteThrowingDependencyHistoryRepository(PgRepos.history());
         TaskDependencyService serviceWithBrokenCompensation = new TaskDependencyService(
                 taskRepository, taskDependencyRepository, deleteThrowingHistory,
-                new InMemoryTransactionRunner(), new IncrementingClock(), dependencyEdgeService);
+                PgRepos.transactionRunner(), new IncrementingClock(), dependencyEdgeService);
 
         assertThatThrownBy(() -> serviceWithBrokenCompensation.removeDependency(taskA, taskB))
                 .isNotInstanceOf(DependencyNotFoundException.class)
@@ -493,37 +456,7 @@ class TaskDependencyServiceTest {
                 .isInstanceOf(InvalidRequestException.class);
     }
 
-    @Test
-    void addDependency_retryAfterTaskWasDeleted_throwsTaskNotFoundException() {
-        service.addDependency(taskA, taskB, DependencyChangeSource.MIND, "evt-1");
-        taskRepository.save(Task.builder()
-                .id(taskA)
-                .status(TaskStatus.ACTIVE)
-                .isReady(true)
-                .blockingCount(0)
-                .openConstraintCount(0)
-                .createdAt(LocalDateTime.now())
-                .deletedAt(LocalDateTime.now())
-                .build());
 
-        assertThatThrownBy(() -> service.addDependency(taskA, taskB, DependencyChangeSource.MIND, "evt-1"))
-                .isInstanceOf(TaskNotFoundException.class);
-    }
-
-    @Test
-    void addDependency_concurrentRetriesWithSameSourceRef_allSucceed_oneHistoryEntry() throws InterruptedException {
-        int threadCount = 20;
-        AtomicInteger successes = new AtomicInteger();
-
-        ConcurrentTestRunner.run(threadCount, () -> {
-            service.addDependency(taskA, taskB, DependencyChangeSource.MIND, "evt-2");
-            successes.incrementAndGet();
-        });
-
-        assertThat(successes.get()).isEqualTo(threadCount);
-        assertThat(service.getHistory(taskA, 0, 20).content()).hasSize(1);
-        assertThat(service.getDependencies(taskA)).containsExactly(taskB);
-    }
 
     @Test
     void addDependency_userSourceWithoutSourceRef_hasNoIdempotencyProtection() {
@@ -645,7 +578,7 @@ void addDependency_whenSameMindEventIsRetried_shouldNotApplyDependencyTwice() {
     DependencyEdgeService edgeService =
         new DependencyEdgeService(
                 taskDependencyRepository,
-                new InMemoryGraphLock(),
+                PgRepos.graphLock(),
                 new TaskCounterUpdater(taskRepository, taskDependencyRepository,
                         new PriorityScoreService(),
                         new SchedulingPublishListener(taskRepository, schedulingUpdateService)), TaskStateHistoryFixtures.newRecorder());

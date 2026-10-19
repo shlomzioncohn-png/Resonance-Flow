@@ -250,6 +250,41 @@ definition instead. Rows have no `onClick`: row actions are real buttons
 (or links) inside a cell, each with an `aria-label` that names the row
 (`"Edit Dana Levi"`), so the table works with a keyboard alone.
 
+## KPI numbers: `KpiTile`
+
+`components/ui/KpiTile` is the **only** component for a big number with a
+label. Don't add another stat/number card: extend `KpiTile` instead. Its
+colors come from `theme.palette` only (`status.*` and `text.*`), so it works
+with the design system and in dark mode.
+
+- `value` is a number or pre-formatted text (`12`, `"1,284"`, `"3.2d"`);
+  `tone` colors it with the `status` palette.
+- `subtitle` (optional): secondary text under the label, e.g. `"Last 7 days"`.
+- `trend` (optional): change vs the previous period, in percent. The color
+  follows whether the change is **good or bad**, not the arrow's direction:
+  set `goodDirection: 'down'` for counts where less is better, like blocked
+  tasks. The arrow and the `+`/`−` sign carry the meaning without color, and
+  screen readers hear a sentence like "Down 25% from previous period".
+- `sparkline` (optional): recent values, oldest first, drawn as a small SVG
+  line. Pass `sparklineLabel` to describe it to screen readers; without it
+  the line is treated as decorative (`aria-hidden`).
+
+```tsx
+import KpiTile from '@/components/ui/KpiTile';
+
+<KpiTile
+  value={12}
+  label="Blocked tasks"
+  subtitle="Last 7 days"
+  tone="critical"
+  trend={{ delta: -25, goodDirection: 'down' }}
+  sparkline={[16, 15, 17, 14, 15, 13, 12]}
+  sparklineLabel="Blocked tasks over the last 7 days, falling from 16 to 12"
+/>;
+```
+
+See every state in Storybook under `KpiTile`.
+
 ## Working example: Theme usage in the App Shell
 
 The App Shell (`components/layout/{AppShell,Header,Sidebar,Logo,PageContainer}`)
