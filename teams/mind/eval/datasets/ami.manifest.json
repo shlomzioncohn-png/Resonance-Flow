@@ -2,7 +2,7 @@
   "dataset": "AMI Meeting Corpus",
   "dataset_version": "ami_public_manual_1.6.2",
   "purpose": "Foundation Gate real-data slice for the persona harness; also the ground-truth source for #176",
-  "split": "manual annotations - abstractive summary (abssumm), <actions> layer; words/ layer (AMI's human word-level transcript, every speaker) for the transcript loader in src/mind/ingestion/ami_transcripts.py (#784)",
+  "split": "manual annotations - abstractive summary (abssumm), <actions> layer; words/ and segments/ layers (AMI's human word-level transcript and its per-speaker segments, every speaker) for the transcript loader in src/mind/ingestion/ami_transcripts.py (#784)",
   "source_url": "https://groups.inf.ed.ac.uk/ami/AMICorpusAnnotations/ami_public_manual_1.6.2.zip",
   "source_page": "https://groups.inf.ed.ac.uk/ami/download/",
   "license": {
@@ -26,7 +26,11 @@
         "local-data/ami/ami_public_manual_1.6.2/words/IB4003.A.words.xml",
         "local-data/ami/ami_public_manual_1.6.2/words/IB4003.B.words.xml",
         "local-data/ami/ami_public_manual_1.6.2/words/IB4003.C.words.xml",
-        "local-data/ami/ami_public_manual_1.6.2/words/IB4003.D.words.xml"
+        "local-data/ami/ami_public_manual_1.6.2/words/IB4003.D.words.xml",
+        "local-data/ami/ami_public_manual_1.6.2/segments/IB4003.A.segments.xml",
+        "local-data/ami/ami_public_manual_1.6.2/segments/IB4003.B.segments.xml",
+        "local-data/ami/ami_public_manual_1.6.2/segments/IB4003.C.segments.xml",
+        "local-data/ami/ami_public_manual_1.6.2/segments/IB4003.D.segments.xml"
       ]
     },
     {
@@ -37,7 +41,11 @@
         "local-data/ami/ami_public_manual_1.6.2/words/IS1008b.A.words.xml",
         "local-data/ami/ami_public_manual_1.6.2/words/IS1008b.B.words.xml",
         "local-data/ami/ami_public_manual_1.6.2/words/IS1008b.C.words.xml",
-        "local-data/ami/ami_public_manual_1.6.2/words/IS1008b.D.words.xml"
+        "local-data/ami/ami_public_manual_1.6.2/words/IS1008b.D.words.xml",
+        "local-data/ami/ami_public_manual_1.6.2/segments/IS1008b.A.segments.xml",
+        "local-data/ami/ami_public_manual_1.6.2/segments/IS1008b.B.segments.xml",
+        "local-data/ami/ami_public_manual_1.6.2/segments/IS1008b.C.segments.xml",
+        "local-data/ami/ami_public_manual_1.6.2/segments/IS1008b.D.segments.xml"
       ]
     },
     {
@@ -48,7 +56,11 @@
         "local-data/ami/ami_public_manual_1.6.2/words/IS1008d.A.words.xml",
         "local-data/ami/ami_public_manual_1.6.2/words/IS1008d.B.words.xml",
         "local-data/ami/ami_public_manual_1.6.2/words/IS1008d.C.words.xml",
-        "local-data/ami/ami_public_manual_1.6.2/words/IS1008d.D.words.xml"
+        "local-data/ami/ami_public_manual_1.6.2/words/IS1008d.D.words.xml",
+        "local-data/ami/ami_public_manual_1.6.2/segments/IS1008d.A.segments.xml",
+        "local-data/ami/ami_public_manual_1.6.2/segments/IS1008d.B.segments.xml",
+        "local-data/ami/ami_public_manual_1.6.2/segments/IS1008d.C.segments.xml",
+        "local-data/ami/ami_public_manual_1.6.2/segments/IS1008d.D.segments.xml"
       ]
     }
   ],
