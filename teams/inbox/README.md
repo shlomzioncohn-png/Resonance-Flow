@@ -84,6 +84,22 @@ To stop:
 docker compose down
 ```
 
+## Creating the first admin
+
+On an empty database there is no user who can log in yet. Migration `V14` seeds a built-in
+`SYSTEM_ADMIN` (`00000000-0000-0000-0000-000000000002`) with no password, so it can never log
+in. Use it once, as the `X-Actor-Id` of a direct API call, to create a real admin with a password:
+
+```bash
+curl -X POST http://localhost:8080/api/v1/users \
+  -H "Content-Type: application/json" \
+  -H "X-Actor-Id: 00000000-0000-0000-0000-000000000002" \
+  -d '{"tenant_id": "00000000-0000-0000-0000-000000000001", "display_name": "Admin",
+       "username": "admin", "role": "SYSTEM_ADMIN", "password": "<choose a password>"}'
+```
+
+That admin logs in with `admin` and the chosen password, and creates tenants and users from there.
+
 ## Kafka
 
 Local Kafka (single-node, KRaft mode — no Zookeeper) plus a web UI for it are part of this
