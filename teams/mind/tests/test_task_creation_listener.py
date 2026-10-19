@@ -88,7 +88,12 @@ def _sent(flow: TaskCreationFlow, loop: asyncio.AbstractEventLoop) -> UUID:
 
 
 def _event() -> TaskCreatedEvent:
-    return TaskCreatedEvent(id=TASK_ID, title="Send the Q3 revenue report", description="Before Friday.")
+    return TaskCreatedEvent(
+        id=TASK_ID,
+        title="Send the Q3 revenue report",
+        description="Before Friday.",
+        tenant_id="11111111-1111-1111-1111-111111111111",
+    )
 
 
 def test_the_handler_passes_the_event_and_the_envelopes_headers(

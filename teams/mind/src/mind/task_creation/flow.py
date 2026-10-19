@@ -2,6 +2,7 @@
 so all three use one pending store. How to compose it: README.md, "Running it".
 """
 
+from collections.abc import Sequence
 from datetime import datetime, timedelta
 from uuid import UUID
 
@@ -43,6 +44,7 @@ class TaskCreationFlow:
         bridge_correlation_id: UUID,
         revision: int,
         task_index: int = 0,
+        dependency_mentions: Sequence[str] = (),
     ) -> UUID:
         """What the pipeline calls for each task it extracted."""
 
@@ -53,6 +55,7 @@ class TaskCreationFlow:
             bridge_correlation_id=bridge_correlation_id,
             revision=revision,
             task_index=task_index,
+            dependency_mentions=dependency_mentions,
         )
 
     async def on_task_created(self, event: TaskCreatedEvent, headers: Headers) -> MatchedReply | None:

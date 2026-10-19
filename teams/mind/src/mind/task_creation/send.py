@@ -5,6 +5,7 @@ Why the order, and what a failed or repeated publish does: README.md,
 """
 
 import asyncio
+from collections.abc import Sequence
 from typing import TYPE_CHECKING
 from uuid import UUID
 
@@ -34,6 +35,7 @@ async def send_creation_request(
     bridge_correlation_id: UUID,
     revision: int,
     task_index: int = 0,
+    dependency_mentions: Sequence[str] = (),
 ) -> UUID:
     """Publish `request` to Inbox and register it; return its correlation_id."""
 
@@ -41,7 +43,10 @@ async def send_creation_request(
     event = to_creation_requested_event(request, correlation_id)
 
     entry = PendingRequest(
-        bridge_correlation_id=bridge_correlation_id, revision=revision, task_index=task_index
+        bridge_correlation_id=bridge_correlation_id,
+        revision=revision,
+        task_index=task_index,
+        dependency_mentions=tuple(dependency_mentions),
     )
     registered_now = await pending.add(correlation_id, entry)
     try:

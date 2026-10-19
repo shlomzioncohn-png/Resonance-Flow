@@ -22,6 +22,7 @@ from tests.test_index_consumer import FakeVectorStore
 
 ITEM = UUID("6f1c2e9a-3b4d-4c8e-9a1f-2d7e5b0c4a83")
 REQUEST_ID = UUID("b5603af4-09b6-569a-b3ca-f6d18a0191a1")
+TENANT = UUID("11111111-1111-1111-1111-111111111111")
 SENT = datetime(2026, 10, 14, 12, 0, tzinfo=UTC)
 
 
@@ -32,7 +33,10 @@ def _no_embedding_model(monkeypatch: pytest.MonkeyPatch) -> None:
 
 async def _pending() -> PendingRequests:
     pending = PendingRequests()
-    await pending.add(REQUEST_ID, PendingRequest(bridge_correlation_id=ITEM, revision=0, task_index=0, sent_at=SENT))
+    await pending.add(
+        REQUEST_ID,
+        PendingRequest(bridge_correlation_id=ITEM, revision=0, task_index=0, sent_at=SENT),
+    )
     return pending
 
 
@@ -71,7 +75,9 @@ async def test_a_reported_request_stays_pending_and_a_late_reply_still_matches()
     pending = await _pending()
     await report_overdue(pending, now=SENT + timedelta(minutes=11))
 
-    reply = TaskCreatedEvent(id="4d0c6f2a-8b1e-4c3d-9a7f-1e2b3c4d5e6f", title="t", description="d")
+    reply = TaskCreatedEvent(
+        id="4d0c6f2a-8b1e-4c3d-9a7f-1e2b3c4d5e6f", title="t", description="d", tenant_id=str(TENANT)
+    )
     headers = [("correlation_id", str(REQUEST_ID).encode())]
 
     assert await handle_task_created_reply(FakeVectorStore(), pending, reply, headers) is not None
@@ -80,7 +86,9 @@ async def test_a_reported_request_stays_pending_and_a_late_reply_still_matches()
 async def test_a_matched_reply_logs_how_long_it_took(caplog: pytest.LogCaptureFixture) -> None:
     """The data for setting the limit from real latencies later."""
 
-    reply = TaskCreatedEvent(id="4d0c6f2a-8b1e-4c3d-9a7f-1e2b3c4d5e6f", title="t", description="d")
+    reply = TaskCreatedEvent(
+        id="4d0c6f2a-8b1e-4c3d-9a7f-1e2b3c4d5e6f", title="t", description="d", tenant_id=str(TENANT)
+    )
     headers = [("correlation_id", str(REQUEST_ID).encode())]
 
     with caplog.at_level(logging.INFO, logger="mind.task_creation"):
@@ -120,7 +128,8 @@ async def test_no_warning_for_a_request_answered_while_the_timer_ran(
 ) -> None:
     pending = AnsweredMidCheck()
     await pending.add(
-        REQUEST_ID, PendingRequest(bridge_correlation_id=ITEM, revision=0, task_index=0, sent_at=SENT)
+        REQUEST_ID,
+        PendingRequest(bridge_correlation_id=ITEM, revision=0, task_index=0, sent_at=SENT),
     )
 
     with caplog.at_level(logging.WARNING, logger="mind.task_creation"):
@@ -173,6 +182,7 @@ async def test_a_discard_cannot_slip_between_mark_reporteds_check_and_write() ->
     listener.join()
 
     await pending.add(
-        REQUEST_ID, PendingRequest(bridge_correlation_id=ITEM, revision=1, task_index=0, sent_at=SENT)
+        REQUEST_ID,
+        PendingRequest(bridge_correlation_id=ITEM, revision=1, task_index=0, sent_at=SENT),
     )
     assert await pending.mark_reported(REQUEST_ID) is True

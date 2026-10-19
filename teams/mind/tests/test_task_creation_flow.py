@@ -8,12 +8,16 @@ issue are the tests below, one each.
 
 import logging
 from datetime import UTC, datetime, timedelta
+from unittest.mock import AsyncMock, patch
 from uuid import UUID
 
 import pytest
 
 from mind.contracts.base_enums import SourceType
 from mind.contracts.task_creation_requested import TaskCreationRequested
+from mind.dependencies.adapter import DependencyAdapter
+from mind.dependencies.publisher import DependencyPublisher
+from mind.embeddings.base import SearchResult
 from mind.messaging.task_created_event_pb2 import TaskCreatedEvent
 from mind.task_creation.flow import TaskCreationFlow
 from mind.task_creation.pending import PendingRequests
@@ -23,6 +27,8 @@ from tests.test_index_consumer import FakeVectorStore
 
 ITEM = UUID("6f1c2e9a-3b4d-4c8e-9a1f-2d7e5b0c4a83")
 TASK_ID = "4d0c6f2a-8b1e-4c3d-9a7f-1e2b3c4d5e6f"  # what Inbox hands out
+DEPENDS_ON_TASK_ID = "9a8b7c6d-5e4f-4a3b-8c2d-1e0f9a8b7c6d"  # the resolved dependency target
+TENANT = UUID("11111111-1111-1111-1111-111111111111")
 
 
 @pytest.fixture(autouse=True)
@@ -59,7 +65,7 @@ class FailingOnceStore(FakeVectorStore):
 
 def _proposal() -> TaskCreationRequested:
     return TaskCreationRequested(
-        tenant_id=UUID("11111111-1111-1111-1111-111111111111"),
+        tenant_id=TENANT,
         title="Send the Q3 revenue report",
         description="Finance needs it before Friday's close.",
         source_type=SourceType.SLACK,
@@ -82,6 +88,7 @@ def _reply(correlation_id: object) -> tuple[TaskCreatedEvent, list[tuple[str, by
         id=TASK_ID,
         title="Send the Q3 revenue report",
         description="Finance needs it before Friday's close.",
+        tenant_id=str(TENANT),
     )
     return event, [("correlation_id", str(correlation_id).encode())]
 
@@ -286,3 +293,69 @@ async def test_an_unreadable_correlation_header_is_a_warning_not_silence(
 
     assert matched is None
     assert "not-a-uuid" in caplog.text
+
+
+# --- wired to DependencyAdapter, end to end (#355) ---------------------------
+
+
+class ListSink:
+    def __init__(self) -> None:
+        self.sent: list[object] = []
+
+    def send(self, payload: object) -> None:
+        self.sent.append(payload)
+
+
+async def test_sending_a_request_publishes_no_dependencies_before_the_reply_arrives() -> None:
+    """Publishing only ever happens from on_matched, which only fires on a
+    reply -- send() alone must trigger nothing."""
+
+    sink = ListSink()
+    publisher = DependencyPublisher(store=object(), sink=sink)  # type: ignore[arg-type]
+    adapter = DependencyAdapter(publisher)
+    flow = TaskCreationFlow(
+        producer=FakeProducer(),
+        index=FakeVectorStore(),
+        pending=PendingRequests(),
+        on_matched=adapter.on_task_created,
+    )
+
+    await flow.send(
+        _proposal(), bridge_correlation_id=ITEM, revision=0, dependency_mentions=["the DB upgrade"]
+    )
+
+    assert sink.sent == []
+
+
+async def test_the_full_round_trip_from_send_to_a_published_dependency() -> None:
+    """send() -> task.created reply -> DependencyAdapter -> publish_dependencies
+    -> Kafka, carrying the real task_id, the tenant_id, and the mentions through."""
+
+    sink = ListSink()
+    publisher = DependencyPublisher(store=object(), sink=sink)  # type: ignore[arg-type]
+    adapter = DependencyAdapter(publisher)
+    flow = TaskCreationFlow(
+        producer=FakeProducer(),
+        index=FakeVectorStore(),
+        pending=PendingRequests(),
+        on_matched=adapter.on_task_created,
+    )
+    proposal = _proposal()
+
+    correlation_id = await flow.send(
+        proposal, bridge_correlation_id=ITEM, revision=0, dependency_mentions=["the DB upgrade"]
+    )
+
+    with patch(
+        "mind.dependencies.publisher.resolve_dependency_targets",
+        AsyncMock(return_value=[[SearchResult(task_id=DEPENDS_ON_TASK_ID, similarity=0.9)]]),
+    ) as mock_resolve:
+        await flow.on_task_created(*_reply(correlation_id))
+
+    mock_resolve.assert_awaited_once_with(
+        publisher._store, ["the DB upgrade"], k=1, exclude_task_id=TASK_ID
+    )
+    [event] = sink.sent
+    assert str(event.task_id) == TASK_ID
+    assert event.tenant_id == proposal.tenant_id
+    assert event.dependencies[0].depends_on_task_id == UUID(DEPENDS_ON_TASK_ID)

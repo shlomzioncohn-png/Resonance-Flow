@@ -2,16 +2,18 @@
 task.dependencies.proposed (#133) to Chain.
 
 Hand-off: `publish_dependencies` takes `task_id`, `tenant_id` and
-`dependency_mentions` explicitly -- not read off #353's `MatchedReply`,
-which doesn't carry them yet (see README.md).
+`dependency_mentions` explicitly -- not read off #353's `MatchedReply`
+itself; `adapter.py` does that (see README.md).
 
 Per mention, only the best resolved candidate becomes an edge: the
 embeddings README notes that a close paraphrase pair (e.g. "login bug" vs
 "logout bug") can both clear the threshold, so taking every candidate above
 it would treat a near-miss as a real dependency. An unresolved mention is
 neither dropped nor force-published -- a later call with the same mentions
-picks it up once it resolves. The sent-edges record is per-process,
-in-memory, and relies on Chain no-op'ing a re-proposed edge after a restart.
+picks it up once it resolves, and `publish_dependencies` returns whether
+everything resolved so the caller knows whether to retry. The sent-edges
+record is per-process, in-memory, and relies on Chain no-op'ing a
+re-proposed edge after a restart.
 """
 
 from __future__ import annotations
@@ -20,7 +22,7 @@ import asyncio
 import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from uuid import UUID
+from uuid import UUID, uuid5
 
 from mind.dependencies.event import build_dependency_event
 from mind.dependencies.kafka_sink import DependencySink
@@ -28,6 +30,10 @@ from mind.embeddings.base import VectorStore
 from mind.embeddings.dependency_resolution import resolve_dependency_targets
 
 logger = logging.getLogger(__name__)
+
+#: Never change: every id would change, and every retry already sent would
+#: be seen as new, defeating Chain's dedup.
+_NAMESPACE = UUID("914f772d-7854-498c-a738-c5e7f9a23572")
 
 
 class DependencyPublisher:
@@ -66,41 +72,55 @@ class DependencyPublisher:
         task_id: str,
         tenant_id: UUID,
         dependency_mentions: list[str],
-    ) -> None:
+    ) -> bool:
         """Resolve `dependency_mentions` (#245) and publish whatever is new.
 
-        A task with no mentions at all publishes nothing.
+        Returns whether every mention resolved to some target -- False means
+        at least one is still outstanding and the caller should consider
+        retrying later. A task with no mentions at all returns True.
         """
         if not dependency_mentions:
-            return
+            return True
+
+        mentions = [m for m in dependency_mentions if m.strip()]
+        blank_count = len(dependency_mentions) - len(mentions)
+        if blank_count:
+            logger.warning(
+                "dependencies: task %s dropped %d blank mention(s)",
+                task_id,
+                blank_count,
+            )
+        if not mentions:
+            return True
 
         task_uuid = UUID(task_id)
+        task_id_normalized = str(task_uuid)
 
         resolved_lists = await resolve_dependency_targets(
-            self._store, dependency_mentions, exclude_task_id=task_id
+            self._store, mentions, k=1, exclude_task_id=task_id_normalized
         )
         candidates: dict[UUID, float] = {}
+        all_resolved = True
         for results in resolved_lists:
-            for result in results:
-                try:
-                    target_uuid = UUID(result.task_id)
-                except ValueError:
-                    logger.warning(
-                        "dependencies: task %s resolved target %r is not a UUID, skipping",
-                        task_id,
-                        result.task_id,
-                    )
-                    continue
-                if target_uuid == task_uuid:
-                    # A mention resolving to the task's own id is not a real
-                    # dependency -- a task cannot depend on itself.
-                    continue
-                if target_uuid not in candidates or result.similarity > candidates[target_uuid]:
-                    candidates[target_uuid] = result.similarity
-                break
+            if not results:
+                all_resolved = False
+                continue
+            result = results[0]
+            try:
+                target_uuid = UUID(result.task_id)
+            except ValueError:
+                logger.warning(
+                    "dependencies: task %s resolved target %r is not a UUID, skipping",
+                    task_id,
+                    result.task_id,
+                )
+                all_resolved = False
+                continue
+            if target_uuid not in candidates or result.similarity > candidates[target_uuid]:
+                candidates[target_uuid] = result.similarity
 
-        async with self._task_lock(task_id):
-            already_sent = self._published.get(task_id, set())
+        async with self._task_lock(task_id_normalized):
+            already_sent = self._published.get(task_id_normalized, set())
             new_edges = {
                 target: confidence
                 for target, confidence in candidates.items()
@@ -112,11 +132,14 @@ class DependencyPublisher:
                     "(%d already sent, %d mentions resolved)",
                     task_id,
                     len(already_sent),
-                    len(dependency_mentions),
+                    len(mentions),
                 )
-                return
+                return all_resolved
 
-            event = build_dependency_event(task_uuid, tenant_id, new_edges)
+            event_id = uuid5(
+                _NAMESPACE, f"{task_id_normalized}:{sorted(str(t) for t in new_edges)}"
+            )
+            event = build_dependency_event(task_uuid, tenant_id, new_edges, event_id=event_id)
             # Off the loop: send() blocks until Kafka acks.
             send_task = asyncio.ensure_future(asyncio.to_thread(self._sink.send, event))
             try:
@@ -129,7 +152,8 @@ class DependencyPublisher:
                 # real outcome so already_sent only updates if it did, then
                 # honor the cancellation.
                 await send_task
-                self._published[task_id] = already_sent | set(new_edges)
+                self._published[task_id_normalized] = already_sent | set(new_edges)
                 raise
             else:
-                self._published[task_id] = already_sent | set(new_edges)
+                self._published[task_id_normalized] = already_sent | set(new_edges)
+                return all_resolved

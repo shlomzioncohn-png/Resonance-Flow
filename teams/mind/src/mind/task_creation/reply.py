@@ -30,6 +30,7 @@ class MatchedReply:
 
     correlation_id: UUID
     task_id: str
+    tenant_id: UUID
     request: PendingRequest
 
 
@@ -91,7 +92,12 @@ async def handle_task_created_reply(
         return None
 
     await handle_task_created(store, event)
-    matched = MatchedReply(correlation_id=correlation_id, task_id=event.id, request=request)
+    matched = MatchedReply(
+        correlation_id=correlation_id,
+        task_id=event.id,
+        tenant_id=UUID(event.tenant_id),
+        request=request,
+    )
     if on_matched is not None:
         await on_matched(matched)
     await pending.discard(correlation_id)

@@ -165,8 +165,28 @@ async def test_waiting_for_the_broker_does_not_block_the_event_loop() -> None:
     )
 
 
-async def test_a_retry_that_went_out_restarts_the_clock_and_keeps_its_revision() -> None:
+class _AdvancingClock:
+    """A fake `datetime` whose `now()` strictly advances on every call -- the
+    real clock's resolution on Windows can return the same instant twice for
+    two calls this close together, which would make a `>` comparison flaky
+    for reasons that have nothing to do with the code under test."""
+
+    def __init__(self, start: datetime) -> None:
+        self._next = start
+
+    def now(self, tz: object = None) -> datetime:
+        self._next += timedelta(microseconds=1)
+        return self._next
+
+
+async def test_a_retry_that_went_out_restarts_the_clock_and_keeps_its_revision(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """The entry describes the latest request Inbox received, not the first."""
+
+    monkeypatch.setattr(
+        "mind.task_creation.pending.datetime", _AdvancingClock(datetime(2026, 1, 1, tzinfo=UTC))
+    )
 
     pending = PendingRequests()
     first = await send_creation_request(

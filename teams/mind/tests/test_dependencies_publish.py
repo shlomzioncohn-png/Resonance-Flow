@@ -153,6 +153,45 @@ async def test_an_unresolved_target_is_not_dropped_and_resolves_on_a_later_call(
     assert event.dependencies[0].depends_on_task_id == UUID(TASK_B)
 
 
+async def test_publish_dependencies_returns_true_when_everything_resolves(publisher, sink):
+    with _resolved([SearchResult(task_id=TASK_B, similarity=0.9)]):
+        resolved = await publisher.publish_dependencies(
+            task_id=TASK_A, tenant_id=TENANT, dependency_mentions=["the DB upgrade"]
+        )
+
+    assert resolved is True
+
+
+async def test_publish_dependencies_returns_false_when_a_mention_does_not_resolve(publisher, sink):
+    with _resolved([]):
+        resolved = await publisher.publish_dependencies(
+            task_id=TASK_A, tenant_id=TENANT, dependency_mentions=["a task that doesn't exist yet"]
+        )
+
+    assert resolved is False
+
+
+async def test_publish_dependencies_returns_false_when_only_some_mentions_resolve(publisher, sink):
+    with _resolved([SearchResult(task_id=TASK_B, similarity=0.9)], []):
+        resolved = await publisher.publish_dependencies(
+            task_id=TASK_A,
+            tenant_id=TENANT,
+            dependency_mentions=["the DB upgrade", "a task that doesn't exist yet"],
+        )
+
+    assert resolved is False
+
+
+async def test_publish_dependencies_returns_true_for_an_empty_mentions_call(publisher, sink):
+    with patch("mind.dependencies.publisher.resolve_dependency_targets") as mock_resolve:
+        resolved = await publisher.publish_dependencies(
+            task_id=TASK_A, tenant_id=TENANT, dependency_mentions=[]
+        )
+
+    assert resolved is True
+    mock_resolve.assert_not_called()
+
+
 async def test_a_later_call_publishes_only_the_newly_resolved_edge(publisher, sink):
     """Two mentions: one resolves immediately, the other only on a later call.
     The later call must add the new edge without re-sending the first one."""
@@ -174,9 +213,10 @@ async def test_a_later_call_publishes_only_the_newly_resolved_edge(publisher, si
     assert second.depends_on_task_id == UUID(TASK_C)
 
 
-async def test_resolve_is_called_with_exclude_task_id(publisher, sink):
-    """The task's own row should be excluded at the search level, not just
-    filtered out afterward by the self-id check below."""
+async def test_resolve_is_called_with_k_one_and_exclude_task_id(publisher, sink):
+    """The task's own row is excluded at the search level (#245's job, see
+    test_dependency_resolution.py) -- this file only has to confirm the call
+    asks for exactly one candidate per mention, excluding this task_id."""
     with patch(
         "mind.dependencies.publisher.resolve_dependency_targets",
         AsyncMock(return_value=[[SearchResult(task_id=TASK_B, similarity=0.9)]]),
@@ -186,17 +226,8 @@ async def test_resolve_is_called_with_exclude_task_id(publisher, sink):
         )
 
     mock_resolve.assert_awaited_once_with(
-        publisher._store, ["the DB upgrade"], exclude_task_id=TASK_A
+        publisher._store, ["the DB upgrade"], k=1, exclude_task_id=TASK_A
     )
-
-
-async def test_a_mention_resolving_to_the_tasks_own_id_is_not_a_self_dependency(publisher, sink):
-    with _resolved([SearchResult(task_id=TASK_A, similarity=0.95)]):
-        await publisher.publish_dependencies(
-            task_id=TASK_A, tenant_id=TENANT, dependency_mentions=["something about this very task"]
-        )
-
-    assert sink.sent == []
 
 
 async def test_two_mentions_resolving_to_the_same_target_publish_one_edge_at_the_higher_confidence(
@@ -334,3 +365,75 @@ async def test_the_same_target_in_different_case_is_deduped_across_mentions(publ
     [event] = sink.sent
     assert len(event.dependencies) == 1
     assert event.dependencies[0].confidence == 0.95
+
+
+async def test_a_redelivered_duplicate_after_a_restart_reuses_the_same_event_id(publisher, sink):
+    """#355 finding 1: event_id must be derived from the data, not random, so
+    Chain's event_id-based dedup survives a crash that wipes `_published`."""
+    with _resolved([SearchResult(task_id=TASK_B, similarity=0.9)]):
+        await publisher.publish_dependencies(
+            task_id=TASK_A, tenant_id=TENANT, dependency_mentions=["the DB upgrade"]
+        )
+        publisher._published.clear()  # simulate a restart losing the in-memory record
+        await publisher.publish_dependencies(
+            task_id=TASK_A, tenant_id=TENANT, dependency_mentions=["the DB upgrade"]
+        )
+
+    assert len(sink.sent) == 2
+    assert sink.sent[1].event_id == sink.sent[0].event_id
+
+
+async def test_different_edge_sets_for_the_same_task_get_different_event_ids(publisher, sink):
+    with _resolved([SearchResult(task_id=TASK_B, similarity=0.9)]):
+        await publisher.publish_dependencies(
+            task_id=TASK_A, tenant_id=TENANT, dependency_mentions=["the DB upgrade"]
+        )
+    with _resolved([SearchResult(task_id=TASK_C, similarity=0.8)]):
+        await publisher.publish_dependencies(
+            task_id=TASK_A, tenant_id=TENANT, dependency_mentions=["a different task"]
+        )
+
+    assert len(sink.sent) == 2
+    assert sink.sent[0].event_id != sink.sent[1].event_id
+
+
+async def test_blank_mentions_mixed_with_a_real_one_are_filtered_and_published(publisher, sink):
+    """#355 finding 2: blank mentions must be dropped before resolution, not
+    caught after -- otherwise one bad mention would sink the whole batch."""
+    with _resolved([SearchResult(task_id=TASK_B, similarity=0.9)]) as mock_resolve:
+        await publisher.publish_dependencies(
+            task_id=TASK_A,
+            tenant_id=TENANT,
+            dependency_mentions=["", "   ", "the DB upgrade"],
+        )
+
+    mock_resolve.assert_awaited_once_with(
+        publisher._store, ["the DB upgrade"], k=1, exclude_task_id=TASK_A
+    )
+    [event] = sink.sent
+    assert event.dependencies[0].depends_on_task_id == UUID(TASK_B)
+
+
+async def test_all_blank_mentions_publish_nothing_and_skip_resolution(publisher, sink):
+    with patch("mind.dependencies.publisher.resolve_dependency_targets") as mock_resolve:
+        await publisher.publish_dependencies(
+            task_id=TASK_A, tenant_id=TENANT, dependency_mentions=["", "  "]
+        )
+
+    assert sink.sent == []
+    mock_resolve.assert_not_called()
+
+
+async def test_the_same_task_in_different_case_is_recognized_as_already_sent(publisher, sink):
+    """#355 finding 3: _published/_locks/_lock_refs must key off the
+    normalized task_id -- a different-cased string for the same task is
+    still the same task."""
+    with _resolved([SearchResult(task_id=TASK_B, similarity=0.9)]):
+        await publisher.publish_dependencies(
+            task_id=TASK_A, tenant_id=TENANT, dependency_mentions=["the DB upgrade"]
+        )
+        await publisher.publish_dependencies(
+            task_id=TASK_A.upper(), tenant_id=TENANT, dependency_mentions=["the DB upgrade"]
+        )
+
+    assert len(sink.sent) == 1

@@ -167,12 +167,20 @@ listener_loop = asyncio.new_event_loop()
 index = PgVectorStore(get_settings().vector_store)
 listener_loop.run_until_complete(index.open())   # on the loop that will use it
 
+producer = ProtobufProducer()
 pending = PendingRequests()          # one store, shared by everything below
+
+# #355: resolves dependency_mentions and publishes task.dependencies.proposed.
+# Shares this same producer and index -- no second store or connection needed.
+sink = KafkaDependencySink(producer)
+publisher = DependencyPublisher(store=index, sink=sink)
+adapter = DependencyAdapter(publisher)
+
 flow = TaskCreationFlow(
-    producer=ProtobufProducer(),
+    producer=producer,
     index=index,
     pending=pending,
-    on_matched=publish_dependencies,  # #355: hears of each real task id, maybe twice
+    on_matched=adapter.on_task_created,  # #355: hears of each real task id, maybe twice
 )
 
 # A listener that has given up must take the process with it, so it is
