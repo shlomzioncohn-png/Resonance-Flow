@@ -12,9 +12,10 @@
       "id": "no_action_items",
       "component": "extraction",
       "owner": "R2",
-      "call": "BasicExtractor.extract(text, SourceType.MEETING)",
+      "call": "BasicExtractor.extract(text, source_type)",
       "input": {
         "kind": "text",
+        "source_type": "MEETING",
         "text": "Good morning everyone. How was the weekend? Mine was great, we went to the beach. The weather was lovely. Anyway, nothing urgent today, let's just catch up next week."
       },
       "acceptable": ["graceful_failure", "low_confidence"],
@@ -41,9 +42,10 @@
       "id": "non_english_text",
       "component": "extraction",
       "owner": "R2",
-      "call": "BasicExtractor.extract(text, SourceType.MEETING)",
+      "call": "BasicExtractor.extract(text, source_type)",
       "input": {
         "kind": "text",
+        "source_type": "MEETING",
         "language": "he",
         "text": "דנה, תשלחי בבקשה את דוח התקציב לכספים עד יום שלישי."
       },
@@ -78,7 +80,7 @@
         "kind": "generated_audio",
         "source": "tests/fixtures/asr/short_meeting_note.wav",
         "generator": "the clean file mixed with a copy of itself delayed by ~1 second",
-        "reference": "the clean file, transcribed the same way"
+        "reference": "the clean file through the same gain and padding, without the delayed copy"
       },
       "acceptable": ["graceful_failure", "low_confidence", "partial"],
       "threshold": 0.368,

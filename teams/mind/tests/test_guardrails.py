@@ -54,6 +54,8 @@ except RuntimeError:
 _needs_tesseract = pytest.mark.skipif(
     not _TESSERACT_AVAILABLE, reason="tesseract system binary not installed on this machine"
 )
+# Presence only: weights that fail asr.py's pinned-hash check come back as
+# ASR_UNAVAILABLE, which _skip_on_environment_failure turns into a skip.
 _needs_whisper = pytest.mark.skipif(
     not (_WHISPER_DIR / "model.bin").exists(),
     reason="Whisper base.en weights not present locally (see models/README.md)",
@@ -79,13 +81,24 @@ def _case(case_id: str) -> dict[str, Any]:
     return case
 
 
+def _skip_on_environment_failure(result: OCRResult | ASRResult) -> None:
+    """Skip, rather than report a finding, when the local setup is what failed.
+
+    An ENVIRONMENT failure (tesseract broken, Whisper weights that fail their
+    pinned hash) says nothing about how the pipeline treats the input, and
+    reporting it as a crash would file a finding against the wrong cause.
+    """
+    if result.failure_category is FailureCategory.ENVIRONMENT:
+        pytest.skip(f"local environment, not the input: {result.reason}: {result.error}")
+
+
 def _media_outcome(result: OCRResult | ASRResult, threshold: float) -> str:
     """Name what a media pipeline did, in cases.json's outcome vocabulary.
 
-    Only a DATA failure counts as graceful: the input was bad and the pipeline
-    said so. An ENVIRONMENT or BUG failure on a bad input is not the pipeline
-    recognising the input, so it is reported as a crash.
+    A DATA failure is graceful: the input was bad and the pipeline said so. A
+    BUG failure (INTERNAL_ERROR) is the crash this set exists to catch.
     """
+    _skip_on_environment_failure(result)
     if not result.success:
         return "graceful_failure" if result.failure_category is FailureCategory.DATA else "crash"
     assert result.mean_confidence is not None, "a successful result must carry its confidence"
@@ -107,8 +120,14 @@ def _noise_png(seed: int, size: int = 400) -> bytes:
     return buf.getvalue()
 
 
-def _crosstalk_wav(clean: bytes, delay_s: float) -> bytes:
-    """The clean recording mixed with a copy of itself delayed by `delay_s`."""
+def _crosstalk_wav(clean: bytes, delay_s: float, *, overlap: bool) -> bytes:
+    """The clean recording at half gain, padded by `delay_s`, plus (if `overlap`)
+    a copy of itself delayed by `delay_s`.
+
+    The reference (`overlap=False`) goes through the same gain and length as
+    the mix, so the only difference between the two is the overlapping voice:
+    a confidence drop cannot come from lower volume or a longer file.
+    """
     with wave.open(io.BytesIO(clean), "rb") as src:
         assert src.getnchannels() == 1 and src.getsampwidth() == 2, "expects 16-bit mono"
         rate = src.getframerate()
@@ -117,7 +136,8 @@ def _crosstalk_wav(clean: bytes, delay_s: float) -> bytes:
     delay = int(delay_s * rate)
     mixed = np.zeros(len(samples) + delay, dtype=np.float64)
     mixed[: len(samples)] += samples
-    mixed[delay:] += samples
+    if overlap:
+        mixed[delay:] += samples
     mixed = np.clip(mixed * 0.5, -32768, 32767).astype(np.int16)
 
     buf = io.BytesIO()
@@ -132,11 +152,20 @@ def _crosstalk_wav(clean: bytes, delay_s: float) -> bytes:
 def _replay_extraction(case_id: str) -> tuple[str, dict[str, Any]]:
     """Run R2's extractor on a case's recorded answers; return (outcome, details)."""
     case = _case(case_id)
-    recorded = json.loads((_GUARDRAILS / "recorded" / f"{case_id}.json").read_text(encoding="utf-8"))
-
-    result = BasicExtractor(ScriptedProvider(*recorded["answers"]), sleep=lambda _: None).extract(
-        case["input"]["text"], SourceType.MEETING
+    recorded = json.loads(
+        (_GUARDRAILS / "recorded" / f"{case_id}.json").read_text(encoding="utf-8")
     )
+
+    provider = ScriptedProvider(*recorded["answers"])
+    try:
+        result = BasicExtractor(provider, sleep=lambda _: None).extract(
+            case["input"]["text"], SourceType(case["input"]["source_type"])
+        )
+    except AssertionError as exc:
+        # ScriptedProvider ran out of answers: today's extractor asked for more
+        # rounds than the recording holds. Failed, not AssertionError, so the
+        # xfail marks below cannot mistake a broken replay for the finding.
+        pytest.fail(f"recording no longer replays, re-record {case_id}: {exc}", pytrace=False)
 
     if not isinstance(result, ExtractionSuccess):
         return "graceful_failure", {"reason": result.reason}
@@ -200,11 +229,16 @@ def test_noise_scan_is_not_read_as_confident_text() -> None:
 @_needs_whisper
 def test_crosstalk_lowers_asr_confidence_against_the_clean_recording() -> None:
     case = _case("crosstalk_audio")
-    clean_bytes = _CLEAN_RECORDING.read_bytes()
+    source = _CLEAN_RECORDING.read_bytes()
 
-    clean = transcribe(clean_bytes, filename="short_meeting_note.wav")
-    mixed = transcribe(_crosstalk_wav(clean_bytes, _CROSSTALK_DELAY_S), filename="crosstalk.wav")
+    clean = transcribe(
+        _crosstalk_wav(source, _CROSSTALK_DELAY_S, overlap=False), filename="reference.wav"
+    )
+    mixed = transcribe(
+        _crosstalk_wav(source, _CROSSTALK_DELAY_S, overlap=True), filename="crosstalk.wav"
+    )
 
+    _skip_on_environment_failure(clean)
     assert clean.success, f"the clean reference must transcribe: {clean.error}"
     assert clean.mean_confidence is not None
 

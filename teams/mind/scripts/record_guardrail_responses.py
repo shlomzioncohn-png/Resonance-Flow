@@ -61,7 +61,9 @@ class _RecordingProvider:
 def _record(case: dict[str, Any], provider: LLMProvider) -> dict[str, Any]:
     recorder = _RecordingProvider(provider)
     outcome = BasicExtractor(recorder).extract(
-        case["input"]["text"], SourceType.MEETING, item_key=f"guardrail/{case['id']}"
+        case["input"]["text"],
+        SourceType(case["input"]["source_type"]),
+        item_key=f"guardrail/{case['id']}",
     )
 
     if isinstance(outcome, ExtractionSuccess):
@@ -111,25 +113,28 @@ def main() -> int:
     text_cases = [c for c in cases if c["input"]["kind"] == "text"]
     _RECORDED_DIR.mkdir(parents=True, exist_ok=True)
 
-    failed = False
+    records: list[dict[str, Any]] = []
     with build_provider() as provider:
         for case in text_cases:
             record = _record(case, provider)
             observed = record["observed_live"]
 
-            # A provider outage says nothing about the case: do not save it,
-            # or the test would replay an outage as if it were the answer.
+            # A provider outage says nothing about the case. Nothing is written
+            # unless every case answered, so the recordings on disk always come
+            # from one run of one model, never a mix of an old and a new run.
             if observed["kind"] == "failure" and observed["reason"] == REASON_PROVIDER_ERROR:
-                print(f"{case['id']}: provider error, not saved: {observed['detail']}", file=sys.stderr)
-                failed = True
-                continue
+                print(f"{case['id']}: provider error: {observed['detail']}", file=sys.stderr)
+                print("nothing written; re-run", file=sys.stderr)
+                return 1
+            records.append(record)
 
-            path = _RECORDED_DIR / f"{case['id']}.json"
-            path.write_text(json.dumps(record, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-            print(f"{case['id']}: {json.dumps(observed, ensure_ascii=False)}")
-            print(f"  -> {path.relative_to(_ROOT)}")
+    for record in records:
+        path = _RECORDED_DIR / f"{record['case_id']}.json"
+        path.write_text(json.dumps(record, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        print(f"{record['case_id']}: {json.dumps(record['observed_live'], ensure_ascii=False)}")
+        print(f"  -> {path.relative_to(_ROOT)}")
 
-    return 1 if failed else 0
+    return 0
 
 
 if __name__ == "__main__":
