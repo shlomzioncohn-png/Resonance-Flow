@@ -11,7 +11,7 @@ from datetime import datetime, timedelta
 from typing import Callable
 
 from ..config import SEVERITIES, GeneratorConfig
-from ..model import DEAD_END_KINDS, TIERS, EdgeBatch, Project, TaskSpec, task_uuid, typical_days
+from ..model import TIERS, EdgeBatch, Project, TaskSpec, pick_upstream, task_uuid, typical_days
 from ..timeutil import snap_to_work_time
 
 T0_RANGE = (0.03, 0.55)  # resolved patterns start early enough to finish before the history ends
@@ -94,10 +94,7 @@ class Planter:
 
     def attach_upstream(self, root: TaskSpec) -> None:
         """Most real blockers are themselves downstream of something healthy."""
-        if self.rng.random() >= 0.6:
-            return
-        before = [n for n in self.normal
-                  if n.created_at < root.created_at - timedelta(days=1) and n.kind not in DEAD_END_KINDS]
-        pool = [n for n in before if n.project == root.project] or before
-        if pool:
-            self.depend(root, [self.rng.choice(pool)])
+        if self.rng.random() < 0.6:
+            upstream = pick_upstream(self.rng, self.normal, root.created_at, root.project)
+            if upstream:
+                self.depend(root, [upstream])

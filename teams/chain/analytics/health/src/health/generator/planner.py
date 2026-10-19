@@ -6,6 +6,7 @@ from collections import defaultdict
 from datetime import datetime, timedelta
 
 from .config import GeneratorConfig
+from .controls import plant_control_chains
 from .diseases import plant_diseases
 from .model import (DEAD_END_KINDS, TIER_DEP_WEIGHTS, TIER_PROFILES, TIERS, EdgeBatch, Project, TaskSpec,
                     World, task_uuid)
@@ -31,10 +32,11 @@ def plan_world(cfg: GeneratorConfig) -> World:
     normal, edges = _plan_normal(cfg, random.Random(f"{cfg.seed}:normal"))
     tasks = list(normal)
     diseases = plant_diseases(cfg, projects, normal, tasks, edges)
+    controls = plant_control_chains(cfg, projects, normal, tasks, edges)
     tasks.sort(key=lambda t: t.created_at)  # stable: ties keep planning order
     edges.sort(key=lambda e: e.at)
     _assert_acyclic_by_rank(tasks, edges)
-    return World(projects=projects, tasks=tasks, edges=edges, diseases=diseases)
+    return World(projects=projects, tasks=tasks, edges=edges, diseases=diseases, controls=controls)
 
 
 def _plan_projects(cfg: GeneratorConfig, rng: random.Random) -> list[Project]:

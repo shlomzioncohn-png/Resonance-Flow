@@ -21,7 +21,7 @@ python -m health.generator          # writes out/dev AND out/eval, validated, in
 ```
 
 The generator itself uses only the standard library. Options: `--out`, `--seed` (dev), `--eval-seed`,
-`--tasks`, `--days`, `--projects`, `--instances` (see `--help`).
+`--tasks`, `--days`, `--projects`, `--instances`, `--missing-tier-rate` (see `--help`).
 
 ## Two timelines: dev and eval
 
@@ -44,12 +44,13 @@ Rows shaped exactly like Chain's two history tables (migrations `V2`, `V7`, `V9`
 |---|---|
 | `task_state_history.csv` | task events: `STATUS_CHANGED`, and `BLOCKED` / `UNBLOCKED` when a task's blocking count crosses zero |
 | `dependency_history.csv` | edge events: `ADDED` / `REMOVED` (`task_id` depends on `depends_on_task_id`), plus `REJECTED` noise |
-| `ground_truth.csv` | **answer key**: per planted disease, one row per involved task and per involved edge, with `type`, `severity`, `tier`, `window_start`, `window_end`, `ongoing_at_end` |
-| `ground_truth.json` | same key with parameters and what the disease actually looked like (`observed`) |
-| `tasks_meta.csv` | **answer key**: per task `tier`, project archetype and kind (`normal`, `slow_legit`, ...). `tier` is not a column of Chain's tables, so it lives here |
+| `ground_truth.csv` | **answer key**: per planted disease, one row per involved task and per involved edge, with `type`, `severity`, `tier`, `in_stage_a`, `window_start`, `window_end`, `ongoing_at_end` |
+| `ground_truth.json` | same key with parameters and what the disease actually looked like (`observed`), including how its root compares with its peers (`peer_group`, and `peer_chains` for a slow chain) |
+| `healthy_controls.csv` | **answer key**: the healthy control chains (same lengths, tiers and shape as the slow chain) with their end-to-end days |
+| `tasks_meta.csv` | **answer key**: per task `tier` (what the analysis may see, blank when unknown), `true_tier`, project archetype, kind (`normal`, `slow_legit`, `control_chain`, ...). Chain's tables have no tier column, so it lives here |
 | `manifest.json` | seed, config, counts, `as_of` (the "now" of the analysis), held-out types |
 
-`ground_truth.*` and `tasks_meta.csv` are for evaluation only. The model's input is the two history tables.
+`ground_truth.*`, `healthy_controls.csv` and `tasks_meta.csv` are for evaluation only. The model's input is the two history tables.
 
 ## How it works
 
@@ -61,21 +62,32 @@ open dependency appears, `UNBLOCKED` exactly when the last one is done or remove
 and the counter rules; the generator refuses to write data that fails it.
 
 Code layout (`src/health/generator/`): `config.py` (all knobs), `model.py` (tiers, task/edge specs),
-`planner.py` (healthy world), `diseases/` (one module per disease), `simulation.py`, `validate.py`,
+`planner.py` (healthy world), `controls.py` (healthy control chains), `peers.py` (peer groups), `diseases/` (one module per disease), `simulation.py`, `validate.py`,
 `export.py`, `__main__.py`.
 
 **Healthy world**
 - **Tiers:** `operational` (70%), `tactical` (22%), `strategic` (8%). Higher tiers take longer
   (work x1 / x2.5 / x6) and wait on lower ones (strategic on tactical, tactical on operational).
+- **Tiers may be missing:** `--missing-tier-rate` (default 5%) hides the tier of that share of tasks in
+  `tasks_meta.csv`; `1.0` gives a dataset with no tiers at all, like real Chain. Everything still works:
+  an unknown tier runs at the average pace in the simulation, and in the peer groups the tier is simply left out.
 - **Teams:** 20 projects of different pace (fast / medium / slow), lognormal durations, working
   hours and weekdays, except about 15% of events (automation, late work) at any hour or day.
 - **Load bursts:** about 15% of tasks are created in 12 bursts, where one to three teams open many tasks within a day or two.
 - **Graph shapes:** chains, fan-out (hub tasks that several later tasks of a project depend on),
   fan-in (integration tasks that wait on 4-7 earlier ones), diamonds. Edges also appear mid-period and are sometimes removed. No cycles.
+- **Healthy control chains:** linear chains of 4 / 7 / 12 tasks (operational and tactical, per team pace) at
+  normal speed. They are the "chains of the same length and shape" a slow chain is judged against.
 - **Healthy lookalikes** (hard negatives, labelled in `tasks_meta.csv`): `slow_legit` (4-8x slower
   than its peers), `reopened_legit`, `backlog` and `abandoned` (never finished, nothing depends on them).
 - **`REJECTED` rows:** about 1% of tasks get one in `dependency_history` (as Chain writes for a
   cross-tenant edge). They never become edges and must be ignored by the analysis.
+
+**Peer groups** (in `ground_truth.json`, so the detectors can be scored against the same yardstick):
+a chronic blocker is compared with healthy blockers of the **same tier, similar subtree size** (bucket of
+transitive dependents) and team pace; a slow chain with healthy chains of the same length, tier and team pace.
+When a group has too few peers the comparison widens step by step (the `level` field says how far), and
+without a tier it drops the tier.
 
 **Diseases**, three severities each (`subtle`, `moderate`, `severe`), judged against the root's own
 tier (`peer_typical_days` in the ground truth). About a third of the hold-based ones are still **ongoing** when the history ends.
@@ -87,6 +99,10 @@ tier (`peer_typical_days` in the ground truth). About a third of the hold-based 
 | `slow_chain` | same-tier chain where every link is several times slower than peers | length 4 / 7 / 12, 3x / 5x / 8x |
 | `growing_bottleneck` | unfinished task that gains dependents over weeks | 6 / 12 / 24 dependents |
 | `stuck_subgraph` (held out of dev) | multi-level subtree stalled behind one held root | 4 / 8 / 15 tasks, 6x / 12x / 24x peers (floor 14 / 28 / 50 days) |
+
+Only `chronic_blocking`, `recurring_blocker` and `slow_chain` belong to stage A. `growing_bottleneck` and
+`stuck_subgraph` are planted for later but labelled `in_stage_a=false` in the ground truth; the stage-A
+detectors and evaluation ignore them.
 
 ### Adding a disease
 

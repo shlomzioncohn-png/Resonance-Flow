@@ -12,7 +12,7 @@ from datetime import datetime, timedelta
 from uuid import UUID
 
 from .config import GeneratorConfig
-from .model import TIER_PROFILES, EdgeBatch, TaskSpec, World, row_uuid
+from .model import EdgeBatch, TaskSpec, World, row_uuid, tier_profile
 from .timeutil import lognormal_hours, snap_to_work_time
 
 _TICK = timedelta(microseconds=1)
@@ -104,10 +104,10 @@ class _Simulator:
         return timedelta(hours=lognormal_hours(st.rng, median, self.projects[st.spec.project].sigma))
 
     def _start_delay(self, st: _State) -> timedelta:
-        return self._hours(st, self.projects[st.spec.project].start_hours * TIER_PROFILES[st.spec.tier].start_mult)
+        return self._hours(st, self.projects[st.spec.project].start_hours * tier_profile(st.spec.tier).start_mult)
 
     def _work(self, st: _State) -> timedelta:
-        tier_mult = TIER_PROFILES[st.spec.tier].work_mult
+        tier_mult = tier_profile(st.spec.tier).work_mult
         return self._hours(st, self.projects[st.spec.project].work_hours * tier_mult * st.spec.work_mult)
 
     # ---- row emission ----

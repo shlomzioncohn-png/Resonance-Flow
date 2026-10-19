@@ -24,6 +24,8 @@ class GeneratorConfig:
     late_dependency_rate: float = 0.08  # extra edges added after creation, per task
     removal_rate: float = 0.04  # share of edges later removed
     rejected_rate: float = 0.01  # REJECTED dependency_history rows per task: noise a consumer must ignore
+    missing_tier_rate: float = 0.05  # share of tasks whose tier the analysis does not get to see
+    control_chains_per_group: int = 6  # healthy chains per (length, tier, team pace): peers of the slow chain
     n_bursts: int = 12  # load spikes: a team opens many tasks within a day or two
     burst_share: float = 0.15  # share of normal tasks created inside a burst
     fan_in_rate: float = 0.03  # tasks that integrate 4-7 earlier tasks

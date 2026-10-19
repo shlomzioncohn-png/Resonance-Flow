@@ -24,12 +24,15 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--projects", type=int, default=GeneratorConfig.n_projects)
     p.add_argument("--instances", type=int, default=GeneratorConfig.instances_per_severity,
                    help="planted instances per disease type and severity")
+    p.add_argument("--missing-tier-rate", type=float, default=GeneratorConfig.missing_tier_rate,
+                   help="share of tasks whose tier is hidden from the analysis (1.0 = like real Chain, no tiers)")
     args = p.parse_args(argv)
     if args.seed == args.eval_seed:
         p.error("--seed and --eval-seed must differ, otherwise eval shares its healthy data with dev")
 
     base = replace(GeneratorConfig(), n_normal_tasks=args.tasks, history_days=args.days,
-                   n_projects=args.projects, instances_per_severity=args.instances)
+                   n_projects=args.projects, instances_per_severity=args.instances,
+                   missing_tier_rate=args.missing_tier_rate)
     datasets = (("dev", replace(base, seed=args.seed)),  # held-out type stays excluded
                 ("eval", replace(base, seed=args.eval_seed, excluded_diseases=())))
     for name, cfg in datasets:

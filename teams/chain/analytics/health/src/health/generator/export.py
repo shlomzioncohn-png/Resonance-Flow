@@ -11,6 +11,7 @@ from uuid import UUID
 from .config import GeneratorConfig
 from .diseases import DISEASE_TYPES
 from .model import World
+from .peers import UNKNOWN_TIER, PeerIndex
 from .simulation import History
 
 
@@ -36,7 +37,7 @@ def _json_default(o):
     raise TypeError(type(o))
 
 
-def _observed(cfg: GeneratorConfig, world: World, history: History) -> dict:
+def _observed(cfg: GeneratorConfig, world: World, history: History, peers: PeerIndex) -> dict:
     """What each planted disease actually looked like once played out (some end up truncated or ongoing)."""
     opened: dict = {}
     longest: dict = defaultdict(float)
@@ -74,12 +75,17 @@ def _observed(cfg: GeneratorConfig, world: World, history: History) -> dict:
             "window_end": cfg.end if ongoing else max(activity, default=d.start),
             "edges": [{"task_id": t, "depends_on_task_id": dep}
                       for t in d.task_ids for dep in edges_by_task[t] if dep in members],
+            # how the root compares with healthy tasks of the same tier and similar subtree
+            "peer_group": peers.blocker_peers(d.root_task_id),
         }
+        if d.type == "slow_chain":  # ...and the chain with healthy chains of the same length, shape and tier
+            out[d.id]["peer_chains"] = peers.chain_peers(d.task_ids)
     return out
 
 
 def write_dataset(out_dir: Path, cfg: GeneratorConfig, world: World, history: History) -> dict:
     out_dir.mkdir(parents=True, exist_ok=True)
+    peers = PeerIndex(cfg, world, history)
 
     for name, rows in (("dependency_history", history.dependency_rows), ("task_state_history", history.state_rows)):
         if not rows:
@@ -90,9 +96,21 @@ def write_dataset(out_dir: Path, cfg: GeneratorConfig, world: World, history: Hi
     projects = {p.id: p for p in world.projects}
     _write_csv(
         out_dir / "tasks_meta.csv",
-        ["task_id", "tier", "project", "archetype", "created_at", "kind", "disease_id"],
-        [{"task_id": t.id, "tier": t.tier, "project": t.project, "archetype": projects[t.project].archetype,
-          "created_at": t.created_at, "kind": t.kind, "disease_id": t.disease_id} for t in world.tasks])
+        ["task_id", "tier", "true_tier", "project", "archetype", "created_at", "kind", "disease_id", "control_id"],
+        # `tier` is what the analysis may see (blank when unknown); `true_tier` is the answer key
+        [{"task_id": t.id, "tier": "" if peers.tier_of[t.id] == UNKNOWN_TIER else t.tier, "true_tier": t.tier,
+          "project": t.project, "archetype": projects[t.project].archetype, "created_at": t.created_at,
+          "kind": t.kind, "disease_id": t.disease_id, "control_id": t.control_id} for t in world.tasks])
+    control_rows = []
+    for c in world.controls:
+        days, done = peers.chain_end_to_end(c.task_ids)
+        control_rows += [{"control_id": c.id, "length": c.length, "shape": c.shape, "tier": c.tier,
+                          "team_pace": projects[c.project].archetype, "position": i, "task_id": t,
+                          "completed": str(done).lower(), "end_to_end_days": round(days, 2)}
+                         for i, t in enumerate(c.task_ids)]
+    _write_csv(out_dir / "healthy_controls.csv",
+               ["control_id", "length", "shape", "tier", "team_pace", "position", "task_id", "completed",
+                "end_to_end_days"], control_rows)
 
     sick = {tid for d in world.diseases for tid in d.task_ids}
     manifest = {
@@ -105,6 +123,8 @@ def write_dataset(out_dir: Path, cfg: GeneratorConfig, world: World, history: Hi
             "task_state_history_rows": len(history.state_rows),
             "planted_diseases": len(world.diseases),
             "sick_tasks": len(sick),
+            "control_chains": len(world.controls),
+            "tasks_with_unknown_tier": sum(1 for t in world.tasks if peers.tier_of[t.id] == UNKNOWN_TIER),
             "rejected_rows": sum(1 for r in history.dependency_rows if r.action == "REJECTED"),
         },
         "disease_types_planted": sorted({d.type for d in world.diseases}),
@@ -113,7 +133,7 @@ def write_dataset(out_dir: Path, cfg: GeneratorConfig, world: World, history: Hi
     }
     (out_dir / "manifest.json").write_text(json.dumps(manifest, default=_json_default, indent=2), encoding="utf-8")
 
-    observed = _observed(cfg, world, history)
+    observed = _observed(cfg, world, history, peers)
     (out_dir / "ground_truth.json").write_text(
         json.dumps({"diseases": [{**asdict(d), "observed": observed[d.id]} for d in world.diseases]},
                    default=_json_default, indent=2),

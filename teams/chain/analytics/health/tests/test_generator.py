@@ -127,7 +127,7 @@ def test_rejected_rows_exist_and_never_change_the_graph(full):
 # ---- tiers, bursts, graph shapes ----
 
 def test_tiers_exist_with_their_expected_shares(full):
-    normal = [t for t in full.world.tasks if t.kind != "disease"]
+    normal = [t for t in full.world.tasks if t.kind not in ("disease", "control_chain")]
     counts = Counter(t.tier for t in normal)
     assert set(counts) == set(TIERS)
     for tier in TIERS:
@@ -149,7 +149,7 @@ def test_higher_tiers_take_longer_to_finish(full):
 
 
 def test_task_creation_comes_in_bursts(full):
-    per_day = Counter(t.created_at.date() for t in full.world.tasks if t.kind != "disease")
+    per_day = Counter(t.created_at.date() for t in full.world.tasks if t.kind not in ("disease", "control_chain"))
     counts = sorted(per_day.values())
     assert counts[-1] >= 3 * statistics.median(counts)
 
@@ -183,6 +183,71 @@ def test_ground_truth_describes_tasks_edges_window_and_severity(full, tmp_path):
     truth = json.loads((tmp_path / "ground_truth.json").read_text(encoding="utf-8"))["diseases"]
     ongoing = [d["observed"]["ongoing_at_end"] for d in truth]
     assert any(ongoing) and not all(ongoing)
+
+
+# ---- peers: similar subtree, controlled chains, no tier ----
+
+def _truth(data, tmp_path):
+    write_dataset(tmp_path, data.config, data.world, data.history)
+    return json.loads((tmp_path / "ground_truth.json").read_text(encoding="utf-8"))["diseases"]
+
+
+def test_a_blocker_is_compared_with_healthy_blockers_of_the_same_tier_and_similar_subtree(full, tmp_path):
+    roots = [d["observed"]["peer_group"] for d in _truth(full, tmp_path) if d["type"] == "chronic_blocking"]
+    assert all(g["n_peers"] >= 20 for g in roots)
+    similar = [g for g in roots if g["level"].startswith("tier+subtree")]
+    assert len(similar) >= 0.8 * len(roots)
+    assert all(g["tier_used"] and g["subtree_bucket"] for g in similar)
+
+
+def test_healthy_control_chains_exist_and_are_linear(full):
+    lengths = {c.length for c in full.world.controls}
+    assert lengths == {4, 7, 12} and all(c.shape == "linear" for c in full.world.controls)
+    edges = {(r.task_id, r.depends_on_task_id) for r in full.history.dependency_rows if r.action == "ADDED"}
+    for c in full.world.controls:
+        assert all((c.task_ids[i], c.task_ids[i - 1]) in edges for i in range(1, c.length))
+
+
+def test_a_slow_chain_is_compared_with_healthy_chains_of_the_same_length_tier_and_pace(full, tmp_path):
+    chains = [d["observed"]["peer_chains"] for d in _truth(full, tmp_path) if d["type"] == "slow_chain"]
+    assert all(c["n_peers"] >= 5 for c in chains)
+    assert sum(c["level"] == "length+tier+team_pace" for c in chains) >= 0.8 * len(chains)
+    severe_done = [c for c, d in zip(chains, [d for d in _truth(full, tmp_path) if d["type"] == "slow_chain"])
+                   if d["severity"] == "severe" and c["completed"]]
+    assert severe_done and all(c["end_to_end_days"] > 1.5 * c["p50_days"] for c in severe_done)
+
+
+def test_everything_works_when_no_task_has_a_known_tier(tmp_path):
+    cfg = replace(SMALL, excluded_diseases=(), missing_tier_rate=1.0)
+    data = generate(cfg)
+    assert _errors(data) == []
+    truth = _truth(data, tmp_path)
+    assert all(d["observed"]["peer_group"]["tier_used"] is None for d in truth)
+    assert all("tier" not in d["observed"]["peer_group"]["level"] for d in truth)
+    assert all(d["observed"]["peer_chains"]["tier_used"] is None for d in truth if d["type"] == "slow_chain")
+    with (tmp_path / "tasks_meta.csv").open(encoding="utf-8") as f:
+        rows = list(csv.DictReader(f))
+    assert all(r["tier"] == "" and r["true_tier"] for r in rows)  # hidden from the analysis, kept in the key
+
+
+def test_the_simulation_runs_for_tasks_that_have_no_tier_at_all():
+    from health.generator.planner import plan_world
+    from health.generator.simulation import simulate
+
+    world = plan_world(SMALL)
+    for i, task in enumerate(world.tasks):
+        if i % 5 == 0:
+            task.tier = None
+    history = simulate(SMALL, world)
+    assert validate(history.dependency_rows, history.state_rows) == []
+
+
+def test_some_tiers_are_hidden_by_default_and_the_rest_are_visible(full, tmp_path):
+    write_dataset(tmp_path, full.config, full.world, full.history)
+    with (tmp_path / "tasks_meta.csv").open(encoding="utf-8") as f:
+        rows = list(csv.DictReader(f))
+    hidden = sum(1 for r in rows if r["tier"] == "") / len(rows)
+    assert abs(hidden - full.config.missing_tier_rate) < 0.02
 
 
 # ---- dev / eval in one command ----
