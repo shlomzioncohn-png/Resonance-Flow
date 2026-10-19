@@ -19,6 +19,11 @@ point. It implements the matching rule locked in `extraction_eval_design.md` §3
 4. `TP` = matched pairs, `FP` = unmatched extracted items, `FN` = unmatched
    annotations.
 
+For real pipeline output, call `evaluate_extracted_items(items, annotated, ...)`
+instead: it takes `ExtractedItem`s (`extraction_contract.py`), so the extracted
+side has to go through the contract before it is scored. `evaluate_extraction`
+stays the string-level engine underneath it (the CLI and the fixture use it).
+
 `similarity` and `threshold` are **parameters, never hardcoded** (issue
 requirement): when Ayala's embedding-similarity function lands it is swapped in at
 the call site with no change here, and the locked lexical threshold
@@ -36,6 +41,8 @@ import numbers
 from collections.abc import Callable, Sequence
 
 from pydantic import BaseModel, ConfigDict, Field, computed_field
+
+from mind.evaluation.extraction_contract import ExtractedItem
 
 
 class MatchedPair(BaseModel):
@@ -240,4 +247,30 @@ def evaluate_extraction(
         matched=matched,
         missed=missed,
         false_positives=false_positives,
+    )
+
+
+def evaluate_extracted_items(
+    items: Sequence[ExtractedItem],
+    annotated: Sequence[str],
+    *,
+    similarity: Callable[[str, str], float],
+    threshold: float,
+) -> ExtractionEvalReport:
+    """`evaluate_extraction` for pipeline output: the extracted side as `ExtractedItem`s.
+
+    The entry point for real extraction output. Taking `ExtractedItem` rather than
+    `str` makes the contract a gate, not a description: an item reaches the eval
+    only after it has validated against `extraction_contract.ExtractedItem`, and
+    `to_comparison_text()` is the one place an item is rendered to the string the
+    matcher compares (`extraction_eval_design.md` §3.3).
+
+    A thin wrapper by design — no matching logic of its own; `similarity`,
+    `threshold` and the report are exactly `evaluate_extraction`'s.
+    """
+    return evaluate_extraction(
+        [item.to_comparison_text() for item in items],
+        annotated,
+        similarity=similarity,
+        threshold=threshold,
     )

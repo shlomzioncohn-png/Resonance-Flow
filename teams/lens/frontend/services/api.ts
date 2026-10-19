@@ -12,7 +12,10 @@ const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? 'http://localhost:8
 /** Error shape the Gateway sends for every 4xx/5xx response (GATEWAY_CONTRACT.md §3-4). */
 export interface GatewayErrorBody {
   status: 'ERROR';
-  /** e.g. NOT_FOUND, FORBIDDEN, SERVICE_UNAVAILABLE */
+  /**
+   * Machine-readable error type, e.g. NOT_FOUND, FORBIDDEN, SERVICE_UNAVAILABLE,
+   * INVALID_TASK_STATUS_TRANSITION (GATEWAY_CONTRACT.md §4)
+   */
   errorCode: string;
   message: string;
   path: string;
@@ -25,6 +28,7 @@ export class ApiError extends Error {
     message: string,
     public readonly status: number,
     public readonly path: string,
+    public readonly code?: string,
   ) {
     super(message);
     this.name = 'ApiError';
@@ -67,7 +71,12 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 
   if (!response.ok) {
     const body: GatewayErrorBody | null = await response.json().catch(() => null);
-    throw new ApiError(body?.message ?? response.statusText, response.status, path);
+    throw new ApiError(
+      body?.message ?? response.statusText,
+      response.status,
+      path,
+      body?.errorCode,
+    );
   }
 
   if (response.status === 204) return undefined as T;

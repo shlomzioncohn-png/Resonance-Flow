@@ -11,12 +11,30 @@ management:
 spring:
   application:
     name: bridge
+  sql:
+    init:
+      # Creates control_plane_state on startup if it doesn't exist yet (schema.sql, IF NOT
+      # EXISTS) - a single static table, so a one-line script is enough; no Flyway needed.
+      mode: always
+      # Tolerates individual statement errors (e.g. table already exists via a races-with-self
+      # redeploy) without failing startup; does NOT cover "Postgres unreachable at all" - a
+      # genuinely absent/misconfigured DB still fails startup loudly, same as a missing
+      # bridge.postgres.* value would. BridgeApplicationTests overrides this to "never" so its
+      # full-context load doesn't require a live Postgres at all - see that test's own comment.
+      continue-on-error: true
   kafka:
     # Team shared / remote environment (do not use unless agreed):
     #   bootstrap-servers: 3.216.80.66:9092
     #   topic: bridge.github.tasks
     bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
     topic: ${KAFKA_TOPIC:bridge.test}
+    # Read directly by RawObjectEventKafkaConfig (raw/config/) for its dedicated Protobuf
+    # producer - this block's producer.* below stays JSON and keeps serving GitHub/CRM/JIRA/
+    # Media via the shared kafkaTemplate bean, per teams/relay/docs/kafka-producer-consumer-guide.md.
+    properties:
+      # Port 8085, not 8081/8082 - those are already taken by Inbox's and Chain's own local
+      # registries. Apicurio, not Redpanda's built-in one - see .env.example for why.
+      schema.registry.url: ${SCHEMA_REGISTRY_URL:http://localhost:8085/apis/ccompat/v6}
     producer:
       key-serializer: org.apache.kafka.common.serialization.StringSerializer
       value-serializer: org.springframework.kafka.support.serializer.JsonSerializer
@@ -63,6 +81,13 @@ jira:
       expression: ${JIRA_SYNC_CRON_EXPRESSION:0 0 2 * * ?}
 
 bridge:
+  # Backs the control-plane lane (GroupStateStore/CursorStore/CalendarEventStateStore), not
+  # the rest of Bridge - no default on any of these three, same convention as HUBSPOT_TOKEN: a
+  # missing value must fail startup loudly, not silently fall back to a placeholder.
+  postgres:
+    url: ${BRIDGE_DB_URL}
+    user: ${BRIDGE_DB_USER}
+    password: ${BRIDGE_DB_PASSWORD}
   # Shared by every structured lane that publishes a Task via
   # KafkaPayloadPublisher (see esti/inbox-kafka-ingestion-contract) - one
   # topic for every source, never a per-lane one.
@@ -92,6 +117,8 @@ bridge:
     # pass that check. CrmLaneConfig's kafka-profile startup check still rejects this exact value
     # by name (not just by shape), so forgetting to override it for a real deployment is caught.
     organization-id: ${CRM_ORGANIZATION_ID:00000000-0000-0000-0000-000000000000}
+    # Days an open deal (PROSPECT/QUALIFIED/PROPOSAL/NEGOTIATION) may sit in the same stage before +1 urgency; <= 0 disables it.
+    stalled-after-days: ${CRM_STALLED_AFTER_DAYS:14}
     sync:
       # Set to true to enable the automatic daily HubSpot to Kafka sync.
       # Off by default, same convention as github.sync.cron - an operator
@@ -119,10 +146,24 @@ bridge:
       tokens-directory: ${BRIDGE_GOOGLE_TOKENS_DIR:}
     email:
       mode: fixture
+      sync:
+        # Set to true to enable scheduled email sync via IntakeSyncJobs/SyncJobScheduler - off
+        # by default, same convention as bridge.crm.sync.cron/github.sync.cron.
+        cron:
+          enabled: ${BRIDGE_INTAKE_EMAIL_SYNC_CRON_ENABLED:false}
+          expression: ${BRIDGE_INTAKE_EMAIL_SYNC_CRON_EXPRESSION:0 */15 * * * ?}
     drive:
       mode: fixture
+      sync:
+        cron:
+          enabled: ${BRIDGE_INTAKE_DRIVE_SYNC_CRON_ENABLED:false}
+          expression: ${BRIDGE_INTAKE_DRIVE_SYNC_CRON_EXPRESSION:0 */15 * * * ?}
     calendar:
       mode: fixture
+      sync:
+        cron:
+          enabled: ${BRIDGE_INTAKE_CALENDAR_SYNC_CRON_ENABLED:false}
+          expression: ${BRIDGE_INTAKE_CALENDAR_SYNC_CRON_EXPRESSION:0 */15 * * * ?}
       # Only read when mode: real. "primary" means the calendar of whichever Google account
       # completes the OAuth consent.
       calendar-id: ${BRIDGE_CALENDAR_ID:primary}
@@ -158,6 +199,48 @@ bridge:
     # recording", not real audio-duration filtering (that needs a codec-aware library this
     # lane doesn't depend on). Tune based on what garbage actually shows up in practice.
     min-file-size-bytes: ${BRIDGE_MEDIA_MIN_FILE_SIZE_BYTES:1024}
+    # Automatic folder polling (MediaIntakeScheduler) - same run as POST /api/bridge/media/run.
+    # Off by default; interval is the gap between the end of one scan and the start of the next.
+    schedule:
+      enabled: ${BRIDGE_MEDIA_SCHEDULE_ENABLED:false}
+      interval: ${BRIDGE_MEDIA_SCHEDULE_INTERVAL:PT2M}
+      initial-delay: PT10S
+    # Sets each item's scope_decision + classification (see media.classification). Off by
+    # default: every item goes out INCLUDED and unclassified, as before. On with no api-key:
+    # deterministic rules only (too-short meeting, empty transcript, blank page).
+    classification:
+      enabled: ${BRIDGE_MEDIA_CLASSIFICATION_ENABLED:false}
+      # EXCLUDED only when the category is listed below AND its confidence reaches this;
+      # anything less confident is still attached, but stays INCLUDED.
+      min-confidence-to-exclude: ${BRIDGE_MEDIA_CLASSIFICATION_MIN_CONFIDENCE:0.6}
+      min-meeting-duration: ${BRIDGE_MEDIA_CLASSIFICATION_MIN_MEETING_DURATION:60s}
+      transcript-excerpt-chars: 4000
+      excluded-meeting-categories: TEST,SOCIAL
+      excluded-document-categories: BLANK,ADVERTISEMENT
+      documents:
+        # Pages are rendered one at a time; the scan stops once pages-to-send non-blank pages
+        # are found, or after max-pages-to-scan pages. BLANK is only decided when every page
+        # was checked. Formats: whatever a PagedDocumentReader supports (images + PDF).
+        max-pages-to-scan: 5
+        pages-to-send: 2
+      model:
+        # Any OpenAI-compatible chat-completions endpoint - switching provider (DeepSeek,
+        # Groq, ...) is a change to these three settings only. Scanned docs need a model that
+        # accepts images.
+        base-url: ${BRIDGE_MEDIA_CLASSIFIER_BASE_URL:https://generativelanguage.googleapis.com/v1beta/openai}
+        name: ${BRIDGE_MEDIA_CLASSIFIER_MODEL:gemini-3.8-flash}
+        api-key: ${BRIDGE_MEDIA_CLASSIFIER_API_KEY:}
+        # Bump on every prompt change in ModelMediaClassifier, so results stay comparable.
+        prompt-version: v2
+        # Thinking models take ~20s per call - keep well above that.
+        timeout: 60s
+    zoom:
+      # Not consumed by MediaIntakeOrchestrator yet - see ZoomCloudRecordingClient's javadoc
+      # for why (no meetingId source). "real" bean is a throw-stub like bridge.intake.*.mode's -
+      # see RealZoomCloudRecordingClient's javadoc for what implementing it actually needs
+      # (Server-to-Server OAuth app credentials, added here once that work starts).
+      mode: fixture
+
 llm:
   enrichment:
     # Master switch for the rule-based task enrichment engine.

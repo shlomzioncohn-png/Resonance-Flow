@@ -56,23 +56,27 @@ import java.util.Optional;
  * <p>
  * <b>Stage mapping.</b> HubSpot stage ids are opaque and portal-specific, so they are never
  * hardcoded. {@link #snapshot()} fetches the pipeline definition and resolves it fresh on every
- * call - see {@link HubSpotStageMapping} for the table and the rationale for its one many-to-one
- * collapse. The constructor ALSO resolves it once, eagerly, discarding the result, purely to fail
- * fast at startup if this portal's pipeline has a stage label {@link HubSpotStageMapping} doesn't
- * recognize - a known tradeoff ({@code CLAUDE.md}): the first {@link #snapshot()} call after
- * startup re-does that same fetch. {@link DealStage#ON_HOLD} has no HubSpot equivalent and this
- * repository never produces it.
+ * call, by stage <em>metadata</em> ({@code isClosed}/{@code probability}), never by label - see
+ * {@link HubSpotStageMapping} for the mapping rules (the actual fix for F6: a renamed or custom
+ * stage label no longer breaks anything). The constructor ALSO resolves it once, eagerly,
+ * discarding the result, purely to fail fast at startup on a pipeline/stage-level problem severe
+ * enough that no individual deal could be isolated from it - a known tradeoff ({@code CLAUDE.md}):
+ * the first {@link #snapshot()} call after startup re-does that same fetch. {@link
+ * DealStage#ON_HOLD} has no HubSpot equivalent and this repository never produces it.
  * <p>
- * <b>Two different failure shapes for "unrecognized stage," by design, not by accident.</b> A deal
- * whose HISTORY references a stage ID absent from an otherwise-valid, fully-resolved pipeline
- * mapping is a per-record skip - counted in {@link DealSnapshot#skippedAtRead()}, the rest of the
- * fetch proceeds. A pipeline whose STAGE LABEL itself isn't in {@link HubSpotStageMapping}'s table
- * fails {@link #snapshot()} entirely, before the deals endpoint is ever called - see
- * {@link HubSpotStageMapping#resolveIdsToStages}. Since {@link #snapshot()} re-resolves the whole
- * pipeline on every call (not just once at construction, the way the repository used to), a stage
- * added to the portal under an unrecognized label now fails every sync from the moment it appears,
- * not just the one deal that first references it - a known limitation for F6 (mapping-rule
- * robustness, out of scope for this task's fix), documented in {@code CLAUDE.md}.
+ * <b>Two different failure shapes for "a stage can't be mapped," by design, not by accident.</b> A
+ * deal whose HISTORY references a stage id {@link HubSpotStageMapping} marked invalid (or that
+ * isn't present in the pipeline at all) is a per-record skip - counted in {@link
+ * DealSnapshot#skippedAtRead()}, the rest of the fetch proceeds; the constructor and every {@link
+ * #snapshot()} call also log one WARN per run listing every invalid stage id and why, independent
+ * of whether any deal currently references it. A pipeline/stage-level problem {@link
+ * HubSpotStageMapping#resolveIdsToStages} can't isolate to one stage - zero stages fetched, a
+ * stage with no id, or every fetched stage turning out invalid - fails {@link #snapshot()}
+ * entirely, before the deals endpoint is ever called. On top of both: if the fraction of deals
+ * skipped this way in one {@link #snapshot()} call exceeds {@code
+ * bridge.crm.hubspot.max-skipped-ratio} (one bad stage used by many deals), the whole run fails
+ * with {@link HubSpotSkipThresholdExceededException} instead of publishing a mostly-skipped
+ * snapshot as if it were a normal sync.
  * <p>
  * <b>Freshness.</b> {@link #snapshot()} performs one fresh, fully independent fetch - pipeline and
  * deals both - every time it is called, and returns an immutable {@link DealSnapshot} whose {@code
@@ -95,6 +99,8 @@ public class HubSpotDealRepository implements DealRepository {
 
     private final HubSpotClient client;
     private final Clock clock;
+    private final HubSpotStageMapping stageMapping;
+    private final double maxSkippedRatio;
 
     @Autowired
     public HubSpotDealRepository(
@@ -106,19 +112,43 @@ public class HubSpotDealRepository implements DealRepository {
             @Value("${bridge.crm.hubspot.initial-backoff-millis:500}") long initialBackoffMillis,
             @Value("${bridge.crm.hubspot.max-backoff-millis:8000}") long maxBackoffMillis,
             @Value("${bridge.crm.hubspot.connect-timeout-millis:5000}") long connectTimeoutMillis,
-            @Value("${bridge.crm.hubspot.read-timeout-millis:15000}") long readTimeoutMillis) {
+            @Value("${bridge.crm.hubspot.read-timeout-millis:15000}") long readTimeoutMillis,
+            @Value("${bridge.crm.hubspot.stage-bands.prospect-max:20}") int prospectMax,
+            @Value("${bridge.crm.hubspot.stage-bands.qualified-max:50}") int qualifiedMax,
+            @Value("${bridge.crm.hubspot.stage-bands.proposal-max:70}") int proposalMax,
+            @Value("${bridge.crm.hubspot.stage-bands.negotiation-max:99}") int negotiationMax,
+            @Value("${bridge.crm.hubspot.max-skipped-ratio:0.5}") double maxSkippedRatio) {
         this(HubSpotClient.production(restClientBuilder, baseUrl, token, pageSize, maxRetries,
                 initialBackoffMillis, maxBackoffMillis, connectTimeoutMillis, readTimeoutMillis),
-                Clock.systemUTC());
+                Clock.systemUTC(),
+                new HubSpotStageMapping(prospectMax, qualifiedMax, proposalMax, negotiationMax),
+                maxSkippedRatio);
     }
 
-    HubSpotDealRepository(HubSpotClient client, Clock clock) {
+    HubSpotDealRepository(
+            HubSpotClient client, Clock clock, HubSpotStageMapping stageMapping, double maxSkippedRatio) {
+        if (!(maxSkippedRatio > 0 && maxSkippedRatio <= 1)) {
+            throw new IllegalStateException(
+                    "bridge.crm.hubspot.max-skipped-ratio must be > 0 and <= 1, was " + maxSkippedRatio);
+        }
         this.client = client;
         this.clock = clock;
-        // Fail fast at startup if this portal's pipeline has a stage label HubSpotStageMapping
-        // doesn't recognize. The result itself is discarded - snapshot() always resolves its own
-        // fresh copy below, never reusing this one (see the class Javadoc's "Stage mapping" note).
-        HubSpotStageMapping.resolveIdsToStages(client.fetchPipelines());
+        this.stageMapping = stageMapping;
+        this.maxSkippedRatio = maxSkippedRatio;
+        // Fail fast at startup on a pipeline/stage-level problem resolveIdsToStages can't isolate
+        // to one stage (see its Javadoc). A per-stage problem it CAN isolate never throws here -
+        // only logged, below - so the app still starts even with one malformed stage in the
+        // portal. The result itself is discarded - snapshot() always resolves its own fresh copy
+        // (see the class Javadoc's "Stage mapping" note).
+        warnIfAnyInvalid(stageMapping.resolveIdsToStages(client.fetchPipelines()));
+    }
+
+    private static void warnIfAnyInvalid(StageResolution resolution) {
+        if (!resolution.invalidStageReasons().isEmpty()) {
+            log.warn("HubSpot pipeline has {} stage(s) that could not be mapped and will be skipped "
+                            + "per deal at read time: {}",
+                    resolution.invalidStageReasons().size(), resolution.invalidStageReasons());
+        }
     }
 
     /**
@@ -128,7 +158,8 @@ public class HubSpotDealRepository implements DealRepository {
      */
     @Override
     public DealSnapshot snapshot() {
-        Map<String, DealStage> stageMapping = HubSpotStageMapping.resolveIdsToStages(client.fetchPipelines());
+        StageResolution resolution = stageMapping.resolveIdsToStages(client.fetchPipelines());
+        warnIfAnyInvalid(resolution);
 
         // The one clock read for this fetch. Every Deal built below shares this instant as the
         // snapshot's asOf(), regardless of how many pages or deals are behind it.
@@ -136,7 +167,9 @@ public class HubSpotDealRepository implements DealRepository {
 
         List<Deal> deals = new ArrayList<>();
         int skippedAtRead = 0;
+        int totalRecordsRead = 0;
         for (HubSpotDealRecord record : client.fetchAllDeals()) {
+            totalRecordsRead++;
             // toDealHistory() parses this one record's date/amount/stage
             // history - each of those is a claim about HubSpot's response
             // shape, not something this lane controls. Catching broadly and
@@ -145,12 +178,13 @@ public class HubSpotDealRepository implements DealRepository {
             // format assumption - gets this same per-record safety net
             // without a matching catch clause added here.
             try {
-                deals.addAll(toDealHistory(record, stageMapping));
+                deals.addAll(toDealHistory(record, resolution));
             } catch (RuntimeException e) {
                 log.warn("Skipping HubSpot deal {} - failed to parse: {}", record.id(), e.getMessage());
                 skippedAtRead++;
             }
         }
+        failIfTooManySkipped(skippedAtRead, totalRecordsRead);
         deals.sort(Comparator.comparing(Deal::stageChangedAt).thenComparing(Deal::dealId));
         List<Deal> allDeals = Collections.unmodifiableList(deals);
 
@@ -167,6 +201,26 @@ public class HubSpotDealRepository implements DealRepository {
 
         return new DealSnapshot(
                 asOf, allDeals, Collections.unmodifiableMap(unmodifiableHistory), dealIds, skippedAtRead);
+    }
+
+    /**
+     * Fails the whole run instead of returning a partial {@link DealSnapshot} once {@code
+     * skippedAtRead} exceeds {@code bridge.crm.hubspot.max-skipped-ratio} of the deals actually
+     * read this call - one invalid stage used by many deals makes every one of them fail the same
+     * way, and past this ratio a "mostly successful" sync is really a broken one. Zero records
+     * read is never a failure - there is nothing to divide by, and nothing was skipped either.
+     */
+    private void failIfTooManySkipped(int skippedAtRead, int totalRecordsRead) {
+        if (totalRecordsRead == 0) {
+            return;
+        }
+        double ratio = (double) skippedAtRead / totalRecordsRead;
+        if (ratio > maxSkippedRatio) {
+            throw new HubSpotSkipThresholdExceededException(
+                    "HubSpot sync skipped " + skippedAtRead + "/" + totalRecordsRead + " deals (ratio "
+                            + ratio + "), exceeding bridge.crm.hubspot.max-skipped-ratio=" + maxSkippedRatio
+                            + " - failing the whole run instead of publishing a partial snapshot");
+        }
     }
 
     /**
@@ -188,12 +242,13 @@ public class HubSpotDealRepository implements DealRepository {
             return Optional.empty();
         }
 
-        Map<String, DealStage> stageMapping = HubSpotStageMapping.resolveIdsToStages(client.fetchPipelines());
-        List<Deal> history = toDealHistory(record.get(), stageMapping);
+        StageResolution resolution = stageMapping.resolveIdsToStages(client.fetchPipelines());
+        warnIfAnyInvalid(resolution);
+        List<Deal> history = toDealHistory(record.get(), resolution);
         return Optional.of(history.get(history.size() - 1));
     }
 
-    private List<Deal> toDealHistory(HubSpotDealRecord record, Map<String, DealStage> stageMapping) {
+    private List<Deal> toDealHistory(HubSpotDealRecord record, StageResolution resolution) {
         Map<String, List<HubSpotPropertyHistoryEntry>> historyByProperty = record.propertiesWithHistory();
         List<HubSpotPropertyHistoryEntry> newestFirst =
                 historyByProperty == null ? null : historyByProperty.get("dealstage");
@@ -212,11 +267,15 @@ public class HubSpotDealRepository implements DealRepository {
 
         List<Deal> deals = new ArrayList<>(oldestFirst.size());
         for (HubSpotPropertyHistoryEntry entry : oldestFirst) {
-            DealStage stage = stageMapping.get(entry.value());
+            DealStage stage = resolution.idToStage().get(entry.value());
             if (stage == null) {
+                String invalidReason = resolution.invalidStageReasons().get(entry.value());
+                String detail = invalidReason != null
+                        ? "which failed to map: " + invalidReason
+                        : "which is not present in the fetched pipeline definition";
                 throw new UnknownHubSpotStageException(
                         "HubSpot deal " + record.id() + " references dealstage id \"" + entry.value()
-                                + "\", which is not present in the fetched pipeline definition");
+                                + "\", " + detail);
             }
             deals.add(Deal.builder()
                     .dealId(record.id())

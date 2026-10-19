@@ -100,6 +100,54 @@ already has (edgeExists() / the task's own stored previousStatus).
   `@EqualsAndHashCode` there, since it generates nothing alongside the hand-written methods.
 
 ## Open items
+- 2026-10-12, issue #580 (tenant isolation) - decisions made while implementing, each resolved
+  directly rather than left implicit:
+  - **Null-tenant policy is strict**: an edge needs both tasks' `tenant_id` non-null and equal;
+    null on either side is rejected, same as a mismatch. Confirmed with the user that existing/
+    test data without a tenant isn't meaningful enough to justify the weaker "skip when unknown"
+    alternative the issue offered. Follow-up: make `task.tenant_id` `NOT NULL` once every row is
+    backfilled through `TaskCreatedEventHandler`/`TaskUpdatedEventHandler`.
+  - **`task.updated` claiming a different tenant than stored is rejected** (`TenantReassignmentException`
+    -> `NonRetryableEventException`), not applied - confirmed directly with the Inbox team
+    (Shlomzion Cohn, Slack) that `tenant_id` never legitimately changes after task creation, so
+    this always signals a bug upstream. A still-null stored tenant is backfilled instead, not
+    treated as a mismatch.
+  - **Dropped the issue's item 3 (a Mind-side `tenant_id` cross-check) entirely, not deferred**:
+    the user confirmed Mind was never meant to be a tenant source (only Inbox is), and separately,
+    Mind's real event (`task-dependencies-proposed-event.proto`, now a cross-team, Relay-owned
+    registered schema under `shared/proto/`, not a private Chain draft) has no such field at all -
+    adding one would be a cross-team schema change, moot anyway since the per-edge same-tenant
+    check already covers an edge Mind proposes.
+  - **Mid-implementation discovery**: an earlier exploration pass for this issue was accidentally
+    done against the unmerged `shifra/chain-pending-task-buffer-tables` branch instead of `main`
+    (that branch's `PendingDependencyService`/pending-event-buffer feature does **not** exist on
+    `main`) - re-verified everything actually touched against the real `main` before implementing.
+    At that point `DependencyProposedEventHandler` called `TaskEligibilityService.addDependencies`
+    directly (no buffer/reconcile layer), so the cross-tenant check/REJECTED-history write was
+    added directly in that handler.
+  - **Superseded by a concurrent rewrite merged the next day (2026-10-13, PR #609 +
+    `chain/ruthHoltzman/582-task-completed-consumer` + the separate
+    "Riki-Mind-Dependency-Events"/`2c425890` work)**: `DependencyProposedEventHandler` no longer
+    calls `TaskEligibilityService.addDependencies` at all - it now calls
+    `TaskDependencyService.addDependency` once per edge (missing target -> buffered via the new
+    `UnresolvedDependencyService`/`unresolved_dependencies` table instead of retried; missing
+    source task is still retried). Merged this branch's tenant check/REJECTED-history code down
+    into `TaskEligibilityService`/`TaskDependencyService` to match, which actually **closes** the
+    gap noted below for Mind's path too: since Mind's edges now go through the same
+    `TaskDependencyService.addDependency` the REST path uses, a *successful* Mind-sourced add is
+    recorded in `dependency_history` as well, not just a rejected one.
+  - Also found incidentally while running the `@Tag("postgres")` suite for the first time in a
+    while (unrelated to tenant work, not fixed, flagged to the team): `TaskRepositoryContractTest`'s
+    `findByParentTaskId_returnsDirectChildren`/`findByParentTaskId_excludesSoftDeletedChildren`
+    seed a child referencing a `parentTaskId` that's never itself inserted - fails the real FK
+    constraint under `PostgresTaskRepositoryContractTest` (passes under the in-memory
+    implementation, which doesn't enforce FKs). `PostgresConstraintRepositoryTest.save_nullReason_roundTripsAsNull`
+    also fails independently (`reason` round-trips as `{}` instead of `null`) - also pre-existing,
+    also unrelated.
+- #649: TaskEligibilityService was split by domain - edges in `DependencyEdgeService`, constraints in
+  `ConstraintEligibilityService`, counter helpers in `TaskCounterUpdater`. The graph lock is the
+  `GraphLock` bean (see "Graph lock" below) shared by `DependencyEdgeService` and
+  `TaskEligibilityService`; older notes below that name `TaskEligibilityService` for moved methods predate this.
 - PR #468 review (2026-09-23, leaRevivo) findings addressed 2026-09-24:
   - Critical: `PostgresConstraintRepositoryTest`/`PostgresConstraintRepositoryConcurrencyTest`
     were committed active with no exclusion, and `values-chain.yaml`'s `postgresql.enabled`
@@ -176,18 +224,14 @@ already has (edgeExists() / the task's own stored previousStatus).
   does not actually cover Task/TaskDependency mutations yet.
 - Waiting on team lead's answer about whether a real DB is coming,
   or whether the in-memory contract is final for now
-- Until real JPA-backed repositories exist, TaskEligibilityService ALSO
-  uses in-process locking to make read-modify-write on blockingCount /
-  openConstraintCount actually atomic - @Transactional alone doesn't
-  cover this today. This locking is only correct for a single JVM owning
-  the in-memory repositories — once persistence is real, add @Version or
-  an atomic UPDATE for the counters and the locking can be retired. Full
-  rationale is in the class Javadoc; summary: dependencyGraphLock guards
-  the edges plus any DONE-status read that decides whether an edge
-  currently counts against blockingCount, per-task locks (striped over a
-  fixed array, not one object per task id, to keep memory bounded) guard
-  a single task's counters, and dependencyGraphLock is always acquired
-  before a per-task lock, never after, so the two can't deadlock.
+- Graph lock: `DependencyEdgeService`'s and `TaskEligibilityService`'s graph-mutating methods run inside
+  `GraphLock#runExclusive` (the old in-process `dependencyGraphLock`
+  `synchronized` is gone - it released before commit). `PostgresGraphLock`
+  takes `pg_advisory_xact_lock` with one constant key, first in the
+  `@Transactional` method and before any task row lock, and it is released only at
+  commit/rollback; `InMemoryGraphLock` (a `ReentrantLock`) backs in-memory
+  runs and the unit tests. Known limit: one key means all graph writes queue,
+  across every project (team-lead decision).
 - Resolved: real persistence layer now exists - Postgres-backed
   `Postgres*Repository`/`JpaTransactionRunner` implementations
   (`repository/`), own `chain` database + own `chain` DB user (not the
@@ -196,20 +240,17 @@ already has (edgeExists() / the task's own stored previousStatus).
   `Task`/`TaskDependency`/`DependencyHistoryEntry` stay plain DTOs -
   entities (`TaskEntity`/`TaskDependencyEntity`/`DependencyHistoryEntity`)
   are mapped to/from them entirely inside the adapters. The H2 placeholder
-  is gone; `MockDataConfig`'s in-memory beans remain only as the
-  `@ConditionalOnMissingBean` fallback when no real `DataSource` is wired.
+  is gone, and so are all `InMemory*` repositories, `MockDataConfig` and `InMemoryProcessedEventStore`
+  (2026-10-15): Postgres is the only persistence, including `PostgresProcessedEventStore` (V10) for
+  event dedup. The tests that used the in-memory fakes now run against Postgres (`PgRepos`).
 - `TaskRepository#update()`'s atomicity is now real: `PostgresTaskRepository`
   uses a pessimistic row lock (`SELECT ... FOR UPDATE`) as the sole
   correctness mechanism for `blockingCount`/`openConstraintCount` under
   concurrent writes - `@Version` on `TaskEntity` is defense-in-depth for a
   different, not-yet-existing write path, not part of this guarantee.
-  `TaskEligibilityService`'s in-process `dependencyGraphLock` is
-  **unchanged and still required** - it isn't redundant with per-row
-  Postgres locking, since it serializes the multi-row cycle-detection DFS
-  and a read-together-with-an-edge-write decision, neither of which
-  reduces to locking one row. Full rationale is in the class Javadoc;
-  summary: dependencyGraphLock guards the edges plus any DONE-status read
-  that decides whether an edge currently counts against blockingCount.
+  The graph lock (see "Graph lock" above) is still required on top of it: it
+  serializes the multi-row cycle-detection DFS and the read-with-edge-write
+  decisions, which a single-row lock cannot.
 - Resolved (#384): Kafka topics wired in chart config - consume
   `task.dependencies.proposed` (addDependency), `task.dependencies.removed`
   (removeDependency, PROPOSED), `task.status.updated` (onTaskStatusChanged,
@@ -219,14 +260,14 @@ already has (edgeExists() / the task's own stored previousStatus).
   exist only in case that changes later.
 - 2026-08-30, addressed a teammate code review on PR #172:
   - Fixed: addDependency/removeDependency were only using
-    dependencyGraphLock, not the per-task lock the other methods use for
+    the graph lock, not the per-task lock the other methods use for
     the same Task fields - no mutual exclusion between them. Now the
     counter mutation itself goes through the per-task lock too.
   - Fixed: adding a dependency on an already-DONE task incremented
     blockingCount with no future status transition ever able to
     decrement it back off (DONE is terminal until reopened) - permanently
     stuck dependents. addDependency/removeDependency now read the
-    target's status (under dependencyGraphLock, so it can't race
+    target's status (under the graph lock, so it can't race
     onTaskStatusChanged's own DONE transition) and only touch the
     counter for a currently-not-DONE target.
   - Disagreed with: the reviewer's deadlock claim. Per-task lock nesting

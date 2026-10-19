@@ -140,7 +140,7 @@ class GatewayRoutingIntegrationTest {
         task.setPriority("HIGH");
         task.setStatus("READY");
         task.setEffortEstimate(35);
-        task.setDueDate(java.time.Instant.parse("2026-08-30T17:00:00Z"));
+        task.setDueDate("30/08/2026");
         task.setOwner("Alex Morgan");
 
         when(restTemplate.exchange(

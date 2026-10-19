@@ -112,6 +112,23 @@ class TaskStateReconciliationServiceTest {
     }
 
     @Test
+    void correction_shouldNotChangeUpdatedAt() {
+        // Fixed past timestamp so a now()-based overwrite would be detected.
+        LocalDateTime inboxUpdatedAt = LocalDateTime.now().minusDays(1);
+        Task task = createTask(TaskStatus.ACTIVE, true, 0, 0, inboxUpdatedAt);
+        Task blocker = createTask(TaskStatus.ACTIVE, false, 0, 0);
+
+        setDependencies(task, blocker);
+
+        assertTrue(service.reconcileTaskState(task.getId()));
+
+        Task updated = tasks.get(task.getId());
+        assertEquals(1, updated.getBlockingCount());
+        assertFalse(updated.isReady());
+        assertEquals(inboxUpdatedAt, updated.getUpdatedAt());
+    }
+
+    @Test
     void incorrectOpenConstraintCount_shouldBeCorrected() {
         Task task = createTask(TaskStatus.ACTIVE, true, 0, 0);
 
@@ -241,16 +258,24 @@ class TaskStateReconciliationServiceTest {
             boolean isReady,
             int blockingCount,
             int openConstraintCount) {
+        return createTask(status, isReady, blockingCount, openConstraintCount, LocalDateTime.now());
+    }
+
+    private Task createTask(
+            TaskStatus status,
+            boolean isReady,
+            int blockingCount,
+            int openConstraintCount,
+            LocalDateTime updatedAt) {
 
         Task task = Task.builder()
                 .id(UUID.randomUUID())
-                .ownerId("test-owner")
                 .status(status)
                 .isReady(isReady)
                 .blockingCount(blockingCount)
                 .openConstraintCount(openConstraintCount)
                 .createdAt(LocalDateTime.now())
-                .updatedAt(LocalDateTime.now())
+                .updatedAt(updatedAt)
                 .build();
 
         tasks.put(task.getId(), task);

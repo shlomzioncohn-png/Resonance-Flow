@@ -90,7 +90,7 @@ Currently wired up:
 A `dependencies` list set in `values-<service>.yaml` **replaces** the one in
 `values.yaml` (Helm merges maps, not lists) - repeat every entry, don't just add.
 
-CI's `setup-service-infra` port-forwards this Postgres to `localhost:5432` and
+CI's `setup-service-infra` port-forwards this Postgres to a free local port and
 exports `PG*` / `TEST_DATABASE_URL` (superuser, `resonance_flow`) to the test step
 of **every** service whose `values-<service>.yaml` enables `postgresql`.
 

@@ -6,11 +6,17 @@ cross-team boundaries.
 
 from mind.contracts.assignee import Assignee, AssigneeCandidate
 from mind.contracts.base_enums import SourceType
-from mind.contracts.raw_object_event import RawObjectEvent
+from mind.contracts.raw_object_event import Classification, RawObjectEvent, RawObjectRef
 from mind.contracts.raw_object_event_enums import (
+    Category,
     ChangeType,
+    DecidedBy,
     Modality,
+    ObjectRole,
+    Quality,
+    RawSourceType,
     ScopeDecision,
+    Sensitivity,
 )
 from mind.contracts.task import Task
 from mind.contracts.task_completed import TaskCompleted
@@ -23,22 +29,32 @@ from mind.contracts.task_enums import (
     TaskStatus,
     TaskTier,
 )
+from mind.contracts.task_score_proposed import TaskScoreProposed
 
 __all__ = [
     "Assignee",
     "AssigneeCandidate",
     "AssigneeType",
+    "Category",
     "ChangeType",
+    "Classification",
+    "DecidedBy",
     "ExtractionProvenance",
     "Modality",
+    "ObjectRole",
+    "Quality",
     "RawObjectEvent",
+    "RawObjectRef",
+    "RawSourceType",
     "RoleContext",
     "ScopeDecision",
+    "Sensitivity",
     "SourceType",
     "Task",
     "TaskCompleted",
     "TaskCreated",
     "TaskCreationRequested",
+    "TaskScoreProposed",
     "TaskStatus",
     "TaskTier",
 ]

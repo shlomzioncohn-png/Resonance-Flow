@@ -1,0 +1,26 @@
+[
+  {
+    "tenantId": "demo-tenant",
+    "channel": "#northwind-deal",
+    "type": "message",
+    "user": "Lior",
+    "text": "Dana, did Northwind confirm the unit count for the quote?",
+    "ts": "1791193200.000100"
+  },
+  {
+    "tenantId": "demo-tenant",
+    "channel": "#northwind-deal",
+    "type": "message",
+    "user": "Dana",
+    "text": "Yes, 300 sensor units with installation. I'll get our pricing proposal over to Northwind before end of day Thursday.",
+    "ts": "1791193260.000200"
+  },
+  {
+    "tenantId": "demo-tenant",
+    "channel": "#northwind-deal",
+    "type": "message",
+    "user": "Lior",
+    "text": "Thanks, sounds good.",
+    "ts": "1791193380.000300"
+  }
+]

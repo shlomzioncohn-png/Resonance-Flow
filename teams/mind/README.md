@@ -99,6 +99,30 @@ scenario for yet, or a scenario the mentor hasn't approved yet, prints a
 warning but does **not** fail the build — the set is expected to be built up
 incrementally before the Foundation Gate.
 
+## Cost and latency monitoring (#479)
+
+Every OCR, ASR and LLM call goes through one ledger,
+`observability.record_call()`, which logs its latency and its cost -- in a
+unit per kind: **CPU seconds** for OCR/ASR (MIND does not pay for its machine
+by the hour, so local models have no dollar price), **US dollars** for LLM
+calls (the provider's price per token), plus the LLM's token usage. Every
+field and log key names its unit (`cpu_seconds`, `cost_usd`, `duration_ms`).
+`GET /debug/model-calls` (and a `model_call_summary` log line every 100 calls)
+shows the aggregate per call name -- count, errors, p50/p95, CPU seconds,
+tokens, dollars -- and a call over its kind's duration limit (or, for LLM, its
+dollar limit) logs a `MODEL_CALL_SLOW` / `MODEL_CALL_EXPENSIVE` WARNING. A
+measure that does not apply to a kind is `n/a` (null total, null count); one
+that applies but is unknown is never shown as 0 -- its total is `null`, with a
+count of how many calls lacked it.
+
+LLM calls are recorded in R2's `BasicExtractor._call`, with her agreement,
+and priced from `extraction/providers/pricing.py`; a model with no price on
+file there (some Gemini models) is recorded as unpriced, not as free.
+
+Metrics, limits, configuration, warnings and known limitations:
+[`src/mind/observability/README.md`](./src/mind/observability/README.md#status-of-479-cost-and-latency-monitoring).
+Run the acceptance suite with `pytest tests/test_cost_latency_monitoring.py -v`.
+
 ## Data policy
 
 **No real Gong data at any point.** Real corpora (AMI, RVL-CDIP/FUNSD,
@@ -114,14 +138,23 @@ licensing constraints.
   ~45s / ~600MB per page). A trade made knowingly — PaddleOCR mobile has ~2.7x
   fewer character errors on FUNSD (grouped CER 0.074 vs. 0.200). See
   [`benchmarks/ocr-asr-benchmark.md`](./benchmarks/ocr-asr-benchmark.md).
-- ASR: **blocked**, not resolved — no AMI audio (or any audio) sample
-  exists anywhere in this repo to benchmark Whisper against. See
-  [`benchmarks/ocr-asr-benchmark.md`](./benchmarks/ocr-asr-benchmark.md)
-  "Known risk".
+- ~~ASR: which local Whisper size~~ Resolved: **Whisper `base.en`** (faster-whisper,
+  int8, CPU), chosen over `tiny.en` / `small.en` on two AMI meetings: rough WER
+  ~0.26 at ~10x real time, vs. `small.en` 0.9–1.6 points better but ~5x slower,
+  and `tiny.en` within noise on WER but less precise. n=2 and a rough word
+  diff — known risks documented in
+  [`benchmarks/ocr-asr-benchmark.md`](./benchmarks/ocr-asr-benchmark.md).
 - Evaluation metric: top-1 accuracy vs. MRR/nDCG
 - How the score is published to Chain: separate event vs. field on `Task`
 - Which real dataset slice to validate against first: FUNSD vs. AMI
 - MIND's exact location/build integration in the monorepo (Python, not Maven — affects Relay's CI and the root `docker-compose.yml`)
+- ~~Compute cost of OCR/ASR in dollars~~ Resolved (#479, with the team lead):
+  MIND does not pay for its machine, so OCR/ASR cost is measured in **CPU
+  seconds**, not dollars; dollars apply only to LLM calls. No CPU-hour rate.
+  A CPU-seconds limit for OCR/ASR waits for a measured baseline.
+- ~~LLM call instrumentation (#479)~~ Resolved with R2: `extractor.py` records
+  `kind`, status, token counts and an unknown cost as `None`, every call under
+  the model it was sent to. Gemini's price is in `pricing.py` (R2).
 
 ## Getting started
 
@@ -130,6 +163,7 @@ cp .env.example .env             # already filled with working defaults today
 make dev                         # install with dev dependencies
 make lint                        # ruff + mypy
 docker compose up vector-store -d # bring up just the DB -- make test/make run need it
+make migrate                     # apply database migrations (alembic upgrade head)
 make test                        # run the test suite
 make eval                        # run the evaluation harness against eval/personas/
 make run                         # run the API locally
@@ -139,14 +173,18 @@ make docker-up                   # or run everything via docker compose (API + v
 `make test` and `make run` connect to Postgres over `MIND_VECTOR_STORE__DSN`
 (already set in `.env.example` against `localhost:5432`), so the
 `vector-store` container above must be up first even when you're running
-`mind` itself outside Docker. `make docker-up` doesn't need that step --
-it brings up `vector-store` itself.
+`mind` itself outside Docker. `make migrate` must then run once against a
+fresh database -- the app itself no longer creates its own schema (see
+[`migrations/`](./migrations) and issue #441); it only checks the schema
+is already there, and fails fast with a clear message if it isn't.
+`make docker-up` doesn't need either step -- it brings up `vector-store`
+and runs the migration itself.
 
 `make docker-up` (`docker compose up`) now brings up the full stack —
-the API **and** its `vector-store` (pgvector) dependency — with one
-command, waiting for `vector-store` to report healthy before starting
-`mind`. On a clean checkout: `docker compose down -v && docker compose
-up -d --build`.
+migrations, the API, **and** its `vector-store` (pgvector) dependency —
+with one command: `vector-store` becomes healthy, a one-shot `migrate`
+service runs against it and exits, then `mind` starts. On a clean
+checkout: `docker compose down -v && docker compose up -d --build`.
 
 Once running, `curl -f http://localhost:8000/health` should return `200`
 with `{"status": "ok", ...}`, and `docker compose ps` should show both
@@ -163,10 +201,19 @@ checks and who owns what.
 
 ## Foundation Gate checklist (end of week 3)
 
-- [ ] Harness and vector store run on toy data **and** on one small real
+- [x] Harness and vector store run on toy data **and** on one small real
       dataset slice (e.g. a handful of AMI recordings or a few scanned
-      FUNSD/RVL-CDIP pages)
-- [ ] Both are runnable by someone outside the MIND team
+      FUNSD/RVL-CDIP pages) -- harness: `eval/real_slice/` (AMI), see
+      `tests/test_real_slice.py`; vector store: same `eval/real_slice/`
+      tasks, see `benchmarks/vector-store-comparison.md`'s "Foundation
+      Gate benchmark (week 3)" section (#469)
+- [ ] Both are runnable by someone outside the MIND team -- vector-store
+      setup guide exists and was run on a clean environment (see
+      `src/mind/embeddings/README.md`'s "Foundation Gate benchmark"
+      section), but no one outside the team has run it from the
+      instructions alone yet (#469's own acceptance criterion -- needs a
+      teammate to actually do this and report what got stuck)
 - [ ] Persona evaluation set complete and mentor-approved
-- [ ] Vector-store choice documented and reasoned
+- [x] Vector-store choice documented and reasoned -- see
+      `benchmarks/vector-store-comparison.md`
 - [ ] Automated tests passing; a README per component; one-command deploy

@@ -19,7 +19,7 @@
       "effort_estimate": 45,
       "tier": "strategic",
       "blocked": false,
-      "parent_task_id": null
+      "parent_task_id": "ceo_board_thursday_session"
     },
     {
       "task_id": "task_regulator",

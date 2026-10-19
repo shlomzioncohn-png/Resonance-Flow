@@ -118,6 +118,12 @@ components:
     resources: *defaultResources
     <<: *defaultHealthProbes
     env: {}
+    # Schema is Alembic-only (#441) -- mind's own container no longer creates
+    # task_embeddings itself, so without this the pod crash-loops on startup
+    # against a fresh database.
+    migration:
+      enabled: true
+      command: ["alembic", "upgrade", "head"]
     # A list set in values-<service>.yaml replaces this one wholesale (Helm merges
     # maps, not lists) - repeat every entry there, don't just add yours.
     dependencies:
@@ -160,7 +166,8 @@ components:
         provider: local
       asr:
         provider: local
-        whisper_model: base
+        # English-only Whisper, decided in #135 / #652 (teams/mind/benchmarks/ocr-asr-benchmark.md).
+        whisper_model: base.en
       object_storage:
         bucket: bridge-raw
       kafka:
@@ -346,6 +353,42 @@ components:
         port: http
       periodSeconds: 5
       failureThreshold: 3
+  # Static Storybook for lens-frontend (nginx) - same source dir, built from the
+  # Dockerfile's `storybook` stage.
+  lens-storybook:
+    enabled: true
+    replicaCount: 1
+    image:
+      repository: "ghcr.io/kamatechorg/resonance-flow/lens-storybook"
+      pullPolicy: IfNotPresent
+      tag: "placeholder"
+    containerPort: 8080
+    service: *defaultService
+    resources:
+      requests:
+        cpu: 25m
+        memory: 32Mi
+      limits:
+        cpu: 100m
+        memory: 64Mi
+    startupProbe:
+      httpGet:
+        path: /
+        port: http
+      periodSeconds: 5
+      failureThreshold: 12
+    livenessProbe:
+      httpGet:
+        path: /
+        port: http
+      periodSeconds: 10
+      failureThreshold: 3
+    readinessProbe:
+      httpGet:
+        path: /
+        port: http
+      periodSeconds: 5
+      failureThreshold: 3
   chain:
     enabled: true
     replicaCount: 1
@@ -388,6 +431,7 @@ components:
             # Consumed, Protobuf (#467): task.created/updated from Inbox, proposals from Mind.
             taskCreated: task.created
             taskUpdated: task.updated
+            taskCompleted: task.completed
             dependenciesProposed: task.dependencies.proposed
             # taskDependenciesRemoved intentionally omitted: Chain confirmed (#385 follow-up)
             # removeDependency is REST-only (Lens BFF -> Chain), no Kafka topic behind it today -

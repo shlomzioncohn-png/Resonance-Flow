@@ -21,7 +21,8 @@ components/
   layout/                     AppShell, Header, Sidebar, PageContainer, Logo
   feedback/                   LoadingState, EmptyState, ErrorState
   ui/                          (reserved for shared, non-layout UI components)
-mocks/                       Mock data adapters used until real APIs exist
+mocks/                       MSW handlers for endpoints the Gateway doesn't expose yet
+                              (on only when NEXT_PUBLIC_API_MOCKING=enabled)
 services/                    Gateway API client (api.ts) — not wired into any page yet;
                               see docs/api-integration-status.md for why
 docs/                        Architecture docs (see below)
@@ -135,9 +136,109 @@ To lint (includes accessibility checks — see [Design system](#design-system-le
 npm run lint
 ```
 
+## Storybook
+
+Every shared component has stories next to it (`components/**/<Name>.stories.tsx`).
+Storybook is both the component catalogue and a test suite: each story is rendered
+in a real browser in CI, its `play` function is run, and it is checked for
+accessibility violations.
+
+### Run locally
+
+```bash
+npm run storybook                       # dev server at http://localhost:6006
+npx vitest run --project=storybook      # run every story as a test (what CI runs)
+npm run build-storybook                 # static build into storybook-static/
+```
+
+The story tests need a browser once: `npx playwright install chromium`.
+
+> On Windows, run the story tests from a path with ASCII characters only. If the
+> checkout sits under a non-ASCII folder (e.g. a Hebrew user name), Vitest reports
+> `No test suite found` for every story.
+
+### Write a new story
+
+Create `<Name>.stories.tsx` beside the component:
+
+```tsx
+import type { Meta, StoryObj } from '@storybook/nextjs-vite';
+import { expect } from 'storybook/test';
+import MyComponent from './MyComponent';
+
+const meta = {
+  component: MyComponent,
+  tags: ['autodocs'], // generates the component's Docs page
+} satisfies Meta<typeof MyComponent>;
+
+export default meta;
+type Story = StoryObj<typeof meta>;
+
+export const Default: Story = {
+  args: { title: 'Hello' },
+  play: async ({ canvas }) => {
+    await expect(canvas.getByText('Hello')).toBeVisible();
+  },
+};
+```
+
+- One story per meaningful state (empty, loading, error, each variant).
+- Always keep `tags: ['autodocs']` - that is what gives the component a Docs page.
+- The MUI theme and `RoleProvider` are already applied to every story in
+  `.storybook/preview.tsx`; don't re-wrap them.
+- A component that reads `usePathname()`/`useRouter()` needs
+  `parameters: { nextjs: { appDirectory: true, navigation: { pathname: '/' } } }`
+  (see `Sidebar.stories.tsx`).
+- Accessibility violations **fail** the test (`a11y.test: 'error'` in
+  `.storybook/preview.tsx`). Fix the component rather than turning the check off.
+  A few stories disable the single `color-contrast` rule with a `TODO(a11y)` note -
+  those are known palette issues waiting on a design decision, not a pattern to copy.
+
+### CI and the deployed Storybook
+
+- **Pull requests** - the `storybook` job in `.github/workflows/lens-frontend-ci.yaml`
+  runs the story tests and `build-storybook`.
+- **Deploy** - on push to `main`, `.github/workflows/lens-storybook-ci.yaml` builds the
+  `storybook` stage of the `Dockerfile` (static build served by nginx on port 8080) and
+  deploys it as the `lens-storybook` component of the shared Helm chart.
+
+To open the Storybook running in the cluster:
+
+```bash
+kubectl -n resonance-flow port-forward svc/resonance-flow-lens-storybook 6006:80
+```
+
+then browse to http://localhost:6006.
+
+## Run all of LENS from the repo root
+
+The root `docker-compose.yml` starts the whole chain - Frontend -> Gateway -> BFF ->
+Inbox -> Postgres - plus Storybook:
+
+```bash
+cp .env.example .env          # first run only, from the repo root
+docker compose up --build
+```
+
+| Service   | URL                          | `.env` variable     |
+| --------- | ---------------------------- | ------------------- |
+| Frontend  | http://localhost:3000        | `FRONTEND_PORT`     |
+| Storybook | http://localhost:6006        | `STORYBOOK_PORT`    |
+| Gateway   | http://localhost:8086/health | `GATEWAY_PORT`      |
+| BFF       | http://localhost:8087/health | `BFF_PORT`          |
+| Inbox     | http://localhost:8082        | `INBOX_SERVER_PORT` |
+
+- **First run:** load Inbox's seed into `resonance-postgres` - step 3 of "Running
+  locally" in `docs/api-integration-status.md`. Without it Inbox answers 401 and the
+  task screens show an error.
+- **Without Inbox:** set `INBOX_MOCK_ENABLED=true` in `.env`; the BFF then serves its
+  own mock tasks.
+- Storybook here is the static build, so it does not hot-reload. While writing
+  stories use `npm run storybook`.
+
 ## Run with Docker
 
-Build and start the frontend:
+Build and start the frontend only:
 
 ```bash
 docker compose up --build

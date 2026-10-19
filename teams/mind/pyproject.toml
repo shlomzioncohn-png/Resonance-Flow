@@ -14,6 +14,10 @@ dependencies = [
     # embeddings (src/mind/embeddings)
     "psycopg[binary,pool]>=3.1",
     "sentence-transformers>=3.0",
+    # migrations (migrations/) -- runs at deploy time, inside the image,
+    # not just in dev, so this belongs here and not in [dev].
+    "alembic>=1.13",
+    "sqlalchemy>=2.0",
     # messaging (src/mind/messaging)
     "confluent-kafka[protobuf,schemaregistry]>=2.5,<2.11",
     "protobuf>=5",
@@ -26,7 +30,17 @@ dependencies = [
     # tesseract-ocr system binary (not pip-installable).
     "pillow",
     "pypdfium2",  # rasterizes PDF pages to images for the OCR pipeline
-    # add as decided: vector-store client, ASR libs, etc.
+    # ASR (src/mind/multimodal/asr.py) -- Whisper base.en, the decision made in
+    # benchmarks/ocr-asr-benchmark.md (#135). faster-whisper, not openai-whisper:
+    # it runs Whisper on CTranslate2 instead of PyTorch -- faster on CPU, lower
+    # peak memory. The weights are not pip-installable: the Dockerfile bakes them
+    # into the image, locally they live in models/whisper/ (models/README.md).
+    "faster-whisper",
+    # PyAV decodes the audio for asr.py. faster-whisper 1.2.1's own decoder calls
+    # av.open(..., metadata_errors=...), a keyword PyAV 19 no longer accepts
+    # (TypeError on every transcribe of a file path, as the benchmark does).
+    # 18.1.0 works; drop this pin once faster-whisper catches up.
+    "av<19",
 ]
 
 [project.optional-dependencies]
@@ -34,8 +48,11 @@ dev = [
     "pytest",
     "pytest-asyncio",
     "pytest-cov",
-    "ruff",
-    "mypy",
+    # Pinned so every CI runner lints with the same version: the self-hosted
+    # runner keeps whatever it installed first, while ubuntu-latest installs
+    # the newest -- ruff 0.17.0 failed lint where 0.16.6 passed (#770).
+    "ruff==0.16.6",
+    "mypy==2.3.1",
     "types-PyYAML",
     "types-psutil",  # CI's `make lint` runs `mypy ... benchmarks`, so this
                      # stub needs to be here, not in [benchmark] below --
@@ -46,7 +63,11 @@ dev = [
                      # verified locally: mypy passes on benchmarks/ with
                      # types-psutil installed and psutil itself uninstalled.
     "grpcio-tools==1.71.0",  # protoc, for `make proto`
+    "types-protobuf",  # stubs for google.protobuf, imported by the generated _pb2.pyi files
     "python-dotenv",  # tests/conftest.py loads .env for os.environ-reading fixtures
+    # demo_flow/feed.py lands the #359 demo artifacts in MinIO the way Bridge
+    # does (Bridge uses the Java io.minio client; this is its Python twin).
+    "minio>=7.2,<8",
 ]
 # Not a runtime dependency of src/mind/ -- only benchmarks/ocr_asr_benchmark.py
 # needs these (psutil for peak-RSS sampling, PaddleOCR as the comparison
@@ -59,6 +80,8 @@ benchmark = [
     "psutil",  # cross-platform peak-RSS/CPU sampling; stdlib `resource` is Unix-only
     "paddleocr",
     "paddlepaddle",
+    # The ASR size benchmark (#135) also needs faster-whisper and av, now
+    # runtime dependencies above (asr.py).
 ]
 
 [build-system]
@@ -82,6 +105,11 @@ exclude = ["_pb2\\.py$"]
 # not a blanket ignore for the whole benchmarks/ tree.
 [[tool.mypy.overrides]]
 module = "paddleocr"
+ignore_missing_imports = true
+
+# Same reason for faster-whisper (no stubs, no py.typed marker).
+[[tool.mypy.overrides]]
+module = ["faster_whisper", "faster_whisper.*"]
 ignore_missing_imports = true
 
 [[tool.mypy.overrides]]

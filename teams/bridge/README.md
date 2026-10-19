@@ -176,16 +176,38 @@ packages above. Bridge never builds a `Task` for this content itself - Mind read
 event and extracts the eventual Task from the object.
 
 **Code:** `media/MediaIntakeService.java` (lands already-read bytes through the shared
-`storage.ObjectStorageClient` and builds a `raw.model.RawObjectEvent`, plus
-`landTranscript(...)` for a transcript sidecar), `media/MediaEventPublisher.java` (validates
-via the shared `raw.RawObjectValidator`, then publishes), `media/MediaDedupIndex.java`
+`storage.ObjectStorageClient` and builds the matching `raw.model.RawObjectEvent` -
+`landMeeting(...)` for a recording plus whichever of its transcript/meeting-metadata
+sidecars were found, `landStandalone(...)` for a scanned doc), `media/MediaEventPublisher.java`
+(validates via the shared `raw.RawObjectValidator`, then publishes), `media/MediaDedupIndex.java`
 (content-hash dedup index stored in MinIO, see below), `media/MediaIntakeOrchestrator.java`
 (manual test intake, see below - holds a declarative list of `{directory, sourceType,
 modality}` mappings, so adding a new intake folder is a new list entry, not a new method),
 `media/controller/MediaIntakeController.java` (triggers it). `source_type` for this lane is
-`MEETING` (Zoom/BBB, `modality: audio`) or `SCANNED_DOC` (`modality: scanned_doc`) - both
-values on the shared `raw.model.RawSourceType` enum (`SCANNED_DOC` isn't in Mind's confirmed
-contract yet - tracked in [#188](https://github.com/KamaTechOrg/Resonance-Flow/issues/188)).
+`ZOOM`, `BIGBLUEBUTTON` or `SCANNED_DOC` - values on the shared `raw.model.RawSourceType`
+enum, which names the source *platform* (so a consumer can build a link back from
+`source_type` + `source_ref`; `RawSourceType.isMeeting()` is the one place that says which
+values are meetings) (`SCANNED_DOC` isn't in Mind's confirmed contract yet - tracked in
+[#188](https://github.com/KamaTechOrg/Resonance-Flow/issues/188)).
+
+**Schema shape (as of issue [#31](https://github.com/KamaTechOrg/Resonance-Flow/issues/31)):**
+one `RawObjectEvent` per logical recording/doc, not one per physical file.
+`object_key`/`content_hash`/`content_type`/`size_bytes`/`modality` live on each entry of the
+event's `objects[]` list (`raw.model.RawObjectRef`), tagged with a `role`
+(`RECORDING`/`TRANSCRIPT`/`SOURCE_METADATA` for this lane; `BODY`/`ATTACHMENT` are Malki's).
+`transcript_object_key` and the former `additional_metadata_object_key` are gone - a
+transcript or meeting-metadata sidecar is just another entry in `objects[]` now, not a
+pointer field. `correlation_id` is required and is this lane's Kafka dedup key (not a content
+hash, since there's no longer one single hash on the event) - a fresh UUID per landed
+recording, shared by every object's `object_key` so they land next to each other in MinIO.
+`source_ref` is the platform's own unique identifier for this one meeting occurrence - Zoom's
+`uuid`, or BBB's `recordID` - and `null` when the metadata sidecar has neither. Never
+`meetingId`: Zoom reuses it across a recurring meeting and BBB across every session in the same
+room, and the issue #31 contract requires `source_ref` to be unique within its `source_type`.
+It's an identifier, not a link, distinct from any `object_key` (which only ever points into our
+own MinIO copy). `revision`/`change_type`/`change_significance_score` are always
+`0`/`UPSERT`/`100` on this lane - a Zoom/BBB recording or scanned doc is never revised once
+landed, unlike Malki's lane where an edited email/message bumps `revision`.
 
 ### Running it locally
 
@@ -199,12 +221,17 @@ curl -X POST http://localhost:8080/api/bridge/media/run
 
 | Env var | Uploads as |
 |---|---|
-| `BRIDGE_MEDIA_ZOOM_RECORDINGS_DIR` | `source_type=MEETING`, `modality=audio` |
-| `BRIDGE_MEDIA_BBB_RECORDINGS_DIR` | `source_type=MEETING`, `modality=audio` |
-| `BRIDGE_MEDIA_SCANNED_DOCS_DIR` | `source_type=SCANNED_DOC`, `modality=scanned_doc` |
+| `BRIDGE_MEDIA_ZOOM_RECORDINGS_DIR` | `source_type=ZOOM`, `modality=AUDIO` |
+| `BRIDGE_MEDIA_BBB_RECORDINGS_DIR` | `source_type=BIGBLUEBUTTON`, `modality=AUDIO` |
+| `BRIDGE_MEDIA_SCANNED_DOCS_DIR` | `source_type=SCANNED_DOC`, `modality=SCANNED_DOC` |
 
-Zoom and BBB are split into separate folders only to keep sample files organized by where they
-came from - the schema has no separate platform field, both land as `MEETING`.
+Each platform has its own folder and its own `source_type`; both share the same meeting handling
+(transcript and metadata sidecars, meeting categories).
+
+To have the folders polled automatically instead, set `BRIDGE_MEDIA_SCHEDULE_ENABLED=true`
+(interval `BRIDGE_MEDIA_SCHEDULE_INTERVAL`, default `PT2M`): `MediaIntakeScheduler` runs the same
+intake on a fixed delay, so a file dropped into a folder lands within one interval. A manual run
+and a scheduled run never overlap - the second one waits.
 
 Each successfully uploaded file is moved into an `uploaded/` subfolder of wherever it came from,
 so re-triggering the endpoint only picks up genuinely new files instead of re-landing (and
@@ -224,10 +251,154 @@ Per file, before it lands:
    - same "MinIO as lightweight state store" approach `plan.md` uses for the Unstructured-intake
    lane's sync cursor). A file whose content hash is already in the index is moved to
    `uploaded/` but not re-landed or re-published.
-3. **Transcript pairing** (`MEETING` only) - a same-basename sidecar file (`.vtt`, `.srt`, or
-   `.txt`) next to a recording is landed alongside it and linked via the recording's
-   `transcript_object_key` - it does not get its own `RawObjectEvent`. Both files move to
+3. **Transcript pairing** (meetings only) - a same-basename sidecar file (`.vtt`, `.srt`, or
+   `.txt`) next to a recording is landed alongside it as a `role: TRANSCRIPT` entry in the
+   same event's `objects[]` - it does not get its own `RawObjectEvent`. Both files move to
    `uploaded/` together.
+
+   For real Zoom, that `.vtt` is what Zoom's own Cloud Recording API returns: `GET
+   /meetings/{meetingId}/recordings` lists every asset for a meeting in one `recording_files[]`
+   array, and the transcript is the entry with `file_type: "TRANSCRIPT"`,
+   `file_extension: "VTT"`, `recording_type: "audio_transcript"` - see
+   `fixtures/media/zoom-cloud-recording.sample.json` for the full shape (reference only, not
+   read by any code yet - field names are the publicly documented API, not live-verified this
+   session, so treat values as illustrative). Fetching it for real means downloading that
+   entry's `download_url` (needs the OAuth token attached, or it 404s), and hits the same
+   blocker as the Real* meeting-metadata reader below: this lane's manual-folder trigger has no
+   `meetingId` to call the API with.
+
+   The seam for that real call already exists: `media/meeting/zoom/ZoomCloudRecordingClient`
+   (+ DTOs `ZoomRecordingFile`/`ZoomRecordingsResponse` matching the documented response shape)
+   is ready to implement against, gated behind `bridge.media.zoom.mode: real`
+   (`application.yml`/`.env`) - same convention as `bridge.intake.*.mode: real` elsewhere in
+   this repo: `RealZoomCloudRecordingClient` is a throw-stub, not a working implementation, on
+   purpose (see its javadoc for exactly what filling it in needs - Server-to-Server OAuth,
+   the two Zoom hosts involved, etc.) - untested network/auth code that nothing ever calls is a
+   false sense of "ready", so that part is written up rather than shipped unverified.
+   `fetchRecordings` is scoped to return the whole response (every `recording_files[]` entry
+   plus meeting-level fields like `password`/`share_url`/`total_size`), not just the transcript
+   entry - `findTranscript` is a convenience default method on top of it - so a future
+   "additional info" sidecar built from this endpoint won't be working off a pre-filtered
+   subset once it's implemented.
+4. **Meeting-metadata pairing** (meetings only) - a same-basename sidecar carrying the
+   source platform's own meeting report is landed alongside the recording, in its native
+   format (no conversion), as a `role: SOURCE_METADATA` entry in the same event's `objects[]`:
+   `<basename>.meeting.json` in the Zoom folder, `<basename>.metadata.xml` in the BBB folder.
+   Both fixtures are field-for-field copies of each platform's own **officially documented**
+   API response shape (Zoom's Dashboard/Report API; BBB's `GET getRecordings` - verified
+   live against https://docs.bigbluebutton.org/development/api/#get-getrecordings, not from
+   memory), with fabricated example values where we have no live API access yet. It's parsed
+   once (`media/meeting/MeetingMetadataReader` + fixture implementations) to fill the event's
+   `participants`/`source_timestamp`/`source_ref` fields - the landed sidecar bytes themselves
+   are untouched.
+
+   Note: BBB's `getRecordings` only returns a participant **count** (`<participants>3</participants>`),
+   never a per-person list - BBB has no public documented endpoint for that. The only place
+   BBB exposes real per-participant join/leave is its "Learning Analytics Dashboard" data,
+   reachable either through an **internal, undocumented** API call (`learningDashboard` -
+   explicitly listed under BBB's own "Internal API calls", not the public developer surface)
+   or a **server-to-server callback** (`meta_analytics-callback-url`, which BBB itself calls
+   when a meeting ends) - neither is a regular request-response API call this lane's
+   local-folder trigger could make. So `participants` stays genuinely empty for BBB
+   recordings - not a parsing gap. Zoom's Report API, by contrast, does return real
+   per-participant join/leave times in a normal API call, so Zoom's fixture carries them.
+
+   Only fixture readers exist today (see `media/meeting/Fixture*MeetingMetadataReader`) - real
+   Zoom API wiring needs a `meetingId` this lane's manual-folder trigger doesn't have yet, and
+   real BBB per-participant data would need callback infrastructure this lane doesn't have.
+
+### Classification (scope_decision)
+
+After dedup and before landing, `media/classification/MediaClassificationService` decides each
+item's `scope_decision` and attaches the optional `classification` object it was derived from
+(category, file quality, sensitivity level, reason, and which model/prompt decided - see
+`raw/model/Classification` and `shared/proto/raw-object-event.proto`). It only tags the item as
+a whole; it never extracts tasks, people, dates or priority - that stays with Mind.
+
+1. **Rules first** (free, deterministic, `decided_by: RULE`): a meeting shorter than
+   `min-meeting-duration` → `TEST`; a document whose pages were *all* checked and are all
+   blank → `BLANK`. An empty transcript is deliberately *not* a rule - it means transcription
+   failed, not that the meeting was empty.
+2. **Model second**, only for what the rules didn't settle (`decided_by: MODEL`): a meeting is
+   judged from its topic + transcript excerpt (never the audio, never participant names). A
+   meeting with no spoken transcript text is never sent - it stays unclassified and `INCLUDED`.
+   Any OpenAI-compatible endpoint works - Gemini by default; switching provider is a change to
+   `bridge.media.classification.model.*` only.
+
+**Scanned documents** are examined once by `media/classification/document/DocumentScanner`, and
+both steps above work from that one scan:
+
+- **Formats** are an explicit list - the union of the `PagedDocumentReader` beans' extensions:
+  PNG, JPEG, TIFF (incl. multi-page) via ImageIO, and PDF via Apache PDFBox. Anything
+  else (DOC/DOCX, WEBP, BMP, GIF, ...) is never opened or sent - it lands `INCLUDED`, unclassified. A new
+  format is one new `PagedDocumentReader`.
+- **Pages** are rendered one at a time, in memory only, and checked for blankness locally; blank
+  pages are skipped. The scan stops once `documents.pages-to-send` (2) content pages are found or
+  `documents.max-pages-to-scan` (5) pages were checked - a 100-page PDF with content on page 1
+  costs two renders.
+- **Outcomes**: content found → those pages (with their page numbers) go to the model; every
+  page checked and blank → `BLANK` by rule; the limit reached with only blank pages and more
+  pages left → unclassified, `INCLUDED` (unchecked pages may have content); unsupported or
+  corrupt/password-protected → unclassified, `INCLUDED`.
+- The model never sees a blank page, so a `BLANK` verdict from it is recorded as `OTHER` - a
+  document with content can never be `EXCLUDED` as blank.
+3. **Fails open**: disabled, model error, rate limit or a malformed reply → `INCLUDED`, no
+   `classification`. An item is `EXCLUDED` only when its category is in
+   `excluded-meeting-categories`/`excluded-document-categories` **and** its confidence reaches
+   `min-confidence-to-exclude` (0.6). `EXCLUDED` items are still landed and published - just
+   tagged, so mistakes can be reviewed.
+
+To try it, in `.env`:
+
+```bash
+BRIDGE_MEDIA_CLASSIFICATION_ENABLED=true
+BRIDGE_MEDIA_CLASSIFIER_API_KEY=<your Gemini key>   # omit to run the rules only
+```
+
+Each decision is logged (`MediaClassificationService`: category, confidence, reason), and shows up
+in the published event's `scope_decision`/`classification` and in the landed objects'
+`scope_decision` MinIO tag.
+
+### `SOURCE_METADATA` format (for consumers)
+
+The `role: SOURCE_METADATA` object is the platform's own meeting report, landed byte-for-byte -
+Bridge never converts or edits it. Its format depends on `source_type`, and its `content_type`
+says which one. Consumers aren't required to read it: everything Bridge derives from it is already
+on the event (`participants`, `source_timestamp`, `source_ref`).
+
+| `source_type` | `content_type` | Shape |
+|---|---|---|
+| `ZOOM` | `application/json` | Zoom Report API `GET /report/meetings/{meetingId}`, merged with its participants endpoint |
+| `BIGBLUEBUTTON` | `application/xml` | One `<recording>` element of BBB's `GET getRecordings` response |
+
+**`ZOOM`** - JSON object (sample: `fixtures/media/zoom-meeting-metadata.sample.json`):
+
+| Field | Meaning |
+|---|---|
+| `id` | Zoom meeting number - reused by a recurring meeting, so not unique |
+| `uuid` | Unique id of this meeting occurrence → `source_ref` |
+| `topic` | Meeting title |
+| `user_email`, `user_name` | Host |
+| `dept` | Host's department |
+| `start_time`, `end_time` | ISO-8601 UTC → `start_time` is `source_timestamp` |
+| `duration`, `total_minutes` | Meeting length / summed participant minutes |
+| `participants_count`, `type` | Head count; Zoom meeting type code |
+| `custom_keys[]`, `tracking_fields[]` | Account-defined key/value pairs |
+| `participants[]` | Per participant: `id`, `user_id`, `participant_user_id`, `name` (→ `participants`), `user_email`, `join_time`, `leave_time`, `duration`, `status`, `failover`, `customer_key`, `registrant_id`, `bo_mtg_id` |
+
+**`BIGBLUEBUTTON`** - XML (sample: `fixtures/media/bbb-metadata.sample.xml`):
+
+| Element | Meaning |
+|---|---|
+| `recordID` | Unique id of this recording → `source_ref` |
+| `meetingID` | Room id - reused by every session in the room, so not unique |
+| `internalMeetingID` | BBB's internal id for the session |
+| `name` | Meeting/room name |
+| `startTime`, `endTime` | Epoch milliseconds → `startTime` is `source_timestamp` |
+| `participants` | A head **count** only - BBB's public API has no per-person list, so `participants` on the event stays empty for BBB |
+| `isBreakout`, `published`, `state` | Recording flags/status |
+| `metadata` | Meeting metadata set by the integration (e.g. `meetingName`) |
+| `playback/format[]` | Playback links per format (`type`, `url`, `processingTime`, `length`) |
 
 **Known gaps (tracked in issue #45):**
 - Test samples aren't yet drawn from the real public corpora named in the spec (AMI/ICSI,

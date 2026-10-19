@@ -1,29 +1,49 @@
 package com.rnd.chain.events;
 
+import com.rnd.chain.testsupport.TaskStateHistoryFixtures;
+
+import com.rnd.chain.testsupport.PgRepos;
+import org.junit.jupiter.api.Tag;
+import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.transaction.annotation.Transactional;
+
 import com.rnd.chain.dto.Task;
 import com.rnd.chain.dto.TaskDependency;
 import com.rnd.chain.dto.TaskStatus;
-import com.rnd.chain.repository.InMemoryConstraintRepository;
+import com.rnd.chain.dto.TaskTestFixtures;
+import com.rnd.chain.repository.DependencyHistoryRepository;
+import com.rnd.chain.repository.GraphLock;
+import com.rnd.chain.repository.TaskDependencyRepository;
+import com.rnd.chain.repository.TaskRepository;
+import com.rnd.chain.repository.TransactionRunner;
+import com.rnd.chain.events.SchedulingPublishListener;
+import com.rnd.chain.service.DependencyEdgeService;
+import com.rnd.chain.service.PriorityScoreService;
 import com.rnd.chain.service.SchedulingUpdateService;
-import static org.mockito.Mockito.mock;
-import com.rnd.chain.repository.InMemoryTaskDependencyRepository;
-import com.rnd.chain.repository.InMemoryTaskRepository;
-import com.rnd.chain.service.TaskEligibilityService;
+import com.rnd.chain.service.TaskCounterUpdater;
+import com.rnd.chain.service.TaskDependencyService;
 import com.rnd.mind.event.DependencyProposedEvent;
 import org.junit.jupiter.api.Test;
 
+import java.time.Clock;
 import java.time.LocalDateTime;
+import java.time.ZoneOffset;
 import java.util.List;
 import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.Mockito.mock;
 
+/** Ported from the in-memory version; runs against the real Postgres repositories (rolled back per test). */
+@Tag("postgres")
+@SpringBootTest
+@Transactional
 class DependencyProposedEventHandlerTest {
 
     private static Task buildTask(UUID id) {
         return Task.builder()
                 .id(id)
-                .ownerId("owner")
+                .tenantId(TaskTestFixtures.DEFAULT_TENANT_ID)
                 .status(TaskStatus.PENDING)
                 .isReady(true)
                 .blockingCount(0)
@@ -33,143 +53,445 @@ class DependencyProposedEventHandlerTest {
                 .build();
     }
 
-    private record Fixture(InMemoryTaskRepository taskRepo, DependencyProposedEventHandler handler) {
+    private static DependencyProposedEvent.Builder eventBuilder() {
+        return DependencyProposedEvent.newBuilder()
+                .setTenantId(TaskTestFixtures.DEFAULT_TENANT_ID.toString());
+    }
+
+    private static com.rnd.mind.event.Dependency dependencyOn(UUID id) {
+        return com.rnd.mind.event.Dependency.newBuilder().setDependsOnTaskId(id.toString()).build();
+    }
+
+    private record Fixture(
+            TaskRepository taskRepo,
+            TaskDependencyRepository dependencyRepo,
+            DependencyHistoryRepository historyRepo,
+            DependencyProposedEventHandler handler) {
     }
 
     private static Fixture newFixture(List<Task> tasks) {
-        InMemoryTaskRepository taskRepo = new InMemoryTaskRepository(tasks);
-        InMemoryTaskDependencyRepository dependencyRepo = new InMemoryTaskDependencyRepository(List.of());
-        TaskEligibilityService eligibilityService = new TaskEligibilityService(taskRepo, dependencyRepo,
-                mock(SchedulingUpdateService.class), new InMemoryConstraintRepository());
-        ChainEventProcessingTemplate template = new ChainEventProcessingTemplate(new InMemoryProcessedEventStore());
-        return new Fixture(taskRepo, new DependencyProposedEventHandler(eligibilityService, template));
+        return newFixture(tasks, List.of());
+    }
+
+    private static Fixture newFixture(
+            List<Task> tasks,
+            List<TaskDependency> existingDependencies) {
+
+        TaskRepository taskRepo =
+                PgRepos.tasks(tasks);
+
+        TaskDependencyRepository dependencyRepo =
+                PgRepos.dependencies(
+                        existingDependencies);
+
+        SchedulingUpdateService schedulingUpdateService = mock(SchedulingUpdateService.class);
+        DependencyEdgeService edgeService =
+                new DependencyEdgeService(
+                        dependencyRepo,
+                        PgRepos.graphLock(),
+                        new TaskCounterUpdater(taskRepo, dependencyRepo, new PriorityScoreService(),
+                                new SchedulingPublishListener(taskRepo, schedulingUpdateService)), TaskStateHistoryFixtures.newRecorder());
+
+        DependencyHistoryRepository historyRepo =
+                PgRepos.history();
+
+        TaskDependencyService dependencyService =
+                new TaskDependencyService(
+                        taskRepo,
+                        dependencyRepo,
+                        historyRepo,
+                        PgRepos.transactionRunner(),
+                        Clock.systemUTC(),
+                        edgeService);
+
+        ChainEventProcessingTemplate template =
+                new ChainEventProcessingTemplate(
+                        PgRepos.processedEvents());
+
+        DependencyProposedEventHandler handler =
+                new DependencyProposedEventHandler(
+                        dependencyService,
+                        template);
+
+        return new Fixture(
+                taskRepo,
+                dependencyRepo,
+                historyRepo,
+                handler);
     }
 
     @Test
     void onMessage_addsEveryDependencyInTheArray() {
+
         UUID taskId = UUID.randomUUID();
         UUID dep1 = UUID.randomUUID();
         UUID dep2 = UUID.randomUUID();
-        Fixture fixture = newFixture(List.of(buildTask(taskId), buildTask(dep1), buildTask(dep2)));
 
-        fixture.handler().onMessage(DependencyProposedEvent.newBuilder()
-                .setEventId(UUID.randomUUID().toString())
-                .setTaskId(taskId.toString())
-                .addDependencies(com.rnd.mind.event.Dependency.newBuilder().setDependsOnTaskId(dep1.toString()).build())
-                .addDependencies(com.rnd.mind.event.Dependency.newBuilder().setDependsOnTaskId(dep2.toString()).build())
-                .build());
+        Fixture fixture = newFixture(
+                List.of(
+                        buildTask(taskId),
+                        buildTask(dep1),
+                        buildTask(dep2)));
 
-        Task after = fixture.taskRepo().findById(taskId).orElseThrow();
+        fixture.handler().onMessage(
+                eventBuilder()
+                        .setEventId(UUID.randomUUID().toString())
+                        .setTaskId(taskId.toString())
+                        .addDependencies(
+                                com.rnd.mind.event.Dependency
+                                        .newBuilder()
+                                        .setDependsOnTaskId(
+                                                dep1.toString())
+                                        .build())
+                        .addDependencies(
+                                com.rnd.mind.event.Dependency
+                                        .newBuilder()
+                                        .setDependsOnTaskId(
+                                                dep2.toString())
+                                        .build())
+                        .build());
+
+        Task after =
+                fixture.taskRepo()
+                        .findById(taskId)
+                        .orElseThrow();
+
         assertEquals(2, after.getBlockingCount());
         assertFalse(after.isReady());
+
+        assertEquals(
+                2,
+                fixture.dependencyRepo()
+                        .findByTaskId(taskId)
+                        .size());
     }
 
     @Test
     void onMessage_redeliveredWithTheSameEventId_isNotAppliedTwice() {
+
         UUID taskId = UUID.randomUUID();
         UUID dep = UUID.randomUUID();
-        Fixture fixture = newFixture(List.of(buildTask(taskId), buildTask(dep)));
-        DependencyProposedEvent event = DependencyProposedEvent.newBuilder()
-                .setEventId(UUID.randomUUID().toString())
-                .setTaskId(taskId.toString())
-                .addDependencies(com.rnd.mind.event.Dependency.newBuilder().setDependsOnTaskId(dep.toString()).build())
-                .build();
+
+        Fixture fixture =
+                newFixture(
+                        List.of(
+                                buildTask(taskId),
+                                buildTask(dep)));
+
+        DependencyProposedEvent event =
+                eventBuilder()
+                        .setEventId(UUID.randomUUID().toString())
+                        .setTaskId(taskId.toString())
+                        .addDependencies(
+                                com.rnd.mind.event.Dependency
+                                        .newBuilder()
+                                        .setDependsOnTaskId(
+                                                dep.toString())
+                                        .build())
+                        .build();
 
         fixture.handler().onMessage(event);
-        fixture.handler().onMessage(event); // exact same event_id, redelivered
+        fixture.handler().onMessage(event);
 
-        Task after = fixture.taskRepo().findById(taskId).orElseThrow();
-        assertEquals(1, after.getBlockingCount(), "redelivery of the same event_id must not double-count");
+        Task after =
+                fixture.taskRepo()
+                        .findById(taskId)
+                        .orElseThrow();
+
+        assertEquals(
+                1,
+                after.getBlockingCount());
+
+        assertEquals(
+                1,
+                fixture.dependencyRepo()
+                        .findByTaskId(taskId)
+                        .size());
     }
 
     @Test
-    void onMessage_referencingATaskThatDoesNotExistYet_throwsReferencedTaskNotFoundException() {
+    void onMessage_crossTenantDependency_throwsNonRetryableEventException_andRecordsRejectedHistory() {
         UUID taskId = UUID.randomUUID();
-        UUID unknownDep = UUID.randomUUID();
+        UUID otherTenantDep = UUID.randomUUID();
+        Task crossTenantTask = Task.builder()
+                .id(otherTenantDep).tenantId(TaskTestFixtures.OTHER_TENANT_ID)
+                .status(TaskStatus.PENDING).isReady(true).blockingCount(0).openConstraintCount(0)
+                .createdAt(LocalDateTime.now()).updatedAt(LocalDateTime.now()).build();
+        Fixture fixture = newFixture(List.of(buildTask(taskId), crossTenantTask));
+        UUID eventId = UUID.randomUUID();
+
+        DependencyProposedEvent event = eventBuilder()
+                .setEventId(eventId.toString())
+                .setTaskId(taskId.toString())
+                .addDependencies(com.rnd.mind.event.Dependency.newBuilder().setDependsOnTaskId(otherTenantDep.toString()).build())
+                .build();
+
+        assertThrows(NonRetryableEventException.class, () -> fixture.handler().onMessage(event));
+
+        assertTrue(fixture.taskRepo().findById(taskId).map(t -> t.getBlockingCount() == 0).orElse(false),
+                "a rejected edge must never be applied");
+        List<com.rnd.chain.dto.DependencyHistoryEntry> entries =
+                fixture.historyRepo().findByTaskId(taskId, 0, 10).content();
+        assertEquals(1, entries.size());
+        assertEquals(com.rnd.chain.dto.DependencyChangeAction.REJECTED, entries.get(0).action());
+        assertEquals(com.rnd.chain.dto.DependencyChangeSource.MIND, entries.get(0).source());
+    }
+
+    @Test
+    void onMessage_missingTarget_createsPendingPlaceholderAndAddsTheEdge() {
+        UUID taskId = UUID.randomUUID();
+        UUID missingDep = UUID.randomUUID();
+        Fixture fixture = newFixture(List.of(buildTask(taskId)));
+
+        fixture.handler().onMessage(eventBuilder()
+                .setEventId(UUID.randomUUID().toString())
+                .setTaskId(taskId.toString())
+                .addDependencies(dependencyOn(missingDep))
+                .build());
+
+        Task placeholder = fixture.taskRepo().findById(missingDep).orElseThrow();
+        assertEquals(TaskStatus.PENDING, placeholder.getStatus());
+        assertEquals(TaskTestFixtures.DEFAULT_TENANT_ID, placeholder.getTenantId());
+        assertEquals(0, placeholder.getBlockingCount());
+        assertEquals(0, placeholder.getOpenConstraintCount());
+        assertEquals(LocalDateTime.ofEpochSecond(0, 0, ZoneOffset.UTC), placeholder.getUpdatedAt());
+        assertEquals(1, fixture.dependencyRepo().findByTaskId(taskId).size());
+        assertEquals(1, fixture.taskRepo().findById(taskId).orElseThrow().getBlockingCount());
+    }
+
+    @Test
+    void onMessage_missingSource_createsPendingPlaceholderAndAddsTheEdge() {
+        UUID missingSource = UUID.randomUUID();
+        UUID dependencyId = UUID.randomUUID();
+        Fixture fixture = newFixture(List.of(buildTask(dependencyId)));
+
+        fixture.handler().onMessage(eventBuilder()
+                .setEventId(UUID.randomUUID().toString())
+                .setTaskId(missingSource.toString())
+                .addDependencies(dependencyOn(dependencyId))
+                .build());
+
+        Task source = fixture.taskRepo().findById(missingSource).orElseThrow();
+        assertEquals(TaskStatus.PENDING, source.getStatus());
+        assertEquals(TaskTestFixtures.DEFAULT_TENANT_ID, source.getTenantId());
+        assertEquals(1, source.getBlockingCount());
+        assertEquals(1, fixture.dependencyRepo().findByTaskId(missingSource).size());
+    }
+
+    @Test
+    void onMessage_bothTasksMissing_createsBothAndAddsTheEdge() {
+        UUID missingSource = UUID.randomUUID();
+        UUID missingDep = UUID.randomUUID();
+        Fixture fixture = newFixture(List.of());
+
+        fixture.handler().onMessage(eventBuilder()
+                .setEventId(UUID.randomUUID().toString())
+                .setTaskId(missingSource.toString())
+                .addDependencies(dependencyOn(missingDep))
+                .build());
+
+        assertEquals(TaskStatus.PENDING, fixture.taskRepo().findById(missingSource).orElseThrow().getStatus());
+        assertEquals(TaskStatus.PENDING, fixture.taskRepo().findById(missingDep).orElseThrow().getStatus());
+        assertEquals(1, fixture.dependencyRepo().findByTaskId(missingSource).size());
+    }
+
+    @Test
+    void onMessage_existingTasks_areNotOverwrittenByPlaceholders() {
+        UUID taskId = UUID.randomUUID();
+        UUID depId = UUID.randomUUID();
+        Task existingDep = Task.builder()
+                .id(depId).tenantId(TaskTestFixtures.DEFAULT_TENANT_ID)
+                .status(TaskStatus.ACTIVE).isReady(true).blockingCount(0).openConstraintCount(0)
+                .createdAt(LocalDateTime.now().truncatedTo(java.time.temporal.ChronoUnit.MICROS))
+                .updatedAt(LocalDateTime.now().truncatedTo(java.time.temporal.ChronoUnit.MICROS)).build();
+        Fixture fixture = newFixture(List.of(buildTask(taskId), existingDep));
+
+        fixture.handler().onMessage(eventBuilder()
+                .setEventId(UUID.randomUUID().toString())
+                .setTaskId(taskId.toString())
+                .addDependencies(dependencyOn(depId))
+                .build());
+
+        Task after = fixture.taskRepo().findById(depId).orElseThrow();
+        assertEquals(TaskStatus.ACTIVE, after.getStatus());
+        assertEquals(existingDep.getUpdatedAt(), after.getUpdatedAt());
+    }
+
+    @Test
+    void onMessage_missingTargetWithEventTenantDifferentFromExistingSource_isRejectedAndCreatesNothing() {
+        UUID taskId = UUID.randomUUID();
+        UUID missingDep = UUID.randomUUID();
         Fixture fixture = newFixture(List.of(buildTask(taskId)));
 
         DependencyProposedEvent event = DependencyProposedEvent.newBuilder()
+                .setTenantId(TaskTestFixtures.OTHER_TENANT_ID.toString())
                 .setEventId(UUID.randomUUID().toString())
                 .setTaskId(taskId.toString())
-                .addDependencies(com.rnd.mind.event.Dependency.newBuilder().setDependsOnTaskId(unknownDep.toString()).build())
+                .addDependencies(dependencyOn(missingDep))
                 .build();
 
-        assertThrows(ReferencedTaskNotFoundException.class, () -> fixture.handler().onMessage(event));
+        assertThrows(NonRetryableEventException.class, () -> fixture.handler().onMessage(event));
+
+        assertTrue(fixture.dependencyRepo().findByTaskId(taskId).isEmpty());
+    }
+
+    @Test
+    void onMessage_withoutTenantId_throwsNonRetryableEventException_andCreatesNothing() {
+        UUID missingSource = UUID.randomUUID();
+        UUID missingDep = UUID.randomUUID();
+        Fixture fixture = newFixture(List.of());
+
+        DependencyProposedEvent event = DependencyProposedEvent.newBuilder()
+                .setEventId(UUID.randomUUID().toString())
+                .setTaskId(missingSource.toString())
+                .addDependencies(dependencyOn(missingDep))
+                .build();
+
+        assertThrows(NonRetryableEventException.class, () -> fixture.handler().onMessage(event));
+
+        assertTrue(fixture.taskRepo().findById(missingSource).isEmpty());
+        assertTrue(fixture.taskRepo().findById(missingDep).isEmpty());
     }
 
     @Test
     void onMessage_thatWouldCreateACycle_throwsNonRetryableEventException() {
+
         UUID taskA = UUID.randomUUID();
         UUID taskB = UUID.randomUUID();
-        InMemoryTaskRepository taskRepo = new InMemoryTaskRepository(List.of(buildTask(taskA), buildTask(taskB)));
-        // B already depends on A - proposing A depends on B would close a cycle.
-        InMemoryTaskDependencyRepository dependencyRepo =
-                new InMemoryTaskDependencyRepository(List.of(new TaskDependency(taskB, taskA)));
-        TaskEligibilityService eligibilityService = new TaskEligibilityService(taskRepo, dependencyRepo,
-                mock(SchedulingUpdateService.class), new InMemoryConstraintRepository());
-        ChainEventProcessingTemplate template = new ChainEventProcessingTemplate(new InMemoryProcessedEventStore());
-        DependencyProposedEventHandler handler = new DependencyProposedEventHandler(eligibilityService, template);
 
-        DependencyProposedEvent event = DependencyProposedEvent.newBuilder()
-                .setEventId(UUID.randomUUID().toString())
-                .setTaskId(taskA.toString())
-                .addDependencies(com.rnd.mind.event.Dependency.newBuilder().setDependsOnTaskId(taskB.toString()).build())
-                .build();
+        Fixture fixture =
+                newFixture(
+                        List.of(
+                                buildTask(taskA),
+                                buildTask(taskB)),
+                        List.of(
+                                new TaskDependency(
+                                        taskB,
+                                        taskA)));
 
-        assertThrows(NonRetryableEventException.class, () -> handler.onMessage(event));
+        /*
+         * B already depends on A.
+         * Proposing A -> B closes the cycle.
+         */
+        DependencyProposedEvent event =
+                eventBuilder()
+                        .setEventId(UUID.randomUUID().toString())
+                        .setTaskId(taskA.toString())
+                        .addDependencies(
+                                com.rnd.mind.event.Dependency
+                                        .newBuilder()
+                                        .setDependsOnTaskId(
+                                                taskB.toString())
+                                        .build())
+                        .build();
+
+        assertThrows(
+                NonRetryableEventException.class,
+                () -> fixture.handler().onMessage(event));
     }
 
     @Test
-    void onMessage_withOneCycleAmongSeveralDependencies_appliesNoneOfThem() {
-        // Regression test for the PR #467 review finding: A already depends on B (A -> B).
-        // Proposing B depends on [C (valid), A (would close a cycle)] - the valid entry (C) comes
-        // first, so the old per-entry-applied-immediately code would have already added it before
-        // ever reaching the cycle at the second entry.
+    void onMessage_withValidDependencyBeforeCycle_keepsPartialSuccess() {
+
         UUID taskA = UUID.randomUUID();
         UUID taskB = UUID.randomUUID();
         UUID taskC = UUID.randomUUID();
-        InMemoryTaskRepository taskRepo = new InMemoryTaskRepository(List.of(buildTask(taskB), buildTask(taskC)));
-        InMemoryTaskDependencyRepository dependencyRepo =
-                new InMemoryTaskDependencyRepository(List.of(new TaskDependency(taskA, taskB)));
-        TaskEligibilityService eligibilityService = new TaskEligibilityService(taskRepo, dependencyRepo,
-                mock(SchedulingUpdateService.class), new InMemoryConstraintRepository());
-        ChainEventProcessingTemplate template = new ChainEventProcessingTemplate(new InMemoryProcessedEventStore());
-        DependencyProposedEventHandler handler = new DependencyProposedEventHandler(eligibilityService, template);
 
-        DependencyProposedEvent event = DependencyProposedEvent.newBuilder()
-                .setEventId(UUID.randomUUID().toString())
-                .setTaskId(taskB.toString())
-                .addDependencies(com.rnd.mind.event.Dependency.newBuilder().setDependsOnTaskId(taskC.toString()).build())
-                .addDependencies(com.rnd.mind.event.Dependency.newBuilder().setDependsOnTaskId(taskA.toString()).build())
-                .build();
+        /*
+         * A -> B already exists.
+         *
+         * Event proposes:
+         * B -> C   valid
+         * B -> A   cycle
+         *
+         * The first dependency is allowed to succeed before the
+         * second one is rejected.
+         */
+        Fixture fixture =
+                newFixture(
+                        List.of(
+                                buildTask(taskA),
+                                buildTask(taskB),
+                                buildTask(taskC)),
+                        List.of(
+                                new TaskDependency(
+                                        taskA,
+                                        taskB)));
 
-        assertThrows(NonRetryableEventException.class, () -> handler.onMessage(event));
+        DependencyProposedEvent event =
+                eventBuilder()
+                        .setEventId(UUID.randomUUID().toString())
+                        .setTaskId(taskB.toString())
+                        .addDependencies(
+                                com.rnd.mind.event.Dependency
+                                        .newBuilder()
+                                        .setDependsOnTaskId(
+                                                taskC.toString())
+                                        .build())
+                        .addDependencies(
+                                com.rnd.mind.event.Dependency
+                                        .newBuilder()
+                                        .setDependsOnTaskId(
+                                                taskA.toString())
+                                        .build())
+                        .build();
 
-        assertTrue(dependencyRepo.findByTaskId(taskB).isEmpty(),
-                "the valid entry (C) earlier in the batch must not be applied when a later entry fails");
+        assertThrows(
+                NonRetryableEventException.class,
+                () -> fixture.handler().onMessage(event));
+
+        List<TaskDependency> dependencies =
+                fixture.dependencyRepo()
+                        .findByTaskId(taskB);
+
+        assertTrue(
+                dependencies.stream()
+                        .anyMatch(dep ->
+                                dep.dependsOnTaskId()
+                                        .equals(taskC)));
     }
 
     @Test
     void onMessage_withAnInvalidEventId_throwsNonRetryableEventException() {
-        Fixture fixture = newFixture(List.of());
-        DependencyProposedEvent event = DependencyProposedEvent.newBuilder()
-                .setEventId("not-a-uuid")
-                .setTaskId(UUID.randomUUID().toString())
-                .build();
 
-        assertThrows(NonRetryableEventException.class, () -> fixture.handler().onMessage(event));
+        Fixture fixture =
+                newFixture(List.of());
+
+        DependencyProposedEvent event =
+                eventBuilder()
+                        .setEventId("not-a-uuid")
+                        .setTaskId(
+                                UUID.randomUUID().toString())
+                        .build();
+
+        assertThrows(
+                NonRetryableEventException.class,
+                () -> fixture.handler().onMessage(event));
     }
 
     @Test
     void onMessage_withAnInvalidDependencyTaskId_throwsNonRetryableEventException() {
-        UUID taskId = UUID.randomUUID();
-        Fixture fixture = newFixture(List.of(buildTask(taskId)));
-        DependencyProposedEvent event = DependencyProposedEvent.newBuilder()
-                .setEventId(UUID.randomUUID().toString())
-                .setTaskId(taskId.toString())
-                .addDependencies(com.rnd.mind.event.Dependency.newBuilder().setDependsOnTaskId("not-a-uuid").build())
-                .build();
 
-        assertThrows(NonRetryableEventException.class, () -> fixture.handler().onMessage(event));
+        UUID taskId = UUID.randomUUID();
+
+        Fixture fixture =
+                newFixture(
+                        List.of(buildTask(taskId)));
+
+        DependencyProposedEvent event =
+                eventBuilder()
+                        .setEventId(UUID.randomUUID().toString())
+                        .setTaskId(taskId.toString())
+                        .addDependencies(
+                                com.rnd.mind.event.Dependency
+                                        .newBuilder()
+                                        .setDependsOnTaskId(
+                                                "not-a-uuid")
+                                        .build())
+                        .build();
+
+        assertThrows(
+                NonRetryableEventException.class,
+                () -> fixture.handler().onMessage(event));
     }
 }
