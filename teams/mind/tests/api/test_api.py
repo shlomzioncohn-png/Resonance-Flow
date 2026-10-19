@@ -42,3 +42,10 @@ def test_caller_supplied_request_id_is_echoed_back():
     response = client.get("/does-not-exist", headers={"x-request-id": "my-test-id"})
     assert response.headers["x-request-id"] == "my-test-id"
     assert response.json()["request_id"] == "my-test-id"
+
+
+def test_metrics_exposes_http_request_metrics():
+    client.get("/health")
+    response = client.get("/metrics")
+    assert response.status_code == 200
+    assert 'http_requests_total{handler="/health"' in response.text

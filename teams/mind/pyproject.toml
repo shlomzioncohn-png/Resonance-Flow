@@ -11,6 +11,8 @@ dependencies = [
     "pydantic-settings>=2.0",
     "fastapi",
     "uvicorn",
+    # /metrics for Prometheus (src/mind/api/main.py)
+    "prometheus-fastapi-instrumentator>=7.0",
     # embeddings (src/mind/embeddings)
     "psycopg[binary,pool]>=3.1",
     "sentence-transformers>=3.0",
