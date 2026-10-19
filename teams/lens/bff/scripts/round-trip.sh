@@ -25,11 +25,20 @@ echo "    tenant: $TENANT_ID  user: $USER_ID"
 
 echo "==> Creating one real task through Inbox's own API"
 kubectl delete pod curl-seed curl-verify -n "$NAMESPACE" --ignore-not-found --wait >/dev/null 2>&1
-kubectl run curl-seed -n "$NAMESPACE" --rm -i --restart=Never --image=curlimages/curl:latest --command -- sh -c "
-  curl -sS -X POST http://resonance-flow-inbox:80/api/v1/tasks \
+kubectl run curl-seed -n "$NAMESPACE" --restart=Never --image=curlimages/curl:latest --command -- sh -c "
+  curl -sS --max-time 30 -X POST -w '\nHTTP_CODE:%{http_code}\n' http://resonance-flow-inbox:80/api/v1/tasks \
     -H 'X-Actor-Id: ${USER_ID}' -H 'Content-Type: application/json' \
     -d '{\"tenant_id\":\"${TENANT_ID}\",\"title\":\"round-trip-check\",\"owner_id\":\"${USER_ID}\"}'
-"
+" >/dev/null
+kubectl wait --for=jsonpath='{.status.phase}'=Succeeded pod/curl-seed -n "$NAMESPACE" --timeout=60s >/dev/null 2>&1 || true
+SEED_RESULT=$(kubectl logs curl-seed -n "$NAMESPACE")
+kubectl delete pod curl-seed -n "$NAMESPACE" --ignore-not-found >/dev/null 2>&1
+echo "$SEED_RESULT"
+
+if ! echo "$SEED_RESULT" | grep -q "HTTP_CODE:2"; then
+  echo "==> FAIL: seeding the task through Inbox's API did not return 2xx - see output above"
+  exit 1
+fi
 
 echo "==> Fetching it back through lens-bff (real InboxClient, not mock)"
 INSTANCE=$(kubectl get pod -n "$NAMESPACE" -l app.kubernetes.io/component=lens-bff -o jsonpath='{.items[0].metadata.labels.app\.kubernetes\.io/instance}')

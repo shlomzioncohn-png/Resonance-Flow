@@ -37,6 +37,7 @@ jobs:
       container_port: 8082
 
   round-trip:
+    needs: ci
     if: github.event_name == 'pull_request'
     runs-on: self-hosted
     timeout-minutes: 25
