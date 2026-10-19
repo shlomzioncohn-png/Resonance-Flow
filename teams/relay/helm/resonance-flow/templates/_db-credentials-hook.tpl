@@ -1,18 +1,14 @@
 {{/*
-Pre-install/pre-upgrade hook that creates "<fullname>-<component>-db-credentials"
-(key "password") before Postgres starts. A hook, not a templated Secret: ArgoCD
-renders offline, so the chart can't see an existing password and would regenerate
-it on every sync; ArgoCD runs these hooks as PreSync. An existing non-empty
-password is kept; an empty one is replaced. Gated on Postgres, not the component:
-initdb needs the Secret even when the component is off. Takes {root, component}.
-MIND keeps its own hook - it also creates its app Secret.
+Creates a random-password Secret. Takes {root, component, secretName,
+secretKey (default "password"), enabled}.
 */}}
-{{- define "resonance-flow.dbCredentialsHook" -}}
+{{- define "resonance-flow.credentialsHook" -}}
 {{- $root := .root }}
 {{- $component := .component }}
-{{- if $root.Values.postgresql.enabled }}
-{{- $name := printf "%s-%s-db-credentials-init" (include "resonance-flow.fullname" $root) $component }}
-{{- $secretName := printf "%s-%s-db-credentials" (include "resonance-flow.fullname" $root) $component }}
+{{- $secretKey := .secretKey | default "password" }}
+{{- if .enabled }}
+{{- $name := printf "%s-init" .secretName }}
+{{- $secretName := .secretName }}
 ---
 apiVersion: v1
 kind: ServiceAccount
@@ -94,7 +90,7 @@ spec:
       labels:
         {{- include "resonance-flow.selectorLabels" $root | nindent 8 }}
         # Not the component itself: that would match its Service/Deployment selectors.
-        app.kubernetes.io/component: {{ $component }}-db-credentials-init
+        app.kubernetes.io/component: {{ $component }}-credentials-init
     spec:
       serviceAccountName: {{ $name }}
       restartPolicy: Never
@@ -129,7 +125,7 @@ spec:
                   -H "Content-Type: application/json" \
                   -X POST "$API" -d "$1"
               }
-              DB_BODY="{\"apiVersion\":\"v1\",\"kind\":\"Secret\",\"metadata\":{\"name\":\"{{ $secretName }}\"},\"type\":\"Opaque\",\"stringData\":{\"password\":\"$PASSWORD\"}}"
+              DB_BODY="{\"apiVersion\":\"v1\",\"kind\":\"Secret\",\"metadata\":{\"name\":\"{{ $secretName }}\"},\"type\":\"Opaque\",\"stringData\":{\"{{ $secretKey }}\":\"$PASSWORD\"}}"
               CODE=$(create "$DB_BODY")
               case "$CODE" in
                 201) echo "Created {{ $secretName }}" ;;
@@ -143,7 +139,7 @@ spec:
                     cat /tmp/get-response.json >&2
                     exit 1
                   fi
-                  EXISTING_PASSWORD="$(sed -n 's/.*"password": *"\([^"]*\)".*/\1/p' /tmp/get-response.json | base64 -d)"
+                  EXISTING_PASSWORD="$(sed -n 's/.*"{{ $secretKey }}": *"\([^"]*\)".*/\1/p' /tmp/get-response.json | base64 -d)"
                   if [ -n "$EXISTING_PASSWORD" ]; then
                     echo "{{ $secretName }} already exists and looks valid - reusing its password"
                   else
@@ -175,4 +171,12 @@ spec:
               cpu: 100m
               memory: 64Mi
 {{- end }}
+{{- end }}
+
+{{/*
+A component's DB password Secret. Takes {root, component}.
+*/}}
+{{- define "resonance-flow.dbCredentialsHook" -}}
+{{- $secretName := printf "%s-%s-db-credentials" (include "resonance-flow.fullname" .root) .component }}
+{{- include "resonance-flow.credentialsHook" (dict "root" .root "component" .component "secretName" $secretName "enabled" .root.Values.postgresql.enabled) }}
 {{- end }}
