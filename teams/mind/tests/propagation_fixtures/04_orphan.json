@@ -9,5 +9,5 @@
     ]
   },
   "expected_order": ["task_with_parent", "task_orphan"],
-  "notes": "Same own importance (0.4) for both -- task_with_parent gets a boost from goal_root, task_orphan has no ancestry to boost it and stays at its own baseline. Must not crash or raise just because parent_task_id is null; null is the normal, expected case for a root-level task, not an error. The stated order assumes a combination model where a parent can only raise a descendant's score relative to having no parent, never lower it below the descendant's own baseline -- under a multiplicative model (0.4*0.9=0.36) task_with_parent would score below task_orphan's bare 0.4, reversing this order. That's a stated assumption for this fixture, not a claim about the real formula; #474 hasn't decided the actual combination yet."
+  "notes": "Same own importance (0.4) for both -- task_with_parent gets a boost from goal_root, task_orphan has no ancestry to boost it and stays at its own baseline. Must not crash or raise just because parent_task_id is null; null is the normal, expected case for a root-level task, not an error. The stated order assumes the add-only combination rule (see README.md's Design decisions, \"A parent can only add, never remove\") -- under a multiplicative model (0.4*0.9=0.36) task_with_parent would score below task_orphan's bare 0.4, reversing this order."
 }

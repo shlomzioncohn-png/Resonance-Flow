@@ -25,6 +25,11 @@ class PropagationFixture(BaseModel):
     Exactly one of `expected_order` / `expected_error` is set: a graph
     either has a correct ranking, or it's deliberately invalid (the cycle
     case) and the correct behaviour is to refuse, not to rank.
+
+    `expected_error` is a human-readable note on why propagation should
+    refuse, for the test author's own documentation -- not an exception
+    type, exact message, or substring #474's test must match. #474 decides
+    the actual exception; this field only records intent.
     """
 
     model_config = ConfigDict(extra="forbid")

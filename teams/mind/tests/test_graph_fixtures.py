@@ -18,6 +18,7 @@ REQUIRED_GRAPH_NAMES = {
     "orphan",
     "deprioritized_initiative",
     "cycle",
+    "initiative_under_goal",
 }
 
 
@@ -45,7 +46,7 @@ def fixtures() -> list[PropagationFixture]:
     return loaded
 
 
-def test_all_six_required_graphs_are_defined_and_loadable(fixtures):
+def test_all_required_graphs_are_defined_and_loadable(fixtures):
     names = {f.name for f in fixtures}
     assert names == REQUIRED_GRAPH_NAMES
 
@@ -171,3 +172,25 @@ def test_the_deprioritized_initiative_fixture_isolates_parent_importance_alone(f
     by_id = fixture.graph.by_id()
     own_scores = {by_id[leaf_id].importance for leaf_id in fixture.leaf_ids()}
     assert len(own_scores) == 1
+
+
+def test_the_initiative_under_goal_fixture_isolates_the_intermediate_node(fixtures):
+    """Both leaves must share the same root and have intentionally
+    differing intermediate initiatives, or the fixture wouldn't isolate
+    what it claims to. Own importance is deliberately NOT equal here
+    (see the fixture's notes): a small asymmetry is needed to turn
+    root-only's and own+max's structural ties into genuine disagreements."""
+    fixture = next(f for f in fixtures if f.name == "initiative_under_goal")
+    by_id = fixture.graph.by_id()
+    important_leaf = by_id["task_under_important_initiative"]
+    deprioritized_leaf = by_id["task_under_deprioritized_initiative"]
+
+    important_chain = _leaf_chain_parents(fixture, important_leaf.task_id)
+    deprioritized_chain = _leaf_chain_parents(fixture, deprioritized_leaf.task_id)
+    assert important_chain[-1] == deprioritized_chain[-1]
+
+    assert deprioritized_leaf.importance > important_leaf.importance
+
+    important_initiative = by_id[important_leaf.parent_task_id]
+    deprioritized_initiative = by_id[deprioritized_leaf.parent_task_id]
+    assert important_initiative.importance != deprioritized_initiative.importance
