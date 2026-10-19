@@ -87,8 +87,7 @@ runs:
         SVC=$(kubectl -n "$SERVICE" get svc \
           -l "app.kubernetes.io/instance=$SERVICE,app.kubernetes.io/name=postgresql,app.kubernetes.io/component=primary" \
           -o jsonpath='{.items[?(@.spec.clusterIP!="None")].metadata.name}')
-        # From the live Secret/values, so it can't drift from what was installed.
-        PG_PASSWORD=$(kubectl -n "$SERVICE" get secret "$SVC" -o jsonpath='{.data.postgres-password}' | base64 -d)
+        PG_PASSWORD=$(kubectl -n "$SERVICE" get secret resonance-flow-postgres-db-credentials -o jsonpath='{.data.password}' | base64 -d)
         PG_DATABASE=$(helm get values "$SERVICE" -n "$SERVICE" --all -o yaml | yq eval '.postgresql.auth.database // ""' -)
         if [ -z "$SVC" ] || [ -z "$PG_PASSWORD" ] || [ -z "$PG_DATABASE" ]; then
           echo "Couldn't resolve Postgres Service/password/database (svc='$SVC', db='$PG_DATABASE')" >&2
