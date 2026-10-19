@@ -4,14 +4,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 
 SEVERITIES = ("subtle", "moderate", "severe")
-DISEASE_TYPES = (
-    "chronic_blocking",
-    "recurring_blocker",
-    "slow_chain",
-    "growing_bottleneck",
-    "stuck_subgraph",
-)
-# Kept out of the dev dataset so the model is never tuned against it; planted only with --include-holdout.
+# Left out of the dev dataset so nothing is tuned against it; the eval dataset plants every type.
 HOLDOUT_DISEASES = ("stuck_subgraph",)
 
 
@@ -31,8 +24,14 @@ class GeneratorConfig:
     late_dependency_rate: float = 0.08  # extra edges added after creation, per task
     removal_rate: float = 0.04  # share of edges later removed
     rejected_rate: float = 0.01  # REJECTED dependency_history rows per task: noise a consumer must ignore
+    n_bursts: int = 12  # load spikes: a team opens many tasks within a day or two
+    burst_share: float = 0.15  # share of normal tasks created inside a burst
+    fan_in_rate: float = 0.03  # tasks that integrate 4-7 earlier tasks
+    hub_rate: float = 0.03  # tasks that several later tasks of the same project depend on
 
     def __post_init__(self) -> None:
+        from .diseases import DISEASE_TYPES  # lazy: the diseases package imports this module
+
         unknown = set(self.excluded_diseases) - set(DISEASE_TYPES)
         if unknown:
             raise ValueError(f"unknown disease types: {sorted(unknown)}")

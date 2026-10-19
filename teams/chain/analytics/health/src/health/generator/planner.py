@@ -2,19 +2,24 @@ from __future__ import annotations
 
 import math
 import random
-from datetime import timedelta
+from collections import defaultdict
+from datetime import datetime, timedelta
 
 from .config import GeneratorConfig
 from .diseases import plant_diseases
-from .model import DEAD_END_KINDS, EdgeBatch, Project, TaskSpec, World, task_uuid
+from .model import (DEAD_END_KINDS, TIER_DEP_WEIGHTS, TIER_PROFILES, TIERS, EdgeBatch, Project, TaskSpec,
+                    World, task_uuid)
 from .timeutil import snap_to_work_time
 
-# (median start delay h, median work h, sigma)
+# (median start delay h, median work h, sigma): a team's pace, before the tier multipliers
 ARCHETYPES = {"fast": (1.0, 4.0, 0.5), "medium": (4.0, 12.0, 0.6), "slow": (12.0, 36.0, 0.7)}
 DEP_COUNT_WEIGHTS = ((0, 40), (1, 35), (2, 18), (3, 7))
 SOURCE_WEIGHTS = (("MIND", 70), ("USER", 25), ("SYSTEM", 5))
 LOCAL_DEP_SHARE = 0.8  # share of dependencies that stay inside the task's own project
-LOCAL_WINDOW = 5  # ...and point at one of that project's most recent tasks
+LOCAL_WINDOW = 5  # ...and point at one of that project's most recent tasks of the chosen tier
+FAN_IN_WINDOW = 12  # an integration task looks further back
+HUB_ATTACH = 0.6  # chance a new task in a project with an open hub depends on it
+BURST_SPREAD_DAYS = 1.5  # std-dev of a burst around its centre
 
 
 def pick_source(rng: random.Random) -> str:
@@ -25,7 +30,7 @@ def plan_world(cfg: GeneratorConfig) -> World:
     projects = _plan_projects(cfg, random.Random(f"{cfg.seed}:projects"))
     normal, edges = _plan_normal(cfg, random.Random(f"{cfg.seed}:normal"))
     tasks = list(normal)
-    diseases = plant_diseases(cfg, normal, tasks, edges)
+    diseases = plant_diseases(cfg, projects, normal, tasks, edges)
     tasks.sort(key=lambda t: t.created_at)  # stable: ties keep planning order
     edges.sort(key=lambda e: e.at)
     _assert_acyclic_by_rank(tasks, edges)
@@ -42,23 +47,49 @@ def _plan_projects(cfg: GeneratorConfig, rng: random.Random) -> list[Project]:
     return projects
 
 
+def _creation_times(cfg: GeneratorConfig, rng: random.Random) -> list[tuple[datetime, int | None]]:
+    """(created_at, forced project) per task: a steady trickle plus bursts where a team opens many at once."""
+    span = 0.92 * cfg.history_days * 86400
+    n_burst = int(cfg.burst_share * cfg.n_normal_tasks) if cfg.n_bursts else 0
+    bursts = [(rng.uniform(0.05, 0.95) * span, rng.sample(range(cfg.n_projects), min(3, cfg.n_projects)))
+              for _ in range(cfg.n_bursts)]
+    raw: list[tuple[float, int | None]] = [(rng.uniform(0, span), None) for _ in range(cfg.n_normal_tasks - n_burst)]
+    for _ in range(n_burst):
+        centre, teams = rng.choice(bursts)
+        raw.append((min(max(rng.gauss(centre, BURST_SPREAD_DAYS * 86400), 0.0), span), rng.choice(teams)))
+    stamped = [(snap_to_work_time(cfg.start + timedelta(seconds=s), rng), p) for s, p in raw]
+    return sorted(stamped, key=lambda x: x[0])
+
+
+class _Pools:
+    """Which earlier tasks a new task may depend on."""
+
+    def __init__(self, n_projects: int):
+        self.all: list[TaskSpec] = []
+        self.by_tier: dict[str, list[TaskSpec]] = defaultdict(list)
+        self.by_project_tier: dict[tuple[int, str], list[TaskSpec]] = defaultdict(list)
+        self.hubs: dict[int, list[list]] = defaultdict(list)  # project -> [[hub task, slots left]]
+
+    def add(self, spec: TaskSpec) -> None:
+        self.all.append(spec)
+        self.by_tier[spec.tier].append(spec)
+        self.by_project_tier[(spec.project, spec.tier)].append(spec)
+
+
 def _plan_normal(cfg: GeneratorConfig, rng: random.Random) -> tuple[list[TaskSpec], list[EdgeBatch]]:
     horizon = cfg.history_days * 86400
     cutoff = cfg.start + timedelta(seconds=0.95 * horizon)  # leave room for tasks to play out
-    times = sorted(
-        snap_to_work_time(cfg.start + timedelta(seconds=rng.uniform(0, 0.92 * horizon)), rng)
-        for _ in range(cfg.n_normal_tasks)
-    )
+    never_ends = cfg.end + timedelta(days=365)
+    tier_weights = [TIER_PROFILES[t].share for t in TIERS]
 
     tasks: list[TaskSpec] = []
     edges: list[EdgeBatch] = []
-    targetable: list[TaskSpec] = []  # tasks other tasks may depend on (not backlog/abandoned)
-    by_project: dict[int, list[TaskSpec]] = {p: [] for p in range(cfg.n_projects)}
-    never_ends = cfg.end + timedelta(days=365)
-    added_at: dict[tuple, object] = {}  # (task, dep) -> when the edge was added, for the removal pass
+    pools = _Pools(cfg.n_projects)
+    added_at: dict[tuple, datetime] = {}  # (task, dep) -> when the edge was added, for the removal pass
 
-    for i, created in enumerate(times):
-        spec = TaskSpec(task_uuid(cfg.seed, f"n{i}"), rng.randrange(cfg.n_projects), created)
+    for i, (created, forced_project) in enumerate(_creation_times(cfg, rng)):
+        project = rng.randrange(cfg.n_projects) if forced_project is None else forced_project
+        spec = TaskSpec(task_uuid(cfg.seed, f"n{i}"), project, created, tier=rng.choices(TIERS, tier_weights)[0])
         roll = rng.random()
         if roll < cfg.slow_legit_rate:
             spec.kind, spec.work_mult = "slow_legit", rng.uniform(4.0, 8.0)
@@ -69,8 +100,12 @@ def _plan_normal(cfg: GeneratorConfig, rng: random.Random) -> tuple[list[TaskSpe
         elif roll < cfg.slow_legit_rate + cfg.reopened_legit_rate + cfg.backlog_rate + cfg.abandoned_rate:
             spec.kind, spec.hold_finish_until = "abandoned", never_ends
 
-        k = rng.choices([c for c, _ in DEP_COUNT_WEIGHTS], [w for _, w in DEP_COUNT_WEIGHTS])[0]
-        targets = _pick_targets(rng, k, targetable, by_project[spec.project])
+        if rng.random() < cfg.fan_in_rate:  # integration task: leans on many earlier ones
+            k, window = rng.randint(4, 7), FAN_IN_WINDOW
+        else:
+            k = rng.choices([c for c, _ in DEP_COUNT_WEIGHTS], [w for _, w in DEP_COUNT_WEIGHTS])[0]
+            window = LOCAL_WINDOW
+        targets = _pick_targets(rng, spec, k, window, pools)
         if targets:
             at = created + timedelta(seconds=rng.uniform(1, 30))
             edges.append(EdgeBatch(at, "ADDED", spec.id, tuple(t.id for t in targets), pick_source(rng)))
@@ -78,8 +113,9 @@ def _plan_normal(cfg: GeneratorConfig, rng: random.Random) -> tuple[list[TaskSpe
                 added_at[(spec.id, t.id)] = at
         tasks.append(spec)
         if spec.kind not in DEAD_END_KINDS:
-            targetable.append(spec)
-            by_project[spec.project].append(spec)
+            pools.add(spec)
+            if rng.random() < cfg.hub_rate:  # later tasks of this project will pile onto it
+                pools.hubs[project].append([spec, rng.randint(3, 8)])
 
     # edges added long after both tasks exist (a dependency discovered later)
     for _ in range(int(cfg.late_dependency_rate * len(tasks))):
@@ -111,10 +147,21 @@ def _plan_normal(cfg: GeneratorConfig, rng: random.Random) -> tuple[list[TaskSpe
     return tasks, edges
 
 
-def _pick_targets(rng, k, earlier, local) -> list[TaskSpec]:
+def _pick_targets(rng: random.Random, spec: TaskSpec, k: int, window: int, pools: _Pools) -> list[TaskSpec]:
     chosen: dict = {}
+    hubs = pools.hubs[spec.project]
+    if hubs and rng.random() < HUB_ATTACH:
+        entry = rng.choice(hubs)
+        chosen[entry[0].id] = entry[0]
+        entry[1] -= 1
+        if entry[1] <= 0:
+            hubs.remove(entry)
+    weights = TIER_DEP_WEIGHTS[spec.tier]
     for _ in range(k):
-        pool = local[-LOCAL_WINDOW:] if local and rng.random() < LOCAL_DEP_SHARE else earlier
+        tier = rng.choices(list(weights), list(weights.values()))[0]
+        local = pools.by_project_tier[(spec.project, tier)][-window:]
+        pool = local if local and rng.random() < LOCAL_DEP_SHARE else pools.by_tier[tier]
+        pool = pool or pools.all  # e.g. the very first strategic task has no tactical work to wait on yet
         if pool:
             target = rng.choice(pool)
             chosen[target.id] = target

@@ -2,7 +2,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from .config import DISEASE_TYPES, HOLDOUT_DISEASES, SEVERITIES, GeneratorConfig
+from .config import HOLDOUT_DISEASES, SEVERITIES, GeneratorConfig
+from .diseases import DISEASE_TYPES
 from .model import World
 from .planner import plan_world
 from .simulation import History, simulate

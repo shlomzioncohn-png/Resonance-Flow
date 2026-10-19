@@ -18,6 +18,29 @@ def row_uuid(seed: int, table: str, sequence: int) -> UUID:
     return uuid.uuid5(_NAMESPACE, f"{seed}:{table}:{sequence}")
 
 
+TIERS = ("operational", "tactical", "strategic")  # ascending scope; higher tiers wait on lower ones
+
+
+@dataclass(frozen=True)
+class TierProfile:
+    share: float  # share of all tasks
+    start_mult: float  # multiplies the project's PENDING -> ACTIVE delay
+    work_mult: float  # multiplies the project's ACTIVE -> DONE duration
+
+
+TIER_PROFILES = {
+    "operational": TierProfile(0.70, 1.0, 1.0),
+    "tactical": TierProfile(0.22, 1.5, 2.5),
+    "strategic": TierProfile(0.08, 3.0, 6.0),
+}
+# which tier a task of the key tier depends on (strategic work waits on tactical work, and so on down)
+TIER_DEP_WEIGHTS = {
+    "operational": {"operational": 0.9, "tactical": 0.1},
+    "tactical": {"operational": 0.6, "tactical": 0.4},
+    "strategic": {"tactical": 0.7, "strategic": 0.3},
+}
+
+
 @dataclass(frozen=True)
 class Project:
     id: int
@@ -27,11 +50,19 @@ class Project:
     sigma: float  # lognormal spread of both
 
 
+def typical_days(project: Project, tier: str) -> float:
+    """Rough elapsed days a healthy task of this tier takes in this project (the peer yardstick)."""
+    p = TIER_PROFILES[tier]
+    # 1.4: working hours only (nights and weekends) stretch elapsed time beyond the raw hours
+    return (project.start_hours * p.start_mult + project.work_hours * p.work_mult) / 24 * 1.4
+
+
 @dataclass
 class TaskSpec:
     id: UUID
     project: int
     created_at: datetime
+    tier: str = "operational"
     kind: str = "normal"  # normal | slow_legit | reopened_legit | disease
     disease_id: str | None = None
     work_mult: float = 1.0
@@ -59,6 +90,7 @@ class DiseaseInstance:
     id: str
     type: str
     severity: str
+    tier: str  # tier of the root task; "similar tasks" means the same tier
     root_task_id: UUID
     task_ids: list[UUID]  # every task that belongs to the pattern, root included
     start: datetime
