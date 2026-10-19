@@ -57,6 +57,23 @@ class ASRSettings(BaseSettings):
         return Path(self.model_cache_dir) / "whisper" / self.whisper_model
 
 
+class ObjectStorageSettings(BaseSettings):
+    """Standalone -- the bridge.raw.landed consumer (#349) reads Bridge's objects.
+
+    Defaults match Bridge's own local ones (teams/bridge application.yml); the
+    credentials have none, so a missing one fails at start-up.
+    """
+
+    model_config = SettingsConfigDict(
+        env_prefix="MIND_OBJECT_STORAGE__", env_file=_ENV_FILE, extra="ignore"
+    )
+
+    endpoint: str = "http://localhost:9000"
+    bucket: str = "bridge-raw"
+    access_key: str
+    secret_key: str
+
+
 class MonitoringSettings(BaseSettings):
     """Standalone -- recording a model call needs no DSN.
 
