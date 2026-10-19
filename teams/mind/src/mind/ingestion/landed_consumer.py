@@ -55,7 +55,7 @@ class LandedHandler:
         try:
             event = to_raw_object_event(message)
         except InvalidEvent as e:
-            logger.error("landed: skipping a message the contract rejects: %s", e)
+            logger.error("landed: skipping an invalid message: %s", e)
             return
 
         arrival = classify_arrival(

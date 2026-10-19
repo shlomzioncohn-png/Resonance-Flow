@@ -136,3 +136,21 @@ def test_a_time_out_of_range_is_rejected(field: str) -> None:
 
     with pytest.raises(InvalidEvent):
         to_raw_object_event(message)
+
+
+def test_a_classification_label_mind_does_not_know_yet_follows_the_contract_rules() -> None:
+    # Unlike source_type or role, the contract forgives these on purpose:
+    # an unknown quality is ignored, an unknown sensitivity is treated as HIGH.
+    classification = pb.Classification(
+        decided_by=pb.DECIDED_BY_MODEL,
+        quality=pb.QualityLabel(value=4, confidence=0.7),  # e.g. a new QUALITY_BLURRY
+        sensitivity=pb.SensitivityLabel(value=4, confidence=0.8),  # e.g. SENSITIVITY_MEDIUM
+        reason="new labels on Bridge's side",
+        classifier=pb.ClassifierInfo(model="gemini-3.8-flash", prompt_version="v4"),
+    )
+
+    event = to_raw_object_event(_message(classification=classification))
+
+    assert event.classification is not None
+    assert event.classification.quality is None
+    assert event.classification.sensitivity.value is Sensitivity.HIGH

@@ -76,6 +76,29 @@ class ObjectStorageSettings(BaseSettings):
     max_object_bytes: int = Field(default=100 * 1024 * 1024, gt=0)
 
 
+class LandedConsumerSettings(BaseSettings):
+    """Standalone -- the bridge.raw.landed runner (#349) needs no database, so it
+    does not read `Settings`, which requires the vector-store DSN.
+
+    Read from the environment and .env like every other MIND_* setting, so an
+    override set next to the MinIO keys in .env is not silently ignored.
+    """
+
+    model_config = SettingsConfigDict(
+        env_prefix="MIND_LANDED_CONSUMER__", env_file=_ENV_FILE, extra="ignore"
+    )
+
+    # Its own group, not the one in ProtobufConsumer's docstring example. Until
+    # extraction is wired, a run marks items processed and commits their
+    # offsets with nothing extracted: a test run against the shared topic sets
+    # MIND_LANDED_CONSUMER__GROUP_ID to a group of its own.
+    group_id: str = "mind-landed-consumer"
+    # The same variable `Settings.log_level` reads.
+    log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"] = Field(
+        default="INFO", validation_alias="MIND_LOG_LEVEL"
+    )
+
+
 class MonitoringSettings(BaseSettings):
     """Standalone -- recording a model call needs no DSN.
 

@@ -46,6 +46,18 @@ def _mind_name(name_of: Callable[[int], str], prefix: str, value: int) -> str:
     return name.removeprefix(f"{prefix}_")
 
 
+def _label_name(name_of: Callable[[int], str], prefix: str, value: int) -> str:
+    """Like _mind_name, for the labels the contract forgives (quality,
+    sensitivity): a number our pb2 has no name for goes through as a name the
+    contract does not know either, so its rule applies (quality ignored,
+    sensitivity HIGH) instead of the whole item being skipped."""
+
+    try:
+        return _mind_name(name_of, prefix, value)
+    except InvalidEvent:
+        return f"UNKNOWN_{value}"
+
+
 def _time(message: Any, field: str) -> datetime | None:
     if not message.HasField(field):
         return None
@@ -113,14 +125,14 @@ def _classification(classification: Classification) -> dict[str, Any]:
         ),
         "quality": (
             {
-                "value": _mind_name(Quality.Name, "QUALITY", quality.value),
+                "value": _label_name(Quality.Name, "QUALITY", quality.value),
                 "confidence": quality.confidence,
             }
             if classification.HasField("quality")
             else None
         ),
         "sensitivity": {
-            "value": _mind_name(Sensitivity.Name, "SENSITIVITY", sensitivity.value),
+            "value": _label_name(Sensitivity.Name, "SENSITIVITY", sensitivity.value),
             "confidence": sensitivity.confidence,
         },
         "reason": classification.reason,

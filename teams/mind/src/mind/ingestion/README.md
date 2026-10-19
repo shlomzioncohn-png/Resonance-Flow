@@ -60,6 +60,7 @@ so each failure is one of two kinds:
 | what happened | what happens |
 |---|---|
 | the contract rejects the message, an enum number Mind's pb2 lacks, or a time out of range | `InvalidEvent`: skipped, logged at ERROR |
+| an unknown quality or sensitivity number | not skipped: the contract's own rule applies (quality ignored, sensitivity HIGH) |
 | `tenant_id` is not a UUID | `InvalidEvent`: skipped, logged at ERROR |
 | duplicate, late, or updated revision | skipped, logged at INFO |
 | a file is missing, or does not match its hash | that file skipped (WARNING), the rest goes on |
@@ -103,7 +104,9 @@ defaults. The credentials have no default, so a missing one fails at start-up.
 most one byte past it is fetched, whatever the event's `size_bytes` says, and
 the read itself stops there even if the server ignores the Range header.
 Kafka and the Schema Registry come from `messaging/config.py`; this consumer
-alone raises `max.poll.interval.ms` to 30 minutes (`conf_overrides`).
+alone raises `max.poll.interval.ms` to 30 minutes (`conf_overrides`). No
+database is needed: the runner reads `LandedConsumerSettings` (group id,
+`MIND_LOG_LEVEL`), not `Settings`, which requires the vector-store DSN.
 
 Until extraction is wired in, `on_texts` logs each text by its item, file and
 length, never its content (Bridge may have classified it HIGH sensitivity),
@@ -113,7 +116,7 @@ which also shows the stage in a demo run.
 extraction is wired, a run marks items processed and commits their offsets
 with nothing extracted, so a later run in the same group never sees them
 again. For a test against the shared topic (the joint test with Bridge, a
-demo rehearsal), use a group of its own:
+demo rehearsal), use a group of its own, in the environment or in `.env`:
 
 ```
 MIND_LANDED_CONSUMER__GROUP_ID=mind-landed-joint-test make run-landed-consumer
@@ -137,6 +140,11 @@ MIND_LANDED_CONSUMER__GROUP_ID=mind-landed-joint-test make run-landed-consumer
   the second request (correlation_id), but extraction pays for it twice. A
   persistent store shared by all replicas only needs `RevisionStore`'s two
   methods.
+- **Memory per event, not per file.** `max_object_bytes` bounds one file, but
+  `handle_raw_object_event` reads every file of the event before any becomes
+  text, and each record keeps its raw bytes through the hand-off: an email
+  with five 90 MB scans holds ~450 MB, over the pod's 512Mi. The fix for both:
+  read, convert and drop one file at a time. Demo items carry one file each.
 - **Work redone after a retry.** When an event stops on a retry (MinIO down,
   `MediaUnavailable`), what was already OCR'd or transcribed for its earlier
   files is lost, and every restart does it again until the cause is fixed.
