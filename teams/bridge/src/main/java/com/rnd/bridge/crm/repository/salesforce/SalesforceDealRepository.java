@@ -52,11 +52,22 @@ import java.util.Optional;
  * sourceRef} as {@code deal.sourceRefPrefix() + deal.dealId()} - no per-source branch there, and
  * HubSpot/JSON are unaffected since {@link Deal}'s default prefix is {@code "crm:"}.
  * <p>
- * <b>{@code stageChangedAt} - one configurable field, no automatic runtime fallback.</b> Read from
- * whichever Opportunity field {@code bridge.crm.salesforce.stage-changed-at-field} names (default
- * {@code LastStageChangeDate}, existence UNVERIFIED against a real org - design doc §2). A
- * deployer who finds it missing switches the config value to {@code LastModifiedDate} - this
- * class does not try one field, fail, and silently retry the other at runtime.
+ * <b>{@code stageChangedAt} - one configurable field, with a per-row {@code CreatedDate}
+ * fallback.</b> Read from whichever Opportunity field
+ * {@code bridge.crm.salesforce.stage-changed-at-field} names (default
+ * {@code LastStageChangeDate}) - verified 2026-10-14 against a real Developer Edition org (API
+ * v68.0): the field exists and is populated once an Opportunity's stage has changed, but is
+ * {@code null} for one that never has. {@link #toDeal} falls back to that row's
+ * {@code CreatedDate} when the configured field is null/blank - a deal that has never changed
+ * stage has been in its current stage since it was created - never {@code LastModifiedDate},
+ * which bumps on any field edit and would wrongly reset stalled-deal detection for a deal that
+ * was edited but never moved. If {@code CreatedDate} is also missing, the row is skipped and
+ * counted in {@link DealSnapshot#skippedAtRead()}, same as any other unparseable record - this
+ * is the normal case for a brand-new deal, so it gets no per-record WARN of its own. A deployer
+ * who finds the configured field itself absent from the org's schema can still switch
+ * {@code bridge.crm.salesforce.stage-changed-at-field} to {@code LastModifiedDate} - this class
+ * does not try one field, fail, and silently retry the other at runtime. Design doc §2 has the
+ * full verification writeup.
  * <p>
  * <b>Stage mapping.</b> {@link #snapshot()} and {@link #fetchDeal(String)} both resolve
  * {@code OpportunityStage} metadata fresh, on every call, via {@link SalesforceStageMapping} - see
@@ -226,6 +237,13 @@ public class SalesforceDealRepository implements DealRepository {
         }
 
         Map<String, Object> owner = asMap(row.get("Owner"));
+        Instant createdAt = parseInstant((String) row.get("CreatedDate"));
+        Instant stageChangedAt = parseInstant((String) row.get(stageChangedAtField));
+        if (stageChangedAt == null) {
+            // A deal that has never changed stage has been in its current stage since it was
+            // created - CreatedDate, never LastModifiedDate, which bumps on any field edit.
+            stageChangedAt = createdAt;
+        }
 
         return Deal.builder()
                 .dealId(rawId)
@@ -240,8 +258,8 @@ public class SalesforceDealRepository implements DealRepository {
                 .currency(null) // CurrencyIsoCode is never queried - see class Javadoc / design doc §3
                 .crmAccountSlug(null) // nothing downstream reads it - see design doc §3
                 .sourceUrl(instanceUrl + "/" + rawId)
-                .createdAt(parseInstant((String) row.get("CreatedDate")))
-                .stageChangedAt(parseInstant((String) row.get(stageChangedAtField)))
+                .createdAt(createdAt)
+                .stageChangedAt(stageChangedAt)
                 .build();
     }
 
