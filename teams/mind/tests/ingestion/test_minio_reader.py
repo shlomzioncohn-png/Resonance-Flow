@@ -20,10 +20,11 @@ class _Response:
         self.data = data
         self.released = False
 
-    def read(self) -> bytes:
+    def read(self, amt: int | None = None) -> bytes:
+        self.asked_amt = amt
         if isinstance(self.data, Exception):
             raise self.data
-        return self.data
+        return self.data if amt is None else self.data[:amt]
 
     def close(self) -> None:
         pass
@@ -35,8 +36,13 @@ class _Response:
 class _Client:
     """Stands in for minio.Minio: only get_object is used, with S3's range rules."""
 
-    def __init__(self, objects: dict[str, bytes | Exception], error: S3Error | None = None) -> None:
-        self.objects, self.error = objects, error
+    def __init__(
+        self,
+        objects: dict[str, bytes | Exception],
+        error: S3Error | None = None,
+        honours_range: bool = True,
+    ) -> None:
+        self.objects, self.error, self.honours_range = objects, error, honours_range
         self.asked: list[tuple[str, str, int]] = []
         self.responses: list[_Response] = []
 
@@ -47,7 +53,7 @@ class _Client:
         if object_name not in self.objects:
             raise _s3_error("NoSuchKey")
         data = self.objects[object_name]
-        if isinstance(data, bytes) and length:
+        if isinstance(data, bytes) and length and self.honours_range:
             if not data:
                 raise _s3_error("InvalidRange")  # S3 refuses any range of an empty object
             data = data[:length]
@@ -74,6 +80,15 @@ def test_an_object_over_the_limit_is_never_read_whole() -> None:
         _read(client)
     assert client.asked == [(BUCKET, KEY, LIMIT + 1)]  # at most one byte past the limit
     assert client.responses[0].released
+
+
+def test_a_server_that_ignores_the_range_still_cannot_fill_memory() -> None:
+    # Some S3-compatible gateways answer 200 with the whole object.
+    client = _Client({KEY: b"x" * (LIMIT * 100)}, honours_range=False)
+
+    with pytest.raises(ObjectTooLarge):
+        _read(client)
+    assert client.responses[0].asked_amt == LIMIT + 1
 
 
 def test_an_object_exactly_at_the_limit_is_read() -> None:

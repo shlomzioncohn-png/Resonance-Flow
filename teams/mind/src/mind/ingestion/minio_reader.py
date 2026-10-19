@@ -45,7 +45,9 @@ class MinioObjectReader:
         # The SDK hands back an open HTTP response: released even when the
         # read fails midway, or the pool runs dry after enough bad reads.
         try:
-            content: bytes = response.read()  # already bytes: no second copy
+            # Bounded here too, not only by the Range header: a server that
+            # ignores it would otherwise send the whole object into memory.
+            content: bytes = response.read(self._max_bytes + 1)
         finally:
             response.close()
             response.release_conn()

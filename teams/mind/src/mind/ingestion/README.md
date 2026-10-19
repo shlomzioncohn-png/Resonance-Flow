@@ -100,7 +100,8 @@ MIND_OBJECT_STORAGE__ACCESS_KEY=... MIND_OBJECT_STORAGE__SECRET_KEY=... make run
 `MIND_OBJECT_STORAGE__BUCKET` (default `bridge-raw`) match Bridge's local
 defaults. The credentials have no default, so a missing one fails at start-up.
 `MIND_OBJECT_STORAGE__MAX_OBJECT_BYTES` (default 100 MB) caps what is read: at
-most one byte past it is fetched, whatever the event's `size_bytes` says.
+most one byte past it is fetched, whatever the event's `size_bytes` says, and
+the read itself stops there even if the server ignores the Range header.
 Kafka and the Schema Registry come from `messaging/config.py`; this consumer
 alone raises `max.poll.interval.ms` to 30 minutes (`conf_overrides`).
 
@@ -118,8 +119,18 @@ which also shows the stage in a demo run.
 - **Per-file retry.** An item with one bad file is still marked processed, so
   that file is never retried. Suggested: track files, not items, so only the
   failed one is tried again.
-- **A persistent revision store.** `InMemoryRevisionStore` forgets everything
-  on restart; a persistent one only needs `RevisionStore`'s two methods.
+- **A persistent, shared revision store.** `InMemoryRevisionStore` forgets
+  everything on restart, keeps only the 100,000 most recently processed items
+  (flat memory for a consumer that runs for weeks), and belongs to one process.
+  With more than one replica, or when a rebalance moves a partition mid-item,
+  two instances can process the same item and hand it on twice: Inbox drops
+  the second request (correlation_id), but extraction pays for it twice. A
+  persistent store shared by all replicas only needs `RevisionStore`'s two
+  methods.
+- **Work redone after a retry.** When an event stops on a retry (MinIO down,
+  `MediaUnavailable`), what was already OCR'd or transcribed for its earlier
+  files is lost, and every restart does it again until the cause is fixed.
+  Keeping partial results across restarts is not worth it yet.
 - **A dead-letter queue.** OCR/ASR `BUG` failures should be parked, not
   dropped; there is no such queue yet, so they are skipped and logged.
 - **An unreadable transcript.** When the event's transcript cannot be read,

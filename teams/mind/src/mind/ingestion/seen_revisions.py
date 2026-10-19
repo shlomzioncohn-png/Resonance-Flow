@@ -6,6 +6,7 @@ finding and updating the tasks the earlier revision produced, which is a
 feature of its own, so it is skipped for now (#349).
 """
 
+from collections import OrderedDict
 from enum import Enum
 from typing import Protocol
 from uuid import UUID
@@ -49,13 +50,22 @@ class RevisionStore(Protocol):
 
 
 class InMemoryRevisionStore:
-    """Forgets everything on restart: Bridge's redelivered items are then processed again."""
+    """Forgets everything on restart: Bridge's redelivered items are then processed again.
 
-    def __init__(self) -> None:
-        self._processed: dict[UUID, int] = {}
+    Holds the `max_items` most recently processed items and forgets older ones,
+    so a consumer that runs for weeks keeps flat memory. A redelivery comes soon
+    after its item; one older than the last `max_items` items is processed again.
+    """
+
+    def __init__(self, max_items: int = 100_000) -> None:
+        self._processed: OrderedDict[UUID, int] = OrderedDict()
+        self._max_items = max_items
 
     def processed_revision(self, correlation_id: UUID) -> int | None:
         return self._processed.get(correlation_id)
 
     def mark_processed(self, correlation_id: UUID, revision: int) -> None:
         self._processed[correlation_id] = revision
+        self._processed.move_to_end(correlation_id)
+        while len(self._processed) > self._max_items:
+            self._processed.popitem(last=False)

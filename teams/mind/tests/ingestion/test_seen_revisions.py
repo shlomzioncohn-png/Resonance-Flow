@@ -33,3 +33,16 @@ def test_the_store_remembers_each_item_separately() -> None:
 
     assert store.processed_revision(ITEM) == 2
     assert store.processed_revision(OTHER_ITEM) is None
+
+
+def test_the_store_forgets_the_oldest_items_past_its_size() -> None:
+    # Dedup matters for redeliveries soon after an item; memory must stay flat.
+    items = [UUID(int=n) for n in range(3)]
+    store = InMemoryRevisionStore(max_items=2)
+
+    for item in items:
+        store.mark_processed(item, 0)
+
+    assert store.processed_revision(items[0]) is None
+    assert store.processed_revision(items[1]) == 0
+    assert store.processed_revision(items[2]) == 0
