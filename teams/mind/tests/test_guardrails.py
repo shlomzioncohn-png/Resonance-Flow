@@ -141,7 +141,7 @@ def _replay_extraction(case_id: str) -> tuple[str, dict[str, Any]]:
 
 # Observed against the live model on the first recording (see the recorded files):
 # a task invented from small talk, and a Hebrew task silently translated to English,
-# both above the 0.5 audit marker. R2 notes this confidence measures extraction
+# both above the 0.5 audit marker. The extraction confidence scores extraction
 # quality, not whether a task exists or is in scope.
 _EXTRACTION_FINDING = (
     "finding (#488): extraction has no signal for 'no task here' or 'not English'; "

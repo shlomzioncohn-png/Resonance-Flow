@@ -19,7 +19,7 @@
       },
       "acceptable": ["graceful_failure", "low_confidence"],
       "threshold": 0.5,
-      "threshold_source": "R1 audit marker only, not a product threshold (no confidence threshold holds a task back, extraction/README.md). R2 notes this confidence measures extraction quality, not whether a task exists."
+      "threshold_source": "R1 audit marker only, not a product threshold (no confidence threshold holds a task back, extraction/README.md)."
     },
     {
       "id": "noise_scan",
