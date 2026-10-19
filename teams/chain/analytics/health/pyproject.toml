@@ -8,11 +8,10 @@ version = "0.1.0"
 description = "Dependency-flow health analysis for Chain: synthetic history generator (and, later, the anomaly model)"
 readme = "README.md"
 requires-python = ">=3.11"
-dependencies = []  # the generator is stdlib-only on purpose; DB loading is the optional "db" extra
+dependencies = []  # the generator is stdlib-only on purpose
 
 [project.optional-dependencies]
 dev = ["pytest>=8"]
-db = ["psycopg[binary]>=3.1"]  # only the loader needs it
 
 [tool.setuptools.packages.find]
 where = ["src"]
