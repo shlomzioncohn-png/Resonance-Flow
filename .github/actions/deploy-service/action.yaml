@@ -4,7 +4,7 @@ description: >
   the chart to enable the component with that image, smoke-tests it, then pushes the
   image to GHCR. Assumes setup-service-infra already ran in this job (same kind cluster,
   same namespace, component installed disabled, $CHART_DIR/$CHART_VALUES/$CHART_ALL_OFF
-  exported).
+  and this job's $KIND_CLUSTER/$KIND_IMAGE_TAG/$KUBECONFIG exported).
 
 inputs:
   service_name:
@@ -14,12 +14,21 @@ inputs:
     description: "Path to the service, e.g. teams/bridge"
     required: true
   container_port:
-    description: "Local port used for the post-deploy smoke test port-forward"
-    required: true
+    description: "Unused: the smoke test now forwards to a free local port. Kept so existing callers don't break."
+    required: false
+    default: ""
   extra_build_contexts:
     description: "Optional docker build-contexts (name=path per line), e.g. shared=shared"
     required: false
     default: ""
+  target:
+    description: "Optional Dockerfile stage to build; empty builds the default (last) stage"
+    required: false
+    default: ""
+  push:
+    description: "'false' skips the GHCR login and push (build, kind deploy and smoke test still run) -- for testing this action on a PR. The image_tag/image_repository outputs are still set but nothing was pushed, so don't feed them to service-update-manifest."
+    required: false
+    default: "true"
 
 outputs:
   image_tag:
@@ -32,6 +41,35 @@ outputs:
 runs:
   using: composite
   steps:
+    # Without these, the build would tag "<service>:" and kind would load into a
+    # cluster that doesn't exist -- fail here with a clear message instead.
+    - name: Check setup-service-infra ran in this job
+      shell: bash
+      run: |
+        : "${KIND_CLUSTER:?setup-service-infra must run before deploy-service in the same job}"
+        : "${KIND_IMAGE_TAG:?setup-service-infra must run before deploy-service in the same job}"
+
+    # Runners on one host run as the same user, so they'd share ~/.docker: one job's
+    # login-action logout (or its token expiring) breaks another job's push, and
+    # setup-buildx's "current builder" is global. Give this job its own config dir,
+    # starting from a copy of the user's config (keeps e.g. a Docker Hub login used
+    # against pull rate limits), and link the user's CLI plugins in so
+    # `docker buildx` is still found. Home is looked up the way docker does: $HOME
+    # first, then the passwd entry (self-hosted runners may not set HOME).
+    - name: Use a per-job Docker config
+      shell: bash
+      run: |
+        HOME_DIR="${HOME:-$(getent passwd "$(id -u)" | cut -d: -f6)}"
+        DOCKER_CONFIG="$RUNNER_TEMP/docker-config"
+        mkdir -p "$DOCKER_CONFIG"
+        if [ -f "$HOME_DIR/.docker/config.json" ]; then
+          cp "$HOME_DIR/.docker/config.json" "$DOCKER_CONFIG/config.json"
+        fi
+        if [ -d "$HOME_DIR/.docker/cli-plugins" ]; then
+          ln -sfn "$HOME_DIR/.docker/cli-plugins" "$DOCKER_CONFIG/cli-plugins"
+        fi
+        echo "DOCKER_CONFIG=$DOCKER_CONFIG" >> "$GITHUB_ENV"
+
     - name: Normalize image name to lowercase
       id: normalize
       shell: bash
@@ -55,20 +93,26 @@ runs:
         echo "tags=${TAGS}" >> "$GITHUB_OUTPUT"
 
     - uses: docker/setup-buildx-action@v3
+      id: buildx
 
     - name: Build image (local, for smoke test)
       uses: docker/build-push-action@v6
       with:
+        # This job's builder, not whichever one is "current" -- another job's
+        # post step may remove its builder while we build.
+        builder: ${{ steps.buildx.outputs.name }}
         context: ${{ inputs.service_dir }}
         build-contexts: ${{ inputs.extra_build_contexts }}
+        target: ${{ inputs.target }}
         load: true
-        tags: ${{ inputs.service_name }}:local
+        # Per-job tag, not a shared ":local" -- a parallel run can't overwrite it.
+        tags: ${{ inputs.service_name }}:${{ env.KIND_IMAGE_TAG }}
         cache-from: type=gha,scope=${{ inputs.service_name }}
         cache-to: type=gha,mode=max,scope=${{ inputs.service_name }}
 
     - name: Load image into kind
       shell: bash
-      run: kind load docker-image ${{ inputs.service_name }}:local --name ${{ inputs.service_name }}-cluster
+      run: kind load docker-image "${{ inputs.service_name }}:$KIND_IMAGE_TAG" --name "$KIND_CLUSTER"
 
     - name: Deploy chart with the built image (smoke test)
       shell: bash
@@ -79,7 +123,7 @@ runs:
           -f "$CHART_ALL_OFF" \
           -f "$CHART_DIR/values/values-${SERVICE}.yaml" \
           --set components.${SERVICE}.image.repository="$SERVICE" \
-          --set components.${SERVICE}.image.tag=local \
+          --set components.${SERVICE}.image.tag="$KIND_IMAGE_TAG" \
           --set components.${SERVICE}.image.pullPolicy=Never \
           --namespace "$SERVICE" --create-namespace \
           --wait --timeout 420s
@@ -109,9 +153,10 @@ runs:
 
     - name: Smoke test
       shell: bash
-      run: bash "${{ github.action_path }}/smoke-test.sh" "${{ inputs.service_name }}" "${{ inputs.container_port }}"
+      run: bash "${{ github.action_path }}/smoke-test.sh" "${{ inputs.service_name }}"
 
     - name: Log in to GHCR
+      if: inputs.push == 'true'
       uses: docker/login-action@v3
       with:
         registry: ghcr.io
@@ -119,10 +164,11 @@ runs:
         password: ${{ github.token }}
 
     - name: Push image
+      if: inputs.push == 'true'
       shell: bash
       run: |
         IFS=',' read -ra TAG_LIST <<< "${{ steps.tags.outputs.tags }}"
         for t in "${TAG_LIST[@]}"; do
-          docker tag ${{ inputs.service_name }}:local "$t"
+          docker tag "${{ inputs.service_name }}:$KIND_IMAGE_TAG" "$t"
           docker push "$t"
         done

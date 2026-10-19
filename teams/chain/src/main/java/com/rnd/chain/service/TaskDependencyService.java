@@ -6,6 +6,7 @@ import com.rnd.chain.dto.DependencyChangeSource;
 import com.rnd.chain.dto.DependencyHistoryEntry;
 import com.rnd.chain.dto.PageResponse;
 import com.rnd.chain.dto.TaskDependency;
+import com.rnd.chain.exception.CrossTenantDependencyException;
 import com.rnd.chain.exception.InvalidDependencyException;
 import com.rnd.chain.exception.InvalidRequestException;
 import com.rnd.chain.exception.TaskNotFoundException;
@@ -30,7 +31,7 @@ import java.util.UUID;
  * task cannot depend on itself, and a given edge cannot be added twice.
  * Also records an audit trail entry for every successful add/remove.
  *
- * Dependency mutations delegate to TaskEligibilityService to keep readiness in sync.
+ * Dependency mutations delegate to DependencyEdgeService to keep readiness in sync.
  */
 @Service
 public class TaskDependencyService {
@@ -42,26 +43,26 @@ public class TaskDependencyService {
     private final DependencyHistoryRepository historyRepository;
     private final TransactionRunner transactionRunner;
     private final Clock clock;
-    private final TaskEligibilityService taskEligibilityService;
+    private final DependencyEdgeService dependencyEdgeService;
 
     public TaskDependencyService(TaskRepository taskRepository,
                                   TaskDependencyRepository taskDependencyRepository,
                                   DependencyHistoryRepository historyRepository,
                                   TransactionRunner transactionRunner,
                                   Clock clock,
-                                  TaskEligibilityService taskEligibilityService) {
+                                  DependencyEdgeService dependencyEdgeService) {
         Objects.requireNonNull(taskRepository, "taskRepository must not be null");
         Objects.requireNonNull(taskDependencyRepository, "taskDependencyRepository must not be null");
         Objects.requireNonNull(historyRepository, "historyRepository must not be null");
         Objects.requireNonNull(transactionRunner, "transactionRunner must not be null");
         Objects.requireNonNull(clock, "clock must not be null");
-        Objects.requireNonNull(taskEligibilityService, "taskEligibilityService must not be null");
+        Objects.requireNonNull(dependencyEdgeService, "dependencyEdgeService must not be null");
         this.taskRepository = taskRepository;
         this.taskDependencyRepository = taskDependencyRepository;
         this.historyRepository = historyRepository;
         this.transactionRunner = transactionRunner;
         this.clock = clock;
-        this.taskEligibilityService = taskEligibilityService;
+        this.dependencyEdgeService = dependencyEdgeService;
     }
 
     /** Same as {@link #addDependency(UUID, UUID, DependencyChangeSource, String)} with source USER, no sourceRef. */
@@ -99,6 +100,32 @@ public class TaskDependencyService {
     //------addDependency------
     public TaskDependency addDependency(UUID taskId, UUID dependsOnTaskId,
                                          DependencyChangeSource source, String sourceRef) {
+        return addDependency(taskId, dependsOnTaskId, source, sourceRef, 1.0);
+    }
+
+    /**
+     * Same as {@link #addDependency(UUID, UUID, DependencyChangeSource, String)}, with an
+     * explicit Mind confidence (issue #445) for this specific edge instead of defaulting to full
+     * confidence.
+     */
+    public TaskDependency addDependency(UUID taskId, UUID dependsOnTaskId,
+                                         DependencyChangeSource source, String sourceRef, Double confidence) {
+        return doAddDependency(taskId, dependsOnTaskId, source, sourceRef, confidence, false, null);
+    }
+
+    /**
+     * Same as the overload above, but a missing task is created as a PENDING placeholder instead of
+     * failing with {@link TaskNotFoundException}; see {@link DependencyEdgeService#addDependencyCreatingMissing}.
+     */
+    public TaskDependency addDependencyCreatingMissing(UUID taskId, UUID dependsOnTaskId,
+                                         DependencyChangeSource source, String sourceRef, Double confidence,
+                                         UUID tenantId) {
+        return doAddDependency(taskId, dependsOnTaskId, source, sourceRef, confidence, true, tenantId);
+    }
+
+    private TaskDependency doAddDependency(UUID taskId, UUID dependsOnTaskId,
+                                         DependencyChangeSource source, String sourceRef, Double confidence,
+                                         boolean createMissing, UUID tenantId) {
         Objects.requireNonNull(taskId, "taskId must not be null");
         Objects.requireNonNull(dependsOnTaskId, "dependsOnTaskId must not be null");
         Objects.requireNonNull(source, "source must not be null");
@@ -114,26 +141,43 @@ public class TaskDependencyService {
         // Existence is checked before the idempotency short-circuit (unlike before) so a
         // retry for a task that was deleted since the original call fails loudly instead
         // of reporting a fabricated success.
-        requireTaskExists(taskId);
-        requireTaskExists(dependsOnTaskId);
+        if (!createMissing) {
+            requireTaskExists(taskId);
+            requireTaskExists(dependsOnTaskId);
+        }
         if (isMatchingRetry(taskId, dependsOnTaskId, DependencyChangeAction.ADDED, source, sourceRef)) {
-            return new TaskDependency(taskId, dependsOnTaskId);
+            return new TaskDependency(taskId, dependsOnTaskId, confidence);
         }
 
         return transactionRunner.runInTransaction(() -> {
             // Re-checked under the transaction lock: the outer check above is only a fast
             // path and can race with a concurrent identical retry (see stage-3 concurrency test).
             if (isMatchingRetry(taskId, dependsOnTaskId, DependencyChangeAction.ADDED, source, sourceRef)) {
-                return new TaskDependency(taskId, dependsOnTaskId);
+                return new TaskDependency(taskId, dependsOnTaskId, confidence);
             }
             // Record history before delegating graph and readiness mutation; remove the
             // speculative entry if the delegate rejects the change.
 
-            
+
             DependencyHistoryEntry recorded = recordHistory(taskId, dependsOnTaskId,
                     DependencyChangeAction.ADDED, source, sourceRef);
             try {
-                return taskEligibilityService.addDependency(taskId, dependsOnTaskId);
+                return createMissing
+                        ? dependencyEdgeService.addDependencyCreatingMissing(taskId, dependsOnTaskId, confidence, tenantId)
+                        : dependencyEdgeService.addDependency(taskId, dependsOnTaskId, confidence);
+            } catch (CrossTenantDependencyException failure) {
+                // Issue #580: unlike a duplicate/missing-task no-op (compensateHistory alone),
+                // this rejection must stay visible, not just vanish with the speculative entry -
+                // replace it with a REJECTED one instead of merely deleting it. Only attempt that
+                // if the delete itself succeeded (compensateHistory returns the same failure
+                // instance on success, a different one if the delete itself failed) - recording
+                // REJECTED on top of a still-dangling speculative ADDED entry would just mask
+                // whatever that deeper problem was.
+                RuntimeException toThrow = compensateHistory(recorded.id(), failure);
+                if (toThrow == failure) {
+                    recordHistory(taskId, dependsOnTaskId, DependencyChangeAction.REJECTED, source, sourceRef);
+                }
+                throw toThrow;
             } catch (RuntimeException failure) {
                 throw compensateHistory(recorded.id(), failure);
             }
@@ -175,7 +219,7 @@ public class TaskDependencyService {
             DependencyHistoryEntry recorded = recordHistory(taskId, dependsOnTaskId,
                     DependencyChangeAction.REMOVED, source, sourceRef);
             try {
-                taskEligibilityService.removeDependency(taskId, dependsOnTaskId);
+                dependencyEdgeService.removeDependency(taskId, dependsOnTaskId);
             } catch (RuntimeException failure) {
                 throw compensateHistory(recorded.id(), failure);
             }

@@ -27,7 +27,7 @@ import java.util.function.Function;
  *
  * Every traversal is an iterative, visited-set-guarded BFS (ArrayDeque as
  * the queue, HashSet<UUID> as the visited set), matching the style of
- * TaskEligibilityService.wouldCreateCycle: the visited set does double
+ * DependencyEdgeService.wouldCreateCycle: the visited set does double
  * duty as cycle-guard and dedup, so multiple paths to the same node never
  * produce duplicates and cyclic/invalid data can never loop forever - a
  * defensive guard, even though cycles are already prevented at write time

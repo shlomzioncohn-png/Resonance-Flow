@@ -122,7 +122,7 @@ class CrmSalesforceLaneIntegrationTest {
         CapturingPublisher publisher = new CapturingPublisher();
         CrmLane lane = new CrmLane(
                 new CrmSourceReader(repository),
-                new DealToTaskMapper(VALID_TENANT_ID, new EnrichmentProperties(), new NoOpTaskEnricher()),
+                new DealToTaskMapper(VALID_TENANT_ID, new EnrichmentProperties(), new NoOpTaskEnricher(), 0),
                 new CrmTaskValidator(new TaskValidator()),
                 publisher);
 

@@ -27,9 +27,6 @@ class Factor(StrEnum):
     QUICK_WIN = "quick_win"
     """How quickly the task can be cleared. Never decisive on its own."""
 
-    INITIATIVE = "initiative"
-    """Whether the task hangs under a parent task, as a weak sign of scope."""
-
 
 #: Every name this package is allowed to put in `contributions`.
 FACTOR_NAMES: frozenset[str] = frozenset(factor.value for factor in Factor)

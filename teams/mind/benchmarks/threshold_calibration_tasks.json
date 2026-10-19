@@ -1,0 +1,26 @@
+{
+  "_comment": "Synthetic task pool for calibrating dependency_match_threshold and duplicate_similarity_threshold. Hand-authored, not derived from eval/real_slice or eval/datasets -- see README's Known limitations for why (avoids overlap with R2/Michal's own evaluation data).",
+  "tasks": [
+    {"task_id": "task-db-upgrade", "title": "Upgrade the production database", "description": "Move the primary database to the new major version before the Q2 freeze."},
+    {"task_id": "task-db-backup", "title": "Back up the production database", "description": "Take a full backup before running the migration."},
+    {"task_id": "task-catering", "title": "Plan the team offsite catering", "description": "Order food and drinks for the all-hands offsite."},
+    {"task_id": "task-standup-notes", "title": "Write up standup notes", "description": "Summarize yesterday's daily standup for the team channel."},
+    {"task_id": "task-release-notes", "title": "Write release notes", "description": "Draft the release notes for the next version."},
+    {"task_id": "task-onboard-hire", "title": "Onboard the new hire", "description": "Set up accounts and send the welcome packet for the new engineer."},
+    {"task_id": "task-offboard-employee", "title": "Offboard a departing employee", "description": "Revoke access and collect equipment from someone leaving the company."},
+    {"task_id": "task-security-audit", "title": "Run the quarterly security audit", "description": "Review access logs and permissions across all services."},
+    {"task_id": "task-vendor-contract", "title": "Renew the vendor contract", "description": "Negotiate terms for the annual software license renewal."},
+    {"task_id": "task-customer-escalation", "title": "Resolve the customer escalation", "description": "Investigate and respond to the high-priority support ticket."},
+    {"task_id": "task-perf-review", "title": "Write performance reviews", "description": "Complete quarterly performance reviews for direct reports."},
+    {"task_id": "task-budget-forecast", "title": "Prepare the budget forecast", "description": "Draft next quarter's spending projections for finance."},
+    {"task_id": "task-ui-redesign", "title": "Redesign the settings page", "description": "Update the UI for the account settings screen."},
+    {"task_id": "task-api-docs", "title": "Update the API documentation", "description": "Document the new endpoints added this sprint."},
+    {"task_id": "task-load-test", "title": "Run load testing", "description": "Stress-test the checkout flow before the holiday traffic spike."},
+    {"task_id": "task-deploy-prod", "title": "Deploy to production", "description": "Deploy the database migration to the production environment."},
+    {"task_id": "task-deploy-staging", "title": "Deploy to staging", "description": "Deploy the database migration to the staging environment."},
+    {"task_id": "task-release-v23", "title": "Finalize v2.3 release notes", "description": "Write and publish the release notes for version 2.3."},
+    {"task_id": "task-release-v24", "title": "Finalize v2.4 release notes", "description": "Write and publish the release notes for version 2.4."},
+    {"task_id": "task-login-bug", "title": "Fix the login crash", "description": "Fix a crash that happens when users try to log in on mobile."},
+    {"task_id": "task-logout-bug", "title": "Fix the logout crash", "description": "Fix a crash that happens when users try to log out on mobile."}
+  ]
+}

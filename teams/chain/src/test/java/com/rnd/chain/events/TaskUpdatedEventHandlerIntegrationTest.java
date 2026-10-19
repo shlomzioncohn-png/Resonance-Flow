@@ -1,11 +1,14 @@
 package com.rnd.chain.events;
 
+import com.rnd.chain.testsupport.PgCleanup;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.Tag;
+import org.springframework.jdbc.core.JdbcTemplate;
+
 import com.google.protobuf.Timestamp;
 import com.rnd.chain.dto.Task;
 import com.rnd.chain.dto.TaskDependency;
 import com.rnd.chain.dto.TaskStatus;
-import com.rnd.chain.repository.InMemoryTaskDependencyRepository;
-import com.rnd.chain.repository.InMemoryTaskRepository;
 import com.rnd.chain.repository.TaskDependencyRepository;
 import com.rnd.chain.repository.TaskRepository;
 import com.rnd.inbox.event.TaskUpdatedEvent;
@@ -47,6 +50,7 @@ import static org.junit.jupiter.api.Assertions.*;
  * pattern as {@link DependencyProposedEventHandlerIntegrationTest}, see its Javadoc for why
  * {@code mock://} schema registry URLs are used instead of a real registry process.
  */
+@Tag("postgres")
 @SpringBootTest
 @EmbeddedKafka(partitions = 1, bootstrapServersProperty = "spring.kafka.bootstrap-servers")
 @TestPropertySource(properties = {
@@ -57,22 +61,6 @@ class TaskUpdatedEventHandlerIntegrationTest {
     private static final String TOPIC = "task.updated";
     private static final String ERROR_TOPIC = TOPIC + ".errors";
     private static final LocalDateTime BASE_TIME = LocalDateTime.of(2026, 1, 1, 12, 0, 0);
-
-    @TestConfiguration
-    static class Fixtures {
-
-        @Bean
-        @Primary
-        TaskRepository testTaskRepository() {
-            return new InMemoryTaskRepository(java.util.List.of());
-        }
-
-        @Bean
-        @Primary
-        TaskDependencyRepository testTaskDependencyRepository() {
-            return new InMemoryTaskDependencyRepository(java.util.List.of());
-        }
-    }
 
     @org.springframework.beans.factory.annotation.Autowired
     private TaskRepository taskRepository;
@@ -85,8 +73,19 @@ class TaskUpdatedEventHandlerIntegrationTest {
 
     private KafkaTemplate<String, TaskUpdatedEvent> producer;
 
+    @org.springframework.beans.factory.annotation.Autowired
+    private JdbcTemplate jdbcTemplate;
+
+    private PgCleanup cleanup;
+
+    @AfterEach
+    void cleanUpRows() {
+        cleanup.restore();
+    }
+
     @BeforeEach
     void setUp() {
+        cleanup = new PgCleanup(jdbcTemplate);
         Map<String, Object> producerProps = new HashMap<>();
         producerProps.put(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, bootstrapServers);
         producerProps.put(ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG, StringSerializer.class);
@@ -101,9 +100,11 @@ class TaskUpdatedEventHandlerIntegrationTest {
         return Timestamp.newBuilder().setSeconds(instant.getEpochSecond()).setNanos(instant.getNano()).build();
     }
 
+    private static final UUID TENANT_ID = UUID.randomUUID();
+
     private static Task buildTask(UUID id, TaskStatus status, LocalDateTime updatedAt) {
         return Task.builder()
-                .id(id).ownerId("owner").status(status).isReady(true)
+                .id(id).tenantId(TENANT_ID).status(status).isReady(true)
                 .blockingCount(0).openConstraintCount(0)
                 .createdAt(BASE_TIME).updatedAt(updatedAt)
                 .build();
@@ -127,11 +128,12 @@ class TaskUpdatedEventHandlerIntegrationTest {
     @Test
     void validNewerEvent_appliesTheStatusChangeAndStampsUpdatedAt() throws InterruptedException {
         UUID taskId = UUID.randomUUID();
-        ((InMemoryTaskRepository) taskRepository).save(buildTask(taskId, TaskStatus.PENDING, BASE_TIME));
+        taskRepository.save(buildTask(taskId, TaskStatus.PENDING, BASE_TIME));
         LocalDateTime newerTime = BASE_TIME.plusMinutes(10);
 
         producer.send(TOPIC, taskId.toString(), TaskUpdatedEvent.newBuilder()
                 .setTaskId(taskId.toString())
+                .setTenantId(TENANT_ID.toString())
                 .setStatus(com.rnd.inbox.event.TaskStatus.TASK_STATUS_IN_PROGRESS)
                 .setUpdatedAt(timestamp(newerTime))
                 .build());
@@ -147,15 +149,16 @@ class TaskUpdatedEventHandlerIntegrationTest {
     void transitioningToDone_releasesDependents() throws InterruptedException {
         UUID blocker = UUID.randomUUID();
         UUID dependent = UUID.randomUUID();
-        ((InMemoryTaskRepository) taskRepository).save(buildTask(blocker, TaskStatus.ACTIVE, BASE_TIME));
-        ((InMemoryTaskRepository) taskRepository).save(Task.builder()
-                .id(dependent).ownerId("owner").status(TaskStatus.PENDING)
+        taskRepository.save(buildTask(blocker, TaskStatus.ACTIVE, BASE_TIME));
+        taskRepository.save(Task.builder()
+                .id(dependent).tenantId(TENANT_ID).status(TaskStatus.PENDING)
                 .isReady(false).blockingCount(1).openConstraintCount(0)
                 .createdAt(BASE_TIME).updatedAt(BASE_TIME).build());
-        ((InMemoryTaskDependencyRepository) taskDependencyRepository).save(new TaskDependency(dependent, blocker));
+        taskDependencyRepository.save(new TaskDependency(dependent, blocker));
 
         producer.send(TOPIC, blocker.toString(), TaskUpdatedEvent.newBuilder()
                 .setTaskId(blocker.toString())
+                .setTenantId(TENANT_ID.toString())
                 .setStatus(com.rnd.inbox.event.TaskStatus.TASK_STATUS_DONE)
                 .setUpdatedAt(timestamp(BASE_TIME.plusMinutes(5)))
                 .build());
@@ -169,10 +172,11 @@ class TaskUpdatedEventHandlerIntegrationTest {
     @Test
     void staleEvent_withAnOlderTimestamp_isANoOp() throws InterruptedException {
         UUID taskId = UUID.randomUUID();
-        ((InMemoryTaskRepository) taskRepository).save(buildTask(taskId, TaskStatus.ACTIVE, BASE_TIME));
+        taskRepository.save(buildTask(taskId, TaskStatus.ACTIVE, BASE_TIME));
 
         producer.send(TOPIC, taskId.toString(), TaskUpdatedEvent.newBuilder()
                 .setTaskId(taskId.toString())
+                .setTenantId(TENANT_ID.toString())
                 .setStatus(com.rnd.inbox.event.TaskStatus.TASK_STATUS_DONE)
                 .setUpdatedAt(timestamp(BASE_TIME.minusMinutes(1))) // older than stored
                 .build());
@@ -199,6 +203,7 @@ class TaskUpdatedEventHandlerIntegrationTest {
 
         producer.send(TOPIC, "bad-key", TaskUpdatedEvent.newBuilder()
                 .setTaskId("not-a-valid-uuid") // fails NonRetryableEventException's UUID parse
+                .setTenantId(TENANT_ID.toString())
                 .setStatus(com.rnd.inbox.event.TaskStatus.TASK_STATUS_DONE)
                 .setUpdatedAt(timestamp(BASE_TIME))
                 .build());
@@ -219,6 +224,7 @@ class TaskUpdatedEventHandlerIntegrationTest {
 
         producer.send(TOPIC, taskId.toString(), TaskUpdatedEvent.newBuilder()
                 .setTaskId(taskId.toString())
+                .setTenantId(TENANT_ID.toString())
                 .setStatus(com.rnd.inbox.event.TaskStatus.TASK_STATUS_IN_PROGRESS)
                 .setUpdatedAt(timestamp(BASE_TIME))
                 .build());
@@ -228,7 +234,7 @@ class TaskUpdatedEventHandlerIntegrationTest {
         // @271's interim retry-based design is meant to tolerate (see TaskUpdatedEventHandler's
         // class Javadoc / the implementation plan's flagged concern about this window's length).
         Thread.sleep(500);
-        ((InMemoryTaskRepository) taskRepository).save(buildTask(taskId, TaskStatus.PENDING, BASE_TIME.minusMinutes(1)));
+        taskRepository.save(buildTask(taskId, TaskStatus.PENDING, BASE_TIME.minusMinutes(1)));
 
         await().atMost(Duration.ofSeconds(20)).alias("a later retry attempt to succeed now that the task exists").until(() ->
                 taskRepository.findById(taskId).map(t -> t.getStatus() == TaskStatus.ACTIVE).orElse(false));
@@ -253,6 +259,7 @@ class TaskUpdatedEventHandlerIntegrationTest {
         Instant beforeSend = Instant.now();
         producer.send(TOPIC, taskId.toString(), TaskUpdatedEvent.newBuilder()
                 .setTaskId(taskId.toString())
+                .setTenantId(TENANT_ID.toString())
                 .setStatus(com.rnd.inbox.event.TaskStatus.TASK_STATUS_IN_PROGRESS)
                 .setUpdatedAt(timestamp(BASE_TIME))
                 .build());

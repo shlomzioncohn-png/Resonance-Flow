@@ -1,4 +1,5 @@
-"""Internal models for the basic task-field extraction stage (#350).
+"""Internal models for the extraction stage: the basic task fields (#350),
+the classification (#351) and the effort estimate (#352).
 
 These are *not* contracts. `TaskCreationRequested` (mind.contracts) is the
 outbound contract; the models here describe the narrower shape we ask an LLM
@@ -6,8 +7,19 @@ for, before the locally-known fields are merged in.
 """
 
 import logging
+import math
+import re
+from enum import StrEnum
+from typing import Self
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationInfo, field_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    ValidationInfo,
+    field_validator,
+    model_validator,
+)
 
 from mind.contracts.task_enums import RoleContext, TaskTier
 
@@ -25,15 +37,98 @@ _NULL_PLACEHOLDERS = frozenset(
     {"", "-", "--", "n/a", "na", "none", "null", "nil", "unknown", "tbd", "not specified"}
 )
 
+
+class EffortBasis(StrEnum):
+    """Where an effort estimate came from. Internal: it never reaches Inbox.
+
+    The model reports which kind of evidence it had, and the confidence the
+    contract carries is derived from that here, rather than being a number the
+    model writes about itself.
+    """
+
+    # The content says how long it takes: "should take about an hour".
+    STATED = "STATED"
+    # The content says what the work is, and the duration follows from it:
+    # "fix the typo on the login page".
+    INFERRED = "INFERRED"
+
+
 # What each categorical field may contain, written as the model must write it.
 # Derived from the enums rather than listed again, so a value Inbox adds shows
 # up here without anyone remembering to copy it.
 _PERMITTED_VALUES: dict[str, frozenset[str]] = {
     "tier": frozenset(member.value for member in TaskTier),
     "role_context": frozenset(member.value for member in RoleContext),
+    "effort_estimate_basis": frozenset(member.value for member in EffortBasis),
 }
 
 URGENCY_RANGE = range(1, 6)
+
+# A month of working time. The product works in short free windows, so a longer
+# estimate is a model error or a project, not a task. Far below the int32 that
+# effort_estimate_minutes is on the wire.
+MAX_EFFORT_MINUTES = 9600
+
+# ASCII digits only, spelled out rather than \d: \d also matches "٣" and other
+# scripts' digits, which float() would then happily read.
+_PLAIN_NUMBER = re.compile(r"-?[0-9]+(\.[0-9]+)?")
+
+
+def _whole_number(
+    field: str, value: object, written: object, round_fractions: bool = False
+) -> int | None:
+    """Read a whole number however the model wrote it, or log and give up.
+
+    Shared by urgency and the effort estimate, so that what counts as "a
+    whole number" is decided in one place and cannot drift between them.
+    """
+
+    # A quoted number is read as the number it quotes, and only when it is
+    # written the plain way: an optional minus, decimal digits, an optional
+    # decimal point. Python's own float() is more lenient than that — it takes
+    # "0_3", "1e0" and "nan" — and that leniency is not ours to inherit.
+    if isinstance(value, str) and _PLAIN_NUMBER.fullmatch(value):
+        value = float(value)
+
+    # bool is an int in Python, and `True` would read as 1.
+    if isinstance(value, bool):
+        number = None
+    elif isinstance(value, int):
+        number = value
+    # What decides is the value, not its spelling: 3.0 is three. A fraction
+    # is the caller's call — 3.5 urgency sits between two answers, 45.5
+    # minutes does not. Halves go up, as "rounded" reads: Python's round()
+    # sends them to the even neighbour, so 0.5 would become 0 and 2.5 would
+    # become 2. isfinite() comes first because floor() raises on inf and nan
+    # rather than returning something to reject.
+    elif isinstance(value, float) and math.isfinite(value) and (
+        round_fractions or value.is_integer()
+    ):
+        number = math.floor(value + 0.5)
+    else:
+        number = None
+
+    if number is None:
+        logger.warning(
+            "extraction: %s came back as %r, which is not a whole number", field, written
+        )
+    return number
+
+
+def _usable_minutes(value: object, written: object) -> int | None:
+    """A whole number of minutes from 1 to MAX_EFFORT_MINUTES, or None."""
+
+    number = _whole_number("effort_estimate_minutes", value, written, round_fractions=True)
+    if number is None or 0 < number <= MAX_EFFORT_MINUTES:
+        return number
+
+    logger.warning(
+        "extraction: effort_estimate_minutes came back as %r, which is not a number of "
+        "minutes from 1 to %d; recording it as null",
+        written,
+        MAX_EFFORT_MINUTES,
+    )
+    return None
 
 
 def _usable_urgency(value: object, written: object = None) -> int | None:
@@ -47,20 +142,8 @@ def _usable_urgency(value: object, written: object = None) -> int | None:
     inflates every downstream ranking.
     """
 
-    # bool is an int in Python, and `True` as an urgency would read as 1.
-    if isinstance(value, bool):
-        number = None
-    elif isinstance(value, int):
-        number = value
-    elif isinstance(value, str) and value.lstrip("-").isdigit():
-        number = int(value)
-    else:
-        number = None
-
+    number = _whole_number("urgency", value, written)
     if number is None:
-        logger.warning(
-            "extraction: urgency came back as %r, which is not a whole number", written
-        )
         return None
 
     if number in URGENCY_RANGE:
@@ -77,7 +160,10 @@ def _usable_urgency(value: object, written: object = None) -> int | None:
 
 
 class ClassificationFields(BaseModel):
-    """What kind of task this is: tier, urgency and role_context (#351).
+    """What kind of task this is and how long it takes (#351, #352).
+
+    tier, urgency and role_context (#351), and the effort estimate with its
+    basis (#352).
 
     Its own model rather than three more fields on `ExtractedFields`. They are
     asked for in the same call today, because the classification rests on the
@@ -101,7 +187,21 @@ class ClassificationFields(BaseModel):
     # at the edge and repaired rather than travelling any further.
     urgency: int | None = Field(default=None, ge=1, le=5)
 
-    @field_validator("tier", "role_context", "urgency", mode="before")
+    # How long the work takes (#352), and what that rests on. Asked for in
+    # the same call and under the same switch as the three above. The basis
+    # is ours, not the contract's: assembly turns it into the separate
+    # effort_estimate_confidence, and the overall confidence is not touched.
+    effort_estimate_minutes: int | None = Field(default=None, gt=0)
+    effort_estimate_basis: EffortBasis | None = None
+
+    @field_validator(
+        "tier",
+        "role_context",
+        "urgency",
+        "effort_estimate_minutes",
+        "effort_estimate_basis",
+        mode="before",
+    )
     @classmethod
     def only_a_usable_answer_survives(cls, value: object, info: ValidationInfo) -> object:
         """Clean up how the answer was written, and drop what cannot be used.
@@ -117,7 +217,7 @@ class ClassificationFields(BaseModel):
            from a model that honestly declined.
 
         Step 4 is the one that departs from `parsing.py`'s line of never
-        salvaging content, and it does so for a specific reason. These three
+        salvaging content, and it does so for a specific reason. These
         fields are optional by design: the prompt tells the model that `null`
         is the correct answer when the content is unclear, and a model that
         wrote `critical` has demonstrated exactly that. Sending it back for
@@ -145,6 +245,8 @@ class ClassificationFields(BaseModel):
 
         if field == "urgency":
             return _usable_urgency(value, written)
+        if field == "effort_estimate_minutes":
+            return _usable_minutes(value, written)
 
         if not isinstance(value, str):
             # A list, an object, a number. The guard above skips the cleanup
@@ -173,6 +275,39 @@ class ClassificationFields(BaseModel):
             sorted(permitted),
         )
         return None
+
+    @model_validator(mode="after")
+    def the_estimate_and_its_basis_travel_together(self) -> Self:
+        """Minutes and basis are one answer, so half of one is settled here.
+
+        Runs after the field validators, so "usable" has already been decided
+        for each on its own; this only looks at the pair.
+
+        - A basis with no minutes is dropped: nothing was estimated.
+        - Minutes with no basis are kept as INFERRED, the weaker reading. Not
+          a repair round, which would risk the whole item over an optional
+          field, and not a null, which would discard an answer the model did
+          give. INFERRED reaches Inbox as low confidence.
+        """
+
+        minutes, basis = self.effort_estimate_minutes, self.effort_estimate_basis
+
+        if basis is not None and minutes is None:
+            logger.warning(
+                "extraction: effort_estimate_basis came back as %s with no usable minutes; "
+                "recording it as null",
+                basis.value,
+            )
+            self.effort_estimate_basis = None
+        elif minutes is not None and basis is None:
+            logger.warning(
+                "extraction: effort_estimate_minutes came back as %d with no usable basis; "
+                "recording the basis as INFERRED, the weaker reading",
+                minutes,
+            )
+            self.effort_estimate_basis = EffortBasis.INFERRED
+
+        return self
 
 
 class ExtractedFields(BaseModel):
@@ -237,7 +372,7 @@ class ExtractedFields(BaseModel):
         return value
 
 class ExtractedFieldsWithClassification(ExtractedFields, ClassificationFields):
-    """The seven fields asked for when classification is switched on (#351).
+    """Every field asked for when classification is switched on (#351, #352).
 
     Two parents and not one copied field definition: anything that changes in
     either model changes here with it, which is what stops the switched-off

@@ -11,13 +11,16 @@ Vectors, semantic search, duplicate/related-task detection.
 ## What's here
 
 ```
-__init__.py          public interface -- embed()/embed_batch() (+ async), SearchResult, VectorStore, nearest_tasks()
+__init__.py          public interface -- embed()/embed_batch() (+ async), SearchResult, VectorStore, nearest_tasks(), resolve_dependency_targets()
 embeddings.py         embed() family -- the real model
 base.py               VectorStore abstract contract + SearchResult
 pgvector_store.py     the ONLY file that knows Postgres/pgvector
 index_consumer.py     #470 -- Kafka task.{created,updated,completed} handlers
 index_consumer_runner.py  #470 -- the process: python -m mind.embeddings.index_consumer_runner
 search.py             nearest_tasks() -- the shared embed()+search() primitive behind #471/#245
+dependency_resolution.py  #245 -- resolve_dependency_targets(): free-text dependency mentions -> ranked candidate task_ids
+duplicate_detection.py  #471 -- find_duplicate(): is a candidate task a duplicate of one already indexed
+related_tasks.py      #472 -- find_related(): live semantic related-task search, exposed to other teams via #450
 loader.py             fetches + verifies the real FUNSD manifest slice
 ingest.py             loader -> embed_batch_async -> upsert
 verify.py             table row count vs. manifest record count
@@ -30,6 +33,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from mind.config import get_settings
 from mind.embeddings.pgvector_store import PgVectorStore
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -95,7 +99,9 @@ from mind.embeddings.pgvector_store import PgVectorStore
 
 store = PgVectorStore(get_settings().vector_store)
 
-vector = await embed_async(task_text(task.title, task.description))  # is_query=False (default) for indexing
+vector = await embed_async(
+    task_text(task.title, task.description)
+)  # is_query=False (default) for indexing
 await store.upsert(task.id, vector)
 
 similar = await store.search(vector, k=5)  # best match first
@@ -114,9 +120,160 @@ await store.mark_completed(task_id)
 await store.mark_incomplete(task_id)  # e.g. a DONE task got reopened
 ```
 
-`nearest_tasks(store, text, *, k)` (`search.py`) is the shared primitive behind #471 and #245 -- `embed(text)` then `store.search(vector, k=k)`, no threshold.
+`nearest_tasks(store, text, *, k, is_query=False, exclude_completed=False)` (`search.py`) is the shared primitive behind #471 and #245 -- `embed(text, is_query=is_query)` then `store.search(vector, k=k, exclude_completed=exclude_completed)`, no threshold. `is_query=True` for #245 (mention vs. passage); `False` for #471's symmetric comparison.
+
+`resolve_dependency_targets(store, references, *, k=5, threshold=None, is_query=True)` (`dependency_resolution.py`) is #245/#244: a `list[str]` of free-text dependency mentions in, one ranked candidate list out per string. **"No match" is the default**: `threshold=None` reads `Settings.dependency_match_threshold` and filters, same as #244's own call. Pass `threshold=0.0` explicitly for the raw, unfiltered ranked list (Yonit's original #245 use case). Always requests `exclude_completed=True` from the store (index_consumer.py never deletes, only flips the flag -- a DONE task must never come back as a live match), regardless of `threshold`. The exclusion happens inside the SQL query itself (`PgVectorStore`'s `WHERE NOT is_completed`), not as a Python filter afterward -- otherwise a small `k` (e.g. `find_duplicate`'s `k=1`) could fetch only completed rows and be left with nothing, even with a real open match just outside that window:
+
+```python
+from mind.embeddings import resolve_dependency_targets
+
+candidates = await resolve_dependency_targets(
+    store, ["the DB upgrade"]
+)  # filtered, [[SearchResult(...), ...]]
+candidates = await resolve_dependency_targets(
+    store, ["the DB upgrade"], threshold=0.0
+)  # raw, unfiltered
+```
+
+`find_duplicate(store, title, description, *, threshold=None)` (`duplicate_detection.py`, #471) is the same pattern: `threshold=None` reads `Settings.duplicate_similarity_threshold`.
+
+`store.get_vector(task_id)` returns the embedding already stored for a task_id (or `None` if it isn't indexed), for callers that already have a task in the system and don't want to re-embed its text. `store.search(..., exclude_task_id=...)` excludes a single task_id from the results, the same SQL-level way `exclude_completed` does -- needed whenever the query vector IS a stored row's own vector, or that row matches itself first.
+
+`find_related(store, task_id, *, k=5, threshold=None)` (`related_tasks.py`, #472) is Mind's one capability called from outside the service, through R4's HTTP layer (#450) -- see "Serving this over HTTP" below for the endpoint. Up to k tasks related to `task_id`, ranked, `task_id` itself always excluded from its own results. `threshold=None` reads `Settings.related_task_threshold` -- a **lower, separate** bar from `duplicate_similarity_threshold`: the same pair can be related without being a duplicate (e.g. a prod and a staging deploy of the same change), so reusing the duplicate threshold here would miss exactly that case. Unlike `resolve_dependency_targets()`/`find_duplicate()`, a completed task is **not** excluded -- relatedness is topical context for display (what Lens/Inbox show alongside a task), not a live blocking check, so a finished related task is still useful context. A `task_id` with no embedding yet, an index with nothing else in it, and no candidate clearing the threshold all return `[]`, never an error:
+
+```python
+from mind.embeddings import find_related
+
+related = await find_related(store, "task-123")  # [] if nothing qualifies
+```
+
+## Threshold calibration
+
+`benchmarks/threshold_calibration.py` picks both thresholds from real similarity scores, not a guess. Method: a 21-task pool (`benchmarks/threshold_calibration_tasks.json`, hand-authored -- kept separate from `eval/real_slice`/`eval/datasets` on purpose, to avoid overlapping with R2/Michal's own evaluation data), 26 test sentences per calibration: 12 true matches (including deliberately hard near-miss pairs -- `prod` vs `staging`, `v2.3` vs `v2.4`, `login` vs `logout` crashes) and 14 true non-matches (including a couple that deliberately share vocabulary with a real task without being a duplicate of it -- `upgrading the office wifi router`, `Write a guide for new hires on our DB setup`), scored against the real store.
+
+The threshold is chosen to separate real matches from real non-matches only. A close sibling that a matched case outranks (e.g. login-bug beating logout-bug into second place) is a ranking question, not a threshold question -- the real answer is still returned, still correct, and it's still above the bar; penalizing the threshold for that isn't right. An earlier version of this script did exactly that, which pushed `dependency_match_threshold` up to 0.754 and silently broke 2 genuine matches (API docs, prod deploy) beyond the single one (security audit) this README used to document. The sweep now scores `expected_similarity` (true positives) only against the best-other score of true non-match cases (true negatives) -- not against a matched case's runner-up -- and picks the midpoint of whichever gap between adjacent observed values misclassifies the fewest cases, not a value snapped onto one example. Re-run anytime: `python -m benchmarks.threshold_calibration`.
+
+**`duplicate_similarity_threshold` = 0.761** (`is_query=False`, full task vs. full task):
+
+| text | expected | exp. sim | best other | other sim |
+|---|---|---|---|---|
+| Move the prod DB to the newer version | task-db-upgrade | 0.804 | task-deploy-staging | 0.692 |
+| Order food for the company offsite | task-catering | 0.801 | task-offboard-employee | 0.642 |
+| Set up accounts for the new engineer joining | task-onboard-hire | 0.859 | task-ui-redesign | 0.613 |
+| Review access logs across services this quarter | task-security-audit | 0.805 | task-perf-review | 0.640 |
+| Investigate the urgent support ticket from a customer | task-customer-escalation | 0.841 | task-load-test | 0.603 |
+| Document the new endpoints from this sprint | task-api-docs | 0.855 | task-release-notes | 0.638 |
+| Push the DB migration out to prod | task-deploy-prod | **0.712 (below the chosen threshold -- a false negative)** | task-db-backup | 0.749 |
+| Push the DB migration out to staging | task-deploy-staging | 0.828 | task-db-backup | 0.756 |
+| Publish the 2.3 release notes | task-release-v23 | 0.881 | task-release-v24 | 0.843 |
+| Publish the 2.4 release notes | task-release-v24 | 0.886 | task-release-v23 | 0.848 |
+| App crashes when logging in on phones | task-login-bug | 0.867 | task-logout-bug | 0.829 |
+| App crashes when logging out on phones | task-logout-bug | 0.869 | task-login-bug | 0.833 |
+| Water the office plants | (none) | - | task-api-docs | 0.533 |
+| Book a conference room for Friday | (none) | - | task-catering | 0.598 |
+| Fix the coffee machine in the break room | (none) | - | task-catering | 0.582 |
+| File this quarter's tax paperwork | (none) | - | task-budget-forecast | 0.678 |
+| Replace the printer on the third floor | (none) | - | task-api-docs | 0.579 |
+| Book the dentist appointment for next week | (none) | - | task-load-test | 0.584 |
+| Plan the company holiday party | (none) | - | task-catering | 0.720 |
+| Book flights for the upcoming conference | (none) | - | task-budget-forecast | 0.613 |
+| Review expense reports from last month's travel | (none) | - | task-perf-review | 0.647 |
+| Clean out the supply closet | (none) | - | task-offboard-employee | 0.617 |
+| Update the office holiday calendar | (none) | - | task-api-docs | 0.664 |
+| Renovate the parking garage entrance | (none) | - | task-ui-redesign | 0.561 |
+| Upgrade the office wifi router firmware | (none) | - | task-api-docs | 0.649 |
+| Write a guide for new hires on our DB setup | (none) | - | task-onboard-hire | 0.696 |
+
+**`dependency_match_threshold` = 0.666** (`is_query=True`, mention vs. passage):
+
+| text | expected | exp. sim | best other | other sim |
+|---|---|---|---|---|
+| the DB upgrade | task-db-upgrade | 0.790 | task-deploy-staging | 0.667 |
+| team offsite food | task-catering | 0.757 | task-offboard-employee | 0.527 |
+| onboarding the new hire | task-onboard-hire | 0.803 | task-offboard-employee | 0.564 |
+| security audit | task-security-audit | **0.650 (below the chosen threshold -- a false negative)** | task-offboard-employee | 0.510 |
+| customer escalation | task-customer-escalation | 0.754 | task-offboard-employee | 0.559 |
+| API docs | task-api-docs | 0.674 | task-release-v23 | 0.517 |
+| prod deploy | task-deploy-prod | 0.681 | task-deploy-staging | 0.670 |
+| staging deploy | task-deploy-staging | 0.848 | task-deploy-prod | 0.738 |
+| v2.3 notes | task-release-v23 | 0.768 | task-release-v24 | 0.707 |
+| v2.4 notes | task-release-v24 | 0.772 | task-release-v23 | 0.717 |
+| login crash | task-login-bug | 0.834 | task-logout-bug | 0.797 |
+| logout crash | task-logout-bug | 0.866 | task-login-bug | 0.744 |
+| the weather forecast | (none) | - | task-budget-forecast | 0.580 |
+| lunch plans for today | (none) | - | task-catering | 0.634 |
+| fixing the office coffee machine | (none) | - | task-offboard-employee | 0.497 |
+| quarterly tax filing | (none) | - | task-perf-review | 0.656 |
+| replacing the office printer | (none) | - | task-api-docs | 0.539 |
+| scheduling the dentist appointment | (none) | - | task-load-test | 0.536 |
+| the company holiday party | (none) | - | task-catering | 0.580 |
+| booking flights for the conference | (none) | - | task-budget-forecast | 0.575 |
+| reviewing expense reports for travel | (none) | - | task-perf-review | 0.645 |
+| organizing the supply closet | (none) | - | task-budget-forecast | 0.572 |
+| the new company holiday calendar | (none) | - | task-load-test | 0.550 |
+| the parking garage renovation | (none) | - | task-offboard-employee | 0.530 |
+| upgrading the office wifi router | (none) | - | task-api-docs | 0.596 |
+| writing the team's weekly newsletter | (none) | - | task-standup-notes | 0.658 |
+
+**`related_task_threshold` = 0.711** (task-to-task, via each task's own stored vector -- not fresh text):
+
+Unlike the two tables above, both sides here are real task_ids from the 21-task pool, compared task-to-task (matching how `find_related()` actually queries, via `get_vector()`). The "related" positives are #471's own hard-pair siblings -- the issue names this exact case (a prod deploy and a staging deploy of the same change) as related, not duplicate -- plus db-upgrade/db-backup (same DB-maintenance theme, clearly not the same task). Every other task in the pool has no designed relation, so its best-other score is this calibration's noise floor.
+
+| task | expected related | exp. sim | best other | other sim |
+|---|---|---|---|---|
+| task-deploy-prod | task-deploy-staging | 0.919 | task-db-backup | 0.755 |
+| task-deploy-staging | task-deploy-prod | 0.919 | task-db-upgrade | 0.720 |
+| task-release-v23 | task-release-v24 | 0.961 | task-release-notes | 0.854 |
+| task-release-v24 | task-release-v23 | 0.961 | task-release-notes | 0.852 |
+| task-login-bug | task-logout-bug | 0.938 | task-customer-escalation | 0.563 |
+| task-logout-bug | task-login-bug | 0.938 | task-customer-escalation | 0.539 |
+| task-db-upgrade | task-db-backup | 0.762 | task-deploy-prod | 0.742 |
+| task-db-backup | task-db-upgrade | 0.762 | task-deploy-prod | 0.755 |
+| task-catering | (none) | - | task-onboard-hire | 0.589 |
+| task-standup-notes | (none) | - | task-release-notes | 0.638 |
+| task-onboard-hire | (none) | - | task-offboard-employee | 0.616 |
+| task-offboard-employee | (none) | - | task-onboard-hire | 0.616 |
+| task-security-audit | (none) | - | task-perf-review | 0.633 |
+| task-vendor-contract | (none) | - | task-api-docs | 0.603 |
+| task-customer-escalation | (none) | - | task-load-test | 0.588 |
+| task-perf-review | (none) | - | task-security-audit | 0.633 |
+| task-budget-forecast | (none) | - | task-release-notes | 0.659 |
+| task-ui-redesign | (none) | - | task-api-docs | 0.613 |
+| task-api-docs | (none) | - | task-release-notes | 0.620 |
+| task-load-test | (none) | - | task-customer-escalation | 0.588 |
+
+`task-release-notes` was deliberately left out of the negative side of this table -- a real run showed it scoring 0.85+ against both v2.3 and v2.4's release notes, i.e. it genuinely *is* related to both ("release notes" generalizes "v2.3 release notes"). Labeling it a negative would have been a wrong label, the same mistake this section's method now avoids for the other two thresholds.
+
+**Real findings, not smoothed over:**
+- Each calibration has exactly one false negative in this sample, and neither is a threshold problem:
+  - **Duplicate:** task-deploy-prod (0.712) scores below 0.761, but raising or lowering the threshold doesn't fix it -- `find_duplicate`'s own `k=1` lookup would never even retrieve it: task-db-backup outranks it (0.749 vs 0.712). This is a ranking confusion between genuinely similar siblings, independent of where the threshold sits.
+  - **Dependency:** "security audit" (0.650) is a genuinely low-similarity paraphrase, not a methodology artifact -- lowering the threshold to catch it would let in "writing the team's weekly newsletter" (0.658), a true non-match that happens to share vocabulary with task-standup-notes.
+  - **Related:** none -- this table separates cleanly (lowest positive 0.762 vs. highest negative 0.659, once task-release-notes is excluded for the reason above).
+- `prod`/`staging`, `v2.3`/`v2.4`, and `login`/`logout` pairs still score within ~0.03-0.06 of each other. This no longer affects the threshold itself (a correct answer outranking its own sibling isn't penalized -- see above), but a consumer that needs that exact distinction should still not rely on similarity alone (e.g. exact substring/number matching as a second check).
+
+**Known limitation:** chosen on 21 hand-authored synthetic tasks (20 cases for the related-task calibration, 26 synthetic test sentences each for the other two), not real production data. Must be re-validated once real tasks/mentions exist (week 8) -- re-run the same script against real data without changing the method.
+
+## #472: related-task search latency
+
+`benchmarks/related_tasks_benchmark.py` measures `find_related()` end to end (`get_vector()` + `search()`, not just raw `search()` -- #87's `vector_search_benchmark.py` already covers that alone), twice:
+
+- **At the order of magnitude this repo actually has real data for today** (the same 21-task pool above -- the real `task_embeddings` table has 0 rows in a fresh local dev environment; see "Known limitations" below): **p50 14.07ms, p95 20.41ms** (100 queries).
+- **At 10,000+ synthetic filler rows** (same approach as #87), to check the path still clears the target at the scale #469's week-8 proof is about -- **not** a claim about current production volume: **p50 18.84ms, p95 23.76ms**, comfortably under the 300ms target.
+
+Re-run: `python -m benchmarks.related_tasks_benchmark`.
+
+## Serving this over HTTP (#450, R4)
+
+Agreed with R4 and wired into `api/v1/router.py` (`src/mind/contracts/related_tasks.py` for the response model) -- see `docs/API.md` for the full contract:
+
+```
+GET /v1/tasks/{task_id}/related
+-> 200 {"related": [{"task_id": str, "similarity": float}, ...]}
+```
+
+`related: []` covers every "nothing to return" case alike -- an unindexed `task_id`, an index with nothing else in it, or no candidate clearing the threshold -- matching `find_related()`'s own contract (see above). Not a 404: Mind doesn't own the canonical task registry, so "unknown to Mind's index" isn't the same claim as "doesn't exist" -- a clean empty result, not an error, for all of them. `threshold` isn't exposed as a request param (R4's call); `k` could be added later as an optional query param without breaking anything.
 
 ## Known limitations (flag these in review)
 
-- `Settings.duplicate_similarity_threshold` is an untuned placeholder -- no caller applies it yet.
 - Real-data coverage is just the 2-document FUNSD slice (PR #141) -- enough to validate pipeline shape, not recall quality.
+- The real `task_embeddings` table has 0 rows in a fresh local dev environment -- #472's latency numbers at "the current real order of magnitude" use the 21-task calibration pool as a stand-in for that order of magnitude, not an actual production measurement.

@@ -28,7 +28,7 @@ export interface ApiTask {
   priority?: string;
   /** Estimated effort in minutes */
   effortEstimate: number;
-  /** ISO-8601 datetime string */
+  /** Already formatted by Inbox, Israel time, e.g. "12/10/2026" - shown as-is, never parsed */
   dueDate?: string;
   /** Display names. Missing for real Inbox tasks: Inbox only sends ids so far. */
   owner?: string;
@@ -72,7 +72,7 @@ export interface SelectedTask {
   description?: string;
   /** Minutes */
   effortEstimate: number;
-  /** ISO-8601 datetime string */
+  /** Already formatted by Inbox, Israel time, e.g. "12/10/2026" - shown as-is, never parsed */
   dueDate?: string;
   /** 0-1, higher is a better pick */
   selectionScore: number;

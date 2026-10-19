@@ -227,11 +227,18 @@ class GeminiProvider:
         usage = payload.get("usageMetadata")
         usage = usage if isinstance(usage, dict) else {}
 
+        # Thinking is billed at the output price, so it belongs in the
+        # completion count. Not every model honours thinkingBudget 0:
+        # gemini-3.8-flash thought 237 tokens for a one-word answer. With no
+        # answer count the total is unknown, not just the thinking: None.
+        answer_tokens = as_int(usage.get("candidatesTokenCount"))
+        thought_tokens = as_int(usage.get("thoughtsTokenCount")) or 0
+
         return LLMResponse(
             text=text,
             model=str(payload.get("modelVersion") or self._settings.model),
             prompt_tokens=as_int(usage.get("promptTokenCount")),
-            completion_tokens=as_int(usage.get("candidatesTokenCount")),
+            completion_tokens=None if answer_tokens is None else answer_tokens + thought_tokens,
         )
 
 

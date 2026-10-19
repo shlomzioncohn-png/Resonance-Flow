@@ -30,7 +30,7 @@ from mind.extraction.providers.base import (
     LLMResponse,
 )
 from mind.extraction.providers.pricing import estimate_cost
-from mind.observability.tracking import record_call
+from mind.observability.tracking import CallKind, CallStatus, record_call
 
 logger = logging.getLogger("mind.extraction")
 
@@ -60,7 +60,8 @@ class ExtractionItem:
 
 @dataclass(frozen=True)
 class ExtractionSuccess:
-    """A validated proposal, ready for classification (#351) and effort (#352)."""
+    """A validated proposal: the basic fields, plus the classification and the
+    effort estimate (#351, #352) when the switch asked for them."""
 
     fields: ExtractedFields
     source_type: SourceType
@@ -122,8 +123,8 @@ class BasicExtractor:
         """
 
         # What we ask for and what we accept are the same decision, read
-        # from one place: a prompt asking for seven fields and a schema
-        # accepting four would fail every answer it received.
+        # from one place: a prompt asking for the classification and a
+        # schema without it would fail every answer it received.
         system = system_prompt(self._config.classify)
         schema = response_model(self._config.classify)
         user = extraction_prompt(source_type, text)
@@ -226,34 +227,38 @@ class BasicExtractor:
             # before raising. Recording only the successes would leave the
             # latency figures describing a better service than this one.
             #
-            # There is no answer to read a model id off, so the provider
-            # names itself, and the cost is 0.0 because no usage was
-            # reported -- not because the call was known to be free.
+            # Recorded under the model id the provider sends, like a success
+            # below, so a model's failures and successes are one row of the
+            # summary -- and its p95 includes the slow failures. The cost is
+            # None: no usage was reported, so it is unknown, not free.
             record_call(
-                model_name=self._provider.name,
+                model_name=self._provider.model,
                 duration_ms=(time.perf_counter() - started) * 1000,
-                cost=0.0,
+                cost=None,
+                kind=CallKind.LLM,
+                status=CallStatus.ERROR,
             )
             raise
 
         duration_ms = (time.perf_counter() - started) * 1000
-        # The model id comes off the response rather than off the provider:
-        # a benchmark comparing two DeepSeek models needs to tell them apart,
-        # and only the answer knows which one produced it.
+        # Recorded under the model id the provider sends -- the key stays
+        # stable even if the API answers an alias with a versioned id -- but
+        # priced by the id the answer reports, the model actually billed.
+        # Two configured models (a benchmark comparing two DeepSeek models)
+        # are still two rows: each provider sends its own id.
         record_call(
-            model_name=response.model or self._provider.name,
+            model_name=self._provider.model,
             duration_ms=duration_ms,
-            # `estimate_cost` returns None for an unpriced model or a provider
-            # that reported no usage, and `record_call` only takes a float, so
-            # both land here as 0.0. That flattening is a known gap: a cost
-            # report cannot currently tell "free" from "unknown", and closing
-            # it means widening ModelCallRecord, which is shared surface.
+            # None for an unpriced model or a provider that reported no
+            # usage: unknown, which the cost report keeps apart from free.
             cost=estimate_cost(
                 response.model,
                 response.prompt_tokens,
                 response.completion_tokens,
-            )
-            or 0.0,
+            ),
+            kind=CallKind.LLM,
+            prompt_tokens=response.prompt_tokens,
+            completion_tokens=response.completion_tokens,
         )
         return response
 

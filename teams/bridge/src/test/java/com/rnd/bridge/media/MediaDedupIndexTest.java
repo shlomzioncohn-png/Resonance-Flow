@@ -38,30 +38,30 @@ class MediaDedupIndexTest {
 
     @Test
     void firstSightingOfAHashIsNotADuplicateAndGetsRecorded() {
-        boolean isDuplicate = dedupIndex.checkAndRecord(RawSourceType.MEETING, "demo-tenant", "sha256:aaa");
+        boolean isDuplicate = dedupIndex.checkAndRecord(RawSourceType.ZOOM, "demo-tenant", "sha256:aaa");
 
         assertThat(isDuplicate).isFalse();
-        assertThat(fakeStorage.get("_dedup/MEETING/demo-tenant.json")).containsExactly("sha256:aaa");
+        assertThat(fakeStorage.get("_dedup/ZOOM/demo-tenant.json")).containsExactly("sha256:aaa");
     }
 
     @Test
     void secondSightingOfTheSameHashIsADuplicateAndIsNotRecordedTwice() {
-        dedupIndex.checkAndRecord(RawSourceType.MEETING, "demo-tenant", "sha256:aaa");
+        dedupIndex.checkAndRecord(RawSourceType.ZOOM, "demo-tenant", "sha256:aaa");
 
-        boolean isDuplicate = dedupIndex.checkAndRecord(RawSourceType.MEETING, "demo-tenant", "sha256:aaa");
+        boolean isDuplicate = dedupIndex.checkAndRecord(RawSourceType.ZOOM, "demo-tenant", "sha256:aaa");
 
         assertThat(isDuplicate).isTrue();
-        assertThat(fakeStorage.get("_dedup/MEETING/demo-tenant.json")).containsExactly("sha256:aaa");
+        assertThat(fakeStorage.get("_dedup/ZOOM/demo-tenant.json")).containsExactly("sha256:aaa");
     }
 
     @Test
     void differentSourceTypesAndTenantsAreTrackedSeparately() {
-        dedupIndex.checkAndRecord(RawSourceType.MEETING, "demo-tenant", "sha256:aaa");
+        dedupIndex.checkAndRecord(RawSourceType.ZOOM, "demo-tenant", "sha256:aaa");
 
         boolean isDuplicateForOtherSourceType =
                 dedupIndex.checkAndRecord(RawSourceType.SCANNED_DOC, "demo-tenant", "sha256:aaa");
         boolean isDuplicateForOtherTenant =
-                dedupIndex.checkAndRecord(RawSourceType.MEETING, "other-tenant", "sha256:aaa");
+                dedupIndex.checkAndRecord(RawSourceType.ZOOM, "other-tenant", "sha256:aaa");
 
         assertThat(isDuplicateForOtherSourceType).isFalse();
         assertThat(isDuplicateForOtherTenant).isFalse();
@@ -69,19 +69,19 @@ class MediaDedupIndexTest {
 
     @Test
     void forgetRollsBackAClaimSoARetryIsNotTreatedAsADuplicateForever() {
-        dedupIndex.checkAndRecord(RawSourceType.MEETING, "demo-tenant", "sha256:aaa");
+        dedupIndex.checkAndRecord(RawSourceType.ZOOM, "demo-tenant", "sha256:aaa");
 
-        dedupIndex.forget(RawSourceType.MEETING, "demo-tenant", "sha256:aaa");
+        dedupIndex.forget(RawSourceType.ZOOM, "demo-tenant", "sha256:aaa");
 
         boolean isDuplicateAfterForget =
-                dedupIndex.checkAndRecord(RawSourceType.MEETING, "demo-tenant", "sha256:aaa");
+                dedupIndex.checkAndRecord(RawSourceType.ZOOM, "demo-tenant", "sha256:aaa");
         assertThat(isDuplicateAfterForget).isFalse();
     }
 
     @Test
     void forgettingAHashThatWasNeverRecordedLeavesTheIndexEmpty() {
-        dedupIndex.forget(RawSourceType.MEETING, "demo-tenant", "sha256:never-seen");
+        dedupIndex.forget(RawSourceType.ZOOM, "demo-tenant", "sha256:never-seen");
 
-        assertThat(fakeStorage.get("_dedup/MEETING/demo-tenant.json")).isEmpty();
+        assertThat(fakeStorage.get("_dedup/ZOOM/demo-tenant.json")).isEmpty();
     }
 }

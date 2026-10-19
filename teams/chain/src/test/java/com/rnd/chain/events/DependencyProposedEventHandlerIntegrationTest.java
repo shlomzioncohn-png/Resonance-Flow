@@ -1,22 +1,24 @@
 package com.rnd.chain.events;
 
+import com.rnd.chain.testsupport.PgCleanup;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.Tag;
+import org.springframework.jdbc.core.JdbcTemplate;
+
 import com.rnd.chain.dto.Task;
 import com.rnd.chain.dto.TaskStatus;
 import com.rnd.chain.repository.ConstraintRepository;
 import com.rnd.chain.repository.DependencyHistoryRepository;
-import com.rnd.chain.repository.InMemoryConstraintRepository;
-import com.rnd.chain.repository.InMemoryDependencyHistoryRepository;
-import com.rnd.chain.repository.InMemoryTaskDependencyRepository;
-import com.rnd.chain.repository.InMemoryTaskRepository;
-import com.rnd.chain.repository.InMemoryTransactionRunner;
-import com.rnd.chain.repository.InMemoryUnresolvedDependencyRepository;
 import com.rnd.chain.repository.TaskDependencyRepository;
 import com.rnd.chain.repository.TaskRepository;
 import com.rnd.chain.repository.TransactionRunner;
 import com.rnd.chain.repository.UnresolvedDependencyRepository;
+import com.rnd.chain.events.SchedulingPublishListener;
+import com.rnd.chain.service.DependencyEdgeService;
+import com.rnd.chain.service.PriorityScoreService;
 import com.rnd.chain.service.SchedulingUpdateService;
+import com.rnd.chain.service.TaskCounterUpdater;
 import com.rnd.chain.service.TaskDependencyService;
-import com.rnd.chain.service.TaskEligibilityService;
 import com.rnd.chain.service.UnresolvedDependencyService;
 import com.rnd.mind.event.DependencyProposedEvent;
 import io.confluent.kafka.serializers.protobuf.KafkaProtobufSerializer;
@@ -61,9 +63,8 @@ import java.util.UUID;
 import static org.awaitility.Awaitility.await;
 import static org.mockito.Mockito.mock;
 
-@SpringBootTest(
-        classes = DependencyProposedEventHandlerIntegrationTest.TestApp.class
-)
+@Tag("postgres")
+@SpringBootTest
 @EmbeddedKafka(
         partitions = 1,
         bootstrapServersProperty = "spring.kafka.bootstrap-servers"
@@ -75,119 +76,7 @@ class DependencyProposedEventHandlerIntegrationTest {
 
     private static final String TOPIC =
             "task.dependencies.proposed";
-        private static final String ERROR_TOPIC = TOPIC + ".errors";
-@Configuration
-@EnableAutoConfiguration(exclude = {
-        DataSourceAutoConfiguration.class,
-        HibernateJpaAutoConfiguration.class,
-        JpaRepositoriesAutoConfiguration.class,
-        FlywayAutoConfiguration.class
-})
-@Import({
-        ChainProtobufKafkaConfig.class,
-        DependencyProposedEventHandler.class,
-        Fixtures.class
-})
-static class TestApp {
-}
-  
-@TestConfiguration
-    static class Fixtures {
-
-        @Bean
-        @Primary
-        TaskRepository testTaskRepository() {
-            return new InMemoryTaskRepository(List.of());
-        }
-
-        @Bean
-        @Primary
-        TaskDependencyRepository testTaskDependencyRepository() {
-            return new InMemoryTaskDependencyRepository(List.of());
-        }
-
-        @Bean
-        @Primary
-        ConstraintRepository testConstraintRepository() {
-            return new InMemoryConstraintRepository();
-        }
-
-        @Bean
-        @Primary
-        DependencyHistoryRepository testDependencyHistoryRepository() {
-            return new InMemoryDependencyHistoryRepository();
-        }
-
-        @Bean
-        @Primary
-        TransactionRunner testTransactionRunner() {
-            return new InMemoryTransactionRunner();
-        }
-        @Bean
-ChainEventProcessingTemplate chainEventProcessingTemplate() {
-    return new ChainEventProcessingTemplate(
-            new InMemoryProcessedEventStore());
-}
-
-        @Bean
-        @Primary
-        UnresolvedDependencyRepository testUnresolvedDependencyRepository() {
-            return new InMemoryUnresolvedDependencyRepository();
-        }
-
-        @Bean
-        @Primary
-        SchedulingUpdateService testSchedulingUpdateService() {
-            return mock(SchedulingUpdateService.class);
-        }
-
-        @Bean
-        @Primary
-        TaskEligibilityService testTaskEligibilityService(
-                TaskRepository taskRepository,
-                TaskDependencyRepository taskDependencyRepository,
-                SchedulingUpdateService schedulingUpdateService,
-                ConstraintRepository constraintRepository) {
-
-            return new TaskEligibilityService(
-                    taskRepository,
-                    taskDependencyRepository,
-                    schedulingUpdateService,
-                    constraintRepository);
-        }
-
-        @Bean
-        @Primary
-        TaskDependencyService testTaskDependencyService(
-                TaskRepository taskRepository,
-                TaskDependencyRepository taskDependencyRepository,
-                DependencyHistoryRepository dependencyHistoryRepository,
-                TransactionRunner transactionRunner,
-                TaskEligibilityService taskEligibilityService) {
-
-            return new TaskDependencyService(
-                    taskRepository,
-                    taskDependencyRepository,
-                    dependencyHistoryRepository,
-                    transactionRunner,
-                    Clock.systemUTC(),
-                    taskEligibilityService);
-        }
-
-        @Bean
-        @Primary
-        UnresolvedDependencyService testUnresolvedDependencyService(
-                UnresolvedDependencyRepository unresolvedDependencyRepository,
-                TaskDependencyService taskDependencyService) {
-
-            return new UnresolvedDependencyService(
-                    unresolvedDependencyRepository,
-                    taskDependencyService,
-                    Clock.systemUTC());
-        }
-    }
-
-    @org.springframework.beans.factory.annotation.Autowired
+        private static final String ERROR_TOPIC = TOPIC + ".errors";    @org.springframework.beans.factory.annotation.Autowired
     private TaskRepository taskRepository;
 
     @org.springframework.beans.factory.annotation.Value(
@@ -196,8 +85,19 @@ ChainEventProcessingTemplate chainEventProcessingTemplate() {
 
     private KafkaTemplate<String, DependencyProposedEvent> producer;
 
+    @org.springframework.beans.factory.annotation.Autowired
+    private JdbcTemplate jdbcTemplate;
+
+    private PgCleanup cleanup;
+
+    @AfterEach
+    void cleanUpRows() {
+        cleanup.restore();
+    }
+
     @BeforeEach
     void setUp() {
+        cleanup = new PgCleanup(jdbcTemplate);
 
         Map<String, Object> producerProps =
                 new HashMap<>();
@@ -224,11 +124,13 @@ ChainEventProcessingTemplate chainEventProcessingTemplate() {
                                 producerProps));
     }
 
+    private static final UUID TENANT_ID = UUID.randomUUID();
+
     private static Task buildTask(UUID id) {
 
         return Task.builder()
                 .id(id)
-                .ownerId("owner")
+                .tenantId(TENANT_ID)
                 .status(TaskStatus.PENDING)
                 .isReady(true)
                 .blockingCount(0)
@@ -249,6 +151,7 @@ ChainEventProcessingTemplate chainEventProcessingTemplate() {
 
         DependencyProposedEvent event =
                 DependencyProposedEvent.newBuilder()
+                        .setTenantId(TENANT_ID.toString())
                         .setEventId(
                                 UUID.randomUUID().toString())
                         .setTaskId(
@@ -292,6 +195,7 @@ ChainEventProcessingTemplate chainEventProcessingTemplate() {
 
         DependencyProposedEvent event =
                 DependencyProposedEvent.newBuilder()
+                        .setTenantId(TENANT_ID.toString())
                         .setEventId(eventId)
                         .setTaskId(taskId.toString())
                         .addDependencies(
@@ -357,15 +261,13 @@ void malformedEvent_goesStraightToTheErrorsTopic_neverRetried() {
             TOPIC,
             "bad-key",
             DependencyProposedEvent.newBuilder()
+                        .setTenantId(TENANT_ID.toString())
                     .setEventId(UUID.randomUUID().toString())
                     .setTaskId("not-a-valid-uuid")
                     .build());
 
     ConsumerRecord<String, String> onErrorsTopic =
-            KafkaTestUtils.getSingleRecord(
-                    errorsProbe,
-                    ERROR_TOPIC,
-                    Duration.ofMillis(3000));
+            KafkaTestUtils.getRecords(errorsProbe, Duration.ofMillis(3000)).iterator().next();
 
     assertNotNull(
             onErrorsTopic,
@@ -425,10 +327,7 @@ void genuinelyMalformedBytes_notValidProtobufAtAll_alsoGoesStraightToTheErrorsTo
                     .getBytes(java.nio.charset.StandardCharsets.UTF_8));
 
     ConsumerRecord<String, String> onErrorsTopic =
-            KafkaTestUtils.getSingleRecord(
-                    errorsProbe,
-                    ERROR_TOPIC,
-                    Duration.ofSeconds(15));
+            KafkaTestUtils.getRecords(errorsProbe, Duration.ofSeconds(15)).iterator().next();
 
     assertNotNull(
             onErrorsTopic,
@@ -438,49 +337,36 @@ void genuinelyMalformedBytes_notValidProtobufAtAll_alsoGoesStraightToTheErrorsTo
 }
 
     @Test
-    void missingTarget_isStoredUntilTargetExists() {
+    void missingTarget_isCreatedAsPendingPlaceholderAndEdgeIsAdded() {
 
         UUID taskId = UUID.randomUUID();
-        UUID missingDependencyId =
-                UUID.randomUUID();
+        UUID missingDependencyId = UUID.randomUUID();
 
         taskRepository.save(buildTask(taskId));
 
         DependencyProposedEvent event =
                 DependencyProposedEvent.newBuilder()
-                        .setEventId(
-                                UUID.randomUUID().toString())
-                        .setTaskId(
-                                taskId.toString())
+                        .setTenantId(TENANT_ID.toString())
+                        .setEventId(UUID.randomUUID().toString())
+                        .setTaskId(taskId.toString())
                         .addDependencies(
                                 com.rnd.mind.event.Dependency
                                         .newBuilder()
-                                        .setDependsOnTaskId(
-                                                missingDependencyId
-                                                        .toString())
+                                        .setDependsOnTaskId(missingDependencyId.toString())
                                         .build())
                         .build();
 
-        producer.send(
-                TOPIC,
-                taskId.toString(),
-                event);
-
+        producer.send(TOPIC, taskId.toString(), event);
         producer.flush();
 
-        /*
-         * Missing target must not make the existing task blocked yet.
-         * It is persisted as unresolved and will be resolved when the
-         * missing task arrives.
-         */
         await()
-                .during(Duration.ofSeconds(1))
-                .atMost(Duration.ofSeconds(5))
+                .atMost(Duration.ofSeconds(10))
                 .until(() ->
-                        taskRepository
-                                .findById(taskId)
-                                .map(task ->
-                                        task.getBlockingCount() == 0)
+                        taskRepository.findById(missingDependencyId)
+                                .map(task -> task.getStatus() == TaskStatus.PENDING)
+                                .orElse(false)
+                                && taskRepository.findById(taskId)
+                                .map(task -> task.getBlockingCount() == 1)
                                 .orElse(false));
     }
 }

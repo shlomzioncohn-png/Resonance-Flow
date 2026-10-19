@@ -1,9 +1,14 @@
 package com.rnd.chain.events;
 
+import com.rnd.chain.testsupport.PgRepos;
+import org.junit.jupiter.api.Tag;
+import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.transaction.annotation.Transactional;
+
 import com.google.protobuf.Timestamp;
 import com.rnd.chain.dto.Task;
 import com.rnd.chain.dto.TaskStatus;
-import com.rnd.chain.repository.InMemoryTaskRepository;
+import com.rnd.chain.repository.TaskRepository;
 import com.rnd.chain.repository.TaskRepository;
 import com.rnd.chain.service.UnresolvedDependencyService;
 import com.rnd.inbox.event.TaskCreatedEvent;
@@ -19,11 +24,15 @@ import java.util.function.UnaryOperator;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
 
+/** Ported from the in-memory version; runs against the real Postgres repositories (rolled back per test). */
+@Tag("postgres")
+@SpringBootTest
+@Transactional
 class TaskCreatedEventHandlerTest {
 
     private static ChainEventProcessingTemplate newTemplate() {
         return new ChainEventProcessingTemplate(
-                new InMemoryProcessedEventStore());
+                PgRepos.processedEvents());
     }
 
     private static Timestamp timestamp(Instant instant) {
@@ -33,23 +42,20 @@ class TaskCreatedEventHandlerTest {
                 .build();
     }
 
-    private static TaskCreatedEvent.Builder eventFor(
-            UUID id,
-            String ownerId) {
+    private static TaskCreatedEvent.Builder eventFor(UUID id) {
 
         return TaskCreatedEvent.newBuilder()
                 .setId(id.toString())
-                .setOwnerId(ownerId)
-                .setStatus(
-                        com.rnd.inbox.event.TaskStatus.TASK_STATUS_NEW)
+                .setTenantId(UUID.randomUUID().toString())
+                .setStatus(com.rnd.inbox.event.TaskStatus.TASK_STATUS_NEW)
                 .setCreatedAt(timestamp(Instant.now()));
     }
 
     @Test
     void onMessage_forANewTask_insertsItReadyWithZeroedCounters() {
 
-        InMemoryTaskRepository repository =
-                new InMemoryTaskRepository(List.of());
+        TaskRepository repository =
+                PgRepos.tasks(List.of());
 
         UnresolvedDependencyService unresolvedService =
                 mock(UnresolvedDependencyService.class);
@@ -63,14 +69,11 @@ class TaskCreatedEventHandlerTest {
         UUID taskId = UUID.randomUUID();
 
         handler.onMessage(
-                eventFor(taskId, "owner-1").build());
+                eventFor(taskId).build());
 
         Task saved =
                 repository.findById(taskId).orElseThrow();
 
-        assertEquals(
-                "owner-1",
-                saved.getOwnerId());
 
         assertEquals(
                 TaskStatus.PENDING,
@@ -97,7 +100,6 @@ class TaskCreatedEventHandlerTest {
 
         Task existing = Task.builder()
                 .id(taskId)
-                .ownerId("stale-owner")
                 .status(TaskStatus.PENDING)
                 .isReady(false)
                 .blockingCount(2)
@@ -106,8 +108,8 @@ class TaskCreatedEventHandlerTest {
                 .updatedAt(LocalDateTime.now())
                 .build();
 
-        InMemoryTaskRepository repository =
-                new InMemoryTaskRepository(
+        TaskRepository repository =
+                PgRepos.tasks(
                         List.of(existing));
 
         UnresolvedDependencyService unresolvedService =
@@ -120,14 +122,11 @@ class TaskCreatedEventHandlerTest {
                         unresolvedService);
 
         handler.onMessage(
-                eventFor(taskId, "real-owner").build());
+                eventFor(taskId).build());
 
         Task merged =
                 repository.findById(taskId).orElseThrow();
 
-        assertEquals(
-                "real-owner",
-                merged.getOwnerId());
 
         assertEquals(
                 2,
@@ -151,14 +150,13 @@ class TaskCreatedEventHandlerTest {
 
         TaskCreatedEventHandler handler =
                 new TaskCreatedEventHandler(
-                        new InMemoryTaskRepository(List.of()),
+                        PgRepos.tasks(List.of()),
                         newTemplate(),
                         unresolvedService);
 
         TaskCreatedEvent event =
                 eventFor(
-                        UUID.randomUUID(),
-                        "owner-1")
+                        UUID.randomUUID())
                         .setId("not-a-uuid")
                         .build();
 
@@ -199,6 +197,10 @@ class TaskCreatedEventHandlerTest {
                         throw new RuntimeException(
                                 "DB is down");
                     }
+                    @Override
+                    public boolean insertIfAbsent(Task task) {
+                        throw new RuntimeException("DB is down");
+                    }
 
                     @Override
                     public Optional<Task> update(
@@ -228,8 +230,8 @@ class TaskCreatedEventHandlerTest {
 
         TaskCreatedEvent event =
                 eventFor(
-                        UUID.randomUUID(),
-                        "owner-1")
+                        UUID.randomUUID()
+)
                         .build();
 
         assertThrows(

@@ -5,13 +5,13 @@ handler. Offsets are committed only after the handler returns.
 MIND writes the handler (its business logic) and picks the topic/type:
 
     from mind.messaging import ProtobufConsumer
-    from mind.messaging.mind_task_created_pb2 import Task
+    from mind.messaging.task_created_event_pb2 import TaskCreatedEvent
 
     def handle(event, msg):
         ...  # MIND's logic
 
     consumer = ProtobufConsumer(group_id="mind-ingestion", topics=["task.created"])
-    consumer.run(Task, handle)
+    consumer.run(TaskCreatedEvent, handle)
 """
 
 from __future__ import annotations

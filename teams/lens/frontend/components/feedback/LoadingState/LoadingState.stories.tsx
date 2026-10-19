@@ -4,7 +4,7 @@ import LoadingState from './LoadingState';
 
 const meta = {
   component: LoadingState,
-  tags: ['ai-generated'],
+  tags: ['autodocs'],
 } satisfies Meta<typeof LoadingState>;
 
 export default meta;

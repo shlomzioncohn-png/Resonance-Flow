@@ -6,12 +6,14 @@ const config: StorybookConfig = {
     '../components/**/*.stories.@(js|jsx|mjs|ts|tsx)',
   ],
   addons: [
-    '@chromatic-com/storybook',
     '@storybook/addon-vitest',
     '@storybook/addon-a11y',
     '@storybook/addon-docs',
     '@storybook/addon-mcp',
+    'msw-storybook-addon',
   ],
   framework: '@storybook/nextjs-vite',
+  // Serves public/mockServiceWorker.js, the Service Worker MSW registers in stories
+  staticDirs: ['../public'],
 };
 export default config;

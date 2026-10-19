@@ -94,16 +94,40 @@ def test_empty_input_is_a_data_failure():
     assert result.retryable is False
 
 
-def test_missing_tesseract_binary_is_an_environment_failure(monkeypatch: pytest.MonkeyPatch):
-    # The case R2 flagged: this must not look like a corrupt document, or her
-    # consumer would silently drop and commit every scanned document.
+def _tesseract_not_installed(monkeypatch: pytest.MonkeyPatch) -> None:
     def not_installed() -> str:
         raise RuntimeError("tesseract not found")
 
     monkeypatch.setattr(ocr, "_find_tesseract", not_installed)
-    result = extract_text(b"some bytes")
+
+
+def test_missing_tesseract_binary_is_an_environment_failure(monkeypatch: pytest.MonkeyPatch):
+    # The case R2 flagged: this must not look like a corrupt document, or her
+    # consumer would silently drop and commit every scanned document. A real image,
+    # so that what fails is the missing binary, not the input.
+    _tesseract_not_installed(monkeypatch)
+    result = extract_text(png_bytes(), filename="a.png")
     assert (result.success, result.reason) == (False, OCRFailureReason.OCR_UNAVAILABLE)
     assert result.retryable is True
+
+
+@pytest.mark.parametrize(
+    ("content", "filename"),
+    [
+        (b"this is a text file, not a scan" * 20, "notes.txt"),
+        (b"%PDF-1.4 not really a pdf", "scan.pdf"),
+    ],
+)
+def test_a_bad_document_without_tesseract_is_unreadable_format_not_ocr_unavailable(
+    monkeypatch: pytest.MonkeyPatch, content: bytes, filename: str
+):
+    # The input is checked before the binary is looked for (the same fix as ASR's,
+    # team-lead review on #478): the document is the problem (DATA, drop it).
+    # OCR_UNAVAILABLE would make the consumer retry a junk file forever.
+    _tesseract_not_installed(monkeypatch)
+    result = extract_text(content, filename=filename)
+    assert (result.success, result.reason) == (False, OCRFailureReason.UNREADABLE_FORMAT)
+    assert result.retryable is False
 
 
 @pytest.mark.usefixtures("tesseract_found")

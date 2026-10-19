@@ -25,14 +25,7 @@ class TaskTest {
                 .hasMessageContaining("id");
     }
 
-    @Test
-    void builder_throwsIllegalArgumentException_whenOwnerIdIsNull() {
-        assertThatThrownBy(() -> TaskTestFixtures.defaultTask(UUID.randomUUID())
-                .ownerId(null)
-                .build())
-                .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining("ownerId");
-    }
+
 
     @Test
     void builder_throwsIllegalArgumentException_whenBlockingCountIsNegative() {
@@ -93,8 +86,8 @@ class TaskTest {
     @Test
     void equals_andHashCode_dependOnlyOnId() {
         UUID id = UUID.randomUUID();
-        Task a = TaskTestFixtures.defaultTask(id).ownerId("ownerA").status(TaskStatus.ACTIVE).build();
-        Task b = TaskTestFixtures.defaultTask(id).ownerId("ownerB").status(TaskStatus.DONE).blockingCount(3).build();
+        Task a = TaskTestFixtures.defaultTask(id).status(TaskStatus.ACTIVE).build();
+        Task b = TaskTestFixtures.defaultTask(id).status(TaskStatus.DONE).blockingCount(3).build();
 
         assertThat(a).isEqualTo(b);
         assertThat(a.hashCode()).isEqualTo(b.hashCode());
