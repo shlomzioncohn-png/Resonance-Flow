@@ -68,6 +68,13 @@ an actual value, never a made-up one. `DealToTaskMapper` is the only override to
 `${bridge.crm.organization-id}` / `CRM_ORGANIZATION_ID` — one static value standing in for one
 account until Inbox supports resolving it per deal from `Deal.crmAccountSlug()`.
 
+`DealToTaskMapper.toUrgency` also adds +1 (before the 1..5 clamp) for a deal in an open stage
+(`PROSPECT`/`QUALIFIED`/`PROPOSAL`/`NEGOTIATION`) that's sat in that stage at least
+`${bridge.crm.stalled-after-days}` / `CRM_STALLED_AFTER_DAYS` days (default 14, `<= 0` disables
+it) as of the run's `asOf` — `ON_HOLD`/`CLOSED_*` are never bumped. Computed only from `asOf` and
+`Deal.stageChangedAt`, so a deal that becomes stalled after its Task already exists in Inbox won't
+get the bump there until Inbox's F2 (insert-only ingestion) is fixed to also update existing tasks.
+
 ## 5. Profile-switched beans
 
 Convention used throughout: a default, always-registered bean, overridden by a `@Profile("x")
@@ -263,21 +270,21 @@ suite (126 tests, 0 failures — see §7):
   "obvious" method. `HubSpotDealRepositoryTest`'s 14 pre-existing tests were migrated to
   `snapshot()` rather than deleted. `HubSpotDealRepository.snapshot()` also re-fetches and
   re-resolves the pipeline/stage mapping on every call (not just at construction), so a stage
-  added to the portal after startup is picked up — the mapping *rules* themselves are unchanged
-  (that's F6, still open). **Tradeoff worth knowing:** the constructor still eagerly resolves the
-  pipeline once too (result discarded), purely to fail fast at startup on an unrecognized stage
-  label — so the very first `snapshot()` call after startup does one redundant pipeline fetch.
-  **Known limitation for F6, worth knowing before a demo:** because the pipeline is now
-  re-resolved on *every* `snapshot()` call, a stage added to the portal under a label
-  `HubSpotStageMapping` doesn't recognize fails the **entire** sync from the moment it appears —
-  not just the one deal that first uses it, the way an unrecognized stage *id* (a recognized label,
-  just a portal-specific id gap) still does. See
-  `HubSpotDealRepositoryTest.secondSnapshotFailsEntirelyWhenTheRefetchedPipelineHasAnUnrecognizedStageLabel`.
+  added to the portal after startup is picked up. **Tradeoff worth knowing:** the constructor
+  still eagerly resolves the pipeline once too (result discarded), purely to fail fast at startup
+  on a pipeline/stage-level problem (see §11) — so the very first `snapshot()` call after startup
+  does one redundant pipeline fetch.
+  **Corrected 2026-10-14 (F6 is fixed, not "still open" as the paragraph here originally said) —
+  see §11 for the full mapping-rule rewrite:** this used to describe a label added under a name
+  `HubSpotStageMapping` doesn't recognize failing the **entire** sync from the moment it appears.
+  Stage resolution is metadata-based now (`isClosed`/`probability`, never the label), the same
+  approach §10's Salesforce fix already used, so that failure mode is gone — a renamed/custom
+  label with valid metadata just resolves correctly.
   `SyncJobScheduler`'s shared `catch (RuntimeException e) { log.error(...) }` (every `SyncJob`'s
   failure handling, not just CRM's — see §9.4) and
   `CrmBridgeController.handleSnapshotFailure` (a 503 with the exception's message, not the
-  framework's default message-less 500) are what keep this loud and clear instead of a confusing
-  failure — neither one *fixes* F6's mapping-rule gap, which is still open.
+  framework's default message-less 500) still apply to what genuinely can't be isolated to one
+  stage (§11's FAIL STARTUP / FAIL RUN rows).
   Only a CRM-only `CrmTaskValidator` (wraps the shared `TaskValidator`, adds tenant-UUID/
   `sourceRef` checks) is new for F5 — the shared `TaskValidator` itself is unchanged, since
   GitHub/JIRA/`TaskEnrichmentConsumer` share it directly and never set a tenant id.
@@ -452,9 +459,9 @@ most likely to trip someone up.
   (a miss costs one request, not two, mirroring `HubSpotDealRepository`'s 404 handling adapted to
   Salesforce's "not found is zero records"). No cache field anywhere on this class — `snapshot()`
   and `fetchDeal()` are both a fresh set of SOQL queries every call (CRM-lane audit finding F1).
-- **Stage resolution is metadata-based, never label matching** (`SalesforceStageMapping`) — this is
-  the actual fix for HubSpot audit finding F6 (a renamed/custom stage label breaking the whole
-  sync). `IsClosed`/`IsWon` on the `OpportunityStage` row map directly to `CLOSED_WON`/
+- **Stage resolution is metadata-based, never label matching** (`SalesforceStageMapping`) — the
+  same fix as HubSpot's own (§11) for CRM audit finding F6 (a renamed/custom stage label breaking
+  the whole sync), landed here first. `IsClosed`/`IsWon` on the `OpportunityStage` row map directly to `CLOSED_WON`/
   `CLOSED_LOST`; an open stage is bucketed by `DefaultProbability` into one of four configurable
   bands read from `bridge.crm.salesforce.stage-bands.*` in `application-salesforce.yml` (defaults
   0–20/21–50/51–80/81–99 → `PROSPECT`/`QUALIFIED`/`PROPOSAL`/`NEGOTIATION`), validated at actual
@@ -483,9 +490,59 @@ most likely to trip someone up.
   `CrmLaneConfig.dealToTaskMapper` (`CrmLaneConfigTest.failsToStartWhenBothHubspotAndSalesforceProfilesAreActive`).
 - **No Salesforce org exists for this work yet** (design doc §9) — everything above is verified
   against `SalesforceClient`/`SalesforceDealRepository`'s own test suites
-  (`MockWebServer`-backed, no live calls), not against a real org. `stage-changed-at-field`
-  defaulting to `LastStageChangeDate` is specifically flagged in the design doc as
-  moderate-confidence/unverified — if it turns out not to exist on the target org, switch
+  (`MockWebServer`-backed, no live calls), not against a real org. **Update 2026-10-14: the
+  `stage-changed-at-field` default was live-verified, and the gap it surfaced is fixed.** Against
+  a real Developer Edition org (API v68.0), `LastStageChangeDate` exists and is set when the stage
+  changes, but is `null` for an Opportunity that never has (true for all 20 seeded records) - and
+  `SalesforceDealRepository.toDeal()` previously read only that field, so every brand-new deal's
+  `stageChangedAt` came back `null`, `Deal`'s `requireNonNull` threw, and the record was silently
+  skipped (`skippedAtRead`). Fixed: `toDeal()` now falls back to that row's `CreatedDate` when the
+  configured field is null/blank (a deal that never changed stage has been in its current stage
+  since creation) - never `LastModifiedDate`, which bumps on any field edit and would break
+  stalled-deal detection. If `CreatedDate` is also missing, the row is still skipped and counted,
+  unchanged. The config-level escape hatch is unrelated and still stands: a deployer who finds the
+  configured field itself absent from the org's schema entirely can switch
   `SALESFORCE_STAGE_CHANGED_AT_FIELD` to `LastModifiedDate` (config change only, no code change),
   noting the real imprecision that comes with it (bumps on any field edit, not just a stage
-  change).
+  change). See `crm-salesforce-design.md` §2 for the full writeup.
+
+## 11. HubSpot stage mapping by metadata — F6 fix
+
+`HubSpotStageMapping` resolves `isClosed`/`probability` metadata on each pipeline stage now,
+never the stage `label` — the same approach §10's `SalesforceStageMapping` already used. A
+renamed or custom stage label with valid metadata just resolves correctly; `label` is purely
+informational (log/error messages only). `StageProbabilityBands` (`crm/repository`, shared with
+Salesforce) holds the four band maxima + their validation + `forOpenStage(percent)`; each CRM
+constructs its own instance from its own `bridge.crm.<crm>.stage-bands.*` config. HubSpot's
+defaults are **20/50/70/99**, not Salesforce's 20/50/80/99 — HubSpot's live default pipeline has
+"Decision Maker Bought-In" at probability 0.8, which must land in `NEGOTIATION` (matching the old
+label mapping), not `PROPOSAL`; at Salesforce's 80-max boundary it wouldn't.
+
+Metadata arrives as JSON strings on the live API (`"false"`, `"0.2"`), but `HubSpotStageMetadata`'s
+fields are plain `String` so a portal sending real JSON booleans/numbers binds identically (Jackson's
+default `String` deserializer accepts either). `probability` is parsed via `BigDecimal` (never
+`Double` — `Double.parseDouble("NaN")` succeeds; `BigDecimal`'s string constructor has no NaN
+representation at all) and compared to `0`/`1` with `compareTo`, never `equals` (`"1.0".equals(ONE)`
+is `false`; `compareTo` is `0`).
+
+**Policy table** (every row implemented in `HubSpotStageMapping`/`HubSpotDealRepository`, tested in
+`HubSpotStageMappingTest`/`HubSpotDealRepositoryTest`):
+
+| Case | Where | Outcome |
+|---|---|---|
+| Pipeline fetch fails; empty pipeline list; a stage with no id; every fetched stage invalid (any reason); bad `stage-bands` config; bad `max-skipped-ratio` | Before the per-deal loop, or at Spring startup | **FAIL STARTUP** (constructor) / **FAIL THE WHOLE SYNC RUN** (`snapshot()`/`fetchDeal()`) |
+| Metadata missing on one stage; `isClosed` missing/not boolean-like; `probability` non-numeric/out-of-range/NaN; `probability` missing on a **closed** stage; closed stage with `0 < p < 1` (can't tell won from lost — HubSpot has no `IsWon`-equivalent flag); a deal's `dealstage` id not in the pipeline at all | Stage classified invalid during resolution (before the loop); effect realized per-deal inside `snapshot()`'s existing per-record `try/catch` | **SKIP** the affected deal(s), **+WARN** (once per invalid stage per run, not per deal), counted in `skippedAtRead` |
+| Open stage, `probability` missing | Same resolution step | **MAP WITH DEFAULT** → `PROSPECT`, +WARN (once per stage per run) |
+| `skippedAtRead / totalRecordsRead` **strictly greater than** `bridge.crm.hubspot.max-skipped-ratio` (default `0.5`; `0` records read never fails) | After the per-deal loop, before returning the `DealSnapshot` | **FAIL THE WHOLE SYNC RUN** (`HubSpotSkipThresholdExceededException`) instead of publishing a mostly-skipped snapshot |
+
+**A skipped deal means a stale Task in Inbox, not a deleted one.** Neither Bridge (`CrmLane`,
+`LoggingPayloadPublisher`/`KafkaPayloadPublisher`) nor Inbox (`StructuredTaskConsumer` →
+`TaskIngestionService`) has any delete-by-absence path — a deal missing from one sync's published
+set (skipped, or just not re-sent) leaves its Inbox `Task` exactly as it was after the last
+successful publish. `CrmSyncJob` logs a WARN ("partial sync") when `skippedAtRead > 0` so a
+scheduled run with skips doesn't look identical to a clean one in the logs; the HTTP path already
+surfaces `skippedAtRead` in `CrmSyncResponse`'s JSON body.
+
+`bridge.crm.hubspot.max-skipped-ratio` is **HubSpot-only for now** — Salesforce's per-record skip
+(§10) has no equivalent aggregate threshold yet. Out of scope for this task; flagged as a
+candidate for the same guard later.

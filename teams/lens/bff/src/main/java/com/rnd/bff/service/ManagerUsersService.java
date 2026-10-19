@@ -3,6 +3,7 @@ package com.rnd.bff.service;
 import com.rnd.bff.client.InboxUserClient;
 import com.rnd.bff.client.InboxUserPageResponse;
 import com.rnd.bff.client.InboxUserRecord;
+import com.rnd.bff.dto.UserCreateRequestDTO;
 import com.rnd.bff.dto.UserDetailsDTO;
 import com.rnd.bff.dto.UserListResponseDTO;
 import com.rnd.bff.dto.UserRowDTO;
@@ -98,6 +99,44 @@ public class ManagerUsersService {
         return toUserDetailsDTO(record, actorId);
     }
 
+    /**
+     * The new user always lands in the acting manager's own tenant — Inbox
+     * requires tenantId, so it's read from the actor's own Inbox record
+     * rather than ever being taken from the request. Only the fields Inbox's
+     * create accepts (minus tenantId/role, set here) are forwarded.
+     */
+    public UserDetailsDTO createUser(String gatewayUserId, UserCreateRequestDTO request) {
+        String actorId = inboxActorId(gatewayUserId);
+        String inboxRole = LensRoleMapper.toInboxRole(request.getRole());
+        if (inboxRole == null) {
+            throw new InboxResponseException(HttpStatus.BAD_REQUEST, "role must be one of MANAGER, EMPLOYEE");
+        }
+        if (request.getDisplayName() == null || request.getDisplayName().isBlank()) {
+            throw new InboxResponseException(HttpStatus.BAD_REQUEST, "displayName is required");
+        }
+
+        InboxUserRecord actor = call(() -> inboxUserClient.getUser(actorId, actorId));
+        if (actor.getTenant() == null || actor.getTenant().getId() == null) {
+            throw new ServiceUnavailableException("inbox", "Inbox didn't return the acting user's tenant");
+        }
+
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("tenantId", actor.getTenant().getId());
+        body.put("displayName", request.getDisplayName());
+        putIfPresent(body, "firstName", request.getFirstName());
+        putIfPresent(body, "lastName", request.getLastName());
+        putIfPresent(body, "email", request.getEmail());
+        putIfPresent(body, "phone", request.getPhone());
+        putIfPresent(body, "username", request.getUsername());
+        body.put("role", inboxRole);
+
+        logger.info("Creating user via Inbox - actorId: {}, tenantId: {}, role: {}",
+                actorId, actor.getTenant().getId(), inboxRole);
+
+        InboxUserRecord record = call(() -> inboxUserClient.createUser(actorId, body));
+        return toUserDetailsDTO(record, actorId);
+    }
+
     public UserDetailsDTO updateStatus(String gatewayUserId, String userId, String status) {
         String actorId = inboxActorId(gatewayUserId);
         if (status == null || !ALLOWED_STATUSES.contains(status)) {
@@ -117,6 +156,13 @@ public class ManagerUsersService {
     // -------------------------------------------------------------------------
     // Shared plumbing
     // -------------------------------------------------------------------------
+
+    /** Blank optional fields are left out, so Inbox doesn't store "" (or trip @Email on it). */
+    private static void putIfPresent(Map<String, Object> body, String key, String value) {
+        if (value != null && !value.isBlank()) {
+            body.put(key, value);
+        }
+    }
 
     /** The Inbox user we act as - the dev override if set, otherwise the userId from the Gateway. */
     private String inboxActorId(String gatewayUserId) {

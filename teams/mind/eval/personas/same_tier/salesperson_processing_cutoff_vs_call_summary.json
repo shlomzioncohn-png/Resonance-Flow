@@ -19,7 +19,7 @@
       "effort_estimate": 15,
       "tier": "tactical",
       "blocked": false,
-      "parent_task_id": null
+      "parent_task_id": "sales_q3_bookings_target"
     },
     {
       "task_id": "task_summary",
@@ -29,7 +29,7 @@
       "effort_estimate": 20,
       "tier": "tactical",
       "blocked": false,
-      "parent_task_id": null
+      "parent_task_id": "sales_q3_bookings_target"
     }
   ],
   "expected_top_task_id": "task_orderform",

@@ -37,15 +37,29 @@ public class DependencyEdgeService {
     private final TaskDependencyRepository taskDependencyRepository;
     private final GraphLock graphLock;
     private final TaskCounterUpdater taskCounterUpdater;
+    private final TaskStateHistoryRecorder historyRecorder;
 
     public DependencyEdgeService(
             TaskDependencyRepository taskDependencyRepository,
             GraphLock graphLock,
-            TaskCounterUpdater taskCounterUpdater) {
+            TaskCounterUpdater taskCounterUpdater,
+            TaskStateHistoryRecorder historyRecorder) {
 
         this.taskDependencyRepository = taskDependencyRepository;
         this.graphLock = graphLock;
         this.taskCounterUpdater = taskCounterUpdater;
+        this.historyRecorder = historyRecorder;
+    }
+
+    /**
+     * Adjusts the blocking count and, if it crossed zero (BLOCKED / UNBLOCKED), records it in the
+     * task state history. Runs under the graph lock, so the before/after reads see only this change.
+     */
+    private void adjustBlockingCountAndRecord(UUID taskId, boolean dependsOnIsDone, int delta) {
+        int before = taskCounterUpdater.requireTask(taskId).getBlockingCount();
+        taskCounterUpdater.adjustBlockingCount(taskId, dependsOnIsDone, delta);
+        int after = taskCounterUpdater.requireTask(taskId).getBlockingCount();
+        historyRecorder.recordBlockingTransition(taskId, before, after);
     }
 
     /** Same as {@link #addDependency(UUID, UUID, Double)}, with no Mind confidence to carry -
@@ -72,7 +86,7 @@ public class DependencyEdgeService {
             UUID dependsOnTaskId,
             Double confidence) {
 
-        return doAddDependency(taskId, dependsOnTaskId, confidence, false, null);
+        return doAddDependency(taskId, dependsOnTaskId, confidence, null);
     }
 
     /**
@@ -87,14 +101,14 @@ public class DependencyEdgeService {
             UUID tenantId) {
 
         Objects.requireNonNull(tenantId, "tenantId must not be null");
-        return doAddDependency(taskId, dependsOnTaskId, confidence, true, tenantId);
+        return doAddDependency(taskId, dependsOnTaskId, confidence, tenantId);
     }
 
+    /** A non-null {@code tenantId} means missing tasks are created as placeholders in that tenant. */
     private TaskDependency doAddDependency(
             UUID taskId,
             UUID dependsOnTaskId,
             Double confidence,
-            boolean createMissing,
             UUID tenantId) {
 
         Objects.requireNonNull(
@@ -113,7 +127,7 @@ public class DependencyEdgeService {
 
         return graphLock.runExclusive(() -> {
 
-            if (createMissing) {
+            if (tenantId != null) {
                 taskCounterUpdater.insertPlaceholdersIfAbsent(taskId, dependsOnTaskId, tenantId);
             }
 
@@ -137,10 +151,11 @@ public class DependencyEdgeService {
 
             Task task = taskCounterUpdater.requireTask(taskId);
             Task dependencyTask = taskCounterUpdater.requireTask(dependsOnTaskId);
-            requireSameTenant(task, dependencyTask);
-            if (createMissing) {
+            if (tenantId != null) {
                 requireTenant(task, tenantId);
                 requireTenant(dependencyTask, tenantId);
+            } else {
+                requireSameTenant(task, dependencyTask);
             }
 
             Optional<TaskDependency> saved =
@@ -160,7 +175,7 @@ public class DependencyEdgeService {
             boolean dependencyAlreadyDone =
                     dependencyTask.getStatus() == TaskStatus.DONE;
 
-            taskCounterUpdater.adjustBlockingCount(
+            adjustBlockingCountAndRecord(
                     task.getId(),
                     dependencyAlreadyDone,
                     1);
@@ -243,7 +258,7 @@ public class DependencyEdgeService {
             recomputeDependencyTargetPriority(edge.dependsOnTaskId());
             return;
         }
-        taskCounterUpdater.adjustBlockingCount(taskId, edge.dependsOnAlreadyDone(), 1);
+        adjustBlockingCountAndRecord(taskId, edge.dependsOnAlreadyDone(), 1);
         recomputeDependencyTargetPriority(edge.dependsOnTaskId());
     }
 
@@ -337,7 +352,7 @@ public class DependencyEdgeService {
             boolean dependencyCurrentlyDone =
                     dependencyTask.getStatus() == TaskStatus.DONE;
 
-            taskCounterUpdater.adjustBlockingCount(
+            adjustBlockingCountAndRecord(
                     taskId,
                     dependencyCurrentlyDone,
                     -1);

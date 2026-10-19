@@ -41,17 +41,20 @@ public class TaskEligibilityService {
     private final TaskDependencyRepository taskDependencyRepository;
     private final GraphLock graphLock;
     private final TaskCounterUpdater taskCounterUpdater;
+    private final TaskStateHistoryRecorder historyRecorder;
 
     public TaskEligibilityService(
             TaskRepository taskRepository,
             TaskDependencyRepository taskDependencyRepository,
             GraphLock graphLock,
-            TaskCounterUpdater taskCounterUpdater) {
+            TaskCounterUpdater taskCounterUpdater,
+            TaskStateHistoryRecorder historyRecorder) {
 
         this.taskRepository = taskRepository;
         this.taskDependencyRepository = taskDependencyRepository;
         this.graphLock = graphLock;
         this.taskCounterUpdater = taskCounterUpdater;
+        this.historyRecorder = historyRecorder;
     }
 
     @Transactional
@@ -101,6 +104,8 @@ public class TaskEligibilityService {
 
             TaskStatus previousStatus =
                     previous.get().getStatus();
+
+            historyRecorder.recordStatusChange(taskId, previousStatus, newStatus);
 
             if (previousStatus != TaskStatus.DONE
                     && newStatus == TaskStatus.DONE) {
@@ -247,6 +252,7 @@ public void onTaskStatusChangedIfNewer(
             log.info("Task {} completed", taskId);
             TaskCounterUpdater.requireUpdated(taskRepository.update(taskId, task ->
                     TaskCounterUpdater.copyOf(task).status(TaskStatus.DONE).build()), taskId);
+            historyRecorder.recordStatusChange(taskId, current.getStatus(), TaskStatus.DONE);
             adjustDependentsBlockingCount(taskId, -1);
         });
     }
@@ -274,6 +280,9 @@ public void onTaskStatusChangedIfNewer(
         // priority_score (see TaskCounterUpdater's confidence sums) even on top of whatever
         // isReady did - recomputePriorityScoreAndPublish decides whether that warrants a publish.
         for (Task task : updated) {
+            Task before = previousById.get(task.getId());
+            historyRecorder.recordBlockingTransition(
+                    task.getId(), before.getBlockingCount(), task.getBlockingCount());
             taskCounterUpdater.recomputePriorityScoreAndPublish(task.getId(), previousById.get(task.getId()), task);
         }
     }

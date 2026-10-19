@@ -110,6 +110,26 @@
             <version>${minio.version}</version>
         </dependency>
 
+        <!-- Renders scanned-doc PDF pages to images for media classification (pure Java,
+             no external tools). -->
+        <dependency>
+            <groupId>org.apache.pdfbox</groupId>
+            <artifactId>pdfbox</artifactId>
+            <version>3.0.5</version>
+        </dependency>
+
+        <!-- control-plane state (GroupStateStore/CursorStore/CalendarEventStateStore) -
+             small, frequently read/written key->blob records, moved off MinIO onto Postgres. -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-jdbc</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.postgresql</groupId>
+            <artifactId>postgresql</artifactId>
+            <scope>runtime</scope>
+        </dependency>
+
         <!-- Gmail/Calendar/Drive: shared Google OAuth2 client machinery plus one generated API
              client per product. All three real readers (RealEmailSourceReader,
              RealCalendarSourceReader, RealDriveSourceReader) share the same credential loading
@@ -177,6 +197,17 @@
         </dependency>
 
         <dependency>
+            <groupId>org.testcontainers</groupId>
+            <artifactId>postgresql</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.testcontainers</groupId>
+            <artifactId>junit-jupiter</artifactId>
+            <scope>test</scope>
+        </dependency>
+
+        <dependency>
             <groupId>org.springdoc</groupId>
             <artifactId>springdoc-openapi-starter-webmvc-ui</artifactId>
             <version>2.6.0</version>
@@ -218,7 +249,11 @@
                     <clearOutputDirectory>false</clearOutputDirectory>
                 </configuration>
                 <executions>
-                    <!-- Registered cross-team schemas, owned by Relay - see shared/proto/README.md. -->
+                    <!-- Registered cross-team schemas, owned by Relay - see shared/proto/README.md.
+                         raw-object-event.proto (bridge.raw.landed-value) is registered under the
+                         pre-production reset in teams/relay/ci/schema-subjects.tsv - its wire shape
+                         (objects: repeated RawObjectRef) can still change without a FULL-compat
+                         fight until that line is removed. -->
                     <execution>
                         <id>compile-shared-proto</id>
                         <goals>
@@ -229,6 +264,7 @@
                             <includes>
                                 <include>task-created-event.proto</include>
                                 <include>task-creation-requested-event.proto</include>
+                                <include>raw-object-event.proto</include>
                             </includes>
                         </configuration>
                     </execution>

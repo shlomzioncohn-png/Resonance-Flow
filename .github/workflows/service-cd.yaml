@@ -16,8 +16,8 @@ on:
         required: true
         type: string
       container_port:
-        description: "Local port used for the post-deploy smoke test port-forward"
-        required: true
+        description: "Unused: the smoke test now forwards to a free local port. Kept so existing callers don't break."
+        required: false
         type: number
       extra_build_contexts:
         description: "Optional docker build-contexts (name=path per line), e.g. shared=shared"

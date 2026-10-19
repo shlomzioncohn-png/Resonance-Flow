@@ -4,6 +4,7 @@ import com.rnd.bridge.intake.config.ChatSessionProperties;
 import com.rnd.bridge.intake.lane.GroupStateStore;
 import com.rnd.bridge.intake.model.ChatMessage;
 import com.rnd.bridge.intake.model.GroupState;
+import com.rnd.bridge.intake.model.LandedAttachment;
 import com.rnd.bridge.intake.model.MessageSnapshot;
 import com.rnd.bridge.intake.model.SourceRecord;
 import com.rnd.bridge.raw.model.RawSourceType;
@@ -185,14 +186,9 @@ public class ChatGroupStateReconciler {
      * here means "confirmed", not just "we built a record for it once".
      * revision tracks the logical content version, independent of publish confirmation (see
      * GroupState's javadoc):
-     * - unchanged content, already confirmed published: the transcript itself needs nothing
-     *   further, but each attachment DOES carry its own independent confirmation state (see
-     *   MessageSnapshot.confirmedAttachmentFileIds/GroupStateStore.confirmAttachmentPublished),
-     *   so newlyConfirmableAttachmentRecords still regenerates candidates from this batch's
-     *   messages and filters out whichever ones are already confirmed - an attachment that
-     *   failed to publish independently of an already-confirmed transcript is still retried,
-     *   but one that already succeeded is not silently republished by the transcript's own
-     *   no-op. Revision untouched.
+     * - unchanged content, already confirmed published: the whole group (transcript + every
+     *   attachment) published together as one event, so there is nothing left outstanding -
+     *   mergeAndMaybePublish returns an empty list. Revision untouched.
      * - unchanged content, not yet confirmed: a retry, not a content change - rebuild and
      *   republish (transcript included) at the same revision.
      * - changed content: advances the revision only if the version being replaced was already
@@ -214,6 +210,17 @@ public class ChatGroupStateReconciler {
      *   are separate concerns: this decides whether the number moves, that decides whether an
      *   outstanding claim survives.
      */
+    /**
+     * A logical object now publishes as exactly one RawObjectEvent (transcript + every
+     * attachment bundled together), so there is no longer an independent per-attachment
+     * republish to carve out here: if the group is already published and genuinely unchanged,
+     * there is nothing left to do at all (an empty list) - any attachment still outstanding
+     * would mean the content changed (a new/returning attachment always changes
+     * mergeSnapshots' output), which is caught by the "content changed" branch below instead.
+     * Otherwise (new group, content change, or an unconfirmed retry) the full current set -
+     * transcript plus every attachment from incoming - is rebuilt and handed to the grouped lane
+     * to land+publish together (see UnstructuredPayloadMapper/UnstructuredIntakeLane).
+     */
     private List<SourceRecord> mergeAndMaybePublish(
             RawSourceType sourceType, String tenantId, String groupId, GroupState emptyValue,
             List<ChatMessage> incoming) {
@@ -221,41 +228,9 @@ public class ChatGroupStateReconciler {
         GroupState updated = mergeIntoGroupState(sourceType, tenantId, groupId, emptyValue, incoming, confirmedUnchanged);
 
         if (confirmedUnchanged.get()) {
-            return newlyConfirmableAttachmentRecords(updated, incoming);
+            return List.of();
         }
-        return chatSourceRecordMapper.toSourceRecords(updated, incoming).stream()
-                .filter(record -> record.attachmentIndex() == 0 || !alreadyConfirmed(updated, record))
-                .toList();
-    }
-
-    /** Every attachment record for incoming, minus whichever ones GroupState already has
-     * recorded as confirmed-published for their owning message (see
-     * MessageSnapshot.confirmedAttachmentFileIds) - the transcript record is never present here
-     * (attachmentIndex() == 0 is filtered out by toSourceRecords' caller contract in this
-     * branch), so unlike the sibling filter above there is nothing else to keep unconditionally. */
-    private List<SourceRecord> newlyConfirmableAttachmentRecords(GroupState state, List<ChatMessage> incoming) {
-        return chatSourceRecordMapper.toSourceRecords(state, incoming).stream()
-                .filter(record -> record.attachmentIndex() > 0)
-                .filter(record -> !alreadyConfirmed(state, record))
-                .toList();
-    }
-
-    /** True only for an attachment record (attachmentIndex() > 0, attachmentFileId() != null)
-     * whose owning message's MessageSnapshot already lists this exact fileId as confirmed - see
-     * SourceRecord.attachmentFileId's javadoc for why fileId, not attachmentIndex, is the
-     * matching key. A record with no fileId (non-Slack attachment, or a Slack source that never
-     * populated one) is never treated as already confirmed - this filter only ever suppresses a
-     * republish it can positively identify as redundant, never guesses. */
-    private boolean alreadyConfirmed(GroupState state, SourceRecord record) {
-        if (record.attachmentFileId() == null || record.sourceMessageIds().isEmpty()) {
-            return false;
-        }
-        String messageId = record.sourceMessageIds().get(0);
-        return state.messages().stream()
-                .filter(snapshot -> snapshot.messageId().equals(messageId))
-                .findFirst()
-                .map(snapshot -> snapshot.confirmedAttachmentFileIds().contains(record.attachmentFileId()))
-                .orElse(false);
+        return chatSourceRecordMapper.toSourceRecords(updated, incoming);
     }
 
     /**
@@ -291,7 +266,8 @@ public class ChatGroupStateReconciler {
             Integer claimedRevision = contentUnchanged ? current.claimedRevision() : null;
             return new GroupState(
                     current.groupId(), current.sourceType(), current.tenantId(), current.chatId(),
-                    current.threadId(), current.correlationId(), merged, false, revision, claimedRevision);
+                    current.threadId(), current.correlationId(), merged, false, revision, claimedRevision,
+                    current.superseded());
         });
     }
 
@@ -343,7 +319,7 @@ public class ChatGroupStateReconciler {
                         new AtomicBoolean())
                 : mergeIntoCurrentChatGroup(sourceType, tenantId, message);
 
-        List<SourceRecord> newAttachmentRecords = newlyConfirmableAttachmentRecords(updated, List.of(message));
+        List<SourceRecord> newAttachmentRecords = newlyLandableAttachmentRecords(updated, List.of(message));
         // newActivity is true only for the genuinely-new-message branch, false for an edit/
         // re-read - see RealtimeReconcileResult's javadoc. Scheduling itself no longer branches
         // on this (SlackEventsController schedules whenever groupState().published() is false,
@@ -373,6 +349,37 @@ public class ChatGroupStateReconciler {
      * (adjacency in time), while OPEN/CLAIMED/CLOSED is lifecycle state - keeping the two
      * concerns separate rather than folding lifecycle checks into the gap heuristic.
      */
+    /** Every new attachment record for incoming, minus whichever ones GroupState already has
+     * recorded as landed-to-MinIO for their owning message (see
+     * GroupStateStore.recordLandedAttachment/MessageSnapshot.landedAttachments) - this is
+     * MinIO-landing dedup only; Kafka publication for the whole group happens once, at session
+     * close (see SlackSessionPublisher), not per attachment here. */
+    private List<SourceRecord> newlyLandableAttachmentRecords(GroupState state, List<ChatMessage> incoming) {
+        return chatSourceRecordMapper.toSourceRecords(state, incoming).stream()
+                .filter(record -> record.attachmentIndex() > 0)
+                .filter(record -> !alreadyLanded(state, record))
+                .toList();
+    }
+
+    /** True only for an attachment record (attachmentIndex() > 0, attachmentFileId() != null)
+     * whose owning message's MessageSnapshot already lists this exact fileId as landed - see
+     * SourceRecord.attachmentFileId's javadoc for why fileId, not attachmentIndex, is the
+     * matching key. A record with no fileId (non-Slack attachment, or a Slack source that never
+     * populated one) is never treated as already landed - this filter only ever suppresses a
+     * re-land it can positively identify as redundant, never guesses. */
+    private boolean alreadyLanded(GroupState state, SourceRecord record) {
+        if (record.attachmentFileId() == null || record.sourceMessageIds().isEmpty()) {
+            return false;
+        }
+        String messageId = record.sourceMessageIds().get(0);
+        return state.messages().stream()
+                .filter(snapshot -> snapshot.messageId().equals(messageId))
+                .findFirst()
+                .map(snapshot -> snapshot.landedAttachments().stream()
+                        .anyMatch(la -> la.fileId().equals(record.attachmentFileId())))
+                .orElse(false);
+    }
+
     private GroupState mergeIntoCurrentChatGroup(RawSourceType sourceType, String tenantId, ChatMessage message) {
         Duration gap = Duration.ofMinutes(properties.sessionGapMinutes());
         return groupStateStore.resolveOpenChatGroupAndMerge(sourceType, tenantId, message.chatId(), candidate -> {
@@ -388,10 +395,11 @@ public class ChatGroupStateReconciler {
     }
 
     /** Whether a candidate GroupState is still OPEN for a genuinely-new message to join - false
-     * once it's published (CLOSED) or has an outstanding publication claim (CLAIMED/CLOSING),
-     * per the session-lifecycle decision above. */
+     * once it's published (CLOSED), has an outstanding publication claim (CLAIMED/CLOSING), or
+     * has been superseded (its content was migrated elsewhere - see GroupStateStore.
+     * markSuperseded), per the session-lifecycle decision above. */
     private boolean isOpenForNewMessages(GroupState candidate) {
-        return !candidate.published() && candidate.claimedRevision() == null;
+        return !candidate.published() && !candidate.superseded() && candidate.claimedRevision() == null;
     }
 
     /**
@@ -428,12 +436,12 @@ public class ChatGroupStateReconciler {
 
     /** Merge by messageId (same id = edit, replace text; new id = append), then re-sort by
      * source timestamp so the rebuilt transcript stays in the order messages actually occurred.
-     * A replaced snapshot carries forward whichever of its previously confirmedAttachmentFileIds
-     * are still among the incoming message's current attachments (see
-     * MessageSnapshot.confirmedAttachmentFileIds) - a Slack retry or a text-only edit of an
-     * already-published attachment must not forget it was already published, but a fileId that's
-     * no longer attached (removed by the edit) is simply dropped rather than kept as stale state
-     * for an attachment that no longer exists on this message. */
+     * A replaced snapshot carries forward whichever of its previously landedAttachments are
+     * still among the incoming message's current attachments (see
+     * MessageSnapshot.landedAttachments) - a Slack retry or a text-only edit of an already-landed
+     * attachment must not forget it was already landed, but a fileId that's no longer attached
+     * (removed by the edit) is simply dropped rather than kept as stale state for an attachment
+     * that no longer exists on this message. */
     private List<MessageSnapshot> mergeSnapshots(List<MessageSnapshot> existing, List<ChatMessage> incoming) {
         Map<String, MessageSnapshot> byId = new LinkedHashMap<>();
         for (MessageSnapshot snapshot : existing) {
@@ -445,12 +453,14 @@ public class ChatGroupStateReconciler {
                     .filter(fileId -> fileId != null)
                     .toList();
             MessageSnapshot previous = byId.get(message.id());
-            List<String> carriedConfirmedFileIds = previous == null
+            List<LandedAttachment> carriedLandedAttachments = previous == null
                     ? List.of()
-                    : previous.confirmedAttachmentFileIds().stream().filter(currentFileIds::contains).toList();
+                    : previous.landedAttachments().stream()
+                            .filter(la -> currentFileIds.contains(la.fileId()))
+                            .toList();
             byId.put(message.id(), new MessageSnapshot(
                     message.id(), message.sender(), message.timestamp(), message.text(),
-                    message.attachments().size(), carriedConfirmedFileIds));
+                    message.attachments().size(), carriedLandedAttachments));
         }
         return byId.values().stream()
                 .sorted((a, b) -> a.timestamp().compareTo(b.timestamp()))
@@ -490,14 +500,19 @@ public class ChatGroupStateReconciler {
      * all, this is an ordinary thread (e.g. the batch/poll path, where ChatSessionGrouper already
      * grouped the root and its replies together from the very first run - see
      * RealSlackSourceReader's hasReplies handling) and there is nothing to migrate.
-     * The copied snapshot drops confirmedAttachmentFileIds (see withoutConfirmedAttachments) -
-     * "confirmed" there means confirmed published under the ORIGINAL group's correlationId, not
-     * this new thread's, so nothing has actually been confirmed published for this group yet.
-     * The original group is only ever read here (groupStateStore.load, not update) - never
-     * modified, never locked - so it truly stays untouched by this migration, exactly as the
-     * design requires. GroupStateStore.writeMessageIndex separately guarantees that persisting
-     * this seeded thread group can never overwrite the root's existing index entry (still
-     * pointing at the original group) - see that method's javadoc.
+     * The copied snapshot KEEPS its landedAttachments (see migratedRootSnapshot) - those files
+     * were already durably landed to MinIO before the migration, and their refs are reused
+     * verbatim by ChatSourceRecordMapper.toSourceRecords(GroupState, List) when this thread
+     * group is published, rather than being re-landed or dropped.
+     * The original group is only ever read here (groupStateStore.load, not update) for its
+     * message content - but migratedRootSnapshot does call GroupStateStore.markSuperseded on it
+     * once a migration is detected, specifically so its own still-pending inactivity timer (if
+     * any) becomes a no-op instead of independently publishing the root a second time under the
+     * original non-thread correlationId (see SlackSessionScheduler.onDeadline). Nothing about the
+     * original group's own messages/revision/correlationId is touched - only superseded flips.
+     * GroupStateStore.writeMessageIndex separately guarantees that persisting this seeded thread
+     * group can never overwrite the root's existing index entry (still pointing at the original
+     * group) - see that method's javadoc.
      */
     private GroupState newThreadGroupState(
             RawSourceType sourceType, String tenantId, String chatId, String threadId) {
@@ -512,19 +527,27 @@ public class ChatGroupStateReconciler {
                 -1, null);
     }
 
+    /**
+     * Resolves the root's CURRENT group via the messageId index; if that is a different
+     * (non-thread) group than threadId itself, this thread is being created by migrating that
+     * root out of it - its snapshot (landedAttachments included, see this method's own javadoc
+     * above) is returned to seed the new thread, and the original group is marked superseded
+     * (GroupStateStore.markSuperseded) so it is never independently published again. If the index
+     * resolves to threadId itself, or to nothing at all, this is an ordinary thread (e.g. the
+     * batch/poll path, where the root and replies were already grouped together from the first
+     * run) and there is nothing to migrate or supersede.
+     */
     private Optional<MessageSnapshot> migratedRootSnapshot(RawSourceType sourceType, String tenantId, String threadId) {
-        return groupStateStore.findGroupIdForMessage(sourceType, tenantId, threadId)
-                .filter(rootGroupId -> !rootGroupId.equals(threadId))
-                .flatMap(rootGroupId -> groupStateStore.load(sourceType, tenantId, rootGroupId))
+        Optional<String> rootGroupId = groupStateStore.findGroupIdForMessage(sourceType, tenantId, threadId)
+                .filter(id -> !id.equals(threadId));
+        if (rootGroupId.isEmpty()) {
+            return Optional.empty();
+        }
+        Optional<MessageSnapshot> rootSnapshot = groupStateStore.load(sourceType, tenantId, rootGroupId.get())
                 .flatMap(rootGroup -> rootGroup.messages().stream()
                         .filter(snapshot -> snapshot.messageId().equals(threadId))
-                        .findFirst())
-                .map(this::withoutConfirmedAttachments);
-    }
-
-    private MessageSnapshot withoutConfirmedAttachments(MessageSnapshot snapshot) {
-        return new MessageSnapshot(
-                snapshot.messageId(), snapshot.sender(), snapshot.timestamp(), snapshot.text(),
-                snapshot.attachmentCount());
+                        .findFirst());
+        rootSnapshot.ifPresent(snapshot -> groupStateStore.markSuperseded(sourceType, tenantId, rootGroupId.get()));
+        return rootSnapshot;
     }
 }

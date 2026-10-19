@@ -10,7 +10,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 COPY pyproject.toml README.md ./
-COPY proto ./proto
 COPY --from=shared proto ./shared/proto
 COPY scripts/gen_proto.py ./scripts/gen_proto.py
 

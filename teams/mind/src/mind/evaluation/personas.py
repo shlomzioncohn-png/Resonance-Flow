@@ -35,6 +35,11 @@ from mind.evaluation.interfaces import PersonaEvaluationScenario, TimeHorizon
 # is spelled out: schema.py and personas_checksum.py import it from here.
 PERSONAS_DIR = Path(__file__).resolve().parents[3] / "eval" / "personas"
 
+# The parent nodes that scenario tasks point at via parent_task_id
+# (teams/mind/eval/hierarchy). A sibling of eval/personas/, not inside it, so
+# load_personas never tries to parse the node file as a scenario.
+HIERARCHY_DIR = PERSONAS_DIR.parent / "hierarchy"
+
 # Present in eval/personas/ as a generated artifact (see mind.evaluation.schema);
 # skipped when scanning the directory for scenario files.
 SCHEMA_FILENAME = "scenario.schema.json"
@@ -48,10 +53,16 @@ ALL_ROLES = {
     "CEO",
 }
 
+# The group of scenarios where the parent hierarchy, not deadline or impact,
+# decides the answer (#507). The original set is every other group.
+HIERARCHY_DECIDES_GROUP = "hierarchy_decides"
+
 MIN_SCENARIOS_PER_ROLE = 4
-MAX_SCENARIOS_PER_ROLE = 6
+# 6 per role / 36 total for the original set, plus one hierarchy_decides scenario
+# per role (#507, raised with the mentor's agreement).
+MAX_SCENARIOS_PER_ROLE = 7
 MIN_TOTAL_SCENARIOS = 24
-MAX_TOTAL_SCENARIOS = 36
+MAX_TOTAL_SCENARIOS = 42
 
 
 class PersonaSchemaError(ValueError):
@@ -83,7 +94,8 @@ def load_personas(personas_dir: str | Path) -> list[PersonaEvaluationScenario]:
     Returns an empty list if the directory has no scenario files yet (the set is
     built up incrementally before the Foundation Gate). Raises FileNotFoundError
     if the directory is missing, and PersonaSchemaError listing every schema
-    violation found, across every offending file, if any scenario fails to parse.
+    violation found, across every offending file, if any scenario fails to parse
+    (including a file that is not valid UTF-8 or not valid JSON at all).
     """
     personas_path = Path(personas_dir)
     if not personas_path.is_dir():
@@ -95,8 +107,14 @@ def load_personas(personas_dir: str | Path) -> list[PersonaEvaluationScenario]:
         if scenario_path.name == SCHEMA_FILENAME:
             continue
 
-        with scenario_path.open(encoding="utf-8") as f:
-            raw = json.load(f)
+        # A file that is not UTF-8 or not JSON is as broken as one that fails the
+        # model: report it with the others instead of escaping as a raw traceback.
+        try:
+            with scenario_path.open(encoding="utf-8") as f:
+                raw = json.load(f)
+        except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+            schema_errors.append(f"{scenario_path.name}: not valid UTF-8 JSON: {exc}")
+            continue
 
         try:
             scenarios.append(PersonaEvaluationScenario.model_validate(raw))
