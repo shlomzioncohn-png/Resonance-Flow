@@ -19,7 +19,7 @@
       "effort_estimate": 45,
       "tier": "strategic",
       "blocked": true,
-      "parent_task_id": null
+      "parent_task_id": "hm_plan_department_planning"
     },
     {
       "task_id": "task_headcount",
@@ -29,7 +29,7 @@
       "effort_estimate": 40,
       "tier": "strategic",
       "blocked": false,
-      "parent_task_id": null
+      "parent_task_id": "hm_plan_department_planning"
     }
   ],
   "expected_top_task_id": "task_headcount",
