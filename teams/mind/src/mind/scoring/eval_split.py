@@ -60,19 +60,25 @@ The split is now 24 / 12 and every role has two holdout scenarios.
 
 Extended for #507
 -----------------
-#507 added six scenarios, one per role, in `hierarchy_decides/`. All six go to
-DEV, for two reasons:
+#507 added six scenarios, one per role, in `hierarchy_decides/`. They go in
+neither half but in a third list, `HIERARCHY_DECIDES_SCENARIO_IDS`:
 
-- They cannot be a valid holdout: the baseline's pick and scores on each of them
-  are already published in `src/mind/evaluation/README.md`, and a holdout is only
-  worth something while nobody has looked at how the model does on it.
-- They are not a calibration target either. Each is built so that the parent
-  hierarchy is the only thing that decides it, and the baseline does not read the
-  hierarchy (#797), so there is nothing in them to tune the baseline on. Its
-  expected result there is fixed by design: it misses the four decided ones and
-  gets the two controls.
+- Not HOLDOUT: the baseline's pick and scores on each of them are already
+  published in `src/mind/evaluation/README.md`, and a holdout is only worth
+  something while nobody has looked at how the model does on it.
+- Not DEV either: rule 1 above makes DEV what every weight is chosen against, and
+  these are not a calibration target. Each is built so that the parent hierarchy
+  is the only thing that decides it, and the baseline does not read the hierarchy
+  (#797), so its result there is fixed by design: it misses the four decided ones
+  and gets the two controls. In DEV they would also pull the dev number down by
+  four misses that are there on purpose — an invitation to "fix" them.
 
-The split is now 30 / 12.
+They are still listed, so `partition()` keeps refusing a scenario it does not
+know; it just returns these in neither half. They are measured with the rest of
+the set by `make eval` (`[hierarchy_decides]`), and
+`tests/test_baseline_ignores_hierarchy.py` pins the baseline's behaviour on them.
+
+The split stays 24 / 12, plus the six.
 
 What leaked anyway: filenames are descriptive, so filename-level signal (which
 scenarios involve a blocked task, which involve an overdue deadline) was
@@ -119,13 +125,6 @@ DEV_SCENARIO_IDS: frozenset[str] = frozenset(
         "higher_manager_approved_vision_memo_vs_expiring_capacity_offer",
         "manager_idle_new_hires_vs_informational_steering_deck",
         "salesperson_dead_rfp_vs_live_signing_round",
-        # Added for #507.
-        "ceo_expansion_partnership_vs_wound_down_line_partnership",
-        "developer_payment_incident_vs_migration_steps",
-        "field_engineer_site_outage_vs_rollout_survey",
-        "higher_manager_migration_budget_vs_reporting_requests",
-        "manager_restructuring_team_signoff_vs_maintenance_team_signoff",
-        "salesperson_core_target_proposal_vs_paused_vertical_proposal",
     }
 )
 
@@ -147,7 +146,22 @@ HOLDOUT_SCENARIO_IDS: frozenset[str] = frozenset(
     }
 )
 
-ALL_SPLIT_SCENARIO_IDS: frozenset[str] = DEV_SCENARIO_IDS | HOLDOUT_SCENARIO_IDS
+#: Added for #507: the `hierarchy_decides/` group. Known to the split, so a change
+#: to the set still fails loudly, but in neither half: see the module docstring.
+HIERARCHY_DECIDES_SCENARIO_IDS: frozenset[str] = frozenset(
+    {
+        "ceo_expansion_partnership_vs_wound_down_line_partnership",
+        "developer_payment_incident_vs_migration_steps",
+        "field_engineer_site_outage_vs_rollout_survey",
+        "higher_manager_migration_budget_vs_reporting_requests",
+        "manager_restructuring_team_signoff_vs_maintenance_team_signoff",
+        "salesperson_core_target_proposal_vs_paused_vertical_proposal",
+    }
+)
+
+ALL_SPLIT_SCENARIO_IDS: frozenset[str] = (
+    DEV_SCENARIO_IDS | HOLDOUT_SCENARIO_IDS | HIERARCHY_DECIDES_SCENARIO_IDS
+)
 
 
 class ScenarioSetDriftError(ValueError):
@@ -169,6 +183,8 @@ def partition(
     scenarios: Iterable[PersonaEvaluationScenario],
 ) -> tuple[list[PersonaEvaluationScenario], list[PersonaEvaluationScenario]]:
     """Split loaded scenarios into `(dev, holdout)`, preserving input order.
+
+    `HIERARCHY_DECIDES_SCENARIO_IDS` are known but returned in neither half.
 
     Raises `ScenarioSetDriftError` if the input contains a `scenario_id` this
     split does not know, or lacks one it does, so a changed eval set surfaces
