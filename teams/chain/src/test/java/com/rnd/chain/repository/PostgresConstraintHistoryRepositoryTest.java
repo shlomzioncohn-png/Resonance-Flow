@@ -29,7 +29,7 @@ class PostgresConstraintHistoryRepositoryTest {
     private static ConstraintHistoryEntry entry(UUID taskId, ConstraintHistoryAction action,
                                                 Constraint.ConstraintStatus previous,
                                                 Constraint.ConstraintStatus next, Instant createdAt) {
-        return new ConstraintHistoryEntry(UUID.randomUUID(), "c-" + UUID.randomUUID(), taskId, action,
+        return new ConstraintHistoryEntry(null, "c-" + UUID.randomUUID(), taskId, action,
                 previous, next, "source-ref", createdAt);
     }
 
@@ -42,8 +42,9 @@ class PostgresConstraintHistoryRepositoryTest {
 
         historyRepository.record(created);
 
-        assertThat(historyRepository.findByTaskId(taskId)).containsExactly(created);
         ConstraintHistoryEntry found = historyRepository.findByTaskId(taskId).get(0);
+        assertThat(found).usingRecursiveComparison().ignoringFields("id").isEqualTo(created);
+        assertThat(found.id()).isNotNull();
         assertThat(found.previousStatus()).isNull();
         assertThat(found.sourceRef()).isEqualTo("source-ref");
         assertThat(found.createdAt()).isEqualTo(now);
@@ -65,8 +66,8 @@ class PostgresConstraintHistoryRepositoryTest {
         historyRepository.record(older);
 
         assertThat(historyRepository.findByTaskId(taskId))
-                .extracting(ConstraintHistoryEntry::id)
-                .containsExactly(second.id(), first.id(), older.id());
+                .extracting(ConstraintHistoryEntry::constraintId)
+                .containsExactly(second.constraintId(), first.constraintId(), older.constraintId());
     }
 
     @Test

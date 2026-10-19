@@ -4,7 +4,6 @@ import com.rnd.chain.dto.UnresolvedDependency;
 import com.rnd.chain.repository.entity.UnresolvedDependencyEntity;
 import com.rnd.chain.repository.jpa.SpringDataUnresolvedDependencyJpaRepository;
 
-import org.springframework.context.annotation.Profile;
 import org.springframework.stereotype.Repository;
 
 import java.util.List;
@@ -12,7 +11,6 @@ import java.util.Optional;
 import java.util.UUID;
 
 @Repository
-@Profile("postgres")
 public class PostgresUnresolvedDependencyRepository
         implements UnresolvedDependencyRepository {
 

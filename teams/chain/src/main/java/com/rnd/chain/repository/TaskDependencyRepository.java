@@ -35,8 +35,7 @@ public interface TaskDependencyRepository {
      * implementation is simply {@link #findByTaskId(UUID)} - safe to call from anywhere, at the
      * cost of this repository's normal internal locking. An implementation MAY override this to
      * skip that internal locking on this path once it's certain the caller-provided exclusivity
-     * makes it redundant here (see {@code InMemoryTaskDependencyRepository} for the motivating
-     * case: a cycle-detection DFS that calls this once per visited graph node, entirely inside
+     * makes it redundant here (e.g. a cycle-detection DFS that calls this once per visited graph node, entirely inside
      * that external lock).
      *
      * <p><b>Calling this from outside that guarantee is unsafe</b> - unlike

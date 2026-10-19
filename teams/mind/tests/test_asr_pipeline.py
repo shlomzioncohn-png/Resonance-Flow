@@ -109,7 +109,7 @@ def test_every_call_that_reaches_the_model_is_recorded():
     calls = get_recent_calls()
     assert [c.model_name for c in calls] == ["whisper-base.en-int8-local"]
     assert calls[0].duration_ms > 0
-    assert calls[0].cost == 0.0  # local compute has no price yet (#479)
+    assert calls[0].cost is None  # a local model costs CPU seconds, not dollars (#479)
 
 
 def model_must_not_load(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -204,7 +204,9 @@ def test_speech_without_the_model_is_still_asr_unavailable(
     result = transcribe(tone(1.0))
     assert (result.success, result.reason) == (False, ASRFailureReason.ASR_UNAVAILABLE)
     assert result.retryable is True
-    assert get_recent_calls()  # the call got past decoding, so it is recorded
+    # Not a model call: Whisper never ran (#479) -- the host lacks it, which the
+    # reason says. Recording it would add a 1 ms "error" to Whisper's figures.
+    assert get_recent_calls() == []
 
 
 @_needs_weights
@@ -825,8 +827,10 @@ def test_an_incomplete_file_whose_timeout_decoded_nothing_is_still_an_environmen
     # make an empty result the file's fault. Here the file is incomplete (its RIFF
     # header says 40 s, it holds 20 s) but the time ran out before any segment came
     # out -- that is the environment, and stays retryable.
-    ticks = iter([0.0])
-    monkeypatch.setattr(asr.time, "perf_counter", lambda: next(ticks, 1000.0))
+    # Time has already run out at the first check: a budget below zero, rather
+    # than a fake clock whose first reading is assumed to be the timeout's start
+    # -- the call's own window (#479) reads the clock before that.
+    monkeypatch.setattr(asr, "TRANSCRIBE_TIMEOUT_S", -1.0)
     use_model(monkeypatch, FakeWhisper([fake_segment(" never reached", 0.0, 1.0)]))
     result = transcribe(cut(wav(seconds=40), 0.5), max_duration_s=5)
     assert (result.success, result.reason) == (False, ASRFailureReason.ASR_FAILED)

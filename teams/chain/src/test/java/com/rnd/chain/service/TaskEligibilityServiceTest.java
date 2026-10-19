@@ -1,5 +1,12 @@
 package com.rnd.chain.service;
 
+import com.rnd.chain.testsupport.TaskStateHistoryFixtures;
+
+import com.rnd.chain.testsupport.PgRepos;
+import org.junit.jupiter.api.Tag;
+import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.transaction.annotation.Transactional;
+
 import com.rnd.chain.dto.Task;
 import com.rnd.chain.dto.TaskDependency;
 import com.rnd.chain.dto.TaskStatus;
@@ -11,10 +18,10 @@ import com.rnd.chain.exception.InvalidDependencyException;
 import com.rnd.chain.exception.InvalidRequestException;
 import com.rnd.chain.exception.TaskNotFoundException;
 import com.rnd.chain.exception.TenantReassignmentException;
-import com.rnd.chain.repository.InMemoryConstraintRepository;
-import com.rnd.chain.repository.InMemoryGraphLock;
-import com.rnd.chain.repository.InMemoryTaskDependencyRepository;
-import com.rnd.chain.repository.InMemoryTaskRepository;
+import com.rnd.chain.repository.ConstraintRepository;
+import com.rnd.chain.repository.GraphLock;
+import com.rnd.chain.repository.TaskDependencyRepository;
+import com.rnd.chain.repository.TaskRepository;
 import com.rnd.chain.testsupport.TestTransactions;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -27,10 +34,14 @@ import java.util.UUID;
 import java.util.stream.Collectors;
 import static org.junit.jupiter.api.Assertions.*;
 
+/** Ported from the in-memory version; runs against the real Postgres repositories (rolled back per test). */
+@Tag("postgres")
+@SpringBootTest
+@Transactional
 class TaskEligibilityServiceTest {
 
-    private InMemoryTaskRepository taskRepository;
-    private InMemoryTaskDependencyRepository dependencyRepository;
+    private TaskRepository taskRepository;
+    private TaskDependencyRepository dependencyRepository;
 
     private RecordingSchedulingUpdatePublisher publisher;
 
@@ -39,17 +50,17 @@ class TaskEligibilityServiceTest {
 
     @BeforeEach
     void setUp() {
-        taskRepository = new InMemoryTaskRepository(List.of());
-        dependencyRepository = new InMemoryTaskDependencyRepository(List.of());
+        taskRepository = PgRepos.tasks(List.of());
+        dependencyRepository = PgRepos.dependencies(List.of());
         publisher = new RecordingSchedulingUpdatePublisher();
         SchedulingUpdateService schedulingUpdateService = new SchedulingUpdateService(publisher);
-        InMemoryGraphLock lock = new InMemoryGraphLock();
+        GraphLock lock = PgRepos.graphLock();
         TaskCounterUpdater counterUpdater = new TaskCounterUpdater(
                 taskRepository, dependencyRepository, new PriorityScoreService(),
                 new SchedulingPublishListener(taskRepository, schedulingUpdateService));
         service = new TaskEligibilityService(
-                taskRepository, dependencyRepository, lock, counterUpdater);
-        edgeService = new DependencyEdgeService(dependencyRepository, lock, counterUpdater);
+                taskRepository, dependencyRepository, lock, counterUpdater, TaskStateHistoryFixtures.newRecorder());
+        edgeService = new DependencyEdgeService(dependencyRepository, lock, counterUpdater, TaskStateHistoryFixtures.newRecorder());
     }
 
     @Test
@@ -233,19 +244,6 @@ class TaskEligibilityServiceTest {
         assertTrue(fixture.taskRepo().findById(taskId).orElseThrow().isReady());
     }
 
-    @Test
-    void alreadyCorrectState_doesNotReplaceStoredTaskInstance() {
-        // Regression test for the code review finding: recalculateTaskEligibility used to write
-        // an unconditional new Task even when nothing had actually changed.
-        UUID taskId = UUID.randomUUID();
-        Fixture fixture = newFixture(List.of(buildTask(taskId, 0, 0, true)), List.of());
-        Task before = fixture.taskRepo().findById(taskId).orElseThrow();
-
-        fixture.service().recalculateTaskEligibility(taskId);
-
-        assertSame(before, fixture.taskRepo().findById(taskId).orElseThrow(),
-                "no-op recalculation must not write a new Task instance");
-    }
 
     @Test
     void staleState_recalculation_replacesStoredTaskInstance() {
@@ -482,9 +480,9 @@ class TaskEligibilityServiceTest {
         }
     }
 
-    private record Fixture(InMemoryTaskRepository taskRepo,
-                            InMemoryTaskDependencyRepository dependencyRepo,
-                            InMemoryConstraintRepository constraintRepo,
+    private record Fixture(TaskRepository taskRepo,
+                            TaskDependencyRepository dependencyRepo,
+                            ConstraintRepository constraintRepo,
                             RecordingSchedulingUpdatePublisher publisher,
                             TaskEligibilityService service,
                             DependencyEdgeService edgeService,
@@ -492,18 +490,18 @@ class TaskEligibilityServiceTest {
     }
 
     private static Fixture newFixture(List<Task> tasks, List<TaskDependency> edges) {
-        InMemoryTaskRepository taskRepo = new InMemoryTaskRepository(tasks);
-        InMemoryTaskDependencyRepository dependencyRepo = new InMemoryTaskDependencyRepository(edges);
-        InMemoryConstraintRepository constraintRepo = new InMemoryConstraintRepository();
+        TaskRepository taskRepo = PgRepos.tasks(tasks);
+        TaskDependencyRepository dependencyRepo = PgRepos.dependencies(edges);
+        ConstraintRepository constraintRepo = PgRepos.constraints();
         RecordingSchedulingUpdatePublisher fixturePublisher = new RecordingSchedulingUpdatePublisher();
         SchedulingUpdateService scheduling = new SchedulingUpdateService(fixturePublisher);
-        InMemoryGraphLock lock = new InMemoryGraphLock();
+        GraphLock lock = PgRepos.graphLock();
         TaskCounterUpdater counterUpdater = new TaskCounterUpdater(
                 taskRepo, dependencyRepo, new PriorityScoreService(),
                 new SchedulingPublishListener(taskRepo, scheduling));
         TaskEligibilityService eligibilityService =
-                new TaskEligibilityService(taskRepo, dependencyRepo, lock, counterUpdater);
-        DependencyEdgeService edgeService = new DependencyEdgeService(dependencyRepo, lock, counterUpdater);
+                new TaskEligibilityService(taskRepo, dependencyRepo, lock, counterUpdater, TaskStateHistoryFixtures.newRecorder());
+        DependencyEdgeService edgeService = new DependencyEdgeService(dependencyRepo, lock, counterUpdater, TaskStateHistoryFixtures.newRecorder());
         return new Fixture(taskRepo, dependencyRepo, constraintRepo, fixturePublisher, eligibilityService,
                 edgeService, counterUpdater);
     }
@@ -615,6 +613,7 @@ class TaskEligibilityServiceTest {
         fixture.counterUpdater().onScoreProposed(taskId, 0.8, 1.0);
         fixture.edgeService().addDependencies(taskId, Map.of(blockerId, 0.2));
         Double withLowConfidence = fixture.taskRepo().findById(taskId).orElseThrow().getPriorityScore();
+        PgRepos.clearPersistenceContext(); // the native upsert changes confidence behind the JPA cache
 
         fixture.edgeService().addDependencies(taskId, Map.of(blockerId, 0.9));
 

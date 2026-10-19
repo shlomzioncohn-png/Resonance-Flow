@@ -237,6 +237,7 @@ The Gateway currently handles these endpoints (manual routing via explicit contr
 | `/api/workspace/tasks/{taskId}` | GET | Get full task details by ID |
 | `/api/workspace/tasks/{taskId}/status` | PATCH | Update task status |
 | `/api/manager/users` | GET | List users, MANAGER only — see below |
+| `/api/manager/users` | POST | Create a user (displayName + role MANAGER/EMPLOYEE), MANAGER only |
 | `/api/manager/users/{id}` | GET | Get one user's details, MANAGER only |
 | `/api/manager/users/{id}` | PATCH | Edit displayName/firstName/lastName/phone, MANAGER only |
 | `/api/manager/users/{id}/status` | PATCH | Change status (ACTIVE/SUSPENDED/DISABLED), MANAGER only |

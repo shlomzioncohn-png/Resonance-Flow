@@ -1,0 +1,52 @@
+{
+  "scenario_id": "manager_restructuring_team_signoff_vs_maintenance_team_signoff",
+  "persona": {
+    "role": "Manager",
+    "department": null
+  },
+  "context": {
+    "free_time_minutes": 45,
+    "current_datetime": "2026-10-13T09:00:00",
+    "time_horizon": "this_week",
+    "constraints": []
+  },
+  "tasks": [
+    {
+      "task_id": "task_birchwood_signoff",
+      "title": "Sign off the Birchwood team's Q4 resourcing plan",
+      "description": "Review the Q4 resourcing plan for the Birchwood team and sign it off so the program office can confirm headcount. The plan is drafted and only needs your approval.",
+      "deadline": "2026-10-15T15:00:00",
+      "effort_estimate": 30,
+      "tier": "tactical",
+      "blocked": false,
+      "parent_task_id": "hd_mgr_routine_maintenance"
+    },
+    {
+      "task_id": "task_atlas_signoff",
+      "title": "Sign off the Atlas team's Q4 resourcing plan",
+      "description": "Review the Q4 resourcing plan for the Atlas team and sign it off so the program office can confirm headcount. The plan is drafted and only needs your approval.",
+      "deadline": "2026-10-15T16:00:00",
+      "effort_estimate": 30,
+      "tier": "tactical",
+      "blocked": false,
+      "parent_task_id": "hd_mgr_q4_restructuring"
+    },
+    {
+      "task_id": "task_filler_drive",
+      "title": "Reorganize the team's shared drive",
+      "description": "Reorganize the team's shared-drive folders; no date set.",
+      "deadline": null,
+      "effort_estimate": 25,
+      "tier": "operational",
+      "blocked": false,
+      "parent_task_id": null
+    }
+  ],
+  "expected_top_task_id": "task_atlas_signoff",
+  "expected_reason": "Both sign-offs are the same tactical approval with the same effort, due an hour apart on Thursday afternoon; task_atlas_signoff serves the Q4 restructuring initiative under this year's organizational goal, while task_birchwood_signoff serves routine maintenance work.",
+  "source": {
+    "type": "synthetic",
+    "source_detail": null
+  },
+  "team_lead_approved": false
+}

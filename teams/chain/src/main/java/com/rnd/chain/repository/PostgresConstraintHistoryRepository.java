@@ -31,9 +31,8 @@ public class PostgresConstraintHistoryRepository implements ConstraintHistoryRep
         Objects.requireNonNull(entry, "entry must not be null");
         jdbcTemplate.update(
             "INSERT INTO constraint_history "
-                + "(id, constraint_id, task_id, action, previous_status, new_status, source_ref, created_at) "
-                + "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-            entry.id(),
+                + "(constraint_id, task_id, action, previous_status, new_status, source_ref, created_at) "
+                + "VALUES (?, ?, ?, ?, ?, ?, ?)",
             entry.constraintId(),
             entry.taskId(),
             entry.action().name(),

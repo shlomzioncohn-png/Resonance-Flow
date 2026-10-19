@@ -38,6 +38,19 @@ if "TEST_DATABASE_URL" in os.environ:
 os.environ.setdefault("MIND_ENVIRONMENT", "ci")
 
 
+@pytest.fixture(autouse=True)
+def _default_monitoring_limits(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Pin the slow/expensive limits and summary interval to their defaults.
+
+    MIND_MONITORING__* in a developer's .env (loaded above) must not change
+    what a test expects. A test that needs other limits sets them itself.
+    """
+    from mind.config import MonitoringSettings
+    from mind.observability import tracking
+
+    monkeypatch.setattr(tracking, "monitoring_settings", MonitoringSettings.model_construct)
+
+
 @pytest.fixture(scope="session")
 def migrated_db() -> None:
     """Applies `alembic upgrade head` once per session. A fixture (not

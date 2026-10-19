@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import PersonAddOutlinedIcon from '@mui/icons-material/PersonAddOutlined';
 import Button from '@mui/material/Button';
 import Dialog from '@mui/material/Dialog';
 import DialogActions from '@mui/material/DialogActions';
@@ -25,6 +26,7 @@ import {
   type UserRow,
   type UserStatus,
 } from '@/services/managerUsersApi';
+import CreateUserDialog from './CreateUserDialog';
 import { buildUserColumns } from './userColumns';
 
 type LoadState = 'loading' | 'loaded' | 'error';
@@ -57,6 +59,8 @@ export default function ManagerUsersPage() {
   const [editForm, setEditForm] = useState<UserEditFields>({});
   const [editError, setEditError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+
+  const [creating, setCreating] = useState(false);
 
   const [menuAnchor, setMenuAnchor] = useState<{ el: HTMLElement; row: UserRow } | null>(null);
   const [statusTarget, setStatusTarget] = useState<{ row: UserRow; newStatus: UserStatus } | null>(null);
@@ -166,6 +170,12 @@ export default function ManagerUsersPage() {
       });
   }, [editingUser, hasChanges, changedFields]);
 
+  const handleCreated = useCallback(() => {
+    setCreating(false);
+    setState('loading');
+    fetchUsers();
+  }, [fetchUsers]);
+
   const openStatusMenu = (event: React.MouseEvent<HTMLElement>, row: UserRow) => {
     setMenuAnchor({ el: event.currentTarget, row });
   };
@@ -199,7 +209,15 @@ export default function ManagerUsersPage() {
   });
 
   return (
-    <PageContainer title="Users" description="Every user in your organization, from Inbox's canonical user table.">
+    <PageContainer
+      title="Users"
+      description="Every user in your organization, from Inbox's canonical user table."
+      actions={
+        <Button variant="contained" startIcon={<PersonAddOutlinedIcon />} onClick={() => setCreating(true)}>
+          New user
+        </Button>
+      }
+    >
       <DataTable
         ariaLabel="Users"
         columns={columns}
@@ -220,6 +238,8 @@ export default function ManagerUsersPage() {
           onPageSizeChange: changePageSize,
         }}
       />
+
+      <CreateUserDialog open={creating} onClose={() => setCreating(false)} onCreated={handleCreated} />
 
       {/* Status menu */}
       <Menu anchorEl={menuAnchor?.el} open={!!menuAnchor} onClose={closeStatusMenu}>

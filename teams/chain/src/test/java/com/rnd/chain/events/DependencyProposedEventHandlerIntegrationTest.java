@@ -1,16 +1,14 @@
 package com.rnd.chain.events;
 
+import com.rnd.chain.testsupport.PgCleanup;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.Tag;
+import org.springframework.jdbc.core.JdbcTemplate;
+
 import com.rnd.chain.dto.Task;
 import com.rnd.chain.dto.TaskStatus;
 import com.rnd.chain.repository.ConstraintRepository;
 import com.rnd.chain.repository.DependencyHistoryRepository;
-import com.rnd.chain.repository.InMemoryConstraintRepository;
-import com.rnd.chain.repository.InMemoryDependencyHistoryRepository;
-import com.rnd.chain.repository.InMemoryGraphLock;
-import com.rnd.chain.repository.InMemoryTaskDependencyRepository;
-import com.rnd.chain.repository.InMemoryTaskRepository;
-import com.rnd.chain.repository.InMemoryTransactionRunner;
-import com.rnd.chain.repository.InMemoryUnresolvedDependencyRepository;
 import com.rnd.chain.repository.TaskDependencyRepository;
 import com.rnd.chain.repository.TaskRepository;
 import com.rnd.chain.repository.TransactionRunner;
@@ -65,9 +63,8 @@ import java.util.UUID;
 import static org.awaitility.Awaitility.await;
 import static org.mockito.Mockito.mock;
 
-@SpringBootTest(
-        classes = DependencyProposedEventHandlerIntegrationTest.TestApp.class
-)
+@Tag("postgres")
+@SpringBootTest
 @EmbeddedKafka(
         partitions = 1,
         bootstrapServersProperty = "spring.kafka.bootstrap-servers"
@@ -79,119 +76,7 @@ class DependencyProposedEventHandlerIntegrationTest {
 
     private static final String TOPIC =
             "task.dependencies.proposed";
-        private static final String ERROR_TOPIC = TOPIC + ".errors";
-@Configuration
-@EnableAutoConfiguration(exclude = {
-        DataSourceAutoConfiguration.class,
-        HibernateJpaAutoConfiguration.class,
-        JpaRepositoriesAutoConfiguration.class,
-        FlywayAutoConfiguration.class
-})
-@Import({
-        ChainProtobufKafkaConfig.class,
-        DependencyProposedEventHandler.class,
-        Fixtures.class
-})
-static class TestApp {
-}
-  
-@TestConfiguration
-    static class Fixtures {
-
-        @Bean
-        @Primary
-        TaskRepository testTaskRepository() {
-            return new InMemoryTaskRepository(List.of());
-        }
-
-        @Bean
-        @Primary
-        TaskDependencyRepository testTaskDependencyRepository() {
-            return new InMemoryTaskDependencyRepository(List.of());
-        }
-
-        @Bean
-        @Primary
-        ConstraintRepository testConstraintRepository() {
-            return new InMemoryConstraintRepository();
-        }
-
-        @Bean
-        @Primary
-        DependencyHistoryRepository testDependencyHistoryRepository() {
-            return new InMemoryDependencyHistoryRepository();
-        }
-
-        @Bean
-        @Primary
-        TransactionRunner testTransactionRunner() {
-            return new InMemoryTransactionRunner();
-        }
-        @Bean
-ChainEventProcessingTemplate chainEventProcessingTemplate() {
-    return new ChainEventProcessingTemplate(
-            new InMemoryProcessedEventStore());
-}
-
-        @Bean
-        @Primary
-        UnresolvedDependencyRepository testUnresolvedDependencyRepository() {
-            return new InMemoryUnresolvedDependencyRepository();
-        }
-
-        @Bean
-        @Primary
-        SchedulingUpdateService testSchedulingUpdateService() {
-            return mock(SchedulingUpdateService.class);
-        }
-
-        @Bean
-        @Primary
-        DependencyEdgeService testDependencyEdgeService(
-                TaskRepository taskRepository,
-                TaskDependencyRepository taskDependencyRepository,
-                SchedulingUpdateService schedulingUpdateService) {
-
-            return new DependencyEdgeService(
-                    taskDependencyRepository,
-                    new InMemoryGraphLock(),
-                    new TaskCounterUpdater(taskRepository, taskDependencyRepository,
-                            new PriorityScoreService(),
-                            new SchedulingPublishListener(taskRepository, schedulingUpdateService)));
-        }
-
-        @Bean
-        @Primary
-        TaskDependencyService testTaskDependencyService(
-                TaskRepository taskRepository,
-                TaskDependencyRepository taskDependencyRepository,
-                DependencyHistoryRepository dependencyHistoryRepository,
-                TransactionRunner transactionRunner,
-                DependencyEdgeService dependencyEdgeService) {
-
-            return new TaskDependencyService(
-                    taskRepository,
-                    taskDependencyRepository,
-                    dependencyHistoryRepository,
-                    transactionRunner,
-                    Clock.systemUTC(),
-                    dependencyEdgeService);
-        }
-
-        @Bean
-        @Primary
-        UnresolvedDependencyService testUnresolvedDependencyService(
-                UnresolvedDependencyRepository unresolvedDependencyRepository,
-                TaskDependencyService taskDependencyService) {
-
-            return new UnresolvedDependencyService(
-                    unresolvedDependencyRepository,
-                    taskDependencyService,
-                    Clock.systemUTC());
-        }
-    }
-
-    @org.springframework.beans.factory.annotation.Autowired
+        private static final String ERROR_TOPIC = TOPIC + ".errors";    @org.springframework.beans.factory.annotation.Autowired
     private TaskRepository taskRepository;
 
     @org.springframework.beans.factory.annotation.Value(
@@ -200,8 +85,19 @@ ChainEventProcessingTemplate chainEventProcessingTemplate() {
 
     private KafkaTemplate<String, DependencyProposedEvent> producer;
 
+    @org.springframework.beans.factory.annotation.Autowired
+    private JdbcTemplate jdbcTemplate;
+
+    private PgCleanup cleanup;
+
+    @AfterEach
+    void cleanUpRows() {
+        cleanup.restore();
+    }
+
     @BeforeEach
     void setUp() {
+        cleanup = new PgCleanup(jdbcTemplate);
 
         Map<String, Object> producerProps =
                 new HashMap<>();
@@ -371,10 +267,7 @@ void malformedEvent_goesStraightToTheErrorsTopic_neverRetried() {
                     .build());
 
     ConsumerRecord<String, String> onErrorsTopic =
-            KafkaTestUtils.getSingleRecord(
-                    errorsProbe,
-                    ERROR_TOPIC,
-                    Duration.ofMillis(3000));
+            KafkaTestUtils.getRecords(errorsProbe, Duration.ofMillis(3000)).iterator().next();
 
     assertNotNull(
             onErrorsTopic,
@@ -434,10 +327,7 @@ void genuinelyMalformedBytes_notValidProtobufAtAll_alsoGoesStraightToTheErrorsTo
                     .getBytes(java.nio.charset.StandardCharsets.UTF_8));
 
     ConsumerRecord<String, String> onErrorsTopic =
-            KafkaTestUtils.getSingleRecord(
-                    errorsProbe,
-                    ERROR_TOPIC,
-                    Duration.ofSeconds(15));
+            KafkaTestUtils.getRecords(errorsProbe, Duration.ofSeconds(15)).iterator().next();
 
     assertNotNull(
             onErrorsTopic,

@@ -124,7 +124,7 @@ public class ConstraintEligibilityService {
                                Constraint.ConstraintStatus previousStatus,
                                Constraint.ConstraintStatus newStatus, String sourceRef) {
         constraintHistoryRepository.record(new ConstraintHistoryEntry(
-                UUID.randomUUID(), constraintId, taskId, action, previousStatus, newStatus, sourceRef,
+                null, constraintId, taskId, action, previousStatus, newStatus, sourceRef,
                 Instant.now()));
     }
 }

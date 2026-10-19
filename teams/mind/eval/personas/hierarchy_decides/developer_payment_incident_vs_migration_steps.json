@@ -1,0 +1,52 @@
+{
+  "scenario_id": "developer_payment_incident_vs_migration_steps",
+  "persona": {
+    "role": "Developer",
+    "department": null
+  },
+  "context": {
+    "free_time_minutes": 60,
+    "current_datetime": "2026-10-21T10:00:00",
+    "time_horizon": "this_week",
+    "constraints": []
+  },
+  "tasks": [
+    {
+      "task_id": "task_port_config",
+      "title": "Port the billing service's configuration to the new platform",
+      "description": "Port the billing service's configuration to the new platform as the next step of the migration; the platform team has the target environment ready and the migration plan lists this step for this week.",
+      "deadline": "2026-10-22T17:00:00",
+      "effort_estimate": 45,
+      "tier": "tactical",
+      "blocked": false,
+      "parent_task_id": "hd_dev_migration_wave"
+    },
+    {
+      "task_id": "task_port_tests",
+      "title": "Move the billing integration tests to the new pipeline",
+      "description": "Move the billing service's integration tests onto the new platform's pipeline as the next step of the migration.",
+      "deadline": "2026-10-23T17:00:00",
+      "effort_estimate": 45,
+      "tier": "tactical",
+      "blocked": false,
+      "parent_task_id": "hd_dev_migration_wave"
+    },
+    {
+      "task_id": "task_payment_retries",
+      "title": "Fix the failing card payments in production",
+      "description": "Card payments have been failing for a share of customers since this morning's deploy; the support SLA for a production payment incident requires a fix or a rollback by 13:00.",
+      "deadline": "2026-10-21T13:00:00",
+      "effort_estimate": 40,
+      "tier": "operational",
+      "blocked": false,
+      "parent_task_id": null
+    }
+  ],
+  "expected_top_task_id": "task_payment_retries",
+  "expected_reason": "task_payment_retries is a live production failure of customer card payments with a 13:00 SLA today; the two migration steps serve this year's top engineering goal but are due later in the week.",
+  "source": {
+    "type": "synthetic",
+    "source_detail": null
+  },
+  "team_lead_approved": false
+}

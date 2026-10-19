@@ -11,8 +11,9 @@ per-task priority score MIND publishes.
   importance down the parent chain; this baseline does not read
   `parent_task_id`, does not declare it on its input, and knows nothing about
   hierarchy. That is deliberate — see *Why hierarchy is absent* below.
-- **Explanations (#358, week 6)** are built on top of the raw factors this model
-  returns; only a fixed template lives here.
+- **Explanations (#358)** are a fixed template over the score's own values, in
+  `ScoreResult.reasoning` — see *Explanations* below. No LLM, and no change to
+  `task.score.proposed`: consumers keep reading `factors`.
 
 ## The contract
 
@@ -55,9 +56,11 @@ not blocked        final =   0.30 + 0.70 x 0.7977           = 0.8584
 The three contributions are what is returned in `ScoreResult.factors`, a
 `ScoreFactors` carrying `contributions` (the weighted values above), `blocked`
 (whether a blocked adjustment was applied) and `base_score` (the score before
-that adjustment). They are *weighted* contributions, not raw feature values, so
-the largest one is genuinely the dominant reason for the score — which is what
-#358's explanations will need. In `report.json` it lands as:
+that adjustment). They are *weighted* contributions, not raw feature values.
+The largest is not by itself the reason for the score: a neutral impact at
+strategic contributes 0.395 and says nothing. The explanation reads each
+factor's distance from neutral instead — see *Explanations* below. In
+`report.json` it lands as:
 
 ```json
 "factors": {"contributions": {"time_pressure": 0.4727, "impact": 0.25, "quick_win": 0.075},
@@ -282,13 +285,94 @@ The honest summary, and the answer to "why 0.65 and not 0.62": the *ordering* is
 derived, the *bounds* are argued, and the decimals were fitted to 20 scenarios
 and then measured on 10 that were never read.
 
+## Explanations
+
+`reasoning` says why a task scored the way it did, in one sentence built from
+the same values the score was computed from:
+
+```
+operational task, scores high: the deadline is 3 hours away; it mentions "sla", "customer".
+tactical task, scores low: its wording plays it down ("housekeeping", "routine"); the deadline is 6 days away.
+strategic task, scores in the middle: no factor stands out; no deadline given.
+```
+
+### What counts as a reason
+
+Every rule's weights sum to 1.0, so a task with every feature at 0.5 has a base
+score of exactly 0.5 under any tier. That makes each factor's **shift**,
+`weight * (value - 0.5)`, its exact share of how far the score moved from
+neutral: the shifts add up to `base - 0.5`. A factor is named when its shift is
+more than `REASON_SHIFT` (0.05) either way.
+
+The shift, not the raw feature value, is what decides, because the raw value
+ignores the weight. An earlier draft named any feature value of 0.6 or more. On
+the 24 dev scenarios that called the effort estimate a reason in 43 of 45
+tasks and gave three expected-top tasks the sole explanation "it takes about
+35" or "40 minutes", for a factor that had moved their score by about 0.01: a real
+number explained by something that did not produce it. Strategic deadlines had
+the same problem, named in all 13 tasks at a weight of 0.21.
+
+0.05 is not fitted. It is the most `quick_win` can move any score (its largest
+weight, 0.10, times 0.5), and the comparison is strict, so it reads as *a reason
+is something that moved the score further than the tie-breaker can* — even a
+0-minute estimate, which reaches 0.05 exactly, stops short. On the dev split 0.03 brings effort
+back as a reason in 14 tasks, and 0.08 drops real impact words such as
+"sign-off" at strategic; 0.05 sits between the two.
+
+Consequences worth knowing:
+
+- **Effort is never named as a reason**, which matches what it is for: it only
+  breaks near-ties. A missing estimate is still stated, and is not mentioned at
+  strategic, which does not weigh effort.
+- **The tier's weights carry through.** "customer" moves an operational score
+  by 0.04 and is not named; it moves a strategic one by 0.12 and is.
+- **A missing deadline needs no special case**: a strong reason against at
+  operational (−0.23), a weaker one at tactical (−0.08), and exactly neutral at
+  strategic, where it is stated as missing rather than as a reason.
+
+### The sentence
+
+- **Verdict** on the base score, symmetric around 0.5: *high* at or above
+  `HIGH_BASE_SCORE` (0.6), *low* below `LOW_BASE_SCORE` (0.4), otherwise *in
+  the middle*. It says *scores*, never *ranks*, because it describes this
+  task's own score, not its place in a list: on the 36 persona scenarios the
+  model's top task scores in the middle in 8 and low in 2, because its rivals
+  score lower still. "Ranks low" for the top task would read as a
+  contradiction; "scores low" is simply true, and why it still comes first is
+  Chain's ordering to explain, not MIND's. A blocked task says *would score*,
+  since its final score sits below every startable one.
+- **A high or low verdict always names something.** Several factors can each
+  stay under the threshold and still add up to a high or low base; then the
+  ones that leaned the verdict's way are named, never the tie-breaker.
+- **Reasons** are this tier's factors only, largest shift first, each with its
+  real value: the hours or days to the deadline, the words that moved impact
+  (a stem such as `escalat*` is printed as the word written, "escalated").
+  Impact words are quoted, as the urgency phrase is: many lexicon entries are
+  not nouns ("needs your", "must reach"), and bare after "it mentions" they
+  would not read as a sentence.
+  Half hours round up, so 2.5 hours reads "3 hours" — not Python's `round`,
+  which would send 2.5 to 2 but 3.5 to 4.
+- **Time pressure names its source.** It is the max of the deadline and the
+  wording, so when the wording won the sentence quotes the phrase and does not
+  credit the deadline. A phrase in both lexicons ("data is at risk") is quoted
+  once, not again as an impact word.
+- **Missing data is stated**: "no deadline given", "no effort estimate" — the
+  deadline even when the wording, not the absent date, set the time pressure.
+
+`SegmentedRankingModel.explain(task, context)` returns the same text plus the
+factors it names and every factor's shift. `tests/test_explanations.py` walks an
+input grid covering every branch and checks that the named factors are the
+score's own, that the text talks about exactly those factors and no others,
+and that each shift is recomputed from the features themselves — which is what
+keeps the text from describing a score it did not come from.
+
 ## Determinism
 
 No LLM call, no clock read, no randomness, no dependence on dict iteration order.
 The same task scores identically on every run. `reasoning` is a fixed template
 over the factors for the same reason — text that changes between runs makes two
-reports impossible to diff. Phrasing explanations properly is #358's job in
-week 6, and it will be built from `factors`, not from this string.
+reports impossible to diff. "Hours away" is measured from
+`context.current_datetime`, never from the clock.
 
 A baseline that is not reproducible cannot be compared to the week-7 stretch,
 which is the entire purpose of measuring it.
@@ -335,11 +419,69 @@ reading a third of the set.
 - **`ASSUMED_TIER_SHIFT` was measured on synthetic tasks.** The spread on real
   extracted ones may differ; re-measure once #353 produces them.
 
+## Publishing the score to Chain (#357)
+
+A separate process, like the index consumer: it reads Inbox's `task.created`
+and `task.updated`, scores each task with this model, and publishes
+`task.score.proposed` to Chain.
+
+| File | Role |
+|---|---|
+| `inbox_task.py` | Inbox event → `InboxTask` (fits `ScorableTask`). Empty fields stay empty. A task or tenant id that is not a UUID raises `InvalidInboxEvent`. |
+| `score_event.py` | `ScoreResult` → `TaskScoreProposed` (`contracts/`). |
+| `kafka_sink.py` | `TaskScoreProposed` → shared/proto's `TaskScoreProposedEvent`, published keyed by `task_id`. |
+| `score_publisher.py` | The handlers, and when to publish. |
+| `score_publisher_runner.py` | The process: one consumer thread per topic. |
+
+The payload, as agreed with Chain on #133: `event_id`, `tenant_id`, `task_id`,
+`mind_score` (the **`base_score`**, never the blocked-adjusted `score`: blocking
+is Chain's call), `scored_at`, `confidence` (`score_confidence`), `factors`, and
+`tier` as Inbox sent it. An unclassified task is scored by the tactical rule, but
+its tier goes out unset.
+
+When a score is published:
+
+- **On `task.created`, and on `task.updated` only when a field the model reads
+  changes** (title, description, tier, deadline, effort). Every score makes Chain
+  publish `task.scheduling.updated`, which makes Inbox emit `task.updated`;
+  publishing on every update would loop forever. `urgency` is not a trigger: the
+  model never reads that field.
+- **Older events are dropped.** The two topics have no ordering between them, so
+  each task keeps the newest Inbox `created_at` / `updated_at` seen. At an equal
+  time, `task.created` counts as older.
+- **Errors that would repeat are skipped, not retried.** Converting the event,
+  scoring the task or building the payload fails the same way on every
+  redelivery (a malformed id, a result without `base_score`, a score outside
+  0..1, a model bug for one task). Propagating it would kill the process on the
+  same message forever, so it is logged with the task id and skipped. Only a
+  failure to send to Kafka propagates, so that message is retried. Anything the
+  model raises counts as permanent, so a model must not raise on a transient
+  failure (#474 already requires falling back to the baseline score).
+- **When propagation changes a score without an Inbox event** (#474: a parent
+  changed, so its children's scores did), the propagation code calls
+  `ScorePublisher.rescore(child_id)` for each affected child. That only queues
+  the id, so it is safe from anywhere, including from inside the model's own
+  `score()`. A worker thread scores each queued child again with the publisher's
+  own model (so that model must be the propagation model) on its newest state,
+  under the same lock as the event handlers. A request for a task already
+  queued is dropped, and a re-score whose score is unchanged is not sent, so a
+  cycle in the hierarchy cannot flood Chain; propagation should still ask only
+  when a parent's score actually changed. `rescore` returns nothing. The state is
+  in memory, so a child no Inbox event has reached since start-up is logged and
+  skipped until its next event.
+- **The lock is held while the model scores**, so a model that calls the network
+  (propagation reads Chain's traversal API) holds up the other topic meanwhile.
+
+What was last published lives in memory, so a restart re-publishes each task
+once on its next event. A score is not re-sent just because time passes.
+
 ## Running it
 
 ```
 pytest tests/test_scoring.py -v                  # the acceptance tests
 pytest tests/test_scoring_missing_fields.py -v   # no tier, no estimate, no description
+pytest tests/test_score_publish.py tests/test_score_event.py \
+       tests/test_inbox_task.py tests/test_kafka_sink.py -v   # publishing to Chain
 ```
 
 That is all this package runs. Evaluating the model against the persona set goes

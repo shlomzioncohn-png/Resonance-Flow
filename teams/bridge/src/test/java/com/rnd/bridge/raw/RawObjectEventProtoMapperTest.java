@@ -34,12 +34,12 @@ class RawObjectEventProtoMapperTest {
         com.rnd.bridge.shared.unstructured.dto.RawObjectEvent proto = mapper.toProto(event);
 
         assertThat(proto.getSchemaVersion()).isEqualTo("1.0");
-        assertThat(proto.getSourceType()).isEqualTo(com.rnd.bridge.shared.unstructured.dto.SourceType.EMAIL);
+        assertThat(proto.getSourceType()).isEqualTo(com.rnd.bridge.shared.unstructured.dto.SourceType.SOURCE_TYPE_EMAIL);
         assertThat(proto.getTenantId()).isEqualTo("kamatech");
         assertThat(Timestamps.toMillis(proto.getIngestedAt()))
                 .isEqualTo(Instant.parse("2026-08-18T09:15:00Z").toEpochMilli());
         assertThat(proto.getScopeDecision())
-                .isEqualTo(com.rnd.bridge.shared.unstructured.dto.ScopeDecision.INCLUDED);
+                .isEqualTo(com.rnd.bridge.shared.unstructured.dto.ScopeDecision.SCOPE_DECISION_INCLUDED);
         assertThat(proto.getParticipantsList()).containsExactly("hadas@kamatech.org");
         assertThat(proto.hasSourceTimestamp()).isTrue();
         assertThat(Timestamps.toMillis(proto.getSourceTimestamp()))
@@ -47,21 +47,21 @@ class RawObjectEventProtoMapperTest {
         assertThat(proto.getCorrelationId()).isEqualTo("corr-1");
         assertThat(proto.getRevision()).isEqualTo(3);
         assertThat(proto.getChangeType())
-                .isEqualTo(com.rnd.bridge.shared.unstructured.dto.ChangeType.DELETE_REVIEW);
+                .isEqualTo(com.rnd.bridge.shared.unstructured.dto.ChangeType.CHANGE_TYPE_DELETE_REVIEW);
         assertThat(proto.getChangeSignificanceScore()).isEqualTo(100);
 
         assertThat(proto.getObjectsList()).hasSize(2);
         com.rnd.bridge.shared.unstructured.dto.RawObjectRef protoBody = proto.getObjects(0);
-        assertThat(protoBody.getRole()).isEqualTo(com.rnd.bridge.shared.unstructured.dto.Role.BODY);
+        assertThat(protoBody.getRole()).isEqualTo(com.rnd.bridge.shared.unstructured.dto.Role.ROLE_BODY);
         assertThat(protoBody.getObjectKey()).isEqualTo("EMAIL/kamatech/2026-08-18/x.json");
         assertThat(protoBody.getContentHash()).isEqualTo("sha256:" + "a".repeat(64));
         assertThat(protoBody.getContentType()).isEqualTo("application/json");
         assertThat(protoBody.hasSizeBytes()).isTrue();
         assertThat(protoBody.getSizeBytes()).isEqualTo(123L);
-        assertThat(protoBody.getModality()).isEqualTo(com.rnd.bridge.shared.unstructured.dto.Modality.AUDIO);
+        assertThat(protoBody.getModality()).isEqualTo(com.rnd.bridge.shared.unstructured.dto.Modality.MODALITY_AUDIO);
 
         com.rnd.bridge.shared.unstructured.dto.RawObjectRef protoAttachment = proto.getObjects(1);
-        assertThat(protoAttachment.getRole()).isEqualTo(com.rnd.bridge.shared.unstructured.dto.Role.ATTACHMENT);
+        assertThat(protoAttachment.getRole()).isEqualTo(com.rnd.bridge.shared.unstructured.dto.Role.ROLE_ATTACHMENT);
     }
 
     @Test
@@ -79,24 +79,67 @@ class RawObjectEventProtoMapperTest {
         assertThat(proto.hasSourceTimestamp()).isFalse();
         assertThat(proto.getObjects(0).getContentType()).isEmpty();
         assertThat(proto.getObjects(0).hasSizeBytes()).isFalse();
-        assertThat(proto.getObjects(0).getModality()).isEqualTo(com.rnd.bridge.shared.unstructured.dto.Modality.TEXT);
+        assertThat(proto.getObjects(0).getModality()).isEqualTo(com.rnd.bridge.shared.unstructured.dto.Modality.MODALITY_TEXT);
     }
 
     @Test
-    void toProto_mapsScannedDocAndDocSourceTypes() {
+    void toProto_mapsMediaSourceTypesToTheirPrefixedWireValues() {
         RawObjectRef ref = new RawObjectRef(
                 Role.BODY, "SCANNED_DOC/kamatech/2026-08-18/x.json", "sha256:" + "c".repeat(64), null, null,
                 Modality.SCANNED_DOC);
-        RawObjectEvent scannedDoc = RawObjectEvent.create(
-                RawSourceType.SCANNED_DOC, "kamatech", Instant.now(), ScopeDecision.INCLUDED, List.of(),
-                null, "corr-3", 0, ChangeType.UPSERT, List.of(ref));
-        RawObjectEvent doc = RawObjectEvent.create(
-                RawSourceType.DOC, "kamatech", Instant.now(), ScopeDecision.INCLUDED, List.of(),
-                null, "corr-4", 0, ChangeType.UPSERT, List.of(ref));
 
-        assertThat(mapper.toProto(scannedDoc).getSourceType())
+        assertThat(mapper.toProto(event(RawSourceType.SCANNED_DOC, ref)).getSourceType())
                 .isEqualTo(com.rnd.bridge.shared.unstructured.dto.SourceType.SOURCE_TYPE_SCANNED_DOC);
-        assertThat(mapper.toProto(doc).getSourceType())
-                .isEqualTo(com.rnd.bridge.shared.unstructured.dto.SourceType.DOC);
+        assertThat(mapper.toProto(event(RawSourceType.ZOOM, ref)).getSourceType())
+                .isEqualTo(com.rnd.bridge.shared.unstructured.dto.SourceType.SOURCE_TYPE_ZOOM);
+        assertThat(mapper.toProto(event(RawSourceType.BIGBLUEBUTTON, ref)).getSourceType())
+                .isEqualTo(com.rnd.bridge.shared.unstructured.dto.SourceType.SOURCE_TYPE_BIGBLUEBUTTON);
+    }
+
+    @Test
+    void toProto_leavesSourceRefAndClassificationUnsetWhenAbsent() {
+        RawObjectRef ref = new RawObjectRef(
+                Role.BODY, "EMAIL/kamatech/2026-08-18/x.json", "sha256:" + "d".repeat(64), "text/plain", 1L,
+                Modality.TEXT);
+
+        com.rnd.bridge.shared.unstructured.dto.RawObjectEvent proto = mapper.toProto(event(RawSourceType.EMAIL, ref));
+
+        assertThat(proto.hasSourceRef()).isFalse();
+        assertThat(proto.hasClassification()).isFalse();
+    }
+
+    @Test
+    void toProto_mapsSourceRefAndClassification() {
+        RawObjectRef ref = new RawObjectRef(
+                Role.BODY, "SCANNED_DOC/kamatech/2026-08-18/x.pdf", "sha256:" + "e".repeat(64),
+                "application/pdf", 10L, Modality.SCANNED_DOC);
+        RawObjectEvent event = event(RawSourceType.SCANNED_DOC, ref)
+                .withSourceRef("rec-1")
+                .withClassification(new com.rnd.bridge.raw.model.Classification(
+                        com.rnd.bridge.raw.model.DecidedBy.MODEL,
+                        new com.rnd.bridge.raw.model.Label<>(com.rnd.bridge.raw.model.DocumentCategory.LETTER, 0.95),
+                        new com.rnd.bridge.raw.model.Label<>(com.rnd.bridge.raw.model.Quality.GOOD, 0.9),
+                        new com.rnd.bridge.raw.model.Label<>(com.rnd.bridge.raw.model.Sensitivity.HIGH, 0.8),
+                        "employee termination letter",
+                        new com.rnd.bridge.raw.model.ClassifierInfo("gemini-3.8-flash", "v2")));
+
+        com.rnd.bridge.shared.unstructured.dto.RawObjectEvent proto = mapper.toProto(event);
+
+        assertThat(proto.getSourceRef()).isEqualTo("rec-1");
+        com.rnd.bridge.shared.unstructured.dto.Classification c = proto.getClassification();
+        assertThat(c.getDecidedBy()).isEqualTo(com.rnd.bridge.shared.unstructured.dto.DecidedBy.DECIDED_BY_MODEL);
+        assertThat(c.getCategory().getValue()).isEqualTo("LETTER");
+        assertThat(c.getCategory().getConfidence()).isEqualTo(0.95f);
+        assertThat(c.getQuality().getValue()).isEqualTo(com.rnd.bridge.shared.unstructured.dto.Quality.QUALITY_GOOD);
+        assertThat(c.getSensitivity().getValue()).isEqualTo(com.rnd.bridge.shared.unstructured.dto.Sensitivity.SENSITIVITY_HIGH);
+        assertThat(c.getReason()).isEqualTo("employee termination letter");
+        assertThat(c.getClassifier().getModel()).isEqualTo("gemini-3.8-flash");
+        assertThat(c.getClassifier().getPromptVersion()).isEqualTo("v2");
+    }
+
+    private static RawObjectEvent event(RawSourceType sourceType, RawObjectRef ref) {
+        return RawObjectEvent.create(
+                sourceType, "kamatech", Instant.now(), ScopeDecision.INCLUDED, List.of(),
+                null, "corr-3", 0, ChangeType.UPSERT, List.of(ref));
     }
 }
