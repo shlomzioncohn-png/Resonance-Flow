@@ -1,44 +1,36 @@
 package com.rnd.bridge.crm.controller;
 
-import com.rnd.bridge.crm.CrmLane;
-import com.rnd.bridge.crm.repository.DealRepository;
-import com.rnd.bridge.crm.repository.DealSnapshot;
+import com.rnd.bridge.crm.CrmSourceResult;
+import com.rnd.bridge.crm.CrmSyncService;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
-import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
-import java.util.Map;
+import java.util.List;
 
 /**
- * Thin HTTP trigger for the CRM lane: {@code POST /bridge/crm/sync} takes one {@link DealSnapshot}
- * and runs {@link CrmLane} against it. No auth; concurrent POSTs are not safe once Kafka is wired (no single-flight guard).
+ * Thin HTTP trigger for the CRM lane: {@code POST /bridge/crm/sync} runs every active source via
+ * {@link CrmSyncService}. 200 if at least one source succeeded; 503 only if all failed.
  */
 @RestController
 @RequestMapping("/bridge/crm")
 public class CrmBridgeController {
 
-    private final CrmLane crmLane;
-    private final DealRepository dealRepository;
+    private final CrmSyncService crmSyncService;
 
-    public CrmBridgeController(CrmLane crmLane, DealRepository dealRepository) {
-        this.crmLane = crmLane;
-        this.dealRepository = dealRepository;
+    public CrmBridgeController(CrmSyncService crmSyncService) {
+        this.crmSyncService = crmSyncService;
     }
 
     @PostMapping("/sync")
-    public CrmSyncResponse sync() {
-        DealSnapshot snapshot = dealRepository.snapshot();
-        return CrmSyncResponse.from(
-                crmLane.run(snapshot.latestPerDeal().stream(), snapshot.asOf()),
-                snapshot.skippedAtRead());
-    }
+    public ResponseEntity<CrmSyncResponse> sync() {
+        List<CrmSourceResult> results = crmSyncService.syncAll();
+        CrmSyncResponse response = CrmSyncResponse.from(results);
 
-    @ExceptionHandler(RuntimeException.class)
-    public ResponseEntity<Map<String, String>> handleSnapshotFailure(RuntimeException e) {
-        return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE)
-                .body(Map.of("error", "CRM sync failed: " + e.getMessage()));
+        boolean anySucceeded = results.isEmpty() || results.stream().anyMatch(result -> result.error() == null);
+        HttpStatus status = anySucceeded ? HttpStatus.OK : HttpStatus.SERVICE_UNAVAILABLE;
+        return ResponseEntity.status(status).body(response);
     }
 }
