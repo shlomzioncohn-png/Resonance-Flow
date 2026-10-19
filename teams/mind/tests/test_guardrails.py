@@ -92,6 +92,12 @@ def _media_outcome(result: OCRResult | ASRResult, threshold: float) -> str:
     return "low_confidence" if result.mean_confidence < threshold else "silent"
 
 
+def _observe(case_id: str, outcome: str, **values: object) -> None:
+    """Print what a case did, pass or fail, for the audit report (run with -s)."""
+    shown = " ".join(f"{key}={value!r}" for key, value in values.items())
+    print(f"\n[guardrail] {case_id}: {outcome} {shown}")
+
+
 def _noise_png(seed: int, size: int = 400) -> bytes:
     """Black/white pixel noise with no text in it, identical on every run."""
     rng = np.random.default_rng(seed)
@@ -165,6 +171,7 @@ _EXTRACTION_FINDING = (
 def test_extraction_does_not_return_a_confident_task_from_bad_input(case_id: str) -> None:
     outcome, details = _replay_extraction(case_id)
 
+    _observe(case_id, outcome, **details)
     assert outcome in _case(case_id)["acceptable"], f"{outcome}: {details}"
 
 
@@ -175,6 +182,15 @@ def test_noise_scan_is_not_read_as_confident_text() -> None:
     result = extract_text(_noise_png(case["input"]["seed"]), filename="noise.png")
 
     outcome = _media_outcome(result, case["threshold"])
+    _observe(
+        "noise_scan",
+        outcome,
+        reason=result.reason,
+        mean_confidence=result.mean_confidence,
+        word_count=result.word_count,
+        low_confidence_count=result.low_confidence_count,
+        text=result.text[:80],
+    )
     assert outcome in case["acceptable"], (
         f"{outcome}: reason={result.reason}, mean_confidence={result.mean_confidence}, "
         f"text={result.text[:80]!r}"
@@ -197,6 +213,17 @@ def test_crosstalk_lowers_asr_confidence_against_the_clean_recording() -> None:
         # Above R4's threshold: acceptable only if confidence still reacted.
         outcome = "partial" if mixed.mean_confidence < clean.mean_confidence else "silent"
 
+    _observe(
+        "crosstalk_audio",
+        outcome,
+        clean_mean_confidence=clean.mean_confidence,
+        mixed_mean_confidence=mixed.mean_confidence,
+        clean_low_segments=clean.low_confidence_count,
+        mixed_low_segments=mixed.low_confidence_count,
+        mixed_reason=mixed.reason,
+        clean_text=clean.text[:80],
+        mixed_text=mixed.text[:80],
+    )
     assert outcome in case["acceptable"], (
         f"{outcome}: clean={clean.mean_confidence:.3f}, mixed={mixed.mean_confidence}, "
         f"mixed text={mixed.text[:80]!r}"
@@ -213,6 +240,15 @@ def test_non_english_audio_is_not_transcribed_as_confident_english() -> None:
     result = transcribe(recording.read_bytes(), filename=recording.name)
 
     outcome = _media_outcome(result, case["threshold"])
+    _observe(
+        "non_english_audio",
+        outcome,
+        reason=result.reason,
+        mean_confidence=result.mean_confidence,
+        segments=len(result.segments),
+        low_confidence_count=result.low_confidence_count,
+        text=result.text[:80],
+    )
     assert outcome in case["acceptable"], (
         f"{outcome}: reason={result.reason}, mean_confidence={result.mean_confidence}, "
         f"text={result.text[:80]!r}"
