@@ -11,6 +11,7 @@ Usage:
 """
 
 import logging
+import os
 from typing import Any
 
 from mind.config import get_settings
@@ -25,7 +26,11 @@ from mind.multimodal import asr
 
 logger = logging.getLogger(__name__)
 
-_GROUP_ID = "mind-ingestion"
+# Its own group, not the one in ProtobufConsumer's docstring example. Until
+# extraction is wired, a run marks items processed and commits their offsets
+# with nothing extracted: a test run against the shared topic sets
+# MIND_LANDED_CONSUMER__GROUP_ID to a group of its own.
+_DEFAULT_GROUP_ID = "mind-landed-consumer"
 _TOPIC = "bridge.raw.landed"
 # One message may run several OCR (up to 200 s each) and ASR (up to 240 s
 # each) calls; librdkafka's default of 5 minutes between polls would have
@@ -46,15 +51,21 @@ def _log_texts(event: RawObjectEvent, texts: Texts) -> None:
         )
 
 
+def _group_id() -> str:
+    return os.environ.get("MIND_LANDED_CONSUMER__GROUP_ID", _DEFAULT_GROUP_ID)
+
+
 def main() -> None:
     logging.basicConfig(level=get_settings().log_level)
-    # Load Whisper now, not inside the first audio message's handler (R4, #478).
-    asr.warm_up()
+    # Settings first: a missing credential fails in milliseconds, not after
+    # the Whisper load below.
     handle = LandedHandler(
         read_object=minio_reader(),
         store=InMemoryRevisionStore(),
         on_texts=_log_texts,
     )
+    # Load Whisper now, not inside the first audio message's handler (R4, #478).
+    asr.warm_up()
 
     def _handler(event: Any, msg: object) -> None:
         # Any: run() has already deserialized it into a RawObjectEventMessage.
@@ -63,7 +74,7 @@ def main() -> None:
         handle(event, msg)
 
     consumer = ProtobufConsumer(
-        group_id=_GROUP_ID,
+        group_id=_group_id(),
         topics=[_TOPIC],
         conf_overrides={"max.poll.interval.ms": _MAX_POLL_INTERVAL_MS},
     )

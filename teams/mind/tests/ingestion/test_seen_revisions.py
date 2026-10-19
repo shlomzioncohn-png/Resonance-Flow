@@ -46,3 +46,17 @@ def test_the_store_forgets_the_oldest_items_past_its_size() -> None:
     assert store.processed_revision(items[0]) is None
     assert store.processed_revision(items[1]) == 0
     assert store.processed_revision(items[2]) == 0
+
+
+def test_an_item_seen_again_is_kept_over_older_ones() -> None:
+    # A duplicate Bridge keeps re-sending is the one dedup must not forget.
+    first, second, third = (UUID(int=n) for n in range(3))
+    store = InMemoryRevisionStore(max_items=2)
+    store.mark_processed(first, 0)
+    store.mark_processed(second, 0)
+
+    store.processed_revision(first)
+    store.mark_processed(third, 0)
+
+    assert store.processed_revision(first) == 0
+    assert store.processed_revision(second) is None

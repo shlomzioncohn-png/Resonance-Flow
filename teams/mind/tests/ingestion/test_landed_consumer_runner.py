@@ -5,7 +5,7 @@ import pytest
 
 from mind.contracts import RawObjectEvent
 from mind.contracts.raw_object_event_enums import Modality, ObjectRole, RawSourceType
-from mind.ingestion.landed_consumer_runner import _log_texts
+from mind.ingestion.landed_consumer_runner import _group_id, _log_texts
 from mind.ingestion.normalized_record import NormalizedRecord
 
 ITEM = UUID("6f1c1f9e-0000-4000-8000-000000000001")
@@ -60,3 +60,15 @@ def test_the_stand_in_hand_off_logs_where_the_text_is_never_what_it_says(
     assert "body.eml" in caplog.text
     assert f"{len(SECRET)} chars" in caplog.text
     assert "salary" not in caplog.text
+
+
+def test_the_consumer_group_is_its_own_and_can_be_overridden(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Until extraction is wired, a run commits offsets with nothing extracted:
+    # a test run against the shared topic takes a group of its own.
+    monkeypatch.delenv("MIND_LANDED_CONSUMER__GROUP_ID", raising=False)
+    assert _group_id() == "mind-landed-consumer"
+
+    monkeypatch.setenv("MIND_LANDED_CONSUMER__GROUP_ID", "mind-landed-joint-test")
+    assert _group_id() == "mind-landed-joint-test"

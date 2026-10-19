@@ -52,9 +52,9 @@ class RevisionStore(Protocol):
 class InMemoryRevisionStore:
     """Forgets everything on restart: Bridge's redelivered items are then processed again.
 
-    Holds the `max_items` most recently processed items and forgets older ones,
-    so a consumer that runs for weeks keeps flat memory. A redelivery comes soon
-    after its item; one older than the last `max_items` items is processed again.
+    Holds the `max_items` most recently processed or looked-up items and
+    forgets older ones, so a consumer that runs for weeks keeps flat memory. A
+    redelivery comes soon after its item; one older than that is processed again.
     """
 
     def __init__(self, max_items: int = 100_000) -> None:
@@ -62,7 +62,11 @@ class InMemoryRevisionStore:
         self._max_items = max_items
 
     def processed_revision(self, correlation_id: UUID) -> int | None:
-        return self._processed.get(correlation_id)
+        revision = self._processed.get(correlation_id)
+        if revision is not None:
+            # Seen again: an item Bridge keeps re-sending stays remembered.
+            self._processed.move_to_end(correlation_id)
+        return revision
 
     def mark_processed(self, correlation_id: UUID, revision: int) -> None:
         self._processed[correlation_id] = revision

@@ -109,6 +109,16 @@ Until extraction is wired in, `on_texts` logs each text by its item, file and
 length, never its content (Bridge may have classified it HIGH sensitivity),
 which also shows the stage in a demo run.
 
+**A run commits offsets.** The consumer group is `mind-landed-consumer`. Until
+extraction is wired, a run marks items processed and commits their offsets
+with nothing extracted, so a later run in the same group never sees them
+again. For a test against the shared topic (the joint test with Bridge, a
+demo rehearsal), use a group of its own:
+
+```
+MIND_LANDED_CONSUMER__GROUP_ID=mind-landed-joint-test make run-landed-consumer
+```
+
 ## Not yet in
 
 - **The hand-off to extraction (#350).** `on_texts` only logs today.
@@ -165,14 +175,23 @@ which also shows the stage in a demo run.
   are not lost, which means a pod without Whisper also stops the text and OCR
   items behind the first recording. An environment to fix, not a skip.
 
+## Open in Mind
+
+- **HIGH-sensitivity content.** Bridge's `classification` is converted but not
+  read yet: every `INCLUDED` item's text is handed on, and once extraction is
+  wired it reaches the external LLM. Whether HIGH-sensitivity content may be
+  sent there, and what to do with `UNREADABLE` quality, are decisions not
+  taken yet.
+
 ## Open with Bridge and Inbox
 
 - **`tenant_id`.** Bridge's Slack and media lanes send `kamatech` /
   `demo-tenant`. Mind passes the tenant to Inbox, which requires the UUID of a
   tenant it has (`@ValidUuid`, then a lookup), so every such item is skipped
   here with an ERROR. Bridge's CRM lane already uses a UUID-shaped
-  placeholder; asked the same of the other lanes, and Inbox which tenant to
-  use for the demo.
+  placeholder; asked the same of the other lanes. Inbox has no demo tenant
+  yet: the only one is System, `00000000-0000-0000-0000-000000000001`, until
+  they decide on a fixed demo UUID.
 
 ## Running the tests
 

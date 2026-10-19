@@ -63,3 +63,12 @@ def test_environment_defaults_to_local_when_unset(tmp_path, monkeypatch):
     settings = Settings(_env_file=None)  # type: ignore[call-arg]
 
     assert settings.environment == "local"
+
+
+def test_the_object_storage_secret_never_prints():
+    from mind.config import ObjectStorageSettings
+
+    settings = ObjectStorageSettings(access_key="minio-user", secret_key="s3cr3t-value")
+
+    assert "s3cr3t-value" not in repr(settings)
+    assert settings.secret_key.get_secret_value() == "s3cr3t-value"

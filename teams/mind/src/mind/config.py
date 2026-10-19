@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any, Literal
 
 import yaml
-from pydantic import BaseModel, ConfigDict, Field, PostgresDsn, Secret
+from pydantic import BaseModel, ConfigDict, Field, PostgresDsn, Secret, SecretStr
 from pydantic.fields import FieldInfo
 from pydantic_settings import BaseSettings, PydanticBaseSettingsSource, SettingsConfigDict
 
@@ -71,7 +71,7 @@ class ObjectStorageSettings(BaseSettings):
     endpoint: str = "http://localhost:9000"
     bucket: str = "bridge-raw"
     access_key: str
-    secret_key: str
+    secret_key: SecretStr  # never printed: repr, logs, tracebacks show '**********'
     # Larger objects are skipped, not read: the process's memory is the limit.
     max_object_bytes: int = Field(default=100 * 1024 * 1024, gt=0)
 

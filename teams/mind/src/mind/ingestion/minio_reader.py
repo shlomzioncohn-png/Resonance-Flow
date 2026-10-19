@@ -69,5 +69,5 @@ def minio_endpoint(url: str) -> tuple[str, bool]:
 def minio_reader(settings: ObjectStorageSettings | None = None) -> MinioObjectReader:
     settings = settings or ObjectStorageSettings()  # type: ignore[call-arg]  # from env
     host, secure = minio_endpoint(settings.endpoint)
-    client = Minio(host, settings.access_key, settings.secret_key, secure=secure)
+    client = Minio(host, settings.access_key, settings.secret_key.get_secret_value(), secure=secure)
     return MinioObjectReader(client, settings.bucket, max_bytes=settings.max_object_bytes)
