@@ -1,6 +1,7 @@
 package com.rnd.inbox.task.service;
 import com.rnd.inbox.task.assignment.Assignment;
 import com.rnd.inbox.task.assignment.AssignmentRepository;
+import com.rnd.inbox.task.assignment.AssignmentService;
 import com.rnd.inbox.task.controller.TaskController;
 import com.rnd.inbox.task.dto.TaskCreateRequestDto;
 import com.rnd.inbox.task.dto.TaskFilterDto;
@@ -17,7 +18,9 @@ import com.rnd.inbox.task.exception.TaskNotFoundException;
 import com.rnd.inbox.task.mapper.TaskMapper;
 import com.rnd.inbox.task.mapper.TaskRestMapper;
 import com.rnd.inbox.task.model.Task;
+import com.rnd.inbox.task.model.TaskFeedback;
 import com.rnd.inbox.task.model.TaskStatus;
+import com.rnd.inbox.task.repository.TaskFeedbackRepository;
 import com.rnd.inbox.task.repository.TaskRepository;
 import com.rnd.inbox.task.security.TaskAuthorization;
 import com.fasterxml.jackson.core.type.TypeReference;
@@ -51,6 +54,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.time.Clock;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.EnumSet;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -71,6 +75,7 @@ public class TaskService {
     };
 
     private final TaskRepository taskRepository;
+    private final TaskFeedbackRepository taskFeedbackRepository;
     private final AuditService auditService;
     private final OutboxEventRepository outboxEventRepository;
     private final AssignmentRepository assignmentRepository;
@@ -82,8 +87,10 @@ public class TaskService {
     private final UserRepository userRepository;
     private final TaskAuthorization taskAuthorization;
     private final TaskRestMapper taskRestMapper;
+    private final AssignmentService assignmentService;
 
     public TaskService(TaskRepository taskRepository,
+                       TaskFeedbackRepository taskFeedbackRepository,
                        AuditService auditService,
                        OutboxEventRepository outboxEventRepository,
                        AssignmentRepository assignmentRepository,
@@ -94,8 +101,10 @@ public class TaskService {
                        ProjectRepository projectRepository,
                        UserRepository userRepository,
                        TaskAuthorization taskAuthorization,
-                       TaskRestMapper taskRestMapper) {
+                       TaskRestMapper taskRestMapper,
+                       AssignmentService assignmentService) {
         this.taskRepository = taskRepository;
+        this.taskFeedbackRepository = taskFeedbackRepository;
         this.auditService = auditService;
         this.outboxEventRepository = outboxEventRepository;
         this.assignmentRepository = assignmentRepository;
@@ -109,6 +118,7 @@ public class TaskService {
         this.userRepository = userRepository;
         this.taskAuthorization = taskAuthorization;
         this.taskRestMapper = taskRestMapper;
+        this.assignmentService = assignmentService;
     }
 
     @Transactional
@@ -122,9 +132,11 @@ public class TaskService {
                 ? resolveUserInTenant(request.getOwnerId(), tenant)
                 : actor;
 
+        List<Assignment> assignments = assignmentService.resolve(request.getAssignees(), tenant, actor);
+
         Task task = taskRestMapper.toEntity(request, tenant, project, owner, actor);
-        Task saved = persistNewTask(task, List.of(), null, actor);
-        return taskRestMapper.toResponseDto(saved);
+        Task saved = persistNewTask(task, assignments, null, actor);
+        return taskRestMapper.toResponseDto(saved, assignments);
     }
 
     @Transactional(readOnly = true)
@@ -132,7 +144,7 @@ public class TaskService {
         User actor = findActorOrThrow(actorId);
         Task task = findTaskOrThrow(id);
         taskAuthorization.assertWithinScope(taskAuthorization.scopeOf(actor), task);
-        return taskRestMapper.toResponseDto(task);
+        return taskRestMapper.toResponseDto(task, assignmentService.findByTask(id));
     }
 
     @Transactional(readOnly = true)
@@ -178,7 +190,10 @@ public class TaskService {
                 filter.getUserId() != null,
                 filter.getUserId(),
                 sortedPageable);
-        return PageResponseDto.from(tasks.map(taskRestMapper::toResponseDto));
+        Map<UUID, List<Assignment>> assignmentsByTask = assignmentService.findByTasks(
+                tasks.getContent().stream().map(Task::getId).toList());
+        return PageResponseDto.from(tasks.map(task -> taskRestMapper.toResponseDto(
+                task, assignmentsByTask.getOrDefault(task.getId(), List.of()))));
     }
 
     @Transactional
@@ -194,10 +209,19 @@ public class TaskService {
                 ? resolveUserInTenant(request.getOwnerId().get(), task.getTenant())
                 : null;
 
+        List<Assignment> desiredAssignments = request.getAssignees().isPresent()
+                ? assignmentService.resolve(request.getAssignees().get(), task.getTenant(), actor)
+                : null;
+        List<Assignment> currentAssignments = assignmentService.findByTask(id);
+
         Map<String, Object> before = auditSnapshot(task);
+        before.put("assignments", assignmentSnapshots(currentAssignments));
         taskRestMapper.applyUpdate(task, request, resolvedProject, resolvedOwner);
-        Task saved = persistUpdatedTask(task, before, null, actor, "TASK_UPDATED");
-        return taskRestMapper.toResponseDto(saved);
+        List<Assignment> assignments = desiredAssignments != null
+                ? assignmentService.replaceAssignments(task, desiredAssignments)
+                : currentAssignments;
+        Task saved = persistUpdatedTask(task, before, null, actor, "TASK_UPDATED", null, assignments);
+        return taskRestMapper.toResponseDto(saved, assignments);
     }
 
     @Transactional
@@ -209,10 +233,26 @@ public class TaskService {
         TaskStatus newStatus = TaskStatus.valueOf(request.getStatus());
         validateStatusTransition(task, newStatus, request.getSnoozedUntil());
 
+        boolean hasFeedbackText = hasText(request.getFeedbackText());
+        if (hasFeedbackText && newStatus != TaskStatus.REJECTED) {
+            throw new InvalidTaskStatusTransitionException("feedback is accepted only when status is REJECTED");
+        }
+
         Map<String, Object> before = auditSnapshot(task);
         taskRestMapper.applyStatusChange(task, newStatus, request.getSnoozedUntil());
-        Task saved = persistUpdatedTask(task, before, null, actor, "TASK_STATUS_UPDATED");
-        return taskRestMapper.toResponseDto(saved);
+
+        // DONE is the one transition with its own topic: it publishes task.completed instead of
+        // task.updated. Every other status - REJECTED included - publishes task.updated.
+        if (newStatus == TaskStatus.DONE) {
+            return taskRestMapper.toResponseDto(completeTask(task, before, actor, null),
+                    assignmentService.findByTask(id));
+        }
+
+        TaskFeedback feedback = hasFeedbackText
+                ? taskRestMapper.toFeedbackEntity(task, actor, request.getFeedbackText())
+                : null;
+        Task saved = persistUpdatedTask(task, before, null, actor, "TASK_STATUS_UPDATED", feedback);
+        return taskRestMapper.toResponseDto(saved, assignmentService.findByTask(id));
     }
 
     @Transactional
@@ -255,7 +295,12 @@ public class TaskService {
 
     @Transactional
     public Task completeTask(Task task, User completedBy, UUID correlationId) {
-        Map<String, Object> before = auditSnapshot(task);
+        return completeTask(task, auditSnapshot(task), completedBy, correlationId);
+    }
+
+    // before: as in persistUpdatedTask. The REST status path applies its change before it gets
+    // here, so it passes in the snapshot it took first.
+    private Task completeTask(Task task, Map<String, Object> before, User completedBy, UUID correlationId) {
         task.setStatus(TaskStatus.DONE);
         Instant now = Instant.now(clock);
         task.setCompletedAt(now);
@@ -288,10 +333,13 @@ public class TaskService {
         task.setUpdatedAt(Instant.now(clock));
 
         Task saved = taskRepository.saveAndFlush(task);
+        Map<String, Object> after = schedulingSnapshot(saved);
 
-        outboxEventRepository.save(buildOutboxEvent(EventType.TASK_UPDATED, TaskUpdatedPayload.from(saved), saved, correlationId));
+        if (!before.equals(after)) {
+            outboxEventRepository.save(buildOutboxEvent(EventType.TASK_UPDATED, TaskUpdatedPayload.from(saved), saved, correlationId));
+        }
         auditService.createUpdateAuditLog("TASK_SCHEDULING_UPDATED", "Task", saved.getId(), saved.getTenant(),
-                null, before, schedulingSnapshot(saved), correlationId);
+                null, before, after, correlationId);
         return saved;
     }
 
@@ -316,13 +364,35 @@ public class TaskService {
     }
 
     private Task persistUpdatedTask(Task task, Map<String, Object> before, UUID correlationId, User actor,
-                                    String auditAction) {
-        Task saved = taskRepository.save(task);
+                                    String auditAction, TaskFeedback feedback) {
+        return persistUpdatedTask(task, before, correlationId, actor, auditAction, feedback, null);
+    }
 
-        outboxEventRepository.save(buildOutboxEvent(EventType.TASK_UPDATED, TaskUpdatedPayload.from(saved), saved, correlationId));
+    // assignments: the task's assignments after the change, added to the audit snapshot; null on
+    // paths that never touch assignments.
+    private Task persistUpdatedTask(Task task, Map<String, Object> before, UUID correlationId, User actor,
+                                    String auditAction, TaskFeedback feedback, List<Assignment> assignments) {
+        Task saved = taskRepository.save(task);
+        if (feedback != null) {
+            taskFeedbackRepository.save(feedback);
+        }
+
+        outboxEventRepository.save(buildOutboxEvent(EventType.TASK_UPDATED, TaskUpdatedPayload.from(saved, feedback), saved, correlationId));
+        Map<String, Object> after = auditSnapshot(saved);
+        if (feedback != null) {
+            after.put("feedbackText", feedback.getFeedbackText());
+        }
+        if (assignments != null) {
+            after.put("assignments", assignmentSnapshots(assignments));
+        }
         auditService.createUpdateAuditLog(auditAction, "Task", saved.getId(), saved.getTenant(), actor,
-                before, auditSnapshot(saved), correlationId);
+                before, after, correlationId);
         return saved;
+    }
+
+    private Task persistUpdatedTask(Task task, Map<String, Object> before, UUID correlationId, User actor,
+                                    String auditAction) {
+        return persistUpdatedTask(task, before, correlationId, actor, auditAction, null);
     }
 
     private void validateFilter(TaskFilterDto filter) {
@@ -364,6 +434,10 @@ public class TaskService {
             throw new InvalidTaskStatusTransitionException(
                     "A task in status " + task.getStatus() + " cannot move to " + newStatus);
         }
+    }
+
+    private static boolean hasText(String value) {
+        return value != null && !value.isBlank();
     }
 
     private Task findTaskOrThrow(UUID id) {
@@ -440,6 +514,15 @@ public class TaskService {
                 task.getSuggestedOwnerUser() != null ? task.getSuggestedOwnerUser().getId() : null);
         snapshot.put("suggestedOwnerConfidence", task.getSuggestedOwnerConfidence());
         return snapshot;
+    }
+
+    // Sorted so that the same set in a different order doesn't count as a change in the update audit diff.
+    private List<Map<String, Object>> assignmentSnapshots(List<Assignment> assignments) {
+        return assignments.stream()
+                .map(this::assignmentSnapshot)
+                .sorted(Comparator.comparing(snapshot -> String.valueOf(
+                        snapshot.get("userId") != null ? snapshot.get("userId") : snapshot.get("teamId"))))
+                .toList();
     }
 
     private Map<String, Object> assignmentSnapshot(Assignment assignment) {

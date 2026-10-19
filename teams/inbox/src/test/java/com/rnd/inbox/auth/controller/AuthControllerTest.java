@@ -3,6 +3,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.rnd.inbox.auth.dto.AuthUserResponseDto;
 import com.rnd.inbox.auth.dto.AuthVerifyRequestDto;
 import com.rnd.inbox.auth.exception.InvalidCredentialsException;
+import com.rnd.inbox.auth.exception.TooManyLoginAttemptsException;
 import com.rnd.inbox.auth.service.AuthService;
 import com.rnd.inbox.shared.config.AppConfig;
 import com.rnd.inbox.shared.config.WebMvcConfig;
@@ -99,5 +100,27 @@ class AuthControllerTest {
                 .andExpect(status().isUnauthorized())
                 .andExpect(jsonPath("$.error").value("INVALID_CREDENTIALS"))
                 .andExpect(jsonPath("$.message").value("Invalid login or password"));
+    }
+
+    @Test
+    void verify_whenLoginIsLocked_returns429() throws Exception {
+        when(authService.verify(any())).thenThrow(new TooManyLoginAttemptsException());
+
+        mockMvc.perform(post(VERIFY_PATH)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body("rachel", "MyPass123")))
+                .andExpect(status().isTooManyRequests())
+                .andExpect(jsonPath("$.error").value("TOO_MANY_LOGIN_ATTEMPTS"));
+    }
+
+    @Test
+    void verify_withPasswordOver72Bytes_returns400() throws Exception {
+        mockMvc.perform(post(VERIFY_PATH)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body("rachel", "א".repeat(40))))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.field_errors[0].field").value("password"));
+
+        verify(authService, never()).verify(any());
     }
 }

@@ -5,6 +5,7 @@ import com.rnd.chain.dto.TaskDependency;
 import com.rnd.chain.dto.TaskEligibilityResponse;
 import com.rnd.chain.dto.TaskStatus;
 import com.rnd.chain.exception.TaskNotFoundException;
+import com.rnd.chain.exception.TenantReassignmentException;
 import com.rnd.chain.repository.GraphLock;
 import com.rnd.chain.repository.TaskDependencyRepository;
 import com.rnd.chain.repository.TaskRepository;
@@ -38,24 +39,25 @@ public class TaskEligibilityService {
 
     private final TaskRepository taskRepository;
     private final TaskDependencyRepository taskDependencyRepository;
-    private final SchedulingUpdateService schedulingUpdateService;
     private final GraphLock graphLock;
     private final TaskCounterUpdater taskCounterUpdater;
+    private final TaskStateHistoryRecorder historyRecorder;
 
     public TaskEligibilityService(
             TaskRepository taskRepository,
             TaskDependencyRepository taskDependencyRepository,
-            SchedulingUpdateService schedulingUpdateService,
             GraphLock graphLock,
-            TaskCounterUpdater taskCounterUpdater) {
+            TaskCounterUpdater taskCounterUpdater,
+            TaskStateHistoryRecorder historyRecorder) {
 
         this.taskRepository = taskRepository;
         this.taskDependencyRepository = taskDependencyRepository;
-        this.schedulingUpdateService = schedulingUpdateService;
         this.graphLock = graphLock;
         this.taskCounterUpdater = taskCounterUpdater;
+        this.historyRecorder = historyRecorder;
     }
 
+    @Transactional
     public void recalculateTaskEligibility(UUID taskId) {
 
         Objects.requireNonNull(
@@ -103,6 +105,8 @@ public class TaskEligibilityService {
             TaskStatus previousStatus =
                     previous.get().getStatus();
 
+            historyRecorder.recordStatusChange(taskId, previousStatus, newStatus);
+
             if (previousStatus != TaskStatus.DONE
                     && newStatus == TaskStatus.DONE) {
 
@@ -128,15 +132,29 @@ public class TaskEligibilityService {
      * interleave between them (PR #467 review).
      *
      * @throws TaskNotFoundException if no task with {@code taskId} exists
+     * @throws TenantReassignmentException if {@code tenantId} differs from the task's already-stored,
+     * non-null tenant - confirmed with the Inbox team that {@code tenant_id} never legitimately
+     * changes after creation, so this always signals a bug upstream. Checked before the staleness
+     * short-circuit below, so a stale/duplicate redelivery carrying a wrong tenant is still flagged.
      */
     @Transactional
-    public void onTaskStatusChangedIfNewer(UUID taskId, TaskStatus newStatus, LocalDateTime eventUpdatedAt) {
+    public void onTaskStatusChangedIfNewer(UUID taskId, TaskStatus newStatus, LocalDateTime eventUpdatedAt,
+                                            UUID tenantId) {
         Objects.requireNonNull(taskId, "taskId must not be null");
         Objects.requireNonNull(newStatus, "newStatus must not be null");
         Objects.requireNonNull(eventUpdatedAt, "eventUpdatedAt must not be null");
 
         graphLock.runExclusive(() -> {
             Task current = taskCounterUpdater.requireTask(taskId);
+
+            if (current.getTenantId() != null && !current.getTenantId().equals(tenantId)) {
+                log.error("task.updated for task {} claims tenant {} but Chain has {} stored - "
+                                + "tenant_id is immutable after creation, rejecting as a bug upstream",
+                        taskId, tenantId, current.getTenantId());
+                throw new TenantReassignmentException("Task " + taskId + " already has tenant "
+                        + current.getTenantId() + ", event claims " + tenantId);
+            }
+
             if (current.getUpdatedAt() != null && !eventUpdatedAt.isAfter(current.getUpdatedAt())) {
                 log.debug("Task {} status update ignored: event updatedAt {} is not newer than stored {}",
                         taskId, eventUpdatedAt, current.getUpdatedAt());
@@ -146,7 +164,9 @@ public class TaskEligibilityService {
             log.info("Task {} status changed to {}", taskId, newStatus);
             TaskStatus previousStatus = current.getStatus();
             TaskCounterUpdater.requireUpdated(taskRepository.update(taskId, task ->
-                    TaskCounterUpdater.copyOf(task).status(newStatus).updatedAt(eventUpdatedAt).build()), taskId);
+                    TaskCounterUpdater.copyOf(task).status(newStatus).updatedAt(eventUpdatedAt)
+                            .tenantId(tenantId).build()), taskId);
+            historyRecorder.recordStatusChange(taskId, previousStatus, newStatus);
 
             if (previousStatus != TaskStatus.DONE && newStatus == TaskStatus.DONE) {
                 adjustDependentsBlockingCount(taskId, -1);
@@ -181,6 +201,7 @@ public class TaskEligibilityService {
             log.info("Task {} completed", taskId);
             TaskCounterUpdater.requireUpdated(taskRepository.update(taskId, task ->
                     TaskCounterUpdater.copyOf(task).status(TaskStatus.DONE).build()), taskId);
+            historyRecorder.recordStatusChange(taskId, current.getStatus(), TaskStatus.DONE);
             adjustDependentsBlockingCount(taskId, -1);
         });
     }
@@ -195,19 +216,23 @@ public class TaskEligibilityService {
 
         List<UUID> dependentIds = dependents.stream().map(TaskDependency::taskId).toList();
 
-        Map<UUID, Boolean> previousReadiness = new HashMap<>();
+        Map<UUID, Task> previousById = new HashMap<>();
         List<Task> updated = taskRepository.updateAll(dependentIds, task -> {
-            previousReadiness.put(task.getId(), task.isReady());
+            previousById.put(task.getId(), task);
             return TaskCounterUpdater.withCounters(
                     task,
                     Math.max(0, task.getBlockingCount() + delta),
                     task.getOpenConstraintCount());
         });
 
+        // Issue #445: each dependent's blockingCount just changed, which can move its own
+        // priority_score (see TaskCounterUpdater's confidence sums) even on top of whatever
+        // isReady did - recomputePriorityScoreAndPublish decides whether that warrants a publish.
         for (Task task : updated) {
-            if (previousReadiness.get(task.getId()) != task.isReady()) {
-                schedulingUpdateService.publishSchedulingUpdate(task);
-            }
+            Task before = previousById.get(task.getId());
+            historyRecorder.recordBlockingTransition(
+                    task.getId(), before.getBlockingCount(), task.getBlockingCount());
+            taskCounterUpdater.recomputePriorityScoreAndPublish(task.getId(), previousById.get(task.getId()), task);
         }
     }
 

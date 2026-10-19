@@ -2,6 +2,7 @@ package com.rnd.inbox.auth.service;
 import com.rnd.inbox.auth.dto.AuthUserResponseDto;
 import com.rnd.inbox.auth.dto.AuthVerifyRequestDto;
 import com.rnd.inbox.auth.exception.InvalidCredentialsException;
+import com.rnd.inbox.auth.exception.TooManyLoginAttemptsException;
 import com.rnd.inbox.tenant.model.Tenant;
 import com.rnd.inbox.user.model.AuthType;
 import com.rnd.inbox.user.model.User;
@@ -27,7 +28,9 @@ import java.util.UUID;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
@@ -45,6 +48,9 @@ class AuthServiceTest {
     @Mock
     private PasswordEncoder passwordEncoder;
 
+    @Mock
+    private LoginAttemptLimiter loginAttemptLimiter;
+
     private AuthService authService;
 
     private UUID tenantId;
@@ -53,7 +59,7 @@ class AuthServiceTest {
     @BeforeEach
     void setUp() {
         when(passwordEncoder.encode(any())).thenReturn(DUMMY_HASH);
-        authService = new AuthService(userAuthIdentityRepository, passwordEncoder,
+        authService = new AuthService(userAuthIdentityRepository, passwordEncoder, loginAttemptLimiter,
                 Clock.fixed(NOW, ZoneOffset.UTC));
 
         tenantId = UUID.randomUUID();
@@ -150,5 +156,37 @@ class AuthServiceTest {
                 .isInstanceOf(InvalidCredentialsException.class)
                 .hasMessage("Invalid login or password");
         assertThat(user.getLastLoginAt()).isNull();
+    }
+
+    @Test
+    void verify_whenLoginIsLocked_throwsTooManyAttemptsWithoutCheckingPassword() {
+        when(loginAttemptLimiter.isLocked(LOGIN)).thenReturn(true);
+
+        assertThatThrownBy(() -> authService.verify(request(LOGIN, PASSWORD)))
+                .isInstanceOf(TooManyLoginAttemptsException.class);
+        verifyNoInteractions(userAuthIdentityRepository);
+        verify(passwordEncoder, never()).matches(any(), any());
+    }
+
+    @Test
+    void verify_withWrongPassword_recordsFailure() {
+        givenIdentityExists();
+        when(passwordEncoder.matches("wrong", PASSWORD_HASH)).thenReturn(false);
+
+        assertThatThrownBy(() -> authService.verify(request(LOGIN, "wrong")))
+                .isInstanceOf(InvalidCredentialsException.class);
+        verify(loginAttemptLimiter).recordFailure(LOGIN);
+        verify(loginAttemptLimiter, never()).recordSuccess(any());
+    }
+
+    @Test
+    void verify_withCorrectPassword_recordsSuccess() {
+        givenIdentityExists();
+        when(passwordEncoder.matches(PASSWORD, PASSWORD_HASH)).thenReturn(true);
+
+        authService.verify(request(LOGIN, PASSWORD));
+
+        verify(loginAttemptLimiter).recordSuccess(LOGIN);
+        verify(loginAttemptLimiter, never()).recordFailure(any());
     }
 }

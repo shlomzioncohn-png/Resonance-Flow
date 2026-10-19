@@ -77,6 +77,22 @@ class TaskUpdatedProtoMapperTest {
         assertThat(event.hasEffortEstimateConfidence()).isFalse();
         assertThat(event.hasSuggestedOwnerUserId()).isFalse();
         assertThat(event.hasSuggestedOwnerConfidence()).isFalse();
+        assertThat(event.hasFeedbackText()).isFalse();
+        assertThat(event.hasFeedbackUserId()).isFalse();
+    }
+
+    @Test
+    void toProto_mapsFeedbackFieldsWhenPresent() {
+        UUID feedbackUserId = UUID.randomUUID();
+        Map<String, Object> payload = minimalPayload();
+        payload.put("status", "REJECTED");
+        payload.put("feedbackText", "Not clear what is expected");
+        payload.put("feedbackUserId", feedbackUserId.toString());
+
+        TaskUpdatedEvent event = mapper.toProto(payload);
+
+        assertThat(event.getFeedbackText()).isEqualTo("Not clear what is expected");
+        assertThat(event.getFeedbackUserId()).isEqualTo(feedbackUserId.toString());
     }
 
     @Test

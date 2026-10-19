@@ -1,11 +1,14 @@
 package com.rnd.chain.service;
 
+import com.rnd.chain.testsupport.TaskStateHistoryFixtures;
 import com.rnd.chain.dto.Task;
 import com.rnd.chain.dto.TaskDependency;
 import com.rnd.chain.dto.TaskStatus;
 import com.rnd.chain.dto.TaskTestFixtures;
+import com.rnd.chain.events.SchedulingPublishListener;
 import com.rnd.chain.events.SchedulingUpdatePublisher;
 import com.rnd.chain.events.TaskSchedulingUpdatedEvent;
+import com.rnd.chain.exception.CrossTenantDependencyException;
 import com.rnd.chain.exception.DependencyNotFoundException;
 import com.rnd.chain.exception.DuplicateDependencyException;
 import com.rnd.chain.exception.InvalidDependencyException;
@@ -14,6 +17,7 @@ import com.rnd.chain.repository.InMemoryConstraintRepository;
 import com.rnd.chain.repository.InMemoryGraphLock;
 import com.rnd.chain.repository.InMemoryTaskDependencyRepository;
 import com.rnd.chain.repository.InMemoryTaskRepository;
+import com.rnd.chain.testsupport.TestTransactions;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import java.time.LocalDateTime;
@@ -38,8 +42,9 @@ class DependencyEdgeServiceTest {
         publisher = new RecordingSchedulingUpdatePublisher();
         SchedulingUpdateService schedulingUpdateService = new SchedulingUpdateService(publisher);
         InMemoryGraphLock lock = new InMemoryGraphLock();
-        TaskCounterUpdater counterUpdater = new TaskCounterUpdater(taskRepository, schedulingUpdateService);
-        service = new DependencyEdgeService(dependencyRepository, lock, counterUpdater);
+        TaskCounterUpdater counterUpdater = new TaskCounterUpdater(taskRepository, dependencyRepository,
+                new PriorityScoreService(), new SchedulingPublishListener(taskRepository, schedulingUpdateService));
+        service = new DependencyEdgeService(dependencyRepository, lock, counterUpdater, TaskStateHistoryFixtures.newRecorder());
     }
 
     @Test
@@ -64,9 +69,9 @@ class DependencyEdgeServiceTest {
                         0,
                         0));
 
-        service.addDependency(
+        TestTransactions.runCommitted(() -> service.addDependency(
                 taskId,
-                dependencyId);
+                dependencyId));
 
         Task updated =
                 taskRepository.findById(taskId)
@@ -250,15 +255,15 @@ class DependencyEdgeServiceTest {
                         0,
                         0));
 
-        service.addDependency(
+        TestTransactions.runCommitted(() -> service.addDependency(
                 taskId,
-                dependencyId);
+                dependencyId));
 
         publisher.clear();
 
-        service.removeDependency(
+        TestTransactions.runCommitted(() -> service.removeDependency(
                 taskId,
-                dependencyId);
+                dependencyId));
 
         Task updated =
                 taskRepository.findById(taskId)
@@ -675,6 +680,65 @@ class DependencyEdgeServiceTest {
                 () -> fixture.service().removeDependency(taskId, null));
     }
 
+    // --- tenant isolation (issue #580) ------------------------------------
+
+    @Test
+    void addDependency_differentTenants_throwsCrossTenantDependencyException() {
+        UUID taskId = UUID.randomUUID();
+        UUID dependsOnTaskId = UUID.randomUUID();
+        Task task = buildTask(taskId, 0, 0, true);
+        Task dependsOnTask = TaskTestFixtures.defaultTask(dependsOnTaskId)
+                .isReady(true).tenantId(TaskTestFixtures.OTHER_TENANT_ID).build();
+        Fixture fixture = newFixture(List.of(task, dependsOnTask), List.of());
+
+        assertThrows(CrossTenantDependencyException.class,
+                () -> fixture.service().addDependency(taskId, dependsOnTaskId));
+        assertTrue(fixture.dependencyRepo().findByTaskId(taskId).isEmpty(),
+                "a rejected edge must never be written");
+    }
+
+    @Test
+    void addDependency_eitherTenantNull_throwsCrossTenantDependencyException() {
+        UUID taskId = UUID.randomUUID();
+        UUID dependsOnTaskId = UUID.randomUUID();
+        Task task = TaskTestFixtures.defaultTask(taskId).isReady(true).tenantId(null).build();
+        Task dependsOnTask = buildTask(dependsOnTaskId, 0, 0, true);
+        Fixture fixture = newFixture(List.of(task, dependsOnTask), List.of());
+
+        assertThrows(CrossTenantDependencyException.class,
+                () -> fixture.service().addDependency(taskId, dependsOnTaskId));
+    }
+
+    @Test
+    void addDependency_sameTenant_isAllowed() {
+        UUID taskId = UUID.randomUUID();
+        UUID dependsOnTaskId = UUID.randomUUID();
+        Fixture fixture = newFixture(
+                List.of(buildTask(taskId, 0, 0, true), buildTask(dependsOnTaskId, 0, 0, true)), List.of());
+
+        fixture.service().addDependency(taskId, dependsOnTaskId);
+
+        assertEquals(1, fixture.taskRepo().findById(taskId).orElseThrow().getBlockingCount());
+    }
+
+    @Test
+    void addDependencies_oneEntryCrossTenant_throwsAndAppliesNoneOfTheBatch() {
+        UUID taskId = UUID.randomUUID();
+        UUID sameTenantDep = UUID.randomUUID();
+        UUID crossTenantDep = UUID.randomUUID();
+        Task crossTenantTask = TaskTestFixtures.defaultTask(crossTenantDep)
+                .isReady(true).tenantId(TaskTestFixtures.OTHER_TENANT_ID).build();
+        Fixture fixture = newFixture(
+                List.of(buildTask(taskId, 0, 0, true), buildTask(sameTenantDep, 0, 0, true), crossTenantTask),
+                List.of());
+
+        assertThrows(CrossTenantDependencyException.class, () -> fixture.service().addDependencies(
+                taskId, List.of(sameTenantDep, crossTenantDep)));
+
+        assertTrue(fixture.dependencyRepo().findByTaskId(taskId).isEmpty(),
+                "the whole batch must be rejected, including the otherwise-valid same-tenant entry");
+    }
+
     private Task createTask(
             UUID id,
             TaskStatus status,
@@ -688,7 +752,7 @@ class DependencyEdgeServiceTest {
         return Task.builder()
                 .id(id)
                 .parentTaskId(null)
-                .ownerId("test-owner")
+                .tenantId(TaskTestFixtures.DEFAULT_TENANT_ID)
                 .status(status)
                 .isReady(ready)
                 .blockingCount(blockingCount)
@@ -734,8 +798,9 @@ class DependencyEdgeServiceTest {
         InMemoryTaskDependencyRepository dependencyRepo = new InMemoryTaskDependencyRepository(edges);
         InMemoryConstraintRepository constraintRepo = new InMemoryConstraintRepository();
         SchedulingUpdateService scheduling = new SchedulingUpdateService(event -> {});
-        TaskCounterUpdater counterUpdater = new TaskCounterUpdater(taskRepo, scheduling);
-        return new Fixture(taskRepo, dependencyRepo, constraintRepo, new DependencyEdgeService(dependencyRepo, new InMemoryGraphLock(), counterUpdater));
+        TaskCounterUpdater counterUpdater = new TaskCounterUpdater(taskRepo, dependencyRepo,
+                new PriorityScoreService(), new SchedulingPublishListener(taskRepo, scheduling));
+        return new Fixture(taskRepo, dependencyRepo, constraintRepo, new DependencyEdgeService(dependencyRepo, new InMemoryGraphLock(), counterUpdater, TaskStateHistoryFixtures.newRecorder()));
     }
 
     private static Task buildTask(UUID id, int blockingCount, int openConstraintCount, boolean isReady) {

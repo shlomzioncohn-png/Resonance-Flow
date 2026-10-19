@@ -31,13 +31,13 @@ import java.util.Map;
  * {@code ReadCursor} overload, which would fetch the deals and the {@code asOf} from two separate,
  * potentially different snapshots.
  * <p>
- * A fetch failure (HubSpot unreachable, retries exhausted, or - since {@code
- * HubSpotDealRepository.snapshot()} re-resolves the pipeline on every call, see its Javadoc - a
- * pipeline stage label {@code HubSpotStageMapping} doesn't recognize) happens inside {@code
- * dealRepository.snapshot()}, before {@link CrmLane} ever runs, so there is no {@link
- * com.rnd.bridge.core.IntakeResult} to shape into a normal 200 response. {@link
- * #handleSnapshotFailure} turns that into an explicit 503 with the failure's message, instead of
- * the framework's default, message-less 500.
+ * A fetch failure (HubSpot/Salesforce unreachable, retries exhausted, a pipeline/stage-level
+ * metadata problem {@code HubSpotStageMapping} can't isolate to one stage - zero stages, a stage
+ * with no id, every stage invalid - or {@code bridge.crm.hubspot.max-skipped-ratio} exceeded, see
+ * {@code HubSpotDealRepository}'s Javadoc) happens inside {@code dealRepository.snapshot()},
+ * before {@link CrmLane} ever runs, so there is no {@link com.rnd.bridge.core.IntakeResult} to
+ * shape into a normal 200 response. {@link #handleSnapshotFailure} turns that into an explicit
+ * 503 with the failure's message, instead of the framework's default, message-less 500.
  */
 @RestController
 @RequestMapping("/bridge/crm")

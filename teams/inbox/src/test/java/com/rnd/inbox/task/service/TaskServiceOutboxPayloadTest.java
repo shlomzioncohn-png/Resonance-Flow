@@ -9,6 +9,7 @@ import com.rnd.inbox.outbox.OutboxEvent;
 import com.rnd.inbox.outbox.OutboxEventRepository;
 import com.rnd.inbox.project.ProjectRepository;
 import com.rnd.inbox.task.assignment.AssignmentRepository;
+import com.rnd.inbox.task.assignment.AssignmentService;
 import com.rnd.inbox.task.event.TaskCompletedProtoMapper;
 import com.rnd.inbox.task.event.TaskCreatedProtoMapper;
 import com.rnd.inbox.task.event.TaskUpdatedProtoMapper;
@@ -18,6 +19,7 @@ import com.rnd.inbox.task.model.SourceType;
 import com.rnd.inbox.task.model.Task;
 import com.rnd.inbox.task.model.TaskExtractionProvenance;
 import com.rnd.inbox.task.model.TaskStatus;
+import com.rnd.inbox.task.repository.TaskFeedbackRepository;
 import com.rnd.inbox.task.repository.TaskRepository;
 import com.rnd.inbox.task.security.TaskAuthorization;
 import com.rnd.inbox.tenant.model.Tenant;
@@ -64,6 +66,7 @@ class TaskServiceOutboxPayloadTest {
         outboxEventRepository = mock(OutboxEventRepository.class);
         taskService = new TaskService(
                 taskRepository,
+                mock(TaskFeedbackRepository.class),
                 mock(AuditService.class),
                 outboxEventRepository,
                 mock(AssignmentRepository.class),
@@ -74,7 +77,8 @@ class TaskServiceOutboxPayloadTest {
                 mock(ProjectRepository.class),
                 mock(UserRepository.class),
                 new TaskAuthorization(),
-                mock(TaskRestMapper.class));
+                mock(TaskRestMapper.class),
+                mock(AssignmentService.class));
         tenant = new Tenant();
         tenant.setId(UUID.randomUUID());
     }

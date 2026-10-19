@@ -1,4 +1,5 @@
 package com.rnd.inbox.auth.dto;
+import com.rnd.inbox.validation.MaxUtf8Bytes;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Size;
 
@@ -9,7 +10,7 @@ public class AuthVerifyRequestDto {
     private String login;
 
     @NotBlank
-    @Size(max = 72)
+    @MaxUtf8Bytes(72)
     private String password;
 
     public String getLogin() {

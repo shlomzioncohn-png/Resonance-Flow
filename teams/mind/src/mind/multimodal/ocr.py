@@ -30,6 +30,7 @@ import os
 import shutil
 import subprocess
 import tempfile
+import time
 from collections.abc import Mapping
 from enum import Enum
 from pathlib import Path
@@ -39,9 +40,10 @@ import pypdfium2 as pdfium
 from PIL import Image
 from pydantic import BaseModel, Field, computed_field
 
-from mind.api.instrumentation import instrumented_call
 from mind.multimodal.failures import FailureCategory
 from mind.multimodal.result import MediaTextResult
+from mind.observability.compute import CpuClock
+from mind.observability.tracking import CallKind, CallStatus, record_call
 
 logger = logging.getLogger(__name__)
 
@@ -51,6 +53,9 @@ logger = logging.getLogger(__name__)
 # CHOSEN_PSM_ARGS is a separate copy, and tests/test_ocr_psm_sync.py fails if
 # the two ever differ, so a future PSM change can't leave one of them behind.
 OCR_PSM_ARGS = ["--psm", "11"]
+
+# The name every OCR call is recorded under (observability.record_call).
+OCR_MODEL_NAME = "tesseract-psm11-ocr"
 
 # Confidence below which a recognized word is flagged as "low confidence"
 # instead of trusted outright. A starting point, not a validated detector:
@@ -375,11 +380,21 @@ def _extract(content: bytes, filename: str, max_pages: int) -> OCRResult:
     if not content:
         return _failure(OCRFailureReason.EMPTY_INPUT, "empty input")
 
-    try:
-        tesseract_cmd = _find_tesseract()
-    except RuntimeError as exc:
-        return _failure(OCRFailureReason.OCR_UNAVAILABLE, str(exc))
-
+    # The document is checked before the binary is looked for: reading it needs
+    # only PIL / pypdfium2. Looking first made a junk file on a host without
+    # tesseract OCR_UNAVAILABLE -- an environment failure, retried forever -- when
+    # the document itself is the problem (the same fix as asr.py's, team-lead
+    # review on #478). The cost: a valid PDF's pages are rendered even when
+    # tesseract then turns out to be missing -- only on a broken host.
+    #
+    # The call's window -- wall clock and CPU -- starts here, so it includes
+    # rendering the PDF pages (in this process, ~0.5 s a page) as well as the
+    # Tesseract runs (#479). Nothing is recorded unless Tesseract runs: input
+    # rejected below, or a host without it, is not a model call. Tesseract runs
+    # as a child process, so its CPU is the children's counters -- None where
+    # the platform cannot report them (Windows).
+    start = time.perf_counter()
+    cpu = CpuClock(include_children=True)
     try:
         if _is_pdf(content, filename):
             page_images, pages_available = _pdf_to_page_images(content, max_pages)
@@ -393,17 +408,37 @@ def _extract(content: bytes, filename: str, max_pages: int) -> OCRResult:
     if not page_images:
         return _failure(OCRFailureReason.UNREADABLE_FORMAT, "PDF has no pages")
 
-    parsed: list[_PageOCR] = []
     try:
-        with instrumented_call("tesseract-psm11-ocr"):
-            for image_bytes in page_images:
-                parsed.append(_parse_tsv(_run_tesseract_tsv(tesseract_cmd, image_bytes)))
+        tesseract_cmd = _find_tesseract()
+    except RuntimeError as exc:
+        # The host, not a failed call: logged, and not recorded as a model call.
+        logger.warning("OCR_UNAVAILABLE: %s", exc)
+        return _failure(OCRFailureReason.OCR_UNAVAILABLE, str(exc))
+
+    parsed: list[_PageOCR] = []
+    # ERROR until the loop completes, so anything that leaves it early --
+    # including a bug, which is not caught below -- is recorded as a failure.
+    status = CallStatus.ERROR
+    try:
+        for image_bytes in page_images:
+            parsed.append(_parse_tsv(_run_tesseract_tsv(tesseract_cmd, image_bytes)))
+        status = CallStatus.SUCCESS
     except (_TesseractFailed, subprocess.TimeoutExpired, OSError) as exc:
         # Every page image was proven valid above, so these are the
         # environment: tesseract exiting non-zero (missing language pack...), a
         # timeout, or being unable to run it (binary gone, disk full). Anything
         # else -- e.g. a bug while parsing the output -- is not caught here.
         return _failure(OCRFailureReason.OCR_FAILED, f"tesseract failed: {exc}")
+    finally:
+        # A local model's cost is its CPU seconds, not dollars (#479).
+        record_call(
+            OCR_MODEL_NAME,
+            (time.perf_counter() - start) * 1000,
+            cost=None,
+            kind=CallKind.OCR,
+            status=status,
+            cpu_s=cpu.elapsed_s(),
+        )
 
     pages = [page.text for page in parsed]
     text = "\n".join(page for page in pages if page)

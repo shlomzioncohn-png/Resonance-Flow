@@ -52,9 +52,10 @@ public class PostgresTaskRepository implements TaskRepository {
     @Transactional
     public Task save(Task task) {
         Objects.requireNonNull(task, "task must not be null");
-        jpaRepository.upsert(task.getId(), task.getParentTaskId(),
+        jpaRepository.upsert(task.getId(), task.getParentTaskId(), task.getTenantId(),
                 task.getStatus().name(), task.isReady(), task.getBlockingCount(),
                 task.getOpenConstraintCount(), task.getEstimatedDurationMin(), task.getScore(),
+                task.getConfidence(), task.getPriorityScore(),
                 task.getCreatedAt(), task.getUpdatedAt(), task.getDeletedAt());
         // Read-back after the row-count-only native upsert; unlike findByIdAndDeletedAtIsNull(),
         // findById() also returns soft-deleted rows.
@@ -136,12 +137,15 @@ public class PostgresTaskRepository implements TaskRepository {
         return Task.builder()
                 .id(entity.getId())
                 .parentTaskId(entity.getParentTaskId())
+                .tenantId(entity.getTenantId())
                 .status(entity.getStatus())
                 .isReady(entity.isReady())
                 .blockingCount(entity.getBlockingCount())
                 .openConstraintCount(entity.getOpenConstraintCount())
                 .estimatedDurationMin(entity.getEstimatedDurationMin())
                 .score(entity.getScore())
+                .confidence(entity.getConfidence())
+                .priorityScore(entity.getPriorityScore())
                 .createdAt(entity.getCreatedAt())
                 .updatedAt(entity.getUpdatedAt())
                 .deletedAt(entity.getDeletedAt())
@@ -152,12 +156,15 @@ public class PostgresTaskRepository implements TaskRepository {
      * fresh save()) so Hibernate's dirty checking emits the UPDATE at commit. */
     private static void copyOnto(TaskEntity entity, Task updated) {
         entity.setParentTaskId(updated.getParentTaskId());
+        entity.setTenantId(updated.getTenantId());
         entity.setStatus(updated.getStatus());
         entity.setReady(updated.isReady());
         entity.setBlockingCount(updated.getBlockingCount());
         entity.setOpenConstraintCount(updated.getOpenConstraintCount());
         entity.setEstimatedDurationMin(updated.getEstimatedDurationMin());
         entity.setScore(updated.getScore());
+        entity.setConfidence(updated.getConfidence());
+        entity.setPriorityScore(updated.getPriorityScore());
         entity.setCreatedAt(updated.getCreatedAt());
         entity.setUpdatedAt(updated.getUpdatedAt());
         entity.setDeletedAt(updated.getDeletedAt());

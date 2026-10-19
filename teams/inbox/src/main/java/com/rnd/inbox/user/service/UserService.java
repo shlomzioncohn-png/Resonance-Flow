@@ -6,6 +6,7 @@ import com.rnd.inbox.user.dto.UserUpdateRequestDto;
 import com.rnd.inbox.user.exception.DuplicateEmailException;
 import com.rnd.inbox.user.exception.DuplicateUsernameException;
 import com.rnd.inbox.user.exception.UserNotFoundException;
+import com.rnd.inbox.user.exception.UsernameImmutableException;
 import com.rnd.inbox.user.mapper.UserMapper;
 import com.rnd.inbox.user.model.AuthType;
 import com.rnd.inbox.user.model.User;
@@ -34,6 +35,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.UUID;
 
 @Service
@@ -92,6 +94,13 @@ public class UserService {
         userAuthIdentityRepository.save(identity);
     }
 
+    private void assertUsernameUnchanged(User user, UserUpdateRequestDto request) {
+        if (request.getUsername().isPresent()
+                && !Objects.equals(request.getUsername().get(), user.getUsername())) {
+            throw new UsernameImmutableException();
+        }
+    }
+
     private void assertLoginAvailable(String username) {
         if (userAuthIdentityRepository.existsByAuthTypeAndIdentifier(
                 AuthType.PASSWORD, UserAuthIdentity.normalizeIdentifier(username))) {
@@ -116,7 +125,7 @@ public class UserService {
             userAuthorization.assertCanChangeRole(actor, user, UserRole.valueOf(request.getRole()));
         }
         assertEmailAvailable(request.getEmail().orElse(null), id);
-        assertUsernameAvailable(request.getUsername().orElse(null), id);
+        assertUsernameUnchanged(user, request);
 
         Map<String, Object> before = auditSnapshot(user);
         userMapper.applyUpdate(user, request);

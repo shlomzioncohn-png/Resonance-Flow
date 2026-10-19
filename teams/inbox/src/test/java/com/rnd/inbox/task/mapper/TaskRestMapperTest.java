@@ -1,4 +1,5 @@
 package com.rnd.inbox.task.mapper;
+import com.rnd.inbox.task.assignment.AssignmentMapper;
 import com.rnd.inbox.task.dto.TaskCreateRequestDto;
 import com.rnd.inbox.task.dto.TaskResponseDto;
 import com.rnd.inbox.task.dto.TaskUpdateRequestDto;
@@ -16,6 +17,7 @@ import org.openapitools.jackson.nullable.JsonNullable;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
+import java.util.List;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -32,7 +34,8 @@ class TaskRestMapperTest {
 
     @BeforeEach
     void setUp() {
-        taskRestMapper = new TaskRestMapper(Clock.fixed(FIXED_NOW, ZoneOffset.UTC));
+        Clock clock = Clock.fixed(FIXED_NOW, ZoneOffset.UTC);
+        taskRestMapper = new TaskRestMapper(clock, new AssignmentMapper(clock));
 
         tenant = new Tenant();
         tenant.setId(UUID.randomUUID());
@@ -195,7 +198,7 @@ class TaskRestMapperTest {
         task.setCreatedAt(FIXED_NOW);
         task.setUpdatedAt(FIXED_NOW);
 
-        TaskResponseDto dto = taskRestMapper.toResponseDto(task);
+        TaskResponseDto dto = taskRestMapper.toResponseDto(task, List.of());
 
         assertThat(dto.getId()).isEqualTo(task.getId());
         assertThat(dto.getTenant().getId()).isEqualTo(tenant.getId());
@@ -218,7 +221,7 @@ class TaskRestMapperTest {
         task.setStatus(TaskStatus.NEW);
         task.setExtractionProvenance(TaskExtractionProvenance.MANUAL);
 
-        TaskResponseDto dto = taskRestMapper.toResponseDto(task);
+        TaskResponseDto dto = taskRestMapper.toResponseDto(task, List.of());
 
         assertThat(dto.getProjectId()).isNull();
         assertThat(dto.getProjectName()).isNull();

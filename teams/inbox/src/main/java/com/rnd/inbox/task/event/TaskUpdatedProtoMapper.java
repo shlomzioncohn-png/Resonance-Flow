@@ -47,6 +47,8 @@ public class TaskUpdatedProtoMapper implements ProtoEventMapper<TaskUpdatedEvent
         setIfPresent(payload, "suggestedOwnerUserId", v -> builder.setSuggestedOwnerUserId((String) v));
         setIfPresent(payload, "suggestedOwnerConfidence", v -> builder.setSuggestedOwnerConfidence(((Number) v).floatValue()));
         setIfPresent(payload, "ownerId", v -> builder.setOwnerId((String) v));
+        setIfPresent(payload, "feedbackText", v -> builder.setFeedbackText((String) v));
+        setIfPresent(payload, "feedbackUserId", v -> builder.setFeedbackUserId((String) v));
 
         return builder.build();
     }

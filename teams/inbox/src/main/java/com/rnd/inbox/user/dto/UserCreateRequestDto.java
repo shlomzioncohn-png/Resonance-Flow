@@ -2,6 +2,8 @@ package com.rnd.inbox.user.dto;
 import com.rnd.inbox.user.model.UserRole;
 import com.rnd.inbox.shared.messaging.validation.ValidEnum;
 import com.rnd.inbox.shared.messaging.validation.ValidUuid;
+import com.rnd.inbox.validation.MaxUtf8Bytes;
+import com.rnd.inbox.validation.OptionalNotBlank;
 import com.fasterxml.jackson.annotation.JsonIgnore;
 import jakarta.validation.constraints.AssertTrue;
 import jakarta.validation.constraints.Email;
@@ -38,7 +40,9 @@ public class UserCreateRequestDto {
     @ValidEnum(enumClass = UserRole.class)
     private String role;
 
-    @Size(min = 8, max = 72)
+    @OptionalNotBlank
+    @Size(min = 8)
+    @MaxUtf8Bytes(72)
     private String password;
 
     @JsonIgnore

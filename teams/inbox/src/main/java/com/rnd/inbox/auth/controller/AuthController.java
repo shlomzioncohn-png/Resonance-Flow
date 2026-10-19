@@ -32,7 +32,9 @@ public class AuthController {
             @ApiResponse(responseCode = "400", description = "Login or password missing or too long"),
             @ApiResponse(responseCode = "401",
                     description = "Invalid login or password (same response for an unknown login, a wrong "
-                            + "password, or an inactive user)")
+                            + "password, or an inactive user)"),
+            @ApiResponse(responseCode = "429",
+                    description = "Login temporarily locked after too many failed attempts")
     })
     @PostMapping("/verify")
     public AuthUserResponseDto verify(@Valid @RequestBody AuthVerifyRequestDto request) {

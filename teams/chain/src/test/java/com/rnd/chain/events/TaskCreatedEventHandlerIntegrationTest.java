@@ -49,6 +49,7 @@ class TaskCreatedEventHandlerIntegrationTest {
 
     private static final String TOPIC = "task.created";
     private static final String ERROR_TOPIC = TOPIC + ".errors";
+    private static final UUID TENANT_ID = UUID.randomUUID();
 
     @TestConfiguration
     static class Fixtures {
@@ -117,6 +118,7 @@ class TaskCreatedEventHandlerIntegrationTest {
                 taskId.toString(),
                 TaskCreatedEvent.newBuilder()
                         .setId(taskId.toString())
+                        .setTenantId(UUID.randomUUID().toString())
                         .setStatus(
                                 com.rnd.inbox.event.TaskStatus.TASK_STATUS_NEW
                         )
@@ -161,6 +163,7 @@ class TaskCreatedEventHandlerIntegrationTest {
         ((InMemoryTaskRepository) taskRepository).save(
                 Task.builder()
                         .id(taskId)
+                        .tenantId(TENANT_ID)
                         .status(TaskStatus.PENDING)
                         .isReady(false)
                         .blockingCount(2)
@@ -175,6 +178,7 @@ class TaskCreatedEventHandlerIntegrationTest {
                 taskId.toString(),
                 TaskCreatedEvent.newBuilder()
                         .setId(taskId.toString())
+                        .setTenantId(TENANT_ID.toString())
                         .setStatus(
                                 com.rnd.inbox.event.TaskStatus
                                         .TASK_STATUS_IN_PROGRESS

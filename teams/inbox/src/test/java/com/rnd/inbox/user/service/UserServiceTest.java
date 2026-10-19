@@ -6,6 +6,7 @@ import com.rnd.inbox.user.dto.UserUpdateRequestDto;
 import com.rnd.inbox.user.exception.DuplicateEmailException;
 import com.rnd.inbox.user.exception.DuplicateUsernameException;
 import com.rnd.inbox.user.exception.UserNotFoundException;
+import com.rnd.inbox.user.exception.UsernameImmutableException;
 import com.rnd.inbox.user.mapper.UserMapper;
 import com.rnd.inbox.user.model.AuthType;
 import com.rnd.inbox.user.model.User;
@@ -557,13 +558,12 @@ class UserServiceTest {
     @Test
     void updateUser_whenUserExists_updatesAndReturnsUser() {
         stubActorFound();
-        UserUpdateRequestDto request = updateRequest("new@acme.com", "newname");
+        UserUpdateRequestDto request = updateRequest("new@acme.com", null);
         UserResponseDto responseDto = new UserResponseDto(userId, "Yehudit Cohen", null, null,
                 "new@acme.com", null, "newname", UserRole.EMPLOYEE, UserStatus.ACTIVE, null, null, null, null);
 
         when(userRepository.findById(userId)).thenReturn(Optional.of(user));
         when(userRepository.findByEmail("new@acme.com")).thenReturn(Optional.empty());
-        when(userRepository.findByUsername("newname")).thenReturn(Optional.empty());
         when(userRepository.save(user)).thenReturn(user);
         when(userMapper.toResponseDto(user)).thenReturn(responseDto);
 
@@ -580,11 +580,10 @@ class UserServiceTest {
     void updateUser_auditsTheValuesFromBeforeAndAfterTheChange() {
         stubActorFound();
         user.setEmail("old@acme.com");
-        UserUpdateRequestDto request = updateRequest("new@acme.com", "newname");
+        UserUpdateRequestDto request = updateRequest("new@acme.com", null);
 
         when(userRepository.findById(userId)).thenReturn(Optional.of(user));
         when(userRepository.findByEmail("new@acme.com")).thenReturn(Optional.empty());
-        when(userRepository.findByUsername("newname")).thenReturn(Optional.empty());
         when(userRepository.save(user)).thenReturn(user);
         // userMapper is a mock, so it changes nothing by itself: stand in for the real mapper
         // changing the user in place, which is what makes "before" and "after" differ.
@@ -606,6 +605,19 @@ class UserServiceTest {
     }
 
     @Test
+    void updateUser_whenUsernameChanges_throwsUsernameImmutableException() {
+        stubActorFound();
+        user.setUsername("yehudit");
+        UserUpdateRequestDto request = updateRequest("yehudit@acme.com", "renamed");
+
+        when(userRepository.findById(userId)).thenReturn(Optional.of(user));
+
+        assertThatThrownBy(() -> userService.updateUser(userId, request, actorId))
+                .isInstanceOf(UsernameImmutableException.class);
+        verify(userRepository, never()).save(any());
+    }
+
+    @Test
     void updateUser_writesAuditSnapshotWithAllUserFields() {
         stubActorFound();
         user.setDisplayName("Yehudit Cohen");
@@ -619,7 +631,6 @@ class UserServiceTest {
 
         when(userRepository.findById(userId)).thenReturn(Optional.of(user));
         when(userRepository.findByEmail("yehudit@acme.com")).thenReturn(Optional.of(user));
-        when(userRepository.findByUsername("yehudit")).thenReturn(Optional.of(user));
         when(userRepository.save(user)).thenReturn(user);
 
         userService.updateUser(userId, request, actorId);
@@ -641,7 +652,7 @@ class UserServiceTest {
 
     @Test
     void updateUser_whenActorDoesNotExist_throwsUnauthenticatedException() {
-        UserUpdateRequestDto request = updateRequest("new@acme.com", "newname");
+        UserUpdateRequestDto request = updateRequest("new@acme.com", null);
         when(userRepository.findById(actorId)).thenReturn(Optional.empty());
 
         assertThatThrownBy(() -> userService.updateUser(userId, request, actorId))
@@ -654,7 +665,7 @@ class UserServiceTest {
     @Test
     void updateUser_whenUserDoesNotExist_throwsUserNotFoundException() {
         stubActorFound();
-        UserUpdateRequestDto request = updateRequest("new@acme.com", "newname");
+        UserUpdateRequestDto request = updateRequest("new@acme.com", null);
         when(userRepository.findById(userId)).thenReturn(Optional.empty());
 
         assertThatThrownBy(() -> userService.updateUser(userId, request, actorId))
@@ -668,7 +679,7 @@ class UserServiceTest {
         stubActorFound();
         actor.setTenant(new Tenant());
         actor.getTenant().setId(UUID.randomUUID());
-        UserUpdateRequestDto request = updateRequest("new@acme.com", "newname");
+        UserUpdateRequestDto request = updateRequest("new@acme.com", null);
 
         when(userRepository.findById(userId)).thenReturn(Optional.of(user));
 
@@ -685,11 +696,10 @@ class UserServiceTest {
         actor.setTenant(new Tenant());
         actor.getTenant().setId(UUID.randomUUID());
         stubActorFound();
-        UserUpdateRequestDto request = updateRequest("new@acme.com", "newname");
+        UserUpdateRequestDto request = updateRequest("new@acme.com", null);
 
         when(userRepository.findById(userId)).thenReturn(Optional.of(user));
         when(userRepository.findByEmail("new@acme.com")).thenReturn(Optional.empty());
-        when(userRepository.findByUsername("newname")).thenReturn(Optional.empty());
         when(userRepository.save(user)).thenReturn(user);
         when(userMapper.toResponseDto(user)).thenReturn(new UserResponseDto(
                 userId, "Yehudit Cohen", null, null, "new@acme.com", null, "newname",
@@ -704,12 +714,11 @@ class UserServiceTest {
     void updateUser_whenActorIsTeamLeadAndTargetIsOnTheirTeam_updatesAndReturnsUser() {
         actor.setRole(UserRole.TEAM_LEAD);
         stubActorFound();
-        UserUpdateRequestDto request = updateRequest("new@acme.com", "newname");
+        UserUpdateRequestDto request = updateRequest("new@acme.com", null);
 
         when(userRepository.findById(userId)).thenReturn(Optional.of(user));
         when(userRepository.existsInTeamLedBy(userId, actorId)).thenReturn(true);
         when(userRepository.findByEmail("new@acme.com")).thenReturn(Optional.empty());
-        when(userRepository.findByUsername("newname")).thenReturn(Optional.empty());
         when(userRepository.save(user)).thenReturn(user);
         when(userMapper.toResponseDto(user)).thenReturn(new UserResponseDto(
                 userId, "Yehudit Cohen", null, null, "new@acme.com", null, "newname",
@@ -724,7 +733,7 @@ class UserServiceTest {
     void updateUser_whenActorIsTeamLeadAndTargetIsNotOnTheirTeam_throwsForbiddenActionException() {
         actor.setRole(UserRole.TEAM_LEAD);
         stubActorFound();
-        UserUpdateRequestDto request = updateRequest("new@acme.com", "newname");
+        UserUpdateRequestDto request = updateRequest("new@acme.com", null);
 
         when(userRepository.findById(userId)).thenReturn(Optional.of(user));
         when(userRepository.existsInTeamLedBy(userId, actorId)).thenReturn(false);
@@ -740,11 +749,10 @@ class UserServiceTest {
     void updateUser_whenActorIsEmployeeAndTargetIsThemselves_updatesAndReturnsUser() {
         actor.setRole(UserRole.EMPLOYEE);
         stubActorFound();
-        UserUpdateRequestDto request = updateRequest("new@acme.com", "newname");
+        UserUpdateRequestDto request = updateRequest("new@acme.com", null);
 
         when(userRepository.findById(actorId)).thenReturn(Optional.of(actor));
         when(userRepository.findByEmail("new@acme.com")).thenReturn(Optional.empty());
-        when(userRepository.findByUsername("newname")).thenReturn(Optional.empty());
         when(userRepository.save(actor)).thenReturn(actor);
         when(userMapper.toResponseDto(actor)).thenReturn(new UserResponseDto(
                 actorId, "Yehudit Cohen", null, null, "new@acme.com", null, "newname",
@@ -844,7 +852,7 @@ class UserServiceTest {
     void updateUser_whenActorIsEmployeeAndTargetIsSomeoneElse_throwsForbiddenActionException() {
         actor.setRole(UserRole.EMPLOYEE);
         stubActorFound();
-        UserUpdateRequestDto request = updateRequest("new@acme.com", "newname");
+        UserUpdateRequestDto request = updateRequest("new@acme.com", null);
 
         when(userRepository.findById(userId)).thenReturn(Optional.of(user));
 
@@ -858,7 +866,7 @@ class UserServiceTest {
     @Test
     void updateUser_whenEmailBelongsToAnotherUser_throwsDuplicateEmailException() {
         stubActorFound();
-        UserUpdateRequestDto request = updateRequest("taken@acme.com", "newname");
+        UserUpdateRequestDto request = updateRequest("taken@acme.com", null);
         User anotherUser = new User();
         anotherUser.setId(UUID.randomUUID());
 
@@ -875,11 +883,11 @@ class UserServiceTest {
     @Test
     void updateUser_whenEmailBelongsToTheSameUser_doesNotThrowAndSaves() {
         stubActorFound();
+        user.setUsername("yehudit");
         UserUpdateRequestDto request = updateRequest("yehudit@acme.com", "yehudit");
 
         when(userRepository.findById(userId)).thenReturn(Optional.of(user));
         when(userRepository.findByEmail("yehudit@acme.com")).thenReturn(Optional.of(user));
-        when(userRepository.findByUsername("yehudit")).thenReturn(Optional.of(user));
         when(userRepository.save(user)).thenReturn(user);
         when(userMapper.toResponseDto(user)).thenReturn(new UserResponseDto(
                 userId, "Yehudit Cohen", null, null, "yehudit@acme.com", null, "yehudit", UserRole.EMPLOYEE,
@@ -889,40 +897,6 @@ class UserServiceTest {
 
         verify(userMapper).applyUpdate(user, request);
         verify(userRepository).save(user);
-    }
-
-    @Test
-    void updateUser_whenUsernameBelongsToAnotherUser_throwsDuplicateUsernameException() {
-        stubActorFound();
-        UserUpdateRequestDto request = updateRequest("yehudit@acme.com", "taken");
-        User anotherUser = new User();
-        anotherUser.setId(UUID.randomUUID());
-
-        when(userRepository.findById(userId)).thenReturn(Optional.of(user));
-        when(userRepository.findByEmail("yehudit@acme.com")).thenReturn(Optional.empty());
-        when(userRepository.findByUsername("taken")).thenReturn(Optional.of(anotherUser));
-
-        assertThatThrownBy(() -> userService.updateUser(userId, request, actorId))
-                .isInstanceOf(DuplicateUsernameException.class);
-
-        verify(userRepository, never()).save(any());
-    }
-
-    @Test
-    void updateUser_whenUsernameUniqueConstraintViolatedConcurrently_throwsDuplicateUsernameException() {
-        stubActorFound();
-        user.setUsername("racer");
-        UserUpdateRequestDto request = updateRequest("yehudit@acme.com", "racer");
-
-        when(userRepository.findById(userId)).thenReturn(Optional.of(user));
-        when(userRepository.findByEmail("yehudit@acme.com")).thenReturn(Optional.empty());
-        when(userRepository.findByUsername("racer")).thenReturn(Optional.empty());
-        when(userRepository.save(user)).thenThrow(constraintViolation("uq_users_username"));
-
-        assertThatThrownBy(() -> userService.updateUser(userId, request, actorId))
-                .isInstanceOf(DuplicateUsernameException.class);
-
-        verifyNoInteractions(auditService);
     }
 
     @Test

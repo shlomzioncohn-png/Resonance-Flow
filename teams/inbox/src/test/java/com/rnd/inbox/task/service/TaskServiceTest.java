@@ -1,7 +1,9 @@
 package com.rnd.inbox.task.service;
 import com.rnd.inbox.task.assignment.Assignment;
 import com.rnd.inbox.task.assignment.AssignmentRepository;
+import com.rnd.inbox.task.assignment.AssignmentService;
 import com.rnd.inbox.task.assignment.AssignmentRole;
+import com.rnd.inbox.task.dto.TaskAssigneeRequestDto;
 import com.rnd.inbox.task.dto.TaskCreateRequestDto;
 import com.rnd.inbox.task.dto.TaskFilterDto;
 import com.rnd.inbox.task.dto.TaskResponseDto;
@@ -16,7 +18,9 @@ import com.rnd.inbox.task.mapper.TaskRestMapper;
 import com.rnd.inbox.task.model.SourceType;
 import com.rnd.inbox.task.model.Task;
 import com.rnd.inbox.task.model.TaskExtractionProvenance;
+import com.rnd.inbox.task.model.TaskFeedback;
 import com.rnd.inbox.task.model.TaskStatus;
+import com.rnd.inbox.task.repository.TaskFeedbackRepository;
 import com.rnd.inbox.task.repository.TaskRepository;
 import com.rnd.inbox.task.security.TaskAuthorization;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -63,6 +67,7 @@ import java.util.UUID;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
@@ -81,6 +86,9 @@ class TaskServiceTest {
 
     @Mock
     private TaskRepository taskRepository;
+
+    @Mock
+    private TaskFeedbackRepository taskFeedbackRepository;
 
     @Mock
     private AuditService auditService;
@@ -106,6 +114,9 @@ class TaskServiceTest {
     @Mock
     private TaskRestMapper taskRestMapper;
 
+    @Mock
+    private AssignmentService assignmentService;
+
     private final ObjectMapper objectMapper = new ObjectMapper().registerModule(new JavaTimeModule());
     private final Clock clock = Clock.fixed(NOW, ZoneOffset.UTC);
 
@@ -117,6 +128,7 @@ class TaskServiceTest {
     void setUp() {
         taskService = new TaskService(
                 taskRepository,
+                taskFeedbackRepository,
                 auditService,
                 outboxEventRepository,
                 assignmentRepository,
@@ -127,7 +139,8 @@ class TaskServiceTest {
                 projectRepository,
                 userRepository,
                 new TaskAuthorization(),
-                taskRestMapper);
+                taskRestMapper,
+                assignmentService);
         tenantId = UUID.randomUUID();
         tenant = new Tenant();
         tenant.setId(tenantId);
@@ -569,6 +582,21 @@ class TaskServiceTest {
     }
 
     @Test
+    void applySchedulingUpdate_withTheValuesTheTaskAlreadyHas_writesNoOutboxEvent() {
+        UUID taskId = UUID.randomUUID();
+        Task task = incomingTask();
+        task.setId(taskId);
+        task.setAvailable(true);
+        task.setPriorityScore(7.5f);
+        when(taskRepository.findById(taskId)).thenReturn(Optional.of(task));
+        when(taskRepository.saveAndFlush(task)).thenReturn(task);
+
+        taskService.applySchedulingUpdate(schedulingEvent(taskId, UUID.randomUUID(), 7.5));
+
+        verify(outboxEventRepository, never()).save(any());
+    }
+
+    @Test
     void applySchedulingUpdate_forATaskThatDoesNotExist_throwsTaskNotFoundExceptionRatherThanFailingOnSave() {
         UUID taskId = UUID.randomUUID();
         when(taskRepository.findById(taskId)).thenReturn(Optional.empty());
@@ -636,7 +664,7 @@ class TaskServiceTest {
     private TaskResponseDto sampleTaskResponseDto() {
         return new TaskResponseDto(UUID.randomUUID(), null, null, null, "Fix flaky test", null, null, null, null,
                 null, null, null, null, TaskStatus.NEW, false, null, null, null, null, null, null, null, null, null,
-                null, NOW, NOW, null, null);
+                null, NOW, NOW, null, null, List.of());
     }
 
     private User actorWithRole(UserRole role) {
@@ -665,8 +693,8 @@ class TaskServiceTest {
         stubSaveAssigning(built, UUID.randomUUID());
         TaskResponseDto responseDto = new TaskResponseDto(UUID.randomUUID(), null, null, null, "Fix flaky test",
                 null, null, null, null, null, null, null, null, TaskStatus.NEW, false, null, null, null, null,
-                actor.getId(), null, null, null, null, actor.getId(), NOW, NOW, null, null);
-        when(taskRestMapper.toResponseDto(built)).thenReturn(responseDto);
+                actor.getId(), null, null, null, null, actor.getId(), NOW, NOW, null, null, List.of());
+        when(taskRestMapper.toResponseDto(built, List.of())).thenReturn(responseDto);
 
         TaskResponseDto result = taskService.createTaskFromRequest(request, actor.getId());
 
@@ -715,7 +743,7 @@ class TaskServiceTest {
         UUID taskId = UUID.randomUUID();
         when(taskRepository.findById(taskId)).thenReturn(Optional.of(task));
         TaskResponseDto responseDto = sampleTaskResponseDto();
-        when(taskRestMapper.toResponseDto(task)).thenReturn(responseDto);
+        when(taskRestMapper.toResponseDto(task, List.of())).thenReturn(responseDto);
 
         TaskResponseDto result = taskService.getTaskById(taskId, actor.getId());
 
@@ -761,7 +789,7 @@ class TaskServiceTest {
                 eq(false), isNull(), eq(withDefaultSort(pageable))))
                 .thenReturn(page);
         TaskResponseDto responseDto = sampleTaskResponseDto();
-        when(taskRestMapper.toResponseDto(task)).thenReturn(responseDto);
+        when(taskRestMapper.toResponseDto(task, List.of())).thenReturn(responseDto);
 
         PageResponseDto<TaskResponseDto> result = taskService.listTasks(new TaskFilterDto(), pageable, actor.getId());
 
@@ -781,7 +809,7 @@ class TaskServiceTest {
                 eq(false), isNull(), eq(withDefaultSort(pageable))))
                 .thenReturn(page);
         TaskResponseDto responseDto = sampleTaskResponseDto();
-        when(taskRestMapper.toResponseDto(task)).thenReturn(responseDto);
+        when(taskRestMapper.toResponseDto(task, List.of())).thenReturn(responseDto);
 
         PageResponseDto<TaskResponseDto> result = taskService.listTasks(new TaskFilterDto(), pageable, actor.getId());
 
@@ -804,7 +832,7 @@ class TaskServiceTest {
                 eq(true), eq(relatedUserId), eq(withDefaultSort(pageable))))
                 .thenReturn(page);
         TaskResponseDto responseDto = sampleTaskResponseDto();
-        when(taskRestMapper.toResponseDto(task)).thenReturn(responseDto);
+        when(taskRestMapper.toResponseDto(task, List.of())).thenReturn(responseDto);
         TaskFilterDto filter = new TaskFilterDto();
         filter.setUserId(relatedUserId);
 
@@ -923,7 +951,7 @@ class TaskServiceTest {
                 eq(false), isNull(), eq(withDefaultSort(pageable))))
                 .thenReturn(page);
         TaskResponseDto responseDto = sampleTaskResponseDto();
-        when(taskRestMapper.toResponseDto(task)).thenReturn(responseDto);
+        when(taskRestMapper.toResponseDto(task, List.of())).thenReturn(responseDto);
         TaskFilterDto filter = new TaskFilterDto();
         filter.setDeadlineFrom(deadlineFrom);
 
@@ -946,7 +974,7 @@ class TaskServiceTest {
                 eq(false), isNull(), eq(withDefaultSort(pageable))))
                 .thenReturn(page);
         TaskResponseDto responseDto = sampleTaskResponseDto();
-        when(taskRestMapper.toResponseDto(task)).thenReturn(responseDto);
+        when(taskRestMapper.toResponseDto(task, List.of())).thenReturn(responseDto);
         TaskFilterDto filter = new TaskFilterDto();
         filter.setDeadlineTo(deadlineTo);
 
@@ -1072,5 +1100,238 @@ class TaskServiceTest {
 
         assertThatThrownBy(() -> taskService.updateTaskStatus(taskId, request, actor.getId()))
                 .isInstanceOf(TaskNotFoundException.class);
+    }
+
+    @Test
+    void updateTaskStatus_toDone_writesTaskCompletedOutboxEventAndAuditLog() {
+        User actor = actorWithRole(UserRole.SYSTEM_ADMIN);
+        when(userRepository.findById(actor.getId())).thenReturn(Optional.of(actor));
+        Task task = existingTask();
+        when(taskRepository.save(task)).thenReturn(task);
+
+        TaskStatusUpdateRequestDto request = new TaskStatusUpdateRequestDto();
+        request.setStatus("DONE");
+
+        taskService.updateTaskStatus(task.getId(), request, actor.getId());
+
+        OutboxEvent event = capturedOutboxEvent();
+        assertThat(event.getEventType()).isEqualTo(EventType.TASK_COMPLETED);
+        assertThat(event.getPayload())
+                .containsEntry("taskId", task.getId().toString())
+                .containsEntry("completed", true);
+        verify(auditService).createUpdateAuditLog(eq("TASK_COMPLETED"), eq("Task"), eq(task.getId()), eq(tenant),
+                eq(actor), any(), any(), any());
+        verifyNoInteractions(taskFeedbackRepository);
+    }
+
+    @Test
+    void updateTaskStatus_toRejectedWithFeedback_savesFeedbackAndPublishesItOnTaskUpdated() {
+        User actor = actorWithRole(UserRole.SYSTEM_ADMIN);
+        when(userRepository.findById(actor.getId())).thenReturn(Optional.of(actor));
+        Task task = existingTask();
+        when(taskRepository.save(task)).thenReturn(task);
+        TaskFeedback feedback = new TaskFeedback();
+        feedback.setTask(task);
+        feedback.setUser(actor);
+        feedback.setFeedbackText("Not clear what is expected");
+        when(taskRestMapper.toFeedbackEntity(task, actor, "Not clear what is expected")).thenReturn(feedback);
+
+        TaskStatusUpdateRequestDto request = new TaskStatusUpdateRequestDto();
+        request.setStatus("REJECTED");
+        request.setFeedbackText("Not clear what is expected");
+
+        taskService.updateTaskStatus(task.getId(), request, actor.getId());
+
+        verify(taskFeedbackRepository).save(feedback);
+        OutboxEvent event = capturedOutboxEvent();
+        assertThat(event.getEventType()).isEqualTo(EventType.TASK_UPDATED);
+        assertThat(event.getPayload())
+                .containsEntry("feedbackText", "Not clear what is expected")
+                .containsEntry("feedbackUserId", actor.getId().toString());
+
+        verify(auditService).createUpdateAuditLog(eq("TASK_STATUS_UPDATED"), eq("Task"), eq(task.getId()), eq(tenant),
+                eq(actor), any(),
+                argThat(after -> "Not clear what is expected".equals(after.get("feedbackText"))),
+                any());
+    }
+
+    @Test
+    void updateTaskStatus_toRejectedWithoutFeedback_publishesTaskUpdatedAndSavesNoFeedback() {
+        User actor = actorWithRole(UserRole.SYSTEM_ADMIN);
+        when(userRepository.findById(actor.getId())).thenReturn(Optional.of(actor));
+        Task task = existingTask();
+        when(taskRepository.save(task)).thenReturn(task);
+
+        TaskStatusUpdateRequestDto request = new TaskStatusUpdateRequestDto();
+        request.setStatus("REJECTED");
+
+        taskService.updateTaskStatus(task.getId(), request, actor.getId());
+
+        verifyNoInteractions(taskFeedbackRepository);
+        OutboxEvent event = capturedOutboxEvent();
+        assertThat(event.getEventType()).isEqualTo(EventType.TASK_UPDATED);
+        assertThat(event.getPayload().get("feedbackText")).isNull();
+        assertThat(event.getPayload().get("feedbackUserId")).isNull();
+    }
+
+    @Test
+    void updateTaskStatus_withFeedbackOnStatusOtherThanRejected_throwsInvalidTaskStatusTransitionException() {
+        User actor = actorWithRole(UserRole.SYSTEM_ADMIN);
+        when(userRepository.findById(actor.getId())).thenReturn(Optional.of(actor));
+        Task task = existingTask();
+
+        TaskStatusUpdateRequestDto request = new TaskStatusUpdateRequestDto();
+        request.setStatus("IN_PROGRESS");
+        request.setFeedbackText("Not clear what is expected");
+
+        assertThatThrownBy(() -> taskService.updateTaskStatus(task.getId(), request, actor.getId()))
+                .isInstanceOf(InvalidTaskStatusTransitionException.class);
+
+        verify(taskRepository, never()).save(any());
+        verifyNoInteractions(taskFeedbackRepository, outboxEventRepository);
+    }
+
+    @Test
+    void updateTaskStatus_toRejectedWithBlankFeedbackText_savesNoFeedback() {
+        User actor = actorWithRole(UserRole.SYSTEM_ADMIN);
+        when(userRepository.findById(actor.getId())).thenReturn(Optional.of(actor));
+        Task task = existingTask();
+        when(taskRepository.save(task)).thenReturn(task);
+
+        TaskStatusUpdateRequestDto request = new TaskStatusUpdateRequestDto();
+        request.setStatus("REJECTED");
+        request.setFeedbackText("   ");
+
+        taskService.updateTaskStatus(task.getId(), request, actor.getId());
+
+        verifyNoInteractions(taskFeedbackRepository);
+        assertThat(capturedOutboxEvent().getPayload().get("feedbackText")).isNull();
+    }
+
+    @Test
+    void createTaskFromRequest_withAssignees_resolvesThemAndSavesThemWithTheTask() {
+        User actor = actorWithRole(UserRole.EMPLOYEE);
+        when(userRepository.findById(actor.getId())).thenReturn(Optional.of(actor));
+        when(tenantRepository.findById(tenantId)).thenReturn(Optional.of(tenant));
+        TaskCreateRequestDto request = new TaskCreateRequestDto();
+        request.setTenantId(tenantId.toString());
+        request.setTitle("Fix flaky test");
+        request.setAssignees(List.of(assigneeRequest(UUID.randomUUID())));
+        Assignment assignment = userAssignment(UUID.randomUUID(), AssignmentRole.ASSIGNEE);
+        when(assignmentService.resolve(request.getAssignees(), tenant, actor)).thenReturn(List.of(assignment));
+
+        Task built = incomingTask();
+        when(taskRestMapper.toEntity(request, tenant, null, actor, actor)).thenReturn(built);
+        stubSaveAssigning(built, UUID.randomUUID());
+        TaskResponseDto responseDto = sampleTaskResponseDto();
+        when(taskRestMapper.toResponseDto(built, List.of(assignment))).thenReturn(responseDto);
+
+        TaskResponseDto result = taskService.createTaskFromRequest(request, actor.getId());
+
+        assertThat(result).isSameAs(responseDto);
+        assertThat(assignment.getTask()).isSameAs(built);
+        verify(assignmentRepository).save(assignment);
+    }
+
+    @Test
+    void updateTaskFromRequest_withoutAssignees_neverTouchesTheAssignments() {
+        User actor = actorWithRole(UserRole.EMPLOYEE);
+        when(userRepository.findById(actor.getId())).thenReturn(Optional.of(actor));
+        Task task = existingTask();
+        when(taskRepository.save(task)).thenReturn(task);
+        TaskUpdateRequestDto request = new TaskUpdateRequestDto();
+        request.setTitle("New title");
+
+        taskService.updateTaskFromRequest(task.getId(), request, actor.getId());
+
+        verify(assignmentService, never()).resolve(any(), any(), any());
+        verify(assignmentService, never()).replaceAssignments(any(), any());
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void updateTaskFromRequest_withAssignees_replacesThemAndAuditsTheChange() {
+        User actor = actorWithRole(UserRole.EMPLOYEE);
+        when(userRepository.findById(actor.getId())).thenReturn(Optional.of(actor));
+        Task task = existingTask();
+        when(taskRepository.save(task)).thenReturn(task);
+        UUID oldUserId = UUID.randomUUID();
+        UUID newUserId = UUID.randomUUID();
+        Assignment current = userAssignment(oldUserId, AssignmentRole.ASSIGNEE);
+        Assignment desired = userAssignment(newUserId, AssignmentRole.OWNER);
+        TaskUpdateRequestDto request = new TaskUpdateRequestDto();
+        request.setAssignees(JsonNullable.of(List.of(assigneeRequest(newUserId))));
+        when(assignmentService.resolve(request.getAssignees().get(), tenant, actor)).thenReturn(List.of(desired));
+        when(assignmentService.findByTask(task.getId())).thenReturn(List.of(current));
+        when(assignmentService.replaceAssignments(task, List.of(desired))).thenReturn(List.of(desired));
+        TaskResponseDto responseDto = sampleTaskResponseDto();
+        when(taskRestMapper.toResponseDto(task, List.of(desired))).thenReturn(responseDto);
+
+        TaskResponseDto result = taskService.updateTaskFromRequest(task.getId(), request, actor.getId());
+
+        assertThat(result).isSameAs(responseDto);
+        ArgumentCaptor<Map<String, Object>> beforeCaptor = ArgumentCaptor.forClass(Map.class);
+        ArgumentCaptor<Map<String, Object>> afterCaptor = ArgumentCaptor.forClass(Map.class);
+        verify(auditService).createUpdateAuditLog(eq("TASK_UPDATED"), eq("Task"), eq(task.getId()), eq(tenant),
+                eq(actor), beforeCaptor.capture(), afterCaptor.capture(), isNull());
+        List<Map<String, Object>> before = (List<Map<String, Object>>) beforeCaptor.getValue().get("assignments");
+        List<Map<String, Object>> after = (List<Map<String, Object>>) afterCaptor.getValue().get("assignments");
+        assertThat(before).singleElement().satisfies(snapshot ->
+                assertThat(snapshot).containsEntry("userId", oldUserId).containsEntry("assignmentRole", "ASSIGNEE"));
+        assertThat(after).singleElement().satisfies(snapshot ->
+                assertThat(snapshot).containsEntry("userId", newUserId).containsEntry("assignmentRole", "OWNER"));
+    }
+
+    @Test
+    void listTasks_loadsTheAssignmentsOfTheWholePageInOneCall() {
+        User actor = actorWithRole(UserRole.SYSTEM_ADMIN);
+        when(userRepository.findById(actor.getId())).thenReturn(Optional.of(actor));
+        Pageable pageable = PageRequest.of(0, 20);
+        Task first = incomingTask();
+        first.setId(UUID.randomUUID());
+        Task second = incomingTask();
+        second.setId(UUID.randomUUID());
+        when(taskRepository.findFiltered(
+                eq(true), isNull(), eq(false), isNull(), eq(false), isNull(), eq(false), isNull(), eq(false),
+                isNull(), eq(false), isNull(), eq(false), isNull(), eq(false), isNull(), eq(false),
+                eq(false), isNull(), eq(withDefaultSort(pageable))))
+                .thenReturn(new PageImpl<>(List.of(first, second), pageable, 2));
+        Assignment assignment = userAssignment(UUID.randomUUID(), AssignmentRole.ASSIGNEE);
+        when(assignmentService.findByTasks(List.of(first.getId(), second.getId())))
+                .thenReturn(Map.of(first.getId(), List.of(assignment)));
+        TaskResponseDto firstDto = sampleTaskResponseDto();
+        TaskResponseDto secondDto = sampleTaskResponseDto();
+        when(taskRestMapper.toResponseDto(first, List.of(assignment))).thenReturn(firstDto);
+        when(taskRestMapper.toResponseDto(second, List.of())).thenReturn(secondDto);
+
+        PageResponseDto<TaskResponseDto> result = taskService.listTasks(new TaskFilterDto(), pageable, actor.getId());
+
+        assertThat(result.getContent()).containsExactly(firstDto, secondDto);
+        verify(assignmentService, times(1)).findByTasks(any());
+        verify(assignmentService, never()).findByTask(any());
+    }
+
+    private static TaskAssigneeRequestDto assigneeRequest(UUID userId) {
+        TaskAssigneeRequestDto dto = new TaskAssigneeRequestDto();
+        dto.setAssigneeType("USER");
+        dto.setId(userId.toString());
+        dto.setAssignmentRole("ASSIGNEE");
+        return dto;
+    }
+
+    private static Assignment userAssignment(UUID userId, AssignmentRole role) {
+        User user = new User();
+        user.setId(userId);
+        Assignment assignment = new Assignment();
+        assignment.setUser(user);
+        assignment.setAssignmentRole(role);
+        return assignment;
+    }
+
+    private Task existingTask() {
+        Task task = incomingTask();
+        task.setId(UUID.randomUUID());
+        when(taskRepository.findById(task.getId())).thenReturn(Optional.of(task));
+        return task;
     }
 }

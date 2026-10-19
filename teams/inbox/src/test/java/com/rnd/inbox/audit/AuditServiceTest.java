@@ -151,7 +151,7 @@ class AuditServiceTest {
         tenant.setId(UUID.randomUUID());
         Map<String, Object> before = snapshot("Fix flaky test", "REJECTED");
         Map<String, Object> after = snapshot("Fix flaky test", "REJECTED");
-        after.put("feedbackType", "NEEDS_CLARIFICATION");
+        after.put("feedbackText", "Not clear what is expected");
 
         auditService.createUpdateAuditLog("TASK_STATUS_UPDATED", "Task", UUID.randomUUID(), tenant, null,
                 before, after, UUID.randomUUID());

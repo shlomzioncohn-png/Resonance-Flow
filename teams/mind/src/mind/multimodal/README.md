@@ -76,8 +76,10 @@ Local OCR + ASR preprocessing.
     third, a bug of ours):
     - data failures (retrying gives the same result, drop the document):
       `EMPTY_INPUT`, `UNREADABLE_FORMAT` (not a readable image or PDF --
-      decided by PIL / `pypdfium2` *before* tesseract runs, so a corrupt or
-      truncated file is never confused with a broken install),
+      decided by PIL / `pypdfium2` *before* tesseract runs -- or is even looked
+      for -- so a corrupt or truncated file is never confused with a broken
+      install: a junk file on a host without tesseract is still
+      `UNREADABLE_FORMAT`, not `OCR_UNAVAILABLE`),
       `NO_TEXT_RECOGNIZED` (a valid image/PDF in which no text was found:
       blank or too poor);
     - environment failures, `retryable=True` (nothing is wrong with the
@@ -123,9 +125,13 @@ Local OCR + ASR preprocessing.
   on top, and a caller that raises `max_pages` should keep
   `max_pages x 20 s` under its own poll interval.
 
-  The call is wrapped in `instrumented_call("tesseract-psm11-ocr")`
-  (`src/mind/api/instrumentation.py`), so latency/cost are recorded like
-  every other call in the service.
+  Every Tesseract run is recorded through `observability.record_call()`
+  (`tesseract-psm11-ocr`, `kind=ocr`, `status=error` if it failed), like
+  every other model call in the service, with its CPU seconds -- rendering
+  the PDF pages in this process plus Tesseract's child processes -- as its
+  compute cost; a local model has no dollar price. `cpu_s` is `None` on
+  Windows, which reports no child-process CPU (#479,
+  `observability/compute.py`).
 
   **Signature: agreed with R2** (in Slack, confirmed on PR #509; she calls this from her
   `bridge.raw.landed` consumer, #349). She asked for: raw `bytes` in (her
@@ -287,10 +293,13 @@ Local OCR + ASR preprocessing.
      into (2). An unpinned size is never downloaded.
 
   Every call whose audio decodes is recorded through
-  `observability.record_call()` (`whisper-base.en-int8-local`; cost 0.0 until
-  MIND has a cost model for local compute, #479), as #478 asks -- note that
-  `ocr.py` uses `instrumented_call` instead; which of the two is the one
-  mechanism is for #479 to settle.
+  `observability.record_call()` (`whisper-base.en-int8-local`, `kind=asr`,
+  with its CPU seconds -- decoding the audio, VAD and Whisper -- as its
+  compute cost; a local model has no dollar price, #479), as #478 asks --
+  except when the weights are missing: `ASR_UNAVAILABLE` is the host, not a
+  failed call, so it is logged as a WARNING and not recorded, like OCR
+  without tesseract. OCR is recorded the same way -- `record_call()` is
+  the one mechanism for model calls.
 
   **Resource budget -- measured in a Linux container, one process holding the
   embedding model and Whisper as the service does** (`benchmarks/asr_container_probe.py`;

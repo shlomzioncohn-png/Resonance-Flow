@@ -399,9 +399,7 @@ export default function EmployeeWorkspacePage() {
                       )
                     }
                   />
-                  {task.dueDate && (
-                    <DetailRow label="Due" value={new Date(task.dueDate).toLocaleString()} />
-                  )}
+                  {task.dueDate && <DetailRow label="Due" value={task.dueDate} />}
                   <DetailRow
                     label="Estimated effort"
                     value={task.effortEstimate != null ? `${task.effortEstimate} min` : '—'}
