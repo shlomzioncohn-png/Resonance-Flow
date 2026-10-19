@@ -4,6 +4,8 @@ import sys
 from datetime import UTC, datetime
 from pathlib import Path
 
+from pydantic import ValidationError
+
 from mind.evaluation.baseline_models import (
     LongestDescriptionModel,
     NearestDeadlineModel,
@@ -18,8 +20,20 @@ from mind.evaluation.baseline_record import (
 )
 from mind.evaluation.dummy_model import DummyModel
 from mind.evaluation.harness import EvaluationOutput, Report, run, split_by_role
+from mind.evaluation.hierarchy import (
+    NODES_FILENAME,
+    validate_hierarchy_fixture,
+    validate_hierarchy_links,
+)
 from mind.evaluation.interfaces import RankingModel
-from mind.evaluation.personas import PersonaSchemaError, load_personas, validate_personas
+from mind.evaluation.personas import (
+    HIERARCHY_DECIDES_GROUP,
+    HIERARCHY_DIR,
+    PersonaSchemaError,
+    load_personas,
+    validate_personas,
+)
+from mind.scoring.hierarchy import load_hierarchy
 
 
 def _summary_lines(label: str, report: Report) -> str:
@@ -56,6 +70,13 @@ def main() -> None:
              "pass a single group directory to evaluate just that group.",
     )
     parser.add_argument(
+        "--hierarchy", type=Path, default=HIERARCHY_DIR, metavar="DIR",
+        help="Directory holding nodes.json, the parent nodes the scenarios' "
+             "parent_task_id values point at (default: eval/hierarchy). Loaded and "
+             "checked against the scenarios before scoring; with --record-baseline "
+             "it is part of the recorded set's checksum.",
+    )
+    parser.add_argument(
         "--min-accuracy", type=float, default=None,
         help="If set, exit 1 when the combined top-1 accuracy falls below this "
              "fraction (0-1) — a regression gate for CI.",
@@ -82,7 +103,8 @@ def main() -> None:
     parser.add_argument(
         "--persona-set-commit", type=str, default=None, metavar="SHA",
         help="With --record-baseline (required there): the last commit that "
-             "touched the persona set (git log -1 --format=%%H -- eval/personas).",
+             "touched the persona set (git log -1 --format=%%H -- eval/personas "
+             "eval/hierarchy).",
     )
     args = parser.parse_args()
     if args.record_baseline is None and (args.model_commit or args.persona_set_commit):
@@ -138,12 +160,41 @@ def main() -> None:
         print("--------------------------------------\n")
         sys.exit(1)
 
+    # The hierarchy is part of the scored set: a broken node file or a parent_task_id
+    # that names no node fails the run, the same way a broken scenario does.
+    hierarchy_dir: Path = args.hierarchy
+    try:
+        fixture = load_hierarchy(hierarchy_dir / NODES_FILENAME)
+    except (OSError, UnicodeDecodeError, ValidationError) as e:
+        print(f"Could not load the hierarchy from {str(hierarchy_dir)!r}: {e}", file=sys.stderr)
+        sys.exit(1)
+    hierarchy_errors = validate_hierarchy_fixture(fixture) + validate_hierarchy_links(
+        all_scenarios, fixture
+    )
+    if hierarchy_errors:
+        print("\n--- Hierarchy validation FAILED ---")
+        for error in hierarchy_errors:
+            print(f"  - {error}")
+        print("-----------------------------------\n")
+        sys.exit(1)
+
     # One report per scenario group (a subdirectory of the personas dir), plus a combined one.
     group_dirs = sorted(p for p in personas_path.iterdir() if p.is_dir())
+    group_scenarios = {group_dir.name: load_personas(group_dir) for group_dir in group_dirs}
     group_reports: dict[str, Report] = {
-        group_dir.name: run(model, load_personas(group_dir)) for group_dir in group_dirs
+        name: run(model, scenarios) for name, scenarios in group_scenarios.items()
     }
     combined_report = run(model, all_scenarios)
+    # The set as it was before the hierarchy group (#507): every other group together.
+    original_report: Report | None = None
+    if HIERARCHY_DECIDES_GROUP in group_scenarios:
+        original_scenarios = [
+            s
+            for name, scenarios in group_scenarios.items()
+            if name != HIERARCHY_DECIDES_GROUP
+            for s in scenarios
+        ]
+        original_report = run(model, original_scenarios)
     # Per role, so a model that is bad for one role can't hide inside the aggregate.
     role_reports = split_by_role(all_scenarios, combined_report)
 
@@ -155,6 +206,9 @@ def main() -> None:
     for role, report in role_reports.items():
         print(_summary_lines(f"[role: {role}]", report))
         print()
+    if original_report is not None:
+        print(_summary_lines(f"[original set: all but {HIERARCHY_DECIDES_GROUP}]", original_report))
+        print()
     print(_summary_lines("[combined]", combined_report))
     print("===========================\n")
 
@@ -163,6 +217,7 @@ def main() -> None:
         combined=combined_report,
         groups=group_reports,
         roles=role_reports,
+        original_set=original_report,
     )
 
     report_text = _report_json(output)
@@ -196,6 +251,7 @@ def main() -> None:
             recorded_on=datetime.now(UTC).date(),
             provenance=provenance,
             personas_path=personas_path,
+            hierarchy_dir=hierarchy_dir,
             scenarios=all_scenarios,
             combined=combined_report,
             groups=group_reports,

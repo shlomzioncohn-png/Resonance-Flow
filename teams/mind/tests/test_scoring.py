@@ -12,6 +12,7 @@ from itertools import product
 import pytest
 
 from mind.evaluation.interfaces import ScoreContext, Task, Tier
+from mind.scoring import features
 from mind.scoring.factors import FACTOR_NAMES, Factor
 from mind.scoring.features import impact
 from mind.scoring.segmented_model import (
@@ -69,13 +70,60 @@ def test_each_tier_weights_sum_to_one() -> None:
         assert sum(rule.weights.values()) == pytest.approx(1.0), tier
 
 
+def test_each_feature_can_reach_its_maximum() -> None:
+    """The other half of the reachability claim, and the half that owns the lexicon.
+
+    `test_every_rule_can_reach_a_full_base_score` forces the features to 1.0,
+    so it proves the weights add up but says nothing about whether a real task
+    can get them there. This one does only that, which is why the wording and
+    the lexicon belong here rather than in a test about tier weights.
+    """
+    loud = make_task(
+        title="Customer outage",
+        description="A customer outage is corrupting records and the SLA is breached.",
+        deadline=NOW - timedelta(hours=1),  # already passed: maximum time pressure
+        effort_estimate=1,  # the smallest a task may claim
+    )
+
+    assert features.time_pressure(loud, NOW, 8.0, 0.15) == pytest.approx(1.0)
+    assert features.impact(loud) == pytest.approx(1.0)
+    # Derived from the cap, not written as a number: `quick_win` cannot reach a
+    # flat 1.0 while a task must claim at least one minute, and a tolerance
+    # tight enough to mean anything would break the next time the cap moves.
+    assert features.quick_win(loud) == pytest.approx(1.0 - 1.0 / features.QUICK_WIN_CAP_MINUTES)
+
+
+def test_every_rule_can_reach_a_full_base_score(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A maxed task must reach a base of 1.0, not merely weights that sum to 1.0.
+
+    The sum check alone is satisfied by a weight parked on a feature that can
+    never leave 0, which silently shortens that rule's scale — the removed
+    `initiative` weight capped the strategic rule at 0.95 while the other two
+    reached 1.0, penalising strategic tasks wherever tiers compete directly.
+
+    Every feature is forced to 1.0 rather than coaxed there with wording and a
+    1-minute estimate: this is a statement about `TIER_RULES`, and it should
+    fail only when a rule's weights are wrong — not when the impact lexicon is
+    retuned or the phrase matcher changes.
+    """
+    monkeypatch.setattr(features, "time_pressure", lambda *_args: 1.0)
+    monkeypatch.setattr(features, "impact", lambda _task: 1.0)
+    monkeypatch.setattr(features, "quick_win", lambda _task: 1.0)
+
+    for tier in TIERS:
+        factors = MODEL.score(make_task(tier=tier), CONTEXT).factors
+
+        assert factors is not None
+        assert factors.base_score == pytest.approx(1.0), (tier, factors)
+
+
 def test_tiers_use_different_feature_sets() -> None:
     """`contributions` names exactly the features that tier's rule actually used."""
     used = {tier: set(contributions_of(make_task(tier=tier))) for tier in TIERS}
 
     assert used["operational"] == {"time_pressure", "impact", "quick_win"}
     assert used["tactical"] == {"time_pressure", "impact", "quick_win"}
-    assert used["strategic"] == {"time_pressure", "impact", "initiative"}
+    assert used["strategic"] == {"time_pressure", "impact"}
 
 
 def test_factor_names_come_from_the_fixed_vocabulary() -> None:
@@ -191,15 +239,42 @@ def test_missing_deadline_is_read_most_generously_at_strategic() -> None:
 
 
 @pytest.mark.parametrize("tier", TIERS)
-def test_missing_parent_task_id_does_not_crash_and_adds_nothing(tier: Tier) -> None:
-    """`parent_task_id is None` is the common case and must be inert, not fatal."""
+def test_parent_task_id_does_not_affect_the_score(tier: Tier) -> None:
+    """The baseline does not read `parent_task_id` at all, at any tier.
+
+    Not an optimisation — a boundary. Hierarchy belongs to the week-7 stretch,
+    and the comparison it is measured against is only honest if the baseline
+    knows nothing about it. A weak signal here would also be close to
+    information-free in production, where almost every task has a parent.
+    """
     without = MODEL.score(make_task(tier=tier, parent_task_id=None), CONTEXT)
     with_parent = MODEL.score(make_task(tier=tier, parent_task_id="task_parent"), CONTEXT)
 
-    if tier == "strategic":
-        assert without.score < with_parent.score  # a weak signal, but a real one
-    else:
-        assert without.score == with_parent.score  # not part of these rules at all
+    assert without.score == with_parent.score
+    assert without.factors == with_parent.factors
+
+
+def test_initiative_is_not_part_of_the_factor_vocabulary() -> None:
+    """Removed with the feature: a name nothing can produce must not be offerable."""
+    assert "initiative" not in FACTOR_NAMES
+    assert not hasattr(Factor, "INITIATIVE")
+
+
+def test_the_strategic_rule_keeps_its_time_to_impact_ratio() -> None:
+    """The freed 0.05 was redistributed in proportion, not reassigned.
+
+    `initiative` held 0.05 of the strategic rule. Renormalising the two
+    remaining weights over 0.95 keeps their ratio, so no weight was re-chosen
+    when the feature went away — the only change is that 0.05 is no longer
+    parked on a feature that always returned 0.
+    """
+    weights = TIER_RULES["strategic"].weights
+
+    assert weights[Factor.TIME_PRESSURE] == pytest.approx(0.21)
+    assert weights[Factor.IMPACT] == pytest.approx(0.79)
+    assert weights[Factor.TIME_PRESSURE] / weights[Factor.IMPACT] == pytest.approx(
+        0.20 / 0.75, rel=0.01
+    )
 
 
 # --- blocked can never win ---------------------------------------------------

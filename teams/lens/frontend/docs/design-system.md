@@ -188,6 +188,103 @@ default `elevation={0}` — that's a per-instance default, and belongs in
 `theme/components.ts → MuiCard.styleOverrides` so every `<Card>` gets it
 automatically, including ones written before the wrapper existed.
 
+## Tables: `DataTable`
+
+Every table in LENS is a `components/ui/DataTable` — don't hand-roll MUI
+`Table` markup on a page. The split is: **the table knows how to display, the
+page decides what to display.**
+
+- `DataTable` owns structure, loading / empty / error states (the existing
+  `components/feedback/*State` components), sort and pagination controls, and
+  table accessibility (`aria-label`, `scope="col"`, `aria-sort`).
+- The page owns the data and the columns. It loads rows itself (through
+  `services/`) and passes `rows`, `loading` and `error`; the table never
+  fetches.
+- Sorting and pagination are **controlled**. The table only reports what the
+  user asked for (`onSortChange`, `pagination.onPageChange`) — it never sorts
+  or slices `rows`. The page reacts, typically by calling the API again.
+- The shared look (header, padding, hover) lives in `theme/components.ts`
+  (`MuiTableCell` / `MuiTableRow`), not in the component.
+
+Column definitions live in a file next to the page. From
+`app/(app)/manager/users/userColumns.tsx`:
+
+```tsx
+import type { Column } from '@/components/ui/DataTable';
+
+const columns: Column<UserRow>[] = [
+  {
+    id: 'displayName', // also the sort key sent to the API
+    header: 'Name',
+    sortable: true,
+    render: (user) => <Typography variant="body2">{user.displayName}</Typography>,
+  },
+  {
+    id: 'status',
+    header: 'Status',
+    render: (user) => <Chip size="small" label={user.status} color={STATUS_COLOR[user.status]} />,
+  },
+];
+```
+
+```tsx
+<DataTable
+  ariaLabel="Users"
+  columns={columns}
+  rows={users}
+  getRowId={(user) => user.id}
+  loading={loading}
+  error={error}
+  onRetry={retry}
+  sort={sort}
+  onSortChange={changeSort}
+  pagination={{ page, pageSize, totalCount, onPageChange, onPageSizeChange }}
+/>
+```
+
+**The rule: content goes in `render`, not in new `DataTable` props.** A status
+chip, a date format, a link to a details page, row actions — all of it is a
+column's `render`. If you're about to add a prop like `showStatusChip`, or a
+branch on what kind of rows the table holds, it belongs in the column
+definition instead. Rows have no `onClick`: row actions are real buttons
+(or links) inside a cell, each with an `aria-label` that names the row
+(`"Edit Dana Levi"`), so the table works with a keyboard alone.
+
+## KPI numbers: `KpiTile`
+
+`components/ui/KpiTile` is the **only** component for a big number with a
+label. Don't add another stat/number card: extend `KpiTile` instead. Its
+colors come from `theme.palette` only (`status.*` and `text.*`), so it works
+with the design system and in dark mode.
+
+- `value` is a number or pre-formatted text (`12`, `"1,284"`, `"3.2d"`);
+  `tone` colors it with the `status` palette.
+- `subtitle` (optional): secondary text under the label, e.g. `"Last 7 days"`.
+- `trend` (optional): change vs the previous period, in percent. The color
+  follows whether the change is **good or bad**, not the arrow's direction:
+  set `goodDirection: 'down'` for counts where less is better, like blocked
+  tasks. The arrow and the `+`/`−` sign carry the meaning without color, and
+  screen readers hear a sentence like "Down 25% from previous period".
+- `sparkline` (optional): recent values, oldest first, drawn as a small SVG
+  line. Pass `sparklineLabel` to describe it to screen readers; without it
+  the line is treated as decorative (`aria-hidden`).
+
+```tsx
+import KpiTile from '@/components/ui/KpiTile';
+
+<KpiTile
+  value={12}
+  label="Blocked tasks"
+  subtitle="Last 7 days"
+  tone="critical"
+  trend={{ delta: -25, goodDirection: 'down' }}
+  sparkline={[16, 15, 17, 14, 15, 13, 12]}
+  sparklineLabel="Blocked tasks over the last 7 days, falling from 16 to 12"
+/>;
+```
+
+See every state in Storybook under `KpiTile`.
+
 ## Working example: Theme usage in the App Shell
 
 The App Shell (`components/layout/{AppShell,Header,Sidebar,Logo,PageContainer}`)

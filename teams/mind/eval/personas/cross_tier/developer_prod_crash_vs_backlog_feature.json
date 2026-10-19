@@ -39,7 +39,7 @@
       "effort_estimate": 40,
       "tier": "tactical",
       "blocked": false,
-      "parent_task_id": null
+      "parent_task_id": "dev_crash_selfservice_roadmap"
     }
   ],
   "expected_top_task_id": "task_crash",

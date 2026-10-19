@@ -1,0 +1,56 @@
+{
+  "_comment": "Reference only - not read by any code yet. Field names/structure are Zoom's Cloud Recording API, GET /meetings/{meetingId}/recordings (publicly documented at developers.zoom.us; not live-verified this session - WebFetch to developers.zoom.us was blocked by network policy, so treat this as 'from memory of the public spec', same caveat the other fixtures are explicit about avoiding). This is what a Real* meeting-metadata/transcript reader would call once this lane has a meetingId to call it with (see plan.md and FixtureZoomMeetingMetadataReader's javadoc for that blocker) - it lists ALL of a meeting's recording assets (video, audio, chat, transcript) in one response; the transcript is the recording_files[] entry with file_type=TRANSCRIPT, file_extension=VTT, recording_type=audio_transcript. download_url needs the OAuth access token appended as a query param (?access_token=...) or sent as a Bearer header, depending on the app type - it 404s without it. VALUES are fabricated placeholders.",
+  "uuid": "iOTQZPmhTUq5a232ETb9eg==",
+  "id": 3927350525,
+  "account_id": "abC123dEf456GhI789",
+  "host_id": "xYz987WvU654",
+  "topic": "Weekly Sync - Resonance Flow",
+  "start_time": "2026-09-08T09:00:03Z",
+  "timezone": "Asia/Jerusalem",
+  "duration": 41,
+  "total_size": 18874368,
+  "recording_count": 3,
+  "share_url": "https://zoom.us/rec/share/example-share-token",
+  "password": "",
+  "recording_play_passcode": "eXaMpLePasscode123",
+  "auto_delete_date": "2026-12-07T09:00:03Z",
+  "recording_files": [
+    {
+      "id": "6f8a2b1c-0000-1111-2222-333344445555",
+      "meeting_id": "iOTQZPmhTUq5a232ETb9eg==",
+      "recording_start": "2026-09-08T09:00:03Z",
+      "recording_end": "2026-09-08T09:41:17Z",
+      "file_type": "MP4",
+      "file_extension": "MP4",
+      "file_size": 18000000,
+      "play_url": "https://zoom.us/rec/play/example-play-token",
+      "download_url": "https://zoom.us/rec/download/example-download-token-mp4",
+      "status": "completed",
+      "recording_type": "shared_screen_with_speaker_view"
+    },
+    {
+      "id": "6f8a2b1c-0000-1111-2222-333344446666",
+      "meeting_id": "iOTQZPmhTUq5a232ETb9eg==",
+      "recording_start": "2026-09-08T09:00:03Z",
+      "recording_end": "2026-09-08T09:41:17Z",
+      "file_type": "TRANSCRIPT",
+      "file_extension": "VTT",
+      "file_size": 8421,
+      "download_url": "https://zoom.us/rec/download/example-download-token-vtt",
+      "status": "completed",
+      "recording_type": "audio_transcript"
+    },
+    {
+      "id": "6f8a2b1c-0000-1111-2222-333344447777",
+      "meeting_id": "iOTQZPmhTUq5a232ETb9eg==",
+      "recording_start": "2026-09-08T09:00:03Z",
+      "recording_end": "2026-09-08T09:41:17Z",
+      "file_type": "CHAT",
+      "file_extension": "TXT",
+      "file_size": 512,
+      "download_url": "https://zoom.us/rec/download/example-download-token-chat",
+      "status": "completed",
+      "recording_type": "chat_file"
+    }
+  ]
+}

@@ -4,12 +4,12 @@ import com.fasterxml.jackson.databind.PropertyNamingStrategies;
 import com.fasterxml.jackson.databind.annotation.JsonNaming;
 
 /**
- * One MinIO object belonging to a {@link RawObjectEvent}'s logical item - the list-based
- * replacement for the old flat object_key/content_hash/content_type/size_bytes/
- * attachment_index/attachment_count/transcript_object_key fields (see RawObjectEvent's
- * javadoc for the migration). role/objectKey/contentHash/contentType/modality are all
- * required; sizeBytes stays nullable, same as it was on the outer event, since not every
- * producer always has it at mapping time.
+ * One physical object landed in MinIO, as an entry of {@link RawObjectEvent#objects()}.
+ * Field names mirror what used to sit directly on {@link RawObjectEvent} itself
+ * (object_key/content_hash/content_type/size_bytes/modality) - they moved here so every
+ * part of a logical item (not just the primary one) gets its own hash/size/type/modality,
+ * instead of only the first object having them and the rest being bare pointer fields
+ * (transcript_object_key, the former additional_metadata_object_key).
  */
 @JsonNaming(PropertyNamingStrategies.SnakeCaseStrategy.class)
 public record RawObjectRef(

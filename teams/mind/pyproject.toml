@@ -48,8 +48,11 @@ dev = [
     "pytest",
     "pytest-asyncio",
     "pytest-cov",
-    "ruff",
-    "mypy",
+    # Pinned so every CI runner lints with the same version: the self-hosted
+    # runner keeps whatever it installed first, while ubuntu-latest installs
+    # the newest -- ruff 0.17.0 failed lint where 0.16.6 passed (#770).
+    "ruff==0.16.6",
+    "mypy==2.3.1",
     "types-PyYAML",
     "types-psutil",  # CI's `make lint` runs `mypy ... benchmarks`, so this
                      # stub needs to be here, not in [benchmark] below --
@@ -62,6 +65,9 @@ dev = [
     "grpcio-tools==1.71.0",  # protoc, for `make proto`
     "types-protobuf",  # stubs for google.protobuf, imported by the generated _pb2.pyi files
     "python-dotenv",  # tests/conftest.py loads .env for os.environ-reading fixtures
+    # demo_flow/feed.py lands the #359 demo artifacts in MinIO the way Bridge
+    # does (Bridge uses the Java io.minio client; this is its Python twin).
+    "minio>=7.2,<8",
 ]
 # Not a runtime dependency of src/mind/ -- only benchmarks/ocr_asr_benchmark.py
 # needs these (psutil for peak-RSS sampling, PaddleOCR as the comparison

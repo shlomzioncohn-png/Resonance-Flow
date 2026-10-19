@@ -2,27 +2,8 @@ components:
   mind:
     enabled: true
     kafkaSasl: false
-    image:
-      repository: mind
-      tag: local
-      pullPolicy: Never
   schema-registry:
     enabled: true
-  lens-bff:
-    enabled: false
-  bridge:
-    enabled: false
-  lens-frontend:
-    enabled: false
-  chain:
-    enabled: false
-  inbox:
-    enabled: false
-  lens-gateway:
-    enabled: false
-  notification-delivery:
-    enabled: false
-
 kafka:
   enabled: true
   image:

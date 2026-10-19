@@ -106,13 +106,27 @@ public class TaskDependencyService {
     /**
      * Same as {@link #addDependency(UUID, UUID, DependencyChangeSource, String)}, with an
      * explicit Mind confidence (issue #445) for this specific edge instead of defaulting to full
-     * confidence. {@code DependencyProposedEventHandler} uses this overload for a dependency
-     * whose target task is already known; see that handler's class for the known gap on the
-     * "target not seen yet" path (confidence isn't preserved through
-     * {@code UnresolvedDependencyService} today).
+     * confidence.
      */
     public TaskDependency addDependency(UUID taskId, UUID dependsOnTaskId,
                                          DependencyChangeSource source, String sourceRef, Double confidence) {
+        return doAddDependency(taskId, dependsOnTaskId, source, sourceRef, confidence, null);
+    }
+
+    /**
+     * Same as the overload above, but a missing task is created as a PENDING placeholder instead of
+     * failing with {@link TaskNotFoundException}; see {@link DependencyEdgeService#addDependencyCreatingMissing}.
+     */
+    public TaskDependency addDependencyCreatingMissing(UUID taskId, UUID dependsOnTaskId,
+                                         DependencyChangeSource source, String sourceRef, Double confidence,
+                                         UUID tenantId) {
+        return doAddDependency(taskId, dependsOnTaskId, source, sourceRef, confidence, tenantId);
+    }
+
+    /** A non-null {@code tenantId} means missing tasks are created as placeholders in that tenant. */
+    private TaskDependency doAddDependency(UUID taskId, UUID dependsOnTaskId,
+                                         DependencyChangeSource source, String sourceRef, Double confidence,
+                                         UUID tenantId) {
         Objects.requireNonNull(taskId, "taskId must not be null");
         Objects.requireNonNull(dependsOnTaskId, "dependsOnTaskId must not be null");
         Objects.requireNonNull(source, "source must not be null");
@@ -128,8 +142,10 @@ public class TaskDependencyService {
         // Existence is checked before the idempotency short-circuit (unlike before) so a
         // retry for a task that was deleted since the original call fails loudly instead
         // of reporting a fabricated success.
-        requireTaskExists(taskId);
-        requireTaskExists(dependsOnTaskId);
+        if (tenantId == null) {
+            requireTaskExists(taskId);
+            requireTaskExists(dependsOnTaskId);
+        }
         if (isMatchingRetry(taskId, dependsOnTaskId, DependencyChangeAction.ADDED, source, sourceRef)) {
             return new TaskDependency(taskId, dependsOnTaskId, confidence);
         }
@@ -147,7 +163,9 @@ public class TaskDependencyService {
             DependencyHistoryEntry recorded = recordHistory(taskId, dependsOnTaskId,
                     DependencyChangeAction.ADDED, source, sourceRef);
             try {
-                return dependencyEdgeService.addDependency(taskId, dependsOnTaskId, confidence);
+                return tenantId != null
+                        ? dependencyEdgeService.addDependencyCreatingMissing(taskId, dependsOnTaskId, confidence, tenantId)
+                        : dependencyEdgeService.addDependency(taskId, dependsOnTaskId, confidence);
             } catch (CrossTenantDependencyException failure) {
                 // Issue #580: unlike a duplicate/missing-task no-op (compensateHistory alone),
                 // this rejection must stay visible, not just vanish with the speculative entry -
