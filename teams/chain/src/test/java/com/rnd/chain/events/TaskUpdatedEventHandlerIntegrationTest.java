@@ -219,8 +219,8 @@ class TaskUpdatedEventHandlerIntegrationTest {
     }
 
     @Test
-    void outOfOrderEvent_succeedsOnceTheReferencedTaskShowsUpDuringTheRetryWindow() throws InterruptedException {
-        UUID taskId = UUID.randomUUID(); // does NOT exist yet when the event is first published
+    void missingTask_isCreatedFromTaskUpdatedEvent() {
+        UUID taskId = UUID.randomUUID();
 
         producer.send(TOPIC, taskId.toString(), TaskUpdatedEvent.newBuilder()
                 .setTaskId(taskId.toString())
@@ -229,34 +229,38 @@ class TaskUpdatedEventHandlerIntegrationTest {
                 .setUpdatedAt(timestamp(BASE_TIME))
                 .build());
 
-        // Give the first attempt a moment to fail with ReferencedTaskNotFoundException, then let
-        // the task "arrive" (simulating task.created landing late) mid-retry-window - same race
-        // @271's interim retry-based design is meant to tolerate (see TaskUpdatedEventHandler's
-        // class Javadoc / the implementation plan's flagged concern about this window's length).
-        Thread.sleep(500);
-        taskRepository.save(buildTask(taskId, TaskStatus.PENDING, BASE_TIME.minusMinutes(1)));
+        await().atMost(Duration.ofSeconds(20)).until(() ->
+                taskRepository.findById(taskId)
+                        .map(t -> t.getStatus() == TaskStatus.ACTIVE)
+                        .orElse(false));
 
-        await().atMost(Duration.ofSeconds(20)).alias("a later retry attempt to succeed now that the task exists").until(() ->
-                taskRepository.findById(taskId).map(t -> t.getStatus() == TaskStatus.ACTIVE).orElse(false));
-    }
+        Task created = taskRepository.findById(taskId).orElseThrow();
+
+        assertEquals(TaskStatus.ACTIVE, created.getStatus());
+        assertEquals(BASE_TIME, created.getUpdatedAt());
+        assertEquals(TENANT_ID, created.getTenantId());
+   }
 
     @Test
-    void referencedTaskThatNeverArrives_exhaustsRetriesThenLandsOnErrors() {
-        // PR #467 review: coverage existed for "retries then succeeds" (the race above) but not
-        // for "retries exhaust, then lands on .errors" - this task never gets created at all.
+    void missingTask_isCreatedAndDoesNotLandOnErrors() {
         UUID taskId = UUID.randomUUID();
 
         Map<String, Object> consumerProps = new HashMap<>();
         consumerProps.put(ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG, bootstrapServers);
-        consumerProps.put(ConsumerConfig.GROUP_ID_CONFIG, "errors-topic-probe-exhaustion");
+        consumerProps.put(ConsumerConfig.GROUP_ID_CONFIG, "errors-topic-probe-missing-task");
         consumerProps.put(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "earliest");
         consumerProps.put(ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class);
         consumerProps.put(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class);
-        Consumer<String, String> errorsProbe = new DefaultKafkaConsumerFactory<>(consumerProps,
-                new StringDeserializer(), new StringDeserializer()).createConsumer();
+
+        Consumer<String, String> errorsProbe =
+                new DefaultKafkaConsumerFactory<>(
+                        consumerProps,
+                        new StringDeserializer(),
+                        new StringDeserializer())
+                        .createConsumer();
+
         errorsProbe.subscribe(java.util.List.of(ERROR_TOPIC));
 
-        Instant beforeSend = Instant.now();
         producer.send(TOPIC, taskId.toString(), TaskUpdatedEvent.newBuilder()
                 .setTaskId(taskId.toString())
                 .setTenantId(TENANT_ID.toString())
@@ -264,16 +268,17 @@ class TaskUpdatedEventHandlerIntegrationTest {
                 .setUpdatedAt(timestamp(BASE_TIME))
                 .build());
 
-        // 3 attempts, 2s backoff -> 2 waits before exhaustion (~4s) - arriving any sooner would
-        // mean it skipped straight to .errors without actually retrying. Filtered by key: .errors
-        // is shared across every test method in this class (reuseForks=false only isolates
-        // between classes), so an unrelated record already sitting there from an earlier test
-        // (e.g. malformedEvent's "bad-key") could otherwise satisfy a key-blind read instantly.
-        ConsumerRecord<String, String> onErrorsTopic =
-                awaitRecordWithKey(errorsProbe, taskId.toString(), java.time.Duration.ofSeconds(15));
-        assertNotNull(onErrorsTopic, "a referenced task that never arrives must exhaust retries and land on .errors");
-        assertTrue(Instant.now().isAfter(beforeSend.plusMillis(3500)),
-                "arrival before ~2 backoff intervals have elapsed means retries didn't actually happen");
+        await().atMost(Duration.ofSeconds(20)).until(() ->
+                taskRepository.findById(taskId).isPresent());
+
+        ConsumerRecord<String, String> error =
+                awaitRecordWithKey(
+                        errorsProbe,
+                        taskId.toString(),
+                        Duration.ofSeconds(3));
+
+        assertNull(error);
+
         errorsProbe.close();
-    }
+     }
 }

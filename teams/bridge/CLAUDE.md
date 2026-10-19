@@ -490,12 +490,21 @@ most likely to trip someone up.
   `CrmLaneConfig.dealToTaskMapper` (`CrmLaneConfigTest.failsToStartWhenBothHubspotAndSalesforceProfilesAreActive`).
 - **No Salesforce org exists for this work yet** (design doc §9) — everything above is verified
   against `SalesforceClient`/`SalesforceDealRepository`'s own test suites
-  (`MockWebServer`-backed, no live calls), not against a real org. `stage-changed-at-field`
-  defaulting to `LastStageChangeDate` is specifically flagged in the design doc as
-  moderate-confidence/unverified — if it turns out not to exist on the target org, switch
+  (`MockWebServer`-backed, no live calls), not against a real org. **Update 2026-10-14: the
+  `stage-changed-at-field` default was live-verified, and the gap it surfaced is fixed.** Against
+  a real Developer Edition org (API v68.0), `LastStageChangeDate` exists and is set when the stage
+  changes, but is `null` for an Opportunity that never has (true for all 20 seeded records) - and
+  `SalesforceDealRepository.toDeal()` previously read only that field, so every brand-new deal's
+  `stageChangedAt` came back `null`, `Deal`'s `requireNonNull` threw, and the record was silently
+  skipped (`skippedAtRead`). Fixed: `toDeal()` now falls back to that row's `CreatedDate` when the
+  configured field is null/blank (a deal that never changed stage has been in its current stage
+  since creation) - never `LastModifiedDate`, which bumps on any field edit and would break
+  stalled-deal detection. If `CreatedDate` is also missing, the row is still skipped and counted,
+  unchanged. The config-level escape hatch is unrelated and still stands: a deployer who finds the
+  configured field itself absent from the org's schema entirely can switch
   `SALESFORCE_STAGE_CHANGED_AT_FIELD` to `LastModifiedDate` (config change only, no code change),
   noting the real imprecision that comes with it (bumps on any field edit, not just a stage
-  change).
+  change). See `crm-salesforce-design.md` §2 for the full writeup.
 
 ## 11. HubSpot stage mapping by metadata — F6 fix
 
