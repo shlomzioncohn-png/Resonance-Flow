@@ -110,7 +110,7 @@ public class TaskDependencyService {
      */
     public TaskDependency addDependency(UUID taskId, UUID dependsOnTaskId,
                                          DependencyChangeSource source, String sourceRef, Double confidence) {
-        return doAddDependency(taskId, dependsOnTaskId, source, sourceRef, confidence, false, null);
+        return doAddDependency(taskId, dependsOnTaskId, source, sourceRef, confidence, null);
     }
 
     /**
@@ -120,12 +120,13 @@ public class TaskDependencyService {
     public TaskDependency addDependencyCreatingMissing(UUID taskId, UUID dependsOnTaskId,
                                          DependencyChangeSource source, String sourceRef, Double confidence,
                                          UUID tenantId) {
-        return doAddDependency(taskId, dependsOnTaskId, source, sourceRef, confidence, true, tenantId);
+        return doAddDependency(taskId, dependsOnTaskId, source, sourceRef, confidence, tenantId);
     }
 
+    /** A non-null {@code tenantId} means missing tasks are created as placeholders in that tenant. */
     private TaskDependency doAddDependency(UUID taskId, UUID dependsOnTaskId,
                                          DependencyChangeSource source, String sourceRef, Double confidence,
-                                         boolean createMissing, UUID tenantId) {
+                                         UUID tenantId) {
         Objects.requireNonNull(taskId, "taskId must not be null");
         Objects.requireNonNull(dependsOnTaskId, "dependsOnTaskId must not be null");
         Objects.requireNonNull(source, "source must not be null");
@@ -141,7 +142,7 @@ public class TaskDependencyService {
         // Existence is checked before the idempotency short-circuit (unlike before) so a
         // retry for a task that was deleted since the original call fails loudly instead
         // of reporting a fabricated success.
-        if (!createMissing) {
+        if (tenantId == null) {
             requireTaskExists(taskId);
             requireTaskExists(dependsOnTaskId);
         }
@@ -162,7 +163,7 @@ public class TaskDependencyService {
             DependencyHistoryEntry recorded = recordHistory(taskId, dependsOnTaskId,
                     DependencyChangeAction.ADDED, source, sourceRef);
             try {
-                return createMissing
+                return tenantId != null
                         ? dependencyEdgeService.addDependencyCreatingMissing(taskId, dependsOnTaskId, confidence, tenantId)
                         : dependencyEdgeService.addDependency(taskId, dependsOnTaskId, confidence);
             } catch (CrossTenantDependencyException failure) {

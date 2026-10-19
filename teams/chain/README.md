@@ -124,7 +124,8 @@ src/main/resources/db/migration/  # Flyway migrations (V1 schema, V2 dependency_
                                   # V6 task.tenant_id + same-tenant trigger, V7 dependency_history
                                   # REJECTED action - V6/V7 issue #580, V8 task.confidence/priority_score (#445),
                                   # V9 task_state_history - issue #773,
-                                  # V10 processed_events - Kafka event dedup claims)
+                                  # V10 processed_events - Kafka event dedup claims,
+                                  # V11 drops unresolved_dependencies - replaced by placeholder tasks)
 src/test/java/com/rnd/chain/
 ├── controller/ChainControllerTest.java
 ├── service/                # TaskDependencyServicePostgresIntegrationTest,
