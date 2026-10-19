@@ -582,6 +582,21 @@ class TaskServiceTest {
     }
 
     @Test
+    void applySchedulingUpdate_withTheValuesTheTaskAlreadyHas_writesNoOutboxEvent() {
+        UUID taskId = UUID.randomUUID();
+        Task task = incomingTask();
+        task.setId(taskId);
+        task.setAvailable(true);
+        task.setPriorityScore(7.5f);
+        when(taskRepository.findById(taskId)).thenReturn(Optional.of(task));
+        when(taskRepository.saveAndFlush(task)).thenReturn(task);
+
+        taskService.applySchedulingUpdate(schedulingEvent(taskId, UUID.randomUUID(), 7.5));
+
+        verify(outboxEventRepository, never()).save(any());
+    }
+
+    @Test
     void applySchedulingUpdate_forATaskThatDoesNotExist_throwsTaskNotFoundExceptionRatherThanFailingOnSave() {
         UUID taskId = UUID.randomUUID();
         when(taskRepository.findById(taskId)).thenReturn(Optional.empty());

@@ -333,10 +333,13 @@ public class TaskService {
         task.setUpdatedAt(Instant.now(clock));
 
         Task saved = taskRepository.saveAndFlush(task);
+        Map<String, Object> after = schedulingSnapshot(saved);
 
-        outboxEventRepository.save(buildOutboxEvent(EventType.TASK_UPDATED, TaskUpdatedPayload.from(saved), saved, correlationId));
+        if (!before.equals(after)) {
+            outboxEventRepository.save(buildOutboxEvent(EventType.TASK_UPDATED, TaskUpdatedPayload.from(saved), saved, correlationId));
+        }
         auditService.createUpdateAuditLog("TASK_SCHEDULING_UPDATED", "Task", saved.getId(), saved.getTenant(),
-                null, before, schedulingSnapshot(saved), correlationId);
+                null, before, after, correlationId);
         return saved;
     }
 
