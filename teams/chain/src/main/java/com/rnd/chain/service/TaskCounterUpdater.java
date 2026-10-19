@@ -89,21 +89,7 @@ public class TaskCounterUpdater {
     }
 
     public static Task.Builder copyOf(Task task) {
-        return Task.builder()
-                .id(task.getId())
-                .parentTaskId(task.getParentTaskId())
-                .tenantId(task.getTenantId())
-                .status(task.getStatus())
-                .isReady(task.isReady())
-                .blockingCount(task.getBlockingCount())
-                .openConstraintCount(task.getOpenConstraintCount())
-                .estimatedDurationMin(task.getEstimatedDurationMin())
-                .score(task.getScore())
-                .confidence(task.getConfidence())
-                .priorityScore(task.getPriorityScore())
-                .createdAt(task.getCreatedAt())
-                .updatedAt(task.getUpdatedAt())
-                .deletedAt(task.getDeletedAt());
+        return task.toBuilder();
     }
 
     public static Task withCounters(

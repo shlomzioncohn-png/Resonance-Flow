@@ -64,7 +64,7 @@ public final class Task {
     private final LocalDateTime updatedAt;
     private final LocalDateTime deletedAt;
 
-    @lombok.Builder(builderClassName = "Builder")
+    @lombok.Builder(builderClassName = "Builder", toBuilder = true)
     private Task(UUID id,
                  UUID parentTaskId,
                  UUID tenantId,
@@ -116,10 +116,7 @@ public final class Task {
      */
     public static Task copyOf(Task source) {
         Objects.requireNonNull(source, "source must not be null");
-        return new Task(source.id, source.parentTaskId, source.tenantId, source.status,
-                source.isReady, source.blockingCount, source.openConstraintCount,
-                source.estimatedDurationMin, source.score, source.confidence, source.priorityScore,
-                source.createdAt, source.updatedAt, source.deletedAt);
+        return source.toBuilder().build();
     }
 
     @Override
