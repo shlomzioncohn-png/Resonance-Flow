@@ -190,6 +190,17 @@ alert routing.
   `--api-versions monitoring.coreos.com/v1/ServiceMonitor`.
 - **NetworkPolicy.** If the component also has `networkPolicy`, Prometheus pods
   in `monitoring.namespace` (default `monitoring`) are allowed in on its `http` port.
+- **Kafka, PostgreSQL, MinIO.** Their exporters are on only in
+  `environments/shared.yaml`, so not in CI. `templates/infra-servicemonitors.yaml`
+  scrapes them, with the same CRD check, labelled `team: relay`. Don't turn on the
+  subcharts' own `metrics.serviceMonitor.enabled`: theirs skip the CRD check, and
+  on a fresh cluster the failed apply would block every team's sync.
+- **Kafka consumer-group lag.** The `kafka-exporter` subchart
+  (prometheus-kafka-exporter), also on only in `environments/shared.yaml`. It logs
+  in with the `kafka.sasl.client` credentials through
+  `templates/kafka-exporter-sasl-secret.yaml` - never set its `sasl.scram`
+  username/password directly. Same as above: its own ServiceMonitor stays off,
+  `infra-servicemonitors.yaml` scrapes it.
 
 ## Component configuration (`config` / `secret`)
 

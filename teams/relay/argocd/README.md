@@ -91,10 +91,14 @@ team's sync.
   `templates/servicemonitor.yaml` only renders once the
   `monitoring.coreos.com/v1` CRDs exist, so on a fresh cluster
   `resonance-flow`'s first sync skips ServiceMonitors, and ArgoCD's next
-  refresh adds them once this app has installed the CRDs.
+  refresh adds them once this app has installed the CRDs. `traefik` is on
+  wave `4`, after it: its chart renders a ServiceMonitor without that check.
 - **Scraping a service.** A team opts its component in with
   `components.<team>.metrics` - see the chart's
   [README](../helm/resonance-flow/README.md#metrics-scraping-metrics).
+- **Infra targets.** Kafka, PostgreSQL and MinIO - see the chart's README.
+  Traefik exposes its own metrics, per router. Kafka consumer-group lag comes
+  from the chart's `kafka-exporter` subchart - see the chart's README.
 
 Nothing here has an Ingress. Reach Prometheus and Alertmanager with:
 

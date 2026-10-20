@@ -10,3 +10,18 @@ ingress:
   # plus cert-manager annotations if it issues it.
   tlsSecretName: ""
   annotations: {}
+kafka:
+  metrics:
+    jmx:
+      enabled: true
+      image:
+        registry: docker.io
+        repository: bitnamilegacy/jmx-exporter
+postgresql:
+  metrics:
+    enabled: true
+minio:
+  metrics:
+    enabled: true
+kafka-exporter:
+  enabled: true

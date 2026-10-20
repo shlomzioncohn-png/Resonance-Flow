@@ -4,7 +4,8 @@ metadata:
   name: traefik
   namespace: argocd
   annotations:
-    argocd.argoproj.io/sync-wave: "2"
+    # See README.md "Monitoring".
+    argocd.argoproj.io/sync-wave: "4"
 spec:
   project: default
   source:
@@ -40,6 +41,14 @@ spec:
                 readTimeout: 0s
         service:
           type: LoadBalancer
+        metrics:
+          prometheus:
+            addRoutersLabels: true
+            addServicesLabels: true
+            service:
+              enabled: true
+            serviceMonitor:
+              enabled: true
   destination:
     server: https://kubernetes.default.svc
     namespace: traefik
