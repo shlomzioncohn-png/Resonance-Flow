@@ -32,12 +32,25 @@ npm run dev
 ```
 
 ### Test Credentials
+
+**EMPLOYEE Role:**
 ```
 Email: testuser123@example.com
 Password: Password123!
 Username: testuser123
 Expected Role: EMPLOYEE
 User ID: 2fc5f6bb-9e60-4aeb-84ab-abd81bdbf99a
+Expected Redirect: /employee
+```
+
+**TENANT_ADMIN Role (Manager):**
+```
+Email: manager@example.com
+Password: Password123!
+Username: manager
+Expected Role: TENANT_ADMIN
+User ID: 550e8400-e29b-41d4-a716-446655440099
+Expected Redirect: /manager
 ```
 
 ### Environment Configuration
@@ -146,7 +159,56 @@ Network tab:
 
 ---
 
-### ❌ Scenario 2: Invalid Password
+### ✅ Scenario 2: Valid Login - Manager (TENANT_ADMIN) Role
+
+**Step 1: Open Login Page**
+```
+URL: http://localhost:3000/login
+```
+
+**Step 2: Enter Manager Credentials**
+```
+Email: manager@example.com
+Password: Password123!
+```
+
+**Step 3: Click "Sign in"**
+
+**Expected Results:**
+```
+✓ POST /auth/login request sent to http://localhost:8080
+✓ Response: 200 OK
+✓ Response body:
+  {
+    "expiresIn": 3600,
+    "user": {
+      "id": "550e8400-e29b-41d4-a716-446655440099",
+      "displayName": "Manager User",
+      "role": "TENANT_ADMIN"
+    }
+  }
+✓ Response headers include: Set-Cookie: accessToken=<JWT>; HttpOnly; Secure; SameSite=Strict
+✓ Redirect to /manager (not /employee)
+✓ URL changes to http://localhost:3000/manager
+```
+
+**DevTools Verification:**
+```
+Console:
+  → No errors
+  → window.localStorage.getItem('lens.auth.token') should be null ✓
+
+Application → Cookies:
+  → accessToken cookie present (verify in DevTools)
+  → HttpOnly = ✓ (verify)
+  → Secure = ✓ (verify)
+  → SameSite = Strict (verify)
+  → Path = / (verify)
+```
+
+---
+
+### ❌ Scenario 3: Invalid Password
 
 **Step 1: Open Login Page**
 ```
@@ -186,7 +248,7 @@ Network tab:
 
 ---
 
-### ❌ Scenario 3: Non-Existent User
+### ❌ Scenario 4: Non-Existent User
 
 **Step 1: Open Login Page**
 ```
@@ -214,7 +276,7 @@ Password: Password123!
 
 ---
 
-### ❌ Scenario 4: Missing Email
+### ❌ Scenario 5: Missing Email
 
 **Step 1: Open Login Page**
 
@@ -237,7 +299,7 @@ Password: Password123!
 
 ---
 
-### ❌ Scenario 5: Missing Password
+### ❌ Scenario 6: Missing Password
 
 **Step 1: Open Login Page**
 
@@ -260,7 +322,7 @@ Password: (empty)
 
 ---
 
-### 🔐 Scenario 6: Security - XSS Protection via HttpOnly Cookies
+### 🔐 Scenario 7: Security - XSS Protection via HttpOnly Cookies
 
 **Step 1: Successful Login (Scenario 1)**
 
@@ -289,7 +351,7 @@ console.log(document.cookie.includes('accessToken'));  // Should be false
 
 ---
 
-### 🔐 Scenario 7: Security - Token Sent in Cookies, Not Headers
+### 🔐 Scenario 8: Security - Token Sent in Cookies, Not Headers
 
 **Step 1: Successful Login (Scenario 1)**
 
@@ -321,7 +383,7 @@ console.log(document.cookie.includes('accessToken'));  // Should be false
 
 ---
 
-### 🔐 Scenario 8: Security - Response Body Does NOT Contain Token
+### 🔐 Scenario 9: Security - Response Body Does NOT Contain Token
 
 **Step 1: Open Postman (or similar)**
 
@@ -353,7 +415,7 @@ Content-Type: application/json
 
 ---
 
-### 🌐 Scenario 9: End-to-End - Login → Make API Call → Logout
+### 🌐 Scenario 10: End-to-End - Login → Make API Call → Logout
 
 **Step 1: Login Successfully (Scenario 1)**
 ```
@@ -389,7 +451,7 @@ Navigate to a page that makes an API call (e.g., /employee/tasks)
 
 ---
 
-### 🔍 Scenario 10: Rate Limiting - Too Many Failed Attempts
+### 🔍 Scenario 11: Rate Limiting - Too Many Failed Attempts
 
 **Step 1: Open Login Page**
 
@@ -453,6 +515,8 @@ Password: WrongPassword1, WrongPassword2, ... (multiple wrong attempts)
 - [ ] EMPLOYEE role redirects to /employee
 - [ ] TENANT_ADMIN role redirects to /manager
 - [ ] TEAM_LEAD role redirects to /manager
+- [ ] EMPLOYEE user cannot access /manager (should redirect to /employee)
+- [ ] TENANT_ADMIN user cannot access /employee (should redirect to /manager)
 
 ### Phase 8: Token Validation
 - [ ] Token in browser cookies is valid JWT
@@ -471,9 +535,14 @@ Password: WrongPassword1, WrongPassword2, ... (multiple wrong attempts)
   "inbox_url": "http://localhost:8082",
   "bff_url": "http://localhost:8085",
   "frontend_url": "http://localhost:3000",
-  "test_email": "testuser123@example.com",
+  
+  "test_email_employee": "testuser123@example.com",
   "test_password": "Password123!",
-  "test_user_id": "2fc5f6bb-9e60-4aeb-84ab-abd81bdbf99a"
+  "test_user_id_employee": "2fc5f6bb-9e60-4aeb-84ab-abd81bdbf99a",
+  
+  "test_email_manager": "manager@example.com",
+  "test_password": "Password123!",
+  "test_user_id_manager": "550e8400-e29b-41d4-a716-446655440099"
 }
 ```
 
