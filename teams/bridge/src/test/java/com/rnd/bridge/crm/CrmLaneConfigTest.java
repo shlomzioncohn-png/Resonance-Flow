@@ -10,7 +10,6 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.kafka.core.KafkaTemplate;
 
-import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.mockito.Mockito.mock;
@@ -90,17 +89,18 @@ class CrmLaneConfigTest {
     }
 
     @Test
-    void failsToStartWhenBothHubspotAndSalesforceProfilesAreActive() {
+    void startsWithBothHubspotAndSalesforceProfilesActive() {
+        // CrmLaneConfig itself no longer treats hubspot+salesforce together as an error - the two
+        // DealRepository beans this doesn't wire (HubSpotDealRepository/SalesforceDealRepository
+        // aren't part of this test's context) is where a real, both-profiles-active deployment
+        // would need CrmSyncService (Step 2) instead of a single-DealRepository consumer; this
+        // test only proves CrmLaneConfig's own beans tolerate both profiles active at once.
         contextRunner
                 .withInitializer(context -> {
                     context.getEnvironment().addActiveProfile("hubspot");
                     context.getEnvironment().addActiveProfile("salesforce");
                 })
-                .run(context -> assertThat(context.getStartupFailure())
-                        .rootCause()
-                        .isInstanceOf(IllegalStateException.class)
-                        .hasMessageContaining("hubspot")
-                        .hasMessageContaining("salesforce"));
+                .run(context -> assertNull(context.getStartupFailure()));
     }
 
     @Test

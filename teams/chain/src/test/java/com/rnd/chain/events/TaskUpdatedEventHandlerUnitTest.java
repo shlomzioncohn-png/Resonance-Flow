@@ -2,7 +2,6 @@ package com.rnd.chain.events;
 
 import com.google.protobuf.Timestamp;
 import com.rnd.chain.dto.TaskStatus;
-import com.rnd.chain.exception.TaskNotFoundException;
 import com.rnd.chain.exception.TenantReassignmentException;
 import com.rnd.chain.service.TaskEligibilityService;
 import com.rnd.inbox.event.TaskUpdatedEvent;
@@ -16,6 +15,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 
@@ -62,12 +62,27 @@ class TaskUpdatedEventHandlerUnitTest {
     }
 
     @Test
-    void unknownTask_becomesRetryableReferencedTaskNotFound() {
+    void doneStatus_isRoutedToOnTaskUpdatedAsDone_notTheGenericStatusPath() {
+        UUID taskId = UUID.randomUUID();
+        TaskUpdatedEvent done = event(taskId.toString(), TENANT_ID.toString()).toBuilder()
+                .setStatus(com.rnd.inbox.event.TaskStatus.TASK_STATUS_DONE)
+                .build();
+
+        handler.onMessage(done);
+
+        verify(service).onTaskUpdatedAsDone(taskId, UPDATED_AT, TENANT_ID);
+        verify(service, never()).onTaskStatusChangedIfNewer(any(), any(), any(), any());
+    }
+
+    // Since #777 an unknown task is created by the service itself, so the handler no longer maps
+    // TaskNotFoundException to a "task not seen yet" retry; if one still escapes it is just a transient failure.
+    @Test
+    void unexpectedTaskNotFound_isTreatedAsTransient() {
         UUID taskId = UUID.randomUUID();
         doThrow(new TaskNotFoundException(taskId)).when(service)
                 .onTaskStatusChangedIfNewer(any(), any(), any(), any());
 
-        assertThrows(ReferencedTaskNotFoundException.class,
+        assertThrows(ChainTransientProcessingException.class,
                 () -> handler.onMessage(event(taskId.toString(), TENANT_ID.toString())));
     }
 

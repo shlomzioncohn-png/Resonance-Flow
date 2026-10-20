@@ -15,3 +15,16 @@ export const taskKeys = {
 export const workloadKeys = {
   all: ['manager', 'workload'] as const,
 };
+
+export const projectKeys = {
+  all: ['manager', 'projects'] as const,
+};
+
+/**
+ * Not keyed by how the graph is shown (full page or the Dashboard's compact
+ * view): both read the same cache entry, so moving between them doesn't refetch.
+ */
+export const bottleneckKeys = {
+  all: ['manager', 'bottlenecks'] as const,
+  graph: (projectId?: string) => [...bottleneckKeys.all, 'graph', projectId ?? 'all'] as const,
+};

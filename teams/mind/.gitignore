@@ -67,3 +67,6 @@ local-data/
 # never project content, must never be committed.
 .claude/
 skills-lock.json
+
+# #359 demo feed: one manifest per run (correlation ids, object keys)
+demo_flow/runs/

@@ -5,11 +5,8 @@ import com.rnd.bridge.crm.model.DealStage;
 import java.util.Map;
 
 /**
- * The result of {@link HubSpotStageMapping#resolveIdsToStages}: every stage id that resolved to a
- * {@link DealStage}, plus every stage id that didn't, each with the reason it failed. Splitting
- * these into two maps (rather than throwing on the first bad stage) is what lets {@code
- * HubSpotDealRepository} skip only the deals that reference an {@code invalidStageReasons} id
- * instead of failing the entire fetch over one malformed stage.
+ * Result of {@link HubSpotStageMapping#resolveIdsToStages}: resolved stage ids, plus invalid ones with their reason.
+ * Two maps, not a throw-on-first-bad-stage, so only deals referencing an invalid id are skipped.
  */
 record StageResolution(Map<String, DealStage> idToStage, Map<String, String> invalidStageReasons) {
 }

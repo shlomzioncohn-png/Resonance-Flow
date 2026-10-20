@@ -26,13 +26,12 @@ const EMPTY_FORM: UserCreateFields = {
   lastName: '',
   email: '',
   phone: '',
-  username: '',
   role: 'EMPLOYEE',
 };
 
 function createErrorMessageFor(error: unknown): string {
   if (error instanceof ApiError) {
-    if (error.status === 409) return error.message || 'A user with this email or username already exists.';
+    if (error.status === 409) return 'A user with this email already exists.';
     if (error.status === 403) return "You don't have permission to create users.";
     if (error.status === 503) return 'The service is unavailable right now. Please try again.';
     if (error.message) return error.message;
@@ -40,10 +39,20 @@ function createErrorMessageFor(error: unknown): string {
   return "Couldn't create the user. Please try again.";
 }
 
-/** Blank optional fields are left out of the request rather than sent as "". */
+/** Inbox compares emails exactly as stored, so normalize them to keep "Dana@x.com" and "dana@x.com" one user. */
+function normalizeEmail(email: string): string {
+  return email.trim().toLowerCase();
+}
+
+/**
+ * The email is the user's login identity, so it doubles as the username — Inbox keeps both
+ * unique, and the manager never types a separate username. Blank optional fields are left
+ * out of the request rather than sent as "".
+ */
 function toRequest(form: UserCreateFields): UserCreateFields {
-  const request: UserCreateFields = { displayName: form.displayName.trim(), role: form.role };
-  for (const key of ['firstName', 'lastName', 'email', 'phone', 'username'] as const) {
+  const email = normalizeEmail(form.email);
+  const request: UserCreateFields = { displayName: form.displayName.trim(), email, username: email, role: form.role };
+  for (const key of ['firstName', 'lastName', 'phone'] as const) {
     const value = form[key]?.trim();
     if (value) request[key] = value;
   }
@@ -63,15 +72,20 @@ export interface CreateUserDialogProps {
 export default function CreateUserDialog({ open, onClose, onCreated }: CreateUserDialogProps) {
   const [form, setForm] = useState<UserCreateFields>(EMPTY_FORM);
   const [error, setError] = useState<string | null>(null);
+  const [duplicateEmail, setDuplicateEmail] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
 
   const emailInvalid = !!form.email && !EMAIL_PATTERN.test(form.email.trim());
-  const canSave = form.displayName.trim().length > 0 && !emailInvalid && !saving;
+  // Stays flagged until the manager changes the email the server rejected.
+  const emailTaken = duplicateEmail !== null && duplicateEmail === normalizeEmail(form.email);
+  const canSave =
+    form.displayName.trim().length > 0 && EMAIL_PATTERN.test(form.email.trim()) && !emailTaken && !saving;
 
   const close = () => {
     if (saving) return;
     setForm(EMPTY_FORM);
     setError(null);
+    setDuplicateEmail(null);
     onClose();
   };
 
@@ -87,6 +101,11 @@ export default function CreateUserDialog({ open, onClose, onCreated }: CreateUse
       })
       .catch((err) => {
         setSaving(false);
+        if (err instanceof ApiError && err.status === 409) {
+          setDuplicateEmail(normalizeEmail(form.email));
+          setError(null);
+          return;
+        }
         setError(createErrorMessageFor(err));
       });
   };
@@ -110,14 +129,18 @@ export default function CreateUserDialog({ open, onClose, onCreated }: CreateUse
           <TextField
             label="Email"
             type="email"
+            required
             {...field('email')}
-            error={emailInvalid}
-            helperText={emailInvalid ? 'Enter a valid email address' : undefined}
+            error={emailInvalid || emailTaken}
+            helperText={
+              emailTaken
+                ? 'A user with this email already exists.'
+                : emailInvalid
+                  ? 'Enter a valid email address'
+                  : 'Also used as the username to sign in'
+            }
           />
-          <Stack direction="row" spacing={2}>
-            <TextField label="Username" {...field('username')} />
-            <TextField label="Phone" {...field('phone')} />
-          </Stack>
+          <TextField label="Phone" {...field('phone')} />
           <TextField select label="Role" required {...field('role')}>
             <MenuItem value="EMPLOYEE">Employee</MenuItem>
             <MenuItem value="MANAGER">Manager</MenuItem>

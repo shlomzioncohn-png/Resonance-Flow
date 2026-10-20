@@ -14,13 +14,8 @@ import java.util.List;
 
 /**
  * One generic scheduler for every {@link SyncJob}, replacing a copy-pasted {@code @Scheduled}
- * method per source (CRM, GitHub and Jira each had their own, and {@code @EnableScheduling} only
- * lived in GitHub/Jira's own config, nowhere shared). Each job's enabled/disabled check is made
- * once here, at startup - a disabled job is logged once and never registered, rather than a
- * {@code @Scheduled} method firing on every tick just to immediately return. An enabled job's
- * {@link SyncJob#runOnce()} always goes through the same start/complete logging and
- * catch-log-never-rethrow handling, regardless of source, so one job's unhandled failure can
- * never propagate into the shared {@link TaskScheduler} thread pool.
+ * method per source. A job's {@link SyncJob#runOnce()} failure is caught and logged here, never
+ * propagating into the shared {@link TaskScheduler} thread pool.
  */
 @Configuration
 @EnableScheduling
