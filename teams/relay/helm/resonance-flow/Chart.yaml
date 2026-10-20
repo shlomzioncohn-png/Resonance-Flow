@@ -40,5 +40,5 @@ dependencies:
   - name: prometheus-kafka-exporter
     alias: kafka-exporter
     version: 4.0.0
-    repository: https://prometheus-community.github.io/helm-charts
+    repository: oci://ghcr.io/prometheus-community/charts
     condition: kafka-exporter.enabled
