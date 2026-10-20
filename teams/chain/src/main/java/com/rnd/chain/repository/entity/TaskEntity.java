@@ -59,6 +59,9 @@ public class TaskEntity {
     @Enumerated(EnumType.STRING)
     private TaskTier tier;
 
+    @Column(name = "scored_at")
+    private LocalDateTime scoredAt;
+
     @Version
     private long version;
 
@@ -168,6 +171,14 @@ public class TaskEntity {
 
     public void setTier(TaskTier tier) {
         this.tier = tier;
+    }
+
+    public LocalDateTime getScoredAt() {
+        return scoredAt;
+    }
+
+    public void setScoredAt(LocalDateTime scoredAt) {
+        this.scoredAt = scoredAt;
     }
 
     public long getVersion() {

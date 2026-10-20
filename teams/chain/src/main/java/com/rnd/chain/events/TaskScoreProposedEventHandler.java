@@ -2,6 +2,7 @@ package com.rnd.chain.events;
 
 import com.rnd.chain.dto.TaskTier;
 import com.rnd.chain.exception.InvalidRequestException;
+import com.rnd.chain.exception.TenantReassignmentException;
 import com.rnd.chain.service.TaskCounterUpdater;
 import com.rnd.mind.event.TaskScoreProposedEvent;
 import org.springframework.kafka.annotation.KafkaListener;
@@ -13,14 +14,17 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
+import java.time.LocalDateTime;
 import java.util.UUID;
 
 import static com.rnd.chain.events.EventFields.parseUuid;
+import static com.rnd.chain.events.EventFields.toLocalDateTime;
 
 /**
  * Consumes task.score.proposed. A task Chain doesn't know yet is created as a PENDING placeholder in
  * the event's tenant before the score is applied. A score or confidence outside [0, 1] goes straight
- * to .errors without retry.
+ * to .errors without retry, and so does a tenant that differs from the stored one. An event scored
+ * earlier than the stored score is ignored.
  */
 @Component
 public class TaskScoreProposedEventHandler {
@@ -66,10 +70,15 @@ public class TaskScoreProposedEventHandler {
         double confidence = toUnitRange(event.getConfidence(), "confidence");
 
         try {
-            taskCounterUpdater.onScoreProposed(taskId, tenantId, toTier(event), mindScore, confidence);
+            LocalDateTime scoredAt = event.hasScoredAt() ? toLocalDateTime(event.getScoredAt()) : null;
+            taskCounterUpdater.onScoreProposed(taskId, tenantId, toTier(event), mindScore, confidence, scoredAt);
         } catch (InvalidRequestException ex) {
             throw new NonRetryableEventException(
                     "Mind proposed an invalid score for task " + taskId, ex);
+        } catch (TenantReassignmentException ex) {
+            // tenant_id never changes after creation, so retrying the same event never helps.
+            throw new NonRetryableEventException(
+                    "task.score.proposed for task " + taskId + " claims a different tenant than stored", ex);
         }
     }
 

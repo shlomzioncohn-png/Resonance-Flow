@@ -389,8 +389,10 @@ around the call) and by the new tests that specifically prove the commit/rollbac
 `task.scheduling.updated`. `mind_score` and `confidence` are rounded to two decimals (so `0.8f` is
 stored as `0.8`); a value outside [0, 1], NaN or an `InvalidRequestException` goes to `.errors`
 without retry. A task Chain hasn't seen yet is created as a PENDING placeholder in the event's
-`tenant_id`. An unspecified `tier` leaves the stored tier unchanged. `scored_at` and `factors` are
-ignored, so a late older event overwrites a newer score for now.
+`tenant_id`; a task stored with a different tenant is rejected to `.errors` (a null stored tenant is
+backfilled). An unspecified `tier` leaves the stored tier unchanged. `scored_at` is stored in
+`task.scored_at` (V15): an event scored earlier than the stored value is ignored (no write, no
+publish), and an event without `scored_at` is applied and keeps the stored value. `factors` is ignored.
 
 ## Running locally with Maven
 
