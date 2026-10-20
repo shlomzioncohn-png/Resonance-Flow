@@ -14,7 +14,7 @@ import java.util.regex.Pattern;
 
 public class Canonicalize {
 
-    private static final Pattern IMPORT = Pattern.compile("^import \"([^\"]+)\";", Pattern.MULTILINE);
+    private static final Pattern IMPORT = Pattern.compile("^\\s*import\\s+(?:public\\s+|weak\\s+)?\"([^\"]+)\"\\s*;", Pattern.MULTILINE);
 
     public static void main(String[] args) throws IOException {
         if (args.length != 2) {
