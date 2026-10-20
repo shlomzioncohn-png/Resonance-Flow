@@ -82,3 +82,36 @@ def test_module_classes_construct():
     # constructing needs a broker/registry, so just assert the API surface
     assert hasattr(ProtobufProducer, "publish")
     assert hasattr(ProtobufConsumer, "run")
+
+
+class _RecordingConsumer:
+    """Stands in for confluent_kafka.Consumer: keeps the conf it was built with."""
+
+    def __init__(self, conf: dict) -> None:
+        self.conf = conf
+
+    def subscribe(self, topics: list[str]) -> None:
+        pass
+
+
+@pytest.mark.parametrize(
+    ("overrides", "expected"),
+    [
+        (None, None),
+        ({"max.poll.interval.ms": 1_800_000}, 1_800_000),
+    ],
+)
+def test_a_consumer_can_override_its_conf(tmp_path, monkeypatch, overrides, expected):
+    # #349's handler can run OCR and ASR for minutes, past Kafka's default
+    # max.poll.interval.ms; other consumers keep the defaults untouched.
+    from mind.messaging import consumer as consumer_module
+
+    monkeypatch.setenv("CONFIG_FILE_PATH", str(tmp_path / "nope.yaml"))
+    monkeypatch.setenv("SECRETS_FILE_PATH", str(tmp_path / "nope2.yaml"))
+    monkeypatch.setattr(consumer_module, "Consumer", _RecordingConsumer)
+
+    built = consumer_module.ProtobufConsumer("g", ["t"], conf_overrides=overrides)
+
+    conf = built._consumer.conf
+    assert conf["group.id"] == "g"
+    assert conf.get("max.poll.interval.ms") == expected

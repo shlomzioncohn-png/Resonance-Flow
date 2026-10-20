@@ -26,6 +26,12 @@ import static com.rnd.chain.events.EventFields.toLocalDateTime;
  * If Chain has not seen the task before, the event creates a local Task using the event's
  * status, updatedAt and tenantId, with zero dependency and constraint counters.
  *
+ * Inbox's DONE status is not applied here: completion (and releasing dependents) belongs to
+ * task.completed alone. A DONE event never changes an existing task's status or updatedAt (only
+ * the tenant check still runs); for an unknown task it creates a PENDING task, see
+ * {@link TaskEligibilityService#onTaskUpdatedAsDone}. Reopening, CANCELLED and REJECTED are
+ * still handled here as before.
+ *
  * Idempotency is state-based, last-write-wins: task.updated carries no event id in its body,
  * so the incoming event's updated_at is compared against the task's stored
  * {@link Task#getUpdatedAt()}. For an existing task, only a strictly newer event is applied;
@@ -64,29 +70,28 @@ public class TaskUpdatedEventHandler {
     @Transactional
     public void onMessage(TaskUpdatedEvent event) {
         UUID taskId = parseUuid(event.getTaskId(), "task_id");
-        TaskStatus newStatus = InboxTaskStatusMapper.map(event.getStatus());
         LocalDateTime eventUpdatedAt = toLocalDateTime(event.getUpdatedAt());
         UUID tenantId = parseUuid(event.getTenantId(), "tenant_id");
-        TaskTier tier = InboxTaskTierMapper.map(event);
 
+        // DONE is applied only by task.completed; CANCELLED/REJECTED still release from here.
+        if (event.getStatus() == com.rnd.inbox.event.TaskStatus.TASK_STATUS_DONE) {
+            template.processUnclaimed(taskId.toString(), "task.updated",
+                    () -> apply(taskId, () -> taskEligibilityService.onTaskUpdatedAsDone(
+                            taskId, eventUpdatedAt, tenantId)));
+            return;
+        }
+
+        TaskStatus newStatus = InboxTaskStatusMapper.map(event.getStatus());
+        TaskTier tier = InboxTaskTierMapper.map(event);
         template.processUnclaimed(taskId.toString(), "task.updated",
-                () -> apply(taskId, newStatus, eventUpdatedAt, tenantId, tier));
+                () -> apply(taskId, () -> taskEligibilityService.onTaskStatusChangedIfNewer(
+                        taskId, newStatus, eventUpdatedAt, tenantId, tier)));
     }
 
-    private void apply(
-        UUID taskId,
-        TaskStatus newStatus,
-        LocalDateTime eventUpdatedAt,
-        UUID tenantId,
-        TaskTier tier) {
+    private void apply(UUID taskId, Runnable action) {
 
     try {
-        taskEligibilityService.onTaskStatusChangedIfNewer(
-                taskId,
-                newStatus,
-                eventUpdatedAt,
-                tenantId,
-                tier);
+        action.run();
 
     } catch (TenantReassignmentException e) {
         // Confirmed with Inbox: tenant_id never legitimately changes after creation, so this

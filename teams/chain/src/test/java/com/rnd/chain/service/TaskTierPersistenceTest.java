@@ -7,12 +7,14 @@ import com.rnd.chain.dto.TaskTier;
 import com.rnd.chain.events.SchedulingPublishListener;
 import com.rnd.chain.repository.GraphLock;
 import com.rnd.chain.repository.TaskDependencyRepository;
+import com.rnd.chain.repository.TaskReadinessRepository;
 import com.rnd.chain.repository.TaskRepository;
 import com.rnd.chain.repository.TaskStateHistoryRepository;
 import com.rnd.chain.testsupport.PgRepos;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -31,6 +33,9 @@ class TaskTierPersistenceTest {
 
     private static final UUID TENANT = TaskTestFixtures.DEFAULT_TENANT_ID;
 
+    @Autowired
+    private TaskReadinessRepository taskReadinessRepository;
+
     private TaskRepository taskRepository;
     private TaskStateHistoryRepository history;
     private TaskEligibilityService service;
@@ -43,9 +48,11 @@ class TaskTierPersistenceTest {
         GraphLock lock = PgRepos.graphLock();
         TaskCounterUpdater counterUpdater = new TaskCounterUpdater(taskRepository, dependencyRepository,
                 new PriorityScoreService(),
-                new SchedulingPublishListener(taskRepository, new SchedulingUpdateService(event -> { })));
+                new SchedulingPublishListener(taskRepository, new SchedulingUpdateService(event -> { })),
+                taskReadinessRepository);
         TaskStateHistoryRecorder recorder = new TaskStateHistoryRecorder(history, Clock.systemUTC());
-        service = new TaskEligibilityService(taskRepository, dependencyRepository, lock, counterUpdater, recorder);
+        service = new TaskEligibilityService(taskRepository, dependencyRepository, lock, counterUpdater, recorder,
+                taskReadinessRepository);
     }
 
     private UUID savedTask(TaskTier tier, LocalDateTime updatedAt) {

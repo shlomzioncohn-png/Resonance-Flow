@@ -177,15 +177,32 @@ class DealToTaskMapperTest {
     }
 
     @Test
-    void hubSpotAndJsonSourceDealsStayExactlyCrmPrefixedBareId() {
-        // Neither HubSpotDealRepository nor JsonDealRepository ever sets Deal.sourceRefPrefix -
-        // Salesforce is the only source that overrides the "crm:" default. Pinning this exact
-        // string (not just "starts with crm:") catches a regression where the default drifts or
-        // doubles up (e.g. "crm:crm:D-1").
+    void jsonSourceDealsStayExactlyCrmPrefixedBareId() {
+        // JsonDealRepository never sets Deal.sourceRefPrefix, so a Deal built with no explicit
+        // override (same shape JsonDealRepository produces) keeps the builder's own bare "crm:"
+        // default - HubSpot and Salesforce both now set an explicit prefix of their own (see
+        // hubSpotSourceDealsGetTheExplicitHubspotPrefix below). Pinning this exact string (not just
+        // "starts with crm:") catches a regression where the default drifts or doubles up (e.g.
+        // "crm:crm:D-1").
         Deal deal = Deal.builder().dealId("D-1").stageChangedAt(Instant.now()).build();
 
         assertEquals("crm:", deal.sourceRefPrefix());
         assertEquals("crm:D-1", MAPPER.toSourceRef(deal));
+    }
+
+    @Test
+    void hubSpotSourceDealsGetTheExplicitHubspotPrefix() {
+        // HubSpotDealRepository sets sourceRefPrefix explicitly to "crm:hubspot:" (distinct from
+        // JSON's bare "crm:" and Salesforce's "crm:salesforce:") so a HubSpot-sourced task's
+        // sourceRef is never confused with either once more than one CRM source is active at once.
+        Deal deal = Deal.builder()
+                .dealId("D-1")
+                .sourceRefPrefix("crm:hubspot:")
+                .stageChangedAt(Instant.now())
+                .build();
+
+        assertEquals("crm:hubspot:", deal.sourceRefPrefix());
+        assertEquals("crm:hubspot:D-1", MAPPER.toSourceRef(deal));
     }
 
     @Test

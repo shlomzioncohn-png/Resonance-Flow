@@ -1,70 +1,56 @@
 import type { Meta, StoryObj } from '@storybook/nextjs-vite';
-import { expect, fn, waitFor, within } from 'storybook/test';
-import type { UserListResponse, UserRow } from '@/services/managerUsersApi';
+import { http, HttpResponse } from 'msw';
+import { expect, waitFor, within } from 'storybook/test';
+import { USERS_URL } from '@/mocks/handlers';
 import ManagerUsersPage from './page';
 
-const users: UserRow[] = [
-  {
-    id: '00000000-0000-0000-0000-000000000001',
-    displayName: 'Dana Levi',
-    email: 'dana@example.com',
-    role: 'MANAGER',
-    status: 'ACTIVE',
-    lastLoginAt: '2026-10-01T08:30:00Z',
-    currentUser: true,
-  },
-  {
-    id: '00000000-0000-0000-0000-000000000002',
-    displayName: 'Noam Cohen',
-    email: 'noam@example.com',
-    role: 'EMPLOYEE',
-    status: 'SUSPENDED',
-  },
-];
+// The Gateway here is MSW with the app's own handlers (mocks/handlers.ts, wired
+// in .storybook/preview.tsx) - the same 12 users as the app in mock mode.
 
-// What POST /api/manager/users answers — a story's beforeEach can switch it to 409.
-let createResponse: { status: number; body: unknown } = { status: 201, body: {} };
+interface SentRequest {
+  method: string;
+  url: URL;
+  body?: unknown;
+}
 
-// Stands in for the Gateway: records every request so the play functions can
-// assert on the query the page actually sent.
-const fetchMock = fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-  const url = new URL(String(input));
-  if (init?.method === 'POST') {
-    return new Response(JSON.stringify(createResponse.body), { status: createResponse.status });
-  }
-  const body: UserListResponse = {
-    items: users,
-    page: Number(url.searchParams.get('page') ?? 0),
-    size: Number(url.searchParams.get('size') ?? 20),
-    totalElements: 45,
-    totalPages: 3,
-  };
-  return new Response(JSON.stringify(body), { status: 200 });
-});
+// Every request the page sent to /api/manager/users, so the play functions can
+// assert on what was actually sent - not just on what ended up on screen.
+let sent: SentRequest[] = [];
 
 function lastListQuery() {
-  const url = new URL(String(fetchMock.mock.calls.at(-1)?.[0]));
+  const url = sent.filter((request) => request.method === 'GET').at(-1)?.url;
   return {
-    path: url.pathname,
-    page: url.searchParams.get('page'),
-    size: url.searchParams.get('size'),
-    sort: url.searchParams.get('sort'),
+    path: url?.pathname,
+    page: url?.searchParams.get('page'),
+    size: url?.searchParams.get('size'),
+    sort: url?.searchParams.get('sort'),
   };
+}
+
+function createCalls() {
+  return sent.filter((request) => request.method === 'POST');
 }
 
 const meta = {
   component: ManagerUsersPage,
   tags: ['ai-generated'],
-  beforeEach: () => {
-    const realFetch = globalThis.fetch;
-    fetchMock.mockClear();
-    createResponse = {
-      status: 201,
-      body: { id: '00000000-0000-0000-0000-000000000009', displayName: 'Noa Levi', role: 'MANAGER', status: 'PENDING', username: '' },
+  beforeEach: ({ msw }) => {
+    sent = [];
+    const record = ({ request }: { request: Request }) => {
+      const url = new URL(request.url);
+      if (!url.pathname.startsWith('/api/manager/users')) return;
+      const entry: SentRequest = { method: request.method, url };
+      sent.push(entry);
+      if (request.method !== 'GET') {
+        request
+          .clone()
+          .json()
+          .then((body) => (entry.body = body));
+      }
     };
-    globalThis.fetch = fetchMock as typeof fetch;
+    msw.events.on('request:start', record);
     return () => {
-      globalThis.fetch = realFetch;
+      msw.events.removeListener('request:start', record);
     };
   },
 } satisfies Meta<typeof ManagerUsersPage>;
@@ -82,25 +68,30 @@ export const ServerSidePagingAndSorting: Story = {
       sort: 'displayName,asc',
     });
 
-    await userEvent.click(canvas.getByRole('button', { name: /next page/i }));
+    // 12 users: at 10 per page there's a second page.
+    await userEvent.click(canvas.getByRole('combobox', { name: /rows per page/i }));
+    await userEvent.click(within(document.body).getByRole('option', { name: '10' }));
     await waitFor(() =>
-      expect(lastListQuery()).toMatchObject({ page: '1', size: '20', sort: 'displayName,asc' }),
+      expect(lastListQuery()).toMatchObject({ page: '0', size: '10', sort: 'displayName,asc' }),
     );
+
+    // findBy: the page shows "Loading…" until the new page arrives.
+    await userEvent.click(await canvas.findByRole('button', { name: /next page/i }));
+    await waitFor(() =>
+      expect(lastListQuery()).toMatchObject({ page: '1', size: '10', sort: 'displayName,asc' }),
+    );
+    // The last two names alphabetically - the page really came from the server.
+    await canvas.findByText('Yotam Barak');
+    await expect(canvas.queryByText('Dana Cohen')).not.toBeInTheDocument();
 
     // Changing the sort re-queries from the first page.
     await userEvent.click(await canvas.findByRole('button', { name: 'Name' }));
     await waitFor(() =>
-      expect(lastListQuery()).toMatchObject({ page: '0', size: '20', sort: 'displayName,desc' }),
+      expect(lastListQuery()).toMatchObject({ page: '0', size: '10', sort: 'displayName,desc' }),
     );
     await expect(await canvas.findByRole('columnheader', { name: 'Name' })).toHaveAttribute(
       'aria-sort',
       'descending',
-    );
-
-    await userEvent.click(canvas.getByRole('combobox', { name: /rows per page/i }));
-    await userEvent.click(within(document.body).getByRole('option', { name: '50' }));
-    await waitFor(() =>
-      expect(lastListQuery()).toMatchObject({ page: '0', size: '50', sort: 'displayName,desc' }),
     );
   },
 };
@@ -109,18 +100,24 @@ export const OwnStatusCannotBeChanged: Story = {
   play: async ({ canvas }) => {
     await canvas.findByRole('table', { name: 'Users' });
 
-    await expect(canvas.getByRole('button', { name: 'Change status for Dana Levi' })).toBeDisabled();
-    await expect(canvas.getByRole('button', { name: 'Edit Dana Levi' })).toBeEnabled();
+    // Dana Cohen is the acting manager in the mock data (currentUser: true).
     await expect(
-      canvas.getByRole('button', { name: 'Change status for Noam Cohen' }),
+      canvas.getByRole('button', { name: 'Change status for Dana Cohen' }),
+    ).toBeDisabled();
+    await expect(canvas.getByRole('button', { name: 'Edit Dana Cohen' })).toBeEnabled();
+    await expect(
+      canvas.getByRole('button', { name: 'Change status for Maya Segal' }),
     ).toBeEnabled();
   },
 };
 
 export const LoadFailure: Story = {
-  beforeEach: () => {
-    fetchMock.mockImplementationOnce(
-      async () => new Response(JSON.stringify({ message: 'Gateway down' }), { status: 503 }),
+  // Only the first list request fails; "Try again" then reaches the normal handler.
+  beforeEach: ({ msw }) => {
+    msw.use(
+      http.get(USERS_URL, () => HttpResponse.json({ message: 'Gateway down' }, { status: 503 }), {
+        once: true,
+      }),
     );
   },
   play: async ({ canvas, userEvent }) => {
@@ -132,10 +129,6 @@ export const LoadFailure: Story = {
   },
 };
 
-function createCalls() {
-  return fetchMock.mock.calls.filter(([, init]) => init?.method === 'POST');
-}
-
 export const CreateUser: Story = {
   play: async ({ canvas, userEvent }) => {
     await canvas.findByRole('table', { name: 'Users' });
@@ -145,8 +138,8 @@ export const CreateUser: Story = {
     // Display name is required — Create stays disabled until it's filled in.
     await expect(dialog.getByRole('button', { name: 'Create' })).toBeDisabled();
 
-    await userEvent.type(dialog.getByLabelText(/display name/i), 'Noa Levi');
-    await userEvent.type(dialog.getByLabelText(/^email/i), 'noa@example');
+    await userEvent.type(dialog.getByLabelText(/display name/i), 'Avital Mor');
+    await userEvent.type(dialog.getByLabelText(/^email/i), 'avital@example');
     await expect(dialog.getByText('Enter a valid email address')).toBeInTheDocument();
     await expect(dialog.getByRole('button', { name: 'Create' })).toBeDisabled();
     await userEvent.type(dialog.getByLabelText(/^email/i), '.com');
@@ -156,36 +149,43 @@ export const CreateUser: Story = {
     await userEvent.click(dialog.getByRole('button', { name: 'Create' }));
 
     await waitFor(() => expect(createCalls()).toHaveLength(1));
-    const [url, init] = createCalls()[0];
-    await expect(new URL(String(url)).pathname).toBe('/api/manager/users');
-    // Blank optional fields aren't sent at all, and there's never a tenant.
-    await expect(JSON.parse(String(init?.body))).toEqual({
-      displayName: 'Noa Levi',
-      email: 'noa@example.com',
-      role: 'MANAGER',
-    });
+    const [created] = createCalls();
+    await expect(created.url.pathname).toBe('/api/manager/users');
+    // Blank optional fields aren't sent at all, there's never a tenant, and the email doubles as the username.
+    await waitFor(() =>
+      expect(created.body).toEqual({
+        displayName: 'Avital Mor',
+        email: 'avital@example.com',
+        username: 'avital@example.com',
+        role: 'MANAGER',
+      }),
+    );
 
-    await waitFor(() => expect(within(document.body).queryByRole('dialog')).not.toBeInTheDocument());
-    // The list is fetched again so the new user shows up.
-    await waitFor(() => expect(lastListQuery().path).toBe('/api/manager/users'));
+    await waitFor(() =>
+      expect(within(document.body).queryByRole('dialog')).not.toBeInTheDocument(),
+    );
+    // The list is fetched again, and the mock server now has the new user in it.
+    await canvas.findByText('Avital Mor');
   },
 };
 
 export const CreateUserDuplicateEmail: Story = {
-  beforeEach: () => {
-    createResponse = { status: 409, body: { message: 'A user with this email already exists' } };
-  },
+  // No override: the shared handler itself answers 409, because Dana Cohen already has this email.
   play: async ({ canvas, userEvent }) => {
     await canvas.findByRole('table', { name: 'Users' });
     await userEvent.click(canvas.getByRole('button', { name: 'New user' }));
 
     const dialog = within(await within(document.body).findByRole('dialog', { name: 'New user' }));
     await userEvent.type(dialog.getByLabelText(/display name/i), 'Dana Levi');
-    await userEvent.type(dialog.getByLabelText(/^email/i), 'dana@example.com');
+    await userEvent.type(dialog.getByLabelText(/^email/i), 'dana.cohen@example.com');
     await userEvent.click(dialog.getByRole('button', { name: 'Create' }));
 
-    await expect(await dialog.findByRole('alert')).toHaveTextContent('A user with this email already exists');
+    // Shown on the Email field itself, and Create stays off until the email is changed.
+    await expect(await dialog.findByText('A user with this email already exists.')).toBeInTheDocument();
+    await expect(dialog.getByRole('button', { name: 'Create' })).toBeDisabled();
     // The dialog stays open with what was typed, so the manager can fix it.
     await expect(dialog.getByLabelText(/display name/i)).toHaveValue('Dana Levi');
+    await userEvent.type(dialog.getByLabelText(/^email/i), 'x');
+    await expect(dialog.getByRole('button', { name: 'Create' })).toBeEnabled();
   },
 };
