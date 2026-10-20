@@ -40,11 +40,13 @@ public class AuthController {
      * POST /auth/login
      * Login with email (regular users) or username (admin).
      * Limited to 5 failed attempts per minute per IP.
-     * Returns JWT token and user info.
+     * 
+     * JWT token is returned ONLY via HttpOnly Set-Cookie header.
+     * Response body contains user info and token expiry time.
      */
-    @Operation(summary = "Login and get JWT token")
+    @Operation(summary = "Login and get user info + token (sent via HttpOnly cookie)")
     @ApiResponses({
-            @ApiResponse(responseCode = "200", description = "Login successful",
+            @ApiResponse(responseCode = "200", description = "Login successful, token sent in Set-Cookie header",
                     content = @Content(schema = @Schema(implementation = AuthLoginResponseDto.class))),
             @ApiResponse(responseCode = "400", description = "Invalid request (missing login or password)"),
             @ApiResponse(responseCode = "401", description = "Invalid credentials"),
@@ -59,19 +61,22 @@ public class AuthController {
         
         String clientIp = getClientIp(httpRequest);
         
-        // Check rate limit: 5 failed attempts per minute per IP
-        // We track failed attempts only (see below)
-        
         try {
             AuthLoginResponseDto response = authService.login(request);
             
-            // Set HttpOnly cookie with JWT token
-            String cookieValue = String.format(
-                    "accessToken=%s; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=%d",
-                    response.getAccessToken(),
-                    response.getExpiresIn()
-            );
-            httpResponse.setHeader("Set-Cookie", cookieValue);
+            // Get the token from context (set by AuthService)
+            String token = AuthContextHolder.getToken();
+            AuthContextHolder.clear();
+            
+            if (token != null) {
+                // Set HttpOnly cookie with JWT token
+                String cookieValue = String.format(
+                        "accessToken=%s; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=%d",
+                        token,
+                        response.getExpiresIn()
+                );
+                httpResponse.setHeader("Set-Cookie", cookieValue);
+            }
             
             return ResponseEntity.ok(response);
         } catch (BffAuthClient.InvalidCredentialsException e) {

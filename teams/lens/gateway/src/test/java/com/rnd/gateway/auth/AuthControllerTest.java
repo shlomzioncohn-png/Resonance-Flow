@@ -19,7 +19,6 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  * Unit tests for AuthController.
  * 
  * Tests cover:
- * - User registration (valid, invalid email, password too short, email taken)
  * - User login (valid, invalid credentials, rate limiting)
  * - Rate limiting enforcement
  */
@@ -31,9 +30,6 @@ public class AuthControllerTest {
     private AuthService authService;
     
     @Mock
-    private RateLimitingConfig.RateLimiter registerRateLimiter;
-    
-    @Mock
     private RateLimitingConfig.RateLimiter loginRateLimiter;
     
     private AuthController authController;
@@ -41,51 +37,18 @@ public class AuthControllerTest {
     @BeforeEach
     public void setUp() {
         MockitoAnnotations.openMocks(this);
-        authController = new AuthController(authService, registerRateLimiter, loginRateLimiter);
+        authController = new AuthController(authService, loginRateLimiter);
         mockMvc = MockMvcBuilders.standaloneSetup(authController).build();
-    }
-
-    @Test
-    public void testRegisterSuccess() throws Exception {
-        // Given
-        UUID userId = UUID.randomUUID();
-        when(registerRateLimiter.allowRequest(anyString())).thenReturn(true);
-        when(authService.register(new AuthRegisterRequestDto(
-            "test@example.com", "Password123!", "Test User"
-        ))).thenReturn(userId);
-
-        // When & Then
-        mockMvc.perform(post("/auth/register")
-            .contentType("application/json")
-            .content("{\"email\":\"test@example.com\",\"password\":\"Password123!\",\"displayName\":\"Test User\"}"))
-            .andExpect(status().isCreated())
-            .andExpect(jsonPath("$.userId").value(userId.toString()));
-    }
-
-    @Test
-    public void testRegisterRateLimitExceeded() throws Exception {
-        // Given
-        when(registerRateLimiter.allowRequest(anyString())).thenReturn(false);
-
-        // When & Then
-        mockMvc.perform(post("/auth/register")
-            .contentType("application/json")
-            .content("{\"email\":\"test@example.com\",\"password\":\"Password123!\",\"displayName\":\"Test User\"}"))
-            .andExpect(status().isTooManyRequests());
     }
 
     @Test
     public void testLoginSuccess() throws Exception {
         // Given
         UUID userId = UUID.randomUUID();
-        BffAuthUserResponse userResponse = new BffAuthUserResponse(
-            userId, "Test User", "EMPLOYEE"
-        );
-        
         when(loginRateLimiter.allowRequest(anyString())).thenReturn(true);
         when(authService.login(new AuthLoginRequestDto("test@example.com", "Password123!")))
             .thenReturn(new AuthLoginResponseDto(
-                "token123", 3600, userId, "Test User", "EMPLOYEE"
+                3600, userId, "Test User", "EMPLOYEE"
             ));
 
         // When & Then
@@ -93,8 +56,9 @@ public class AuthControllerTest {
             .contentType("application/json")
             .content("{\"login\":\"test@example.com\",\"password\":\"Password123!\"}"))
             .andExpect(status().isOk())
-            .andExpect(jsonPath("$.accessToken").value("token123"))
             .andExpect(jsonPath("$.expiresIn").value(3600))
+            .andExpect(jsonPath("$.user.id").value(userId.toString()))
+            .andExpect(jsonPath("$.user.displayName").value("Test User"))
             .andExpect(jsonPath("$.user.role").value("EMPLOYEE"));
     }
 

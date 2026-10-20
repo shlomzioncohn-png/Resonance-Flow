@@ -1,27 +1,32 @@
 /**
- * Auth API — sign-in with a username and password. The Gateway doesn't expose
- * `POST /api/auth/login` yet, so in local development it's answered by MSW in
- * the browser (mocks/handlers.ts, on when NEXT_PUBLIC_API_MOCKING=enabled).
- * This call already has its final shape: once the Gateway serves the endpoint,
- * only the mock handler goes away.
+ * Auth API — sign-in with email and password via the LENS Gateway.
+ * Gateway serves POST /auth/login (see teams/lens/gateway/GATEWAY_CONTRACT.md).
+ * 
+ * The Gateway validates credentials against Inbox and returns user info + token.
+ * JWT token is sent ONLY via HttpOnly Set-Cookie header (not in response body).
+ * Frontend should NOT attempt to extract the token — the browser manages it automatically.
  */
 import { api } from './api';
 
-export type AuthRole = 'manager' | 'employee';
+export type AuthRole = 'EMPLOYEE' | 'TENANT_ADMIN' | 'TEAM_LEAD';
 
 export interface LoginRequest {
-  username: string;
+  login: string;  // email address
   password: string;
 }
 
-/** The signed-in user. */
+/** The signed-in user information returned after successful login. */
 export interface LoginResponse {
-  id: string;
-  displayName: string;
-  role: AuthRole;
+  expiresIn: number;    // Token expiry in seconds
+  user: {
+    id: string;
+    displayName: string;
+    role: AuthRole;
+  };
 }
 
-/** Rejects with an ApiError (status 401) when the username or password is wrong. */
+/** Rejects with an ApiError (status 401) when the login or password is wrong. */
 export function login(credentials: LoginRequest): Promise<LoginResponse> {
-  return api.post<LoginResponse>('/api/auth/login', credentials);
+  return api.post<LoginResponse>('/auth/login', credentials);
 }
+

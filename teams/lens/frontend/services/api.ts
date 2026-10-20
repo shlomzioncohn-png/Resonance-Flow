@@ -64,9 +64,16 @@ export function getErrorMessage(error: unknown): string {
 }
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
+  const headers = { 'Content-Type': 'application/json', ...init?.headers };
+
+  // JWT token is sent automatically by the browser via HttpOnly cookie.
+  // No need to manually add Authorization header — fetch() with credentials: 'include'
+  // will attach the cookie to every request.
+
   const response = await fetch(`${API_BASE_URL}${path}`, {
     ...init,
-    headers: { 'Content-Type': 'application/json', ...init?.headers },
+    headers,
+    credentials: 'include',  // Include HttpOnly cookies in requests
   });
 
   if (!response.ok) {

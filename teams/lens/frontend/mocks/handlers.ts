@@ -1,18 +1,20 @@
 /**
- * MSW request handlers - the mock data, and the rules for which requests get
- * mocked. Each `http.<method>(url, resolver)` entry intercepts real fetch()
- * calls matching that URL and returns a fake Response instead of hitting the
- * network. Everything NOT matched by a handler here passes straight through
- * to the real Gateway (`onUnhandledRequest: 'bypass'` in MockingProvider), so
- * the /api/workspace/* and /api/manager/* calls are untouched by MSW.
+ * MSW request handlers - mock data for endpoints the Gateway doesn't expose yet.
+ * Each `http.<method>(url, resolver)` entry intercepts real fetch() calls matching
+ * that URL and returns a fake Response instead of hitting the network.
+ * 
+ * Everything NOT matched by a handler here passes straight through to the real Gateway
+ * (`onUnhandledRequest: 'bypass'` in MockingProvider).
  *
- * Only endpoints the Gateway doesn't expose yet belong here. Once the Gateway
- * serves one, delete its handler - the calling code (services/usersApi.ts,
- * services/authApi.ts) already has its final shape and keeps working unchanged.
+ * Current status:
+ * - POST /api/auth/login: REMOVED (Gateway now handles this with real Inbox)
+ * - GET /api/users: Still mocked (Gateway doesn't expose user listing yet)
+ * 
+ * Once the Gateway serves an endpoint, delete its handler - the calling code already
+ * has its final shape and keeps working unchanged.
  */
 import { delay, http, HttpResponse } from 'msw';
 import type { GatewayErrorBody } from '@/services/api';
-import type { LoginRequest, LoginResponse } from '@/services/authApi';
 import type { User, UsersPage } from '@/services/usersApi';
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? 'http://localhost:8080';
@@ -119,23 +121,12 @@ const MOCK_USERS: User[] = [
   },
 ];
 
-// Same users and passwords as the Keycloak realm (teams/lens/keycloak/realm-lens.json).
-const MOCK_ACCOUNTS: (LoginRequest & LoginResponse)[] = [
-  {
-    username: 'manager1',
-    password: 'manager1',
-    id: 'a3c5e0b2-4f1d-4c8e-9b7a-1d2e3f4a5b01',
-    displayName: 'Maya Manager',
-    role: 'manager',
-  },
-  {
-    username: 'employee1',
-    password: 'employee1',
-    id: 'a3c5e0b2-4f1d-4c8e-9b7a-1d2e3f4a5b02',
-    displayName: 'Eli Employee',
-    role: 'employee',
-  },
-];
+// Test accounts - REMOVED, using Gateway instead.
+// These used to be used when Gateway wasn't ready yet.
+// Now the Gateway handles login via POST /auth/login with real Inbox credentials.
+// 
+// For local testing with real Inbox, use credentials from teams/inbox/src/main/resources/import.sql
+// Example test user: testuser123@example.com / Password123!
 
 /** A non-negative integer query param, or `fallback` when it's missing or invalid. */
 function intParam(value: string | null, fallback: number, min: number): number {
@@ -158,36 +149,9 @@ export const handlers = [
     });
   }),
 
-  // POST /api/auth/login - a wrong username or password gets the Gateway's 401 error body.
-  // The generics type the request body and allow either response body (success or error).
-  http.post<never, LoginRequest, LoginResponse | GatewayErrorBody>(
-    `${API_BASE_URL}/api/auth/login`,
-    async ({ request }) => {
-      await delay(400);
-
-      const { username, password } = await request.json();
-      const account = MOCK_ACCOUNTS.find(
-        (candidate) => candidate.username === username && candidate.password === password,
-      );
-
-      if (!account) {
-        return HttpResponse.json<GatewayErrorBody>(
-          {
-            status: 'ERROR',
-            errorCode: 'UNAUTHORIZED',
-            message: 'Invalid username or password',
-            path: '/api/auth/login',
-            timestamp: new Date().toISOString(),
-          },
-          { status: 401 },
-        );
-      }
-
-      return HttpResponse.json<LoginResponse>({
-        id: account.id,
-        displayName: account.displayName,
-        role: account.role,
-      });
-    },
-  ),
+  // POST /api/auth/login - REMOVED, Gateway handles this now.
+  // The Gateway validates credentials against real Inbox and returns JWT token.
+  // MSW will bypass this (onUnhandledRequest: 'bypass' in MockingProvider),
+  // so the real Gateway endpoint will handle the request.
+  // (old handler removed - no longer needed)
 ];

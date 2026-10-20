@@ -1,8 +1,9 @@
 'use client';
 
 import { createContext, useContext, useEffect, useState, type ReactNode } from 'react';
+import type { AuthRole } from '@/services/authApi';
 
-export type Role = 'manager' | 'employee' | null;
+export type Role = AuthRole | null;
 
 interface RoleContextValue {
   role: Role;
@@ -25,8 +26,11 @@ export function RoleProvider({ children }: { children: ReactNode }) {
     // this pattern exists to avoid.
     try {
       const stored = window.localStorage.getItem(STORAGE_KEY);
-      // eslint-disable-next-line react-hooks/set-state-in-effect
-      if (stored === 'manager' || stored === 'employee') setRoleState(stored);
+      // Only restore if it's a valid role
+      if (stored === 'EMPLOYEE' || stored === 'TENANT_ADMIN' || stored === 'TEAM_LEAD') {
+        // eslint-disable-next-line react-hooks/set-state-in-effect
+        setRoleState(stored as AuthRole);
+      }
     } catch {
       // localStorage unavailable — fall back to the in-memory default (no role)
     }

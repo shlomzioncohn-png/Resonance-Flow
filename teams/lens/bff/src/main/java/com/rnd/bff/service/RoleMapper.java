@@ -6,14 +6,15 @@ import org.springframework.stereotype.Service;
  * Maps Inbox roles to LENS roles.
  * 
  * Inbox role hierarchy:
- * - SYSTEM_ADMIN: Full system access
+ * - SYSTEM_ADMIN: Full system access (→ TENANT_ADMIN)
  * - TENANT_ADMIN: Tenant-level admin
- * - TEAM_LEAD: Team-level lead (mapped to EMPLOYEE for now, awaiting future decision)
+ * - TEAM_LEAD: Team-level lead
  * - EMPLOYEE: Regular employee
  * 
- * LENS role hierarchy:
- * - MANAGER: Can see and manage other employees' tasks
- * - EMPLOYEE: Can see and manage only their own tasks
+ * LENS roles (passed back to Frontend):
+ * - EMPLOYEE: Regular employee
+ * - TENANT_ADMIN: Tenant admin
+ * - TEAM_LEAD: Team lead
  */
 @Service
 public class RoleMapper {
@@ -22,7 +23,7 @@ public class RoleMapper {
      * Map Inbox role to LENS role.
      * 
      * @param inboxRole role from Inbox (SYSTEM_ADMIN, TENANT_ADMIN, TEAM_LEAD, EMPLOYEE)
-     * @return LENS role (MANAGER or EMPLOYEE)
+     * @return LENS role (EMPLOYEE, TENANT_ADMIN, or TEAM_LEAD)
      */
     public String mapToLensRole(String inboxRole) {
         if (inboxRole == null) {
@@ -30,9 +31,9 @@ public class RoleMapper {
         }
 
         return switch (inboxRole) {
-            case "SYSTEM_ADMIN" -> "MANAGER";
-            case "TENANT_ADMIN" -> "EMPLOYEE";  // Awaiting decision on this mapping
-            case "TEAM_LEAD" -> "EMPLOYEE";     // Awaiting decision on this mapping
+            case "SYSTEM_ADMIN" -> "TENANT_ADMIN";
+            case "TENANT_ADMIN" -> "TENANT_ADMIN";
+            case "TEAM_LEAD" -> "TEAM_LEAD";
             case "EMPLOYEE" -> "EMPLOYEE";
             default -> "EMPLOYEE";
         };

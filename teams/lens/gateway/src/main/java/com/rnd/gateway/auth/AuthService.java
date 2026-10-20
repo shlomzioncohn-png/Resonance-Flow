@@ -29,8 +29,11 @@ public class AuthService {
      * Login user and generate JWT token.
      * Verifies credentials via BFF, then issues JWT.
      * 
+     * The JWT token is returned ONLY via HttpOnly Set-Cookie header in the response.
+     * The response body contains only user info and expiry time (no accessToken).
+     * 
      * @param request containing login (email or username) and password
-     * @return login response with JWT token
+     * @return login response with user info and token expiry (token is in Set-Cookie header)
      */
     public AuthLoginResponseDto login(AuthLoginRequestDto request) {
         log.info("Login attempt for: {}", request.getLogin());
@@ -41,7 +44,7 @@ public class AuthService {
                 request.getPassword()
         );
         
-        // Generate JWT token
+        // Generate JWT token (will be returned in Set-Cookie header by AuthController)
         String token = tokenService.generateToken(
                 userResponse.getId(),
                 userResponse.getDisplayName(),
@@ -50,8 +53,12 @@ public class AuthService {
         
         long expiresIn = tokenService.getTokenTtlSeconds();
         
+        // Store token in request scope for AuthController to set cookie
+        // (We'll use a thread-local or request attribute pattern)
+        AuthContextHolder.setToken(token);
+        
+        // Return only user info and expiry (no token in JSON body)
         AuthLoginResponseDto response = new AuthLoginResponseDto(
-                token,
                 expiresIn,
                 userResponse.getId(),
                 userResponse.getDisplayName(),

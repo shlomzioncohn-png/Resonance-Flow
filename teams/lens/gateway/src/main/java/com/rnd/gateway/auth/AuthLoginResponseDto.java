@@ -4,29 +4,26 @@ import java.util.UUID;
 
 /**
  * Response DTO for POST /auth/login endpoint
- * Contains JWT token and user info
+ * Contains user info and token expiry time.
+ * 
+ * NOTE: JWT token is sent ONLY via HttpOnly cookie (Set-Cookie header),
+ * NOT in the response body. This prevents XSS attacks from stealing the token
+ * via JavaScript access to response.accessToken.
+ * 
+ * Frontend should NOT attempt to extract or store the token — the browser
+ * handles cookie management automatically.
  */
 public class AuthLoginResponseDto {
 
-    private String accessToken;
     private long expiresIn;  // Seconds until token expiry
     private UserInfo user;
 
     public AuthLoginResponseDto() {
     }
 
-    public AuthLoginResponseDto(String accessToken, long expiresIn, UUID id, String displayName, String role) {
-        this.accessToken = accessToken;
+    public AuthLoginResponseDto(long expiresIn, UUID id, String displayName, String role) {
         this.expiresIn = expiresIn;
         this.user = new UserInfo(id, displayName, role);
-    }
-
-    public String getAccessToken() {
-        return accessToken;
-    }
-
-    public void setAccessToken(String accessToken) {
-        this.accessToken = accessToken;
     }
 
     public long getExpiresIn() {

@@ -1,5 +1,5 @@
 server:
-  port: ${SERVER_PORT:8082}
+  port: ${SERVER_PORT:8085}
 
 spring:
   application:
@@ -9,9 +9,9 @@ spring:
 inbox:
   # true = in-memory mock tasks, no Inbox needed. Set false to call the real Inbox.
   mock-enabled: ${INBOX_MOCK_ENABLED:false}
-  # Inbox runs on 8080
+  # Inbox runs on Docker - use localhost when BFF runs locally
   service:
-    url: ${INBOX_SERVICE_URL:http://inbox-service:8080}
+    url: ${INBOX_SERVICE_URL:http://localhost:8082}
   # Seeded Inbox user UUID sent as X-Actor-Id instead of the Gateway's mock "emp_001".
   # Local testing only - empty means "send the userId from the Gateway".
   dev-actor-id: ${INBOX_DEV_ACTOR_ID:}

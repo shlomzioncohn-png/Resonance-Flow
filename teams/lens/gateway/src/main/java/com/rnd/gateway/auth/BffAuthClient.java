@@ -34,7 +34,7 @@ public class BffAuthClient {
     private final CurrentUserContext currentUserContext;
 
     public BffAuthClient(
-            @Value("${bff.service.url:http://localhost:8082}") String bffServiceUrl,
+            @Value("${bff.service.url:http://localhost:8085}") String bffServiceUrl,
             RestTemplate restTemplate,
             CurrentUserContext currentUserContext) {
         this.bffServiceUrl = bffServiceUrl;

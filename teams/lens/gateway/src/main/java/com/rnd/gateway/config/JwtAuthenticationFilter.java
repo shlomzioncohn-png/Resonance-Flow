@@ -31,12 +31,17 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
     protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain filterChain)
             throws ServletException, IOException {
         
-        // Try to extract authentication from cookie or Authorization header
-        Authentication authentication = converter.extractAuthentication(request);
-        
-        if (authentication != null) {
-            logger.debug("Setting authentication in SecurityContext for: {}", authentication.getName());
-            SecurityContextHolder.getContext().setAuthentication(authentication);
+        try {
+            // Try to extract authentication from cookie or Authorization header
+            Authentication authentication = converter.extractAuthentication(request);
+            
+            if (authentication != null) {
+                logger.debug("Setting authentication in SecurityContext for: {}", authentication.getName());
+                SecurityContextHolder.getContext().setAuthentication(authentication);
+            }
+        } catch (Exception e) {
+            logger.error("Error extracting JWT authentication: {}", e.getMessage(), e);
+            // Continue with next filter even if JWT extraction fails
         }
         
         filterChain.doFilter(request, response);
