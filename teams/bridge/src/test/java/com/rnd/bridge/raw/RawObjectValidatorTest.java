@@ -81,6 +81,20 @@ class RawObjectValidatorTest {
     }
 
     @Test
+    void validatePassesForADeleteReviewEventWithAnEmptyObjectList() {
+        // DELETE_REVIEW's own contract (Calendar's cancellation, Drive's trashed, and now
+        // Slack's emptied-group path) is an empty objects list - the logical item no longer
+        // exists. Regression test: this used to be unconditionally rejected by
+        // requireNonEmpty(objects), which would have blocked every DELETE_REVIEW event from ever
+        // reaching Kafka through the real (non-mocked) validator.
+        RawObjectEvent event = RawObjectEvent.create(
+                RawSourceType.SLACK, "kamatech", Instant.parse("2026-08-18T09:15:00Z"), ScopeDecision.INCLUDED,
+                List.of(), Instant.parse("2026-08-18T09:15:00Z"), "corr-1", 1, ChangeType.DELETE_REVIEW, List.of());
+
+        assertThatCode(() -> validator.validate(event)).doesNotThrowAnyException();
+    }
+
+    @Test
     void validateRejectsAnObjectMissingItsContentHash() {
         RawObjectRef invalidRef = new RawObjectRef(Role.BODY, "EMAIL/kamatech/2026-08-18/x.json", null,
                 "application/json", 1L, Modality.TEXT);
