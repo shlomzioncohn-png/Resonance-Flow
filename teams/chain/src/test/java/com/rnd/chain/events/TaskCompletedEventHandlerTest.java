@@ -159,6 +159,23 @@ class TaskCompletedEventHandlerTest {
     }
 
     @Test
+    void onMessage_forATaskCreatedByADoneTaskUpdated_releasesItsDependents() {
+        UUID blocker = UUID.randomUUID();
+        UUID dependent = UUID.randomUUID();
+        LocalDateTime doneEventTime = BASE_TIME.plusMinutes(5);
+        // task.updated(DONE) leaves the task PENDING with updated_at one second before the event.
+        Fixture fixture = newFixture(
+                List.of(task(blocker, TaskStatus.PENDING, doneEventTime.minusSeconds(1), 0),
+                        task(dependent, TaskStatus.PENDING, BASE_TIME, 1)),
+                List.of(new TaskDependency(dependent, blocker)));
+
+        fixture.handler().onMessage(record(blocker.toString(), true, doneEventTime));
+
+        assertEquals(TaskStatus.DONE, fixture.taskRepo().findById(blocker).orElseThrow().getStatus());
+        assertEquals(0, fixture.taskRepo().findById(dependent).orElseThrow().getBlockingCount());
+    }
+
+    @Test
     void onMessage_doesNotOverwriteUpdatedAtWithTheKafkaTimestamp() {
         UUID blocker = UUID.randomUUID();
         Fixture fixture = newFixture(List.of(task(blocker, TaskStatus.ACTIVE, BASE_TIME, 0)), List.of());

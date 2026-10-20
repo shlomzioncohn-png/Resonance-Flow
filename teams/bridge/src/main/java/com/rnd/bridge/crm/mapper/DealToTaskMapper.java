@@ -17,12 +17,8 @@ import java.time.ZoneOffset;
 import java.time.temporal.ChronoUnit;
 
 /**
- * {@code organizationId} is a single value read from configuration - a
- * stand-in for one Inbox organization/account, not a real multi-tenant
- * mapping. Resolving it per deal from {@link Deal#crmAccountSlug()} is the
- * real answer, once Inbox supports looking an organization up by that slug;
- * nothing in this tree does that yet, so one configured value is what every
- * deal from this lane gets.
+ * Maps a CRM {@link Deal} to the canonical {@code Task} (stage to status, close date to deadline, urgency).
+ * {@code organizationId} is one configured value standing in for a real per-deal tenant lookup (not implemented).
  */
 public final class DealToTaskMapper extends AbstractTaskMapper<Deal> {
 
@@ -38,41 +34,20 @@ public final class DealToTaskMapper extends AbstractTaskMapper<Deal> {
         this.stalledAfterDays = stalledAfterDays;
     }
 
-    // Deal.closeDate -> Task.deadline convention (end-of-day UTC). Provisional
-    // pending confirmation from Inbox re: a shared date-to-instant convention
-    // across all adapters - one-line change here once the answer lands.
-    //
-    // Not LocalTime.MAX (23:59:59.999999999): Postgres TIMESTAMPTZ stores at
-    // microsecond precision and rounds, so .999999999 rounds up to .000000
-    // of the next second - the deadline would land in Inbox one day late.
+    // Not LocalTime.MAX: Postgres TIMESTAMPTZ rounds .999999999 up to the next second, landing a day late.
     private static final ZoneOffset DEADLINE_ZONE = ZoneOffset.UTC;
     private static final LocalTime DEADLINE_TIME_OF_DAY = LocalTime.of(23, 59, 59);
 
     public static TaskStatus toTaskStatus(DealStage stage) {
         return switch (stage) {
             case PROSPECT, QUALIFIED, PROPOSAL, NEGOTIATION -> TaskStatus.NEW;
-            // Not SNOOZED: Inbox requires snoozed_until whenever
-            // status = snoozed, and a Deal carries no resume date
-            // (closeDate is a target close date, not a snooze-until date).
-            // Fabricating one is forbidden, so the task stays NEW and
-            // toUrgency() holds it at urgency 1 instead of hiding it in a
-            // snoozed queue with a made-up wake time.
+            // Not SNOOZED: Inbox requires snoozed_until, and a Deal has no resume date to give it.
             case ON_HOLD -> TaskStatus.NEW;
             case CLOSED_WON -> TaskStatus.DONE;
             case CLOSED_LOST -> TaskStatus.CANCELLED;
         };
     }
 
-    /**
-     * Deal.closeDate is a plain date; Inbox's {@code tasks.deadline} is
-     * {@code TIMESTAMPTZ}. Converted to end-of-day UTC so a deal closing "on
-     * the 30th" is not already overdue at 00:01 on the 30th.
-     * <p>
-     * Provisional pending confirmation from Inbox: a shared date-to-instant
-     * convention across all adapters is out to their team lead. Should be a
-     * one-line change ({@link #DEADLINE_ZONE} / {@link #DEADLINE_TIME_OF_DAY})
-     * once the answer lands.
-     */
     static Instant toDeadline(LocalDate closeDate) {
         if (closeDate == null) {
             return null;
@@ -121,46 +96,8 @@ public final class DealToTaskMapper extends AbstractTaskMapper<Deal> {
     }
 
     /**
-     * Urgency for Inbox's {@code tasks.urgency} ({@code SMALLINT CHECK
-     * (urgency BETWEEN 1 AND 5)}), built from deal momentum plus a
-     * time-pressure bonus for open deals.
-     * <p>
-     * Base score by stage (deal momentum):
-     * <ul>
-     *   <li>{@code NEGOTIATION} -&gt; 4</li>
-     *   <li>{@code PROPOSAL} -&gt; 3</li>
-     *   <li>{@code QUALIFIED} -&gt; 2</li>
-     *   <li>{@code PROSPECT}, {@code ON_HOLD}, {@code CLOSED_WON}, {@code
-     *       CLOSED_LOST} -&gt; 1</li>
-     * </ul>
-     * Time-pressure bonus, added only for the four open stages ({@code
-     * PROSPECT}, {@code QUALIFIED}, {@code PROPOSAL}, {@code NEGOTIATION}),
-     * based on {@code daysToClose} - the day count from {@code asOf}'s UTC
-     * date to {@code deal.closeDate()}:
-     * <ul>
-     *   <li>{@code closeDate} null -&gt; +0</li>
-     *   <li>{@code daysToClose < 0} (already overdue, still open) -&gt; +2</li>
-     *   <li>{@code 0 <= daysToClose <= 3} -&gt; +2</li>
-     *   <li>{@code 4 <= daysToClose <= 14} -&gt; +1</li>
-     *   <li>{@code daysToClose > 14} -&gt; +0</li>
-     * </ul>
-     * {@code ON_HOLD}, {@code CLOSED_WON} and {@code CLOSED_LOST} get no
-     * bonus: a paused or finished deal should not be pushed up the queue by
-     * a date.
-     * <p>
-     * Stalled bonus, added after the above and before the final clamp: +1 for
-     * a deal in one of the four open stages whose days between {@code
-     * stageChangedAt} and {@code asOf} (UTC dates, same convention as the
-     * time-pressure bonus) is at least {@code stalledAfterDays} (config:
-     * {@code bridge.crm.stalled-after-days} / {@code CRM_STALLED_AFTER_DAYS},
-     * default 14; {@code <= 0} disables this bonus entirely).
-     * {@code stageChangedAt} after {@code asOf} (clock skew or bad data)
-     * never counts as stalled. {@code ON_HOLD}, {@code CLOSED_WON} and
-     * {@code CLOSED_LOST} are never bumped by this rule either.
-     * <p>
-     * The result is clamped to 1..5 (AbstractTaskMapper clamps it again
-     * defensively; this local clamp is kept so calling this method directly
-     * still returns an in-range value).
+     * Urgency: stage base (PROSPECT 1 / QUALIFIED 2 / PROPOSAL 3 / NEGOTIATION 4, others 1) + close-date
+     * bonus (open stages only: +2 if &lt;=3 days to close, +1 if &lt;=14, else +0) + stalled +1; clamped to 1..5.
      */
     @Override
     protected Integer toUrgency(Deal deal, Instant asOf) {
@@ -226,11 +163,7 @@ public final class DealToTaskMapper extends AbstractTaskMapper<Deal> {
 
     @Override
     protected Instant toCompletedAt(Deal deal) {
-        // Only a won deal actually completed. CLOSED_LOST maps to CANCELLED,
-        // not DONE, and did not complete. Reuses toDeadline's close-date
-        // conversion so the two end-of-day-UTC conversions cannot drift -
-        // including returning null when the close date itself is null (see
-        // D-10552: marked won with no close date recorded).
+        // Only CLOSED_WON completed; reuses toDeadline so both conversions can't drift (D-10552: null close date -> null).
         return deal.stage() == DealStage.CLOSED_WON ? toDeadline(deal.closeDate()) : null;
     }
 }

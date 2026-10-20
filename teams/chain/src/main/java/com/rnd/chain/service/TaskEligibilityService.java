@@ -37,12 +37,8 @@ public class TaskEligibilityService {
     private static final Logger log =
             LoggerFactory.getLogger(TaskEligibilityService.class);
 
-    /**
-     * How far before a DONE task.updated's own updated_at a task created
-     * from it is stamped.
-     */
-    static final Duration DONE_EVENT_UPDATED_AT_SKEW =
-            Duration.ofSeconds(1);
+    /** How far before a DONE task.updated's own updated_at a task created from it is stamped. */
+    static final Duration DONE_EVENT_UPDATED_AT_SKEW = Duration.ofSeconds(1);
 
     private final TaskRepository taskRepository;
     private final TaskDependencyRepository taskDependencyRepository;
