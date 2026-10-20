@@ -49,6 +49,7 @@ class TaskCreatedEventHandlerTest {
                 .setCreatedAt(timestamp(Instant.now()));
     }
 
+
     @Test
     void onMessage_forANewTask_insertsItReadyWithZeroedCounters() {
 
@@ -162,6 +163,10 @@ class TaskCreatedEventHandlerTest {
 
                         return List.of();
                     }
+                        @Override
+                        public List<Task> findByTenantId(UUID tenantId) {
+                                return List.of();
+                        }  
 
                     @Override
                     public List<Task> findByParentTaskId(
@@ -195,6 +200,7 @@ class TaskCreatedEventHandlerTest {
 
                         return List.of();
                     }
+
                 };
 
         TaskCreatedEventHandler handler =
