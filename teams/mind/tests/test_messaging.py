@@ -37,6 +37,22 @@ def test_config_reads_kafka_from_the_mounted_files(tmp_path, monkeypatch):
     assert s.consumer_conf("g")["group.id"] == "g"
 
 
+def test_kafka_sasl_password_comes_from_its_mounted_file_first(tmp_path, monkeypatch):
+    sec = tmp_path / "secrets.yaml"
+    sec.write_text("kafka:\n  sasl: { mechanism: PLAIN, username: u, password: stale }\n")
+    sasl_dir = tmp_path / "kafka-sasl"
+    sasl_dir.mkdir()
+    (sasl_dir / "client-passwords").write_text("fresh\n")
+    monkeypatch.setenv("CONFIG_FILE_PATH", str(tmp_path / "nope.yaml"))
+    monkeypatch.setenv("SECRETS_FILE_PATH", str(sec))
+    monkeypatch.setenv("KAFKA_SASL_SECRETS_DIR", str(sasl_dir))
+
+    assert load_settings().sasl.password == "fresh"
+
+    (sasl_dir / "client-passwords").unlink()
+    assert load_settings().sasl.password == "stale"
+
+
 def test_config_missing_files_is_safe(tmp_path, monkeypatch):
     monkeypatch.setenv("CONFIG_FILE_PATH", str(tmp_path / "nope.yaml"))
     monkeypatch.setenv("SECRETS_FILE_PATH", str(tmp_path / "nope2.yaml"))

@@ -25,6 +25,7 @@ import yaml
 
 _DEFAULT_CONFIG = "/etc/resonance-flow/config/config.yaml"
 _DEFAULT_SECRETS = "/etc/resonance-flow/secret/secrets.yaml"
+_DEFAULT_KAFKA_SASL_SECRETS_DIR = "/etc/resonance-flow/secrets/kafka-sasl"
 
 
 @dataclass
@@ -97,6 +98,13 @@ def load_settings() -> MessagingSettings:
     kafka = merged.get("kafka", {}) or {}
     producer = kafka.get("producer", {}) or {}
     sasl = kafka.get("sasl", {}) or {}
+    password_file = (
+        Path(os.environ.get("KAFKA_SASL_SECRETS_DIR", _DEFAULT_KAFKA_SASL_SECRETS_DIR))
+        / "client-passwords"
+    )
+    password = (
+        password_file.read_text().strip() if password_file.is_file() else sasl.get("password", "")
+    )
     return MessagingSettings(
         bootstrap_servers=kafka.get("bootstrap_servers", ""),
         schema_registry_url=kafka.get("schema_registry_url", ""),
@@ -105,6 +113,6 @@ def load_settings() -> MessagingSettings:
         sasl=SaslSettings(
             mechanism=sasl.get("mechanism", ""),
             username=sasl.get("username", ""),
-            password=sasl.get("password", ""),
+            password=password,
         ),
     )
