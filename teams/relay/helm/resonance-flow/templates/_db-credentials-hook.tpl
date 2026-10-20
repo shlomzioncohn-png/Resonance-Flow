@@ -1,11 +1,11 @@
 {{/*
 Creates a random-password Secret. Takes {root, component, secretName,
-secretKey (default "password"), enabled}.
+secretKeys (default ["password"]), enabled}. Each key gets its own password.
 */}}
 {{- define "resonance-flow.credentialsHook" -}}
 {{- $root := .root }}
 {{- $component := .component }}
-{{- $secretKey := .secretKey | default "password" }}
+{{- $secretKeys := .secretKeys | default (list "password") }}
 {{- if .enabled }}
 {{- $name := printf "%s-init" .secretName }}
 {{- $secretName := .secretName }}
@@ -113,11 +113,15 @@ spec:
               set -eu
               SA=/var/run/secrets/kubernetes.io/serviceaccount
               API="https://kubernetes.default.svc/api/v1/namespaces/{{ $root.Release.Namespace }}/secrets"
+              DATA=""
+              {{- range $i, $key := $secretKeys }}
               PASSWORD="$(tr -dc 'A-Za-z0-9' </dev/urandom | head -c 32)"
               if [ -z "$PASSWORD" ]; then
                 echo "Generated an empty password, refusing to continue" >&2
                 exit 1
               fi
+              DATA="${DATA}{{ if $i }},{{ end }}\"{{ $key }}\":\"$PASSWORD\""
+              {{- end }}
               create() {
                 curl -sS -o /tmp/response -w '%{http_code}' \
                   --cacert "$SA/ca.crt" \
@@ -125,7 +129,7 @@ spec:
                   -H "Content-Type: application/json" \
                   -X POST "$API" -d "$1"
               }
-              DB_BODY="{\"apiVersion\":\"v1\",\"kind\":\"Secret\",\"metadata\":{\"name\":\"{{ $secretName }}\"},\"type\":\"Opaque\",\"stringData\":{\"{{ $secretKey }}\":\"$PASSWORD\"}}"
+              DB_BODY="{\"apiVersion\":\"v1\",\"kind\":\"Secret\",\"metadata\":{\"name\":\"{{ $secretName }}\"},\"type\":\"Opaque\",\"stringData\":{$DATA}}"
               CODE=$(create "$DB_BODY")
               case "$CODE" in
                 201) echo "Created {{ $secretName }}" ;;
@@ -139,11 +143,14 @@ spec:
                     cat /tmp/get-response.json >&2
                     exit 1
                   fi
-                  EXISTING_PASSWORD="$(sed -n 's/.*"{{ $secretKey }}": *"\([^"]*\)".*/\1/p' /tmp/get-response.json | base64 -d)"
-                  if [ -n "$EXISTING_PASSWORD" ]; then
+                  VALID=true
+                  {{- range $secretKeys }}
+                  [ -n "$(sed -n 's/.*"{{ . }}": *"\([^"]*\)".*/\1/p' /tmp/get-response.json | base64 -d)" ] || VALID=false
+                  {{- end }}
+                  if [ "$VALID" = true ]; then
                     echo "{{ $secretName }} already exists and looks valid - reusing its password"
                   else
-                    echo "{{ $secretName }} exists but its password is empty - recreating it" >&2
+                    echo "{{ $secretName }} exists but a password is missing or empty - recreating it" >&2
                     DELETE_CODE=$(curl -sS -o /tmp/delete-response -w '%{http_code}' \
                       --cacert "$SA/ca.crt" \
                       -H "Authorization: Bearer $(cat "$SA/token")" \
