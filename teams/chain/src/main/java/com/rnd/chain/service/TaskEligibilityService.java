@@ -17,6 +17,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.HashMap;
 import java.util.List;
@@ -35,6 +36,13 @@ public class TaskEligibilityService {
 
     private static final Logger log =
             LoggerFactory.getLogger(TaskEligibilityService.class);
+
+    /**
+     * How far before a DONE task.updated's own updated_at a task created
+     * from it is stamped.
+     */
+    static final Duration DONE_EVENT_UPDATED_AT_SKEW =
+            Duration.ofSeconds(1);
 
     private final TaskRepository taskRepository;
     private final TaskDependencyRepository taskDependencyRepository;
@@ -68,7 +76,8 @@ public class TaskEligibilityService {
 
         TaskReadinessSnapshot readiness =
                 requireReadinessSnapshot(
-                        taskReadinessRepository.findByIds(List.of(taskId)),
+                        taskReadinessRepository.findByIds(
+                                List.of(taskId)),
                         taskId);
 
         taskCounterUpdater.updateCounters(
@@ -108,11 +117,13 @@ public class TaskEligibilityService {
                             || (previousStatus == TaskStatus.DONE
                             && newStatus != TaskStatus.DONE);
 
-            List<UUID> dependentIds = List.of();
-            Map<UUID, TaskReadinessSnapshot> beforeReadiness = Map.of();
+            List<UUID> dependentIds =
+                    List.of();
+
+            Map<UUID, TaskReadinessSnapshot> beforeReadiness =
+                    Map.of();
 
             /*
-             * Important:
              * Read the View BEFORE changing the blocker status.
              * Once the blocker becomes DONE/non-DONE the View itself changes.
              */
@@ -126,7 +137,8 @@ public class TaskEligibilityService {
                                 .toList();
 
                 beforeReadiness =
-                        taskReadinessRepository.findByIds(dependentIds);
+                        taskReadinessRepository.findByIds(
+                                dependentIds);
             }
 
             TaskCounterUpdater.requireUpdated(
@@ -164,13 +176,12 @@ public class TaskEligibilityService {
     }
 
     /**
-     * Same status-change effect as {@link #onTaskStatusChanged}, but for a producer
-     * (task.updated) whose events carry no id and must be ordered by the updatedAt
-     * on the event itself.
+     * Same status-change effect as {@link #onTaskStatusChanged},
+     * but for a task.updated producer whose events are ordered by
+     * eventUpdatedAt.
      *
-     * @throws TaskNotFoundException if no task with {@code taskId} exists
-     * @throws TenantReassignmentException if {@code tenantId} differs from the task's
-     * already-stored non-null tenant
+     * @throws TenantReassignmentException if tenantId differs from
+     * the already stored tenant
      */
     @Transactional
     public void onTaskStatusChangedIfNewer(
@@ -198,25 +209,18 @@ public class TaskEligibilityService {
         graphLock.runExclusive(() -> {
 
             Task current =
-                    taskRepository.findById(taskId).orElse(null);
+                    taskRepository.findById(taskId)
+                            .orElse(null);
 
             if (current == null) {
-                Task newTask = Task.builder()
-                        .id(taskId)
-                        .parentTaskId(null)
-                        .tenantId(tenantId)
-                        .status(newStatus)
-                        .isReady(true)
-                        .blockingCount(0)
-                        .openConstraintCount(0)
-                        .estimatedDurationMin(null)
-                        .score(null)
-                        .createdAt(LocalDateTime.now())
-                        .updatedAt(eventUpdatedAt)
-                        .deletedAt(null)
-                        .build();
 
-                taskRepository.insertIfAbsent(newTask);
+                taskRepository.insertIfAbsent(
+                        newTaskFromEvent(
+                                taskId,
+                                tenantId,
+                                newStatus,
+                                eventUpdatedAt));
+
                 return;
             }
 
@@ -240,7 +244,8 @@ public class TaskEligibilityService {
             }
 
             if (current.getUpdatedAt() != null
-                    && !eventUpdatedAt.isAfter(current.getUpdatedAt())) {
+                    && !eventUpdatedAt.isAfter(
+                            current.getUpdatedAt())) {
 
                 log.debug(
                         "Task {} status update ignored: event updatedAt {} is not newer than stored {}",
@@ -260,8 +265,11 @@ public class TaskEligibilityService {
                             || (previousStatus == TaskStatus.DONE
                             && newStatus != TaskStatus.DONE);
 
-            List<UUID> dependentIds = List.of();
-            Map<UUID, TaskReadinessSnapshot> beforeReadiness = Map.of();
+            List<UUID> dependentIds =
+                    List.of();
+
+            Map<UUID, TaskReadinessSnapshot> beforeReadiness =
+                    Map.of();
 
             if (affectsDependents) {
 
@@ -273,7 +281,8 @@ public class TaskEligibilityService {
                                 .toList();
 
                 beforeReadiness =
-                        taskReadinessRepository.findByIds(dependentIds);
+                        taskReadinessRepository.findByIds(
+                                dependentIds);
             }
 
             log.info(
@@ -318,11 +327,97 @@ public class TaskEligibilityService {
     }
 
     /**
-     * Applies task.completed.
-     * The Kafka record timestamp is compared against the stored updatedAt
-     * but is not written back to it.
+     * Handles a task.updated carrying Inbox's DONE status.
      *
-     * @throws TaskNotFoundException if no task with {@code taskId} exists
+     * Completion itself is applied only by task.completed.
+     * This method preserves task.updated's tenant validation and
+     * missing-task creation behavior.
+     */
+    @Transactional
+    public void onTaskUpdatedAsDone(
+            UUID taskId,
+            LocalDateTime eventUpdatedAt,
+            UUID tenantId) {
+
+        Objects.requireNonNull(
+                taskId,
+                "taskId must not be null");
+
+        Objects.requireNonNull(
+                eventUpdatedAt,
+                "eventUpdatedAt must not be null");
+
+        Objects.requireNonNull(
+                tenantId,
+                "tenantId must not be null");
+
+        graphLock.runExclusive(() -> {
+
+            Task current =
+                    taskRepository.findById(taskId)
+                            .orElse(null);
+
+            if (current == null) {
+
+                taskRepository.insertIfAbsent(
+                        newTaskFromEvent(
+                                taskId,
+                                tenantId,
+                                TaskStatus.PENDING,
+                                eventUpdatedAt.minus(
+                                        DONE_EVENT_UPDATED_AT_SKEW)));
+
+                return;
+            }
+
+            if (current.getTenantId() != null
+                    && !current.getTenantId().equals(tenantId)) {
+
+                throw new TenantReassignmentException(
+                        "Task "
+                                + taskId
+                                + " already has tenant "
+                                + current.getTenantId()
+                                + ", event claims "
+                                + tenantId);
+            }
+
+            log.debug(
+                    "Task {} task.updated DONE ignored: "
+                            + "completion is applied by task.completed",
+                    taskId);
+        });
+    }
+
+    private static Task newTaskFromEvent(
+            UUID taskId,
+            UUID tenantId,
+            TaskStatus status,
+            LocalDateTime updatedAt) {
+
+        return Task.builder()
+                .id(taskId)
+                .parentTaskId(null)
+                .tenantId(tenantId)
+                .status(status)
+                .isReady(true)
+                .blockingCount(0)
+                .openConstraintCount(0)
+                .estimatedDurationMin(null)
+                .score(null)
+                .createdAt(LocalDateTime.now())
+                .updatedAt(updatedAt)
+                .deletedAt(null)
+                .build();
+    }
+
+    /**
+     * Applies task.completed.
+     *
+     * The Kafka record timestamp is compared against the stored updatedAt
+     * but is not written back to it, so a later task.updated is not skewed.
+     *
+     * @throws TaskNotFoundException if no task with taskId exists
      */
     @Transactional
     public void onTaskCompleted(
@@ -347,7 +442,8 @@ public class TaskEligibilityService {
             }
 
             if (current.getUpdatedAt() != null
-                    && !kafkaTimestamp.isAfter(current.getUpdatedAt())) {
+                    && !kafkaTimestamp.isAfter(
+                            current.getUpdatedAt())) {
 
                 log.debug(
                         "Task {} completion ignored: record timestamp {} is not newer than stored {}",
@@ -366,7 +462,8 @@ public class TaskEligibilityService {
                             .toList();
 
             Map<UUID, TaskReadinessSnapshot> beforeReadiness =
-                    taskReadinessRepository.findByIds(dependentIds);
+                    taskReadinessRepository.findByIds(
+                            dependentIds);
 
             log.info(
                     "Task {} completed",
@@ -423,7 +520,8 @@ public class TaskEligibilityService {
                                     task,
                                     Math.max(
                                             0,
-                                            task.getBlockingCount() + delta),
+                                            task.getBlockingCount()
+                                                    + delta),
                                     task.getOpenConstraintCount());
                         });
 
@@ -432,7 +530,8 @@ public class TaskEligibilityService {
          * This is the authoritative readiness state.
          */
         Map<UUID, TaskReadinessSnapshot> afterReadiness =
-                taskReadinessRepository.findByIds(dependentIds);
+                taskReadinessRepository.findByIds(
+                        dependentIds);
 
         for (Task task : updated) {
 
@@ -447,20 +546,16 @@ public class TaskEligibilityService {
                             task.getId());
 
             /*
-             * History receives the values calculated by the View,
+             * History receives values calculated by the View,
              * not the stored task.blocking_count.
              */
             historyRecorder.recordBlockingTransition(
                     task.getId(),
-                    before.blockingCount() + before.openConstraintCount(),
-                    after.blockingCount()+ after.openConstraintCount());
+                    before.blockingCount()
+                            + before.openConstraintCount(),
+                    after.blockingCount()
+                            + after.openConstraintCount());
 
-            /*
-             * Stored counters are still maintained during this migration stage.
-             *
-             * The next change in TaskCounterUpdater will make the readiness/publish
-             * decision itself use before/after from the View as well.
-             */
             taskCounterUpdater.recomputePriorityScoreAndPublish(
                     task.getId(),
                     previousById.get(task.getId()),
@@ -477,9 +572,6 @@ public class TaskEligibilityService {
                 taskId,
                 "taskId must not be null");
 
-        /*
-         * Still validates that the task itself exists.
-         */
         Task task =
                 taskCounterUpdater.requireTask(taskId);
 
@@ -504,6 +596,7 @@ public class TaskEligibilityService {
                 snapshots.get(taskId);
 
         if (snapshot == null) {
+
             throw new IllegalStateException(
                     "No task_readiness row found for task "
                             + taskId);
