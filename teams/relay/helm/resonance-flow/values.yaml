@@ -115,6 +115,9 @@ components:
       tag: "22a8e01"
     containerPort: 8000
     service: *defaultService
+    metrics:
+      enabled: true
+      path: /metrics
     resources: *defaultResources
     <<: *defaultHealthProbes
     env: {}
@@ -180,6 +183,9 @@ components:
       tag: "placeholder"
     containerPort: 8082
     service: *defaultService
+    metrics:
+      enabled: true
+      team: lens
     resources: *defaultResources
     <<: *defaultHealthProbes
     env: {}
@@ -218,6 +224,10 @@ components:
       tag: "94c3259"
     containerPort: 8080
     service: *defaultService
+    # base-path: / in bridge's application.yml, so no /actuator prefix.
+    metrics:
+      enabled: true
+      path: /prometheus
     resources: *defaultResources
     <<: *defaultHealthProbes
     env: {}
@@ -355,6 +365,10 @@ components:
       tag: "placeholder"
     containerPort: 8081
     service: *defaultService
+    # base-path: / in chain's application.yml, so no /actuator prefix.
+    metrics:
+      enabled: true
+      path: /prometheus
     resources: *defaultResources
     <<: *defaultHealthProbes
     # Password comes from the chain-db-credentials Secret, mounted as a file below -
@@ -403,6 +417,8 @@ components:
       tag: "085a2e7"
     containerPort: 8080
     service: *defaultService
+    metrics:
+      enabled: true
     resources: *defaultResources
     startupProbe:
       httpGet:
@@ -506,6 +522,9 @@ components:
       tag: "placeholder"
     containerPort: 8080
     service: *defaultService
+    metrics:
+      enabled: true
+      team: lens
     resources: *defaultResources
     <<: *defaultHealthProbes
     volumeMounts:
@@ -536,6 +555,9 @@ components:
     service:
       type: ClusterIP
       port: 80
+    metrics:
+      enabled: true
+      team: relay
     resources:
       requests:
         cpu: 100m

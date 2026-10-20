@@ -16,6 +16,7 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
+from prometheus_fastapi_instrumentator import Instrumentator
 from starlette.middleware.base import RequestResponseEndpoint
 from starlette.responses import Response
 
@@ -66,6 +67,11 @@ app.include_router(v1_router)
 # /debug/simulate-call and /debug/instrumentation -- temporary, see
 # api/debug.py and api/README.md "Instrumentation".
 app.include_router(debug_router)
+
+# /metrics for Prometheus -- HTTP request count/latency per route, plus the
+# default process/Python metrics. Scraped via components.mind.metrics in
+# the shared Helm chart.
+Instrumentator().instrument(app).expose(app, include_in_schema=False)
 
 _START_TIME = time.time()
 
