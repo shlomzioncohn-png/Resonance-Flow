@@ -4,6 +4,7 @@ import com.rnd.chain.dto.Task;
 import com.rnd.chain.dto.TaskDependency;
 import com.rnd.chain.dto.TaskEligibilityResponse;
 import com.rnd.chain.dto.TaskStatus;
+import com.rnd.chain.dto.TaskTier;
 import com.rnd.chain.exception.TaskNotFoundException;
 import com.rnd.chain.exception.TenantReassignmentException;
 import com.rnd.chain.repository.GraphLock;
@@ -136,13 +137,16 @@ public class TaskEligibilityService {
      * non-null tenant - confirmed with the Inbox team that {@code tenant_id} never legitimately
      * changes after creation, so this always signals a bug upstream. Checked before the staleness
      * short-circuit below, so a stale/duplicate redelivery carrying a wrong tenant is still flagged.
+     *
+     * <p>{@code tier} is stored under the same staleness check; null keeps the stored tier.
      */
    @Transactional
 public void onTaskStatusChangedIfNewer(
         UUID taskId,
         TaskStatus newStatus,
         LocalDateTime eventUpdatedAt,
-        UUID tenantId) {
+        UUID tenantId,
+        TaskTier tier) {
 
     Objects.requireNonNull(taskId, "taskId must not be null");
     Objects.requireNonNull(newStatus, "newStatus must not be null");
@@ -163,6 +167,7 @@ public void onTaskStatusChangedIfNewer(
                     .openConstraintCount(0)
                     .estimatedDurationMin(null)
                     .score(null)
+                    .tier(tier)
                     .createdAt(LocalDateTime.now())
                     .updatedAt(eventUpdatedAt)
                     .deletedAt(null)
@@ -211,6 +216,7 @@ public void onTaskStatusChangedIfNewer(
                                 .status(newStatus)
                                 .updatedAt(eventUpdatedAt)
                                 .tenantId(tenantId)
+                                .tier(tier != null ? tier : task.getTier())
                                 .build()),
                 taskId);
 

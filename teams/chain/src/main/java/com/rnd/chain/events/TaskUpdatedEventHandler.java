@@ -2,6 +2,7 @@ package com.rnd.chain.events;
 
 import com.rnd.chain.dto.Task;
 import com.rnd.chain.dto.TaskStatus;
+import com.rnd.chain.dto.TaskTier;
 import com.rnd.chain.exception.TenantReassignmentException;
 import com.rnd.chain.service.TaskEligibilityService;
 import com.rnd.inbox.event.TaskUpdatedEvent;
@@ -66,23 +67,26 @@ public class TaskUpdatedEventHandler {
         TaskStatus newStatus = InboxTaskStatusMapper.map(event.getStatus());
         LocalDateTime eventUpdatedAt = toLocalDateTime(event.getUpdatedAt());
         UUID tenantId = parseUuid(event.getTenantId(), "tenant_id");
+        TaskTier tier = InboxTaskTierMapper.map(event);
 
         template.processUnclaimed(taskId.toString(), "task.updated",
-                () -> apply(taskId, newStatus, eventUpdatedAt, tenantId));
+                () -> apply(taskId, newStatus, eventUpdatedAt, tenantId, tier));
     }
 
     private void apply(
         UUID taskId,
         TaskStatus newStatus,
         LocalDateTime eventUpdatedAt,
-        UUID tenantId) {
+        UUID tenantId,
+        TaskTier tier) {
 
     try {
         taskEligibilityService.onTaskStatusChangedIfNewer(
                 taskId,
                 newStatus,
                 eventUpdatedAt,
-                tenantId);
+                tenantId,
+                tier);
 
     } catch (TenantReassignmentException e) {
         // Confirmed with Inbox: tenant_id never legitimately changes after creation, so this
