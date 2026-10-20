@@ -249,6 +249,55 @@ class ChatGroupStateReconcilerTest {
         assertThat(originalGroup.messages().get(0).landedAttachments()).extracting("fileId").containsExactly("F1");
     }
 
+    @org.junit.jupiter.api.Disabled(
+            "Known, unfixed bug (not in scope of docs/plans/slack-message-deleted.md): when A's reply "
+                    + "migrates A into a brand-new thread group, a second non-thread message B that had "
+                    + "already landed in the same original time-gap group as A is left behind in the "
+                    + "now-superseded original group - never migrated into the thread, never reachable by any "
+                    + "group that can still publish, so B is permanently stranded and never reaches Kafka. "
+                    + "newThreadGroupState/migratedRootSnapshot only ever copies the ROOT's own snapshot (keyed "
+                    + "by threadId) into the new thread group - every other message sharing the original "
+                    + "group's id (B here) is not considered at all. Left failing (not deleted or weakened) so "
+                    + "it fails loudly again once someone attempts a fix; tracked separately from this plan.")
+    @Test
+    void secondNonThreadMessageIsNotStrandedInTheSupersededGroupWhenTheFirstIsLaterThreaded() {
+        // A arrives, then B shortly after (same chat, within the session gap) - both land in the
+        // same non-thread time-gap group, before that group is ever published.
+        reconciler.reconcileNonThreadedMessage(
+                message("chat-a", "malki", "2026-08-18T09:00:00Z", "message A", "a1"));
+        ChatGroupStateReconciler.RealtimeReconcileResult bResult = reconciler.reconcileNonThreadedMessage(
+                message("chat-a", "ruth", "2026-08-18T09:01:00Z", "message B", "b1"));
+        String originalGroupId = bResult.groupState().groupId();
+        assertThat(bResult.groupState().messages()).extracting(MessageSnapshot::messageId)
+                .containsExactly("a1", "b1");
+
+        // A reply to A arrives before the group was ever published - this migrates A out into a
+        // brand-new thread group and marks the original (A+B) group superseded.
+        reconciler.group(List.of(
+                threadMessage("chat-a", "esti", "2026-08-18T09:05:00Z", "reply to A", "reply1", "a1")));
+
+        GroupState originalGroup = groupStateStore.load(RawSourceType.SLACK, "kamatech", originalGroupId).orElseThrow();
+        assertThat(originalGroup.superseded()).isTrue();
+
+        // B is still only sitting in the now-superseded original group - never moved into the
+        // new thread group, and never published, since a superseded group is never scheduled for
+        // publication again (see SlackSessionScheduler.onDeadline / isOpenForNewMessages).
+        GroupState threadGroup = groupStateStore.load(RawSourceType.SLACK, "kamatech", "a1").orElseThrow();
+        assertThat(threadGroup.messages()).extracting(MessageSnapshot::messageId).doesNotContain("b1");
+        assertThat(originalGroup.messages()).extracting(MessageSnapshot::messageId).contains("b1");
+
+        // B's content should still be reachable by some group that can eventually publish -
+        // either migrated into the new thread group, or left in a non-superseded group of its
+        // own. If neither holds, B is permanently stranded and will never be published.
+        boolean bReachableSomewhereOpen = threadGroup.messages().stream()
+                .anyMatch(m -> m.messageId().equals("b1"))
+                || (!originalGroup.superseded() && originalGroup.messages().stream()
+                        .anyMatch(m -> m.messageId().equals("b1")));
+        assertThat(bReachableSomewhereOpen)
+                .as("B must remain reachable by a group that can still be published")
+                .isTrue();
+    }
+
     @Test
     void editingTheRootAfterThreadingUpdatesTheThreadCopyNotTheOriginalGroup() {
         ChatGroupStateReconciler.RealtimeReconcileResult rootResult = reconciler.reconcileNonThreadedMessage(
