@@ -129,7 +129,8 @@ src/main/resources/db/migration/  # Flyway migrations (V1 schema, V2 dependency_
                                   # V10 processed_events - Kafka event dedup claims,
                                   # V11 task readiness view + indexes,
                                   # V12 constraint_history - issue #815,
-                                  # V13 drops unresolved_dependencies - replaced by placeholder tasks)
+                                  # V13 drops unresolved_dependencies - replaced by placeholder tasks,
+                                  # V14 task.tier - issue #864)
 src/test/java/com/rnd/chain/
 ├── controller/ChainControllerTest.java
 ├── service/                # TaskDependencyServicePostgresIntegrationTest,
@@ -215,6 +216,14 @@ Javadoc for what a claim does and doesn't guarantee.
 **Status mapping**: `InboxTaskStatusMapper` collapses Inbox's 8 task statuses into Chain's 3.
 `DONE`, `CANCELLED` and `REJECTED` map to `DONE`, because all three release dependents. `IN_PROGRESS`
 maps to `ACTIVE`, and every other status maps to `PENDING`.
+
+**Tier (Issue #864)**: `task.updated` may carry an optional `tier` (strategic / tactical / operational).
+Chain stores only the latest one in `task.tier` (V14, nullable, CHECK on the three values). It is not exposed
+in any API and has no effect on `priority_score` or `is_available`. `InboxTaskTierMapper` reads it only
+when `hasTier()`; a missing, `UNSPECIFIED` or unrecognized tier maps to null. Merge rule: an event with a tier
+replaces the stored one, an event without a tier keeps it, so a stored tier can never be cleared. The tier is
+written in the same transaction and under the same newest-wins check as the status, both when the task is
+created from `task.updated` and when it already exists. A tier-only change writes no `task_state_history` row.
 
 **Publishing**: the only publisher for `task.scheduling.updated` is `KafkaSchedulingUpdatePublisher`
 (`com.rnd.chain.events` - the same package as the consumers, see #543), used by `SchedulingUpdateService`. It maps `TaskSchedulingUpdatedEvent` to the
