@@ -564,3 +564,73 @@ Solution:
 - Timing-attack resistant password hashing
 - Proper error messages without info leakage
 
+
+
+### ❌ Scenario 2: Invalid Credentials - Error Handling
+
+**Step 1: Open Login Page**
+```
+URL: http://localhost:3000/login
+```
+
+**Step 2: Enter Invalid Credentials**
+```
+Email: testuser123@example.com
+Password: WrongPassword123!
+```
+
+**Step 3: Click "Sign in"**
+
+**Expected Results:**
+```
+✓ POST /auth/login request sent to http://localhost:8080
+✓ Response: 401 Unauthorized
+✓ Response body:
+  {
+    "status": "ERROR",
+    "errorCode": "UNAUTHORIZED",
+    "message": "Invalid email or password.",
+    "path": "/auth/login",
+    "timestamp": "2026-10-20T18:09:18..."
+  }
+✓ Frontend displays Alert: "Invalid email or password. Please try again."
+✓ Form remains visible for retry
+✓ NO redirect
+✓ Button re-enabled for retry
+```
+
+**✅ STATUS: WORKING - Invalid credentials properly handled 2026-10-20 18:09**
+
+---
+
+## Summary: End-to-End Login Flow ✅ COMPLETE
+
+### What's Working:
+1. ✅ **Valid credentials** → 200 OK + HttpOnly cookie + redirect
+2. ✅ **Invalid credentials** → 401 Unauthorized + user-friendly error
+3. ✅ **Token in HttpOnly cookie** → XSS protected
+4. ✅ **No token in JSON response** → Secure by default
+5. ✅ **No localStorage** → Cannot be stolen via XSS
+6. ✅ **Proper error messages** → "Invalid email or password" for auth failures
+7. ✅ **Service integration** → Frontend → Gateway → BFF → Inbox → Database
+
+### Security Implemented:
+- HttpOnly cookie: JavaScript cannot access token
+- Secure flag: HTTPS only (when deployed)
+- SameSite=Strict: CSRF protection
+- JWT validation: cryptographically signed
+- Database validation: password hashing with BCrypt
+- Rate limiting: Too many failed attempts temporarily locks account
+- Timing attack protection: Dummy hash for non-existent users
+
+### Testing Checklist:
+- [x] Login with valid credentials works
+- [x] Login with invalid password shows error
+- [x] Login with non-existent email shows error
+- [x] Error messages are user-friendly
+- [x] HttpOnly cookie set correctly
+- [x] localStorage is empty
+- [x] Token not in response body
+- [x] Redirect works for valid login
+- [x] Form re-enables for retry on error
+- [x] All services communicate end-to-end
