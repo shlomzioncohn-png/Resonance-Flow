@@ -38,9 +38,9 @@ public interface SpringDataTaskJpaRepository extends JpaRepository<TaskEntity, U
     @Query(value = """
         INSERT INTO task (id, parent_task_id, tenant_id, status, is_ready, blocking_count,
                           open_constraint_count, estimated_duration_min, score, confidence,
-                          priority_score, version, created_at, updated_at, deleted_at)
+                          priority_score, tier, version, created_at, updated_at, deleted_at)
         VALUES (:id, :parentTaskId, :tenantId, :status, :isReady, :blockingCount,
-                :openConstraintCount, :estimatedDurationMin, :score, :confidence, :priorityScore, 0,
+                :openConstraintCount, :estimatedDurationMin, :score, :confidence, :priorityScore, :tier, 0,
                 :createdAt, :updatedAt, :deletedAt)
         ON CONFLICT (id) DO UPDATE SET
             parent_task_id = EXCLUDED.parent_task_id,
@@ -51,6 +51,7 @@ public interface SpringDataTaskJpaRepository extends JpaRepository<TaskEntity, U
             open_constraint_count = EXCLUDED.open_constraint_count,
             estimated_duration_min = EXCLUDED.estimated_duration_min, score = EXCLUDED.score,
             confidence = EXCLUDED.confidence, priority_score = EXCLUDED.priority_score,
+            tier = EXCLUDED.tier,
             created_at = EXCLUDED.created_at, updated_at = EXCLUDED.updated_at,
             deleted_at = EXCLUDED.deleted_at, version = task.version + 1
         """, nativeQuery = true)
@@ -64,6 +65,7 @@ public interface SpringDataTaskJpaRepository extends JpaRepository<TaskEntity, U
                 @Param("estimatedDurationMin") Integer estimatedDurationMin,
                 @Param("score") Double score, @Param("confidence") Double confidence,
                 @Param("priorityScore") Double priorityScore,
+                @Param("tier") String tier,
                 @Param("createdAt") LocalDateTime createdAt,
                 @Param("updatedAt") LocalDateTime updatedAt, @Param("deletedAt") LocalDateTime deletedAt);
 

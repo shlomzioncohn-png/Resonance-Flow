@@ -1,6 +1,7 @@
 package com.rnd.chain.repository.entity;
 
 import com.rnd.chain.dto.TaskStatus;
+import com.rnd.chain.dto.TaskTier;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;
@@ -53,6 +54,10 @@ public class TaskEntity {
      * is set - see {@code PriorityScoreService}. */
     @Column(name = "priority_score")
     private Double priorityScore;
+
+    /** Mind's tier, set from task.score.proposed; null until classified. */
+    @Enumerated(EnumType.STRING)
+    private TaskTier tier;
 
     @Version
     private long version;
@@ -155,6 +160,14 @@ public class TaskEntity {
 
     public void setPriorityScore(Double priorityScore) {
         this.priorityScore = priorityScore;
+    }
+
+    public TaskTier getTier() {
+        return tier;
+    }
+
+    public void setTier(TaskTier tier) {
+        this.tier = tier;
     }
 
     public long getVersion() {

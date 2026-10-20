@@ -3,6 +3,7 @@ package com.rnd.chain.service;
 import com.rnd.chain.dto.Task;
 import com.rnd.chain.dto.TaskDependency;
 import com.rnd.chain.dto.TaskStatus;
+import com.rnd.chain.dto.TaskTier;
 import com.rnd.chain.events.SchedulingPublishListener;
 import com.rnd.chain.exception.InvalidRequestException;
 import com.rnd.chain.exception.TaskNotFoundException;
@@ -101,6 +102,7 @@ public class TaskCounterUpdater {
                 .score(task.getScore())
                 .confidence(task.getConfidence())
                 .priorityScore(task.getPriorityScore())
+                .tier(task.getTier())
                 .createdAt(task.getCreatedAt())
                 .updatedAt(task.getUpdatedAt())
                 .deletedAt(task.getDeletedAt());
@@ -324,7 +326,7 @@ public class TaskCounterUpdater {
 
     /**
      * Issue #445: receives Mind's score for a task (the event is {@code task.score.proposed} -
-     * wiring an actual Kafka consumer onto this method is #386, out of scope here). Updates
+     * the Kafka consumer calls the tenant-aware overload below instead). Updates
      * {@code Task.score}/{@code confidence} and recomputes/publishes {@code priorityScore}
      * accordingly.
      *
@@ -349,6 +351,35 @@ public class TaskCounterUpdater {
                 taskRepository.update(taskId, task -> {
                     previous.set(task);
                     return copyOf(task).score(mindScore).confidence(confidence).build();
+                }),
+                taskId);
+
+        recomputePriorityScoreAndPublish(taskId, previous.get(), updated);
+    }
+
+    /**
+     * task.score.proposed entry point: like {@link #onScoreProposed(UUID, Double, Double)}, but
+     * creates a PENDING placeholder in {@code tenantId} first if the task is not known yet, and
+     * also stores {@code tier} (a null tier leaves the stored one untouched).
+     */
+    @Transactional
+    public void onScoreProposed(UUID taskId, UUID tenantId, TaskTier tier, Double mindScore, Double confidence) {
+        Objects.requireNonNull(taskId, "taskId must not be null");
+        Objects.requireNonNull(tenantId, "tenantId must not be null");
+        requireInUnitRangeIfPresent(mindScore, "mindScore");
+        requireInUnitRangeIfPresent(confidence, "confidence");
+
+        insertPlaceholderIfAbsent(taskId, tenantId);
+
+        AtomicReference<Task> previous = new AtomicReference<>();
+        Task updated = requireUpdated(
+                taskRepository.update(taskId, task -> {
+                    previous.set(task);
+                    return copyOf(task)
+                            .tier(tier != null ? tier : task.getTier())
+                            .score(mindScore)
+                            .confidence(confidence)
+                            .build();
                 }),
                 taskId);
 

@@ -60,6 +60,9 @@ public final class Task {
      * {@code TaskEligibilityService}. */
     private final Double priorityScore;
 
+    /** Mind's tier for this task (task.score.proposed). Null until Mind classifies it. */
+    private final TaskTier tier;
+
     private final LocalDateTime createdAt;
     private final LocalDateTime updatedAt;
     private final LocalDateTime deletedAt;
@@ -76,6 +79,7 @@ public final class Task {
                  Double score,
                  Double confidence,
                  Double priorityScore,
+                 TaskTier tier,
                  LocalDateTime createdAt,
                  LocalDateTime updatedAt,
                  LocalDateTime deletedAt) {
@@ -102,6 +106,7 @@ public final class Task {
         this.score = score;
         this.confidence = confidence;
         this.priorityScore = priorityScore;
+        this.tier = tier;
         this.createdAt = createdAt;
         this.updatedAt = updatedAt;
         this.deletedAt = deletedAt;
@@ -119,7 +124,7 @@ public final class Task {
         return new Task(source.id, source.parentTaskId, source.tenantId, source.status,
                 source.isReady, source.blockingCount, source.openConstraintCount,
                 source.estimatedDurationMin, source.score, source.confidence, source.priorityScore,
-                source.createdAt, source.updatedAt, source.deletedAt);
+                source.tier, source.createdAt, source.updatedAt, source.deletedAt);
     }
 
     @Override
