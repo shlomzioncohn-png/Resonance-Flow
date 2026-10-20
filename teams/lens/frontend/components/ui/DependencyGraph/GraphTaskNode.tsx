@@ -10,7 +10,7 @@ import { useTheme } from '@mui/material/styles';
 import StatusBadge from '@/components/ui/StatusBadge';
 import type { GraphNode } from '@/services/bottlenecksApi';
 import { NODE_HEIGHT, NODE_WIDTH } from './layout';
-import { blocksLabel, TASK_STATUS_BADGE, type BlockerLevel } from './taskStatus';
+import { TASK_STATUS_BADGE, type BlockerLevel } from './taskStatus';
 
 export type GraphTaskNodeData = {
   task: GraphNode;
@@ -88,7 +88,7 @@ function GraphTaskNode({ data }: NodeProps<GraphTaskFlowNode>) {
               color: level === 'critical' ? tone.critical.text : 'text.secondary',
             }}
           >
-            {blocksLabel(task.blocksCount)}
+            Blocks {task.blocksCount}
           </Typography>
         </Stack>
       </Box>

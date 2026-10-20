@@ -1,7 +1,7 @@
 import { Graph, layout } from '@dagrejs/dagre';
 import type { DependencyGraph, GraphNode } from '@/services/bottlenecksApi';
 
-export const NODE_WIDTH = 240;
+export const NODE_WIDTH = 260;
 export const NODE_HEIGHT = 96;
 
 /**
