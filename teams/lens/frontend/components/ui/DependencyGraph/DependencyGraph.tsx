@@ -141,7 +141,15 @@ function GraphCanvas({
   };
 
   return (
-    <Box onKeyDown={handleKeyDown} sx={{ height, width: '100%' }}>
+    <Box
+      onKeyDown={handleKeyDown}
+      sx={{
+        height,
+        width: '100%',
+        // React Flow's own gray attribution link is too faint to read (WCAG contrast).
+        '& .react-flow__attribution a': { color: theme.palette.text.secondary },
+      }}
+    >
       <ReactFlow
         aria-label={ariaLabel}
         nodes={nodes}

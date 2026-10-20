@@ -88,7 +88,7 @@ export const ServerError: Story = {
     msw.use(bottlenecksGraphErrorHandler);
   },
   play: async ({ canvas }) => {
-    await expect(await canvas.findByRole('alert')).toHaveTextContent(/temporarily unavailable/);
+    await expect(await canvas.findByRole('alert')).toHaveTextContent('Something went wrong. Please try again.');
     await expect(canvas.getByRole('button', { name: 'Try again' })).toBeInTheDocument();
   },
 };

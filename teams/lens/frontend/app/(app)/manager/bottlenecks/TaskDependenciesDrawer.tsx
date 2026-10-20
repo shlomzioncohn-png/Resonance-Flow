@@ -6,6 +6,7 @@ import Divider from '@mui/material/Divider';
 import Drawer from '@mui/material/Drawer';
 import IconButton from '@mui/material/IconButton';
 import List from '@mui/material/List';
+import ListItem from '@mui/material/ListItem';
 import ListItemButton from '@mui/material/ListItemButton';
 import ListItemText from '@mui/material/ListItemText';
 import Stack from '@mui/material/Stack';
@@ -46,12 +47,14 @@ function TaskList({
       ) : (
         <List dense disablePadding>
           {tasks.map((related) => (
-            <ListItemButton key={related.id} onClick={() => onSelectTask(related.id)} sx={{ borderRadius: 1 }}>
-              <ListItemText
-                primary={related.title}
-                secondary={`${TASK_STATUS_BADGE[related.status].label} · blocks ${related.blocksCount}`}
-              />
-            </ListItemButton>
+            <ListItem key={related.id} disablePadding>
+              <ListItemButton onClick={() => onSelectTask(related.id)} sx={{ borderRadius: 1 }}>
+                <ListItemText
+                  primary={related.title}
+                  secondary={`${TASK_STATUS_BADGE[related.status].label} · blocks ${related.blocksCount}`}
+                />
+              </ListItemButton>
+            </ListItem>
           ))}
         </List>
       )}
