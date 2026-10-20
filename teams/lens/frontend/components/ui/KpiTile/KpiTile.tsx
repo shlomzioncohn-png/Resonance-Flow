@@ -11,7 +11,7 @@ import { useTheme } from '@mui/material/styles';
 import { SparkLineChart } from '@mui/x-charts/SparkLineChart';
 import type { StatusTone } from '../StatusBadge';
 
-export interface KpiTrend {
+type KpiTrend = {
   /** Change vs the previous period, in percent: 8 means +8%, -3 means -3%. */
   delta: number;
   /**
@@ -19,7 +19,7 @@ export interface KpiTrend {
    * counts where less is better, e.g. blocked tasks.
    */
   goodDirection?: 'up' | 'down';
-}
+};
 
 /** Hides text visually but keeps it for screen readers. */
 const srOnly = {
@@ -64,11 +64,11 @@ function TrendIndicator({ delta, goodDirection = 'up' }: KpiTrend) {
 
 const SPARKLINE_HEIGHT = 32;
 
-interface SparklineProps {
+type SparklineProps = {
   data: number[];
   color: string;
   label?: string;
-}
+};
 
 function Sparkline({ data, color, label }: SparklineProps) {
   if (data.length < 2) return null;
@@ -87,7 +87,7 @@ function Sparkline({ data, color, label }: SparklineProps) {
   );
 }
 
-export interface KpiTileProps {
+type KpiTileProps = {
   /** Raw count or pre-formatted text, e.g. 12, "1,284" or "3.2d". */
   value: number | string;
   label: string;
@@ -109,7 +109,7 @@ export interface KpiTileProps {
    * and hidden from screen readers.
    */
   sparklineLabel?: string;
-}
+};
 
 export default function KpiTile({
   value,
