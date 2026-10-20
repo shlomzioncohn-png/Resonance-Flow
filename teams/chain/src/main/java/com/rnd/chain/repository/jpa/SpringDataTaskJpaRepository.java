@@ -74,16 +74,17 @@ public interface SpringDataTaskJpaRepository extends JpaRepository<TaskEntity, U
      */
     @Modifying(clearAutomatically = true)
     @Query(value = """
-        INSERT INTO task (id, parent_task_id, status, is_ready, blocking_count,
+        INSERT INTO task (id, parent_task_id, tenant_id, status, is_ready, blocking_count,
                           open_constraint_count, estimated_duration_min, score, version,
                           created_at, updated_at, deleted_at)
-        VALUES (:id, :parentTaskId, :status, :isReady, :blockingCount,
+        VALUES (:id, :parentTaskId, :tenantId, :status, :isReady, :blockingCount,
                 :openConstraintCount, :estimatedDurationMin, :score, 0,
                 :createdAt, :updatedAt, :deletedAt)
         ON CONFLICT (id) DO NOTHING
         """, nativeQuery = true)
     int insertIfAbsent(@Param("id") UUID id,
                        @Param("parentTaskId") UUID parentTaskId,
+                       @Param("tenantId") UUID tenantId,
                        @Param("status") String status,
                        @Param("isReady") boolean isReady,
                        @Param("blockingCount") int blockingCount,

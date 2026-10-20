@@ -16,7 +16,6 @@ import java.util.UUID;
 
 import static com.rnd.chain.events.EventFields.parseUuid;
 import static com.rnd.chain.events.EventFields.toLocalDateTime;
-import com.rnd.chain.service.UnresolvedDependencyService;
 
 /**
  * Consumes task.created (Inbox, Protobuf) - the event that tells Chain a task exists at all.
@@ -42,16 +41,13 @@ public class TaskCreatedEventHandler {
 
     private final TaskRepository taskRepository;
     private final ChainEventProcessingTemplate template;
-    private final UnresolvedDependencyService unresolvedDependencyService;
 
     public TaskCreatedEventHandler(
         TaskRepository taskRepository,
-        ChainEventProcessingTemplate template,
-        UnresolvedDependencyService unresolvedDependencyService) {
+        ChainEventProcessingTemplate template) {
 
         this.taskRepository = taskRepository;
         this.template = template;
-        this.unresolvedDependencyService = unresolvedDependencyService;
 }
 
     @RetryableTopic(
@@ -108,8 +104,6 @@ public class TaskCreatedEventHandler {
                         .updatedAt(createdAt)
                         .build());
             }
-
-            unresolvedDependencyService.resolveWaitingForTask(taskId);
         } catch (RuntimeException e) {
             throw new ChainTransientProcessingException(
                     "Failed to persist task " + taskId + " from task.created", e);

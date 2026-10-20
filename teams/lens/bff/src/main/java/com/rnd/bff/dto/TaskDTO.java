@@ -6,7 +6,6 @@ import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
-import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 
@@ -57,7 +56,8 @@ public class TaskDTO {
     /** Estimated effort, in minutes. */
     private Integer effortEstimate;
 
-    private Instant dueDate;
+    /** Already formatted for display by Inbox, Israel time: "12/10/2026" for dueDate, "12/10/2026 09:00" for the rest. */
+    private String dueDate;
     private String owner;
     private String project;
 
@@ -116,7 +116,7 @@ public class TaskDTO {
     private Double priorityScore;
 
     /** Real `snoozed_until`, set when inboxStatus = snoozed. */
-    private Instant snoozedUntil;
+    private String snoozedUntil;
 
     /** Real `extraction_provenance` enum (etl/ml_inferred/manual). */
     private String extractionProvenance;
@@ -136,7 +136,7 @@ public class TaskDTO {
     /** Real `created_by` (UUID, nullable). */
     private String createdBy;
 
-    private Instant createdAt;
-    private Instant updatedAt;
-    private Instant completedAt;
+    private String createdAt;
+    private String updatedAt;
+    private String completedAt;
 }

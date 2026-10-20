@@ -27,6 +27,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.jwt;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -127,6 +128,61 @@ class ManagerUsersControllerTest {
         assertThat(body).contains("555-1234");
         assertThat(body).doesNotContain("SYSTEM_ADMIN");
         assertThat(body).doesNotContain("hacked@evil.com");
+    }
+
+    // -------------------------------------------------------------------------
+    // Create — validated here, only known fields leave the Gateway
+    // -------------------------------------------------------------------------
+
+    @Test
+    @Order(12)
+    @DisplayName("POST create forwards only the known fields to BFF and returns BFF's 201")
+    void createUser_forwardsKnownFieldsAndReturns201() throws Exception {
+        mockBff.enqueue(new MockResponse()
+                .setResponseCode(201)
+                .setHeader("Content-Type", "application/json")
+                .setBody("{\"id\":\"u9\",\"displayName\":\"Noa\",\"role\":\"EMPLOYEE\",\"status\":\"PENDING\"}"));
+
+        mockMvc.perform(post("/api/manager/users")
+                        .with(jwt().authorities(new SimpleGrantedAuthority(MANAGER_AUTHORITY)))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"displayName\":\"Noa\",\"email\":\"noa@example.com\",\"role\":\"EMPLOYEE\","
+                                + "\"tenantId\":\"other-tenant\",\"status\":\"ACTIVE\"}"))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.id").value("u9"));
+
+        RecordedRequest recorded = takeRequest();
+        assertThat(recorded.getMethod()).isEqualTo("POST");
+        assertThat(recorded.getPath()).isEqualTo("/manager/users");
+        String body = recorded.getBody().readUtf8();
+        assertThat(body).contains("noa@example.com").contains("EMPLOYEE");
+        assertThat(body).doesNotContain("other-tenant").doesNotContain("ACTIVE");
+    }
+
+    @Test
+    @Order(13)
+    @DisplayName("POST create with a missing displayName or an unknown role returns 400, never reaches BFF")
+    void createUser_invalidBody_returns400() throws Exception {
+        mockMvc.perform(post("/api/manager/users")
+                        .with(jwt().authorities(new SimpleGrantedAuthority(MANAGER_AUTHORITY)))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"role\":\"EMPLOYEE\"}"))
+                .andExpect(status().isBadRequest());
+
+        mockMvc.perform(post("/api/manager/users")
+                        .with(jwt().authorities(new SimpleGrantedAuthority(MANAGER_AUTHORITY)))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"displayName\":\"Noa\",\"role\":\"SYSTEM_ADMIN\"}"))
+                .andExpect(status().isBadRequest());
+
+        mockMvc.perform(post("/api/manager/users")
+                        .with(jwt().authorities(new SimpleGrantedAuthority(MANAGER_AUTHORITY)))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"displayName\":\"Noa\",\"email\":\"not-an-email\",\"role\":\"EMPLOYEE\"}"))
+                .andExpect(status().isBadRequest());
+
+        assertThat(mockBff.takeRequest(300, TimeUnit.MILLISECONDS))
+                .as("Gateway must reject an invalid create before ever calling BFF").isNull();
     }
 
     // -------------------------------------------------------------------------

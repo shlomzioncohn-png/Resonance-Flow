@@ -57,6 +57,12 @@ services:
     # shared/proto, rather than relying on anything persisting across restarts.
     image: apicurio/apicurio-registry-mem:2.5.11.Final
     container_name: bridge-schema-registry
+    environment:
+      # Same as the cluster (teams/relay/helm/resonance-flow/values.yaml): ccompat lookups
+      # otherwise exact-match schema text, and the Confluent serializer (use.latest.version)
+      # looks the schema up by its comment-free rendering - which never matches a registered
+      # shared/proto file that has comments, so every Protobuf publish fails with 40403.
+      REGISTRY_CCOMPAT_USE_CANONICAL_HASH: "true"
     ports:
       # 8081/8082 are already taken by Inbox/Chain's own registries - see SCHEMA_REGISTRY_URL.
       - "8085:8080"

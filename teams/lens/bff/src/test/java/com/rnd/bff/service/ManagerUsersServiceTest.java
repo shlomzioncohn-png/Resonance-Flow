@@ -14,6 +14,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.rnd.bff.client.InboxUserClient;
 import com.rnd.bff.client.InboxUserPageResponse;
 import com.rnd.bff.client.InboxUserRecord;
+import com.rnd.bff.dto.UserCreateRequestDTO;
 import com.rnd.bff.dto.UserDetailsDTO;
 import com.rnd.bff.dto.UserListResponseDTO;
 import com.rnd.bff.exception.InboxResponseException;
@@ -127,6 +128,79 @@ class ManagerUsersServiceTest {
                 forwarded.size() == 1 && forwarded.containsKey("firstName")
                         && !forwarded.containsKey("lastName") && !forwarded.containsKey("phone")
                         && !forwarded.containsKey("displayName")));
+    }
+
+    // -------------------------------------------------------------------------
+    // createUser — tenant from the actor, LENS role -> Inbox role
+    // -------------------------------------------------------------------------
+
+    private static final String TENANT_ID = "33333333-3333-3333-3333-333333333333";
+
+    private InboxUserRecord actorInTenant() {
+        InboxUserRecord actor = record(ACTOR_ID, "TENANT_ADMIN");
+        actor.setTenant(new InboxUserRecord.TenantSummary(TENANT_ID, "Acme", "acme"));
+        return actor;
+    }
+
+    @Test
+    void createUser_usesTheActorsTenantAndMapsTheRole() {
+        when(inboxUserClient.getUser(ACTOR_ID, ACTOR_ID)).thenReturn(actorInTenant());
+        when(inboxUserClient.createUser(eq(ACTOR_ID), any())).thenReturn(record(OTHER_USER_ID, "TENANT_ADMIN"));
+
+        UserDetailsDTO result = managerUsersService.createUser(ACTOR_ID, UserCreateRequestDTO.builder()
+                .displayName("Noa Levi").email("noa@example.com").phone("").role("MANAGER").build());
+
+        assertThat(result.getId()).isEqualTo(OTHER_USER_ID);
+        assertThat(result.getRole()).isEqualTo("MANAGER");
+        verify(inboxUserClient).createUser(eq(ACTOR_ID), eq(Map.of(
+                "tenantId", TENANT_ID,
+                "displayName", "Noa Levi",
+                "email", "noa@example.com",
+                "role", "TENANT_ADMIN")));
+    }
+
+    @Test
+    void createUser_employeeStaysEmployee() {
+        when(inboxUserClient.getUser(ACTOR_ID, ACTOR_ID)).thenReturn(actorInTenant());
+        when(inboxUserClient.createUser(eq(ACTOR_ID), any())).thenReturn(record(OTHER_USER_ID, "EMPLOYEE"));
+
+        managerUsersService.createUser(ACTOR_ID,
+                UserCreateRequestDTO.builder().displayName("Eli").role("EMPLOYEE").build());
+
+        verify(inboxUserClient).createUser(eq(ACTOR_ID), argThat(body -> "EMPLOYEE".equals(body.get("role"))));
+    }
+
+    @Test
+    void createUser_unknownRole_rejectedBeforeReachingInbox() {
+        assertThatThrownBy(() -> managerUsersService.createUser(ACTOR_ID,
+                UserCreateRequestDTO.builder().displayName("Eli").role("SYSTEM_ADMIN").build()))
+                .isInstanceOf(InboxResponseException.class)
+                .satisfies(e -> assertThat(((InboxResponseException) e).getStatus()).isEqualTo(HttpStatus.BAD_REQUEST));
+
+        verify(inboxUserClient, never()).createUser(anyString(), any());
+    }
+
+    @Test
+    void createUser_blankDisplayName_rejectedBeforeReachingInbox() {
+        assertThatThrownBy(() -> managerUsersService.createUser(ACTOR_ID,
+                UserCreateRequestDTO.builder().displayName("  ").role("EMPLOYEE").build()))
+                .isInstanceOf(InboxResponseException.class);
+
+        verify(inboxUserClient, never()).createUser(anyString(), any());
+    }
+
+    @Test
+    void createUser_duplicateEmail_inbox409PassesThrough() {
+        when(inboxUserClient.getUser(ACTOR_ID, ACTOR_ID)).thenReturn(actorInTenant());
+        when(inboxUserClient.createUser(eq(ACTOR_ID), any())).thenThrow(HttpClientErrorException.create(
+                HttpStatus.CONFLICT, "Conflict", HttpHeaders.EMPTY,
+                "{\"message\":\"Email already exists\"}".getBytes(), null));
+
+        assertThatThrownBy(() -> managerUsersService.createUser(ACTOR_ID,
+                UserCreateRequestDTO.builder().displayName("Eli").email("dup@example.com").role("EMPLOYEE").build()))
+                .isInstanceOf(InboxResponseException.class)
+                .hasMessage("Email already exists")
+                .satisfies(e -> assertThat(((InboxResponseException) e).getStatus()).isEqualTo(HttpStatus.CONFLICT));
     }
 
     // -------------------------------------------------------------------------

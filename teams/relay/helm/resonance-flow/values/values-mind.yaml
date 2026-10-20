@@ -2,13 +2,8 @@ components:
   mind:
     enabled: true
     kafkaSasl: false
-    image:
-      repository: mind
-      tag: local
-      pullPolicy: Never
   schema-registry:
     enabled: true
-
 kafka:
   enabled: true
   image:

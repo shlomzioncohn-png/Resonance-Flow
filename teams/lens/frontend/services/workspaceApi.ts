@@ -28,7 +28,7 @@ export interface ApiTask {
   priority?: string;
   /** Estimated effort in minutes */
   effortEstimate: number;
-  /** ISO-8601 datetime string */
+  /** Already formatted by Inbox, Israel time, e.g. "12/10/2026" - shown as-is, never parsed */
   dueDate?: string;
   /** Display names. Missing for real Inbox tasks: Inbox only sends ids so far. */
   owner?: string;
@@ -72,7 +72,7 @@ export interface SelectedTask {
   description?: string;
   /** Minutes */
   effortEstimate: number;
-  /** ISO-8601 datetime string */
+  /** Already formatted by Inbox, Israel time, e.g. "12/10/2026" - shown as-is, never parsed */
   dueDate?: string;
   /** 0-1, higher is a better pick */
   selectionScore: number;
@@ -164,4 +164,16 @@ export function updateTaskStatus(
     status,
     ...(snoozedUntil && { snoozedUntil: snoozedUntil.toISOString() }),
   });
+}
+
+/** Error code the backend returns when a status change is not allowed (e.g. moving a DONE task). */
+export const INVALID_TASK_STATUS_TRANSITION = 'INVALID_TASK_STATUS_TRANSITION';
+
+/**
+ * A finished task can't move to any other status. Inbox calls it DONE, the BFF DTO
+ * documents COMPLETED — accept both until the name is settled.
+ */
+export function isFinalStatus(status: string): boolean {
+  const normalised = status.toUpperCase();
+  return normalised === 'DONE' || normalised === 'COMPLETED';
 }

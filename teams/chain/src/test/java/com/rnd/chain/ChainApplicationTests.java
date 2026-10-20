@@ -1,5 +1,6 @@
 package com.rnd.chain;
 
+import com.rnd.chain.repository.ConstraintHistoryRepository;
 import com.rnd.chain.repository.ConstraintRepository;
 import com.rnd.chain.repository.TaskDependencyRepository;
 import com.rnd.chain.repository.TaskRepository;
@@ -21,6 +22,9 @@ class ChainApplicationTests {
 
     @MockBean
     private ConstraintRepository constraintRepository;
+
+    @MockBean
+    private ConstraintHistoryRepository constraintHistoryRepository;
 
     @Test
     void contextLoads() {
