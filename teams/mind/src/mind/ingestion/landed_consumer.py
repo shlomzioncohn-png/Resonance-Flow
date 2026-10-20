@@ -21,8 +21,8 @@ from collections.abc import Callable
 
 from mind.contracts import RawObjectEvent
 from mind.extraction.extractor import ExtractionItem
+from mind.ingestion.event_objects import InvalidEvent, ObjectReader
 from mind.ingestion.extraction_items import extraction_items
-from mind.ingestion.raw_object_event_handler import InvalidEvent, ObjectReader
 from mind.ingestion.raw_object_event_proto import to_raw_object_event
 from mind.ingestion.seen_revisions import RevisionStore, classify_arrival
 from mind.messaging.raw_object_event_pb2 import RawObjectEvent as RawObjectEventMessage

@@ -14,7 +14,7 @@ from mind.contracts.raw_object_event_enums import (
     ScopeDecision,
     Sensitivity,
 )
-from mind.ingestion.raw_object_event_handler import InvalidEvent
+from mind.ingestion.event_objects import InvalidEvent
 from mind.ingestion.raw_object_event_proto import to_raw_object_event
 from mind.messaging import raw_object_event_pb2 as pb
 

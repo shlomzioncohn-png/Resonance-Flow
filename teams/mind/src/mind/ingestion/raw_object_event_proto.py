@@ -18,7 +18,7 @@ from typing import Any
 from pydantic import ValidationError
 
 from mind.contracts import RawObjectEvent
-from mind.ingestion.raw_object_event_handler import InvalidEvent
+from mind.ingestion.event_objects import InvalidEvent
 from mind.messaging.raw_object_event_pb2 import (
     ChangeType,
     Classification,

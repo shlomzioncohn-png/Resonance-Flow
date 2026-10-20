@@ -7,8 +7,8 @@ import pytest
 
 from mind.contracts import RawObjectEvent
 from mind.extraction.extractor import ExtractionItem
+from mind.ingestion.event_objects import ObjectNotFound, ObjectReader
 from mind.ingestion.landed_consumer import LandedHandler
-from mind.ingestion.raw_object_event_handler import ObjectNotFound, ObjectReader
 from mind.ingestion.seen_revisions import InMemoryRevisionStore
 from mind.ingestion.to_text import MediaUnavailable
 from mind.messaging import raw_object_event_pb2 as pb

@@ -3,8 +3,8 @@ from typing import Any, cast
 import pytest
 from minio.error import S3Error
 
+from mind.ingestion.event_objects import ObjectNotFound, ObjectTooLarge
 from mind.ingestion.minio_reader import MinioObjectReader, minio_endpoint
-from mind.ingestion.raw_object_event_handler import ObjectNotFound, ObjectTooLarge
 
 BUCKET = "bridge-raw"
 KEY = "ZOOM/550e8400-e29b-41d4-a716-446655440000/2026-10-18/meeting.vtt"

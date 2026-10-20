@@ -23,7 +23,7 @@ from mind.contracts.raw_object_event_enums import (
     ScopeDecision,
 )
 from mind.extraction.extractor import ExtractionItem
-from mind.ingestion.raw_object_event_handler import ObjectReader, read_checked, tenant_uuid
+from mind.ingestion.event_objects import ObjectReader, read_event_object, tenant_uuid
 from mind.ingestion.to_text import MediaPipeline, text_of
 from mind.multimodal.asr import transcribe
 from mind.multimodal.ocr import extract_text
@@ -93,7 +93,7 @@ def extraction_items(
     source_type = task_source_type(event.source_type)
 
     def item_of(obj: RawObjectRef) -> ExtractionItem | None:
-        content = read_checked(obj, read_object, event.correlation_id)
+        content = read_event_object(obj, read_object, event.correlation_id)
         if content is None:
             return None
         text = text_of(content, obj.modality, obj.object_key, ocr, asr)

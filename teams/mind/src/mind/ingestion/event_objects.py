@@ -45,23 +45,21 @@ def tenant_uuid(event: RawObjectEvent) -> UUID:
         raise InvalidEvent(f"RawObjectEvent.tenant_id is not a UUID: {event.tenant_id!r}") from None
 
 
-def read_checked(obj: RawObjectRef, read_object: ObjectReader, item: UUID) -> bytes | None:
+def read_event_object(obj: RawObjectRef, read_object: ObjectReader, item: UUID) -> bytes | None:
     """The file's bytes, or None when it is missing, too large, or does not
     match its content_hash (logged). Any other read failure propagates."""
 
     try:
         content = read_object(obj.object_key)
     except ObjectNotFound:
-        logger.warning("raw_object_event: skipping missing object %s of %s", obj.object_key, item)
+        logger.warning("event_objects: skipping missing object %s of %s", obj.object_key, item)
         return None
     except ObjectTooLarge:
-        logger.error(
-            "raw_object_event: skipping %s of %s, over the size limit", obj.object_key, item
-        )
+        logger.error("event_objects: skipping %s of %s, over the size limit", obj.object_key, item)
         return None
     if f"sha256:{hashlib.sha256(content).hexdigest()}" != obj.content_hash:
         logger.warning(
-            "raw_object_event: skipping %s of %s, content does not match its hash",
+            "event_objects: skipping %s of %s, content does not match its hash",
             obj.object_key,
             item,
         )

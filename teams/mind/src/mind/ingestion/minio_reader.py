@@ -16,7 +16,7 @@ from minio import Minio
 from minio.error import S3Error
 
 from mind.config import ObjectStorageSettings
-from mind.ingestion.raw_object_event_handler import ObjectNotFound, ObjectTooLarge
+from mind.ingestion.event_objects import ObjectNotFound, ObjectTooLarge
 
 
 class _GetObject(Protocol):

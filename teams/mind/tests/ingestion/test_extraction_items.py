@@ -9,12 +9,12 @@ from mind.contracts import RawObjectEvent
 from mind.contracts.base_enums import SourceType
 from mind.contracts.raw_object_event_enums import RawSourceType
 from mind.extraction.extractor import ExtractionItem
-from mind.ingestion.extraction_items import extraction_items, task_source_type
-from mind.ingestion.raw_object_event_handler import (
+from mind.ingestion.event_objects import (
     InvalidEvent,
     ObjectNotFound,
     ObjectTooLarge,
 )
+from mind.ingestion.extraction_items import extraction_items, task_source_type
 from mind.multimodal.asr import ASRResult
 from mind.multimodal.ocr import OCRResult
 

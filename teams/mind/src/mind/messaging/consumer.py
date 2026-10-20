@@ -33,10 +33,10 @@ class ProtobufConsumer:
         group_id: str,
         topics: list[str],
         settings: MessagingSettings | None = None,
-        conf_overrides: dict | None = None,
+        conf_overrides: dict[str, str | int | float | bool] | None = None,
     ):
-        """`conf_overrides` replaces librdkafka keys for this consumer only,
-        e.g. a longer max.poll.interval.ms for a handler that runs for minutes."""
+        """`conf_overrides` replaces librdkafka config keys for this consumer only,
+        e.g. {"max.poll.interval.ms": 1_800_000} for a handler that runs for minutes."""
         self._settings = settings or load_settings()
         conf = self._settings.consumer_conf(group_id) | (conf_overrides or {})
         self._consumer = Consumer(conf)

@@ -24,7 +24,7 @@ bridge.raw.landed ─► to_raw_object_event ─► classify_arrival ─► extr
 | `raw_object_event_proto.py` | the protobuf message → the `RawObjectEvent` contract |
 | `seen_revisions.py` | whether an item was already processed, and at which revision |
 | `extraction_items.py` | the event → one `ExtractionItem` per file, one file at a time |
-| `raw_object_event_handler.py` | the reader contract and per-file checks (tenant, `content_hash`) |
+| `event_objects.py` | the reader contract and per-file checks (tenant, `content_hash`) |
 | `minio_reader.py` | reads one file from MinIO |
 | `to_text.py` | one file's bytes → text, via R4's OCR and ASR |
 
