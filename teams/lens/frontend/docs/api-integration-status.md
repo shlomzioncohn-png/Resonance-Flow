@@ -41,11 +41,18 @@ still mocked inside the BFF.
     `GET /admin/projects[/{id}]` — mocked inside the BFF
 - **Frontend**: every screen calls the Gateway through `services/*Api.ts`. MSW was
   removed on 2026-10-06, when the mock data moved into the BFF, and brought back on
-  2026-10-14 for the Manager's Users screen only: `/api/manager/users` (list, details,
-  create, edit, status), so that screen can be worked on without Gateway + BFF + Inbox
-  running. It runs only when `NEXT_PUBLIC_API_MOCKING=enabled`, keeps its data in
-  memory until a reload, and every other call still goes to the Gateway. With the
-  variable empty, the same screen calls the real Gateway.
+  2026-10-14 for:
+  - `/api/manager/users` (list, details, create, edit, status) — the Manager's Users
+    screen (`services/managerUsersApi.ts`), so it can be worked on without Gateway + BFF
+    + Inbox running. The data stays in memory until a reload. With the variable empty,
+    the same screen calls the real Gateway.
+  - `POST /api/auth/login` — the Login screen (`services/authApi.ts`). Mock users match
+    the Keycloak realm: `manager1`/`manager1` (manager) and `employee1`/`employee1`
+    (employee). A wrong password gets the Gateway's 401 error body.
+
+  MSW runs only when `NEXT_PUBLIC_API_MOCKING=enabled`; every other call still goes to
+  the Gateway. Without it, sign-in fails until the Gateway serves `/api/auth/login`.
+  Once the Gateway serves the login endpoint, delete its handler in `mocks/handlers.ts`.
 
 ## Inbox Task API (branch `inbox-team`, commit `438c368`)
 

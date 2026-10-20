@@ -30,7 +30,7 @@ class UnstructuredIntakeLaneConfig {
             GroupStateStore groupStateStore,
             CalendarEventStateStore calendarEventStateStore) {
         return Arrays.stream(RawSourceType.values())
-                .filter(sourceType -> sourceType != RawSourceType.MEETING)
+                .filter(sourceType -> !sourceType.isMeeting())
                 .map(sourceType -> new UnstructuredIntakeLane(
                         sourceType,
                         new SourceRecordReaderAdapter(sourceType, loader),

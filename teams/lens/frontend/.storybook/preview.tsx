@@ -14,13 +14,18 @@ const preview: Preview = {
   // the addon's reset between stories; a story's own `msw.use(...)` overrides don't.
   loaders: [
     mswLoader(async () => {
+      // Anything without a handler (Storybook's own requests) goes to the network as usual
       await worker.start({ quiet: true, onUnhandledRequest: 'bypass' });
       return worker;
     }),
   ],
-  // Every story starts from the same 12 users, whatever the story before it created or edited.
-  beforeEach: () => {
+  beforeEach() {
+    // Every story starts from the same 12 users, whatever the story before it created or edited.
     resetMockUsers();
+    // Every story starts signed out. RoleProvider keeps the role in localStorage, and all
+    // stories share one browser, so a story that signs in (Pages/Login) would otherwise
+    // leave its role behind for the next one.
+    window.localStorage.removeItem('lens.role');
   },
   parameters: {
     controls: {

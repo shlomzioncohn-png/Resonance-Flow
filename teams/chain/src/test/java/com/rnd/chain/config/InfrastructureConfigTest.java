@@ -1,7 +1,5 @@
 package com.rnd.chain.config;
 
-import com.rnd.chain.repository.InMemoryTransactionRunner;
-import com.rnd.chain.repository.TransactionRunner;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
 import org.springframework.context.annotation.Bean;
@@ -12,24 +10,6 @@ import java.time.Clock;
 import static org.assertj.core.api.Assertions.assertThat;
 
 class InfrastructureConfigTest {
-
-    @Test
-    void transactionRunner_doesNotOverrideAnExistingBean() {
-        new ApplicationContextRunner()
-                .withUserConfiguration(CustomTransactionRunnerConfig.class, InfrastructureConfig.class)
-                .run(context -> {
-                    assertThat(context.getBeansOfType(TransactionRunner.class)).hasSize(1);
-                    assertThat(context.getBean(TransactionRunner.class))
-                            .isSameAs(CustomTransactionRunnerConfig.CUSTOM_INSTANCE);
-                });
-    }
-
-    @Test
-    void transactionRunner_isCreated_whenNoOtherBeanIsRegistered() {
-        new ApplicationContextRunner()
-                .withUserConfiguration(InfrastructureConfig.class)
-                .run(context -> assertThat(context.getBeansOfType(TransactionRunner.class)).hasSize(1));
-    }
 
     @Test
     void clock_doesNotOverrideAnExistingBean() {
@@ -46,16 +26,6 @@ class InfrastructureConfigTest {
         new ApplicationContextRunner()
                 .withUserConfiguration(InfrastructureConfig.class)
                 .run(context -> assertThat(context.getBeansOfType(Clock.class)).hasSize(1));
-    }
-
-    @Configuration
-    static class CustomTransactionRunnerConfig {
-        static final TransactionRunner CUSTOM_INSTANCE = new InMemoryTransactionRunner();
-
-        @Bean
-        TransactionRunner transactionRunner() {
-            return CUSTOM_INSTANCE;
-        }
     }
 
     @Configuration

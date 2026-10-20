@@ -6,18 +6,22 @@
  * to the real Gateway (`onUnhandledRequest: 'bypass'` in MockingProvider), so
  * the /api/workspace/* calls are untouched by MSW.
  *
- * What's here: the Manager's Users screen (/api/manager/users). The Gateway
- * does serve it, but for real it needs Gateway + BFF + Inbox + Postgres
- * running. With NEXT_PUBLIC_API_MOCKING=enabled the whole screen - list,
- * create, edit, status change - works with nothing but `npm run dev`. The
- * calling code (services/managerUsersApi.ts) is the same either way.
+ * What's here:
+ * - The Manager's Users screen (/api/manager/users). The Gateway does serve it,
+ *   but for real it needs Gateway + BFF + Inbox + Postgres running. With
+ *   NEXT_PUBLIC_API_MOCKING=enabled the whole screen - list, create, edit,
+ *   status change - works with nothing but `npm run dev`. The data lives in
+ *   memory: changes survive until the page is reloaded.
+ * - POST /api/auth/login, which the Gateway doesn't expose yet. Once it does,
+ *   delete its handler - services/authApi.ts already has its final shape.
  *
- * The data lives in memory: changes survive until the page is reloaded.
- *
- * Storybook uses these same handlers (.storybook/preview.tsx), so the app in
- * mock mode and the stories always see the same fake Gateway.
+ * The calling code (services/managerUsersApi.ts, services/authApi.ts) is the
+ * same either way. Storybook uses these same handlers (.storybook/preview.tsx),
+ * so the app in mock mode and the stories always see the same fake Gateway.
  */
 import { delay, http, HttpResponse } from 'msw';
+import type { GatewayErrorBody } from '@/services/api';
+import type { LoginRequest, LoginResponse } from '@/services/authApi';
 import type {
   UserCreateFields,
   UserDetails,
@@ -80,6 +84,24 @@ export function resetMockUsers() {
   users = INITIAL_USERS.map((user) => ({ ...user }));
 }
 resetMockUsers();
+
+// Same users and passwords as the Keycloak realm (teams/lens/keycloak/realm-lens.json).
+const MOCK_ACCOUNTS: (LoginRequest & LoginResponse)[] = [
+  {
+    username: 'manager1',
+    password: 'manager1',
+    id: 'a3c5e0b2-4f1d-4c8e-9b7a-1d2e3f4a5b01',
+    displayName: 'Maya Manager',
+    role: 'manager',
+  },
+  {
+    username: 'employee1',
+    password: 'employee1',
+    id: 'a3c5e0b2-4f1d-4c8e-9b7a-1d2e3f4a5b02',
+    displayName: 'Eli Employee',
+    role: 'employee',
+  },
+];
 
 /** A non-negative integer query param, or `fallback` when it's missing or invalid. */
 function intParam(value: string | null, fallback: number, min: number): number {
@@ -178,4 +200,37 @@ export const handlers = [
     const fields = (await request.json()) as UserEditFields;
     return HttpResponse.json(touch(user, fields));
   }),
+
+  // POST /api/auth/login - a wrong username or password gets the Gateway's 401 error body.
+  // The generics type the request body and allow either response body (success or error).
+  http.post<never, LoginRequest, LoginResponse | GatewayErrorBody>(
+    `${API_BASE_URL}/api/auth/login`,
+    async ({ request }) => {
+      await delay(400);
+
+      const { username, password } = await request.json();
+      const account = MOCK_ACCOUNTS.find(
+        (candidate) => candidate.username === username && candidate.password === password,
+      );
+
+      if (!account) {
+        return HttpResponse.json<GatewayErrorBody>(
+          {
+            status: 'ERROR',
+            errorCode: 'UNAUTHORIZED',
+            message: 'Invalid username or password',
+            path: '/api/auth/login',
+            timestamp: new Date().toISOString(),
+          },
+          { status: 401 },
+        );
+      }
+
+      return HttpResponse.json<LoginResponse>({
+        id: account.id,
+        displayName: account.displayName,
+        role: account.role,
+      });
+    },
+  ),
 ];

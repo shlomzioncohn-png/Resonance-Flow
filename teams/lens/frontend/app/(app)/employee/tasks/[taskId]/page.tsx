@@ -1,6 +1,6 @@
 'use client';
 
-import { use, useEffect, useState } from 'react';
+import { use } from 'react';
 import Link from 'next/link';
 import Avatar from '@mui/material/Avatar';
 import Box from '@mui/material/Box';
@@ -21,32 +21,14 @@ import WarningAmberOutlinedIcon from '@mui/icons-material/WarningAmberOutlined';
 import { radiusTokens } from '@/theme';
 import { DetailRow, PriorityChip, softToneSx, statusTone } from '../../shared';
 import { getErrorMessage } from '@/services/api';
-import { getTask, type ApiTask } from '@/services/workspaceApi';
+import { useTaskDetails } from '@/hooks/useTaskDetails';
 
 export default function TaskDetailsPage({ params }: { params: Promise<{ taskId: string }> }) {
+  // Next.js 16 passes params as a Promise; use() unwraps it
   const { taskId } = use(params);
-  const [task, setTask] = useState<ApiTask | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const { data: task, isPending, isError, error } = useTaskDetails(taskId);
 
-  useEffect(() => {
-    let ignore = false;
-    getTask(taskId)
-      .then((result) => {
-        if (!ignore) setTask(result);
-      })
-      .catch((err) => {
-        if (!ignore) setError(getErrorMessage(err));
-      })
-      .finally(() => {
-        if (!ignore) setLoading(false);
-      });
-    return () => {
-      ignore = true;
-    };
-  }, [taskId]);
-
-  if (loading) {
+  if (isPending) {
     return (
       <Container maxWidth="lg" sx={{ py: 4, display: 'flex', justifyContent: 'center' }}>
         <CircularProgress />
@@ -54,12 +36,12 @@ export default function TaskDetailsPage({ params }: { params: Promise<{ taskId: 
     );
   }
 
-  if (error || !task) {
+  if (isError) {
     return (
       <Container maxWidth="lg" sx={{ py: 4 }}>
         <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
           <WarningAmberOutlinedIcon color="error" />
-          <Typography color="error.main">{error ?? 'Task not found'}</Typography>
+          <Typography color="error.main">{getErrorMessage(error)}</Typography>
         </Stack>
       </Container>
     );
@@ -153,9 +135,7 @@ export default function TaskDetailsPage({ params }: { params: Promise<{ taskId: 
                     )
                   }
                 />
-                {task.dueDate && (
-                  <DetailRow label="Due" value={new Date(task.dueDate).toLocaleString()} />
-                )}
+                {task.dueDate && <DetailRow label="Due" value={task.dueDate} />}
                 <DetailRow label="Priority" value={<PriorityChip priority={task.priority} />} />
                 <DetailRow
                   label="Estimated effort"

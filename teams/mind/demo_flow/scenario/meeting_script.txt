@@ -1,0 +1,15 @@
+# Synthetic Northwind account sync, read by text-to-speech into meeting.m4a.
+# One utterance per line: "Speaker: text". Only the text is spoken (the speaker
+# name is not), so whoever owns a commitment has to be named in what is said,
+# as in a real recording with no speaker diarization. Lines starting with # are
+# skipped.
+Lior: Okay, let's get started. This is the weekly sync for the Northwind account.
+Lior: A quick update first. The warehouse move is finished, so deliveries are back to normal.
+Lior: The main topic today is the price quote that Northwind asked for on Monday.
+Dana: Right. They want a quote for three hundred sensor units, including installation.
+Omer: The hardware prices went up last month, so our old cost sheet is out of date.
+Omer: I will finish the updated cost sheet by Wednesday. It is about half a day of work.
+Dana: Great. Once I have the updated cost sheet from Omer, I will send Northwind the price quote by Thursday.
+Lior: Good. So, to recap. Omer finishes the updated cost sheet by Wednesday.
+Lior: And Dana sends Northwind the price quote by Thursday, as soon as the cost sheet is ready.
+Lior: Anything else? No? Okay, thanks everyone.

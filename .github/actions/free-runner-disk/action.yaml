@@ -24,17 +24,9 @@ runs:
         # until=12h spares a network another job has just created and not yet attached to a container.
         docker network prune -f --filter "until=12h" || true
 
-    - name: Free Docker disk if below ${{ inputs.min_free_gb }} GB
+    - name: Remove kind clusters older than ${{ inputs.stale_cluster_hours }}h
       shell: bash
       run: |
-        DOCKER_ROOT=$(docker info -f '{{.DockerRootDir}}')
-        free_gb() { df -BG --output=avail "$DOCKER_ROOT" | tail -1 | tr -dc '0-9'; }
-        BEFORE=$(free_gb)
-        echo "Free on $DOCKER_ROOT: ${BEFORE}G (threshold ${{ inputs.min_free_gb }}G)"
-        if [ "$BEFORE" -ge "${{ inputs.min_free_gb }}" ]; then
-          exit 0
-        fi
-
         # kind-action's post step deletes its cluster, unless the job was killed first.
         # Via docker labels, not `kind`: kind isn't on PATH until kind-action runs.
         CUTOFF=$(date -d "-${{ inputs.stale_cluster_hours }} hours" +%s)
@@ -45,6 +37,17 @@ runs:
             docker rm -f -v "$node" || true
           fi
         done
+
+    - name: Free Docker disk if below ${{ inputs.min_free_gb }} GB
+      shell: bash
+      run: |
+        DOCKER_ROOT=$(docker info -f '{{.DockerRootDir}}')
+        free_gb() { df -BG --output=avail "$DOCKER_ROOT" | tail -1 | tr -dc '0-9'; }
+        BEFORE=$(free_gb)
+        echo "Free on $DOCKER_ROOT: ${BEFORE}G (threshold ${{ inputs.min_free_gb }}G)"
+        if [ "$BEFORE" -ge "${{ inputs.min_free_gb }}" ]; then
+          exit 0
+        fi
 
         # until=1h spares an image another job just built and hasn't `kind load`ed yet.
         docker container prune -f --filter "until=1h" || true

@@ -19,7 +19,7 @@
       "effort_estimate": 15,
       "tier": "operational",
       "blocked": false,
-      "parent_task_id": null
+      "parent_task_id": "mgr_reorg_status_reporting"
     },
     {
       "task_id": "task_filler_survey",
@@ -39,7 +39,7 @@
       "effort_estimate": 35,
       "tier": "strategic",
       "blocked": false,
-      "parent_task_id": null
+      "parent_task_id": "mgr_reorg_quarterly_initiative"
     }
   ],
   "expected_top_task_id": "task_reorg",

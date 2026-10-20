@@ -89,7 +89,9 @@ def main() -> int:
 
     # The proposal Inbox would receive. tenant_id is invented here: outside a
     # smoke test it comes from the intake event, never from this stage.
-    proposal = to_task_creation_requested(outcome, tenant_id=uuid4())
+    proposal = to_task_creation_requested(
+        outcome, tenant_id=uuid4(), bridge_source_ref=None, bridge_correlation_id=uuid4()
+    )
     print("\nTaskCreationRequested:")
     print(proposal.model_dump_json(indent=2, exclude={"tenant_id"}))
     return 0

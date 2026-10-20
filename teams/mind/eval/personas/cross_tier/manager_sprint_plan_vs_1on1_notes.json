@@ -39,7 +39,7 @@
       "effort_estimate": 55,
       "tier": "tactical",
       "blocked": false,
-      "parent_task_id": null
+      "parent_task_id": "mgr_sprint_quarterly_delivery"
     }
   ],
   "expected_top_task_id": "task_sprint",

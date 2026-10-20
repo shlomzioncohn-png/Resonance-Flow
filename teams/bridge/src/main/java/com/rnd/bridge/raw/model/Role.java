@@ -1,12 +1,12 @@
 package com.rnd.bridge.raw.model;
 
 /**
- * What a single {@link RawObjectRef} inside a RawObjectEvent's object list represents.
- * BODY is the primary text content of a non-chat source; TRANSCRIPT is a chat
- * session's concatenated text or a media recording's sidecar transcript; RECORDING is
- * the primary audio/video file for the meeting/doc/audio lane; SOURCE_METADATA is
- * reserved for a future source-generated metadata sidecar, not emitted by any
- * producer yet.
+ * What one {@link RawObjectRef} is, within the logical item its {@link RawObjectEvent}
+ * represents. Generic across both unstructured lanes - not a per-source enum - so a new
+ * source never needs a new role unless it's genuinely a new kind of part:
+ * BODY/ATTACHMENT (Malki's email/chat lane: the message text, and any files attached to
+ * it) and RECORDING/TRANSCRIPT/SOURCE_METADATA (Esther's meeting lane: the Zoom/BBB
+ * recording itself, its transcript, and the platform's own meeting report).
  */
 public enum Role {
     BODY,
