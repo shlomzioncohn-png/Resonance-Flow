@@ -27,6 +27,7 @@ export const navSections: NavSection[] = [
         href: '/manager',
         icon: <SupervisorAccountOutlinedIcon fontSize="small" />,
       },
+      { label: 'Projects', href: '/manager/projects' },
       { label: 'Workload', href: '/manager/workload' },
       { label: 'Work in progress', href: '/manager/wip' },
       { label: 'Blocked & delayed', href: '/manager/blocked' },
