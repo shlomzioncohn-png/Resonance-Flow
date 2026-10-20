@@ -43,6 +43,7 @@ jobs:
             docker run --rm -v "$PWD:/workspace" -w /workspace maven:3.9.9-eclipse-temurin-21 \
               java -jar teams/relay/schema-canonicalize/target/canonicalize.jar shared/proto "$(basename "$f")" \
               > "teams/relay/schema-sync-hook/files/schemas/$(basename "$f")"
+            [ -s "teams/relay/schema-sync-hook/files/schemas/$(basename "$f")" ] || { echo "::error::canonicalize produced no output for $f"; exit 1; }
           done
           # only the scripts the chart actually mounts — not seed-registry.sh /
           # check-all-schemas.sh, which are CI-only
