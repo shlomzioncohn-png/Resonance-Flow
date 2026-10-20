@@ -34,7 +34,7 @@ export default function LoginPage() {
       // Route based on role: TENANT_ADMIN and TEAM_LEAD go to /manager, EMPLOYEE goes to /employee
       router.push(['TENANT_ADMIN', 'TEAM_LEAD'].includes(response.user.role) ? '/manager' : '/employee');
     } catch (err) {
-      setError(getErrorMessage(err));
+      setError(getErrorMessage(err, '/auth/login'));
       setSubmitting(false);
     }
   };
