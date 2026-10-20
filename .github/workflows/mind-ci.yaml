@@ -172,6 +172,14 @@ jobs:
           extra_build_contexts: shared=shared
           push: 'false'
 
+      - name: Register the schemas through Relay's schema-sync-hook
+        run: |
+          SR_SVC=$(kubectl -n "$NAMESPACE" get svc -l app.kubernetes.io/component=schema-registry -o jsonpath='{.items[0].metadata.name}')
+          helm install schema-sync teams/relay/schema-sync-hook -n "$NAMESPACE" \
+            --set schemaRegistryUrl="http://${SR_SVC}.${NAMESPACE}.svc.cluster.local:8080/apis/ccompat/v6" \
+            --wait --wait-for-jobs --timeout 300s \
+            || { kubectl -n "$NAMESPACE" logs -l app.kubernetes.io/instance=schema-sync --tail=200; exit 1; }
+
       # Kafka's advertised.listeners is the in-cluster pod DNS name, unreachable
       # through a port-forward - run round-trip.py inside the MIND pod instead.
       - name: Round trip
