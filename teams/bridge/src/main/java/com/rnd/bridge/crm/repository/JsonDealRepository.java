@@ -3,6 +3,7 @@ package com.rnd.bridge.crm.repository;
 import com.fasterxml.jackson.databind.json.JsonMapper;
 import com.rnd.bridge.crm.model.Deal;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.context.annotation.Profile;
 import org.springframework.core.io.Resource;
 import org.springframework.core.io.ResourceLoader;
 import org.springframework.stereotype.Repository;
@@ -18,16 +19,11 @@ import java.util.Map;
 import java.util.Optional;
 
 /**
- * Loads the synthetic CRM deal feed from a JSON resource.
- * <p>
- * The dataset is the adapter's actual runtime data source - there is no live CRM in scope for
- * this program - so it is read eagerly at construction time and failures are fatal at startup
- * rather than surfacing lazily per call. The fixture never changes at runtime, so one {@link
- * DealSnapshot} built once at construction correctly serves every {@link #snapshot()} call - there
- * is no cross-call staleness to guard against here the way there is in {@code
- * HubSpotDealRepository}.
+ * Loads the synthetic CRM deal feed from a JSON resource, read once at construction time.
+ * Active only when neither {@code hubspot} nor {@code salesforce} profile is.
  */
 @Repository
+@Profile("!hubspot & !salesforce")
 public class JsonDealRepository implements DealRepository {
 
     private final DealSnapshot snapshot;
@@ -78,15 +74,15 @@ public class JsonDealRepository implements DealRepository {
     }
 
     @Override
+    public String source() {
+        return "json";
+    }
+
+    @Override
     public DealSnapshot snapshot() {
         return snapshot;
     }
 
-    /**
-     * The fixture is loaded once at construction (see the class Javadoc) and never changes at
-     * runtime, so "fresh" here means the same thing it does for {@link #snapshot()}: there is no
-     * live source to re-read, just the one dataset read at startup.
-     */
     @Override
     public Optional<Deal> fetchDeal(String dealId) {
         if (dealId == null || dealId.isBlank()) {

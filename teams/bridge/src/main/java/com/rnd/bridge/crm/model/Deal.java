@@ -29,10 +29,7 @@ public record Deal(
         if (dealId.isBlank()) {
             throw new IllegalArgumentException("dealId must not be blank");
         }
-        // HubSpot/JSON never set this explicitly (the synthetic dataset has no such field, and
-        // Jackson leaves an absent record component null) - "crm:" is every source's prefix
-        // except Salesforce's, so null defaults to it rather than every other call site having to
-        // repeat it.
+        // JSON never sets this explicitly - "crm:" is its default prefix (HubSpot/Salesforce set their own).
         if (sourceRefPrefix == null) {
             sourceRefPrefix = "crm:";
         }
