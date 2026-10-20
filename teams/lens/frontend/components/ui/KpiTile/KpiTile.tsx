@@ -8,6 +8,7 @@ import Card from '@mui/material/Card';
 import Stack from '@mui/material/Stack';
 import Typography from '@mui/material/Typography';
 import { useTheme } from '@mui/material/styles';
+import { SparkLineChart } from '@mui/x-charts/SparkLineChart';
 import type { StatusTone } from '../StatusBadge';
 
 export interface KpiTrend {
@@ -61,10 +62,7 @@ function TrendIndicator({ delta, goodDirection = 'up' }: KpiTrend) {
   );
 }
 
-const SPARKLINE_WIDTH = 100;
 const SPARKLINE_HEIGHT = 32;
-/** Keeps the line's stroke from being clipped at the top and bottom edges. */
-const SPARKLINE_PADDING = 2;
 
 interface SparklineProps {
   data: number[];
@@ -75,38 +73,17 @@ interface SparklineProps {
 function Sparkline({ data, color, label }: SparklineProps) {
   if (data.length < 2) return null;
 
-  const min = Math.min(...data);
-  const max = Math.max(...data);
-  const range = max - min || 1;
-  const drawHeight = SPARKLINE_HEIGHT - SPARKLINE_PADDING * 2;
-  const points = data
-    .map((point, index) => {
-      const x = (index / (data.length - 1)) * SPARKLINE_WIDTH;
-      const y = SPARKLINE_PADDING + drawHeight - ((point - min) / range) * drawHeight;
-      return `${x},${y}`;
-    })
-    .join(' ');
-
   return (
-    <svg
-      width="100%"
-      height={SPARKLINE_HEIGHT}
-      viewBox={`0 0 ${SPARKLINE_WIDTH} ${SPARKLINE_HEIGHT}`}
-      preserveAspectRatio="none"
-      role={label ? 'img' : undefined}
-      aria-label={label}
-      aria-hidden={label ? undefined : true}
-    >
-      <polyline
-        points={points}
-        fill="none"
-        stroke={color}
-        strokeWidth={2}
-        strokeLinejoin="round"
-        strokeLinecap="round"
-        vectorEffect="non-scaling-stroke"
+    <Box role={label ? 'img' : undefined} aria-label={label} aria-hidden={label ? undefined : true}>
+      <SparkLineChart
+        data={data}
+        height={SPARKLINE_HEIGHT}
+        color={color}
+        margin={2}
+        showTooltip
+        showHighlight
       />
-    </svg>
+    </Box>
   );
 }
 
