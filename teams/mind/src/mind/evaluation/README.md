@@ -847,3 +847,7 @@ hits the same limit — and is tracked in
 eval changes when it is fixed: whether the pipeline returns a list per text or
 meetings are segmented upstream, the eval groups results by meeting through
 `item_key` (see "The extracted-item contract").
+
+## Guardrail eval
+
+A separate, deliberately adversarial set (`eval/guardrails/`, `tests/test_guardrails.py`) that feeds bad input to extraction, OCR and ASR and checks for graceful failure instead of confident output. It is not part of the persona set or its score. Findings and the per-component confidence audit: [`docs/guardrail_audit.md`](../../../docs/guardrail_audit.md) (#488).
