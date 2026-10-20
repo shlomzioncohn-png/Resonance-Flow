@@ -17,13 +17,14 @@ import com.rnd.chain.service.SchedulingUpdateService;
 import static org.mockito.Mockito.mock;
 import com.rnd.chain.repository.TaskDependencyRepository;
 import com.rnd.chain.repository.TaskRepository;
+import com.rnd.chain.repository.TaskReadinessRepository;
 import com.rnd.chain.events.SchedulingPublishListener;
 import com.rnd.chain.service.PriorityScoreService;
 import com.rnd.chain.service.TaskCounterUpdater;
 import com.rnd.chain.service.TaskEligibilityService;
 import com.rnd.inbox.event.TaskUpdatedEvent;
-import com.rnd.chain.service.SchedulingUpdateService;
 import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.annotation.Autowired;
 
 import java.time.Instant;
 import java.time.LocalDateTime;
@@ -32,7 +33,6 @@ import java.util.List;
 import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.*;
-import static org.mockito.Mockito.mock;
 
 /** Ported from the in-memory version; runs against the real Postgres repositories (rolled back per test). */
 @Tag("postgres")
@@ -40,9 +40,11 @@ import static org.mockito.Mockito.mock;
 @Transactional
 class TaskUpdatedEventHandlerTest {
 
+    @Autowired
+    private TaskReadinessRepository taskReadinessRepository;
+
     private static final LocalDateTime BASE_TIME =
             LocalDateTime.of(2026, 1, 1, 12, 0, 0);
-
     private static final UUID TENANT_ID = UUID.randomUUID();
 
     private static Timestamp timestamp(LocalDateTime dateTime) {
@@ -75,13 +77,14 @@ class TaskUpdatedEventHandlerTest {
                            TaskEligibilityService service, TaskDependencyRepository dependencyRepo) {
     }
 
-    private static Fixture newFixture(List<Task> tasks, List<TaskDependency> edges) {
+    private Fixture newFixture(List<Task> tasks, List<TaskDependency> edges) {
         TaskRepository taskRepo = PgRepos.tasks(tasks);
         TaskDependencyRepository dependencyRepo = PgRepos.dependencies(edges);
         SchedulingUpdateService scheduling = mock(SchedulingUpdateService.class);
         TaskEligibilityService eligibilityService = new TaskEligibilityService(taskRepo, dependencyRepo,
                 PgRepos.graphLock(), new TaskCounterUpdater(taskRepo, dependencyRepo,
-                        new PriorityScoreService(), new SchedulingPublishListener(taskRepo, scheduling)), TaskStateHistoryFixtures.newRecorder());
+                        new PriorityScoreService(), new SchedulingPublishListener(taskRepo, scheduling), taskReadinessRepository),
+                TaskStateHistoryFixtures.newRecorder(), taskReadinessRepository);
         ChainEventProcessingTemplate template = new ChainEventProcessingTemplate(PgRepos.processedEvents());
         return new Fixture(taskRepo, new TaskUpdatedEventHandler(eligibilityService, template), eligibilityService, dependencyRepo);
     }

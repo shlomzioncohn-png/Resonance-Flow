@@ -26,6 +26,7 @@ import com.rnd.chain.repository.DependencyHistoryRepository;
 import com.rnd.chain.repository.GraphLock;
 import com.rnd.chain.repository.TaskDependencyRepository;
 import com.rnd.chain.repository.TaskRepository;
+import com.rnd.chain.repository.TaskReadinessRepository;
 import com.rnd.chain.repository.TransactionRunner;
 import com.rnd.chain.repository.TaskDependencyRepository;
 import com.rnd.chain.repository.TaskRepository;
@@ -36,6 +37,7 @@ import com.rnd.chain.testsupport.TaskFixtures;
 import com.rnd.chain.testsupport.TestTransactions;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.annotation.Autowired;
 import com.rnd.chain.events.TaskSchedulingUpdatedEvent;
 import java.util.ArrayList;
 import java.time.LocalDateTime;
@@ -63,6 +65,9 @@ import static org.mockito.Mockito.when;
 @SpringBootTest
 @Transactional
 class TaskDependencyServiceTest {
+
+    @Autowired
+    private TaskReadinessRepository taskReadinessRepository;
 
     private UUID taskA;
     private UUID taskB;
@@ -94,7 +99,8 @@ class TaskDependencyServiceTest {
                 taskDependencyRepository, PgRepos.graphLock(),
                 new TaskCounterUpdater(taskRepository, taskDependencyRepository,
                         new PriorityScoreService(),
-                        new SchedulingPublishListener(taskRepository, new SchedulingUpdateService(event -> {}))), TaskStateHistoryFixtures.newRecorder());
+                        new SchedulingPublishListener(taskRepository, new SchedulingUpdateService(event -> {})), taskReadinessRepository),
+                TaskStateHistoryFixtures.newRecorder(), taskReadinessRepository);
 
         service = new TaskDependencyService(taskRepository, taskDependencyRepository,
                 historyRepository, transactionRunner, new IncrementingClock(), dependencyEdgeService);
@@ -110,7 +116,8 @@ class TaskDependencyServiceTest {
                 taskDependencyRepository, PgRepos.graphLock(),
                 new TaskCounterUpdater(dummyTaskRepository, taskDependencyRepository,
                         new PriorityScoreService(),
-                        new SchedulingPublishListener(dummyTaskRepository, new SchedulingUpdateService(event -> {}))), TaskStateHistoryFixtures.newRecorder());
+                        new SchedulingPublishListener(dummyTaskRepository, new SchedulingUpdateService(event -> {})), taskReadinessRepository),
+                TaskStateHistoryFixtures.newRecorder(), taskReadinessRepository);
 
         assertThatThrownBy(() -> new TaskDependencyService(null, taskDependencyRepository,
                 PgRepos.history(), PgRepos.transactionRunner(), new IncrementingClock(),
@@ -127,7 +134,8 @@ class TaskDependencyServiceTest {
                 dummyDependencyRepository, PgRepos.graphLock(),
                 new TaskCounterUpdater(taskRepository, dummyDependencyRepository,
                         new PriorityScoreService(),
-                        new SchedulingPublishListener(taskRepository, new SchedulingUpdateService(event -> {}))), TaskStateHistoryFixtures.newRecorder());
+                        new SchedulingPublishListener(taskRepository, new SchedulingUpdateService(event -> {})), taskReadinessRepository),
+                TaskStateHistoryFixtures.newRecorder(), taskReadinessRepository);
 
         assertThatThrownBy(() -> new TaskDependencyService(taskRepository, null,
                 PgRepos.history(), PgRepos.transactionRunner(), new IncrementingClock(),
@@ -341,7 +349,8 @@ class TaskDependencyServiceTest {
                 taskDependencyRepository, PgRepos.graphLock(),
                 new TaskCounterUpdater(taskRepository, taskDependencyRepository,
                         new PriorityScoreService(),
-                        new SchedulingPublishListener(taskRepository, new SchedulingUpdateService(event -> {}))), TaskStateHistoryFixtures.newRecorder());
+                        new SchedulingPublishListener(taskRepository, new SchedulingUpdateService(event -> {})), taskReadinessRepository),
+                TaskStateHistoryFixtures.newRecorder(), taskReadinessRepository);
         TaskDependencyService serviceWithFailingHistory = new TaskDependencyService(
                 taskRepository, taskDependencyRepository, failingHistoryRepository,
                 PgRepos.transactionRunner(), new IncrementingClock(), dependencyEdgeService);
@@ -362,7 +371,8 @@ class TaskDependencyServiceTest {
                 taskDependencyRepository, PgRepos.graphLock(),
                 new TaskCounterUpdater(taskRepository, taskDependencyRepository,
                         new PriorityScoreService(),
-                        new SchedulingPublishListener(taskRepository, new SchedulingUpdateService(event -> {}))), TaskStateHistoryFixtures.newRecorder());
+                        new SchedulingPublishListener(taskRepository, new SchedulingUpdateService(event -> {})), taskReadinessRepository),
+                TaskStateHistoryFixtures.newRecorder(), taskReadinessRepository);
         TaskDependencyService serviceWithFailingHistory = new TaskDependencyService(
                 taskRepository, taskDependencyRepository, failingHistoryRepository,
                 PgRepos.transactionRunner(), new IncrementingClock(), dependencyEdgeService);
@@ -581,7 +591,8 @@ void addDependency_whenSameMindEventIsRetried_shouldNotApplyDependencyTwice() {
                 PgRepos.graphLock(),
                 new TaskCounterUpdater(taskRepository, taskDependencyRepository,
                         new PriorityScoreService(),
-                        new SchedulingPublishListener(taskRepository, schedulingUpdateService)), TaskStateHistoryFixtures.newRecorder());
+                        new SchedulingPublishListener(taskRepository, schedulingUpdateService), taskReadinessRepository),
+                        TaskStateHistoryFixtures.newRecorder(), taskReadinessRepository);
 
     TaskDependencyService mindService =
             new TaskDependencyService(
