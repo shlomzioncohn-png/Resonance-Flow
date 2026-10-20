@@ -1,17 +1,20 @@
 package com.rnd.bff.controller;
 
 import static org.hamcrest.Matchers.is;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyMap;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.rnd.bff.config.SecurityConfig;
+import com.rnd.bff.dto.UserCreateRequestDTO;
 import com.rnd.bff.dto.UserDetailsDTO;
 import com.rnd.bff.dto.UserListResponseDTO;
 import com.rnd.bff.dto.UserRowDTO;
@@ -80,6 +83,24 @@ class ManagerUsersControllerTest {
         mockMvc.perform(get("/manager/users/" + TARGET_ID).header("X-User-Id", ACTOR_ID))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.username", is("eli")));
+    }
+
+    @Test
+    void createUser_returns201WithTheCreatedUser() throws Exception {
+        UserDetailsDTO created = UserDetailsDTO.detailsBuilder()
+                .id(TARGET_ID).displayName("Noa").role("EMPLOYEE").status("PENDING").build();
+        when(managerUsersService.createUser(eq(ACTOR_ID), any(UserCreateRequestDTO.class))).thenReturn(created);
+
+        mockMvc.perform(post("/manager/users")
+                        .header("X-User-Id", ACTOR_ID)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"displayName\":\"Noa\",\"role\":\"EMPLOYEE\"}"))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.id", is(TARGET_ID)))
+                .andExpect(jsonPath("$.status", is("PENDING")));
+
+        verify(managerUsersService).createUser(eq(ACTOR_ID),
+                eq(UserCreateRequestDTO.builder().displayName("Noa").role("EMPLOYEE").build()));
     }
 
     @Test

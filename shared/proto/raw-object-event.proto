@@ -8,13 +8,13 @@ option java_multiple_files = true;
 import "google/protobuf/timestamp.proto";
 
 // kafkaTopic: bridge.raw.landed
-// Reconciled against the agreed Bridge/MIND RawObjectEvent contract
-// (teams/bridge/src/main/java/com/rnd/bridge/raw/model/RawObjectEvent.java): one RawObjectEvent
-// is one logical item carrying every MinIO object it owns (body/transcript and every attachment
-// alike) as a repeated RawObjectRef, instead of fanning out into several Kafka events keyed by
-// attachment_index. The schema_version field's runtime value stays "0.1" - this hasn't shipped
-// to any real consumer yet, so there's no released "1.0" to version past; bump it once this is
-// actually in production use.
+// The Bridge/MIND RawObjectEvent contract as agreed in issue #31 - a breaking change from the
+// earlier flat contract: one RawObjectEvent is one logical item carrying every MinIO object it
+// owns (body/transcript and every attachment alike) as a repeated RawObjectRef, instead of
+// fanning out into several Kafka events keyed by attachment_index.
+// Enum values carry their enum's name as a prefix, per Relay's convention
+// (teams/relay/docs/kafka-producer-consumer-guide.md): proto3 enum value names share the file's
+// scope, so the prefix is what lets SourceType and Modality both have a SCANNED_DOC value.
 
 message RawObjectEvent {
   string schema_version = 1;
@@ -24,11 +24,25 @@ message RawObjectEvent {
   ScopeDecision scope_decision = 5;
   repeated string participants = 6;
   google.protobuf.Timestamp source_timestamp = 7;
+  // Stable across every revision of the item - with revision, the consumer dedup key.
   string correlation_id = 8;
+  // Strictly increasing per correlation_id.
   int32 revision = 9;
   ChangeType change_type = 10;
+  // 0-100, informational only - consumers never skip a revision based on it.
   int32 change_significance_score = 11;
+  // May be empty when change_type is DELETE_REVIEW.
   repeated RawObjectRef objects = 12;
+  // The source system's own identifier for the item - an identifier, not a link (building a
+  // link from source_type + source_ref is the UI's job). Unique within its source_type, e.g.
+  // a Zoom meeting uuid, a BigBlueButton recordID, an email Message-ID, a Slack channel_id:ts.
+  // Unset when the source has none (e.g. WhatsApp); may change between revisions.
+  optional string source_ref = 13;
+  // Bridge's whole-item triage (work-related or not, what kind, how readable, how sensitive)
+  // that scope_decision was derived from. Absent when nothing classified the item -
+  // scope_decision is then the INCLUDED default, not a judgement. Never carries tasks, people,
+  // dates or priority: extraction stays with MIND, priority with Chain.
+  optional Classification classification = 14;
 }
 
 message RawObjectRef {
@@ -40,43 +54,116 @@ message RawObjectRef {
   Modality modality = 6;
 }
 
-enum Role {
-  ROLE_UNSPECIFIED = 0;
-  BODY = 1;
-  ATTACHMENT = 2;
-  TRANSCRIPT = 3;
-  RECORDING = 4;
-  SOURCE_METADATA = 5;
+// Unknown values: category -> treat as OTHER; sensitivity -> treat as SENSITIVITY_HIGH;
+// quality -> ignore. (role, modality, change_type and scope_decision have no such fallback - an
+// unknown value there is an error.)
+message Classification {
+  DecidedBy decided_by = 1;
+  CategoryLabel category = 2;
+  QualityLabel quality = 3;
+  SensitivityLabel sensitivity = 4;
+  // Human-readable rationale for debugging/review only - no names or dates, and not meant to
+  // be parsed or branched on.
+  string reason = 5;
+  ClassifierInfo classifier = 6;
 }
 
+// value is a string, not an enum, because the allowed set depends on the event's source_type:
+//   ZOOM, BIGBLUEBUTTON: PLANNING | STANDUP | CUSTOMER_CALL | INTERVIEW | ONE_ON_ONE | SOCIAL |
+//                        TEST | OTHER
+//   SCANNED_DOC:         the 16 RVL-CDIP classes (LETTER | FORM | EMAIL | HANDWRITTEN |
+//                        ADVERTISEMENT | SCIENTIFIC_REPORT | SCIENTIFIC_PUBLICATION |
+//                        SPECIFICATION | FILE_FOLDER | NEWS_ARTICLE | BUDGET | INVOICE |
+//                        PRESENTATION | QUESTIONNAIRE | RESUME | MEMO) plus BLANK | OTHER
+// Present only for source types that have a list. confidence on every label is in [0, 1];
+// 1.0 when decided_by is DECIDED_BY_RULE. A model's self-reported confidence is not a
+// calibrated probability - only threshold it after measuring.
+message CategoryLabel {
+  string value = 1;
+  float confidence = 2;
+}
+
+message QualityLabel {
+  Quality value = 1;
+  float confidence = 2;
+}
+
+message SensitivityLabel {
+  Sensitivity value = 1;
+  float confidence = 2;
+}
+
+message ClassifierInfo {
+  string model = 1;          // e.g. "gemini-3.8-flash", or "rules" when decided_by is RULE
+  string prompt_version = 2; // bumped on every prompt change, so results stay comparable
+}
+
+// The source *platform* - every value names one, so a consumer can build a link back to the
+// original from source_type + source_ref. Meetings are split per platform; the former shared
+// MEETING value and the unused DOC value are retired.
 enum SourceType {
+  reserved 6, 8;
+  reserved "MEETING", "DOC";
   SOURCE_TYPE_UNSPECIFIED = 0;
-  EMAIL = 1;
-  SLACK = 2;
-  WHATSAPP = 3;
-  DRIVE = 4;
-  CALENDAR = 5;
-  MEETING = 6;
-  SOURCE_TYPE_SCANNED_DOC = 7; // prefixed - plain SCANNED_DOC collides with Modality.SCANNED_DOC
-                               // (proto3 enum values are siblings of the package, not their enum)
-  DOC = 8;
+  SOURCE_TYPE_EMAIL = 1;
+  SOURCE_TYPE_SLACK = 2;
+  SOURCE_TYPE_WHATSAPP = 3;
+  SOURCE_TYPE_DRIVE = 4;
+  SOURCE_TYPE_CALENDAR = 5;
+  SOURCE_TYPE_SCANNED_DOC = 7;
+  SOURCE_TYPE_ZOOM = 9;
+  SOURCE_TYPE_BIGBLUEBUTTON = 10;
+}
+
+enum Role {
+  ROLE_UNSPECIFIED = 0;
+  ROLE_BODY = 1;
+  ROLE_ATTACHMENT = 2;
+  ROLE_TRANSCRIPT = 3;
+  ROLE_RECORDING = 4;
+  ROLE_SOURCE_METADATA = 5;
 }
 
 enum ScopeDecision {
   SCOPE_DECISION_UNSPECIFIED = 0;
-  INCLUDED = 1;
-  EXCLUDED = 2;
+  SCOPE_DECISION_INCLUDED = 1;
+  SCOPE_DECISION_EXCLUDED = 2;
 }
 
 enum Modality {
   MODALITY_UNSPECIFIED = 0;
-  AUDIO = 1;
-  SCANNED_DOC = 2;
-  TEXT = 3;
+  MODALITY_AUDIO = 1;
+  MODALITY_SCANNED_DOC = 2;
+  MODALITY_TEXT = 3;
 }
 
 enum ChangeType {
   CHANGE_TYPE_UNSPECIFIED = 0;
-  UPSERT = 1;
-  DELETE_REVIEW = 2;
+  CHANGE_TYPE_UPSERT = 1;
+  CHANGE_TYPE_DELETE_REVIEW = 2;
+}
+
+enum DecidedBy {
+  DECIDED_BY_UNSPECIFIED = 0;
+  DECIDED_BY_MODEL = 1;
+  DECIDED_BY_RULE = 2;
+}
+
+// Of the landed file itself, not of its content: an important meeting with bad audio is
+// SCOPE_DECISION_INCLUDED + QUALITY_POOR, not excluded.
+enum Quality {
+  QUALITY_UNSPECIFIED = 0;
+  QUALITY_GOOD = 1;
+  QUALITY_POOR = 2;
+  QUALITY_UNREADABLE = 3;
+}
+
+// NONE: nothing sensitive. LOW: ordinary personal/business details (names, a vendor invoice,
+// a project budget). HIGH: harmful if exposed (medical, an individual's termination or
+// salary, litigation, bank details, national ID numbers).
+enum Sensitivity {
+  SENSITIVITY_UNSPECIFIED = 0;
+  SENSITIVITY_NONE = 1;
+  SENSITIVITY_LOW = 2;
+  SENSITIVITY_HIGH = 3;
 }

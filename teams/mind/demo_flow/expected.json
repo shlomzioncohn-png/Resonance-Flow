@@ -1,0 +1,117 @@
+{
+  "scenario": "Northwind price quote (#359 demo flow)",
+  "written": "2026-10-18, before any run of the pipeline on these artifacts",
+  "timeline_note": "Times are on the scenario Monday (2026-10-05). The feed shifts every timestamp by whole weeks onto the Monday it is given (--anchor), so the weekdays below always hold. A deadline named as a weekday means that weekday of the same week as the meeting.",
+  "sources": {
+    "meeting": {
+      "file": "artifacts/meeting.m4a",
+      "made_from": "scenario/meeting_script.txt",
+      "metadata": "scenario/meeting.meeting.json (Zoom meeting report: participants Lior, Dana, Omer)",
+      "source_type": "ZOOM",
+      "exercises": "ASR (no transcript sidecar is landed, so the consumer has to transcribe)"
+    },
+    "slack": {
+      "file": "scenario/slack_thread.json",
+      "source_type": "SLACK",
+      "exercises": "duplicate detection: repeats the meeting's quote commitment in different words"
+    },
+    "email": {
+      "file": "scenario/email.json",
+      "source_type": "EMAIL",
+      "exercises": "a text body plus a scanned attachment in the same event"
+    },
+    "email_attachment": {
+      "file": "artifacts/supplier_form.jpg",
+      "made_from": "scenario/supplier_form.txt",
+      "exercises": "OCR (modality SCANNED_DOC, role ATTACHMENT of the email event)"
+    }
+  },
+  "tasks": [
+    {
+      "id": "T1",
+      "title": "Send Northwind the price quote",
+      "suggested_owner": "Dana",
+      "deadline_weekday": "Thursday",
+      "effort_estimate_minutes": null,
+      "mentions": [
+        {
+          "source": "meeting",
+          "text": "Once I have the updated cost sheet from Omer, I will send Northwind the price quote by Thursday."
+        },
+        {
+          "source": "meeting",
+          "text": "And Dana sends Northwind the price quote by Thursday, as soon as the cost sheet is ready."
+        },
+        {
+          "source": "slack",
+          "text": "I'll get our pricing proposal over to Northwind before end of day Thursday."
+        }
+      ]
+    },
+    {
+      "id": "T2",
+      "title": "Finish the updated cost sheet",
+      "suggested_owner": "Omer",
+      "deadline_weekday": "Wednesday",
+      "effort_estimate_minutes": 240,
+      "effort_note": "\"about half a day of work\": read as roughly 4 hours; any estimate between 180 and 300 minutes matches",
+      "mentions": [
+        {
+          "source": "meeting",
+          "text": "I will finish the updated cost sheet by Wednesday. It is about half a day of work."
+        },
+        {
+          "source": "meeting",
+          "text": "Omer finishes the updated cost sheet by Wednesday."
+        }
+      ]
+    },
+    {
+      "id": "T3",
+      "title": "Return the signed supplier registration form to Northwind",
+      "suggested_owner": "Dana",
+      "deadline_weekday": "Friday",
+      "effort_estimate_minutes": null,
+      "mentions": [
+        {
+          "source": "email",
+          "text": "please complete, sign and return the attached supplier registration form by Friday."
+        },
+        {
+          "source": "email_attachment",
+          "text": "Please return the completed and signed form to procurement@northwind.example"
+        }
+      ]
+    }
+  ],
+  "duplicates": [
+    {
+      "task": "T1",
+      "sources": ["meeting", "slack"],
+      "expected": "one task, not two: the Slack message is the same commitment as the meeting's"
+    }
+  ],
+  "dependencies": [
+    {
+      "task": "T1",
+      "depends_on": "T2",
+      "evidence": "Once I have the updated cost sheet from Omer, I will send Northwind the price quote by Thursday.",
+      "published_to": "task.dependencies.proposed"
+    }
+  ],
+  "not_dependencies": [
+    {
+      "pair": ["T1", "T3"],
+      "why": "the form is needed for Northwind's vendor system; nothing says the quote waits for it"
+    }
+  ],
+  "not_tasks": [
+    "The warehouse move is finished (a status update, already done)",
+    "Lior's Slack question about the unit count (answered in the thread)",
+    "Thanks, sounds good."
+  ],
+  "fields_every_task_carries": {
+    "required": ["tier", "urgency", "role_context", "score"],
+    "note": "The content does not fix their values (nobody states a role or a tier), so the expected answer is that they are set, not to what. suggested_owner and effort_estimate are expected only where listed above."
+  }
+}

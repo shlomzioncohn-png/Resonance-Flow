@@ -45,10 +45,8 @@ public class ObjectKeyBuilder {
         return switch (sourceType) {
             case EMAIL, DRIVE, CALENDAR -> "json";
             case SLACK, WHATSAPP -> "txt";
-            case MEETING, SCANNED_DOC -> throw new IllegalArgumentException(
+            case ZOOM, BIGBLUEBUTTON, SCANNED_DOC -> throw new IllegalArgumentException(
                     sourceType + " is produced by the meeting/doc/audio lane, not this one");
-            // Contract-only value - no reader produces this yet (see RawSourceType.DOC's javadoc).
-            case DOC -> throw new IllegalArgumentException(sourceType + " has no reader yet");
         };
     }
 }

@@ -1,13 +1,19 @@
 package com.rnd.chain.events;
 
 import com.rnd.chain.testsupport.TaskStateHistoryFixtures;
+
+import com.rnd.chain.testsupport.PgRepos;
+import org.junit.jupiter.api.Tag;
+import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.transaction.annotation.Transactional;
+
 import com.rnd.chain.dto.Task;
 import com.rnd.chain.dto.TaskDependency;
 import com.rnd.chain.dto.TaskStatus;
-import com.rnd.chain.repository.InMemoryConstraintRepository;
-import com.rnd.chain.repository.InMemoryGraphLock;
-import com.rnd.chain.repository.InMemoryTaskDependencyRepository;
-import com.rnd.chain.repository.InMemoryTaskRepository;
+import com.rnd.chain.repository.ConstraintRepository;
+import com.rnd.chain.repository.GraphLock;
+import com.rnd.chain.repository.TaskDependencyRepository;
+import com.rnd.chain.repository.TaskRepository;
 import com.rnd.chain.events.SchedulingPublishListener;
 import com.rnd.chain.service.SchedulingUpdateService;
 import com.rnd.chain.service.PriorityScoreService;
@@ -28,6 +34,10 @@ import java.util.UUID;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.mock;
 
+/** Ported from the in-memory version; runs against the real Postgres repositories (rolled back per test). */
+@Tag("postgres")
+@SpringBootTest
+@Transactional
 class TaskCompletedEventHandlerTest {
 
     private static final LocalDateTime BASE_TIME = LocalDateTime.of(2026, 1, 1, 12, 0, 0);
@@ -44,23 +54,23 @@ class TaskCompletedEventHandlerTest {
 
     private static Task task(UUID id, TaskStatus status, LocalDateTime updatedAt, int blockingCount) {
         return Task.builder()
-                .id(id).status(status)
+                .id(id).status(status).tenantId(com.rnd.chain.testsupport.TaskFixtures.DEFAULT_TENANT_ID)
                 .isReady(blockingCount == 0).blockingCount(blockingCount).openConstraintCount(0)
                 .createdAt(BASE_TIME).updatedAt(updatedAt)
                 .build();
     }
 
-    private record Fixture(InMemoryTaskRepository taskRepo, TaskCompletedEventHandler handler) {
+    private record Fixture(TaskRepository taskRepo, TaskCompletedEventHandler handler) {
     }
 
     private static Fixture newFixture(List<Task> tasks, List<TaskDependency> edges) {
-        InMemoryTaskRepository taskRepo = new InMemoryTaskRepository(tasks);
-        InMemoryTaskDependencyRepository dependencyRepo = new InMemoryTaskDependencyRepository(edges);
+        TaskRepository taskRepo = PgRepos.tasks(tasks);
+        TaskDependencyRepository dependencyRepo = PgRepos.dependencies(edges);
         SchedulingUpdateService scheduling = mock(SchedulingUpdateService.class);
         TaskEligibilityService service = new TaskEligibilityService(taskRepo, dependencyRepo,
-                new InMemoryGraphLock(), new TaskCounterUpdater(taskRepo, dependencyRepo,
+                PgRepos.graphLock(), new TaskCounterUpdater(taskRepo, dependencyRepo,
                         new PriorityScoreService(), new SchedulingPublishListener(taskRepo, scheduling)), TaskStateHistoryFixtures.newRecorder());
-        ChainEventProcessingTemplate template = new ChainEventProcessingTemplate(new InMemoryProcessedEventStore());
+        ChainEventProcessingTemplate template = new ChainEventProcessingTemplate(PgRepos.processedEvents());
         return new Fixture(taskRepo, new TaskCompletedEventHandler(service, template));
     }
 
@@ -83,6 +93,23 @@ class TaskCompletedEventHandlerTest {
         Task dependentAfter = fixture.taskRepo().findById(dependent).orElseThrow();
         assertEquals(0, dependentAfter.getBlockingCount());
         assertTrue(dependentAfter.isReady());
+    }
+
+    @Test
+    void onMessage_forATaskCreatedByADoneTaskUpdated_releasesItsDependents() {
+        UUID blocker = UUID.randomUUID();
+        UUID dependent = UUID.randomUUID();
+        LocalDateTime doneEventTime = BASE_TIME.plusMinutes(5);
+        // task.updated(DONE) leaves the task PENDING with updated_at one second before the event.
+        Fixture fixture = newFixture(
+                List.of(task(blocker, TaskStatus.PENDING, doneEventTime.minusSeconds(1), 0),
+                        task(dependent, TaskStatus.PENDING, BASE_TIME, 1)),
+                List.of(new TaskDependency(dependent, blocker)));
+
+        fixture.handler().onMessage(record(blocker.toString(), true, doneEventTime));
+
+        assertEquals(TaskStatus.DONE, fixture.taskRepo().findById(blocker).orElseThrow().getStatus());
+        assertEquals(0, fixture.taskRepo().findById(dependent).orElseThrow().getBlockingCount());
     }
 
     @Test

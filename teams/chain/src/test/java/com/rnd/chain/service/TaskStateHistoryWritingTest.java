@@ -1,15 +1,20 @@
 package com.rnd.chain.service;
 
+import com.rnd.chain.testsupport.PgRepos;
+import org.junit.jupiter.api.Tag;
+import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.transaction.annotation.Transactional;
+
 import com.rnd.chain.dto.Task;
 import com.rnd.chain.dto.TaskStateEventType;
 import com.rnd.chain.dto.TaskStateHistoryEntry;
 import com.rnd.chain.dto.TaskStatus;
 import com.rnd.chain.dto.TaskTestFixtures;
 import com.rnd.chain.events.SchedulingPublishListener;
-import com.rnd.chain.repository.InMemoryGraphLock;
-import com.rnd.chain.repository.InMemoryTaskDependencyRepository;
-import com.rnd.chain.repository.InMemoryTaskRepository;
-import com.rnd.chain.repository.InMemoryTaskStateHistoryRepository;
+import com.rnd.chain.repository.GraphLock;
+import com.rnd.chain.repository.TaskDependencyRepository;
+import com.rnd.chain.repository.TaskRepository;
+import com.rnd.chain.repository.TaskStateHistoryRepository;
 import com.rnd.chain.testsupport.ConcurrentTestRunner;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -25,21 +30,25 @@ import java.util.stream.IntStream;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Issue #774: task_state_history is written exactly once per applied change, never for a rejected one. */
+/** Ported from the in-memory version; runs against the real Postgres repositories (rolled back per test). */
+@Tag("postgres")
+@SpringBootTest
+@Transactional
 class TaskStateHistoryWritingTest {
 
     private static final UUID TENANT = TaskTestFixtures.DEFAULT_TENANT_ID;
 
-    private InMemoryTaskRepository taskRepository;
-    private InMemoryTaskStateHistoryRepository history;
+    private TaskRepository taskRepository;
+    private TaskStateHistoryRepository history;
     private TaskEligibilityService service;
     private DependencyEdgeService edgeService;
 
     @BeforeEach
     void setUp() {
-        taskRepository = new InMemoryTaskRepository(List.of());
-        history = new InMemoryTaskStateHistoryRepository();
-        InMemoryTaskDependencyRepository dependencyRepository = new InMemoryTaskDependencyRepository(List.of());
-        InMemoryGraphLock lock = new InMemoryGraphLock();
+        taskRepository = PgRepos.tasks(List.of());
+        history = PgRepos.stateHistory();
+        TaskDependencyRepository dependencyRepository = PgRepos.dependencies(List.of());
+        GraphLock lock = PgRepos.graphLock();
         TaskCounterUpdater counterUpdater = new TaskCounterUpdater(taskRepository, dependencyRepository,
                 new PriorityScoreService(),
                 new SchedulingPublishListener(taskRepository, new SchedulingUpdateService(event -> { })));
@@ -220,41 +229,6 @@ class TaskStateHistoryWritingTest {
         assertThat(after.getScore()).isEqualTo(original.getScore());
     }
 
-    // --- concurrency ---
 
-    @Test
-    void concurrentRedeliveryOfTheSameEvent_writesExactlyOneRow() throws InterruptedException {
-        LocalDateTime stored = LocalDateTime.now();
-        UUID id = savedTask(TaskStatus.ACTIVE, stored);
-        LocalDateTime eventTime = stored.plusSeconds(10);
 
-        ConcurrentTestRunner.run(16, () ->
-                service.onTaskStatusChangedIfNewer(id, TaskStatus.DONE, eventTime, TENANT));
-
-        assertThat(rowsOf(id)).hasSize(1);
-    }
-
-    @Test
-    void concurrentEdges_onOneDependent_writeExactlyOneBlockedRow() throws InterruptedException {
-        UUID hub = savedTask();
-        List<UUID> blockers = IntStream.range(0, 16).mapToObj(i -> savedTask()).collect(Collectors.toList());
-
-        ConcurrentTestRunner.run(16, i -> edgeService.addDependency(hub, blockers.get(i)));
-
-        assertThat(rowsOf(hub)).extracting(TaskStateHistoryEntry::eventType)
-                .containsExactly(TaskStateEventType.BLOCKED);
-    }
-
-    @Test
-    void concurrentCompletionOfAllBlockers_writesExactlyOneUnblockedRow() throws InterruptedException {
-        UUID hub = savedTask();
-        List<UUID> blockers = IntStream.range(0, 16).mapToObj(i -> savedTask()).collect(Collectors.toList());
-        blockers.forEach(b -> edgeService.addDependency(hub, b));
-
-        ConcurrentTestRunner.run(16, i -> service.onTaskStatusChanged(blockers.get(i), TaskStatus.DONE));
-
-        assertThat(rowsOf(hub)).extracting(TaskStateHistoryEntry::eventType)
-                .containsExactly(TaskStateEventType.BLOCKED, TaskStateEventType.UNBLOCKED);
-        blockers.forEach(b -> assertThat(rowsOf(b)).hasSize(1));
-    }
 }

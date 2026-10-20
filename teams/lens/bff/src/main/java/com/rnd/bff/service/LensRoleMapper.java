@@ -3,24 +3,23 @@ package com.rnd.bff.service;
 import java.util.Set;
 
 /**
- * Maps Inbox's `users.role` to one of LENS's two roles (MANAGER/EMPLOYEE) —
- * task spec §3: "role בתשובות הוא תפקיד LENS... לפי המיפוי שכבר מוגדר ב-BFF
- * במשימת ה-auth". That mapping doesn't exist in this repo (the auth task
- * this one depends on was never built — see ManagerUsersController's
- * javadoc), so this is a best-effort stand-in, not the real mapping:
+ * Maps between Inbox's `users.role` (com.rnd.inbox.user.UserRole:
+ * SYSTEM_ADMIN, TENANT_ADMIN, TEAM_LEAD, EMPLOYEE) and LENS's two roles
+ * (MANAGER/EMPLOYEE) — task spec §3: "role בתשובות הוא תפקיד LENS... לפי
+ * המיפוי שכבר מוגדר ב-BFF במשימת ה-auth". That auth-task mapping doesn't
+ * exist in this repo yet, so this is a best-effort stand-in:
  *
- * In the current code, com.rnd.inbox.user.UserCreateRequestDto declares
- * `role` as a plain, unvalidated String (`@NotBlank @Size(max=50)`), not a
- * fixed enum — there is no authoritative list of Inbox's "4 roles" to read
- * from code. SYSTEM_ADMIN and MANAGER are treated as LENS MANAGER; every
- * other value (TEAM_LEAD, EMPLOYEE, anything unrecognized) is treated as
- * LENS EMPLOYEE. Confirm this against Inbox's actual role vocabulary
- * (Inbox_Data_Schema_Specification §3.2, per the task doc) before relying
- * on it for anything more than this screen's display column.
+ * Inbox -> LENS: SYSTEM_ADMIN and TENANT_ADMIN are LENS MANAGER; TEAM_LEAD,
+ * EMPLOYEE and anything unrecognized are LENS EMPLOYEE.
+ *
+ * LENS -> Inbox (creating a user): MANAGER becomes TENANT_ADMIN — the Users
+ * screen is a manager's screen, and Inbox only lets SYSTEM_ADMIN/TENANT_ADMIN
+ * create users, so a LENS manager has to be at least TENANT_ADMIN for the
+ * screen to work. EMPLOYEE stays EMPLOYEE. Round-trips through toLensRole.
  */
 public final class LensRoleMapper {
 
-    private static final Set<String> MANAGER_INBOX_ROLES = Set.of("SYSTEM_ADMIN", "MANAGER");
+    private static final Set<String> MANAGER_INBOX_ROLES = Set.of("SYSTEM_ADMIN", "TENANT_ADMIN");
 
     private LensRoleMapper() {
     }
@@ -30,5 +29,16 @@ public final class LensRoleMapper {
             return "EMPLOYEE";
         }
         return MANAGER_INBOX_ROLES.contains(inboxRole.toUpperCase()) ? "MANAGER" : "EMPLOYEE";
+    }
+
+    /** @return the Inbox role for a LENS role, or null if lensRole isn't MANAGER or EMPLOYEE. */
+    public static String toInboxRole(String lensRole) {
+        if ("MANAGER".equals(lensRole)) {
+            return "TENANT_ADMIN";
+        }
+        if ("EMPLOYEE".equals(lensRole)) {
+            return "EMPLOYEE";
+        }
+        return null;
     }
 }

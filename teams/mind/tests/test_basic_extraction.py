@@ -25,10 +25,17 @@ from mind.extraction.extractor import (
     ExtractionSuccess,
 )
 from mind.extraction.providers.base import LLMRejected, LLMTimeout
-from mind.observability.tracking import _reset_for_tests, get_recent_calls
+from mind.extraction.providers.pricing import estimate_cost
+from mind.observability.tracking import (
+    CallKind,
+    CallStatus,
+    _reset_for_tests,
+    get_recent_calls,
+)
 from tests.extraction.fakes import ScriptedProvider
 
 TENANT_ID = UUID("11111111-1111-1111-1111-111111111111")
+BRIDGE_ITEM = UUID("6f1c2e9a-3b4d-4c8e-9a1f-2d7e5b0c4a83")
 
 EMAIL_TEXT = (
     "Hi team, please send the Q3 revenue report to the board before Friday. "
@@ -83,7 +90,9 @@ def test_extraction_output_validates_against_the_contract() -> None:
     result = extractor(GOOD_ANSWER).extract(EMAIL_TEXT, SourceType.EMAIL)
     assert isinstance(result, ExtractionSuccess)
 
-    request = to_task_creation_requested(result, tenant_id=TENANT_ID)
+    request = to_task_creation_requested(
+        result, tenant_id=TENANT_ID, bridge_source_ref=None, bridge_correlation_id=BRIDGE_ITEM
+    )
 
     assert isinstance(request, TaskCreationRequested)
     assert request.tenant_id == TENANT_ID
@@ -239,8 +248,12 @@ def test_missing_source_ref_is_a_normal_outcome() -> None:
     # A scanned document has no pointer to carry, so nothing is deducted.
     assert "missing_source_ref" not in {p.reason for p in result.confidence.penalties}
 
-    request = to_task_creation_requested(result, tenant_id=TENANT_ID)
-    assert request.source_ref is None
+    # Inbox requires a source_ref, so the task carries Bridge's id for the
+    # item instead (#353); nothing from the content is passed off as one.
+    request = to_task_creation_requested(
+        result, tenant_id=TENANT_ID, bridge_source_ref=None, bridge_correlation_id=BRIDGE_ITEM
+    )
+    assert request.source_ref == f"bridge:{BRIDGE_ITEM}"
 
 
 def test_placeholder_source_ref_is_normalised_to_none() -> None:
@@ -279,8 +292,8 @@ def test_a_failed_call_is_recorded_too() -> None:
     assert len(get_recent_calls()) == outcome.provider_calls
 
 
-def test_a_failed_call_is_recorded_under_the_provider_name() -> None:
-    """There is no answer to read a model id off, so the provider names it."""
+def test_a_failed_call_is_recorded_under_the_model_it_was_sent_to() -> None:
+    """The same key as a success, so a model's failures land on its own row (#479)."""
 
     _reset_for_tests()
     provider = ScriptedProvider(LLMTimeout("too slow"), LLMTimeout("again"), LLMTimeout("again"))
@@ -288,9 +301,10 @@ def test_a_failed_call_is_recorded_under_the_provider_name() -> None:
     BasicExtractor(provider, sleep=lambda _: None).extract(EMAIL_TEXT, SourceType.EMAIL)
 
     record = get_recent_calls()[0]
-    assert record.model_name == provider.name
+    assert record.model_name == provider.model
     assert record.duration_ms >= 0.0
-    assert record.cost == 0.0
+    assert (record.kind, record.status) == (CallKind.LLM, CallStatus.ERROR)
+    assert record.cost is None  # no usage reported: unknown, not free
 
 
 def test_a_run_that_mixes_failure_and_success_records_both() -> None:
@@ -301,6 +315,36 @@ def test_a_run_that_mixes_failure_and_success_records_both() -> None:
 
     assert isinstance(outcome, ExtractionSuccess)
     assert len(get_recent_calls()) == 2
+
+
+def test_a_successful_call_is_recorded_with_its_tokens_and_dollar_cost() -> None:
+    """#479: the cost report totals tokens and dollars per model."""
+
+    _reset_for_tests()
+    provider = ScriptedProvider(GOOD_ANSWER, model="deepseek-chat")
+
+    BasicExtractor(provider, sleep=lambda _: None).extract(EMAIL_TEXT, SourceType.EMAIL)
+
+    [record] = get_recent_calls()
+    assert (record.kind, record.status) == (CallKind.LLM, CallStatus.SUCCESS)
+    assert record.completion_tokens == len(GOOD_ANSWER)  # what the scripted provider reports
+    assert record.prompt_tokens is not None and record.prompt_tokens > 0
+    assert record.cost == pytest.approx(
+        estimate_cost("deepseek-chat", record.prompt_tokens, record.completion_tokens)
+    )
+
+
+def test_a_call_to_an_unpriced_model_is_recorded_as_unpriced_not_free() -> None:
+    """The usage is still recorded; only the price is unknown."""
+
+    _reset_for_tests()
+    provider = ScriptedProvider(GOOD_ANSWER, model="a-model-with-no-price")
+
+    BasicExtractor(provider, sleep=lambda _: None).extract(EMAIL_TEXT, SourceType.EMAIL)
+
+    [record] = get_recent_calls()
+    assert record.cost is None
+    assert record.completion_tokens == len(GOOD_ANSWER)
 
 
 # --- a failed item has to be findable -------------------------------------

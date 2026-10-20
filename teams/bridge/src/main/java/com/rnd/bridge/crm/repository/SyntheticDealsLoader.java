@@ -10,11 +10,8 @@ import java.io.InputStream;
 import java.util.List;
 
 /**
- * Reads the synthetic CRM deal feed for a class that needs the raw deal
- * list (currently {@link CrmDealsSeeder}), using the same
- * {@link CrmDealJsonMapper} configuration as {@link JsonDealRepository} so
- * the two paths that read the same file cannot silently drift apart in how
- * they parse it.
+ * Reads the synthetic CRM deal feed for a class that needs the raw deal list, using the same
+ * {@link CrmDealJsonMapper} configuration as {@link JsonDealRepository} so the two can't drift apart.
  */
 final class SyntheticDealsLoader {
 
