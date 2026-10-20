@@ -2,7 +2,6 @@ package com.rnd.chain.events;
 
 import com.google.protobuf.Timestamp;
 import com.rnd.chain.dto.TaskStatus;
-import com.rnd.chain.exception.TaskNotFoundException;
 import com.rnd.chain.exception.TenantReassignmentException;
 import com.rnd.chain.service.TaskEligibilityService;
 import com.rnd.inbox.event.TaskUpdatedEvent;
